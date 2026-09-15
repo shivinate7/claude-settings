@@ -57,9 +57,9 @@ This runs as root before Claude starts and writes:
   the same one-liner, so each new or resumed session re-fetches both files.
 
 Why the hook: Anthropic snapshots the VM after the setup script and reuses it for ~7 days, so the
-setup script alone would pin whatever was on `main` at snapshot time. The hook keeps it fresh.
-The hook runs after Claude launches, so a change pushed minutes ago may land one session late.
-Editing the setup script text (any character) forces a fresh snapshot immediately.
+setup script alone would pin whatever was on `main` at snapshot time. The hook keeps it fresh,
+and Claude Code reads CLAUDE.md after SessionStart hooks finish, so the fetched files are live in
+that same session. Editing the setup script text (any character) forces a fresh snapshot.
 
 Pin a commit instead of `main` if you want cloud sessions to change only when you say so:
 replace `/main/` in the URL with `/<sha>/` and set `CLAUDE_SETTINGS_REF=<sha>` as an environment
@@ -68,10 +68,21 @@ variable on the environment.
 Verify in a cloud session: `/context` for the memory file, and ask Claude to run
 `echo $CLAUDE_CODE_SUBAGENT_MODEL` (expect `sonnet`).
 
+## Local auto-pull
+
+`settings.json` carries a `SessionStart` hook that runs at every local session start. It reads
+the `@` pointer in `~/.claude/CLAUDE.md` to find the clone, then runs a quiet `git pull --ff-only`
+there. It exits at once in cloud sessions (`CLAUDE_CODE_REMOTE` is set), prints nothing, and never
+blocks a session: no network, no clone, or a diverged branch all fall through silently. Claude
+Code reads CLAUDE.md after SessionStart hooks finish (measured: a hook that rewrote CLAUDE.md
+changed the same session's first answer), so a pulled change is live in that very session. The
+cloud installer replaces this hook with its own refresh hook, so it never runs in the cloud.
+
 ## Editing
 
 Edit `CLAUDE.md` or `settings.json` here, commit, push. Local picks it up on `git pull`; cloud
 picks it up on the next session start.
 
-Keep hooks out of `settings.json`: the cloud install generates its own, and a hook written for
-bash would error in a Windows local session.
+Hooks in `settings.json` run everywhere the file lands. Command hooks use `sh` syntax, which Git
+Bash runs on Windows; guard anything local-only with `CLAUDE_CODE_REMOTE`. The cloud install
+replaces the `SessionStart` list with its own refresh hook and leaves every other event alone.
