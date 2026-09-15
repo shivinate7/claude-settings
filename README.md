@@ -57,9 +57,9 @@ This runs as root before Claude starts and writes:
   the same one-liner, so each new or resumed session re-fetches both files.
 
 Why the hook: Anthropic snapshots the VM after the setup script and reuses it for ~7 days, so the
-setup script alone would pin whatever was on `main` at snapshot time. The hook keeps it fresh.
-The hook runs after Claude launches, so a change pushed minutes ago may land one session late.
-Editing the setup script text (any character) forces a fresh snapshot immediately.
+setup script alone would pin whatever was on `main` at snapshot time. The hook keeps it fresh,
+and Claude Code reads CLAUDE.md after SessionStart hooks finish, so the fetched files are live in
+that same session. Editing the setup script text (any character) forces a fresh snapshot.
 
 Pin a commit instead of `main` if you want cloud sessions to change only when you say so:
 replace `/main/` in the URL with `/<sha>/` and set `CLAUDE_SETTINGS_REF=<sha>` as an environment
@@ -73,9 +73,10 @@ Verify in a cloud session: `/context` for the memory file, and ask Claude to run
 `settings.json` carries a `SessionStart` hook that runs at every local session start. It reads
 the `@` pointer in `~/.claude/CLAUDE.md` to find the clone, then runs a quiet `git pull --ff-only`
 there. It exits at once in cloud sessions (`CLAUDE_CODE_REMOTE` is set), prints nothing, and never
-blocks a session: no network, no clone, or a diverged branch all fall through silently. Because
-CLAUDE.md is read before hooks finish, a change pulled this way lands one session late. The cloud
-installer replaces this hook with its own refresh hook, so it never runs in the cloud.
+blocks a session: no network, no clone, or a diverged branch all fall through silently. Claude
+Code reads CLAUDE.md after SessionStart hooks finish (measured: a hook that rewrote CLAUDE.md
+changed the same session's first answer), so a pulled change is live in that very session. The
+cloud installer replaces this hook with its own refresh hook, so it never runs in the cloud.
 
 ## Editing
 
