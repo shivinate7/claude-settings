@@ -14,6 +14,33 @@ New-Item -ItemType Directory -Force -Path $ClaudeDir | Out-Null
 
 function Log([string]$msg) { Write-Host "claude-settings: $msg" }
 
+# Bandaid for machines without symlink rights: a git post-merge hook in this clone re-copies
+# settings.json into ~\.claude after every `git pull`, so pull stays the only update step.
+function Install-PostMergeHook {
+    $hooksDir = Join-Path $RepoDir '.git\hooks'
+    if (-not (Test-Path $hooksDir)) { Log "no .git\hooks directory found; skipping post-merge hook"; return }
+    $hookPath = Join-Path $hooksDir 'post-merge'
+    $marker   = '# claude-settings post-merge hook'
+    if ((Test-Path $hookPath) -and -not ((Get-Content -Raw $hookPath) -match [regex]::Escape($marker))) {
+        Log "a post-merge hook already exists at $hookPath and is not ours; left untouched. Re-run install.ps1 after pulls instead."
+        return
+    }
+    $hook = @"
+#!/bin/sh
+$marker
+# Keeps ~/.claude/settings.json in sync after every git pull when symlinks are unavailable.
+repo="`$(git rev-parse --show-toplevel)"
+dest="`${CLAUDE_CONFIG_DIR:-`$HOME/.claude}/settings.json"
+if [ -f "`$repo/settings.json" ] && [ ! -L "`$dest" ]; then
+  cp "`$repo/settings.json" "`$dest" && echo "claude-settings: refreshed `$dest"
+fi
+exit 0
+"@
+    $hook = $hook -replace "`r`n", "`n"
+    [System.IO.File]::WriteAllText($hookPath, $hook, (New-Object System.Text.UTF8Encoding $false))
+    Log "installed git post-merge hook; from now on 'git pull' also refreshes settings.json. No re-run needed."
+}
+
 # ---- CLAUDE.md pointer -------------------------------------------------------------------------
 # Forward slashes: the @import parser is happier with them than with backslashes.
 $Pointer  = '@' + (($RepoDir -replace '\\', '/').TrimEnd('/')) + '/CLAUDE.md'
@@ -54,5 +81,5 @@ try {
 } catch {
     Copy-Item $SrcJson $TargetJson
     Log "symlink not permitted (enable Windows Developer Mode, or run as admin); copied instead."
-    Log "re-run install.ps1 after each git pull to refresh settings.json. CLAUDE.md needs no re-run."
+    Install-PostMergeHook
 }
