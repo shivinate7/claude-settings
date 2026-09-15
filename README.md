@@ -68,6 +68,15 @@ variable on the environment.
 Verify in a cloud session: `/context` for the memory file, and ask Claude to run
 `echo $CLAUDE_CODE_SUBAGENT_MODEL` (expect `sonnet`).
 
+## Local auto-pull
+
+`settings.json` carries a `SessionStart` hook that runs at every local session start. It reads
+the `@` pointer in `~/.claude/CLAUDE.md` to find the clone, then runs a quiet `git pull --ff-only`
+there. It exits at once in cloud sessions (`CLAUDE_CODE_REMOTE` is set), prints nothing, and never
+blocks a session: no network, no clone, or a diverged branch all fall through silently. Because
+CLAUDE.md is read before hooks finish, a change pulled this way lands one session late. The cloud
+installer replaces this hook with its own refresh hook, so it never runs in the cloud.
+
 ## Editing
 
 Edit `CLAUDE.md` or `settings.json` here, commit, push. Local picks it up on `git pull`; cloud

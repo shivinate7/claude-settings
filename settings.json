@@ -31,6 +31,18 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -n \"$CLAUDE_CODE_REMOTE\" ] && exit 0; d=$(sed -n \"s|^@\\(.*\\)/CLAUDE\\.md$|\\1|p\" \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md\" | head -n1); case \"$d\" in \"~\"/*) d=\"$HOME${d#\\~}\";; esac; [ -n \"$d\" ] && [ -d \"$d/.git\" ] && git -C \"$d\" pull -q --ff-only >/dev/null 2>&1; exit 0",
+            "timeout": 20
+          }
+        ]
+      }
     ]
   }
 }
