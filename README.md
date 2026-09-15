@@ -28,7 +28,9 @@ Result:
   Nothing to re-run.
 * `~\.claude\settings.json` is a symlink to the clone's `settings.json`. Symlinks need Windows
   Developer Mode (Settings > System > For developers) or an admin shell. Without it the script
-  copies the file instead and you re-run `install.ps1` after each pull.
+  copies the file instead and installs a git `post-merge` hook in the clone that re-copies it
+  after every `git pull`, so pull is still the only update step. The hook is a bandaid; once
+  Developer Mode is on, re-run `install.ps1` once to get the real symlink.
 * Any existing `~\.claude\CLAUDE.md` or `settings.json` is backed up as `*.bak.<timestamp>`
   first. Merge keys you want to keep (for example a `permissions.allow` list Claude Code built up
   from "always allow") into the repo's `settings.json`, then commit.
