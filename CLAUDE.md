@@ -9,7 +9,8 @@ into a hook or check. This file is the fallback, not the enforcement.
 
 **Roles, if this session can spawn agents.** The parent session is the orchestrator:
 the top reasoning model that plans, briefs, verifies, and reports. Let a builder model
-implement. Read-only agents explore only. The orchestrator never edits product code.
+implement. Subagents run on Sonnet. Before you pass a stronger model, give me the case in
+one line; the permission prompt that follows is my decision. Read-only agents explore only. The orchestrator never edits product code.
 Brief the task, its files, the governing decisions,
 and the check that proves the task done. Quote the target entry's first sentence, never
 paraphrase it. State which later orchestrator instructions may widen the brief. Ask

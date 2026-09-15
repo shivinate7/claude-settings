@@ -78,6 +78,16 @@ Code reads CLAUDE.md after SessionStart hooks finish (measured: a hook that rewr
 changed the same session's first answer), so a pulled change is live in that very session. The
 cloud installer replaces this hook with its own refresh hook, so it never runs in the cloud.
 
+## Subagent model gate
+
+`CLAUDE_CODE_SUBAGENT_MODEL=sonnet` is only a default: a model Claude passes when it spawns a
+subagent, or a `model` field in an agent definition, outranks it. A `PreToolUse` hook on the
+`Agent` tool closes the first gap. When the spawn names a model other than Sonnet or Haiku, the
+hook returns `ask`, so a permission prompt appears, in auto mode too, and you decide. CLAUDE.md
+tells the orchestrator to make its case in one line before such a spawn. Definition-level models
+in agent files are not caught; set `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` if you want those pinned
+to Sonnet as well, at the cost of removing the ask path.
+
 ## Editing
 
 Edit `CLAUDE.md` or `settings.json` here, commit, push. Local picks it up on `git pull`; cloud
