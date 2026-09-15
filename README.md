@@ -83,5 +83,6 @@ cloud installer replaces this hook with its own refresh hook, so it never runs i
 Edit `CLAUDE.md` or `settings.json` here, commit, push. Local picks it up on `git pull`; cloud
 picks it up on the next session start.
 
-Keep hooks out of `settings.json`: the cloud install generates its own, and a hook written for
-bash would error in a Windows local session.
+Hooks in `settings.json` run everywhere the file lands. Command hooks use `sh` syntax, which Git
+Bash runs on Windows; guard anything local-only with `CLAUDE_CODE_REMOTE`. The cloud install
+replaces the `SessionStart` list with its own refresh hook and leaves every other event alone.
