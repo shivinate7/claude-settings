@@ -29,7 +29,10 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-GUARD = os.path.join(HERE, "guard.py")
+# GUARD_UNDER_TEST points the suite at another copy of the guard, such as a `.bak` copy carrying
+# one mutation. A mutation test then needs no copy of this file, so the cases cannot drift from the
+# cases that pass.
+GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(HERE, "guard.py")
 
 # Assembled, so this file never holds the token whole.
 ENV = "." + "env"
@@ -335,6 +338,10 @@ add("env: NotebookEdit of a variant", "deny", "env-file", tool="NotebookEdit", c
     notebook_path=slash(os.path.join(PROJ, ENV + ".ipynb")))
 add("env: Grep naming the file by path", "deny", "env-file", tool="Grep", cwd=NOGIT,
     path=slash(os.path.join(PROJ, ENV + ".local")))
+# The reviewer's own payload, pinned by name. Every refused case is checked for a leaked file
+# name, and this one holds the exact shape the review asked for.
+add("env: a Read outside the fixtures, and the reason names no file", "deny", "env-file",
+    tool="Read", cwd="C:/repo", file_path="C:/repo/" + ENV)
 add("env: Read of the example file", "allow", tool="Read", cwd=NOGIT,
     file_path=slash(os.path.join(PROJ, ENV + ".example")))
 add("env: Edit of the example file", "allow", tool="Edit", cwd=NOGIT,
@@ -671,8 +678,58 @@ def log_case():
     return True, "one line, and nothing for the allow"
 
 
+# --------------------------------------------------------------------------- the reason hygiene
+#
+# CLAUDE.md: "A refusal's printed remedy never names the forbidden target." The WHOLE printed
+# reason is covered, not its last sentence, so no refusal may carry the file it refused. This is
+# checked on every refused case rather than on a few, because one interpolated name is the whole
+# defect and it can enter through any rule.
+FORBIDDEN_IN_A_REASON = (ENV, ROOT, slash(ROOT), "settings.json", "CLAUDE.md", "guard.py",
+                         ".claude")
+
+
+def names_the_target(reason):
+    """Return the first forbidden fragment the printed reason carries, else ''."""
+    for fragment in FORBIDDEN_IN_A_REASON:
+        if fragment and fragment in reason:
+            return fragment
+    return ""
+
+
+def log_env_case():
+    """A refused environment file reaches the log, although it never reaches the reason.
+
+    The reason is generic on purpose, so the log is the only place a person can still read WHICH
+    file fired. A guard that hid both would refuse and explain nothing.
+    """
+    folder = os.path.join(ROOT, "envlog")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "guard.log")
+    if os.path.exists(path):
+        os.remove(path)
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    result = subprocess.run(
+        [sys.executable, GUARD],
+        input=json.dumps({"tool_name": "Read",
+                          "tool_input": {"file_path": "C:/repo/" + ENV},
+                          "cwd": "C:/repo"}),
+        capture_output=True, text=True, env=env, timeout=60,
+    )
+    if ENV in result.stdout:
+        return False, "the printed output names the file"
+    if not os.path.exists(path):
+        return False, "no log file was written"
+    with open(path, encoding="utf-8") as handle:
+        lines = [line for line in handle.read().splitlines() if line.strip()]
+    if len(lines) != 1 or ENV not in lines[0].split("\t")[-1]:
+        return False, "the log line does not carry the path"
+    return True, "generic on stdout, named in the log"
+
+
 def main():
-    print("guard cases, %d in all" % (len(CASES) + 1))
+    total = len(CASES) + 2
+    print("guard cases, %d in all" % total)
     print("fixtures under " + ROOT)
     print()
     failed = 0
@@ -683,18 +740,23 @@ def main():
         if ok and case["rule"] and case["rule"] not in reason:
             ok = False
             note = "  (the reason does not name rule %r: %s)" % (case["rule"], reason[:90])
+        elif ok and got != "allow" and names_the_target(reason):
+            ok = False
+            note = "  (the reason names the forbidden target %r)" % names_the_target(reason)
         elif not ok:
             note = "  (%s)" % reason[:110] if reason else ""
         failed += 0 if ok else 1
         print("%s  %-6s(want %-6s)  [%-11s] %s%s" % (
             "PASS" if ok else "FAIL", got, case["expected"], case["tool"], case["name"], note))
-    ok, note = log_case()
-    failed += 0 if ok else 1
-    print("%s  %-6s(want %-6s)  [%-11s] %s  (%s)" % (
-        "PASS" if ok else "FAIL", "logged" if ok else "wrong", "logged", "Bash",
-        "log: one line per refusal and none for an allow", note))
+    for label, checker in (
+        ("log: one line per refusal and none for an allow", log_case),
+        ("log: the refused file is named in the log and nowhere else", log_env_case),
+    ):
+        ok, note = checker()
+        failed += 0 if ok else 1
+        print("%s  %-6s(want %-6s)  [%-11s] %s  (%s)" % (
+            "PASS" if ok else "FAIL", "logged" if ok else "wrong", "logged", "Bash", label, note))
     print()
-    total = len(CASES) + 1
     shutil.rmtree(ROOT, ignore_errors=True)
     if failed:
         print("test_guard FAIL: %d of %d cases wrong" % (failed, total))

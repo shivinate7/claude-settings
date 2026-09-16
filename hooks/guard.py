@@ -469,6 +469,25 @@ ENV_ADVICE = (
     "A listing and a test for existence are allowed."
 )
 
+# THE PRINTED REASONS, AND NONE OF THEM NAMES A FILE. Each one says which shape of access fired,
+# so the reader knows what to change, and the log carries the file name for a person to read.
+ENV_REDIRECT_REASON = "a redirect would overwrite an environment file"
+ENV_VARIABLE_REASON = (
+    "a shell variable holds the path of an environment file, and the guard cannot follow "
+    "a variable to where it is used"
+)
+ENV_RUNNER_REASON = (
+    "only a runner may be handed an environment file with the loader flag, and this command "
+    "is not a runner"
+)
+ENV_CONTENTS_REASON = (
+    "this command would read, write or commit the contents of an environment file"
+)
+ENV_TOOL_REASON = (
+    "an environment file holds the user's own secrets, and this tool would put the contents "
+    "in the session"
+)
+
 # One shell segment for the environment layer, ported whole. It breaks on `&` as well, because a
 # background job is its own command.
 SEGMENT_BREAK = re.compile(r"\|\||&&|[;\n|&]")
@@ -499,8 +518,15 @@ def env_reference(word: str) -> str:
     return word
 
 
-def env_refusal(cmd: str) -> str:
-    """Return why the command must be refused for touching an environment file, else ''.
+def env_refusal(cmd: str):
+    """Return (printed reason, logged text) when the command touches an environment file.
+
+    Both are the empty string when the command is clean.
+
+    THE PRINTED REASON NAMES NO FILE. CLAUDE.md: "A refusal's printed remedy never names the
+    forbidden target." The whole printed reason is covered, not the last sentence of it, so the
+    reason says that an environment file was named and nothing more. The file name, the flag and
+    the command word go to the log, where a person can read them and a session cannot.
 
     The command arrives with its own separators intact. Normalizing them is what made a search for
     the environment accessor read as a path.
@@ -524,25 +550,27 @@ def env_refusal(cmd: str) -> str:
             previous = words[index - 1] if index else ""
             # A redirect onto the file overwrites it, whatever the command turns out to be.
             if REDIRECT.fullmatch(previous):
-                return "a redirect onto '%s' would overwrite the file" % named
+                return (ENV_REDIRECT_REASON,
+                        "a redirect onto '%s' would overwrite the file" % named)
             # A shell variable holding the path. The assignment reads nothing, but the guard cannot
             # follow the variable to its use, so `E=.env; cat $E` would be a one-line way past this
             # whole layer.
             if assigned and not flag:
-                return ("a shell variable holding '%s' is refused, because the guard cannot "
-                        "follow it to where it is used" % named)
+                return (ENV_VARIABLE_REASON,
+                        "a shell variable holds '%s'" % named)
             loaded = flag in ENV_LOADER_FLAGS or previous in ENV_LOADER_FLAGS
             if loaded and command.lower() in ENV_LOADER_COMMANDS:
                 continue  # a runner loading it into its own environment prints nothing
             if loaded:
-                return "only a runner may be handed '%s' with %s, and '%s' is not one" % (
-                    named, flag or previous, command,
-                )
+                return (ENV_RUNNER_REASON,
+                        "only a runner may be handed '%s' with %s, and '%s' is not one" % (
+                            named, flag or previous, command))
             if command in ENV_EXISTENCE_COMMANDS:
                 continue  # asking whether the file is there reads none of it
             actor = "'%s'" % command if command else "this command"
-            return "%s would read, write or commit the contents of '%s'" % (actor, named)
-    return ""
+            return (ENV_CONTENTS_REASON,
+                    "%s would read, write or commit the contents of '%s'" % (actor, named))
+    return "", ""
 
 
 def is_env(path: str) -> bool:
@@ -807,9 +835,9 @@ def judge_shell(tool: str, raw: str, cwd: str) -> None:
                        "git push " + " ".join(args))
 
     # 4. The environment file. This layer reads the command BEFORE normalization.
-    refusal = env_refusal(stripped)
+    refusal, logged = env_refusal(stripped)
     if refusal:
-        refuse(tool, "deny", "env-file", refusal + ". " + ENV_ADVICE, refusal)
+        refuse(tool, "deny", "env-file", refusal + ". " + ENV_ADVICE, logged)
 
     # 5. A merge into main.
     if GH_PR_MERGE.search(cmd):
@@ -856,12 +884,10 @@ def judge(payload) -> None:
         return
 
     # 4. The environment file. Every matched tool is refused, a read included, because the rule is
-    # about the contents and a read is contents.
+    # about the contents and a read is contents. The reason names no file, and the log holds the
+    # path the tool asked for.
     if is_env(target):
-        refuse(tool, "deny", "env-file",
-               "a '%s' file holds the user's own secrets, and this tool would put the "
-               "contents in the session. " % norm(target).rsplit("/", 1)[-1] + ENV_ADVICE,
-               target)
+        refuse(tool, "deny", "env-file", ENV_TOOL_REASON + ". " + ENV_ADVICE, target)
 
     # 6. A frozen path. A read-only tool may look, because reading the hook is how anyone finds out
     # what it does. A writing tool may not.
