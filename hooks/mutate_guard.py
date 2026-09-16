@@ -16,9 +16,9 @@ Run:
     python hooks/mutate_guard.py
 
 Ported from a prior run at
-.../scratchpad/mutate3.py (fourteen mutations), plus three added for rules
-guard.py grew since that run: the live-stream rule and the REDIRECTION strip
-in git_calls.
+.../scratchpad/mutate3.py (fourteen mutations), plus four added for rules
+guard.py grew since that run: the live-stream rule, the REDIRECTION strip
+in git_calls, and the Decision 7 config-edit log line.
 """
 
 import os
@@ -98,6 +98,13 @@ MUTATIONS = [
     ("git-call parsing: drop the redirect strip before tokenizing",
      '    tokens = REDIRECTION.sub(" ", segment).split()',
      '    tokens = segment.split()'),
+    ("config-edit: stop noting project config edits, shell tool",
+     '    matched = project_config_shell_hit(stripped, cwd)\n'
+     '    if matched:\n'
+     '        record(tool, "noted", "config-edit", matched)',
+     '    matched = project_config_shell_hit(stripped, cwd)\n'
+     '    if False:\n'
+     '        record(tool, "noted", "config-edit", matched)'),
 ]
 
 
