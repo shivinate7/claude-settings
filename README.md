@@ -7,11 +7,13 @@ sessions started from the desktop app / claude.ai/code.
 | --------------- | ---------------------------------------------------- |
 | `CLAUDE.md`     | `~/.claude/CLAUDE.md` (via a one-line `@` import)    |
 | `settings.json` | `~/.claude/settings.json` (symlink locally, generated copy in the cloud) |
+| `agents/*.md`   | `~/.claude/agents/*.md` (symlink per file locally, copies in the cloud) |
 | `install.sh`    | Wiring for Linux/macOS and for the cloud setup script |
 | `install.ps1`   | Wiring for Windows                                   |
 
-`settings.json` sets `outputStyle: "Concise"` (built-in style, needs Claude Code v2.1.237+) and
-`CLAUDE_CODE_SUBAGENT_MODEL=sonnet`.
+`settings.json` sets `outputStyle: "Concise"` (built-in style, needs Claude Code v2.1.237+),
+`CLAUDE_CODE_SUBAGENT_MODEL=sonnet`, `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`, and
+`worktree.baseRef: "head"`.
 
 ## Local machine (Windows)
 
@@ -26,11 +28,12 @@ Result:
 * `~\.claude\CLAUDE.md` contains one line, `@C:/src/claude-settings/CLAUDE.md`. Claude Code
   resolves `@` imports at session start, so after `git pull` the next session reads the new file.
   Nothing to re-run.
-* `~\.claude\settings.json` is a symlink to the clone's `settings.json`. Symlinks need Windows
-  Developer Mode (Settings > System > For developers) or an admin shell. Without it the script
-  copies the file instead and installs a git `post-merge` hook in the clone that re-copies it
-  after every `git pull`, so pull is still the only update step. The hook is a bandaid; once
-  Developer Mode is on, re-run `install.ps1` once to get the real symlink.
+* `~\.claude\settings.json` is a symlink to the clone's `settings.json`, and each
+  `~\.claude\agents\<role>.md` is a symlink to the clone's `agents\<role>.md`. Symlinks need
+  Windows Developer Mode (Settings > System > For developers) or an admin shell. Without it the
+  script copies the files instead and installs a git `post-merge` hook in the clone that
+  re-copies them after every `git pull`, so pull is still the only update step. The hook is a
+  bandaid; once Developer Mode is on, re-run `install.ps1` once to get the real symlinks.
 * Any existing `~\.claude\CLAUDE.md` or `settings.json` is backed up as `*.bak.<timestamp>`
   first. Merge keys you want to keep (for example a `permissions.allow` list Claude Code built up
   from "always allow") into the repo's `settings.json`, then commit.
@@ -53,6 +56,7 @@ Leave network access at **Trusted** (or add `raw.githubusercontent.com` to a Cus
 This runs as root before Claude starts and writes:
 
 * `/root/.claude/CLAUDE.md` = `@~/claude-settings/CLAUDE.md`
+* `/root/.claude/agents/builder.md` and `reviewer.md` = copies of the repo files
 * `/root/.claude/settings.json` = repo `settings.json` plus a `SessionStart` hook that re-runs
   the same one-liner, so each new or resumed session re-fetches both files.
 
@@ -88,10 +92,44 @@ tells the orchestrator to make its case in one line before such a spawn. Definit
 in agent files are not caught; set `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` if you want those pinned
 to Sonnet as well, at the cost of removing the ask path.
 
+## Roles
+
+CLAUDE.md names three worker roles; two are shipped here as user-level agent definitions, the
+third is Claude Code's built-in `Explore`.
+
+| Role       | File                 | Tools                                   | Tree                       |
+| ---------- | -------------------- | --------------------------------------- | -------------------------- |
+| `builder`  | `agents/builder.md`  | all                                     | own worktree, from `head`  |
+| `reviewer` | `agents/reviewer.md` | all except `Edit`, `Write`, `NotebookEdit` | caller's checkout       |
+| `Explore`  | built in             | read-only                               | caller's checkout          |
+
+`worktree.baseRef: "head"` makes a builder's worktree branch from the orchestrator's current
+branch instead of `main`, so a second-round builder sees the first round's commits. A worktree
+holds tracked files only: a repo with heavy dependencies adds a `.worktreeinclude` for its env
+files and an install step to the brief.
+
+**Workers never spawn.** `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` removes the `Agent` tool
+from every subagent, so only the main conversation fans out. Reason, as of September 2026: a
+nested child's completion notice is delivered to the main conversation or dropped instead of
+reaching the subagent that launched it, and that subagent then waits forever
+([anthropics/claude-code#75043](https://github.com/anthropics/claude-code/issues/75043),
+[#86782](https://github.com/anthropics/claude-code/issues/86782),
+[#88545](https://github.com/anthropics/claude-code/issues/88545)). Claude Code's cloud
+environment already runs at depth 1; this setting makes local sessions match. A repo that needs
+nesting sets a higher depth in its own `.claude/settings.json` and records the stall risk in its
+CLAUDE.md. Re-check those issues before raising it here.
+
+A project-level `.claude/agents/builder.md` with the same `name` shadows the user-level file, so
+a repo can specialize a role and note the change in its CLAUDE.md.
+
 ## Editing
 
 Edit `CLAUDE.md` or `settings.json` here, commit, push. Local picks it up on `git pull`; cloud
 picks it up on the next session start.
+
+A new role is a new `agents/<name>.md`. Locally, re-run the installer once so the symlink exists;
+in copy mode the post-merge hook picks the file up on the next pull. Cloud picks it up on the next
+session start.
 
 Hooks in `settings.json` run everywhere the file lands. Command hooks use `sh` syntax, which Git
 Bash runs on Windows; guard anything local-only with `CLAUDE_CODE_REMOTE`. The cloud install

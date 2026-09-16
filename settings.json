@@ -16,7 +16,11 @@
   "skipWorkflowUsageWarning": true,
   "outputStyle": "Concise",
   "env": {
-    "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"
+    "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
+    "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "1"
+  },
+  "worktree": {
+    "baseRef": "head"
   },
   "hooks": {
     "Stop": [
@@ -50,7 +54,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "m=$(grep -o \"\\\"model\\\"[[:space:]]*:[[:space:]]*\\\"[^\\\"]*\\\"\" | head -n1 | sed \"s/.*:[[:space:]]*\\\"\\(.*\\)\\\"/\\1/\"); case \"$m\" in \"\"|*sonnet*|*haiku*) exit 0;; esac; printf \"{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"PreToolUse\\\",\\\"permissionDecision\\\":\\\"ask\\\",\\\"permissionDecisionReason\\\":\\\"Subagent model %s is above the Sonnet default. Approve only if the orchestrator made its case in the message above.\\\"}}\\n\" \"$m\"",
+            "command": "in=$(cat); m=$(printf \"%s\" \"$in\" | grep -o \"\\\"model\\\"[[:space:]]*:[[:space:]]*\\\"[^\\\"]*\\\"\" | head -n1 | sed \"s/.*:[[:space:]]*\\\"\\(.*\\)\\\"/\\1/\"); case \"$m\" in \"\"|*sonnet*|*haiku*) exit 0;; esac; printf \"{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"PreToolUse\\\",\\\"permissionDecision\\\":\\\"ask\\\",\\\"permissionDecisionReason\\\":\\\"Subagent model %s is above the Sonnet default. Approve only if the orchestrator made its case in the message above.\\\"}}\\n\" \"$m\"",
             "timeout": 10
           }
         ]
