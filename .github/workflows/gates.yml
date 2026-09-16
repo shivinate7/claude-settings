@@ -1,0 +1,49 @@
+name: gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      full_ste_audit:
+        description: Run the STE linter over every file, report only, never fail the build.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Guard fixture suite
+        run: python3 hooks/test_guard.py
+
+      - name: Stop-hook gate fixture suite
+        run: python3 lint/test_gates.py
+
+      - name: Shell syntax check, install.sh
+        run: bash -n install.sh
+
+      - name: PowerShell syntax check, install.ps1
+        shell: pwsh
+        run: |
+          $e = $null
+          [System.Management.Automation.Language.Parser]::ParseFile('install.ps1', [ref]$null, [ref]$e)
+          if ($e) { $e; exit 1 }
+
+      - name: STE lint
+        uses: ./actions/ste-lint
+        with:
+          scope: ${{ inputs.full_ste_audit && 'all' || 'changed' }}
+          fail: ${{ !inputs.full_ste_audit }}
