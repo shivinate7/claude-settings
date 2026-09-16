@@ -30,7 +30,9 @@ LABEL_RE = re.compile(r"^\*\*(.+?)\*\*")
 BLOCK_REASON = (
     "This turn landed a commit, push, or merge. End with the report: one blockquote, "
     "bold labels Done, Deviations, Input Needed, Next in that order, drop a label that "
-    "does not apply, no code fence, nothing above or below."
+    "does not apply, no code fence, nothing above or below. Write it tight and concise, "
+    "in Simplified Technical English: short sentences, no semicolons, no contractions, "
+    "no Latin abbreviations."
 )
 
 
