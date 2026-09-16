@@ -614,7 +614,8 @@ _PROTECT = [
     (re.compile(r"\b[A-Z]\.(?=[A-Z]\.)"), None),
 ]
 
-SENTENCE_SPLIT = re.compile(r'(?<=[.!?])["\')\]]?\s+')
+# claude-settings patch: a sentence end inside bold or italic markers also splits
+SENTENCE_SPLIT = re.compile(r'(?<=[.!?])(?:\*\*|[*_])?["\')\]]?\s+')
 LIST_COLON_SPLIT = re.compile(r"(?<=:)\s+")
 
 
