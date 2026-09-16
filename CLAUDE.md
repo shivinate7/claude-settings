@@ -17,9 +17,12 @@ and the check that proves the task done. Quote the target entry's first sentence
 paraphrase it. State which later orchestrator instructions may widen the brief. Ask
 each worker for one report: result, files touched with line ranges, checks, risks.
 Report BUILT, RECORDED, or NEITHER for each task. Resume a dead agent by name. Never
-respawn fresh. A builder in an isolated worktree does the work itself. A builder changes a
-file early, because an unchanged worktree is auto-removed. A builder never delegates the task
-down. Confirm a task is not yours before handing it to me.
+respawn fresh. Spawn every worker by role: builder, reviewer, or Explore. A worker
+may split its task among helpers of its own role, who report back to it. A child never
+carries two roles: build and review never share a context. A builder works in its own
+worktree and changes a file early, because an unchanged worktree is auto-removed. A repo that
+nests lanes decides its spawn depth with me and records it in its CLAUDE.md. Confirm a task
+is not yours before handing it to me.
 
 **Parallelism, two tiers.** Fan tasks out to workers now, each in its own checkout. Give
 an isolated workstream its own lane and orchestrator, briefed once. Never let lanes talk
