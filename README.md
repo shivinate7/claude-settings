@@ -37,9 +37,11 @@ Result:
   Windows Developer Mode (Settings > System > For developers) or an admin shell. Without it the
   script copies the files instead, and installs a git `post-merge` hook in the clone. The loop
   is then: a merge lands on main, the next local session start pulls the clone, and the hook
-  copies `settings.json`, `agents\*`, and `lint\*`. The hook also re-runs `install.ps1` when the
-  pull changed it. A new landed folder or a changed hook body then needs no manual run. Both the
-  hook and `install.ps1` log one dated line per run to `~\.claude\claude-settings-install.log`.
+  copies `settings.json`, `agents\*`, and `lint\*`. The hook copies only when the checked-out
+  branch is `main`, so merging an unreviewed branch elsewhere never pushes its settings live.
+  The hook also re-runs `install.ps1` when the pull changed it. A new landed folder or a changed
+  hook body then needs no manual run. Both the hook and `install.ps1` log one dated line per run
+  to `~\.claude\claude-settings-install.log`.
   The hook is a bandaid. When Developer Mode is on, re-run `install.ps1` once to get the real
   symlinks.
 * Any existing `~\.claude\CLAUDE.md` or `settings.json` is backed up as `*.bak.<timestamp>`
@@ -256,9 +258,11 @@ picks it up on the next session start.
 A new role is a new `agents/<name>.md`. A linter change is a change to `lint/`. A guard change is
 a change to `hooks/`. Locally, re-run the installer once so the symlink exists. In copy mode, the
 post-merge hook copies `settings.json`, `agents\*`, `lint\*`, and `hooks\*` on the next pull. It
-also re-runs `install.ps1` itself when the pull changed it. So a new landed folder or a changed
-hook body needs no manual run. Check `~\.claude\claude-settings-install.log` for a dated line
-from each run. Cloud picks it up on the next session start.
+copies only when the checked-out branch is `main`, so a merge on any other branch leaves
+`~\.claude` untouched. It also re-runs `install.ps1` itself when the pull changed it. So a new
+landed folder or a changed hook body needs no manual run. Check
+`~\.claude\claude-settings-install.log` for a dated line from each run. Cloud picks it up on the
+next session start.
 
 Hooks in `settings.json` run everywhere the file lands. Command hooks use `sh` syntax, which Git
 Bash runs on Windows. Guard anything local-only with `CLAUDE_CODE_REMOTE`. The cloud install

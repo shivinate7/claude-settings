@@ -44,7 +44,13 @@ $marker
 # Keeps ~/.claude/settings.json, ~/.claude/agents/*, and ~/.claude/lint/* in sync after every
 # git pull when symlinks are unavailable. Re-runs install.ps1 when the pull changed it, so a
 # changed installer or hook body still lands without a manual re-run.
+# Runs only when the checked-out branch is main, so a local merge of an unreviewed branch
+# (into any other branch) never pushes its settings.json into ~/.claude.
 repo="`$(git rev-parse --show-toplevel)"
+branch="`$(git rev-parse --abbrev-ref HEAD)"
+if [ "`$branch" != "main" ]; then
+  exit 0
+fi
 cfg="`${CLAUDE_CONFIG_DIR:-`$HOME/.claude}"
 log="`$cfg/claude-settings-install.log"
 if git rev-parse -q --verify ORIG_HEAD >/dev/null 2>&1 \
@@ -72,7 +78,7 @@ exit 0
     $tmpPath = Join-Path $hooksDir 'post-merge.tmp'
     [System.IO.File]::WriteAllText($tmpPath, $hook, (New-Object System.Text.UTF8Encoding $false))
     Move-Item -Force $tmpPath $hookPath
-    Log "installed git post-merge hook; 'git pull' now refreshes settings.json, agents, and lint, and reruns install.ps1 when it changed."
+    Log "installed git post-merge hook; 'git pull' on main now refreshes settings.json, agents, and lint, and reruns install.ps1 when it changed. Merges on other branches are skipped."
     return 'installed'
 }
 
