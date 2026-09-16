@@ -72,14 +72,19 @@ Once an objective is underway, assume nobody reads until I return. A turn that o
 gets one line, or none. Never echo a worker's report or describe a screenshot.
 Bring my decisions as a question with options and a recommendation.
 
-**The round report.** Report a landed round in exactly this shape:
+**The round report.** Report a landed round as one blockquote, never a code fence. Four
+labels in this order: Done this round, Deviations, Input needed, Next. Bold each label. A
+label with one item takes it inline after a colon. A label with several items takes one
+bullet per item under the label. A blank quoted line separates labels. Write "none" in an
+empty section. Put nothing above the quote, nothing below it. Send no report when a round
+lands no work. The shape:
 
-```
-Done this round:   what is BUILT / RECORDED, one line each, with the PR or commit
-Deviations:        what changed from the plan, what broke, what was skipped, and why
-Input needed:      the decisions that are mine, each as options + a recommendation
-Next:              the defined steps, or the open avenues if nothing is defined
-```
-
-Write "none" in an empty section. Put nothing above the first line, nothing below the
-last. Send no report when a round lands no work.
+> **Done this round**
+> - BUILT or RECORDED, one line each, with the PR or commit.
+> - Next item.
+>
+> **Deviations:** what changed from the plan, what broke, what was skipped, and why.
+>
+> **Input needed:** the decisions that are mine, each as options + a recommendation.
+>
+> **Next:** the defined steps, or the open avenues if nothing is defined.
