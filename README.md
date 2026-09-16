@@ -125,13 +125,14 @@ a repo can specialize a role and note the change in its CLAUDE.md.
 
 ## STE lint gate
 
-CLAUDE.md asks for Simplified Technical English. Two hooks in `settings.json` enforce the
-part a machine can check, at error severity only:
+CLAUDE.md asks for Simplified Technical English and a fixed report shape. Three hooks in
+`settings.json` enforce the parts a machine can check, at error severity only:
 
 | Hook | Trigger | Effect |
 | --- | --- | --- |
 | `PreToolUse` on `Write`, `Edit`, `MultiEdit` | the target path ends in `.md` | the write is denied and the findings come back, so Claude fixes the text and writes again |
-| `Stop` | end of a turn | the turn is blocked once and Claude rewrites the reply. The rewrite passes even if it still has findings |
+| `Stop` | end of a turn | a warning is shown as a system message. The turn is not blocked |
+| `Stop` | the turn ran `git commit`, `git push`, `git merge`, or a GitHub MCP write tool | the turn is blocked once unless the reply is one blockquote with the bold labels Done, Deviations, Input Needed, Next in order |
 
 Errors are: a sentence over the STE budget (STE001), a semicolon (STE006), a Latin
 abbreviation such as `i.e.` (STE007), a contraction (STE008). Warnings such as passive voice
@@ -140,9 +141,13 @@ and paragraph length are not gated. Fenced code and inline code are exempt. Tabl
 The linter is `lint/ste_lint.py`, vendored from
 [DotDebian/asd-ste100-skill](https://github.com/DotDebian/asd-ste100-skill) at commit
 `e71a969`, MIT, license in `lint/LICENSE-ste_lint`. It is Python 3.9+ with no dependencies.
-The gate is `lint/ste_gate.py`. The hook command exits silently when the files or Python are
-missing, so a machine without Python runs without the gate. The cloud image has Python 3.11.
-On Windows, install Python and make sure `python3` or `python` is on the PATH of Git Bash.
+The STE gate is `lint/ste_gate.py`. The report gate is `lint/report_gate.py`. It checks the
+shape only, not the wording, and it fires only after a landed commit, push, or merge. Both
+gates share one fixture suite, `lint/test_gates.py`. Its cases are the check that proves each
+gate goes red on the defect it guards. The hook command exits silently when the files or
+Python are missing, so a machine without Python runs without the gates. The cloud image has
+Python 3.11. On Windows, install Python and make sure `python3` or `python` is on the PATH of
+Git Bash.
 
 Run it by hand:
 
