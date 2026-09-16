@@ -7,6 +7,7 @@
 # What it does:
 #   ~/.claude/CLAUDE.md      -> one-line pointer: @<repo>/CLAUDE.md
 #   ~/.claude/agents/*.md    -> role definitions (builder, reviewer): local symlinks, cloud copies
+#   ~/.claude/lint/*         -> STE linter + hook gate: local symlinks, cloud copies
 #   ~/.claude/settings.json  -> local: symlink to <repo>/settings.json
 #                               cloud: generated copy of settings.json plus a SessionStart hook
 #                                      that re-runs this script, so every new cloud session pulls
@@ -35,8 +36,9 @@ if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/CLAUDE.md" ] && [ -f "$SCRIPT_DIR/s
 else
   SRC="$HOME/claude-settings"
   mkdir -p "$SRC"
-  mkdir -p "$SRC/agents"
-  for f in CLAUDE.md settings.json agents/builder.md agents/reviewer.md; do
+  mkdir -p "$SRC/agents" "$SRC/lint"
+  for f in CLAUDE.md settings.json agents/builder.md agents/reviewer.md \
+           lint/ste_lint.py lint/ste_gate.py lint/LICENSE-ste_lint; do
     if curl -fsSL "$RAW/$f" -o "$SRC/$f.tmp"; then
       mv "$SRC/$f.tmp" "$SRC/$f"
     else
@@ -67,28 +69,34 @@ fi
 printf '%s\n' "$POINTER" > "$TARGET_MD"
 log "wrote $TARGET_MD -> $POINTER"
 
-# ---- ~/.claude/agents : role definitions ------------------------------------------------------
-# One file per role (builder, reviewer). Local: per-file symlink. Cloud: copy.
-AGENTS_DIR="$CLAUDE_DIR/agents"
-mkdir -p "$AGENTS_DIR"
-LANDED=""
-for f in "$SRC"/agents/*.md; do
-  [ -f "$f" ] || continue
-  DEST="$AGENTS_DIR/$(basename "$f")"
-  if [ "$CLOUD" = 1 ]; then
-    cp "$f" "$DEST"
-  else
-    if [ -L "$DEST" ] && [ "$(readlink "$DEST")" = "$f" ]; then LANDED="$LANDED $(basename "$f")"; continue; fi
-    if [ -e "$DEST" ] && [ ! -L "$DEST" ]; then
-      BAK="$DEST.bak.$(date +%Y%m%d%H%M%S)"
-      mv "$DEST" "$BAK"
-      log "existing $DEST moved to $BAK"
+# ---- ~/.claude/agents and ~/.claude/lint --------------------------------------------------------
+# agents/: one file per role (builder, reviewer). lint/: the STE linter and its hook gate.
+# Local: per-file symlink. Cloud: copy.
+land_dir() {
+  sub="$1"
+  DEST_DIR="$CLAUDE_DIR/$sub"
+  mkdir -p "$DEST_DIR"
+  LANDED=""
+  for f in "$SRC/$sub"/*; do
+    [ -f "$f" ] || continue
+    DEST="$DEST_DIR/$(basename "$f")"
+    if [ "$CLOUD" = 1 ]; then
+      cp "$f" "$DEST"
+    else
+      if [ -L "$DEST" ] && [ "$(readlink "$DEST")" = "$f" ]; then LANDED="$LANDED $(basename "$f")"; continue; fi
+      if [ -e "$DEST" ] && [ ! -L "$DEST" ]; then
+        BAK="$DEST.bak.$(date +%Y%m%d%H%M%S)"
+        mv "$DEST" "$BAK"
+        log "existing $DEST moved to $BAK"
+      fi
+      ln -sfn "$f" "$DEST"
     fi
-    ln -sfn "$f" "$DEST"
-  fi
-  LANDED="$LANDED $(basename "$f")"
-done
-[ -n "$LANDED" ] && log "agents in $AGENTS_DIR:$LANDED"
+    LANDED="$LANDED $(basename "$f")"
+  done
+  [ -n "$LANDED" ] && log "$sub in $DEST_DIR:$LANDED"
+}
+land_dir agents
+land_dir lint
 
 # ---- ~/.claude/settings.json ------------------------------------------------------------------
 TARGET_JSON="$CLAUDE_DIR/settings.json"

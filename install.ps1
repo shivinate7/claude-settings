@@ -5,9 +5,10 @@
 # What it does:
 #   ~\.claude\CLAUDE.md      -> one-line pointer: @C:/path/to/claude-settings/CLAUDE.md
 #   ~\.claude\agents\*.md    -> role definitions (builder, reviewer), symlink per file
+#   ~\.claude\lint\*         -> STE linter + hook gate (needs python3 on PATH), symlink per file
 #   ~\.claude\settings.json  -> symlink to <clone>\settings.json (needs Developer Mode or admin),
 #                               falls back to a copy plus a git post-merge hook that re-copies
-#                               settings.json and agents\*.md after each git pull.
+#                               settings.json, agents\*.md, and lint\* after each git pull.
 $ErrorActionPreference = 'Stop'
 
 $RepoDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -30,22 +31,23 @@ function Install-PostMergeHook {
     $hook = @"
 #!/bin/sh
 $marker
-# Keeps ~/.claude/settings.json and ~/.claude/agents/*.md in sync after every git pull when
-# symlinks are unavailable.
+# Keeps ~/.claude/settings.json, ~/.claude/agents/*, and ~/.claude/lint/* in sync after every
+# git pull when symlinks are unavailable.
 repo="`$(git rev-parse --show-toplevel)"
 cfg="`${CLAUDE_CONFIG_DIR:-`$HOME/.claude}"
 dest="`$cfg/settings.json"
 if [ -f "`$repo/settings.json" ] && [ ! -L "`$dest" ]; then
   cp "`$repo/settings.json" "`$dest" && echo "claude-settings: refreshed `$dest"
 fi
-if [ -d "`$repo/agents" ]; then
-  mkdir -p "`$cfg/agents"
-  for f in "`$repo"/agents/*.md; do
+for sub in agents lint; do
+  [ -d "`$repo/`$sub" ] || continue
+  mkdir -p "`$cfg/`$sub"
+  for f in "`$repo/`$sub"/*; do
     [ -f "`$f" ] || continue
-    d="`$cfg/agents/`$(basename "`$f")"
+    d="`$cfg/`$sub/`$(basename "`$f")"
     [ -L "`$d" ] || { cp "`$f" "`$d" && echo "claude-settings: refreshed `$d"; }
   done
-fi
+done
 exit 0
 "@
     $hook = $hook -replace "`r`n", "`n"
@@ -69,30 +71,35 @@ if (Test-Path $TargetMd) {
 Set-Content -Path $TargetMd -Value $Pointer -Encoding UTF8 -NoNewline
 Log "wrote $TargetMd -> $Pointer"
 
-# ---- agents\*.md : role definitions -------------------------------------------------------------
-$AgentsSrc = Join-Path $RepoDir 'agents'
-$AgentsDir = Join-Path $ClaudeDir 'agents'
-New-Item -ItemType Directory -Force -Path $AgentsDir | Out-Null
+# ---- agents\ and lint\ : per-file symlinks, copy fallback -----------------------------------------
 $AgentCopied = $false
-foreach ($src in @(Get-ChildItem -Path $AgentsSrc -Filter '*.md' -File -ErrorAction SilentlyContinue)) {
-    $dest = Join-Path $AgentsDir $src.Name
-    $cur  = Get-Item $dest -ErrorAction SilentlyContinue
-    if ($cur -and $cur.LinkType -eq 'SymbolicLink' -and $cur.Target -eq $src.FullName) { continue }
-    if ($cur -and -not $cur.LinkType) {
-        $bak = "$dest.bak.$(Get-Date -Format yyyyMMddHHmmss)"
-        Move-Item $dest $bak
-        Log "existing $dest moved to $bak"
-    } elseif ($cur) {
-        Remove-Item $dest
+foreach ($sub in @('agents', 'lint')) {
+    $srcDir  = Join-Path $RepoDir $sub
+    $destDir = Join-Path $ClaudeDir $sub
+    New-Item -ItemType Directory -Force -Path $destDir | Out-Null
+    foreach ($src in @(Get-ChildItem -Path $srcDir -File -ErrorAction SilentlyContinue)) {
+        $dest = Join-Path $destDir $src.Name
+        $cur  = Get-Item $dest -ErrorAction SilentlyContinue
+        if ($cur -and $cur.LinkType -eq 'SymbolicLink' -and $cur.Target -eq $src.FullName) { continue }
+        if ($cur -and -not $cur.LinkType) {
+            $bak = "$dest.bak.$(Get-Date -Format yyyyMMddHHmmss)"
+            Move-Item $dest $bak
+            Log "existing $dest moved to $bak"
+        } elseif ($cur) {
+            Remove-Item $dest
+        }
+        try {
+            New-Item -ItemType SymbolicLink -Path $dest -Target $src.FullName -ErrorAction Stop | Out-Null
+            Log "linked $dest -> $($src.FullName)"
+        } catch {
+            Copy-Item $src.FullName $dest
+            $AgentCopied = $true
+            Log "copied $dest (symlink not permitted)"
+        }
     }
-    try {
-        New-Item -ItemType SymbolicLink -Path $dest -Target $src.FullName -ErrorAction Stop | Out-Null
-        Log "linked $dest -> $($src.FullName)"
-    } catch {
-        Copy-Item $src.FullName $dest
-        $AgentCopied = $true
-        Log "copied $dest (symlink not permitted)"
-    }
+}
+if (-not (Get-Command python3 -ErrorAction SilentlyContinue) -and -not (Get-Command python -ErrorAction SilentlyContinue)) {
+    Log "python3 not found on PATH; the STE lint gate stays silent on this machine until Python is installed"
 }
 
 # ---- settings.json -----------------------------------------------------------------------------
