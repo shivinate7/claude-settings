@@ -188,6 +188,27 @@ class ReportGateTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0)
         self.assertEqual(run.stdout.strip(), "")
 
+    def test_13_valid_json_not_object_no_output(self):
+        run = run_gate(REPORT_GATE, None, raw_stdin="[1,2,3]")
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_14_stray_non_object_transcript_line_skipped_still_blocks(self):
+        path = os.path.join(self.tmp.name, "transcript.jsonl")
+        lines = [
+            json.dumps(human("do the task")),
+            "5",
+            json.dumps(tool_use_msg("Bash", {"command": "git commit -m x"})),
+            json.dumps(tool_result_msg()),
+            json.dumps(assistant_text("Done BUILT abc123")),
+        ]
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        run = run_gate(REPORT_GATE, self.hook_for(path))
+        self.assertEqual(run.returncode, 0)
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+
 
 class SteGateStopTests(unittest.TestCase):
     def test_11_contraction_warns_no_block(self):
@@ -210,6 +231,11 @@ class SteGateStopTests(unittest.TestCase):
             "last_assistant_message": "I don't think this needs a rewrite.",
         }
         run = run_gate(STE_GATE, hook)
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_15_valid_json_not_object_no_output(self):
+        run = run_gate(STE_GATE, None, raw_stdin="[1,2,3]")
         self.assertEqual(run.returncode, 0)
         self.assertEqual(run.stdout.strip(), "")
 

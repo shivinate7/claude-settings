@@ -58,7 +58,7 @@ def last_reply(hook):
                     rec = json.loads(line)
                 except Exception:
                     continue
-                if rec.get("type") != "assistant":
+                if not isinstance(rec, dict) or rec.get("type") != "assistant":
                     continue
                 parts = [b.get("text", "") for b in (rec.get("message") or {}).get("content", [])
                          if isinstance(b, dict) and b.get("type") == "text"]
@@ -73,6 +73,8 @@ def main():
     try:
         hook = json.load(sys.stdin)
     except Exception:
+        return
+    if not isinstance(hook, dict):
         return
     linter = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ste_lint.py")
     if not os.path.exists(linter):

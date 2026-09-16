@@ -110,6 +110,8 @@ def main():
         hook = json.load(sys.stdin)
     except Exception:
         return
+    if not isinstance(hook, dict):
+        return
     if hook.get("hook_event_name") != "Stop":
         return
     if hook.get("stop_hook_active"):
@@ -127,9 +129,11 @@ def main():
                 if not line:
                     continue
                 try:
-                    records.append(json.loads(line))
+                    rec = json.loads(line)
                 except Exception:
                     continue
+                if isinstance(rec, dict):
+                    records.append(rec)
     except Exception:
         return
 
