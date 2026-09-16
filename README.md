@@ -228,9 +228,11 @@ the whole tree in report mode. That run never fails the build. It only writes a 
 
 `actions/ste-lint` is the composite action behind the STE step. Scope `changed` diffs
 markdown against the pull request base, or the default branch on a push. Scope `all` lints
-every file the `paths` glob names. Input `fail` sets whether an error blocks the step. The
-action always writes a step summary: the file count, the error and warning counts, and a
-table of the first fifty findings.
+every file the `paths` glob names. Input `fail` sets whether an error blocks the step. Input
+`exclude` drops newline- or comma-separated pathspecs from both scopes. Use it for a
+generated file, such as a decision index, the linter should never see. The action always
+writes a step summary. The summary holds the file count, the excluded count, the error and
+warning counts, and a table of the first fifty findings.
 
 A caller pins the action to `@main`:
 
@@ -241,6 +243,7 @@ A caller pins the action to `@main`:
   with:
     scope: changed
     fail: "true"
+    exclude: docs/Decision_Index.md
 ```
 
 The caller needs `actions/checkout` at `fetch-depth: 0`. Scope `changed` diffs against a
