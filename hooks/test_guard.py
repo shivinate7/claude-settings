@@ -213,6 +213,25 @@ sh("checkout: the previous branch", VCS + " checkout -", "allow", cwd=NOGIT)
 sh("checkout: a forced new branch at a commit", VCS + " checkout -B tmp 380d5fc", "allow",
    cwd=NOGIT)
 sh("checkout: tracking a remote branch", VCS + " checkout --track origin/main", "allow", cwd=NOGIT)
+
+# THE REDIRECT FALSE POSITIVE. MEASURED in guard.log: `git checkout origin/claude/pass3-seam 2>&1`
+# was refused while the same call with no redirect passed, because `2>&1` reached
+# `checkout_names_a_path` as a second plain word. A redirect must never change what a `git checkout`
+# call is judged to name.
+sh("checkout: a start point survives a merged-output redirect",
+   VCS + " checkout origin/claude/pass3-seam 2>&1", "allow", cwd=NOGIT)
+sh("checkout: a start point survives a discarded-error redirect",
+   VCS + " checkout main 2>/dev/null", "allow", cwd=NOGIT)
+sh("checkout: a new branch survives a log redirect and merged output",
+   VCS + " checkout -b feat/x origin/feat/x >log.txt 2>&1", "allow", cwd=NOGIT)
+sh("checkout: a status piped onward is not a checkout at all",
+   VCS + " status 2>&1 | head -5", "allow", cwd=NOGIT)
+sh("checkout: a path after the double dash survives a merged-output redirect",
+   VCS + " checkout -- README.md 2>&1", "deny", "shared-tree", cwd=NOGIT)
+sh("checkout: an older commit and a path survive a discarded-output redirect",
+   VCS + " checkout HEAD~1 src/app.py >/dev/null", "deny", "shared-tree", cwd=NOGIT)
+sh("stash: a discarded-error redirect is not a way past the rule",
+   VCS + " stash 2>/dev/null", "deny", "shared-tree", cwd=NOGIT)
 sh("shared tree: reading the tree", VCS + " status --porcelain", "allow", cwd=NOGIT)
 sh("shared tree: a log is not a discard", VCS + " log main..HEAD --oneline", "allow", cwd=NOGIT)
 sh("shared tree: a diff naming a path is not a discard", VCS + " diff --stat main..HEAD -- src/",
