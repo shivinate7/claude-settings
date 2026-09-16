@@ -520,7 +520,7 @@ add("merge: every call of the merge tool asks", "ask", "merge-main",
 for tool in ("Write", "Edit", "MultiEdit"):
     add("frozen: " + tool + " of the config settings", "deny", "frozen-path", tool=tool, cwd=NOGIT,
         file_path=CFG_SETTINGS)
-    add("frozen: " + tool + " of a project settings file", "deny", "frozen-path", tool=tool,
+    add("config-edit: " + tool + " of a project settings file is allowed", "allow", tool=tool,
         cwd=NOGIT, file_path=PROJ_SETTINGS)
 add("frozen: Write of the global CLAUDE.md", "deny", "frozen-path", tool="Write", cwd=NOGIT,
     file_path=CFG_CLAUDEMD)
@@ -530,11 +530,11 @@ add("frozen: Write of a config lint script", "deny", "frozen-path", tool="Write"
     file_path=CFG_LINT)
 add("frozen: Write of a config agent file", "deny", "frozen-path", tool="Write", cwd=NOGIT,
     file_path=CFG_AGENT)
-add("frozen: Edit of a project local settings file", "deny", "frozen-path", tool="Edit", cwd=NOGIT,
-    file_path=PROJ_LOCAL)
-add("frozen: Edit of a project hook", "deny", "frozen-path", tool="Edit", cwd=NOGIT,
+add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
+    cwd=NOGIT, file_path=PROJ_LOCAL)
+add("config-edit: Edit of a project hook is allowed", "allow", tool="Edit", cwd=NOGIT,
     file_path=PROJ_HOOK)
-add("frozen: NotebookEdit of a project hook", "deny", "frozen-path", tool="NotebookEdit",
+add("config-edit: NotebookEdit of a project hook is allowed", "allow", tool="NotebookEdit",
     cwd=NOGIT, notebook_path=PROJ_HOOK)
 # MEASURED on Linux CI 2026-09-16: guard.py's own docstring scopes this equivalence to
 # Windows ("a forward slash, a backslash ... all read the same on Windows"). On POSIX a
@@ -543,7 +543,7 @@ add("frozen: NotebookEdit of a project hook", "deny", "frozen-path", tool="Noteb
 add("frozen: a backslash spelling of the same path",
     "deny" if os.name == "nt" else "allow", "frozen-path" if os.name == "nt" else None,
     tool="Write", cwd=NOGIT, file_path=CFG_SETTINGS.replace("/", "\\"))
-add("frozen: a relative spelling resolved against the cwd", "deny", "frozen-path", tool="Write",
+add("config-edit: a relative spelling resolved against the cwd is allowed", "allow", tool="Write",
     cwd=PROJ, file_path=".claude/settings.json")
 
 add("frozen: a frozen path stays readable", "allow", tool="Read", cwd=NOGIT,
@@ -560,42 +560,42 @@ add("frozen: an ordinary source file", "allow", tool="Edit", cwd=NOGIT, file_pat
 add("frozen: an ordinary project file by absolute path", "allow", tool="Write", cwd=NOGIT,
     file_path=slash(os.path.join(PROJ, "src", "app.py")))
 
-sh("frozen: a redirect onto a project settings file", "echo '{}' > " + PROJ_SETTINGS, "deny",
-   "frozen-path", cwd=NOGIT)
-sh("frozen: an append onto a project settings file", "echo '{}' >> " + PROJ_SETTINGS, "deny",
-   "frozen-path", cwd=NOGIT)
+sh("config-edit: a redirect onto a project settings file is allowed",
+   "echo '{}' > " + PROJ_SETTINGS, "allow", cwd=NOGIT)
+sh("config-edit: an append onto a project settings file is allowed",
+   "echo '{}' >> " + PROJ_SETTINGS, "allow", cwd=NOGIT)
 sh("frozen: a redirect onto the global CLAUDE.md", "echo x > " + CFG_CLAUDEMD, "deny",
    "frozen-path", cwd=NOGIT)
 sh("frozen: a redirect onto a config hook", "cat template.py > " + CFG_HOOK, "deny", "frozen-path",
    cwd=NOGIT)
-sh("frozen: rm of a project settings file", "rm " + PROJ_SETTINGS, "deny", "frozen-path",
+sh("config-edit: rm of a project settings file is allowed", "rm " + PROJ_SETTINGS, "allow",
    cwd=NOGIT)
-sh("frozen: mv of a project settings file", "mv " + PROJ_SETTINGS + " elsewhere.json", "deny",
-   "frozen-path", cwd=NOGIT)
-sh("frozen: chmod of a project hook", "chmod 000 " + PROJ_HOOK, "deny", "frozen-path", cwd=NOGIT)
-sh("frozen: sed -i on a project settings file", "sed -i s/a/b/ " + PROJ_SETTINGS, "deny",
-   "frozen-path", cwd=NOGIT)
-sh("frozen: tee onto a project settings file", "echo x | tee " + PROJ_SETTINGS, "deny",
-   "frozen-path", cwd=NOGIT)
-sh("frozen: truncate of a project hook", "truncate -s 0 " + PROJ_HOOK, "deny", "frozen-path",
+sh("config-edit: mv of a project settings file is allowed",
+   "mv " + PROJ_SETTINGS + " elsewhere.json", "allow", cwd=NOGIT)
+sh("config-edit: chmod of a project hook is allowed", "chmod 000 " + PROJ_HOOK, "allow", cwd=NOGIT)
+sh("config-edit: sed -i on a project settings file is allowed",
+   "sed -i s/a/b/ " + PROJ_SETTINGS, "allow", cwd=NOGIT)
+sh("config-edit: tee onto a project settings file is allowed",
+   "echo x | tee " + PROJ_SETTINGS, "allow", cwd=NOGIT)
+sh("config-edit: truncate of a project hook is allowed", "truncate -s 0 " + PROJ_HOOK, "allow",
    cwd=NOGIT)
-sh("frozen: a heredoc redirected onto a settings file",
-   "cat <<'DOC' > " + PROJ_SETTINGS + "\n{ \"hooks\": {} }\nDOC", "deny", "frozen-path",
+sh("config-edit: a heredoc redirected onto a settings file is allowed",
+   "cat <<'DOC' > " + PROJ_SETTINGS + "\n{ \"hooks\": {} }\nDOC", "allow",
    cwd=NOGIT)
 sh("frozen: a heredoc redirected onto the environment file",
    "cat <<'DOC' > " + ENV + "\nKEY=value\nDOC", "deny", "env-file", cwd=NOGIT)
 
-sh("frozen: PowerShell Set-Content", "Set-Content -Path " + PROJ_SETTINGS + " -Value 'x'", "deny",
-   "frozen-path", tool="PowerShell", cwd=NOGIT)
-sh("frozen: PowerShell Out-File with backslashes",
-   "'x' | Out-File " + PROJ_SETTINGS.replace("/", "\\"), "deny", "frozen-path", tool="PowerShell",
+sh("config-edit: PowerShell Set-Content is allowed",
+   "Set-Content -Path " + PROJ_SETTINGS + " -Value 'x'", "allow", tool="PowerShell", cwd=NOGIT)
+sh("config-edit: PowerShell Out-File with backslashes is allowed",
+   "'x' | Out-File " + PROJ_SETTINGS.replace("/", "\\"), "allow", tool="PowerShell",
    cwd=NOGIT)
-sh("frozen: PowerShell Add-Content", "Add-Content " + PROJ_HOOK + " 'x'", "deny", "frozen-path",
+sh("config-edit: PowerShell Add-Content is allowed", "Add-Content " + PROJ_HOOK + " 'x'", "allow",
    tool="PowerShell", cwd=NOGIT)
-sh("frozen: PowerShell Remove-Item", "Remove-Item " + PROJ_SETTINGS, "deny", "frozen-path",
+sh("config-edit: PowerShell Remove-Item is allowed", "Remove-Item " + PROJ_SETTINGS, "allow",
    tool="PowerShell", cwd=NOGIT)
-sh("frozen: PowerShell Copy-Item", "Copy-Item other.json " + PROJ_SETTINGS, "deny", "frozen-path",
-   tool="PowerShell", cwd=NOGIT)
+sh("config-edit: PowerShell Copy-Item is allowed", "Copy-Item other.json " + PROJ_SETTINGS,
+   "allow", tool="PowerShell", cwd=NOGIT)
 
 # THE THREE MEASURED FALSE POSITIVES of the q_max backstop. Each was a case of judging the TEXT of a
 # command instead of its behaviour.
@@ -619,7 +619,7 @@ sh("frozen: a heredoc writing prose that names the environment file",
 sh("frozen: a leftover token is not a key to the environment rule",
    "DESTRUCTIVE_OK=1 cat " + ENV, "deny", "env-file", cwd=NOGIT)
 sh("frozen: a leftover token is not a key to the frozen rule",
-   "DESTRUCTIVE_OK=1 tee " + PROJ_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+   "DESTRUCTIVE_OK=1 tee " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 sh("frozen: a leftover token is not a key to the shared-tree rule",
    "GIT_DISCARD_OK=1 " + VCS + " restore src", "deny", "shared-tree", cwd=NOGIT)
 sh("frozen: a leftover token is not a key to the push rule",
@@ -721,6 +721,48 @@ def log_case():
     return True, "one line, and nothing for the allow"
 
 
+def config_edit_log_case():
+    """Decision 7: a project config edit is allowed, and logged as `noted`/`config-edit`.
+
+    Three calls that each touch a project's own `.claude` config: an Edit of its settings.json,
+    an Edit of a hook under `.claude/hooks/`, and a Bash append onto its settings.json. Each must
+    print nothing (a silent allow) and each must add one `noted`/`config-edit` line to the log.
+    """
+    folder = os.path.join(ROOT, "cfglog")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "guard.log")
+    if os.path.exists(path):
+        os.remove(path)
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    calls = [
+        {"tool_name": "Edit", "tool_input": {"file_path": PROJ_SETTINGS}, "cwd": NOGIT},
+        {"tool_name": "Edit", "tool_input": {"file_path": PROJ_HOOK}, "cwd": NOGIT},
+        {"tool_name": "Bash", "tool_input": {"command": "echo x >> " + PROJ_SETTINGS},
+         "cwd": NOGIT},
+    ]
+    for payload in calls:
+        result = subprocess.run(
+            [sys.executable, GUARD], input=json.dumps(payload), capture_output=True, text=True,
+            env=env, timeout=60,
+        )
+        if result.returncode != 0:
+            return False, "guard exited %d" % result.returncode
+        if result.stdout.strip():
+            return False, "expected a silent allow, got %r" % result.stdout.strip()[:120]
+    if not os.path.exists(path):
+        return False, "no log file was written for the noted edits"
+    with open(path, encoding="utf-8") as handle:
+        lines = [line for line in handle.read().splitlines() if line.strip()]
+    if len(lines) != 3:
+        return False, "expected three lines, found %d" % len(lines)
+    for line in lines:
+        fields = line.split("\t")
+        if len(fields) != 5 or fields[2] != "noted" or fields[3] != "config-edit":
+            return False, "line does not read noted/config-edit: %r" % line
+    return True, "three noted lines, one per config edit"
+
+
 # --------------------------------------------------------------------------- the reason hygiene
 #
 # CLAUDE.md: "A refusal's printed remedy never names the forbidden target." The WHOLE printed
@@ -771,7 +813,7 @@ def log_env_case():
 
 
 def main():
-    total = len(CASES) + 2
+    total = len(CASES) + 3
     print("guard cases, %d in all" % total)
     print("fixtures under " + ROOT)
     print()
@@ -794,6 +836,7 @@ def main():
     for label, checker in (
         ("log: one line per refusal and none for an allow", log_case),
         ("log: the refused file is named in the log and nowhere else", log_env_case),
+        ("log: a project config edit is allowed and noted", config_edit_log_case),
     ):
         ok, note = checker()
         failed += 0 if ok else 1

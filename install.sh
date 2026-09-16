@@ -40,7 +40,7 @@ else
   mkdir -p "$SRC/agents" "$SRC/lint" "$SRC/hooks"
   for f in CLAUDE.md settings.json agents/builder.md agents/reviewer.md \
            lint/ste_lint.py lint/ste_gate.py lint/report_gate.py lint/LICENSE-ste_lint \
-           hooks/guard.py hooks/session_start.sh hooks/test_guard.py; do
+           hooks/guard.py hooks/session_start.sh hooks/test_guard.py hooks/config_report.py; do
     if curl -fsSL "$RAW/$f" -o "$SRC/$f.tmp"; then
       mv "$SRC/$f.tmp" "$SRC/$f"
     else

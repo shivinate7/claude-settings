@@ -21,7 +21,15 @@ one fixed order, and the first match wins.
     destructive-delete a recursive delete at a root, a home or a glob
   5 env-file           any read or write of an environment file
   6 merge-main         a pull request merged into main
-  7 frozen-path        a write to the settings, the hooks or the global CLAUDE.md
+  7 frozen-path        a write to the settings, the hooks or the global CLAUDE.md, under
+                       `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. Always denied.
+
+A project's own `.claude/settings.json`, `.claude/settings.local.json`, and
+`.claude/hooks/*` are NOT frozen (Decision 7). They are allowed, and the guard appends
+one log line with decision `noted` and rule `config-edit`. This is the one place the
+guard logs an ALLOW rather than a refusal, so a person can see the edit at turn end.
+Nothing is printed for a noted edit; the config-report Stop hook is what surfaces it to
+the transcript.
 
 Every refusal names its rule and says what to do instead. A remedy never names
 the refused command or the refused path, because a remedy that repeats the
@@ -711,8 +719,12 @@ def merge_base(cmd: str) -> str:
 #
 # THE CLONE ITSELF IS NOT FROZEN. `<clone>/settings.json` is the source that the install script
 # copies into the config directory, so it must stay editable. The test is that a path is frozen only
-# when it sits under the config directory, or when it sits under a project's own `.claude` folder.
-# A file at the root of the clone does neither.
+# when it sits under the config directory. A file at the root of the clone does not.
+#
+# A PROJECT'S OWN `.claude/settings.json`, `.claude/settings.local.json`, and `.claude/hooks/*` are
+# a SEPARATE, UNFROZEN set (Decision 7: "allow and report"). They decide only that one project's
+# session, the owner is often away from the desk, and the edit is not sensitive enough for a hard
+# wall. `is_project_config` answers that question; `is_frozen` never does.
 CONFIG_FROZEN_FILES = (
     os.path.normcase("settings.json"),
     os.path.normcase("CLAUDE.md"),
@@ -749,10 +761,11 @@ def _resolved(path: str, cwd: str) -> str:
 
 
 def is_frozen(path: str, cwd: str) -> bool:
-    """True when the path is part of the harness configuration.
+    """True when the path is part of the harness configuration under the config directory.
 
     Paths are compared after normcase and realpath, so a `~`, a forward slash, a backslash and a
-    difference of case all read the same on Windows.
+    difference of case all read the same on Windows. A project's own `.claude` files are a
+    separate, unfrozen set: see `is_project_config`.
     """
     if not path:
         return False
@@ -761,12 +774,27 @@ def is_frozen(path: str, cwd: str) -> bool:
         root = os.path.normcase(os.path.realpath(config_dir()))
     except Exception:
         return False
-    if target.startswith(root + os.sep):
-        parts = target[len(root) + 1:].split(os.sep)
-        if len(parts) == 1 and parts[0] in CONFIG_FROZEN_FILES:
-            return True
-        if len(parts) > 1 and parts[0] in CONFIG_FROZEN_DIRS:
-            return True
+    if not target.startswith(root + os.sep):
+        return False
+    parts = target[len(root) + 1:].split(os.sep)
+    if len(parts) == 1 and parts[0] in CONFIG_FROZEN_FILES:
+        return True
+    if len(parts) > 1 and parts[0] in CONFIG_FROZEN_DIRS:
+        return True
+    return False
+
+
+def is_project_config(path: str, cwd: str) -> bool:
+    """True when the path is a project's own `.claude/settings*.json` or `.claude/hooks/*`.
+
+    Decision 7: allowed in any checkout, never denied. The caller logs the edit as `noted` under
+    rule `config-edit` instead of refusing it.
+    """
+    if not path:
+        return False
+    try:
+        target = _resolved(path, cwd)
+    except Exception:
         return False
     posix = norm(target)
     if any(posix.endswith(name) for name in PROJECT_FROZEN_FILES):
@@ -808,8 +836,8 @@ def writes_to(path: str, cmd: str) -> bool:
     return False
 
 
-def frozen_shell_hit(cmd: str, cwd: str) -> str:
-    """Return the frozen path a shell command writes to, else ''."""
+def _shell_write_hit(cmd: str, cwd: str, predicate) -> str:
+    """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''."""
     for segment in SEGMENT_SPLIT.split(cmd):
         if not segment.strip():
             continue
@@ -819,9 +847,19 @@ def frozen_shell_hit(cmd: str, cwd: str) -> str:
             bare = word.strip("'\"")
             if not bare or bare in (">", ">>"):
                 continue
-            if is_frozen(bare, cwd) and writes_to(word, segment):
+            if predicate(bare, cwd) and writes_to(word, segment):
                 return bare
     return ""
+
+
+def frozen_shell_hit(cmd: str, cwd: str) -> str:
+    """Return the frozen (config-dir) path a shell command writes to, else ''."""
+    return _shell_write_hit(cmd, cwd, is_frozen)
+
+
+def project_config_shell_hit(cmd: str, cwd: str) -> str:
+    """Return the project config path a shell command writes to, else ''."""
+    return _shell_write_hit(cmd, cwd, is_project_config)
 
 
 # ------------------------------------------------------------------ the log
@@ -918,6 +956,11 @@ def judge_shell(tool: str, raw: str, cwd: str) -> None:
     if matched:
         refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)
 
+    # 7b. A project config edit: allowed (Decision 7), and noted in the log only.
+    matched = project_config_shell_hit(stripped, cwd)
+    if matched:
+        record(tool, "noted", "config-edit", matched)
+
 
 def judge(payload) -> None:
     tool = payload.get("tool_name", "") or ""
@@ -957,8 +1000,12 @@ def judge(payload) -> None:
 
     # 7. A frozen path. A read-only tool may look, because reading the hook is how anyone finds out
     # what it does. A writing tool may not.
-    if tool not in READ_ONLY_TOOLS and is_frozen(target, cwd):
-        refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)
+    if tool not in READ_ONLY_TOOLS:
+        if is_frozen(target, cwd):
+            refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)
+        # 7b. A project config edit: allowed (Decision 7), and noted in the log only.
+        if is_project_config(target, cwd):
+            record(tool, "noted", "config-edit", target)
 
 
 def main() -> None:

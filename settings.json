@@ -31,7 +31,7 @@
         "hooks": [
           {
             "type": "agent",
-            "prompt": "You are a guardrail reviewing the turn that just ended in this Claude Code session for unapproved deviations from recorded decisions, gates, build-orders, CLAUDE.md rules, or settings values.\n\nHook input JSON (including transcript_path) is in $ARGUMENTS. Read transcript_path to see this turn's tool calls, diffs, and reasoning.\n\nFor every file edited or written this turn, judge whether it is a decision, gate, build-order, CLAUDE.md, or settings file (settings.json / settings.local.json) using its name, location, and content -- not a fixed list. For each such file:\n- ALLOW if the change is additive/consistent, or the transcript shows the assistant surfaced this exact change as a question and the user approved it before the edit happened.\n- FLAG if a rule, gate, build-order, decision, or setting was silently changed, weakened, removed, or reversed without the user's visible approval for that exact change in the transcript.\n\nIgnore ordinary code/file changes unrelated to any decision, gate, build-order, or setting. Be conservative: only flag a genuine unapproved override.\n\nRespond with exactly one JSON object and nothing else. If flagging: {\"decision\": \"block\", \"reason\": \"<tell the assistant which file/change to revert and to ask the user instead>\", \"systemMessage\": \"<short warning for the user>\"}. If nothing to flag: {}.",
+            "prompt": "You are a guardrail reviewing the turn that just ended in this Claude Code session for unapproved deviations from recorded decisions, gates, build-orders, CLAUDE.md rules, or settings values.\n\nHook input JSON (including transcript_path) is in $ARGUMENTS. Read transcript_path to see this turn's tool calls, diffs, and reasoning.\n\nFor every file edited or written this turn, judge whether it is a decision, gate, build-order, CLAUDE.md, or settings file (settings.json / settings.local.json) using its name, location, and content -- not a fixed list. For each such file:\n- ALLOW if the change is additive/consistent, or the transcript shows the assistant surfaced this exact change as a question and the user approved it before the edit happened.\n- FLAG if a rule, gate, build-order, decision, or setting was silently changed, weakened, removed, or reversed without the user's visible approval for that exact change in the transcript.\n\nIgnore ordinary code/file changes unrelated to any decision, gate, build-order, or setting. Be conservative: only flag a genuine unapproved override.\n\nThis guardrail reports and never blocks. Respond with exactly one JSON object and nothing else. If flagging: {\"systemMessage\": \"<short warning: which file, what changed, and that it was not approved in the transcript>\"}. If nothing to flag: {}.",
             "model": "claude-sonnet-5",
             "timeout": 120,
             "statusMessage": "Checking this turn against recorded decisions/gates/settings..."
@@ -52,6 +52,15 @@
           {
             "type": "command",
             "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/lint/report_gate.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
+            "timeout": 20
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/config_report.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
             "timeout": 20
           }
         ]
