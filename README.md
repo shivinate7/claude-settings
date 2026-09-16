@@ -157,6 +157,8 @@ and paragraph length are not gated. Fenced code and inline code are exempt. Tabl
 The linter is `lint/ste_lint.py`, vendored from
 [DotDebian/asd-ste100-skill](https://github.com/DotDebian/asd-ste100-skill) at commit
 `e71a969`, MIT, license in `lint/LICENSE-ste_lint`. It is Python 3.9+ with no dependencies.
+It carries one local patch: a closing `**`, `*`, or `_` after a sentence end also ends the
+sentence, so `**Bold.** Next.` reads as two sentences.
 The STE gate is `lint/ste_gate.py`. The report gate is `lint/report_gate.py`. It checks the
 shape only, not the wording, and it fires only after a landed commit, push, or merge. Both
 gates share one fixture suite, `lint/test_gates.py`. Its cases are the check that proves each
@@ -204,7 +206,7 @@ errors often, and a background command with a completion notice does the same jo
 1. Discards and force push: **ask or deny, no tokens.** Deny `git stash`, `git reset`, `git restore`, `git clean -f`, and a `git checkout` that names a path when the cwd is a shared checkout. Answer `ask` for the same commands when the cwd is a git worktree, and `ask` for `git push --force` or `-f` anywhere. The user's click in the permission prompt is the grant. Reason: q_max's `GIT_DISCARD_OK=1` and `DESTRUCTIVE_OK=1` tokens pass silently and are typed by the agent, so nothing proves the user was asked.
 2. Merge into main: **ask always.** `gh pr merge` whose PR base is `main` (read with `gh pr view <n> --json baseRefName`, and `ask` when unreadable), and every call of the `mcp__github__merge_pull_request` tool. A merge into any other base passes. No `OWNER_MERGE=1` token. Superseded by Decision 8.
 3. Composite action pin for callers: **`@main`.**
-4. STE in CI: **changed files only** against the PR base by default. A `scope: all` input runs the whole tree in report mode and never fails the build, for manual audits from the Actions tab.
+4. STE in CI, refined: **changed lines only** against the PR base by default. A finding counts only when its line sits in an added or changed hunk of the diff. Findings on untouched lines of a changed file show in the step summary and never fail the build. A `scope: all` input runs the whole tree in report mode and never fails the build, for manual audits from the Actions tab. Reason, measured on q_max: whole-file scope made the first branch to touch an old document pay that document's whole backlog.
 5. Stamping of decision records: **stays local** in each repo. Formats differ (`D100_<slug>.md` per kind by date in job-cost-reporting, `<slug>.md` with `id: pending` in first-parent order in q_max). Do not touch it.
 6. Extras: add the SessionStart checkout line. No scheduled audit, dispatch only. No stamp work.
 7. Project config edits: **allow and report.** An edit to a project's `.claude/hooks/*`, `.claude/settings.json`, or `.claude/settings.local.json` is allowed in any checkout. It is logged in `guard.log`, listed in a system message at the end of the turn, and named under Deviations in the report. Paths under `~/.claude` stay denied, the clone of claude-settings is the way. Reason: the owner is often away from the desk. The work is not sensitive enough for a hard wall, and a change seen at turn end is enough.
@@ -236,12 +238,15 @@ Manual dispatch takes one input, `full_ste_audit`. Enable it from the Actions ta
 the whole tree in report mode. That run never fails the build. It only writes a summary.
 
 `actions/ste-lint` is the composite action behind the STE step. Scope `changed` diffs
-markdown against the pull request base, or the default branch on a push. Scope `all` lints
-every file the `paths` glob names. Input `fail` sets whether an error blocks the step. Input
-`exclude` drops newline- or comma-separated pathspecs from both scopes. Use it for a
-generated file, such as a decision index, the linter should never see. The action always
-writes a step summary. The summary holds the file count, the excluded count, the error and
-warning counts, and a table of the first fifty findings.
+markdown against the pull request base, or the default branch on a push. It then gates only
+the added or changed lines of that diff (Decision 4). A finding on an untouched line of a
+changed file still shows, under "Pre-existing, not gated", and never fails the build.
+
+Scope `all` lints every file the `paths` glob names, in report mode, and never fails the
+build. Input `fail` sets whether an in-hunk error blocks the step. Input `exclude` drops
+newline- or comma-separated pathspecs from both scopes, for a generated file the linter
+should never see. The action always writes a step summary, with the file count, the excluded
+count, both counts by group, and a findings table for each group.
 
 A caller pins the action to `@main`:
 

@@ -18,6 +18,9 @@ STE_GATE = os.path.join(HERE, "ste_gate.py")
 REPORT_GATE = os.path.join(HERE, "report_gate.py")
 CONFIG_REPORT = os.path.join(HERE, "..", "hooks", "config_report.py")
 
+sys.path.insert(0, HERE)
+import ste_lint  # noqa: E402
+
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 
 
@@ -313,6 +316,34 @@ class SteGateStopTests(unittest.TestCase):
         run = run_gate(STE_GATE, None, raw_stdin="[1,2,3]")
         self.assertEqual(run.returncode, 0)
         self.assertEqual(run.stdout.strip(), "")
+
+
+class SentenceSplitBoldTests(unittest.TestCase):
+    """A sentence end inside bold or italic markers still splits (claude-settings patch)."""
+
+    def lint(self, text):
+        config = dict(ste_lint.DEFAULT_CONFIG)
+        linter = ste_lint.Linter(config)
+        return linter.check_text("t.md", text)
+
+    def test_19_bold_split_sentences_each_under_limit_no_ste001(self):
+        text = (
+            "**First short sentence.** Second short sentence that alone is well "
+            "under the limit for this test case and it stays clear plain short "
+            "words here.\n"
+        )
+        # Each sentence alone is under the 25-word descriptive budget. Joined as
+        # one sentence (the pre-patch behavior), the word count would exceed it.
+        findings = self.lint(text)
+        codes = [f.code for f in findings]
+        self.assertNotIn("STE001", codes)
+
+    def test_20_plain_thirty_word_sentence_still_ste001(self):
+        words = ["word"] * 30
+        text = " ".join(words).capitalize() + ".\n"
+        findings = self.lint(text)
+        codes = [f.code for f in findings]
+        self.assertIn("STE001", codes)
 
 
 if __name__ == "__main__":
