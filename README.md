@@ -9,6 +9,7 @@ sessions started from the desktop app / claude.ai/code.
 | `settings.json` | `~/.claude/settings.json` (symlink locally, generated copy in the cloud) |
 | `agents/*.md`   | `~/.claude/agents/*.md` (symlink per file locally, copies in the cloud) |
 | `lint/*`        | `~/.claude/lint/*` STE linter and hook gate (same treatment)          |
+| `hooks/*`       | `~/.claude/hooks/*` guard and session-start line (same treatment)     |
 | `install.sh`    | Wiring for Linux/macOS and for the cloud setup script |
 | `install.ps1`   | Wiring for Windows                                   |
 
@@ -129,7 +130,7 @@ a repo can specialize a role and note the change in its CLAUDE.md.
 
 ## STE lint gate
 
-CLAUDE.md asks for Simplified Technical English and a fixed report shape. Three hooks in
+CLAUDE.md asks for Simplified Technical English and a fixed report shape. Hooks in
 `settings.json` enforce the parts a machine can check, at error severity only:
 
 | Hook | Trigger | Effect |
@@ -137,6 +138,8 @@ CLAUDE.md asks for Simplified Technical English and a fixed report shape. Three 
 | `PreToolUse` on `Write`, `Edit`, `MultiEdit` | the target path ends in `.md` | the write is denied and the findings come back, so Claude fixes the text and writes again |
 | `Stop` | end of a turn | a warning is shown as a system message. The turn is not blocked |
 | `Stop` | the turn ran `git commit`, `git push`, `git merge`, or a GitHub MCP write tool | the turn is blocked once unless the reply is one blockquote with the bold labels Done, Deviations, Input Needed, Next in order |
+| `PreToolUse` on `Bash`, `PowerShell`, `Read`, `Grep`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and the GitHub merge tool | a call matches a guard rule | the guard answers deny, ask, or nothing. See Guard below |
+| `SessionStart` on `startup`, `resume` | every local session start or resume | the session-start line prints. See Guard below |
 
 Errors are: a sentence over the STE budget (STE001), a semicolon (STE006), a Latin
 abbreviation such as `i.e.` (STE007), a contraction (STE008). Warnings such as passive voice
@@ -165,17 +168,65 @@ The linter is an approximation of ASD-STE100, whose dictionary is not open. Veri
 merge: the old Roles paragraph with its semicolon goes red, the current CLAUDE.md is clean at
 error level.
 
+## Guard
+
+`hooks/guard.py` is a `PreToolUse` hook on `Bash`, `PowerShell`, `Read`, `Grep`,
+`Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and the GitHub merge tool. It answers
+deny, ask, or nothing. It fails open on bad input.
+
+| Rule | Tools | Decision | Remedy |
+| --- | --- | --- | --- |
+| Shared trees: `git stash`, `git reset`, `git restore`, `git clean -f`, `git checkout <path>` | `Bash`, `PowerShell` | deny in a shared checkout, ask in a git worktree | mutation-test with a `.bak` copy, or work in a worktree of your own |
+| Machine-wide kills: `pkill`, `killall`, `lsof -t`, `taskkill /IM`, `Stop-Process -Name` | `Bash`, `PowerShell` | deny | name one PID this session started |
+| Force push: `--force`, `-f`, `--force-with-lease` | `Bash`, `PowerShell` | ask | the click in the prompt is the grant |
+| Recursive delete at `/`, `~`, `.`, `*`, or a drive root | `Bash`, `PowerShell` | deny | name the folder |
+| Environment files: any `.env*` except `.env.example` | `Read`, `Grep`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and shell text | deny | ask the user for the value. Loader flags such as `--env-file` and existence checks with `ls` or `test` pass |
+| Merge into main: `gh pr merge` with base `main`, and every `mcp__github__merge_pull_request` call | `Bash`, `PowerShell`, MCP | ask | the click is the grant. A merge into another base passes |
+| Frozen paths: a project's `.claude/settings.json`, `.claude/settings.local.json`, `.claude/hooks/*`, and `settings.json`, `CLAUDE.md`, `hooks/*`, `lint/*`, `agents/*` under `~/.claude` | `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and shell writes | deny | edit the clone of claude-settings and open a PR |
+
+### Decisions
+
+1. Discards and force push: **ask or deny, no tokens.** Deny `git stash`, `git reset`, `git restore`, `git clean -f`, and a `git checkout` that names a path when the cwd is a shared checkout. Answer `ask` for the same commands when the cwd is a git worktree, and `ask` for `git push --force` or `-f` anywhere. The user's click in the permission prompt is the grant. Reason: q_max's `GIT_DISCARD_OK=1` and `DESTRUCTIVE_OK=1` tokens pass silently and are typed by the agent, so nothing proves the user was asked.
+2. Merge into main: **ask always.** `gh pr merge` whose PR base is `main` (read with `gh pr view <n> --json baseRefName`, and `ask` when unreadable), and every call of the `mcp__github__merge_pull_request` tool. A merge into any other base passes. No `OWNER_MERGE=1` token.
+3. Composite action pin for callers: **`@main`.**
+4. STE in CI: **changed files only** against the PR base by default. A `scope: all` input runs the whole tree in report mode and never fails the build, for manual audits from the Actions tab.
+5. Stamping of decision records: **stays local** in each repo. Formats differ (`D100_<slug>.md` per kind by date in job-cost-reporting, `<slug>.md` with `id: pending` in first-parent order in q_max). Do not touch it.
+6. Extras: add the SessionStart checkout line. No scheduled audit, dispatch only. No stamp work.
+
+Every deny or ask appends one line to `~/.claude/guard.log`: timestamp, tool,
+decision, rule, and the matched text cut at 120 characters. Allows are never
+logged. This is how a false positive gets measured later.
+
+Both job-cost-reporting and q_max keep their own guards until a week of clean
+`guard.log` on both machines. After that, each repo trims to what only it
+owns. That is a later task.
+
+`hooks/session_start.sh` prints `checkout <toplevel> on <branch>, <n> dirty
+files` at local session start and resume. It stays silent outside a git tree.
+The cloud install replaces the `SessionStart` list, so this line is local
+only.
+
+Run the fixture suite with `python3 ~/.claude/hooks/test_guard.py`. Each case
+is the check that proves a rule goes red on the defect it guards.
+
 ## Editing
 
 Edit `CLAUDE.md` or `settings.json` here, commit, push. Local picks it up on `git pull`. Cloud
 picks it up on the next session start.
 
+<<<<<<< HEAD
 A new role is a new `agents/<name>.md`. A linter change is a change to `lint/`. Locally, re-run
 the installer once so the symlink exists. In copy mode, the post-merge hook copies
 `settings.json`, `agents\*`, and `lint\*` on the next pull. It also re-runs `install.ps1` itself
 when the pull changed it. So a new landed folder or a changed hook body needs no manual run.
 Check `~\.claude\claude-settings-install.log` for a dated line from each run. Cloud picks it up
 on the next session start.
+=======
+A new role is a new `agents/<name>.md`. A linter change is a change to `lint/` or `hooks/`.
+Locally, re-run
+the installer once so the symlink exists. In copy mode the post-merge hook picks the file up on
+the next pull. Cloud picks it up on the next session start.
+>>>>>>> worktree-agent-a999373c8abee1d95
 
 Hooks in `settings.json` run everywhere the file lands. Command hooks use `sh` syntax, which Git
 Bash runs on Windows. Guard anything local-only with `CLAUDE_CODE_REMOTE`. The cloud install
