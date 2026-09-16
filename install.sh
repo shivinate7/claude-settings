@@ -6,6 +6,7 @@
 #
 # What it does:
 #   ~/.claude/CLAUDE.md      -> one-line pointer: @<repo>/CLAUDE.md
+#   ~/.claude/agents/*.md    -> role definitions (builder, reviewer): local symlinks, cloud copies
 #   ~/.claude/settings.json  -> local: symlink to <repo>/settings.json
 #                               cloud: generated copy of settings.json plus a SessionStart hook
 #                                      that re-runs this script, so every new cloud session pulls
@@ -34,7 +35,8 @@ if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/CLAUDE.md" ] && [ -f "$SCRIPT_DIR/s
 else
   SRC="$HOME/claude-settings"
   mkdir -p "$SRC"
-  for f in CLAUDE.md settings.json; do
+  mkdir -p "$SRC/agents"
+  for f in CLAUDE.md settings.json agents/builder.md agents/reviewer.md; do
     if curl -fsSL "$RAW/$f" -o "$SRC/$f.tmp"; then
       mv "$SRC/$f.tmp" "$SRC/$f"
     else
@@ -64,6 +66,29 @@ if [ -f "$TARGET_MD" ] && ! grep -qx -- "$POINTER" "$TARGET_MD"; then
 fi
 printf '%s\n' "$POINTER" > "$TARGET_MD"
 log "wrote $TARGET_MD -> $POINTER"
+
+# ---- ~/.claude/agents : role definitions ------------------------------------------------------
+# One file per role (builder, reviewer). Local: per-file symlink. Cloud: copy.
+AGENTS_DIR="$CLAUDE_DIR/agents"
+mkdir -p "$AGENTS_DIR"
+LANDED=""
+for f in "$SRC"/agents/*.md; do
+  [ -f "$f" ] || continue
+  DEST="$AGENTS_DIR/$(basename "$f")"
+  if [ "$CLOUD" = 1 ]; then
+    cp "$f" "$DEST"
+  else
+    if [ -L "$DEST" ] && [ "$(readlink "$DEST")" = "$f" ]; then LANDED="$LANDED $(basename "$f")"; continue; fi
+    if [ -e "$DEST" ] && [ ! -L "$DEST" ]; then
+      BAK="$DEST.bak.$(date +%Y%m%d%H%M%S)"
+      mv "$DEST" "$BAK"
+      log "existing $DEST moved to $BAK"
+    fi
+    ln -sfn "$f" "$DEST"
+  fi
+  LANDED="$LANDED $(basename "$f")"
+done
+[ -n "$LANDED" ] && log "agents in $AGENTS_DIR:$LANDED"
 
 # ---- ~/.claude/settings.json ------------------------------------------------------------------
 TARGET_JSON="$CLAUDE_DIR/settings.json"
