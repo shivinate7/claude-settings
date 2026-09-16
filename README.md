@@ -185,6 +185,10 @@ deny, ask, or nothing. It fails open on bad input.
 | Environment files: any `.env*` except `.env.example` | `Read`, `Grep`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and shell text | deny | ask the user for the value. Loader flags such as `--env-file` and existence checks with `ls` or `test` pass |
 | Merge into main: `gh pr merge` with base `main`, and every `mcp__github__merge_pull_request` call | `Bash`, `PowerShell`, MCP | ask | the click is the grant. A merge into another base passes |
 | Frozen paths: a project's `.claude/settings.json`, `.claude/settings.local.json`, `.claude/hooks/*`, and `settings.json`, `CLAUDE.md`, `hooks/*`, `lint/*`, `agents/*` under `~/.claude` | `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and shell writes | deny | edit the clone of claude-settings and open a PR |
+| Live streams: `tail -f`, `tail -F`, `--follow`, `Get-Content -Wait` | `Bash`, `PowerShell` | deny | run it in the foreground with a timeout, or in the background and wait for the completion notice |
+
+The harness watcher tool `Monitor` is removed through `permissions.deny` in `settings.json`. It
+errors often, and a background command with a completion notice does the same job.
 
 ### Decisions
 

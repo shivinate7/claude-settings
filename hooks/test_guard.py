@@ -281,6 +281,25 @@ sh("kill: one process id with Stop-Process", "Stop-Process -Id 123", "allow", to
    cwd=NOGIT)
 
 
+# =========================================================================== 2b. live streams
+#
+# CLAUDE.md: "Never pipe a live stream through `tail`." A follow flag never ends on its own, so
+# it outlives the turn and the agent that started it.
+
+sh("stream: tail -f never ends", "tail -f app.log", "deny", "live-stream", cwd=NOGIT)
+sh("stream: tail -F retries across rotation", "tail -F app.log", "deny", "live-stream", cwd=NOGIT)
+sh("stream: the long follow flag", "tail --follow=name app.log", "deny", "live-stream", cwd=NOGIT)
+sh("stream: a combined short flag", "tail -fn 20 app.log", "deny", "live-stream", cwd=NOGIT)
+sh("stream: Get-Content -Wait never ends", "Get-Content app.log -Wait", "deny", "live-stream",
+   tool="PowerShell", cwd=NOGIT)
+
+sh("stream: an ordinary line count", "tail -n 50 app.log", "allow", cwd=NOGIT)
+sh("stream: a short line count", "tail -5 app.log", "allow", cwd=NOGIT)
+sh("stream: a pipe into a bounded tail", "python x.py | tail -5", "allow", cwd=NOGIT)
+sh("stream: Get-Content -Tail reads and stops", "Get-Content app.log -Tail 20", "allow",
+   tool="PowerShell", cwd=NOGIT)
+
+
 # =========================================================================== 3. push and delete
 
 sh("push: the long force flag", VCS + " push --force", "ask", "force-push", cwd=NOGIT)
@@ -690,7 +709,7 @@ def log_case():
 # checked on every refused case rather than on a few, because one interpolated name is the whole
 # defect and it can enter through any rule.
 FORBIDDEN_IN_A_REASON = (ENV, ROOT, slash(ROOT), "settings.json", "CLAUDE.md", "guard.py",
-                         ".claude")
+                         ".claude", "app.log")
 
 
 def names_the_target(reason):
