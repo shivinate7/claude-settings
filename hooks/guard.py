@@ -154,10 +154,28 @@ GIT_CHECKOUT_TAKES_NAME = {"-b", "-B", "--orphan"}
 PATH_PREFIX = re.compile(r"^(?:\.{1,2}$|\.{1,2}[/\\]|[/~]|[A-Za-z]:[/\\])")
 PATH_EXTENSION = re.compile(r"\.[A-Za-z0-9]{1,6}$")
 
+# A shell redirection, dropped before a segment is tokenized for a git call. `2>&1` is a false
+# positive, MEASURED in guard.log: `git checkout origin/claude/pass3-seam 2>&1` was refused as
+# `git checkout origin/claude/pass3-seam` was not, because `2>&1` reached `git_calls` as one more
+# plain word, and `checkout_names_a_path` reads two plain words as a start point plus a path.
+#
+# The redirect information itself is NOT lost. The frozen-path rule reads it from `writes_to`,
+# against the raw command text, which this function never touches. This regex only shrinks the
+# copy that decides what a `git` call's OWN arguments are.
+#
+# Order matters: `&>file` starts with a literal `&`, which the third branch would not reach on its
+# own, so it is tried first. The other three shapes (`>file`, `>>file`, `<file`, and the fd forms
+# `2>&1`, `>&2`, `1>&2`) all share one greedy `\S+` for the target, spaced or not.
+REDIRECTION = re.compile(
+    r"&>>?\s*\S+"       # &>file, &>>file
+    r"|<\s*\S+"         # <file
+    r"|\d?>>?\s*\S+"    # >file, >>file, 2>file, 2>>file, 2>&1, >&2, 1>&2
+)
+
 
 def git_calls(segment: str):
     """Return (subcommand, arguments) for every `git` call in one segment."""
-    tokens = segment.split()
+    tokens = REDIRECTION.sub(" ", segment).split()
     calls = []
     index = 0
     while index < len(tokens):

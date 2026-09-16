@@ -245,8 +245,10 @@ The caller needs `actions/checkout` at `fetch-depth: 0`. Scope `changed` diffs a
 branch, and a shallow clone carries no history for the diff.
 
 One manual step remains, in this repository only. Open Settings, then Actions, then
-General, then Access. Set "Accessible from repositories owned by the user". No file sets
-this switch. Flip it after this pull request merges, before the first external caller runs.
+General, then Access. Set "Accessible from repositories owned by the user". That setting
+applies to a private repository only. This repository is public, so any repository can
+call the action today. No file sets this switch. Flip it after this pull request merges,
+before the first external caller runs.
 
 ## Editing
 
