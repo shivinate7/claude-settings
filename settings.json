@@ -64,9 +64,29 @@
             "timeout": 20
           }
         ]
+      },
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "s=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/session_start.sh\"; [ -f \"$s\" ] && sh \"$s\"; exit 0",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Read|Grep|Edit|Write|MultiEdit|NotebookEdit|mcp__github__merge_pull_request",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/guard.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
+            "timeout": 20
+          }
+        ]
+      },
       {
         "matcher": "Agent",
         "hooks": [

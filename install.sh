@@ -8,6 +8,7 @@
 #   ~/.claude/CLAUDE.md      -> one-line pointer: @<repo>/CLAUDE.md
 #   ~/.claude/agents/*.md    -> role definitions (builder, reviewer): local symlinks, cloud copies
 #   ~/.claude/lint/*         -> STE linter + hook gate: local symlinks, cloud copies
+#   ~/.claude/hooks/*        -> PreToolUse guard + session-start line: local symlinks, cloud copies
 #   ~/.claude/settings.json  -> local: symlink to <repo>/settings.json
 #                               cloud: generated copy of settings.json plus a SessionStart hook
 #                                      that re-runs this script, so every new cloud session pulls
@@ -36,9 +37,10 @@ if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/CLAUDE.md" ] && [ -f "$SCRIPT_DIR/s
 else
   SRC="$HOME/claude-settings"
   mkdir -p "$SRC"
-  mkdir -p "$SRC/agents" "$SRC/lint"
+  mkdir -p "$SRC/agents" "$SRC/lint" "$SRC/hooks"
   for f in CLAUDE.md settings.json agents/builder.md agents/reviewer.md \
-           lint/ste_lint.py lint/ste_gate.py lint/report_gate.py lint/LICENSE-ste_lint; do
+           lint/ste_lint.py lint/ste_gate.py lint/report_gate.py lint/LICENSE-ste_lint \
+           hooks/guard.py hooks/session_start.sh hooks/test_guard.py; do
     if curl -fsSL "$RAW/$f" -o "$SRC/$f.tmp"; then
       mv "$SRC/$f.tmp" "$SRC/$f"
     else
@@ -97,6 +99,7 @@ land_dir() {
 }
 land_dir agents
 land_dir lint
+land_dir hooks
 
 # ---- ~/.claude/settings.json ------------------------------------------------------------------
 TARGET_JSON="$CLAUDE_DIR/settings.json"

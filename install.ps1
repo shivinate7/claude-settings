@@ -6,6 +6,7 @@
 #   ~\.claude\CLAUDE.md      -> one-line pointer: @C:/path/to/claude-settings/CLAUDE.md
 #   ~\.claude\agents\*.md    -> role definitions (builder, reviewer), symlink per file
 #   ~\.claude\lint\*         -> STE linter + hook gate (needs python3 on PATH), symlink per file
+#   ~\.claude\hooks\*        -> PreToolUse guard + session-start line, symlink per file
 #   ~\.claude\settings.json  -> symlink to <clone>\settings.json (needs Developer Mode or admin),
 #                               falls back to a copy plus a git post-merge hook that re-copies
 #                               settings.json, agents\*.md, and lint\* after each git pull.
@@ -39,7 +40,7 @@ dest="`$cfg/settings.json"
 if [ -f "`$repo/settings.json" ] && [ ! -L "`$dest" ]; then
   cp "`$repo/settings.json" "`$dest" && echo "claude-settings: refreshed `$dest"
 fi
-for sub in agents lint; do
+for sub in agents lint hooks; do
   [ -d "`$repo/`$sub" ] || continue
   mkdir -p "`$cfg/`$sub"
   for f in "`$repo/`$sub"/*; do
@@ -73,7 +74,7 @@ Log "wrote $TargetMd -> $Pointer"
 
 # ---- agents\ and lint\ : per-file symlinks, copy fallback -----------------------------------------
 $AgentCopied = $false
-foreach ($sub in @('agents', 'lint')) {
+foreach ($sub in @('agents', 'lint', 'hooks')) {
     $srcDir  = Join-Path $RepoDir $sub
     $destDir = Join-Path $ClaudeDir $sub
     New-Item -ItemType Directory -Force -Path $destDir | Out-Null
