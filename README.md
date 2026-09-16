@@ -12,6 +12,8 @@ sessions started from the desktop app / claude.ai/code.
 | `hooks/*`       | `~/.claude/hooks/*` guard and session-start line (same treatment)     |
 | `install.sh`    | Wiring for Linux/macOS and for the cloud setup script |
 | `install.ps1`   | Wiring for Windows                                   |
+| `.github/`      | The `gates.yml` workflow. Runs in this repository only, never installed |
+| `actions/`      | Composite actions this repository publishes. Callers pin them at `@main` |
 
 `settings.json` sets `outputStyle: "Concise"` (built-in style, needs Claude Code v2.1.237+),
 `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`, `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`, and
@@ -212,6 +214,39 @@ only.
 
 Run the fixture suite with `python3 ~/.claude/hooks/test_guard.py`. Each case
 is the check that proves a rule goes red on the defect it guards.
+
+## CI
+
+`.github/workflows/gates.yml` runs on push to `main`, on every pull request, and on manual
+dispatch. Each run sets up Python 3.11. It then runs the guard suite, the report-gate suite,
+a shell check of `install.sh`, a PowerShell parse of `install.ps1`, and the STE lint action.
+
+Manual dispatch takes one input, `full_ste_audit`. Enable it from the Actions tab to lint
+the whole tree in report mode. That run never fails the build. It only writes a summary.
+
+`actions/ste-lint` is the composite action behind the STE step. Scope `changed` diffs
+markdown against the pull request base, or the default branch on a push. Scope `all` lints
+every file the `paths` glob names. Input `fail` sets whether an error blocks the step. The
+action always writes a step summary: the file count, the error and warning counts, and a
+table of the first fifty findings.
+
+A caller pins the action to `@main`:
+
+```yaml
+- uses: actions/checkout@v4
+  with: { fetch-depth: 0 }
+- uses: ssemwal-cdc/claude-settings/actions/ste-lint@main
+  with:
+    scope: changed
+    fail: "true"
+```
+
+The caller needs `actions/checkout` at `fetch-depth: 0`. Scope `changed` diffs against a
+branch, and a shallow clone carries no history for the diff.
+
+One manual step remains, in this repository only. Open Settings, then Actions, then
+General, then Access. Set "Accessible from repositories owned by the user". No file sets
+this switch. Flip it after this pull request merges, before the first external caller runs.
 
 ## Editing
 

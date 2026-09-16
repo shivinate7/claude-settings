@@ -517,8 +517,13 @@ add("frozen: Edit of a project hook", "deny", "frozen-path", tool="Edit", cwd=NO
     file_path=PROJ_HOOK)
 add("frozen: NotebookEdit of a project hook", "deny", "frozen-path", tool="NotebookEdit",
     cwd=NOGIT, notebook_path=PROJ_HOOK)
-add("frozen: a backslash spelling of the same path", "deny", "frozen-path", tool="Write",
-    cwd=NOGIT, file_path=CFG_SETTINGS.replace("/", "\\"))
+# MEASURED on Linux CI 2026-09-16: guard.py's own docstring scopes this equivalence to
+# Windows ("a forward slash, a backslash ... all read the same on Windows"). On POSIX a
+# backslash is an ordinary filename character, not a separator, so the same text swap
+# builds an unrelated relative path instead of an alternate spelling of the frozen file.
+add("frozen: a backslash spelling of the same path",
+    "deny" if os.name == "nt" else "allow", "frozen-path" if os.name == "nt" else None,
+    tool="Write", cwd=NOGIT, file_path=CFG_SETTINGS.replace("/", "\\"))
 add("frozen: a relative spelling resolved against the cwd", "deny", "frozen-path", tool="Write",
     cwd=PROJ, file_path=".claude/settings.json")
 

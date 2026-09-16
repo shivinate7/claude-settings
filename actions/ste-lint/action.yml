@@ -1,0 +1,95 @@
+name: STE lint
+description: >
+  Run lint/ste_lint.py against changed markdown (scope changed, default) or the whole
+  tree (scope all). The caller needs actions/checkout with fetch-depth 0 so the
+  changed-files diff can reach the base branch.
+inputs:
+  scope:
+    description: "'changed' (default) diffs against the base branch. 'all' lints every matching file."
+    required: false
+    default: changed
+  fail:
+    description: "'true' (default) fails the step at error severity. 'false' never fails, report only."
+    required: false
+    default: "true"
+  paths:
+    description: Glob passed to `git ls-files` when scope is 'all'.
+    required: false
+    default: "**/*.md"
+runs:
+  using: composite
+  steps:
+    - name: Lint markdown
+      shell: bash
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        BASE_REF: ${{ github.base_ref }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        REF_NAME: ${{ github.ref_name }}
+        SCOPE: ${{ inputs.scope }}
+        FAIL: ${{ inputs.fail }}
+        PATHS_GLOB: ${{ inputs.paths }}
+      run: |
+        set -euo pipefail
+        # Needs actions/checkout with fetch-depth 0: scope 'changed' diffs against the
+        # base branch, and a shallow clone would not carry that history.
+        LINTER="${{ github.action_path }}/../../lint/ste_lint.py"
+
+        FILES=()
+        if [ "$SCOPE" = "all" ]; then
+          # ':(glob)' turns on real double-star matching. Without it, git's default
+          # pathspec needs a literal '/' for '**/', so a root file such as README.md
+          # never matches '**/*.md' (measured).
+          while IFS= read -r f; do
+            [ -n "$f" ] && FILES+=("$f")
+          done < <(git ls-files -- ":(glob)$PATHS_GLOB")
+        else
+          if [ -n "$BASE_REF" ]; then
+            BASE="$BASE_REF"
+          else
+            BASE="$DEFAULT_BRANCH"
+          fi
+          if ! git rev-parse --verify -q "refs/remotes/origin/$BASE" >/dev/null; then
+            git fetch origin "$BASE" --depth=1
+          fi
+          if [ -z "$BASE_REF" ] && [ "$REF_NAME" = "$BASE" ]; then
+            # A push to the default branch itself has no other side to diff against.
+            RANGE="HEAD~1..HEAD"
+          else
+            RANGE="origin/$BASE...HEAD"
+          fi
+          while IFS= read -r f; do
+            [ -n "$f" ] && FILES+=("$f")
+          done < <(git diff --name-only --diff-filter=AMR "$RANGE" -- '*.md')
+        fi
+
+        SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+        if [ ${#FILES[@]} -eq 0 ]; then
+          echo "ste-lint: no markdown changed"
+          {
+            echo "### STE lint"
+            echo
+            echo "No markdown changed."
+          } >> "$SUMMARY"
+          exit 0
+        fi
+
+        echo "ste-lint: ${#FILES[@]} file(s) in scope"
+        printf '  %s\n' "${FILES[@]}"
+
+        JSON_OUT="$(mktemp)"
+        set +e
+        python3 "$LINTER" --no-color --format json --fail-on error "${FILES[@]}" > "$JSON_OUT"
+        LINT_EXIT=$?
+        set -e
+
+        # A single Python statement, semicolon-joined and on one physical line, so the YAML
+        # block scalar's own indentation never lands inside the Python source (an indented
+        # top-level statement is a Python syntax error).
+        python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); s = d["summary"]; print("### STE lint"); print(); print("Files checked: %d. Errors: %d. Warnings: %d." % (d["files"], s["error"], s["warning"])); print(); print("| File | Line | Rule | Message |"); print("| --- | --- | --- | --- |"); [print("| %s | %d | %s | %s |" % (f["path"], f["line"], f["code"], f["message"].replace("|", "\\|").replace("\n", " "))) for f in d["findings"][:50]]' "$JSON_OUT" >> "$SUMMARY"
+
+        if [ "$FAIL" = "true" ]; then
+          exit "$LINT_EXIT"
+        fi
+        exit 0
