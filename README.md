@@ -137,7 +137,7 @@ CLAUDE.md asks for Simplified Technical English and a fixed report shape. Hooks 
 | --- | --- | --- |
 | `PreToolUse` on `Write`, `Edit`, `MultiEdit` | the target path ends in `.md` | the write is denied and the findings come back, so Claude fixes the text and writes again |
 | `Stop` | end of a turn | a warning is shown as a system message. The turn is not blocked |
-| `Stop` | the turn ran `git commit`, `git push`, `git merge`, or a GitHub MCP write tool | the turn is blocked once unless the reply is one blockquote with the bold labels Done, Deviations, Input Needed, Next in order |
+| `Stop` | the turn ran `git commit`, `git push`, `git merge`, or a GitHub MCP write tool | the turn is blocked once unless the reply is one blockquote with the bold labels Done, Deviations, Input Needed, Next in order, written tight in Simplified Technical English |
 | `PreToolUse` on `Bash`, `PowerShell`, `Read`, `Grep`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and the GitHub merge tool | a call matches a guard rule | the guard answers deny, ask, or nothing. See Guard below |
 | `SessionStart` on `startup`, `resume` | every local session start or resume | the session-start line prints. See Guard below |
 
