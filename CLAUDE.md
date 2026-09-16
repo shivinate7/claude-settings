@@ -65,8 +65,8 @@ Once an objective is underway, assume nobody reads until I return. A turn that o
 gets one line, or none. Never echo a worker's report or describe a screenshot.
 Bring my decisions as a question with options and a recommendation.
 
-**Reports, in order:** Done, Deviations, Input needed, Next. Done lists BUILT, RECORDED, or
-OTHER, one line each with the PR or commit. A worker's Done names files, line ranges, and
+**Reports, in order:** Done, Deviations, Input Needed, Next. Done: one line per item, BUILT,
+RECORDED, or OTHER, with its PR or commit. Workers also list files touched, line ranges, and
 checks run. One item inline, several as bullets. Drop a label that does not apply. Your report
 to me: bold labels in one blockquote, never a code fence, nothing above or below. No report
 when nothing landed.
