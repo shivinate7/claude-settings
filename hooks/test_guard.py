@@ -319,6 +319,23 @@ sh("stream: Get-Content -Tail reads and stops", "Get-Content app.log -Tail 20", 
    tool="PowerShell", cwd=NOGIT)
 
 
+# =========================================================================== 2c. waiter loops
+#
+# Rule 9, approved by the owner. A pause between polls turns waiting into a loop of turns that
+# each print a word.
+
+sh("waiter: a bare sleep", "sleep 30", "deny", "waiter", cwd=NOGIT)
+sh("waiter: sleep ahead of a poll", "sleep 5 && gh pr list", "deny", "waiter", cwd=NOGIT)
+sh("waiter: Start-Sleep on PowerShell", "Start-Sleep -Seconds 10", "deny", "waiter",
+   tool="PowerShell", cwd=NOGIT)
+sh("waiter: timeout /t on Windows cmd", "timeout /t 5", "deny", "waiter", cwd=NOGIT)
+
+sh("waiter: a tool that waits once is allowed", "gh pr checks 12 --watch", "allow", cwd=NOGIT)
+sh("waiter: a readiness check is allowed", "curl --retry 5 http://localhost:3000", "allow",
+   cwd=NOGIT)
+sh("waiter: an unrelated log query is allowed", VCS + " log --since=yesterday", "allow", cwd=NOGIT)
+
+
 # =========================================================================== 3. push and delete
 
 sh("push: the long force flag", VCS + " push --force", "ask", "force-push", cwd=NOGIT)
@@ -493,20 +510,24 @@ sh("env: the accessor search in the other shell",
 
 
 # =========================================================================== 5. merge into main
+#
+# Decision 8 ("Merge into main: allow and report") supersedes Decision 2 ("ask always"). Every
+# merge call is now an ALLOW; the guard log is what carries the base and the tool, checked in
+# merge_log_case() below.
 
-sh("merge: a base of main asks", "gh pr merge 12 --squash", "ask", "merge-main", cwd=NOGIT,
+sh("merge: a base of main is allowed", "gh pr merge 12 --squash", "allow", cwd=NOGIT,
    env_path=GHMAIN + os.pathsep + PY_PATH)
-sh("merge: a base of dev needs no prompt", "gh pr merge 12 --squash", "allow", cwd=NOGIT,
+sh("merge: a base of dev is allowed", "gh pr merge 12 --squash", "allow", cwd=NOGIT,
    env_path=GHDEV + os.pathsep + PY_PATH)
-sh("merge: an unreadable base is not a safe base", "gh pr merge 12 --squash", "ask", "merge-main",
+sh("merge: an unreadable base is allowed", "gh pr merge 12 --squash", "allow",
    cwd=NOGIT, env_path=GHNONE + os.pathsep + PY_PATH)
-sh("merge: no number asks about the current branch", "gh pr merge", "ask", "merge-main",
+sh("merge: no number is allowed", "gh pr merge", "allow",
    cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
 sh("merge: reading a pull request is untouched", "gh pr view 75 --json baseRefName", "allow",
    cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
 sh("merge: opening a pull request is untouched", "gh pr create --base main --title x --body y",
    "allow", cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
-add("merge: every call of the merge tool asks", "ask", "merge-main",
+add("merge: every call of the merge tool is allowed", "allow",
     tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12, repo="x", owner="y")
 
 
@@ -770,7 +791,76 @@ def config_edit_log_case():
 # checked on every refused case rather than on a few, because one interpolated name is the whole
 # defect and it can enter through any rule.
 FORBIDDEN_IN_A_REASON = (ENV, ROOT, slash(ROOT), "settings.json", "CLAUDE.md", "guard.py",
-                         ".claude", "app.log")
+                         ".claude", "app.log", "sleep")
+
+
+def merge_log_case():
+    """Decision 8: a merge into main is allowed, and noted in the log when the base is main or
+    unreadable, or when the call goes through the MCP tool that carries no base at all. A base of
+    dev is allowed and logs nothing.
+    """
+    scenarios = [
+        ("gh pr merge 12", GHMAIN, True, "base main"),
+        ("gh pr merge 12", GHDEV, False, "base dev"),
+        ("gh pr merge 12", GHNONE, True, "base unreadable"),
+    ]
+    problems = []
+    for index, (command, ghdir, expect_logged, label) in enumerate(scenarios):
+        folder = os.path.join(ROOT, "mlog%d" % index)
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, "guard.log")
+        env = dict(os.environ)
+        env["CLAUDE_CONFIG_DIR"] = folder
+        env["PATH"] = ghdir + os.pathsep + PY_PATH
+        result = subprocess.run(
+            [sys.executable, GUARD],
+            input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command},
+                              "cwd": NOGIT}),
+            capture_output=True, text=True, env=env, timeout=60,
+        )
+        if result.stdout.strip():
+            problems.append("%s: expected a silent allow, got %r" % (
+                label, result.stdout.strip()[:80]))
+            continue
+        logged = False
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as handle:
+                logged = any(
+                    line.split("\t")[2:4] == ["noted", "merge-main"]
+                    for line in handle.read().splitlines() if line.strip()
+                )
+        if logged != expect_logged:
+            problems.append("%s: expected logged=%s, got %s" % (label, expect_logged, logged))
+
+    folder = os.path.join(ROOT, "mlogtool")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "guard.log")
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    result = subprocess.run(
+        [sys.executable, GUARD],
+        input=json.dumps({"tool_name": "mcp__github__merge_pull_request",
+                          "tool_input": {"pullNumber": 12, "repo": "x", "owner": "y"},
+                          "cwd": NOGIT}),
+        capture_output=True, text=True, env=env, timeout=60,
+    )
+    if result.stdout.strip():
+        problems.append("merge tool: expected a silent allow, got %r" % (
+            result.stdout.strip()[:80]))
+    elif not os.path.exists(path):
+        problems.append("merge tool: no log file was written")
+    else:
+        with open(path, encoding="utf-8") as handle:
+            logged = any(
+                line.split("\t")[2:4] == ["noted", "merge-main"]
+                for line in handle.read().splitlines() if line.strip()
+            )
+        if not logged:
+            problems.append("merge tool: log line does not read noted/merge-main")
+
+    if problems:
+        return False, "; ".join(problems)
+    return True, "allow in all four cases, noted where the base is unsafe or unread"
 
 
 def names_the_target(reason):
@@ -813,7 +903,7 @@ def log_env_case():
 
 
 def main():
-    total = len(CASES) + 3
+    total = len(CASES) + 4
     print("guard cases, %d in all" % total)
     print("fixtures under " + ROOT)
     print()
@@ -837,6 +927,7 @@ def main():
         ("log: one line per refusal and none for an allow", log_case),
         ("log: the refused file is named in the log and nowhere else", log_env_case),
         ("log: a project config edit is allowed and noted", config_edit_log_case),
+        ("log: a merge into main is allowed and noted where the base is unsafe", merge_log_case),
     ):
         ok, note = checker()
         failed += 0 if ok else 1
