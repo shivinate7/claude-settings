@@ -23,6 +23,7 @@
     "baseRef": "head"
   },
   "permissions": {
+    "allow": ["Bash(gh pr merge:*)"],
     "deny": ["Monitor"]
   },
   "hooks": {

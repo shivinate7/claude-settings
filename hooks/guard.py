@@ -17,10 +17,11 @@ one fixed order, and the first match wins.
   1 shared-tree        a command that throws away a working tree
   2 machine-wide-kill  a kill by name or by pattern
   3 live-stream        a command that follows a stream and never ends on its own
+  3 waiter             a shell segment whose command word is a sleep-and-poll
   4 force-push         a rewrite of a published branch
     destructive-delete a recursive delete at a root, a home or a glob
   5 env-file           any read or write of an environment file
-  6 merge-main         a pull request merged into main
+  6 merge-main         a pull request merged into main. Allowed, and logged (Decision 8).
   7 frozen-path        a write to the settings, the hooks or the global CLAUDE.md, under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. Always denied.
 
@@ -30,6 +31,13 @@ one log line with decision `noted` and rule `config-edit`. This is the one place
 guard logs an ALLOW rather than a refusal, so a person can see the edit at turn end.
 Nothing is printed for a noted edit; the config-report Stop hook is what surfaces it to
 the transcript.
+
+Decision 8 ("Merge into main: allow and report") makes `merge-main` the same shape: a
+merge into main is allowed, never asked, and the guard logs `noted`/`merge-main` when
+the base is `main` or unreadable, and always for the MCP merge tool, which carries no
+base at all. CLAUDE.md's "merged only when I name the act" stays the model's rule; the
+guard cannot read chat, so a prompt here would only repeat a decision the owner already
+made in the conversation.
 
 Every refusal names its rule and says what to do instead. A remedy never names
 the refused command or the refused path, because a remedy that repeats the
@@ -438,6 +446,39 @@ LIVE_STREAM_REASON = (
 )
 
 
+# ------------------------------------------------------------------ a waiter loop
+#
+# Rule 9, approved by the owner: a shell segment whose command word is a sleep-and-poll turns
+# waiting into a loop of turns that each print a word. Placed beside the live-stream rule, because
+# both are about a command that should not be how a session waits.
+#
+# THE COMMAND WORD is the segment's first token, so an unrelated later argument never matches. The
+# Windows `timeout /t` form is the one case where the wait is the SECOND word, so it is read apart:
+# `timeout /t 5` waits, `timeout /help` (no `/t`) does not.
+WAITER_COMMANDS = ("sleep", "start-sleep")
+
+
+def waiter_hit(segment: str) -> str:
+    """Return the matched text when one segment's command word is a sleep-and-poll, else ''."""
+    tokens = segment.split()
+    if not tokens:
+        return ""
+    word = basename(tokens[0])
+    if word in WAITER_COMMANDS:
+        return tokens[0]
+    if word == "timeout" and any(t.lower() == "/t" for t in tokens[1:]):
+        return tokens[0] + " /t"
+    return ""
+
+
+WAITER_REASON = (
+    "a pause between polls turns waiting into a loop of turns that each print a word. "
+    "Remedy: run the long command in the background and wait for its completion notice, "
+    "or use a tool that waits once, such as gh pr checks --watch or gh run watch "
+    "--exit-status. For a server warm-up, use a readiness check such as curl --retry."
+)
+
+
 # ------------------------------------------------------------------ a rewrite and a wide delete
 #
 # A force push rewrites a branch other people have pulled. It is sometimes right, so it asks rather
@@ -648,35 +689,19 @@ def is_env(path: str) -> bool:
 
 # ------------------------------------------------------------------ the merge into main
 #
-# CLAUDE.md: "Move main only by pull request, merged only when I name the act, or under a repo
-# grant." The act is `gh pr merge`, and the click in the prompt is the owner naming it.
+# Decision 8 ("Merge into main: allow and report") supersedes Decision 2 ("ask always"). CLAUDE.md
+# still says "merged only when I name the act", but the owner names the act in chat, and the guard
+# cannot read chat. A prompt here would only repeat a decision already made, so the call is
+# allowed and NOTED in `guard.log` instead, for a person to read at turn end and the report to
+# name under Done.
 #
 # THE BASE IS QUERIED, never guessed from the command. `gh pr merge 75 --squash` names no base at
-# all, because the base is a property of the pull request. A merge into any other base needs no
-# prompt, because an integration branch takes its lanes without asking anybody.
+# all, because the base is a property of the pull request. A merge into any other base is not
+# noted at all, because an integration branch takes its lanes without asking anybody.
 #
-# AN UNREADABLE BASE IS NOT A SAFE BASE, so it asks.
+# AN UNREADABLE BASE IS NOT A SAFE ANSWER, so it is noted the same as a base of main.
 GH_PR_MERGE = re.compile(r"\bgh\s+pr\s+merge\b")
 PROTECTED_BASE = "main"
-
-MERGE_REASON = (
-    "Rule (Git): this moves %s, and %s moves only when the owner names the act. "
-    "Remedy: the click in this prompt is that act. "
-    "A merge into an integration branch needs no prompt at all."
-) % (PROTECTED_BASE, PROTECTED_BASE)
-
-MERGE_UNKNOWN_REASON = (
-    "Rule (Git): the base branch of this pull request could not be read, so the guard "
-    "cannot tell whether the merge moves %s. An unreadable answer is not a safe answer. "
-    "Remedy: check that the command line tool is signed in and that the number is right. "
-    "The click in this prompt is the owner naming the act."
-) % PROTECTED_BASE
-
-MERGE_TOOL_REASON = (
-    "Rule (Git): a pull request merged through this tool carries no base for the guard to "
-    "read, so every call asks. "
-    "Remedy: the click in this prompt is the owner naming the act."
-)
 
 
 def merge_base(cmd: str) -> str:
@@ -921,11 +946,14 @@ def judge_shell(tool: str, raw: str, cwd: str) -> None:
         if matched:
             refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
 
-    # 3. A live stream that never ends.
+    # 3. A live stream that never ends, or a waiter loop (Rule 9).
     for segment in SEGMENT_SPLIT.split(stripped):
         matched = live_stream_hit(segment)
         if matched:
             refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)
+        matched = waiter_hit(segment)
+        if matched:
+            refuse(tool, "deny", "waiter", WAITER_REASON, matched)
 
     # 4. A wide delete denies, and a force push asks.
     for pattern in DESTRUCTIVE_DELETE:
@@ -943,13 +971,13 @@ def judge_shell(tool: str, raw: str, cwd: str) -> None:
     if refusal:
         refuse(tool, "deny", "env-file", refusal + ". " + ENV_ADVICE, logged)
 
-    # 6. A merge into main.
+    # 6. A merge into main: allow (Decision 8), and note it when the base is main or unreadable.
     if GH_PR_MERGE.search(cmd):
         base = merge_base(stripped)
         if base == PROTECTED_BASE:
-            refuse(tool, "ask", "merge-main", MERGE_REASON, "gh pr merge into " + base)
-        if base == "":
-            refuse(tool, "ask", "merge-main", MERGE_UNKNOWN_REASON, "gh pr merge, base unread")
+            record(tool, "noted", "merge-main", "gh pr merge into " + base)
+        elif base == "":
+            record(tool, "noted", "merge-main", "gh pr merge, base unread")
 
     # 7. A frozen path.
     matched = frozen_shell_hit(stripped, cwd)
@@ -971,8 +999,10 @@ def judge(payload) -> None:
     if not isinstance(cwd, str):
         cwd = ""
 
+    # A merge through the MCP tool carries no base for the guard to read, so every call is
+    # allowed (Decision 8) and noted, the same as an unreadable `gh pr merge` base.
     if tool in MERGE_TOOLS:
-        refuse(tool, "ask", "merge-main", MERGE_TOOL_REASON, tool)
+        record(tool, "noted", "merge-main", tool)
 
     if tool in SHELL_TOOLS:
         command = tool_input.get("command", "") or ""
