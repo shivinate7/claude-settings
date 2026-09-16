@@ -214,19 +214,12 @@ is the check that proves a rule goes red on the defect it guards.
 Edit `CLAUDE.md` or `settings.json` here, commit, push. Local picks it up on `git pull`. Cloud
 picks it up on the next session start.
 
-<<<<<<< HEAD
-A new role is a new `agents/<name>.md`. A linter change is a change to `lint/`. Locally, re-run
-the installer once so the symlink exists. In copy mode, the post-merge hook copies
-`settings.json`, `agents\*`, and `lint\*` on the next pull. It also re-runs `install.ps1` itself
-when the pull changed it. So a new landed folder or a changed hook body needs no manual run.
-Check `~\.claude\claude-settings-install.log` for a dated line from each run. Cloud picks it up
-on the next session start.
-=======
-A new role is a new `agents/<name>.md`. A linter change is a change to `lint/` or `hooks/`.
-Locally, re-run
-the installer once so the symlink exists. In copy mode the post-merge hook picks the file up on
-the next pull. Cloud picks it up on the next session start.
->>>>>>> worktree-agent-a999373c8abee1d95
+A new role is a new `agents/<name>.md`. A linter change is a change to `lint/`. A guard change is
+a change to `hooks/`. Locally, re-run the installer once so the symlink exists. In copy mode, the
+post-merge hook copies `settings.json`, `agents\*`, `lint\*`, and `hooks\*` on the next pull. It
+also re-runs `install.ps1` itself when the pull changed it. So a new landed folder or a changed
+hook body needs no manual run. Check `~\.claude\claude-settings-install.log` for a dated line
+from each run. Cloud picks it up on the next session start.
 
 Hooks in `settings.json` run everywhere the file lands. Command hooks use `sh` syntax, which Git
 Bash runs on Windows. Guard anything local-only with `CLAUDE_CODE_REMOTE`. The cloud install
