@@ -16,6 +16,12 @@ inputs:
     description: Glob passed to `git ls-files` when scope is 'all'.
     required: false
     default: "**/*.md"
+  exclude:
+    description: >
+      Newline- or comma-separated git pathspecs to leave out of both scopes. Use this for
+      a generated file the linter should never see.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -29,20 +35,36 @@ runs:
         SCOPE: ${{ inputs.scope }}
         FAIL: ${{ inputs.fail }}
         PATHS_GLOB: ${{ inputs.paths }}
+        EXCLUDE: ${{ inputs.exclude }}
       run: |
         set -euo pipefail
         # Needs actions/checkout with fetch-depth 0: scope 'changed' diffs against the
         # base branch, and a shallow clone would not carry that history.
         LINTER="${{ github.action_path }}/../../lint/ste_lint.py"
 
+        # 'exclude' takes newline- or comma-separated pathspecs. Trim each, skip empty
+        # lines, turn each into git's ':(exclude)<pattern>' pathspec magic.
+        EXCLUDE_PATTERNS=()
+        EXCLUDE_PATHSPECS=()
+        while IFS= read -r p; do
+          p="$(echo "$p" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+          [ -n "$p" ] || continue
+          EXCLUDE_PATTERNS+=("$p")
+          EXCLUDE_PATHSPECS+=(":(exclude)$p")
+        done < <(echo "$EXCLUDE" | tr ',' '\n')
+
+        RAW_FILES=()
         FILES=()
         if [ "$SCOPE" = "all" ]; then
           # ':(glob)' turns on real double-star matching. Without it, git's default
           # pathspec needs a literal '/' for '**/', so a root file such as README.md
           # never matches '**/*.md' (measured).
           while IFS= read -r f; do
-            [ -n "$f" ] && FILES+=("$f")
+            [ -n "$f" ] && RAW_FILES+=("$f")
           done < <(git ls-files -- ":(glob)$PATHS_GLOB")
+          while IFS= read -r f; do
+            [ -n "$f" ] && FILES+=("$f")
+          done < <(git ls-files -- ":(glob)$PATHS_GLOB" "${EXCLUDE_PATHSPECS[@]}")
         else
           if [ -n "$BASE_REF" ]; then
             BASE="$BASE_REF"
@@ -59,9 +81,31 @@ runs:
             RANGE="origin/$BASE...HEAD"
           fi
           while IFS= read -r f; do
-            [ -n "$f" ] && FILES+=("$f")
+            [ -n "$f" ] && RAW_FILES+=("$f")
           done < <(git diff --name-only --diff-filter=AMR "$RANGE" -- '*.md')
+          while IFS= read -r f; do
+            [ -n "$f" ] && FILES+=("$f")
+          done < <(git diff --name-only --diff-filter=AMR "$RANGE" -- '*.md' "${EXCLUDE_PATHSPECS[@]}")
         fi
+
+        # In-script fallback: a caller that passes a plain glob (no ':(exclude)' magic
+        # understanding needed) still gets it dropped here.
+        if [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ] && [ ${#FILES[@]} -gt 0 ]; then
+          KEPT=()
+          for f in "${FILES[@]}"; do
+            DROP=0
+            for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+              if [[ "$f" == $pattern ]]; then
+                DROP=1
+                break
+              fi
+            done
+            [ "$DROP" -eq 0 ] && KEPT+=("$f")
+          done
+          FILES=("${KEPT[@]}")
+        fi
+
+        EXCLUDED_COUNT=$((${#RAW_FILES[@]} - ${#FILES[@]}))
 
         SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"
 
@@ -71,11 +115,15 @@ runs:
             echo "### STE lint"
             echo
             echo "No markdown changed."
+            if [ "$EXCLUDED_COUNT" -gt 0 ]; then
+              echo
+              echo "Excluded: $EXCLUDED_COUNT file(s)."
+            fi
           } >> "$SUMMARY"
           exit 0
         fi
 
-        echo "ste-lint: ${#FILES[@]} file(s) in scope"
+        echo "ste-lint: ${#FILES[@]} file(s) in scope, $EXCLUDED_COUNT excluded"
         printf '  %s\n' "${FILES[@]}"
 
         JSON_OUT="$(mktemp)"
@@ -87,7 +135,7 @@ runs:
         # A single Python statement, semicolon-joined and on one physical line, so the YAML
         # block scalar's own indentation never lands inside the Python source (an indented
         # top-level statement is a Python syntax error).
-        python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); s = d["summary"]; print("### STE lint"); print(); print("Files checked: %d. Errors: %d. Warnings: %d." % (d["files"], s["error"], s["warning"])); print(); print("| File | Line | Rule | Message |"); print("| --- | --- | --- | --- |"); [print("| %s | %d | %s | %s |" % (f["path"], f["line"], f["code"], f["message"].replace("|", "\\|").replace("\n", " "))) for f in d["findings"][:50]]' "$JSON_OUT" >> "$SUMMARY"
+        python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); s = d["summary"]; excluded = int(sys.argv[2]); print("### STE lint"); print(); print("Files checked: %d. Excluded: %d. Errors: %d. Warnings: %d." % (d["files"], excluded, s["error"], s["warning"])); print(); print("| File | Line | Rule | Message |"); print("| --- | --- | --- | --- |"); [print("| %s | %d | %s | %s |" % (f["path"], f["line"], f["code"], f["message"].replace("|", "\\|").replace("\n", " "))) for f in d["findings"][:50]]' "$JSON_OUT" "$EXCLUDED_COUNT" >> "$SUMMARY"
 
         if [ "$FAIL" = "true" ]; then
           exit "$LINT_EXIT"
