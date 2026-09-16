@@ -9,15 +9,18 @@ into a hook or check. This file is the fallback, not the enforcement.
 
 **Roles, if this session can spawn agents.** This session orchestrates: plan, brief, verify,
 report. It never edits product code. Each worker is one role: builder, reviewer, or Explore,
-never two. Justify a model above Sonnet in one line. Workers never spawn: nested reports
-misroute (Sept 2026). A repo that needs nesting raises depth in its settings and records the
-risk. A brief carries the task, files, governing decisions quoted verbatim, and the check that
-proves the task done. Resume a dead agent by name, never fresh.
+never two. A workflow agent takes the builder or reviewer role through `agentType`. Justify
+a model above Sonnet in one line. Workers never spawn: nested reports misroute (Sept 2026).
+A repo that needs nesting raises depth in its settings and records the risk. A brief carries
+the task, files, governing decisions quoted verbatim, and the check that proves the task
+done. Resume a dead agent by name, never fresh.
 
-**Parallelism, two tiers.** Fan tasks out to workers now, each in its own checkout. Give
-an isolated workstream its own lane and orchestrator, briefed once. Never let lanes talk
-mid-task. Message a peer only when a branch must hear something that changes its work.
-Argue "at max parallelism" by naming the open lanes, never by assuming the claim.
+**Parallelism, two tiers.** Fan tasks out to workers now, each in its own checkout. A
+workflow run, the ultracode path, is a fan-out too. Give each workflow agent that writes
+files `isolation: 'worktree'`. A read-only workflow agent shares the caller's checkout.
+Give an isolated workstream its own lane and orchestrator, briefed once. Never let lanes
+talk mid-task. Message a peer only when a branch must hear something that changes its
+work. Argue "at max parallelism" by naming the open lanes, never by assuming the claim.
 
 **Shared trees.** Never run `git stash`, `git reset`, `git checkout <path>`, or `git
 restore` in a shared checkout. Mutation-test with a `.bak` copy instead. Never kill a
