@@ -82,9 +82,12 @@ foreach ($sub in @('agents', 'lint')) {
         $cur  = Get-Item $dest -ErrorAction SilentlyContinue
         if ($cur -and $cur.LinkType -eq 'SymbolicLink' -and $cur.Target -eq $src.FullName) { continue }
         if ($cur -and -not $cur.LinkType) {
-            $bak = "$dest.bak.$(Get-Date -Format yyyyMMddHHmmss)"
-            Move-Item $dest $bak
-            Log "existing $dest moved to $bak"
+            if ((Get-FileHash $dest).Hash -ne (Get-FileHash $src.FullName).Hash) {
+                $bak = "$dest.bak.$(Get-Date -Format yyyyMMddHHmmss)"
+                Copy-Item $dest $bak
+                Log "existing $dest backed up to $bak"
+            }
+            Remove-Item $dest
         } elseif ($cur) {
             Remove-Item $dest
         }
@@ -114,9 +117,12 @@ if ($item -and $item.LinkType -eq 'SymbolicLink' -and $item.Target -eq $SrcJson)
 }
 
 if ($item -and -not $item.LinkType) {
-    $bak = "$TargetJson.bak.$(Get-Date -Format yyyyMMddHHmmss)"
-    Move-Item $TargetJson $bak
-    Log "existing $TargetJson moved to $bak; merge any keys you want (permissions, etc.) into $SrcJson"
+    if ((Get-FileHash $TargetJson).Hash -ne (Get-FileHash $SrcJson).Hash) {
+        $bak = "$TargetJson.bak.$(Get-Date -Format yyyyMMddHHmmss)"
+        Copy-Item $TargetJson $bak
+        Log "existing $TargetJson backed up to $bak; merge any keys you want (permissions, etc.) into $SrcJson"
+    }
+    Remove-Item $TargetJson
 } elseif ($item) {
     Remove-Item $TargetJson
 }
