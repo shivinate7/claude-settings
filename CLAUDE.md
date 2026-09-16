@@ -38,10 +38,10 @@ each PR's own commit. Close the originals as superseded once the integration bra
 **Verification.** If the repo has screens, view each screen at three widths, both themes.
 Use my browser login only when needed. Trust a guard only once it goes red on
 the defect it guards. A green check proves only its platform and fixture. Verify long
-work against the repo, not your status line. Never write a waiter loop. Never pipe a
-live stream through `tail`. Never dry-run a block-list. Bump a dependency to the first
-version fixing the problem, never the latest. If this repo lints markdown, give every
-published number and path a checked reader. Verify a claim before you rely on it.
+work against the repo, not your status line. Never write a waiter loop. Never dry-run
+a block-list. Bump a dependency to the first version fixing the problem, never the
+latest. If this repo lints markdown, give every published number and path a checked
+reader. Verify a claim before you rely on it.
 
 **Tokens.** Never load a long document whole. Read one entry, one section, or a
 rendered view. Point a brief at files. Never paste them in. Read a sub-agent's report,

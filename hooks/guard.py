@@ -16,11 +16,12 @@ one fixed order, and the first match wins.
 
   1 shared-tree        a command that throws away a working tree
   2 machine-wide-kill  a kill by name or by pattern
-  3 force-push         a rewrite of a published branch
+  3 live-stream        a command that follows a stream and never ends on its own
+  4 force-push         a rewrite of a published branch
     destructive-delete a recursive delete at a root, a home or a glob
-  4 env-file           any read or write of an environment file
-  5 merge-main         a pull request merged into main
-  6 frozen-path        a write to the settings, the hooks or the global CLAUDE.md
+  5 env-file           any read or write of an environment file
+  6 merge-main         a pull request merged into main
+  7 frozen-path        a write to the settings, the hooks or the global CLAUDE.md
 
 Every refusal names its rule and says what to do instead. A remedy never names
 the refused command or the refused path, because a remedy that repeats the
@@ -367,6 +368,47 @@ KILL_REASON = (
     "machine-wide. This machine runs other agents' servers and the owner's own editor. "
     "Remedy: name one process id that this session started, and stop that one process. "
     "Leave any other process alone."
+)
+
+
+# ------------------------------------------------------------------ a stream that never ends
+#
+# CLAUDE.md: "Never pipe a live stream through `tail`." A follow flag turns `tail` or
+# `Get-Content` into a command that never exits on its own, so it outlives the turn and the
+# agent that started it. The COMMAND WORD is checked first, so an unrelated `-f` on another
+# program never matches.
+#
+# The short-flag test reads the WHOLE TOKEN for an `f` or an `F`, the same shape as
+# `clean_deletes_files` and `push_is_forced` above, so `-fn 20` and `-nf` both match a combined
+# flag. `-F` is `tail`'s own retry-on-rotate form of follow, so it counts too.
+LIVE_STREAM_TAIL_TOOL = "tail"
+LIVE_STREAM_GETCONTENT_TOOLS = ("get-content", "gc")
+
+
+def live_stream_hit(segment: str) -> str:
+    """Return the matched text when one segment follows a stream and never ends, else ''."""
+    tokens = segment.split()
+    for index, token in enumerate(tokens):
+        tool = basename(token)
+        if tool == LIVE_STREAM_TAIL_TOOL:
+            for arg in tokens[index + 1:]:
+                if arg == "--follow" or arg.startswith("--follow="):
+                    return token + " " + arg
+                if arg.startswith("-") and not arg.startswith("--") and (
+                        "f" in arg or "F" in arg):
+                    return token + " " + arg
+        elif tool in LIVE_STREAM_GETCONTENT_TOOLS:
+            for arg in tokens[index + 1:]:
+                if arg.lower() == "-wait":
+                    return token + " " + arg
+    return ""
+
+
+LIVE_STREAM_REASON = (
+    "this command follows a stream and never ends on its own, so it outlives the turn "
+    "and the agent that started it. "
+    "Remedy: run the command in the foreground with a timeout, or in the background and "
+    "wait for its completion notice."
 )
 
 
@@ -823,7 +865,13 @@ def judge_shell(tool: str, raw: str, cwd: str) -> None:
         if matched:
             refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
 
-    # 3. A wide delete denies, and a force push asks.
+    # 3. A live stream that never ends.
+    for segment in SEGMENT_SPLIT.split(stripped):
+        matched = live_stream_hit(segment)
+        if matched:
+            refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)
+
+    # 4. A wide delete denies, and a force push asks.
     for pattern in DESTRUCTIVE_DELETE:
         found = pattern.search(cmd)
         if found:
@@ -834,12 +882,12 @@ def judge_shell(tool: str, raw: str, cwd: str) -> None:
                 refuse(tool, "ask", "force-push", PUSH_REASON,
                        "git push " + " ".join(args))
 
-    # 4. The environment file. This layer reads the command BEFORE normalization.
+    # 5. The environment file. This layer reads the command BEFORE normalization.
     refusal, logged = env_refusal(stripped)
     if refusal:
         refuse(tool, "deny", "env-file", refusal + ". " + ENV_ADVICE, logged)
 
-    # 5. A merge into main.
+    # 6. A merge into main.
     if GH_PR_MERGE.search(cmd):
         base = merge_base(stripped)
         if base == PROTECTED_BASE:
@@ -847,7 +895,7 @@ def judge_shell(tool: str, raw: str, cwd: str) -> None:
         if base == "":
             refuse(tool, "ask", "merge-main", MERGE_UNKNOWN_REASON, "gh pr merge, base unread")
 
-    # 6. A frozen path.
+    # 7. A frozen path.
     matched = frozen_shell_hit(stripped, cwd)
     if matched:
         refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)
@@ -883,13 +931,13 @@ def judge(payload) -> None:
     if not isinstance(target, str) or not target:
         return
 
-    # 4. The environment file. Every matched tool is refused, a read included, because the rule is
+    # 5. The environment file. Every matched tool is refused, a read included, because the rule is
     # about the contents and a read is contents. The reason names no file, and the log holds the
     # path the tool asked for.
     if is_env(target):
         refuse(tool, "deny", "env-file", ENV_TOOL_REASON + ". " + ENV_ADVICE, target)
 
-    # 6. A frozen path. A read-only tool may look, because reading the hook is how anyone finds out
+    # 7. A frozen path. A read-only tool may look, because reading the hook is how anyone finds out
     # what it does. A writing tool may not.
     if tool not in READ_ONLY_TOOLS and is_frozen(target, cwd):
         refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)
