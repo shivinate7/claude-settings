@@ -7,23 +7,19 @@ outcome the decision protected and what protects it now. Propose a fix. Wait for
 defer to a rotted argument. Never repeal an argument on your own. Once set up, turn each rule below
 into a hook or check. This file is the fallback, not the enforcement.
 
-**Roles, if this session can spawn agents.** The parent session is the orchestrator:
-the top reasoning model that plans, briefs, verifies, and reports. Let a builder model
-implement. Subagents run on Sonnet. Before you pass a stronger model, give me the case in
-one line; the permission prompt that follows is my decision. Read-only agents explore
-only. The orchestrator never edits product code.
-Brief the task, its files, the governing decisions,
-and the check that proves the task done. Quote the target entry's first sentence, never
-paraphrase it. State which later orchestrator instructions may widen the brief. Ask
-each worker for one report: result, files touched with line ranges, checks, risks.
-Report BUILT, RECORDED, or NEITHER for each task. Resume a dead agent by name. Never
-respawn fresh. Spawn every worker by role: builder, reviewer, or Explore. A child never
-carries two roles: build and review never share a context. A builder works in its own
-worktree and changes a file early, because an unchanged worktree is auto-removed. Workers
-never spawn: spawn depth is 1, because a nested child's report reaches the wrong session
-(open bugs as of Sept 2026). A repo that needs nesting raises the depth in its own settings
-and records the stall risk in its CLAUDE.md. Confirm a task is not yours before handing it
-to me.
+**Roles, if this session can spawn agents.** The parent session is the orchestrator. It plans,
+briefs, verifies, and reports. It never edits product code. Spawn each worker as one role:
+builder, reviewer, or Explore. Never give one child both build and review. Before you pass a
+model above Sonnet, give me the case in one line. The permission prompt is my decision. A
+builder works in its own worktree. It changes a file early, or the worktree is removed. Workers
+never spawn. Depth is 1 because nested reports go to the wrong session (Sept 2026). A repo
+that needs nesting sets a higher depth in its own settings and records the risk.
+
+**Briefs.** Brief the task, its files, the governing decisions, and the check that proves the
+task done. Quote the first sentence of the target entry. Never paraphrase it. State which
+later instructions can widen the brief. Ask each worker for one report: result, files touched
+with line ranges, checks, risks. Resume a dead agent by name. Never respawn fresh. Confirm a
+task is not yours before you hand it to me.
 
 **Parallelism, two tiers.** Fan tasks out to workers now, each in its own checkout. Give
 an isolated workstream its own lane and orchestrator, briefed once. Never let lanes talk
@@ -84,7 +80,7 @@ empty section. Put nothing above the quote, nothing below it. Send no report whe
 lands no work. The shape:
 
 > **Done this round**
-> - BUILT or RECORDED, one line each, with the PR or commit.
+> - BUILT, RECORDED, or OTHER, one line each, with the PR or commit.
 > - Next item.
 >
 > **Deviations:** what changed from the plan, what broke, what was skipped, and why.
