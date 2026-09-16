@@ -217,11 +217,15 @@ only.
 Run the fixture suite with `python3 ~/.claude/hooks/test_guard.py`. Each case
 is the check that proves a rule goes red on the defect it guards.
 
+`hooks/mutate_guard.py` breaks one rule at a time in a copy of `guard.py`. It
+expects the fixture suite to go red. CI runs it on every push and pull request.
+
 ## CI
 
 `.github/workflows/gates.yml` runs on push to `main`, on every pull request, and on manual
-dispatch. Each run sets up Python 3.11. It then runs the guard suite, the report-gate suite,
-a shell check of `install.sh`, a PowerShell parse of `install.ps1`, and the STE lint action.
+dispatch. Each run sets up Python 3.11. It then runs the guard suite and the guard
+mutation harness. It also runs the report-gate suite, a shell check of `install.sh`, a
+PowerShell parse of `install.ps1`, and the STE lint action.
 
 Manual dispatch takes one input, `full_ste_audit`. Enable it from the Actions tab to lint
 the whole tree in report mode. That run never fails the build. It only writes a summary.
