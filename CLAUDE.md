@@ -7,19 +7,12 @@ outcome the decision protected and what protects it now. Propose a fix. Wait for
 defer to a rotted argument. Never repeal an argument on your own. Once set up, turn each rule below
 into a hook or check. This file is the fallback, not the enforcement.
 
-**Roles, if this session can spawn agents.** The parent session is the orchestrator. It plans,
-briefs, verifies, and reports. It never edits product code. Spawn each worker as one role:
-builder, reviewer, or Explore. Never give one child both build and review. Before you pass a
-model above Sonnet, give me the case in one line. The permission prompt is my decision. A
-builder works in its own worktree. It changes a file early, or the worktree is removed. Workers
-never spawn. Depth is 1 because nested reports go to the wrong session (Sept 2026). A repo
-that needs nesting sets a higher depth in its own settings and records the risk.
-
-**Briefs.** Brief the task, its files, the governing decisions, and the check that proves the
-task done. Quote the first sentence of the target entry. Never paraphrase it. State which
-later instructions can widen the brief. Ask each worker for one report: result, files touched
-with line ranges, checks, risks. Resume a dead agent by name. Never respawn fresh. Confirm a
-task is not yours before you hand it to me.
+**Roles, if this session can spawn agents.** This session orchestrates: plan, brief, verify,
+report. It never edits product code. Each worker is one role: builder, reviewer, or Explore,
+never two. Justify a model above Sonnet in one line. Workers never spawn: nested reports
+misroute (Sept 2026). A repo that needs nesting raises depth in its settings and records the
+risk. A brief carries the task, files, governing decisions quoted verbatim, and the check that
+proves the task done. Resume a dead agent by name, never fresh.
 
 **Parallelism, two tiers.** Fan tasks out to workers now, each in its own checkout. Give
 an isolated workstream its own lane and orchestrator, briefed once. Never let lanes talk
@@ -72,19 +65,8 @@ Once an objective is underway, assume nobody reads until I return. A turn that o
 gets one line, or none. Never echo a worker's report or describe a screenshot.
 Bring my decisions as a question with options and a recommendation.
 
-**The round report.** Report a landed round as one blockquote, never a code fence. Four
-labels in this order: Done this round, Deviations, Input needed, Next. Bold each label. A
-label with one item takes it inline after a colon. A label with several items takes one
-bullet per item under the label. A blank quoted line separates labels. Write "none" in an
-empty section. Put nothing above the quote, nothing below it. Send no report when a round
-lands no work. The shape:
-
-> **Done this round**
-> - BUILT, RECORDED, or OTHER, one line each, with the PR or commit.
-> - Next item.
->
-> **Deviations:** what changed from the plan, what broke, what was skipped, and why.
->
-> **Input needed:** the decisions that are mine, each as options + a recommendation.
->
-> **Next:** the defined steps, or the open avenues if nothing is defined.
+**Reports, in order:** Done, Deviations, Input needed, Next. Done lists BUILT, RECORDED, or
+OTHER, one line each with the PR or commit. A worker's Done names files, line ranges, and
+checks run. One item inline, several as bullets. Drop a label that does not apply. Your report
+to me: bold labels in one blockquote, never a code fence, nothing above or below. No report
+when nothing landed.

@@ -16,10 +16,7 @@ You cannot spawn agents: spawn depth is 1, so the orchestrator fans out and you 
 If the task is too large for one worker, stop at a clean point and report PARTIAL with the
 split you propose. Never review your own work; the orchestrator sends a reviewer.
 
-Report once, in this order:
-1. Result: BUILT, PARTIAL, or OTHER, with the one-line reason.
-2. Worktree path and branch that hold the work.
-3. Files touched, each with line ranges.
-4. Checks you ran, with the command and the outcome.
-5. Risks and open questions.
-Write in Simplified Technical English. Start with the point. No preamble.
+Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input needed, Next.
+Under Done: BUILT, PARTIAL, or OTHER on the first line, then the worktree path and branch,
+the files touched with line ranges, and the checks run with their outcome. Drop a label that
+does not apply. Write in Simplified Technical English. Start with the point. No preamble.

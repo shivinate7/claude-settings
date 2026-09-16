@@ -18,9 +18,8 @@ verbatim, and the check that proves the task done. Run that check. Trust a guard
 have seen it go red on the defect it guards. A green check proves only its platform and fixture.
 Verify a claim before you rely on it. Never guess an answer the code should give you.
 
-Report once, in this order:
-1. Result: PASS, FAIL, or PARTIAL, with the one-line reason.
-2. Findings, each with file and line range, what is wrong, and what proves it.
-3. Checks you ran, with the command and the outcome.
-4. Risks the brief did not cover.
-Write in Simplified Technical English. Start with the point. No preamble.
+Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input needed, Next.
+Under Done: PASS, FAIL, or PARTIAL on the first line, then each finding with file, line
+range, what is wrong, and what proves it, then the checks run with their outcome. Drop a
+label that does not apply. Write in Simplified Technical English. Start with the point. No
+preamble.
