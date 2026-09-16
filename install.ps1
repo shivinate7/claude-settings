@@ -17,24 +17,41 @@ New-Item -ItemType Directory -Force -Path $ClaudeDir | Out-Null
 
 function Log([string]$msg) { Write-Host "claude-settings: $msg" }
 
+# One dated line per install.ps1 run, on every exit path, so a copy-mode machine has a record
+# of what happened without re-reading Write-Host output.
+$InstallLogPath = Join-Path $ClaudeDir 'claude-settings-install.log'
+function Write-InstallLog([string]$SettingsMode, [string]$AgentsMode, [string]$HookMode) {
+    $line = "$(Get-Date -Format s) install.ps1: settings.json=$SettingsMode agents/lint=$AgentsMode hook=$HookMode`n"
+    [System.IO.File]::AppendAllText($InstallLogPath, $line, (New-Object System.Text.UTF8Encoding $false))
+}
+
 # Bandaid for machines without symlink rights: a git post-merge hook in this clone re-copies
 # settings.json into ~\.claude after every `git pull`, so pull stays the only update step.
+# Returns 'installed' or 'skipped', for the install-log summary.
 function Install-PostMergeHook {
     $hooksDir = Join-Path $RepoDir '.git\hooks'
-    if (-not (Test-Path $hooksDir)) { Log "no .git\hooks directory found; skipping post-merge hook"; return }
+    if (-not (Test-Path $hooksDir)) { Log "no .git\hooks directory found; skipping post-merge hook"; return 'skipped' }
     $hookPath = Join-Path $hooksDir 'post-merge'
     $marker   = '# claude-settings post-merge hook'
     if ((Test-Path $hookPath) -and -not ((Get-Content -Raw $hookPath) -match [regex]::Escape($marker))) {
         Log "a post-merge hook already exists at $hookPath and is not ours; left untouched. Re-run install.ps1 after pulls instead."
-        return
+        return 'skipped'
     }
     $hook = @"
 #!/bin/sh
 $marker
 # Keeps ~/.claude/settings.json, ~/.claude/agents/*, and ~/.claude/lint/* in sync after every
-# git pull when symlinks are unavailable.
+# git pull when symlinks are unavailable. Re-runs install.ps1 when the pull changed it, so a
+# changed installer or hook body still lands without a manual re-run.
 repo="`$(git rev-parse --show-toplevel)"
 cfg="`${CLAUDE_CONFIG_DIR:-`$HOME/.claude}"
+log="`$cfg/claude-settings-install.log"
+if git rev-parse -q --verify ORIG_HEAD >/dev/null 2>&1 \
+   && git diff-tree -r --name-only --no-commit-id ORIG_HEAD HEAD | grep -qx 'install.ps1'; then
+  mkdir -p "`$cfg"
+  echo "`$(date) post-merge: install.ps1 changed, re-running install.ps1" >> "`$log"
+  exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File "`$repo/install.ps1"
+fi
 dest="`$cfg/settings.json"
 if [ -f "`$repo/settings.json" ] && [ ! -L "`$dest" ]; then
   cp "`$repo/settings.json" "`$dest" && echo "claude-settings: refreshed `$dest"
@@ -51,8 +68,11 @@ done
 exit 0
 "@
     $hook = $hook -replace "`r`n", "`n"
-    [System.IO.File]::WriteAllText($hookPath, $hook, (New-Object System.Text.UTF8Encoding $false))
-    Log "installed git post-merge hook; from now on 'git pull' also refreshes settings.json. No re-run needed."
+    $tmpPath = Join-Path $hooksDir 'post-merge.tmp'
+    [System.IO.File]::WriteAllText($tmpPath, $hook, (New-Object System.Text.UTF8Encoding $false))
+    Move-Item -Force $tmpPath $hookPath
+    Log "installed git post-merge hook; 'git pull' now refreshes settings.json, agents, and lint, and reruns install.ps1 when it changed."
+    return 'installed'
 }
 
 # ---- CLAUDE.md pointer -------------------------------------------------------------------------
@@ -112,7 +132,10 @@ $TargetJson = Join-Path $ClaudeDir 'settings.json'
 $item = Get-Item $TargetJson -ErrorAction SilentlyContinue
 if ($item -and $item.LinkType -eq 'SymbolicLink' -and $item.Target -eq $SrcJson) {
     Log "$TargetJson already links to $SrcJson"
-    if ($AgentCopied) { Install-PostMergeHook }
+    $AgentsMode = if ($AgentCopied) { 'copy' } else { 'symlink' }
+    $HookMode = 'not needed'
+    if ($AgentCopied) { $HookMode = Install-PostMergeHook }
+    Write-InstallLog -SettingsMode 'symlink' -AgentsMode $AgentsMode -HookMode $HookMode
     exit 0
 }
 
@@ -130,8 +153,12 @@ if ($item -and -not $item.LinkType) {
 try {
     New-Item -ItemType SymbolicLink -Path $TargetJson -Target $SrcJson -ErrorAction Stop | Out-Null
     Log "linked $TargetJson -> $SrcJson (git pull in the clone is now the whole update)"
+    $AgentsMode = if ($AgentCopied) { 'copy' } else { 'symlink' }
+    Write-InstallLog -SettingsMode 'symlink' -AgentsMode $AgentsMode -HookMode 'not needed'
 } catch {
     Copy-Item $SrcJson $TargetJson
     Log "symlink not permitted (enable Windows Developer Mode, or run as admin); copied instead."
-    Install-PostMergeHook
+    $HookMode = Install-PostMergeHook
+    $AgentsMode = if ($AgentCopied) { 'copy' } else { 'symlink' }
+    Write-InstallLog -SettingsMode 'copy' -AgentsMode $AgentsMode -HookMode $HookMode
 }
