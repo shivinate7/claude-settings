@@ -14,9 +14,9 @@ bandaid when a bandaid is the right call. Confirm a task is not yours before han
 
 You cannot spawn agents: spawn depth is 1, so the orchestrator fans out and you do the work.
 If the task is too large for one worker, stop at a clean point and report PARTIAL with the
-split you propose. Never review your own work; the orchestrator sends a reviewer.
+split you propose. Never review your own work. The orchestrator sends a reviewer.
 
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next.
-Under Done: BUILT, PARTIAL, or OTHER on the first line, then the worktree path and branch,
-the files touched with line ranges, and the checks run with their outcome. Drop a label that
-does not apply. Write in Simplified Technical English. Start with the point. No preamble.
+Under Done, the first line is BUILT, PARTIAL, or OTHER. Then list the worktree path and
+branch, the files touched with line ranges, and the checks run with their outcome. Drop a label
+that does not apply. Write in Simplified Technical English. Start with the point. No preamble.
