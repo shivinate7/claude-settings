@@ -7,8 +7,9 @@ severity only. Prints JSON when there is something to say. Always exits 0.
 PreToolUse on Write, Edit, MultiEdit for a *.md path: deny the write when the new text has
 STE errors, and hand the findings back so the writer fixes them first.
 
-Stop: block the turn once when the last reply has STE errors. When stop_hook_active is set
-the reply is already a rewrite, so the gate lets it through.
+Stop: warn once when the last reply has STE errors. The warning is a systemMessage, not a
+block, so the turn ends anyway. When stop_hook_active is set, the reply is already a rewrite,
+so the gate stays quiet.
 """
 import json
 import os
@@ -57,7 +58,7 @@ def last_reply(hook):
                     rec = json.loads(line)
                 except Exception:
                     continue
-                if rec.get("type") != "assistant":
+                if not isinstance(rec, dict) or rec.get("type") != "assistant":
                     continue
                 parts = [b.get("text", "") for b in (rec.get("message") or {}).get("content", [])
                          if isinstance(b, dict) and b.get("type") == "text"]
@@ -72,6 +73,8 @@ def main():
     try:
         hook = json.load(sys.stdin)
     except Exception:
+        return
+    if not isinstance(hook, dict):
         return
     linter = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ste_lint.py")
     if not os.path.exists(linter):
@@ -113,9 +116,8 @@ def main():
         findings = lint(linter, text)
         if not findings:
             return
-        reason = "STE lint on your last reply:\n%s\n%s Rewrite the reply, then stop." % (
-            "\n".join(findings), NOTE)
-        print(json.dumps({"decision": "block", "reason": reason}))
+        msg = "STE: %d error(s) in the reply. %s" % (len(findings), findings[0])
+        print(json.dumps({"systemMessage": msg}))
 
 
 if __name__ == "__main__":

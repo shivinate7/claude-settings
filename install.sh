@@ -38,7 +38,7 @@ else
   mkdir -p "$SRC"
   mkdir -p "$SRC/agents" "$SRC/lint"
   for f in CLAUDE.md settings.json agents/builder.md agents/reviewer.md \
-           lint/ste_lint.py lint/ste_gate.py lint/LICENSE-ste_lint; do
+           lint/ste_lint.py lint/ste_gate.py lint/report_gate.py lint/LICENSE-ste_lint; do
     if curl -fsSL "$RAW/$f" -o "$SRC/$f.tmp"; then
       mv "$SRC/$f.tmp" "$SRC/$f"
     else
