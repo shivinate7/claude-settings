@@ -1,8 +1,10 @@
 name: STE lint
 description: >
   Run lint/ste_lint.py against changed markdown (scope changed, default) or the whole
-  tree (scope all). The caller needs actions/checkout with fetch-depth 0 so the
-  changed-files diff can reach the base branch.
+  tree (scope all). Scope changed gates on the added or changed lines of the diff only;
+  findings on untouched lines of a changed file are reported but never fail the build.
+  The caller needs actions/checkout with fetch-depth 0 so the changed-files diff can
+  reach the base branch.
 inputs:
   scope:
     description: "'changed' (default) diffs against the base branch. 'all' lints every matching file."
@@ -127,17 +129,102 @@ runs:
         printf '  %s\n' "${FILES[@]}"
 
         JSON_OUT="$(mktemp)"
+        python3 "$LINTER" --no-color --format json --fail-on never "${FILES[@]}" > "$JSON_OUT"
+
+        if [ "$SCOPE" = "all" ]; then
+          # Report-mode audit: whole-file findings, never fails the build.
+          # A single Python statement, semicolon-joined and on one physical line, so the
+          # YAML block scalar's own indentation never lands inside the Python source (an
+          # indented top-level statement is a Python syntax error).
+          python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); s = d["summary"]; excluded = int(sys.argv[2]); print("### STE lint"); print(); print("Files checked: %d. Excluded: %d. Errors: %d. Warnings: %d." % (d["files"], excluded, s["error"], s["warning"])); print(); print("| File | Line | Rule | Message |"); print("| --- | --- | --- | --- |"); [print("| %s | %d | %s | %s |" % (f["path"], f["line"], f["code"], f["message"].replace("|", "\\|").replace("\n", " "))) for f in d["findings"][:50]]' "$JSON_OUT" "$EXCLUDED_COUNT" >> "$SUMMARY"
+          exit 0
+        fi
+
+        # Decision 4: changed lines only. Build a map of file -> added line numbers from a
+        # zero-context unified diff, "@@ -a,b +c,d @@" giving c..c+d-1 (d defaults to 1, d
+        # of 0 means the hunk added no lines). Written to a script file, not a `python3 -c`
+        # multi-line string, so the YAML block scalar's own indentation never lands inside
+        # the Python source (an indented top-level statement is a Python syntax error).
+        HUNK_MAP_PY="$(mktemp)"
+        cat > "$HUNK_MAP_PY" <<'PYEOF'
+        import re, sys
+        cur = None
+        out = []
+        header = re.compile(r"^\+\+\+ b/(.*)$")
+        hunk = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+        for line in sys.stdin:
+            line = line.rstrip("\n")
+            m = header.match(line)
+            if m:
+                cur = m.group(1)
+                continue
+            m = hunk.match(line)
+            if m and cur is not None:
+                start = int(m.group(1))
+                count = int(m.group(2)) if m.group(2) is not None else 1
+                for n in range(start, start + count):
+                    out.append("%s\t%d" % (cur, n))
+        print("\n".join(out))
+        PYEOF
+
+        HUNKS="$(mktemp)"
+        git diff -U0 "$RANGE" -- "${FILES[@]}" | python3 "$HUNK_MAP_PY" > "$HUNKS"
+
+        # Split findings into in-hunk (gated) and out-of-hunk (pre-existing, report only).
+        # A finding without a line number counts as in-hunk.
+        SPLIT_PY="$(mktemp)"
+        cat > "$SPLIT_PY" <<'PYEOF'
+        import json, sys
+        json_path, hunks_path, excluded, fail = sys.argv[1:5]
+        d = json.load(open(json_path))
+        added = set()
+        with open(hunks_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.rstrip("\n")
+                if not line:
+                    continue
+                path, n = line.rsplit("\t", 1)
+                added.add((path, int(n)))
+        in_hunk, out_hunk = [], []
+        for finding in d["findings"]:
+            line = finding.get("line")
+            if line is None or (finding["path"], line) in added:
+                in_hunk.append(finding)
+            else:
+                out_hunk.append(finding)
+
+        def sev_count(items, sev):
+            return sum(1 for f in items if f["severity"] == sev)
+
+        def table(items):
+            print("| File | Line | Rule | Message |")
+            print("| --- | --- | --- | --- |")
+            for f in items[:50]:
+                print("| %s | %s | %s | %s |" % (
+                    f["path"], f.get("line", ""), f["code"],
+                    f["message"].replace("|", "\\|").replace("\n", " ")))
+
+        print("### STE lint")
+        print()
+        print("Files checked: %d. Excluded: %d." % (d["files"], int(excluded)))
+        print("Gated, changed lines: %d error(s), %d warning(s)."
+              % (sev_count(in_hunk, "error"), sev_count(in_hunk, "warning")))
+        print("Pre-existing, not gated: %d error(s), %d warning(s)."
+              % (sev_count(out_hunk, "error"), sev_count(out_hunk, "warning")))
+        print()
+        table(in_hunk)
+        if out_hunk:
+            print()
+            print("#### Pre-existing, not gated")
+            print()
+            table(out_hunk)
+
+        sys.exit(1 if (fail == "true" and sev_count(in_hunk, "error") > 0) else 0)
+        PYEOF
+
         set +e
-        python3 "$LINTER" --no-color --format json --fail-on error "${FILES[@]}" > "$JSON_OUT"
-        LINT_EXIT=$?
+        python3 "$SPLIT_PY" "$JSON_OUT" "$HUNKS" "$EXCLUDED_COUNT" "$FAIL" >> "$SUMMARY"
+        GATE_EXIT=$?
         set -e
 
-        # A single Python statement, semicolon-joined and on one physical line, so the YAML
-        # block scalar's own indentation never lands inside the Python source (an indented
-        # top-level statement is a Python syntax error).
-        python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); s = d["summary"]; excluded = int(sys.argv[2]); print("### STE lint"); print(); print("Files checked: %d. Excluded: %d. Errors: %d. Warnings: %d." % (d["files"], excluded, s["error"], s["warning"])); print(); print("| File | Line | Rule | Message |"); print("| --- | --- | --- | --- |"); [print("| %s | %d | %s | %s |" % (f["path"], f["line"], f["code"], f["message"].replace("|", "\\|").replace("\n", " "))) for f in d["findings"][:50]]' "$JSON_OUT" "$EXCLUDED_COUNT" >> "$SUMMARY"
-
-        if [ "$FAIL" = "true" ]; then
-          exit "$LINT_EXIT"
-        fi
-        exit 0
+        exit "$GATE_EXIT"

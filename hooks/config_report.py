@@ -15,9 +15,15 @@ Stop: when this turn edited a project config file (an `Edit`/`Write`/`MultiEdit`
 tool_use, or a `Bash`/`PowerShell` command that writes to one) after the last human message, print
 `{"systemMessage": "..."}` naming the files. Otherwise print nothing. When `stop_hook_active` is
 set, the reply is already a rewrite, so the gate stays quiet.
+
+Decision 8 ("Merge into main: allow and report") makes this hook also surface a merge into main
+landed this turn: a `Bash`/`PowerShell` tool_use whose command matches `gh pr merge`, and any
+`mcp__github__merge_pull_request` tool_use. The guard already allows and logs these; this hook is
+how the owner still SEES them at turn end, so the reply can name them under Done.
 """
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -25,8 +31,13 @@ sys.path.insert(0, HERE)
 
 FILE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 SHELL_TOOLS = {"Bash", "PowerShell"}
+MERGE_TOOLS = {"mcp__github__merge_pull_request"}
 
-MESSAGE = "Config files changed this turn: %s. Name them under Deviations."
+GH_PR_MERGE = re.compile(r"\bgh\s+pr\s+merge\b")
+
+CONFIG_MESSAGE = "Config files changed this turn: %s."
+MERGE_MESSAGE = "Merges into main this turn: %s."
+TAIL = " Name them in the report."
 
 
 # ------------------------------------------------------------------ transcript walking
@@ -138,6 +149,29 @@ def collect_paths(records, cwd):
     return seen
 
 
+def collect_merges(records):
+    """Return the merges into main this turn's tools named, in first-seen order."""
+    seen = []
+
+    def note(text):
+        if text and text not in seen:
+            seen.append(text)
+
+    for rec in records:
+        for b in tool_uses(rec):
+            name = b.get("name")
+            inp = b.get("input") or {}
+            if not isinstance(inp, dict):
+                continue
+            if name in MERGE_TOOLS:
+                note(name)
+            elif name in SHELL_TOOLS:
+                cmd = inp.get("command") or ""
+                if isinstance(cmd, str) and GH_PR_MERGE.search(cmd):
+                    note(cmd.strip())
+    return seen
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
@@ -166,10 +200,16 @@ def main():
         cwd = ""
 
     hits = collect_paths(after, cwd)
-    if not hits:
+    merges = collect_merges(after)
+    if not hits and not merges:
         return
 
-    print(json.dumps({"systemMessage": MESSAGE % ", ".join(hits)}))
+    parts = []
+    if hits:
+        parts.append(CONFIG_MESSAGE % ", ".join(hits))
+    if merges:
+        parts.append(MERGE_MESSAGE % ", ".join(merges))
+    print(json.dumps({"systemMessage": " ".join(parts) + TAIL}))
 
 
 if __name__ == "__main__":

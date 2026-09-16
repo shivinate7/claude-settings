@@ -142,7 +142,7 @@ CLAUDE.md asks for Simplified Technical English and a fixed report shape. Hooks 
 | `PreToolUse` on `Write`, `Edit`, `MultiEdit` | the target path ends in `.md` | the write is denied and the findings come back, so Claude fixes the text and writes again |
 | `Stop` | end of a turn | a warning is shown as a system message. The turn is not blocked |
 | `Stop` | the turn ran `git commit`, `git push`, `git merge`, or a GitHub MCP write tool | the turn is blocked once unless the reply is one blockquote with the bold labels Done, Deviations, Input Needed, Next in order, written tight in Simplified Technical English |
-| `Stop` | any project config file changed this turn | a system message names each changed `.claude/settings.json`, `.claude/settings.local.json`, or `.claude/hooks/*` path, so the reply can name it under Deviations. See `hooks/config_report.py` |
+| `Stop` | any project config file changed, or a merge into main landed, this turn | a system message names each changed `.claude/settings.json`, `.claude/settings.local.json`, or `.claude/hooks/*` path, and each `gh pr merge` or GitHub MCP merge call, so the reply can name them in the report. See `hooks/config_report.py` |
 | `PreToolUse` on `Bash`, `PowerShell`, `Read`, `Grep`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and the GitHub merge tool | a call matches a guard rule | the guard answers deny, ask, or nothing. See Guard below |
 | `SessionStart` on `startup`, `resume` | every local session start or resume | the session-start line prints. See Guard below |
 
@@ -157,6 +157,8 @@ and paragraph length are not gated. Fenced code and inline code are exempt. Tabl
 The linter is `lint/ste_lint.py`, vendored from
 [DotDebian/asd-ste100-skill](https://github.com/DotDebian/asd-ste100-skill) at commit
 `e71a969`, MIT, license in `lint/LICENSE-ste_lint`. It is Python 3.9+ with no dependencies.
+It carries one local patch: a closing `**`, `*`, or `_` after a sentence end also ends the
+sentence, so `**Bold.** Next.` reads as two sentences.
 The STE gate is `lint/ste_gate.py`. The report gate is `lint/report_gate.py`. It checks the
 shape only, not the wording, and it fires only after a landed commit, push, or merge. Both
 gates share one fixture suite, `lint/test_gates.py`. Its cases are the check that proves each
@@ -190,10 +192,11 @@ deny, ask, or nothing. It fails open on bad input.
 | Force push: `--force`, `-f`, `--force-with-lease` | `Bash`, `PowerShell` | ask | the click in the prompt is the grant |
 | Recursive delete at `/`, `~`, `.`, `*`, or a drive root | `Bash`, `PowerShell` | deny | name the folder |
 | Environment files: any `.env*` except `.env.example` | `Read`, `Grep`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and shell text | deny | ask the user for the value. Loader flags such as `--env-file` and existence checks with `ls` or `test` pass |
-| Merge into main: `gh pr merge` with base `main`, and every `mcp__github__merge_pull_request` call | `Bash`, `PowerShell`, MCP | ask | the click is the grant. A merge into another base passes |
+| Merge into main: `gh pr merge`, and every `mcp__github__merge_pull_request` call | `Bash`, `PowerShell`, MCP | allow, logged `noted`/`merge-main` when the base is `main` or unreadable, and always for the MCP tool, and named in a system message at turn end | name it under Done in the report |
 | Frozen paths: `settings.json`, `CLAUDE.md`, `hooks/*`, `lint/*`, `agents/*` under `~/.claude` | `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and shell writes | deny | edit the clone of claude-settings and open a PR |
 | Project config: a project's own `.claude/settings.json`, `.claude/settings.local.json`, `.claude/hooks/*` | `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and shell writes | allow, logged `noted`/`config-edit`, and named in a system message at turn end | name it under Deviations in the report |
 | Live streams: `tail -f`, `tail -F`, `--follow`, `Get-Content -Wait` | `Bash`, `PowerShell` | deny | run it in the foreground with a timeout, or in the background and wait for the completion notice |
+| Waiter loops: a segment whose command word is `sleep`, `Start-Sleep`, or `timeout /t` | `Bash`, `PowerShell` | deny | run the long command in the background and wait for its completion notice, or use a tool that waits once, such as `gh pr checks --watch` |
 
 The harness watcher tool `Monitor` is removed through `permissions.deny` in `settings.json`. It
 errors often, and a background command with a completion notice does the same job.
@@ -201,12 +204,13 @@ errors often, and a background command with a completion notice does the same jo
 ### Decisions
 
 1. Discards and force push: **ask or deny, no tokens.** Deny `git stash`, `git reset`, `git restore`, `git clean -f`, and a `git checkout` that names a path when the cwd is a shared checkout. Answer `ask` for the same commands when the cwd is a git worktree, and `ask` for `git push --force` or `-f` anywhere. The user's click in the permission prompt is the grant. Reason: q_max's `GIT_DISCARD_OK=1` and `DESTRUCTIVE_OK=1` tokens pass silently and are typed by the agent, so nothing proves the user was asked.
-2. Merge into main: **ask always.** `gh pr merge` whose PR base is `main` (read with `gh pr view <n> --json baseRefName`, and `ask` when unreadable), and every call of the `mcp__github__merge_pull_request` tool. A merge into any other base passes. No `OWNER_MERGE=1` token.
+2. Merge into main: **ask always.** `gh pr merge` whose PR base is `main` (read with `gh pr view <n> --json baseRefName`, and `ask` when unreadable), and every call of the `mcp__github__merge_pull_request` tool. A merge into any other base passes. No `OWNER_MERGE=1` token. Superseded by Decision 8.
 3. Composite action pin for callers: **`@main`.**
-4. STE in CI: **changed files only** against the PR base by default. A `scope: all` input runs the whole tree in report mode and never fails the build, for manual audits from the Actions tab.
+4. STE in CI, refined: **changed lines only** against the PR base by default. A finding counts only when its line sits in an added or changed hunk of the diff. Findings on untouched lines of a changed file show in the step summary and never fail the build. A `scope: all` input runs the whole tree in report mode and never fails the build, for manual audits from the Actions tab. Reason, measured on q_max: whole-file scope made the first branch to touch an old document pay that document's whole backlog.
 5. Stamping of decision records: **stays local** in each repo. Formats differ (`D100_<slug>.md` per kind by date in job-cost-reporting, `<slug>.md` with `id: pending` in first-parent order in q_max). Do not touch it.
 6. Extras: add the SessionStart checkout line. No scheduled audit, dispatch only. No stamp work.
 7. Project config edits: **allow and report.** An edit to a project's `.claude/hooks/*`, `.claude/settings.json`, or `.claude/settings.local.json` is allowed in any checkout. It is logged in `guard.log`, listed in a system message at the end of the turn, and named under Deviations in the report. Paths under `~/.claude` stay denied, the clone of claude-settings is the way. Reason: the owner is often away from the desk. The work is not sensitive enough for a hard wall, and a change seen at turn end is enough.
+8. Merge into main: **allow and report.** Supersedes 2. `gh pr merge` into `main` and the `mcp__github__merge_pull_request` tool are allowed, logged in `guard.log` as `noted merge-main`. Both are listed in the system message at turn end and named under Done in the report. `Bash(gh pr merge:*)` sits in `permissions.allow` so the harness does not prompt either. CLAUDE.md's "merged only when I name the act" stays the model's rule. Reason: the owner says merge in chat and the guard cannot read chat. The prompt only repeats a decision already made.
 
 Every deny or ask appends one line to `~/.claude/guard.log`: timestamp, tool,
 decision, rule, and the matched text cut at 120 characters. Allows are never
@@ -238,12 +242,15 @@ Manual dispatch takes one input, `full_ste_audit`. Enable it from the Actions ta
 the whole tree in report mode. That run never fails the build. It only writes a summary.
 
 `actions/ste-lint` is the composite action behind the STE step. Scope `changed` diffs
-markdown against the pull request base, or the default branch on a push. Scope `all` lints
-every file the `paths` glob names. Input `fail` sets whether an error blocks the step. Input
-`exclude` drops newline- or comma-separated pathspecs from both scopes. Use it for a
-generated file, such as a decision index, the linter should never see. The action always
-writes a step summary. The summary holds the file count, the excluded count, the error and
-warning counts, and a table of the first fifty findings.
+markdown against the pull request base, or the default branch on a push. It then gates only
+the added or changed lines of that diff (Decision 4). A finding on an untouched line of a
+changed file still shows, under "Pre-existing, not gated", and never fails the build.
+
+Scope `all` lints every file the `paths` glob names, in report mode, and never fails the
+build. Input `fail` sets whether an in-hunk error blocks the step. Input `exclude` drops
+newline- or comma-separated pathspecs from both scopes, for a generated file the linter
+should never see. The action always writes a step summary, with the file count, the excluded
+count, both counts by group, and a findings table for each group.
 
 A caller pins the action to `@main`:
 
