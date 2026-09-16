@@ -142,8 +142,13 @@ CLAUDE.md asks for Simplified Technical English and a fixed report shape. Hooks 
 | `PreToolUse` on `Write`, `Edit`, `MultiEdit` | the target path ends in `.md` | the write is denied and the findings come back, so Claude fixes the text and writes again |
 | `Stop` | end of a turn | a warning is shown as a system message. The turn is not blocked |
 | `Stop` | the turn ran `git commit`, `git push`, `git merge`, or a GitHub MCP write tool | the turn is blocked once unless the reply is one blockquote with the bold labels Done, Deviations, Input Needed, Next in order, written tight in Simplified Technical English |
+| `Stop` | any project config file changed this turn | a system message names each changed `.claude/settings.json`, `.claude/settings.local.json`, or `.claude/hooks/*` path, so the reply can name it under Deviations. See `hooks/config_report.py` |
 | `PreToolUse` on `Bash`, `PowerShell`, `Read`, `Grep`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and the GitHub merge tool | a call matches a guard rule | the guard answers deny, ask, or nothing. See Guard below |
 | `SessionStart` on `startup`, `resume` | every local session start or resume | the session-start line prints. See Guard below |
+
+The first `Stop` hook is a Sonnet agent guardrail that checks the turn against recorded
+decisions, gates, build-orders, CLAUDE.md rules, and settings values. It reports a finding as
+a system message and never blocks the turn.
 
 Errors are: a sentence over the STE budget (STE001), a semicolon (STE006), a Latin
 abbreviation such as `i.e.` (STE007), a contraction (STE008). Warnings such as passive voice
@@ -186,7 +191,8 @@ deny, ask, or nothing. It fails open on bad input.
 | Recursive delete at `/`, `~`, `.`, `*`, or a drive root | `Bash`, `PowerShell` | deny | name the folder |
 | Environment files: any `.env*` except `.env.example` | `Read`, `Grep`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and shell text | deny | ask the user for the value. Loader flags such as `--env-file` and existence checks with `ls` or `test` pass |
 | Merge into main: `gh pr merge` with base `main`, and every `mcp__github__merge_pull_request` call | `Bash`, `PowerShell`, MCP | ask | the click is the grant. A merge into another base passes |
-| Frozen paths: a project's `.claude/settings.json`, `.claude/settings.local.json`, `.claude/hooks/*`, and `settings.json`, `CLAUDE.md`, `hooks/*`, `lint/*`, `agents/*` under `~/.claude` | `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and shell writes | deny | edit the clone of claude-settings and open a PR |
+| Frozen paths: `settings.json`, `CLAUDE.md`, `hooks/*`, `lint/*`, `agents/*` under `~/.claude` | `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and shell writes | deny | edit the clone of claude-settings and open a PR |
+| Project config: a project's own `.claude/settings.json`, `.claude/settings.local.json`, `.claude/hooks/*` | `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and shell writes | allow, logged `noted`/`config-edit`, and named in a system message at turn end | name it under Deviations in the report |
 | Live streams: `tail -f`, `tail -F`, `--follow`, `Get-Content -Wait` | `Bash`, `PowerShell` | deny | run it in the foreground with a timeout, or in the background and wait for the completion notice |
 
 The harness watcher tool `Monitor` is removed through `permissions.deny` in `settings.json`. It
@@ -200,6 +206,7 @@ errors often, and a background command with a completion notice does the same jo
 4. STE in CI: **changed files only** against the PR base by default. A `scope: all` input runs the whole tree in report mode and never fails the build, for manual audits from the Actions tab.
 5. Stamping of decision records: **stays local** in each repo. Formats differ (`D100_<slug>.md` per kind by date in job-cost-reporting, `<slug>.md` with `id: pending` in first-parent order in q_max). Do not touch it.
 6. Extras: add the SessionStart checkout line. No scheduled audit, dispatch only. No stamp work.
+7. Project config edits: **allow and report.** An edit to a project's `.claude/hooks/*`, `.claude/settings.json`, or `.claude/settings.local.json` is allowed in any checkout. It is logged in `guard.log`, listed in a system message at the end of the turn, and named under Deviations in the report. Paths under `~/.claude` stay denied, the clone of claude-settings is the way. Reason: the owner is often away from the desk. The work is not sensitive enough for a hard wall, and a change seen at turn end is enough.
 
 Every deny or ask appends one line to `~/.claude/guard.log`: timestamp, tool,
 decision, rule, and the matched text cut at 120 characters. Allows are never

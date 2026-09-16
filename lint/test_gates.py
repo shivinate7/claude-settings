@@ -16,6 +16,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 STE_GATE = os.path.join(HERE, "ste_gate.py")
 REPORT_GATE = os.path.join(HERE, "report_gate.py")
+CONFIG_REPORT = os.path.join(HERE, "..", "hooks", "config_report.py")
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 
@@ -208,6 +209,64 @@ class ReportGateTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0)
         out = json.loads(run.stdout)
         self.assertEqual(out.get("decision"), "block")
+
+
+class ConfigReportTests(unittest.TestCase):
+    """Decision 7: an allowed project config edit is still reported at turn end."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def hook_for(self, path, stop_hook_active=False):
+        return {
+            "hook_event_name": "Stop",
+            "transcript_path": path,
+            "cwd": self.tmp.name,
+            "stop_hook_active": stop_hook_active,
+        }
+
+    def test_16_hook_edit_after_last_human_names_it(self):
+        target = os.path.join(self.tmp.name, ".claude", "hooks", "x.py")
+        records = [
+            human("edit the project hook"),
+            tool_use_msg("Edit", {"file_path": target}),
+            tool_result_msg(),
+            assistant_text("done"),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(CONFIG_REPORT, self.hook_for(path))
+        self.assertEqual(run.returncode, 0)
+        out = json.loads(run.stdout)
+        self.assertIn("systemMessage", out)
+        self.assertIn(target.replace("\\", "/"), out["systemMessage"].replace("\\", "/"))
+        self.assertIn("Deviations", out["systemMessage"])
+
+    def test_17_ordinary_source_edit_no_output(self):
+        target = os.path.join(self.tmp.name, "src", "app.py")
+        records = [
+            human("edit the app"),
+            tool_use_msg("Edit", {"file_path": target}),
+            tool_result_msg(),
+            assistant_text("done"),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(CONFIG_REPORT, self.hook_for(path))
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_18_stop_hook_active_no_output(self):
+        target = os.path.join(self.tmp.name, ".claude", "hooks", "x.py")
+        records = [
+            human("edit the project hook"),
+            tool_use_msg("Edit", {"file_path": target}),
+            tool_result_msg(),
+            assistant_text("done"),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(CONFIG_REPORT, self.hook_for(path, stop_hook_active=True))
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(run.stdout.strip(), "")
 
 
 class SteGateStopTests(unittest.TestCase):
