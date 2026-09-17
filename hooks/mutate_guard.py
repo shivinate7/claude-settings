@@ -131,6 +131,20 @@ MUTATIONS = [
      '    matched = project_config_shell_hit(stripped, cwd)\n'
      '    if False:\n'
      '        record(tool, "noted", "config-edit", matched)'),
+    # Added: the stash/reset/restore split (Decision 12). Each mutation collapses one predicate
+    # back to a bare name match, the exact defect this split fixes, so a later edit that redoes
+    # that collapse goes red here.
+    ("shared-tree: stash collapses back to a name match on every action",
+     '    return action not in STASH_READ_ACTIONS and action not in STASH_RESTORE_ACTIONS',
+     '    return True'),
+    ("shared-tree: reset collapses back to a name match, --hard or not",
+     '    return "--hard" in args',
+     '    return True'),
+    ("shared-tree: restore collapses back to a name match, --staged or not",
+     '    staged = "--staged" in args or "-S" in args\n'
+     '    worktree = "--worktree" in args or "-W" in args\n'
+     '    return worktree or not staged',
+     '    return True'),
 ]
 
 

@@ -261,8 +261,11 @@ GIT_OPT_WITH_VALUE = {
     "--super-prefix", "--config-env",
 }
 
-# A subcommand that discards the working tree on its own.
-TREE_DISCARD = {"stash", "reset", "restore"}
+# `stash`, `reset`, and `restore` each cover both a read and a discard, so the SUBCOMMAND NAME
+# alone never proves the act. MEASURED: `git stash list` only reads, and `git stash apply
+# stash@{0}` puts work back with git itself refusing to overwrite a modified file, yet both
+# tripped this rule under the old name match. The predicates below read the ACT each one takes,
+# never the spelling of the subcommand.
 
 # These options are followed by a NEW branch name, which is never a path.
 GIT_CHECKOUT_TAKES_NAME = {"-b", "-B", "--orphan"}
@@ -366,11 +369,82 @@ def push_is_forced(args) -> bool:
     return False
 
 
+STASH_READ_ACTIONS = {"list", "show"}
+STASH_RESTORE_ACTIONS = {"apply", "pop"}
+
+
+def stash_action(args) -> str:
+    """Return the stash call's own action word, or 'push' when the call names none.
+
+    A bare `git stash` and `git stash -u` both push, the same as `git stash push`. `stash`
+    takes no flag of its own before the action word, so the first plain word is the action.
+    """
+    for arg in args:
+        if not arg.startswith("-"):
+            return arg
+    return "push"
+
+
+def stash_discards(args) -> bool:
+    """True when a `git stash` call can lose work with no way back.
+
+    `list` and `show` read the stash and change nothing. `apply` and `pop` put work back into
+    the tree, and git refuses to overwrite a modified file rather than clobber it (MEASURED
+    against a real conflicting change, 2026-09-17: `git stash apply` aborted and printed
+    "Please commit your changes or stash them before you merge", leaving the file untouched).
+    `push`, `save`, and a bare `stash` move work OUT of the tree; the work stays reachable in
+    the stash, but git itself does not refuse the move, so today's deny or ask stays. `drop`
+    and `clear` destroy stashed work with no way back at all.
+    """
+    action = stash_action(args)
+    return action not in STASH_READ_ACTIONS and action not in STASH_RESTORE_ACTIONS
+
+
+def reset_discards(args) -> bool:
+    """True when a `git reset` call can overwrite the working tree with no way back.
+
+    Only `--hard` rewrites tracked files in the working tree unconditionally (MEASURED against
+    a real uncommitted change, 2026-09-17: it was gone after the reset). The default, with no
+    flag and no paths, and `--soft`, `--mixed`, `--keep`, and `--merge` all leave the working
+    tree alone or abort when a local change would be overwritten (MEASURED the same day: `git
+    reset --keep` and `git reset --merge` both stopped with "error: Entry 'f.txt' not uptodate.
+    Cannot merge." against a modified file, and the file kept its uncommitted line). A `reset`
+    that names paths only ever touches the index, and git refuses to combine `--hard` with a
+    path at all ("fatal: Cannot do hard reset with paths."), so no path form can lose the
+    working tree either.
+    """
+    return "--hard" in args
+
+
+def restore_discards(args) -> bool:
+    """True when a `git restore` call writes the working tree.
+
+    The working tree is the DEFAULT target `restore` writes to, so the bare form with neither
+    flag overwrites it (MEASURED, 2026-09-17: an uncommitted line was gone after a plain `git
+    restore f.txt`). `--worktree`, alone or together with `--staged`, does the same. `--staged`
+    alone writes only the index and leaves the working tree file as it was (MEASURED the same
+    day: the uncommitted line survived).
+    """
+    staged = "--staged" in args or "-S" in args
+    worktree = "--worktree" in args or "-W" in args
+    return worktree or not staged
+
+
 def shared_tree_hit(segment: str) -> str:
     """Return the matched text when one segment discards a working tree, else ''."""
     for subcommand, args in git_calls(segment):
-        if subcommand in TREE_DISCARD:
-            return ("git " + subcommand + " " + " ".join(args)).strip()
+        if subcommand == "stash":
+            if stash_discards(args):
+                return ("git stash " + " ".join(args)).strip()
+            continue
+        if subcommand == "reset":
+            if reset_discards(args):
+                return ("git reset " + " ".join(args)).strip()
+            continue
+        if subcommand == "restore":
+            if restore_discards(args):
+                return ("git restore " + " ".join(args)).strip()
+            continue
         if subcommand == "clean" and clean_deletes_files(args):
             return ("git clean " + " ".join(args)).strip()
         if subcommand == "checkout":
