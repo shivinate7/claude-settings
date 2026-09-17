@@ -42,8 +42,7 @@ Write a slug. Claim the number at merge. Cite by id, never by path. Give each re
 own file, one folder per kind. Merge overlapping PRs into one integration branch. Keep
 each PR's own commit. Close the originals as superseded once the integration branch merges.
 
-**Verification.** If the repo has screens, check each screen at every width its layout
-changes at, in both themes. Give a verdict per screen, never a description.
+**Verification.** If the repo has screens, view each screen at three widths, both themes.
 Use my browser login only when needed. Trust a guard only once it goes red on
 the defect it guards. A green check proves only its platform and fixture. Verify long
 work against the repo, not your status line. Never write a waiter loop. Never dry-run
