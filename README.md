@@ -22,7 +22,7 @@ sessions started from the desktop app / claude.ai/code.
 ## Local machine (Windows)
 
 ```powershell
-git clone https://github.com/ssemwal-cdc/claude-settings C:\src\claude-settings
+git clone https://github.com/shivinate7/claude-settings C:\src\claude-settings
 cd C:\src\claude-settings
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
@@ -51,7 +51,27 @@ Result:
 Verify in a session: `/context` lists `~/.claude/CLAUDE.md` and the imported file under
 **Memory files**. `/status` shows the Concise output style.
 
-Linux/macOS: `bash install.sh` from the clone does the same with a real symlink.
+## Local machine (macOS, Linux)
+
+```bash
+git clone https://github.com/shivinate7/claude-settings ~/claude-settings
+cd ~/claude-settings
+bash install.sh
+```
+
+Result:
+
+* `~/.claude/CLAUDE.md` contains one line, `@~/claude-settings/CLAUDE.md`.
+* `~/.claude/settings.json` is a real symlink to the clone. The same is true for each file
+  under `agents/`, `lint/`, and `hooks/`. A `git pull` in the clone is the whole update, and
+  the `SessionStart` auto-pull below runs that pull for you.
+* Any existing `~/.claude/CLAUDE.md` or `settings.json` is backed up as `*.bak.<timestamp>`
+  first. Fold keys you want to keep into the repo `settings.json`, then commit.
+* Re-run `bash install.sh` only when a new file lands under `agents/`, `lint/`, or `hooks/`.
+  A symlink needs no re-run for a change to a file it already points at.
+
+macOS has Python 3 through the Command Line Tools, so the STE and guard hooks run. Check with
+`python3 -V`. Install the tools with `xcode-select --install` if the command is missing.
 
 ## Cloud sessions (desktop app, claude.ai/code, `claude --cloud`)
 
@@ -59,7 +79,7 @@ Cloud VMs never see your machine's `~/.claude`, so the environment's **setup scr
 recreate it. In claude.ai/code > environment settings, set the setup script to:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ssemwal-cdc/claude-settings/main/install.sh | bash -s -- --cloud
+curl -fsSL https://raw.githubusercontent.com/shivinate7/claude-settings/main/install.sh | bash -s -- --cloud
 ```
 
 Leave network access at **Trusted** (or add `raw.githubusercontent.com` to a Custom list).
@@ -257,7 +277,7 @@ A caller pins the action to `@main`:
 ```yaml
 - uses: actions/checkout@v4
   with: { fetch-depth: 0 }
-- uses: ssemwal-cdc/claude-settings/actions/ste-lint@main
+- uses: shivinate7/claude-settings/actions/ste-lint@main
   with:
     scope: changed
     fail: "true"
