@@ -79,4 +79,5 @@ Bring my decisions as a question with options and a recommendation.
 **Reports, in order:** Done, Deviations, Input Needed, Next. Done: one line per item, BUILT,
 RECORDED, or OTHER, with its PR or commit. One item inline, several as bullets. Drop a label
 that does not apply. Your report to me: bold labels in one blockquote, never a code fence,
-nothing above or below. No report when nothing landed.
+nothing below. Put nothing above it, unless I asked a question that turn. Then answer above
+the report. No report when nothing landed.

@@ -241,6 +241,42 @@ class ReportGateTests(unittest.TestCase):
         out = json.loads(run.stdout)
         self.assertEqual(out.get("decision"), "block")
 
+    def test_52_prose_above_report_after_a_question_passes(self):
+        records = [
+            human("why does it only fire sometimes?"),
+            tool_use_msg("Bash", {"command": "git commit -m x"}),
+            tool_result_msg(),
+            assistant_text("The gate fires on a landing turn only.\n\n" + GOOD_REPORT),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(REPORT_GATE, self.hook_for(path))
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_53_prose_above_report_without_a_question_blocks(self):
+        records = [
+            human("do the task"),
+            tool_use_msg("Bash", {"command": "git commit -m x"}),
+            tool_result_msg(),
+            assistant_text("Here is some prose.\n\n" + GOOD_REPORT),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(REPORT_GATE, self.hook_for(path))
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+
+    def test_54_prose_below_report_after_a_question_blocks(self):
+        records = [
+            human("why does it only fire sometimes?"),
+            tool_use_msg("Bash", {"command": "git commit -m x"}),
+            tool_result_msg(),
+            assistant_text(GOOD_REPORT + "\n\nOne more thought."),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(REPORT_GATE, self.hook_for(path))
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+
 
 class ConfigReportTests(unittest.TestCase):
     """Decision 7: an allowed project config edit is still reported at turn end."""
