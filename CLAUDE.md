@@ -25,7 +25,9 @@ talk mid-task. Message a peer only when a branch must hear something that change
 work. Argue "at max parallelism" by naming the open lanes, never by assuming the claim.
 
 **Shared trees.** Never run `git stash`, `git reset`, `git checkout <path>`, or `git
-restore` in a shared checkout. Mutation-test with a `.bak` copy instead. Never kill a
+restore` in a shared checkout. Mutation-test with a `.bak` copy instead. Set work
+aside with a commit on your own branch, never a stash. A stash entry belongs to
+no branch. It outlives no session that holds its tag. Never kill a
 process you did not start. Never restart another person's server. Treat `pkill -f` and
 `lsof -t` as machine-wide. Give one checkout to each concurrent agent. A branch switch
 is a whole-tree act. Give each checkout its own ports and data. Confirm which checkout

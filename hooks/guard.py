@@ -525,12 +525,14 @@ TREE_DENY_REASON = (
     "Rule (shared trees): this command throws away work in a checkout that other "
     "sessions and the owner share, and no step puts it back. "
     "Remedy: copy the file to a name ending in .bak and change the copy. "
-    "Make a commit for work you must set aside. "
+    "Commit work you must set aside on your own branch, never a stash: a stash entry "
+    "belongs to no branch, and it outlives no session that holds its tag. "
     "Run the command in a worktree of your own when the tree must change."
 )
 TREE_ASK_REASON = (
     "Rule (shared trees): this command throws away work in a working tree. "
     "This checkout is a worktree, so the loss is limited to this lane. "
+    "Commit work you must set aside on your own branch, never a stash. "
     "The click in this prompt is the grant."
 )
 
