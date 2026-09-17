@@ -2,7 +2,7 @@
 # Wire ~/.claude to the files in this repo. Linux/macOS local, and Claude Code cloud sessions.
 #
 #   Local (from a clone):   bash install.sh
-#   Cloud setup script:     curl -fsSL https://raw.githubusercontent.com/ssemwal-cdc/claude-settings/main/install.sh | bash -s -- --cloud
+#   Cloud setup script:     curl -fsSL https://raw.githubusercontent.com/shivinate7/claude-settings/main/install.sh | bash -s -- --cloud
 #
 # What it does:
 #   ~/.claude/CLAUDE.md      -> one-line pointer: @<repo>/CLAUDE.md
@@ -15,7 +15,7 @@
 #                                      the latest files from GitHub.
 set -u
 
-REPO="ssemwal-cdc/claude-settings"
+REPO="shivinate7/claude-settings"
 REF="${CLAUDE_SETTINGS_REF:-main}"
 RAW="https://raw.githubusercontent.com/${REPO}/${REF}"
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
