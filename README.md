@@ -252,7 +252,7 @@ errors often, and a background command with a completion notice does the same jo
 13. The orchestrator and product code: **judge the act, not the file.** This session writes records, docs, and briefs. Building goes to a lane, with one exception: a small fix, under 10 lines, named in the report. Reason, measured here: "It never edits product code" read as a file test. It blocked a decision entry, which is orchestration, and charged a whole lane for one comment.
 14. Setting work aside: **commit it, never stash it.** A lane that must park uncommitted work makes a commit on its own branch. Reason: a stash entry belongs to no branch. Only the session that holds the tag can find it again, and that session can die. The work is then unreachable in a tree where the next reader sees an empty stack. A commit survives the session, pushes with the branch, and any reader of the branch can see it. This states the remedy the guard already owed: `git stash push` is denied in a shared checkout (Decision 12), and the refusal now names the commit as the way out.
 
-`guard-reads-its-subject`. Shared trees, the subject: **read it before you refuse over
+15. Shared trees, the subject: **read it before you refuse over
 it.** This extends Decision 12 one level up. Decision 12 judged the subcommand name. This
 judges what the command would take.
 
