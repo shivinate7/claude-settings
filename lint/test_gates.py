@@ -197,6 +197,31 @@ class ReportGateTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0)
         self.assertEqual(run.stdout.strip(), "")
 
+    def test_21_merge_base_is_not_a_landing_command_passes(self):
+        records = [
+            human("check ancestry"),
+            tool_use_msg("Bash", {"command": "git merge-base --is-ancestor a b"}),
+            tool_result_msg(),
+            assistant_text("a is an ancestor of b, no report needed."),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(REPORT_GATE, self.hook_for(path))
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_22_git_merge_no_edit_blocks(self):
+        records = [
+            human("merge the branch"),
+            tool_use_msg("Bash", {"command": "git merge --no-edit feature"}),
+            tool_result_msg(),
+            assistant_text("Merged feature in."),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(REPORT_GATE, self.hook_for(path))
+        self.assertEqual(run.returncode, 0)
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+
     def test_14_stray_non_object_transcript_line_skipped_still_blocks(self):
         path = os.path.join(self.tmp.name, "transcript.jsonl")
         lines = [

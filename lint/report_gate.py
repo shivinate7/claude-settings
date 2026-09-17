@@ -17,7 +17,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ste_gate import last_reply  # noqa: E402
 
-LANDING_COMMAND = re.compile(r"\bgit\s+(commit|push|merge)\b")
+LANDING_COMMAND = re.compile(r"\bgit\s+(?:-C\s+\S+\s+)?(commit|push|merge)(?!\S)")
 LANDING_TOOLS = {
     "mcp__github__merge_pull_request",
     "mcp__github__create_pull_request",
