@@ -54,14 +54,15 @@ Verify in a session: `/context` lists `~/.claude/CLAUDE.md` and the imported fil
 ## Local machine (macOS, Linux)
 
 ```bash
-git clone https://github.com/shivinate7/claude-settings ~/claude-settings
-cd ~/claude-settings
+mkdir -p ~/Developer
+git clone https://github.com/shivinate7/claude-settings ~/Developer/claude-settings
+cd ~/Developer/claude-settings
 bash install.sh
 ```
 
 Result:
 
-* `~/.claude/CLAUDE.md` contains one line, `@~/claude-settings/CLAUDE.md`.
+* `~/.claude/CLAUDE.md` contains one line, `@~/Developer/claude-settings/CLAUDE.md`.
 * `~/.claude/settings.json` is a real symlink to the clone. The same is true for each file
   under `agents/`, `lint/`, and `hooks/`. A `git pull` in the clone is the whole update, and
   the `SessionStart` auto-pull below runs that pull for you.
