@@ -140,6 +140,43 @@ MUTATIONS = [
     ("shared-tree: reset collapses back to a name match, --hard or not",
      '    return "--hard" in args',
      '    return True'),
+    # Added: the subject read. One per arm. Each mutation blinds ONE subject read, which must
+    # turn that arm's empty-subject case red: a guard that refuses without reading its subject is
+    # the defect these arms fix.
+    ("subject: the reset arm never reads the working tree",
+     'def reset_subject(args, where: str):',
+     'def reset_subject(args, where: str):\n    return False'),
+    ("subject: a hard reset at any commit passes on a clean tree, the owner's narrowing undone",
+     '    if reset_target(args) not in RESET_HEAD_TARGETS:\n        return False',
+     '    if False:\n        return False'),
+    ("subject: the stash arm never reads the tree or the stack",
+     'def stash_subject(args, where: str):',
+     'def stash_subject(args, where: str):\n    return False'),
+    ("subject: the restore arm never reads its paths",
+     'def restore_subject(args, where: str):',
+     'def restore_subject(args, where: str):\n    return False'),
+    ("subject: the checkout arm never reads its paths",
+     'def checkout_subject(args, where: str):',
+     'def checkout_subject(args, where: str):\n    return False'),
+    ("subject: the clean arm never reads the untracked entries",
+     'def clean_subject(args, where: str):',
+     'def clean_subject(args, where: str):\n    return False'),
+    ("subject: a clean exclude pattern is read as a pathspec, so the read narrows wrongly",
+     'CLEAN_OPT_WITH_VALUE = {"-e", "--exclude"}',
+     'CLEAN_OPT_WITH_VALUE = set()'),
+    ("subject: an unreadable subject is refused instead of allowed and logged",
+     '        if state is None:\n'
+     '            record(tool, "noted", "subject-unread", matched)\n'
+     '            continue',
+     '        if False:\n'
+     '            record(tool, "noted", "subject-unread", matched)\n'
+     '            continue'),
+    ("scratchpad: this session's own scratchpad stops being private",
+     'def under_session_scratchpad(where: str, session_id: str) -> bool:',
+     'def under_session_scratchpad(where: str, session_id: str) -> bool:\n    return False'),
+    ("scratchpad: every path reads as this session's scratchpad",
+     '    parts = real.split(os.sep)',
+     '    return True\n    parts = real.split(os.sep)'),
     ("shared-tree: restore collapses back to a name match, --staged or not",
      '    staged = "--staged" in args or "-S" in args\n'
      '    worktree = "--worktree" in args or "-W" in args\n'

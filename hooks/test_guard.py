@@ -42,7 +42,7 @@ CASES = []
 
 
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
-        **tool_input):
+        session=None, **tool_input):
     CASES.append({
         "name": name,
         "expected": expected,
@@ -51,12 +51,14 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "tool": tool,
         "cwd": cwd,
         "env_path": env_path,
+        "session": session,
         "tool_input": tool_input,
     })
 
 
-def sh(name, command, expected, rule=None, tool="Bash", cwd=None, env_path=None):
-    add(name, expected, rule=rule, tool=tool, cwd=cwd, env_path=env_path, command=command)
+def sh(name, command, expected, rule=None, tool="Bash", cwd=None, env_path=None, session=None):
+    add(name, expected, rule=rule, tool=tool, cwd=cwd, env_path=env_path, session=session,
+        command=command)
 
 
 # --------------------------------------------------------------------------- the fixtures
@@ -73,6 +75,16 @@ NOGIT = os.path.join(ROOT, "nogit")        # a directory that is not a git tree
 GITMAIN = os.path.join(ROOT, "repo")       # an ordinary checkout, shared with other sessions
 GITWT = os.path.join(ROOT, "lane")         # a linked worktree of that checkout
 CONFLICT = os.path.join(ROOT, "conflict")  # a real checkout with an unresolved merge conflict
+SUBJCLEAN = os.path.join(ROOT, "subjclean")  # a real checkout with a clean tree and no stash
+SUBJCLEANWT = os.path.join(ROOT, "subjcleanlane")  # a real, clean linked worktree of that one
+SUBJDIRTY = os.path.join(ROOT, "subjdirty")  # a real checkout with real uncommitted work
+SUBJSTASH = os.path.join(ROOT, "subjstash")  # a clean tree carrying one real stash entry
+GITBLIND = os.path.join(ROOT, "gitblind")  # a git that answers the repo test and no status read
+# A repository under a scratchpad named after one session. ROOT already sits under the system
+# temporary directory, which is the other half of the path test.
+FAKE_SESSION = "5b9f6a3d-0000-4000-8000-000000000000"
+OTHER_SESSION = "0000ffff-0000-4000-8000-000000000000"
+PRIVREPO = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "priv")
 GHMAIN = os.path.join(ROOT, "ghmain")      # a fake command line tool answering "main"
 GHDEV = os.path.join(ROOT, "ghdev")        # the same, answering "dev"
 GHNONE = os.path.join(ROOT, "ghnone")      # an empty directory, so the tool is missing
@@ -116,6 +128,126 @@ def _require_conflict(where, path):
         )
 
 
+IDENT = ["-c", "user.email=cases@example.invalid", "-c", "user.name=cases"]
+
+
+def _porcelain(where):
+    """Return the lines of `git status --porcelain`, the same read the guard makes."""
+    status = run_vcs(where, "status", "--porcelain")
+    if status.returncode != 0:
+        sys.exit(
+            "fixture setup failed in build_fixtures: git status --porcelain failed in %r. "
+            "stderr: %s" % (where, status.stderr.strip())
+        )
+    return [line for line in status.stdout.splitlines() if line.strip()]
+
+
+def _require_clean(where):
+    """Stop the suite unless `where` really has an empty working-tree subject.
+
+    The empty-subject cases below prove that an empty subject PASSES. A fixture that is quietly
+    dirty would pass them for the wrong reason, the PR #30 defect: a fixture whose setup never
+    ran and whose case therefore proved nothing.
+    """
+    lines = _porcelain(where)
+    if lines:
+        sys.exit(
+            "fixture setup failed in build_fixtures: %r was built to be clean, and git status "
+            "--porcelain shows: %r" % (where, lines)
+        )
+
+
+def _require_dirty(where, tracked, untracked, clean_path):
+    """Stop the suite unless `where` really holds a modified tracked file, a real untracked file,
+    and one tracked path that is NOT in the status output.
+
+    The non-empty cases below prove that a non-empty subject is still refused, and the per-path
+    cases prove that a clean path inside a dirty tree passes. Both need each of the three to be
+    real, so each one is read back with git itself.
+    """
+    lines = _porcelain(where)
+    if not any(line[1:].strip().endswith(tracked) and line[:2].strip() == "M" for line in lines):
+        sys.exit(
+            "fixture setup failed in build_fixtures: %r is not modified in %r. git status "
+            "--porcelain shows: %r" % (tracked, where, lines)
+        )
+    if not any(line[:2] == "??" and line[3:].strip().endswith(untracked) for line in lines):
+        sys.exit(
+            "fixture setup failed in build_fixtures: %r is not untracked in %r. git status "
+            "--porcelain shows: %r" % (untracked, where, lines)
+        )
+    if any(clean_path in line for line in lines):
+        sys.exit(
+            "fixture setup failed in build_fixtures: %r was built to be clean inside %r, and "
+            "git status --porcelain shows it: %r" % (clean_path, where, lines)
+        )
+    scoped = run_vcs(where, "status", "--porcelain", "--", clean_path)
+    if scoped.returncode != 0 or scoped.stdout.strip():
+        sys.exit(
+            "fixture setup failed in build_fixtures: the path-scoped read of %r in %r is not "
+            "empty: exit %d, %r" % (clean_path, where, scoped.returncode, scoped.stdout)
+        )
+
+
+def _require_stash(where, count):
+    """Stop the suite unless `where`'s stash stack really holds `count` entries.
+
+    A fixture that claims a one-entry stack and holds none would make the `stash drop` case pass
+    for the wrong reason. MEASURED lesson from CI: `git stash push` writes a commit, so it needs
+    a git identity, and a runner has none unless the call carries one.
+    """
+    listing = run_vcs(where, "stash", "list")
+    if listing.returncode != 0:
+        sys.exit(
+            "fixture setup failed in build_fixtures: git stash list failed in %r. stderr: %s"
+            % (where, listing.stderr.strip())
+        )
+    lines = [line for line in listing.stdout.splitlines() if line.strip()]
+    if len(lines) != count:
+        sys.exit(
+            "fixture setup failed in build_fixtures: %r was built with %d stash entries, and "
+            "git stash list shows %d: %r" % (where, count, len(lines), lines)
+        )
+
+
+def make_repo(where, files):
+    """Build a real checkout holding `files`, committed, with an explicit identity."""
+    os.makedirs(where, exist_ok=True)
+    run_vcs(where, "init", "-q", "-b", "main", ".")
+    for name, text in files.items():
+        write(os.path.join(where, name), text)
+    run_vcs(where, "add", "-A")
+    commit = run_vcs(where, *IDENT, "commit", "-q", "-m", "first")
+    if commit.returncode != 0:
+        sys.exit(
+            "fixture setup failed in build_fixtures: the first commit in %r failed. stderr: %s"
+            % (where, commit.stderr.strip())
+        )
+
+
+def make_blind_git(folder):
+    """Put a `git` on PATH that answers the repository test and NO status read.
+
+    The unreadable-subject arm needs git to fail to ANSWER, which is not the same as a directory
+    that is no git tree. A real repository is still the cwd; only the program answering is blind,
+    so the case drives the guard's own "I could not read this" path rather than a mock of it.
+
+    MEASURED on Windows 2026-09-16, recorded in `make_fake_gh` below: a call through
+    CreateProcess appends `.exe` and never reads PATHEXT, so a `git.cmd` stand-in would be
+    skipped there and the case would answer for the wrong reason. The unreadable-subject cases
+    are therefore SKIPPED on Windows rather than run against a stand-in that never answers.
+    """
+    os.makedirs(folder, exist_ok=True)
+    script = os.path.join(folder, "git")
+    write(script, "#!/bin/sh\n"
+                  "for arg in \"$@\"; do\n"
+                  "  if [ \"$arg\" = \"--is-inside-work-tree\" ]; then echo true; exit 0; fi\n"
+                  "done\n"
+                  "echo 'blind git: no answer' >&2\n"
+                  "exit 128\n")
+    os.chmod(script, 0o755)
+
+
 def make_fake_gh(folder, base):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
@@ -155,10 +287,57 @@ def build_fixtures():
     os.makedirs(GHNONE, exist_ok=True)
     # A real checkout and a real linked worktree of it. The shared-tree rule asks git which is
     # which, so no fake will do.
+    #
+    # BOTH TREES CARRY REAL UNCOMMITTED WORK. The four worktree cases below are about the
+    # deny-or-ask SPLIT, and the rule now reads the subject first, so a clean tree there would
+    # pass on the empty subject and prove nothing about the split. That is the PR #30 defect in
+    # its general form: a fixture that passes for a reason it was not built to test.
     run_vcs(GITMAIN, "init", "-q", "-b", "main", ".")
-    run_vcs(GITMAIN, "-c", "user.email=cases@example.invalid", "-c", "user.name=cases",
-            "commit", "-q", "--allow-empty", "-m", "first")
+    run_vcs(GITMAIN, *IDENT, "commit", "-q", "--allow-empty", "-m", "first")
+    write(os.path.join(GITMAIN, "docs", "DEBTS.md"), "base\n")
+    write(os.path.join(GITMAIN, "f.txt"), "base\n")
+    write(os.path.join(GITMAIN, "keep.txt"), "base\n")
+    run_vcs(GITMAIN, "add", "-A")
+    run_vcs(GITMAIN, *IDENT, "commit", "-q", "-m", "files")
     run_vcs(GITMAIN, "worktree", "add", "-q", GITWT, "-b", "lane")
+    for _tree in (GITMAIN, GITWT):
+        write(os.path.join(_tree, "docs", "DEBTS.md"), "uncommitted\n")
+        write(os.path.join(_tree, "f.txt"), "uncommitted\n")
+        write(os.path.join(_tree, "new.txt"), "untracked\n")
+        _require_dirty(_tree, "f.txt", "new.txt", "keep.txt")
+
+    # THE SUBJECT READ. Each arm gets both sides, built with real state: a real clean tree, a
+    # real uncommitted edit, a real untracked file, a real one-entry stash stack.
+    make_repo(SUBJCLEAN, {"f.txt": "base\n", "keep.txt": "base\n"})
+    _require_clean(SUBJCLEAN)
+    _require_stash(SUBJCLEAN, 0)
+    # A CLEAN worktree of that clean checkout. The narrowed `reset --hard` arm keeps the
+    # deny-or-ask split for a named commit, and the ask half of that split can only be shown in a
+    # real linked worktree whose tree is also clean.
+    run_vcs(SUBJCLEAN, "worktree", "add", "-q", SUBJCLEANWT, "-b", "subjlane")
+    _require_clean(SUBJCLEANWT)
+
+    make_repo(SUBJDIRTY, {"f.txt": "base\n", "keep.txt": "base\n"})
+    write(os.path.join(SUBJDIRTY, "f.txt"), "uncommitted\n")
+    write(os.path.join(SUBJDIRTY, "new.txt"), "untracked\n")
+    _require_dirty(SUBJDIRTY, "f.txt", "new.txt", "keep.txt")
+    _require_stash(SUBJDIRTY, 0)
+
+    # One real stash entry over a CLEAN tree, so the `stash drop` cases prove the guard reads the
+    # STACK and not the tree. The push carries the identity, because a stash writes a commit.
+    make_repo(SUBJSTASH, {"f.txt": "base\n"})
+    write(os.path.join(SUBJSTASH, "f.txt"), "to be stashed\n")
+    run_vcs(SUBJSTASH, *IDENT, "stash", "push", "-m", "cases")
+    _require_stash(SUBJSTASH, 1)
+    _require_clean(SUBJSTASH)
+
+    # A dirty repository under a scratchpad named after one session.
+    make_repo(PRIVREPO, {"f.txt": "base\n", "keep.txt": "base\n"})
+    write(os.path.join(PRIVREPO, "f.txt"), "uncommitted\n")
+    write(os.path.join(PRIVREPO, "new.txt"), "untracked\n")
+    _require_dirty(PRIVREPO, "f.txt", "new.txt", "keep.txt")
+
+    make_blind_git(GITBLIND)
 
     # A real checkout with a real, unresolved merge conflict, built with git itself rather than
     # mocked. Two branches each change the same file, and merging one into the other leaves
@@ -285,12 +464,117 @@ sh("checkout: a named file", VCS + " checkout -- README.md", "deny", "shared-tre
 # worktree cases above use a real checkout.
 sh("checkout: --theirs resolves a real, unresolved merge conflict",
    VCS + " checkout --theirs docs/DEBTS.md", "allow", cwd=CONFLICT)
+# GITMAIN carries a real uncommitted change to this same file, so the call has a subject to
+# destroy and the case is still about the missing conflict, not about an empty tree.
 sh("checkout: the same call with no conflict in progress keeps today's decision",
    VCS + " checkout --theirs docs/DEBTS.md", "deny", "shared-tree", cwd=GITMAIN)
 sh("checkout: a path with no conflict-side flag still denies, even in the conflicted tree",
    VCS + " checkout -- docs/DEBTS.md", "deny", "shared-tree", cwd=CONFLICT)
 sh("checkout: a branch and a path still denies, even in the conflicted tree",
    VCS + " checkout main -- docs/", "deny", "shared-tree", cwd=CONFLICT)
+
+# THE SUBJECT READ, BOTH SIDES OF EVERY ARM. The rule reads what the call would TAKE, with the
+# two reads git itself makes: `git status --porcelain` for a working-tree subject and `git stash
+# list` for a stack subject. An empty subject passes, and a non-empty subject is refused exactly
+# as before. Every fixture below is real state, asserted in build_fixtures: SUBJCLEAN is a clean
+# tree with no stash, SUBJDIRTY holds a modified `f.txt`, an untracked `new.txt`, and a clean
+# tracked `keep.txt`, and SUBJSTASH holds one stash entry over a clean tree.
+sh("subject: a hard reset in a clean tree takes nothing", VCS + " reset --hard HEAD", "allow",
+   cwd=SUBJCLEAN)
+sh("subject: a hard reset over a real uncommitted change still denies", VCS + " reset --hard HEAD",
+   "deny", "shared-tree", cwd=SUBJDIRTY)
+sh("subject: a bare hard reset in a clean tree takes nothing", VCS + " reset --hard", "allow",
+   cwd=SUBJCLEAN)
+sh("subject: a bare hard reset in a clean worktree takes nothing", VCS + " reset --hard", "allow",
+   cwd=SUBJCLEANWT)
+sh("subject: a hard reset at HEAD in a clean worktree takes nothing",
+   VCS + " reset --hard HEAD", "allow", cwd=SUBJCLEANWT)
+# A `reset --hard` THAT NAMES ANOTHER COMMIT also moves the branch. Another session standing in
+# that checkout is then on rewritten history, and the reflog that recovers the commit belongs to
+# the tree that ran the reset, not to theirs. So a clean tree is NOT a pass for these forms, and
+# the deny-or-ask split stays: deny in the shared checkout, ask in the worktree.
+sh("subject: a hard reset one commit back moves the branch, clean tree or not",
+   VCS + " reset --hard HEAD~1", "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("subject: the same reset in a clean worktree asks", VCS + " reset --hard HEAD~1", "ask",
+   "shared-tree", cwd=SUBJCLEANWT)
+sh("subject: a hard reset at a remote branch moves the branch", VCS + " reset --hard origin/main",
+   "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("subject: a hard reset at a raw sha moves the branch",
+   VCS + " reset --hard 380d5fca1b2c3d4e5f60718293a4b5c6d7e8f901", "deny", "shared-tree",
+   cwd=SUBJCLEAN)
+sh("subject: a hard reset at a raw sha in a clean worktree asks",
+   VCS + " reset --hard 380d5fca1b2c3d4e5f60718293a4b5c6d7e8f901", "ask", "shared-tree",
+   cwd=SUBJCLEANWT)
+sh("subject: a quiet hard reset at HEAD is still a pass in a clean tree",
+   VCS + " reset -q --hard HEAD", "allow", cwd=SUBJCLEAN)
+sh("subject: setting aside a clean tree takes nothing", VCS + " stash push -u -m lane", "allow",
+   cwd=SUBJCLEAN)
+sh("subject: setting aside real uncommitted work still denies", VCS + " stash push -u -m lane",
+   "deny", "shared-tree", cwd=SUBJDIRTY)
+sh("subject: a bare stash over a clean tree takes nothing", VCS + " stash", "allow",
+   cwd=SUBJCLEAN)
+# THE STACK IS ITS OWN SUBJECT. `drop` and `clear` destroy stashed work, so the read is `git
+# stash list`, never the tree. SUBJDIRTY is dirty and its stack is empty; SUBJSTASH is clean and
+# its stack holds one entry. The two cases cross, which is what proves the right read is made.
+sh("subject: dropping an empty stash stack destroys nothing", VCS + " stash drop", "allow",
+   cwd=SUBJDIRTY)
+sh("subject: dropping a real stash entry still denies", VCS + " stash drop", "deny",
+   "shared-tree", cwd=SUBJSTASH)
+sh("subject: clearing an empty stash stack destroys nothing", VCS + " stash clear", "allow",
+   cwd=SUBJDIRTY)
+sh("subject: clearing a stack holding a real entry still denies", VCS + " stash clear", "deny",
+   "shared-tree", cwd=SUBJSTASH)
+sh("subject: a hard reset in the tree that holds the stash takes nothing",
+   VCS + " reset --hard HEAD", "allow", cwd=SUBJSTASH)
+# PER PATH for `restore` and `checkout <path>`: the pathspec goes to git, and an empty answer
+# proves the write changes nothing. Both named paths sit in the SAME dirty tree.
+sh("subject: restoring a clean path inside a dirty tree changes nothing",
+   VCS + " restore keep.txt", "allow", cwd=SUBJDIRTY)
+sh("subject: restoring the modified path still denies", VCS + " restore f.txt", "deny",
+   "shared-tree", cwd=SUBJDIRTY)
+sh("subject: restoring the whole clean tree changes nothing", VCS + " restore .", "allow",
+   cwd=SUBJCLEAN)
+sh("subject: checking out a clean path inside a dirty tree changes nothing",
+   VCS + " checkout -- keep.txt", "allow", cwd=SUBJDIRTY)
+sh("subject: checking out the modified path still denies", VCS + " checkout -- f.txt", "deny",
+   "shared-tree", cwd=SUBJDIRTY)
+sh("subject: a start point and a clean path change nothing",
+   VCS + " checkout HEAD -- keep.txt", "allow", cwd=SUBJDIRTY)
+sh("subject: a start point and the modified path still denies",
+   VCS + " checkout HEAD -- f.txt", "deny", "shared-tree", cwd=SUBJDIRTY)
+# `clean -f` deletes the UNTRACKED part of that same output, so that part is its subject.
+sh("subject: a clean with no untracked file deletes nothing", VCS + " clean -fd", "allow",
+   cwd=SUBJCLEAN)
+sh("subject: a clean over a real untracked file still denies", VCS + " clean -fd", "deny",
+   "shared-tree", cwd=SUBJDIRTY)
+sh("subject: a clean scoped to a tracked path deletes nothing", VCS + " clean -fd keep.txt",
+   "allow", cwd=SUBJDIRTY)
+# `-e` carries a value. The value is NOT a pathspec, and reading it as one would narrow the read
+# and let the delete of everything else pass on an empty answer.
+sh("subject: an exclude pattern is not a pathspec", VCS + " clean -fd -e build", "deny",
+   "shared-tree", cwd=SUBJDIRTY)
+# THIS SESSION'S SCRATCHPAD, BY PATH. The same dirty repository answers three ways: private to
+# the session the payload names, shared to any other session, and shared with no session at all.
+add("scratchpad: a discard in this session's own scratchpad is private", "allow", cwd=PRIVREPO,
+    session=FAKE_SESSION, command=VCS + " reset --hard HEAD")
+add("scratchpad: another session's scratchpad is not this session's", "deny", "shared-tree",
+    cwd=PRIVREPO, session=OTHER_SESSION, command=VCS + " reset --hard HEAD")
+add("scratchpad: no session id names no scratchpad", "deny", "shared-tree", cwd=PRIVREPO,
+    command=VCS + " reset --hard HEAD")
+add("scratchpad: the same session id outside the scratchpad proves nothing", "deny",
+    "shared-tree", cwd=SUBJDIRTY, session=FAKE_SESSION, command=VCS + " reset --hard HEAD")
+# AN UNREADABLE SUBJECT IS ALLOWED, and logged under its own rule (checked in
+# subject_unread_log_case). The cwd is the REAL dirty repository, so the only difference from the
+# deny case above is that the git on PATH gives no answer.
+if os.name != "nt":
+    sh("subject: a git that cannot answer the status read allows, rather than guess",
+       VCS + " reset --hard HEAD", "allow", cwd=SUBJDIRTY, env_path=GITBLIND)
+    sh("subject: the same blind git on a stack subject allows", VCS + " stash drop", "allow",
+       cwd=SUBJSTASH, env_path=GITBLIND)
+# A DIRECTORY THAT IS NO GIT TREE IS NOT AN UNREADABLE SUBJECT. git answers there, and the answer
+# is "no tree", so the rule keeps its fail-closed deny. Every NOGIT case above rests on this.
+sh("subject: a directory that is no git tree still denies", VCS + " reset --hard HEAD", "deny",
+   "shared-tree", cwd=NOGIT)
 
 sh("clean: -fd deletes untracked files", VCS + " clean -fd", "deny", "shared-tree", cwd=NOGIT)
 sh("clean: the long force flag", VCS + " clean --force -d", "deny", "shared-tree", cwd=NOGIT)
@@ -840,9 +1124,15 @@ def decide(case):
         body = {"tool_name": case["tool"], "tool_input": dict(case["tool_input"])}
         if case["cwd"]:
             body["cwd"] = case["cwd"]
+        if case["session"]:
+            body["session_id"] = case["session"]
         payload = json.dumps(body)
     env = dict(os.environ)
     env["CLAUDE_CONFIG_DIR"] = CFG
+    # The scratchpad pass reads the session id the PAYLOAD carries, and falls back to the
+    # environment only when the payload carries none. A real session id in the runner's own
+    # environment would leak into every case, so it is dropped here and each case names its own.
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
     if case["env_path"]:
         env["PATH"] = case["env_path"]
     result = subprocess.run(
@@ -967,6 +1257,47 @@ def conflict_resolve_log_case():
     return True, "one noted/conflict-resolve line"
 
 
+def subject_unread_log_case():
+    """A subject the guard could not read is allowed, and logged as `noted`/`subject-unread`.
+
+    The line must be DISTINCT from a refusal line, so a reader can tell "I could not confirm
+    this" from "this destroys something". The case drives a real dirty repository with a blind
+    `git` on PATH, and it also checks the allow stays silent on stdout.
+    """
+    if os.name == "nt":
+        return True, "skipped: a stand-in git is not reached through CreateProcess"
+    folder = os.path.join(ROOT, "unreadlog")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "guard.log")
+    if os.path.exists(path):
+        os.remove(path)
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    env["PATH"] = GITBLIND
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    result = subprocess.run(
+        [sys.executable, GUARD],
+        input=json.dumps({"tool_name": "Bash",
+                          "tool_input": {"command": VCS + " reset --hard HEAD"},
+                          "cwd": SUBJDIRTY}),
+        capture_output=True, text=True, env=env, timeout=60,
+    )
+    if result.stdout.strip():
+        return False, "expected a silent allow, got %r" % result.stdout.strip()[:120]
+    if not os.path.exists(path):
+        return False, "no log file was written for the unread subject"
+    with open(path, encoding="utf-8") as handle:
+        lines = [line for line in handle.read().splitlines() if line.strip()]
+    if len(lines) != 1:
+        return False, "expected one line, found %d" % len(lines)
+    fields = lines[0].split("\t")
+    if len(fields) != 5 or fields[2] != "noted" or fields[3] != "subject-unread":
+        return False, "line does not read noted/subject-unread: %r" % lines[0]
+    if "reset" not in fields[4]:
+        return False, "the line does not carry the matched command: %r" % fields[4]
+    return True, "one noted/subject-unread line, distinct from a refusal"
+
+
 # --------------------------------------------------------------------------- the reason hygiene
 #
 # CLAUDE.md: "A refusal's printed remedy never names the forbidden target." The WHOLE printed
@@ -1086,7 +1417,7 @@ def log_env_case():
 
 
 def main():
-    total = len(CASES) + 5
+    total = len(CASES) + 6
     print("guard cases, %d in all" % total)
     print("fixtures under " + ROOT)
     print()
@@ -1112,6 +1443,7 @@ def main():
         ("log: a project config edit is allowed and noted", config_edit_log_case),
         ("log: a merge into main is allowed and noted where the base is unsafe", merge_log_case),
         ("log: a conflict-side checkout is allowed and noted", conflict_resolve_log_case),
+        ("log: an unreadable subject is allowed and noted", subject_unread_log_case),
     ):
         ok, note = checker()
         failed += 0 if ok else 1
