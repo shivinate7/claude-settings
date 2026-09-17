@@ -494,6 +494,231 @@ class MdSweepTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0)
         self.assertEqual(run.stdout.strip(), "")
 
+    # ---------------------------------------------------------- quote-aware split (Task 1)
+
+    def test_32_quoted_semicolon_in_sed_expression_still_blocks(self):
+        target = os.path.join(self.tmp.name, "NOTES.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.ERROR_TEXT)
+        cmd = "sed -i 's/a;b/c/' %s" % target
+        run = self.run_sweep(cmd)
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("NOTES.md", out.get("reason", ""))
+
+    def test_33_quoted_semicolon_in_sed_expression_clean_no_block(self):
+        target = os.path.join(self.tmp.name, "NOTES.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.CLEAN_TEXT)
+        cmd = "sed -i 's/a;b/c/' %s" % target
+        run = self.run_sweep(cmd)
+        self.assertEqual(run.stdout.strip(), "")
+
+    # ---------------------------------------------------------- node -e fs writes
+
+    def test_34_node_write_file_sync_error_blocks(self):
+        target = os.path.join(self.tmp.name, "notes.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.ERROR_TEXT)
+        script = "const fs=require('fs'); fs.writeFileSync('%s', 'x')" % target
+        cmd = 'node -e "%s"' % script
+        run = self.run_sweep(cmd)
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("notes.md", out.get("reason", ""))
+
+    def test_35_node_write_file_sync_clean_no_block(self):
+        target = os.path.join(self.tmp.name, "notes.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.CLEAN_TEXT)
+        script = "const fs=require('fs'); fs.writeFileSync('%s', 'x')" % target
+        cmd = 'node -e "%s"' % script
+        run = self.run_sweep(cmd)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_36_program_name_in_quoted_grep_arg_is_not_a_write(self):
+        target = os.path.join(self.tmp.name, "notes.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.ERROR_TEXT)
+        cmd = 'grep -n "fs.writeFileSync" %s' % target
+        run = self.run_sweep(cmd)
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(run.stdout.strip(), "")
+
+    # ---------------------------------------------------------- perl -i / perl -e open
+
+    def test_37_perl_inplace_error_blocks(self):
+        target = os.path.join(self.tmp.name, "guide.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.ERROR_TEXT)
+        cmd = "perl -i -pe 's/foo/bar/' %s" % target
+        run = self.run_sweep(cmd)
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("guide.md", out.get("reason", ""))
+
+    def test_38_perl_inplace_clean_no_block(self):
+        target = os.path.join(self.tmp.name, "guide.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.CLEAN_TEXT)
+        cmd = "perl -i -pe 's/foo/bar/' %s" % target
+        run = self.run_sweep(cmd)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_39_perl_open_for_write_error_blocks(self):
+        target = os.path.join(self.tmp.name, "notes.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.ERROR_TEXT)
+        script = 'open(FH, ">%s"); print FH "x";' % target
+        cmd = "perl -e '%s'" % script
+        run = self.run_sweep(cmd)
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("notes.md", out.get("reason", ""))
+
+    def test_40_perl_e_without_open_write_no_block(self):
+        target = os.path.join(self.tmp.name, "notes.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.ERROR_TEXT)
+        script = 'print "%s\\n";' % target
+        cmd = "perl -e '%s'" % script
+        run = self.run_sweep(cmd)
+        self.assertEqual(run.stdout.strip(), "")
+
+    # ---------------------------------------------------------- ruby -i
+
+    def test_41_ruby_inplace_error_blocks(self):
+        target = os.path.join(self.tmp.name, "guide.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.ERROR_TEXT)
+        cmd = "ruby -i -pe 's/foo/bar/' %s" % target
+        run = self.run_sweep(cmd)
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("guide.md", out.get("reason", ""))
+
+    def test_42_ruby_inplace_clean_no_block(self):
+        target = os.path.join(self.tmp.name, "guide.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.CLEAN_TEXT)
+        cmd = "ruby -i -pe 's/foo/bar/' %s" % target
+        run = self.run_sweep(cmd)
+        self.assertEqual(run.stdout.strip(), "")
+
+    # ---------------------------------------------------------- awk / gawk output redirect
+
+    def test_43_awk_program_redirect_error_blocks(self):
+        target = os.path.join(self.tmp.name, "notes.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.ERROR_TEXT)
+        cmd = 'awk \'{ print > "%s" }\' /dev/null' % target
+        run = self.run_sweep(cmd)
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("notes.md", out.get("reason", ""))
+
+    def test_44_awk_program_redirect_clean_no_block(self):
+        target = os.path.join(self.tmp.name, "notes.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.CLEAN_TEXT)
+        cmd = 'awk \'{ print > "%s" }\' /dev/null' % target
+        run = self.run_sweep(cmd)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_45_gawk_program_redirect_error_blocks(self):
+        target = os.path.join(self.tmp.name, "notes.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.ERROR_TEXT)
+        cmd = 'gawk \'{ print >> "%s" }\' /dev/null' % target
+        run = self.run_sweep(cmd)
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("notes.md", out.get("reason", ""))
+
+    # ---------------------------------------------------------- dd of=
+
+    def test_46_dd_of_error_blocks(self):
+        target = os.path.join(self.tmp.name, "notes.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.ERROR_TEXT)
+        cmd = "dd if=/dev/zero of=%s bs=1 count=1" % target
+        run = self.run_sweep(cmd)
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("notes.md", out.get("reason", ""))
+
+    def test_47_dd_of_clean_no_block(self):
+        target = os.path.join(self.tmp.name, "notes.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.CLEAN_TEXT)
+        cmd = "dd if=/dev/zero of=%s bs=1 count=1" % target
+        run = self.run_sweep(cmd)
+        self.assertEqual(run.stdout.strip(), "")
+
+    # ---------------------------------------------------------- python pathlib write
+
+    def test_48_pathlib_write_text_error_blocks(self):
+        target = os.path.join(self.tmp.name, "notes.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.ERROR_TEXT)
+        script = "from pathlib import Path; Path('%s').write_text('x')" % target
+        cmd = 'python3 -c "%s"' % script
+        run = self.run_sweep(cmd)
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("notes.md", out.get("reason", ""))
+
+    def test_49_pathlib_open_write_error_blocks(self):
+        target = os.path.join(self.tmp.name, "notes.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.ERROR_TEXT)
+        script = "from pathlib import Path; Path('%s').open('w').write('x')" % target
+        cmd = 'python3 -c "%s"' % script
+        run = self.run_sweep(cmd)
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("notes.md", out.get("reason", ""))
+
+    def test_50_pathlib_write_text_clean_no_block(self):
+        target = os.path.join(self.tmp.name, "notes.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.CLEAN_TEXT)
+        script = "from pathlib import Path; Path('%s').write_text('x')" % target
+        cmd = 'python3 -c "%s"' % script
+        run = self.run_sweep(cmd)
+        self.assertEqual(run.stdout.strip(), "")
+
+    # ---------------------------------------------------------- printf redirect
+
+    def test_51_printf_redirect_error_blocks(self):
+        target = os.path.join(self.tmp.name, "notes.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.ERROR_TEXT)
+        cmd = "printf 'This sentence holds a semicolon; here.\\n' > %s" % target
+        run = self.run_sweep(cmd)
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("notes.md", out.get("reason", ""))
+
+    def test_52_printf_redirect_clean_no_block(self):
+        target = os.path.join(self.tmp.name, "notes.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.CLEAN_TEXT)
+        cmd = "printf 'clean text\\n' > %s" % target
+        run = self.run_sweep(cmd)
+        self.assertEqual(run.stdout.strip(), "")
+
+    # ---------------------------------------------------------- variable-held path (out of scope)
+
+    def test_53_variable_held_path_stays_out_of_scope(self):
+        target = os.path.join(self.tmp.name, "notes.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.ERROR_TEXT)
+        cmd = 'f=%s; sed -i "s/foo/bar/" "$f"' % target
+        run = self.run_sweep(cmd)
+        # Documented hole: a path only reachable through a shell variable is never seen.
+        self.assertEqual(run.stdout.strip(), "")
+
 
 if __name__ == "__main__":
     unittest.main()
