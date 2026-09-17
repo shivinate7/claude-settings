@@ -92,6 +92,30 @@ def run_vcs(cwd, *args):
     return subprocess.run([VCS, *args], cwd=cwd, capture_output=True, text=True)
 
 
+def _require_conflict(where, path):
+    """Stop the suite unless `where` really holds an unresolved conflict on `path`.
+
+    A fixture whose setup silently fails proves nothing: it can pass for the wrong reason on
+    one machine and fail on another. This reads the tree with git itself, the same two checks
+    the guard's own `conflict_in_progress` makes, so a broken build step is caught here rather
+    than showing up later as a wrong PASS or a confusing FAIL far from its cause.
+    """
+    verify = run_vcs(where, "rev-parse", "--verify", "-q", "MERGE_HEAD")
+    if verify.returncode != 0:
+        sys.exit(
+            "fixture setup failed in build_fixtures: MERGE_HEAD does not resolve in %r. "
+            "The conflict-repo merge did not run, or it did not conflict. "
+            "stderr: %s" % (where, verify.stderr.strip())
+        )
+    status = run_vcs(where, "status", "--porcelain")
+    lines = [line for line in status.stdout.splitlines() if path in line]
+    if not any(line[:2] in ("UU", "AA") for line in lines):
+        sys.exit(
+            "fixture setup failed in build_fixtures: %r is not left in an unresolved "
+            "conflict state in %r. git status --porcelain shows: %r" % (path, where, lines)
+        )
+
+
 def make_fake_gh(folder, base):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
@@ -154,7 +178,13 @@ def build_fixtures():
     write(os.path.join(CONFLICT, "docs", "DEBTS.md"), "main change\n")
     run_vcs(CONFLICT, "add", "docs/DEBTS.md")
     run_vcs(CONFLICT, *ident, "commit", "-q", "-m", "main change")
-    run_vcs(CONFLICT, "merge", "feature")  # conflicts and leaves MERGE_HEAD set
+    # MEASURED on CI (run 35182973995): this call ran with no `ident`, so on a runner with no
+    # global git identity the merge refused before it ever touched the tree ("Committer identity
+    # unknown", exit 128), MERGE_HEAD was never set, and the conflict-resolve fixtures below were
+    # silently testing a CLEAN tree. It passed here only because this machine's own ~/.gitconfig
+    # supplied an identity the fixture never asked for.
+    run_vcs(CONFLICT, *ident, "merge", "feature")  # conflicts and leaves MERGE_HEAD set
+    _require_conflict(CONFLICT, "docs/DEBTS.md")
 
 
 build_fixtures()
