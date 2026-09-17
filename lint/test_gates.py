@@ -17,6 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 STE_GATE = os.path.join(HERE, "ste_gate.py")
 REPORT_GATE = os.path.join(HERE, "report_gate.py")
 CONFIG_REPORT = os.path.join(HERE, "..", "hooks", "config_report.py")
+MD_SWEEP = os.environ.get("MD_SWEEP_UNDER_TEST") or os.path.join(HERE, "md_sweep.py")
 
 sys.path.insert(0, HERE)
 import ste_lint  # noqa: E402
@@ -51,7 +52,7 @@ def write_transcript(records, tmpdir, name="transcript.jsonl"):
     return path
 
 
-def run_gate(gate, hook, raw_stdin=None):
+def run_gate(gate, hook, raw_stdin=None, env=None):
     stdin_text = raw_stdin if raw_stdin is not None else json.dumps(hook)
     run = subprocess.run(
         [sys.executable, gate],
@@ -59,6 +60,7 @@ def run_gate(gate, hook, raw_stdin=None):
         capture_output=True,
         text=True,
         timeout=15,
+        env=env,
     )
     return run
 
@@ -369,6 +371,128 @@ class SentenceSplitBoldTests(unittest.TestCase):
         findings = self.lint(text)
         codes = [f.code for f in findings]
         self.assertIn("STE001", codes)
+
+
+class MdSweepTests(unittest.TestCase):
+    """Fixtures for lint/md_sweep.py (Stop): the markdown sweep that reads this turn's shell writes
+    from disk, not from the tool call. Each fixture writes the FILE the shell command would have
+    produced, and puts the shell command's text in the transcript, because the sweep judges the
+    command text and lints the disk file, and never runs the command itself.
+    """
+
+    ERROR_TEXT = "This sentence holds a semicolon; and that trips the STE006 rule.\n"
+    CLEAN_TEXT = "This is a short clean sentence.\nHere is one more short clean sentence.\n"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def hook_for(self, path, stop_hook_active=False):
+        return {
+            "hook_event_name": "Stop",
+            "transcript_path": path,
+            "cwd": self.tmp.name,
+            "stop_hook_active": stop_hook_active,
+        }
+
+    def run_sweep(self, cmd, stop_hook_active=False, env=None):
+        records = [
+            human("write the doc"),
+            tool_use_msg("Bash", {"command": cmd}),
+            tool_result_msg(),
+            assistant_text("done"),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        hook = self.hook_for(path, stop_hook_active=stop_hook_active)
+        return run_gate(MD_SWEEP, hook, env=env)
+
+    def test_23_bash_heredoc_error_blocks_and_names_file(self):
+        target = os.path.join(self.tmp.name, "notes.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.ERROR_TEXT)
+        cmd = "cat <<'EOF' > %s\n%sEOF" % (target, self.ERROR_TEXT)
+        run = self.run_sweep(cmd)
+        self.assertEqual(run.returncode, 0)
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("notes.md", out.get("reason", ""))
+        self.assertIn("STE006", out.get("reason", ""))
+
+    def test_24_sed_i_error_blocks_and_names_file(self):
+        target = os.path.join(self.tmp.name, "guide.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.ERROR_TEXT)
+        cmd = "sed -i 's/foo/bar/' %s" % target
+        run = self.run_sweep(cmd)
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("guide.md", out.get("reason", ""))
+
+    def test_25_redirect_error_blocks_and_names_file(self):
+        target = os.path.join(self.tmp.name, "readme_bit.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.ERROR_TEXT)
+        cmd = "echo 'This sentence holds a semicolon; here.' > %s" % target
+        run = self.run_sweep(cmd)
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("readme_bit.md", out.get("reason", ""))
+
+    def test_26_clean_markdown_via_bash_no_block(self):
+        target = os.path.join(self.tmp.name, "clean.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.CLEAN_TEXT)
+        cmd = "echo 'clean' > %s" % target
+        run = self.run_sweep(cmd)
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_27_py_file_via_bash_no_block(self):
+        target = os.path.join(self.tmp.name, "script.py")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write("print('a; b')\n")
+        cmd = "echo 'print(1)' > %s" % target
+        run = self.run_sweep(cmd)
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_28_stop_hook_active_no_block(self):
+        target = os.path.join(self.tmp.name, "notes.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.ERROR_TEXT)
+        cmd = "cat <<'EOF' > %s\n%sEOF" % (target, self.ERROR_TEXT)
+        run = self.run_sweep(cmd, stop_hook_active=True)
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_29_named_but_missing_from_disk_no_block(self):
+        target = os.path.join(self.tmp.name, "ghost.md")
+        cmd = "echo 'x' > %s" % target  # never actually created on disk for this fixture
+        run = self.run_sweep(cmd)
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_30_exclude_env_stops_the_block(self):
+        target = os.path.join(self.tmp.name, "notes.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.ERROR_TEXT)
+        cmd = "cat <<'EOF' > %s\n%sEOF" % (target, self.ERROR_TEXT)
+        env = dict(os.environ)
+        env["MD_SWEEP_EXCLUDE"] = "notes.md"
+        run = self.run_sweep(cmd, env=env)
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_31_disable_env_stops_the_block(self):
+        target = os.path.join(self.tmp.name, "notes.md")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(self.ERROR_TEXT)
+        cmd = "cat <<'EOF' > %s\n%sEOF" % (target, self.ERROR_TEXT)
+        env = dict(os.environ)
+        env["MD_SWEEP_DISABLE"] = "1"
+        run = self.run_sweep(cmd, env=env)
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(run.stdout.strip(), "")
 
 
 if __name__ == "__main__":

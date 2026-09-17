@@ -39,6 +39,13 @@ base at all. CLAUDE.md's "merged only when I name the act" stays the model's rul
 guard cannot read chat, so a prompt here would only repeat a decision the owner already
 made in the conversation.
 
+`conflict-resolve` is a third case in that same shape, inside rule 1. A `git checkout`
+that carries `--ours`, `--theirs`, or `--merge` while a merge, rebase, cherry-pick or
+revert is unresolved in the tree picks a conflict side; it does not discard work, and
+git itself already holds the tree open. That one call is allowed and logged as
+`noted`/`conflict-resolve`. Any other `git checkout` that names a path keeps rule 1's
+ordinary deny or ask.
+
 Every refusal names its rule and says what to do instead. A remedy never names
 the refused command or the refused path, because a remedy that repeats the
 target reads as permission to run it (CLAUDE.md, Git paragraph). The matched
@@ -59,6 +66,7 @@ hands, which is what the tokens were reaching for.
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -102,9 +110,104 @@ def basename(token: str) -> str:
     return token.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
 
 
-# One shell segment of the command. Each segment is judged on its own, so an allowed first half
+# ------------------------------------------------------------------ shell segments and command words
+#
+# ONE SHELL SEGMENT of the command. Each segment is judged on its own, so an allowed first half
 # licenses nothing in the second half.
-SEGMENT_SPLIT = re.compile(r"\|\||&&|[;|\n]")
+#
+# QUOTE-AWARE, deliberately, and the only splitter left in the file. A blind split on `|` and
+# `;` cuts a quoted argument that happens to hold one of those characters into a segment of its
+# own, and whatever word lands first in that fragment then reads as a COMMAND. MEASURED: the
+# owner's `grep -n -i "...|make reap|pkill..." CLAUDE.md` splits on the pipes INSIDE the quotes
+# under a blind splitter, and one fragment starts with `pkill`. A rule that then judged the
+# fragment's first word would deny a grep as if it were a kill.
+def split_segments(cmd: str):
+    """Split into shell segments on unquoted `;`, `|`, `||`, `&&`, and newline.
+
+    Quoted text, single or double, is copied whole into the current segment, so a delimiter
+    inside a quote never starts a new one. An unterminated quote runs to the end of the string,
+    which keeps the remainder inside it rather than guessing where it would have closed.
+    """
+    segments = []
+    current = []
+    quote = ""
+    index = 0
+    length = len(cmd)
+    while index < length:
+        char = cmd[index]
+        if quote:
+            current.append(char)
+            if char == quote:
+                quote = ""
+            index += 1
+            continue
+        if char in ("'", '"'):
+            quote = char
+            current.append(char)
+            index += 1
+            continue
+        if char == "&" and cmd[index:index + 2] == "&&":
+            segments.append("".join(current))
+            current = []
+            index += 2
+            continue
+        if char == "|":
+            index += 2 if cmd[index:index + 2] == "||" else 1
+            segments.append("".join(current))
+            current = []
+            continue
+        if char in (";", "\n"):
+            segments.append("".join(current))
+            current = []
+            index += 1
+            continue
+        current.append(char)
+        index += 1
+    segments.append("".join(current))
+    return segments
+
+
+# A leading `VAR=value` assignment, which is not a segment's command. Shared with the
+# environment layer below, so the two never drift into judging an assignment two different ways.
+ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+# A wrapper that runs another program in its place, so the CALLED program is a segment's real
+# command word, not the wrapper. `xargs pkill foo` runs pkill, so `xargs` unwraps the same as
+# the rest: the token after it, once its own flags are skipped, is what actually runs.
+COMMAND_WRAPPERS = {"sudo", "env", "command", "nohup", "nice", "time", "doas", "xargs"}
+
+
+def segment_tokens(segment: str):
+    """Tokenize one segment with shlex, or return None when it cannot be parsed.
+
+    An unmatched quote or a stray backslash means the guard cannot tell what the segment would
+    run. That must fail open, this file's existing stance: judge nothing rather than guess.
+    """
+    try:
+        return shlex.split(segment, posix=True)
+    except ValueError:
+        return None
+
+
+def resolve_command(tokens):
+    """Return the index of the command word in a tokenized segment, or None when it names none.
+
+    Skips leading `VAR=value` assignments, then unwraps command wrappers (`sudo`, `env`,
+    `command`, `nohup`, `nice`, `time`, `doas`, `xargs`) along with each wrapper's own flags and
+    any assignment it takes ahead of the program name, so the index returned is the program that
+    actually runs, never the wrapper carrying it there.
+    """
+    index = 0
+    end = len(tokens)
+    while index < end and ASSIGNMENT.match(tokens[index]):
+        index += 1
+    while index < end and basename(tokens[index]) in COMMAND_WRAPPERS:
+        index += 1
+        while index < end and tokens[index].startswith("-"):
+            index += 1
+        while index < end and ASSIGNMENT.match(tokens[index]):
+            index += 1
+    return index if index < end else None
 
 
 # ------------------------------------------------------------------ heredoc bodies
@@ -358,6 +461,70 @@ TREE_ASK_REASON = (
 )
 
 
+# ------------------------------------------------------------------ picking a conflict side
+#
+# The owner's argument: `git checkout --theirs docs/DEBTS.md` during an unresolved merge does
+# not discard uncommitted work. It picks a conflict side, and the file is already in a
+# conflicted state that git itself will not let the caller leave silently. `checkout_names_a_path`
+# still flags the call, because a bare `git checkout <path>` overwrites from the index, so the
+# state of the TREE is what tells the two apart, not the flags alone.
+#
+# THE STATE IS READ WITH GIT, NEVER GUESSED FROM THE COMMAND TEXT. CLAUDE.md: "Never guess an
+# answer the code should give you." `MERGE_HEAD`, `CHERRY_PICK_HEAD`, and `REVERT_HEAD` each
+# name an in-progress operation when the ref exists. A rebase is checked twice: `REBASE_HEAD` is
+# a ref once a rebase has stopped on a conflict, and a `rebase-merge` or `rebase-apply` directory
+# in the git dir also marks one in progress.
+#
+# `git rev-parse --verify -q <ref>` answers three ways: 0 when the ref exists (a conflict IS in
+# progress), 1 when it plainly does not (quiet, no stderr), and anything else (128, "not a git
+# repository", a timeout) when the tree cannot be read at all. Only the last one is UNKNOWN, and
+# an unknown state keeps today's decision rather than assuming either answer.
+CHECKOUT_CONFLICT_FLAGS = {"--ours", "--theirs", "--merge"}
+CONFLICT_STATE_REFS = ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "REBASE_HEAD")
+REBASE_STATE_DIRS = ("rebase-merge", "rebase-apply")
+
+
+def conflict_in_progress(where: str):
+    """True when a merge, rebase, cherry-pick or revert is unresolved in the tree, False when
+    none is, None when the state cannot be read.
+    """
+    if not where or not os.path.isdir(where):
+        return None
+    for ref in CONFLICT_STATE_REFS:
+        answer = _git(where, "rev-parse", "--verify", "-q", ref)
+        if answer is None:
+            return None
+        if answer.returncode == 0:
+            return True
+        if answer.returncode != 1:
+            return None  # not "ref not found": the tree itself could not be read
+    gitdir = _git(where, "rev-parse", "--git-dir")
+    if gitdir is None or gitdir.returncode != 0 or not gitdir.stdout.strip():
+        return None
+    path = gitdir.stdout.strip()
+    if not os.path.isabs(path):
+        path = os.path.join(where, path)
+    return any(os.path.isdir(os.path.join(path, name)) for name in REBASE_STATE_DIRS)
+
+
+def checkout_conflict_resolve(segment: str, root: str) -> str:
+    """Return the matched `git checkout` text when it picks a conflict side during an unresolved
+    merge, rebase, cherry-pick or revert in `root`, else ''.
+
+    Only `--ours`, `--theirs`, and `--merge` qualify: each picks a side of an existing conflict
+    rather than overwriting a clean file from the index. An unreadable tree state keeps today's
+    decision, so the caller still runs `shared_tree_hit`'s ordinary deny or ask.
+    """
+    for subcommand, args in git_calls(segment):
+        if subcommand != "checkout":
+            continue
+        if not any(flag in CHECKOUT_CONFLICT_FLAGS for flag in args):
+            continue
+        if conflict_in_progress(root) is True:
+            return ("git checkout " + " ".join(args)).strip()
+    return ""
+
+
 # ------------------------------------------------------------------ a machine-wide kill
 #
 # CLAUDE.md: "Never kill a process you did not start. Treat `pkill -f` and `lsof -t` as
@@ -366,34 +533,46 @@ TREE_ASK_REASON = (
 #
 # A KILL BY PID IS NOT ON THIS LIST, deliberately. A PID names one process. `taskkill /PID` and
 # `Stop-Process -Id` are the same act under the other shell, and neither is refused.
-MACHINE_WIDE_KILL = (
-    re.compile(r"\bpkill\b"),
-    re.compile(r"\bkillall\b"),
-    re.compile(r"(?i)\btaskkill\b(?=[^\n;|&]*\s[/-]im\b)"),
-    re.compile(r"(?i)\bstop-process\b(?=[^\n;|&]*\s-n(?:ame)?\b)"),
-)
+#
+# THE PREDICATE IS THE ACT, NOT THE TOOL OR THE SPELLING. The earlier version was four bare
+# regexes over the whole command text, so the NAME tripped it wherever it sat: inside a quoted
+# grep pattern, on the far side of a pipe, in a comment. MEASURED: the owner's
+# `grep -n -i "...|make reap|pkill..." CLAUDE.md` was denied, though the command calls grep, not
+# pkill. `cat notes.md | grep pkill` and `echo "pkill -f node"` are the same defect: the word is
+# there, but nothing in the segment calls it.
+#
+# Every check below reads `resolve_command`'s answer for the segment's own tokens: the tool must
+# sit in COMMAND POSITION, wrappers unwrapped, before its flags are read at all.
+KILL_COMMAND_WORDS = {"pkill", "killall"}
+TASKKILL_IMAGE_FLAGS = {"/im", "-im"}
+STOP_PROCESS_NAME_FLAGS = {"-n", "-name"}
 
-# The flag-aware form, ported from job-cost-reporting. It catches `lsof -t` and `lsof -ti`, which
-# feed a kill list, and leaves `lsof -i :3000` alone, because asking which port is busy kills
-# nothing.
-PROC_TOOLS = {"pkill", "lsof"}
 
+def kill_hit(tokens) -> str:
+    """Return the matched text when a tokenized segment's command word is a machine-wide kill.
 
-def machine_wide_process_call(segment: str) -> str:
-    """Return the matched text when a call reaches processes by pattern."""
-    tokens = segment.split()
-    for index, token in enumerate(tokens):
-        tool = basename(token)
-        if tool not in PROC_TOOLS:
-            continue
-        for arg in tokens[index + 1:]:
-            if not arg.startswith("-"):
-                continue
-            if tool == "pkill" and (arg == "--full" or
-                                    (not arg.startswith("--") and "f" in arg)):
-                return token + " " + arg
-            if tool == "lsof" and not arg.startswith("--") and "t" in arg:
-                return token + " " + arg
+    `pkill` and `killall` deny outright: naming a process by pattern or by name always reaches
+    every match, flags or none. `taskkill` and `Stop-Process` deny only with the flag that names
+    a process by image or by name; `taskkill /PID` and `Stop-Process -Id` name one process and
+    pass. `lsof` denies only with a `-t`/`-ti` flag, which feeds a kill list; `lsof -i :3000`
+    asks which port is busy and kills nothing.
+    """
+    index = resolve_command(tokens)
+    if index is None:
+        return ""
+    word = tokens[index]
+    tool = basename(word)
+    rest = tokens[index + 1:]
+    if tool in KILL_COMMAND_WORDS:
+        return word
+    if tool == "taskkill" and any(flag.lower() in TASKKILL_IMAGE_FLAGS for flag in rest):
+        return word
+    if tool == "stop-process" and any(flag.lower() in STOP_PROCESS_NAME_FLAGS for flag in rest):
+        return word
+    if tool == "lsof":
+        for arg in rest:
+            if arg.startswith("-") and not arg.startswith("--") and "t" in arg:
+                return word + " " + arg
     return ""
 
 
@@ -603,8 +782,7 @@ ENV_TOOL_REASON = (
 SEGMENT_BREAK = re.compile(r"\|\||&&|[;\n|&]")
 # A redirect operator, spaced into a word of its own before the words are read.
 REDIRECT = re.compile(r"(\d?>>?)")
-# A leading `VAR=value` assignment, which is not the segment's command.
-ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# ASSIGNMENT (a leading `VAR=value`) is defined once, above, and shared with `resolve_command`.
 
 
 def env_reference(word: str) -> str:
@@ -864,7 +1042,7 @@ def writes_to(path: str, cmd: str) -> bool:
 
 def _shell_write_hit(cmd: str, cwd: str, predicate) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''."""
-    for segment in SEGMENT_SPLIT.split(cmd):
+    for segment in split_segments(cmd):
         if not segment.strip():
             continue
         for word in REDIRECT.sub(r" \1 ", segment).split():
@@ -926,29 +1104,37 @@ def judge_shell(tool: str, raw: str, cwd: str) -> None:
     cmd = norm(stripped)
 
     # 1. Shared trees.
-    for segment in SEGMENT_SPLIT.split(stripped):
+    for segment in split_segments(stripped):
         if not segment.strip():
             continue
         matched = shared_tree_hit(segment)
         if not matched:
             continue
-        worktree = is_worktree(command_root(stripped, cwd))
+        root = command_root(stripped, cwd)
+        resolved = checkout_conflict_resolve(segment, root)
+        if resolved:
+            record(tool, "noted", "conflict-resolve", resolved)
+            continue
+        worktree = is_worktree(root)
         if worktree is True:
             refuse(tool, "ask", "shared-tree", TREE_ASK_REASON, matched)
         refuse(tool, "deny", "shared-tree", TREE_DENY_REASON, matched)
 
-    # 2. A machine-wide kill.
-    for pattern in MACHINE_WIDE_KILL:
-        found = pattern.search(cmd)
-        if found:
-            refuse(tool, "deny", "machine-wide-kill", KILL_REASON, found.group(0))
-    for segment in SEGMENT_SPLIT.split(stripped):
-        matched = machine_wide_process_call(segment)
+    # 2. A machine-wide kill. Judged in COMMAND POSITION, from the segment's own tokens, never
+    # by the word appearing anywhere in the text. A segment shlex cannot parse fails open:
+    # judge nothing rather than guess what it would run.
+    for segment in split_segments(stripped):
+        if not segment.strip():
+            continue
+        tokens = segment_tokens(segment)
+        if tokens is None:
+            continue
+        matched = kill_hit(tokens)
         if matched:
             refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
 
     # 3. A live stream that never ends, or a waiter loop (Rule 9).
-    for segment in SEGMENT_SPLIT.split(stripped):
+    for segment in split_segments(stripped):
         matched = live_stream_hit(segment)
         if matched:
             refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)
@@ -961,7 +1147,7 @@ def judge_shell(tool: str, raw: str, cwd: str) -> None:
         found = pattern.search(cmd)
         if found:
             refuse(tool, "deny", "destructive-delete", DELETE_REASON, found.group(0))
-    for segment in SEGMENT_SPLIT.split(stripped):
+    for segment in split_segments(stripped):
         for subcommand, args in git_calls(segment):
             if subcommand == "push" and push_is_forced(args):
                 refuse(tool, "ask", "force-push", PUSH_REASON,

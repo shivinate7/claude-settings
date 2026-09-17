@@ -161,6 +161,7 @@ CLAUDE.md asks for Simplified Technical English and a fixed report shape. Hooks 
 | Hook | Trigger | Effect |
 | --- | --- | --- |
 | `PreToolUse` on `Write`, `Edit`, `MultiEdit` | the target path ends in `.md` | the write is denied and the findings come back, so Claude fixes the text and writes again |
+| `Stop` | this turn wrote a markdown file through any tool, Bash included | the turn is blocked once, and each file and finding is named. See Markdown sweep below |
 | `Stop` | end of a turn | a warning is shown as a system message. The turn is not blocked |
 | `Stop` | the turn ran `git commit`, `git push`, `git merge`, or a GitHub MCP write tool | the turn is blocked once unless the reply is one blockquote with the bold labels Done, Deviations, Input Needed, Next in order, written tight in Simplified Technical English |
 | `Stop` | any project config file changed, or a merge into main landed, this turn | a system message names each changed `.claude/settings.json`, `.claude/settings.local.json`, or `.claude/hooks/*` path, and each `gh pr merge` or GitHub MCP merge call, so the reply can name them in the report. See `hooks/config_report.py` |
@@ -209,7 +210,8 @@ deny, ask, or nothing. It fails open on bad input.
 | Rule | Tools | Decision | Remedy |
 | --- | --- | --- | --- |
 | Shared trees: `git stash`, `git reset`, `git restore`, `git clean -f`, `git checkout <path>` | `Bash`, `PowerShell` | deny in a shared checkout, ask in a git worktree | mutation-test with a `.bak` copy, or work in a worktree of your own |
-| Machine-wide kills: `pkill`, `killall`, `lsof -t`, `taskkill /IM`, `Stop-Process -Name` | `Bash`, `PowerShell` | deny | name one PID this session started |
+| Conflict side: `git checkout --ours`, `--theirs`, `--merge`, with a merge, rebase, cherry-pick, or revert in progress | `Bash`, `PowerShell` | allow, logged `noted`/`conflict-resolve` | nothing to do. The call picks a side, it discards no uncommitted work |
+| Machine-wide kills: `pkill`, `killall`, `lsof -t`, `taskkill /IM`, `Stop-Process -Name`, in command position only | `Bash`, `PowerShell` | deny | name one PID this session started |
 | Force push: `--force`, `-f`, `--force-with-lease` | `Bash`, `PowerShell` | ask | the click in the prompt is the grant |
 | Recursive delete at `/`, `~`, `.`, `*`, or a drive root | `Bash`, `PowerShell` | deny | name the folder |
 | Environment files: any `.env*` except `.env.example` | `Read`, `Grep`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and shell text | deny | ask the user for the value. Loader flags such as `--env-file` and existence checks with `ls` or `test` pass |
@@ -232,6 +234,12 @@ errors often, and a background command with a completion notice does the same jo
 6. Extras: add the SessionStart checkout line. No scheduled audit, dispatch only. No stamp work.
 7. Project config edits: **allow and report.** An edit to a project's `.claude/hooks/*`, `.claude/settings.json`, or `.claude/settings.local.json` is allowed in any checkout. It is logged in `guard.log`, listed in a system message at the end of the turn, and named under Deviations in the report. Paths under `~/.claude` stay denied, the clone of claude-settings is the way. Reason: the owner is often away from the desk. The work is not sensitive enough for a hard wall, and a change seen at turn end is enough.
 8. Merge into main: **allow and report.** Supersedes 2. `gh pr merge` into `main` and the `mcp__github__merge_pull_request` tool are allowed, logged in `guard.log` as `noted merge-main`. Both are listed in the system message at turn end and named under Done in the report. `Bash(gh pr merge:*)` sits in `permissions.allow` so the harness does not prompt either. CLAUDE.md's "merged only when I name the act" stays the model's rule. Reason: the owner says merge in chat and the guard cannot read chat. The prompt only repeats a decision already made.
+
+9. Command resolution: **resolve the act, never match the spelling.** A rule that names a program fires only when that program sits in command position in a segment. Segments come from `split_segments`, which tracks quotes. Tokens come from `shlex`. Wrappers such as `sudo`, `env`, `xargs`, and `nohup` are unwrapped, so `xargs pkill` still denies. A command the tokenizer cannot parse fails open. Reason, measured: a bare `\bpkill\b` over the whole command string denied `grep -n -i "...|make reap|pkill..." CLAUDE.md`, a search for the word. The file already held the right standard in its flag-aware helper. That helper told `lsof -ti` from `lsof -i :3000`. The four regexes above it skipped the step.
+
+10. The conflict side of a merge: **allow and log.** `git checkout --ours`, `--theirs`, or `--merge` is allowed when git reports a merge, rebase, cherry-pick, or revert in progress in the tree the command acts on. The state comes from `MERGE_HEAD`, `REBASE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, and the rebase directories, never from the command text. Unknown state keeps the old decision. Reason: that call picks a conflict side. It discards no uncommitted work, and git does not let a tree leave a conflict silently. Every other path-naming checkout keeps Decision 1.
+
+11. Late markdown check: **block the turn once.** The `PreToolUse` gate sees `Write`, `Edit`, and `MultiEdit` only. `lint/md_sweep.py` runs at `Stop`, lints each markdown file this turn wrote through any tool, and blocks once at error severity. Scope is this turn only, read from the transcript, so an old document is not this turn's debt. `MD_SWEEP_DISABLE` turns it off and `MD_SWEEP_EXCLUDE` takes globs for generated markdown. Reason, measured: an 830-line CLAUDE.md landed through a Bash heredoc with no check. The operating instructions for a session prefer Bash, so the default path skirted the gate. A gate a lane can skip by picking another tool is not a gate.
 
 Every deny or ask appends one line to `~/.claude/guard.log`: timestamp, tool,
 decision, rule, and the matched text cut at 120 characters. Allows are never

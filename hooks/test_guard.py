@@ -72,6 +72,7 @@ CLONE = os.path.join(ROOT, "clone")        # the clone of claude-settings, which
 NOGIT = os.path.join(ROOT, "nogit")        # a directory that is not a git tree
 GITMAIN = os.path.join(ROOT, "repo")       # an ordinary checkout, shared with other sessions
 GITWT = os.path.join(ROOT, "lane")         # a linked worktree of that checkout
+CONFLICT = os.path.join(ROOT, "conflict")  # a real checkout with an unresolved merge conflict
 GHMAIN = os.path.join(ROOT, "ghmain")      # a fake command line tool answering "main"
 GHDEV = os.path.join(ROOT, "ghdev")        # the same, answering "dev"
 GHNONE = os.path.join(ROOT, "ghnone")      # an empty directory, so the tool is missing
@@ -89,6 +90,30 @@ def write(path, text):
 
 def run_vcs(cwd, *args):
     return subprocess.run([VCS, *args], cwd=cwd, capture_output=True, text=True)
+
+
+def _require_conflict(where, path):
+    """Stop the suite unless `where` really holds an unresolved conflict on `path`.
+
+    A fixture whose setup silently fails proves nothing: it can pass for the wrong reason on
+    one machine and fail on another. This reads the tree with git itself, the same two checks
+    the guard's own `conflict_in_progress` makes, so a broken build step is caught here rather
+    than showing up later as a wrong PASS or a confusing FAIL far from its cause.
+    """
+    verify = run_vcs(where, "rev-parse", "--verify", "-q", "MERGE_HEAD")
+    if verify.returncode != 0:
+        sys.exit(
+            "fixture setup failed in build_fixtures: MERGE_HEAD does not resolve in %r. "
+            "The conflict-repo merge did not run, or it did not conflict. "
+            "stderr: %s" % (where, verify.stderr.strip())
+        )
+    status = run_vcs(where, "status", "--porcelain")
+    lines = [line for line in status.stdout.splitlines() if path in line]
+    if not any(line[:2] in ("UU", "AA") for line in lines):
+        sys.exit(
+            "fixture setup failed in build_fixtures: %r is not left in an unresolved "
+            "conflict state in %r. git status --porcelain shows: %r" % (path, where, lines)
+        )
 
 
 def make_fake_gh(folder, base):
@@ -134,6 +159,32 @@ def build_fixtures():
     run_vcs(GITMAIN, "-c", "user.email=cases@example.invalid", "-c", "user.name=cases",
             "commit", "-q", "--allow-empty", "-m", "first")
     run_vcs(GITMAIN, "worktree", "add", "-q", GITWT, "-b", "lane")
+
+    # A real checkout with a real, unresolved merge conflict, built with git itself rather than
+    # mocked. Two branches each change the same file, and merging one into the other leaves
+    # MERGE_HEAD set and the file in the conflicted "AA" state, which git will not let a commit
+    # leave silently.
+    os.makedirs(CONFLICT, exist_ok=True)
+    run_vcs(CONFLICT, "init", "-q", "-b", "main", ".")
+    ident = ["-c", "user.email=cases@example.invalid", "-c", "user.name=cases"]
+    write(os.path.join(CONFLICT, "docs", "DEBTS.md"), "base\n")
+    run_vcs(CONFLICT, "add", "docs/DEBTS.md")
+    run_vcs(CONFLICT, *ident, "commit", "-q", "-m", "base")
+    run_vcs(CONFLICT, "checkout", "-q", "-b", "feature")
+    write(os.path.join(CONFLICT, "docs", "DEBTS.md"), "feature change\n")
+    run_vcs(CONFLICT, "add", "docs/DEBTS.md")
+    run_vcs(CONFLICT, *ident, "commit", "-q", "-m", "feature change")
+    run_vcs(CONFLICT, "checkout", "-q", "main")
+    write(os.path.join(CONFLICT, "docs", "DEBTS.md"), "main change\n")
+    run_vcs(CONFLICT, "add", "docs/DEBTS.md")
+    run_vcs(CONFLICT, *ident, "commit", "-q", "-m", "main change")
+    # MEASURED on CI (run 35182973995): this call ran with no `ident`, so on a runner with no
+    # global git identity the merge refused before it ever touched the tree ("Committer identity
+    # unknown", exit 128), MERGE_HEAD was never set, and the conflict-resolve fixtures below were
+    # silently testing a CLEAN tree. It passed here only because this machine's own ~/.gitconfig
+    # supplied an identity the fixture never asked for.
+    run_vcs(CONFLICT, *ident, "merge", "feature")  # conflicts and leaves MERGE_HEAD set
+    _require_conflict(CONFLICT, "docs/DEBTS.md")
 
 
 build_fixtures()
@@ -188,6 +239,20 @@ sh("checkout: an older commit and a path", VCS + " checkout HEAD~1 -- src/utils/
 sh("checkout: a branch and a path", VCS + " checkout main -- harness/check-invariants.mjs", "deny",
    "shared-tree", cwd=NOGIT)
 sh("checkout: a named file", VCS + " checkout -- README.md", "deny", "shared-tree", cwd=NOGIT)
+
+# PICKING A CONFLICT SIDE is not a discard. `--theirs` (or `--ours`, or `--merge`) resolves one
+# side of an existing conflict; the tree is already left open by git itself, which will not let a
+# commit go through silently. Built with a REAL merge conflict, never mocked, the same way the
+# worktree cases above use a real checkout.
+sh("checkout: --theirs resolves a real, unresolved merge conflict",
+   VCS + " checkout --theirs docs/DEBTS.md", "allow", cwd=CONFLICT)
+sh("checkout: the same call with no conflict in progress keeps today's decision",
+   VCS + " checkout --theirs docs/DEBTS.md", "deny", "shared-tree", cwd=GITMAIN)
+sh("checkout: a path with no conflict-side flag still denies, even in the conflicted tree",
+   VCS + " checkout -- docs/DEBTS.md", "deny", "shared-tree", cwd=CONFLICT)
+sh("checkout: a branch and a path still denies, even in the conflicted tree",
+   VCS + " checkout main -- docs/", "deny", "shared-tree", cwd=CONFLICT)
+
 sh("clean: -fd deletes untracked files", VCS + " clean -fd", "deny", "shared-tree", cwd=NOGIT)
 sh("clean: the long force flag", VCS + " clean --force -d", "deny", "shared-tree", cwd=NOGIT)
 sh("clean: the doubled force flag", VCS + " clean -ff", "deny", "shared-tree", cwd=NOGIT)
@@ -298,6 +363,25 @@ sh("kill: one process id in Bash", "kill 123", "allow", cwd=NOGIT)
 sh("kill: one process id with taskkill", "taskkill /PID 4711 /F", "allow", cwd=NOGIT)
 sh("kill: one process id with Stop-Process", "Stop-Process -Id 123", "allow", tool="PowerShell",
    cwd=NOGIT)
+sh("kill: taskkill by image name, no other flag", "taskkill /IM node.exe", "deny",
+   "machine-wide-kill", cwd=NOGIT)
+sh("kill: xargs unwraps to the real command it runs", "xargs pkill", "deny",
+   "machine-wide-kill", cwd=NOGIT)
+
+# THE PREDICATE IS THE ACT, NOT THE TOOL OR THE SPELLING. MEASURED: the owner ran
+# `grep -n -i "...|make reap|pkill..." CLAUDE.md` to search CLAUDE.md for the word, and it was
+# denied as a machine-wide kill, although the command calls grep. Each case below names the word
+# without ever calling the program that shares it.
+sh("kill: a grep for the word is not a call to it, the owner's report",
+   'grep -n -i "graceful shutdown|make reap|pkill" CLAUDE.md', "allow", cwd=NOGIT)
+sh("kill: the word inside a single-quoted argument",
+   "grep -n -i 'graceful shutdown|make reap|pkill' CLAUDE.md", "allow", cwd=NOGIT)
+sh("kill: an echoed word and flag, quoted, prints text and calls nothing",
+   'echo "pkill -f node"', "allow", cwd=NOGIT)
+sh("kill: the word on the far side of a pipe filter", "cat notes.md | grep pkill", "allow",
+   cwd=NOGIT)
+sh("kill: a quoted phrase ahead of a real chained kill still denies",
+   'echo "safe text" && pkill node', "deny", "machine-wide-kill", cwd=NOGIT)
 
 
 # =========================================================================== 2b. live streams
@@ -784,6 +868,38 @@ def config_edit_log_case():
     return True, "three noted lines, one per config edit"
 
 
+def conflict_resolve_log_case():
+    """`git checkout --theirs` during a real conflict is allowed, and logged as
+    `noted`/`conflict-resolve`, the same shape as the other allow-and-log rules.
+    """
+    folder = os.path.join(ROOT, "conflictlog")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "guard.log")
+    if os.path.exists(path):
+        os.remove(path)
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    result = subprocess.run(
+        [sys.executable, GUARD],
+        input=json.dumps({"tool_name": "Bash",
+                          "tool_input": {"command": VCS + " checkout --theirs docs/DEBTS.md"},
+                          "cwd": CONFLICT}),
+        capture_output=True, text=True, env=env, timeout=60,
+    )
+    if result.stdout.strip():
+        return False, "expected a silent allow, got %r" % result.stdout.strip()[:120]
+    if not os.path.exists(path):
+        return False, "no log file was written for the noted resolve"
+    with open(path, encoding="utf-8") as handle:
+        lines = [line for line in handle.read().splitlines() if line.strip()]
+    if len(lines) != 1:
+        return False, "expected one line, found %d" % len(lines)
+    fields = lines[0].split("\t")
+    if len(fields) != 5 or fields[2] != "noted" or fields[3] != "conflict-resolve":
+        return False, "line does not read noted/conflict-resolve: %r" % lines[0]
+    return True, "one noted/conflict-resolve line"
+
+
 # --------------------------------------------------------------------------- the reason hygiene
 #
 # CLAUDE.md: "A refusal's printed remedy never names the forbidden target." The WHOLE printed
@@ -903,7 +1019,7 @@ def log_env_case():
 
 
 def main():
-    total = len(CASES) + 4
+    total = len(CASES) + 5
     print("guard cases, %d in all" % total)
     print("fixtures under " + ROOT)
     print()
@@ -928,6 +1044,7 @@ def main():
         ("log: the refused file is named in the log and nowhere else", log_env_case),
         ("log: a project config edit is allowed and noted", config_edit_log_case),
         ("log: a merge into main is allowed and noted where the base is unsafe", merge_log_case),
+        ("log: a conflict-side checkout is allowed and noted", conflict_resolve_log_case),
     ):
         ok, note = checker()
         failed += 0 if ok else 1
