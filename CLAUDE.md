@@ -51,7 +51,9 @@ latest. If this repo lints markdown, give every published number and path a chec
 reader. Verify a claim before you rely on it.
 
 **Tokens.** Never load a long document whole. Read one entry, one section, or a
-rendered view. Point a brief at files. Never paste them in. Read a sub-agent's report,
+rendered view. A verification command's answer is its verdict, not its stream. Get the
+verdict with one bounded command. Never scroll a log to find out whether something
+passed. Point a brief at files. Never paste them in. Read a sub-agent's report,
 never its transcript. When compacting, keep the files, the commands, and the rulings.
 Drop the narration.
 
@@ -70,6 +72,7 @@ records". Never cite a bare id. Never explain a rule in a paragraph. If I ask
 unless told otherwise. Start every reply with the point. Give no preamble.
 Once an objective is underway, assume nobody reads until I return. A turn that only tracks running work
 gets one line, or none. Never echo a worker's report or describe a screenshot.
+Never paste a passing run's output into a report. Give the verdict.
 Bring my decisions as a question with options and a recommendation.
 
 **Reports, in order:** Done, Deviations, Input Needed, Next. Done: one line per item, BUILT,
