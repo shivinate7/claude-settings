@@ -14,7 +14,9 @@ all allow the call. A guard bug must never brick a session.
 The rules below are the owner's global CLAUDE.md made mechanical. They run in
 one fixed order, and the first match wins.
 
-  1 shared-tree        a command that throws away a working tree
+  1 shared-tree        a command that throws away a working tree, judged against the STATE OF
+                       ITS SUBJECT: an empty subject passes, an unreadable subject is allowed
+                       and logged as `noted`/`subject-unread`
   2 machine-wide-kill  a kill by name or by pattern
   3 live-stream        a command that follows a stream and never ends on its own
   3 waiter             a shell segment whose command word is a sleep-and-poll
@@ -27,10 +29,15 @@ one fixed order, and the first match wins.
 
 A project's own `.claude/settings.json`, `.claude/settings.local.json`, and
 `.claude/hooks/*` are NOT frozen (Decision 7). They are allowed, and the guard appends
-one log line with decision `noted` and rule `config-edit`. This is the one place the
-guard logs an ALLOW rather than a refusal, so a person can see the edit at turn end.
-Nothing is printed for a noted edit; the config-report Stop hook is what surfaces it to
-the transcript.
+one log line with decision `noted` and rule `config-edit`, so a person can see the edit at
+turn end. Nothing is printed for a noted edit; the config-report Stop hook is what surfaces
+it to the transcript. `merge-main`, `conflict-resolve`, and `subject-unread` are logged the
+same way: an ALLOW that a person still gets to see.
+
+A subject the guard could not read is the fourth such line. The call is allowed, because a
+refusal whose ground could not be read is a guess, and the line names what could not be
+read so a reader can tell "I could not confirm this" from "this destroys something". The
+config-report Stop hook prints those lines for the turn that wrote them.
 
 Decision 8 ("Merge into main: allow and report") makes `merge-main` the same shape: a
 merge into main is allowed, never asked, and the guard logs `noted`/`merge-main` when
@@ -70,6 +77,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 
 
@@ -430,28 +438,40 @@ def restore_discards(args) -> bool:
     return worktree or not staged
 
 
-def shared_tree_hit(segment: str) -> str:
-    """Return the matched text when one segment discards a working tree, else ''."""
+def shared_tree_match(segment: str):
+    """Return (matched text, subcommand, arguments) for the first call in one segment that
+    discards a working tree, else None.
+
+    The subcommand and the arguments travel with the matched text because the SUBJECT READ
+    below needs them. A matched text alone says what fired; only the arguments say what the
+    call would take.
+    """
     for subcommand, args in git_calls(segment):
         if subcommand == "stash":
             if stash_discards(args):
-                return ("git stash " + " ".join(args)).strip()
+                return ("git stash " + " ".join(args)).strip(), subcommand, args
             continue
         if subcommand == "reset":
             if reset_discards(args):
-                return ("git reset " + " ".join(args)).strip()
+                return ("git reset " + " ".join(args)).strip(), subcommand, args
             continue
         if subcommand == "restore":
             if restore_discards(args):
-                return ("git restore " + " ".join(args)).strip()
+                return ("git restore " + " ".join(args)).strip(), subcommand, args
             continue
         if subcommand == "clean" and clean_deletes_files(args):
-            return ("git clean " + " ".join(args)).strip()
+            return ("git clean " + " ".join(args)).strip(), subcommand, args
         if subcommand == "checkout":
             named = checkout_names_a_path(args)
             if named:
-                return "git checkout " + named
-    return ""
+                return "git checkout " + named, subcommand, args
+    return None
+
+
+def shared_tree_hit(segment: str) -> str:
+    """Return the matched text when one segment discards a working tree, else ''."""
+    match = shared_tree_match(segment)
+    return match[0] if match else ""
 
 
 # ------------------------------------------------------------------ which tree the command runs in
@@ -519,6 +539,246 @@ def is_worktree(where: str):
     own = os.path.normcase(os.path.realpath(os.path.join(root, lines[0].strip())))
     common = os.path.normcase(os.path.realpath(os.path.join(root, lines[1].strip())))
     return own != common
+
+
+# ------------------------------------------------------------------ reading the subject
+#
+# READ THE SUBJECT BEFORE REFUSING OVER IT. The rule above judges the ACT of a git call. This
+# layer judges what the act would TAKE. A command that takes nothing destroys nothing, whichever
+# checkout it runs in.
+#
+# MEASURED on 6e179ae with the real hook: `git reset --hard HEAD` in a CLEAN tree answered deny,
+# though nothing was uncommitted, so nothing could be lost. The same call in a fresh `git init`
+# repository under the session scratchpad answered deny too, though no other session can reach
+# that repository.
+#
+# The subject is read WITH GIT, the same two reads git itself makes:
+#
+#   git status --porcelain   for every arm whose subject is the working tree: `reset --hard`,
+#                            `restore` in the forms that write the worktree, `stash push`/`save`
+#                            /bare, `checkout <path>`, and `clean -f`
+#   git stash list           for the arms whose subject is the stack: `stash drop`, `stash clear`
+#
+# An EMPTY subject is a PASS. There is nothing to take and nothing to destroy, and git itself
+# errors on an empty stack. For `checkout <path>` and `restore <path>` the pass is PER PATH: the
+# pathspec goes to `git status --porcelain -- <paths>`, so git resolves the path, the directory,
+# the glob and the quoting, and an empty answer proves the write changes nothing. For `clean -f`
+# the subject is the untracked part of that same output, plus the ignored part when `-x` or `-X`
+# widens the delete to ignored files.
+#
+# A path-scoped read passes ONLY when the call's paths can be enumerated. `--pathspec-from-file`
+# holds them in a file, so that form falls back to the whole tree instead of guessing.
+#
+# A DIRECTORY THAT IS NOT A GIT TREE IS NOT AN UNREADABLE SUBJECT. `_inside_work_tree` answers
+# False there, and the rule keeps its old fail-closed deny: nothing was read, so nothing is
+# proven. Only git failing to ANSWER is unreadable, which is arm 2 below.
+#
+# A CLEAN TREE PASSES EVEN WHEN THE CALL NAMES ANOTHER COMMIT. `git reset --hard origin/main` in
+# a clean tree moves the branch and rewrites tracked files, and it loses no UNCOMMITTED work;
+# the commits it leaves behind stay reachable through the reflog. The rule is about work that
+# exists nowhere else, which is what `git status --porcelain` reports.
+RESTORE_OPT_WITH_VALUE = {"-s", "--source", "--conflict", "--pathspec-from-file"}
+PATHSPEC_FROM_FILE = "--pathspec-from-file"
+
+
+def _inside_work_tree(where: str):
+    """True inside a git working tree, False when git says this is no git tree, None when git
+    gives no answer at all (git missing, a timeout, a crash).
+    """
+    if not where:
+        return False
+    answer = _git(where, "rev-parse", "--is-inside-work-tree")
+    if answer is None:
+        return None
+    if answer.returncode == 0:
+        return answer.stdout.strip() == "true"
+    return False
+
+
+def porcelain(where: str, pathspecs=(), ignored: bool = False):
+    """Return the lines of `git status --porcelain`, or None when it cannot be read."""
+    args = ["status", "--porcelain"]
+    if ignored:
+        args.append("--ignored")
+    if pathspecs:
+        args.append("--")
+        args.extend(pathspecs)
+    answer = _git(where, *args)
+    if answer is None or answer.returncode != 0:
+        return None
+    return [line for line in answer.stdout.splitlines() if line.strip()]
+
+
+def stash_stack(where: str):
+    """Return the lines of `git stash list`, or None when it cannot be read."""
+    answer = _git(where, "stash", "list")
+    if answer is None or answer.returncode != 0:
+        return None
+    return [line for line in answer.stdout.splitlines() if line.strip()]
+
+
+def named_pathspecs(subcommand: str, args):
+    """Return (pathspecs, complete) for a call that names paths.
+
+    `complete` is False when the call's paths cannot be enumerated from its own arguments, and
+    the caller then reads the whole tree rather than a subset it is not sure of.
+    """
+    if any(arg == PATHSPEC_FROM_FILE or arg.startswith(PATHSPEC_FROM_FILE + "=")
+           for arg in args):
+        return [], False
+    if "--" in args:
+        return args[args.index("--") + 1:], True
+    plain = []
+    skip = False
+    for arg in args:
+        if skip:
+            skip = False
+            continue
+        if arg.startswith("-"):
+            if subcommand == "checkout" and arg in GIT_CHECKOUT_TAKES_NAME:
+                skip = True
+            elif subcommand == "restore" and arg in RESTORE_OPT_WITH_VALUE:
+                skip = True
+            continue
+        plain.append(arg)
+    if subcommand == "checkout" and len(plain) >= 2:
+        return plain[1:], True  # a start point, then the paths
+    return plain, True
+
+
+def _tree_subject(where: str, pathspecs=(), complete: bool = True):
+    """True when the working tree holds nothing under `pathspecs`, False when it holds
+    something, None when it cannot be read.
+    """
+    lines = porcelain(where, pathspecs if complete else ())
+    if lines is None:
+        return None
+    return not lines
+
+
+def reset_subject(args, where: str):
+    """The subject of `git reset --hard` is the whole working tree."""
+    return _tree_subject(where)
+
+
+def stash_subject(args, where: str):
+    """`push`, `save` and a bare `stash` take the working tree. `drop` and `clear` take the
+    stack, so each one is read where its own subject lives.
+    """
+    if stash_action(args) in ("drop", "clear"):
+        stack = stash_stack(where)
+        if stack is None:
+            return None
+        return not stack
+    return _tree_subject(where)
+
+
+def restore_subject(args, where: str):
+    """`git restore` writes the paths it names, so the read is per path."""
+    specs, complete = named_pathspecs("restore", args)
+    return _tree_subject(where, specs, complete)
+
+
+def checkout_subject(args, where: str):
+    """`git checkout <path>` writes the paths it names, so the read is per path."""
+    specs, complete = named_pathspecs("checkout", args)
+    return _tree_subject(where, specs, complete)
+
+
+def clean_reads_ignored(args) -> bool:
+    """True when `git clean` also deletes ignored files, which porcelain hides by default."""
+    for arg in args:
+        if arg.startswith("--"):
+            continue
+        if arg.startswith("-") and ("x" in arg or "X" in arg):
+            return True
+    return False
+
+
+def clean_subject(args, where: str):
+    """The subject of `git clean -f` is the untracked part of the status output, widened to the
+    ignored part when `-x` or `-X` is on the call.
+    """
+    specs, complete = named_pathspecs("clean", args)
+    ignored = clean_reads_ignored(args)
+    lines = porcelain(where, specs if complete else (), ignored=ignored)
+    if lines is None:
+        return None
+    return not [line for line in lines if line[:2] in ("??", "!!")]
+
+
+SUBJECT_READS = {
+    "reset": reset_subject,
+    "stash": stash_subject,
+    "restore": restore_subject,
+    "checkout": checkout_subject,
+    "clean": clean_subject,
+}
+
+
+def subject_state(subcommand: str, args, where: str):
+    """True when the call's subject holds nothing, False when it holds something, None when the
+    subject cannot be read at all.
+    """
+    if not where or not os.path.isdir(where):
+        return False
+    inside = _inside_work_tree(where)
+    if inside is None:
+        return None
+    if inside is not True:
+        return False  # not a git tree: nothing was read, so the old decision stands
+    reader = SUBJECT_READS.get(subcommand)
+    if reader is None:
+        return False
+    return reader(args, where)
+
+
+# ------------------------------------------------------------------ this session's scratchpad
+#
+# A repository under THIS SESSION'S scratchpad is private. No other session and no editor holds
+# it, so a discard there loses only work this session made minutes ago.
+#
+# BY PATH ONLY. The wider tests are guesses: counting worktrees says nothing about who else reads
+# the tree, and "this session created it" cannot be read back from a path at all. The path itself
+# carries the proof, because the scratchpad of a session is named after that session.
+#
+# The session id comes from the hook payload Claude Code writes, never from the command and never
+# from a token the agent types, so Decision 1 stands: this is not an escape hatch. The
+# environment variable is read only as a fallback for a payload that carries no session id, and
+# the guard's environment is Claude Code's own, which a `Bash` call cannot change.
+#
+# SYMLINKS ARE RESOLVED ON BOTH SIDES, with `os.path.realpath`, so a symlink into the scratchpad
+# passes and a symlink out of it does not. An environment that names no scratchpad, or a session
+# id the payload does not carry, simply fails the test and keeps the old decision.
+SESSION_ID_RE = re.compile(r"^[A-Za-z0-9._-]{8,200}$")
+
+
+def session_id_of(payload) -> str:
+    """Return this session's id, from the hook payload, else from the environment."""
+    value = ""
+    if isinstance(payload, dict):
+        value = payload.get("session_id", "") or ""
+    if not isinstance(value, str) or not value:
+        value = os.environ.get("CLAUDE_CODE_SESSION_ID", "") or ""
+    return value if SESSION_ID_RE.match(value or "") else ""
+
+
+def under_session_scratchpad(where: str, session_id: str) -> bool:
+    """True when `where` resolves to a path inside this session's own scratchpad."""
+    if not where or not session_id or not SESSION_ID_RE.match(session_id):
+        return False
+    try:
+        real = os.path.realpath(where)
+        temp = os.path.realpath(tempfile.gettempdir())
+    except Exception:
+        return False
+    if not (os.path.normcase(real) + os.sep).startswith(os.path.normcase(temp) + os.sep):
+        return False
+    parts = real.split(os.sep)
+    for index in range(len(parts) - 1):
+        if parts[index] == session_id and parts[index + 1] == "scratchpad":
+            return True
+    return False
 
 
 TREE_DENY_REASON = (
@@ -1175,7 +1435,7 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str) -> No
     sys.exit(0)
 
 
-def judge_shell(tool: str, raw: str, cwd: str) -> None:
+def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
     stripped = strip_heredoc_bodies(raw)
     cmd = norm(stripped)
 
@@ -1183,13 +1443,26 @@ def judge_shell(tool: str, raw: str, cwd: str) -> None:
     for segment in split_segments(stripped):
         if not segment.strip():
             continue
-        matched = shared_tree_hit(segment)
-        if not matched:
+        match = shared_tree_match(segment)
+        if match is None:
             continue
+        matched, subcommand, args = match
         root = command_root(stripped, cwd)
         resolved = checkout_conflict_resolve(segment, root)
         if resolved:
             record(tool, "noted", "conflict-resolve", resolved)
+            continue
+        # This session's own scratchpad: private by path, so nothing shared can be lost.
+        if under_session_scratchpad(root, session_id):
+            continue
+        # The subject read. An empty subject is a silent pass. An unreadable subject is allowed
+        # and logged under its OWN rule, so a reader can tell "I could not confirm this" from
+        # "this destroys something", and the Stop hook names it at the end of the turn.
+        state = subject_state(subcommand, args, root)
+        if state is None:
+            record(tool, "noted", "subject-unread", matched)
+            continue
+        if state is True:
             continue
         worktree = is_worktree(root)
         if worktree is True:
@@ -1270,7 +1543,7 @@ def judge(payload) -> None:
     if tool in SHELL_TOOLS:
         command = tool_input.get("command", "") or ""
         if isinstance(command, str) and command.strip():
-            judge_shell(tool, command, cwd)
+            judge_shell(tool, command, cwd, session_id_of(payload))
         return
 
     if tool not in READ_ONLY_TOOLS + WRITE_TOOLS:

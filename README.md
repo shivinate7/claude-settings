@@ -164,7 +164,7 @@ CLAUDE.md asks for Simplified Technical English and a fixed report shape. Hooks 
 | `Stop` | this turn wrote a markdown file through any tool, Bash included | the turn is blocked once, and each file and finding is named. See Markdown sweep below |
 | `Stop` | end of a turn | a warning is shown as a system message. The turn is not blocked |
 | `Stop` | the turn ran `git commit`, `git push`, `git merge`, or a GitHub MCP write tool | the turn is blocked once unless the reply is one blockquote with the bold labels Done, Deviations, Input Needed, Next in order, written tight in Simplified Technical English |
-| `Stop` | any project config file changed, or a merge into main landed, this turn | a system message names each changed `.claude/settings.json`, `.claude/settings.local.json`, or `.claude/hooks/*` path, and each `gh pr merge` or GitHub MCP merge call, so the reply can name them in the report. See `hooks/config_report.py` |
+| `Stop` | any project config file changed, a merge into main landed, or the guard could not read the subject of a discarding git call, this turn | a system message names each changed `.claude/settings.json`, `.claude/settings.local.json`, or `.claude/hooks/*` path, each `gh pr merge` or GitHub MCP merge call, and each command whose subject was unreadable, so the reply can name them in the report. See `hooks/config_report.py` |
 | `PreToolUse` on `Bash`, `PowerShell`, `Read`, `Grep`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and the GitHub merge tool | a call matches a guard rule | the guard answers deny, ask, or nothing. See Guard below |
 | `SessionStart` on `startup`, `resume` | every local session start or resume | the session-start line prints. See Guard below |
 
@@ -209,8 +209,12 @@ deny, ask, or nothing. It fails open on bad input.
 
 | Rule | Tools | Decision | Remedy |
 | --- | --- | --- | --- |
-| Shared trees: `git stash push`/`save`/bare, `stash drop`, `stash clear`, `git reset --hard`, `git restore` with neither flag or with `--worktree`, `git clean -f`, `git checkout <path>` | `Bash`, `PowerShell` | deny in a shared checkout, ask in a git worktree | mutation-test with a `.bak` copy, commit work you must set aside on your own branch, or work in a worktree of your own |
+| Shared trees, with a subject to take: `git stash push`/`save`/bare, `stash drop`, `stash clear`, `git reset --hard`, `git restore` with neither flag or with `--worktree`, `git clean -f`, `git checkout <path>` | `Bash`, `PowerShell` | deny in a shared checkout, ask in a git worktree | mutation-test with a `.bak` copy, commit work you must set aside on your own branch, or work in a worktree of your own |
 | Reads and safe restores in the same trees: `git stash list`/`show`/`apply`/`pop`, `git reset` with no flag, `--soft`, `--mixed`, `--keep`, `--merge`, or a path, `git restore --staged` alone | `Bash`, `PowerShell` | allow | nothing to do. Each one reads, or puts work back, or touches only the index, and git itself refuses to overwrite a modified file |
+| An empty subject: the same commands when `git status --porcelain` is empty, or empty for the paths they name, or holds no untracked entry for a `clean -f`, or when `git stash list` is empty for a `stash drop` or `stash clear` | `Bash`, `PowerShell` | allow | nothing to do. The command takes nothing, so it destroys nothing |
+| An unreadable subject: git gives no answer to the status read or the stack read | `Bash`, `PowerShell` | allow, logged `noted`/`subject-unread`, and named in a system message at turn end | name it under Deviations in the report. A refusal whose ground could not be read is a guess |
+| This session's own scratchpad: a tree whose real path lies under the session scratchpad the hook payload names | `Bash`, `PowerShell` | allow | nothing to do. No other session and no editor holds that tree |
+| A directory that is no git tree | `Bash`, `PowerShell` | deny in a shared checkout, ask in a git worktree | nothing was read there, so the refusal stands |
 | Conflict side: `git checkout --ours`, `--theirs`, `--merge`, with a merge, rebase, cherry-pick, or revert in progress | `Bash`, `PowerShell` | allow, logged `noted`/`conflict-resolve` | nothing to do. The call picks a side, it discards no uncommitted work |
 | Machine-wide kills: `pkill`, `killall`, `lsof -t`, `taskkill /IM`, `Stop-Process -Name`, in command position only | `Bash`, `PowerShell` | deny | name one PID this session started |
 | Force push: `--force`, `-f`, `--force-with-lease` | `Bash`, `PowerShell` | ask | the click in the prompt is the grant |
@@ -246,6 +250,38 @@ errors often, and a background command with a completion notice does the same jo
 
 13. The orchestrator and product code: **judge the act, not the file.** This session writes records, docs, and briefs. Building goes to a lane, with one exception: a small fix, under 10 lines, named in the report. Reason, measured here: "It never edits product code" read as a file test. It blocked a decision entry, which is orchestration, and charged a whole lane for one comment.
 14. Setting work aside: **commit it, never stash it.** A lane that must park uncommitted work makes a commit on its own branch. Reason: a stash entry belongs to no branch. Only the session that holds the tag can find it again, and that session can die. The work is then unreachable in a tree where the next reader sees an empty stack. A commit survives the session, pushes with the branch, and any reader of the branch can see it. This states the remedy the guard already owed: `git stash push` is denied in a shared checkout (Decision 12), and the refusal now names the commit as the way out.
+
+`guard-reads-its-subject`. Shared trees, the subject: **read it before you refuse over
+it.** This extends Decision 12 one level up. Decision 12 judged the subcommand name. This
+judges what the command would take.
+
+MEASURED on `6e179ae` with the real hook. `git reset --hard HEAD` in a clean tree
+answered deny. Nothing was uncommitted, so nothing could be lost. `git reset --hard HEAD`
+and `git stash push -u -m t` in a fresh `git init` repository under the session scratchpad
+answered deny too. No other session can reach that repository.
+
+The guard now makes the two reads git itself makes. `git status --porcelain` is the
+subject of five arms. They are `reset --hard`, `restore` in the forms that write the
+worktree, `stash push`/`save`/bare, `checkout <path>`, and `clean -f`. `git stash list` is the
+subject of `stash drop` and `stash clear`. An empty subject allows.
+
+For `checkout <path>` and `restore <path>` the pathspec goes to `git status --porcelain --
+<paths>`. The pass is then per path, and git resolves the path, the directory and the
+glob. For `clean -f` the subject is the untracked part of that output. `-x` or `-X` widens
+it to the ignored part.
+
+A subject git cannot answer for allows. The guard logs `noted`/`subject-unread`, and the
+system message at turn end names it. A refusal that cannot read its own ground is a guess.
+A directory that is no git tree is NOT an unreadable subject. git answers "no tree"
+there, so that deny stands.
+
+A tree whose real path lies under the scratchpad of the session the hook payload names
+allows. The test is the path alone, and it resolves symlinks on both sides. No token and
+no override: the deny-or-ask split and the permission click stay the grant (Decision 1).
+
+MEASURED after the change, on the same probes, with a real uncommitted line added for the
+dirty rows. A clean tree allows. A dirty tree denies. The dirty scratchpad repository
+allows for this session's id, and denies for another session's id.
 
 Every deny or ask appends one line to `~/.claude/guard.log`: timestamp, tool,
 decision, rule, and the matched text cut at 120 characters. Allows are never

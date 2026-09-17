@@ -16,6 +16,14 @@ tool_use, or a `Bash`/`PowerShell` command that writes to one) after the last hu
 `{"systemMessage": "..."}` naming the files. Otherwise print nothing. When `stop_hook_active` is
 set, the reply is already a rewrite, so the gate stays quiet.
 
+It also surfaces the guard's `noted`/`subject-unread` lines. The shared-tree rule reads the
+SUBJECT of a discarding git call, and a subject it could not read is allowed rather than refused
+on a guess. That allow must not be silent, so the guard logs one line and this hook names it at
+turn end. The lines come from `guard.log`, bounded by the timestamp of the last human message, so
+an older turn's line is not reported again. The guard writes a LOCAL time and the transcript
+carries a UTC time, so the bound is converted to local time rather than compared across zones,
+and one second is taken off it because the guard truncates its stamp to whole seconds.
+
 Decision 8 ("Merge into main: allow and report") makes this hook also surface a merge into main
 landed this turn: a `Bash`/`PowerShell` tool_use whose command matches `gh pr merge`, and any
 `mcp__github__merge_pull_request` tool_use. The guard already allows and logs these; this hook is
@@ -25,6 +33,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime, timedelta
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -37,7 +46,11 @@ GH_PR_MERGE = re.compile(r"\bgh\s+pr\s+merge\b")
 
 CONFIG_MESSAGE = "Config files changed this turn: %s."
 MERGE_MESSAGE = "Merges into main this turn: %s."
+UNREAD_MESSAGE = (
+    "The guard could not read the subject of these commands, and allowed them: %s."
+)
 TAIL = " Name them in the report."
+UNREAD_RULE = "subject-unread"
 
 
 # ------------------------------------------------------------------ transcript walking
@@ -172,6 +185,71 @@ def collect_merges(records):
     return seen
 
 
+def last_human_stamp(records):
+    """Return the timestamp of the last human message, else ''."""
+    stamp = ""
+    for rec in records:
+        if is_last_human(rec):
+            value = rec.get("timestamp") or ""
+            stamp = value if isinstance(value, str) else ""
+    return stamp
+
+
+def _turn_bound(stamp):
+    """Return the last human message time as a naive LOCAL datetime, else None.
+
+    The transcript stamp is UTC and the guard's log stamp is local, so the bound is converted
+    rather than compared across zones. One second is taken off, because the guard truncates its
+    own stamp to whole seconds and a line written in the same second would otherwise be dropped.
+    """
+    text = (stamp or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        moment = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if moment.tzinfo is not None:
+        moment = moment.astimezone().replace(tzinfo=None)
+    return moment - timedelta(seconds=1)
+
+
+def collect_unread(stamp):
+    """Return the matched text of each `noted`/`subject-unread` guard line from this turn."""
+    bound = _turn_bound(stamp)
+    if bound is None:
+        return []
+    try:
+        import guard  # PreToolUse guard.py, same directory
+        path = os.path.join(guard.config_dir(), "guard.log")
+    except Exception:
+        return []
+    if not os.path.exists(path):
+        return []
+    seen = []
+    try:
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+    except Exception:
+        return []
+    for line in lines:
+        fields = line.split("\t")
+        if len(fields) != 5 or fields[3] != UNREAD_RULE:
+            continue
+        try:
+            when = datetime.fromisoformat(fields[0])
+        except Exception:
+            continue
+        if when < bound:
+            continue
+        text = fields[4].strip()
+        if text and text not in seen:
+            seen.append(text)
+    return seen
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
@@ -201,7 +279,8 @@ def main():
 
     hits = collect_paths(after, cwd)
     merges = collect_merges(after)
-    if not hits and not merges:
+    unread = collect_unread(last_human_stamp(records))
+    if not hits and not merges and not unread:
         return
 
     parts = []
@@ -209,6 +288,8 @@ def main():
         parts.append(CONFIG_MESSAGE % ", ".join(hits))
     if merges:
         parts.append(MERGE_MESSAGE % ", ".join(merges))
+    if unread:
+        parts.append(UNREAD_MESSAGE % ", ".join(unread))
     print(json.dumps({"systemMessage": " ".join(parts) + TAIL}))
 
 

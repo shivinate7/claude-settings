@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STE_GATE = os.path.join(HERE, "ste_gate.py")
@@ -282,6 +283,60 @@ class ConfigReportTests(unittest.TestCase):
         ]
         path = write_transcript(records, self.tmp.name)
         run = run_gate(CONFIG_REPORT, self.hook_for(path))
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(run.stdout.strip(), "")
+
+    # THE UNREADABLE SUBJECT REPORT. The guard allows a discarding git call whose subject it
+    # could not read, and logs one `noted`/`subject-unread` line. This hook is where a person
+    # still sees it. The log holds LOCAL times and the transcript holds UTC times, so each test
+    # builds both stamps for real rather than assuming one zone.
+    def _turn(self, log_lines, human_offset_seconds=0):
+        """Write a transcript whose last human message carries a UTC stamp, plus a guard.log
+        holding `log_lines`, and return (transcript path, environment).
+        """
+        when = datetime.now(timezone.utc) - timedelta(seconds=human_offset_seconds)
+        record = human("do the task")
+        record["timestamp"] = when.isoformat().replace("+00:00", "Z")
+        records = [record, tool_use_msg("Bash", {"command": "ls"}), tool_result_msg(),
+                   assistant_text("done")]
+        path = write_transcript(records, self.tmp.name)
+        config = os.path.join(self.tmp.name, "cfg")
+        os.makedirs(config, exist_ok=True)
+        with open(os.path.join(config, "guard.log"), "w", encoding="utf-8") as handle:
+            handle.write("".join(line + "\n" for line in log_lines))
+        env = dict(os.environ)
+        env["CLAUDE_CONFIG_DIR"] = config
+        return path, env
+
+    @staticmethod
+    def _log_line(rule, decision, matched, age_seconds=0):
+        stamp = (datetime.now() - timedelta(seconds=age_seconds)).isoformat(timespec="seconds")
+        return "\t".join([stamp, "Bash", decision, rule, matched])
+
+    def test_20_unread_subject_this_turn_is_named(self):
+        path, env = self._turn([self._log_line("subject-unread", "noted",
+                                               "git reset --hard HEAD")])
+        run = run_gate(CONFIG_REPORT, self.hook_for(path), env=env)
+        self.assertEqual(run.returncode, 0)
+        out = json.loads(run.stdout)
+        self.assertIn("could not read the subject", out["systemMessage"])
+        self.assertIn("git reset --hard HEAD", out["systemMessage"])
+        self.assertIn("Name them in the report.", out["systemMessage"])
+
+    def test_21_unread_subject_from_an_older_turn_is_not_named(self):
+        path, env = self._turn(
+            [self._log_line("subject-unread", "noted", "git reset --hard HEAD",
+                            age_seconds=600)],
+            human_offset_seconds=60,
+        )
+        run = run_gate(CONFIG_REPORT, self.hook_for(path), env=env)
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_22_a_refusal_line_is_not_an_unread_subject(self):
+        path, env = self._turn([self._log_line("shared-tree", "deny",
+                                               "git reset --hard HEAD")])
+        run = run_gate(CONFIG_REPORT, self.hook_for(path), env=env)
         self.assertEqual(run.returncode, 0)
         self.assertEqual(run.stdout.strip(), "")
 
