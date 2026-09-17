@@ -57,14 +57,33 @@ MUTATIONS = [
     ("merge-main: trust an unreadable merge base",
      '        elif base == "":',
      '        elif base == "never":'),
-    ("machine-wide-kill: blind the name and image kill patterns",
-     "    for pattern in MACHINE_WIDE_KILL:\n        found = pattern.search(cmd)",
-     "    for pattern in ():\n        found = pattern.search(cmd)"),
-    ("machine-wide-kill: blind the flag-aware kill arm",
-     '    tokens = segment.split()\n    for index, token in enumerate(tokens):\n'
-     '        tool = basename(token)',
-     '    return ""\n    tokens = segment.split()\n    for index, token in enumerate(tokens):\n'
-     '        tool = basename(token)'),
+    ("machine-wide-kill: pkill and killall no longer deny in command position",
+     '    if tool in KILL_COMMAND_WORDS:\n        return word',
+     '    if False:\n        return word'),
+    ("machine-wide-kill: taskkill's image flag no longer denies",
+     '    if tool == "taskkill" and any(flag.lower() in TASKKILL_IMAGE_FLAGS for flag in rest):\n'
+     '        return word',
+     '    if False:\n        return word'),
+    ("machine-wide-kill: Stop-Process's name flag no longer denies",
+     '    if tool == "stop-process" and any('
+     'flag.lower() in STOP_PROCESS_NAME_FLAGS for flag in rest):\n        return word',
+     '    if False:\n        return word'),
+    ("machine-wide-kill: lsof -t no longer feeds a kill list",
+     '            if arg.startswith("-") and not arg.startswith("--") and "t" in arg:\n'
+     '                return word + " " + arg',
+     '            if False:\n                return word + " " + arg'),
+    ("command word: a wrapper such as xargs no longer unwraps to what it runs",
+     '    while index < end and basename(tokens[index]) in COMMAND_WRAPPERS:',
+     '    while False:'),
+    ("shell segments: a quote never closes, so a real call after it is swallowed whole",
+     '            if char == quote:\n                quote = ""',
+     '            if False:\n                quote = ""'),
+    ("conflict-resolve: a conflict-side flag no longer exempts the checkout",
+     'CHECKOUT_CONFLICT_FLAGS = {"--ours", "--theirs", "--merge"}',
+     'CHECKOUT_CONFLICT_FLAGS = set()'),
+    ("conflict-resolve: every tree reads as mid-conflict",
+     '    return any(os.path.isdir(os.path.join(path, name)) for name in REBASE_STATE_DIRS)',
+     '    return True'),
     ("log: stop logging refusals",
      '        with open(os.path.join(folder, "guard.log"), "a", encoding="utf-8") as handle:\n'
      '            handle.write(line + "\\n")',
@@ -84,11 +103,11 @@ MUTATIONS = [
      '        refuse(tool, "deny", "frozen-path", FROZEN_REASON + " " + target, target)'),
     # Added: rules guard.py grew after the prior mutation run.
     ("live-stream: never refuse a live stream",
-     '    for segment in SEGMENT_SPLIT.split(stripped):\n'
+     '    for segment in split_segments(stripped):\n'
      '        matched = live_stream_hit(segment)\n'
      '        if matched:\n'
      '            refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)',
-     '    for segment in SEGMENT_SPLIT.split(stripped):\n'
+     '    for segment in split_segments(stripped):\n'
      '        matched = live_stream_hit(segment)\n'
      '        if False:\n'
      '            refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)'),
