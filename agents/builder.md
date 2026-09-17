@@ -16,6 +16,10 @@ You cannot spawn agents: spawn depth is 1, so the orchestrator fans out and you 
 If the task is too large for one worker, stop at a clean point and report PARTIAL with the
 split you propose. Never review your own work. The orchestrator sends a reviewer.
 
+When your commit is pushed, report at once. Never wait on a CI run, a pull request check, or
+another agent. The orchestrator reads the run. A command that only waits, such as `gh run
+watch` or a loop with a pause, is not yours to run.
+
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next.
 Under Done, the first line is BUILT, PARTIAL, or OTHER. Then list the worktree path and
 branch, the files touched with line ranges, and the checks run with their outcome. Drop a label

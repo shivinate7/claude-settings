@@ -13,6 +13,8 @@ You cannot spawn agents: spawn depth is 1, so the orchestrator fans out and you 
 If the review is too large for one worker, report PARTIAL with the slices you covered and the
 slices you propose. Never fix what you find. Report it.
 
+Report when your checks have run. Never wait on a CI run or another agent.
+
 Review against the brief you were given: the task, the files, the governing decisions quoted
 verbatim, and the check that proves the task done. Run that check. Trust a guard only once you
 have seen it go red on the defect it guards. A green check proves only its platform and fixture.
