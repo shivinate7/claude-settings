@@ -5,9 +5,11 @@ Reads the hook JSON on stdin. Always exits 0. Fails open on bad input, a missing
 transcript, or a parse error.
 
 Stop: when this turn ran `git commit`, `git push`, `git merge`, or a GitHub MCP write tool
-after the last human message, block once unless the reply is one blockquote with the bold
-labels Done, Deviations, Input Needed, Next, in that order (CLAUDE.md, "Reports, in order").
-When stop_hook_active is set, the reply is already a rewrite, so the gate stays quiet.
+after the last human message, block once unless the reply ends with one blockquote holding
+the bold labels Done, Deviations, Input Needed, Next, in that order (CLAUDE.md, "Reports, in
+order"). When the last human message asks a question, prose may sit above the report, so the
+answer does not have to hide inside it. Nothing may follow the report either way. When
+stop_hook_active is set, the reply is already a rewrite, so the gate stays quiet.
 """
 import json
 import os
@@ -27,13 +29,18 @@ LANDING_TOOLS = {
 LABEL_ORDER = ["Done", "Deviations", "Input Needed", "Next"]
 LABEL_RE = re.compile(r"^\*\*(.+?)\*\*")
 
-BLOCK_REASON = (
-    "This turn landed a commit, push, or merge. End with the report: one blockquote, "
-    "bold labels Done, Deviations, Input Needed, Next in that order, drop a label that "
-    "does not apply, no code fence, nothing above or below. Write it tight and concise, "
-    "in Simplified Technical English: short sentences, no semicolons, no contractions, "
-    "no Latin abbreviations. Append the report only. Do not repeat the reply you "
-    "already wrote."
+BLOCK_REASON_HEAD = (
+    "Report-shape gate: this turn landed a commit, push, or merge, so the reply must end "
+    "with the report. One blockquote, bold labels Done, Deviations, Input Needed, Next in "
+    "that order, drop a label that does not apply, no code fence, nothing after it."
+)
+BLOCK_REASON_NO_PREFIX = (
+    " Nothing may sit above the report on this turn. Write the whole reply again as the "
+    "report alone. Do not repeat the prose you already wrote."
+)
+BLOCK_REASON_PREFIX_OK = (
+    " The last human message asks a question, so prose may sit above the report. Write the "
+    "whole reply again: the answer first, then the report last."
 )
 
 
@@ -76,11 +83,33 @@ def turn_landed(records):
     return False
 
 
-def report_shape_ok(text):
+def asked_question(rec):
+    """True when the last human message holds a question mark."""
+    msg = rec.get("message") or {}
+    content = msg.get("content")
+    if isinstance(content, str):
+        return "?" in content
+    if isinstance(content, list):
+        for b in content:
+            if isinstance(b, dict) and b.get("type") == "text" and "?" in (b.get("text") or ""):
+                return True
+    return False
+
+
+def report_shape_ok(text, allow_prefix=False):
     lines = text.splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith(">"):
+            start = i
+            break
+    if start is None:
+        return False
+    if start > 0 and not allow_prefix:
+        return False
     seen = []
     any_label = False
-    for line in lines:
+    for line in lines[start:]:
         if not line.strip():
             continue
         if not line.lstrip().startswith(">"):
@@ -151,10 +180,12 @@ def main():
     if not turn_landed(after):
         return
 
+    allow_prefix = asked_question(records[last_human_idx])
     text = last_reply(hook)
-    if report_shape_ok(text):
+    if report_shape_ok(text, allow_prefix):
         return
-    print(json.dumps({"decision": "block", "reason": BLOCK_REASON}))
+    tail = BLOCK_REASON_PREFIX_OK if allow_prefix else BLOCK_REASON_NO_PREFIX
+    print(json.dumps({"decision": "block", "reason": BLOCK_REASON_HEAD + tail}))
 
 
 if __name__ == "__main__":

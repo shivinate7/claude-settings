@@ -42,7 +42,8 @@ Write a slug. Claim the number at merge. Cite by id, never by path. Give each re
 own file, one folder per kind. Merge overlapping PRs into one integration branch. Keep
 each PR's own commit. Close the originals as superseded once the integration branch merges.
 
-**Verification.** If the repo has screens, view each screen at three widths, both themes.
+**Verification.** If the repo has screens, check each screen at every size and theme it
+ships in. Give a verdict per screen, never a description.
 Use my browser login only when needed. Trust a guard only once it goes red on
 the defect it guards. A green check proves only its platform and fixture. Verify long
 work against the repo, not your status line. Never write a waiter loop. Never dry-run
@@ -78,4 +79,5 @@ Bring my decisions as a question with options and a recommendation.
 **Reports, in order:** Done, Deviations, Input Needed, Next. Done: one line per item, BUILT,
 RECORDED, or OTHER, with its PR or commit. One item inline, several as bullets. Drop a label
 that does not apply. Your report to me: bold labels in one blockquote, never a code fence,
-nothing above or below. No report when nothing landed.
+nothing below. Put nothing above it, unless I asked a question that turn. Then answer above
+the report. No report when nothing landed.
