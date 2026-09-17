@@ -76,6 +76,7 @@ GITMAIN = os.path.join(ROOT, "repo")       # an ordinary checkout, shared with o
 GITWT = os.path.join(ROOT, "lane")         # a linked worktree of that checkout
 CONFLICT = os.path.join(ROOT, "conflict")  # a real checkout with an unresolved merge conflict
 SUBJCLEAN = os.path.join(ROOT, "subjclean")  # a real checkout with a clean tree and no stash
+SUBJCLEANWT = os.path.join(ROOT, "subjcleanlane")  # a real, clean linked worktree of that one
 SUBJDIRTY = os.path.join(ROOT, "subjdirty")  # a real checkout with real uncommitted work
 SUBJSTASH = os.path.join(ROOT, "subjstash")  # a clean tree carrying one real stash entry
 GITBLIND = os.path.join(ROOT, "gitblind")  # a git that answers the repo test and no status read
@@ -310,6 +311,11 @@ def build_fixtures():
     make_repo(SUBJCLEAN, {"f.txt": "base\n", "keep.txt": "base\n"})
     _require_clean(SUBJCLEAN)
     _require_stash(SUBJCLEAN, 0)
+    # A CLEAN worktree of that clean checkout. The narrowed `reset --hard` arm keeps the
+    # deny-or-ask split for a named commit, and the ask half of that split can only be shown in a
+    # real linked worktree whose tree is also clean.
+    run_vcs(SUBJCLEAN, "worktree", "add", "-q", SUBJCLEANWT, "-b", "subjlane")
+    _require_clean(SUBJCLEANWT)
 
     make_repo(SUBJDIRTY, {"f.txt": "base\n", "keep.txt": "base\n"})
     write(os.path.join(SUBJDIRTY, "f.txt"), "uncommitted\n")
@@ -477,8 +483,30 @@ sh("subject: a hard reset in a clean tree takes nothing", VCS + " reset --hard H
    cwd=SUBJCLEAN)
 sh("subject: a hard reset over a real uncommitted change still denies", VCS + " reset --hard HEAD",
    "deny", "shared-tree", cwd=SUBJDIRTY)
-sh("subject: a hard reset at another commit in a clean tree takes nothing",
-   VCS + " reset --hard HEAD~1", "allow", cwd=SUBJCLEAN)
+sh("subject: a bare hard reset in a clean tree takes nothing", VCS + " reset --hard", "allow",
+   cwd=SUBJCLEAN)
+sh("subject: a bare hard reset in a clean worktree takes nothing", VCS + " reset --hard", "allow",
+   cwd=SUBJCLEANWT)
+sh("subject: a hard reset at HEAD in a clean worktree takes nothing",
+   VCS + " reset --hard HEAD", "allow", cwd=SUBJCLEANWT)
+# A `reset --hard` THAT NAMES ANOTHER COMMIT also moves the branch. Another session standing in
+# that checkout is then on rewritten history, and the reflog that recovers the commit belongs to
+# the tree that ran the reset, not to theirs. So a clean tree is NOT a pass for these forms, and
+# the deny-or-ask split stays: deny in the shared checkout, ask in the worktree.
+sh("subject: a hard reset one commit back moves the branch, clean tree or not",
+   VCS + " reset --hard HEAD~1", "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("subject: the same reset in a clean worktree asks", VCS + " reset --hard HEAD~1", "ask",
+   "shared-tree", cwd=SUBJCLEANWT)
+sh("subject: a hard reset at a remote branch moves the branch", VCS + " reset --hard origin/main",
+   "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("subject: a hard reset at a raw sha moves the branch",
+   VCS + " reset --hard 380d5fca1b2c3d4e5f60718293a4b5c6d7e8f901", "deny", "shared-tree",
+   cwd=SUBJCLEAN)
+sh("subject: a hard reset at a raw sha in a clean worktree asks",
+   VCS + " reset --hard 380d5fca1b2c3d4e5f60718293a4b5c6d7e8f901", "ask", "shared-tree",
+   cwd=SUBJCLEANWT)
+sh("subject: a quiet hard reset at HEAD is still a pass in a clean tree",
+   VCS + " reset -q --hard HEAD", "allow", cwd=SUBJCLEAN)
 sh("subject: setting aside a clean tree takes nothing", VCS + " stash push -u -m lane", "allow",
    cwd=SUBJCLEAN)
 sh("subject: setting aside real uncommitted work still denies", VCS + " stash push -u -m lane",

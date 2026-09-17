@@ -573,11 +573,26 @@ def is_worktree(where: str):
 # False there, and the rule keeps its old fail-closed deny: nothing was read, so nothing is
 # proven. Only git failing to ANSWER is unreadable, which is arm 2 below.
 #
-# A CLEAN TREE PASSES EVEN WHEN THE CALL NAMES ANOTHER COMMIT. `git reset --hard origin/main` in
-# a clean tree moves the branch and rewrites tracked files, and it loses no UNCOMMITTED work;
-# the commits it leaves behind stay reachable through the reflog. The rule is about work that
-# exists nowhere else, which is what `git status --porcelain` reports.
+# A CLEAN TREE PASSES A `reset --hard` ONLY AT `HEAD`, OR WITH NO TARGET AT ALL. A `reset --hard`
+# can lose two different things, and the subject read covers only one of them.
+#
+#   uncommitted work  has no copy anywhere. `git status --porcelain` reports it, so an empty
+#                     answer proves there is none to lose.
+#   a commit          is lost differently. The BRANCH MOVES. Another session standing in that
+#                     checkout is then on rewritten history, and the reflog that recovers the
+#                     commit belongs to the tree that ran the reset, NOT to theirs.
+#
+# The outcome this rule protects is the OTHER session's tree, so the reflog does not make the
+# named-commit form safe: it makes it whole for one tree only. `git reset --hard HEAD~1` therefore
+# keeps today's answer, deny in a shared checkout and ask in a worktree, whatever the tree holds.
+# (Owner's ruling, 2026-09-17. MEASURED on 1be660c in a pristine repository with an empty
+# porcelain: `git reset --hard HEAD` answered allow, and so did `git reset --hard HEAD~1`.)
 RESTORE_OPT_WITH_VALUE = {"-s", "--source", "--conflict", "--pathspec-from-file"}
+# `git reset` takes a value after this one. A pathspec form cannot carry `--hard` at all ("fatal:
+# Cannot do hard reset with paths."), which `reset_discards` above already records, so the plain
+# operand of a `--hard` call is always the target and never a path.
+RESET_OPT_WITH_VALUE = {"--pathspec-from-file"}
+RESET_HEAD_TARGETS = ("", "HEAD")
 # `git clean -e <pattern>` carries a value. Without this, the pattern would land in the pathspec
 # list, the read would narrow to it, and a delete of everything else would pass on an empty
 # answer. A wrong PASS is the one failure this layer must not have.
@@ -662,8 +677,42 @@ def _tree_subject(where: str, pathspecs=(), complete: bool = True):
     return not lines
 
 
+def reset_target(args):
+    """Return the commit a `git reset` names, '' when it names none, or None when the operands
+    cannot be read as one target.
+
+    Operands stop at `--`, flags are skipped, and the one flag that carries a value takes its
+    value with it. More than one plain operand is a form this does not understand, and an
+    unreadable target is never a pass.
+    """
+    plain = []
+    skip = False
+    for arg in args:
+        if skip:
+            skip = False
+            continue
+        if arg == "--":
+            break
+        if arg.startswith("-"):
+            if arg in RESET_OPT_WITH_VALUE:
+                skip = True
+            continue
+        plain.append(arg)
+    if not plain:
+        return ""
+    if len(plain) == 1:
+        return plain[0]
+    return None
+
+
 def reset_subject(args, where: str):
-    """The subject of `git reset --hard` is the whole working tree."""
+    """The subject of `git reset --hard HEAD` is the whole working tree.
+
+    A `reset --hard` that names ANY OTHER commit also moves the branch, so it keeps today's
+    answer whatever the tree holds. See the ruling above the option tables.
+    """
+    if reset_target(args) not in RESET_HEAD_TARGETS:
+        return False
     return _tree_subject(where)
 
 

@@ -211,7 +211,8 @@ deny, ask, or nothing. It fails open on bad input.
 | --- | --- | --- | --- |
 | Shared trees, with a subject to take: `git stash push`/`save`/bare, `stash drop`, `stash clear`, `git reset --hard`, `git restore` with neither flag or with `--worktree`, `git clean -f`, `git checkout <path>` | `Bash`, `PowerShell` | deny in a shared checkout, ask in a git worktree | mutation-test with a `.bak` copy, commit work you must set aside on your own branch, or work in a worktree of your own |
 | Reads and safe restores in the same trees: `git stash list`/`show`/`apply`/`pop`, `git reset` with no flag, `--soft`, `--mixed`, `--keep`, `--merge`, or a path, `git restore --staged` alone | `Bash`, `PowerShell` | allow | nothing to do. Each one reads, or puts work back, or touches only the index, and git itself refuses to overwrite a modified file |
-| An empty subject: the same commands when `git status --porcelain` is empty, or empty for the paths they name, or holds no untracked entry for a `clean -f`, or when `git stash list` is empty for a `stash drop` or `stash clear` | `Bash`, `PowerShell` | allow | nothing to do. The command takes nothing, so it destroys nothing |
+| An empty subject: the same commands when `git status --porcelain` is empty, or empty for the paths they name, or holds no untracked entry for a `clean -f`, or when `git stash list` is empty for a `stash drop` or `stash clear`. For `git reset --hard` the target must also be `HEAD` or absent | `Bash`, `PowerShell` | allow | nothing to do. The command takes nothing, so it destroys nothing |
+| `git reset --hard <any other commit>`: a branch, a tag, a raw sha, `HEAD~1` | `Bash`, `PowerShell` | deny in a shared checkout, ask in a git worktree, whatever the tree holds | the branch moves, so another session in that checkout lands on rewritten history. Reset your own worktree, or name the commit in a new commit on your own branch |
 | An unreadable subject: git gives no answer to the status read or the stack read | `Bash`, `PowerShell` | allow, logged `noted`/`subject-unread`, and named in a system message at turn end | name it under Deviations in the report. A refusal whose ground could not be read is a guess |
 | This session's own scratchpad: a tree whose real path lies under the session scratchpad the hook payload names | `Bash`, `PowerShell` | allow | nothing to do. No other session and no editor holds that tree |
 | A directory that is no git tree | `Bash`, `PowerShell` | deny in a shared checkout, ask in a git worktree | nothing was read there, so the refusal stands |
@@ -260,6 +261,12 @@ answered deny. Nothing was uncommitted, so nothing could be lost. `git reset --h
 and `git stash push -u -m t` in a fresh `git init` repository under the session scratchpad
 answered deny too. No other session can reach that repository.
 
+`git reset --hard` passes on a clean tree only at `HEAD`, or with no target at all. A
+`reset --hard` that names any other commit keeps the deny-or-ask split, whatever the tree
+holds. The reason: that form MOVES THE BRANCH. Another session in the same checkout then
+lands on rewritten history. The reflog that recovers the commit belongs to the tree that
+ran the reset, not to theirs. The outcome this rule protects is the other session's tree.
+
 The guard now makes the two reads git itself makes. `git status --porcelain` is the
 subject of five arms. They are `reset --hard`, `restore` in the forms that write the
 worktree, `stash push`/`save`/bare, `checkout <path>`, and `clean -f`. `git stash list` is the
@@ -280,8 +287,9 @@ allows. The test is the path alone, and it resolves symlinks on both sides. No t
 no override: the deny-or-ask split and the permission click stay the grant (Decision 1).
 
 MEASURED after the change, on the same probes, with a real uncommitted line added for the
-dirty rows. A clean tree allows. A dirty tree denies. The dirty scratchpad repository
-allows for this session's id, and denies for another session's id.
+dirty rows. A clean tree allows `git reset --hard HEAD`. A dirty tree denies it. The dirty
+scratchpad repository allows for this session's id, and denies for another session's id.
+In the clean tree, `git reset --hard HEAD~1`, `origin/main`, and a raw sha each deny.
 
 Every deny or ask appends one line to `~/.claude/guard.log`: timestamp, tool,
 decision, rule, and the matched text cut at 120 characters. Allows are never
