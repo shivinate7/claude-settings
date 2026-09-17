@@ -212,19 +212,58 @@ PY_PATH = os.path.dirname(sys.executable)
 
 sh("stash: set work aside in a shared tree", VCS + " stash push -u -m lane", "deny", "shared-tree",
    cwd=NOGIT)
-sh("stash: any subcommand, list included", VCS + " stash list", "deny", "shared-tree", cwd=NOGIT)
+sh("stash: a bare stash pushes, same as `stash push`", VCS + " stash", "deny", "shared-tree",
+   cwd=NOGIT)
+sh("stash: save is the old name for push", VCS + " stash save lane", "deny", "shared-tree",
+   cwd=NOGIT)
+sh("stash: drop destroys stashed work with no way back", VCS + " stash drop", "deny",
+   "shared-tree", cwd=NOGIT)
+sh("stash: clear destroys every stash with no way back", VCS + " stash clear", "deny",
+   "shared-tree", cwd=NOGIT)
+# `list` and `show` only read. `apply` and `pop` put work back, and git itself refuses to
+# overwrite a modified file rather than clobber it (MEASURED against a real conflicting change,
+# 2026-09-17). None of the four can discard a working tree, so the guard reads the ACTION word,
+# not the subcommand name, and allows all four.
+sh("stash: list only reads, no subcommand match", VCS + " stash list", "allow", cwd=NOGIT)
+sh("stash: show only reads", VCS + " stash show", "allow", cwd=NOGIT)
+sh("stash: apply puts work back, git refuses an overwrite", VCS + " stash apply", "allow",
+   cwd=NOGIT)
+sh("stash: pop puts work back, git refuses an overwrite", VCS + " stash pop stash@{0}", "allow",
+   cwd=NOGIT)
 sh("reset: throws the tree away", VCS + " reset --hard origin/main", "deny", "shared-tree",
    cwd=NOGIT)
-sh("reset: a plain reset unstages an index somebody else built", VCS + " reset HEAD~1", "deny",
-   "shared-tree", cwd=NOGIT)
-sh("reset: a soft reset moves the branch", VCS + " reset --soft HEAD~1", "deny", "shared-tree",
-   cwd=NOGIT)
 sh("reset: --hard with no argument", VCS + " reset --hard", "deny", "shared-tree", cwd=NOGIT)
+# A bare reset, and every flag except `--hard`, leaves the working tree alone, or aborts rather
+# than overwrite a local change (MEASURED against a real uncommitted change, 2026-09-17: `--keep`
+# and `--merge` both stopped with "Entry not up to date. Cannot merge." and the change survived).
+# Only `--hard` rewrites the tree unconditionally, so it alone stays denied.
+sh("reset: a plain reset only unstages, the working tree is untouched", VCS + " reset HEAD~1",
+   "allow", cwd=NOGIT)
+sh("reset: a bare reset with no argument", VCS + " reset", "allow", cwd=NOGIT)
+sh("reset: an explicit mixed reset", VCS + " reset --mixed HEAD~1", "allow", cwd=NOGIT)
+sh("reset: a soft reset moves the branch and touches nothing else", VCS + " reset --soft HEAD~1",
+   "allow", cwd=NOGIT)
+sh("reset: --keep aborts rather than overwrite a local change", VCS + " reset --keep HEAD~1",
+   "allow", cwd=NOGIT)
+sh("reset: --merge aborts rather than overwrite a local change", VCS + " reset --merge HEAD~1",
+   "allow", cwd=NOGIT)
+sh("reset: a reset naming a path only touches the index",
+   VCS + " reset -- app/src/50_engine.js", "allow", cwd=NOGIT)
+sh("reset: a reset at a commit naming a path only touches the index",
+   VCS + " reset HEAD~1 -- app/src/50_engine.js", "allow", cwd=NOGIT)
 sh("restore: overwrites a file", VCS + " restore app/src/50_engine.js", "deny", "shared-tree",
    cwd=NOGIT)
 sh("restore: the whole tree", VCS + " restore .", "deny", "shared-tree", cwd=NOGIT)
 sh("restore: staged and worktree together", VCS + " restore --staged --worktree src/jobStore.ts",
    "deny", "shared-tree", cwd=NOGIT)
+sh("restore: the worktree flag alone still overwrites the file",
+   VCS + " restore --worktree src/jobStore.ts", "deny", "shared-tree", cwd=NOGIT)
+# `--staged` alone writes only the index. The working tree file is left as it was (MEASURED
+# against a real uncommitted change, 2026-09-17).
+sh("restore: staged alone only touches the index", VCS + " restore --staged src/jobStore.ts",
+   "allow", cwd=NOGIT)
+sh("restore: the short staged flag alone only touches the index",
+   VCS + " restore -S src/jobStore.ts", "allow", cwd=NOGIT)
 sh("checkout: a path after the double dash", VCS + " checkout -- app/src/50_engine.js", "deny",
    "shared-tree", cwd=NOGIT)
 sh("checkout: a start point and a path", VCS + " checkout HEAD app/src/50_engine.js", "deny",
@@ -311,14 +350,42 @@ sh("shared tree: a compound of allowed commands", VCS + " checkout -b lane; " + 
 # THE WORKTREE HALF. A discard in a linked worktree loses only that lane's own work, so it asks. In
 # the shared checkout it denies. The guard asks git which tree it stands in, so these four cases
 # drive a real checkout and a real worktree built beside it.
-sh("worktree: a stash in the shared checkout denies", VCS + " stash list", "deny", "shared-tree",
-   cwd=GITMAIN)
-sh("worktree: the same stash inside a worktree asks", VCS + " stash list", "ask", "shared-tree",
-   cwd=GITWT)
+sh("worktree: a hard reset in the shared checkout denies", VCS + " reset --hard", "deny",
+   "shared-tree", cwd=GITMAIN)
+sh("worktree: the same reset inside a worktree asks", VCS + " reset --hard", "ask",
+   "shared-tree", cwd=GITWT)
 sh("worktree: -C naming the worktree asks, from the shared checkout",
-   VCS + " -C " + slash(GITWT) + " stash list", "ask", "shared-tree", cwd=GITMAIN)
+   VCS + " -C " + slash(GITWT) + " reset --hard", "ask", "shared-tree", cwd=GITMAIN)
 sh("worktree: a cd into the worktree asks, from the shared checkout",
-   "cd " + slash(GITWT) + " && " + VCS + " stash list", "ask", "shared-tree", cwd=GITMAIN)
+   "cd " + slash(GITWT) + " && " + VCS + " reset --hard", "ask", "shared-tree", cwd=GITMAIN)
+
+# THE TABLE'S ALLOW ROWS, checked in both a shared checkout and a worktree, so an allow is proven
+# to hold regardless of which tree the call runs in — a read or a restore never needed the
+# worktree/shared split, which the rows below confirm rather than assume.
+for _tree_name, _tree_path in (("shared checkout", GITMAIN), ("worktree", GITWT)):
+    sh("stash: list allows in the " + _tree_name, VCS + " stash list", "allow", cwd=_tree_path)
+    sh("stash: show allows in the " + _tree_name, VCS + " stash show", "allow", cwd=_tree_path)
+    sh("stash: apply allows in the " + _tree_name, VCS + " stash apply", "allow", cwd=_tree_path)
+    sh("stash: pop allows in the " + _tree_name, VCS + " stash pop", "allow", cwd=_tree_path)
+    sh("reset: a plain reset allows in the " + _tree_name, VCS + " reset HEAD~1", "allow",
+       cwd=_tree_path)
+    sh("reset: --soft allows in the " + _tree_name, VCS + " reset --soft HEAD~1", "allow",
+       cwd=_tree_path)
+    sh("reset: --keep allows in the " + _tree_name, VCS + " reset --keep HEAD~1", "allow",
+       cwd=_tree_path)
+    sh("reset: --merge allows in the " + _tree_name, VCS + " reset --merge HEAD~1", "allow",
+       cwd=_tree_path)
+    sh("reset: naming a path allows in the " + _tree_name, VCS + " reset -- f.txt", "allow",
+       cwd=_tree_path)
+    sh("restore: --staged alone allows in the " + _tree_name, VCS + " restore --staged f.txt",
+       "allow", cwd=_tree_path)
+
+# THE OWNER'S EXACT COMMAND, carrying a redirect and a pipe into `tail`. `tail -10` is not a
+# follow, so it must not trip the live-stream rule either.
+sh("stash: the owner's exact apply command allows in the shared checkout",
+   VCS + " stash apply stash@{0} 2>&1 | tail -10", "allow", cwd=GITMAIN)
+sh("stash: the owner's exact apply command allows in a worktree",
+   VCS + " stash apply stash@{0} 2>&1 | tail -10", "allow", cwd=GITWT)
 
 # A COMMIT MESSAGE DISCUSSES THESE COMMANDS. MEASURED in job-cost-reporting on 2026-08-20: a
 # heredoc body was read as a command, and a commit message naming the protected folder was refused.
