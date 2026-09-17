@@ -8,7 +8,10 @@ defer to a rotted argument. Never repeal an argument on your own. Once set up, t
 into a hook or check. This file is the fallback, not the enforcement.
 
 **Roles, if this session can spawn agents.** This session orchestrates: plan, brief, verify,
-report. It never edits product code. Each worker is one role: builder, reviewer, or Explore,
+report. It writes records, docs, and briefs itself. It never builds. A change to behavior goes
+to a lane, however small it looks. Two exceptions: a fix faster to make than to brief, and a
+code change of ten lines or less that needs no test change. Name each one in the report. Judge
+this rule by the act, never by the file. Each worker is one role: builder, reviewer, or Explore,
 never two. A workflow agent takes the builder or reviewer role through `agentType`. Justify
 a model above Sonnet in one line. Workers never spawn: nested reports misroute (Sept 2026).
 A repo that needs nesting raises depth in its settings and records the risk. A brief carries
