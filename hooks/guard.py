@@ -578,6 +578,10 @@ def is_worktree(where: str):
 # the commits it leaves behind stay reachable through the reflog. The rule is about work that
 # exists nowhere else, which is what `git status --porcelain` reports.
 RESTORE_OPT_WITH_VALUE = {"-s", "--source", "--conflict", "--pathspec-from-file"}
+# `git clean -e <pattern>` carries a value. Without this, the pattern would land in the pathspec
+# list, the read would narrow to it, and a delete of everything else would pass on an empty
+# answer. A wrong PASS is the one failure this layer must not have.
+CLEAN_OPT_WITH_VALUE = {"-e", "--exclude"}
 PATHSPEC_FROM_FILE = "--pathspec-from-file"
 
 
@@ -638,6 +642,8 @@ def named_pathspecs(subcommand: str, args):
             if subcommand == "checkout" and arg in GIT_CHECKOUT_TAKES_NAME:
                 skip = True
             elif subcommand == "restore" and arg in RESTORE_OPT_WITH_VALUE:
+                skip = True
+            elif subcommand == "clean" and arg in CLEAN_OPT_WITH_VALUE:
                 skip = True
             continue
         plain.append(arg)

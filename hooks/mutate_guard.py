@@ -158,6 +158,9 @@ MUTATIONS = [
     ("subject: the clean arm never reads the untracked entries",
      'def clean_subject(args, where: str):',
      'def clean_subject(args, where: str):\n    return False'),
+    ("subject: a clean exclude pattern is read as a pathspec, so the read narrows wrongly",
+     'CLEAN_OPT_WITH_VALUE = {"-e", "--exclude"}',
+     'CLEAN_OPT_WITH_VALUE = set()'),
     ("subject: an unreadable subject is refused instead of allowed and logged",
      '        if state is None:\n'
      '            record(tool, "noted", "subject-unread", matched)\n'

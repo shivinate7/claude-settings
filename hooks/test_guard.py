@@ -521,6 +521,10 @@ sh("subject: a clean over a real untracked file still denies", VCS + " clean -fd
    "shared-tree", cwd=SUBJDIRTY)
 sh("subject: a clean scoped to a tracked path deletes nothing", VCS + " clean -fd keep.txt",
    "allow", cwd=SUBJDIRTY)
+# `-e` carries a value. The value is NOT a pathspec, and reading it as one would narrow the read
+# and let the delete of everything else pass on an empty answer.
+sh("subject: an exclude pattern is not a pathspec", VCS + " clean -fd -e build", "deny",
+   "shared-tree", cwd=SUBJDIRTY)
 # THIS SESSION'S SCRATCHPAD, BY PATH. The same dirty repository answers three ways: private to
 # the session the payload names, shared to any other session, and shared with no session at all.
 add("scratchpad: a discard in this session's own scratchpad is private", "allow", cwd=PRIVREPO,
