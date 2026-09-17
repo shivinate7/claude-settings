@@ -32,7 +32,8 @@ BLOCK_REASON = (
     "bold labels Done, Deviations, Input Needed, Next in that order, drop a label that "
     "does not apply, no code fence, nothing above or below. Write it tight and concise, "
     "in Simplified Technical English: short sentences, no semicolons, no contractions, "
-    "no Latin abbreviations."
+    "no Latin abbreviations. Append the report only. Do not repeat the reply you "
+    "already wrote."
 )
 
 

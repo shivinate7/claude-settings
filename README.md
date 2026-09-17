@@ -196,7 +196,7 @@ deny, ask, or nothing. It fails open on bad input.
 | Frozen paths: `settings.json`, `CLAUDE.md`, `hooks/*`, `lint/*`, `agents/*` under `~/.claude` | `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and shell writes | deny | edit the clone of claude-settings and open a PR |
 | Project config: a project's own `.claude/settings.json`, `.claude/settings.local.json`, `.claude/hooks/*` | `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and shell writes | allow, logged `noted`/`config-edit`, and named in a system message at turn end | name it under Deviations in the report |
 | Live streams: `tail -f`, `tail -F`, `--follow`, `Get-Content -Wait` | `Bash`, `PowerShell` | deny | run it in the foreground with a timeout, or in the background and wait for the completion notice |
-| Waiter loops: a segment whose command word is `sleep`, `Start-Sleep`, or `timeout /t` | `Bash`, `PowerShell` | deny | run the long command in the background and wait for its completion notice, or use a tool that waits once, such as `gh pr checks --watch` |
+| Waiter loops: a segment whose command word is `sleep`, `Start-Sleep`, or `timeout /t` | `Bash`, `PowerShell` | deny | run the long command in the background and wait for its completion notice, or use a tool that waits once, such as `gh run watch <id> --exit-status` (avoid `gh pr checks --watch`, which serves a cached status) |
 
 The harness watcher tool `Monitor` is removed through `permissions.deny` in `settings.json`. It
 errors often, and a background command with a completion notice does the same job.
@@ -228,11 +228,15 @@ only.
 Run the fixture suite with `python3 ~/.claude/hooks/test_guard.py`. Each case
 is the check that proves a rule goes red on the defect it guards.
 
+`hooks/mutate_guard.py` breaks one rule at a time in a copy of `guard.py`. It
+expects the fixture suite to go red. CI runs it on every push and pull request.
+
 ## CI
 
 `.github/workflows/gates.yml` runs on push to `main`, on every pull request, and on manual
-dispatch. Each run sets up Python 3.11. It then runs the guard suite, the report-gate suite,
-a shell check of `install.sh`, a PowerShell parse of `install.ps1`, and the STE lint action.
+dispatch. Each run sets up Python 3.11. It then runs the guard suite and the guard
+mutation harness. It also runs the report-gate suite, a shell check of `install.sh`, a
+PowerShell parse of `install.ps1`, and the STE lint action.
 
 Manual dispatch takes one input, `full_ste_audit`. Enable it from the Actions tab to lint
 the whole tree in report mode. That run never fails the build. It only writes a summary.
