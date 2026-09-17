@@ -196,7 +196,7 @@ deny, ask, or nothing. It fails open on bad input.
 | Frozen paths: `settings.json`, `CLAUDE.md`, `hooks/*`, `lint/*`, `agents/*` under `~/.claude` | `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and shell writes | deny | edit the clone of claude-settings and open a PR |
 | Project config: a project's own `.claude/settings.json`, `.claude/settings.local.json`, `.claude/hooks/*` | `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and shell writes | allow, logged `noted`/`config-edit`, and named in a system message at turn end | name it under Deviations in the report |
 | Live streams: `tail -f`, `tail -F`, `--follow`, `Get-Content -Wait` | `Bash`, `PowerShell` | deny | run it in the foreground with a timeout, or in the background and wait for the completion notice |
-| Waiter loops: a segment whose command word is `sleep`, `Start-Sleep`, or `timeout /t` | `Bash`, `PowerShell` | deny | run the long command in the background and wait for its completion notice, or use a tool that waits once, such as `gh pr checks --watch` |
+| Waiter loops: a segment whose command word is `sleep`, `Start-Sleep`, or `timeout /t` | `Bash`, `PowerShell` | deny | run the long command in the background and wait for its completion notice, or use a tool that waits once, such as `gh run watch <id> --exit-status` (avoid `gh pr checks --watch`, which serves a cached status) |
 
 The harness watcher tool `Monitor` is removed through `permissions.deny` in `settings.json`. It
 errors often, and a background command with a completion notice does the same job.

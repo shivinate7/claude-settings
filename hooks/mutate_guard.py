@@ -16,9 +16,9 @@ Run:
     python hooks/mutate_guard.py
 
 Ported from a prior run at
-.../scratchpad/mutate3.py (fourteen mutations), plus four added for rules
-guard.py grew since that run: the live-stream rule, the REDIRECTION strip
-in git_calls, and the Decision 7 config-edit log line.
+.../scratchpad/mutate3.py (fourteen mutations), plus five added for rules
+guard.py grew since that run: the live-stream rule, the waiter rule (Rule 9),
+the REDIRECTION strip in git_calls, and the Decision 7 config-edit log line.
 """
 
 import os
@@ -33,8 +33,8 @@ SUITE = os.path.join(HERE, "test_guard.py")
 
 # (name, anchor text found once in the source, its mutated replacement).
 # Each one breaks exactly one rule. One mutation per rule at least:
-# shared-tree, machine-wide kill, live-stream, force push, destructive delete,
-# env-file, merge-main, frozen-path, the redirect strip, and the log.
+# shared-tree, machine-wide kill, live-stream, waiter, force push, destructive
+# delete, env-file, merge-main, frozen-path, the redirect strip, and the log.
 MUTATIONS = [
     ("shared-tree: drop the git clean arm",
      '        if subcommand == "clean" and clean_deletes_files(args):',
@@ -55,8 +55,8 @@ MUTATIONS = [
      'def push_is_forced(args) -> bool:',
      'def push_is_forced(args) -> bool:\n    return False'),
     ("merge-main: trust an unreadable merge base",
-     '        if base == "":',
-     '        if base == "never":'),
+     '        elif base == "":',
+     '        elif base == "never":'),
     ("machine-wide-kill: blind the name and image kill patterns",
      "    for pattern in MACHINE_WIDE_KILL:\n        found = pattern.search(cmd)",
      "    for pattern in ():\n        found = pattern.search(cmd)"),
@@ -92,6 +92,13 @@ MUTATIONS = [
      '        matched = live_stream_hit(segment)\n'
      '        if False:\n'
      '            refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)'),
+    ("waiter: never refuse a waiter loop (Rule 9)",
+     '        matched = waiter_hit(segment)\n'
+     '        if matched:\n'
+     '            refuse(tool, "deny", "waiter", WAITER_REASON, matched)',
+     '        matched = waiter_hit(segment)\n'
+     '        if False:\n'
+     '            refuse(tool, "deny", "waiter", WAITER_REASON, matched)'),
     ("destructive-delete: blind the wide-delete patterns",
      "    for pattern in DESTRUCTIVE_DELETE:\n        found = pattern.search(cmd)",
      "    for pattern in ():\n        found = pattern.search(cmd)"),
