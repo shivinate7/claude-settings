@@ -53,3 +53,13 @@ jobs:
         with:
           scope: ${{ inputs.full_ste_audit && 'all' || 'changed' }}
           fail: ${{ !inputs.full_ste_audit }}
+
+  # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
+  # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.
+  pointer-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pointer encoding test, Windows PowerShell 5.1
+        shell: powershell
+        run: powershell -NoProfile -File install.test.ps1
