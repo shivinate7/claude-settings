@@ -45,6 +45,9 @@ jobs:
           [System.Management.Automation.Language.Parser]::ParseFile('install.ps1', [ref]$null, [ref]$e)
           if ($e) { $e; exit 1 }
 
+      - name: Pointer encoding test, install.test.ps1
+        run: pwsh -NoProfile -File install.test.ps1
+
       - name: STE lint
         uses: ./actions/ste-lint
         with:
