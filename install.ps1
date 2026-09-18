@@ -3,7 +3,7 @@
 #   Run once from the clone:   powershell -ExecutionPolicy Bypass -File .\install.ps1
 #
 # What it does:
-#   ~\.claude\CLAUDE.md      -> one-line pointer: @C:/path/to/claude-settings/CLAUDE.md
+#   ~\.claude\CLAUDE.md      -> one-line pointer: @C:/path/to/claude-settings/CLAUDE.md (UTF-8, no BOM)
 #   ~\.claude\agents\*.md    -> role definitions (builder, reviewer), symlink per file
 #   ~\.claude\lint\*         -> STE linter + hook gate (needs python3 on PATH), symlink per file
 #   ~\.claude\hooks\*        -> PreToolUse guard + session-start line, symlink per file
@@ -84,19 +84,26 @@ exit 0
 
 # ---- CLAUDE.md pointer -------------------------------------------------------------------------
 # Forward slashes: the @import parser is happier with them than with backslashes.
-$Pointer  = '@' + (($RepoDir -replace '\\', '/').TrimEnd('/')) + '/CLAUDE.md'
-$TargetMd = Join-Path $ClaudeDir 'CLAUDE.md'
+# Written as UTF-8 without a BOM: Windows PowerShell 5.1 `Set-Content -Encoding UTF8` prepends
+# U+FEFF, which the @import parser reads as part of the path. The comparison also ignores a
+# leading BOM so a file the old installer wrote is not backed up on every rerun.
+# Kept as a function so install.test.ps1 can exercise it against a temp directory.
+function Write-Pointer([string]$RepoDir, [string]$ClaudeDir) {
+    $Pointer  = '@' + (($RepoDir -replace '\\', '/').TrimEnd('/')) + '/CLAUDE.md'
+    $TargetMd = Join-Path $ClaudeDir 'CLAUDE.md'
 
-if (Test-Path $TargetMd) {
-    $existing = Get-Content -Raw $TargetMd
-    if ($existing.Trim() -ne $Pointer) {
-        $bak = "$TargetMd.bak.$(Get-Date -Format yyyyMMddHHmmss)"
-        Copy-Item $TargetMd $bak
-        Log "existing $TargetMd backed up to $bak; fold anything you want to keep into $RepoDir\CLAUDE.md"
+    if (Test-Path $TargetMd) {
+        $existing = Get-Content -Raw $TargetMd
+        if ($existing.TrimStart([char]0xFEFF).Trim() -ne $Pointer) {
+            $bak = "$TargetMd.bak.$(Get-Date -Format yyyyMMddHHmmss)"
+            Copy-Item $TargetMd $bak
+            Log "existing $TargetMd backed up to $bak; fold anything you want to keep into $RepoDir\CLAUDE.md"
+        }
     }
+    [IO.File]::WriteAllText($TargetMd, $Pointer, [Text.UTF8Encoding]::new($false))
+    Log "wrote $TargetMd -> $Pointer"
 }
-Set-Content -Path $TargetMd -Value $Pointer -Encoding UTF8 -NoNewline
-Log "wrote $TargetMd -> $Pointer"
+Write-Pointer -RepoDir $RepoDir -ClaudeDir $ClaudeDir
 
 # ---- agents\ and lint\ : per-file symlinks, copy fallback -----------------------------------------
 $AgentCopied = $false

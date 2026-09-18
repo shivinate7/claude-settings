@@ -45,8 +45,21 @@ jobs:
           [System.Management.Automation.Language.Parser]::ParseFile('install.ps1', [ref]$null, [ref]$e)
           if ($e) { $e; exit 1 }
 
+      - name: Pointer encoding test, install.test.ps1
+        run: pwsh -NoProfile -File install.test.ps1
+
       - name: STE lint
         uses: ./actions/ste-lint
         with:
           scope: ${{ inputs.full_ste_audit && 'all' || 'changed' }}
           fail: ${{ !inputs.full_ste_audit }}
+
+  # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
+  # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.
+  pointer-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pointer encoding test, Windows PowerShell 5.1
+        shell: powershell
+        run: powershell -NoProfile -File install.test.ps1
