@@ -100,7 +100,7 @@ function Write-Pointer([string]$RepoDir, [string]$ClaudeDir) {
             Log "existing $TargetMd backed up to $bak; fold anything you want to keep into $RepoDir\CLAUDE.md"
         }
     }
-    [IO.File]::WriteAllText($TargetMd, $Pointer, [Text.UTF8Encoding]::new($false))
+    Set-Content -Path $TargetMd -Value $Pointer -Encoding UTF8 -NoNewline
     Log "wrote $TargetMd -> $Pointer"
 }
 Write-Pointer -RepoDir $RepoDir -ClaudeDir $ClaudeDir
