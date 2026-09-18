@@ -265,6 +265,42 @@ class ReportGateTests(unittest.TestCase):
         out = json.loads(run.stdout)
         self.assertEqual(out.get("decision"), "block")
 
+    def test_55_colon_inside_the_bold_label_passes(self):
+        records = [
+            human("do the task"),
+            tool_use_msg("Bash", {"command": "git commit -m x"}),
+            tool_result_msg(),
+            assistant_text("> **Done:** BUILT abc123\n> **Next:** ship it"),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(REPORT_GATE, self.hook_for(path))
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_56_colon_label_out_of_order_still_blocks(self):
+        records = [
+            human("do the task"),
+            tool_use_msg("Bash", {"command": "git commit -m x"}),
+            tool_result_msg(),
+            assistant_text("> **Done:** BUILT\n> **Next:** ship\n> **Deviations:** none"),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(REPORT_GATE, self.hook_for(path))
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+
+    def test_57_unknown_colon_label_still_blocks(self):
+        records = [
+            human("do the task"),
+            tool_use_msg("Bash", {"command": "git commit -m x"}),
+            tool_result_msg(),
+            assistant_text("> **Summary:** something"),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(REPORT_GATE, self.hook_for(path))
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+
     def test_54_prose_below_report_after_a_question_blocks(self):
         records = [
             human("why does it only fire sometimes?"),

@@ -28,6 +28,8 @@ LANDING_TOOLS = {
 }
 LABEL_ORDER = ["Done", "Deviations", "Input Needed", "Next"]
 LABEL_RE = re.compile(r"^\*\*(.+?)\*\*")
+# A label may carry its colon inside the bold, as in "**Done:**". Both forms read the same,
+# so the colon is stripped before the label is matched against LABEL_ORDER.
 
 BLOCK_REASON_HEAD = (
     "Report-shape gate: this turn landed a commit, push, or merge, so the reply must end "
@@ -122,7 +124,9 @@ def report_shape_ok(text, allow_prefix=False):
         m = LABEL_RE.match(stripped)
         if not m:
             continue
-        label = m.group(1)
+        label = m.group(1).strip()
+        if label.endswith(":"):
+            label = label[:-1].strip()
         any_label = True
         if label not in LABEL_ORDER:
             return False
