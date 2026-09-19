@@ -196,6 +196,41 @@ add("workflow shape: a `//` commented line naming opus and nothing else -> allow
     workflow(script='// agent(prompt, { model: "%s" })' % OPUS),
     {"decision": "allow"})
 
+add("workflow shape: double-quoted key, no marker -> deny",
+    workflow(script='const cfg = { "model": "%s" }; agent(prompt, cfg);' % OPUS),
+    {"decision": "deny", "reason_excludes": [OPUS]})
+
+add("workflow shape: double-quoted key, with marker -> ask",
+    workflow(script=(
+        'const cfg = { "model": "%s" }; agent(prompt, cfg);\n// %s'
+        % (OPUS, GOOD_MARKER)
+    )),
+    {"decision": "ask", "reason_includes": ["needs deep multi-file refactor reasoning"]})
+
+add("workflow shape: single-quoted key, no marker -> deny",
+    workflow(script="const cfg = { 'model': '%s' }; agent(prompt, cfg);" % OPUS),
+    {"decision": "deny", "reason_excludes": [OPUS]})
+
+add("workflow shape: member assignment (opts.model = ...), no marker -> deny",
+    workflow(script="opts.model = '%s';\nagent(prompt, opts);" % OPUS),
+    {"decision": "deny", "reason_excludes": [OPUS]})
+
+add("workflow shape: bracketed quoted-key member assignment (opts[\"model\"] = ...), no marker -> deny",
+    workflow(script='opts["model"] = \'%s\';\nagent(prompt, opts);' % OPUS),
+    {"decision": "deny", "reason_excludes": [OPUS]})
+
+add("workflow shape: double-quoted key with a below-the-bar literal -> allow",
+    workflow(script='const cfg = { "model": "%s" }; agent(prompt, cfg);' % SONNET),
+    {"decision": "allow"})
+
+add("workflow shape: fullwidth digit in the id reads as above the bar -> deny",
+    workflow(script='agent(prompt, { model: "claude-sonnet-５" })'),
+    {"decision": "deny"})
+
+add("workflow shape: `//` line naming opus with a quoted key -> allow",
+    workflow(script='// const cfg = { "model": "%s" };' % OPUS),
+    {"decision": "allow"})
+
 add("workflow shape: meta block's phase model override is not an agent option -> allow",
     workflow(script=(
         "export const meta = {\n"
