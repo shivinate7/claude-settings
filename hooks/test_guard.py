@@ -42,7 +42,13 @@ CASES = []
 
 
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
-        session=None, **tool_input):
+        session=None, carries=(), states_target=False, **tool_input):
+    """Register one case.
+
+    `carries` names fragments the printed reason MUST hold, which is how a case pins what an
+    approver reads, not only the decision. `states_target` lifts the generic-reason check for the
+    one rule whose reason names its subject on purpose: see the `subagent-model-cap` section.
+    """
     CASES.append({
         "name": name,
         "expected": expected,
@@ -52,12 +58,16 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "cwd": cwd,
         "env_path": env_path,
         "session": session,
+        "carries": (carries,) if isinstance(carries, str) else tuple(carries),
+        "states_target": states_target,
         "tool_input": tool_input,
     })
 
 
-def sh(name, command, expected, rule=None, tool="Bash", cwd=None, env_path=None, session=None):
+def sh(name, command, expected, rule=None, tool="Bash", cwd=None, env_path=None, session=None,
+       carries=(), states_target=False):
     add(name, expected, rule=rule, tool=tool, cwd=cwd, env_path=env_path, session=session,
+        carries=carries, states_target=states_target,
         command=command)
 
 
@@ -1089,6 +1099,122 @@ sh("frozen: a leftover token is not a key to the push rule",
    "GIT_DISCARD_OK=1 " + VCS + " push --force", "ask", "force-push", cwd=NOGIT)
 
 
+# =========================================================================== 6b. the model cap
+#
+# Rule 8. A project settings file overrides the owner's user settings, so a write there can lift
+# the subagent model cap the user settings hold. The decision is `ask`, never `deny`: the same
+# write is how an Opus worker gets enabled on purpose.
+#
+# THE ASK NAMES THE VALUE AND THE FILE. Every case below carries `states_target=True` for that
+# reason, and each ask case also pins the fragment the approver must read through `carries`. The
+# generic-reason rule these cases step around governs a REFUSAL'S REMEDY, where naming the target
+# reads as permission to run it. This is an ask whose whole job is to say what is being turned on.
+#
+# BOTH DIRECTIONS ARE PINNED here too: the settings write that touches neither variable keeps the
+# silent Decision 7 allow, and the config directory's own settings keep rule 7's deny.
+
+CAP_KEY = "CLAUDE_CODE_SUBAGENT_MODEL"
+CAP_FORCE = CAP_KEY + "_FORCE"
+OPUS = "claude-opus-5"
+MANAGED_SETTINGS = slash(os.path.join(ROOT, "managed", "managed-settings.json"))
+PROJ_README = slash(os.path.join(PROJ, "README.md"))
+
+
+def cap_settings(model=OPUS, force="1", compact=False):
+    """The text of a settings file that sets the cap variables."""
+    body = {"env": {CAP_KEY: model, CAP_FORCE: force}}
+    if compact:
+        return json.dumps(body, separators=(",", ":"))
+    return json.dumps(body, indent=2)
+
+
+add("cap: Write of a project local settings file setting an opus model asks", "ask",
+    "subagent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL, content=cap_settings(),
+    carries=(OPUS, "settings.local.json"), states_target=True)
+add("cap: Write of a project settings file setting an opus model asks", "ask",
+    "subagent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS, content=cap_settings(),
+    carries=(OPUS, "settings.json"), states_target=True)
+add("cap: a relative project settings path setting an opus model asks", "ask",
+    "subagent-model-cap", tool="Write", cwd=PROJ, file_path=".claude/settings.local.json",
+    content=cap_settings(), carries=(OPUS,), states_target=True)
+add("cap: Edit turning the force flag off asks", "ask", "subagent-model-cap", tool="Edit",
+    cwd=NOGIT, file_path=PROJ_SETTINGS,
+    old_string='"' + CAP_FORCE + '": "1"', new_string='"' + CAP_FORCE + '": "0"',
+    carries=(CAP_FORCE + " = 0",), states_target=True)
+add("cap: Edit naming the model variable with no value asks", "ask", "subagent-model-cap",
+    tool="Edit", cwd=NOGIT, file_path=PROJ_LOCAL,
+    old_string='"' + CAP_KEY + '": "sonnet",', new_string="",
+    carries=(CAP_KEY + " = sonnet",), states_target=True)
+add("cap: MultiEdit reaching an opus model asks", "ask", "subagent-model-cap", tool="MultiEdit",
+    cwd=NOGIT, file_path=PROJ_LOCAL,
+    edits=[{"old_string": '"' + CAP_KEY + '": "sonnet"',
+            "new_string": '"' + CAP_KEY + '": "' + OPUS + '"'}],
+    carries=(OPUS,), states_target=True)
+add("cap: a managed settings file is a settings file", "ask", "subagent-model-cap", tool="Write",
+    cwd=NOGIT, file_path=MANAGED_SETTINGS, content=cap_settings(), carries=(OPUS,),
+    states_target=True)
+# The clone's settings.json is the SOURCE the install script copies into the config directory, so a
+# cap change there reaches the owner's own settings at the next install. Editable (rule 7), asked.
+add("cap: the clone's own settings file is asked, not denied", "ask", "subagent-model-cap",
+    tool="Edit", cwd=CLONE, file_path=CLONE_SETTINGS,
+    old_string='"' + CAP_KEY + '": "sonnet"', new_string='"' + CAP_KEY + '": "' + OPUS + '"',
+    carries=(OPUS,), states_target=True)
+
+sh("cap: a heredoc writing a project settings file asks",
+   "cat <<'JSON' > " + PROJ_LOCAL + "\n" + cap_settings() + "\nJSON",
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,), states_target=True)
+sh("cap: a tee onto a project settings file asks",
+   "printf '%s' '" + cap_settings(compact=True) + "' | tee " + PROJ_SETTINGS,
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,), states_target=True)
+sh("cap: a sed -i on a project settings file asks, and names the value it arrives at",
+   "sed -i 's/\"" + CAP_KEY + "\": \"sonnet\"/\"" + CAP_KEY + "\": \"" + OPUS + "\"/' "
+   + PROJ_SETTINGS,
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(CAP_KEY + " = " + OPUS,), states_target=True)
+sh("cap: a redirect onto a project settings file asks",
+   "printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,), states_target=True)
+sh("cap: an append onto a project settings file asks",
+   "echo '\"" + CAP_FORCE + "\": \"0\"' >> " + PROJ_SETTINGS,
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(CAP_FORCE + " = 0",), states_target=True)
+
+# RULE ORDER. The config directory's own settings keep rule 7's deny, which stands ahead of rule 8,
+# so the cap content never turns that wall into a prompt.
+add("cap: the config settings stay denied, never asked", "deny", "frozen-path", tool="Write",
+    cwd=NOGIT, file_path=CFG_SETTINGS, content=cap_settings())
+sh("cap: a heredoc onto the config settings stays denied",
+   "cat <<'JSON' > " + CFG_SETTINGS + "\n" + cap_settings() + "\nJSON",
+   "deny", "frozen-path", cwd=NOGIT)
+
+# THE OTHER DIRECTION. A settings write that touches neither variable, and a file that only TALKS
+# about them, both keep their old answer.
+add("cap: a project settings write touching neither variable is allowed", "allow", tool="Write",
+    cwd=NOGIT, file_path=PROJ_SETTINGS,
+    content=json.dumps({"env": {"TZ": "UTC"}, "permissions": {"allow": ["Bash(ls:*)"]}}, indent=2))
+add("cap: prose naming the variable in a README is allowed", "allow", tool="Write", cwd=NOGIT,
+    file_path=PROJ_README,
+    content="Set " + CAP_KEY + " to sonnet, with " + CAP_FORCE + " at 1, to cap every worker.\n")
+add("cap: an ordinary source file naming the variable is allowed", "allow", tool="Edit", cwd=NOGIT,
+    file_path=slash(os.path.join(PROJ, "src", "env.py")),
+    old_string="x = 1", new_string='CAP = os.environ["' + CAP_KEY + '"]')
+add("cap: a Read of a settings file is not a write", "allow", tool="Read", cwd=NOGIT,
+    file_path=PROJ_LOCAL)
+sh("cap: a grep for the variable in a settings file is not a write",
+   "grep -n " + CAP_KEY + " " + PROJ_SETTINGS, "allow", cwd=NOGIT)
+sh("cap: reading a settings file into another file is not a write to it",
+   "cat " + PROJ_SETTINGS + " > /tmp/copy.json", "allow", cwd=NOGIT)
+
+# FAILING OPEN, this rule's own shapes. A content field of the wrong type, an edit list of the
+# wrong type, and a payload with no tool name at all: each allows the call.
+add("cap: a content field that is not a string allows", "allow", tool="Write", cwd=NOGIT,
+    file_path=PROJ_LOCAL, content=3)
+add("cap: an edit list that is not a list allows", "allow", tool="MultiEdit", cwd=NOGIT,
+    file_path=PROJ_LOCAL, edits="not a list")
+add("cap: an edit list holding something other than an object allows", "allow", tool="MultiEdit",
+    cwd=NOGIT, file_path=PROJ_LOCAL, edits=[7])
+add("cap: a payload with no tool name allows", "allow",
+    raw=json.dumps({"tool_input": {"file_path": PROJ_LOCAL, "content": cap_settings()}}))
+
+
 # =========================================================================== ordinary work
 
 for ordinary in (
@@ -1230,6 +1356,51 @@ def config_edit_log_case():
         if len(fields) != 5 or fields[2] != "noted" or fields[3] != "config-edit":
             return False, "line does not read noted/config-edit: %r" % line
     return True, "three noted lines, one per config edit"
+
+
+def cap_log_case():
+    """Rule 8 logs its ask the way the other rules log, so the config report can surface it.
+
+    One tool call and one shell call, each lifting the cap in a project settings file. Each must
+    print an `ask`, and each must add one `ask`/`subagent-model-cap` line whose matched text holds
+    the file and the requested value.
+    """
+    folder = os.path.join(ROOT, "caplog")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "guard.log")
+    if os.path.exists(path):
+        os.remove(path)
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    calls = [
+        {"tool_name": "Write",
+         "tool_input": {"file_path": PROJ_LOCAL, "content": cap_settings()}, "cwd": NOGIT},
+        {"tool_name": "Bash",
+         "tool_input": {"command": "printf '%s' '" + cap_settings(compact=True) + "' > "
+                        + PROJ_SETTINGS},
+         "cwd": NOGIT},
+    ]
+    for payload in calls:
+        result = subprocess.run(
+            [sys.executable, GUARD], input=json.dumps(payload), capture_output=True, text=True,
+            env=env, timeout=60,
+        )
+        if result.returncode != 0:
+            return False, "guard exited %d" % result.returncode
+        if '"ask"' not in result.stdout:
+            return False, "expected an ask, got %r" % result.stdout.strip()[:120]
+    if not os.path.exists(path):
+        return False, "no log file was written for the asks"
+    with open(path, encoding="utf-8") as handle:
+        lines = [line for line in handle.read().splitlines() if line.strip()]
+    asks = [line.split("\t") for line in lines if line.split("\t")[2:4] == ["ask",
+                                                                           "subagent-model-cap"]]
+    if len(asks) != 2:
+        return False, "expected two ask lines, found %d of %d" % (len(asks), len(lines))
+    for fields in asks:
+        if len(fields) != 5 or OPUS not in fields[4] or "settings" not in fields[4]:
+            return False, "the log line does not carry the file and the value: %r" % fields[-1:]
+    return True, "two ask lines, each naming the file and the model"
 
 
 def conflict_resolve_log_case():
@@ -1424,7 +1595,7 @@ def log_env_case():
 
 
 def main():
-    total = len(CASES) + 6
+    total = len(CASES) + 7
     print("guard cases, %d in all" % total)
     print("fixtures under " + ROOT)
     print()
@@ -1436,7 +1607,11 @@ def main():
         if ok and case["rule"] and case["rule"] not in reason:
             ok = False
             note = "  (the reason does not name rule %r: %s)" % (case["rule"], reason[:90])
-        elif ok and got != "allow" and names_the_target(reason):
+        elif ok and case["carries"] and [f for f in case["carries"] if f not in reason]:
+            ok = False
+            note = "  (the reason does not carry %r: %s)" % (
+                [f for f in case["carries"] if f not in reason][0], reason[:90])
+        elif ok and got != "allow" and not case["states_target"] and names_the_target(reason):
             ok = False
             note = "  (the reason names the forbidden target %r)" % names_the_target(reason)
         elif not ok:
@@ -1448,6 +1623,7 @@ def main():
         ("log: one line per refusal and none for an allow", log_case),
         ("log: the refused file is named in the log and nowhere else", log_env_case),
         ("log: a project config edit is allowed and noted", config_edit_log_case),
+        ("log: a cap lift is asked and logged with its file and value", cap_log_case),
         ("log: a merge into main is allowed and noted where the base is unsafe", merge_log_case),
         ("log: a conflict-side checkout is allowed and noted", conflict_resolve_log_case),
         ("log: an unreadable subject is allowed and noted", subject_unread_log_case),
