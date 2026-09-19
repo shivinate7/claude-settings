@@ -3,16 +3,22 @@
 
 THE DEFECT THIS CLOSES. The PreToolUse STE gate (ste_gate.py) only sees a Write, Edit, or
 MultiEdit call on a *.md path. A markdown file written through Bash never passes through
-those tools. A heredoc, a `>` redirect, a `sed -i`, a `tee`, and a `python -c` that opens
-the file for writing all skip the PreToolUse gate. The predicate that gate checks is the
-tool or the file extension spelled in a tool call, not the act of writing a markdown file.
-This hook checks the act instead, at the end of the turn.
+that gate. The earlier version of this hook chased the hole by matching SHAPES in the Bash
+command text: a heredoc, a `>` redirect, `sed -i`, a `python -c` string, and more. That list
+can only grow, never finish. `python3 gen.py`, `bash gen.sh`, `pandoc -o notes.md`, and
+`make docs` were all invisible to it, because the hole is the class "any program not on the
+list," not one shape.
+
+This hook now checks the ACT, not the command shape: a markdown file under `cwd` whose mtime
+is newer than this turn's last human message, kept only when it is also dirty against HEAD in
+a git work tree. It never reads a command string.
 
 SEVERITY. This hook blocks the turn once when it finds an error, the same severity as the
 PreToolUse gate. A gate a lane can skip by picking another tool is not a gate.
 
 SCOPE. This hook lints only the markdown files this turn changed, whatever tool wrote them.
-It walks the transcript from the last human message, the way hooks/config_report.py does.
+It reads the last human message's timestamp from the transcript, the way
+hooks/config_report.py reads that same field for its own turn boundary.
 It never scans the whole repository. An old file with old errors is not this turn's debt.
 
 Reads the hook JSON on stdin. Always exits 0. Fails open on bad input, a missing transcript,
@@ -25,42 +31,48 @@ Exclude: set MD_SWEEP_EXCLUDE to a comma-separated list of glob patterns. Each p
 straight to ste_lint.py's own `--exclude` flag, so a generated report can name its own path
 or a glob for its folder, from the shell, with no edit to this repo.
 
-Stop: when this turn wrote a markdown file through Write, Edit, MultiEdit, NotebookEdit, or
-a Bash or PowerShell command, read each such file from disk and lint it at error severity.
-Block once, naming every file and its findings, when any file has an error. When
-stop_hook_active is set, the reply is already a rewrite, so the gate stays quiet.
+THE PREDICATE.
 
-SHAPES CAUGHT. A heredoc, a `>` or `>>` redirect, `sed -i`, `perl -i`, `ruby -i`, `tee`,
-`mv`, `cp`, `install`, `chmod`, `truncate`, `ln`, the PowerShell write cmdlets, `dd of=`,
-`awk`/`gawk` with an output redirect inside the program text, a `python -c` that opens the
-path as a string literal or uses `pathlib.Path(...).write_text` or `.open("w")`, a `perl -e`
-that opens the path for writing, and a `node -e` that calls `fs.writeFileSync`,
-`fs.appendFileSync`, or `fs.createWriteStream`.
+1. Find the last human message record in the transcript. Read its `timestamp` field, an
+   ISO-8601 UTC string such as `2026-08-29T18:56:54.926Z`.
+2. Find every `.md` and `.markdown` file under `cwd` whose mtime is newer than that
+   timestamp.
+3. When `cwd` is a git work tree, keep only the files `git status --porcelain` also marks
+   dirty against HEAD. A `git pull` or a branch switch mid-turn rewrites the mtime of many
+   markdown files the turn did not author. A pull or a switch leaves those files clean, so
+   this filter drops them.
+4. Outside a git tree, or when git is missing or fails, mtime alone decides.
+5. Lint the survivors from disk with ste_lint.py at error severity, exactly as before. Block
+   once, naming every file and its findings.
 
-SHAPE NOT CAUGHT, ON PURPOSE. A path held in a shell VARIABLE, not written as a literal in
-the command text, stays out of scope. `f=notes.md; sed -i s/a/b/ "$f"` is not seen. This
-hook reads literal path arguments only. It never expands a variable, because a variable can
-hold anything at hook time, and guessing its value would be exactly the kind of workaround
-this repo avoids. This is a known hole, not a defect: name it in the report, do not silently
-patch it with a guess.
+HOLES IN THE NEW PREDICATE, NAMED HONESTLY.
 
-Each shell segment is judged by its COMMAND WORD, the way hooks/guard.py judges a shell
-segment. A program name inside a quoted argument, for example `grep -n "fs.writeFileSync"
-notes.md`, is never mistaken for that program running.
+A last human record with no `timestamp` field gives no baseline. The sweep then does
+nothing at all. This is a silent miss, not a crash.
+
+A file this turn wrote, whose final content ends up identical to HEAD, for example an edit
+undone by a later edit in the same turn, reads as clean against HEAD. The git filter drops
+it, even though this turn did touch it.
+
+A concurrent agent writing markdown into the same checkout, from a second session sharing
+this working directory, is attributed to this turn. The predicate reads mtime and git status
+only. It has no notion of which session wrote a file.
+
+A large clock skew between the machine that stamped the transcript timestamp and the
+filesystem clock that stamps mtimes would corrupt the comparison. Both clocks are the same
+machine in the normal case, so this is named as a hole, not treated as a live defect.
 """
 import json
 import os
-import re
-import shlex
 import subprocess
 import sys
+from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LINTER = os.path.join(HERE, "ste_lint.py")
 
 MD_SUFFIXES = (".md", ".markdown")
-FILE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
-SHELL_TOOLS = {"Bash", "PowerShell"}
+SKIP_DIR_NAMES = {"node_modules"}
 
 DISABLE_VAR = "MD_SWEEP_DISABLE"
 EXCLUDE_VAR = "MD_SWEEP_EXCLUDE"
@@ -71,7 +83,7 @@ NOTE = ("Code in backticks or a fence is exempt. Errors only: sentence length, s
 
 # ------------------------------------------------------------------ transcript walking
 #
-# Copied from lint/report_gate.py, not imported. This keeps the hook in one file, with no
+# Copied from hooks/config_report.py, not imported. This keeps the hook in one file, with no
 # import between two hooks fired by the same Stop event.
 
 def is_last_human(rec):
@@ -92,26 +104,6 @@ def is_last_human(rec):
     return False
 
 
-def tool_uses(rec):
-    msg = rec.get("message") or {}
-    content = msg.get("content")
-    if not isinstance(content, list):
-        return
-    for b in content:
-        if isinstance(b, dict) and b.get("type") == "tool_use":
-            yield b
-
-
-def records_after_last_human(records):
-    last_human_idx = None
-    for i, rec in enumerate(records):
-        if is_last_human(rec):
-            last_human_idx = i
-    if last_human_idx is None:
-        return []
-    return records[last_human_idx + 1:]
-
-
 def read_transcript(path):
     records = []
     with open(path, encoding="utf-8") as f:
@@ -128,337 +120,150 @@ def read_transcript(path):
     return records
 
 
-# ------------------------------------------------------------------ shell write detection
-#
-# Copied and adapted from hooks/guard.py (`split_segments`, `segment_tokens`, `resolve_command`,
-# `strip_heredoc_bodies`), not imported. hooks/guard.py is under edit by another builder while
-# this hook is built, so an import would tie this hook's behavior to a file in flux. This repo's
-# convention is to copy small helpers across `lint/` and `hooks/` rather than import them, the
-# same choice hooks/config_report.py made for its own transcript walk. These copies are not the
-# same objects, and a future change to guard.py does not reach here on its own.
-#
-# guard.py's `resolve_command` answers one question: which token is THE command that runs. This
-# sweep asks a different question: which markdown paths, if any, does that command write. So the
-# code below tests each segment's command word, then reads that command's own arguments for a
-# markdown path, rather than checking one path handed in by a caller.
+def last_human_stamp(records):
+    """Return the `timestamp` field of the last human message, else an empty string.
 
-HEREDOC_HEADER = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
-INTERPRETER_HEREDOC = re.compile(
-    r"\b(bash|sh|zsh|dash|ksh|python3?|perl|ruby|node)\b[^\n]*<<"
-)
-
-
-def strip_heredoc_bodies(cmd):
-    """Drop the body of every heredoc, and keep every header line.
-
-    A heredoc body is data, not a command. Text inside it must not read as a write. The header
-    line is kept, so `cat <<'EOF' > notes.md` still counts as a write to notes.md.
+    A transcript can hold more than one human record. This turn's boundary is the LAST one,
+    so a later record's stamp always wins over an earlier one.
     """
-    if INTERPRETER_HEREDOC.search(cmd):
-        return cmd  # an interpreter may run the body, so keep it under inspection
-    lines = cmd.split("\n")
-    kept = []
-    index = 0
-    while index < len(lines):
-        line = lines[index]
-        kept.append(line)
-        match = HEREDOC_HEADER.search(line)
-        index += 1
-        if not match:
-            continue
-        delimiter = match.group(2)
-        while index < len(lines) and lines[index].strip() != delimiter:
-            index += 1
-        if index < len(lines):
-            index += 1  # drop the closing delimiter line too
-    return "\n".join(kept)
+    stamp = ""
+    for rec in records:
+        if is_last_human(rec):
+            value = rec.get("timestamp") or ""
+            stamp = value if isinstance(value, str) else ""
+    return stamp
 
 
-# ------------------------------------------------------------------ quote-aware segment split
-#
-# Copied from hooks/guard.py `split_segments`, verbatim in behavior. A blind split on `;`
-# and `|` cuts a quoted argument that holds one of those characters into a segment of its
-# own, and whatever word lands first in that fragment then reads as a COMMAND. MEASURED
-# defect class: `sed -i 's/a;b/c/' notes.md` split on the naive splitter puts `b/c/'
-# notes.md` in its own fragment, so the sweep never sees `notes.md` as an argument of the
-# `sed -i` call that actually writes it.
-def split_segments(cmd):
-    """Split into shell segments on unquoted `;`, `|`, `||`, `&&`, and newline.
+def parse_utc_timestamp(text):
+    """Parse an ISO-8601 transcript timestamp into POSIX epoch seconds, or return None.
 
-    Quoted text, single or double, is copied whole into the current segment, so a delimiter
-    inside a quote never starts a new one. An unterminated quote runs to the end of the
-    string, which keeps the remainder inside it rather than guessing where it would close.
+    The transcript field looks like `2026-08-29T18:56:54.926Z`. `datetime.fromisoformat`
+    does not accept a trailing `Z` on every supported Python version, so it is swapped for
+    `+00:00` first. A value with no zone offset at all is treated as UTC, because every real
+    record on this machine carries the `Z`. Anything that still fails to parse gives no
+    baseline, the same as a missing field.
     """
-    segments = []
-    current = []
-    quote = ""
-    index = 0
-    length = len(cmd)
-    while index < length:
-        char = cmd[index]
-        if quote:
-            current.append(char)
-            if char == quote:
-                quote = ""
-            index += 1
-            continue
-        if char in ("'", '"'):
-            quote = char
-            current.append(char)
-            index += 1
-            continue
-        if char == "&" and cmd[index:index + 2] == "&&":
-            segments.append("".join(current))
-            current = []
-            index += 2
-            continue
-        if char == "|":
-            index += 2 if cmd[index:index + 2] == "||" else 1
-            segments.append("".join(current))
-            current = []
-            continue
-        if char in (";", "\n"):
-            segments.append("".join(current))
-            current = []
-            index += 1
-            continue
-        current.append(char)
-        index += 1
-    segments.append("".join(current))
-    return segments
+    text = (text or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        moment = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.timestamp()
 
 
-def basename(token):
-    """Copied from hooks/guard.py `basename`. The final path component, lowercased."""
-    return token.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+# ------------------------------------------------------------------ finding markdown files
 
+def _run_git(cwd, args, timeout=20):
+    """Run one git command rooted at cwd. Return the finished process, or None on any failure.
 
-# A leading `VAR=value` assignment, which is not a segment's command. Copied from guard.py.
-ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-
-# A wrapper that runs another program in its place. Copied from guard.py `COMMAND_WRAPPERS`.
-COMMAND_WRAPPERS = {"sudo", "env", "command", "nohup", "nice", "time", "doas", "xargs"}
-
-
-def segment_tokens(segment):
-    """Tokenize one segment with shlex, or return None when it cannot be parsed.
-
-    An unmatched quote or a stray backslash means this hook cannot tell what the segment
-    would run. Fail open here: judge nothing rather than guess.
+    None covers a missing git binary, a timeout, and any other exception. It never covers a
+    plain non-zero exit, which the caller reads from `returncode`.
     """
     try:
-        return shlex.split(segment, posix=True)
-    except ValueError:
+        return subprocess.run(
+            ["git", "-C", cwd] + args, capture_output=True, text=True, timeout=timeout,
+        )
+    except Exception:
         return None
 
 
-def resolve_command(tokens):
-    """Return the index of the command word in a tokenized segment, or None when it names none.
+def markdown_files_git(cwd):
+    """Return absolute markdown paths under cwd, from git's own file listing.
 
-    Copied from hooks/guard.py `resolve_command`. Skips leading `VAR=value` assignments, then
-    unwraps command wrappers (`sudo`, `env`, `command`, `nohup`, `nice`, `time`, `doas`,
-    `xargs`) along with each wrapper's own flags, so the index returned is the program that
-    actually runs.
+    Covers tracked files and untracked files git does not ignore, scoped to cwd's own
+    subtree with the trailing `-- .` pathspec. Returns None when git is missing, cwd is not a
+    work tree, or the command fails, so the caller falls back to a filesystem walk. This
+    listing already skips `.git`, `node_modules`, build output, and anything else the
+    repository's own `.gitignore` names, with no separate skip list to keep in step with it.
     """
+    run = _run_git(cwd, ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "."])
+    if run is None or run.returncode != 0:
+        return None
+    paths = []
+    for rel in run.stdout.split("\0"):
+        if rel and rel.lower().endswith(MD_SUFFIXES):
+            paths.append(os.path.realpath(os.path.join(cwd, rel)))
+    return paths
+
+
+def markdown_files_walk(cwd):
+    """Return absolute markdown paths under cwd, from a plain filesystem walk.
+
+    Used only when cwd is not a git work tree, or git is missing or fails. Skips `.git`,
+    `node_modules`, and every other dot-directory, so the walk never descends into a huge
+    generated or vendored tree that a real turn never touches.
+    """
+    paths = []
+    for root, dirs, files in os.walk(cwd):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIR_NAMES and not d.startswith(".")]
+        for name in files:
+            if name.lower().endswith(MD_SUFFIXES):
+                paths.append(os.path.realpath(os.path.join(root, name)))
+    return paths
+
+
+def git_dirty_paths(cwd):
+    """Return the absolute paths `git status --porcelain` marks dirty against HEAD.
+
+    Return None when git is missing, cwd is not a work tree, or the command fails, so the
+    caller skips the dirty filter rather than dropping every file on a guess. A rename or a
+    copy entry carries a second, NUL-separated field for its old path, which is consumed and
+    dropped here, never counted as a dirty target on its own.
+    """
+    run = _run_git(cwd, ["status", "--porcelain", "-z", "--untracked-files=all", "--", "."])
+    if run is None or run.returncode != 0:
+        return None
+    dirty = set()
+    fields = run.stdout.split("\0")
     index = 0
-    end = len(tokens)
-    while index < end and ASSIGNMENT.match(tokens[index]):
+    while index < len(fields):
+        entry = fields[index]
         index += 1
-    while index < end and basename(tokens[index]) in COMMAND_WRAPPERS:
-        index += 1
-        while index < end and tokens[index].startswith("-"):
-            index += 1
-        while index < end and ASSIGNMENT.match(tokens[index]):
-            index += 1
-    return index if index < end else None
+        if not entry:
+            continue
+        status, rel = entry[:2], entry[3:]
+        dirty.add(os.path.realpath(os.path.join(cwd, rel)))
+        if status[0] in ("R", "C"):
+            index += 1  # the next field is the rename or copy source path, not a target
+    return dirty
 
 
-# ------------------------------------------------------------------ write shapes
-#
-# A Python one-liner that opens a markdown path in a write mode. `open('notes.md', 'w')`,
-# `open('notes.md', "a")`, `open('notes.md', 'x')`. The mode must be the SECOND argument, so a
-# path that itself starts with w, x, or a is never mistaken for a mode. Scanned over the raw
-# segment text, unchanged from the earlier version of this hook.
-PYTHON_OPEN_WRITE_CALL = re.compile(
-    r"""open\s*\(\s*['"]([^'"]+\.(?:md|markdown))['"]\s*,\s*['"][xaw]"""
-)
+def collect_markdown_targets(cwd, baseline):
+    """Return markdown files under cwd newer than baseline, first-seen order, deduplicated.
 
-# A `pathlib.Path` write. `Path("notes.md").write_text(...)`, `.write_bytes(...)`, or
-# `.open("w")` / `.open("a")` / `.open("x")`.
-PATHLIB_WRITE_TEXT = re.compile(
-    r"""Path\s*\(\s*['"]([^'"]+\.(?:md|markdown))['"]\s*\)\s*\.\s*(?:write_text|write_bytes)\s*\("""
-)
-PATHLIB_OPEN_WRITE = re.compile(
-    r"""Path\s*\(\s*['"]([^'"]+\.(?:md|markdown))['"]\s*\)\s*\.\s*open\s*\(\s*['"][xaw]"""
-)
-
-# A Node one-liner that writes with the `fs` module. `fs.writeFileSync("notes.md", ...)`,
-# `fs.appendFileSync(...)`, `fs.createWriteStream(...)`.
-NODE_WRITE_CALL = re.compile(
-    r"""fs\.(?:writeFileSync|appendFileSync|createWriteStream)\s*\(\s*['"]([^'"]+\.(?:md|markdown))['"]"""
-)
-
-# A Perl `open` for writing. The two-arg form folds the mode into the path string,
-# `open(FH, ">notes.md")`. The three-arg form keeps them apart, `open(FH, '>', 'notes.md')`.
-PERL_OPEN_WRITE_2ARG = re.compile(
-    r"""open\s*\(?\s*[A-Za-z_][A-Za-z0-9_]*\s*,\s*['"]>>?\s*([^'"]+\.(?:md|markdown))['"]"""
-)
-PERL_OPEN_WRITE_3ARG = re.compile(
-    r"""open\s*\(?\s*[A-Za-z_][A-Za-z0-9_]*\s*,\s*['"]>>?['"]\s*,\s*['"]([^'"]+\.(?:md|markdown))['"]"""
-)
-
-# `awk`/`gawk` write inside their own program text, not at the shell. `{ print > "notes.md" }`.
-# The program is one shell argument (usually one shlex token), so this is matched against each
-# of the command's own arguments, never against the whole segment.
-AWK_PROGRAM_REDIRECT = re.compile(r'>>?\s*"([^"]+\.(?:md|markdown))"')
-
-# Commands whose own arguments name the path they write, once the command word is confirmed.
-# Flags are skipped. Copied in spirit from the earlier MUTATING_COMMAND list, plus the shapes
-# this task adds.
-SIMPLE_WRITE_COMMANDS = {
-    "mv", "cp", "chmod", "truncate", "install", "ln", "tee",
-    "set-content", "add-content", "clear-content", "out-file", "new-item",
-    "remove-item", "move-item", "copy-item", "rename-item", "set-itemproperty",
-    "ri", "rd", "rmdir", "del", "erase", "move", "copy", "ren",
-}
-
-# Interpreters whose `-i` (in-place) flag turns their own file arguments into writes.
-INPLACE_EDIT_COMMANDS = {"sed", "perl", "ruby"}
-
-# `-i`, `-i.bak`, `--in-place`, or a combined short form such as `-pi` or `-ni`. Matches only
-# a token that starts with one dash and holds an `i`, which is the shape sed/perl/ruby use.
-INPLACE_FLAG = re.compile(r"^-[a-z]*i[a-z0-9._-]*$")
-
-
-def _has_inplace_flag(args):
-    for arg in args:
-        if arg in ("-i", "--in-place") or arg.startswith("--in-place"):
-            return True
-        if arg.startswith("-") and not arg.startswith("--") and INPLACE_FLAG.match(arg):
-            return True
-    return False
-
-
-def _flag_value(args, flags):
-    """Return the value of the first matching flag, spaced or attached, or None."""
-    for index, arg in enumerate(args):
-        for flag in flags:
-            if arg == flag and index + 1 < len(args):
-                return args[index + 1]
-            if arg.startswith(flag) and len(arg) > len(flag):
-                return arg[len(flag):]
-    return None
-
-
-def _literal_args(args):
-    return [a for a in args if not a.startswith("-")]
-
-
-def command_targets(word, args):
-    """Return candidate markdown paths this one command call writes, judged by its own word.
-
-    `word` is the resolved command word, already unwrapped from `sudo`/`env`/etc. `args` are
-    its own tokens, quote-stripped by shlex. A path in a VARIABLE, not a literal, is invisible
-    here on purpose: this function never expands `$foo`, it only reads literal tokens.
+    In a git work tree, a file must also be dirty against HEAD to survive. Outside a git
+    tree, or when git is missing or fails, the mtime check alone decides.
     """
-    targets = []
-    if word in SIMPLE_WRITE_COMMANDS:
-        targets += _literal_args(args)
-    if word in INPLACE_EDIT_COMMANDS and _has_inplace_flag(args):
-        targets += _literal_args(args)
-    if word in ("awk", "gawk"):
-        for arg in args:
-            targets += AWK_PROGRAM_REDIRECT.findall(arg)
-    if word == "dd":
-        for arg in args:
-            if arg.startswith("of="):
-                targets.append(arg[3:])
-    if word in ("python", "python3"):
-        script = _flag_value(args, ("-c",))
-        if script:
-            targets += PYTHON_OPEN_WRITE_CALL.findall(script)
-            targets += PATHLIB_WRITE_TEXT.findall(script)
-            targets += PATHLIB_OPEN_WRITE.findall(script)
-    if word == "node":
-        script = _flag_value(args, ("-e", "-p", "--eval"))
-        if script:
-            targets += NODE_WRITE_CALL.findall(script)
-    if word == "perl":
-        script = _flag_value(args, ("-e",))
-        if script:
-            targets += PERL_OPEN_WRITE_2ARG.findall(script)
-            targets += PERL_OPEN_WRITE_3ARG.findall(script)
-    return [t for t in targets if t.lower().endswith(MD_SUFFIXES)]
+    files = markdown_files_git(cwd)
+    dirty = git_dirty_paths(cwd) if files is not None else None
+    if files is None:
+        files = markdown_files_walk(cwd)
 
-
-# A shell redirection operator, spaced or attached to its target: `>`, `>>`, `2>`, or the
-# same attached to a following word, `>notes.md`. Read off shlex tokens, so a redirect
-# character sitting inside a quoted argument never reaches this check.
-REDIRECT_TOKEN = re.compile(r"^(\d?>>?)(.*)$")
-
-
-def redirect_targets_in_tokens(tokens):
-    """Return the words a segment's tokens redirect onto, in order."""
-    targets = []
-    index = 0
-    while index < len(tokens):
-        match = REDIRECT_TOKEN.match(tokens[index])
-        if match:
-            rest = match.group(2)
-            if rest:
-                targets.append(rest)
-            elif index + 1 < len(tokens):
-                targets.append(tokens[index + 1])
-        index += 1
-    return targets
-
-
-def markdown_shell_targets(cmd):
-    """Return the markdown paths this shell command writes to, in first-seen order.
-
-    Splits on the quote-aware splitter, then judges each segment by its own command word,
-    the way hooks/guard.py judges a segment. A segment shlex cannot parse is skipped: fail
-    open, never guess.
-    """
-    stripped = strip_heredoc_bodies(cmd)
-    found = []
-
-    def note(path):
-        bare = path.strip("'\"") if path else ""
-        if bare and bare.lower().endswith(MD_SUFFIXES) and bare not in found:
-            found.append(bare)
-
-    for segment in split_segments(stripped):
-        if not segment.strip():
+    seen = []
+    seen_set = set()
+    for path in files:
+        if path in seen_set:
             continue
-        # Kept ungated, over the raw segment text: the shape this hook already caught.
-        for m in PYTHON_OPEN_WRITE_CALL.finditer(segment):
-            note(m.group(1))
-
-        tokens = segment_tokens(segment)
-        if tokens is None:
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
             continue
-
-        for target in redirect_targets_in_tokens(tokens):
-            note(target)
-
-        index = resolve_command(tokens)
-        if index is None:
+        if mtime <= baseline:
             continue
-        word = basename(tokens[index])
-        for target in command_targets(word, tokens[index + 1:]):
-            note(target)
-    return found
+        if dirty is not None and path not in dirty:
+            continue
+        seen_set.add(path)
+        seen.append(path)
+    return seen
 
 
-# ------------------------------------------------------------------ collecting this turn's targets
-
-def _resolve_path(path, cwd):
-    target = os.path.expandvars(os.path.expanduser(path.strip("'\"")))
-    if not os.path.isabs(target) and cwd:
-        target = os.path.join(cwd, target)
-    return os.path.realpath(target)
-
+# ------------------------------------------------------------------ project and readability checks
 
 def _within_project(path, cwd):
     try:
@@ -466,43 +271,6 @@ def _within_project(path, cwd):
     except Exception:
         return False
     return path == root or path.startswith(root + os.sep)
-
-
-def collect_markdown_targets(records, cwd):
-    """Return the markdown paths (resolved, absolute) this turn's tools wrote, first-seen order."""
-    seen = []
-    resolved_set = set()
-
-    def note(raw_path):
-        if not raw_path or not isinstance(raw_path, str):
-            return
-        try:
-            resolved = _resolve_path(raw_path, cwd)
-        except Exception:
-            return
-        if resolved in resolved_set:
-            return
-        resolved_set.add(resolved)
-        seen.append(resolved)
-
-    for rec in records:
-        for b in tool_uses(rec):
-            name = b.get("name")
-            inp = b.get("input") or {}
-            if not isinstance(inp, dict):
-                continue
-            if name in FILE_TOOLS:
-                target = (
-                    inp.get("file_path") or inp.get("path") or inp.get("notebook_path") or ""
-                )
-                if isinstance(target, str) and target.lower().endswith(MD_SUFFIXES):
-                    note(target)
-            elif name in SHELL_TOOLS:
-                cmd = inp.get("command") or ""
-                if isinstance(cmd, str) and cmd.strip():
-                    for md_path in markdown_shell_targets(cmd):
-                        note(md_path)
-    return seen
 
 
 # ------------------------------------------------------------------ linting from disk
@@ -556,20 +324,25 @@ def main():
     except Exception:
         return
 
-    after = records_after_last_human(records)
-    if not after:
-        return
+    baseline = parse_utc_timestamp(last_human_stamp(records))
+    if baseline is None:
+        return  # no timestamp on the last human record: no baseline, so no sweep
 
     cwd = hook.get("cwd") or ""
     if not isinstance(cwd, str) or not cwd:
         cwd = os.getcwd()
+    if not os.path.isdir(cwd):
+        return
 
-    targets = collect_markdown_targets(after, cwd)
+    try:
+        targets = collect_markdown_targets(cwd, baseline)
+    except Exception:
+        return
     if not targets:
         return
 
-    # Fail open: a missing file, a file outside the project, or a file this hook cannot read is
-    # dropped here and never reaches the linter or the block message.
+    # Fail open: a file outside the project, or a file this hook cannot read, is dropped here
+    # and never reaches the linter or the block message.
     readable = []
     for resolved in targets:
         try:
