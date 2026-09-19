@@ -874,6 +874,270 @@ class MdSweepTests(unittest.TestCase):
         run = self.run_sweep(env=env)
         self.assert_no_block(run)
 
+    # ---------------------------------------------------------- scoping to changed blocks
+
+    THREE_ERRORS_ONE_CLEAN = (
+        "This sentence holds a semicolon; and that trips the STE006 rule.\n"
+        "\n"
+        "This one also holds a semicolon; right here for good measure.\n"
+        "\n"
+        "A third sentence with a semicolon; sits in its own paragraph.\n"
+        "\n"
+        "This is the clean block that gets edited later.\n"
+    )
+    THREE_ERRORS_ONE_CLEAN_EDITED = (
+        "This sentence holds a semicolon; and that trips the STE006 rule.\n"
+        "\n"
+        "This one also holds a semicolon; right here for good measure.\n"
+        "\n"
+        "A third sentence with a semicolon; sits in its own paragraph.\n"
+        "\n"
+        "This is the clean block that gets edited later today.\n"
+    )
+
+    def test_59_pre_existing_errors_elsewhere_edited_clean_block_no_block(self):
+        # THE HEADLINE CASE. HEAD already holds 3 STE006 errors in 3 untouched blocks. This
+        # turn edits only the last, clean block, and keeps it clean. Against the pre-scoping
+        # gate this blocks and names all 3 pre-existing errors (see redgreen.py in the task
+        # report). Scoped to the changed block, it must not block at all.
+        self._init_git()
+        self._write_md("notes.md", self.THREE_ERRORS_ONE_CLEAN)
+        self._git_commit_all()
+        self._write_md("notes.md", self.THREE_ERRORS_ONE_CLEAN_EDITED)
+        run = self.run_sweep()
+        self.assert_no_block(run)
+
+    def test_60_error_introduced_in_the_edited_block_still_blocks(self):
+        # THE INVERSE, the one that matters most: an error introduced IN the changed block
+        # must still block, even while 3 other, untouched blocks also hold errors.
+        edited_with_new_error = self.THREE_ERRORS_ONE_CLEAN.replace(
+            "This is the clean block that gets edited later.\n",
+            "This is the block that gets edited later; and now holds a semicolon too.\n",
+        )
+        self._init_git()
+        self._write_md("notes.md", self.THREE_ERRORS_ONE_CLEAN)
+        self._git_commit_all()
+        self._write_md("notes.md", edited_with_new_error)
+        run = self.run_sweep()
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+        # Only the edited block's own STE006 finding surfaces, at its own line 7. The 3
+        # pre-existing errors, in untouched blocks, stay out of scope.
+        self.assertIn("line 7: STE006", out["reason"])
+        self.assertEqual(out["reason"].count("STE006"), 1)
+
+    def test_61_multiline_sentence_crossing_a_changed_line_still_blocks(self):
+        # THE TRAP. A sentence starts on the paragraph's first line (unchanged this turn) and
+        # only crosses the descriptive 25-word limit because of words added on its THIRD
+        # line, the only line this turn's edit touches. A naive line-only filter keeps only
+        # the changed line and drops the finding, because the finding is reported at the
+        # SENTENCE-START line, which is outside the diff. A block-scoped filter must not.
+        head = (
+            "w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12\n"
+            "w13 w14 w15 w16 w17 w18 w19 w20\n"
+            "w21 w22 w23.\n"
+        )
+        edited = (
+            "w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12\n"
+            "w13 w14 w15 w16 w17 w18 w19 w20\n"
+            "w21 w22 w23 w24 w25 w26 w27 w28 w29 w30.\n"
+        )
+        self._init_git()
+        self._write_md("sentence.md", head)
+        self._git_commit_all()
+        self._write_md("sentence.md", edited)
+        run = self.run_sweep()
+        # A naive line filter (kept only line 3, the changed one) would drop this finding,
+        # because ste_lint.py reports STE001 at line 1, where the sentence starts. Assert the
+        # actual, wrong-if-naive outcome: it blocks, and names STE001.
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block", "a naive per-line filter would pass "
+                          "this wrongly, dropping the sentence-start finding")
+        self.assertIn("STE001", out["reason"])
+
+    def test_62_different_file_gains_an_error_still_blocks_naming_it(self):
+        # A file edited in a clean block must not suppress a genuinely new error in a
+        # DIFFERENT file this same turn touched.
+        self._init_git()
+        self._write_md("scoped.md", self.THREE_ERRORS_ONE_CLEAN)
+        self._write_md("other.md", self.CLEAN_TEXT)
+        self._git_commit_all()
+        self._write_md("scoped.md", self.THREE_ERRORS_ONE_CLEAN_EDITED)  # clean block, no block
+        self._write_md("other.md", self.ERROR_TEXT)  # a fresh error, different file
+        run = self.run_sweep()
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("other.md", out["reason"])
+        self.assertNotIn("scoped.md", out["reason"])
+
+    def test_63_untracked_file_blocks_on_every_pre_existing_error(self):
+        # Item 5: an untracked file has no HEAD baseline to diff against, so it lints in
+        # full. All 3 STE006 errors in it must surface, not only one.
+        self._init_git()
+        self._write_md("README.md", self.CLEAN_TEXT)
+        self._git_commit_all()
+        self._write_md("notes.md", self.THREE_ERRORS_ONE_CLEAN)  # untracked, this turn
+        run = self.run_sweep()
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertEqual(out["reason"].count("STE006"), 3)
+
+    def test_64_staged_new_file_blocks_on_every_error(self):
+        # Item 4: a brand new file, `git add`-ed but not yet committed, has no content in
+        # HEAD at all. `git diff HEAD` reports it as entirely added, so every line is in
+        # scope, and every error in it must block.
+        self._init_git()
+        self._write_md("README.md", self.CLEAN_TEXT)
+        self._git_commit_all()
+        target = self._write_md("notes.md", self.THREE_ERRORS_ONE_CLEAN)
+        subprocess.run(["git", "add", target], cwd=self.tmp.name, check=True,
+                        capture_output=True, text=True)
+        run = self.run_sweep()
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertEqual(out["reason"].count("STE006"), 3)
+
+
+class SteGatePreToolUseTests(unittest.TestCase):
+    """Fixtures for lint/ste_gate.py's PreToolUse handler: it replays the proposed edit onto
+    the file on disk to get the full proposed content, then lints only the blocks that
+    differ from disk. See ste_gate.py's own module docstring, "SCOPING TO CHANGED BLOCKS".
+    """
+
+    ERROR_LINE = "This sentence holds a semicolon; and that trips the STE006 rule.\n"
+    CLEAN_LINE = "This is a short clean sentence.\n"
+
+    THREE_ERRORS_ONE_CLEAN = (
+        "This sentence holds a semicolon; and that trips the STE006 rule.\n"
+        "\n"
+        "This one also holds a semicolon; right here for good measure.\n"
+        "\n"
+        "A third sentence with a semicolon; sits in its own paragraph.\n"
+        "\n"
+        "This is the clean block that gets edited.\n"
+    )
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def _write(self, name, text):
+        target = os.path.join(self.tmp.name, name)
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(text)
+        return target
+
+    def run_pretooluse(self, tool_name, tool_input):
+        hook = {"hook_event_name": "PreToolUse", "tool_name": tool_name, "tool_input": tool_input}
+        return run_gate(STE_GATE, hook)
+
+    def assert_denied(self, run):
+        self.assertEqual(run.returncode, 0)
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("hookSpecificOutput", {}).get("permissionDecision"), "deny")
+        return out["hookSpecificOutput"]["permissionDecisionReason"]
+
+    def assert_allowed(self, run):
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(run.stdout.strip(), "")
+
+    # ---------------------------------------------------------- the headline case (item 1)
+
+    def test_59_pre_existing_errors_elsewhere_clean_edit_allowed(self):
+        target = self._write("notes.md", self.THREE_ERRORS_ONE_CLEAN)
+        run = self.run_pretooluse("Edit", {
+            "file_path": target,
+            "old_string": "This is the clean block that gets edited.\n",
+            "new_string": "This is the clean block that gets edited today.\n",
+        })
+        self.assert_allowed(run)
+
+    # ---------------------------------------------------------- the inverse (item 2)
+
+    def test_60_error_introduced_in_the_edit_still_denied(self):
+        target = self._write("notes.md", self.THREE_ERRORS_ONE_CLEAN)
+        run = self.run_pretooluse("Edit", {
+            "file_path": target,
+            "old_string": "This is the clean block that gets edited.\n",
+            "new_string": "This block now holds a semicolon; right in the edit itself.\n",
+        })
+        reason = self.assert_denied(run)
+        self.assertIn("semicolon", reason.lower())
+
+    # ---------------------------------------------------------- the multi-line trap (item 3)
+
+    def test_61_multiline_sentence_crossing_a_changed_line_still_denied(self):
+        head = (
+            "w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12\n"
+            "w13 w14 w15 w16 w17 w18 w19 w20\n"
+            "w21 w22 w23.\n"
+        )
+        target = self._write("sentence.md", head)
+        run = self.run_pretooluse("Edit", {
+            "file_path": target,
+            "old_string": "w21 w22 w23.\n",
+            "new_string": "w21 w22 w23 w24 w25 w26 w27 w28 w29 w30.\n",
+        })
+        reason = self.assert_denied(run)
+        self.assertIn("STE001", reason)
+
+    # ---------------------------------------------------------- a brand new file (item 4)
+
+    def test_62_new_file_via_write_denied_on_every_error(self):
+        target = os.path.join(self.tmp.name, "new.md")  # never created: Write makes it
+        run = self.run_pretooluse("Write", {"file_path": target, "content": self.THREE_ERRORS_ONE_CLEAN})
+        reason = self.assert_denied(run)
+        self.assertEqual(reason.count("STE006"), 3)
+
+    # ---------------------------------------------------------- MultiEdit and Write scoping
+
+    def test_63_multiedit_clean_edits_allowed_despite_other_errors(self):
+        target = self._write("notes.md", self.THREE_ERRORS_ONE_CLEAN)
+        run = self.run_pretooluse("MultiEdit", {"file_path": target, "edits": [
+            {"old_string": "This is the clean block that gets edited.\n",
+             "new_string": "This is the clean block that gets edited today.\n"},
+        ]})
+        self.assert_allowed(run)
+
+    def test_64_write_full_file_clean_change_allowed_despite_other_errors(self):
+        target = self._write("notes.md", self.THREE_ERRORS_ONE_CLEAN)
+        proposed = self.THREE_ERRORS_ONE_CLEAN.replace(
+            "This is the clean block that gets edited.\n",
+            "This is the clean block that gets edited today.\n",
+        )
+        run = self.run_pretooluse("Write", {"file_path": target, "content": proposed})
+        self.assert_allowed(run)
+
+    def test_65_write_over_existing_file_still_denies_a_new_error(self):
+        target = self._write("notes.md", self.THREE_ERRORS_ONE_CLEAN)
+        proposed = self.THREE_ERRORS_ONE_CLEAN.replace(
+            "This is the clean block that gets edited.\n",
+            "This block now holds a semicolon; right in the edit itself.\n",
+        )
+        run = self.run_pretooluse("Write", {"file_path": target, "content": proposed})
+        reason = self.assert_denied(run)
+        self.assertIn("semicolon", reason.lower())
+
+    # ---------------------------------------------------------- fail-open on an unresolved edit
+
+    def test_66_old_string_not_found_falls_back_to_linting_the_new_text_in_full(self):
+        # The edit cannot be replayed: `old_string` is not in the file on disk. Rather than
+        # guess which blocks changed, the gate lints the proposed new_string in full. The
+        # STE006 semicolon in it must still be caught.
+        target = self._write("notes.md", self.THREE_ERRORS_ONE_CLEAN)
+        run = self.run_pretooluse("Edit", {
+            "file_path": target,
+            "old_string": "text that is not actually in the file",
+            "new_string": "This new text holds a semicolon; introduced here.",
+        })
+        reason = self.assert_denied(run)
+        self.assertIn("semicolon", reason.lower())
+
+    def test_67_non_markdown_path_allowed(self):
+        target = self._write("notes.py", "print('a; b')\n")
+        run = self.run_pretooluse("Write", {"file_path": target, "content": "print('a; b')\n"})
+        self.assert_allowed(run)
+
 
 if __name__ == "__main__":
     unittest.main()
