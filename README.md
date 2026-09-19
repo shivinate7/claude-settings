@@ -83,7 +83,8 @@ recreate it. In claude.ai/code > environment settings, set the setup script to:
 curl -fsSL https://raw.githubusercontent.com/shivinate7/claude-settings/main/install.sh | bash -s -- --cloud
 ```
 
-Leave network access at **Trusted** (or add `raw.githubusercontent.com` to a Custom list).
+Leave network access at **Trusted** (or add `raw.githubusercontent.com`, `github.com`, and
+`codeload.github.com` to a Custom list).
 This runs as root before Claude starts and writes:
 
 * `/root/.claude/CLAUDE.md` = `@~/claude-settings/CLAUDE.md`

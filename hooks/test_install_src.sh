@@ -36,6 +36,13 @@ work=$(mktemp -d); work=$(realpwd "$work")
 cleanup() { rm -rf "$work"; }
 trap cleanup EXIT
 
+# Build the tarball once, from this repo's own tracked files, so the curl stub serves
+# exactly what GitHub's archive/refs/heads/<ref>.tar.gz would serve: a top-level
+# "claude-settings-main" directory holding every tracked file.
+tarsrc="$work/tarsrc/claude-settings-main"; mkdir -p "$tarsrc"
+( cd "$REPO_ROOT" && git ls-files -z | tar -cf - --null -T - ) | tar -xf - -C "$tarsrc"
+tar -czf "$work/repo.tar.gz" -C "$work/tarsrc" claude-settings-main
+
 # Make a bare-bones fake checkout of the repo at $1, with CLAUDE.md/settings.json content
 # of our choosing. $3, if given, is the origin URL (default: the legitimate https form);
 # pass an adversarial or alternate-form origin to drive the origin-matching cases.
@@ -56,20 +63,23 @@ make_checkout() {
 make_curl_stub() {
   stub_bin="$1"
   mkdir -p "$stub_bin"
-  cat > "$stub_bin/curl" <<'EOF'
+  # $work is captured at generation time (unquoted heredoc marker); everything else is
+  # escaped so it stays a literal to be evaluated when the stub itself runs.
+  cat > "$stub_bin/curl" <<EOF
 #!/bin/sh
 # usage: curl -fsSL <url> -o <out>
 out=""
 prev=""
-for a in "$@"; do
-  if [ "$prev" = "-o" ]; then out="$a"; fi
-  prev="$a"
+for a in "\$@"; do
+  if [ "\$prev" = "-o" ]; then out="\$a"; fi
+  prev="\$a"
 done
-[ -n "$out" ] || exit 1
-case "$*" in
-  *CLAUDE.md*) printf '# fallback mirror CLAUDE.md\n' > "$out" ;;
-  *settings.json*) printf '{}\n' > "$out" ;;
-  *) printf '# stub\n' > "$out" ;;
+[ -n "\$out" ] || exit 1
+case "\$*" in
+  *.tar.gz*) cp "$work/repo.tar.gz" "\$out" ;;
+  *CLAUDE.md*) printf '# fallback mirror CLAUDE.md\n' > "\$out" ;;
+  *settings.json*) printf '{}\n' > "\$out" ;;
+  *) printf '# stub\n' > "\$out" ;;
 esac
 exit 0
 EOF
@@ -243,6 +253,40 @@ case7() {
     bad "$name" "pointer target [$pointer] != checkout [$co] (cwd-only detection would miss this)"
   elif [ -d "$h/claude-settings" ]; then
     bad "$name" "$h/claude-settings was created; a mirror should not have been fetched"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+# ---- Case 8: fallback mirror lands every tracked file under hooks/ and lint/, no hand list -
+# Guards against a hand-maintained per-file fetch list drifting behind git: every file
+# `git ls-files` reports under hooks/ and lint/ must land both in the fetched mirror
+# ($h/claude-settings/<path>) and in the config dir land_dir() copies it into for cloud
+# installs ($cfg/<path>, since --cloud always copies rather than symlinks).
+case8() {
+  name="case8: fallback mirror lands every tracked file under hooks/ and lint/"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; scratch="$work/case8-scratch"
+  mkdir -p "$scratch"
+
+  stub_bin="$work/case8-bin"
+  make_curl_stub "$stub_bin"
+
+  out=$(cd "$scratch" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+        GIT_CEILING_DIRECTORIES="$scratch" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+  rc=$?
+
+  missing=""
+  for path in $(git -C "$REPO_ROOT" ls-files hooks lint); do
+    [ -f "$h/claude-settings/$path" ] || missing="$missing mirror:$path"
+    [ -f "$cfg/$path" ] || missing="$missing landed:$path"
+  done
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ -n "$missing" ]; then
+    bad "$name" "missing files:$missing"
   else
     ok "$name"
   fi
@@ -503,6 +547,7 @@ case2
 case3
 case_origins
 case7
+case8
 pointer_case1
 pointer_case2
 pointer_case3
