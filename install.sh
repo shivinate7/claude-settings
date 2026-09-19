@@ -35,6 +35,36 @@ fi
 if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/CLAUDE.md" ] && [ -f "$SCRIPT_DIR/settings.json" ]; then
   SRC="$SCRIPT_DIR"
 else
+  # No file to locate ourselves by (e.g. piped: curl | bash). Look for an existing git
+  # checkout of this repo before falling back to fetching a mirror from GitHub: the
+  # shell's own cwd is usually this repo already in a cloud session, and using it keeps
+  # the checkout's own branch in force instead of overwriting it with a frozen copy of main.
+  #
+  # A "cwd" from hook JSON on stdin is deliberately NOT read here: in the documented
+  # cloud call (`curl ... | bash -s -- --cloud`), bash reads this very script off that
+  # same stdin, and a `cat`/`read` on fd 0 mid-script races bash's own buffered read of
+  # the remaining script text and can truncate it (reproduced while testing this change).
+  # It would also never fire in that pipeline anyway: in `cmd1 | cmd2`, only cmd1 (curl)
+  # inherits the outer stdin, so hook JSON piped to the whole pipeline never reaches bash.
+  SRC=""
+  for cand in "${CLAUDE_PROJECT_DIR:-}" "$PWD"; do
+    [ -n "$cand" ] || continue
+    top=$(git -C "$cand" rev-parse --show-toplevel 2>/dev/null) || continue
+    [ -n "$top" ] || continue
+    origin=$(git -C "$top" remote get-url origin 2>/dev/null) || continue
+    case "$origin" in
+      *"$REPO"*) : ;;
+      *) continue ;;
+    esac
+    [ -f "$top/CLAUDE.md" ] || continue
+    [ -f "$top/settings.json" ] || continue
+    SRC="$top"
+    break
+  done
+  [ -n "$SRC" ] && log "found existing checkout of $REPO at $SRC; using it as source"
+fi
+
+if [ -z "$SRC" ]; then
   SRC="$HOME/claude-settings"
   mkdir -p "$SRC"
   mkdir -p "$SRC/agents" "$SRC/lint" "$SRC/hooks"
