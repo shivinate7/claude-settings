@@ -1715,6 +1715,73 @@ def cap_ask_reason(change: str, where: str) -> str:
 #
 # One line for each refusal, and nothing for an allow. An allow is the ordinary case, so logging it
 # would bury the refusals. A failure to write the log never changes the decision.
+#
+# THE MATCHED FIELD IS BOUNDED, so a crafted command or a deep path cannot fill the log file. The
+# bound cuts from the TAIL, which is right for a command, because a command says what it is in its
+# first words. A CUT IS MARKED, the same contract `cap_safe` holds for the printed reason: a
+# shortened field must never read as a whole one. An unmarked cut is what hid the defect below.
+LOG_MAX_MATCHED = 120
+LOG_CUT_MARK = " [cut]"
+
+# A PATH IS SHORTENED FROM ITS HEAD, never from its tail. The tail of a path names the project, the
+# folder and the file, which is what a reader needs. The head names only the machine's temporary or
+# home root, which no reader needs.
+LOG_PATH_MARK = "..."
+
+# The tail of the path that survives whatever else shares the field. MEASURED: the widest ORDINARY
+# reading rule 8 writes is both cap variables with a full model id,
+# `CLAUDE_CODE_SUBAGENT_MODEL = claude-sonnet-5, CLAUDE_CODE_SUBAGENT_MODEL_FORCE = 1`, at 82
+# characters. LOG_MAX_MATCHED less that reading and the one space between the parts leaves 37, so
+# the ordinary reading and a path tail of 37 both fit whole, at any path depth.
+LOG_MIN_PATH = LOG_MAX_MATCHED - 1 - 82
+
+
+def log_cut(text: str, limit: int) -> str:
+    """Return one log field, whitespace folded to spaces, no longer than `limit`, cut MARKED.
+
+    The mark is inside the limit, never added past it, so a caller can budget a field by adding up
+    the parts and trust the sum.
+    """
+    text = re.sub(r"\s+", " ", text or "")
+    if len(text) <= limit:
+        return text
+    return (text[:max(limit - len(LOG_CUT_MARK), 0)] + LOG_CUT_MARK)[:limit]
+
+
+def log_path(path: str, limit: int) -> str:
+    """Return a path as a log field of at most `limit` characters, shortened from the HEAD."""
+    path = re.sub(r"\s+", " ", path or "")
+    if len(path) <= limit:
+        return path
+    keep = max(limit - len(LOG_PATH_MARK), 0)
+    return (LOG_PATH_MARK + path[len(path) - keep:])[:limit]
+
+
+def log_path_and_text(where: str, text: str) -> str:
+    """Compose a log field out of a PATH and a TEXT so that BOTH survive the field's bound.
+
+    THE DEFECT THIS FIXES, MEASURED 2026-09-19 on macOS: rule 8 handed `record` the path and the
+    cap reading joined into one string, and `record` cut the join at LOG_MAX_MATCHED from the tail.
+    A macOS temporary root is long (`/var/folders/nv/mtfv7k2n11g3m1zvzw6bffym0000gn/T/...`), so the
+    path alone ate the field and the line ended `... CLAUDE_CODE_SUBAG`: the variable cut mid-token
+    and the MODEL GONE. The model is the part that says how far the cap was lifted, so the log line
+    lost the one thing it is written for. Ubuntu passed only because `/tmp` is short, which is the
+    platform reading a green check proves and nothing more.
+
+    THE FIX IS A BUDGET, not a bigger bound. A bigger bound moves the cliff to a deeper path. Here
+    the text takes the room it needs, the path takes the rest and never less than LOG_MIN_PATH
+    characters of its tail, and each part marks its own cut. A path of any depth now leaves the
+    ordinary reading whole, and a crafted text of any length still leaves the path readable.
+    """
+    text = re.sub(r"\s+", " ", text or "")
+    room = LOG_MAX_MATCHED - 1  # the one space between the two parts
+    for_path = min(len(re.sub(r"\s+", " ", where or "")),
+                   max(LOG_MIN_PATH, room - len(text)))
+    for_path = max(0, min(for_path, room))
+    short = log_path(where, for_path)
+    return short + " " + log_cut(text, room - len(short))
+
+
 def record(tool: str, decision: str, rule: str, matched: str) -> None:
     try:
         folder = config_dir()
@@ -1724,7 +1791,7 @@ def record(tool: str, decision: str, rule: str, matched: str) -> None:
             tool or "",
             decision,
             rule,
-            re.sub(r"\s+", " ", matched or "")[:120],
+            log_cut(matched, LOG_MAX_MATCHED),
         ])
         with open(os.path.join(folder, "guard.log"), "a", encoding="utf-8") as handle:
             handle.write(line + "\n")
@@ -1847,7 +1914,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
         change = cap_change(raw)
         if change:
             refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, matched),
-                   matched + " " + change)
+                   log_path_and_text(matched, change))
 
 
 def judge(payload) -> None:
@@ -1906,7 +1973,7 @@ def judge(payload) -> None:
             change = cap_change_parts(write_content_parts(tool_input))
             if change:
                 refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, target),
-                       target + " " + change)
+                       log_path_and_text(target, change))
 
 
 def main() -> None:
