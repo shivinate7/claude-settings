@@ -12,6 +12,13 @@ the source moved on and the mutation no longer proves anything. That must fail
 loudly, not be skipped, so it exits 1 with an error line instead of counting the
 mutation either way.
 
+The mutants run IN PARALLEL, one suite process per mutant, up to the CPU count at once
+(MUTATE_JOBS overrides). Each mutant gets its own guard copy and its own config directory, so
+the runs share nothing but the read-only fixture tree the suite builds under its own temp
+root. MEASURED 2026-09-19 on a 4-core machine: 38 mutants serial, 14 min 8 s (22 s each);
+47 mutants parallel, 4 min 29 s. The suite itself spawns guard.py once per case, which is
+where the time goes.
+
 Run:
     python hooks/mutate_guard.py
 
@@ -26,6 +33,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GUARD = os.path.join(HERE, "guard.py")
@@ -49,8 +57,10 @@ MUTATIONS = [
      '    if INTERPRETER_HEREDOC.search(cmd):\n        return cmd',
      '    if False:\n        return cmd'),
     ("frozen-path: freeze nothing",
-     '    if not path:\n        return False',
-     '    if path:\n        return False'),
+     '    if not path:\n        return False\n    try:\n        target = _resolved(path, cwd)\n'
+     '        root = os.path.normcase(os.path.realpath(config_dir()))',
+     '    if path:\n        return False\n    try:\n        target = _resolved(path, cwd)\n'
+     '        root = os.path.normcase(os.path.realpath(config_dir()))'),
     ("force-push: forget the force push",
      'def push_is_forced(args) -> bool:',
      'def push_is_forced(args) -> bool:\n    return False'),
@@ -182,6 +192,58 @@ MUTATIONS = [
      '    worktree = "--worktree" in args or "-W" in args\n'
      '    return worktree or not staged',
      '    return True'),
+    # Added: the subagent model cap (rule 8, PR #42). These are the mutations its builder ran by hand
+    # on `.bak` copies, now in CI. Each one undoes one thing the review made the rule do, so a later
+    # edit that redoes it goes red here.
+    ("cap: the edit-count cap comes back, so 200 no-op edits hide a lift",
+     '    if isinstance(edits, list):\n        for edit in edits:',
+     '    if isinstance(edits, list):\n        for edit in edits[:200]:'),
+    ("cap: the resolved-basename branch is gone, so a symlink to a settings file walks past",
+     '        return basename(_resolved(path, cwd)) in SETTINGS_BASENAMES\n'
+     '    except Exception:\n        return False',
+     '        return False\n'
+     '    except Exception:\n        return False'),
+    ("cap: the JSON key walk is gone, so a JSON-escaped key walks past",
+     '    for key, value in json_cap_values(text).items():',
+     '    for key, value in ():'),
+    ("cap: cap_safe passes text through, so a long value is neither cut nor marked",
+     '    clean = CAP_CONTROL.sub(" ", text or "")',
+     '    return text or ""\n    clean = CAP_CONTROL.sub(" ", text or "")'),
+    ("cap: the bare-key pass is gone, so an unreadable value walks past",
+     '    for found in SUBAGENT_CAP_KEY.finditer(text):\n'
+     '        reading.setdefault(found.group(0), "")',
+     '    for found in ():\n'
+     '        reading.setdefault(found.group(0), "")'),
+    ("cap: the rule runs ahead of the frozen-path deny, so the config settings ask instead",
+     '        if is_frozen(target, cwd):\n'
+     '            refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)',
+     '        if is_settings_file(target, cwd):\n'
+     '            change = cap_change_parts(write_content_parts(tool_input))\n'
+     '            if change:\n'
+     '                refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, target),\n'
+     '                       target + " " + change)\n'
+     '        if is_frozen(target, cwd):\n'
+     '            refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)'),
+    ("cap: the shell route runs ahead of the frozen-path deny, so a heredoc onto the config "
+     "settings asks instead",
+     '    matched = frozen_shell_hit(stripped, cwd)\n'
+     '    if matched:\n'
+     '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)',
+     '    matched = _shell_write_hit(stripped, cwd, is_settings_file)\n'
+     '    if matched:\n'
+     '        change = cap_change(raw)\n'
+     '        if change:\n'
+     '            refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, matched),\n'
+     '                   matched + " " + change)\n'
+     '    matched = frozen_shell_hit(stripped, cwd)\n'
+     '    if matched:\n'
+     '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)'),
+    ("cap: the shell route reads the stripped command, so a heredoc body's cap change walks past",
+     '        change = cap_change(raw)',
+     '        change = cap_change(stripped)'),
+    ("cap: an earlier part wins, so an Edit names the value it leaves, not the one it arrives at",
+     '            values[key] = value',
+     '            values.setdefault(key, value)'),
 ]
 
 
@@ -201,29 +263,52 @@ def safe_name(label: str) -> str:
     return "".join(ch if ch.isalnum() else "_" for ch in label)[:60]
 
 
+def run_mutant(source: str, work: str, entry):
+    """Apply one mutation, run the suite against it, and return (label, code, FAIL lines)."""
+    label, old, new = entry
+    mutated = source.replace(old, new, 1)
+    copy_path = os.path.join(work, "guard_%s.py" % safe_name(label))
+    with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(mutated)
+    config_dir = os.path.join(work, "cfg_%s" % safe_name(label))
+    os.makedirs(config_dir, exist_ok=True)
+    code, red = run_suite(copy_path, config_dir)
+    return label, code, red
+
+
+def job_count() -> int:
+    """How many suites to run at once: MUTATE_JOBS, else the CPU count, at least one."""
+    try:
+        wanted = int(os.environ.get("MUTATE_JOBS", "") or 0)
+    except ValueError:
+        wanted = 0
+    return max(1, wanted or os.cpu_count() or 1)
+
+
 def main() -> int:
     with open(GUARD, encoding="utf-8") as handle:
         source = handle.read()
 
+    # Every anchor is checked BEFORE any suite runs, so a stale mutation fails in the first
+    # second, not after the mutants ahead of it in the list have spent their minutes.
+    for label, old, _new in MUTATIONS:
+        if old not in source:
+            print("ERROR stale mutation, anchor text not found: %s" % label)
+            return 1
+
     work = tempfile.mkdtemp(prefix="mutate_guard_")
     survivors = 0
+    jobs = job_count()
+    print("%d mutations, %d at a time" % (len(MUTATIONS), jobs))
     try:
-        for label, old, new in MUTATIONS:
-            if old not in source:
-                print("ERROR stale mutation, anchor text not found: %s" % label)
-                return 1
-            mutated = source.replace(old, new, 1)
-            copy_path = os.path.join(work, "guard_%s.py" % safe_name(label))
-            with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
-                handle.write(mutated)
-            config_dir = os.path.join(work, "cfg_%s" % safe_name(label))
-            os.makedirs(config_dir, exist_ok=True)
-            code, red = run_suite(copy_path, config_dir)
-            if code == 0 or not red:
-                survivors += 1
-                print("SURVIVED  %-64s %2d red" % (label, len(red)))
-            else:
-                print("KILLED    %-64s %2d red" % (label, len(red)))
+        with ThreadPoolExecutor(max_workers=jobs) as pool:
+            results = pool.map(lambda entry: run_mutant(source, work, entry), MUTATIONS)
+            for label, code, red in results:
+                if code == 0 or not red:
+                    survivors += 1
+                    print("SURVIVED  %-64s %2d red" % (label, len(red)), flush=True)
+                else:
+                    print("KILLED    %-64s %2d red" % (label, len(red)), flush=True)
         print()
         print("%d of %d mutations killed" % (len(MUTATIONS) - survivors, len(MUTATIONS)))
         return 1 if survivors else 0
