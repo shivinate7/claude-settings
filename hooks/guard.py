@@ -850,6 +850,18 @@ TREE_ASK_REASON = (
     "Commit work you must set aside on your own branch, never a stash. "
     "The click in this prompt is the grant."
 )
+# The stash stack is one ref, `refs/stash`, kept in the COMMON git directory, so every worktree
+# of a clone reads and writes the same stack (MEASURED 2026-09-19: from a linked worktree,
+# `git rev-parse --git-path refs/stash` answered `<repo>/.git/refs/stash`, not the worktree's own
+# `.git/worktrees/<name>`). A worktree therefore limits nothing for `stash drop` and `stash clear`:
+# the entry destroyed may be another session's, or the owner's. Those two arms deny everywhere.
+STASH_STACK_ACTIONS = {"drop", "clear"}
+STACK_DENY_REASON = (
+    "Rule (shared trees): this command destroys a stash entry with no way back, and the stash "
+    "stack belongs to the whole clone, so a worktree does not limit the loss. "
+    "Remedy: `git stash show -p stash@{N}` and commit the patch on your own branch, "
+    "then leave the entry for its owner to drop."
+)
 
 
 # ------------------------------------------------------------------ picking a conflict side
@@ -1519,6 +1531,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
             continue
         if state is True:
             continue
+        if subcommand == "stash" and stash_action(args) in STASH_STACK_ACTIONS:
+            refuse(tool, "deny", "shared-tree", STACK_DENY_REASON, matched)
         worktree = is_worktree(root)
         if worktree is True:
             refuse(tool, "ask", "shared-tree", TREE_ASK_REASON, matched)
