@@ -58,24 +58,35 @@ if [ -n "$d" ] && [ -d "$d/.git" ]; then
   # fresh as the last fetch. A stale ref would report "0 behind" on a machine
   # that is actually behind, so we fetch first, refs only, with a short
   # background timeout. This adds a small network read at every session
-  # start, and up to about 2 seconds of latency when the network is slow. On
-  # no network or no origin remote, the fetch fails silently and the check
-  # reports nothing, rather than presenting a possibly stale answer as fresh.
+  # start, and up to about 2 seconds of latency when the network is slow.
+  #
+  # The fetch can fail or be killed by the timeout. Either way is a read
+  # that did not run, never a clean "0 behind". We capture the fetch's own
+  # exit status and branch on it: 0 means it ran, anything else (a git
+  # failure or the timeout's kill) means we do not know, and we say so
+  # instead of staying silent, which would read as "up to date".
+  #
+  # CLAUDE_SETTINGS_FETCH_TIMEOUT overrides the 2 second bound, for tests.
   if [ "$pointer_branch" = "main" ]; then
+    fetch_timeout="${CLAUDE_SETTINGS_FETCH_TIMEOUT:-2}"
     ( cd "$d" 2>/dev/null && git fetch --quiet origin main >/dev/null 2>&1 ) &
     fetch_pid=$!
-    ( sleep 2; kill "$fetch_pid" >/dev/null 2>&1 ) >/dev/null 2>&1 &
+    ( sleep "$fetch_timeout"; kill "$fetch_pid" >/dev/null 2>&1 ) >/dev/null 2>&1 &
     killer_pid=$!
     wait "$fetch_pid" 2>/dev/null
+    fetch_rc=$?
     kill "$killer_pid" >/dev/null 2>&1
     wait "$killer_pid" 2>/dev/null
 
-    if (cd "$d" 2>/dev/null && git rev-parse --verify -q origin/main >/dev/null 2>&1); then
+    if [ "$fetch_rc" -eq 0 ] 2>/dev/null; then
       behind=$(cd "$d" 2>/dev/null && git rev-list --count main..origin/main 2>/dev/null)
       if [ -n "$behind" ] && [ "$behind" -gt 0 ] 2>/dev/null; then
         printf 'claude-settings: %s is %s commits behind origin/main; global rules and hooks are stale\n' \
           "$d" "$behind"
       fi
+    else
+      printf 'claude-settings: cannot check %s against origin/main, the fetch did not run; freshness unknown\n' \
+        "$d"
     fi
   fi
 fi

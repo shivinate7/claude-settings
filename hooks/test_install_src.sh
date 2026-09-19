@@ -799,7 +799,12 @@ caseF3() {
 }
 
 caseF4() {
-  name="caseF4: no reachable origin stays silent about freshness, no error, exit 0"
+  # A failed fetch must never read as "up to date". It must say freshness is
+  # unknown, per CLAUDE.md: "report a read that could not run as unknown,
+  # never as clear or broken." Silence here would be indistinguishable from
+  # a clean check, which is the exact defect CI caught (caseF1 read as
+  # silent, identical to this case, when the fetch did not land).
+  name="caseF4: no reachable origin reports freshness unknown, no error, exit 0"
   co="$work/caseF4-checkout"; cfg="$work/caseF4-cfg"
   # A local path that does not exist: fails the same way a dead network host would
   # (fetch cannot reach it), but fails immediately, so the case stays fast and offline.
@@ -812,13 +817,61 @@ caseF4() {
   rc=$?
   errsize=$(wc -c < /tmp/cF4err | tr -d '[:space:]'); rm -f /tmp/cF4err
   stale_lines=$(printf '%s\n' "$out" | grep -c 'commits behind origin/main')
+  unknown_lines=$(printf '%s\n' "$out" | grep -c 'freshness unknown')
 
   if [ $rc -ne 0 ]; then
     bad "$name" "exit $rc"
   elif [ "$errsize" != "0" ]; then
     bad "$name" "wrote to stderr"
   elif [ "$stale_lines" != "0" ]; then
-    bad "$name" "reported freshness with no reachable origin: $out"
+    bad "$name" "reported a commit count with no reachable origin: $out"
+  elif [ "$unknown_lines" != "1" ]; then
+    bad "$name" "expected exactly 1 freshness-unknown line, got $unknown_lines: $out"
+  else
+    ok "$name"
+  fi
+}
+
+caseF6() {
+  # Forces the other failure shape: the fetch is reachable but does not land
+  # inside the timeout, so it gets killed. This must report unknown too, not
+  # silence and not a stale count read off a ref the fetch never updated.
+  # CLAUDE_SETTINGS_FETCH_TIMEOUT=0 makes the kill race the fetch instead of
+  # waiting the full 2 seconds, and the origin's upload-pack is wrapped in a
+  # real sleep so the fetch cannot win that race.
+  name="caseF6: a fetch killed by the timeout reports freshness unknown, not silence"
+  co="$work/caseF6-checkout"; cfg="$work/caseF6-cfg"; bare="$work/caseF6-origin.git"
+  git init -q --bare "$bare"
+  make_checkout "$co" "# caseF6 content" "$bare"
+  force_main_branch "$co"
+  ( cd "$co" && git push -q origin main )
+  slow_helper="$work/caseF6-slow-upload.sh"
+  cat > "$slow_helper" <<EOF
+#!/bin/sh
+sleep 5
+exec git-upload-pack "\$1"
+EOF
+  chmod +x "$slow_helper"
+  git config -f "$co/.git/config" remote.origin.url "ext::sh $slow_helper $bare"
+  git config -f "$co/.git/config" protocol.ext.allow always
+  mkdir -p "$cfg"
+  printf '@%s/CLAUDE.md\n' "$co" > "$cfg/CLAUDE.md"
+
+  out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" CLAUDE_SETTINGS_FETCH_TIMEOUT=0 \
+        sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/cF6err)
+  rc=$?
+  errsize=$(wc -c < /tmp/cF6err | tr -d '[:space:]'); rm -f /tmp/cF6err
+  stale_lines=$(printf '%s\n' "$out" | grep -c 'commits behind origin/main')
+  unknown_lines=$(printf '%s\n' "$out" | grep -c 'freshness unknown')
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "exit $rc"
+  elif [ "$errsize" != "0" ]; then
+    bad "$name" "wrote to stderr"
+  elif [ "$stale_lines" != "0" ]; then
+    bad "$name" "reported a commit count off a fetch that was killed: $out"
+  elif [ "$unknown_lines" != "1" ]; then
+    bad "$name" "expected exactly 1 freshness-unknown line, got $unknown_lines: $out"
   else
     ok "$name"
   fi
@@ -872,6 +925,7 @@ caseF2
 caseF3
 caseF4
 caseF5
+caseF6
 
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
