@@ -57,8 +57,10 @@ MUTATIONS = [
      '    if INTERPRETER_HEREDOC.search(cmd):\n        return cmd',
      '    if False:\n        return cmd'),
     ("frozen-path: freeze nothing",
-     '    if not path:\n        return False',
-     '    if path:\n        return False'),
+     '    if not path:\n        return False\n    try:\n        target = _resolved(path, cwd)\n'
+     '        root = os.path.normcase(os.path.realpath(config_dir()))',
+     '    if path:\n        return False\n    try:\n        target = _resolved(path, cwd)\n'
+     '        root = os.path.normcase(os.path.realpath(config_dir()))'),
     ("force-push: forget the force push",
      'def push_is_forced(args) -> bool:',
      'def push_is_forced(args) -> bool:\n    return False'),
