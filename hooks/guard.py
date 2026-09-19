@@ -507,10 +507,32 @@ def shared_tree_hit(segment: str) -> str:
 # judged a worktree command against another branch.
 CD_RE = re.compile(r"(?:^|[;&|]\s*)cd\s+(['\"]?)([^'\";&|]+)\1")
 GIT_C_RE = re.compile(r"\bgit\s+-C\s+(['\"]?)([^'\";&|\s]+)\1")
+# `--work-tree` NAMES THE TREE THE FILES COME FROM, and it outranks `-C` and a `cd`, because git
+# applies it after both. MEASURED 2026-09-19 with real git: from a CLEAN checkout A,
+# `git --work-tree=B status --porcelain` reported B's modified file and B's untracked file. The
+# files a call discards are B's, so B is the tree this rule must judge. Both the `=` and the
+# spaced form are read, because git takes either.
+GIT_WORK_TREE_RE = re.compile(r"--work-tree(?:=|\s+)(['\"]?)([^'\";&|\s]+)\1")
 
 
-def command_root(cmd: str, shell_cwd: str) -> str:
-    """Return the directory the command acts on."""
+def _absolute(where: str, shell_cwd: str) -> str:
+    """Expand and absolutize one directory taken from a command."""
+    where = os.path.expandvars(os.path.expanduser(where))
+    if re.match(r"^/[a-zA-Z]/", where):  # Git Bash `/c/Users/...` to `C:/Users/...`
+        where = where[1].upper() + ":" + where[2:]
+    # Python 3.13 and later on Windows: a bare `/x` is not absolute, so test the converted
+    # form, and only then join a relative path onto the cwd.
+    if not os.path.isabs(where) and shell_cwd:
+        where = os.path.join(shell_cwd, where)
+    return where
+
+
+def _run_dir(cmd: str, shell_cwd: str) -> str:
+    """Return the directory the command RUNS in: a `git -C`, else the last `cd`, else the cwd.
+
+    This is the part both roots share. Neither `--work-tree` nor `--git-dir` is read here,
+    because each answers a different question and each belongs to one caller.
+    """
     where = None
     match = GIT_C_RE.search(cmd)
     if match:
@@ -520,14 +542,21 @@ def command_root(cmd: str, shell_cwd: str) -> str:
         if changes:
             where = changes[-1].group(2).strip()
     if where:
-        where = os.path.expandvars(os.path.expanduser(where))
-        if re.match(r"^/[a-zA-Z]/", where):  # Git Bash `/c/Users/...` to `C:/Users/...`
-            where = where[1].upper() + ":" + where[2:]
-        # Python 3.13 and later on Windows: a bare `/x` is not absolute, so test the converted
-        # form, and only then join a relative `cd` onto the cwd.
-        if not os.path.isabs(where) and shell_cwd:
-            where = os.path.join(shell_cwd, where)
+        where = _absolute(where, shell_cwd)
     return where or shell_cwd or ""
+
+
+def command_root(cmd: str, shell_cwd: str) -> str:
+    """Return the WORKING TREE the command acts on.
+
+    This answers "whose files does this call write or discard". It is NOT the answer to "whose
+    HEAD does this call move": a git directory and a work tree are set separately and can name
+    two different checkouts. `head_root` answers that second question.
+    """
+    match = GIT_WORK_TREE_RE.search(cmd)
+    if match:
+        return _absolute(match.group(2), _run_dir(cmd, shell_cwd))
+    return _run_dir(cmd, shell_cwd)
 
 
 def _git(where: str, *args):
@@ -1042,31 +1071,74 @@ def pointer_checkout() -> str:
     return os.path.normcase(os.path.realpath(target))
 
 
-def git_toplevel(where: str) -> str:
-    """Return the normalized, resolved top level of the work tree at `where`, or ''."""
-    if not where or not os.path.isdir(where):
+# `--git-dir` NAMES WHERE HEAD LIVES. MEASURED 2026-09-19 with real git: from an unrelated
+# directory, `git --git-dir=<X>/.git switch other` moved HEAD inside X from `main` to `other`, with
+# no `-C`, no `cd` and no `--work-tree` anywhere on the line. The git directory alone decides whose
+# HEAD a call moves, so the pointer rule reads it and the shared-tree rule does not.
+GIT_DIR_RE = re.compile(r"--git-dir(?:=|\s+)(['\"]?)([^'\";&|\s]+)\1")
+
+
+def head_root(cmd: str, shell_cwd: str) -> str:
+    """Return the directory whose HEAD the command would move.
+
+    A `--git-dir` on the line names that HEAD directly, wherever the call runs from. With none,
+    the HEAD that moves belongs to the tree the call RUNS in.
+    """
+    run_dir = _run_dir(cmd, shell_cwd)
+    match = GIT_DIR_RE.search(cmd)
+    if not match:
+        # NOT `command_root`. A `--work-tree` retargets the FILES and leaves HEAD where the call
+        # runs, so reading it here would name the wrong checkout's HEAD.
+        return run_dir
+    return _absolute(match.group(2), run_dir)
+
+
+def git_dir_of(where: str) -> str:
+    """Return the normalized, resolved git directory that holds `where`'s own HEAD, or ''.
+
+    `--absolute-git-dir` answers the PER-WORKTREE directory, never the shared common one, which
+    is the point: HEAD is per worktree. A linked worktree of a clone therefore answers
+    `<repo>/.git/worktrees/<name>` and never `<repo>/.git`, so it is not mistaken for its primary
+    checkout. A path that is already a git directory answers itself.
+    """
+    if not where:
         return ""
-    answer = _git(where, "rev-parse", "--show-toplevel")
-    if answer is None or answer.returncode != 0 or not answer.stdout.strip():
+    if os.path.isdir(where):
+        answer = _git(where, "rev-parse", "--absolute-git-dir")
+        if answer is not None and answer.returncode == 0 and answer.stdout.strip():
+            return os.path.normcase(os.path.realpath(answer.stdout.strip()))
         return ""
-    return os.path.normcase(os.path.realpath(answer.stdout.strip()))
+    return ""
 
 
 def in_pointer_checkout(root: str) -> bool:
-    """True when `root` sits inside the pointer checkout's OWN work tree.
+    """True when the HEAD at `root` is the POINTER CHECKOUT'S OWN HEAD.
 
-    The comparison is between top levels, never between the two paths as written, so a command
-    run from a subdirectory of the pointer checkout still counts, and a linked worktree of the
-    same clone does NOT: a worktree answers its own top level. The pointer directory is resolved
-    to its top level too, so a pointer naming a subdirectory still matches.
+    The comparison is between GIT DIRECTORIES read from git, never between the two paths as
+    written. That is what makes each of these come out right:
+
+      a subdirectory of the pointer checkout    same git directory, so it counts
+      `--git-dir=<pointer>/.git` from anywhere  the git directory IS the pointer's, so it counts
+      a linked worktree of the same clone       its own `<repo>/.git/worktrees/<name>`, so it
+                                                does NOT count: its HEAD is its own
+      a `--git-dir` naming a directory that is  unreadable, so the rule does not fire
+      gone
     """
     pointer = pointer_checkout()
     if not pointer:
         return False
-    top = git_toplevel(root)
-    if not top:
+    mine = git_dir_of(root)
+    if not mine:
+        # A `--git-dir` may name the git directory itself, which is not a work tree git can be
+        # asked about. Compare it directly in that case.
+        if root and os.path.isdir(root):
+            mine = os.path.normcase(os.path.realpath(root))
+        if not mine:
+            return False
+    theirs = git_dir_of(pointer)
+    if not theirs:
         return False
-    return top == (git_toplevel(pointer) or pointer)
+    return mine == theirs
 
 
 def head_move_target(subcommand: str, args) -> str:
@@ -2037,11 +2109,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
     # 1b. The pointer checkout's HEAD. Placed AFTER rule 1 on purpose: a `git checkout` that
     # names a path is a path operation, rule 1 already judges it, and this rule never sees it, so
     # the shared-tree clause keeps governing those calls unchanged.
-    root = command_root(stripped, cwd)
+    head_where = head_root(stripped, cwd)
     for segment in split_segments(stripped):
         if not segment.strip():
             continue
-        matched = pointer_head_hit(segment, root)
+        matched = pointer_head_hit(segment, head_where)
         if matched:
             refuse(tool, "deny", "pointer-head", POINTER_HEAD_REASON, matched)
 

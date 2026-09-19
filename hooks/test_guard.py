@@ -759,6 +759,21 @@ sh("heredoc: a quoted call inside python source is not parsed as a shell call",
    "python - <<EOF\nimport os\nos.system(\"" + VCS + " stash\")\nEOF", "allow", cwd=NOGIT)
 
 
+# `--work-tree` NAMES THE TREE WHOSE FILES A CALL DISCARDS. MEASURED 2026-09-19 with real git:
+# from a CLEAN checkout, `git --work-tree=<dirty> status --porcelain` reported the OTHER tree's
+# modified and untracked files. So rule 1 judges the named tree, not the one the call runs in.
+# BOTH DIRECTIONS: a clean cwd pointed at a dirty tree must deny, and a dirty cwd pointed at a
+# clean tree must pass, or the option is only half read.
+sh("work-tree: a clean cwd pointed at a dirty tree is judged on the dirty tree",
+   VCS + " --work-tree=" + slash(SUBJDIRTY) + " reset --hard", "deny", "shared-tree",
+   cwd=SUBJCLEAN)
+sh("work-tree: a dirty cwd pointed at a clean tree passes on the empty subject",
+   VCS + " --work-tree=" + slash(SUBJCLEAN) + " reset --hard", "allow", cwd=SUBJDIRTY)
+sh("work-tree: the spaced form is read the same way",
+   VCS + " --work-tree " + slash(SUBJDIRTY) + " reset --hard", "deny", "shared-tree",
+   cwd=SUBJCLEAN)
+
+
 # =========================================================================== 1b. the pointer HEAD
 #
 # The pointer checkout is the one checkout whose HEAD decides which copy of the rules and the gates
@@ -852,6 +867,38 @@ sh("pointer: a double dash names a path, and no HEAD moves", VCS + " checkout --
    cwd=PTRMAIN, config=PTRCFG)
 sh("pointer: --theirs with an extensionless path is no branch switch",
    VCS + " checkout --theirs docs", "allow", cwd=PTRMAIN, config=PTRCFG)
+
+# THE GIT DIRECTORY IS WHERE HEAD LIVES. MEASURED 2026-09-19 with real git: from an unrelated
+# directory, `git --git-dir=<X>/.git switch other` moved HEAD inside X, with no `-C`, no `cd` and
+# no `--work-tree` on the line. So the rule reads `--git-dir`, and the comparison is between git
+# directories rather than between top levels.
+PTR_GITDIR = slash(os.path.join(PTRMAIN, ".git"))
+OTHER_GITDIR = slash(os.path.join(GITMAIN, ".git"))
+PTRWT_GITDIR = slash(os.path.join(PTRMAIN, ".git", "worktrees", "ptrlane"))
+
+sh("pointer: --git-dir reaches the pointer HEAD from an unrelated directory",
+   VCS + " --git-dir=" + PTR_GITDIR + " switch somebranch", "deny", "pointer-head", cwd=NOGIT,
+   config=PTRCFG)
+sh("pointer: the spaced --git-dir form is the same act",
+   VCS + " --git-dir " + PTR_GITDIR + " checkout somebranch", "deny", "pointer-head", cwd=NOGIT,
+   config=PTRCFG)
+sh("pointer: --git-dir with a move to main keeps the exemption",
+   VCS + " --git-dir=" + PTR_GITDIR + " checkout main", "allow", cwd=NOGIT, config=PTRCFG)
+sh("pointer: --git-dir naming another clone is allowed",
+   VCS + " --git-dir=" + OTHER_GITDIR + " switch somebranch", "allow", cwd=NOGIT, config=PTRCFG)
+# A linked worktree keeps its own HEAD in its own per-worktree git directory, so naming that
+# directory is not naming the primary checkout's HEAD.
+sh("pointer: --git-dir naming a worktree of the pointer clone is allowed",
+   VCS + " --git-dir=" + PTRWT_GITDIR + " switch somebranch", "allow", cwd=NOGIT, config=PTRCFG)
+sh("pointer: a --git-dir that is not there fires nothing",
+   VCS + " --git-dir=" + slash(os.path.join(ROOT, "nosuchgitdir")) + " switch somebranch",
+   "allow", cwd=NOGIT, config=PTRCFG)
+# `--work-tree` retargets the FILES and leaves HEAD where the call runs, so it must NOT be read as
+# a pointer HEAD move. Run from a directory that is no git tree, this names the pointer checkout's
+# files and no checkout's HEAD.
+sh("pointer: --work-tree alone moves no HEAD in the pointer checkout",
+   VCS + " --work-tree=" + slash(PTRMAIN) + " switch somebranch", "allow", cwd=NOGIT,
+   config=PTRCFG)
 
 # FAIL OPEN. An unreadable pointer means no rule, never a broken session.
 sh("pointer: a rules file with no pointer line fires nothing",
