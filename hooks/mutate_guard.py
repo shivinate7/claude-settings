@@ -44,6 +44,33 @@ SUITE = os.path.join(HERE, "test_guard.py")
 # shared-tree, machine-wide kill, live-stream, waiter, force push, destructive
 # delete, env-file, merge-main, frozen-path, the redirect strip, and the log.
 MUTATIONS = [
+    # RULE 1b, the pointer checkout's HEAD. Each mutant breaks one arm: the act test, the tree
+    # test, the main exemption, the two path-operation arms, the `switch` subcommand, the top-level
+    # read, and the pointer parse.
+    ("pointer-head: no command ever moves HEAD",
+     'def head_move_target(subcommand: str, args) -> str:',
+     'def head_move_target(subcommand: str, args) -> str:\n    return ""'),
+    ("pointer-head: call every tree the pointer checkout",
+     '    return top == (git_toplevel(pointer) or pointer)',
+     '    return True'),
+    ("pointer-head: lose the exemption for a move to main",
+     '    if target == PROTECTED_BASE:\n        return ""',
+     '    if target == "no-such-branch":\n        return ""'),
+    ("pointer-head: read a double dash as a branch",
+     '    if "--" in args:\n        return ""\n    switching = subcommand == "switch"',
+     '    if False:\n        return ""\n    switching = subcommand == "switch"'),
+    ("pointer-head: forget the path-operation flags",
+     'CHECKOUT_PATH_FLAGS = {"--ours", "--theirs", "--patch", "-p", "--overlay", "--no-overlay"}',
+     'CHECKOUT_PATH_FLAGS = set()'),
+    ("pointer-head: watch checkout and not switch",
+     'HEAD_MOVE_SUBCOMMANDS = ("checkout", "switch")',
+     'HEAD_MOVE_SUBCOMMANDS = ("checkout",)'),
+    ("pointer-head: compare the directory as written, not its top level",
+     '    top = git_toplevel(root)\n    if not top:',
+     '    top = os.path.normcase(os.path.realpath(root)) if root else ""\n    if not top:'),
+    ("pointer-head: a pointer line that never parses",
+     'POINTER_LINE = re.compile(r"^@(.+)/CLAUDE\\.md[ \\t]*$", re.MULTILINE)',
+     'POINTER_LINE = re.compile(r"^@@(.+)/CLAUDE\\.md[ \\t]*$", re.MULTILINE)'),
     ("shared-tree: drop the git clean arm",
      '        if subcommand == "clean" and clean_deletes_files(args):',
      '        if False and clean_deletes_files(args):'),
