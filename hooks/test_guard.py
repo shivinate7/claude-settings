@@ -79,6 +79,7 @@ SUBJCLEAN = os.path.join(ROOT, "subjclean")  # a real checkout with a clean tree
 SUBJCLEANWT = os.path.join(ROOT, "subjcleanlane")  # a real, clean linked worktree of that one
 SUBJDIRTY = os.path.join(ROOT, "subjdirty")  # a real checkout with real uncommitted work
 SUBJSTASH = os.path.join(ROOT, "subjstash")  # a clean tree carrying one real stash entry
+SUBJSTASHWT = os.path.join(ROOT, "subjstashlane")  # a linked worktree of it: same stack
 GITBLIND = os.path.join(ROOT, "gitblind")  # a git that answers the repo test and no status read
 # A repository under a scratchpad named after one session. ROOT already sits under the system
 # temporary directory, which is the other half of the path test.
@@ -330,6 +331,10 @@ def build_fixtures():
     run_vcs(SUBJSTASH, *IDENT, "stash", "push", "-m", "cases")
     _require_stash(SUBJSTASH, 1)
     _require_clean(SUBJSTASH)
+    # A linked worktree of that checkout. `refs/stash` lives in the common git directory, so the
+    # worktree sees the same one-entry stack, and a drop there destroys the primary's entry.
+    run_vcs(SUBJSTASH, "worktree", "add", "-q", SUBJSTASHWT, "-b", "stashlane")
+    _require_stash(SUBJSTASHWT, 1)
 
     # A dirty repository under a scratchpad named after one session.
     make_repo(PRIVREPO, {"f.txt": "base\n", "keep.txt": "base\n"})
@@ -520,6 +525,8 @@ sh("subject: dropping an empty stash stack destroys nothing", VCS + " stash drop
    cwd=SUBJDIRTY)
 sh("subject: dropping a real stash entry still denies", VCS + " stash drop", "deny",
    "shared-tree", cwd=SUBJSTASH)
+sh("subject: dropping a real stash entry from a worktree still denies, the stack is clone-wide",
+   VCS + " stash drop", "deny", "shared-tree", cwd=SUBJSTASHWT)
 sh("subject: clearing an empty stash stack destroys nothing", VCS + " stash clear", "allow",
    cwd=SUBJDIRTY)
 sh("subject: clearing a stack holding a real entry still denies", VCS + " stash clear", "deny",
