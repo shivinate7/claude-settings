@@ -51,6 +51,33 @@ if [ -n "$d" ] && [ -d "$d/.git" ]; then
     printf 'claude-settings: %s is on %s, not main; global rules and hooks are that branch\n' \
       "$d" "$pointer_branch"
   fi
+
+  # Freshness check, only when the pointer clone is on main.
+  #
+  # main..origin/main reads the local remote-tracking ref, which is only as
+  # fresh as the last fetch. A stale ref would report "0 behind" on a machine
+  # that is actually behind, so we fetch first, refs only, with a short
+  # background timeout. This adds a small network read at every session
+  # start, and up to about 2 seconds of latency when the network is slow. On
+  # no network or no origin remote, the fetch fails silently and the check
+  # reports nothing, rather than presenting a possibly stale answer as fresh.
+  if [ "$pointer_branch" = "main" ]; then
+    ( cd "$d" 2>/dev/null && git fetch --quiet origin main >/dev/null 2>&1 ) &
+    fetch_pid=$!
+    ( sleep 2; kill "$fetch_pid" >/dev/null 2>&1 ) >/dev/null 2>&1 &
+    killer_pid=$!
+    wait "$fetch_pid" 2>/dev/null
+    kill "$killer_pid" >/dev/null 2>&1
+    wait "$killer_pid" 2>/dev/null
+
+    if (cd "$d" 2>/dev/null && git rev-parse --verify -q origin/main >/dev/null 2>&1); then
+      behind=$(cd "$d" 2>/dev/null && git rev-list --count main..origin/main 2>/dev/null)
+      if [ -n "$behind" ] && [ "$behind" -gt 0 ] 2>/dev/null; then
+        printf 'claude-settings: %s is %s commits behind origin/main; global rules and hooks are stale\n' \
+          "$d" "$behind"
+      fi
+    fi
+  fi
 fi
 
 exit 0

@@ -699,6 +699,153 @@ prune_case6() {
   rm -rf "$h"
 }
 
+# ---- Case F1-F5: session_start.sh origin-freshness check ---------------------------------
+# These cases use a real local bare repo as "origin", so `git fetch` succeeds with no
+# network and the behind-count is exact. They also confirm the fetch never runs, and
+# never blocks, when it cannot help: wrong branch, no reachable remote, no git tree,
+# no pointer file.
+
+# Ensure a checkout's current branch is named "main", regardless of this machine's
+# init.defaultBranch. Cases below depend on the branch name, not on ambient git config.
+force_main_branch() {
+  ( cd "$1" && git branch -m main >/dev/null 2>&1 )
+}
+
+caseF1() {
+  name="caseF1: pointer on main and behind origin/main prints the stale line"
+  co="$work/caseF1-checkout"; cfg="$work/caseF1-cfg"; bare="$work/caseF1-origin.git"
+  extra="$work/caseF1-extra"
+  git init -q --bare "$bare"
+  make_checkout "$co" "# caseF1 content" "$bare"
+  force_main_branch "$co"
+  ( cd "$co" && git push -q origin main )
+  # Advance origin two commits past the checkout's own main, from a second clone, so
+  # the checkout is behind by an exact, known count.
+  ( git clone -q "$bare" "$extra" \
+      && cd "$extra" && git config user.email t@example.com && git config user.name t \
+      && echo a >> extra.txt && git add extra.txt && git commit -q -m extra1 \
+      && echo b >> extra.txt && git add extra.txt && git commit -q -m extra2 \
+      && git push -q origin main ) >/dev/null 2>&1
+  mkdir -p "$cfg"
+  printf '@%s/CLAUDE.md\n' "$co" > "$cfg/CLAUDE.md"
+
+  out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/cF1err)
+  rc=$?
+  errsize=$(wc -c < /tmp/cF1err | tr -d '[:space:]'); rm -f /tmp/cF1err
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "exit $rc"
+  elif [ "$errsize" != "0" ]; then
+    bad "$name" "wrote to stderr"
+  elif ! printf '%s\n' "$out" | grep -q "$co is 2 commits behind origin/main"; then
+    bad "$name" "expected stale line naming 2 commits behind, got: $out"
+  else
+    ok "$name"
+  fi
+}
+
+caseF2() {
+  name="caseF2: pointer on main and up to date with origin/main prints no stale line"
+  co="$work/caseF2-checkout"; cfg="$work/caseF2-cfg"; bare="$work/caseF2-origin.git"
+  git init -q --bare "$bare"
+  make_checkout "$co" "# caseF2 content" "$bare"
+  force_main_branch "$co"
+  ( cd "$co" && git push -q origin main )
+  mkdir -p "$cfg"
+  printf '@%s/CLAUDE.md\n' "$co" > "$cfg/CLAUDE.md"
+
+  out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/cF2err)
+  rc=$?
+  errsize=$(wc -c < /tmp/cF2err | tr -d '[:space:]'); rm -f /tmp/cF2err
+  lines=$(printf '%s\n' "$out" | grep -c 'commits behind origin/main')
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "exit $rc"
+  elif [ "$errsize" != "0" ]; then
+    bad "$name" "wrote to stderr"
+  elif [ "$lines" != "0" ]; then
+    bad "$name" "unexpected stale line when up to date: $out"
+  else
+    ok "$name"
+  fi
+}
+
+caseF3() {
+  name="caseF3: pointer on a branch other than main still reports the branch, never fetches"
+  co="$work/caseF3-checkout"; cfg="$work/caseF3-cfg"; bare="$work/caseF3-origin.git"
+  git init -q --bare "$bare"
+  make_checkout "$co" "# caseF3 content" "$bare"
+  ( cd "$co" && git push -q origin HEAD:main && git checkout -q -b feature-branch )
+  mkdir -p "$cfg"
+  printf '@%s/CLAUDE.md\n' "$co" > "$cfg/CLAUDE.md"
+
+  out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/cF3err)
+  rc=$?
+  errsize=$(wc -c < /tmp/cF3err | tr -d '[:space:]'); rm -f /tmp/cF3err
+  branch_lines=$(printf '%s\n' "$out" | grep -c 'is on feature-branch, not main')
+  stale_lines=$(printf '%s\n' "$out" | grep -c 'commits behind origin/main')
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "exit $rc"
+  elif [ "$errsize" != "0" ]; then
+    bad "$name" "wrote to stderr"
+  elif [ "$branch_lines" != "1" ]; then
+    bad "$name" "expected the existing branch report, got: $out"
+  elif [ "$stale_lines" != "0" ]; then
+    bad "$name" "freshness check ran on a non-main branch: $out"
+  else
+    ok "$name"
+  fi
+}
+
+caseF4() {
+  name="caseF4: no reachable origin stays silent about freshness, no error, exit 0"
+  co="$work/caseF4-checkout"; cfg="$work/caseF4-cfg"
+  # A local path that does not exist: fails the same way a dead network host would
+  # (fetch cannot reach it), but fails immediately, so the case stays fast and offline.
+  make_checkout "$co" "# caseF4 content" "$work/caseF4-no-such-remote"
+  force_main_branch "$co"
+  mkdir -p "$cfg"
+  printf '@%s/CLAUDE.md\n' "$co" > "$cfg/CLAUDE.md"
+
+  out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/cF4err)
+  rc=$?
+  errsize=$(wc -c < /tmp/cF4err | tr -d '[:space:]'); rm -f /tmp/cF4err
+  stale_lines=$(printf '%s\n' "$out" | grep -c 'commits behind origin/main')
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "exit $rc"
+  elif [ "$errsize" != "0" ]; then
+    bad "$name" "wrote to stderr"
+  elif [ "$stale_lines" != "0" ]; then
+    bad "$name" "reported freshness with no reachable origin: $out"
+  else
+    ok "$name"
+  fi
+}
+
+caseF5() {
+  name="caseF5: outside a git tree with no pointer file, stays fully silent, exit 0"
+  outside="$work/caseF5-not-a-repo"; cfg="$work/caseF5-cfg"
+  mkdir -p "$outside"
+  # No CLAUDE_CONFIG_DIR contents at all: the pointer file itself is missing.
+
+  out=$(cd "$outside" && CLAUDE_CONFIG_DIR="$cfg" GIT_CEILING_DIRECTORIES="$outside" \
+        sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/cF5err)
+  rc=$?
+  errsize=$(wc -c < /tmp/cF5err | tr -d '[:space:]'); rm -f /tmp/cF5err
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "exit $rc"
+  elif [ "$errsize" != "0" ]; then
+    bad "$name" "wrote to stderr"
+  elif [ -n "$out" ]; then
+    bad "$name" "unexpected output: $out"
+  else
+    ok "$name"
+  fi
+}
+
 case1
 case2
 case3
@@ -720,6 +867,11 @@ prune_case3
 prune_case4
 prune_case5
 prune_case6
+caseF1
+caseF2
+caseF3
+caseF4
+caseF5
 
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
