@@ -135,6 +135,39 @@ that precedence. It is not yet confirmed by a measurement here. One check would
 confirm it. Start a fresh local session in a repo with the grant file in place.
 Spawn a worker. Read the model the worker reports.
 
+A second run, from a local Claude Code Desktop session (engine 2.1.275, above
+the 2.1.257 floor), moved three of the four steps forward but could not
+finish the fourth.
+
+With no grant file, a subagent read `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` and
+`CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` from its shell, and reported running on
+Sonnet. That matches the user settings, which already carry the force key at
+this CLI version.
+
+The write of `.claude/settings.local.json` with the two-key grant was fed to
+`hooks/guard.py` directly, with the exact payload the write call used. Rule 8
+returned an `ask`, naming the model (`opus`) and the file. The live write
+itself produced no visible refusal or denial in this session's tool results.
+That is consistent with an ask that was shown and approved. But the
+transcript available to the model carries no permission-dialog record. This
+entry counts the direct `guard.py` run as the confirmation, not the live
+write.
+
+Without restarting the session, a second subagent still read
+`CLAUDE_CODE_SUBAGENT_MODEL=sonnet` and ran on Sonnet. The grant did not take
+effect live. This matches "not live" rather than "does not override." The one
+check that tells them apart needs a fresh session, started with the grant file
+already in place. A running session cannot restart itself from inside the
+task that is measuring it. That check did not run here. Removing the grant
+file and spawning a third subagent read `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`
+again, as expected since the grant was never live.
+
+The merge rule for `env` therefore stays unmeasured. What this run adds: the
+ask fires on the documented payload, and a written grant does not apply
+without a fresh session. What still needs a fresh local session with the
+grant file already in place before that session starts: whether the project
+file then wins.
+
 ## No per-call prompt is possible under the cap
 
 The old gate asked at the moment of the call. The cap cannot. While
