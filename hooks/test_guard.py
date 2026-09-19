@@ -1573,7 +1573,13 @@ def decide(case):
             body["session_id"] = case["session"]
         payload = json.dumps(body)
     env = dict(os.environ)
-    env["CLAUDE_CONFIG_DIR"] = case["config"] or CFG
+    # `.get`, not `[...]`: a checker below builds a case dict by hand and names only the keys it
+    # needs, so a key added here must not turn into a KeyError in a checker that never asked for
+    # it. MEASURED on CI run 35473213091: indexing this key crashed `stack_reason_hygiene_case`,
+    # which reached this branch through the pull request's MERGE commit. It landed on main (#54)
+    # after this branch started, so no run on the branch alone could have caught it. A hand-built
+    # case is the shape to expect from the next such checker too, so the read tolerates it.
+    env["CLAUDE_CONFIG_DIR"] = case.get("config") or CFG
     # The scratchpad pass reads the session id the PAYLOAD carries, and falls back to the
     # environment only when the payload carries none. A real session id in the runner's own
     # environment would leak into every case, so it is dropped here and each case names its own.
