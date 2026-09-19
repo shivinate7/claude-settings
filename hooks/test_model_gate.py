@@ -242,6 +242,44 @@ add("workflow shape: meta block's phase model override is not an agent option ->
     )),
     {"decision": "allow"})
 
+# --------------------------------------------------------------------------- third review pass: backtick key, restricted `=`
+
+add("workflow shape: backtick-quoted key, above-bar literal, no marker -> deny",
+    workflow(script='agent(p, { `model`: "%s" })' % OPUS),
+    {"decision": "deny", "reason_excludes": [OPUS]})
+
+add("workflow shape: backtick-quoted key, above-bar literal, with marker -> ask",
+    workflow(script='agent(p, { `model`: "%s" })\n// %s' % (OPUS, GOOD_MARKER)),
+    {"decision": "ask", "reason_includes": ["needs deep multi-file refactor reasoning"]})
+
+add("workflow shape: backtick-quoted key, below-bar literal -> allow",
+    workflow(script='agent(p, { `model`: "%s" })' % SONNET),
+    {"decision": "allow"})
+
+add("finding 2 regression: bare `model = ...` in a log line, no member/bracket key -> allow",
+    workflow(script='console.log("Setting model = default for this run");'),
+    {"decision": "allow"})
+
+add("finding 2 regression: bare `model = someVariable` inside prose -> allow",
+    workflow(script='const note = "Please set model = someVariable before running this.";'),
+    {"decision": "allow"})
+
+add("workflow shape: dot member assignment (opts.model = ...) still denies after narrowing `=`",
+    workflow(script="opts.model = '%s';\nagent(prompt, opts);" % OPUS),
+    {"decision": "deny", "reason_excludes": [OPUS]})
+
+add("workflow shape: double-quoted bracketed key (opts[\"model\"] = ...) still denies after narrowing `=`",
+    workflow(script='opts["model"] = \'%s\';\nagent(prompt, opts);' % OPUS),
+    {"decision": "deny", "reason_excludes": [OPUS]})
+
+add("workflow shape: single-quoted bracketed key (opts['model'] = ...) still denies after narrowing `=`",
+    workflow(script="opts['model'] = '%s';\nagent(prompt, opts);" % OPUS),
+    {"decision": "deny", "reason_excludes": [OPUS]})
+
+add("workflow shape: member assignment with an unprovable value, no marker -> deny",
+    workflow(script="opts.model = M;\nagent(prompt, opts);"),
+    {"decision": "deny"})
+
 
 def _workflow_scriptpath_cases():
     tmp = tempfile.mkdtemp(prefix="model_gate_cases_")

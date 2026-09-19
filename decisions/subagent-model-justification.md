@@ -76,6 +76,14 @@ This is a deliberately crude text test. It is not a JavaScript parser. A
 false ask is the accepted cost of a value the gate cannot resolve. The
 marker clears it, the same as any above-bar id.
 
+A third review pass found two more edges. The key side now also matches a
+backtick-quoted `model`, next to the bare, double-quoted, and single-quoted
+forms. The `=` separator now needs a member or bracketed key: `.model =`,
+`["model"] =`, `['model'] =`, or the backtick form. It no longer fires on
+a bare `model =`. A log line like `"Setting model = default"` no longer
+denies. A bare `model:` in prose can still ask for a marker it does not
+need. The marker clears it, an accepted cost.
+
 ## The three gaps this closes
 
 The gate it replaces was one inline shell command in `settings.json`. It

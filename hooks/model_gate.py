@@ -194,17 +194,39 @@ def judge_against_text(model: str, text: str) -> None:
 # the script's own `export const meta = {...}` header, whose `phases[].model`
 # names a phase's model override, not an agent call.
 #
-# The key side alone has three shapes that all name the same option: bare
-# `model`, double-quoted `"model"`, and single-quoted `'model'`, each optionally
-# followed by a closing `]` for member-index access (`opts["model"] = ...`).
-# The separator is `:` (an object literal) or `=` (a plain or member
-# assignment, `opts.model = ...`). Matching the key by shape, not by one fixed
-# spelling, is the fix for the bypass a quoted or member-assigned key opened:
-# `SCRIPT_MODEL_RE` used to require the colon to sit right after the bare word
-# `model`, so `{"model": "claude-opus-5"}` and `opts.model = "claude-opus-5"`
-# never matched at all.
+# The key side has four shapes that all name the same option: bare `model`,
+# double-quoted `"model"`, single-quoted `'model'`, and backtick-quoted
+# `` `model` ``, each optionally followed by a closing `]` for member-index
+# access (`opts["model"] = ...`, `` opts[`model`] = ... ``). A backtick key
+# was a further bypass the quote alternation first missed; it is covered the
+# same way as the other two quote marks.
+#
+# The separator does not behave the same for every key shape. `:` (an object
+# literal) fires on any key shape, bare word included -- a crude text test,
+# so prose that happens to read `model:` (`"Choose the right model: it
+# matters"`) can still ask for a marker it does not strictly need. That is an
+# accepted cost the marker clears; see decisions/subagent-model-justification.md.
+# `=` (an assignment) fires only behind a member access or a bracketed key --
+# `.model =`, `["model"] =`, `['model'] =`, `` [`model`] = `` -- never behind
+# a bare `model =`. A bare `model =` shows up in ordinary prose and log lines
+# (`"Setting model = default for this run"`) that name no agent option at
+# all; widening `=` to fire on the bare word turned every such line into a
+# false deny. Requiring a real assignment shape on `=` is the fix, and it
+# loses no genuine case: a real workflow sets the option as `{ model: ... }`
+# with a colon, or assigns it through a member access.
+#
+# Matching the key by shape, not by one fixed spelling, is the fix for the
+# bypass a quoted or member-assigned key opened: `SCRIPT_MODEL_RE` used to
+# require the colon to sit right after the bare word `model`, so
+# `{"model": "claude-opus-5"}` and `opts.model = "claude-opus-5"` never
+# matched at all.
 SCRIPT_MODEL_RE = re.compile(
-    r"""(?:\bmodel\b|(?P<q>['"])model(?P=q))\s*\]?\s*[:=]\s*(?P<value>[^,;}\n]+)"""
+    r"""
+    (?:\bmodel\b|(?P<q>['"`])model(?P=q))\s*\]?\s*:\s*(?P<value>[^,;}\n]+)
+    |
+    (?:\.model\b|(?P<q2>['"`])model(?P=q2)\s*\])\s*=\s*(?P<value2>[^,;}\n]+)
+    """,
+    re.VERBOSE,
 )
 
 _META_BLOCK_RE = re.compile(r"\bmeta\s*=\s*\{")
@@ -248,7 +270,10 @@ def script_models(text: str):
         if line.strip().startswith("//"):
             continue
         for match in SCRIPT_MODEL_RE.finditer(line):
-            value = re.sub(r"//.*$", "", match.group("value")).strip()
+            raw = match.group("value")
+            if raw is None:
+                raw = match.group("value2")
+            value = re.sub(r"//.*$", "", raw).strip()
             literal_match = _QUOTED_LITERAL_RE.match(value)
             yield value, (literal_match.group(2) if literal_match else None)
 
