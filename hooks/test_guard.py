@@ -1481,6 +1481,61 @@ def cap_log_case():
     return True, "two ask lines, each naming the file and the model"
 
 
+def cap_deep_path_log_case():
+    """A cap lift under a DEEP path still logs the model, on every platform.
+
+    THE DEFECT THIS PINS, MEASURED 2026-09-19: the guard joined the settings path and the cap
+    reading into one log field and cut the join from the tail at the log's bound. A long root ate
+    the field, and the line ended `CLAUDE_CODE_SUBAG` with the model gone. That is the one thing the
+    line is written for. The suite caught it on macOS only, because a macOS temporary root is long
+    and `/tmp` on ubuntu is short. THE FIXTURE BUILDS ITS OWN LONG PATH, so the case reads the same
+    on every platform and ubuntu CI goes red on a regression too.
+
+    The path is never created. Rule 8 judges the payload, so an absent file proves the same point
+    and the case stays cheap.
+    """
+    deep = os.path.join(ROOT, "d" * 60, "e" * 60, "proj", ".claude", "settings.local.json")
+    deep = slash(deep)
+    if len(deep) <= 120:
+        return False, "the fixture path is only %d characters, so it pins nothing" % len(deep)
+    folder = os.path.join(ROOT, "capdeeplog")
+    os.makedirs(folder, exist_ok=True)
+    log = os.path.join(folder, "guard.log")
+    if os.path.exists(log):
+        os.remove(log)
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    payload = {"tool_name": "Write",
+               "tool_input": {"file_path": deep, "content": cap_settings()},
+               "cwd": NOGIT}
+    result = subprocess.run(
+        [sys.executable, GUARD], input=json.dumps(payload), capture_output=True, text=True,
+        env=env, timeout=60,
+    )
+    if result.returncode != 0:
+        return False, "guard exited %d" % result.returncode
+    if '"ask"' not in result.stdout:
+        return False, "expected an ask, got %r" % result.stdout.strip()[:120]
+    if not os.path.exists(log):
+        return False, "no log file was written for the ask"
+    with open(log, encoding="utf-8") as handle:
+        lines = [line for line in handle.read().splitlines() if line.strip()]
+    asks = [line.split("\t") for line in lines
+            if line.split("\t")[2:4] == ["ask", "subagent-model-cap"]]
+    if len(asks) != 1:
+        return False, "expected one ask line, found %d of %d" % (len(asks), len(lines))
+    matched = asks[0][4] if len(asks[0]) == 5 else ""
+    if OPUS not in matched:
+        return False, "the deep path crowded the model out of the log line: %r" % matched
+    if "settings.local.json" not in matched:
+        return False, "the log line does not name the settings file: %r" % matched
+    if len(matched) > 120:
+        return False, "the log field runs to %d characters, past its bound" % len(matched)
+    if "..." not in matched:
+        return False, "the shortened path is not marked as shortened: %r" % matched
+    return True, "%d characters, model and file both kept, head of the path marked" % len(matched)
+
+
 def cap_reason_bound_case():
     """The one reason built from tool text stays bounded, single-line, and marked where it was cut.
 
@@ -1727,8 +1782,24 @@ def log_env_case():
     return True, "generic on stdout, named in the log"
 
 
+# The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
+# literal count drifts the moment a case is added, and a suite that miscounts its own cases is a
+# suite a reader stops trusting.
+LOG_CHECKS = (
+    ("log: one line per refusal and none for an allow", log_case),
+    ("log: the refused file is named in the log and nowhere else", log_env_case),
+    ("log: a project config edit is allowed and noted", config_edit_log_case),
+    ("log: a cap lift is asked and logged with its file and value", cap_log_case),
+    ("log: a cap lift under a deep path still logs the model", cap_deep_path_log_case),
+    ("cap: the printed reason is bounded, single-line and marks a cut", cap_reason_bound_case),
+    ("log: a merge into main is allowed and noted where the base is unsafe", merge_log_case),
+    ("log: a conflict-side checkout is allowed and noted", conflict_resolve_log_case),
+    ("log: an unreadable subject is allowed and noted", subject_unread_log_case),
+)
+
+
 def main():
-    total = len(CASES) + 8
+    total = len(CASES) + len(LOG_CHECKS)
     print("guard cases, %d in all" % total)
     print("fixtures under " + ROOT)
     print()
@@ -1753,17 +1824,7 @@ def main():
         failed += 0 if ok else 1
         print("%s  %-6s(want %-6s)  [%-11s] %s%s" % (
             "PASS" if ok else "FAIL", got, case["expected"], case["tool"], case["name"], note))
-    for label, checker in (
-        ("log: one line per refusal and none for an allow", log_case),
-        ("log: the refused file is named in the log and nowhere else", log_env_case),
-        ("log: a project config edit is allowed and noted", config_edit_log_case),
-        ("log: a cap lift is asked and logged with its file and value", cap_log_case),
-        ("cap: the printed reason is bounded, single-line and marks a cut",
-         cap_reason_bound_case),
-        ("log: a merge into main is allowed and noted where the base is unsafe", merge_log_case),
-        ("log: a conflict-side checkout is allowed and noted", conflict_resolve_log_case),
-        ("log: an unreadable subject is allowed and noted", subject_unread_log_case),
-    ):
+    for label, checker in LOG_CHECKS:
         ok, note = checker()
         failed += 0 if ok else 1
         print("%s  %-6s(want %-6s)  [%-11s] %s  (%s)" % (
