@@ -38,6 +38,9 @@ jobs:
       - name: Shell syntax check, install.sh
         run: bash -n install.sh
 
+      - name: install.sh checkout-detection suite
+        run: sh hooks/test_install_src.sh
+
       - name: PowerShell syntax check, install.ps1
         shell: pwsh
         run: |

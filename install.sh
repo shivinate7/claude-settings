@@ -26,6 +26,82 @@ CLOUD=0
 
 log() { printf 'claude-settings: %s\n' "$*"; }
 
+# Exact match for a git origin URL against $REPO on github.com, not a substring test and
+# not host-agnostic. Trims trailing whitespace/newline and a trailing slash, drops a
+# trailing ".git", then requires the host to be exactly "github.com" and the remaining
+# path to be exactly "$REPO" (not merely to end with it). Matches:
+#   https://github.com/shivinate7/claude-settings.git   (and without .git)
+#   git@github.com:shivinate7/claude-settings.git       (and without .git)
+#   ssh://git@github.com:22/shivinate7/claude-settings.git
+# and rejects a different host (gitlab.com), extra leading path segments
+# (github.com/mirror/shivinate7/claude-settings), and anything with no recognizable
+# host at all (a bare relative path, a file:// URL). Case is not folded: an origin
+# spelled "GITHUB.COM" is rejected too, the safe direction for a mismatch.
+origin_matches_repo() {
+  o=$(printf '%s' "$1" | tr -d '\r\n')
+  o=$(printf '%s' "$o" | sed -e 's/[[:space:]]*$//')
+  o="${o%/}"
+  o="${o%.git}"
+  o="${o%/}"
+
+  case "$o" in
+    *://*)
+      rest="${o#*://}"
+      rest="${rest#*@}"
+      host="${rest%%/*}"
+      host="${host%%:*}"
+      path="${rest#*/}"
+      ;;
+    *@*:*)
+      rest="${o#*@}"
+      host="${rest%%:*}"
+      path="${rest#*:}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  [ "$host" = "github.com" ] || return 1
+  [ "$path" = "$REPO" ]
+}
+
+# A candidate directory is this repo's checkout only if: it is inside a git worktree,
+# that worktree's origin matches $REPO exactly, and it carries the two files install.sh
+# always needs. Prints the toplevel and returns 0 on match, prints nothing and returns
+# 1 otherwise.
+checkout_at() {
+  cand="$1"
+  [ -n "$cand" ] || return 1
+  top=$(git -C "$cand" rev-parse --show-toplevel 2>/dev/null) || return 1
+  [ -n "$top" ] || return 1
+  origin=$(git -C "$top" remote get-url origin 2>/dev/null) || return 1
+  origin_matches_repo "$origin" || return 1
+  [ -f "$top/CLAUDE.md" ] || return 1
+  [ -f "$top/settings.json" ] || return 1
+  printf '%s' "$top"
+}
+
+# The directory an existing ~/.claude/CLAUDE.md already points at, if any: parsed the
+# same way settings.json's refresh hook and hooks/session_start.sh's divergence check
+# read it (the "@<path>/CLAUDE.md" line, "~/" expanded against $HOME). A person's clone
+# can sit any number of levels under $HOME (e.g. ~/Developer/claude-settings), which the
+# bounded root scan below cannot reach; a pointer already installed by a previous run
+# names it exactly, with no assumption about depth. Prints nothing on a missing file, an
+# unparseable line, or a path that no longer exists. It is a hint about where to look,
+# not a reason to trust what is found there: checkout_at() still applies the same origin
+# check to it as to every other candidate.
+pointer_dir() {
+  md="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md"
+  [ -f "$md" ] || return 1
+  d=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$md" 2>/dev/null | head -n1)
+  case "$d" in
+    "~"/*) d="$HOME${d#\~}" ;;
+  esac
+  [ -n "$d" ] && [ -d "$d" ] || return 1
+  printf '%s' "$d"
+}
+
 # Locate the source files: the clone this script lives in, else fetch from GitHub.
 SCRIPT_DIR=""
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
@@ -35,6 +111,48 @@ fi
 if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/CLAUDE.md" ] && [ -f "$SCRIPT_DIR/settings.json" ]; then
   SRC="$SCRIPT_DIR"
 else
+  # No file to locate ourselves by (e.g. piped: curl | bash). Look for an existing git
+  # checkout of this repo before falling back to fetching a mirror from GitHub: the
+  # shell's own cwd is usually this repo already in a cloud session, and using it keeps
+  # the checkout's own branch in force instead of overwriting it with a frozen copy of main.
+  #
+  # A "cwd" from hook JSON on stdin is deliberately NOT read here: in the documented
+  # cloud call (`curl ... | bash -s -- --cloud`), bash reads this very script off that
+  # same stdin, and a `cat`/`read` on fd 0 mid-script races bash's own buffered read of
+  # the remaining script text and can truncate it (reproduced while testing this change).
+  # It would also never fire in that pipeline anyway: in `cmd1 | cmd2`, only cmd1 (curl)
+  # inherits the outer stdin, so hook JSON piped to the whole pipeline never reaches bash.
+  SRC=""
+  PTR_DIR=$(pointer_dir) || PTR_DIR=""
+  for cand in "$PTR_DIR" "${CLAUDE_PROJECT_DIR:-}" "$PWD"; do
+    [ -n "$cand" ] || continue
+    t=$(checkout_at "$cand") && { SRC="$t"; break; }
+  done
+
+  # cwd is not documented to be the checkout for every caller (setup script, SessionStart
+  # hook), so don't rest detection on $PWD alone: fall back to a bounded, one-level-deep
+  # look under the container's usual home directories. Cheap on purpose, since this runs
+  # at every session start: no recursive find, stop at the first exact origin match.
+  if [ -z "$SRC" ]; then
+    # Search roots are fixed in production; a test harness may override them (via
+    # CLAUDE_SETTINGS_SEARCH_ROOTS, space-separated) to avoid scanning this container's
+    # own real checkouts under /home/user or /root.
+    for root in ${CLAUDE_SETTINGS_SEARCH_ROOTS:-/home/user /root "$HOME"}; do
+      [ -d "$root" ] || continue
+      for child in "$root"/*; do
+        [ -d "$child/.git" ] || continue
+        t=$(checkout_at "$child") && { SRC="$t"; break 2; }
+      done
+    done
+  fi
+  if [ -z "$SRC" ]; then
+    t=$(checkout_at "$HOME/claude-settings") && SRC="$t"
+  fi
+
+  [ -n "$SRC" ] && log "found existing checkout of $REPO at $SRC; using it as source"
+fi
+
+if [ -z "$SRC" ]; then
   SRC="$HOME/claude-settings"
   mkdir -p "$SRC"
   mkdir -p "$SRC/agents" "$SRC/lint" "$SRC/hooks"
