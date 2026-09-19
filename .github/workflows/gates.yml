@@ -66,3 +66,21 @@ jobs:
       - name: Pointer encoding test, Windows PowerShell 5.1
         shell: powershell
         run: powershell -NoProfile -File install.test.ps1
+
+  # /bin/bash on macOS is 3.2.57 (2007) and /var is a symlink to /private/var. The
+  # checkout-detection suite is the only gate whose result depends on either, and it
+  # was once green on Linux while 8 of its 18 cases failed on a real Mac. The rest of
+  # the gates job gains no signal from a second OS, so only these steps run here.
+  shell-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Report the shell this job actually runs
+        run: |
+          /bin/bash --version | head -n1
+          command -v bash
+          bash --version | head -n1
+      - name: Shell syntax check, install.sh
+        run: bash -n install.sh
+      - name: install.sh checkout-detection suite
+        run: sh hooks/test_install_src.sh
