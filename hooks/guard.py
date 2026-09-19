@@ -49,7 +49,9 @@ only the project-scoped case is asked.
 That one ask NAMES the requested value and the file. It is not an exception to the remedy rule
 below. A remedy hides the target because repeating it reads as permission to run it, while this
 ask exists to tell the approver WHAT is being turned on and WHERE. An ask that hid both would ask
-nothing.
+nothing. It is also the one reason in this file built from text a tool passed in, so the value and
+the path are cleaned of control characters, cut at a bound, and marked where they were cut: a
+reason that a caller can lengthen or forge lines inside is a reason an approver cannot trust.
 
 A subject the guard could not read is the fourth such line. The call is allowed, because a
 refusal whose ground could not be read is a guess, and the line names what could not be
@@ -1497,9 +1499,12 @@ def project_config_shell_hit(cmd: str, cwd: str) -> str:
 # so the owner answers one call at a time. A wall here would only push the work off the guard's
 # path.
 #
-# THE SETTINGS TEST IS THE BASENAME, never the filesystem. A basename reads the same in every
-# checkout, needs no `realpath`, and cannot raise, so this rule adds no new way for the guard to
-# fail. The managed settings file joins the list at the same price.
+# THE SETTINGS TEST IS A BASENAME, and it is taken from the RESOLVED path as well as from the
+# spelling the tool passed. Rule 7 resolves its own paths with `realpath`, so a basename test on the
+# spelling alone would leave rule 8 blind to a shape rule 7 already sees: a symlink named
+# `alias.json` that points at a project's `.claude/settings.json`. The resolve sits inside a `try`,
+# so the cannot-raise property of this rule holds. The managed settings file joins the list at the
+# same price.
 SETTINGS_BASENAMES = ("settings.json", "settings.local.json", "managed-settings.json")
 
 # The cap's two variables, and a value beside one of them. The key side carries the optional
@@ -1513,8 +1518,22 @@ SUBAGENT_CAP_ASSIGN = re.compile(
 
 # The fields a write tool carries its content in. `old_string` stands before `new_string`, so that
 # `cap_change` reads the value the edit ARRIVES at, not the value it leaves.
+#
+# EVERY EDIT IS READ. An earlier version of this rule read the first 200 edits of a `MultiEdit`,
+# and a review MEASURED the boundary that cap bought an attacker: 199 no-op edits ahead of the cap
+# change asked, 200 allowed. A bound that hides a lift is worse than no bound, and the scan is
+# cheap: MEASURED 2026-09-19 on this machine, the reading takes 2.8 ms over a 2 MB blob and 11.9 ms
+# over an 8 MB blob, linear, and 29 ms over an edit list of 5000. Nothing is capped here, and the
+# boundary is gone: 199, 200, 201, 400 and 5000 no-op edits ahead of the lift all ask.
 CAP_CONTENT_FIELDS = ("content", "old_string", "new_string", "new_source")
-CAP_MAX_EDITS = 200
+
+# What the printed reason may carry. A reason is read by a person under time pressure, and it is the
+# one reason in this file built from tool-supplied text, so the text is bounded and cleaned first.
+CAP_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+CAP_MAX_VALUE = 60
+CAP_MAX_CHANGE = 300
+CAP_MAX_PATH = 200
+CAP_CUT_MARK = " [cut]"
 
 CAP_ASK_REASON = (
     "Rule (configuration): this write sets the subagent model cap, which the owner's user settings "
@@ -1525,44 +1544,144 @@ CAP_ASK_REASON = (
 
 
 def is_settings_file(path: str, cwd: str = "") -> bool:
-    """True when the path names a settings file, judged by its basename alone.
+    """True when the path, or the path it resolves to, names a settings file.
 
-    `cwd` is taken and not used, so this reads as a predicate of `_shell_write_hit`, beside
-    `is_frozen` and `is_project_config`.
+    The spelling is tested first, so a path that names no existing file still reads. The resolved
+    spelling is tested next, which is what catches a symlink pointing at a settings file. The
+    resolve is wrapped, so this predicate cannot raise.
     """
     if not path or not isinstance(path, str):
         return False
-    return basename(path) in SETTINGS_BASENAMES
+    if basename(path) in SETTINGS_BASENAMES:
+        return True
+    try:
+        return basename(_resolved(path, cwd)) in SETTINGS_BASENAMES
+    except Exception:
+        return False
+
+
+def cap_safe(text: str, limit: int) -> str:
+    """Return text fit to print inside a reason: cleaned, bounded, and a cut MARKED.
+
+    A control character becomes a space, so a crafted value or path cannot print a line of its own
+    that reads like an approval. A text over the limit is cut and the cut is marked, so a shortened
+    value is never read as the whole value.
+    """
+    clean = CAP_CONTROL.sub(" ", text or "")
+    if len(clean) > limit:
+        return clean[:limit] + CAP_CUT_MARK
+    return clean
+
+
+def _json_value_text(value) -> str:
+    """Return a JSON value as text, or '' for a value that is not a scalar."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    return ""  # an object, a list or null: the key is named, the value is unread
+
+
+def json_cap_values(text: str):
+    """Return {key: value text} for each cap variable a JSON payload sets, else {}.
+
+    The walk reads KEYS, so a key spelled with a JSON escape (`\\u0043LAUDE_CODE_...`) reads the
+    same as a key spelled plainly, and a value the text pattern cannot read, an object or a number,
+    still names its key. Content that does not parse as JSON returns {} and leaves the text passes
+    to answer. The walk carries its own stack, so a deep payload cannot exhaust the interpreter's.
+    """
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return {}
+    found = {}
+    stack = [parsed]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if isinstance(key, str) and SUBAGENT_CAP_KEY.fullmatch(key.strip()):
+                    found[key.strip()] = _json_value_text(value)
+                if isinstance(value, (dict, list)):
+                    stack.append(value)
+        elif isinstance(node, list):
+            for value in node:
+                if isinstance(value, (dict, list)):
+                    stack.append(value)
+    return found
+
+
+def _cap_reading(text: str):
+    """Return an ordered {key: value text} for ONE text, empty when it names no cap variable.
+
+    Three passes. THE TEXT PATTERN reads a `"KEY": "value"` pair and a `KEY=value` assignment, for
+    text that is no whole JSON document: an `Edit` fragment, a heredoc body, a `sed` expression. The
+    LAST assignment of a key wins there, which is what a `sed -i` expression carries: the
+    replacement stands after the text it replaces. THE BARE KEY catches a key whose value the
+    pattern cannot read, `"$OPUS_ID"` or an opening brace, and leaves it empty, which prints as
+    `(value unread)`: the guard never guesses a value the text does not carry. THE JSON WALK reads
+    the keys of text that parses as JSON, and its value wins, because it is the value the file will
+    hold.
+
+    Inside one text a READABLE value wins over a bare mention, because a key named twice in one blob
+    is a settings pair plus a mention of it, not a change.
+
+    THE LIMIT: a key spelled with a JSON escape inside text that does NOT parse as JSON, a heredoc
+    body on one shell line for instance, is out of reach of all three passes. The shell route reads
+    the whole command, and a command is no JSON document.
+    """
+    reading = {}
+    if not isinstance(text, str) or not text:
+        return reading
+    for found in SUBAGENT_CAP_ASSIGN.finditer(text):
+        reading[found.group(1)] = found.group(2)
+    for found in SUBAGENT_CAP_KEY.finditer(text):
+        reading.setdefault(found.group(0), "")
+    for key, value in json_cap_values(text).items():
+        if value or key not in reading:
+            reading[key] = value
+    return reading
+
+
+def cap_change_parts(parts) -> str:
+    """Return a short reading of each cap variable the write sets or changes, else ''.
+
+    A LATER PART IS AUTHORITATIVE, an unreadable value included. The parts arrive in the order the
+    write applies them, `old_string` before `new_string`, edit after edit, so the last part that
+    names a key is the part that decides what the file ends up holding. An `Edit` from `"sonnet"` to
+    `"$OPUS_ID"` therefore reads `(value unread)`, never `sonnet`: naming the value being LEFT would
+    tell the approver the opposite of what is being turned on.
+    """
+    order = []
+    values = {}
+    for part in parts:
+        for key, value in _cap_reading(part).items():
+            if key not in values:
+                order.append(key)
+            values[key] = value
+    if not order:
+        return ""
+    printed = [key + " = " + (cap_safe(values[key], CAP_MAX_VALUE) or "(value unread)")
+               for key in order]
+    return cap_safe(", ".join(printed), CAP_MAX_CHANGE)
 
 
 def cap_change(text: str) -> str:
-    """Return a short reading of each cap variable the text sets or changes, else ''.
+    """The one-text reading, for the shell route, which judges a whole command."""
+    return cap_change_parts([text])
 
-    The LAST assignment of a key wins, which is what a `sed -i` expression carries: the
-    replacement stands after the text it replaces. A key with no readable value beside it reads
-    `(value unread)`, because the guard never guesses a value the text does not carry.
+
+def write_content_parts(tool_input):
+    """Return the texts a write tool would put in the file, IN THE ORDER IT APPLIES THEM.
+
+    A list, never one joined blob, so `cap_change_parts` can tell the value an edit leaves from the
+    value it arrives at. Every edit of a `MultiEdit` is read: see the measurement beside
+    CAP_CONTENT_FIELDS.
     """
-    if not isinstance(text, str) or not text:
-        return ""
-    order = []
-    values = {}
-    for found in SUBAGENT_CAP_ASSIGN.finditer(text):
-        key = found.group(1)
-        if key not in values:
-            order.append(key)
-        values[key] = found.group(2)
-    for found in SUBAGENT_CAP_KEY.finditer(text):
-        key = found.group(0)
-        if key not in values:
-            order.append(key)
-            values[key] = ""
-    return ", ".join(key + " = " + (values[key] or "(value unread)") for key in order)
-
-
-def write_content_text(tool_input) -> str:
-    """Join the text a write tool would put in the file, a `MultiEdit` edit list included."""
     if not isinstance(tool_input, dict):
-        return ""
+        return []
     parts = []
     for field in CAP_CONTENT_FIELDS:
         value = tool_input.get(field, "")
@@ -1570,18 +1689,26 @@ def write_content_text(tool_input) -> str:
             parts.append(value)
     edits = tool_input.get("edits", [])
     if isinstance(edits, list):
-        for edit in edits[:CAP_MAX_EDITS]:
+        for edit in edits:
             if not isinstance(edit, dict):
                 continue
             for field in CAP_CONTENT_FIELDS:
                 value = edit.get(field, "")
                 if isinstance(value, str):
                     parts.append(value)
-    return "\n".join(parts)
+    return parts
 
 
 def cap_ask_reason(change: str, where: str) -> str:
-    return CAP_ASK_REASON.format(change=change, where=where)
+    """Build the printed ask, BOUNDED BY CONSTRUCTION.
+
+    The template is fixed, the change holds at most the cap's two keys with a value of at most
+    CAP_MAX_VALUE characters each, and the path is cut at CAP_MAX_PATH. So the reason cannot run
+    past roughly 800 characters however long the value or the path a tool passed. `cap_safe` does
+    the cleaning and marks each cut.
+    """
+    return CAP_ASK_REASON.format(change=cap_safe(change, CAP_MAX_CHANGE),
+                                 where=cap_safe(where, CAP_MAX_PATH))
 
 
 # ------------------------------------------------------------------ the log
@@ -1770,10 +1897,13 @@ def judge(payload) -> None:
         if is_project_config(target, cwd):
             record(tool, "noted", "config-edit", target)
         # 8. The subagent model cap. Rule 7 already denied the config directory's own settings, so
-        # only a project-scoped or clone-scoped settings file reaches here. The content fields are
-        # what the tool would write, so a file that merely NAMES the variable elsewhere never fires.
+        # only a project-scoped or clone-scoped settings file reaches here. The content read is what
+        # the tool would WRITE, so a file that carries the variable name anywhere in that content
+        # asks, a permission string or a comment line included. That is an over-ask and it stays:
+        # the alternative is a value test that a crafted spelling walks past. A write that does not
+        # carry the name never fires, and no other file than a settings file reaches this rule.
         if is_settings_file(target, cwd):
-            change = cap_change(write_content_text(tool_input))
+            change = cap_change_parts(write_content_parts(tool_input))
             if change:
                 refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, target),
                        target + " " + change)
