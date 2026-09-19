@@ -542,6 +542,163 @@ case6() {
   fi
 }
 
+# ---- land_dir prune cases: local mode removes an entry only for a file that is both ------
+# a symlink land_dir made and points at a source file that is now gone. Each case runs
+# install.sh (copied into the checkout, local mode, no --cloud) against a real checkout so
+# git tracking is never a variable: local mode reads SCRIPT_DIR/CLAUDE.md and
+# SCRIPT_DIR/settings.json directly, the same detection case3 exercises, with no git
+# requirement on the files under hooks/.
+run_local_install() {
+  # $1 = checkout dir, $2 = HOME, $3 = CLAUDE_CONFIG_DIR
+  ( cd "$1" && env -i PATH="$PATH" HOME="$2" CLAUDE_CONFIG_DIR="$3" bash ./install.sh 2>&1 )
+}
+
+prune_case1() {
+  name="prune1: source file removed leaves no destination entry"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/prune1-checkout"
+  make_checkout "$co" "# prune1 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  printf '#!/bin/sh\necho hi\n' > "$co/hooks/temp_hook.sh"
+
+  out1=$(run_local_install "$co" "$h" "$cfg"); rc1=$?
+  rm -f "$co/hooks/temp_hook.sh"
+  out2=$(run_local_install "$co" "$h" "$cfg"); rc2=$?
+
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then
+    bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
+  elif [ -e "$cfg/hooks/temp_hook.sh" ] || [ -L "$cfg/hooks/temp_hook.sh" ]; then
+    bad "$name" "stale entry $cfg/hooks/temp_hook.sh survived the second install"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+prune_case2() {
+  name="prune2: hand-placed regular file in config dir survives prune"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/prune2-checkout"
+  make_checkout "$co" "# prune2 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  mkdir -p "$cfg/hooks"
+  printf 'a person wrote this by hand\n' > "$cfg/hooks/manual.sh"
+
+  out=$(run_local_install "$co" "$h" "$cfg"); rc=$?
+  content=$(cat "$cfg/hooks/manual.sh" 2>/dev/null)
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ ! -f "$cfg/hooks/manual.sh" ] || [ -L "$cfg/hooks/manual.sh" ]; then
+    bad "$name" "manual.sh is gone or was replaced by a symlink"
+  elif [ "$content" != "a person wrote this by hand" ]; then
+    bad "$name" "manual.sh content changed: $content"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+prune_case3() {
+  name="prune3: symlink pointing outside \$SRC/\$sub survives prune"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/prune3-checkout"
+  make_checkout "$co" "# prune3 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  mkdir -p "$cfg/hooks"
+  outside_target="$work/prune3-outside-target.sh"
+  printf 'not from this checkout\n' > "$outside_target"
+  ln -sfn "$outside_target" "$cfg/hooks/external.sh"
+  # The pointed-to file then disappears too, so the only thing distinguishing this link
+  # from a stale one land_dir made is where it points, not whether that target exists.
+  rm -f "$outside_target"
+
+  out=$(run_local_install "$co" "$h" "$cfg"); rc=$?
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ ! -L "$cfg/hooks/external.sh" ]; then
+    bad "$name" "external.sh was removed or replaced"
+  elif [ "$(readlink "$cfg/hooks/external.sh")" != "$outside_target" ]; then
+    bad "$name" "external.sh target changed"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+prune_case4() {
+  name="prune4: a .bak.* file land_dir created survives prune"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/prune4-checkout"
+  make_checkout "$co" "# prune4 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  printf '#!/bin/sh\necho new\n' > "$co/hooks/foo.sh"
+  mkdir -p "$cfg/hooks"
+  printf 'old hand-placed content\n' > "$cfg/hooks/foo.sh"
+
+  # First install: foo.sh in the config dir is a regular file, not land_dir's own symlink,
+  # so land_dir backs it up to foo.sh.bak.<timestamp> before linking. That backup is the
+  # thing this case protects.
+  out1=$(run_local_install "$co" "$h" "$cfg"); rc1=$?
+  bak=$(ls "$cfg/hooks/"foo.sh.bak.* 2>/dev/null | head -n1)
+
+  rm -f "$co/hooks/foo.sh"
+  out2=$(run_local_install "$co" "$h" "$cfg"); rc2=$?
+
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then
+    bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
+  elif [ -z "$bak" ]; then
+    bad "$name" "no .bak.* file was created by the first install"
+  elif [ ! -f "$bak" ]; then
+    bad "$name" "$bak was removed by the second install"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+prune_case5() {
+  name="prune5: source file still present keeps its link, and it still resolves"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/prune5-checkout"
+  make_checkout "$co" "# prune5 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  printf '#!/bin/sh\necho keep\n' > "$co/hooks/keep.sh"
+
+  out1=$(run_local_install "$co" "$h" "$cfg"); rc1=$?
+  out2=$(run_local_install "$co" "$h" "$cfg"); rc2=$?
+
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then
+    bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
+  elif [ ! -L "$cfg/hooks/keep.sh" ]; then
+    bad "$name" "keep.sh is not a symlink"
+  elif [ "$(cat "$cfg/hooks/keep.sh" 2>/dev/null)" != "$(printf '#!/bin/sh\necho keep')" ]; then
+    bad "$name" "keep.sh does not resolve to the source content"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+prune_case6() {
+  name="prune6: cloud mode does not prune a stale copy (documented, not fixed)"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/prune6-checkout"
+  make_checkout "$co" "# prune6 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  printf '#!/bin/sh\necho cloud\n' > "$co/hooks/cloud_hook.sh"
+
+  out1=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+        bash ./install.sh --cloud 2>&1); rc1=$?
+  rm -f "$co/hooks/cloud_hook.sh"
+  out2=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+        bash ./install.sh --cloud 2>&1); rc2=$?
+
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then
+    bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
+  elif [ ! -f "$cfg/hooks/cloud_hook.sh" ]; then
+    bad "$name" "cloud_hook.sh was pruned; cloud mode is documented to leave stale copies in place"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
 case1
 case2
 case3
@@ -557,6 +714,12 @@ pointer_case6
 case4
 case5
 case6
+prune_case1
+prune_case2
+prune_case3
+prune_case4
+prune_case5
+prune_case6
 
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

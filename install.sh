@@ -189,6 +189,25 @@ log "wrote $TARGET_MD -> $POINTER"
 # ---- ~/.claude/agents and ~/.claude/lint --------------------------------------------------------
 # agents/: one file per role (builder, reviewer). lint/: the STE linter and its hook gate.
 # Local: per-file symlink. Cloud: copy.
+#
+# Local mode also prunes: after landing every file the source defines now, it removes a
+# destination entry that this same function linked on an earlier run, for a source file
+# that has since gone away. Without this, "$DEST_DIR" holds the UNION of every file that
+# has ever existed in "$SRC/$sub" across every install, not the set the current ref
+# defines. A prune candidate must pass all three tests: it is a symlink (never a regular
+# file, so a person's own file is never touched), its target sits inside "$SRC/$sub"
+# (never a symlink land_dir did not create, so a hand-made link elsewhere is left alone),
+# and that target no longer exists (so a live link is left alone too). A ".bak.*" file
+# this function writes below is a regular file, so it already fails the first test.
+#
+# Cloud mode does not prune. A cloud install copies bytes, not links, so a landed file
+# in "$DEST_DIR" carries no mark of which source file made it or whether that source
+# still exists. Proving a copy is stale needs a manifest recording what the last run
+# landed, kept outside "$DEST_DIR" so the copies cannot corrupt the record that would
+# prune them. That manifest is a real feature, not a line fix, and is left for a
+# separate change. Until then, cloud mode accumulates stale copies for any source file
+# removed after a cloud install has run: a real file with stale content, and it never
+# dangles, so no "[ -f ]" hook guard catches it either.
 land_dir() {
   sub="$1"
   DEST_DIR="$CLAUDE_DIR/$sub"
@@ -211,6 +230,21 @@ land_dir() {
     LANDED="$LANDED $(basename "$f")"
   done
   [ -n "$LANDED" ] && log "$sub in $DEST_DIR:$LANDED"
+  if [ "$CLOUD" != 1 ]; then
+    PRUNED=""
+    for d in "$DEST_DIR"/*; do
+      [ -L "$d" ] || continue
+      target=$(readlink "$d")
+      case "$target" in
+        "$SRC/$sub"/*) ;;
+        *) continue ;;
+      esac
+      [ -e "$target" ] && continue
+      rm -f "$d"
+      PRUNED="$PRUNED $(basename "$d")"
+    done
+    [ -n "$PRUNED" ] && log "$sub in $DEST_DIR: pruned (source removed):$PRUNED"
+  fi
 }
 land_dir agents
 land_dir lint

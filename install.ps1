@@ -116,6 +116,17 @@ function Write-Pointer([string]$RepoDir, [string]$ClaudeDir) {
 Write-Pointer -RepoDir $RepoDir -ClaudeDir $ClaudeDir
 
 # ---- agents\ and lint\ : per-file symlinks, copy fallback -----------------------------------------
+# After landing every file the source defines now, prune a destination entry this same loop
+# symlinked on an earlier run, for a source file that has since gone away. Mirrors install.sh's
+# land_dir() prune: see the comment above land_dir() there for the reasoning and the three
+# tests. A prune candidate must be a symlink, its target must sit inside $srcDir (never a
+# hand-made link elsewhere), and that target must no longer exist. A regular file (including a
+# ".bak.*" file this loop writes above) fails the first test and is left alone.
+#
+# When symlinks are not permitted, this loop falls back to Copy-Item, same as install.sh's
+# cloud mode. That copy is pruned no more than install.sh prunes a cloud copy: a copied file
+# carries no mark of which source made it, so this loop does not remove it. It is left in
+# place as a documented gap, same reasoning as install.sh's cloud-mode comment.
 $AgentCopied = $false
 foreach ($sub in @('agents', 'lint', 'hooks')) {
     $srcDir  = Join-Path $RepoDir $sub
@@ -143,6 +154,17 @@ foreach ($sub in @('agents', 'lint', 'hooks')) {
             $AgentCopied = $true
             Log "copied $dest (symlink not permitted)"
         }
+    }
+    foreach ($entry in @(Get-ChildItem -Path $destDir -File -ErrorAction SilentlyContinue)) {
+        if ($entry.LinkType -ne 'SymbolicLink') { continue }
+        # .Target can come back as a one-element array depending on PowerShell version;
+        # take the first (only) element either way.
+        $tgt = @($entry.Target)[0]
+        if (-not $tgt) { continue }
+        if ((Split-Path $tgt -Parent) -ne $srcDir) { continue }
+        if (Test-Path $tgt) { continue }
+        Remove-Item $entry.FullName
+        Log "removed stale $($entry.FullName) (source $tgt no longer exists)"
     }
 }
 if (-not (Get-Command python3 -ErrorAction SilentlyContinue) -and -not (Get-Command python -ErrorAction SilentlyContinue)) {
