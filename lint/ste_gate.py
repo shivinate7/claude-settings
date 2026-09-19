@@ -7,10 +7,24 @@ severity only. Prints JSON when there is something to say. Always exits 0.
 PreToolUse on Write, Edit, MultiEdit for a *.md path: deny the write when the new text has
 STE errors, and hand the findings back so the writer fixes them first.
 
+SCOPING TO CHANGED BLOCKS. This hook sees the proposed content before the write lands. It
+replays the tool's own edit onto the file currently on disk to get the FULL proposed text,
+the same content the write would leave behind, then lints only the BLOCKS that differ from
+disk. A block is a paragraph, a run of lines bounded by blank lines: STE001 is a sentence
+rule and a sentence can run over more than one line, reported at the line it starts on, so a
+plain line filter could drop a finding whose sentence starts outside the edit. A sentence
+never crosses a blank line, so filtering by block instead of by line closes that hole.
+
+A file that does not exist on disk yet is entirely new, so it lints in full. So does a Write
+or Edit this hook cannot replay onto disk content alone, an Edit whose `old_string` is not on
+disk, or matched more than once without `replace_all`: rather than guess which blocks
+changed, it lints the whole proposed text, the strict, no-worse-than-before default.
+
 Stop: warn once when the last reply has STE errors. The warning is a systemMessage, not a
 block, so the turn ends anyway. When stop_hook_active is set, the reply is already a rewrite,
 so the gate stays quiet.
 """
+import difflib
 import json
 import os
 import subprocess
@@ -22,7 +36,7 @@ NOTE = "Code in backticks or a fence is exempt. Errors only: sentence length, se
 
 
 def lint(linter, text):
-    """Return the error-level findings of ste_lint.py on text, as lines."""
+    """Return the error-level findings of ste_lint.py on text, as finding dicts."""
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "gate.md")
         with open(path, "w", encoding="utf-8") as f:
@@ -35,12 +49,89 @@ def lint(linter, text):
             data = json.loads(run.stdout or "{}")
         except Exception:
             return []
-    out = []
-    for f in data.get("findings", []):
-        if f.get("severity") != "error":
+    return [f for f in data.get("findings", []) if f.get("severity") == "error"]
+
+
+def format_finding(f):
+    return "line %s: %s %s" % (f.get("line"), f.get("code"), f.get("message"))
+
+
+# ------------------------------------------------------------------ scoping to changed blocks
+
+def paragraph_blocks(text):
+    """Return (start_line, end_line) 1-indexed ranges, one per run of non-blank lines.
+
+    A block is a paragraph: lines bounded by blank lines. Copied from lint/md_sweep.py, not
+    imported, the way that hook's own transcript helpers are copied from hooks/config_report.py:
+    each hook fired by its own event stays in one file.
+    """
+    lines = text.split("\n")
+    blocks = []
+    start = None
+    for i, line in enumerate(lines, start=1):
+        if line.strip() == "":
+            if start is not None:
+                blocks.append((start, i - 1))
+                start = None
+        elif start is None:
+            start = i
+    if start is not None:
+        blocks.append((start, len(lines)))
+    return blocks
+
+
+def changed_new_lines(old_text, new_text):
+    """Return the 1-indexed lines of `new_text` that differ from `old_text`.
+
+    A pure deletion, text removed with nothing put in its place, has no line of its own in
+    `new_text`. Both the line before and the line after the point it sat at are counted as
+    changed instead, so the block on either side of a deletion is still caught.
+    """
+    old_lines = old_text.split("\n")
+    new_lines = new_text.split("\n")
+    matcher = difflib.SequenceMatcher(None, old_lines, new_lines, autojunk=False)
+    changed = set()
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
             continue
-        out.append("line %s: %s %s" % (f.get("line"), f.get("code"), f.get("message")))
-    return out
+        if j2 > j1:
+            changed.update(range(j1 + 1, j2 + 1))
+        else:
+            changed.add(j1 + 1)
+            if j1 > 0:
+                changed.add(j1)
+    return changed
+
+
+def scope_of_change(old_text, new_text):
+    """Return the lines of `new_text` in scope for linting: every line of every block that
+    differs from `old_text`. Empty when the two texts are identical."""
+    changed = changed_new_lines(old_text, new_text)
+    if not changed:
+        return set()
+    in_scope = set()
+    for start, end in paragraph_blocks(new_text):
+        if any(n in changed for n in range(start, end + 1)):
+            in_scope.update(range(start, end + 1))
+    return in_scope
+
+
+def apply_edit(text, old_string, new_string, replace_all):
+    """Return `text` with `old_string` replaced by `new_string`, the way the Edit tool itself
+    resolves a replacement, or None when that cannot be resolved from `text` alone:
+    `old_string` empty or absent, or present more than once without `replace_all`.
+    """
+    if not old_string:
+        return None
+    count = text.count(old_string)
+    if count == 0:
+        return None
+    if replace_all:
+        return text.replace(old_string, new_string)
+    if count > 1:
+        return None
+    index = text.find(old_string)
+    return text[:index] + new_string + text[index + len(old_string):]
 
 
 def last_reply(hook):
@@ -87,19 +178,56 @@ def main():
         path = ti.get("file_path") or ""
         if not path.lower().endswith(MD_SUFFIXES):
             return
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                old_text = f.read()
+        except Exception:
+            old_text = None  # no file on disk yet: entirely new, lint in full
+
+        # `resolved` holds the full proposed content once known. None means the edit could
+        # not be replayed against disk content alone, so the fallback text below is linted
+        # in full rather than guessed at.
+        resolved = None
         if tool == "Write":
             text = ti.get("content") or ""
+            resolved = text
         elif tool == "Edit":
             text = ti.get("new_string") or ""
+            if old_text is not None:
+                resolved = apply_edit(old_text, ti.get("old_string") or "", text,
+                                       bool(ti.get("replace_all")))
         elif tool == "MultiEdit":
-            text = "\n\n".join((e or {}).get("new_string") or "" for e in ti.get("edits") or [])
+            edits = ti.get("edits") or []
+            text = "\n\n".join((e or {}).get("new_string") or "" for e in edits)
+            if old_text is not None:
+                resolved = old_text
+                for e in edits:
+                    e = e or {}
+                    applied = apply_edit(resolved, e.get("old_string") or "",
+                                          e.get("new_string") or "", bool(e.get("replace_all")))
+                    if applied is None:
+                        resolved = None
+                        break
+                    resolved = applied
         else:
             return
-        findings = lint(linter, text)
+
+        if old_text is None or resolved is None:
+            scope = None  # new file, or an edit this hook could not replay: lint in full
+            full_text = resolved if resolved is not None else text
+        else:
+            full_text = resolved
+            scope = scope_of_change(old_text, full_text)
+
+        findings = lint(linter, full_text)
+        if scope is not None:
+            findings = [f for f in findings if f.get("line") in scope]
         if not findings:
             return
+        lines = [format_finding(f) for f in findings]
         reason = "STE lint on the text for %s:\n%s\n%s Fix the text, then write again." % (
-            os.path.basename(path), "\n".join(findings), NOTE)
+            os.path.basename(path), "\n".join(lines), NOTE)
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
@@ -116,7 +244,7 @@ def main():
         findings = lint(linter, text)
         if not findings:
             return
-        msg = "STE: %d error(s) in the reply. %s" % (len(findings), findings[0])
+        msg = "STE: %d error(s) in the reply. %s" % (len(findings), format_finding(findings[0]))
         print(json.dumps({"systemMessage": msg}))
 
 

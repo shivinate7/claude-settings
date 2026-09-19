@@ -21,6 +21,10 @@ It reads the last human message's timestamp from the transcript, the way
 hooks/config_report.py reads that same field for its own turn boundary.
 It never scans the whole repository. An old file with old errors is not this turn's debt.
 
+Inside a changed file, it lints only the BLOCKS the diff against HEAD touched, not the whole
+file. An untracked file, or one with no HEAD baseline, has nothing to diff against, so it
+lints in full, same as before this scoping existed. See "SCOPING TO CHANGED BLOCKS" below.
+
 Reads the hook JSON on stdin. Always exits 0. Fails open on bad input, a missing transcript,
 a parse error, a missing file, a file outside the project, or a file this hook cannot read.
 A hook must never brick a session.
@@ -62,9 +66,34 @@ only. It has no notion of which session wrote a file.
 A large clock skew between the machine that stamped the transcript timestamp and the
 filesystem clock that stamps mtimes would corrupt the comparison. Both clocks are the same
 machine in the normal case, so this is named as a hole, not treated as a live defect.
+
+SCOPING TO CHANGED BLOCKS.
+
+A whole-file lint means editing one line forces fixing every pre-existing error in that
+file. Once a file is clean, it also means adding a rule to ste_lint.py later breaks every
+clean file at once, on the next turn that touches any one of them. Both costs come from
+linting the whole file when only a part of it changed.
+
+This hook instead lints only the BLOCKS `git diff HEAD --unified=0` marks changed. A block
+is a paragraph, a run of lines bounded by blank lines. THE TRAP: STE001 is a sentence rule,
+and a sentence can run over more than one source line. A finding is reported at the line the
+sentence STARTS on. A plain line filter would drop a finding whose sentence starts outside
+the diff but only crosses the word limit because of a later, changed line. Filtering by
+block instead of by line closes that hole, because a sentence never crosses a blank line:
+ste_lint.py's own `segment_markdown` flushes its paragraph at every blank line, the same unit
+`paragraph_blocks` below reconstructs.
+
+An untracked file, and a file with no HEAD baseline at all, such as one added and committed
+in the same working tree state git diff can't reach, keeps no diff to scope by, so it lints
+in full. A brand new file stays strict: every error in it still blocks.
+
+A git diff call that fails, inside a real work tree, drops that one file from linting rather
+than widening it back to the whole file. This mirrors the rule `collect_markdown_targets`
+already applies to its own git failures: never widen scope on an error, only narrow it.
 """
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -227,17 +256,18 @@ def markdown_files_walk(cwd):
     return paths
 
 
-def git_dirty_paths(cwd):
-    """Return the absolute paths `git status --porcelain` marks dirty against HEAD, or None.
+def git_status_entries(cwd):
+    """Return {absolute path: 2-char porcelain status} from `git status --porcelain`, or None.
 
     Returns None when the command fails, for the caller to read against `is_git_work_tree`.
-    A rename or a copy entry carries a second, NUL-separated field for its old path, which is
-    consumed and dropped here, never counted as a dirty target on its own.
+    The 2-char code is git's own, `??` for untracked. A rename or a copy entry carries a
+    second, NUL-separated field for its old path, which is consumed and dropped here, never
+    counted as a target on its own.
     """
     run = _run_git(cwd, ["status", "--porcelain", "-z", "--untracked-files=all", "--", "."])
     if run is None or run.returncode != 0:
         return None
-    dirty = set()
+    entries = {}
     fields = run.stdout.split("\0")
     index = 0
     while index < len(fields):
@@ -246,32 +276,49 @@ def git_dirty_paths(cwd):
         if not entry:
             continue
         status, rel = entry[:2], entry[3:]
-        dirty.add(os.path.realpath(os.path.join(cwd, rel)))
+        entries[os.path.realpath(os.path.join(cwd, rel))] = status
         if status[0] in ("R", "C"):
             index += 1  # the next field is the rename or copy source path, not a target
-    return dirty
+    return entries
+
+
+def git_dirty_paths(cwd):
+    """Return the absolute paths `git status --porcelain` marks dirty against HEAD, or None.
+
+    A thin view over `git_status_entries`, kept for the callers that only need membership,
+    never the status code itself.
+    """
+    entries = git_status_entries(cwd)
+    return None if entries is None else set(entries)
 
 
 def collect_markdown_targets(cwd, baseline):
-    """Return markdown files under cwd newer than baseline, first-seen order, deduplicated.
+    """Return (targets, status_entries): the markdown files under cwd newer than baseline,
+    first-seen order and deduplicated, plus the git status entries used to filter them.
 
-    Outside a git work tree, a plain filesystem walk and the mtime check alone decide.
-    Inside one, git decides both the file list and the dirty filter, and a failure of
+    Outside a git work tree, a plain filesystem walk and the mtime check alone decide, and
+    `status_entries` is None: there is no git status to hand back, and the caller reads that
+    None as "no git baseline at all", the same signal it uses to skip block-scoping and lint
+    a survivor in full.
+
+    Inside a work tree, git decides both the file list and the dirty filter, and a failure of
     either git call returns no targets. It never widens to the walk. The hook's own SCOPE
     promise, an old file with old errors is not this turn's debt, holds only while the
     dirty filter runs. Falling back to the walk would break that promise to keep the mtime
     check alive. Doing nothing keeps both. A stale `index.lock` left by a concurrent agent
     in a shared checkout is one real way this branch fires, and it must not turn into a
-    false block.
+    false block. On that failure `status_entries` is also None, but the caller never reaches
+    it: an empty target list returns before block-scoping runs at all.
     """
     if not is_git_work_tree(cwd):
-        return _newer_than(markdown_files_walk(cwd), None, baseline)
+        return _newer_than(markdown_files_walk(cwd), None, baseline), None
 
     files = markdown_files_git(cwd)
-    dirty = git_dirty_paths(cwd) if files is not None else None
+    entries = git_status_entries(cwd) if files is not None else None
+    dirty = set(entries) if entries is not None else None
     if files is None or dirty is None:
-        return []
-    return _newer_than(files, dirty, baseline)
+        return [], None
+    return _newer_than(files, dirty, baseline), entries
 
 
 def _newer_than(files, dirty, baseline):
@@ -309,10 +356,109 @@ def _within_project(path, cwd):
     return path == root or path.startswith(root + os.sep)
 
 
+# ------------------------------------------------------------------ scoping to changed blocks
+#
+# See "SCOPING TO CHANGED BLOCKS" in the module docstring for why this lints blocks, not
+# lines, and what a git failure here does.
+
+HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+
+
+class _DropFile:
+    """Sentinel: the git diff call for this file failed. The caller drops the file rather
+    than widen it back to a whole-file lint."""
+
+
+DROP_FILE = _DropFile()
+
+
+def paragraph_blocks(text):
+    """Return (start_line, end_line) 1-indexed ranges, one per run of non-blank lines.
+
+    A block is a paragraph: lines bounded by blank lines. A blank line is one that is empty
+    or holds only whitespace. This is the same unit ste_lint.py's own `segment_markdown`
+    flushes a paragraph at, which is why a multi-line STE001 sentence, reported at the line
+    it starts on, always lands inside the one block its later lines also belong to.
+    """
+    lines = text.split("\n")
+    blocks = []
+    start = None
+    for i, line in enumerate(lines, start=1):
+        if line.strip() == "":
+            if start is not None:
+                blocks.append((start, i - 1))
+                start = None
+        elif start is None:
+            start = i
+    if start is not None:
+        blocks.append((start, len(lines)))
+    return blocks
+
+
+def git_diff_changed_lines(cwd, path):
+    """Return the 1-indexed lines of `path` ON DISK that `git diff HEAD --unified=0` marks
+    changed, or None when the git call itself fails.
+
+    `--unified=0` keeps a hunk header the only output for that hunk, so no untouched context
+    line is ever mistaken for a changed one. A pure deletion hunk has a new-side count of 0:
+    nothing was added, and its line number instead marks the point the deletion sits at. Both
+    the line before and the line after that point are counted as changed, so the block on
+    either side of a deleted line is still caught, whichever side the reported line prefers.
+    """
+    # `path` is always a realpath (see `_newer_than`), while `cwd` comes straight from the
+    # hook JSON and can hold a symlinked component, macOS's /tmp for one. relpath against the
+    # raw cwd would then walk back out through the realpath's own directories and land
+    # outside the repository. Resolving cwd first keeps both sides in the same form.
+    rel = os.path.relpath(path, os.path.realpath(cwd))
+    run = _run_git(cwd, ["diff", "HEAD", "--unified=0", "--", rel])
+    if run is None or run.returncode != 0:
+        return None
+    changed = set()
+    for line in run.stdout.splitlines():
+        m = HUNK_RE.match(line)
+        if not m:
+            continue
+        new_start = int(m.group(1))
+        new_count = int(m.group(2)) if m.group(2) is not None else 1
+        if new_count == 0:
+            changed.add(max(new_start, 1))
+            changed.add(new_start + 1)
+        else:
+            changed.update(range(new_start, new_start + new_count))
+    return changed
+
+
+def scope_for(cwd, path, untracked):
+    """Return the lines of `path` in scope for linting.
+
+    None means lint the whole file: `untracked` is True, so git has no baseline to diff
+    against. DROP_FILE means the git diff call failed: drop the file rather than widen to the
+    whole file, the same fail-closed rule `collect_markdown_targets` already applies to its
+    own git failures. Otherwise, a set of the lines every touched block spans.
+    """
+    if untracked:
+        return None
+    changed = git_diff_changed_lines(cwd, path)
+    if changed is None:
+        return DROP_FILE
+    if not changed:
+        return set()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            text = f.read()
+    except Exception:
+        return DROP_FILE
+    in_scope = set()
+    for start, end in paragraph_blocks(text):
+        if any(n in changed for n in range(start, end + 1)):
+            in_scope.update(range(start, end + 1))
+    return in_scope
+
+
 # ------------------------------------------------------------------ linting from disk
 
 def lint_files(paths, exclude):
-    """Return {path: [finding lines]} for the error-level findings of ste_lint.py on paths.
+    """Return {path: [finding dict]} for the error-level findings of ste_lint.py on paths.
 
     Every path here was already checked to exist and to be readable. That check runs before
     this call, not during it. If a path vanishes in the gap between the two, ste_lint.py
@@ -336,9 +482,12 @@ def lint_files(paths, exclude):
     for f in data.get("findings", []):
         if f.get("severity") != "error":
             continue
-        by_path.setdefault(f.get("path"), []).append(
-            "line %s: %s %s" % (f.get("line"), f.get("code"), f.get("message")))
+        by_path.setdefault(f.get("path"), []).append(f)
     return by_path
+
+
+def format_finding(f):
+    return "line %s: %s %s" % (f.get("line"), f.get("code"), f.get("message"))
 
 
 def main():
@@ -375,7 +524,7 @@ def main():
         return
 
     try:
-        targets = collect_markdown_targets(cwd, baseline)
+        targets, status_entries = collect_markdown_targets(cwd, baseline)
     except Exception:
         return
     if not targets:
@@ -398,18 +547,44 @@ def main():
     if not readable:
         return
 
+    # SCOPING. status_entries is None only when cwd is not a git work tree at all (a git
+    # failure inside a work tree already returned above, with an empty target list). With no
+    # git baseline to diff against, every survivor lints in full, the rule this hook already
+    # had before block-scoping existed. Inside a work tree, each survivor gets its own scope:
+    # None (untracked, lint in full), DROP_FILE (its git diff call failed, skip it), or the
+    # set of lines its changed blocks span.
+    scopes = {}
+    for resolved in readable:
+        if status_entries is None:
+            scopes[resolved] = None
+        else:
+            untracked = status_entries.get(resolved, "")[:2] == "??"
+            try:
+                scopes[resolved] = scope_for(cwd, resolved, untracked)
+            except Exception:
+                scopes[resolved] = DROP_FILE
+
+    lintable = [p for p in readable if scopes[p] is not DROP_FILE]
+    if not lintable:
+        return
+
     exclude = os.environ.get(EXCLUDE_VAR, "")
-    by_path = lint_files(readable, exclude)
+    by_path = lint_files(lintable, exclude)
     if not by_path:
         return
 
     lines = []
-    for resolved in readable:
+    for resolved in lintable:
         findings = by_path.get(resolved)
         if not findings:
             continue
+        scope = scopes[resolved]
+        if scope is not None:
+            findings = [f for f in findings if f.get("line") in scope]
+        if not findings:
+            continue
         lines.append("%s:" % os.path.basename(resolved))
-        lines.extend("  " + x for x in findings)
+        lines.extend("  " + format_finding(f) for f in findings)
     if not lines:
         return
 
