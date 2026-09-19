@@ -716,18 +716,42 @@ caseF1() {
   co="$work/caseF1-checkout"; cfg="$work/caseF1-cfg"; bare="$work/caseF1-origin.git"
   extra="$work/caseF1-extra"
   git init -q --bare "$bare"
+  # A bare repo's HEAD follows init.defaultBranch, which this machine may set to
+  # main but a GitHub runner leaves unset, defaulting to master. Force it, the
+  # same way force_main_branch already does for checkouts, so this case does not
+  # depend on the runner's git config.
+  git -C "$bare" symbolic-ref HEAD refs/heads/main
   make_checkout "$co" "# caseF1 content" "$bare"
   force_main_branch "$co"
   ( cd "$co" && git push -q origin main )
   # Advance origin two commits past the checkout's own main, from a second clone, so
-  # the checkout is behind by an exact, known count.
-  ( git clone -q "$bare" "$extra" \
+  # the checkout is behind by an exact, known count. Captured, not swallowed: a
+  # setup step whose exit status nobody reads can silently fail to build the state
+  # the case is about to judge the hook against.
+  extra_log=$( { git clone -q "$bare" "$extra" \
       && cd "$extra" && git config user.email t@example.com && git config user.name t \
       && echo a >> extra.txt && git add extra.txt && git commit -q -m extra1 \
       && echo b >> extra.txt && git add extra.txt && git commit -q -m extra2 \
-      && git push -q origin main ) >/dev/null 2>&1
+      && git push -q origin main ; } 2>&1 )
+  extra_rc=$?
   mkdir -p "$cfg"
   printf '@%s/CLAUDE.md\n' "$co" > "$cfg/CLAUDE.md"
+
+  # Precondition: verify the fixture actually built "checkout is 2 behind origin",
+  # by comparing the checkout's own main to the bare repo's main directly, never by
+  # asking the hook under test. A hook failure and a fixture failure must never be
+  # reported as the same thing.
+  co_main=$(cd "$co" && git rev-parse main 2>/dev/null)
+  bare_main=$(cd "$bare" && git rev-parse main 2>/dev/null)
+  behind_built=$(cd "$bare" && git rev-list --count "$co_main..$bare_main" 2>/dev/null)
+
+  if [ "$extra_rc" -ne 0 ]; then
+    bad "$name" "FIXTURE failed to advance origin: $extra_log"
+    return
+  elif [ "$behind_built" != "2" ]; then
+    bad "$name" "FIXTURE did not build the behind-by-2 state (checkout vs origin main differ by [$behind_built])"
+    return
+  fi
 
   out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/cF1err)
   rc=$?
@@ -748,6 +772,7 @@ caseF2() {
   name="caseF2: pointer on main and up to date with origin/main prints no stale line"
   co="$work/caseF2-checkout"; cfg="$work/caseF2-cfg"; bare="$work/caseF2-origin.git"
   git init -q --bare "$bare"
+  git -C "$bare" symbolic-ref HEAD refs/heads/main
   make_checkout "$co" "# caseF2 content" "$bare"
   force_main_branch "$co"
   ( cd "$co" && git push -q origin main )
@@ -774,6 +799,7 @@ caseF3() {
   name="caseF3: pointer on a branch other than main still reports the branch, never fetches"
   co="$work/caseF3-checkout"; cfg="$work/caseF3-cfg"; bare="$work/caseF3-origin.git"
   git init -q --bare "$bare"
+  git -C "$bare" symbolic-ref HEAD refs/heads/main
   make_checkout "$co" "# caseF3 content" "$bare"
   ( cd "$co" && git push -q origin HEAD:main && git checkout -q -b feature-branch )
   mkdir -p "$cfg"
@@ -842,6 +868,7 @@ caseF6() {
   name="caseF6: a fetch killed by the timeout reports freshness unknown, not silence"
   co="$work/caseF6-checkout"; cfg="$work/caseF6-cfg"; bare="$work/caseF6-origin.git"
   git init -q --bare "$bare"
+  git -C "$bare" symbolic-ref HEAD refs/heads/main
   make_checkout "$co" "# caseF6 content" "$bare"
   force_main_branch "$co"
   ( cd "$co" && git push -q origin main )
