@@ -1390,6 +1390,13 @@ CONFIG_FROZEN_DIRS = (
     os.path.normcase("hooks"),
     os.path.normcase("lint"),
     os.path.normcase("agents"),
+    # `state` holds the baseline `hooks/config_watch.py` restores a reverted file from. A session
+    # that could rewrite the baseline could launder a cap lift into it, so the store is frozen on
+    # the same terms as the hooks themselves. Rule 7 needs only the PATH, never the value, so this
+    # covers every shape rule 8 misses for want of a readable value: `cp`, `mv` and `sed -i`
+    # included. The two shapes that hide the path from PreToolUse, `python3 -c` and a script file,
+    # are not covered here and `config_watch.py` reports a lost baseline as unknown, never clear.
+    os.path.normcase("state"),
 )
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
 PROJECT_FROZEN_DIR = "/.claude/hooks/"
