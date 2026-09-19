@@ -44,6 +44,48 @@ SUITE = os.path.join(HERE, "test_guard.py")
 # shared-tree, machine-wide kill, live-stream, waiter, force push, destructive
 # delete, env-file, merge-main, frozen-path, the redirect strip, and the log.
 MUTATIONS = [
+    # THE TWO ROOTS. `--work-tree` names whose FILES a call discards, and `--git-dir` names whose
+    # HEAD it moves. Each mutant makes one of them unread, or makes one root answer the other's
+    # question.
+    ("work-tree: the tree option goes unread, so rule 1 judges the wrong tree",
+     'GIT_WORK_TREE_RE = re.compile(r"--work-tree(?:=|\\s+)([\'\\"]?)([^\'\\";&|\\s]+)\\1")',
+     'GIT_WORK_TREE_RE = re.compile(r"--never-a-real-option(\\A\\Z)(\\A\\Z)")'),
+    ("pointer-head: the git directory option goes unread",
+     'GIT_DIR_RE = re.compile(r"--git-dir(?:=|\\s+)([\'\\"]?)([^\'\\";&|\\s]+)\\1")',
+     'GIT_DIR_RE = re.compile(r"--never-a-real-option(\\A\\Z)(\\A\\Z)")'),
+    ("pointer-head: the HEAD root falls back through the work tree, naming the wrong HEAD",
+     '        return run_dir\n    return _absolute(match.group(2), run_dir)',
+     '        return command_root(cmd, shell_cwd)\n    return _absolute(match.group(2), run_dir)'),
+    ("pointer-head: read the shared common git directory, so a worktree reads as its primary",
+     '        answer = _git(where, "rev-parse", "--absolute-git-dir")',
+     '        answer = _git(where, "rev-parse", "--git-common-dir")'),
+    # RULE 1b, the pointer checkout's HEAD. Each mutant breaks one arm: the act test, the tree
+    # test, the main exemption, the two path-operation arms, the `switch` subcommand, the top-level
+    # read, and the pointer parse.
+    ("pointer-head: no command ever moves HEAD",
+     'def head_move_target(subcommand: str, args) -> str:',
+     'def head_move_target(subcommand: str, args) -> str:\n    return ""'),
+    ("pointer-head: call every tree the pointer checkout",
+     '    return mine == theirs',
+     '    return True'),
+    ("pointer-head: lose the exemption for a move to main",
+     '    if target == PROTECTED_BASE:\n        return ""',
+     '    if target == "no-such-branch":\n        return ""'),
+    ("pointer-head: read a double dash as a branch",
+     '    if "--" in args:\n        return ""\n    switching = subcommand == "switch"',
+     '    if False:\n        return ""\n    switching = subcommand == "switch"'),
+    ("pointer-head: forget the path-operation flags",
+     'CHECKOUT_PATH_FLAGS = {"--ours", "--theirs", "--patch", "-p", "--overlay", "--no-overlay"}',
+     'CHECKOUT_PATH_FLAGS = set()'),
+    ("pointer-head: watch checkout and not switch",
+     'HEAD_MOVE_SUBCOMMANDS = ("checkout", "switch")',
+     'HEAD_MOVE_SUBCOMMANDS = ("checkout",)'),
+    ("pointer-head: compare the directory as written, not the git directory git reports",
+     '    mine = git_dir_of(root)',
+     '    mine = os.path.normcase(os.path.realpath(root)) if root else ""'),
+    ("pointer-head: a pointer line that never parses",
+     'POINTER_LINE = re.compile(r"^@(.+)/CLAUDE\\.md[ \\t]*$", re.MULTILINE)',
+     'POINTER_LINE = re.compile(r"^@@(.+)/CLAUDE\\.md[ \\t]*$", re.MULTILINE)'),
     ("shared-tree: drop the git clean arm",
      '        if subcommand == "clean" and clean_deletes_files(args):',
      '        if False and clean_deletes_files(args):'),
