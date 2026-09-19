@@ -26,6 +26,37 @@ CLOUD=0
 
 log() { printf 'claude-settings: %s\n' "$*"; }
 
+# Exact "owner/name" match for a git origin URL against $REPO, not a substring test:
+# strip a trailing slash and ".git", fold the ssh ":" separator to "/", then compare
+# the last two path segments. Matches both
+#   https://github.com/shivinate7/claude-settings.git
+#   git@github.com:shivinate7/claude-settings.git
+# and rejects any repo whose origin merely contains "$REPO" as a substring, such as
+# .../shivinate7/claude-settings-evil.git or .../evil-shivinate7/claude-settings.git.
+origin_matches_repo() {
+  o="${1%/}"
+  o="${o%.git}"
+  o=$(printf '%s' "$o" | tr ':' '/')
+  o=$(printf '%s' "$o" | awk -F/ '{ if (NF >= 2) print $(NF-1) "/" $NF; else print "" }')
+  [ "$o" = "$REPO" ]
+}
+
+# A candidate directory is this repo's checkout only if: it is inside a git worktree,
+# that worktree's origin matches $REPO exactly, and it carries the two files install.sh
+# always needs. Prints the toplevel and returns 0 on match, prints nothing and returns
+# 1 otherwise.
+checkout_at() {
+  cand="$1"
+  [ -n "$cand" ] || return 1
+  top=$(git -C "$cand" rev-parse --show-toplevel 2>/dev/null) || return 1
+  [ -n "$top" ] || return 1
+  origin=$(git -C "$top" remote get-url origin 2>/dev/null) || return 1
+  origin_matches_repo "$origin" || return 1
+  [ -f "$top/CLAUDE.md" ] || return 1
+  [ -f "$top/settings.json" ] || return 1
+  printf '%s' "$top"
+}
+
 # Locate the source files: the clone this script lives in, else fetch from GitHub.
 SCRIPT_DIR=""
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
@@ -49,18 +80,29 @@ else
   SRC=""
   for cand in "${CLAUDE_PROJECT_DIR:-}" "$PWD"; do
     [ -n "$cand" ] || continue
-    top=$(git -C "$cand" rev-parse --show-toplevel 2>/dev/null) || continue
-    [ -n "$top" ] || continue
-    origin=$(git -C "$top" remote get-url origin 2>/dev/null) || continue
-    case "$origin" in
-      *"$REPO"*) : ;;
-      *) continue ;;
-    esac
-    [ -f "$top/CLAUDE.md" ] || continue
-    [ -f "$top/settings.json" ] || continue
-    SRC="$top"
-    break
+    t=$(checkout_at "$cand") && { SRC="$t"; break; }
   done
+
+  # cwd is not documented to be the checkout for every caller (setup script, SessionStart
+  # hook), so don't rest detection on $PWD alone: fall back to a bounded, one-level-deep
+  # look under the container's usual home directories. Cheap on purpose, since this runs
+  # at every session start: no recursive find, stop at the first exact origin match.
+  if [ -z "$SRC" ]; then
+    # Search roots are fixed in production; a test harness may override them (via
+    # CLAUDE_SETTINGS_SEARCH_ROOTS, space-separated) to avoid scanning this container's
+    # own real checkouts under /home/user or /root.
+    for root in ${CLAUDE_SETTINGS_SEARCH_ROOTS:-/home/user /root "$HOME"}; do
+      [ -d "$root" ] || continue
+      for child in "$root"/*; do
+        [ -d "$child/.git" ] || continue
+        t=$(checkout_at "$child") && { SRC="$t"; break 2; }
+      done
+    done
+  fi
+  if [ -z "$SRC" ]; then
+    t=$(checkout_at "$HOME/claude-settings") && SRC="$t"
+  fi
+
   [ -n "$SRC" ] && log "found existing checkout of $REPO at $SRC; using it as source"
 fi
 

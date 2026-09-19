@@ -28,17 +28,44 @@ work=$(mktemp -d)
 cleanup() { rm -rf "$work"; }
 trap cleanup EXIT
 
-# Make a bare-bones fake checkout of the repo at $1, with a fake origin remote matching
-# $REPO, and CLAUDE.md/settings.json content of our choosing.
+# Make a bare-bones fake checkout of the repo at $1, with CLAUDE.md/settings.json content
+# of our choosing. $3, if given, is the origin URL (default: the legitimate https form);
+# pass an adversarial or alternate-form origin to drive the origin-matching cases.
 make_checkout() {
   dir="$1"
   md_body="$2"
+  origin="${3:-https://github.com/shivinate7/claude-settings.git}"
   mkdir -p "$dir/hooks" "$dir/agents" "$dir/lint"
   ( cd "$dir" && git init -q && git config user.email t@example.com && git config user.name t \
-      && git remote add origin https://github.com/shivinate7/claude-settings.git )
+      && git remote add origin "$origin" )
   printf '%s\n' "$md_body" > "$dir/CLAUDE.md"
   printf '{}\n' > "$dir/settings.json"
   ( cd "$dir" && git add -A && git commit -q -m init )
+}
+
+# A curl stub for the fetch-fallback path: writes minimal fixtures instead of hitting
+# GitHub. Installed at $1/curl.
+make_curl_stub() {
+  stub_bin="$1"
+  mkdir -p "$stub_bin"
+  cat > "$stub_bin/curl" <<'EOF'
+#!/bin/sh
+# usage: curl -fsSL <url> -o <out>
+out=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-o" ]; then out="$a"; fi
+  prev="$a"
+done
+[ -n "$out" ] || exit 1
+case "$*" in
+  *CLAUDE.md*) printf '# fallback mirror CLAUDE.md\n' > "$out" ;;
+  *settings.json*) printf '{}\n' > "$out" ;;
+  *) printf '# stub\n' > "$out" ;;
+esac
+exit 0
+EOF
+  chmod +x "$stub_bin/curl"
 }
 
 # ---- Case 1: piped cloud install, checkout present -> SRC is the checkout ----------------
@@ -75,28 +102,14 @@ case2() {
   mkdir -p "$scratch"
 
   # Stub curl: instead of hitting GitHub, write minimal local fixtures.
-  stub_bin="$work/case2-bin"; mkdir -p "$stub_bin"
-  cat > "$stub_bin/curl" <<'EOF'
-#!/bin/sh
-# usage: curl -fsSL <url> -o <out>
-out=""
-prev=""
-for a in "$@"; do
-  if [ "$prev" = "-o" ]; then out="$a"; fi
-  prev="$a"
-done
-[ -n "$out" ] || exit 1
-case "$*" in
-  *CLAUDE.md*) printf '# fallback mirror CLAUDE.md\n' > "$out" ;;
-  *settings.json*) printf '{}\n' > "$out" ;;
-  *) printf '# stub\n' > "$out" ;;
-esac
-exit 0
-EOF
-  chmod +x "$stub_bin/curl"
+  stub_bin="$work/case2-bin"
+  make_curl_stub "$stub_bin"
 
+  # Disable the bounded root search for this case: this container's own /home/user is a
+  # real matching checkout, and without this override the search would find it instead
+  # of exercising the fallback this case is about.
   out=$(cd "$scratch" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
-        GIT_CEILING_DIRECTORIES="$scratch" \
+        GIT_CEILING_DIRECTORIES="$scratch" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
         bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 
@@ -134,6 +147,90 @@ case3() {
     bad "$name" "install.sh exited $rc: $out"
   elif [ "$pointer" != "$co" ]; then
     bad "$name" "pointer target [$pointer] != clone [$co]"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+# ---- Origin-matching cases: exact owner/name, not substring ------------------------------
+# Each drives a piped cloud install with a checkout at the given origin, and asserts
+# whether that checkout is accepted (SRC = checkout, no fetch) or rejected (falls through
+# to the fetch-fallback mirror, curl stubbed so nothing hits the network).
+origin_case() {
+  case_name="$1"; origin_url="$2"; should_match="$3"   # should_match: yes|no
+
+  h=$(mktemp -d); cfg="$h/.claude-cfg"
+  co="$work/origin-$(printf '%s' "$case_name" | tr -c 'a-zA-Z0-9' '-')-checkout"
+  make_checkout "$co" "# origin case content" "$origin_url"
+
+  stub_bin="$work/origin-$(printf '%s' "$case_name" | tr -c 'a-zA-Z0-9' '-')-bin"
+  make_curl_stub "$stub_bin"
+
+  # Same reason as case2: keep this container's real /home/user checkout out of the
+  # rejection cases, so a wrongly-permissive origin match can't be masked by the search.
+  out=$(cd "$co" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+        CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+  rc=$?
+
+  pointer=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$cfg/CLAUDE.md" 2>/dev/null | head -n1)
+  case "$pointer" in "~"/*) pointer="$h${pointer#\~}";; esac
+
+  if [ $rc -ne 0 ]; then
+    bad "$case_name" "install.sh exited $rc: $out"
+  elif [ "$should_match" = "yes" ]; then
+    if [ "$pointer" = "$co" ]; then ok "$case_name"; else
+      bad "$case_name" "expected checkout accepted, pointer=[$pointer] checkout=[$co]"
+    fi
+  else
+    if [ "$pointer" = "$co" ]; then
+      bad "$case_name" "adversarial origin [$origin_url] was wrongly accepted as shivinate7/claude-settings"
+    elif [ "$pointer" = "$h/claude-settings" ] && [ -f "$h/claude-settings/CLAUDE.md" ]; then
+      ok "$case_name"
+    else
+      bad "$case_name" "expected fallback mirror, got pointer=[$pointer]"
+    fi
+  fi
+  rm -rf "$h"
+}
+
+case_origins() {
+  # REPO is shivinate7/claude-settings.
+  origin_case "origin: https with .git matches"        "https://github.com/shivinate7/claude-settings.git" yes
+  origin_case "origin: https without .git matches"      "https://github.com/shivinate7/claude-settings"     yes
+  origin_case "origin: ssh with .git matches"           "git@github.com:shivinate7/claude-settings.git"     yes
+  origin_case "origin: ssh without .git matches"        "git@github.com:shivinate7/claude-settings"         yes
+  origin_case "origin: name-suffix-evil does not match" "https://github.com/shivinate7/claude-settings-evil.git" no
+  origin_case "origin: owner-prefix-evil does not match" "https://github.com/evil-shivinate7/claude-settings.git" no
+  origin_case "origin: owner-notshivinate7 does not match" "https://github.com/notshivinate7/claude-settings.git" no
+}
+
+# ---- Case 7: no $CLAUDE_PROJECT_DIR, cwd not the checkout -> bounded root search finds it --
+case7() {
+  name="case7: no CLAUDE_PROJECT_DIR, cwd elsewhere, checkout under \$HOME is still found"
+  h=$(mktemp -d); cfg="$h/.claude-cfg"
+  co="$h/some-project-dir"     # one level under $HOME, as the bounded search expects
+  make_checkout "$co" "# case7 content"
+  notacheckout="$work/case7-elsewhere"; mkdir -p "$notacheckout"
+
+  # Root list narrowed to the temp $h for this case, standing in for "$HOME": production
+  # always includes $HOME itself, this just avoids also scanning the container's real
+  # /home/user and /root (which would pass anyway, but would not prove this case's point).
+  out=$(cd "$notacheckout" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+        GIT_CEILING_DIRECTORIES="$notacheckout" CLAUDE_SETTINGS_SEARCH_ROOTS="$h" \
+        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+  rc=$?
+
+  pointer=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$cfg/CLAUDE.md" 2>/dev/null | head -n1)
+  case "$pointer" in "~"/*) pointer="$h${pointer#\~}";; esac
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ "$pointer" != "$co" ]; then
+    bad "$name" "pointer target [$pointer] != checkout [$co] (cwd-only detection would miss this)"
+  elif [ -d "$h/claude-settings" ]; then
+    bad "$name" "$h/claude-settings was created; a mirror should not have been fetched"
   else
     ok "$name"
   fi
@@ -216,6 +313,8 @@ case6() {
 case1
 case2
 case3
+case_origins
+case7
 case4
 case5
 case6
