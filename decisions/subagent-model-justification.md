@@ -54,7 +54,10 @@ expression, a template literal, or a value from `args`.
 A `PreToolUse` hook cannot run the script. It cannot know what a variable or
 an expression will resolve to.
 
-So the gate reads `model:` by shape, not only by literal value.
+So the gate reads `model:` by shape, not only by literal value. The key side
+matches a bare, double-quoted, or single-quoted `model`, with `:` or `=` as
+the separator. Member access counts too: `opts.model = ...` and
+`opts["model"] = ...` both match.
 
 * A quoted literal below the bar: allow.
 * A quoted literal above the bar: needs the marker. Same as an Agent call.

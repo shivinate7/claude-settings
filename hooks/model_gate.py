@@ -80,13 +80,18 @@ _CONTEXT_SUFFIX_RE = re.compile(r"\[[^\]]*\]$")
 # Haiku shapes, once `_normalize_model_id` has stripped an optional vendor prefix and
 # an optional trailing context-window suffix. An id that matches none of these shapes
 # is unrecognised, not assumed cheap: it needs the marker like any above-bar id.
+#
+# re.ASCII keeps `\d` to the ASCII digits 0-9. Without it `\d` is Unicode-aware and
+# also matches a fullwidth digit such as U+FF15 (`５`), so `claude-sonnet-５` would
+# read as a below-bar version number. The gate must judge the id's own text, not a
+# look-alike a Unicode digit lets through.
 _BELOW_BAR_RE = re.compile(
     r"""^(?:
         (?:sonnet|haiku)                                   # bare family name
         |claude-(?:sonnet|haiku)-\d+(?:-\d+)*(?:-\d{8})?    # claude-sonnet-<version>[-<date>]
         |claude-\d+(?:-\d+)*-(?:sonnet|haiku)(?:-\d{8})?    # claude-<version>-sonnet[-<date>]
     )$""",
-    re.VERBOSE,
+    re.VERBOSE | re.ASCII,
 )
 
 # A second family token anywhere in the id overrides a shape match. An alias or a
@@ -188,7 +193,19 @@ def judge_against_text(model: str, text: str) -> None:
 # text at all: a line the script itself comments out (`//` starts the line), and
 # the script's own `export const meta = {...}` header, whose `phases[].model`
 # names a phase's model override, not an agent call.
-SCRIPT_MODEL_RE = re.compile(r"""\bmodel\b\s*:\s*([^,;}\n]+)""")
+#
+# The key side alone has three shapes that all name the same option: bare
+# `model`, double-quoted `"model"`, and single-quoted `'model'`, each optionally
+# followed by a closing `]` for member-index access (`opts["model"] = ...`).
+# The separator is `:` (an object literal) or `=` (a plain or member
+# assignment, `opts.model = ...`). Matching the key by shape, not by one fixed
+# spelling, is the fix for the bypass a quoted or member-assigned key opened:
+# `SCRIPT_MODEL_RE` used to require the colon to sit right after the bare word
+# `model`, so `{"model": "claude-opus-5"}` and `opts.model = "claude-opus-5"`
+# never matched at all.
+SCRIPT_MODEL_RE = re.compile(
+    r"""(?:\bmodel\b|(?P<q>['"])model(?P=q))\s*\]?\s*[:=]\s*(?P<value>[^,;}\n]+)"""
+)
 
 _META_BLOCK_RE = re.compile(r"\bmeta\s*=\s*\{")
 
@@ -231,7 +248,7 @@ def script_models(text: str):
         if line.strip().startswith("//"):
             continue
         for match in SCRIPT_MODEL_RE.finditer(line):
-            value = re.sub(r"//.*$", "", match.group(1)).strip()
+            value = re.sub(r"//.*$", "", match.group("value")).strip()
             literal_match = _QUOTED_LITERAL_RE.match(value)
             yield value, (literal_match.group(2) if literal_match else None)
 
