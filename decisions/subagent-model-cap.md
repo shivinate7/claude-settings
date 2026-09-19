@@ -162,11 +162,33 @@ task that is measuring it. That check did not run here. Removing the grant
 file and spawning a third subagent read `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`
 again, as expected since the grant was never live.
 
-The merge rule for `env` therefore stays unmeasured. What this run adds: the
-ask fires on the documented payload, and a written grant does not apply
-without a fresh session. What still needs a fresh local session with the
-grant file already in place before that session starts: whether the project
+The merge rule for `env` therefore stays unmeasured after the second run. What
+that run adds: the ask fires on the documented payload. A written grant does
+not apply without a fresh session. What still needs a fresh local session,
+with the grant file in place before that session starts: whether the project
 file then wins.
+
+A third run closed that gap. It used a genuinely fresh OS process, not a new
+Code-tab session. The check ran `claude -p` from a new terminal tab, with the
+grant file already in `.claude/settings.local.json`. That `claude -p` process
+spawned one subagent. The subagent's task: run
+`printenv CLAUDE_CODE_SUBAGENT_MODEL` and self-report which model it ran as.
+Run twice, independently, the result was consistent. `printenv` inside the
+subagent's own shell printed `opus`. The subagent identified itself as Opus
+5. The user settings file caps the default at Sonnet. An Opus run only
+happens if the project file's override reached the subagent. It did.
+
+`CLAUDE_CODE_SUBAGENT_MODEL_FORCE` itself did not show up under `printenv` in
+the subagent's shell. That does not weaken the finding. The model outcome is
+the direct evidence the force worked. A Sonnet default would not otherwise
+produce an Opus run. The likely reason: the harness consumes `FORCE`
+internally, to decide whether to override. It does not export `FORCE` into
+the tool shell the way it exports the resolved model name.
+
+The merge rule for `env` is now confirmed for this variable. A project-local
+`.claude/settings.local.json` overrides the user-settings value, in a fresh
+process. The grant above does not depend on this finding either way. It sets
+both keys regardless of merge order.
 
 ## No per-call prompt is possible under the cap
 
