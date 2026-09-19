@@ -859,6 +859,21 @@ class MdSweepTests(unittest.TestCase):
         run = self.run_sweep(include_timestamp=False)
         self.assert_no_block(run)
 
+    def test_58_broken_git_dir_inside_real_work_tree_no_block(self):
+        # A real work tree, `.git` present on disk, but every git subprocess call fails: a
+        # broken `GIT_DIR` reproduces a stale `index.lock` or any other git-side failure. The
+        # file is clean against HEAD, with a freshly touched mtime, so it must not block
+        # whether git works or not. Before the fix this branch widened to a plain mtime-only
+        # walk on git failure, and a clean-but-new file wrongly blocked.
+        self._init_git()
+        self._write_md("notes.md", self.ERROR_TEXT)
+        self._git_commit_all()
+        self._write_md("notes.md", self.ERROR_TEXT)  # mtime refreshed, content unchanged
+        env = dict(os.environ)
+        env["GIT_DIR"] = os.path.join(self.tmp.name, "definitely-missing", ".git")
+        run = self.run_sweep(env=env)
+        self.assert_no_block(run)
+
 
 if __name__ == "__main__":
     unittest.main()
