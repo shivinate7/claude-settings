@@ -26,19 +26,44 @@ CLOUD=0
 
 log() { printf 'claude-settings: %s\n' "$*"; }
 
-# Exact "owner/name" match for a git origin URL against $REPO, not a substring test:
-# strip a trailing slash and ".git", fold the ssh ":" separator to "/", then compare
-# the last two path segments. Matches both
-#   https://github.com/shivinate7/claude-settings.git
-#   git@github.com:shivinate7/claude-settings.git
-# and rejects any repo whose origin merely contains "$REPO" as a substring, such as
-# .../shivinate7/claude-settings-evil.git or .../evil-shivinate7/claude-settings.git.
+# Exact match for a git origin URL against $REPO on github.com, not a substring test and
+# not host-agnostic. Trims trailing whitespace/newline and a trailing slash, drops a
+# trailing ".git", then requires the host to be exactly "github.com" and the remaining
+# path to be exactly "$REPO" (not merely to end with it). Matches:
+#   https://github.com/shivinate7/claude-settings.git   (and without .git)
+#   git@github.com:shivinate7/claude-settings.git       (and without .git)
+#   ssh://git@github.com:22/shivinate7/claude-settings.git
+# and rejects a different host (gitlab.com), extra leading path segments
+# (github.com/mirror/shivinate7/claude-settings), and anything with no recognizable
+# host at all (a bare relative path, a file:// URL). Case is not folded: an origin
+# spelled "GITHUB.COM" is rejected too, the safe direction for a mismatch.
 origin_matches_repo() {
-  o="${1%/}"
+  o=$(printf '%s' "$1" | tr -d '\r\n')
+  o=$(printf '%s' "$o" | sed -e 's/[[:space:]]*$//')
+  o="${o%/}"
   o="${o%.git}"
-  o=$(printf '%s' "$o" | tr ':' '/')
-  o=$(printf '%s' "$o" | awk -F/ '{ if (NF >= 2) print $(NF-1) "/" $NF; else print "" }')
-  [ "$o" = "$REPO" ]
+  o="${o%/}"
+
+  case "$o" in
+    *://*)
+      rest="${o#*://}"
+      rest="${rest#*@}"
+      host="${rest%%/*}"
+      host="${host%%:*}"
+      path="${rest#*/}"
+      ;;
+    *@*:*)
+      rest="${o#*@}"
+      host="${rest%%:*}"
+      path="${rest#*:}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  [ "$host" = "github.com" ] || return 1
+  [ "$path" = "$REPO" ]
 }
 
 # A candidate directory is this repo's checkout only if: it is inside a git worktree,

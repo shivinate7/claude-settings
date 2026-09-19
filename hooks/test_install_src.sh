@@ -204,6 +204,10 @@ case_origins() {
   origin_case "origin: name-suffix-evil does not match" "https://github.com/shivinate7/claude-settings-evil.git" no
   origin_case "origin: owner-prefix-evil does not match" "https://github.com/evil-shivinate7/claude-settings.git" no
   origin_case "origin: owner-notshivinate7 does not match" "https://github.com/notshivinate7/claude-settings.git" no
+  origin_case "origin: ssh with explicit port matches"      "ssh://git@github.com:22/shivinate7/claude-settings.git" yes
+  origin_case "origin: wrong host (gitlab.com) does not match" "https://gitlab.com/shivinate7/claude-settings.git" no
+  origin_case "origin: extra leading path segment does not match" "https://github.com/mirror/shivinate7/claude-settings.git" no
+  origin_case "origin: bare path with no host does not match" "file:///local/shivinate7/claude-settings" no
 }
 
 # ---- Case 7: no $CLAUDE_PROJECT_DIR, cwd not the checkout -> bounded root search finds it --
