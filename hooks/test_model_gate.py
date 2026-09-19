@@ -13,6 +13,14 @@ The masking-regression case is the one that must fail against the OLD grep hook:
 a prompt that quotes `"model": "sonnet"` while `tool_input.model` is an opus id.
 The old hook greps the payload text and reads the quoted decoy. This gate parses
 JSON and reads `tool_input.model` by key, so it must still deny.
+
+The allowlist-regression case (`claude-opus-4-sonnet-alias`) is the one that must
+fail against the 8d30693 hook: that hook's `is_above_sonnet` was a substring test,
+so an id merely containing "sonnet" passed with no justification, opus family or
+not. Point GATE_UNDER_TEST at a copy of that old file to see it fail there and
+pass here:
+
+    GATE_UNDER_TEST=/path/to/old/model_gate.py python hooks/test_model_gate.py
 """
 
 import json
@@ -108,6 +116,95 @@ add("workflow script names opus, with marker in a comment -> ask",
 
 add("workflow script names sonnet only -> allow",
     workflow(script='const cfg = { model: "%s" };' % SONNET),
+    {"decision": "allow"})
+
+# --------------------------------------------------------------------------- Change 1: is_above_sonnet allowlist
+
+BELOW_BAR_IDS = [
+    "sonnet",
+    "haiku",
+    "claude-sonnet-5",
+    "claude-haiku-4-5-20251001",
+    "claude-3-5-sonnet-20241022",
+    "us.anthropic.claude-sonnet-5",
+    "anthropic/claude-sonnet-5",
+    "claude-sonnet-5[1m]",
+]
+
+ABOVE_BAR_IDS = [
+    "claude-opus-5",
+    "claude-fable-5-1",
+    "claude-opus-4-sonnet-alias",
+    "sonnet-opus",
+    "gpt-5",
+    "some-unknown-model",
+    "claude-sonnet",  # no version: an unrecognised shape, not assumed cheap
+]
+
+for model_id in BELOW_BAR_IDS:
+    add("allowlist: %r is below the bar -> allow, no marker needed" % model_id,
+        agent(model=model_id, prompt="Do the task."),
+        {"decision": "allow"})
+
+for model_id in ABOVE_BAR_IDS:
+    add("allowlist: %r is above the bar -> deny without a marker" % model_id,
+        agent(model=model_id, prompt="Do the task."),
+        {"decision": "deny", "reason_excludes": [model_id]})
+
+# This is the case that must fail against the 8d30693 hook: its substring test let
+# "sonnet" anywhere in the id pass, opus family or not. See the module docstring
+# for how to run this file against a copy of the old hook.
+add("allowlist regression: claude-opus-4-sonnet-alias denies although it contains 'sonnet'",
+    agent(model="claude-opus-4-sonnet-alias", prompt="Do the task."),
+    {"decision": "deny", "reason_excludes": ["claude-opus-4-sonnet-alias"]})
+
+add("allowlist: above-bar id with a valid marker -> ask",
+    agent(model="claude-opus-4-sonnet-alias", prompt="Do the task.\n" + GOOD_MARKER),
+    {"decision": "ask", "reason_includes": ["needs deep multi-file refactor reasoning"]})
+
+# --------------------------------------------------------------------------- Change 2: Workflow shape test
+
+add("workflow shape: quoted literal below the bar -> allow",
+    workflow(script='agent(prompt, { model: "%s" })' % SONNET),
+    {"decision": "allow"})
+
+add("workflow shape: quoted literal above the bar, no marker -> deny",
+    workflow(script='agent(prompt, { model: "%s" })' % OPUS),
+    {"decision": "deny", "reason_excludes": [OPUS]})
+
+add("workflow shape: quoted literal above the bar, with marker -> ask",
+    workflow(script='agent(prompt, { model: "%s" })\n// %s' % (OPUS, GOOD_MARKER)),
+    {"decision": "ask", "reason_includes": ["needs deep multi-file refactor reasoning"]})
+
+add("workflow shape: variable value, no marker -> deny (unprovable, not allowed by default)",
+    workflow(script="const M = '%s'\nagent(prompt, { model: M })" % OPUS),
+    {"decision": "deny"})
+
+add("workflow shape: variable value, with marker -> ask",
+    workflow(script=(
+        "const M = '%s'\n"
+        "// %s\n"
+        "agent(prompt, { model: M })" % (OPUS, GOOD_MARKER)
+    )),
+    {"decision": "ask", "reason_includes": ["needs deep multi-file refactor reasoning"]})
+
+add("workflow shape: template literal value -> deny (unprovable)",
+    workflow(script="agent(prompt, { model: `claude-${tier}` })"),
+    {"decision": "deny"})
+
+add("workflow shape: a `//` commented line naming opus and nothing else -> allow",
+    workflow(script='// agent(prompt, { model: "%s" })' % OPUS),
+    {"decision": "allow"})
+
+add("workflow shape: meta block's phase model override is not an agent option -> allow",
+    workflow(script=(
+        "export const meta = {\n"
+        "  name: 'x',\n"
+        "  description: 'y',\n"
+        "  phases: [{ title: 'Scan', model: '%s' }],\n"
+        "}\n"
+        "agent('hi')" % OPUS
+    )),
     {"decision": "allow"})
 
 
