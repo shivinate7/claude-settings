@@ -30,7 +30,7 @@ bad() { FAIL=$((FAIL + 1)); printf 'FAIL - %s: %s\n' "$1" "$2"; }
 # names /private/var/folders/.... Resolving every temp dir to its physical path right
 # after creating it means every path built from it already matches what install.sh will
 # write, with no separate resolve step needed at each comparison.
-realpwd() { printf "%s\n" "$1"; }  # TEMP: reintroduce the symlink bug
+realpwd() { ( cd "$1" 2>/dev/null && pwd -P ); }
 
 work=$(mktemp -d); work=$(realpwd "$work")
 cleanup() { rm -rf "$work"; }
