@@ -42,7 +42,7 @@ CASES = []
 
 
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
-        session=None, carries=(), **tool_input):
+        session=None, carries=(), config=None, **tool_input):
     """Register one case.
 
     `carries` names fragments the printed reason MUST hold, which is how a case pins what an
@@ -62,14 +62,17 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "env_path": env_path,
         "session": session,
         "carries": (carries,) if isinstance(carries, str) else tuple(carries),
+        # The config directory the case runs against. It decides where the global rules file is
+        # read from, so a pointer case names its own and every other case keeps the default.
+        "config": config,
         "tool_input": tool_input,
     })
 
 
 def sh(name, command, expected, rule=None, tool="Bash", cwd=None, env_path=None, session=None,
-       carries=()):
+       carries=(), config=None):
     add(name, expected, rule=rule, tool=tool, cwd=cwd, env_path=env_path, session=session,
-        carries=carries, command=command)
+        carries=carries, config=config, command=command)
 
 
 # --------------------------------------------------------------------------- the fixtures
@@ -100,6 +103,16 @@ PRIVREPO = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "priv")
 GHMAIN = os.path.join(ROOT, "ghmain")      # a fake command line tool answering "main"
 GHDEV = os.path.join(ROOT, "ghdev")        # the same, answering "dev"
 GHNONE = os.path.join(ROOT, "ghnone")      # an empty directory, so the tool is missing
+# THE POINTER CHECKOUT. `PTRCFG` is a config directory whose global rules file points at
+# `PTRMAIN`, which stands in for the machine's primary checkout: the one every session runs its
+# hooks and its lint from. `PTRWT` is a real linked worktree of it, which must stay allowed.
+# `PTRBADCFG` and `PTRGONECFG` are the two fail-open shapes, and `PTRNOCFG` holds no rules file.
+PTRCFG = os.path.join(ROOT, "ptrcfg")
+PTRMAIN = os.path.join(ROOT, "ptrmain")
+PTRWT = os.path.join(ROOT, "ptrlane")
+PTRBADCFG = os.path.join(ROOT, "ptrbadcfg")
+PTRGONECFG = os.path.join(ROOT, "ptrgonecfg")
+PTRNOCFG = os.path.join(ROOT, "ptrnocfg")
 
 
 def slash(path):
@@ -219,6 +232,21 @@ def _require_stash(where, count):
         sys.exit(
             "fixture setup failed in build_fixtures: %r was built with %d stash entries, and "
             "git stash list shows %d: %r" % (where, count, len(lines), lines)
+        )
+
+
+def _require_pointer_branch(where, branch):
+    """Stop the suite unless `where` is really checked out on `branch`.
+
+    The allowed case below is a move TO `main`, and the refused cases are moves away from it. A
+    fixture sitting on some other branch would answer the same decisions for a reason the cases
+    were not built to prove, so the branch is read back with git itself.
+    """
+    head = run_vcs(where, "rev-parse", "--abbrev-ref", "HEAD")
+    if head.returncode != 0 or head.stdout.strip() != branch:
+        sys.exit(
+            "fixture setup failed in build_fixtures: %r was built on %r, and git answers %r. "
+            "stderr: %s" % (where, branch, head.stdout.strip(), head.stderr.strip())
         )
 
 
@@ -352,6 +380,28 @@ def build_fixtures():
     write(os.path.join(PRIVREPO, "f.txt"), "uncommitted\n")
     write(os.path.join(PRIVREPO, "new.txt"), "untracked\n")
     _require_dirty(PRIVREPO, "f.txt", "new.txt", "keep.txt")
+
+    # THE POINTER CHECKOUT, built with git itself. The rule compares TOP LEVELS read from git, so
+    # no fake directory will do, and the worktree that must stay allowed has to be a real one.
+    #
+    # PTRMAIN CARRIES REAL UNCOMMITTED WORK on `f.txt`, and `keep.txt` is really clean inside it.
+    # The path-operation cases are what prove rule 1 still governs `checkout -- <path>` in this
+    # checkout, unchanged, and both of rule 1's answers need real state to come out of.
+    # `docs/note.md` exists so that the subdirectory case below runs in a real directory. A `cd`
+    # into a directory that is not there would answer "allow" for the wrong reason.
+    make_repo(PTRMAIN, {"f.txt": "base\n", "keep.txt": "base\n", "docs/note.md": "base\n"})
+    write(os.path.join(PTRMAIN, "f.txt"), "uncommitted\n")
+    write(os.path.join(PTRMAIN, "new.txt"), "untracked\n")
+    _require_dirty(PTRMAIN, "f.txt", "new.txt", "keep.txt")
+    run_vcs(PTRMAIN, "worktree", "add", "-q", PTRWT, "-b", "ptrlane")
+    _require_clean(PTRWT)
+    _require_pointer_branch(PTRMAIN, "main")
+    # The pointer line has the same shape the installer writes and the shell readers parse.
+    write(os.path.join(PTRCFG, "CLAUDE.md"), "@" + slash(PTRMAIN) + "/CLAUDE.md\n")
+    write(os.path.join(PTRBADCFG, "CLAUDE.md"), "rules with no pointer line\n")
+    write(os.path.join(PTRGONECFG, "CLAUDE.md"),
+          "@" + slash(os.path.join(ROOT, "nosuchcheckout")) + "/CLAUDE.md\n")
+    os.makedirs(PTRNOCFG, exist_ok=True)
 
     make_blind_git(GITBLIND)
 
@@ -744,6 +794,156 @@ sh("heredoc: a body fed to a shell stays under inspection",
 # inside a quoted string. The guard allows it, and this case says so rather than hiding it.
 sh("heredoc: a quoted call inside python source is not parsed as a shell call",
    "python - <<EOF\nimport os\nos.system(\"" + VCS + " stash\")\nEOF", "allow", cwd=NOGIT)
+
+
+# `--work-tree` NAMES THE TREE WHOSE FILES A CALL DISCARDS. MEASURED 2026-09-19 with real git:
+# from a CLEAN checkout, `git --work-tree=<dirty> status --porcelain` reported the OTHER tree's
+# modified and untracked files. So rule 1 judges the named tree, not the one the call runs in.
+# BOTH DIRECTIONS: a clean cwd pointed at a dirty tree must deny, and a dirty cwd pointed at a
+# clean tree must pass, or the option is only half read.
+sh("work-tree: a clean cwd pointed at a dirty tree is judged on the dirty tree",
+   VCS + " --work-tree=" + slash(SUBJDIRTY) + " reset --hard", "deny", "shared-tree",
+   cwd=SUBJCLEAN)
+sh("work-tree: a dirty cwd pointed at a clean tree passes on the empty subject",
+   VCS + " --work-tree=" + slash(SUBJCLEAN) + " reset --hard", "allow", cwd=SUBJDIRTY)
+sh("work-tree: the spaced form is read the same way",
+   VCS + " --work-tree " + slash(SUBJDIRTY) + " reset --hard", "deny", "shared-tree",
+   cwd=SUBJCLEAN)
+
+
+# =========================================================================== 1b. the pointer HEAD
+#
+# The pointer checkout is the one checkout whose HEAD decides which copy of the rules and the gates
+# every session on this machine runs. Its HEAD stays `main`.
+#
+# BOTH DIRECTIONS ARE PINNED, and the GREEN half carries the weight here: a rule this broad would
+# stop every lane from switching a branch anywhere. So the same two commands are run in a
+# non-pointer checkout and in a real linked worktree of the pointer checkout itself, and both must
+# be allowed.
+
+sh("pointer: checkout of a branch in the pointer checkout is refused",
+   VCS + " checkout somebranch", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: switch of a branch in the pointer checkout is refused",
+   VCS + " switch somebranch", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: a new branch with -b is refused",
+   VCS + " checkout -b somebranch", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: a new branch with -b and a start point is refused",
+   VCS + " checkout -b somebranch origin/main", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: -B resets and switches, so it is refused",
+   VCS + " checkout -B somebranch", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: an orphan branch is refused",
+   VCS + " checkout --orphan somebranch", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: switch -c is the new-branch form of switch",
+   VCS + " switch -c somebranch", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: detaching leaves no branch named at all",
+   VCS + " checkout --detach", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: switch -d detaches too",
+   VCS + " switch -d somebranch", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: the previous-branch shorthand is a switch",
+   VCS + " checkout -", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+# A remote-tracking ref detaches HEAD rather than putting it on `main`, so the exemption for the
+# bare name `main` must not reach it.
+sh("pointer: origin/main detaches, so it is not the main exemption",
+   VCS + " checkout origin/main", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: a subdirectory of the pointer checkout is still the pointer checkout",
+   "cd " + slash(os.path.join(PTRMAIN, "docs")) + " && " + VCS + " switch somebranch", "deny",
+   "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: -C reaches the pointer checkout from anywhere",
+   VCS + " -C " + slash(PTRMAIN) + " switch somebranch", "deny", "pointer-head", cwd=NOGIT,
+   config=PTRCFG)
+
+# THE MOVE TO MAIN IS THE REPAIR. A deny there would wall off the one command that restores the
+# invariant this rule exists to protect.
+sh("pointer: a move back to main restores the invariant and passes",
+   VCS + " checkout main", "allow", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: switch main passes for the same reason",
+   VCS + " switch main", "allow", cwd=PTRMAIN, config=PTRCFG)
+
+# READS NEVER FIRE.
+sh("pointer: listing branches only reads", VCS + " branch --list", "allow", cwd=PTRMAIN,
+   config=PTRCFG)
+sh("pointer: status only reads", VCS + " status", "allow", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: a bare checkout names no branch and moves no HEAD", VCS + " checkout", "allow",
+   cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: worktree add is the remedy, not the act",
+   VCS + " worktree add -b somebranch " + slash(os.path.join(ROOT, "newlane")), "allow",
+   cwd=PTRMAIN, config=PTRCFG)
+
+# THE RULE IS NOT TOO BROAD. The same two commands in another checkout, and in a real linked
+# worktree of the pointer checkout, are allowed.
+sh("pointer: checkout of a branch in another checkout is allowed",
+   VCS + " checkout somebranch", "allow", cwd=GITMAIN, config=PTRCFG)
+sh("pointer: switch of a branch in another checkout is allowed",
+   VCS + " switch somebranch", "allow", cwd=GITMAIN, config=PTRCFG)
+sh("pointer: checkout of a branch in a worktree of the pointer checkout is allowed",
+   VCS + " checkout somebranch", "allow", cwd=PTRWT, config=PTRCFG)
+sh("pointer: switch of a branch in a worktree of the pointer checkout is allowed",
+   VCS + " switch somebranch", "allow", cwd=PTRWT, config=PTRCFG)
+sh("pointer: a branch switch in a directory that is no git tree is allowed",
+   VCS + " switch somebranch", "allow", cwd=NOGIT, config=PTRCFG)
+
+# RULE 1 KEEPS GOVERNING A PATH OPERATION IN THIS CHECKOUT, UNCHANGED. `f.txt` is really modified
+# there, so rule 1 denies; `keep.txt` is really clean, so rule 1's empty-subject arm passes. Both
+# answers are rule 1's own, and the pointer rule never sees either call.
+sh("pointer: checkout of a dirty path keeps rule 1's deny", VCS + " checkout -- f.txt", "deny",
+   "shared-tree", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: checkout of a clean path keeps rule 1's empty-subject pass",
+   VCS + " checkout -- keep.txt", "allow", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: a bare path argument is still rule 1's subject", VCS + " checkout f.txt", "deny",
+   "shared-tree", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: --theirs is a path operation, not a branch switch",
+   VCS + " checkout --theirs f.txt", "deny", "shared-tree", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: a branch plus a path writes one file, and rule 1 judges it",
+   VCS + " checkout somebranch -- f.txt", "deny", "shared-tree", cwd=PTRMAIN, config=PTRCFG)
+
+# THE PATH-OPERATION ARMS OF THIS RULE, REACHED. Rule 1 answers first for a dirty or
+# file-shaped pathspec, so these two are the cases where rule 1b's own `--` and `--theirs` arms
+# are what decides. `docs` is a real, clean, extensionless directory in the fixture, which rule 1
+# reads as neither a path nor a discard, so the call arrives at rule 1b untouched.
+sh("pointer: a double dash names a path, and no HEAD moves", VCS + " checkout -- docs", "allow",
+   cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: --theirs with an extensionless path is no branch switch",
+   VCS + " checkout --theirs docs", "allow", cwd=PTRMAIN, config=PTRCFG)
+
+# THE GIT DIRECTORY IS WHERE HEAD LIVES. MEASURED 2026-09-19 with real git: from an unrelated
+# directory, `git --git-dir=<X>/.git switch other` moved HEAD inside X, with no `-C`, no `cd` and
+# no `--work-tree` on the line. So the rule reads `--git-dir`, and the comparison is between git
+# directories rather than between top levels.
+PTR_GITDIR = slash(os.path.join(PTRMAIN, ".git"))
+OTHER_GITDIR = slash(os.path.join(GITMAIN, ".git"))
+PTRWT_GITDIR = slash(os.path.join(PTRMAIN, ".git", "worktrees", "ptrlane"))
+
+sh("pointer: --git-dir reaches the pointer HEAD from an unrelated directory",
+   VCS + " --git-dir=" + PTR_GITDIR + " switch somebranch", "deny", "pointer-head", cwd=NOGIT,
+   config=PTRCFG)
+sh("pointer: the spaced --git-dir form is the same act",
+   VCS + " --git-dir " + PTR_GITDIR + " checkout somebranch", "deny", "pointer-head", cwd=NOGIT,
+   config=PTRCFG)
+sh("pointer: --git-dir with a move to main keeps the exemption",
+   VCS + " --git-dir=" + PTR_GITDIR + " checkout main", "allow", cwd=NOGIT, config=PTRCFG)
+sh("pointer: --git-dir naming another clone is allowed",
+   VCS + " --git-dir=" + OTHER_GITDIR + " switch somebranch", "allow", cwd=NOGIT, config=PTRCFG)
+# A linked worktree keeps its own HEAD in its own per-worktree git directory, so naming that
+# directory is not naming the primary checkout's HEAD.
+sh("pointer: --git-dir naming a worktree of the pointer clone is allowed",
+   VCS + " --git-dir=" + PTRWT_GITDIR + " switch somebranch", "allow", cwd=NOGIT, config=PTRCFG)
+sh("pointer: a --git-dir that is not there fires nothing",
+   VCS + " --git-dir=" + slash(os.path.join(ROOT, "nosuchgitdir")) + " switch somebranch",
+   "allow", cwd=NOGIT, config=PTRCFG)
+# `--work-tree` retargets the FILES and leaves HEAD where the call runs, so it must NOT be read as
+# a pointer HEAD move. Run from a directory that is no git tree, this names the pointer checkout's
+# files and no checkout's HEAD.
+sh("pointer: --work-tree alone moves no HEAD in the pointer checkout",
+   VCS + " --work-tree=" + slash(PTRMAIN) + " switch somebranch", "allow", cwd=NOGIT,
+   config=PTRCFG)
+
+# FAIL OPEN. An unreadable pointer means no rule, never a broken session.
+sh("pointer: a rules file with no pointer line fires nothing",
+   VCS + " switch somebranch", "allow", cwd=PTRMAIN, config=PTRBADCFG)
+sh("pointer: a pointer naming a directory that is gone fires nothing",
+   VCS + " switch somebranch", "allow", cwd=PTRMAIN, config=PTRGONECFG)
+sh("pointer: no global rules file at all fires nothing",
+   VCS + " switch somebranch", "allow", cwd=PTRMAIN, config=PTRNOCFG)
 
 
 # =========================================================================== 2. machine-wide kills
@@ -1386,7 +1586,13 @@ def decide(case):
             body["session_id"] = case["session"]
         payload = json.dumps(body)
     env = dict(os.environ)
-    env["CLAUDE_CONFIG_DIR"] = CFG
+    # `.get`, not `[...]`: a checker below builds a case dict by hand and names only the keys it
+    # needs, so a key added here must not turn into a KeyError in a checker that never asked for
+    # it. MEASURED on CI run 35473213091: indexing this key crashed `stack_reason_hygiene_case`,
+    # which reached this branch through the pull request's MERGE commit. It landed on main (#54)
+    # after this branch started, so no run on the branch alone could have caught it. A hand-built
+    # case is the shape to expect from the next such checker too, so the read tolerates it.
+    env["CLAUDE_CONFIG_DIR"] = case.get("config") or CFG
     # The scratchpad pass reads the session id the PAYLOAD carries, and falls back to the
     # environment only when the payload carries none. A real session id in the runner's own
     # environment would leak into every case, so it is dropped here and each case names its own.
@@ -1703,8 +1909,11 @@ def subject_unread_log_case():
 # reason is covered, not its last sentence, so no refusal may carry the file it refused. This is
 # checked on every refused case rather than on a few, because one interpolated name is the whole
 # defect and it can enter through any rule.
+# `git checkout` and `git switch` are on this list for the pointer rule, and the list is global,
+# so no rule may print either one in a remedy. The pointer rule's remedy is a worktree, and it
+# names `git worktree add` instead, which is a different command and not the refused target.
 FORBIDDEN_IN_A_REASON = (ENV, ROOT, slash(ROOT), "settings.json", "CLAUDE.md", "guard.py",
-                         ".claude", "app.log", "sleep")
+                         ".claude", "app.log", "sleep", VCS + " checkout", VCS + " switch")
 
 # ONE RULE MAY NAME ITS SUBJECT, and only the fragments listed beside it. Rule 8 asks rather than
 # refuses, and the ask exists to tell an approver what is being turned on and where, so the settings
