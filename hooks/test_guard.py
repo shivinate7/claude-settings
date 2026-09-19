@@ -465,16 +465,19 @@ sh("stash: drop destroys stashed work with no way back", VCS + " stash drop", "d
    "shared-tree", cwd=NOGIT)
 sh("stash: clear destroys every stash with no way back", VCS + " stash clear", "deny",
    "shared-tree", cwd=NOGIT)
-# `list` and `show` only read. `apply` and `pop` put work back, and git itself refuses to
-# overwrite a modified file rather than clobber it (MEASURED against a real conflicting change,
-# 2026-09-17). None of the four can discard a working tree, so the guard reads the ACTION word,
-# not the subcommand name, and allows all four.
+# `list` and `show` only read the stack, so they allow everywhere. Every other action takes an
+# entry OFF the stack, and the stack belongs to the whole clone, so each one denies here. Owner's
+# ruling, 2026-09-19: the old exemption for `apply` and `pop` read the wrong subject. Git does
+# refuse to overwrite a modified file, which the old note MEASURED on 2026-09-17, but the thing
+# at risk is the shared entry, not this tree.
 sh("stash: list only reads, no subcommand match", VCS + " stash list", "allow", cwd=NOGIT)
 sh("stash: show only reads", VCS + " stash show", "allow", cwd=NOGIT)
-sh("stash: apply puts work back, git refuses an overwrite", VCS + " stash apply", "allow",
-   cwd=NOGIT)
-sh("stash: pop puts work back, git refuses an overwrite", VCS + " stash pop stash@{0}", "allow",
-   cwd=NOGIT)
+sh("stash: apply takes an entry off a stack the whole clone shares", VCS + " stash apply", "deny",
+   "shared-tree", cwd=NOGIT)
+sh("stash: pop consumes the entry it applies", VCS + " stash pop stash@{0}", "deny",
+   "shared-tree", cwd=NOGIT)
+sh("stash: branch consumes the entry it builds from", VCS + " stash branch lane", "deny",
+   "shared-tree", cwd=NOGIT)
 sh("reset: throws the tree away", VCS + " reset --hard origin/main", "deny", "shared-tree",
    cwd=NOGIT)
 sh("reset: --hard with no argument", VCS + " reset --hard", "deny", "shared-tree", cwd=NOGIT)
@@ -579,9 +582,14 @@ sh("subject: setting aside real uncommitted work still denies", VCS + " stash pu
    "deny", "shared-tree", cwd=SUBJDIRTY)
 sh("subject: a bare stash over a clean tree takes nothing", VCS + " stash", "allow",
    cwd=SUBJCLEAN)
-# THE STACK IS ITS OWN SUBJECT. `drop` and `clear` destroy stashed work, so the read is `git
-# stash list`, never the tree. SUBJDIRTY is dirty and its stack is empty; SUBJSTASH is clean and
-# its stack holds one entry. The two cases cross, which is what proves the right read is made.
+# THE STACK IS ITS OWN SUBJECT. Every action that takes an entry off the stack is read with `git
+# stash list`, never with the tree. SUBJDIRTY is dirty and its stack is empty. SUBJSTASH is clean
+# and its stack holds one entry. The two cases cross, which is what proves the right read is made.
+#
+# A CLEAN TREE IS NOT A PASS FOR THESE ARMS. MEASURED 2026-09-19 against the guard before this
+# change: `git stash pop` allowed in a clean checkout holding a real entry, which is exactly the
+# state in which taking another session's work leaves no trace. The SUBJSTASH rows below are that
+# case, one per action.
 sh("subject: dropping an empty stash stack destroys nothing", VCS + " stash drop", "allow",
    cwd=SUBJDIRTY)
 sh("subject: dropping a real stash entry still denies", VCS + " stash drop", "deny",
@@ -592,6 +600,28 @@ sh("subject: clearing an empty stash stack destroys nothing", VCS + " stash clea
    cwd=SUBJDIRTY)
 sh("subject: clearing a stack holding a real entry still denies", VCS + " stash clear", "deny",
    "shared-tree", cwd=SUBJSTASH)
+sh("subject: popping an empty stash stack takes nothing", VCS + " stash pop", "allow",
+   cwd=SUBJDIRTY)
+sh("subject: popping a real entry from a CLEAN checkout still denies", VCS + " stash pop",
+   "deny", "shared-tree", cwd=SUBJSTASH)
+sh("subject: popping a real entry from a worktree still denies, the stack is clone-wide",
+   VCS + " stash pop", "deny", "shared-tree", cwd=SUBJSTASHWT)
+sh("subject: applying over an empty stash stack takes nothing", VCS + " stash apply", "allow",
+   cwd=SUBJDIRTY)
+sh("subject: applying a real entry from a CLEAN checkout still denies", VCS + " stash apply",
+   "deny", "shared-tree", cwd=SUBJSTASH)
+sh("subject: the named-entry apply is the same act", VCS + " stash apply stash@{0}", "deny",
+   "shared-tree", cwd=SUBJSTASH)
+sh("subject: branching off a real entry still denies", VCS + " stash branch lane", "deny",
+   "shared-tree", cwd=SUBJSTASH)
+sh("subject: branching off an empty stash stack takes nothing", VCS + " stash branch lane",
+   "allow", cwd=SUBJDIRTY)
+# THE TWO READS STAY ALLOWED where the stack really holds an entry, which is the only place the
+# allow means anything.
+sh("subject: list reads the stack that holds a real entry", VCS + " stash list", "allow",
+   cwd=SUBJSTASH)
+sh("subject: show reads the entry without taking it", VCS + " stash show stash@{0}", "allow",
+   cwd=SUBJSTASH)
 sh("subject: a hard reset in the tree that holds the stash takes nothing",
    VCS + " reset --hard HEAD", "allow", cwd=SUBJSTASH)
 # PER PATH for `restore` and `checkout <path>`: the pathspec goes to git, and an empty answer
@@ -717,8 +747,10 @@ sh("worktree: a cd into the worktree asks, from the shared checkout",
 for _tree_name, _tree_path in (("shared checkout", GITMAIN), ("worktree", GITWT)):
     sh("stash: list allows in the " + _tree_name, VCS + " stash list", "allow", cwd=_tree_path)
     sh("stash: show allows in the " + _tree_name, VCS + " stash show", "allow", cwd=_tree_path)
-    sh("stash: apply allows in the " + _tree_name, VCS + " stash apply", "allow", cwd=_tree_path)
-    sh("stash: pop allows in the " + _tree_name, VCS + " stash pop", "allow", cwd=_tree_path)
+    sh("stash: apply over an empty stack allows in the " + _tree_name, VCS + " stash apply",
+       "allow", cwd=_tree_path)
+    sh("stash: pop over an empty stack allows in the " + _tree_name, VCS + " stash pop",
+       "allow", cwd=_tree_path)
     sh("reset: a plain reset allows in the " + _tree_name, VCS + " reset HEAD~1", "allow",
        cwd=_tree_path)
     sh("reset: --soft allows in the " + _tree_name, VCS + " reset --soft HEAD~1", "allow",
@@ -733,10 +765,12 @@ for _tree_name, _tree_path in (("shared checkout", GITMAIN), ("worktree", GITWT)
        "allow", cwd=_tree_path)
 
 # THE OWNER'S EXACT COMMAND, carrying a redirect and a pipe into `tail`. `tail -10` is not a
-# follow, so it must not trip the live-stream rule either.
-sh("stash: the owner's exact apply command allows in the shared checkout",
+# follow, so it must not trip the live-stream rule either. Both stacks are empty, so the allow
+# here proves the redirect and the pipe are read, not that the act is safe: the SUBJSTASH rows
+# above hold the same command against a stack that really carries an entry.
+sh("stash: the owner's exact apply command over an empty stack allows in the shared checkout",
    VCS + " stash apply stash@{0} 2>&1 | tail -10", "allow", cwd=GITMAIN)
-sh("stash: the owner's exact apply command allows in a worktree",
+sh("stash: the owner's exact apply command over an empty stack allows in a worktree",
    VCS + " stash apply stash@{0} 2>&1 | tail -10", "allow", cwd=GITWT)
 
 # A COMMIT MESSAGE DISCUSSES THESE COMMANDS. MEASURED in job-cost-reporting on 2026-08-20: a
@@ -1954,6 +1988,38 @@ def names_the_target(reason, rule=None):
     return ""
 
 
+def stack_reason_hygiene_case():
+    """CLAUDE.md: "A refusal's printed remedy never names the forbidden target."
+
+    The stack refusal is the one message a worker reads after the harness worktree reminder tells
+    it to use the very commands this rule forbids. The message must therefore point somewhere
+    else. It may name the two reads, `git stash list` and `git stash show`, because both stay
+    allowed. It may not name the action it just refused.
+    """
+    forbidden = ("pop", "apply", "drop", "clear", "branch")
+    problems = []
+    for action in forbidden:
+        command = VCS + " stash " + action
+        if action == "branch":
+            command += " lane"
+        got, reason = decide({
+            "raw": None, "tool": "Bash", "cwd": SUBJSTASH, "session": None,
+            "env_path": None, "tool_input": {"command": command},
+        })
+        if got != "deny":
+            problems.append("%s: expected deny, got %s" % (action, got))
+            continue
+        named = [word for word in forbidden if "stash " + word in reason]
+        if named:
+            problems.append("%s: the reason names the forbidden action %r" % (action, named[0]))
+        for read in ("git stash list", "git stash show"):
+            if read not in reason:
+                problems.append("%s: the reason does not point at %r" % (action, read))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "five refusals, none naming its own action, all pointing at the two reads"
+
+
 def log_env_case():
     """A refused environment file reaches the log, although it never reaches the reason.
 
@@ -1998,6 +2064,7 @@ LOG_CHECKS = (
     ("log: a merge into main is allowed and noted where the base is unsafe", merge_log_case),
     ("log: a conflict-side checkout is allowed and noted", conflict_resolve_log_case),
     ("log: an unreadable subject is allowed and noted", subject_unread_log_case),
+    ("stack: the refusal never names the action it refused", stack_reason_hygiene_case),
 )
 
 

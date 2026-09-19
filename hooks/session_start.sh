@@ -40,4 +40,17 @@ if [ -f "$global_md" ]; then
   fi
 fi
 
+# The pointer checkout's HEAD must be `main`. `~/.claude/lint/*`, `~/.claude/hooks/*` and
+# `~/.claude/agents/*` are symlinks into that one checkout, so its branch decides which copy
+# of the rules and the gates every session on this machine runs. A branch left checked out
+# there makes unreviewed work live everywhere, silently. Reported here, never fixed here: a
+# branch switch is a whole-tree act and another session may be working in it.
+if [ -n "$d" ] && [ -d "$d/.git" ]; then
+  pointer_branch=$(cd "$d" 2>/dev/null && git rev-parse --abbrev-ref HEAD 2>/dev/null)
+  if [ -n "$pointer_branch" ] && [ "$pointer_branch" != "main" ]; then
+    printf 'claude-settings: %s is on %s, not main; global rules and hooks are that branch\n' \
+      "$d" "$pointer_branch"
+  fi
+fi
+
 exit 0

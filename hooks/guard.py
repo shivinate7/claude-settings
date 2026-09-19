@@ -292,10 +292,9 @@ GIT_OPT_WITH_VALUE = {
 }
 
 # `stash`, `reset`, and `restore` each cover both a read and a discard, so the SUBCOMMAND NAME
-# alone never proves the act. MEASURED: `git stash list` only reads, and `git stash apply
-# stash@{0}` puts work back with git itself refusing to overwrite a modified file, yet both
-# tripped this rule under the old name match. The predicates below read the ACT each one takes,
-# never the spelling of the subcommand.
+# alone never proves the act. MEASURED: `git stash list` only reads, yet it tripped this rule
+# under the old name match. The predicates below read the ACT each one takes, never the spelling
+# of the subcommand.
 
 # These options are followed by a NEW branch name, which is never a path.
 GIT_CHECKOUT_TAKES_NAME = {"-b", "-B", "--orphan"}
@@ -400,7 +399,10 @@ def push_is_forced(args) -> bool:
 
 
 STASH_READ_ACTIONS = {"list", "show"}
-STASH_RESTORE_ACTIONS = {"apply", "pop"}
+# `push`, `save` and a bare `git stash` PUT work onto the stack. They take it from the working
+# tree, so the working tree is their subject. Every other action that is not a read TAKES an
+# entry off the stack, so the stack is theirs.
+STASH_TREE_ACTIONS = {"push", "save"}
 
 
 def stash_action(args) -> str:
@@ -415,19 +417,37 @@ def stash_action(args) -> str:
     return "push"
 
 
-def stash_discards(args) -> bool:
-    """True when a `git stash` call can lose work with no way back.
+def stash_takes_the_stack(args) -> bool:
+    """True when a `git stash` call takes an entry OFF the shared stack.
 
-    `list` and `show` read the stash and change nothing. `apply` and `pop` put work back into
-    the tree, and git refuses to overwrite a modified file rather than clobber it (MEASURED
-    against a real conflicting change, 2026-09-17: `git stash apply` aborted and printed
-    "Please commit your changes or stash them before you merge", leaving the file untouched).
-    `push`, `save`, and a bare `stash` move work OUT of the tree; the work stays reachable in
-    the stash, but git itself does not refuse the move, so today's deny or ask stays. `drop`
-    and `clear` destroy stashed work with no way back at all.
+    The predicate is the DIRECTION of the act, not a list of action words. A call reads the
+    stack, puts work onto it, or takes an entry off it. `list` and `show` read. `push`, `save`
+    and a bare `git stash` put work on. Every other action takes an entry off: `pop` and
+    `branch` consume the entry they use, `drop` and `clear` destroy entries outright, and
+    `apply` reads another session's work into this tree without that session's word.
+
+    An action word this guard does not know falls on the stack side. That is the side where a
+    wrong answer costs another session its work.
     """
     action = stash_action(args)
-    return action not in STASH_READ_ACTIONS and action not in STASH_RESTORE_ACTIONS
+    return action not in STASH_READ_ACTIONS and action not in STASH_TREE_ACTIONS
+
+
+def stash_discards(args) -> bool:
+    """True when a `git stash` call can lose work.
+
+    `list` and `show` read the stash and change nothing, so they pass. Every other action can
+    lose work, and the SUBJECT READ below decides whether this call would lose any.
+
+    OWNER'S RULING, 2026-09-19, which repeals the earlier exemption for `apply` and `pop`. The
+    old argument was MEASURED and correct on its own facts: git refuses to overwrite a modified
+    file rather than clobber it (2026-09-17, `git stash apply` aborted with "Please commit your
+    changes or stash them before you merge" and left the file untouched). It was wrong about the
+    SUBJECT. The thing at risk in an `apply` or a `pop` is not this tree. It is the shared stack.
+    The entry consumed may belong to another session, and a tree with nothing in it is exactly
+    when that theft leaves no trace.
+    """
+    return stash_action(args) not in STASH_READ_ACTIONS
 
 
 def reset_discards(args) -> bool:
@@ -608,7 +628,9 @@ def is_worktree(where: str):
 #   git status --porcelain   for every arm whose subject is the working tree: `reset --hard`,
 #                            `restore` in the forms that write the worktree, `stash push`/`save`
 #                            /bare, `checkout <path>`, and `clean -f`
-#   git stash list           for the arms whose subject is the stack: `stash drop`, `stash clear`
+#   git stash list           for every arm whose subject is the stack: every `stash` action that
+#                            takes an entry off it, which is all of them but the two reads and
+#                            the three that put work on
 #
 # An EMPTY subject is a PASS. There is nothing to take and nothing to destroy, and git itself
 # errors on an empty stack. For `checkout <path>` and `restore <path>` the pass is PER PATH: the
@@ -768,10 +790,13 @@ def reset_subject(args, where: str):
 
 
 def stash_subject(args, where: str):
-    """`push`, `save` and a bare `stash` take the working tree. `drop` and `clear` take the
-    stack, so each one is read where its own subject lives.
+    """`push`, `save` and a bare `stash` take the working tree. Every action that takes an entry
+    off the stack is read against the STACK, so each one is read where its own subject lives.
+
+    A CLEAN TREE IS NO REASON TO PASS A STACK ACTION. The tree says nothing about what the stack
+    holds, and an empty tree is the state in which taking another session's entry is invisible.
     """
-    if stash_action(args) in ("drop", "clear"):
+    if stash_takes_the_stack(args):
         stack = stash_stack(where)
         if stack is None:
             return None
@@ -904,14 +929,20 @@ TREE_ASK_REASON = (
 # The stash stack is one ref, `refs/stash`, kept in the COMMON git directory, so every worktree
 # of a clone reads and writes the same stack (MEASURED 2026-09-19: from a linked worktree,
 # `git rev-parse --git-path refs/stash` answered `<repo>/.git/refs/stash`, not the worktree's own
-# `.git/worktrees/<name>`). A worktree therefore limits nothing for `stash drop` and `stash clear`:
-# the entry destroyed may be another session's, or the owner's. Those two arms deny everywhere.
-STASH_STACK_ACTIONS = {"drop", "clear"}
+# `.git/worktrees/<name>`). A worktree therefore limits nothing for an action that takes an entry
+# off the stack: the entry taken may be another session's, or the owner's. Those arms deny
+# everywhere.
+#
+# THE REMEDY NAMES NO FORBIDDEN COMMAND. It names the two reads, which stay allowed, and the
+# commit that sets work aside on a branch of the caller's own. A worker sent here by the harness
+# reminder, which asks for a tagged entry and a later restore, reads what to do instead.
 STACK_DENY_REASON = (
-    "Rule (shared trees): this command destroys a stash entry with no way back, and the stash "
-    "stack belongs to the whole clone, so a worktree does not limit the loss. "
-    "Remedy: `git stash show -p stash@{N}` and commit the patch on your own branch, "
-    "then leave the entry for its owner to drop."
+    "Rule (shared trees): this command takes a stash entry, and the stash stack belongs to the "
+    "whole clone, so the entry may hold another session's work and a worktree does not limit "
+    "the loss. "
+    "Remedy: read the entry with `git stash list` and `git stash show -p stash@{N}`, commit any "
+    "patch you need on a branch of your own, and leave the entry for its owner. "
+    "Set your own work aside with a commit on your own branch, never on the stack."
 )
 
 
@@ -2099,7 +2130,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
             continue
         if state is True:
             continue
-        if subcommand == "stash" and stash_action(args) in STASH_STACK_ACTIONS:
+        if subcommand == "stash" and stash_takes_the_stack(args):
             refuse(tool, "deny", "shared-tree", STACK_DENY_REASON, matched)
         worktree = is_worktree(root)
         if worktree is True:
