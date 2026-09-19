@@ -17,6 +17,7 @@
   "outputStyle": "Concise",
   "env": {
     "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
+    "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1",
     "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "1"
   },
   "worktree": {
@@ -106,16 +107,6 @@
             "type": "command",
             "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/guard.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
             "timeout": 20
-          }
-        ]
-      },
-      {
-        "matcher": "Agent|Workflow",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/model_gate.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
-            "timeout": 10
           }
         ]
       },

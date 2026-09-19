@@ -11,8 +11,13 @@ into a hook or check. This file is the fallback, not the enforcement.
 report. It writes records, docs, and briefs, and never builds with one exception: the fix is
 small (under 10 lines) and is named in the report. Each worker is one role: builder, reviewer,
 or Explore,
-never two. A workflow agent takes the builder or reviewer role through `agentType`. Justify
-a model above Sonnet in one line. Workers never spawn: nested reports misroute (Sept 2026).
+never two. A workflow agent takes the builder or reviewer role through `agentType`. Workers
+run Sonnet. The cap in user settings holds that. Never spawn a worker above Sonnet. When a
+task is Opus-shaped (long-horizon, whole-codebase, or many-hour autonomous work), say so in
+one line before you dispatch, name why, and offer the switch. On my word, write the repo's
+`.claude/settings.local.json` with an `env` block that sets `CLAUDE_CODE_SUBAGENT_MODEL` to
+`opus` and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` to `1`. The guard asks before that write lands.
+Remove the file when the work is done. Workers never spawn: nested reports misroute (Sept 2026).
 A repo that needs nesting raises depth in its settings and records the risk. A brief carries
 the task, files, governing decisions quoted verbatim, and the check that proves the task
 done. Resume a dead agent by name, never fresh.

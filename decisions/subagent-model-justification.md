@@ -1,162 +1,144 @@
-# Subagent model justification
+# Subagent model cap
 
-CLAUDE.md says two things about a subagent model above Sonnet. "Justify a model
-above Sonnet in one line." "Once set up, turn each rule below into a hook or
-check." This entry records the check that makes the second sentence true for the
-first one.
+CLAUDE.md says: "Once set up, turn each rule below into a hook or check." The rule
+on a worker's model is now a cap in the harness, not a gate in a hook. This entry
+records what the gate was for, why it was the wrong mechanism, and what replaces it.
 
-## The rule
+## What the gate was for
 
-`hooks/model_gate.py` runs as a `PreToolUse` hook on `Agent` and `Workflow`
-calls. It reads the tool payload with `json.loads`. It never scans the raw text
-with a pattern match.
+CLAUDE.md said: "Justify a model above Sonnet in one line." Four commits on this
+branch built `hooks/model_gate.py` to make that sentence a check. The gate ran as
+a `PreToolUse` hook on `Agent` and `Workflow` calls. It read the model from the
+tool payload. When the model was above Sonnet, it looked for a
+`MODEL-JUSTIFICATION:` line in the prompt. With no line, it denied the call. With
+a line, it asked the owner and quoted the reason. The intent was sound: keep a
+worker on Sonnet unless someone made a case for more.
 
-A model counts as above Sonnet unless it matches a recognised Sonnet or Haiku
-id. This is an allowlist, not a substring test. An id the allowlist does not
-recognise counts as above the bar. It is not assumed cheap.
+## Why a justification was the wrong mechanism
 
-The gate first strips two optional parts from the id:
+The gate read the reason after the orchestrator had already chosen the model. A
+reason written at that point does not change the choice. It defends the choice.
+Lerner and Tetlock showed this in 1999 ("Accounting for the Effects of
+Accountability", Psychological Bulletin 125, 255-275). When a person expects to
+justify a decision that is already made, the reasons they give are defensive
+bolstering, not reconsideration. Accountability improves judgement only when it
+comes before the decision, and only when the audience's view is unknown. A 2017
+study of process accountability found the same shape: a demand to justify the
+process changed neither accuracy nor strategy. The gate asked for the wrong thing
+at the wrong time. It produced one line of text and no better choice.
 
-* a vendor prefix: `us.`, `eu.`, or `apac.` followed by `anthropic.`, or a
-  leading `anthropic/`
-* a trailing context suffix, such as `[1m]`
+The gate also had a structural cost. It had to read a model id out of a payload,
+an id it could not always resolve. A `Workflow` script can set `model` through a
+variable. A `fork` carries no model field at all. Each gap needed a new shape
+test, and each shape test added a false ask. The four commits on this branch
+show that cost. Each closed a bypass and opened a new edge.
 
-It then checks the id against a fixed set of shapes:
+## Why the cap is right
 
-* the bare word `sonnet` or `haiku`
-* `claude-sonnet-<version>` or `claude-haiku-<version>`, with an optional
-  trailing date
-* `claude-<version>-sonnet` or `claude-<version>-haiku`, with an optional
-  trailing date
+Claude Code has a documented setting for this: `CLAUDE_CODE_SUBAGENT_MODEL` names
+the model a subagent runs, and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` makes that
+name win. The sub-agents documentation says, verbatim:
 
-`opus` or `fable` anywhere in the id overrides a shape match. An alias such as
-`claude-opus-4-sonnet-alias` is still above the bar. An empty or absent model
-is not above Sonnet. The harness then applies the Sonnet default from
-`env.CLAUDE_CODE_SUBAGENT_MODEL`.
+```text
+While `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is on, Claude Code ignores the `model`
+field of every subagent definition, including the built-in Explore and Plan
+subagents, and Claude can't pass a model when it starts a subagent.
+```
 
-When a call asks for a model above Sonnet, the gate looks for a line matching
-`MODEL-JUSTIFICATION: <text>` in the prompt or script. The match is case
-sensitive. It needs at least twelve characters of text after the colon.
+It applies "to every subagent, teammate, and workflow agent". The setting needs
+CLI 2.1.257 or later. The installed CLI is 2.1.278. CLAUDE.md: "Check whether
+the primitive exists before building a workaround." The primitive exists. The
+gate was the workaround.
 
-* No marker, or a marker under twelve characters: deny. The reason names the
-  marker to add. It does not name the model that was refused. CLAUDE.md: "A
-  refusal's printed remedy never names the forbidden target."
-* A valid marker: ask. The reason states the requested model and quotes the
-  justification. The approver then decides against a stated case, not a blank
-  prompt.
+The cap also matches the shape Anthropic documents for multi-agent work. A
+frontier model orchestrates. Lower-cost models do the worker tasks. Anthropic's
+model-selection matrix names sub-agent tasks under Haiku. Opus costs 2.5 times
+Sonnet per token: $5 in and $25 out per million, against $2 and $10. A worker
+that does one bounded task in one worktree does not need the frontier tier.
 
-### The Workflow test is a shape test
+The frontier tier does pay in one place: long-horizon work over a large corpus.
+Published comparisons put a Sonnet worker 10 to 12 points behind Opus on that
+kind of task. That is the case the prose rule names. When a task is Opus-shaped,
+the orchestrator says so before it dispatches, names why, and offers the switch.
+The owner decides. The reason now comes before the choice, to an audience whose
+view is unknown. That is the order Lerner and Tetlock found to work.
 
-A `Workflow` script can set a `model` option many ways. It can use a quoted
-literal, a variable, or a concatenation. It can also use a ternary, a member
-expression, a template literal, or a value from `args`.
+## What the cap does not cover
 
-A `PreToolUse` hook cannot run the script. It cannot know what a variable or
-an expression will resolve to.
+The documentation states the exception: "Two kinds of subagent still run on the
+main conversation's model: a fork". A fork inherits the session's model. The cap
+does not touch it. A session that runs Opus forks Opus. The prose rule in
+CLAUDE.md is the only guard on a fork, and this entry records that as a known
+gap. If the harness adds a cap on forks, this entry should point at it.
 
-So the gate reads `model:` by shape, not only by literal value. The key side
-matches a bare, double-quoted, or single-quoted `model`, with `:` or `=` as
-the separator. Member access counts too: `opts.model = ...` and
-`opts["model"] = ...` both match.
+## Where the cap sits, and what makes lifting it visible
 
-* A quoted literal below the bar: allow.
-* A quoted literal above the bar: needs the marker. Same as an Agent call.
-* Any other value: needs the marker too. The gate cannot prove it is below
-  the bar. It cannot allow what it cannot prove.
+The cap lives in the `env` block of `settings.json`, which `install.sh` installs
+as the user settings file. In the settings stack that is precedence level 5. A
+project settings file at level 3 (`.claude/settings.local.json`) or level 4
+(`.claude/settings.json`) overrides it. Any repo can lift the cap with one file.
 
-Two things are skipped on purpose. This keeps the test about agent options:
+Guard rule 8, `subagent-model-cap`, in `hooks/guard.py` is what makes that lift
+visible. A settings write that sets or changes `CLAUDE_CODE_SUBAGENT_MODEL` or
+`CLAUDE_CODE_SUBAGENT_MODEL_FORCE` asks the owner. The ask names the requested
+model and the file. The cap can be lifted, but never in silence.
 
-* a line the script comments out with a leading `//`
-* the script's own `export const meta = {...}` header
+## The grant
 
-A phase's `model` override in that header names the workflow's own config.
-It is not an agent call.
+An Opus worker is enabled for one session, on the owner's word in chat. The
+orchestrator writes the active repo's `.claude/settings.local.json` with an
+`env` block that sets both keys:
 
-This is a deliberately crude text test. It is not a JavaScript parser. A
-false ask is the accepted cost of a value the gate cannot resolve. The
-marker clears it, the same as any above-bar id.
+```json
+{
+  "env": {
+    "CLAUDE_CODE_SUBAGENT_MODEL": "opus",
+    "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"
+  }
+}
+```
 
-A third review pass found two more edges. The key side now also matches a
-backtick-quoted `model`, next to the bare, double-quoted, and single-quoted
-forms. The `=` separator now needs a member or bracketed key: `.model =`,
-`["model"] =`, `['model'] =`, or the backtick form. It no longer fires on
-a bare `model =`. A log line like `"Setting model = default"` no longer
-denies. A bare `model:` in prose can still ask for a marker it does not
-need. The marker clears it, an accepted cost.
+Both keys are set on purpose. If the settings stack merges `env` key by key,
+the project file changes the model and keeps the force. If the stack replaces
+the whole `env` block, the project file still carries the force. The grant is
+correct under either merge rule. The cap holds throughout. The grant changes
+which model is forced. It never lets a per-call `model` through.
 
-## The three gaps this closes
+That write triggers guard rule 8. The ask names the model and the file. That
+prompt is the approval step. The grant can never open silently. When the work
+is done, the orchestrator removes the file.
 
-The gate it replaces was one inline shell command in `settings.json`. It
-grepped the whole stdin payload for the first `"model"` string. It asked when
-the value looked above Sonnet, with no deny path at all.
+### What was measured
 
-1. **No deny path, ever.** Every call above Sonnet reached "ask", justified or
-   not. A justification was welcome but never required. `model_gate.py` denies
-   the call outright when no marker is present.
-2. **The grep read prompt text as the model field.** A payload whose prompt
-   quoted `"model": "sonnet"` matched before the real `tool_input.model` value
-   did. Grep has no notion of which JSON key a string sits under. The real
-   field could hold an opus id, and the old hook would still see "sonnet" and
-   allow. `hooks/test_model_gate.py` carries this case, and it fails against
-   the old hook: feed the old command a payload with
-   `tool_input.model = "claude-opus-4-1-20250805"` and a prompt that reads
-   `"model": "sonnet"`, and it answers ask. It quotes the masked model, not
-   deny. `model_gate.py` reads `tool_input.model` by key and denies.
-3. **`Workflow` and `fork` were not covered.** The matcher was `Agent` only.
-   A `Workflow` script naming an opus-class agent model, or an `Agent` call
-   with `subagent_type: "fork"`, passed with no hook running at all.
-   `model_gate.py` is wired with matcher `Agent|Workflow`. It treats `fork` as
-   needing the marker, under the rule below.
+The build that landed this entry tested the merge rule from a subagent. It
+wrote a project-local `env` block that set `CLAUDE_CODE_SUBAGENT_MODEL` to
+`haiku`. The user settings set that key to `sonnet`, and set
+`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` to `1`. The build then read both values
+from its own shell.
 
-## The fork deviation
+The result was inconclusive. The depth read `1` before and after the write. The
+model was empty before and after the write. The user settings value `sonnet`
+never reached the shell of the subagent. The project value `haiku` did not
+reach it either. The start-time environment of the Claude Code process held
+the depth and not the model. The test could not show which level wins. It could
+not show whether a settings file is picked up live. The session ran on Claude
+Code on the web. The installed guard there was the main-branch version, without
+rule 8. The write landed without an ask.
 
-The option approved before this build was: deny `subagent_type: "fork"` on a
-session already running above Sonnet. A fork carries no `model` field of its
-own. It inherits whatever model the parent session is running. A `PreToolUse`
-hook's stdin payload does not carry the session's model at all.
+The merge rule for `env` is unmeasured. The grant above does not depend on it,
+because it sets both keys. What does depend on it is the claim that a project
+file overrides user settings for this variable at all. The documentation states
+that precedence. It is not yet confirmed by a measurement here. One check would
+confirm it. Start a fresh local session in a repo with the grant file in place.
+Spawn a worker. Read the model the worker reports.
 
-A hook that guessed the session model from an environment variable, a file, or
-a heuristic would be the kind of guess CLAUDE.md rules out. "Never guess an
-answer the code should give you."
+## No per-call prompt is possible under the cap
 
-So the fork rule asks for the marker on every fork, on every session. This
-holds whether that session runs Sonnet or a model above it. A fork on a
-Sonnet session now needs a justification it did not strictly need under the
-approved option. That is a real cost. It pays for not guessing the one field
-the hook cannot read. If the harness starts passing the session model into the
-`PreToolUse` payload, this rule should read it. It should then fall back to
-allow when the session is at or below Sonnet.
-
-## Two gaps closed after review
-
-A review of this gate found two more bypasses. The owner saw both and
-approved this fix. It supersedes the rule shipped in `8d30693`.
-
-**Gap 1: the substring test was an allowlist waiting to happen.** The old
-`is_above_sonnet` allowed any id that contained `sonnet` or `haiku`
-anywhere. `claude-opus-4-sonnet-alias` names the opus family. The old test
-still read it as below the bar, with no marker asked at all. The fix
-inverts the test to an allowlist. See "The rule" above for the exact
-shapes it recognises.
-
-**Gap 2: a script could name its model where the gate could not see it.**
-The old `SCRIPT_MODEL_RE` only matched a quoted literal after `model`. A
-script could set the option through a variable instead:
-
-    const M = 'claude-opus-5'
-    agent(prompt, { model: M })
-
-No quoted literal above the bar ever appeared in the script text. The gate
-found nothing to judge, and the call passed with no marker. The fix makes
-the Workflow test a shape test. See "The Workflow test is a shape test"
-above.
-
-**The accepted cost.** Both fixes trade a known miss for a new kind of
-false ask. An id the allowlist does not recognise now asks for the marker,
-even when the model is in fact cheap. A `model:` value the gate cannot
-resolve now asks for the marker too, even when the script sets it below
-the bar. Both cases clear on their own terms: add the marker, or extend
-the allowlist to cover the id after the shape becomes a known one.
+The old gate asked at the moment of the call. The cap cannot. While
+`CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is on, the harness drops a per-call `model`
+before the tool call runs. The request never reaches the permission layer, so
+no hook can ask about it. The only prompt left is the one on the settings
+write, and that is where the approval now lives.
 
 ## Where this lives
 
