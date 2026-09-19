@@ -23,7 +23,8 @@ Accountability", Psychological Bulletin 125, 255-275). When a person expects to
 justify a decision that is already made, the reasons they give are defensive
 bolstering, not reconsideration. Accountability improves judgement only when it
 comes before the decision, and only when the audience's view is unknown. A 2017
-study of process accountability found the same shape: a demand to justify the
+study of process accountability (Hoffmann, Gaissmaier and von Helversen, Judgment
+and Decision Making 12(6), 627-641) found the same shape: a demand to justify the
 process changed neither accuracy nor strategy. The gate asked for the wrong thing
 at the wrong time. It produced one line of text and no better choice.
 
@@ -57,8 +58,9 @@ Sonnet per token: $5 in and $25 out per million, against $2 and $10. A worker
 that does one bounded task in one worktree does not need the frontier tier.
 
 The frontier tier does pay in one place: long-horizon work over a large corpus.
-Published comparisons put a Sonnet worker 10 to 12 points behind Opus on that
-kind of task. That is the case the prose rule names. When a task is Opus-shaped,
+Anthropic's own measurement (platform.claude.com, "Optimizing for cost and
+intelligence") is the source. A frontier lead over Sonnet workers scored 10 to 12
+points below an all-frontier run on that kind of task, at about half the cost. That is the case the prose rule names. When a task is Opus-shaped,
 the orchestrator says so before it dispatches, names why, and offers the switch.
 The owner decides. The reason now comes before the choice, to an audience whose
 view is unknown. That is the order Lerner and Tetlock found to work.
@@ -66,8 +68,9 @@ view is unknown. That is the order Lerner and Tetlock found to work.
 ## What the cap does not cover
 
 The documentation states the exception: "Two kinds of subagent still run on the
-main conversation's model: a fork". A fork inherits the session's model. The cap
-does not touch it. A session that runs Opus forks Opus. The prose rule in
+main conversation's model: a fork" and "a skill that runs in a subagent with
+`model: inherit`". A fork inherits the session's model. The cap does not touch
+it. The same holds for a skill run in a subagent with `model: inherit`. A session that runs Opus forks Opus. The prose rule in
 CLAUDE.md is the only guard on a fork, and this entry records that as a known
 gap. If the harness adds a cap on forks, this entry should point at it.
 
