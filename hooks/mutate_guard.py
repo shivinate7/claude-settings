@@ -38,6 +38,15 @@ from concurrent.futures import ThreadPoolExecutor
 HERE = os.path.dirname(os.path.abspath(__file__))
 GUARD = os.path.join(HERE, "guard.py")
 SUITE = os.path.join(HERE, "test_guard.py")
+WATCH = os.path.join(HERE, "config_watch.py")
+WATCH_SUITE = os.path.join(HERE, "test_config_watch.py")
+
+# A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
+# every mutation written before the watch existed reads unchanged.
+TARGETS = {
+    "guard": (GUARD, SUITE, "GUARD_UNDER_TEST", "guard"),
+    "watch": (WATCH, WATCH_SUITE, "WATCH_UNDER_TEST", "config_watch"),
+}
 
 # (name, anchor text found once in the source, its mutated replacement).
 # Each one breaks exactly one rule. One mutation per rule at least:
@@ -296,16 +305,45 @@ MUTATIONS = [
     ("cap: an earlier part wins, so an Edit names the value it leaves, not the one it arrives at",
      '            values[key] = value',
      '            values.setdefault(key, value)'),
+    ("frozen-path: the config-watch baseline store is not frozen",
+     '    os.path.normcase("state"),',
+     '    os.path.normcase("state_unfrozen"),'),
+
+    # ---- the PostToolUse watch. These break `hooks/config_watch.py` and must be killed by
+    # `hooks/test_config_watch.py`, which writes the cap for real and reads the file back.
+    ("watch: never restore, only report",
+     '    if not restore(path, baseline["content"]):',
+     '    if False and not restore(path, baseline["content"]):', "watch"),
+    ("watch: restore in silence, so a revert is never reported",
+     '    if messages:\n        print(json.dumps({"systemMessage": " ".join(messages)}))',
+     '    if False:\n        print(json.dumps({"systemMessage": " ".join(messages)}))', "watch"),
+    ("watch: treat every write as explained, so nothing is ever undone",
+     '    if explained and explained == resolve(path, cwd):',
+     '    if True:', "watch"),
+    ("watch: compare the bytes, not the cap reading, so an ordinary edit is reverted too",
+     '    if reading == was:',
+     '    if False:', "watch"),
+    ("watch: watch settings.json alone, so the local file is unwatched",
+     'WATCHED_NAMES = tuple(name.lstrip("/") for name in guard.PROJECT_FROZEN_FILES)',
+     'WATCHED_NAMES = ("\x2eclaude/settings.json",)', "watch"),
+    ("watch: an absent file reads the same as an empty one, so a created file is not a change",
+     '    if content is None:\n        return ""\n    return hashlib.sha256(content).hexdigest()',
+     '    return hashlib.sha256(content or b"").hexdigest()', "watch"),
+    ("watch: a missing baseline is read as clear rather than recorded",
+     '    if baseline is None:\n        save_baseline(path, current)',
+     '    if baseline is None:\n        save_baseline(path, None)', "watch"),
 ]
 
 
-def run_suite(guard_path: str, config_dir: str):
-    """Run the fixture suite against one guard copy. Return (exit code, FAIL lines)."""
+def run_suite(suite: str, variable: str, copy_path: str, config_dir: str):
+    """Run one fixture suite against one mutated copy. Return (exit code, FAIL lines)."""
     env = dict(os.environ)
-    env["GUARD_UNDER_TEST"] = guard_path
+    env.pop("GUARD_UNDER_TEST", None)
+    env.pop("WATCH_UNDER_TEST", None)
+    env[variable] = copy_path
     env["CLAUDE_CONFIG_DIR"] = config_dir
     result = subprocess.run(
-        [sys.executable, SUITE], capture_output=True, text=True, env=env, timeout=1200,
+        [sys.executable, suite], capture_output=True, text=True, env=env, timeout=1200,
     )
     red = [line for line in result.stdout.splitlines() if line.startswith("FAIL")]
     return result.returncode, red
@@ -315,16 +353,24 @@ def safe_name(label: str) -> str:
     return "".join(ch if ch.isalnum() else "_" for ch in label)[:60]
 
 
-def run_mutant(source: str, work: str, entry):
-    """Apply one mutation, run the suite against it, and return (label, code, FAIL lines)."""
-    label, old, new = entry
-    mutated = source.replace(old, new, 1)
-    copy_path = os.path.join(work, "guard_%s.py" % safe_name(label))
+def mutation_parts(entry):
+    """Return (label, old, new, target) for one mutation. The target defaults to the guard."""
+    label, old, new = entry[0], entry[1], entry[2]
+    target = entry[3] if len(entry) > 3 else "guard"
+    return label, old, new, target
+
+
+def run_mutant(sources, work: str, entry):
+    """Apply one mutation, run its suite against it, and return (label, code, FAIL lines)."""
+    label, old, new, target = mutation_parts(entry)
+    _path, suite, variable, stem = TARGETS[target]
+    mutated = sources[target].replace(old, new, 1)
+    copy_path = os.path.join(work, "%s_%s.py" % (stem, safe_name(label)))
     with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(mutated)
     config_dir = os.path.join(work, "cfg_%s" % safe_name(label))
     os.makedirs(config_dir, exist_ok=True)
-    code, red = run_suite(copy_path, config_dir)
+    code, red = run_suite(suite, variable, copy_path, config_dir)
     return label, code, red
 
 
@@ -338,13 +384,20 @@ def job_count() -> int:
 
 
 def main() -> int:
-    with open(GUARD, encoding="utf-8") as handle:
-        source = handle.read()
+    sources = {}
+    for name, (path, _suite, _variable, _stem) in TARGETS.items():
+        with open(path, encoding="utf-8") as handle:
+            sources[name] = handle.read()
 
     # Every anchor is checked BEFORE any suite runs, so a stale mutation fails in the first
-    # second, not after the mutants ahead of it in the list have spent their minutes.
-    for label, old, _new in MUTATIONS:
-        if old not in source:
+    # second, not after the mutants ahead of it in the list have spent their minutes. A mutation
+    # whose anchor sits in the WRONG file is stale too, which is what the target lookup catches.
+    for entry in MUTATIONS:
+        label, old, _new, target = mutation_parts(entry)
+        if target not in TARGETS:
+            print("ERROR unknown mutation target %r: %s" % (target, label))
+            return 1
+        if old not in sources[target]:
             print("ERROR stale mutation, anchor text not found: %s" % label)
             return 1
 
@@ -354,7 +407,7 @@ def main() -> int:
     print("%d mutations, %d at a time" % (len(MUTATIONS), jobs))
     try:
         with ThreadPoolExecutor(max_workers=jobs) as pool:
-            results = pool.map(lambda entry: run_mutant(source, work, entry), MUTATIONS)
+            results = pool.map(lambda entry: run_mutant(sources, work, entry), MUTATIONS)
             for label, code, red in results:
                 if code == 0 or not red:
                     survivors += 1

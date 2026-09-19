@@ -439,6 +439,9 @@ CFG_CLAUDEMD = slash(os.path.join(CFG, "CLAUDE.md"))
 CFG_HOOK = slash(os.path.join(CFG, "hooks", "guard.py"))
 CFG_LINT = slash(os.path.join(CFG, "lint", "prose.py"))
 CFG_AGENT = slash(os.path.join(CFG, "agents", "builder.md"))
+# The baseline store `hooks/config_watch.py` restores from. A session that could rewrite the
+# baseline could launder a cap lift into it, so it is frozen on the same terms as the hooks.
+CFG_STATE = slash(os.path.join(CFG, "state", "config-watch", "entry.json"))
 PROJ_SETTINGS = slash(os.path.join(PROJ, ".claude", "settings.json"))
 PROJ_LOCAL = slash(os.path.join(PROJ, ".claude", "settings.local.json"))
 PROJ_HOOK = slash(os.path.join(PROJ, ".claude", "hooks", "g.py"))
@@ -1238,6 +1241,16 @@ add("frozen: Write of a config lint script", "deny", "frozen-path", tool="Write"
     file_path=CFG_LINT)
 add("frozen: Write of a config agent file", "deny", "frozen-path", tool="Write", cwd=NOGIT,
     file_path=CFG_AGENT)
+add("frozen: Write of the config-watch baseline store", "deny", "frozen-path", tool="Write",
+    cwd=NOGIT, file_path=CFG_STATE)
+# `cp` onto the store carries no readable value, so rule 8 would stay silent. Rule 7 needs only the
+# PATH, which is why the store is frozen rather than merely watched.
+sh("frozen: cp onto the config-watch baseline store", "cp /tmp/x.json " + CFG_STATE, "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen: sed -i on the config-watch baseline store", "sed -i '' s/a/b/ " + CFG_STATE, "deny",
+   "frozen-path", cwd=NOGIT)
+add("frozen: Read of the config-watch baseline store is allowed", "allow", tool="Read",
+    cwd=NOGIT, file_path=CFG_STATE)
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
 add("config-edit: Edit of a project hook is allowed", "allow", tool="Edit", cwd=NOGIT,
