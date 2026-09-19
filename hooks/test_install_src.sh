@@ -249,6 +249,182 @@ case7() {
   rm -rf "$h"
 }
 
+# ---- Pointer-as-candidate cases: an existing ~/.claude/CLAUDE.md pointer is tried first --
+# Each case pre-seeds $cfg/CLAUDE.md with a pointer line before running install.sh, with
+# cwd elsewhere and no CLAUDE_PROJECT_DIR, and (unless the case is specifically about
+# depth) a root-scan list that cannot reach the pointer's target either, so only the
+# pointer candidate itself can produce a match.
+seed_pointer() {
+  # $1 = cfg dir, $2 = the "@<path>" line's path half (already ~-form or absolute)
+  mkdir -p "$1"
+  printf '@%s/CLAUDE.md\n' "$2" > "$1/CLAUDE.md"
+}
+
+pointer_case1() {
+  name="pointer1: pointer names a checkout two levels under \$HOME, root scan can't reach it"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"
+  co="$h/Developer/claude-settings"     # two levels deep, mirrors the owner's layout
+  make_checkout "$co" "# pointer1 content"
+  seed_pointer "$cfg" "$co"
+  elsewhere="$work/pointer1-elsewhere"; mkdir -p "$elsewhere"
+  stub_bin="$work/pointer1-bin"; make_curl_stub "$stub_bin"
+
+  # CLAUDE_SETTINGS_SEARCH_ROOTS=$h only scans one level under $h ("Developer"), which
+  # is not itself a git toplevel, so the bounded scan cannot find $co on its own here.
+  out=$(cd "$elsewhere" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+        GIT_CEILING_DIRECTORIES="$elsewhere" CLAUDE_SETTINGS_SEARCH_ROOTS="$h" \
+        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+  rc=$?
+
+  pointer=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$cfg/CLAUDE.md" 2>/dev/null | head -n1)
+  case "$pointer" in "~"/*) pointer="$h${pointer#\~}";; esac
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ "$pointer" != "$co" ]; then
+    bad "$name" "pointer target [$pointer] != checkout [$co] (root scan alone would miss this)"
+  elif [ -d "$h/claude-settings" ]; then
+    bad "$name" "$h/claude-settings was created; a mirror should not have been fetched"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+pointer_case2() {
+  name="pointer2: pointer names a directory that does not exist, falls through to fallback"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"
+  seed_pointer "$cfg" "$h/no-such-checkout"
+  elsewhere="$work/pointer2-elsewhere"; mkdir -p "$elsewhere"
+  stub_bin="$work/pointer2-bin"; make_curl_stub "$stub_bin"
+
+  out=$(cd "$elsewhere" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+        GIT_CEILING_DIRECTORIES="$elsewhere" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+  rc=$?
+
+  pointer=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$cfg/CLAUDE.md" 2>/dev/null | head -n1)
+  case "$pointer" in "~"/*) pointer="$h${pointer#\~}";; esac
+  expect="$h/claude-settings"
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ "$pointer" != "$expect" ]; then
+    bad "$name" "pointer target [$pointer] != fallback mirror [$expect]"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+pointer_case3() {
+  name="pointer3: pointer names a directory that is not a git checkout, falls through"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"
+  notgit="$h/not-a-checkout"; mkdir -p "$notgit"
+  seed_pointer "$cfg" "$notgit"
+  elsewhere="$work/pointer3-elsewhere"; mkdir -p "$elsewhere"
+  stub_bin="$work/pointer3-bin"; make_curl_stub "$stub_bin"
+
+  out=$(cd "$elsewhere" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+        GIT_CEILING_DIRECTORIES="$elsewhere" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+  rc=$?
+
+  pointer=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$cfg/CLAUDE.md" 2>/dev/null | head -n1)
+  case "$pointer" in "~"/*) pointer="$h${pointer#\~}";; esac
+  expect="$h/claude-settings"
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ "$pointer" != "$expect" ]; then
+    bad "$name" "pointer target [$pointer] != fallback mirror [$expect]"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+pointer_case4() {
+  name="pointer4: pointer names a checkout with a rejected origin, is not accepted"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"
+  co="$h/evil-checkout"
+  make_checkout "$co" "# pointer4 content" "https://gitlab.com/shivinate7/claude-settings.git"
+  seed_pointer "$cfg" "$co"
+  elsewhere="$work/pointer4-elsewhere"; mkdir -p "$elsewhere"
+  stub_bin="$work/pointer4-bin"; make_curl_stub "$stub_bin"
+
+  out=$(cd "$elsewhere" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+        GIT_CEILING_DIRECTORIES="$elsewhere" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+  rc=$?
+
+  pointer=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$cfg/CLAUDE.md" 2>/dev/null | head -n1)
+  case "$pointer" in "~"/*) pointer="$h${pointer#\~}";; esac
+  expect="$h/claude-settings"
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ "$pointer" = "$co" ]; then
+    bad "$name" "pointer to a rejected-origin checkout was wrongly accepted"
+  elif [ "$pointer" != "$expect" ]; then
+    bad "$name" "pointer target [$pointer] != fallback mirror [$expect]"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+pointer_case5() {
+  name="pointer5: no pointer file at all, cwd-based detection is unaffected"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"
+  co="$work/pointer5-checkout"
+  make_checkout "$co" "# pointer5 content"
+  # No seed_pointer call: $cfg does not exist yet, same as a first-ever install.
+
+  out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+  rc=$?
+
+  pointer=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$cfg/CLAUDE.md" 2>/dev/null | head -n1)
+  case "$pointer" in "~"/*) pointer="$h${pointer#\~}";; esac
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ "$pointer" != "$co" ]; then
+    bad "$name" "pointer target [$pointer] != checkout [$co]"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+pointer_case6() {
+  name="pointer6: pointer line uses the ~/ form, expands and matches"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"
+  co="$h/Developer/claude-settings"
+  make_checkout "$co" "# pointer6 content"
+  seed_pointer "$cfg" "~/Developer/claude-settings"
+  elsewhere="$work/pointer6-elsewhere"; mkdir -p "$elsewhere"
+  stub_bin="$work/pointer6-bin"; make_curl_stub "$stub_bin"
+
+  out=$(cd "$elsewhere" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+        GIT_CEILING_DIRECTORIES="$elsewhere" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+  rc=$?
+
+  pointer=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$cfg/CLAUDE.md" 2>/dev/null | head -n1)
+  case "$pointer" in "~"/*) pointer="$h${pointer#\~}";; esac
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ "$pointer" != "$co" ]; then
+    bad "$name" "pointer target [$pointer] != checkout [$co]"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
 # ---- Case 4/5/6: session_start.sh divergence check ----------------------------------------
 case4() {
   name="case4: session_start.sh with pointer == checkout prints no extra line"
@@ -327,6 +503,12 @@ case2
 case3
 case_origins
 case7
+pointer_case1
+pointer_case2
+pointer_case3
+pointer_case4
+pointer_case5
+pointer_case6
 case4
 case5
 case6

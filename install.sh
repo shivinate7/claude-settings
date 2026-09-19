@@ -82,6 +82,26 @@ checkout_at() {
   printf '%s' "$top"
 }
 
+# The directory an existing ~/.claude/CLAUDE.md already points at, if any: parsed the
+# same way settings.json's refresh hook and hooks/session_start.sh's divergence check
+# read it (the "@<path>/CLAUDE.md" line, "~/" expanded against $HOME). A person's clone
+# can sit any number of levels under $HOME (e.g. ~/Developer/claude-settings), which the
+# bounded root scan below cannot reach; a pointer already installed by a previous run
+# names it exactly, with no assumption about depth. Prints nothing on a missing file, an
+# unparseable line, or a path that no longer exists. It is a hint about where to look,
+# not a reason to trust what is found there: checkout_at() still applies the same origin
+# check to it as to every other candidate.
+pointer_dir() {
+  md="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md"
+  [ -f "$md" ] || return 1
+  d=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$md" 2>/dev/null | head -n1)
+  case "$d" in
+    "~"/*) d="$HOME${d#\~}" ;;
+  esac
+  [ -n "$d" ] && [ -d "$d" ] || return 1
+  printf '%s' "$d"
+}
+
 # Locate the source files: the clone this script lives in, else fetch from GitHub.
 SCRIPT_DIR=""
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
@@ -103,7 +123,8 @@ else
   # It would also never fire in that pipeline anyway: in `cmd1 | cmd2`, only cmd1 (curl)
   # inherits the outer stdin, so hook JSON piped to the whole pipeline never reaches bash.
   SRC=""
-  for cand in "${CLAUDE_PROJECT_DIR:-}" "$PWD"; do
+  PTR_DIR=$(pointer_dir) || PTR_DIR=""
+  for cand in "$PTR_DIR" "${CLAUDE_PROJECT_DIR:-}" "$PWD"; do
     [ -n "$cand" ] || continue
     t=$(checkout_at "$cand") && { SRC="$t"; break; }
   done
