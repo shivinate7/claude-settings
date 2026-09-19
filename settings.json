@@ -13,6 +13,7 @@
   "tui": "fullscreen",
   "theme": "dark",
   "agentPushNotifEnabled": true,
+  "inputNeededNotifEnabled": true,
   "skipWorkflowUsageWarning": true,
   "outputStyle": "Concise",
   "env": {
