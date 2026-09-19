@@ -24,7 +24,15 @@ FAIL=0
 ok() { PASS=$((PASS + 1)); printf 'ok   - %s\n' "$1"; }
 bad() { FAIL=$((FAIL + 1)); printf 'FAIL - %s: %s\n' "$1" "$2"; }
 
-work=$(mktemp -d)
+# Canonicalize: on macOS, mktemp -d returns a /var/folders/... path where /var is itself
+# a symlink to /private/var. install.sh's checkout detection goes through
+# `git rev-parse --show-toplevel`, which resolves that symlink, so the pointer it writes
+# names /private/var/folders/.... Resolving every temp dir to its physical path right
+# after creating it means every path built from it already matches what install.sh will
+# write, with no separate resolve step needed at each comparison.
+realpwd() { ( cd "$1" 2>/dev/null && pwd -P ); }
+
+work=$(mktemp -d); work=$(realpwd "$work")
 cleanup() { rm -rf "$work"; }
 trap cleanup EXIT
 
@@ -71,7 +79,7 @@ EOF
 # ---- Case 1: piped cloud install, checkout present -> SRC is the checkout ----------------
 case1() {
   name="case1: piped cloud install with checkout present uses the checkout"
-  h=$(mktemp -d); cfg="$h/.claude-cfg"; co="$work/case1-checkout"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/case1-checkout"
   make_checkout "$co" "# repo CLAUDE.md case1"
 
   # Simulate `curl ... | bash -s -- --cloud`: bash reads the script off its own stdin
@@ -98,7 +106,7 @@ case1() {
 # ---- Case 2: piped cloud install, no checkout anywhere -> old fallback mirror -------------
 case2() {
   name="case2: piped cloud install with no checkout fetches the fallback mirror"
-  h=$(mktemp -d); cfg="$h/.claude-cfg"; scratch="$work/case2-scratch"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; scratch="$work/case2-scratch"
   mkdir -p "$scratch"
 
   # Stub curl: instead of hitting GitHub, write minimal local fixtures.
@@ -132,7 +140,7 @@ case2() {
 # ---- Case 3: local ./install.sh from a clone -> unchanged, SRC is the clone --------------
 case3() {
   name="case3: local install.sh from a clone uses the clone"
-  h=$(mktemp -d); cfg="$h/.claude-cfg"; co="$work/case3-checkout"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/case3-checkout"
   make_checkout "$co" "# repo CLAUDE.md case3"
   cp "$INSTALL_SH" "$co/install.sh"
 
@@ -160,7 +168,7 @@ case3() {
 origin_case() {
   case_name="$1"; origin_url="$2"; should_match="$3"   # should_match: yes|no
 
-  h=$(mktemp -d); cfg="$h/.claude-cfg"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"
   co="$work/origin-$(printf '%s' "$case_name" | tr -c 'a-zA-Z0-9' '-')-checkout"
   make_checkout "$co" "# origin case content" "$origin_url"
 
@@ -213,7 +221,7 @@ case_origins() {
 # ---- Case 7: no $CLAUDE_PROJECT_DIR, cwd not the checkout -> bounded root search finds it --
 case7() {
   name="case7: no CLAUDE_PROJECT_DIR, cwd elsewhere, checkout under \$HOME is still found"
-  h=$(mktemp -d); cfg="$h/.claude-cfg"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"
   co="$h/some-project-dir"     # one level under $HOME, as the bounded search expects
   make_checkout "$co" "# case7 content"
   notacheckout="$work/case7-elsewhere"; mkdir -p "$notacheckout"
