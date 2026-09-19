@@ -18,6 +18,7 @@ set -u
 REPO="shivinate7/claude-settings"
 REF="${CLAUDE_SETTINGS_REF:-main}"
 RAW="https://raw.githubusercontent.com/${REPO}/${REF}"
+TARBALL="https://github.com/${REPO}/archive/refs/heads/${REF}.tar.gz"
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
 CLOUD=0
@@ -155,17 +156,13 @@ fi
 if [ -z "$SRC" ]; then
   SRC="$HOME/claude-settings"
   mkdir -p "$SRC"
-  mkdir -p "$SRC/agents" "$SRC/lint" "$SRC/hooks"
-  for f in CLAUDE.md settings.json agents/builder.md agents/reviewer.md \
-           lint/ste_lint.py lint/ste_gate.py lint/report_gate.py lint/LICENSE-ste_lint \
-           hooks/guard.py hooks/session_start.sh hooks/test_guard.py hooks/config_report.py; do
-    if curl -fsSL "$RAW/$f" -o "$SRC/$f.tmp"; then
-      mv "$SRC/$f.tmp" "$SRC/$f"
-    else
-      rm -f "$SRC/$f.tmp"
-      log "WARN: could not fetch $RAW/$f; keeping existing $SRC/$f if present"
-    fi
-  done
+  tmp="$SRC/.tarball.tmp.tar.gz"
+  if curl -fsSL "$TARBALL" -o "$tmp" && tar -xzf "$tmp" --strip-components=1 -C "$SRC"; then
+    rm -f "$tmp"
+  else
+    rm -f "$tmp"
+    log "WARN: could not fetch $TARBALL; keeping existing $SRC if present"
+  fi
   for f in CLAUDE.md settings.json; do
     [ -f "$SRC/$f" ] || { log "ERROR: $SRC/$f missing, aborting"; exit 0; }
   done
