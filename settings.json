@@ -110,11 +110,11 @@
         ]
       },
       {
-        "matcher": "Agent",
+        "matcher": "Agent|Workflow",
         "hooks": [
           {
             "type": "command",
-            "command": "in=$(cat); m=$(printf \"%s\" \"$in\" | grep -o \"\\\"model\\\"[[:space:]]*:[[:space:]]*\\\"[^\\\"]*\\\"\" | head -n1 | sed \"s/.*:[[:space:]]*\\\"\\(.*\\)\\\"/\\1/\"); case \"$m\" in \"\"|*sonnet*|*haiku*) exit 0;; esac; printf \"{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"PreToolUse\\\",\\\"permissionDecision\\\":\\\"ask\\\",\\\"permissionDecisionReason\\\":\\\"Subagent model %s is above the Sonnet default. Approve only if the orchestrator made its case in the message above.\\\"}}\\n\" \"$m\"",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/model_gate.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
             "timeout": 10
           }
         ]
