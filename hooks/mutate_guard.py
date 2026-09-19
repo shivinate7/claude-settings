@@ -145,8 +145,18 @@ MUTATIONS = [
     # back to a bare name match, the exact defect this split fixes, so a later edit that redoes
     # that collapse goes red here.
     ("shared-tree: stash collapses back to a name match on every action",
-     '    return action not in STASH_READ_ACTIONS and action not in STASH_RESTORE_ACTIONS',
+     '    return stash_action(args) not in STASH_READ_ACTIONS',
      '    return True'),
+    # Added 2026-09-19 with the stack clause. The first mutant blinds the DIRECTION predicate, so
+    # every stash call is read against the working tree. The second puts back the exact defect
+    # this change fixes: only `drop` and `clear` read the stack, so `pop`, `apply` and `branch`
+    # pass over a clean tree that carries another session's entry.
+    ("shared-tree: no stash action is read as taking an entry off the stack",
+     'def stash_takes_the_stack(args) -> bool:',
+     'def stash_takes_the_stack(args) -> bool:\n    return False'),
+    ("subject: only drop and clear read the stack, the narrow clause put back",
+     '    if stash_takes_the_stack(args):\n        stack = stash_stack(where)',
+     '    if stash_action(args) in ("drop", "clear"):\n        stack = stash_stack(where)'),
     ("shared-tree: reset collapses back to a name match, --hard or not",
      '    return "--hard" in args',
      '    return True'),
