@@ -12,11 +12,21 @@
 #                               settings.json, agents\*.md, and lint\* after each git pull.
 $ErrorActionPreference = 'Stop'
 
-$RepoDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ScriptPath = $MyInvocation.MyCommand.Path
+$RepoDir   = if ($ScriptPath) { Split-Path -Parent $ScriptPath } else { '' }
 $ClaudeDir = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE '.claude' }
 New-Item -ItemType Directory -Force -Path $ClaudeDir | Out-Null
 
 function Log([string]$msg) { Write-Host "claude-settings: $msg" }
+
+# $MyInvocation.MyCommand.Path is $null unless this script runs from a file, so a piped run
+# (iwr ... | iex) leaves $RepoDir empty and every path built from it points at nowhere. Stop here
+# instead of installing to a wrong location.
+if (-not $RepoDir -or -not (Test-Path (Join-Path $RepoDir 'CLAUDE.md')) -or -not (Test-Path (Join-Path $RepoDir 'settings.json'))) {
+    Log "cannot locate this clone (CLAUDE.md and settings.json not found next to the script)."
+    Log "run it from the clone: powershell -ExecutionPolicy Bypass -File .\install.ps1"
+    exit 1
+}
 
 # One dated line per install.ps1 run, on every exit path, so a copy-mode machine has a record
 # of what happened without re-reading Write-Host output.
