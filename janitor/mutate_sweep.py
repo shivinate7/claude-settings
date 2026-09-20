@@ -19,6 +19,12 @@ any of those four protections at all, and the build brief names all four by name
 here carries a TARGET ("sweep" or "guard") and this file mutates a copy of whichever file
 actually holds the line, the same file guard.py's own line 8 explains sweep.py leans on.
 
+A THIRD TARGET, "session_end_sweep", covers the SessionEnd hook itself (janitor/session_end_
+sweep.py), proven against its own suite (janitor/test_session_end_sweep.py) instead of
+test_sweep.py -- see SUITE_FOR_TARGET below. Its scaffold additionally carries a copy of the
+real REPO_ROOT/settings.json, never mutated, because that suite's own HookBudgetFitsUnderIts
+HostCeiling arm reads it.
+
 WHY A SCAFFOLD DIRECTORY, NOT AN ENV VAR. hooks/test_guard.py and hooks/test_config_watch.py
 each read a `*_UNDER_TEST` environment variable naming the copy to import instead of the real
 file (see hooks/mutate_guard.py's own TARGETS table). janitor/test_sweep.py has no such
@@ -72,7 +78,24 @@ SWEEP = os.path.join(HERE, "sweep.py")
 SUITE = os.path.join(HERE, "test_sweep.py")
 GUARD = os.path.join(REPO_ROOT, "hooks", "guard.py")
 
-SOURCES = {"sweep": SWEEP, "guard": GUARD}
+# A third target, added for the SessionEnd hook's own two budget protections (remaining-time
+# spend, and the upper-edge headroom guard): the hook has its own suite, test_session_end_sweep,
+# which additionally reads the real REPO_ROOT/settings.json (HookBudgetFitsUnderItsHostCeiling)
+# -- so its scaffold needs that file too, never mutated, copied alongside the rest.
+SESSION_END_SWEEP = os.path.join(HERE, "session_end_sweep.py")
+SESSION_END_SUITE = os.path.join(HERE, "test_session_end_sweep.py")
+SETTINGS_JSON = os.path.join(REPO_ROOT, "settings.json")
+
+SOURCES = {"sweep": SWEEP, "guard": GUARD, "session_end_sweep": SESSION_END_SWEEP}
+
+# Which suite proves a mutation of a given target. Every "sweep"/"guard" mutant is proven against
+# test_sweep.py, exactly as before; "session_end_sweep" mutants are proven against the hook's own
+# suite instead.
+SUITE_FOR_TARGET = {
+    "sweep": "test_sweep.py",
+    "guard": "test_sweep.py",
+    "session_end_sweep": "test_session_end_sweep.py",
+}
 
 # (label, target, anchor text found once in the source, its mutated replacement, the case name
 # (or a distinctive fragment of it) that MUST appear among the suite's own FAIL lines). One
@@ -362,6 +385,35 @@ MUTATIONS = [
      '        if False:\n'
      '            continue  # MUTANT: the exclusion never fires',
      "test_no_decision_is_recorded_against_the_primary_checkout_when_swept_via_a_linked_worktree"),
+
+    # ---- the SessionEnd hook's own two budget protections (this build) ----
+    #
+    # 1. Spend what remains, not what was guessed: `remaining_sweep_timeout_seconds` must shrink
+    # (or refuse to run the sweep at all) as the hook's own elapsed time eats into its budget,
+    # rather than always handing the sweep the fixed SWEEP_TIMEOUT_SECONDS guess. Verified by
+    # hand against a `.bak` copy before this mutant was written: ignoring `elapsed_seconds`
+    # entirely fails exactly test_too_little_budget_left_returns_none among the FAIL lines (and,
+    # not required here, two siblings in the same protection).
+    ("budget: the sweep timeout ignores how much of the hook's budget is already spent",
+     "session_end_sweep",
+     '    remaining = SESSION_END_CEILING_SECONDS - elapsed_seconds - EXIT_MARGIN_SECONDS\n'
+     '    sweep_timeout = min(SWEEP_TIMEOUT_SECONDS, remaining)\n'
+     '    if sweep_timeout < MIN_USEFUL_SWEEP_SECONDS:\n'
+     '        return None\n'
+     '    return sweep_timeout',
+     '    return SWEEP_TIMEOUT_SECONDS  # MUTANT: elapsed_seconds is never consulted',
+     "test_too_little_budget_left_returns_none"),
+
+    # 2. The upper-edge headroom guard: a margin between settings.json's ceiling and the hook's
+    # own worst case must not be allowed to run arbitrarily far ahead. Verified by hand against a
+    # `.bak` copy: widening SESSION_END_TIMEOUT_MAX_HEADROOM_SECONDS to 2000 fails exactly
+    # test_ceiling_far_ahead_of_the_worst_case_fails_the_band among the FAIL lines, and no other
+    # case.
+    ("budget: the upper-edge headroom guard accepts an unbounded margin",
+     "session_end_sweep",
+     'SESSION_END_TIMEOUT_MAX_HEADROOM_SECONDS = 20.0',
+     'SESSION_END_TIMEOUT_MAX_HEADROOM_SECONDS = 2000.0',
+     "test_ceiling_far_ahead_of_the_worst_case_fails_the_band"),
 ]
 
 
@@ -384,11 +436,13 @@ def mutation_parts(entry):
 
 
 def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_text: str):
-    """Lay out <scaffold>/hooks/guard.py and <scaffold>/janitor/{sweep.py,test_sweep.py} so that
-    running <scaffold>/janitor/test_sweep.py resolves `import guard` and `import sweep` to the
-    copies placed here (see the module docstring, "WHY A SCAFFOLD DIRECTORY"). Exactly one of
-    guard.py / sweep.py carries `mutated_text`; the other is the real source, unchanged.
-    test_sweep.py is always the real source, unchanged: this harness never edits the suite."""
+    """Lay out <scaffold>/hooks/guard.py, <scaffold>/janitor/{sweep.py,test_sweep.py,
+    session_end_sweep.py,test_session_end_sweep.py} and <scaffold>/settings.json so that running
+    either suite from <scaffold>/janitor resolves `import guard`, `import sweep` and
+    `import session_end_sweep` to the copies placed here (see the module docstring, "WHY A
+    SCAFFOLD DIRECTORY"). Exactly one of guard.py / sweep.py / session_end_sweep.py carries
+    `mutated_text`; the rest are the real sources, unchanged. Both suites, and settings.json, are
+    always the real sources: this harness never edits a suite or the real settings.json."""
     hooks_dir = os.path.join(scaffold, "hooks")
     janitor_dir = os.path.join(scaffold, "janitor")
     os.makedirs(hooks_dir, exist_ok=True)
@@ -396,6 +450,9 @@ def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_te
 
     guard_text = mutated_text if mutated_target == "guard" else sources["guard"]
     sweep_text = mutated_text if mutated_target == "sweep" else sources["sweep"]
+    session_end_text = (
+        mutated_text if mutated_target == "session_end_sweep" else sources["session_end_sweep"]
+    )
 
     with open(os.path.join(hooks_dir, "guard.py"), "w", encoding="utf-8", newline="\n") as h:
         h.write(guard_text)
@@ -403,6 +460,17 @@ def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_te
         h.write(sweep_text)
     with open(os.path.join(janitor_dir, "test_sweep.py"), "w", encoding="utf-8", newline="\n") as h:
         h.write(sources["test_sweep"])
+    with open(
+        os.path.join(janitor_dir, "session_end_sweep.py"), "w", encoding="utf-8", newline="\n"
+    ) as h:
+        h.write(session_end_text)
+    with open(
+        os.path.join(janitor_dir, "test_session_end_sweep.py"),
+        "w", encoding="utf-8", newline="\n",
+    ) as h:
+        h.write(sources["test_session_end_sweep"])
+    with open(os.path.join(scaffold, "settings.json"), "w", encoding="utf-8", newline="\n") as h:
+        h.write(sources["settings_json"])
 
 
 def run_suite(suite_path: str, config_dir: str):
@@ -434,7 +502,8 @@ def run_mutant(sources, work: str, index: int, entry):
     os.makedirs(config_dir, exist_ok=True)
     try:
         build_scaffold(scaffold, sources, target, mutated_text)
-        code, red = run_suite(os.path.join(scaffold, "janitor", "test_sweep.py"), config_dir)
+        suite_path = os.path.join(scaffold, "janitor", SUITE_FOR_TARGET[target])
+        code, red = run_suite(suite_path, config_dir)
         return label, code, red, required
     finally:
         shutil.rmtree(scaffold, ignore_errors=True)
@@ -457,6 +526,10 @@ def main() -> int:
             sources[name] = handle.read()
     with open(SUITE, encoding="utf-8") as handle:
         sources["test_sweep"] = handle.read()
+    with open(SESSION_END_SUITE, encoding="utf-8") as handle:
+        sources["test_session_end_sweep"] = handle.read()
+    with open(SETTINGS_JSON, encoding="utf-8") as handle:
+        sources["settings_json"] = handle.read()
 
     # Every anchor is checked before any suite runs, so a stale mutation fails in the first
     # second, not after the mutants ahead of it in the list have spent their minutes.

@@ -286,10 +286,61 @@ class HookBudgetFitsUnderItsHostCeiling(unittest.TestCase):
     def test_settings_json_timeout_leaves_a_real_margin_not_a_sliver(self):
         """Strictly-greater alone would let a 45.01s ceiling "pass" for a 45s worst case, which
         leaves no room for process-start and interpreter-import overhead neither number above
-        counts. Require at least 5 seconds of headroom."""
+        counts. Require at least SESSION_END_TIMEOUT_MIN_HEADROOM_SECONDS of headroom -- the real
+        constant the module states beside its arithmetic, never a copy of the number."""
         timeout = self._session_end_timeout(self.settings)
         self.assertIsNotNone(timeout)
-        self.assertGreaterEqual(timeout - self.mod.HOOK_WORST_CASE_SECONDS, 5)
+        self.assertGreaterEqual(
+            timeout - self.mod.HOOK_WORST_CASE_SECONDS,
+            self.mod.SESSION_END_TIMEOUT_MIN_HEADROOM_SECONDS,
+        )
+
+    def test_settings_json_timeout_does_not_leave_more_than_the_stated_headroom(self):
+        """Arm: SettingsCeilingHeadroomHasAnUpperEdge. The floor test above only refuses a
+        ceiling that runs too CLOSE to the worst case. Nothing above refused one that runs too
+        FAR ahead -- a later change that quietly doubled SWEEP_TIMEOUT_SECONDS (or halved it
+        while settings.json's timeout stayed put) would still pass every arm above it. This arm
+        reads the real constant the module states beside its own arithmetic
+        (SESSION_END_TIMEOUT_MAX_HEADROOM_SECONDS), never a copy of it, and refuses a margin
+        that runs past it. When this goes red: either shrink the work (bring
+        SWEEP_TIMEOUT_SECONDS or the git-call budget back down), or move the ceiling on purpose
+        (widen settings.json's SessionEnd timeout AND this module's max-headroom constant, in
+        the same commit, with a reason)."""
+        timeout = self._session_end_timeout(self.settings)
+        self.assertIsNotNone(timeout)
+        self.assertTrue(
+            self.mod.headroom_within_bounds(timeout, self.mod.HOOK_WORST_CASE_SECONDS),
+            "settings.json's SessionEnd timeout (%r) leaves a margin over "
+            "HOOK_WORST_CASE_SECONDS (%r) outside [%r, %r]" % (
+                timeout, self.mod.HOOK_WORST_CASE_SECONDS,
+                self.mod.SESSION_END_TIMEOUT_MIN_HEADROOM_SECONDS,
+                self.mod.SESSION_END_TIMEOUT_MAX_HEADROOM_SECONDS,
+            ),
+        )
+
+
+class HeadroomWithinBoundsUnit(unittest.TestCase):
+    """Direct, synthetic-number coverage of `headroom_within_bounds`, proving the upper-edge arm
+    goes red in BOTH directions -- not just against the one real settings.json this checkout
+    happens to ship. Cheap and fast: no subprocess, no git, no real settings.json involved."""
+
+    def setUp(self):
+        import session_end_sweep
+        self.mod = session_end_sweep
+
+    def test_real_settings_headroom_is_within_bounds(self):
+        """Sanity: the actual repository is not, itself, the defect this arm guards."""
+        self.assertTrue(self.mod.headroom_within_bounds(55.0, 45.0))
+
+    def test_worst_case_grown_toward_the_ceiling_fails_the_band(self):
+        """Direction 1: the worst case creeps up toward the ceiling (SWEEP_TIMEOUT_SECONDS grew,
+        or a future guard._git timeout grew) until the margin drops under the stated floor."""
+        self.assertFalse(self.mod.headroom_within_bounds(55.0, 51.0))  # margin 4 < floor 5
+
+    def test_ceiling_far_ahead_of_the_worst_case_fails_the_band(self):
+        """Direction 2: settings.json's ceiling runs far ahead of the worst case (raised without
+        a matching reason, or the worst case shrank without the ceiling following it down)."""
+        self.assertFalse(self.mod.headroom_within_bounds(100.0, 45.0))  # margin 55 > ceiling 20
 
 
 class ResolveRepoRootUnit(unittest.TestCase):
@@ -320,6 +371,73 @@ class ResolveRepoRootUnit(unittest.TestCase):
     def test_no_repository_returns_none(self):
         empty = tempfile.mkdtemp(prefix="unit_no_repo_", dir=ROOT)
         self.assertIsNone(self.mod.resolve_repo_root(empty))
+
+
+class SweepReceivesTheRemainingBudgetNotAFixedNumber(unittest.TestCase):
+    """Arm: HookSpendsWhatRemains. `remaining_sweep_timeout_seconds` is the exact function
+    `handle` calls to compute the `timeout=` it hands `subprocess.run` -- proving facts about
+    IT proves facts about the value the hook actually passes, with no sleep involved (CLAUDE.md,
+    "never write a waiter loop")."""
+
+    def setUp(self):
+        import session_end_sweep
+        self.mod = session_end_sweep
+
+    def test_plenty_of_budget_left_gets_the_fixed_cap(self):
+        # elapsed=1s of a 55s ceiling, 3s margin reserved -> 51s left, capped at the fixed 25s.
+        self.assertEqual(
+            self.mod.remaining_sweep_timeout_seconds(1.0), self.mod.SWEEP_TIMEOUT_SECONDS
+        )
+
+    def test_much_of_the_budget_already_spent_shrinks_the_timeout_to_match(self):
+        """The hook starts with much of its budget already spent (45s of a 55s ceiling): the
+        timeout the sweep receives must have shrunk to match what is actually left, not stayed
+        pinned at the fixed SWEEP_TIMEOUT_SECONDS guess."""
+        elapsed = 45.0
+        got = self.mod.remaining_sweep_timeout_seconds(elapsed)
+        self.assertIsNotNone(got)
+        self.assertLess(got, self.mod.SWEEP_TIMEOUT_SECONDS)
+        self.assertAlmostEqual(
+            got,
+            self.mod.SESSION_END_CEILING_SECONDS - elapsed - self.mod.EXIT_MARGIN_SECONDS,
+        )
+
+    def test_too_little_budget_left_returns_none(self):
+        """When nothing usable remains, the function must say so (None), not a near-zero or
+        negative timeout that `subprocess.run` would reject or that could not run anything
+        useful."""
+        elapsed = self.mod.SESSION_END_CEILING_SECONDS  # the whole ceiling already spent
+        self.assertIsNone(self.mod.remaining_sweep_timeout_seconds(elapsed))
+
+
+class HookSweepsNothingWhenTooLittleBudgetRemains(unittest.TestCase):
+    """Arm: HookSkipsTheSweepWhenBudgetIsSpent. End-to-end, the same way every other fail-open
+    arm in this file is proven: the real hook process, a real repository with a real reapable
+    branch, and JANITOR_HOOK_ELAPSED_OVERRIDE_SECONDS standing in for a hook that started with
+    (almost) no budget left -- see session_end_sweep.py's own comment on that override for why
+    it is additive, never a replacement for the real measurement, and never a sleep."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.repo = os.path.join(ROOT, "budget_too_little_repo")
+        make_repo(cls.repo)
+        add_reapable_branch(cls.repo, "reap-me-budget")
+        require("reap-me-budget" in local_branches(cls.repo), "fixture: reapable branch present")
+
+    def test_too_little_budget_left_exits_0_and_sweeps_nothing(self):
+        cfg = os.path.join(ROOT, "cfg_budget_too_little")
+        result = run_hook(
+            {"hook_event_name": "SessionEnd", "cwd": self.repo},
+            env_extra={
+                "CLAUDE_CONFIG_DIR": cfg,
+                "JANITOR_HOOK_ELAPSED_OVERRIDE_SECONDS": "9999",
+            },
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(os.path.exists(os.path.join(cfg, "janitor", "restore-log.jsonl")),
+                          "a sweep given no time at all must never have run")
+        self.assertIn("reap-me-budget", local_branches(self.repo),
+                       "nothing was swept, so the reapable branch must still be there")
 
 
 if __name__ == "__main__":
