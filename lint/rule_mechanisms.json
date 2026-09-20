@@ -1,0 +1,459 @@
+{
+  "_note": "Checked-in map for lint/rule_audit.py. Each key is a `<!-- rule:<slug> -->` anchor in CLAUDE.md. `mechanism.kind` is one of guard, gate, ci, unmechanized. guard.ref must name a rule string passed to refuse()/record() in hooks/guard.py. gate.ref must be a file path, relative to the repo root, that exists; gate.needle, if set, must still appear in that file. ci.ref must name a `- name:` step in .github/workflows/gates.yml. unmechanized.reason must say what a hook or check would have to see.",
+  "rules": {
+    "outcomes-judge-by-outcome": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Judging the outcome for the person served is a human read of context and consequence. No test scores outcome quality."
+      }
+    },
+    "outcomes-decision-is-argument": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "A stance for how to read a recorded decision, not an independently checkable action a hook can observe."
+      }
+    },
+    "outcomes-stale-decision-protocol": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Naming a stale decision, measuring its claim, and proposing a fix are judgment calls in prose. Nothing parses staleness or fix quality."
+      }
+    },
+    "outcomes-never-defer-rotted": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Whether an argument has rotted is a judgment call on its merit. No test reads argument quality."
+      }
+    },
+    "outcomes-never-repeal-alone": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Nothing in the repo distinguishes a solo repeal of a decision from one the owner approved."
+      }
+    },
+    "outcomes-mechanize-rules": {
+      "mechanism": {
+        "kind": "gate",
+        "ref": "lint/rule_audit.py",
+        "needle": "every CLAUDE.md rule anchor maps to a mechanism"
+      }
+    },
+    "roles-orchestrator-never-builds": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No hook classifies a session's own act as orchestration versus building, or counts a fix against the ten-line exception."
+      }
+    },
+    "roles-one-role-per-worker": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Nothing inspects which role, builder, reviewer, or Explore, a spawned agent holds at runtime, or catches a worker that carries two."
+      }
+    },
+    "roles-workers-run-sonnet": {
+      "mechanism": {
+        "kind": "guard",
+        "ref": "subagent-model-cap"
+      }
+    },
+    "roles-opus-shaped-say-so": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Judging whether a task is Opus-shaped, and whether the assistant said so in one line first, is a human read of the transcript."
+      }
+    },
+    "roles-opus-override-guarded": {
+      "mechanism": {
+        "kind": "guard",
+        "ref": "subagent-model-cap"
+      }
+    },
+    "roles-remove-override-file": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Nothing checks that the settings.local.json cap override was deleted once the subagent work finished."
+      }
+    },
+    "roles-workers-never-spawn": {
+      "mechanism": {
+        "kind": "gate",
+        "ref": "settings.json",
+        "needle": "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"
+      }
+    },
+    "roles-brief-contents": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check parses a brief for the task, files, decisions quoted verbatim, and a done-check. Brief quality is read by a human."
+      }
+    },
+    "roles-resume-by-name": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Nothing distinguishes a resumed agent from a freshly spawned one at the tool layer this repo governs."
+      }
+    },
+    "parallelism-each-own-checkout": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check counts checkouts against concurrent workers or catches two agents sharing one tree."
+      }
+    },
+    "parallelism-isolation-worktree": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Nothing inspects the isolation field a workflow agent invocation carries."
+      }
+    },
+    "parallelism-own-lane-orchestrator": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Lane assignment and briefing happen in chat and briefs, which no hook here reads."
+      }
+    },
+    "parallelism-no-mid-task-talk": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No hook reads inter-lane messages for content or timing to catch a mid-task exchange."
+      }
+    },
+    "parallelism-argue-max-parallelism": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Naming the open lanes correctly is a factual claim written in prose, not a structure a check can verify."
+      }
+    },
+    "shared-trees-no-destructive-git": {
+      "mechanism": {
+        "kind": "guard",
+        "ref": "shared-tree"
+      }
+    },
+    "shared-trees-no-machine-wide-kill": {
+      "mechanism": {
+        "kind": "guard",
+        "ref": "machine-wide-kill"
+      }
+    },
+    "shared-trees-one-checkout-per-agent": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check counts how many agents hold a given checkout at once."
+      }
+    },
+    "shared-trees-confirm-before-write": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "guard.py acts on the command itself. Nothing checks that the assistant confirmed its checkout and branch before issuing it."
+      }
+    },
+    "shared-trees-own-ports-data": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check compares the ports or data paths two checkouts use."
+      }
+    },
+    "shared-trees-reverify-after-incident": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Detecting an incident and confirming a re-verify followed it both need a human read of the transcript."
+      }
+    },
+    "shared-trees-install-refusal-hook": {
+      "mechanism": {
+        "kind": "gate",
+        "ref": "settings.json",
+        "needle": "hooks/guard.py"
+      }
+    },
+    "git-main-only-by-pr": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Branch protection on main is a GitHub repository setting, external to this codebase. No file here proves it is switched on."
+      }
+    },
+    "git-wait-for-required-checks": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Waiting is a behavior in time. No artifact records whether the assistant waited before it acted again."
+      }
+    },
+    "git-never-merge-failing-ci": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Enforcement is GitHub's required-status-checks setting on the branch, not something this repo's files can attest to."
+      }
+    },
+    "git-never-discard-output": {
+      "mechanism": {
+        "kind": "guard",
+        "ref": "silent-write"
+      }
+    },
+    "git-remedy-never-names-target": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No fixture asserts that a guard REASON string omits the exact command text it denied."
+      }
+    },
+    "git-slug-then-claim-number": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "README Decision 5 keeps id-claiming manual and per repo, on purpose. Nothing enforces a free number at merge time."
+      }
+    },
+    "git-cite-by-id": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No lint checks citation style in a commit message or a PR body for an id versus a bare path."
+      }
+    },
+    "git-record-own-file-per-kind": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check enforces one file per decision or a separate folder per record kind."
+      }
+    },
+    "git-integration-branch-merge": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Sequencing overlapping PRs into one integration branch and closing the originals is a manual coordination step."
+      }
+    },
+    "verification-screens-verdict": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No harness renders every screen at every size and theme and demands a verdict line per screen."
+      }
+    },
+    "verification-browser-login-only-needed": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Whether a login was needed for a given check is a judgment call, not a loggable fact this repo captures."
+      }
+    },
+    "verification-trust-guard-after-red": {
+      "mechanism": {
+        "kind": "gate",
+        "ref": "hooks/mutate_guard.py",
+        "needle": "SURVIVED"
+      }
+    },
+    "verification-verify-against-repo": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Nothing compares a claim of completion in a status line against the actual state of the repo."
+      }
+    },
+    "verification-never-waiter-loop": {
+      "mechanism": {
+        "kind": "guard",
+        "ref": "waiter"
+      }
+    },
+    "verification-never-dry-run-blocklist": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No test asserts that a deny or ask rule was exercised for real, rather than dry-run, before it was trusted."
+      }
+    },
+    "verification-bump-first-fix-version": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check compares a dependency bump's target version against the first version that fixed the named problem."
+      }
+    },
+    "verification-checked-reader-for-numbers": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "lint/ste_lint.py checks sentence style, not whether a published number or path has a reader that actually checked it."
+      }
+    },
+    "verification-report-unknown-reads": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check distinguishes a report of unknown from a report wrongly marked clear or broken."
+      }
+    },
+    "tokens-never-load-whole-doc": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check measures how much of a document a session read before acting on it."
+      }
+    },
+    "tokens-verdict-not-stream": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check tells a pasted verdict apart from a pasted stream, or counts the commands used to get it."
+      }
+    },
+    "tokens-point-brief-at-files": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Nothing inspects a brief's content to confirm it names files rather than pasting their contents."
+      }
+    },
+    "tokens-read-report-not-transcript": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check tells whether the orchestrator read a sub-agent's report or its full transcript."
+      }
+    },
+    "tokens-compacting-keep-essentials": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Compaction content is a judgment call about what to keep. Nothing scores a compacted context against this rule."
+      }
+    },
+    "building-never-guess-answer": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Telling a guessed answer from a computed one needs a read of the reasoning, which no check performs."
+      }
+    },
+    "building-surface-ambiguity": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Whether an ambiguity was surfaced or silently resolved is a judgment call on the reply's content."
+      }
+    },
+    "building-never-drop-item-silently": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check compares a task's item list against a reply to catch a silently dropped item."
+      }
+    },
+    "building-check-primitive-first": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Whether a primitive was checked before a workaround was built needs a read of the session's own steps."
+      }
+    },
+    "building-fix-cause-not-symptom": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Distinguishing a cause fix from a symptom fix is a code-review judgment, not a parseable property."
+      }
+    },
+    "building-name-bandaid": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Whether a fix is a bandaid, and whether it was named as one, is a judgment call on the report text."
+      }
+    },
+    "building-land-design-or-abandon": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Nothing checks that a design discussed in chat was later landed in a spec, a decision entry, or declared abandoned."
+      }
+    },
+    "speak-cite-id-plus-gloss": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No lint checks that a decision citation in a reply carries an id plus a short gloss rather than a bare id."
+      }
+    },
+    "speak-never-explain-in-paragraph": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Judging whether a rule explanation ran to a paragraph is a style read, not a parsed structure."
+      }
+    },
+    "output-write-in-ste": {
+      "mechanism": {
+        "kind": "gate",
+        "ref": "lint/ste_lint.py"
+      }
+    },
+    "output-start-with-point": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check reads whether the first sentence of a reply is the point rather than a preamble."
+      }
+    },
+    "output-tracking-turn-one-line": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Whether a turn only tracked running work, and whether the reply held to one line, is a content judgment."
+      }
+    },
+    "output-never-echo-worker-report": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check compares a reply against a worker's report to catch an echoed copy or a described screenshot."
+      }
+    },
+    "output-never-paste-passing-output": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check tells a pasted command stream apart from a stated verdict in a reply."
+      }
+    },
+    "output-bring-decisions-as-question": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Whether a decision was framed as a question with options and a recommendation is a style read of the reply."
+      }
+    },
+    "reports-order-of-labels": {
+      "mechanism": {
+        "kind": "gate",
+        "ref": "lint/report_gate.py",
+        "needle": "LABEL_ORDER"
+      }
+    },
+    "reports-done-format": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "lint/report_gate.py checks the label headers only. It does not read whether Done's line says BUILT, RECORDED, or OTHER, or names a PR or commit."
+      }
+    },
+    "reports-item-count-format": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check counts whether a label held one inline item or several as bullets."
+      }
+    },
+    "reports-drop-unused-label": {
+      "mechanism": {
+        "kind": "gate",
+        "ref": "lint/report_gate.py",
+        "needle": "LABEL_ORDER"
+      }
+    },
+    "reports-blockquote-no-fence": {
+      "mechanism": {
+        "kind": "gate",
+        "ref": "lint/report_gate.py",
+        "needle": "```"
+      }
+    },
+    "reports-nothing-above-unless-question": {
+      "mechanism": {
+        "kind": "gate",
+        "ref": "lint/report_gate.py",
+        "needle": "allow_prefix"
+      }
+    },
+    "reports-no-report-when-nothing-landed": {
+      "mechanism": {
+        "kind": "gate",
+        "ref": "lint/report_gate.py",
+        "needle": "turn_landed"
+      }
+    },
+    "verification-cry-wolf-guard-is-spent": {
+      "mechanism": {
+        "kind": "gate",
+        "ref": "lint/test_gates.py",
+        "needle": "test_58_quoted_git_commit_in_probe_list_passes"
+      }
+    },
+    "verification-recovery-not-gated-on-own-state": {
+      "mechanism": {
+        "kind": "guard",
+        "ref": "pointer-head"
+      }
+    }
+  }
+}

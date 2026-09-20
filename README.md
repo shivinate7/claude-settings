@@ -357,6 +357,11 @@ dispatch. Each run sets up Python 3.11. It then runs the guard suite and the gua
 mutation harness. It also runs the report-gate suite, a shell check of `install.sh`, a
 PowerShell parse of `install.ps1`, and the STE lint action.
 
+`lint/rule_audit.py` checks that every `<!-- rule:<slug> -->` anchor in `CLAUDE.md` has a row
+in `lint/rule_mechanisms.json`. A row names the guard rule, gate file, or CI step that
+enforces it, or the token `unmechanized` plus a reason. CI runs the audit and its own
+fixture suite, `lint/test_rule_audit.py`, on every push and pull request.
+
 Manual dispatch takes one input, `full_ste_audit`. Enable it from the Actions tab to lint
 the whole tree in report mode. That run never fails the build. It only writes a summary.
 

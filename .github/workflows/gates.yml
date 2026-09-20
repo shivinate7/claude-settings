@@ -35,6 +35,12 @@ jobs:
       - name: Stop-hook gate fixture suite
         run: python3 lint/test_gates.py
 
+      - name: Rule audit fixture suite
+        run: python3 lint/test_rule_audit.py
+
+      - name: Rule mechanization audit
+        run: python3 lint/rule_audit.py
+
       - name: Shell syntax check, install.sh
         run: bash -n install.sh
 
