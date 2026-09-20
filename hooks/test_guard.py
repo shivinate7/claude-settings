@@ -743,6 +743,24 @@ sh("worktree: -C naming the worktree asks, from the shared checkout",
    VCS + " -C " + slash(GITWT) + " reset --hard", "ask", "shared-tree", cwd=GITMAIN)
 sh("worktree: a cd into the worktree asks, from the shared checkout",
    "cd " + slash(GITWT) + " && " + VCS + " reset --hard", "ask", "shared-tree", cwd=GITMAIN)
+sh("worktree: restore of a dirty path still asks, unchanged", VCS + " restore f.txt", "ask",
+   "shared-tree", cwd=GITWT)
+sh("worktree: checkout -- of a dirty path still asks, unchanged", VCS + " checkout -- f.txt",
+   "ask", "shared-tree", cwd=GITWT)
+
+# THE PUSH ARM. `refs/stash` lives in the COMMON git directory (MEASURED above, next to
+# SUBJSTASHWT), so a push from a worktree lands on the SAME one-entry-wide stack the primary
+# checkout and every other lane share. The worktree "ask" that `reset --hard` and `restore` earn
+# just above never applies to this arm: it is earned for a subject that lives in THIS tree
+# alone, and a stash push's subject does not.
+sh("worktree: a stash push in a dirty worktree denies, the stack is clone-wide",
+   VCS + " stash push -u -m lane", "deny", "shared-tree", cwd=GITWT)
+sh("worktree: a bare stash in a dirty worktree denies, the stack is clone-wide",
+   VCS + " stash", "deny", "shared-tree", cwd=GITWT)
+sh("worktree: stash save in a dirty worktree denies, the stack is clone-wide",
+   VCS + " stash save lane", "deny", "shared-tree", cwd=GITWT)
+sh("worktree: a stash push in the shared checkout still denies, unchanged",
+   VCS + " stash push -u -m lane", "deny", "shared-tree", cwd=GITMAIN)
 
 # THE TABLE'S ALLOW ROWS, checked in both a shared checkout and a worktree, so an allow is proven
 # to hold regardless of which tree the call runs in — a read or a restore never needed the
