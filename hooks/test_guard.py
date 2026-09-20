@@ -989,6 +989,14 @@ sh("kill: the word on the far side of a pipe filter", "cat notes.md | grep pkill
 sh("kill: a quoted phrase ahead of a real chained kill still denies",
    'echo "safe text" && pkill node', "deny", "machine-wide-kill", cwd=NOGIT)
 
+# BLAST RADIUS of the loop-keyword fix in `resolve_command` (Rule 9's own defect): a kill inside
+# a loop's `do` block, or inside an `if`'s `then` block, used to resolve to the keyword as its
+# command word and pass. MEASURED wrongly allowed before this fix.
+sh("kill: a pkill inside a loop's do-block, MEASURED wrongly allowed",
+   "while true; do pkill -f server; done", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: a pkill inside an if's then-block, MEASURED wrongly allowed",
+   "if true; then pkill -f server; fi", "deny", "machine-wide-kill", cwd=NOGIT)
+
 
 # =========================================================================== 2b. live streams
 #
@@ -1008,6 +1016,12 @@ sh("stream: a pipe into a bounded tail", "python x.py | tail -5", "allow", cwd=N
 sh("stream: Get-Content -Tail reads and stops", "Get-Content app.log -Tail 20", "allow",
    tool="PowerShell", cwd=NOGIT)
 
+# BLAST RADIUS of the loop-keyword fix: `live_stream_hit` already reads every token of its
+# segment, not only the first, so a follow flag inside a loop's do-block denied before this fix
+# too. Pinned here so a later change cannot narrow that read back to command position only.
+sh("stream: tail -f inside a loop's do-block denies unchanged",
+   "while true; do tail -f app.log; done", "deny", "live-stream", cwd=NOGIT)
+
 
 # =========================================================================== 2c. waiter loops
 #
@@ -1025,6 +1039,19 @@ sh("waiter: a readiness check is allowed", "curl --retry 5 http://localhost:3000
    cwd=NOGIT)
 sh("waiter: an unrelated log query is allowed", VCS + " log --since=yesterday", "allow", cwd=NOGIT)
 
+# Rule 9 missed every loop body. `split_segments` cuts a loop on its own `;`, so the segment
+# after it is `do sleep 1`, and the command word read as `do`, not `sleep`. MEASURED against the
+# live guard before this fix: the two loops below were both wrongly allowed.
+sh("waiter: a while-loop with a pattern-polling condition, MEASURED wrongly allowed",
+   "while ! pgrep -f server; do sleep 1; done", "deny", "waiter",
+   carries=("condition polls",))
+sh("waiter: an until-loop over a plain readiness check, MEASURED wrongly allowed",
+   "until curl -sf localhost:3000; do sleep 2; done", "deny", "waiter")
+sh("waiter: a for-loop's own do-block still denies",
+   "for i in 1 2 3; do sleep 1; done", "deny", "waiter")
+sh("waiter: a non-waiter loop body stays allowed",
+   'while read l; do echo "$l"; done', "allow", cwd=NOGIT)
+
 
 # =========================================================================== 3. push and delete
 
@@ -1037,6 +1064,12 @@ sh("push: force from the PowerShell tool as well", VCS + " push --force-with-lea
    "force-push", tool="PowerShell", cwd=NOGIT)
 sh("push: an ordinary push", VCS + " push", "allow", cwd=NOGIT)
 sh("push: setting the upstream", VCS + " push -u origin claude/lane", "allow", cwd=NOGIT)
+
+# BLAST RADIUS of the loop-keyword fix: `git_calls` already scans every token of its segment for
+# `git`, not only the first, so a force push inside a loop's do-block asked before this fix too.
+# Pinned here so a later change cannot narrow that scan back to command position only.
+sh("push: git push --force inside a loop's do-block asks unchanged",
+   "while true; do " + VCS + " push --force; done", "ask", "force-push", cwd=NOGIT)
 
 sh("delete: the root", "rm -rf /", "deny", "destructive-delete", cwd=NOGIT)
 sh("delete: the home directory", "rm -fr ~", "deny", "destructive-delete", cwd=NOGIT)

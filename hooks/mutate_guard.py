@@ -191,10 +191,27 @@ MUTATIONS = [
     ("waiter: never refuse a waiter loop (Rule 9)",
      '        matched = waiter_hit(segment)\n'
      '        if matched:\n'
+     '            if poller:\n'
+     '                refuse(tool, "deny", "waiter", PATTERN_POLLER_REASON, poller + " " + matched)\n'
      '            refuse(tool, "deny", "waiter", WAITER_REASON, matched)',
      '        matched = waiter_hit(segment)\n'
      '        if False:\n'
-     '            refuse(tool, "deny", "waiter", WAITER_REASON, matched)', "guard", 'waiter: a bare sleep'),
+     '            if poller:\n'
+     '                refuse(tool, "deny", "waiter", PATTERN_POLLER_REASON, poller + " " + matched)\n'
+     '            refuse(tool, "deny", "waiter", WAITER_REASON, matched)', "guard",
+     'waiter: a bare sleep'),
+    ("command word: a loop keyword no longer yields to the command inside it (Rule 9's own gap)",
+     '    while index < end and (ASSIGNMENT.match(tokens[index]) or tokens[index] in '
+     'LOOP_KEYWORDS):',
+     '    while index < end and (ASSIGNMENT.match(tokens[index]) or False):', "guard",
+     'waiter: an until-loop over a plain readiness check, MEASURED wrongly allowed'),
+    ("waiter: a pattern-polling loop condition no longer gets its own reason",
+     '            if poller:\n'
+     '                refuse(tool, "deny", "waiter", PATTERN_POLLER_REASON, poller + " " + matched)',
+     '            if False:\n'
+     '                refuse(tool, "deny", "waiter", PATTERN_POLLER_REASON, poller + " " + matched)',
+     "guard",
+     'waiter: a while-loop with a pattern-polling condition, MEASURED wrongly allowed'),
     ("destructive-delete: blind the wide-delete patterns",
      "    for pattern in DESTRUCTIVE_DELETE:\n        found = pattern.search(cmd)",
      "    for pattern in ():\n        found = pattern.search(cmd)", "guard", 'delete: the root'),
