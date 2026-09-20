@@ -51,7 +51,10 @@ each PR's own commit. Close the originals as superseded once the integration bra
 ships in. Give a verdict per screen, never a description.
 Use my browser login only when needed. Trust a guard only once it goes red on
 the defect it guards. A green check proves only its platform and the states its
-fixtures build. Verify long work against the repo, not your status line. Never write
+fixtures build. A gate's allow list is the constant the code reads, never a copy.
+A check that cries wolf is worse than no check. When a mutant lives, find the
+state your fixtures never reach. When a mutant dies, check the cause.
+Verify long work against the repo, not your status line. Never write
 a waiter loop. Never dry-run a block-list. Bump a dependency to the first version
 fixing the problem, never the latest. If this repo lints markdown, give every
 published number and path a checked reader. Verify a claim before you rely on it, and
@@ -67,7 +70,8 @@ Drop the narration.
 **Building.** Never guess an answer the code should give you. Surface ambiguity instead
 of resolving it silently. Never drop an item without saying so. Check whether the
 primitive exists before building a workaround. Fix the cause, not the symptom. Name a
-fix as a bandaid when a bandaid is the right call. A capability no user can reach is not built. A design living
+fix as a bandaid when a bandaid is the right call. A capability no user can reach is not built. Never
+gate a recovery control on the state it recovers. A design living
 only in chat is not done. Land the design in a spec or decision entry now, or declare
 the design abandoned.
 
