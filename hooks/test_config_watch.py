@@ -19,12 +19,15 @@ LIFTED cap there. Without that number the green run proves nothing.
     python hooks/test_config_watch.py               # here: the bypasses are undone
 """
 
+import base64
+import hashlib
 import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GUARD = os.path.join(HERE, "guard.py")
@@ -37,7 +40,41 @@ WATCH = os.environ.get("WATCH_UNDER_TEST") or os.path.join(HERE, "config_watch.p
 # that reads it.
 KEY = "CLAUDE_CODE_" + "SUBAGENT_MODEL"
 KEY_FORCE = KEY + "_FORCE"
-LIFT = json.dumps({"env": {KEY: "opus", KEY_FORCE: "1"}})
+EXPIRY_FIELD = "_subagentCapUntil"
+
+
+def _iso(hours_from_now: float) -> str:
+    when = datetime.now(timezone.utc) + timedelta(hours=hours_from_now)
+    return when.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+VALID_UNTIL = _iso(1)     # one hour ahead: current
+PASSED_UNTIL = _iso(-1)   # one hour ago: expired
+TOO_FAR_UNTIL = _iso(48)  # two days ahead: over the 24-hour ceiling
+
+
+def cap_json(model=None, force=None, until=None, extra=None):
+    """Build one settings.local.json body. `until`, when given, sits OUTSIDE `env` on purpose:
+    that is the whole point of the field under test."""
+    body = {}
+    env = {}
+    if model is not None:
+        env[KEY] = model
+    if force is not None:
+        env[KEY_FORCE] = force
+    if env:
+        body["env"] = env
+    if until is not None:
+        body[EXPIRY_FIELD] = until
+    if extra:
+        body.update(extra)
+    return json.dumps(body)
+
+
+# LIFT now carries a valid, current expiry: a lift with none is, since this change, exactly what
+# the new "bad expiry" cases below test. The bypass cases reuse LIFT too, and are unaffected: they
+# are reverted for being UNASKED, a check that runs before the expiry rule ever does.
+LIFT = cap_json(model="opus", force="1", until=VALID_UNTIL)
 SONNET = json.dumps({"env": {KEY: "sonnet", KEY_FORCE: "1"}})
 UNRELATED = json.dumps({"env": {KEY: "sonnet", KEY_FORCE: "1"}, "theme": "light"})
 
@@ -283,6 +320,65 @@ def empty_then_absent(project):
             "settings": project.content()}
 
 
+# --------------------------------------------------------------------------- the expiry
+#
+# `_subagentCapUntil` only matters once a lift is APPROVED: an unasked write is reverted for being
+# unasked, before the expiry rule ever runs. So every case here goes through the approved-Write
+# path, the same shape `approved_write` above uses, and differs only in what `_subagentCapUntil`
+# says.
+
+
+def approved_case(name, content, kind):
+    @case(name, "expiry", kind=kind)
+    def run_case(project):
+        project.settle()
+        decision = project.pre("Write", {"file_path": project.settings, "content": content})
+        write(project.settings, content)
+        message = project.post("Write", {"file_path": project.settings, "content": content})
+        return {"pre": decision, "lifted": project.lifted(), "message": message}
+    return run_case
+
+
+approved_case("an approved lift with a missing _subagentCapUntil is revoked",
+              cap_json(model="opus", force="1"), "bad")
+approved_case("an approved lift with an unparseable _subagentCapUntil is revoked",
+              cap_json(model="opus", force="1", until="not-a-time"), "bad")
+approved_case("an approved lift with _subagentCapUntil more than 24h ahead is revoked",
+              cap_json(model="opus", force="1", until=TOO_FAR_UNTIL), "bad")
+approved_case("an approved lift with _subagentCapUntil already passed is revoked",
+              cap_json(model="opus", force="1", until=PASSED_UNTIL), "bad")
+approved_case("an approved lift with a valid, current _subagentCapUntil is NOT reverted, "
+              "and stays silent", cap_json(model="opus", force="1", until=VALID_UNTIL), "valid")
+approved_case("a file with no lift above Sonnet and a stray _subagentCapUntil does nothing",
+              cap_json(model="sonnet", force="1", until=VALID_UNTIL), "nocap")
+
+
+# --------------------------------------------------------------------------- the old shape
+
+
+@case("a baseline entry in the old on-disk shape (no 'prior' key) still works", "compat")
+def old_shape_baseline(project):
+    # Seed the store with exactly the shape `main`'s save_baseline ever wrote: no "prior" key at
+    # all. load_baseline must read this without crashing, and the unasked lift below must still
+    # be caught and reverted from it.
+    store_dir = os.path.join(project.cfg, "state", "config-watch")
+    os.makedirs(store_dir, exist_ok=True)
+    content = SONNET.encode("utf-8")
+    key = hashlib.sha256(project.settings.encode("utf-8", "replace")).hexdigest() + ".json"
+    entry = {
+        "path": project.settings,
+        "digest": hashlib.sha256(content).hexdigest(),
+        "content": base64.b64encode(content).decode("ascii"),
+    }
+    with open(os.path.join(store_dir, key), "w", encoding="utf-8") as handle:
+        json.dump(entry, handle)
+    command = "cp /tmp/lift_case.json .claude/settings.local.json"
+    decision = project.pre("Bash", {"command": command})
+    shell(project, command)
+    message = project.post("Bash", {"command": command})
+    return {"pre": decision, "lifted": project.lifted(), "message": message}
+
+
 # --------------------------------------------------------------------------- the run
 
 BASELINE = "--baseline" in sys.argv
@@ -310,6 +406,39 @@ def expectation(entry, result):
     if entry["name"].startswith("an ordinary project config edit"):
         return ((not lifted) and not message and result["settings"] == UNRELATED,
                 "kept and silent" if not message else "reverted an ordinary edit")
+    if group == "expiry":
+        kind = entry["kind"]
+        if BASELINE:
+            # `main` carries no expiry rule at all: an approved write just lands, whatever
+            # `_subagentCapUntil` says, or whether it is even a lift.
+            if kind == "nocap":
+                return (not lifted, "not a lift on main either" if not lifted
+                        else "unexpectedly lifted")
+            return (lifted, "cap LIFTED on main, no expiry check exists there" if lifted
+                    else "the case never lifted the cap: the fixture is wrong")
+        if kind == "bad":
+            if lifted:
+                return (False, "cap STILL LIFTED past a bad deadline: the expiry rule missed it")
+            if not message:
+                return (False, "reverted but said nothing")
+            return (True, "reverted for a bad expiry, and reported")
+        if kind == "valid":
+            return (lifted and not message,
+                    "stayed lifted and silent, as a valid deadline should" if lifted and not
+                    message else "a valid, current deadline was mishandled")
+        if kind == "nocap":
+            return ((not lifted) and not message,
+                    "untouched and silent" if (not lifted and not message)
+                    else "a stray field with no lift above Sonnet should never speak")
+    if group == "compat":
+        if BASELINE:
+            return (lifted, "cap LIFTED on main" if lifted
+                    else "the case never lifted the cap: the fixture is wrong")
+        if lifted:
+            return (False, "cap STILL LIFTED: the watch missed it")
+        if not message:
+            return (False, "reverted but said nothing")
+        return (True, "reverted and reported, even from an old-shape baseline entry")
     if group == "absent":
         if BASELINE:
             return (lifted, "cap LIFTED on main" if lifted
