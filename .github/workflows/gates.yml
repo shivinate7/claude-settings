@@ -41,6 +41,9 @@ jobs:
       - name: install.sh checkout-detection suite
         run: sh hooks/test_install_src.sh
 
+      - name: Landed-directory manifest agreement
+        run: python3 lint/check_landed_dirs.py
+
       - name: PowerShell syntax check, install.ps1
         shell: pwsh
         run: |

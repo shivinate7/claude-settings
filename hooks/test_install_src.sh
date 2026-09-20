@@ -32,6 +32,13 @@ bad() { FAIL=$((FAIL + 1)); printf 'FAIL - %s: %s\n' "$1" "$2"; }
 # write, with no separate resolve step needed at each comparison.
 realpwd() { ( cd "$1" 2>/dev/null && pwd -P ); }
 
+# The directories install.sh lands, read from the same manifest install.sh itself reads
+# (landed-dirs.txt at the repo root), not a hand-kept list here. Keeps case8 honest about
+# every landed directory, not just the two it happened to name by hand.
+landed_dirs() {
+  sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//' "$REPO_ROOT/landed-dirs.txt" | grep -v '^$'
+}
+
 work=$(mktemp -d); work=$(realpwd "$work")
 cleanup() { rm -rf "$work"; }
 trap cleanup EXIT
@@ -50,7 +57,9 @@ make_checkout() {
   dir="$1"
   md_body="$2"
   origin="${3:-https://github.com/shivinate7/claude-settings.git}"
-  mkdir -p "$dir/hooks" "$dir/agents" "$dir/lint"
+  mkdir -p "$dir"
+  cp "$REPO_ROOT/landed-dirs.txt" "$dir/landed-dirs.txt"
+  for sub in $(landed_dirs); do mkdir -p "$dir/$sub"; done
   ( cd "$dir" && git init -q && git config user.email t@example.com && git config user.name t \
       && git remote add origin "$origin" )
   printf '%s\n' "$md_body" > "$dir/CLAUDE.md"
@@ -259,13 +268,15 @@ case7() {
   rm -rf "$h"
 }
 
-# ---- Case 8: fallback mirror lands every tracked file under hooks/ and lint/, no hand list -
+# ---- Case 8: fallback mirror lands every tracked file under every landed directory, no hand list
 # Guards against a hand-maintained per-file fetch list drifting behind git: every file
-# `git ls-files` reports under hooks/ and lint/ must land both in the fetched mirror
-# ($h/claude-settings/<path>) and in the config dir land_dir() copies it into for cloud
-# installs ($cfg/<path>, since --cloud always copies rather than symlinks).
+# `git ls-files` reports under a directory landed-dirs.txt names must land both in the fetched
+# mirror ($h/claude-settings/<path>) and in the config dir land_dir() copies it into for cloud
+# installs ($cfg/<path>, since --cloud always copies rather than symlinks). The directory list
+# itself comes from landed-dirs.txt (see landed_dirs() above), not a hand-kept "hooks lint"
+# pair here, so this case cannot go blind to a directory the manifest adds.
 case8() {
-  name="case8: fallback mirror lands every tracked file under hooks/ and lint/"
+  name="case8: fallback mirror lands every tracked file under every landed directory"
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; scratch="$work/case8-scratch"
   mkdir -p "$scratch"
 
@@ -278,7 +289,7 @@ case8() {
   rc=$?
 
   missing=""
-  for path in $(git -C "$REPO_ROOT" ls-files hooks lint); do
+  for path in $(git -C "$REPO_ROOT" ls-files $(landed_dirs)); do
     [ -f "$h/claude-settings/$path" ] || missing="$missing mirror:$path"
     [ -f "$cfg/$path" ] || missing="$missing landed:$path"
   done
