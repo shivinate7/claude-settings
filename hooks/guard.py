@@ -716,14 +716,69 @@ def shared_tree_hit(segment: str) -> str:
 # The directory is the last `cd <path>` in the command, or a `git -C <path>`, or the shell's own cwd.
 # MEASURED in job-cost-reporting on 2026-09-10: a gate that read the main checkout for every command
 # judged a worktree command against another branch.
-CD_RE = re.compile(r"(?:^|[;&|]\s*)cd\s+(['\"]?)([^'\";&|]+)\1")
-GIT_C_RE = re.compile(r"\bgit\s+-C\s+(['\"]?)([^'\";&|\s]+)\1")
+#
+# READ OFF PARSED TOKENS, NOT THE RAW STRING. A regex over the raw text cannot tell a real `cd`
+# from one sitting inside a quoted argument or a `#` comment. MEASURED against this file before
+# this fix: `bash -c 'true; cd /elsewhere; rm -rf x'; <destructive>` and `# note; cd
+# /elsewhere\n<destructive>` both resolved to `/elsewhere`, because the old `CD_RE` only asked
+# whether `cd` was preceded by `^`, `;`, `&`, or `|` in the raw text — true for both, despite the
+# `cd` in each case never running. `split_segments` (quote- and comment-aware) plus
+# `segment_tokens` (shlex) are the readers already used elsewhere in this file for the same
+# reason. Lifted from `~/Developer/pkmnscan/scripts/shell_parse.py`, which paid this debt first
+# by reading `cd` and `git -C` off tokens instead of a raw-text regex.
 # `--work-tree` NAMES THE TREE THE FILES COME FROM, and it outranks `-C` and a `cd`, because git
 # applies it after both. MEASURED 2026-09-19 with real git: from a CLEAN checkout A,
 # `git --work-tree=B status --porcelain` reported B's modified file and B's untracked file. The
 # files a call discards are B's, so B is the tree this rule must judge. Both the `=` and the
-# spaced form are read, because git takes either.
+# spaced form are read, because git takes either. This one stays a raw-text regex: it is outside
+# this fix's scope (the recorded debt named only `_run_dir`'s `cd`/`git -C` reading).
 GIT_WORK_TREE_RE = re.compile(r"--work-tree(?:=|\s+)(['\"]?)([^'\";&|\s]+)\1")
+
+
+def _segment_cd_target(tokens):
+    """Return the path a tokenized segment's `cd` would take, or None when it names none, or
+    when the segment's command word is not `cd`."""
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]) != "cd":
+        return None
+    for token in tokens[index + 1:]:
+        if token.startswith("-"):
+            continue
+        return token
+    return None
+
+
+def _segment_git_c_target(tokens):
+    """Return a tokenized segment's `git -C <path>` target, or None when it names none, or
+    when the segment's command word is not `git`.
+
+    ONLY THE SPACED FORM, `-C <path>`, IS READ. MEASURED against the real binary: `git
+    -C/some/path status` and `git -C=/some/path status` both fail with `unknown option:
+    -C/some/path` (or `-C=...`) and never run. An earlier version of this function also
+    accepted an attached `-C<path>` as if it named a tree, which let a command text attach any
+    path it liked to `-C` and have `_run_dir` read that path as though it were real, even
+    though git itself refused the call and the command ran wherever the shell's own cwd (or an
+    earlier, real `cd`) put it. Found in review of PR #75, reproduced against real git and
+    against the live guard: the attached form ALLOWED a `git reset --hard HEAD` that ran in a
+    real dirty checkout, because the fake `-C<path>` pointed the subject read at an unrelated
+    clean one.
+    """
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]) not in ("git", "git.exe"):
+        return None
+    cursor = index + 1
+    while cursor < len(tokens):
+        token = tokens[cursor]
+        if token == "-C":
+            return tokens[cursor + 1] if cursor + 1 < len(tokens) else None
+        if token in GIT_OPT_WITH_VALUE:
+            cursor += 2
+            continue
+        if token.startswith("-"):
+            cursor += 1
+            continue
+        break
+    return None
 
 
 def _absolute(where: str, shell_cwd: str) -> str:
@@ -738,20 +793,72 @@ def _absolute(where: str, shell_cwd: str) -> str:
     return where
 
 
+def _strip_heredoc_bodies_unconditionally(cmd: str) -> str:
+    """Drop the body of every heredoc, header line kept, even one fed to an interpreter.
+
+    `strip_heredoc_bodies` keeps an INTERPRETER heredoc's body under inspection, on purpose,
+    because that body may be executed. But "may be executed" means the INTERPRETER runs it, not
+    the outer shell: a `cd` inside a `python3 <<'EOF'` body changes python's notion of a
+    directory, never the outer shell's cwd, so `_run_dir` must never read it as a live segment.
+    Found in review of PR #75, reproduced against the live guard: a `cd <clean checkout>` line
+    inside such a body ALLOWED a `git reset --hard HEAD` that actually ran in a real dirty
+    checkout named by the command's own cwd, because `_run_dir` read the heredoc body's `cd` as
+    though the outer shell had run it. This is a dedicated copy for `_run_dir` alone; every
+    other caller of `strip_heredoc_bodies` still needs the interpreter body kept for its OWN
+    question, which is what a write or a refused command might say, not where the shell sits.
+    """
+    lines = cmd.split("\n")
+    kept = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        kept.append(line)
+        match = HEREDOC_HEADER.search(line)
+        index += 1
+        if not match:
+            continue
+        delimiter = match.group(2)
+        while index < len(lines) and lines[index].strip() != delimiter:
+            index += 1
+        if index < len(lines):
+            index += 1  # drop the closing delimiter line too
+    return "\n".join(kept)
+
+
 def _run_dir(cmd: str, shell_cwd: str) -> str:
     """Return the directory the command RUNS in: a `git -C`, else the last `cd`, else the cwd.
 
     This is the part both roots share. Neither `--work-tree` nor `--git-dir` is read here,
     because each answers a different question and each belongs to one caller.
+
+    READ OFF TOKENS, PER SEGMENT, not a regex over the raw string: a `cd` or `git -C` sitting
+    inside a quoted argument or a `#` comment is text, not a command, and only a segment that
+    tokenizes to `cd`/`git` as its OWN command word (via `resolve_command`, which already steps
+    over wrappers and loop keywords) counts. A segment that fails to tokenize (an unmatched
+    quote) is skipped, the same fail-open stance `segment_tokens` documents elsewhere. The FIRST
+    `git -C` found, across all segments in order, still wins over every `cd`, matching this
+    function's behaviour before this fix; failing that, the LAST `cd` found wins.
+
+    HEREDOC BODIES ARE STRIPPED FIRST, unconditionally, even an interpreter body that
+    `strip_heredoc_bodies` keeps for other callers: a `cd` line inside one never moves the
+    OUTER shell, which is the tree this function answers about.
     """
+    cmd = _strip_heredoc_bodies_unconditionally(cmd)
     where = None
-    match = GIT_C_RE.search(cmd)
-    if match:
-        where = match.group(2)
-    else:
-        changes = list(CD_RE.finditer(cmd))
-        if changes:
-            where = changes[-1].group(2).strip()
+    last_cd = None
+    for segment in split_segments(cmd):
+        tokens = segment_tokens(segment)
+        if tokens is None:
+            continue
+        if where is None:
+            git_c = _segment_git_c_target(tokens)
+            if git_c is not None:
+                where = git_c
+        cd = _segment_cd_target(tokens)
+        if cd is not None:
+            last_cd = cd
+    if where is None:
+        where = last_cd
     if where:
         where = _absolute(where, shell_cwd)
     return where or shell_cwd or ""

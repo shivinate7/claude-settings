@@ -627,6 +627,17 @@ sh("subject: show reads the entry without taking it", VCS + " stash show stash@{
    cwd=SUBJSTASH)
 sh("subject: a hard reset in the tree that holds the stash takes nothing",
    VCS + " reset --hard HEAD", "allow", cwd=SUBJSTASH)
+# `_run_dir` BYPASSES, found in review of the token-based rewrite. Both send the command's cwd
+# to SUBJDIRTY (real, dirty) and name SUBJCLEAN (real, clean) as a directory the command text
+# ATTACHES or MENTIONS, never one it actually runs in. The real subject stays SUBJDIRTY, so both
+# still deny. MEASURED against the reviewed head: both wrongly read the subject as SUBJCLEAN and
+# ALLOWED a real `reset --hard` over the dirty tree.
+sh("run-dir bypass: an attached `-C<path>` is not a spelling git accepts, so it names no tree",
+   VCS + " -C" + SUBJCLEAN + " status; " + VCS + " reset --hard HEAD",
+   "deny", "shared-tree", cwd=SUBJDIRTY)
+sh("run-dir bypass: a `cd` inside an interpreter heredoc body never moves the outer shell",
+   "python3 <<'EOF'\ncd " + SUBJCLEAN + "\nprint('hi')\nEOF\n" + VCS + " reset --hard HEAD",
+   "deny", "shared-tree", cwd=SUBJDIRTY)
 # PER PATH for `restore` and `checkout <path>`: the pathspec goes to git, and an empty answer
 # proves the write changes nothing. Both named paths sit in the SAME dirty tree.
 sh("subject: restoring a clean path inside a dirty tree changes nothing",
@@ -1069,6 +1080,15 @@ sh("waiter: a for-loop's own do-block still denies",
    "for i in 1 2 3; do sleep 1; done", "deny", "waiter")
 sh("waiter: a non-waiter loop body stays allowed",
    'while read l; do echo "$l"; done', "allow", cwd=NOGIT)
+
+# `split_segments` read the `'` in a `#` comment as opening a quote that ran to the end of the
+# text, so every loop under such a comment was invisible. MEASURED in Banchi on 2026-09-19 on
+# its lifted copy: the runaway-driver fixture went from refused to allowed. A `#` that starts
+# a word is a comment to the end of its line; one inside a word or a quote is not.
+sh("waiter: a loop under a comment holding an apostrophe, MEASURED wrongly allowed",
+   "# the merge driver's shape\nwhile true; do sleep 5; done", "deny", "waiter")
+sh("waiter: a `#` inside a word is not a comment, so the loop after it still denies",
+   "echo fix#3; while true; do sleep 5; done", "deny", "waiter")
 
 
 # =========================================================================== 2d. the silent write
