@@ -20,6 +20,12 @@ one fixed order, and the first match wins.
   1b pointer-head      a command that moves HEAD off `main` in the POINTER checkout, the one
                        checkout every session on this machine runs its hooks and its lint from.
                        Always denied. A move TO `main` restores the invariant and passes.
+  1c silent-write      a `commit`, `push`, `merge`, `tag`, `rebase`, or `cherry-pick` whose own
+                       trace is silenced, by a redirect of either stream to a null device, or,
+                       on `push`/`merge`/`rebase` only (MEASURED), by git's own `-q`/`--quiet`
+                       flag alone. `commit`, `tag`, and `cherry-pick`'s own flags are measured
+                       carve-outs. `merge --abort` is carved out, and every read subcommand is
+                       untouched.
   2 machine-wide-kill  a kill by name or by pattern
   3 live-stream        a command that follows a stream and never ends on its own
   3 waiter             a shell segment whose command word is a sleep-and-poll
@@ -74,6 +80,35 @@ revert is unresolved in the tree picks a conflict side; it does not discard work
 git itself already holds the tree open. That one call is allowed and logged as
 `noted`/`conflict-resolve`. Any other `git checkout` that names a path keeps rule 1's
 ordinary deny or ask.
+
+Rule 1c, `silent-write`, mechanizes CLAUDE.md's "Never discard a command's output" for
+git. pkmnscan's `scripts/silent-write-guard.py` carries the measurement this rule ports:
+a coordinator reported work as landed twice in one session when it had not, once because
+a pre-commit refusal went to `/dev/null`, and once because the `git log` that followed
+showed the PREVIOUS commit, indistinguishable at a glance from the one that should have
+landed. A discarding redirect reproduces that on any of the six subcommands below: the
+shell throws the stream away before git gets a say, so a refusal and a proof of landing
+are both gone, together.
+
+git's OWN quiet flag is judged separately, because it is git's choice of what to print,
+not the shell's, and the choice is not the same for every subcommand. MEASURED
+2026-09-19 and 2026-09-20, in throwaway repos, never a shared checkout, all six: `commit`
+carves out, because a hook's refusal and a no-op's message both keep their own stream and
+a nonzero exit, so a silent exit-0 commit is already unambiguous. `push`, `merge`, and
+`rebase` do not carve out: each one's success and its own no-op are BOTH silent at exit 0,
+so the flag erases the one line that told a real write from one that moved nothing. `tag`
+carves out for a sharper reason: it has no `-q` or `--quiet` at all, so the flag is always
+a loud, immediate option-parsing failure, never a silent write. `cherry-pick` carves out
+too: its short form is invalid the same way `tag`'s is, and its long form still prints a
+full commit summary, a full conflict, or a full "nothing to commit" in every state, so
+nothing is silenced either way. A discarding redirect still denies any of the six.
+
+The carve-outs are pinned by fixtures, not left to judgement. `git fetch -q`, every read
+subcommand, and the test-by-exit-code shape `git rev-parse -q --verify <ref> >/dev/null
+2>&1` that rule 1b already relies on, all stay allowed, because none of them is in
+`SILENT_WRITE_SUBCOMMANDS`. `git merge --abort` is carved out inside the rule itself: an
+abort lands nothing, so it has no landing to prove. No environment hatch. The permission
+prompt is the grant here, the same as everywhere else in this file.
 
 Every refusal names its rule and says what to do instead. A remedy never names
 the refused command or the refused path, because a remedy that repeats the
@@ -206,6 +241,14 @@ ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 # the rest: the token after it, once its own flags are skipped, is what actually runs.
 COMMAND_WRAPPERS = {"sudo", "env", "command", "nohup", "nice", "time", "doas", "xargs"}
 
+# A leading shell keyword that opens or joins a control-flow block, never a command itself.
+# `split_segments` cuts on `;`, so the segment after a loop's own semicolon starts with `do`, and
+# the word after THAT is the command. MEASURED against the live guard: `while ! pgrep -f server;
+# do sleep 1; done` allowed the sleep, because the segment `do sleep 1` resolved to `do` as its
+# command word. Skip a keyword the same way a wrapper is skipped, so every rule that reads a
+# command word sees the command inside the block, never the keyword that opens it.
+LOOP_KEYWORDS = {"do", "then", "else", "elif", "while", "until", "if", "{", "("}
+
 
 def segment_tokens(segment: str):
     """Tokenize one segment with shlex, or return None when it cannot be parsed.
@@ -222,14 +265,15 @@ def segment_tokens(segment: str):
 def resolve_command(tokens):
     """Return the index of the command word in a tokenized segment, or None when it names none.
 
-    Skips leading `VAR=value` assignments, then unwraps command wrappers (`sudo`, `env`,
+    Skips leading `VAR=value` assignments and leading loop keywords (`do`, `then`, `else`,
+    `elif`, `while`, `until`, `if`, `{`, `(`), then unwraps command wrappers (`sudo`, `env`,
     `command`, `nohup`, `nice`, `time`, `doas`, `xargs`) along with each wrapper's own flags and
     any assignment it takes ahead of the program name, so the index returned is the program that
-    actually runs, never the wrapper carrying it there.
+    actually runs, never the keyword or the wrapper carrying it there.
     """
     index = 0
     end = len(tokens)
-    while index < end and ASSIGNMENT.match(tokens[index]):
+    while index < end and (ASSIGNMENT.match(tokens[index]) or tokens[index] in LOOP_KEYWORDS):
         index += 1
     while index < end and basename(tokens[index]) in COMMAND_WRAPPERS:
         index += 1
@@ -396,6 +440,141 @@ def push_is_forced(args) -> bool:
         if arg.startswith("-") and not arg.startswith("--") and "f" in arg:
             return True
     return False
+
+
+# ------------------------------------------------------------------ the silent write
+#
+# Rule 1c. CLAUDE.md (Git): "Never discard a command's output." A discarding REDIRECT is denied on
+# every one of these six subcommands, whatever the subcommand does with its own output: the shell
+# throws the stream away before git ever gets a say, so a hook's refusal and git's own proof of
+# landing are both gone, together, always.
+SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick")
+
+# git's OWN `-q`/`--quiet` flag is a narrower claim, and it does not read the same for every
+# subcommand. MEASURED 2026-09-19 and 2026-09-20, in throwaway repos under this session's
+# scratchpad, never in a shared checkout, `-q`/`--quiet` alone, no redirect, three states each: a
+# write that succeeds, one a hook refuses (a `pre-commit`/`pre-receive` hook, or the conflict
+# `merge`, `rebase`, and `cherry-pick` raise on their own), and a no-op (nothing staged or to
+# push, an already-merged branch, nothing left to replay, a change already present).
+#
+#   git commit -q       success        exit 0, stdout '',                stderr ''
+#                        hook refusal   exit 1, stdout '',                stderr the hook's own line
+#                        no-op          exit 1, stdout "nothing to        stderr ''
+#                                                commit ...",
+#
+#   git push --quiet    success        exit 0, stdout '',                stderr ''
+#                        hook refusal   exit 1, stdout '',                stderr the full rejection
+#                        no-op          exit 0, stdout '',                stderr ''
+#
+#   git merge -q         success        exit 0, stdout '',                stderr ''
+#                        conflict       exit 1, stdout the full           stderr ''
+#                                                CONFLICT message,
+#                        no-op          exit 0, stdout '',                stderr ''
+#
+#   git rebase -q       success        exit 0, stdout '',                stderr ''
+#                        conflict       exit 1, stdout the CONFLICT       stderr the apply error
+#                                                message,                 and its hints,
+#                        no-op          exit 0, stdout '',                stderr ''
+#
+#   git tag -q          every state    exit 129, stdout '',              stderr "error: unknown
+#                                                                                switch `q'" plus
+#                                                                                the full usage
+#
+#   git cherry-pick -q  every state    exit 129, stdout '',              stderr the full usage
+#                                                                                ("-q" is not a
+#                                                                                cherry-pick option)
+#   git cherry-pick
+#     --quiet            success        exit 0, stdout the full commit    stderr ''
+#                                                summary line,
+#                        conflict       exit 1, stdout the CONFLICT       stderr the apply error
+#                                                message,                 and its hints,
+#                        no-op          exit 1, stdout "nothing to        stderr "previous
+#                                                commit ...",              cherry-pick is now
+#                                                                          empty" and its hint
+#
+# `commit -q` hides nothing a session could not already read: a refusal keeps its own message on
+# stderr, a no-op keeps its own message on stdout, and both keep a nonzero exit code, so silence
+# at exit 0 is unambiguous proof of a landed commit. `commit` drops out of the quiet-flag arm.
+#
+# `push -q` and `merge -q` and `rebase -q` measure the same way as each other, and differently
+# from `commit`. Each one's own refusal (a hook, or a real conflict) stays fully readable. But
+# each one's success and its own no-op are BOTH silent and BOTH exit 0 (without `-q` they already
+# differ: `push` prints "Everything up-to-date" against the `sha..sha  branch -> branch` summary,
+# `merge` and `rebase` print their own "up to date"/"nothing to replay" line against a diffstat or
+# a "Successfully rebased" line). `-q` erases the one line that told a real write from a no-op, so
+# a session cannot read whether the write it just ran moved anything. All three keep the
+# quiet-flag arm on this measurement, not on the flag's name.
+#
+# `tag` has NO `-q` and NO `--quiet` at all (git 2.39.3): both spellings exit 129 with "error:
+# unknown switch" before git reads the tag name, the message, or the repository state. Every
+# state measures identically, because the flag never gets past option parsing. `tag` therefore
+# cannot use `-q`/`--quiet` to hide a success from a no-op or a refusal: the attempt is always a
+# loud, immediate failure. `tag` drops out of the quiet-flag arm.
+#
+# `cherry-pick`'s short form, `-q`, is ALSO not a valid option (exit 129, the same shape as
+# `tag`). Its long form, `--quiet`, IS valid, and measures as the least silent of the six: a
+# success still prints the full one-line commit summary to stdout, a conflict prints its own
+# CONFLICT message and hints in full, and a no-op (an already-applied change) prints "nothing to
+# commit" and "previous cherry-pick is now empty" in full, at its own distinct nonzero exit. No
+# state is silent, so nothing is lost by allowing either spelling. `cherry-pick` drops out of the
+# quiet-flag arm.
+QUIET_FLAG_SUBCOMMANDS = ("push", "merge", "rebase")
+
+# A null-device target, on either stream, in the three shells this guard reads a command from:
+# POSIX (`/dev/null`), Windows cmd (`NUL`), and PowerShell (`$null`). `2>&1` duplicates one stream
+# onto another file descriptor and is not this: the line still reaches a stream the session reads.
+SILENT_WRITE_REDIRECT = re.compile(
+    r"(?:&>>?|\d?>>?)\s*(['\"]?)(?:/dev/null|NUL|\$null)\1(?=$|[\s;&|])",
+    re.IGNORECASE,
+)
+
+
+def discards_output(segment: str) -> bool:
+    """True when the segment redirects stdout or stderr, on any descriptor, to a null device."""
+    return bool(SILENT_WRITE_REDIRECT.search(segment))
+
+
+def quiet_write(args) -> bool:
+    """True when a git call carries `-q` or `--quiet`."""
+    return "-q" in args or "--quiet" in args
+
+
+def silent_write_hit(segment: str):
+    """Return (matched text, mechanism) for a write whose own trace is silenced, else ("", "").
+
+    `mechanism` is `"redirect"` or `"quiet"`, so the caller can print the reason that matches
+    what actually fired: a redirect can hide a refusal AND a proof of landing on any of the six
+    subcommands, while the quiet flag is judged per subcommand against `QUIET_FLAG_SUBCOMMANDS`,
+    the measured set. Only `SILENT_WRITE_SUBCOMMANDS` are judged at all. `fetch`, `rev-parse`, and
+    every other read subcommand fall outside it, which is what keeps `git fetch -q` and the
+    test-by-exit-code shape `git rev-parse -q --verify <ref> >/dev/null 2>&1` allowed. `merge
+    --abort` is carved out inside the loop: it lands nothing, so it has no landing to prove.
+    """
+    for subcommand, args in git_calls(segment):
+        if subcommand not in SILENT_WRITE_SUBCOMMANDS:
+            continue
+        if subcommand == "merge" and "--abort" in args:
+            continue
+        matched = ("git " + subcommand + " " + " ".join(args)).strip()
+        if discards_output(segment):
+            return matched, "redirect"
+        if subcommand in QUIET_FLAG_SUBCOMMANDS and quiet_write(args):
+            return matched, "quiet"
+    return "", ""
+
+
+SILENT_WRITE_REDIRECT_REASON = (
+    "Rule (Git): a redirect silences this write's own output, so neither a refusal nor "
+    "the line that proves it landed would reach the session. "
+    "Remedy: run the same write without silencing either stream, and read what it "
+    "prints before you say it landed."
+)
+SILENT_WRITE_QUIET_REASON = (
+    "Rule (Git): this write's own quiet flag drops the one line that told a real update "
+    "apart from one that moved nothing, so the session cannot read which one just ran. "
+    "Remedy: run the same write without the quiet flag, and read what it prints before "
+    "you say it landed."
+)
 
 
 STASH_READ_ACTIONS = {"list", "show"}
@@ -1343,22 +1522,28 @@ LIVE_STREAM_REASON = (
 # waiting into a loop of turns that each print a word. Placed beside the live-stream rule, because
 # both are about a command that should not be how a session waits.
 #
-# THE COMMAND WORD is the segment's first token, so an unrelated later argument never matches. The
-# Windows `timeout /t` form is the one case where the wait is the SECOND word, so it is read apart:
-# `timeout /t 5` waits, `timeout /help` (no `/t`) does not.
+# THE COMMAND WORD is read through `resolve_command`, wrappers and leading loop keywords skipped,
+# not the segment's raw first token: `split_segments` cuts a loop's `while COND; do sleep 1;
+# done` into `do sleep 1` as its own segment, and the command inside that block is `sleep`, not
+# `do`. A segment `shlex` cannot parse fails open, this file's standing rule. The Windows
+# `timeout /t` form is the one case where the wait is the SECOND word after the command, so it is
+# read apart: `timeout /t 5` waits, `timeout /help` (no `/t`) does not.
 WAITER_COMMANDS = ("sleep", "start-sleep")
 
 
 def waiter_hit(segment: str) -> str:
     """Return the matched text when one segment's command word is a sleep-and-poll, else ''."""
-    tokens = segment.split()
+    tokens = segment_tokens(segment)
     if not tokens:
         return ""
-    word = basename(tokens[0])
+    index = resolve_command(tokens)
+    if index is None:
+        return ""
+    word = basename(tokens[index])
     if word in WAITER_COMMANDS:
-        return tokens[0]
-    if word == "timeout" and any(t.lower() == "/t" for t in tokens[1:]):
-        return tokens[0] + " /t"
+        return tokens[index]
+    if word == "timeout" and any(t.lower() == "/t" for t in tokens[index + 1:]):
+        return tokens[index] + " /t"
     return ""
 
 
@@ -1368,6 +1553,41 @@ WAITER_REASON = (
     "or use a tool that waits once, such as gh run watch <id> --exit-status. Avoid "
     "gh pr checks --watch, which serves a cached status. For a server warm-up, use a "
     "readiness check such as curl --retry."
+)
+
+
+# ------------------------------------------------------------------ a waiter loop over a pattern
+#
+# Ported from pkmnscan's `scripts/guard-shell.py:800-990` (predicate and wording only, not the
+# file, and no override token: this repo ships none). MEASURED there, twice on 2026-09-12: a
+# session wrote `until ! pgrep -f 'scratchpad/drive.sh'` to wait out its own driver script, and
+# the condition never went false, because `pgrep -f` matches every process whose command line
+# names the pattern, including that very invocation of itself. A second copy of the driver then
+# raced the live one.
+#
+# THE CONDITION IS READ WHOLE, not only in command position: a negation (`while ! pgrep ...`) or
+# a subshell can sit ahead of the poller, the same reason `live_stream_hit` below reads every
+# token of its segment rather than only the first.
+PATTERN_POLLERS = {"pgrep", "pkill", "lsof"}
+
+
+def loop_condition_polls_a_pattern(segment: str) -> str:
+    """Return the matched tool when a `while`/`until` segment's condition polls a pattern."""
+    tokens = segment.split()
+    if not tokens or tokens[0] not in ("while", "until"):
+        return ""
+    for token in tokens[1:]:
+        if basename(token) in PATTERN_POLLERS:
+            return token
+    return ""
+
+
+PATTERN_POLLER_REASON = (
+    "the loop's own condition polls for a process by name or by pattern. That pattern can match "
+    "every process whose command line names it, including this session's own wrapper for the "
+    "same wait, so the condition can stay true long after the work is done. "
+    "Remedy: wait on one pid this session started, such as `kill -0 $PID`, or use a tool that "
+    "waits once, such as gh run watch <id> --exit-status."
 )
 
 
@@ -1645,6 +1865,12 @@ CONFIG_FROZEN_FILES = (
     os.path.normcase("settings.json"),
     os.path.normcase("CLAUDE.md"),
 )
+# This tuple is a literal on purpose, not a read of landed-dirs.txt at the repo root (the
+# manifest install.sh and install.ps1 both read). A frozen-path list read from a file shrinks
+# to nothing when the file is missing or unreadable, which turns a missing file into a silent
+# weakening of a security control. This list must not be shrinkable, so it stays hardcoded here.
+# lint/check_landed_dirs.py checks by hand that this set and the manifest agree, `state` (below)
+# excepted as a documented guard-only extra.
 CONFIG_FROZEN_DIRS = (
     os.path.normcase("hooks"),
     os.path.normcase("lint"),
@@ -2155,6 +2381,19 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
         if matched:
             refuse(tool, "deny", "pointer-head", POINTER_HEAD_REASON, matched)
 
+    # 1c. A git write whose own trace is silenced, by a redirect of either stream to a null
+    # device, or, on the measured subcommands, by git's own quiet flag alone. Placed after the
+    # pointer-head rule and before every rule below, so a silenced write is caught on its own
+    # defect before anything else judges the same segment.
+    for segment in split_segments(stripped):
+        if not segment.strip():
+            continue
+        matched, mechanism = silent_write_hit(segment)
+        if matched:
+            reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"
+                      else SILENT_WRITE_QUIET_REASON)
+            refuse(tool, "deny", "silent-write", reason, matched)
+
     # 2. A machine-wide kill. Judged in COMMAND POSITION, from the segment's own tokens, never
     # by the word appearing anywhere in the text. A segment shlex cannot parse fails open:
     # judge nothing rather than guess what it would run.
@@ -2168,13 +2407,19 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
         if matched:
             refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
 
-    # 3. A live stream that never ends, or a waiter loop (Rule 9).
+    # 3. A live stream that never ends, or a waiter loop (Rule 9). A waiter loop whose own
+    # condition polls a pattern gets the more specific reason: the pattern can match the loop's
+    # own command line and never go false.
+    poller = ""
     for segment in split_segments(stripped):
         matched = live_stream_hit(segment)
         if matched:
             refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)
+        poller = loop_condition_polls_a_pattern(segment) or poller
         matched = waiter_hit(segment)
         if matched:
+            if poller:
+                refuse(tool, "deny", "waiter", PATTERN_POLLER_REASON, poller + " " + matched)
             refuse(tool, "deny", "waiter", WAITER_REASON, matched)
 
     # 4. A wide delete denies, and a force push asks.

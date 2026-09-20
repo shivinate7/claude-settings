@@ -35,11 +35,23 @@ jobs:
       - name: Stop-hook gate fixture suite
         run: python3 lint/test_gates.py
 
+      - name: Rule audit fixture suite
+        run: python3 lint/test_rule_audit.py
+
+      - name: Rule mechanization audit
+        run: python3 lint/rule_audit.py
+
       - name: Shell syntax check, install.sh
         run: bash -n install.sh
 
       - name: install.sh checkout-detection suite
         run: sh hooks/test_install_src.sh
+
+      - name: Unknown-read contract (guard + session_start)
+        run: python3 lint/check_unknown_reads_contract.py
+
+      - name: Landed-directory manifest agreement
+        run: python3 lint/check_landed_dirs.py
 
       - name: PowerShell syntax check, install.ps1
         shell: pwsh

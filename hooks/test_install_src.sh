@@ -32,6 +32,13 @@ bad() { FAIL=$((FAIL + 1)); printf 'FAIL - %s: %s\n' "$1" "$2"; }
 # write, with no separate resolve step needed at each comparison.
 realpwd() { ( cd "$1" 2>/dev/null && pwd -P ); }
 
+# The directories install.sh lands, read from the same manifest install.sh itself reads
+# (landed-dirs.txt at the repo root), not a hand-kept list here. Keeps case8 honest about
+# every landed directory, not just the two it happened to name by hand.
+landed_dirs() {
+  sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//' "$REPO_ROOT/landed-dirs.txt" | grep -v '^$'
+}
+
 work=$(mktemp -d); work=$(realpwd "$work")
 cleanup() { rm -rf "$work"; }
 trap cleanup EXIT
@@ -50,7 +57,9 @@ make_checkout() {
   dir="$1"
   md_body="$2"
   origin="${3:-https://github.com/shivinate7/claude-settings.git}"
-  mkdir -p "$dir/hooks" "$dir/agents" "$dir/lint"
+  mkdir -p "$dir"
+  cp "$REPO_ROOT/landed-dirs.txt" "$dir/landed-dirs.txt"
+  for sub in $(landed_dirs); do mkdir -p "$dir/$sub"; done
   ( cd "$dir" && git init -q && git config user.email t@example.com && git config user.name t \
       && git remote add origin "$origin" )
   printf '%s\n' "$md_body" > "$dir/CLAUDE.md"
@@ -259,13 +268,15 @@ case7() {
   rm -rf "$h"
 }
 
-# ---- Case 8: fallback mirror lands every tracked file under hooks/ and lint/, no hand list -
+# ---- Case 8: fallback mirror lands every tracked file under every landed directory, no hand list
 # Guards against a hand-maintained per-file fetch list drifting behind git: every file
-# `git ls-files` reports under hooks/ and lint/ must land both in the fetched mirror
-# ($h/claude-settings/<path>) and in the config dir land_dir() copies it into for cloud
-# installs ($cfg/<path>, since --cloud always copies rather than symlinks).
+# `git ls-files` reports under a directory landed-dirs.txt names must land both in the fetched
+# mirror ($h/claude-settings/<path>) and in the config dir land_dir() copies it into for cloud
+# installs ($cfg/<path>, since --cloud always copies rather than symlinks). The directory list
+# itself comes from landed-dirs.txt (see landed_dirs() above), not a hand-kept "hooks lint"
+# pair here, so this case cannot go blind to a directory the manifest adds.
 case8() {
-  name="case8: fallback mirror lands every tracked file under hooks/ and lint/"
+  name="case8: fallback mirror lands every tracked file under every landed directory"
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; scratch="$work/case8-scratch"
   mkdir -p "$scratch"
 
@@ -278,7 +289,7 @@ case8() {
   rc=$?
 
   missing=""
-  for path in $(git -C "$REPO_ROOT" ls-files hooks lint); do
+  for path in $(git -C "$REPO_ROOT" ls-files $(landed_dirs)); do
     [ -f "$h/claude-settings/$path" ] || missing="$missing mirror:$path"
     [ -f "$cfg/$path" ] || missing="$missing landed:$path"
   done
@@ -494,15 +505,14 @@ case4() {
 }
 
 case5() {
-  name="case5: session_start.sh with pointer != checkout prints exactly one line"
-  co="$work/case5-checkout"; cfg="$work/case5-cfg"
+  name="case5: two clones of one origin, differing CLAUDE.md, prints exactly one line"
+  co="$work/case5-checkout"; other="$work/case5-other"; cfg="$work/case5-cfg"
+  # Both trees are real clones of the same origin URL (make_checkout's default), so the
+  # fix's same-repository gate passes and the raw content differs, so the line must print.
   make_checkout "$co" "# checkout content, v1"
+  make_checkout "$other" "# global content, different"
   mkdir -p "$cfg"
-  printf '# global content, different\n' > "$cfg/CLAUDE.md.pointed"
-  # Pointer names a separate file with different content than the checkout's CLAUDE.md.
-  mkdir -p "$cfg/other"
-  printf '# global content, different\n' > "$cfg/other/CLAUDE.md"
-  printf '@%s/other/CLAUDE.md\n' "$cfg" > "$cfg/CLAUDE.md"
+  printf '@%s/CLAUDE.md\n' "$other" > "$cfg/CLAUDE.md"
 
   out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/c5err)
   rc=$?
@@ -537,6 +547,59 @@ case6() {
     bad "$name" "wrote to stderr"
   elif [ -n "$out" ]; then
     bad "$name" "unexpected output: $out"
+  else
+    ok "$name"
+  fi
+}
+
+case9() {
+  name="case9: unrelated repo with its own CLAUDE.md stays silent (the pkmnscan repro)"
+  co="$work/case9-checkout"; pointer_co="$work/case9-pointer-checkout"; cfg="$work/case9-cfg"
+  # $co is its own repo, a different origin than the pointer target, with its own,
+  # differing CLAUDE.md. This is the live defect: pkmnscan is not a claude-settings clone.
+  make_checkout "$co" "# unrelated repo content" "https://github.com/someone/pkmnscan.git"
+  make_checkout "$pointer_co" "# global content, different"
+  mkdir -p "$cfg"
+  printf '@%s/CLAUDE.md\n' "$pointer_co" > "$cfg/CLAUDE.md"
+
+  out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/c9err)
+  rc=$?
+  errsize=$(wc -c < /tmp/c9err | tr -d '[:space:]'); rm -f /tmp/c9err
+  lines=$(printf '%s\n' "$out" | grep -c 'differ from this checkout')
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "exit $rc"
+  elif [ "$errsize" != "0" ]; then
+    bad "$name" "wrote to stderr"
+  elif [ "$lines" != "0" ]; then
+    bad "$name" "unrelated repo wrongly printed a divergence line: $out"
+  else
+    ok "$name"
+  fi
+}
+
+case10() {
+  name="case10: an unreadable pointer remote stays silent"
+  co="$work/case10-checkout"; pointer_co="$work/case10-pointer-notgit"; cfg="$work/case10-cfg"
+  make_checkout "$co" "# checkout content"
+  # Pointer target exists and has a CLAUDE.md, but is not a git repo at all, so
+  # `git remote get-url origin` fails there. The read failure must stay silent, never print.
+  mkdir -p "$pointer_co"
+  printf '# global content, different\n' > "$pointer_co/CLAUDE.md"
+  mkdir -p "$cfg"
+  printf '@%s/CLAUDE.md\n' "$pointer_co" > "$cfg/CLAUDE.md"
+
+  out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/c10err)
+  rc=$?
+  errsize=$(wc -c < /tmp/c10err | tr -d '[:space:]'); rm -f /tmp/c10err
+  lines=$(printf '%s\n' "$out" | grep -c 'differ from this checkout')
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "exit $rc"
+  elif [ "$errsize" != "0" ]; then
+    bad "$name" "wrote to stderr"
+  elif [ "$lines" != "0" ]; then
+    bad "$name" "unreadable remote wrongly printed a divergence line: $out"
   else
     ok "$name"
   fi
@@ -941,6 +1004,8 @@ pointer_case6
 case4
 case5
 case6
+case9
+case10
 prune_case1
 prune_case2
 prune_case3

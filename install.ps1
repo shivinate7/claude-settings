@@ -73,7 +73,11 @@ dest="`$cfg/settings.json"
 if [ -f "`$repo/settings.json" ] && [ ! -L "`$dest" ]; then
   cp "`$repo/settings.json" "`$dest" && echo "claude-settings: refreshed `$dest"
 fi
-for sub in agents lint hooks; do
+# landed-dirs.txt at the repo root names the directories, the same file install.ps1 itself
+# reads below and install.sh reads on Linux/macOS. One name per line, `#` comments allowed.
+while IFS= read -r sub || [ -n "`$sub" ]; do
+  sub=`$(printf '%s' "`$sub" | tr -d '\r' | sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*`$//')
+  [ -n "`$sub" ] || continue
   [ -d "`$repo/`$sub" ] || continue
   mkdir -p "`$cfg/`$sub"
   for f in "`$repo/`$sub"/*; do
@@ -81,7 +85,7 @@ for sub in agents lint hooks; do
     d="`$cfg/`$sub/`$(basename "`$f")"
     [ -L "`$d" ] || { cp "`$f" "`$d" && echo "claude-settings: refreshed `$d"; }
   done
-done
+done < "`$repo/landed-dirs.txt"
 exit 0
 "@
     $hook = $hook -replace "`r`n", "`n"
@@ -127,8 +131,19 @@ Write-Pointer -RepoDir $RepoDir -ClaudeDir $ClaudeDir
 # cloud mode. That copy is pruned no more than install.sh prunes a cloud copy: a copied file
 # carries no mark of which source made it, so this loop does not remove it. It is left in
 # place as a documented gap, same reasoning as install.sh's cloud-mode comment.
+# The set of directories landed here comes from landed-dirs.txt at the repo root, the single
+# source the embedded post-merge hook above reads too, and that install.sh reads on
+# Linux/macOS (see the comment there). hooks/guard.py's CONFIG_FROZEN_DIRS is a deliberately
+# separate literal; see the comment beside it in hooks/guard.py for why. lint/check_landed_dirs.py
+# checks the two stay in agreement.
+function Get-LandedDirs([string]$FromRepoDir) {
+    Get-Content (Join-Path $FromRepoDir 'landed-dirs.txt') |
+        ForEach-Object { ($_ -replace '#.*', '').Trim() } |
+        Where-Object { $_ -ne '' }
+}
+
 $AgentCopied = $false
-foreach ($sub in @('agents', 'lint', 'hooks')) {
+foreach ($sub in (Get-LandedDirs $RepoDir)) {
     $srcDir  = Join-Path $RepoDir $sub
     $destDir = Join-Path $ClaudeDir $sub
     New-Item -ItemType Directory -Force -Path $destDir | Out-Null

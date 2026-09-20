@@ -989,6 +989,14 @@ sh("kill: the word on the far side of a pipe filter", "cat notes.md | grep pkill
 sh("kill: a quoted phrase ahead of a real chained kill still denies",
    'echo "safe text" && pkill node', "deny", "machine-wide-kill", cwd=NOGIT)
 
+# BLAST RADIUS of the loop-keyword fix in `resolve_command` (Rule 9's own defect): a kill inside
+# a loop's `do` block, or inside an `if`'s `then` block, used to resolve to the keyword as its
+# command word and pass. MEASURED wrongly allowed before this fix.
+sh("kill: a pkill inside a loop's do-block, MEASURED wrongly allowed",
+   "while true; do pkill -f server; done", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: a pkill inside an if's then-block, MEASURED wrongly allowed",
+   "if true; then pkill -f server; fi", "deny", "machine-wide-kill", cwd=NOGIT)
+
 
 # =========================================================================== 2b. live streams
 #
@@ -1008,6 +1016,12 @@ sh("stream: a pipe into a bounded tail", "python x.py | tail -5", "allow", cwd=N
 sh("stream: Get-Content -Tail reads and stops", "Get-Content app.log -Tail 20", "allow",
    tool="PowerShell", cwd=NOGIT)
 
+# BLAST RADIUS of the loop-keyword fix: `live_stream_hit` already reads every token of its
+# segment, not only the first, so a follow flag inside a loop's do-block denied before this fix
+# too. Pinned here so a later change cannot narrow that read back to command position only.
+sh("stream: tail -f inside a loop's do-block denies unchanged",
+   "while true; do tail -f app.log; done", "deny", "live-stream", cwd=NOGIT)
+
 
 # =========================================================================== 2c. waiter loops
 #
@@ -1025,6 +1039,85 @@ sh("waiter: a readiness check is allowed", "curl --retry 5 http://localhost:3000
    cwd=NOGIT)
 sh("waiter: an unrelated log query is allowed", VCS + " log --since=yesterday", "allow", cwd=NOGIT)
 
+# Rule 9 missed every loop body. `split_segments` cuts a loop on its own `;`, so the segment
+# after it is `do sleep 1`, and the command word read as `do`, not `sleep`. MEASURED against the
+# live guard before this fix: the two loops below were both wrongly allowed.
+sh("waiter: a while-loop with a pattern-polling condition, MEASURED wrongly allowed",
+   "while ! pgrep -f server; do sleep 1; done", "deny", "waiter",
+   carries=("condition polls",))
+sh("waiter: an until-loop over a plain readiness check, MEASURED wrongly allowed",
+   "until curl -sf localhost:3000; do sleep 2; done", "deny", "waiter")
+sh("waiter: a for-loop's own do-block still denies",
+   "for i in 1 2 3; do sleep 1; done", "deny", "waiter")
+sh("waiter: a non-waiter loop body stays allowed",
+   'while read l; do echo "$l"; done', "allow", cwd=NOGIT)
+
+
+# =========================================================================== 2d. the silent write
+#
+# Rule 1c, the owner's ruling. CLAUDE.md: "Never discard a command's output." A discarding
+# redirect denies on any of the six subcommands, whatever git itself would have printed. git's
+# own `-q`/`--quiet` flag is judged per subcommand, against `QUIET_FLAG_SUBCOMMANDS`, MEASURED
+# 2026-09-19 and 2026-09-20 in throwaway repos, never a shared checkout, all six. `push`, `merge`,
+# and `rebase` deny on the flag alone: each one's success and its own no-op are both silent at
+# exit 0, so the flag erases the one line that told a real write from one that moved nothing.
+# `commit`, `tag`, and `cherry-pick` carve out: `commit`'s refusal and no-op both keep their own
+# stream and a nonzero exit; `tag` has no `-q`/`--quiet` at all, so the flag is always a loud,
+# immediate option-parsing failure (exit 129); `cherry-pick`'s short form is invalid the same way,
+# and its long form still prints a full summary, conflict, or "nothing to commit" in every state.
+
+sh("silent-write: push's own quiet flag needs no redirect at all",
+   VCS + " push --quiet", "deny", "silent-write", carries="moved nothing", cwd=NOGIT)
+sh("silent-write: merge's own quiet flag needs no redirect at all, MEASURED 2026-09-20",
+   VCS + " merge --quiet feature/x", "deny", "silent-write", carries="moved nothing", cwd=NOGIT)
+sh("silent-write: rebase's own quiet flag needs no redirect at all, MEASURED 2026-09-20",
+   VCS + " rebase -q main", "deny", "silent-write", carries="moved nothing", cwd=NOGIT)
+sh("silent-write: a discarded refusal, stderr alone",
+   VCS + " commit -m x 2>/dev/null", "deny", "silent-write", carries="a redirect silences",
+   cwd=NOGIT)
+sh("silent-write: a discarded proof of landing, stdout alone",
+   VCS + " commit -m x >/dev/null", "deny", "silent-write", carries="a redirect silences",
+   cwd=NOGIT)
+sh("silent-write: both streams discarded together",
+   VCS + " commit -q -m x >/dev/null 2>&1", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write: a tag silenced by a discarded stream, its own flag does not exist",
+   VCS + " tag -a v1 -m x >/dev/null 2>&1", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write: a cherry-pick silenced by a discarded stream",
+   VCS + " cherry-pick --quiet abc1234 >/dev/null 2>&1", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write: the Windows null device denies with no quiet flag at all",
+   VCS + " commit -m x 2>NUL", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write: PowerShell's null variable denies with no quiet flag at all",
+   VCS + " commit -m x 2>$null", "deny", "silent-write", tool="PowerShell", cwd=NOGIT)
+
+sh("silent-write: an ordinary commit stays allowed", VCS + " commit -m x", "allow", cwd=NOGIT)
+sh("silent-write: an ordinary push stays allowed", VCS + " push", "allow", cwd=NOGIT)
+sh("silent-write: commit's own quiet flag is a carve-out, MEASURED 2026-09-19",
+   VCS + " commit -q -m x", "allow", cwd=NOGIT)
+sh("silent-write: commit's own quiet flag stays a carve-out with -a as well",
+   VCS + " commit -q -a -m x", "allow", cwd=NOGIT)
+sh("silent-write: tag's own quiet flag is a carve-out, MEASURED 2026-09-20 (tag has no -q at all)",
+   VCS + " tag -a v1 -m x -q", "allow", cwd=NOGIT)
+sh("silent-write: tag's own long quiet flag is a carve-out too, same measurement",
+   VCS + " tag -a v1 -m x --quiet", "allow", cwd=NOGIT)
+sh("silent-write: cherry-pick's short quiet flag is a carve-out, MEASURED 2026-09-20 "
+   "(-q is not a cherry-pick option)",
+   VCS + " cherry-pick -q abc1234", "allow", cwd=NOGIT)
+sh("silent-write: cherry-pick's long quiet flag is a carve-out too, MEASURED 2026-09-20 "
+   "(every state still prints in full)",
+   VCS + " cherry-pick --quiet abc1234", "allow", cwd=NOGIT)
+sh("silent-write: fetch's own quiet flag is a carve-out",
+   VCS + " fetch -q", "allow", cwd=NOGIT)
+sh("silent-write: fetch discarding both streams is a carve-out",
+   VCS + " fetch --quiet origin main >/dev/null 2>&1", "allow", cwd=NOGIT)
+sh("silent-write: an abort lands nothing, so it is carved out",
+   VCS + " merge --abort 2>/dev/null", "allow", cwd=NOGIT)
+sh("silent-write: the exit-code test shape rule 1b already relies on",
+   VCS + " rev-parse -q --verify HEAD >/dev/null 2>&1", "allow", cwd=NOGIT)
+sh("silent-write: an ordinary read discarding its output is a carve-out",
+   VCS + " status --porcelain >/dev/null 2>&1", "allow", cwd=NOGIT)
+sh("silent-write: 2>&1 alone duplicates a stream and discards nothing",
+   VCS + " commit -m x 2>&1", "allow", cwd=NOGIT)
+
 
 # =========================================================================== 3. push and delete
 
@@ -1037,6 +1130,12 @@ sh("push: force from the PowerShell tool as well", VCS + " push --force-with-lea
    "force-push", tool="PowerShell", cwd=NOGIT)
 sh("push: an ordinary push", VCS + " push", "allow", cwd=NOGIT)
 sh("push: setting the upstream", VCS + " push -u origin claude/lane", "allow", cwd=NOGIT)
+
+# BLAST RADIUS of the loop-keyword fix: `git_calls` already scans every token of its segment for
+# `git`, not only the first, so a force push inside a loop's do-block asked before this fix too.
+# Pinned here so a later change cannot narrow that scan back to command position only.
+sh("push: git push --force inside a loop's do-block asks unchanged",
+   "while true; do " + VCS + " push --force; done", "ask", "force-push", cwd=NOGIT)
 
 sh("delete: the root", "rm -rf /", "deny", "destructive-delete", cwd=NOGIT)
 sh("delete: the home directory", "rm -fr ~", "deny", "destructive-delete", cwd=NOGIT)

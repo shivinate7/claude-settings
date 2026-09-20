@@ -218,6 +218,7 @@ deny, ask, or nothing. It fails open on bad input.
 | This session's own scratchpad: a tree whose real path lies under the session scratchpad the hook payload names | `Bash`, `PowerShell` | allow | nothing to do. No other session and no editor holds that tree |
 | A directory that is no git tree | `Bash`, `PowerShell` | deny in a shared checkout, ask in a git worktree | nothing was read there, so the refusal stands |
 | Conflict side: `git checkout --ours`, `--theirs`, `--merge`, with a merge, rebase, cherry-pick, or revert in progress | `Bash`, `PowerShell` | allow, logged `noted`/`conflict-resolve` | nothing to do. The call picks a side, it discards no uncommitted work |
+| Silent write: `commit`, `push`, `merge`, `tag`, `rebase`, or `cherry-pick` with a redirect of either stream to `/dev/null`, `NUL`, or `$null`, or `push`, `merge`, or `rebase` (MEASURED) with `-q`/`--quiet` alone | `Bash`, `PowerShell` | deny | run the same write without silencing either stream, and read what it prints. `commit -q`, `tag -q`, `cherry-pick -q`/`--quiet` alone, `merge --abort`, `fetch`, and every read subcommand pass |
 | Machine-wide kills: `pkill`, `killall`, `lsof -t`, `taskkill /IM`, `Stop-Process -Name`, in command position only | `Bash`, `PowerShell` | deny | name one PID this session started |
 | Force push: `--force`, `-f`, `--force-with-lease` | `Bash`, `PowerShell` | ask | the click in the prompt is the grant |
 | Recursive delete at `/`, `~`, `.`, `*`, or a drive root | `Bash`, `PowerShell` | deny | name the folder |
@@ -226,7 +227,8 @@ deny, ask, or nothing. It fails open on bad input.
 | Frozen paths: `settings.json`, `CLAUDE.md`, `hooks/*`, `lint/*`, `agents/*` under `~/.claude` | `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and shell writes | deny | edit the clone of claude-settings and open a PR |
 | Project config: a project's own `.claude/settings.json`, `.claude/settings.local.json`, `.claude/hooks/*` | `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and shell writes | allow, logged `noted`/`config-edit`, and named in a system message at turn end | name it under Deviations in the report |
 | Live streams: `tail -f`, `tail -F`, `--follow`, `Get-Content -Wait` | `Bash`, `PowerShell` | deny | run it in the foreground with a timeout, or in the background and wait for the completion notice |
-| Waiter loops: a segment whose command word is `sleep`, `Start-Sleep`, or `timeout /t` | `Bash`, `PowerShell` | deny | run the long command in the background and wait for its completion notice, or use a tool that waits once, such as `gh run watch <id> --exit-status` (avoid `gh pr checks --watch`, which serves a cached status) |
+| Waiter loops: a segment's command word, loop keyword and wrapper skipped, is `sleep`, `Start-Sleep`, or `timeout /t` | `Bash`, `PowerShell` | deny | run the long command in the background and wait for its completion notice, or use a tool that waits once, such as `gh run watch <id> --exit-status` (avoid `gh pr checks --watch`, which serves a cached status) |
+| Waiter loops over a pattern: a `while`/`until` condition that polls `pgrep`, `pkill`, or `lsof`, with a sleep-and-poll in its own `do` block | `Bash`, `PowerShell` | deny | wait on one pid this session started, or use a tool that waits once |
 
 The harness watcher tool `Monitor` is removed through `permissions.deny` in `settings.json`. It
 errors often, and a background command with a completion notice does the same job.
@@ -292,6 +294,43 @@ dirty rows. A clean tree allows `git reset --hard HEAD`. A dirty tree denies it.
 scratchpad repository allows for this session's id, and denies for another session's id.
 In the clean tree, `git reset --hard HEAD~1`, `origin/main`, and a raw sha each deny.
 
+- **silent-write-leaves-a-trace**: **deny a discarding redirect always. Deny the
+  quiet flag only where it measures the same way.** `commit`, `push`, `merge`,
+  `tag`, `rebase`, and `cherry-pick` deny on a redirect that sends either stream
+  to a null device. The shell throws the stream away before git gets a say. A
+  refusal and a proof of landing are both gone, on any of the six. git's own
+  `-q`/`--quiet` flag is judged per subcommand instead of by name. MEASURED
+  2026-09-19 and 2026-09-20, in throwaway repos, never a shared checkout, all
+  six. Each was checked across a write that succeeds, one a hook or a real
+  conflict refuses, and a no-op.
+
+  `push`, `merge`, and `rebase` deny on the flag alone. Each one's success and
+  its own no-op are both silent at exit 0. Without the flag they already
+  differ, by a line such as "Everything up-to-date" or "Successfully
+  rebased". The flag erases that line. A session cannot read whether the
+  write it just ran moved anything.
+
+  `commit`, `tag`, and `cherry-pick` carve out. `commit -q` leaves a hook's
+  refusal on stderr and a no-op's message on stdout, both at a nonzero exit.
+  A silent exit-0 commit is already unambiguous. `tag` has no `-q` or
+  `--quiet` at all. Both spellings exit 129 with an unknown-option error,
+  before git reads the tag name or the repository state. Every state
+  measures the same. `cherry-pick`'s short form fails the same way. Its long
+  form still prints a full commit summary, a full conflict, or a full
+  "nothing to commit" in every state, so nothing is silenced either way.
+
+  A discarding redirect still denies any of the six, carve-out or not.
+  `merge --abort` passes, because it lands nothing. `fetch`, `rev-parse`, and
+  every other read subcommand pass too. Reason: CLAUDE.md says never discard
+  a command's output. pkmnscan's `scripts/silent-write-guard.py` carries the
+  measurement this rule ports. A coordinator reported work as landed twice
+  in one session, when it had not. Once, a refusal was discarded. Once, a
+  proof of landing was discarded. The bare flag turned out to be a narrower
+  claim than the redirect, and a different claim for each subcommand. Only
+  the measurement above told them apart. No number is claimed here. The
+  entry is a slug, and the number waits for merge (CLAUDE.md: never allocate
+  a numbered record on a branch).
+
 Every deny or ask appends one line to `~/.claude/guard.log`: timestamp, tool,
 decision, rule, and the matched text cut at 120 characters. Allows are never
 logged. This is how a false positive gets measured later.
@@ -317,6 +356,17 @@ expects the fixture suite to go red. CI runs it on every push and pull request.
 dispatch. Each run sets up Python 3.11. It then runs the guard suite and the guard
 mutation harness. It also runs the report-gate suite, a shell check of `install.sh`, a
 PowerShell parse of `install.ps1`, and the STE lint action.
+
+`lint/rule_audit.py` checks that every `<!-- rule:<slug> -->` anchor in `CLAUDE.md` has a row
+in `lint/rule_mechanisms.json`. A row names the guard rule, gate file, or CI step that
+enforces it, or the token `unmechanized` plus a reason. CI runs the audit and its own
+fixture suite, `lint/test_rule_audit.py`, on every push and pull request.
+
+`lint/check_unknown_reads_contract.py` mechanizes one CLAUDE.md rule behaviorally: a read
+that could not run must be reported as unknown, never as clear or broken. It makes a read
+genuinely fail, in `hooks/guard.py` and in `hooks/session_start.sh`, and asserts the code's
+own answer names the unknown state. Its docstring states the contract, so a later case
+joins it by fixture, not by a new grep pattern.
 
 Manual dispatch takes one input, `full_ste_audit`. Enable it from the Actions tab to lint
 the whole tree in report mode. That run never fails the build. It only writes a summary.

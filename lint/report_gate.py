@@ -16,10 +16,28 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 from ste_gate import last_reply  # noqa: E402
 
-LANDING_COMMAND = re.compile(r"\bgit\s+(?:-C\s+\S+\s+)?(commit|push|merge)(?!\S)")
+# guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
+# heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
+# and past the pre-subcommand options that take a value (`-C <dir>`, `--git-dir=<path>`, and
+# the rest of `GIT_OPT_WITH_VALUE`) to the subcommand it actually runs. lint/ and hooks/ land
+# side by side, both under the repo root and under ~/.claude, so the hop from one to its
+# sibling holds in both places. MEASURED: the old regex `LANDING_COMMAND.search(cmd)` read
+# the raw command text and could not tell a quoted probe string, or a heredoc body, from an
+# actual git write. See decisions/predicate-is-the-act.md.
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+try:
+    import guard
+except ImportError:
+    # A gate that cannot read cannot accuse. Fail open, the same posture every other gate
+    # here takes on a missing or unreadable input: turn_landed() below reports no landing at
+    # all when guard did not load, so this Stop hook never demands a report it cannot judge.
+    guard = None
+
+GIT_LANDING_SUBCOMMANDS = {"commit", "push", "merge"}
 LANDING_TOOLS = {
     "mcp__github__merge_pull_request",
     "mcp__github__create_pull_request",
@@ -72,14 +90,36 @@ def tool_uses(rec):
             yield b
 
 
+def _segment_lands_a_git_write(segment):
+    """True when one of the segment's own `git` calls resolves to `commit`, `push`, or `merge`.
+
+    `guard.git_calls` is the parser every git rule in guard.py already trusts: it walks past
+    `sudo`, and past the pre-subcommand options that take a value (`-C <dir>`,
+    `--git-dir=<path>`, and the rest of `GIT_OPT_WITH_VALUE`), to the subcommand a call would
+    actually run. Reusing it, rather than a second hand-rolled skip, is what keeps
+    `git -C /path commit` counted as a landing. `git merge-base` resolves to the subcommand
+    `merge-base`, a different word than `merge`, and never matches.
+    """
+    for subcommand, _args in guard.git_calls(segment):
+        if subcommand in GIT_LANDING_SUBCOMMANDS:
+            return True
+    return False
+
+
 def turn_landed(records):
+    if guard is None:
+        return False
     for rec in records:
         for b in tool_uses(rec):
             name = b.get("name")
             if name == "Bash":
                 cmd = (b.get("input") or {}).get("command") or ""
-                if LANDING_COMMAND.search(cmd):
-                    return True
+                if not isinstance(cmd, str) or not cmd.strip():
+                    continue
+                stripped = guard.strip_heredoc_bodies(cmd)
+                for segment in guard.split_segments(stripped):
+                    if _segment_lands_a_git_write(segment):
+                        return True
             elif name in LANDING_TOOLS:
                 return True
     return False
