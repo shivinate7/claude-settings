@@ -20,6 +20,12 @@ printf 'checkout %s on %s, %s dirty files\n' "$toplevel" "$branch" "$n"
 
 # Divergence check: does ~/.claude/CLAUDE.md's pointer target match this checkout's CLAUDE.md?
 # Same parsing as settings.json's refresh hook. Silent on any missing/unreadable piece.
+#
+# This only means something when $toplevel is itself a second clone of the same repo the
+# pointer names, for example a lane worktree. In any other repo, the pointer's CLAUDE.md and
+# the checkout's CLAUDE.md differ by design, so the raw file compare below is gated on both
+# trees sharing one origin. Read the origin fails closed: either remote missing or unreadable
+# means silence, never a printed line.
 config_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 global_md="$config_dir/CLAUDE.md"
 if [ -f "$global_md" ]; then
@@ -34,8 +40,14 @@ if [ -f "$global_md" ]; then
     rp="$(cd "$(dirname "$pointer_target")" 2>/dev/null && pwd)/CLAUDE.md"
     rc="$(cd "$(dirname "$checkout_md")" 2>/dev/null && pwd)/CLAUDE.md"
     [ -n "$rp" ] && [ -n "$rc" ] && [ "$rp" = "$rc" ] && same_path=1
-    if [ "$same_path" != 1 ] && ! cmp -s "$pointer_target" "$checkout_md" 2>/dev/null; then
-      printf 'claude-settings: global rules at %s differ from this checkout at %s\n' "$pointer_target" "$checkout_md"
+    if [ "$same_path" != 1 ]; then
+      pointer_origin=$(cd "$d" 2>/dev/null && git remote get-url origin 2>/dev/null)
+      checkout_origin=$(cd "$toplevel" 2>/dev/null && git remote get-url origin 2>/dev/null)
+      if [ -n "$pointer_origin" ] && [ -n "$checkout_origin" ] \
+         && [ "$pointer_origin" = "$checkout_origin" ] \
+         && ! cmp -s "$pointer_target" "$checkout_md" 2>/dev/null; then
+        printf 'claude-settings: global rules at %s differ from this checkout at %s\n' "$pointer_target" "$checkout_md"
+      fi
     fi
   fi
 fi

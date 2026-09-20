@@ -50,8 +50,10 @@ each PR's own commit. Close the originals as superseded once the integration bra
 **Verification.** If the repo has screens, check each screen at every size and theme it
 ships in. Give a verdict per screen, never a description.
 Use my browser login only when needed. Trust a guard only once it goes red on
-the defect it guards. A green check proves only its platform and the states its
-fixtures build. Verify long work against the repo, not your status line. Never write
+the defect it guards. A guard that goes red when nothing is wrong is spent,
+because the reader learns to scroll past it. A green check proves only its
+platform and the states its fixtures build. Verify long work against the repo,
+not your status line. Never write
 a waiter loop. Never dry-run a block-list. Bump a dependency to the first version
 fixing the problem, never the latest. If this repo lints markdown, give every
 published number and path a checked reader. Verify a claim before you rely on it, and

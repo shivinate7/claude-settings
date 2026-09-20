@@ -301,6 +301,130 @@ class ReportGateTests(unittest.TestCase):
         out = json.loads(run.stdout)
         self.assertEqual(out.get("decision"), "block")
 
+    def test_58_quoted_git_commit_in_probe_list_passes(self):
+        # MEASURED: a read-only Bash call quoting a probe list, 'git commit -q -m x'
+        # 'git push --quiet', made the old regex-based gate demand a report for a turn
+        # that landed nothing. The words sit inside single quotes, never run as a command.
+        records = [
+            human("check the guard against a probe list"),
+            tool_use_msg("Bash", {
+                "command": "grep -n \"'git commit -q -m x' 'git push --quiet'\" hooks/guard.py",
+            }),
+            tool_result_msg(),
+            assistant_text("Found the probe list in the test fixtures, no report needed."),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(REPORT_GATE, self.hook_for(path))
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_59_heredoc_body_naming_git_merge_passes(self):
+        records = [
+            human("write a note about merging"),
+            tool_use_msg("Bash", {
+                "command": "cat <<'EOF' > notes.txt\nremember to git merge later\nEOF",
+            }),
+            tool_result_msg(),
+            assistant_text("Wrote the note, no report needed."),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(REPORT_GATE, self.hook_for(path))
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_60_real_git_commit_blocks(self):
+        records = [
+            human("land the fix"),
+            tool_use_msg("Bash", {"command": "git commit -m x"}),
+            tool_result_msg(),
+            assistant_text("Committed."),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(REPORT_GATE, self.hook_for(path))
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+
+    def test_61_sudo_git_push_blocks(self):
+        records = [
+            human("push the branch"),
+            tool_use_msg("Bash", {"command": "sudo git push"}),
+            tool_result_msg(),
+            assistant_text("Pushed."),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(REPORT_GATE, self.hook_for(path))
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+
+    def test_62_git_commit_in_an_earlier_turn_passes(self):
+        # Pin: already correct before this fix. A landing in an earlier turn must not
+        # demand a report on a later turn that did nothing itself.
+        records = [
+            human("land it"),
+            tool_use_msg("Bash", {"command": "git commit -m first"}),
+            tool_result_msg("tu_1"),
+            human("what does the log show now"),
+            tool_use_msg("Bash", {"command": "git log -1"}),
+            tool_result_msg("tu_2"),
+            assistant_text("The last commit is `first`, no report needed."),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(REPORT_GATE, self.hook_for(path))
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_63_git_dash_c_commit_blocks(self):
+        # Regression: `-C <dir>` is a pre-subcommand option that takes a value. A predicate
+        # that requires the subcommand to be `git`'s own literal next token misses this and
+        # lets a real landing through unreported, a false negative worse than the false
+        # positive this fix set out to remove.
+        records = [
+            human("commit from another checkout"),
+            tool_use_msg("Bash", {"command": "git -C /some/path commit -m x"}),
+            tool_result_msg(),
+            assistant_text("Committed."),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(REPORT_GATE, self.hook_for(path))
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+
+    def test_64_git_dash_c_push_blocks(self):
+        records = [
+            human("push from another checkout"),
+            tool_use_msg("Bash", {"command": "git -C /some/path push"}),
+            tool_result_msg(),
+            assistant_text("Pushed."),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(REPORT_GATE, self.hook_for(path))
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+
+    def test_65_git_dash_dash_git_dir_commit_blocks(self):
+        records = [
+            human("commit against an explicit git dir"),
+            tool_use_msg("Bash", {"command": "git --git-dir=/x/.git commit -m y"}),
+            tool_result_msg(),
+            assistant_text("Committed."),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(REPORT_GATE, self.hook_for(path))
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+
+    def test_66_quoted_git_dash_c_commit_in_echo_passes(self):
+        records = [
+            human("show the reproduction command"),
+            tool_use_msg("Bash", {"command": "echo 'git -C /path commit'"}),
+            tool_result_msg(),
+            assistant_text("That command is only printed, no report needed."),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(REPORT_GATE, self.hook_for(path))
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(run.stdout.strip(), "")
+
     def test_54_prose_below_report_after_a_question_blocks(self):
         records = [
             human("why does it only fire sometimes?"),
