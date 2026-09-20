@@ -389,7 +389,7 @@ MUTATIONS = [
      'SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick")',
      'SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick", '
      '"fetch")', "guard",
-     "silent-write: fetch's own quiet flag is a carve-out"),
+     "silent-write: fetch discarding both streams is a carve-out"),
     ("silent-write: commit, tag, and cherry-pick rejoin the quiet-flag arm, the measured "
      "carve-outs undone",
      'QUIET_FLAG_SUBCOMMANDS = ("push", "merge", "rebase")',
