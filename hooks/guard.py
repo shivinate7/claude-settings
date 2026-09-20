@@ -192,6 +192,14 @@ def split_segments(cmd: str):
     Quoted text, single or double, is copied whole into the current segment, so a delimiter
     inside a quote never starts a new one. An unterminated quote runs to the end of the string,
     which keeps the remainder inside it rather than guessing where it would have closed.
+
+    THE COMMENT RULE, measured before it was written: without it, the `'` in `# the driver's
+    shape` opens a quote that runs to the end of the text, and `guard-shell-selftest.sh`'s
+    runaway-driver fixture — a script whose second line is exactly that comment — went from
+    refused to ALLOWED once the parent's per-line reader was replaced by this function. An
+    unquoted `#` that STARTS A WORD (index 0, or the previous character is space, tab,
+    newline, `;`, `|`, `&`, or `(`) is a comment to the end of its line — the shell's own
+    rule. `fix#3` and `'#300'` are not comments under it.
     """
     segments = []
     current = []
@@ -205,6 +213,10 @@ def split_segments(cmd: str):
             if char == quote:
                 quote = ""
             index += 1
+            continue
+        if char == "#" and (index == 0 or cmd[index - 1] in " \t\n;|&("):
+            while index < length and cmd[index] != "\n":
+                index += 1
             continue
         if char in ("'", '"'):
             quote = char
