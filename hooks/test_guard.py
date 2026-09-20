@@ -1026,6 +1026,50 @@ sh("waiter: a readiness check is allowed", "curl --retry 5 http://localhost:3000
 sh("waiter: an unrelated log query is allowed", VCS + " log --since=yesterday", "allow", cwd=NOGIT)
 
 
+# =========================================================================== 2d. the silent write
+#
+# Rule 1c, the owner's ruling. CLAUDE.md: "Never discard a command's output." MEASURED against the
+# guard before this rule: `git commit -q -m x` and `git push --quiet` both passed unrefused.
+
+sh("silent-write: commit's own quiet flag needs no redirect at all",
+   VCS + " commit -q -m x", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write: push's own quiet flag needs no redirect at all",
+   VCS + " push --quiet", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write: a discarded refusal, stderr alone",
+   VCS + " commit -m x 2>/dev/null", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write: a discarded proof of landing, stdout alone",
+   VCS + " commit -m x >/dev/null", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write: both streams discarded together",
+   VCS + " commit -q -m x >/dev/null 2>&1", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write: a merge that is not an abort stays covered",
+   VCS + " merge --quiet feature/x", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write: a tag silenced by its own flag",
+   VCS + " tag -a v1 -m x -q", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write: a rebase silenced by a discarded stream",
+   VCS + " rebase main >/dev/null 2>&1", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write: a cherry-pick silenced by its own flag",
+   VCS + " cherry-pick -q abc1234", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write: the Windows null device denies with no quiet flag at all",
+   VCS + " commit -m x 2>NUL", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write: PowerShell's null variable denies with no quiet flag at all",
+   VCS + " commit -m x 2>$null", "deny", "silent-write", tool="PowerShell", cwd=NOGIT)
+
+sh("silent-write: an ordinary commit stays allowed", VCS + " commit -m x", "allow", cwd=NOGIT)
+sh("silent-write: an ordinary push stays allowed", VCS + " push", "allow", cwd=NOGIT)
+sh("silent-write: fetch's own quiet flag is a carve-out",
+   VCS + " fetch -q", "allow", cwd=NOGIT)
+sh("silent-write: fetch discarding both streams is a carve-out",
+   VCS + " fetch --quiet origin main >/dev/null 2>&1", "allow", cwd=NOGIT)
+sh("silent-write: an abort lands nothing, so it is carved out",
+   VCS + " merge --abort 2>/dev/null", "allow", cwd=NOGIT)
+sh("silent-write: the exit-code test shape rule 1b already relies on",
+   VCS + " rev-parse -q --verify HEAD >/dev/null 2>&1", "allow", cwd=NOGIT)
+sh("silent-write: an ordinary read discarding its output is a carve-out",
+   VCS + " status --porcelain >/dev/null 2>&1", "allow", cwd=NOGIT)
+sh("silent-write: 2>&1 alone duplicates a stream and discards nothing",
+   VCS + " commit -m x 2>&1", "allow", cwd=NOGIT)
+
+
 # =========================================================================== 3. push and delete
 
 sh("push: the long force flag", VCS + " push --force", "ask", "force-push", cwd=NOGIT)

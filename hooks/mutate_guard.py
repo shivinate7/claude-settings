@@ -309,6 +309,42 @@ MUTATIONS = [
      '    os.path.normcase("state"),',
      '    os.path.normcase("state_unfrozen"),'),
 
+    # ---- Rule 1c, the silent write (Decision, silent-write-leaves-a-trace). One mutant per arm:
+    # the rule disabled outright, each of the two silencing detectors on its own, the one
+    # in-loop carve-out, and the subcommand set a carve-out depends on staying narrow.
+    # REQUIRED CASE NAMES, for the fifth `mutation_parts` field once it lands: each label below
+    # names the silent-write test case its own red line must carry.
+    #   "silent-write: the rule never denies at all"
+    #     -> "silent-write: commit's own quiet flag needs no redirect at all"
+    #   "silent-write: git's own quiet flag no longer silences anything"
+    #     -> "silent-write: push's own quiet flag needs no redirect at all"
+    #   "silent-write: a discarding redirect no longer silences anything"
+    #     -> "silent-write: a discarded proof of landing, stdout alone"
+    #   "silent-write: the merge --abort carve-out is gone"
+    #     -> "silent-write: an abort lands nothing, so it is carved out"
+    #   "silent-write: fetch joins the denied subcommands"
+    #     -> "silent-write: fetch's own quiet flag is a carve-out"
+    ("silent-write: the rule never denies at all",
+     '        matched = silent_write_hit(segment)\n'
+     '        if matched:\n'
+     '            refuse(tool, "deny", "silent-write", SILENT_WRITE_REASON, matched)',
+     '        matched = silent_write_hit(segment)\n'
+     '        if False:\n'
+     '            refuse(tool, "deny", "silent-write", SILENT_WRITE_REASON, matched)'),
+    ("silent-write: git's own quiet flag no longer silences anything",
+     '        if quiet_write(args) or discards_output(segment):',
+     '        if discards_output(segment):'),
+    ("silent-write: a discarding redirect no longer silences anything",
+     '        if quiet_write(args) or discards_output(segment):',
+     '        if quiet_write(args):'),
+    ("silent-write: the merge --abort carve-out is gone",
+     '        if subcommand == "merge" and "--abort" in args:\n            continue',
+     '        if False:\n            continue'),
+    ("silent-write: fetch joins the denied subcommands",
+     'SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick")',
+     'SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick", '
+     '"fetch")'),
+
     # ---- the PostToolUse watch. These break `hooks/config_watch.py` and must be killed by
     # `hooks/test_config_watch.py`, which writes the cap for real and reads the file back.
     ("watch: never restore, only report",

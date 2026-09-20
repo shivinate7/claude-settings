@@ -218,6 +218,7 @@ deny, ask, or nothing. It fails open on bad input.
 | This session's own scratchpad: a tree whose real path lies under the session scratchpad the hook payload names | `Bash`, `PowerShell` | allow | nothing to do. No other session and no editor holds that tree |
 | A directory that is no git tree | `Bash`, `PowerShell` | deny in a shared checkout, ask in a git worktree | nothing was read there, so the refusal stands |
 | Conflict side: `git checkout --ours`, `--theirs`, `--merge`, with a merge, rebase, cherry-pick, or revert in progress | `Bash`, `PowerShell` | allow, logged `noted`/`conflict-resolve` | nothing to do. The call picks a side, it discards no uncommitted work |
+| Silent write: `commit`, `push`, `merge`, `tag`, `rebase`, or `cherry-pick` with `-q`/`--quiet`, or with a redirect of either stream to `/dev/null`, `NUL`, or `$null` | `Bash`, `PowerShell` | deny | run the same write without silencing either stream, and read what it prints. `merge --abort`, `fetch`, and every read subcommand pass |
 | Machine-wide kills: `pkill`, `killall`, `lsof -t`, `taskkill /IM`, `Stop-Process -Name`, in command position only | `Bash`, `PowerShell` | deny | name one PID this session started |
 | Force push: `--force`, `-f`, `--force-with-lease` | `Bash`, `PowerShell` | ask | the click in the prompt is the grant |
 | Recursive delete at `/`, `~`, `.`, `*`, or a drive root | `Bash`, `PowerShell` | deny | name the folder |
@@ -291,6 +292,19 @@ MEASURED after the change, on the same probes, with a real uncommitted line adde
 dirty rows. A clean tree allows `git reset --hard HEAD`. A dirty tree denies it. The dirty
 scratchpad repository allows for this session's id, and denies for another session's id.
 In the clean tree, `git reset --hard HEAD~1`, `origin/main`, and a raw sha each deny.
+
+- **silent-write-leaves-a-trace**: **deny, no environment hatch.** The rule denies
+  `commit`, `push`, `merge`, `tag`, `rebase`, and `cherry-pick` when git's own
+  `-q`/`--quiet` flag hides the result. It also denies them when a redirect sends
+  either stream to a null device. `merge --abort` passes, because it lands nothing.
+  `fetch`, `rev-parse`, and every other read subcommand pass too. Reason, MEASURED:
+  `git commit -q -m x` and `git push --quiet` both passed the guard before this rule.
+  CLAUDE.md says never discard a command's output. A silenced refusal and a silenced
+  proof of landing read the same to the reader. pkmnscan's
+  `scripts/silent-write-guard.py` carries the measurement this rule ports. A
+  coordinator there reported work as landed twice in one session, when it had not.
+  No number is claimed here. The entry is a slug, and the number waits for merge
+  (CLAUDE.md: never allocate a numbered record on a branch).
 
 Every deny or ask appends one line to `~/.claude/guard.log`: timestamp, tool,
 decision, rule, and the matched text cut at 120 characters. Allows are never

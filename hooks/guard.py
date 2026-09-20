@@ -20,6 +20,10 @@ one fixed order, and the first match wins.
   1b pointer-head      a command that moves HEAD off `main` in the POINTER checkout, the one
                        checkout every session on this machine runs its hooks and its lint from.
                        Always denied. A move TO `main` restores the invariant and passes.
+  1c silent-write      a `commit`, `push`, `merge`, `tag`, `rebase`, or `cherry-pick` whose own
+                       trace is silenced, by git's own `-q`/`--quiet` flag or by a redirect of
+                       either stream to a null device. Always denied. `merge --abort` is
+                       carved out, and every read subcommand is untouched.
   2 machine-wide-kill  a kill by name or by pattern
   3 live-stream        a command that follows a stream and never ends on its own
   3 waiter             a shell segment whose command word is a sleep-and-poll
@@ -74,6 +78,23 @@ revert is unresolved in the tree picks a conflict side; it does not discard work
 git itself already holds the tree open. That one call is allowed and logged as
 `noted`/`conflict-resolve`. Any other `git checkout` that names a path keeps rule 1's
 ordinary deny or ask.
+
+Rule 1c, `silent-write`, mechanizes CLAUDE.md's "Never discard a command's output" for
+git. MEASURED this session: `git commit -q -m x` and `git push --quiet` both passed the
+guard unrefused. pkmnscan's `scripts/silent-write-guard.py` carries the measurement that
+this rule ports: a coordinator reported work as landed twice in one session when it had
+not, once because a pre-commit refusal went to `/dev/null`, and once because the `git
+log` that followed showed the PREVIOUS commit, indistinguishable at a glance from the
+one that should have landed. A discarded refusal and a discarded proof of landing read
+the same to the session that discarded them: silence either way, and nothing left to
+tell "nothing is wrong" from "nothing is known yet" apart.
+
+The carve-outs are pinned by fixtures, not left to judgement. `git fetch -q`, every read
+subcommand, and the test-by-exit-code shape `git rev-parse -q --verify <ref> >/dev/null
+2>&1` that rule 1b already relies on, all stay allowed, because none of them is in
+`SILENT_WRITE_SUBCOMMANDS`. `git merge --abort` is carved out inside the rule itself: an
+abort lands nothing, so it has no landing to prove. No environment hatch. The permission
+prompt is the grant here, the same as everywhere else in this file.
 
 Every refusal names its rule and says what to do instead. A remedy never names
 the refused command or the refused path, because a remedy that repeats the
@@ -396,6 +417,64 @@ def push_is_forced(args) -> bool:
         if arg.startswith("-") and not arg.startswith("--") and "f" in arg:
             return True
     return False
+
+
+# ------------------------------------------------------------------ the silent write
+#
+# Rule 1c. CLAUDE.md (Git): "Never discard a command's output." A git write proves it landed with
+# one line, and proves a refusal with another. Silence either one and the reader cannot tell them
+# apart. `commit` and `push` are the two cases MEASURED this session: `git commit -q -m x` drops
+# the "[branch 1a2b3c4] message" summary the same way `>/dev/null` would, and `git push --quiet`
+# drops the update line the same way `2>/dev/null` would. Neither call needs a redirect to go
+# silent, so both the flag and the redirect are judged here.
+SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick")
+
+# A null-device target, on either stream, in the three shells this guard reads a command from:
+# POSIX (`/dev/null`), Windows cmd (`NUL`), and PowerShell (`$null`). `2>&1` duplicates one stream
+# onto another file descriptor and is not this: the line still reaches a stream the session reads.
+SILENT_WRITE_REDIRECT = re.compile(
+    r"(?:&>>?|\d?>>?)\s*(['\"]?)(?:/dev/null|NUL|\$null)\1(?=$|[\s;&|])",
+    re.IGNORECASE,
+)
+
+
+def discards_output(segment: str) -> bool:
+    """True when the segment redirects stdout or stderr, on any descriptor, to a null device."""
+    return bool(SILENT_WRITE_REDIRECT.search(segment))
+
+
+def quiet_write(args) -> bool:
+    """True when a git call carries `-q` or `--quiet`, which silences the same line a discarding
+    redirect would, without any redirect at all.
+    """
+    return "-q" in args or "--quiet" in args
+
+
+def silent_write_hit(segment: str) -> str:
+    """Return the matched `git <subcommand> ...` text for a write whose own trace is silenced,
+    else ''.
+
+    Only `SILENT_WRITE_SUBCOMMANDS` are judged. `fetch`, `rev-parse`, and every other read
+    subcommand fall outside it, which is what keeps `git fetch -q` and the test-by-exit-code shape
+    `git rev-parse -q --verify <ref> >/dev/null 2>&1` allowed. `merge --abort` is carved out inside
+    the loop: it lands nothing, so it has no landing to prove.
+    """
+    for subcommand, args in git_calls(segment):
+        if subcommand not in SILENT_WRITE_SUBCOMMANDS:
+            continue
+        if subcommand == "merge" and "--abort" in args:
+            continue
+        if quiet_write(args) or discards_output(segment):
+            return ("git " + subcommand + " " + " ".join(args)).strip()
+    return ""
+
+
+SILENT_WRITE_REASON = (
+    "Rule (Git): this write's own trace is silenced, so neither a refusal nor the line "
+    "that proves it landed would reach the session. "
+    "Remedy: run the same write without silencing either stream, and read what it "
+    "prints before you say it landed."
+)
 
 
 STASH_READ_ACTIONS = {"list", "show"}
@@ -2154,6 +2233,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
         matched = pointer_head_hit(segment, head_where)
         if matched:
             refuse(tool, "deny", "pointer-head", POINTER_HEAD_REASON, matched)
+
+    # 1c. A git write whose own trace is silenced, by git's own quiet flag or by a redirect of
+    # either stream to a null device. Placed after the pointer-head rule and before every rule
+    # below, so a silenced write is caught on its own defect before anything else judges the
+    # same segment.
+    for segment in split_segments(stripped):
+        if not segment.strip():
+            continue
+        matched = silent_write_hit(segment)
+        if matched:
+            refuse(tool, "deny", "silent-write", SILENT_WRITE_REASON, matched)
 
     # 2. A machine-wide kill. Judged in COMMAND POSITION, from the segment's own tokens, never
     # by the word appearing anywhere in the text. A segment shlex cannot parse fails open:
