@@ -342,6 +342,26 @@ MUTATIONS = [
      '    if not isinstance(extra, list):\n'
      '        extra = []',
      "test_sweep_string_false_refuses_the_whole_repository"),
+
+    # ---- the primary-checkout exclusion (review fix, PR #83) ----
+    #
+    # A reviewer ran sweep.py against a LINKED WORKTREE's own path (a shape session_end_sweep.py
+    # exists to prevent, but sweep.py itself must not depend on every caller getting that right)
+    # and watched the clone's real primary checkout get labeled `REAP removable`. `git worktree
+    # remove` on it then failed only because git itself refuses to remove a main working tree
+    # that way -- a refusal this program must not lean on (CLAUDE.md, "a recovery control must
+    # not depend on the state it recovers"). This mutant drops the exclusion `_is_primary_checkout`
+    # decides on, the same shape the reviewer measured by hand: the primary checkout falls
+    # through to `decide_worktree` again and gets a real decision recorded against it.
+    ("primary-checkout: the clone's own main working tree is no longer excluded from decide_worktree",
+     "sweep",
+     '        is_primary = _is_primary_checkout(entry["path"])\n'
+     '        if is_primary is True:\n'
+     '            continue  # the clone\'s one primary checkout: no decision is ever recorded against it',
+     '        is_primary = _is_primary_checkout(entry["path"])\n'
+     '        if False:\n'
+     '            continue  # MUTANT: the exclusion never fires',
+     "test_no_decision_is_recorded_against_the_primary_checkout_when_swept_via_a_linked_worktree"),
 ]
 
 

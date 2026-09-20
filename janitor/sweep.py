@@ -226,9 +226,50 @@ def _branch_reap_label(where: str, base: str, branch: str) -> str:
 # Same shape: every boolean (dirty, locked, live) is guard's own primitive
 # (guard.porcelain, guard.worktree_locked, guard.worktree_live_session), read in the same order
 # guard.worktree_remove_subject already uses. This function adds only the "which one refused"
-# label and the "never touch the primary checkout" exclusion, which is the sweep's own concern
-# (guard's rule judges one `git worktree remove <path>` call at a time and has no reason to know
-# which path is the primary tree of the clone it is asked about).
+# label. The "never touch the primary checkout" exclusion is NOT here: it is decided in
+# `sweep_repo`, before `decide_worktree` is ever called, by `_is_primary_checkout` below. See
+# that function's docstring for why comparing against the ROOT argument (an earlier version of
+# this file did that, and only that) is not enough.
+
+
+def _is_primary_checkout(entry_path: str):
+    """True when `entry_path` IS the repository's one primary checkout, False for a linked
+    worktree, None when the read failed.
+
+    THE DEFECT THIS REPLACES: an earlier version of this file compared each worktree entry's
+    real path against the `root` argument `sweep_repo` was called with, and skipped only that
+    one match. That is correct ONLY when `root` already names the primary checkout. Call
+    `sweep_repo` with a LINKED WORKTREE's own path instead (`session_end_sweep.py`'s whole job
+    is to prevent that, by resolving to the primary checkout first, but `sweep.py` itself must
+    not depend on every caller doing that correctly) and the actual primary checkout stops
+    matching `root`, stops being excluded, and gets evaluated by `decide_worktree` like any
+    other worktree -- `REAP removable` when it happens to be clean, unlocked, and not live. A
+    reviewer measured exactly that against a real fixture: `git worktree remove` on the primary
+    tree then failed only because GIT ITSELF refuses to remove a main working tree that way --
+    a refusal this program does not control and must not lean on (CLAUDE.md,
+    "verification-recovery-not-gated-on-own-state"; a guard that depends on someone else's
+    refusal fails the day that refusal changes).
+
+    THE FIX: ask git which path is primary, independent of what `root` was. Every worktree of
+    one clone shares exactly one git directory (`--git-common-dir`); the primary checkout is
+    the one worktree whose OWN git directory (`--git-dir`) equals that shared one. A linked
+    worktree's own git directory is instead a subdirectory of the shared one
+    (`<common>/worktrees/<name>`), so the two never match there. This is the same read
+    `hooks/guard.py.is_worktree` already makes and `hooks/test_guard.py` already exercises, run
+    here per-entry so it answers correctly no matter which worktree `sweep_repo` was pointed at.
+    """
+    answer = guard._git(entry_path, "rev-parse", "--git-dir", "--git-common-dir")
+    if answer is None or answer.returncode != 0:
+        return None
+    lines = answer.stdout.splitlines()
+    if len(lines) < 2:
+        return None
+    try:
+        own = os.path.normcase(os.path.realpath(os.path.join(entry_path, lines[0].strip())))
+        common = os.path.normcase(os.path.realpath(os.path.join(entry_path, lines[1].strip())))
+    except Exception:
+        return None
+    return own == common
 
 
 def decide_worktree(where: str, entry: dict):
@@ -375,7 +416,6 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str):
         result["refused"] = "unreadable-worktree-list"
         return result
 
-    root_real = os.path.normcase(os.path.realpath(root))
     checked_out_branches = {e["branch"] for e in entries if e.get("branch")}
 
     branches = list_local_branches(root)
@@ -392,12 +432,16 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str):
     for entry in entries:
         if entry.get("bare"):
             continue
-        try:
-            entry_real = os.path.normcase(os.path.realpath(entry["path"]))
-        except Exception:
-            entry_real = entry["path"]
-        if entry_real == root_real:
-            continue  # never the primary checkout of the clone being swept
+        is_primary = _is_primary_checkout(entry["path"])
+        if is_primary is True:
+            continue  # the clone's one primary checkout: no decision is ever recorded against it
+        if is_primary is None:
+            # Could not tell whether this IS the primary checkout. Rule 7's direction: an
+            # unreadable subject means keep, never a guess that it is safe to evaluate.
+            result["worktrees"].append(
+                {"path": entry["path"], "action": "keep", "reason": "unreadable-subject"}
+            )
+            continue
         decision = decide_worktree(root, entry)
         result["worktrees"].append(decision)
         if confirm and decision["action"] == "reap":

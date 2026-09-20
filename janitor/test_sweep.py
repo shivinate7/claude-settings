@@ -393,6 +393,75 @@ class WorktreeDecisionTests(unittest.TestCase):
         self.assertEqual(decision["reason"], "unreadable-subject")
 
 
+class PrimaryCheckoutExclusionTests(unittest.TestCase):
+    """`sweep_repo` must never record a decision against the clone's one primary checkout, NO
+    MATTER WHICH WORKTREE PATH IT WAS CALLED WITH. An earlier version of this file compared
+    each worktree entry against the `root` argument alone, which is correct only when `root`
+    already names the primary checkout; called with a LINKED worktree's own path instead, the
+    real primary checkout used to fall through to `decide_worktree` like any other worktree and
+    could be labeled `REAP removable`. `git worktree remove` on it then failed only because git
+    itself refuses to remove a main working tree that way -- a refusal this suite must not lean
+    on (CLAUDE.md, "a recovery control must not depend on the state it recovers"). This class
+    calls `sweep_repo` with the LINKED worktree as `root`, the exact shape that exposed the
+    defect, and asserts no decision was ever RECORDED for the primary checkout's path -- not
+    that the directory still exists on disk, which git's own refusal could make true even with
+    the defect back in place."""
+
+    # A FRESH fixture per test method, not shared via setUpClass: a `confirm=True` case in this
+    # class really does remove the linked worktree it is pointed at (it is not the primary
+    # checkout, and this fixture leaves it clean/unlocked/session-free on purpose, so it is a
+    # genuinely reapable worktree). Sharing one fixture across methods let an earlier `confirm`
+    # case consume it before a later `preview` case ran, and that case's "at least one decision"
+    # assertion failed for a reason that had nothing to do with the exclusion this class exists
+    # to prove -- an empty-subject case exactly like the ones CLAUDE.md and this suite's own
+    # module docstring warn against, just introduced from the test side this time.
+    def setUp(self):
+        tag = self.id().rsplit(".", 1)[-1]
+        self.primary = os.path.join(ROOT, "primary-checkout-%s" % tag)
+        make_repo(self.primary, {"f.txt": "base\n"})
+        self.linked = os.path.join(ROOT, "primary-checkout-linked-%s" % tag)
+        require(run_vcs(self.primary, "worktree", "add", "-q", self.linked, "-b", "lane-x")
+                .returncode == 0, "worktree add for the exclusion fixture")
+        require(os.path.isdir(self.linked), "fixture: linked worktree exists")
+
+    def _decisions(self, root, confirm):
+        log_path = os.path.join(ROOT, "primary-exclusion-%s.log" % self.id().rsplit(".", 1)[-1])
+        return sweep.sweep_repo(root, confirm=confirm, restore_log_path=log_path)
+
+    def _primary_recorded(self, result):
+        primary_real = os.path.normcase(os.path.realpath(self.primary))
+        for w in result["worktrees"]:
+            if os.path.normcase(os.path.realpath(w["path"])) == primary_real:
+                return w
+        return None
+
+    def test_no_decision_is_recorded_against_the_primary_checkout_when_swept_via_a_linked_worktree(self):
+        result = self._decisions(self.linked, confirm=False)
+        self.assertTrue(len(result["worktrees"]) > 0,
+                         "fixture must produce at least one worktree decision to mean anything")
+        recorded = self._primary_recorded(result)
+        self.assertIsNone(
+            recorded,
+            "the primary checkout must never appear in the worktree decisions at all, got: %r"
+            % (recorded,),
+        )
+
+    def test_confirm_via_a_linked_worktree_never_attempts_to_remove_the_primary_checkout(self):
+        result = self._decisions(self.linked, confirm=True)
+        self.assertTrue(len(result["worktrees"]) > 0,
+                         "fixture must produce at least one worktree decision to mean anything")
+        self.assertIsNone(self._primary_recorded(result))
+        self.assertTrue(os.path.isdir(self.primary),
+                         "the primary checkout must survive even a --confirm sweep")
+
+    def test_swept_via_its_own_root_the_primary_checkout_is_still_excluded(self):
+        """Same exclusion, the ordinary call shape (root IS the primary checkout), so the fix
+        does not regress the case the old root-comparison already handled."""
+        result = self._decisions(self.primary, confirm=False)
+        self.assertTrue(len(result["worktrees"]) > 0, "fixture must produce a decision")
+        self.assertIsNone(self._primary_recorded(result))
+
+
 # --------------------------------------------------------------------------- discovery
 
 

@@ -78,6 +78,11 @@ jobs:
           scope: ${{ inputs.full_ste_audit && 'all' || 'changed' }}
           fail: ${{ !inputs.full_ste_audit }}
 
+      - name: Janitor triggers fixture suite (SessionEnd hook + launchd installer)
+        run: |
+          python3 janitor/test_session_end_sweep.py
+          python3 janitor/test_install_launchd.py
+
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.
   pointer-windows:
