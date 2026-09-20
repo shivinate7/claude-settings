@@ -51,7 +51,18 @@ Taken on this machine on 2026-09-20, across the five repositories under
 | Husk directories | 0 |
 | Redundant by a squash merge | 0 |
 
-The ancestry test reaps 46 branches. The patch test adds 5 more. The
+The ancestry test reaps 46 branches. The patch test adds 5 more.
+
+This table counts content, and nothing else. It asks one question of each
+branch: does the branch hold work that sits nowhere else? The sweep asks a
+second question first. It applies the refusals in order. A branch that a
+worktree checks out therefore lands in the checked-out group. It never reaches
+the ancestor group.
+
+Both numbers are right, and they answer different questions. A review on
+2026-09-20 re-measured both, and the arithmetic ties them together. Of the 46
+ancestors, 29 sit in a worktree today. 46 minus 29 leaves the 17 that the
+sweep's own preview reports. The
 squash test adds none today, so this build does not ship it.
 
 ## The decisions
