@@ -1028,17 +1028,21 @@ sh("waiter: an unrelated log query is allowed", VCS + " log --since=yesterday", 
 
 # =========================================================================== 2d. the silent write
 #
-# Rule 1c, the owner's ruling. CLAUDE.md: "Never discard a command's output." MEASURED against the
-# guard before this rule: `git commit -q -m x` and `git push --quiet` both passed unrefused.
+# Rule 1c, the owner's ruling. CLAUDE.md: "Never discard a command's output." A discarding
+# redirect denies on any of the six subcommands, whatever git itself would have printed. git's
+# own `-q`/`--quiet` flag is judged per subcommand, against `QUIET_FLAG_SUBCOMMANDS`, the
+# MEASURED set: `commit`'s own flag leaves a refusal and a no-op both readable and both at a
+# nonzero exit, so it carves out below. `push`'s own flag does not: a real update and "nothing to
+# push" measure identically, silent at exit 0, so it stays denied.
 
-sh("silent-write: commit's own quiet flag needs no redirect at all",
-   VCS + " commit -q -m x", "deny", "silent-write", cwd=NOGIT)
 sh("silent-write: push's own quiet flag needs no redirect at all",
-   VCS + " push --quiet", "deny", "silent-write", cwd=NOGIT)
+   VCS + " push --quiet", "deny", "silent-write", carries="moved nothing", cwd=NOGIT)
 sh("silent-write: a discarded refusal, stderr alone",
-   VCS + " commit -m x 2>/dev/null", "deny", "silent-write", cwd=NOGIT)
+   VCS + " commit -m x 2>/dev/null", "deny", "silent-write", carries="a redirect silences",
+   cwd=NOGIT)
 sh("silent-write: a discarded proof of landing, stdout alone",
-   VCS + " commit -m x >/dev/null", "deny", "silent-write", cwd=NOGIT)
+   VCS + " commit -m x >/dev/null", "deny", "silent-write", carries="a redirect silences",
+   cwd=NOGIT)
 sh("silent-write: both streams discarded together",
    VCS + " commit -q -m x >/dev/null 2>&1", "deny", "silent-write", cwd=NOGIT)
 sh("silent-write: a merge that is not an abort stays covered",
@@ -1056,6 +1060,10 @@ sh("silent-write: PowerShell's null variable denies with no quiet flag at all",
 
 sh("silent-write: an ordinary commit stays allowed", VCS + " commit -m x", "allow", cwd=NOGIT)
 sh("silent-write: an ordinary push stays allowed", VCS + " push", "allow", cwd=NOGIT)
+sh("silent-write: commit's own quiet flag is a carve-out, MEASURED 2026-09-19",
+   VCS + " commit -q -m x", "allow", cwd=NOGIT)
+sh("silent-write: commit's own quiet flag stays a carve-out with -a as well",
+   VCS + " commit -q -a -m x", "allow", cwd=NOGIT)
 sh("silent-write: fetch's own quiet flag is a carve-out",
    VCS + " fetch -q", "allow", cwd=NOGIT)
 sh("silent-write: fetch discarding both streams is a carve-out",

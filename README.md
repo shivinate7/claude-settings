@@ -218,7 +218,7 @@ deny, ask, or nothing. It fails open on bad input.
 | This session's own scratchpad: a tree whose real path lies under the session scratchpad the hook payload names | `Bash`, `PowerShell` | allow | nothing to do. No other session and no editor holds that tree |
 | A directory that is no git tree | `Bash`, `PowerShell` | deny in a shared checkout, ask in a git worktree | nothing was read there, so the refusal stands |
 | Conflict side: `git checkout --ours`, `--theirs`, `--merge`, with a merge, rebase, cherry-pick, or revert in progress | `Bash`, `PowerShell` | allow, logged `noted`/`conflict-resolve` | nothing to do. The call picks a side, it discards no uncommitted work |
-| Silent write: `commit`, `push`, `merge`, `tag`, `rebase`, or `cherry-pick` with `-q`/`--quiet`, or with a redirect of either stream to `/dev/null`, `NUL`, or `$null` | `Bash`, `PowerShell` | deny | run the same write without silencing either stream, and read what it prints. `merge --abort`, `fetch`, and every read subcommand pass |
+| Silent write: `commit`, `push`, `merge`, `tag`, `rebase`, or `cherry-pick` with a redirect of either stream to `/dev/null`, `NUL`, or `$null`, or `push`, `merge`, `tag`, `rebase`, or `cherry-pick` (MEASURED, not `commit`) with `-q`/`--quiet` alone | `Bash`, `PowerShell` | deny | run the same write without silencing either stream, and read what it prints. `commit -q` alone, `merge --abort`, `fetch`, and every read subcommand pass |
 | Machine-wide kills: `pkill`, `killall`, `lsof -t`, `taskkill /IM`, `Stop-Process -Name`, in command position only | `Bash`, `PowerShell` | deny | name one PID this session started |
 | Force push: `--force`, `-f`, `--force-with-lease` | `Bash`, `PowerShell` | ask | the click in the prompt is the grant |
 | Recursive delete at `/`, `~`, `.`, `*`, or a drive root | `Bash`, `PowerShell` | deny | name the folder |
@@ -293,18 +293,31 @@ dirty rows. A clean tree allows `git reset --hard HEAD`. A dirty tree denies it.
 scratchpad repository allows for this session's id, and denies for another session's id.
 In the clean tree, `git reset --hard HEAD~1`, `origin/main`, and a raw sha each deny.
 
-- **silent-write-leaves-a-trace**: **deny, no environment hatch.** The rule denies
-  `commit`, `push`, `merge`, `tag`, `rebase`, and `cherry-pick` when git's own
-  `-q`/`--quiet` flag hides the result. It also denies them when a redirect sends
-  either stream to a null device. `merge --abort` passes, because it lands nothing.
-  `fetch`, `rev-parse`, and every other read subcommand pass too. Reason, MEASURED:
-  `git commit -q -m x` and `git push --quiet` both passed the guard before this rule.
-  CLAUDE.md says never discard a command's output. A silenced refusal and a silenced
-  proof of landing read the same to the reader. pkmnscan's
+- **silent-write-leaves-a-trace**: **deny a discarding redirect always. Deny the
+  quiet flag only where it measures the same way.** `commit`, `push`, `merge`,
+  `tag`, `rebase`, and `cherry-pick` deny on a redirect that sends either stream
+  to a null device. The shell throws the stream away before git gets a say. A
+  refusal and a proof of landing are both gone, on any of the six. git's own
+  `-q`/`--quiet` flag is judged per subcommand instead of by name. MEASURED
+  2026-09-19, in a throwaway repo, never a shared checkout: the flag does not
+  read the same for `commit` and for `push`. `commit -q` leaves a hook's refusal
+  on stderr and a no-op's message on stdout, both at a nonzero exit. A silent
+  exit-0 commit is unambiguous. `commit` is a carve-out on the flag alone,
+  pinned by a fixture. A discarding redirect still denies it. `push --quiet`
+  does not carve out: a real update and "nothing to push" are both silent at
+  exit 0. The flag erases the one line that told them apart. `push` keeps the
+  flag in the deny arm on that measurement, not on the flag's name. `merge`,
+  `tag`, `rebase`, and `cherry-pick`'s own flags are UNMEASURED. They keep the
+  deny they had before this measurement. `merge --abort` passes, because it
+  lands nothing. `fetch`, `rev-parse`, and every other read subcommand pass
+  too. Reason: CLAUDE.md says never discard a command's output. pkmnscan's
   `scripts/silent-write-guard.py` carries the measurement this rule ports. A
-  coordinator there reported work as landed twice in one session, when it had not.
-  No number is claimed here. The entry is a slug, and the number waits for merge
-  (CLAUDE.md: never allocate a numbered record on a branch).
+  coordinator reported work as landed twice in one session, when it had not.
+  Once, a refusal was discarded. Once, a proof of landing was discarded. The
+  bare `-q` flag turned out to be a narrower claim than the redirect. Only the
+  measurement above told the two apart. No number is claimed here. The entry
+  is a slug, and the number waits for merge (CLAUDE.md: never allocate a
+  numbered record on a branch).
 
 Every deny or ask appends one line to `~/.claude/guard.log`: timestamp, tool,
 decision, rule, and the matched text cut at 120 characters. Allows are never
