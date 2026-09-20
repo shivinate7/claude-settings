@@ -246,9 +246,15 @@ land_dir() {
     [ -n "$PRUNED" ] && log "$sub in $DEST_DIR: pruned (source removed):$PRUNED"
   fi
 }
-land_dir agents
-land_dir lint
-land_dir hooks
+# The set of directories landed above comes from landed-dirs.txt at the repo root, the single
+# source install.ps1 reads too (see the comment there). hooks/guard.py's CONFIG_FROZEN_DIRS is a
+# deliberately separate literal; see the comment beside it in hooks/guard.py for why.
+# lint/check_landed_dirs.py checks the two stay in agreement.
+while IFS= read -r sub || [ -n "$sub" ]; do
+  sub=$(printf '%s' "$sub" | tr -d '\r' | sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//')
+  [ -n "$sub" ] || continue
+  land_dir "$sub"
+done < "$SRC/landed-dirs.txt"
 
 # ---- ~/.claude/settings.json ------------------------------------------------------------------
 TARGET_JSON="$CLAUDE_DIR/settings.json"

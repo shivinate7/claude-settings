@@ -1865,6 +1865,12 @@ CONFIG_FROZEN_FILES = (
     os.path.normcase("settings.json"),
     os.path.normcase("CLAUDE.md"),
 )
+# This tuple is a literal on purpose, not a read of landed-dirs.txt at the repo root (the
+# manifest install.sh and install.ps1 both read). A frozen-path list read from a file shrinks
+# to nothing when the file is missing or unreadable, which turns a missing file into a silent
+# weakening of a security control. This list must not be shrinkable, so it stays hardcoded here.
+# lint/check_landed_dirs.py checks by hand that this set and the manifest agree, `state` (below)
+# excepted as a documented guard-only extra.
 CONFIG_FROZEN_DIRS = (
     os.path.normcase("hooks"),
     os.path.normcase("lint"),
