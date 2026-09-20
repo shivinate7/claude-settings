@@ -325,7 +325,8 @@ MUTATIONS = [
     #     -> "silent-write: an abort lands nothing, so it is carved out"
     #   "silent-write: fetch joins the denied subcommands"
     #     -> "silent-write: fetch's own quiet flag is a carve-out"
-    #   "silent-write: commit rejoins the quiet-flag arm, the measured carve-out undone"
+    #   "silent-write: commit, tag, and cherry-pick rejoin the quiet-flag arm, the measured
+    #   carve-outs undone"
     #     -> "silent-write: commit's own quiet flag is a carve-out, MEASURED 2026-09-19"
     ("silent-write: the rule never denies at all",
      '        matched, mechanism = silent_write_hit(segment)\n'
@@ -351,8 +352,9 @@ MUTATIONS = [
      'SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick")',
      'SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick", '
      '"fetch")'),
-    ("silent-write: commit rejoins the quiet-flag arm, the measured carve-out undone",
-     'QUIET_FLAG_SUBCOMMANDS = ("push", "merge", "tag", "rebase", "cherry-pick")',
+    ("silent-write: commit, tag, and cherry-pick rejoin the quiet-flag arm, the measured "
+     "carve-outs undone",
+     'QUIET_FLAG_SUBCOMMANDS = ("push", "merge", "rebase")',
      'QUIET_FLAG_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick")'),
 
     # ---- the PostToolUse watch. These break `hooks/config_watch.py` and must be killed by

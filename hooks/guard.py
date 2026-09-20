@@ -22,10 +22,10 @@ one fixed order, and the first match wins.
                        Always denied. A move TO `main` restores the invariant and passes.
   1c silent-write      a `commit`, `push`, `merge`, `tag`, `rebase`, or `cherry-pick` whose own
                        trace is silenced, by a redirect of either stream to a null device, or,
-                       on `push`/`merge`/`tag`/`rebase`/`cherry-pick` only, by git's own
-                       `-q`/`--quiet` flag alone. `commit -q` is a measured carve-out. Always
-                       denied otherwise. `merge --abort` is carved out, and every read
-                       subcommand is untouched.
+                       on `push`/`merge`/`rebase` only (MEASURED), by git's own `-q`/`--quiet`
+                       flag alone. `commit`, `tag`, and `cherry-pick`'s own flags are measured
+                       carve-outs. `merge --abort` is carved out, and every read subcommand is
+                       untouched.
   2 machine-wide-kill  a kill by name or by pattern
   3 live-stream        a command that follows a stream and never ends on its own
   3 waiter             a shell segment whose command word is a sleep-and-poll
@@ -91,15 +91,17 @@ shell throws the stream away before git gets a say, so a refusal and a proof of 
 are both gone, together.
 
 git's OWN quiet flag is judged separately, because it is git's choice of what to print,
-not the shell's, and the choice is not the same for every subcommand. MEASURED 2026-09-19,
-in a throwaway repo, never a shared checkout: `git commit -q` leaves a hook's refusal on
-stderr and a no-op's message on stdout, both at a nonzero exit, so a silent exit-0 commit
-is unambiguous. `commit` is a carve-out on the flag alone, pinned by a fixture; a
-discarding redirect still denies it. `git push --quiet` measures differently: a real
-update and "nothing to push" are BOTH silent at exit 0, so the flag erases the one line
-that told them apart. `push` keeps the flag in the deny arm on that measurement.
-`merge`, `tag`, `rebase`, and `cherry-pick`'s own flags are UNMEASURED and keep the deny
-they had before this measurement.
+not the shell's, and the choice is not the same for every subcommand. MEASURED
+2026-09-19 and 2026-09-20, in throwaway repos, never a shared checkout, all six: `commit`
+carves out, because a hook's refusal and a no-op's message both keep their own stream and
+a nonzero exit, so a silent exit-0 commit is already unambiguous. `push`, `merge`, and
+`rebase` do not carve out: each one's success and its own no-op are BOTH silent at exit 0,
+so the flag erases the one line that told a real write from one that moved nothing. `tag`
+carves out for a sharper reason: it has no `-q` or `--quiet` at all, so the flag is always
+a loud, immediate option-parsing failure, never a silent write. `cherry-pick` carves out
+too: its short form is invalid the same way `tag`'s is, and its long form still prints a
+full commit summary, a full conflict, or a full "nothing to commit" in every state, so
+nothing is silenced either way. A discarding redirect still denies any of the six.
 
 The carve-outs are pinned by fixtures, not left to judgement. `git fetch -q`, every read
 subcommand, and the test-by-exit-code shape `git rev-parse -q --verify <ref> >/dev/null
@@ -440,32 +442,74 @@ def push_is_forced(args) -> bool:
 SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick")
 
 # git's OWN `-q`/`--quiet` flag is a narrower claim, and it does not read the same for every
-# subcommand. MEASURED 2026-09-19, in a throwaway repo under this session's scratchpad, never in
-# a shared checkout, `-q`/`--quiet` alone, no redirect, three states each:
+# subcommand. MEASURED 2026-09-19 and 2026-09-20, in throwaway repos under this session's
+# scratchpad, never in a shared checkout, `-q`/`--quiet` alone, no redirect, three states each: a
+# write that succeeds, one a hook refuses (a `pre-commit`/`pre-receive` hook, or the conflict
+# `merge`, `rebase`, and `cherry-pick` raise on their own), and a no-op (nothing staged or to
+# push, an already-merged branch, nothing left to replay, a change already present).
 #
-#   git commit -q         success            exit 0, stdout '',                 stderr ''
-#                          hook refusal       exit 1, stdout '',                 stderr the hook's own line
-#                          nothing staged     exit 1, stdout "nothing to commit  stderr ''
-#                                                       ...", stderr ''
+#   git commit -q       success        exit 0, stdout '',                stderr ''
+#                        hook refusal   exit 1, stdout '',                stderr the hook's own line
+#                        no-op          exit 1, stdout "nothing to        stderr ''
+#                                                commit ...",
 #
-#   git push --quiet      success (new work) exit 0, stdout '',                 stderr ''
-#                          hook refusal       exit 1, stdout '',                 stderr the full rejection
-#                          nothing to push    exit 0, stdout '',                 stderr ''
+#   git push --quiet    success        exit 0, stdout '',                stderr ''
+#                        hook refusal   exit 1, stdout '',                stderr the full rejection
+#                        no-op          exit 0, stdout '',                stderr ''
+#
+#   git merge -q         success        exit 0, stdout '',                stderr ''
+#                        conflict       exit 1, stdout the full           stderr ''
+#                                                CONFLICT message,
+#                        no-op          exit 0, stdout '',                stderr ''
+#
+#   git rebase -q       success        exit 0, stdout '',                stderr ''
+#                        conflict       exit 1, stdout the CONFLICT       stderr the apply error
+#                                                message,                 and its hints,
+#                        no-op          exit 0, stdout '',                stderr ''
+#
+#   git tag -q          every state    exit 129, stdout '',              stderr "error: unknown
+#                                                                                switch `q'" plus
+#                                                                                the full usage
+#
+#   git cherry-pick -q  every state    exit 129, stdout '',              stderr the full usage
+#                                                                                ("-q" is not a
+#                                                                                cherry-pick option)
+#   git cherry-pick
+#     --quiet            success        exit 0, stdout the full commit    stderr ''
+#                                                summary line,
+#                        conflict       exit 1, stdout the CONFLICT       stderr the apply error
+#                                                message,                 and its hints,
+#                        no-op          exit 1, stdout "nothing to        stderr "previous
+#                                                commit ...",              cherry-pick is now
+#                                                                          empty" and its hint
 #
 # `commit -q` hides nothing a session could not already read: a refusal keeps its own message on
 # stderr, a no-op keeps its own message on stdout, and both keep a nonzero exit code, so silence
 # at exit 0 is unambiguous proof of a landed commit. `commit` drops out of the quiet-flag arm.
 #
-# `push --quiet` measures differently. Its rejection message is intact, the same as commit's. But
-# a real update and "nothing to push" are BOTH silent and BOTH exit 0 (without `-q` they already
-# differ: "Everything up-to-date" against the `sha..sha  branch -> branch` summary). `--quiet`
-# erases the one line that told them apart, so a session cannot read whether the push it just ran
-# moved anything. `push` keeps the quiet-flag arm on this measurement, not on the flag's name.
+# `push -q` and `merge -q` and `rebase -q` measure the same way as each other, and differently
+# from `commit`. Each one's own refusal (a hook, or a real conflict) stays fully readable. But
+# each one's success and its own no-op are BOTH silent and BOTH exit 0 (without `-q` they already
+# differ: `push` prints "Everything up-to-date" against the `sha..sha  branch -> branch` summary,
+# `merge` and `rebase` print their own "up to date"/"nothing to replay" line against a diffstat or
+# a "Successfully rebased" line). `-q` erases the one line that told a real write from a no-op, so
+# a session cannot read whether the write it just ran moved anything. All three keep the
+# quiet-flag arm on this measurement, not on the flag's name.
 #
-# `merge`, `tag`, `rebase`, and `cherry-pick`'s own quiet flags are UNMEASURED. They keep the deny
-# they had before this measurement, pending a check of their own; the redirect arm above already
-# covers every one of the six regardless.
-QUIET_FLAG_SUBCOMMANDS = ("push", "merge", "tag", "rebase", "cherry-pick")
+# `tag` has NO `-q` and NO `--quiet` at all (git 2.39.3): both spellings exit 129 with "error:
+# unknown switch" before git reads the tag name, the message, or the repository state. Every
+# state measures identically, because the flag never gets past option parsing. `tag` therefore
+# cannot use `-q`/`--quiet` to hide a success from a no-op or a refusal: the attempt is always a
+# loud, immediate failure. `tag` drops out of the quiet-flag arm.
+#
+# `cherry-pick`'s short form, `-q`, is ALSO not a valid option (exit 129, the same shape as
+# `tag`). Its long form, `--quiet`, IS valid, and measures as the least silent of the six: a
+# success still prints the full one-line commit summary to stdout, a conflict prints its own
+# CONFLICT message and hints in full, and a no-op (an already-applied change) prints "nothing to
+# commit" and "previous cherry-pick is now empty" in full, at its own distinct nonzero exit. No
+# state is silent, so nothing is lost by allowing either spelling. `cherry-pick` drops out of the
+# quiet-flag arm.
+QUIET_FLAG_SUBCOMMANDS = ("push", "merge", "rebase")
 
 # A null-device target, on either stream, in the three shells this guard reads a command from:
 # POSIX (`/dev/null`), Windows cmd (`NUL`), and PowerShell (`$null`). `2>&1` duplicates one stream
