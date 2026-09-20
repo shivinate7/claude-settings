@@ -47,18 +47,75 @@ it into `hooks/guard.py:split_segments` unchanged in substance. pkmnscan's own
 copy threads a `delimiters` parameter that `hooks/guard.py`'s version does not
 have. This change does not add that parameter.
 
+## `_run_dir` debt: paid, 2026-09-20
+
+The debt below is paid. `hooks/guard.py:_run_dir` no longer reads `cd` and
+`git -C` with `CD_RE` / `GIT_C_RE` over the raw command string. It now
+splits the command into segments with `split_segments`. That is the same
+quote- and comment-aware reader this file's fix uses. Each segment is
+tokenized with `segment_tokens` (shlex). A segment counts as a `cd` or a
+`git -C` only when `resolve_command` says that word is the segment's OWN
+command. That is the same reader `LOOP_KEYWORDS` and `COMMAND_WRAPPERS`
+already use elsewhere in this file. The approach is a lifted copy of
+`~/Developer/pkmnscan/scripts/shell_parse.py`. That file paid this exact
+debt first. It reads `cd` off parsed tokens instead of a raw-text regex.
+Its own comment says so.
+
+MEASURED before the fix, against `hooks/guard.py` on `main` (1c62a6e):
+
+```
+cmd1 = "bash -c 'true; cd /elsewhere; rm -rf x'; some_destructive_call"
+guard._run_dir(cmd1, "/Users/shivinate/real-tree")
+# -> "/elsewhere"   (WRONG: the cd never runs; it is text inside a quoted -c argument)
+
+cmd2 = "# note; cd /elsewhere\nsome_destructive_call"
+guard._run_dir(cmd2, "/Users/shivinate/real-tree")
+# -> "/elsewhere\nsome_destructive_call"   (WRONG, twice over: the cd sits inside a
+#    comment, and CD_RE's capture group also runs past the newline into the next line)
+```
+
+Both cases needed a `cd` preceded by `;` in the raw text. `CD_RE` only fires
+when `cd` follows start-of-string or one of `;&|`. A `cd` after a plain
+space, such as `# cd /elsewhere` with nothing before it, was already safe by
+accident. A `cd` after a semicolon, quoted or commented, was not.
+
+MEASURED after the fix, same two commands, same call:
+
+```
+guard._run_dir(cmd1, "/Users/shivinate/real-tree")  # -> "/Users/shivinate/real-tree"
+guard._run_dir(cmd2, "/Users/shivinate/real-tree")  # -> "/Users/shivinate/real-tree"
+```
+
+Both now resolve to the shell's own cwd. Neither command holds a `cd` that
+actually runs. A real `cd` and a real `git -C` were re-measured the same way.
+Both are unchanged:
+
+```
+guard._run_dir("cd /a/b; echo hi", "/x")                     # -> "/a/b"
+guard._run_dir("git -C /a/b status", "/x")                   # -> "/a/b"
+guard.command_root("git --work-tree=/a -C /b status", "/x")  # -> "/a"
+```
+
+The last line confirms `--work-tree` still outranks `-C` and `cd`
+(hooks/guard.py:710-716's documented precedence). `GIT_WORK_TREE_RE` was not
+touched. The recorded debt named only `_run_dir`'s `cd`/`git -C` reading,
+not `command_root`'s `--work-tree` reading.
+
+`python3 hooks/test_guard.py` stayed green throughout. It read 498 of 498
+before this entry's test additions and 500 of 500 after (see next section).
+
 ## Holes, named
 
-- `hooks/guard.py:_run_dir` reads `cd` with a regular expression over the raw
-  command string. That regex can match a `cd` sitting inside a quoted script
-  body, such as a heredoc body or a quoted `-c` argument. It then reads that
-  match as a real directory change. Banchi's `shell_parse.py` avoids this. It
-  reads `cd` off parsed tokens instead of the raw string. This is a known
-  defect in `_run_dir`. It is not fixed here. The fix touches a function this
-  change's brief put out of scope. A second builder lane is editing
-  `guard.py` at the same time. This entry records the debt so it is not lost.
-  It does not resolve the debt.
-- The comment rule is unmeasured against every quoting shape a real shell
-  accepts. `split_segments` does not model `$'...'` ANSI-C quoting. It does
-  not model `$(...)` or backtick command substitution either, comment or no
-  comment. This fix changes nothing about that pre-existing gap.
+- `_run_dir`'s token reader still cannot see everything a real shell can.
+  `split_segments` does not model `$'...'` ANSI-C quoting. It does not model
+  `$(...)` or backtick command substitution. It also cannot see a `cd`
+  whose target only exists after variable expansion: `cd "$DIR"` resolves
+  to the literal string `$DIR`, not the directory it would expand to at
+  runtime. A `cd` hidden inside one of those forms is invisible to this
+  reader, the same way it was invisible to the old regex. The direction is
+  fail-open: the hidden `cd` is skipped, not misread as a literal path.
+  This is unmeasured against pkmnscan's own gaps in the same areas.
+  `shell_parse.py`'s own docstring does not claim to close them either.
+- The comment rule itself stays unmeasured against every quoting shape a
+  real shell accepts, as recorded above before this update. This fix
+  changes nothing about that pre-existing gap.

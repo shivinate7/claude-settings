@@ -1070,6 +1070,15 @@ sh("waiter: a for-loop's own do-block still denies",
 sh("waiter: a non-waiter loop body stays allowed",
    'while read l; do echo "$l"; done', "allow", cwd=NOGIT)
 
+# `split_segments` read the `'` in a `#` comment as opening a quote that ran to the end of the
+# text, so every loop under such a comment was invisible. MEASURED in Banchi on 2026-09-19 on
+# its lifted copy: the runaway-driver fixture went from refused to allowed. A `#` that starts
+# a word is a comment to the end of its line; one inside a word or a quote is not.
+sh("waiter: a loop under a comment holding an apostrophe, MEASURED wrongly allowed",
+   "# the merge driver's shape\nwhile true; do sleep 5; done", "deny", "waiter")
+sh("waiter: a `#` inside a word is not a comment, so the loop after it still denies",
+   "echo fix#3; while true; do sleep 5; done", "deny", "waiter")
+
 
 # =========================================================================== 2d. the silent write
 #
