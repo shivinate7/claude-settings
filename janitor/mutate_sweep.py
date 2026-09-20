@@ -318,6 +318,30 @@ MUTATIONS = [
      '        if decision["action"] == "reap":\n'
      '            reap_branch(root, branch, decision, restore_log_path)',
      "test_preview_names_reapable_subjects_but_touches_neither"),
+
+    # ---- the opt-out file: a present-but-malformed value must refuse, not default (fail-open
+    # fix). A present `sweep` that is not a boolean, or a present `protectedPrefixes` that is not
+    # a list of strings, must refuse the whole repository -- the same direction an unreadable
+    # file already takes -- rather than fall through to the permissive default and sweep a
+    # repository that stated a wish the sweep could not read.
+    ("opt-out: a malformed present sweep/protectedPrefixes value falls back to the permissive default",
+     "sweep",
+     '    if "sweep" in data and not isinstance(data["sweep"], bool):\n'
+     '        return False, (), False\n'
+     '    sweep_enabled = data.get("sweep", True)\n'
+     '    if "protectedPrefixes" in data:\n'
+     '        extra = data["protectedPrefixes"]\n'
+     '        if not isinstance(extra, list) or not all(isinstance(item, str) for item in extra):\n'
+     '            return False, (), False\n'
+     '    else:\n'
+     '        extra = []',
+     '    sweep_enabled = data.get("sweep", True)\n'
+     '    if not isinstance(sweep_enabled, bool):\n'
+     '        sweep_enabled = True\n'
+     '    extra = data.get("protectedPrefixes", [])\n'
+     '    if not isinstance(extra, list):\n'
+     '        extra = []',
+     "test_sweep_string_false_refuses_the_whole_repository"),
 ]
 
 
