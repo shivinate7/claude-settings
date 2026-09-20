@@ -411,33 +411,70 @@ class SweepReceivesTheRemainingBudgetNotAFixedNumber(unittest.TestCase):
 
 
 class HookSweepsNothingWhenTooLittleBudgetRemains(unittest.TestCase):
-    """Arm: HookSkipsTheSweepWhenBudgetIsSpent. End-to-end, the same way every other fail-open
-    arm in this file is proven: the real hook process, a real repository with a real reapable
-    branch, and JANITOR_HOOK_ELAPSED_OVERRIDE_SECONDS standing in for a hook that started with
-    (almost) no budget left -- see session_end_sweep.py's own comment on that override for why
-    it is additive, never a replacement for the real measurement, and never a sleep."""
+    """Arm: HookSkipsTheSweepWhenBudgetIsSpent. In-process: `elapsed_seconds` reaches `handle`
+    only as an explicit argument now (PR #84 review dropped the environment seam), so this arm
+    calls `handle` directly, the way a caller who genuinely has an elapsed reading would, with a
+    real repository and a real reapable branch. `subprocess.run` is monkeypatched to raise if it
+    is ever called at all -- definitive proof the sweep never ran, not just an inference from its
+    absence."""
 
-    @classmethod
-    def setUpClass(cls):
-        cls.repo = os.path.join(ROOT, "budget_too_little_repo")
-        make_repo(cls.repo)
-        add_reapable_branch(cls.repo, "reap-me-budget")
-        require("reap-me-budget" in local_branches(cls.repo), "fixture: reapable branch present")
+    def setUp(self):
+        import session_end_sweep
+        self.mod = session_end_sweep
 
-    def test_too_little_budget_left_exits_0_and_sweeps_nothing(self):
-        cfg = os.path.join(ROOT, "cfg_budget_too_little")
-        result = run_hook(
-            {"hook_event_name": "SessionEnd", "cwd": self.repo},
-            env_extra={
-                "CLAUDE_CONFIG_DIR": cfg,
-                "JANITOR_HOOK_ELAPSED_OVERRIDE_SECONDS": "9999",
-            },
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertFalse(os.path.exists(os.path.join(cfg, "janitor", "restore-log.jsonl")),
-                          "a sweep given no time at all must never have run")
-        self.assertIn("reap-me-budget", local_branches(self.repo),
+    def test_too_little_budget_left_exits_cleanly_and_sweeps_nothing(self):
+        repo = os.path.join(ROOT, "budget_too_little_repo")
+        make_repo(repo)
+        add_reapable_branch(repo, "reap-me-budget")
+        require("reap-me-budget" in local_branches(repo), "fixture: reapable branch present")
+
+        def refuse_to_run(*args, **kwargs):
+            raise AssertionError(
+                "subprocess.run must never be called when too little budget remains"
+            )
+
+        real_run = self.mod.subprocess.run
+        self.mod.subprocess.run = refuse_to_run
+        try:
+            self.mod.handle(
+                {"hook_event_name": "SessionEnd", "cwd": repo},
+                elapsed_seconds=self.mod.SESSION_END_CEILING_SECONDS,
+            )
+        finally:
+            self.mod.subprocess.run = real_run
+
+        self.assertIn("reap-me-budget", local_branches(repo),
                        "nothing was swept, so the reapable branch must still be there")
+
+
+class RemainingSweepTimeoutRefusesAnUntrustworthyElapsedReading(unittest.TestCase):
+    """Arms guarding the property PR #84 review actually asked for: even with the environment
+    seam gone, an elapsed reading this function cannot trust must never be spent as if it were
+    free time. Each case is named for the shape of reading it guards against."""
+
+    def setUp(self):
+        import session_end_sweep
+        self.mod = session_end_sweep
+
+    def test_negative_elapsed_is_refused_not_treated_as_extra_time(self):
+        """A negative elapsed (a clock read backwards, or a bad caller) must not add time back
+        onto the budget. Refused -> None, sweep nothing, never the full SWEEP_TIMEOUT_SECONDS."""
+        self.assertIsNone(self.mod.remaining_sweep_timeout_seconds(-1000.0))
+
+    def test_non_finite_elapsed_is_refused(self):
+        """nan and inf both parse as a Python float without raising, so `except ValueError`
+        alone never catches them -- proven for both shapes at once."""
+        self.assertIsNone(self.mod.remaining_sweep_timeout_seconds(float("nan")))
+        self.assertIsNone(self.mod.remaining_sweep_timeout_seconds(float("inf")))
+
+    def test_elapsed_larger_than_the_ceiling_is_refused(self):
+        """A plainly numeric, finite, non-negative elapsed that simply exceeds the whole ceiling
+        must still land on None, the same as the too-little-budget-left case above -- proven
+        directly against the real ceiling, not a copy of it."""
+        got = self.mod.remaining_sweep_timeout_seconds(
+            self.mod.SESSION_END_CEILING_SECONDS + 1000.0
+        )
+        self.assertIsNone(got)
 
 
 if __name__ == "__main__":

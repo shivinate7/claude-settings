@@ -414,6 +414,25 @@ MUTATIONS = [
      'SESSION_END_TIMEOUT_MAX_HEADROOM_SECONDS = 20.0',
      'SESSION_END_TIMEOUT_MAX_HEADROOM_SECONDS = 2000.0',
      "test_ceiling_far_ahead_of_the_worst_case_fails_the_band"),
+
+    # 3. PR #84 review: an elapsed reading this function cannot trust (negative, or non-finite)
+    # must not be spent as if it were free time. Verified by hand against a `.bak` copy: dropping
+    # the validation block fails exactly test_negative_elapsed_is_refused_not_treated_as_extra_
+    # time and test_non_finite_elapsed_is_refused among the FAIL lines, and no other case (the
+    # larger-than-the-ceiling case stays green on its own, unrelated arithmetic).
+    ("budget: an untrustworthy elapsed reading (negative or non-finite) is spent as real time",
+     "session_end_sweep",
+     '    if (\n'
+     '        not isinstance(elapsed_seconds, (int, float))\n'
+     '        or isinstance(elapsed_seconds, bool)\n'
+     '        or not math.isfinite(elapsed_seconds)\n'
+     '        or elapsed_seconds < 0\n'
+     '    ):\n'
+     '        return None\n'
+     '    remaining = SESSION_END_CEILING_SECONDS - elapsed_seconds - EXIT_MARGIN_SECONDS',
+     '    remaining = SESSION_END_CEILING_SECONDS - elapsed_seconds - EXIT_MARGIN_SECONDS  '
+     '# MUTANT: no validation',
+     "test_negative_elapsed_is_refused_not_treated_as_extra_time"),
 ]
 
 

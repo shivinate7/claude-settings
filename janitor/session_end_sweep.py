@@ -29,6 +29,7 @@ session touched, and calls the same program a person would call by hand.
 """
 import inspect
 import json
+import math
 import os
 import re
 import subprocess
@@ -48,14 +49,11 @@ try:
 except (TypeError, ValueError):
     SWEEP_TIMEOUT_SECONDS = 25.0
 
-# A third override, for tests only: added on top of the elapsed time this hook actually measures
-# for itself (never used to REPLACE that measurement), so a fixture can push the hook close to
-# its own ceiling without an artificial sleep (CLAUDE.md, "never write a waiter loop"). Production
-# runs never set this; it defaults to nothing added.
-try:
-    ELAPSED_OVERRIDE_SECONDS = float(os.environ["JANITOR_HOOK_ELAPSED_OVERRIDE_SECONDS"])
-except (KeyError, TypeError, ValueError):
-    ELAPSED_OVERRIDE_SECONDS = None
+# NO environment seam for elapsed time, on purpose (PR #84 review). A hook that is now live on
+# this machine and deletes branches unattended must never let an inherited shell variable change
+# its own timing: `elapsed_seconds` reaches `handle` only as an explicit argument (see `handle`
+# and `main` below), which a test can pass directly by calling the function in-process. There is
+# no name here for an environment to carry.
 
 
 def _guard_git_call_timeout_seconds() -> float:
@@ -168,13 +166,27 @@ EXIT_MARGIN_SECONDS = 3.0
 MIN_USEFUL_SWEEP_SECONDS = 2.0
 
 
-def remaining_sweep_timeout_seconds(elapsed_seconds: float):
+def remaining_sweep_timeout_seconds(elapsed_seconds):
     """How much of the sweep's own subprocess.run timeout to give it, given `elapsed_seconds`
     already spent since this hook started. Never more than SWEEP_TIMEOUT_SECONDS -- that cap is
     what HOOK_WORST_CASE_SECONDS and the ceiling arms above assume, so this function must never
     hand the sweep more than the static worst-case arithmetic already accounts for. Returns None
     when what is left, after EXIT_MARGIN_SECONDS, does not clear MIN_USEFUL_SWEEP_SECONDS: the
-    caller must not run the sweep at all in that case."""
+    caller must not run the sweep at all in that case.
+
+    AN ELAPSED READING THIS FUNCTION CANNOT TRUST IS ALSO "TOO LITTLE TIME LEFT" (PR #84 review).
+    Negative, non-finite (`nan`/`inf`), or otherwise non-numeric `elapsed_seconds` is refused the
+    same way an elapsed_seconds so large it eats the whole ceiling is refused: this function
+    hands out real time only when it can actually measure how much is left, never when handed a
+    number it cannot make sense of. A caller that cannot supply a trustworthy elapsed reading
+    gets the same answer as a caller that ran out of budget: None, sweep nothing."""
+    if (
+        not isinstance(elapsed_seconds, (int, float))
+        or isinstance(elapsed_seconds, bool)
+        or not math.isfinite(elapsed_seconds)
+        or elapsed_seconds < 0
+    ):
+        return None
     remaining = SESSION_END_CEILING_SECONDS - elapsed_seconds - EXIT_MARGIN_SECONDS
     sweep_timeout = min(SWEEP_TIMEOUT_SECONDS, remaining)
     if sweep_timeout < MIN_USEFUL_SWEEP_SECONDS:
@@ -220,13 +232,19 @@ def resolve_repo_root(cwd: str):
     return primary
 
 
-def handle(hook, start=None) -> None:
+def handle(hook, start=None, elapsed_seconds=None) -> None:
     """Run the sweep for the repository `hook` names, or do nothing. Never raises.
 
     `start` is the `time.monotonic()` reading this hook's own process began at; `main` passes
-    the real one, taken before stdin is even read, so `elapsed_seconds` below counts the whole
-    run, not just the part inside this function. A caller that omits it (direct unit-testing of
-    this function, for example) gets one taken right here instead."""
+    the real one, taken before stdin is even read, so the elapsed time computed below counts the
+    whole run, not just the part inside this function. A caller that omits it (direct unit-
+    testing of this function, for example) gets one taken right here instead.
+
+    `elapsed_seconds`, when given, is used INSTEAD of measuring `start`: an explicit argument a
+    test can pass by calling this function in-process, never an environment variable a hook that
+    is live on this machine would otherwise have to trust (PR #84 review: a test seam that
+    production reads from the environment is a control surface, not a seam). `main` never passes
+    it; only tests do."""
     if start is None:
         start = time.monotonic()
     if not isinstance(hook, dict):
@@ -247,7 +265,8 @@ def handle(hook, start=None) -> None:
     if not os.path.isfile(SWEEP_PATH):
         return  # the sweep this checkout ships is missing; nothing runs, nothing is denied
 
-    elapsed_seconds = (time.monotonic() - start) + (ELAPSED_OVERRIDE_SECONDS or 0.0)
+    if elapsed_seconds is None:
+        elapsed_seconds = time.monotonic() - start
     sweep_timeout = remaining_sweep_timeout_seconds(elapsed_seconds)
     if sweep_timeout is None:
         # too little of this hook's own budget is left: a sweep the harness kills part way
