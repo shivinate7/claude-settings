@@ -117,6 +117,82 @@ MUTATIONS = [
     ("shared-tree: call every tree a worktree",
      '    return own != common',
      '    return True', "guard", 'worktree: a hard reset in the shared checkout denies'),
+
+    # ---- rule 1's three new git forms: branch delete, worktree remove, worktree prune. Each
+    # mutation breaks one arm of the state read the plan named as the hole in this rule.
+    ("branch-delete: -D no longer marks a delete call",
+     'BRANCH_DELETE_FLAGS = {"-d", "-D", "--delete"}',
+     'BRANCH_DELETE_FLAGS = {"-d", "--delete"}', "guard",
+     'branch: a commit found nowhere else is the only copy, and the rule denies'),
+    ("branch-delete: -d no longer marks a delete call",
+     'BRANCH_DELETE_FLAGS = {"-d", "-D", "--delete"}',
+     'BRANCH_DELETE_FLAGS = {"-D", "--delete"}', "guard",
+     'branch: -d over the same only-copy branch still denies'),
+    ("branch-delete: the ancestor test asks the question backwards",
+     '    answer = _git(where, "merge-base", "--is-ancestor", branch, base)',
+     '    answer = _git(where, "merge-base", "--is-ancestor", base, branch)', "guard",
+     'branch: a commit found nowhere else is the only copy, and the rule denies'),
+    ("branch-delete: cherry never reads as empty, so a rebased patch looks unique",
+     '    return not any(line.startswith("+") for line in answer.stdout.splitlines())',
+     '    return False', "guard",
+     "branch: a rebased commit's patch already sits on origin/main, cherry proves it"),
+    ("branch-delete: no remote ever contains a branch",
+     '    return bool(answer.stdout.strip())',
+     '    return False', "guard", 'branch: a commit pushed to the remote is not the only copy'),
+    ("branch-delete: the only-copy branch never denies",
+     '        if empty is False:\n            return False\n    return True',
+     '        if False:\n            return False\n    return True', "guard",
+     'branch: a commit found nowhere else is the only copy, and the rule denies'),
+    ("branch-delete: the base never falls back past origin/HEAD",
+     '    for name in ("main", "master"):\n        answer = _git(where, "rev-parse", "--verify", '
+     '"-q", "refs/heads/" + name)',
+     '    for name in ():\n        answer = _git(where, "rev-parse", "--verify", "-q", '
+     '"refs/heads/" + name)', "guard",
+     'branch: local main\'s fallback still denies an only-copy branch'),
+
+    ("worktree-remove: --force is read as the path, missing the real target",
+     '    for arg in args:\n        if arg.startswith("-"):\n            continue\n        '
+     'return _absolute(arg, where)\n    return ""',
+     '    for arg in args:\n        if False:\n            continue\n        '
+     'return _absolute(arg, where)\n    return ""', "guard",
+     'worktree remove: the force flag does not skip the subject read'),
+    ("worktree-remove: uncommitted and untracked work no longer denies",
+     '    lines = porcelain(target)\n    if lines is None:\n        return None\n    if lines:\n'
+     '        return False',
+     '    lines = porcelain(target)\n    if lines is None:\n        return None\n    if False:\n'
+     '        return False', "guard", 'worktree remove: uncommitted and untracked work denies'),
+    ("worktree-remove: a locked tree no longer denies",
+     '    locked = worktree_locked(where, target)\n    if locked is None:\n        return None\n'
+     '    if locked:\n        return False',
+     '    locked = worktree_locked(where, target)\n    if locked is None:\n        return None\n'
+     '    if False:\n        return False', "guard",
+     'worktree remove: a locked tree denies even though it is clean'),
+    ("worktree-remove: a live session no longer denies",
+     '    live = worktree_live_session(target)\n    if live is None:\n        return None\n'
+     '    if live:\n        return False',
+     '    live = worktree_live_session(target)\n    if live is None:\n        return None\n'
+     '    if False:\n        return False', "guard",
+     'worktree remove: a live session standing in a clean tree still denies'),
+    ("worktree-remove: any session record counts as live, recycled pid included",
+     '    return abs(actual - started) <= SESSION_LIVE_TOLERANCE_MS',
+     '    return True', "guard", 'does not deny'),
+
+    ("worktree-prune: reads only stdout, missing git's own stderr message",
+     '    return not (answer.stdout.strip() or answer.stderr.strip())',
+     '    return not answer.stdout.strip()', "guard",
+     'worktree prune: a stale record asks, never denies'),
+    ("worktree-prune: never asks, so a dropped record is silent",
+     '        if subcommand == "worktree-prune":\n'
+     '            refuse(tool, "ask", "shared-tree", WORKTREE_PRUNE_ASK_REASON, matched)',
+     '        if False:\n'
+     '            refuse(tool, "ask", "shared-tree", WORKTREE_PRUNE_ASK_REASON, matched)', "guard",
+     'worktree prune: a stale record asks, never denies'),
+    ("worktree-prune: the call's own -n no longer reads as a pure read",
+     '                if any(a in ("-n", "--dry-run") for a in args[1:]):\n'
+     '                    continue  # the call\'s own dry run is a read, never a discard',
+     '                if False:\n'
+     '                    continue  # the call\'s own dry run is a read, never a discard', "guard",
+     'worktree prune: -n itself is a read, not a discard, so it passes unconditionally'),
     ("env-file: read only the bare environment basename",
      'ENV_BASENAME = re.compile(r"^\\.env(\\.[A-Za-z0-9_.\\-]+)?$")',
      'ENV_BASENAME = re.compile(r"^\\.env$")', "guard", 'env: a path token wherever the path puts it, cat .env.local'),
