@@ -481,11 +481,11 @@ MUTATIONS = [
      '    if messages:\n        print(json.dumps({"systemMessage": " ".join(messages)}))',
      '    if False:\n        print(json.dumps({"systemMessage": " ".join(messages)}))', "watch", 'sed -i in place'),
     ("watch: treat every write as explained, so nothing is ever undone",
-     '    if explained and explained == resolve(path, cwd):',
-     '    if True:', "watch", 'mv from another file'),
+     'not (explained and explained == resolve(path, cwd))',
+     'not (True)', "watch", 'mv from another file'),
     ("watch: compare the bytes, not the cap reading, so an ordinary edit is reverted too",
-     '    if reading == was:',
-     '    if False:', "watch", 'an ordinary project config edit is allowed and not reverted'),
+     'if reading != was and not (',
+     'if True and not (', "watch", 'an ordinary project config edit is allowed and not reverted'),
     ("watch: watch settings.json alone, so the local file is unwatched",
      'WATCHED_NAMES = tuple(name.lstrip("/") for name in guard.PROJECT_FROZEN_FILES)',
      'WATCHED_NAMES = ("\x2eclaude/settings.json",)', "watch", 'python3 -c writes the path'),
@@ -496,6 +496,56 @@ MUTATIONS = [
     ("watch: a missing baseline is read as clear rather than recorded",
      '    if baseline is None:\n        save_baseline(path, current)',
      '    if baseline is None:\n        save_baseline(path, None)', "watch", 'a write to an unrelated file triggers nothing'),
+
+    # ---- the expiry rule, added 2026-09-20. Nothing killed a mutant here before this block:
+    # every case below is new, exercising `cap_lift_value`, `next_prior`, `expiry_problem`, and
+    # the expiry tail of `judge_path` that `hooks/test_config_watch.py`'s "expiry" cases guard.
+    ("watch: the 24-hour ceiling runs backwards, so only a SAFE deadline reads as too far ahead",
+     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:',
+     '    if ahead < EXPIRY_MAX_AHEAD_HOURS * 3600:', "watch",
+     'more than 24h ahead is revoked'),
+    ("watch: the 24-hour bound is negated, so even a one-hour deadline reads as too far ahead",
+     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:',
+     '    if ahead > -(EXPIRY_MAX_AHEAD_HOURS * 3600):', "watch",
+     'a valid, current _subagentCapUntil is NOT reverted'),
+    ("watch: the passed-deadline test is inverted, so an expired deadline reads as current",
+     '    if ahead < 0:\n        return "already passed"',
+     '    if ahead > 0:\n        return "already passed"', "watch",
+     'already passed is revoked'),
+    ("watch: the missing-expiry branch is turned off, so a lift with no deadline survives",
+     '    if where is None:\n        return "missing"',
+     '    if False:\n        return "missing"', "watch",
+     'a missing _subagentCapUntil is revoked'),
+    ("watch: next_prior carries the first lift's own content forward, so a later revert "
+     "installs an override instead of the true baseline",
+     '    if cap_lift_value(was):\n        return baseline.get("prior")',
+     '    if cap_lift_value(was):\n        return baseline["content"]', "watch",
+     "keeps the ORIGINAL pre-lift content as prior"),
+
+    # ---- the 24-hour boundary itself, added 2026-09-20 (round 3). `expiry_problem` now takes
+    # an injectable `clock`, so `hooks/test_config_watch.py`'s boundary cases can pin a
+    # fixture's `_subagentCapUntil` and the watch's own "now" to the SAME instant, and an
+    # off-by-one at the exact edge is no longer invisible to this harness.
+    ("watch: the too-far-ahead check admits its own edge, so a deadline exactly 24h out is "
+     "wrongly revoked",
+     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:',
+     '    if ahead >= EXPIRY_MAX_AHEAD_HOURS * 3600:', "watch",
+     "exactly 24 hours ahead is accepted"),
+    ("watch: the passed-deadline check admits its own edge, so the deadline instant itself "
+     "reads as already passed",
+     '    if ahead < 0:',
+     '    if ahead <= 0:', "watch",
+     "exactly at the deadline instant is accepted"),
+    ("watch: the 24-hour ceiling is one second too loose, so a deadline one second over is "
+     "wrongly accepted",
+     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:',
+     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600 + 1:', "watch",
+     "one second outside the 24h bound is revoked"),
+    ("watch: the 24-hour ceiling is one second too tight, so a deadline exactly on it is "
+     "wrongly revoked",
+     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:',
+     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600 - 1:', "watch",
+     "exactly 24 hours ahead is accepted"),
 ]
 
 

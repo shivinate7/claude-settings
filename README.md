@@ -124,6 +124,13 @@ tells the orchestrator to make its case in one line before such a spawn. The hoo
 a `model` field in an agent file. Set `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` to pin those to Sonnet
 as well, at the cost of removing the ask path.
 
+A project can still lift the cap. Write `.claude/settings.local.json` with an `env` block that
+sets `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`. `hooks/guard.py` asks
+before that write lands. The file must also carry `_subagentCapUntil`, an ISO-8601 instant no
+more than 24 hours ahead. `hooks/config_watch.py` reads that field on every sweep. A missing,
+unparseable, or expired deadline gets the override reverted, with a systemMessage naming the
+file and the problem. See `decisions/subagent-model-cap.md` for the full record.
+
 ## Roles
 
 CLAUDE.md names three worker roles. Two are shipped here as user-level agent definitions. The
@@ -166,6 +173,7 @@ CLAUDE.md asks for Simplified Technical English and a fixed report shape. Hooks 
 | `Stop` | end of a turn | a warning is shown as a system message. The turn is not blocked |
 | `Stop` | the turn ran `git commit`, `git push`, `git merge`, or a GitHub MCP write tool | the turn is blocked once unless the reply is one blockquote with the bold labels Done, Deviations, Input Needed, Next in order, written tight in Simplified Technical English |
 | `Stop` | any project config file changed, a merge into main landed, or the guard could not read the subject of a discarding git call, this turn | a system message names each changed `.claude/settings.json`, `.claude/settings.local.json`, or `.claude/hooks/*` path, each `gh pr merge` or GitHub MCP merge call, and each command whose subject was unreadable, so the reply can name them in the report. See `hooks/config_report.py` |
+| `PostToolUse` on `Bash`, `PowerShell`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, and `Stop` | a project's `settings.json` or `settings.local.json` sets or changes the subagent model cap, unasked, or its `_subagentCapUntil` is missing, unparseable, expired, or more than 24 hours ahead | the pre-override content goes back and a system message names the file and the problem. See Subagent model gate above and `hooks/config_watch.py` |
 | `PreToolUse` on `Bash`, `PowerShell`, `Read`, `Grep`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and the GitHub merge tool | a call matches a guard rule | the guard answers deny, ask, or nothing. See Guard below |
 | `SessionStart` on `startup`, `resume` | every local session start or resume | the session-start line prints. See Guard below |
 
