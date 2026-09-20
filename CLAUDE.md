@@ -50,9 +50,9 @@ each PR's own commit. Close the originals as superseded once the integration bra
 **Verification.** If the repo has screens, check each screen at every size and theme it
 ships in. Give a verdict per screen, never a description.<!-- rule:verification-screens-verdict -->
 Use my browser login only when needed.<!-- rule:verification-browser-login-only-needed --> Trust a guard only once it goes red on
-the defect it guards. A green check proves only its platform and the states its
-fixtures build.<!-- rule:verification-trust-guard-after-red --> A guard that goes red when nothing is wrong is spent,
-because the reader learns to scroll past it.<!-- rule:verification-cry-wolf-guard-is-spent --> A recovery control must not depend
+the defect it guards.<!-- rule:verification-trust-guard-after-red --> A guard that goes red when nothing is wrong is
+spent, because the reader learns to scroll past it.<!-- rule:verification-cry-wolf-guard-is-spent --> A green check proves only its platform
+and the states its fixtures build.<!-- rule:verification-green-proves-only-its-fixtures --> A recovery control must not depend
 on the state it recovers, or it fails on the one day it is needed.<!-- rule:verification-recovery-not-gated-on-own-state --> Verify long work against the repo, not your status line.<!-- rule:verification-verify-against-repo --> Never write
 a waiter loop.<!-- rule:verification-never-waiter-loop --> Never dry-run a block-list.<!-- rule:verification-never-dry-run-blocklist --> Bump a dependency to the first version
 fixing the problem, never the latest.<!-- rule:verification-bump-first-fix-version --> If this repo lints markdown, give every

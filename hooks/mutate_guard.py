@@ -372,7 +372,7 @@ MUTATIONS = [
      '            reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"\n'
      '                      else SILENT_WRITE_QUIET_REASON)\n'
      '            refuse(tool, "deny", "silent-write", reason, matched)', "guard",
-     "silent-write: push's own quiet flag needs no redirect at all"),
+     "silent-write: a discarded proof of landing, stdout alone"),
     ("silent-write: the quiet-flag arm no longer fires for any subcommand",
      '        if subcommand in QUIET_FLAG_SUBCOMMANDS and quiet_write(args):',
      '        if False and quiet_write(args):', "guard",

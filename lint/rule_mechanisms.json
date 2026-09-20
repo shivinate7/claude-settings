@@ -192,8 +192,9 @@
     },
     "git-remedy-never-names-target": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No fixture asserts that a guard REASON string omits the exact command text it denied."
+        "kind": "gate",
+        "ref": "hooks/test_guard.py",
+        "needle": "FORBIDDEN_IN_A_REASON"
       }
     },
     "git-slug-then-claim-number": {
@@ -241,8 +242,9 @@
     },
     "verification-verify-against-repo": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "Nothing compares a claim of completion in a status line against the actual state of the repo."
+        "kind": "gate",
+        "ref": "hooks/mutate_guard.py",
+        "needle": "WRONG CAUSE"
       }
     },
     "verification-never-waiter-loop": {
@@ -253,8 +255,9 @@
     },
     "verification-never-dry-run-blocklist": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No test asserts that a deny or ask rule was exercised for real, rather than dry-run, before it was trusted."
+        "kind": "gate",
+        "ref": "hooks/test_guard.py",
+        "needle": "drives the guard as Claude Code drives it"
       }
     },
     "verification-bump-first-fix-version": {
@@ -453,6 +456,12 @@
       "mechanism": {
         "kind": "guard",
         "ref": "pointer-head"
+      }
+    },
+    "verification-green-proves-only-its-fixtures": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check reads a green result and reports which platforms and fixture states it did not cover. The CI matrix runs three platforms, which is coverage, not a check on how a reader treats the green."
       }
     }
   }
