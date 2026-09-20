@@ -106,7 +106,7 @@
           {
             "type": "command",
             "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/janitor/session_end_sweep.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
-            "timeout": 30
+            "timeout": 55
           }
         ]
       }

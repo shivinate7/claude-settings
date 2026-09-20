@@ -244,6 +244,54 @@ class SweepsOnlyTheEndingSessionsRepository(unittest.TestCase):
                           "the shared repository's reapable branch should still have been swept")
 
 
+class HookBudgetFitsUnderItsHostCeiling(unittest.TestCase):
+    """The hook's own worst-case run time (`session_end_sweep.HOOK_WORST_CASE_SECONDS`) must be
+    STRICTLY SMALLER than the timeout settings.json actually gives this hook -- proven against
+    the real settings.json in this checkout, not a copy of the number typed into this file.
+    A reviewer measured the earlier arithmetic wrong: two 10s guard._git calls plus a 25s sweep
+    is 45s, against a 30s settings.json ceiling that used to sit there unchecked."""
+
+    SETTINGS_PATH = os.path.join(REPO_ROOT, "settings.json")
+
+    @staticmethod
+    def _session_end_timeout(settings):
+        for entry in settings.get("hooks", {}).get("SessionEnd", []):
+            for h in entry.get("hooks", []):
+                if "session_end_sweep.py" in (h.get("command") or ""):
+                    return h.get("timeout")
+        return None
+
+    def setUp(self):
+        import session_end_sweep
+        self.mod = session_end_sweep
+        with open(self.SETTINGS_PATH, encoding="utf-8") as handle:
+            self.settings = json.load(handle)
+
+    def test_default_arithmetic_matches_what_the_module_documents(self):
+        self.assertEqual(self.mod.GUARD_GIT_CALL_TIMEOUT_SECONDS, 10.0)
+        self.assertEqual(self.mod.RESOLVE_ROOT_GIT_CALLS, 2)
+        self.assertEqual(self.mod.RESOLVE_ROOT_WORST_CASE_SECONDS, 20.0)
+        self.assertEqual(self.mod.HOOK_WORST_CASE_SECONDS, 45.0)
+
+    def test_settings_json_gives_this_hook_a_timeout_strictly_above_its_worst_case(self):
+        timeout = self._session_end_timeout(self.settings)
+        self.assertIsNotNone(timeout, "no SessionEnd entry in settings.json calls this hook")
+        self.assertGreater(
+            timeout, self.mod.HOOK_WORST_CASE_SECONDS,
+            "settings.json's SessionEnd timeout (%r) must exceed this hook's own worst-case "
+            "run time (%r), or Claude Code's own ceiling could cut the hook off before it "
+            "reaches its own fail-open exit" % (timeout, self.mod.HOOK_WORST_CASE_SECONDS),
+        )
+
+    def test_settings_json_timeout_leaves_a_real_margin_not_a_sliver(self):
+        """Strictly-greater alone would let a 45.01s ceiling "pass" for a 45s worst case, which
+        leaves no room for process-start and interpreter-import overhead neither number above
+        counts. Require at least 5 seconds of headroom."""
+        timeout = self._session_end_timeout(self.settings)
+        self.assertIsNotNone(timeout)
+        self.assertGreaterEqual(timeout - self.mod.HOOK_WORST_CASE_SECONDS, 5)
+
+
 class ResolveRepoRootUnit(unittest.TestCase):
     """Direct unit coverage of the one piece of new logic this hook adds beyond calling the
     sweep: resolving `cwd` to a primary checkout, in-process (cheap; the subprocess arms above

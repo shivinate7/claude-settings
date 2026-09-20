@@ -27,8 +27,10 @@ per-repository opt-out (`.claude/janitor.json`, plan: "the sweep is automatic, a
 opts out"). This hook adds no new judgment call: it locates the one repository the ending
 session touched, and calls the same program a person would call by hand.
 """
+import inspect
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -38,13 +40,58 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
 import guard  # noqa: E402
 
 # Both overridable by environment, so a test fixture can point at a fake sweep or a short fuse
-# without editing this file. Unset, they are this checkout's own sweep and a timeout comfortably
-# under the 30s the SessionEnd entry in settings.json gives this hook end to end.
+# without editing this file.
 SWEEP_PATH = os.environ.get("JANITOR_SWEEP_PATH") or os.path.join(HERE, "sweep.py")
 try:
     SWEEP_TIMEOUT_SECONDS = float(os.environ.get("JANITOR_SWEEP_TIMEOUT") or 25)
 except (TypeError, ValueError):
     SWEEP_TIMEOUT_SECONDS = 25.0
+
+
+def _guard_git_call_timeout_seconds() -> float:
+    """The per-call timeout `hooks/guard.py._git` actually enforces on every git subprocess it
+    runs. This hook is not allowed to touch `guard.py` (out of scope, and freezing it is the
+    whole point of `CONFIG_FROZEN_DIRS`), so it cannot turn that literal into a shared named
+    constant there. Reading it back out of `guard._git`'s own source, instead of writing `10.0`
+    here by hand, is the next best thing: a copy of the number could drift the day someone
+    changes guard.py's own timeout, silently making the arithmetic below wrong; this can only
+    go stale LOUDLY, by falling back to the number below when the read fails (CLAUDE.md,
+    "building-allow-list-is-the-constant": point at the real constant, never a copy of it)."""
+    try:
+        source = inspect.getsource(guard._git)
+        match = re.search(r"timeout\s*=\s*(\d+)", source)
+        if match:
+            return float(match.group(1))
+    except Exception:
+        pass
+    return 10.0  # guard._git's own timeout as of this writing; used only if the read above fails
+
+
+# THE BUDGET ARITHMETIC (checked against the real settings.json by
+# test_session_end_sweep.py's HookBudgetFitsUnderItsHostCeiling arm):
+#
+#   resolve_repo_root makes exactly two guard._git calls (--show-toplevel, then
+#   --git-common-dir), each bounded by guard._git's own subprocess timeout. Worst case, both
+#   hang out their full timeout before guard._git gives up and returns None:
+GUARD_GIT_CALL_TIMEOUT_SECONDS = _guard_git_call_timeout_seconds()
+RESOLVE_ROOT_GIT_CALLS = 2
+RESOLVE_ROOT_WORST_CASE_SECONDS = GUARD_GIT_CALL_TIMEOUT_SECONDS * RESOLVE_ROOT_GIT_CALLS
+#
+#   Then, worst case, the sweep subprocess itself runs the full SWEEP_TIMEOUT_SECONDS before
+#   this hook's own timeout cuts it off:
+HOOK_WORST_CASE_SECONDS = RESOLVE_ROOT_WORST_CASE_SECONDS + SWEEP_TIMEOUT_SECONDS
+#
+#   With the defaults above (10 * 2 + 25), that is 45 seconds -- MORE than the 30-second
+# ceiling settings.json's SessionEnd entry used to give this hook end to end (measured by a
+# reviewer against a real run: the process was still inside its own subprocess.run call when
+# Claude Code's own timeout would already have killed it, which fails open only because Claude
+# Code enforces that outer ceiling itself, not because this script proved anything about its
+# own worst case). settings.json's SessionEnd entry for this hook must set a timeout STRICTLY
+# GREATER than HOOK_WORST_CASE_SECONDS, with margin for process-start and interpreter-import
+# overhead neither number above counts; it now sets 55, a 10-second margin over the 45-second
+# worst case above. Changing SWEEP_TIMEOUT_SECONDS (or a future change to guard._git's own
+# timeout) without also widening that settings.json entry is exactly the drift
+# HookBudgetFitsUnderItsHostCeiling exists to catch.
 
 
 def resolve_repo_root(cwd: str):
