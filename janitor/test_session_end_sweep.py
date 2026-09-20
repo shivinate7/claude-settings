@@ -414,9 +414,14 @@ class HookSweepsNothingWhenTooLittleBudgetRemains(unittest.TestCase):
     """Arm: HookSkipsTheSweepWhenBudgetIsSpent. In-process: `elapsed_seconds` reaches `handle`
     only as an explicit argument now (PR #84 review dropped the environment seam), so this arm
     calls `handle` directly, the way a caller who genuinely has an elapsed reading would, with a
-    real repository and a real reapable branch. `subprocess.run` is monkeypatched to raise if it
-    is ever called at all -- definitive proof the sweep never ran, not just an inference from its
-    absence."""
+    real repository and a real reapable branch.
+
+    `subprocess.run` is monkeypatched to RECORD each call, never to raise inside the callback:
+    `handle` wraps that call in `except Exception`, on purpose, because the hook must fail open,
+    so a raise inside the patched function is swallowed before it ever reaches this test runner
+    (second PR #84 review: a test that signals failure through the code under test is at the
+    mercy of that code). The recorded list is asserted on AFTER `handle` returns, the one point
+    where no exception handler of `handle`'s own stands between the fact and the check."""
 
     def setUp(self):
         import session_end_sweep
@@ -428,13 +433,22 @@ class HookSweepsNothingWhenTooLittleBudgetRemains(unittest.TestCase):
         add_reapable_branch(repo, "reap-me-budget")
         require("reap-me-budget" in local_branches(repo), "fixture: reapable branch present")
 
-        def refuse_to_run(*args, **kwargs):
-            raise AssertionError(
-                "subprocess.run must never be called when too little budget remains"
-            )
-
+        calls = []
         real_run = self.mod.subprocess.run
-        self.mod.subprocess.run = refuse_to_run
+
+        def record_call(*args, **kwargs):
+            # `session_end_sweep.subprocess` is the SAME module object `guard.py` imports too --
+            # patching its `.run` patches it everywhere, including the real git calls
+            # `resolve_repo_root` still needs to make. Record, and short-circuit, only the one
+            # shape `handle` uses for the sweep subprocess itself; let every other call (git)
+            # through to the real `subprocess.run` untouched.
+            argv = args[0] if args else kwargs.get("args")
+            if isinstance(argv, list) and self.mod.SWEEP_PATH in argv:
+                calls.append((args, kwargs))
+                return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
+            return real_run(*args, **kwargs)
+
+        self.mod.subprocess.run = record_call
         try:
             self.mod.handle(
                 {"hook_event_name": "SessionEnd", "cwd": repo},
@@ -443,6 +457,9 @@ class HookSweepsNothingWhenTooLittleBudgetRemains(unittest.TestCase):
         finally:
             self.mod.subprocess.run = real_run
 
+        self.assertEqual(
+            calls, [], "subprocess.run must never be called when too little budget remains"
+        )
         self.assertIn("reap-me-budget", local_branches(repo),
                        "nothing was swept, so the reapable branch must still be there")
 
