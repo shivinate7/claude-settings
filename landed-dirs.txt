@@ -12,3 +12,4 @@
 agents
 lint
 hooks
+janitor

@@ -138,13 +138,45 @@ def asked_question(rec):
     return False
 
 
-def report_shape_ok(text, allow_prefix=False):
-    lines = text.splitlines()
-    start = None
+def find_block_start(lines):
+    """Return the index of the first blockquote line, else None.
+
+    Shared by `report_shape_ok` and by `block_text`, so a second caller (such as
+    `hooks/config_report.py`'s merge-report check) locates the same block this gate judges,
+    rather than re-deriving its own idea of where the report starts.
+    """
     for i, line in enumerate(lines):
         if line.lstrip().startswith(">"):
-            start = i
+            return i
+    return None
+
+
+def block_text(text):
+    """Return the reply's report block, quote markers stripped, or "" when there is none.
+
+    This does not judge shape (label order, fencing, a prefix where none is allowed): that is
+    `report_shape_ok`'s job. It only hands back the block's own text, so a caller that needs to
+    know whether the block already SAYS something (such as a PR number) can search it without
+    hand-rolling a second blockquote parser.
+    """
+    lines = text.splitlines()
+    start = find_block_start(lines)
+    if start is None:
+        return ""
+    out = []
+    for line in lines[start:]:
+        if not line.strip():
+            continue
+        if not line.lstrip().startswith(">"):
             break
+        stripped = line.lstrip()[1:].lstrip() if line.lstrip().startswith(">") else line
+        out.append(stripped)
+    return "\n".join(out)
+
+
+def report_shape_ok(text, allow_prefix=False):
+    lines = text.splitlines()
+    start = find_block_start(lines)
     if start is None:
         return False
     if start > 0 and not allow_prefix:

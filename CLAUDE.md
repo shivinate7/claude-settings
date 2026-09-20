@@ -17,6 +17,8 @@ task is Opus-shaped (long-horizon, whole-codebase, or many-hour autonomous work)
 one line before you dispatch, name why, and offer the switch.<!-- rule:roles-opus-shaped-say-so --> On my word, write the repo's
 `.claude/settings.local.json` with an `env` block that sets `CLAUDE_CODE_SUBAGENT_MODEL` to
 `opus` and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` to `1`. The guard asks before that write lands.<!-- rule:roles-opus-override-guarded -->
+The file also carries `_subagentCapUntil`, an ISO-8601 time no more than 24 hours ahead. The
+watch removes the override once that time passes.<!-- rule:roles-override-carries-expiry -->
 Remove the file when the work is done.<!-- rule:roles-remove-override-file --> Workers never spawn: nested reports misroute (Sept 2026).
 A repo that needs nesting raises depth in its settings and records the risk.<!-- rule:roles-workers-never-spawn --> A brief carries
 the task, files, governing decisions quoted verbatim, and the check that proves the task

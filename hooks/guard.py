@@ -14,9 +14,11 @@ all allow the call. A guard bug must never brick a session.
 The rules below are the owner's global CLAUDE.md made mechanical. They run in
 one fixed order, and the first match wins.
 
-  1 shared-tree        a command that throws away a working tree, judged against the STATE OF
-                       ITS SUBJECT: an empty subject passes, an unreadable subject is allowed
-                       and logged as `noted`/`subject-unread`
+  1 shared-tree        a command that throws away work, judged against the STATE OF ITS SUBJECT:
+                       a working tree's uncommitted or untracked files, a deleted branch's only
+                       copy, a removed worktree's files, or a pruned worktree's stale record. An
+                       empty subject passes, an unreadable subject is allowed and logged as
+                       `noted`/`subject-unread`
   1b pointer-head      a command that moves HEAD off `main` in the POINTER checkout, the one
                        checkout every session on this machine runs its hooks and its lint from.
                        Always denied. A move TO `main` restores the invariant and passes.
@@ -135,6 +137,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime
 
 
@@ -432,6 +435,28 @@ def checkout_names_a_path(args) -> str:
     return ""
 
 
+BRANCH_DELETE_FLAGS = {"-d", "-D", "--delete"}
+
+
+def branch_delete_names(args):
+    """Return the branch names a `git branch -d/-D` call would delete, else [].
+
+    Any other `git branch` call (create, rename, list, `-a`, `-r`, ...) returns []. Only the
+    exact delete flags mark the call: a short flag glued to others (`-df`) is a form this does
+    not read, the same stance `checkout_names_a_path` above takes for its own flag set.
+    """
+    delete = False
+    names = []
+    for arg in args:
+        if arg in BRANCH_DELETE_FLAGS:
+            delete = True
+            continue
+        if arg.startswith("-"):
+            continue
+        names.append(arg)
+    return names if delete else []
+
+
 def clean_deletes_files(args) -> bool:
     """True when `git clean` carries the force flag that makes it delete."""
     for arg in args:
@@ -698,6 +723,22 @@ def shared_tree_match(segment: str):
             named = checkout_names_a_path(args)
             if named:
                 return "git checkout " + named, subcommand, args
+        if subcommand == "branch":
+            names = branch_delete_names(args)
+            if names:
+                return ("git branch " + " ".join(args)).strip(), "branch-delete", args
+            continue
+        if subcommand == "worktree":
+            action = args[0] if args else ""
+            if action == "remove":
+                matched = ("git worktree " + " ".join(args)).strip()
+                return matched, "worktree-remove", args[1:]
+            if action == "prune":
+                if any(a in ("-n", "--dry-run") for a in args[1:]):
+                    continue  # the call's own dry run is a read, never a discard
+                matched = ("git worktree " + " ".join(args)).strip()
+                return matched, "worktree-prune", args[1:]
+            continue
     return None
 
 
@@ -1136,12 +1177,323 @@ def clean_subject(args, where: str):
     return not [line for line in lines if line[:2] in ("??", "!!")]
 
 
+# ------------------------------------------------------------------ a branch's only copy
+#
+# `git branch -d/-D <name>` throws away a branch pointer. The FILES never move, so this is not a
+# working-tree read at all: the subject is the WORK the branch names, and the question is whether
+# that work exists anywhere else.
+#
+# Resolve the base in this order: `origin/HEAD`, then local `main`, then local `master` (owner's
+# ruling, this plan). None answering is UNREADABLE, never a silent pass and never a silent deny:
+# a repository with no default branch this rule can find is one this rule cannot judge.
+#
+# THREE TESTS, ANY ONE PASSING PROVES THE WORK SURVIVES the branch:
+#   ancestor       `git merge-base --is-ancestor <branch> <base>`. The branch's tip is already
+#                  reachable from the base, commit id for commit id.
+#   cherry-empty   `git cherry <base> <branch>` prints a `+` for every commit NOT already on the
+#                  base by PATCH id, so no `+` line means every commit's content is already
+#                  there, even after a rebase changed every commit id.
+#   remote-contains a remote-tracking ref's history already contains the branch's tip, so a
+#                  clone elsewhere holds the same commit.
+# Any one of the three failing to ANSWER (not "false", but "git could not tell") makes the whole
+# read unreadable, because a read that skipped a test it could not run is a guess, not a proof.
+def resolve_default_base(where: str):
+    """Return the ref name of the repository's default branch, or None when none answers.
+
+    `origin/HEAD` first, then local `main`, then local `master` (owner's ruling). A branch is
+    read against whichever one resolves; the others are never tried once one does.
+    """
+    origin_head = _git(where, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD")
+    if origin_head is not None and origin_head.returncode == 0 and origin_head.stdout.strip():
+        return origin_head.stdout.strip()
+    for name in ("main", "master"):
+        answer = _git(where, "rev-parse", "--verify", "-q", "refs/heads/" + name)
+        if answer is not None and answer.returncode == 0:
+            return name
+    return None
+
+
+def branch_is_ancestor(where: str, base: str, branch: str):
+    """True when `branch`'s tip is already reachable from `base`, False when it plainly is not,
+    None when the question could not be answered (an unresolvable revision, a git that would not
+    run)."""
+    answer = _git(where, "merge-base", "--is-ancestor", branch, base)
+    if answer is None:
+        return None
+    if answer.returncode == 0:
+        return True
+    if answer.returncode == 1:
+        return False
+    return None
+
+
+def branch_cherry_empty(where: str, base: str, branch: str):
+    """True when `git cherry <base> <branch>` prints no `+` line: every commit's PATCH already
+    sits on the base, even one a rebase or a cherry-pick gave a new commit id. None when the
+    read failed."""
+    answer = _git(where, "cherry", base, branch)
+    if answer is None or answer.returncode != 0:
+        return None
+    return not any(line.startswith("+") for line in answer.stdout.splitlines())
+
+
+def branch_on_remote(where: str, branch: str):
+    """True when some remote-tracking ref's history already contains `branch`'s tip, False when
+    none does, None when the read failed."""
+    answer = _git(
+        where, "for-each-ref", "--contains", branch, "--format=%(refname)", "refs/remotes"
+    )
+    if answer is None or answer.returncode != 0:
+        return None
+    return bool(answer.stdout.strip())
+
+
+def branch_is_empty(where: str, base: str, branch: str):
+    """True when `branch` holds no work absent elsewhere, False when it holds the only copy,
+    None when any one of the three tests could not be read."""
+    ancestor = branch_is_ancestor(where, base, branch)
+    if ancestor is None:
+        return None
+    if ancestor:
+        return True
+    cherry_empty = branch_cherry_empty(where, base, branch)
+    if cherry_empty is None:
+        return None
+    if cherry_empty:
+        return True
+    on_remote = branch_on_remote(where, branch)
+    if on_remote is None:
+        return None
+    return on_remote
+
+
+def branch_delete_subject(args, where: str):
+    """The subject of `git branch -d/-D <name>...` is the work each named branch holds, read
+    against the repository's own default branch. One name that holds the only copy makes the
+    whole call's subject non-empty."""
+    names = branch_delete_names(args)
+    if not names:
+        return True  # defensive: the matcher only sends real delete calls here
+    base = resolve_default_base(where)
+    if base is None:
+        return None
+    for name in names:
+        empty = branch_is_empty(where, base, name)
+        if empty is None:
+            return None
+        if empty is False:
+            return False
+    return True
+
+
+# ------------------------------------------------------------------ a removed or pruned worktree
+#
+# `git worktree remove <path>` throws away one worktree's own files. Its subject lives at PATH,
+# never at `where` (the checkout the command RUNS in): removing a worktree is ordinarily typed
+# from the primary checkout or from any other worktree of the same clone, never from inside the
+# tree it deletes.
+#
+# THREE THINGS MAKE THE SUBJECT NON-EMPTY, so the call denies: uncommitted or untracked work in
+# that tree (`git status --porcelain`), a lock (`git worktree list --porcelain` naming it
+# `locked`), or a LIVE SESSION still standing in it. None of the three is a guess: each is read
+# straight off git or off the session record git-worktree-remove would run past.
+def worktree_remove_target(args, where: str) -> str:
+    """Return the absolute path a `git worktree remove` call would delete, or '' when it names
+    none (`git worktree remove` with no path is not a call this rule can happen upon; the
+    matcher already required at least the subcommand)."""
+    for arg in args:
+        if arg.startswith("-"):
+            continue
+        return _absolute(arg, where)
+    return ""
+
+
+def worktree_locked(where: str, target: str):
+    """True when TARGET is registered as a locked worktree, False when it is registered and
+    unlocked, None when the registration cannot be read, or TARGET is not a registered worktree
+    of this clone at all (an unreadable state: nothing here says the removal is safe)."""
+    answer = _git(where, "worktree", "list", "--porcelain")
+    if answer is None or answer.returncode != 0:
+        return None
+    try:
+        target_real = os.path.normcase(os.path.realpath(target))
+    except Exception:
+        return None
+    for block in answer.stdout.split("\n\n"):
+        lines = block.splitlines()
+        if not lines or not lines[0].startswith("worktree "):
+            continue
+        path = lines[0][len("worktree "):].strip()
+        if os.path.normcase(os.path.realpath(path)) != target_real:
+            continue
+        return any(line == "locked" or line.startswith("locked ") for line in lines[1:])
+    return None
+
+
+# Liveness reads `~/.claude/sessions/*.json` (or `${CLAUDE_CONFIG_DIR}/sessions`, the same
+# override `config_dir` already answers for the frozen-path rule). A missing directory is a real,
+# readable answer: zero sessions have ever recorded liveness here, so nothing stands in any tree.
+# A directory that exists but cannot be LISTED is unreadable, and a bad individual record is
+# skipped rather than treated as a read failure, so one corrupt file cannot make an otherwise
+# readable directory look unreadable.
+SESSION_LIVE_TOLERANCE_MS = 5000
+
+
+def session_records():
+    """Return this machine's session records, or None when the session directory exists but
+    cannot be listed at all."""
+    folder = os.path.join(config_dir(), "sessions")
+    if not os.path.isdir(folder):
+        return []
+    try:
+        names = os.listdir(folder)
+    except Exception:
+        return None
+    records = []
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(folder, name), encoding="utf-8") as handle:
+                records.append(json.load(handle))
+        except Exception:
+            continue  # one bad record does not make the whole directory unreadable
+    return records
+
+
+def _process_start_ms(pid: int):
+    """Return a live process's start time in epoch milliseconds, or None when the pid is not
+    running, or the read failed.
+
+    `ps -o lstart=` prints the start time in THIS machine's own local clock, with no timezone
+    marker at all. Read it with `time.mktime`, which turns a naive `struct_time` into an epoch
+    by treating it as LOCAL time on THIS SAME machine, so the number it returns lines up with the
+    epoch millisecond a session record already carries (written by `Date.now()`, the same local
+    machine).
+    MEASURED trap, named in the plan this task comes from: parsing the identical string as UTC
+    (`calendar.timegm`, or `datetime.fromisoformat(...).timestamp()` after tagging it UTC)
+    introduced a five-hour offset and made a live session look expired. `mktime` is the read that
+    does not carry that trap, because it never assumes a zone the string never named.
+    """
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return None
+    try:
+        answer = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=5,
+        )
+    except Exception:
+        return None
+    if answer.returncode != 0:
+        return None
+    text = answer.stdout.strip()
+    if not text:
+        return None
+    try:
+        parsed = time.strptime(text, "%a %b %d %H:%M:%S %Y")
+        return int(time.mktime(parsed) * 1000)
+    except Exception:
+        return None
+
+
+def session_is_live(record) -> bool:
+    """True only when the record's process id is alive AND its recorded start time still
+    matches that live process's own start time, within a small tolerance for `ps`'s
+    one-second granularity. A recycled pid then cannot inherit a dead session's claim: the
+    process at that pid today started at a different moment than the one the record names."""
+    if not isinstance(record, dict):
+        return False
+    pid = record.get("pid")
+    started = record.get("startedAt")
+    if not isinstance(started, (int, float)) or isinstance(started, bool):
+        return False
+    actual = _process_start_ms(pid)
+    if actual is None:
+        return False
+    return abs(actual - started) <= SESSION_LIVE_TOLERANCE_MS
+
+
+def worktree_live_session(target: str):
+    """True when a live session's cwd sits at or under TARGET, False when none does, None when
+    the session directory itself could not be read."""
+    records = session_records()
+    if records is None:
+        return None
+    try:
+        target_real = os.path.normcase(os.path.realpath(target)) + os.sep
+    except Exception:
+        return None
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        cwd = record.get("cwd")
+        if not isinstance(cwd, str) or not cwd:
+            continue
+        if not session_is_live(record):
+            continue
+        try:
+            cwd_real = os.path.normcase(os.path.realpath(cwd)) + os.sep
+        except Exception:
+            continue
+        if cwd_real.startswith(target_real):
+            return True
+    return False
+
+
+def worktree_remove_subject(args, where: str):
+    """The subject of `git worktree remove <path>` is PATH's own uncommitted and untracked work,
+    widened by whether it is locked and whether a live session still stands in it."""
+    target = worktree_remove_target(args, where)
+    if not target:
+        return None
+    lines = porcelain(target)
+    if lines is None:
+        return None
+    if lines:
+        return False
+    locked = worktree_locked(where, target)
+    if locked is None:
+        return None
+    if locked:
+        return False
+    live = worktree_live_session(target)
+    if live is None:
+        return None
+    if live:
+        return False
+    return True
+
+
+# `git worktree prune` deletes no files at all: it drops the ADMINISTRATIVE RECORD of a worktree
+# whose directory is already gone. `-n` is the read git itself offers for exactly this question,
+# the same shape `git status --porcelain` is for a working tree elsewhere in this file: it is not
+# a dry run of a block list (CLAUDE.md: never dry-run a block list), because nothing here compares
+# the answer against a list of names. An empty answer means nothing would be pruned, so the call
+# passes; any line named means a record would go, and the caller turns that into an ASK, never a
+# deny, because the record is not a file and the loss is the record alone.
+def worktree_prune_subject(args, where: str):
+    """True when `git worktree prune -n` names nothing to prune, False when it names something,
+    None when the dry run could not be read.
+
+    MEASURED: git prints each worktree it would remove to STDERR, not stdout (`Removing
+    worktrees/<name>: <reason>`), so both streams are read. A non-empty stderr from a `-n` call
+    that still exits 0 is this message, never an error: an error exits non-zero, which the
+    caller above already turns into `None`.
+    """
+    answer = _git(where, "worktree", "prune", "-n")
+    if answer is None or answer.returncode != 0:
+        return None
+    return not (answer.stdout.strip() or answer.stderr.strip())
+
+
 SUBJECT_READS = {
     "reset": reset_subject,
     "stash": stash_subject,
     "restore": restore_subject,
     "checkout": checkout_subject,
     "clean": clean_subject,
+    "branch-delete": branch_delete_subject,
+    "worktree-remove": worktree_remove_subject,
+    "worktree-prune": worktree_prune_subject,
 }
 
 
@@ -1256,6 +1608,36 @@ PUSH_DENY_REASON = (
     "Remedy: commit the work on a branch of your own instead. "
     "Set work aside with a commit on your own branch, never a stash: a stash entry belongs to "
     "no branch, and it outlives no session that holds its tag."
+)
+# A branch deletion always denies here, never asks: the branch ref lives in the COMMON git
+# directory, the same one every worktree of the clone reads, so which checkout the delete runs
+# from limits nothing about what is lost. This mirrors PUSH_DENY_REASON's own reasoning for the
+# stash stack.
+BRANCH_DELETE_DENY_REASON = (
+    "Rule (shared trees): this branch holds work that exists nowhere else. It is not an "
+    "ancestor of the repository's default branch, its patches are not already on that branch, "
+    "and no remote ref contains it. Deleting it loses the only copy. "
+    "Remedy: push the branch, or merge it, before it is deleted."
+)
+# A worktree removal always denies here too. The tree it deletes is not the tree the command RUNS
+# in, so the running checkout's own worktree-ness (the split every other arm in this rule reads)
+# says nothing about whether the loss is confined to one lane: it is confined to the REMOVED
+# tree's lane regardless, and that tree is never the one asking permission.
+WORKTREE_REMOVE_DENY_REASON = (
+    "Rule (shared trees): this working tree holds uncommitted or untracked work, is locked, or a "
+    "live session still stands in it, and removing it puts nothing back. "
+    "Remedy: commit or set aside the work on its own branch first, never a shared stash, "
+    "unlock the tree if a lock holds it, and let a session standing in it finish or leave "
+    "before the tree is removed."
+)
+# Pruning deletes no files: it drops the administrative record of a worktree whose directory is
+# already gone. The worst case is clearing another session's record of a tree it still means to
+# use, so this asks, never denies, whatever the run location.
+WORKTREE_PRUNE_ASK_REASON = (
+    "Rule (shared trees): this drops the administrative record of a worktree whose directory no "
+    "longer exists. It deletes no files, but the record it drops could belong to another "
+    "session. "
+    "The click in this prompt is the grant."
 )
 
 
@@ -2009,6 +2391,10 @@ CONFIG_FROZEN_DIRS = (
     os.path.normcase("hooks"),
     os.path.normcase("lint"),
     os.path.normcase("agents"),
+    # janitor/sweep.py deletes branches and worktrees. A session must not rewrite a program that
+    # deletes things, same reasoning as hooks/lint/agents, so it lands here too (plan:
+    # janitor-build-plan.md, "The code lands in a new janitor/ directory").
+    os.path.normcase("janitor"),
     # `state` holds the baseline `hooks/config_watch.py` restores a reverted file from. A session
     # that could rewrite the baseline could launder a cap lift into it, so the store is frozen on
     # the same terms as the hooks themselves. Rule 7 needs only the PATH, never the value, so this
@@ -2497,6 +2883,15 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
             continue
         if state is True:
             continue
+        # A branch's ref and a worktree's own tree are never the running checkout's own lane, so
+        # neither earns the worktree-scoped "ask" below: each is judged on its own terms, before
+        # that generic split runs.
+        if subcommand == "branch-delete":
+            refuse(tool, "deny", "shared-tree", BRANCH_DELETE_DENY_REASON, matched)
+        if subcommand == "worktree-remove":
+            refuse(tool, "deny", "shared-tree", WORKTREE_REMOVE_DENY_REASON, matched)
+        if subcommand == "worktree-prune":
+            refuse(tool, "ask", "shared-tree", WORKTREE_PRUNE_ASK_REASON, matched)
         if subcommand == "stash" and stash_takes_the_stack(args):
             refuse(tool, "deny", "shared-tree", STACK_DENY_REASON, matched)
         # A stash PUT reaches here only when it would discard (state is not True above), and its
