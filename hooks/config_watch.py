@@ -60,6 +60,41 @@ happens before the next tool call can spawn one.
 DECISION 7 STILL HOLDS. A project's own `.claude` files are allowed and reported, never denied. So
 an ordinary project config edit is re-baselined in silence. Only a change to a CAP VARIABLE is
 reverted, and only when the guard did not ask about it.
+
+THE EXPIRY, ADDED 2026-09-20. An APPROVED lift (the guard asked, the owner said yes) used to stay
+lifted forever: nothing removed the file once the work was done. `decisions/subagent-model-cap.md`
+records that as the grant's own promise, and `lint/rule_mechanisms.json` recorded rule
+`roles-remove-override-file` as `unmechanized` for exactly that reason.
+
+The fix reads a second field the override file carries OUTSIDE its `env` block:
+`_subagentCapUntil`, an ISO-8601 instant. It sits outside `env` for two reasons. A key inside
+`env` is exported into every subagent's shell, which an expiry timestamp has no business being.
+And a key inside `env` is read by `guard.SUBAGENT_CAP_KEY`, which would turn a plain expiry write
+into a second cap-change ask the field is not one. MEASURED: `guard._cap_reading('"_subagentCapUntil":
+"2026-09-21T00:00:00Z"')` returns `{}`. The guard's PreToolUse ask never sees this field, and only
+this watch reads it. See `decisions/subagent-model-cap.md` for the rejected spelling this replaced
+and its own measurement.
+
+An override whose current reading sets the model above Sonnet is now judged on every sweep, not
+only on the sweep that changed it, because a deadline passes with no write of its own: the file
+never changes again and only the clock moves. The deadline is bad when `_subagentCapUntil` is
+missing, unparseable, already passed, or more than 24 hours ahead of now. A field written
+INSIDE `env` by mistake reads as its own problem, not as "missing": the owner can see the
+field, so the message says where it belongs instead of pretending it is absent. A bad
+deadline is revoked the same way an unasked write is: the pre-lift content goes back, the
+lifted content is kept beside the store, and a systemMessage names the file and what was
+wrong with the expiry.
+
+THE ONE HARD PART. `save_baseline` used to re-baseline an APPROVED cap change straight to the
+lifted content, so the pre-lift bytes were gone by the time a deadline could be checked against
+them. The baseline entry now carries a THIRD field, `prior`: the content last seen before the
+lift began. It is computed once, when a lift first appears, and carried forward unchanged
+through any later edit that keeps the reading lifted, so a chain of re-approvals still restores to
+the one true pre-lift state. `load_baseline` treats a missing `prior` key, the shape every entry
+written by the version on `main` carries, the same as an explicit `null`: no prior recorded. When
+the expiry check finds no prior to restore to, it does not invent one and does not leave the
+override running in silence. It reports UNKNOWN, the same as `judge_path` already does for a
+first sight it cannot read.
 """
 
 import base64
@@ -67,6 +102,7 @@ import hashlib
 import json
 import os
 import sys
+from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -107,6 +143,20 @@ REVERT_MESSAGE = (
 UNKNOWN_MESSAGE = (
     "Guard (subagent-model-cap): {where} sets the subagent model cap and this session holds no "
     "baseline for it, so the guard cannot tell a lift from the file's own starting state. "
+    "Reading: {change}. Nothing was changed. Check the file by hand."
+)
+
+EXPIRE_MESSAGE = (
+    "Guard (subagent-model-cap): the subagent model cap override in {where} expired. "
+    "_subagentCapUntil is {problem}. "
+    "The pre-override content is back in place and the lifted content is kept at {kept}. "
+    "To lift the cap again, set _subagentCapUntil to an ISO-8601 time no more than 24 hours "
+    "ahead, and approve the write."
+)
+
+EXPIRE_UNKNOWN_MESSAGE = (
+    "Guard (subagent-model-cap): {where} sets the subagent model cap above Sonnet and "
+    "_subagentCapUntil is {problem}, but this session holds no pre-override content to restore. "
     "Reading: {change}. Nothing was changed. Check the file by hand."
 )
 
@@ -173,6 +223,13 @@ def load_baseline(path: str):
 
     An unreadable or malformed entry reads as None, the same as no entry. A baseline that cannot be
     trusted is not a baseline.
+
+    The result carries a third field, `prior`: the content last seen before the current lift
+    began, or None when no lift is in effect or none was ever recorded. An entry written by the
+    version on `main` carries no `prior` key at all, and `entry.get("prior")` reads that the same
+    as an explicit `null` -- no prior recorded, never a crash. A `prior` that fails to decode is
+    dropped the same way, rather than invalidating the whole entry: `prior` is supplementary, and
+    an unreadable one must never be trusted, only treated as absent.
     """
     try:
         with open(os.path.join(store_dir(), store_key(path)), "r", encoding="utf-8") as handle:
@@ -183,26 +240,41 @@ def load_baseline(path: str):
         return None
     blob = entry.get("content")
     if blob is None:
-        return {"digest": "", "content": None}
-    if not isinstance(blob, str):
-        return None
-    try:
-        content = base64.b64decode(blob.encode("ascii"), validate=True)
-    except Exception:
-        return None
-    if digest(content) != entry.get("digest"):
-        return None
-    return {"digest": entry.get("digest"), "content": content}
+        result = {"digest": "", "content": None}
+    else:
+        if not isinstance(blob, str):
+            return None
+        try:
+            content = base64.b64decode(blob.encode("ascii"), validate=True)
+        except Exception:
+            return None
+        if digest(content) != entry.get("digest"):
+            return None
+        result = {"digest": entry.get("digest"), "content": content}
+
+    prior = None
+    prior_blob = entry.get("prior")
+    if isinstance(prior_blob, str):
+        try:
+            prior = base64.b64decode(prior_blob.encode("ascii"), validate=True)
+        except Exception:
+            prior = None
+    result["prior"] = prior
+    return result
 
 
-def save_baseline(path: str, content) -> None:
-    """Record one path's content as the baseline. A failure here never changes a decision."""
+def save_baseline(path: str, content, prior=None) -> None:
+    """Record one path's content as the baseline, with its pre-lift `prior` beside it.
+
+    A failure here never changes a decision.
+    """
     try:
         os.makedirs(store_dir(), exist_ok=True)
         entry = {
             "path": path,
             "digest": digest(content),
             "content": None if content is None else base64.b64encode(content).decode("ascii"),
+            "prior": None if prior is None else base64.b64encode(prior).decode("ascii"),
         }
         target = os.path.join(store_dir(), store_key(path))
         with open(target + ".tmp", "w", encoding="utf-8") as handle:
@@ -274,6 +346,116 @@ def reading_text(reading) -> str:
     parts = [key + " = " + (guard.cap_safe(value, guard.CAP_MAX_VALUE) or "(value unread)")
              for key, value in reading.items()]
     return guard.cap_safe(", ".join(parts), guard.CAP_MAX_CHANGE)
+
+
+# ------------------------------------------------------------------ the expiry
+#
+# `_subagentCapUntil` is a REPO-OWNED field, read from the parsed JSON document only, never from a
+# text scan. That keeps it out of `env` (see the module docstring: an `env` key is exported into
+# every subagent's shell, and a key inside `env` is what `guard.SUBAGENT_CAP_KEY` reads). It also
+# keeps this watch the ONLY reader of it: MEASURED, `guard._cap_reading('"_subagentCapUntil": "..."')`
+# returns `{}`, so the PreToolUse ask never fires on this field alone.
+
+_MODEL_KEY = "CLAUDE_CODE_SUBAGENT_MODEL"
+EXPIRY_FIELD = "_subagentCapUntil"
+EXPIRY_MAX_AHEAD_HOURS = 24
+
+
+def cap_lift_value(reading) -> bool:
+    """True when a cap reading sets the model above Sonnet, the state the expiry rule watches.
+
+    A value this file's own reading cannot read (the bare-key match, printed as "(value
+    unread)") counts as a lift too. The expiry rule would rather ask for a deadline that turns
+    out unneeded than stay silent on a value it cannot confirm is Sonnet.
+    """
+    if _MODEL_KEY not in reading:
+        return False
+    value = (reading.get(_MODEL_KEY) or "").strip().lower()
+    return value != "sonnet"
+
+
+def next_prior(reading, was, baseline):
+    """Return the pre-lift bytes to carry forward as the new `prior`, or None.
+
+    None when the new reading is not a lift: nothing needs protecting. The last-seen baseline
+    content when the lift is FRESH (the old reading was not a lift). The EXISTING prior, carried
+    forward untouched, when the lift CONTINUES a lift already in effect, so a chain of
+    re-approvals still restores to the one true pre-lift state, never to the most recent lifted
+    content.
+    """
+    if not cap_lift_value(reading):
+        return None
+    if cap_lift_value(was):
+        return baseline.get("prior")
+    return baseline["content"]
+
+
+EXPIRY_WRONG_PLACE = (
+    "inside the env block, not at the top level -- env keys are exported into every "
+    "subagent's shell"
+)
+
+
+def cap_expiry_location(content):
+    """Return (where, value) for `_subagentCapUntil`, read from the PARSED document only.
+
+    `where` is "top" when the field sits where it belongs, "env" when it sits inside the
+    `env` block instead -- a mistake, not an absence, and the message must say so rather than
+    read as "missing" -- or None when the field is nowhere in the file. Content that is not a
+    JSON object reads the same as a file with no expiry at all: (None, None).
+    """
+    if content is None:
+        return (None, None)
+    try:
+        parsed = json.loads(content.decode("utf-8", "replace"))
+    except Exception:
+        return (None, None)
+    if not isinstance(parsed, dict):
+        return (None, None)
+    value = parsed.get(EXPIRY_FIELD)
+    if isinstance(value, str):
+        return ("top", value)
+    env = parsed.get("env")
+    if isinstance(env, dict):
+        value = env.get(EXPIRY_FIELD)
+        if isinstance(value, str):
+            return ("env", value)
+    return (None, None)
+
+
+def expiry_problem(content, clock=None) -> str:
+    """Return why `_subagentCapUntil` fails, or '' when it names a valid, current deadline.
+
+    `clock` lets a caller inject the instant this check reads as "now". It defaults to None,
+    and a None reads the real clock, `datetime.now(timezone.utc)`, AT CALL TIME. Production
+    never passes anything else, so production always reads the live clock, exactly as before
+    this parameter existed. Only a test pins `clock` to a fixed instant, which is the only way
+    a fixture can sit exactly on the 24-hour boundary: `datetime.now()` called once to build
+    the fixture and once more, later, inside this function, are never the same instant, so no
+    fixture could otherwise land ON the boundary rather than near it.
+    """
+    where, raw = cap_expiry_location(content)
+    if where is None:
+        return "missing"
+    if where == "env":
+        return EXPIRY_WRONG_PLACE
+    text = raw.strip()
+    if text[-1:] in ("Z", "z"):
+        text = text[:-1] + "+00:00"
+    try:
+        deadline = datetime.fromisoformat(text)
+    except Exception:
+        return "not a parseable ISO-8601 time"
+    if deadline.tzinfo is None:
+        deadline = deadline.replace(tzinfo=timezone.utc)
+    if clock is None:
+        clock = datetime.now(timezone.utc)
+    ahead = (deadline - clock).total_seconds()
+    if ahead < 0:
+        return "already passed"
+    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:
+        return "more than 24 hours ahead"
+    return ""
 
 
 # ------------------------------------------------------------------ the explained test
@@ -361,17 +543,26 @@ def command_text(tool: str, tool_input) -> str:
     return safe(str(target) or "(none)", MAX_COMMAND) if target else "(none)"
 
 
-def judge_path(path: str, tool: str, tool_input, cwd: str, explained: str):
+def judge_path(path: str, tool: str, tool_input, cwd: str, explained: str, clock=None):
     """Judge one watched path. Return a message to print, or ''.
 
-    Four answers, in order:
+    Five answers, in order:
 
       no baseline  : record it. Report UNKNOWN when the file already sets the cap, because a first
                      sight cannot tell a lift from a starting state, and silence there would read
                      as clear.
-      unchanged    : nothing.
-      cap unchanged: Decision 7. Re-baseline and say nothing.
-      cap changed  : explained, so re-baseline and pass. Otherwise restore and report.
+      unchanged    : fall through to the expiry check below, unchanged or not.
+      cap unchanged: Decision 7. Re-baseline, carry `prior` forward, and say nothing yet.
+      cap changed,
+        explained  : re-baseline, carry `prior` forward, and say nothing yet.
+      cap changed,
+        unasked    : restore and report. The expiry rule never runs here: the write itself was
+                     never authorized, so its deadline is beside the point.
+
+    THE EXPIRY RULE runs last, on every path that did not just get reverted as an unasked write,
+    changed this sweep or not. A deadline passes with no write of its own: the file that set it
+    never changes again, and only the clock moves, so the check must run whether or not `now`
+    differs from the baseline digest.
     """
     current = read_file(path)
     now = digest(current)
@@ -385,35 +576,55 @@ def judge_path(path: str, tool: str, tool_input, cwd: str, explained: str):
                 where=safe(path, guard.CAP_MAX_PATH), change=reading_text(reading))
         return ""
 
-    if now == baseline["digest"]:
+    if now != baseline["digest"]:
+        was = cap_reading(baseline["content"])
+        reading = cap_reading(current)
+
+        if reading != was and not (explained and explained == resolve(path, cwd)):
+            kept = keep_rejected(path, current)
+            if not restore(path, baseline["content"]):
+                return UNKNOWN_MESSAGE.format(
+                    where=safe(path, guard.CAP_MAX_PATH), change=reading_text(reading))
+            save_baseline(path, baseline["content"], baseline.get("prior"))
+            guard.record(tool or "Stop", "reverted", "subagent-model-cap",
+                         guard.log_path_and_text(path, reading_text(reading)))
+            return REVERT_MESSAGE.format(
+                where=safe(path, guard.CAP_MAX_PATH),
+                tool=safe(tool or "(turn end)", 40),
+                what=command_text(tool, tool_input),
+                change=reading_text(reading),
+                kept=safe(kept or "(not kept)", guard.CAP_MAX_PATH))
+
+        prior = next_prior(reading, was, baseline)
+        save_baseline(path, current, prior)
+        baseline = {"digest": now, "content": current, "prior": prior}
+
+    reading = cap_reading(baseline["content"])
+    if not cap_lift_value(reading):
+        return ""
+    problem = expiry_problem(baseline["content"], clock)
+    if not problem:
         return ""
 
-    was = cap_reading(baseline["content"])
-    reading = cap_reading(current)
-    if reading == was:
-        save_baseline(path, current)
-        return ""
+    if baseline.get("prior") is None:
+        return EXPIRE_UNKNOWN_MESSAGE.format(
+            where=safe(path, guard.CAP_MAX_PATH), problem=problem,
+            change=reading_text(reading))
 
-    if explained and explained == resolve(path, cwd):
-        save_baseline(path, current)
-        return ""
-
-    kept = keep_rejected(path, current)
-    if not restore(path, baseline["content"]):
-        return UNKNOWN_MESSAGE.format(
-            where=safe(path, guard.CAP_MAX_PATH), change=reading_text(reading))
-    save_baseline(path, baseline["content"])
+    kept = keep_rejected(path, baseline["content"])
+    if not restore(path, baseline["prior"]):
+        return EXPIRE_UNKNOWN_MESSAGE.format(
+            where=safe(path, guard.CAP_MAX_PATH), problem=problem,
+            change=reading_text(reading))
+    save_baseline(path, baseline["prior"], None)
     guard.record(tool or "Stop", "reverted", "subagent-model-cap",
-                 guard.log_path_and_text(path, reading_text(reading)))
-    return REVERT_MESSAGE.format(
-        where=safe(path, guard.CAP_MAX_PATH),
-        tool=safe(tool or "(turn end)", 40),
-        what=command_text(tool, tool_input),
-        change=reading_text(reading),
+                 guard.log_path_and_text(path, "expired: " + problem))
+    return EXPIRE_MESSAGE.format(
+        where=safe(path, guard.CAP_MAX_PATH), problem=problem,
         kept=safe(kept or "(not kept)", guard.CAP_MAX_PATH))
 
 
-def sweep(payload):
+def sweep(payload, clock=None):
     """Judge every watched path for this payload. Return the messages, in path order."""
     tool = payload.get("tool_name", "") or ""
     tool_input = payload.get("tool_input", {}) or {}
@@ -425,10 +636,35 @@ def sweep(payload):
     explained = explained_path(tool, tool_input, cwd)
     messages = []
     for path in watched_paths(cwd):
-        message = judge_path(path, tool, tool_input, cwd, explained)
+        message = judge_path(path, tool, tool_input, cwd, explained, clock)
         if message:
             messages.append(message)
     return messages
+
+
+# TEST_CLOCK_ENV lets `hooks/test_config_watch.py` pin the expiry rule's clock to a fixed
+# instant, the only way a fixture can sit exactly on the 24-hour boundary (see
+# `expiry_problem`'s own docstring). Production never sets this variable, so `main` always
+# passes `clock=None` there, and `expiry_problem` always reads the live clock: the injection
+# cannot drift from what runs, because it IS what runs, absent the variable.
+TEST_CLOCK_ENV = "CONFIG_WATCH_TEST_CLOCK"
+
+
+def _test_clock():
+    """Return the instant `TEST_CLOCK_ENV` pins, or None when it is unset or unreadable."""
+    raw = os.environ.get(TEST_CLOCK_ENV)
+    if not raw:
+        return None
+    try:
+        text = raw.strip()
+        if text[-1:] in ("Z", "z"):
+            text = text[:-1] + "+00:00"
+        clock = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if clock.tzinfo is None:
+        clock = clock.replace(tzinfo=timezone.utc)
+    return clock
 
 
 def main() -> None:
@@ -440,7 +676,7 @@ def main() -> None:
     if not isinstance(payload, dict):
         sys.exit(0)  # fail open on a payload that is not an object
     try:
-        messages = sweep(payload)
+        messages = sweep(payload, _test_clock())
     except Exception:
         sys.exit(0)  # fail open on a watch defect
     if messages:

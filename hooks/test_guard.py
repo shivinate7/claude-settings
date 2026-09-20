@@ -27,6 +27,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # GUARD_UNDER_TEST points the suite at another copy of the guard, such as a `.bak` copy carrying
@@ -113,6 +114,42 @@ PTRWT = os.path.join(ROOT, "ptrlane")
 PTRBADCFG = os.path.join(ROOT, "ptrbadcfg")
 PTRGONECFG = os.path.join(ROOT, "ptrgonecfg")
 PTRNOCFG = os.path.join(ROOT, "ptrnocfg")
+
+# --------------------------------------------------------------- branch delete / worktree fixtures
+#
+# BRANCHREMOTE stands in for a remote: a bare clone BRANCHREPO pushes to, so `git for-each-ref
+# --contains` has a real remote-tracking ref to answer against. BRANCHREPO carries a real
+# `origin/HEAD`, so its cases prove the FIRST base in the resolve order. BRANCHFALLBACKMAIN and
+# BRANCHFALLBACKMASTER carry no remote at all, so their one case each proves the second and third
+# steps of that same order. BRANCHNOBASE answers none of the three, so its case proves the
+# unreadable arm.
+BRANCHREMOTE = os.path.join(ROOT, "branchremote.git")
+BRANCHREPO = os.path.join(ROOT, "branchrepo")
+BRANCHFALLBACKMAIN = os.path.join(ROOT, "branchfallbackmain")
+BRANCHFALLBACKMASTER = os.path.join(ROOT, "branchfallbackmaster")
+BRANCHNOBASE = os.path.join(ROOT, "branchnobase")
+
+# WTMAIN is the primary checkout of its own small repository. Every linked worktree below is a
+# real one, because the rule reads `git worktree list --porcelain` and `git status --porcelain`
+# with git itself, never a guess from a path. WTPRUNE is a SEPARATE repository, so pruning it
+# never touches WTMAIN's own registrations.
+WTMAIN = os.path.join(ROOT, "wtmain")
+WTCLEAN = os.path.join(ROOT, "wtclean")
+WTDIRTY = os.path.join(ROOT, "wtdirtylane")
+WTLOCKED = os.path.join(ROOT, "wtlocked")
+WTLIVE = os.path.join(ROOT, "wtlive")
+WTDEADSESSION = os.path.join(ROOT, "wtdeadsession")
+WTSTALESTART = os.path.join(ROOT, "wtstalestart")
+WTPRUNE = os.path.join(ROOT, "wtprune")
+WTPRUNESTALE = os.path.join(ROOT, "wtprunestale")
+
+# Each of these is a config directory whose `sessions/` folder holds one record, read through
+# `CLAUDE_CONFIG_DIR` exactly as the live sessions folder would be. A record is built against a
+# REAL process (this test runner's own pid), read back with `ps` the same way the guard itself
+# reads it, so the fixture cannot drift from what the guard actually measures.
+WTLIVECFG = os.path.join(ROOT, "wtlivecfg")
+WTDEADCFG = os.path.join(ROOT, "wtdeadcfg")
+WTSTALESTARTCFG = os.path.join(ROOT, "wtstalestartcfg")
 
 
 def slash(path):
@@ -248,6 +285,28 @@ def _require_pointer_branch(where, branch):
             "fixture setup failed in build_fixtures: %r was built on %r, and git answers %r. "
             "stderr: %s" % (where, branch, head.stdout.strip(), head.stderr.strip())
         )
+
+
+def _real_process_start_ms(pid):
+    """Return `pid`'s real start time in epoch milliseconds, read the same way the guard reads
+    it: `ps -o lstart=`, parsed with `time.mktime` as this machine's own local clock.
+
+    A session-liveness fixture built from ANY OTHER read (a rendered string compared by eye, a
+    guessed offset) could drift from what `hooks/guard.py` itself computes and pass or fail the
+    live-session cases for the wrong reason. This is a second, independent implementation of the
+    same read, not a call into the guard's own function, so a fixture and the code it proves
+    cannot share one bug.
+    """
+    result = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)],
+                             capture_output=True, text=True, timeout=5)
+    text = result.stdout.strip()
+    if result.returncode != 0 or not text:
+        sys.exit(
+            "fixture setup failed in build_fixtures: `ps -o lstart= -p %d` answered nothing. "
+            "stderr: %s" % (pid, result.stderr.strip())
+        )
+    parsed = time.strptime(text, "%a %b %d %H:%M:%S %Y")
+    return int(time.mktime(parsed) * 1000)
 
 
 def make_repo(where, files):
@@ -430,6 +489,219 @@ def build_fixtures():
     # supplied an identity the fixture never asked for.
     run_vcs(CONFLICT, *ident, "merge", "feature")  # conflicts and leaves MERGE_HEAD set
     _require_conflict(CONFLICT, "docs/DEBTS.md")
+
+    # ----------------------------------------------------------------- branch delete fixtures
+    #
+    # BRANCHREPO pushes to a real bare remote, so `git cherry` and `git for-each-ref --contains`
+    # both read REAL history, never a guess. The shape below builds four branches off one
+    # history so each of the rule's three tests gets a branch only IT would pass:
+    #
+    #   ancestor-work   never moves past the first commit: trivially an ancestor of `origin/main`.
+    #   rebased-work    carries a commit whose PATCH main also carries, under a different commit
+    #                   id, so only `git cherry` (not ancestry) proves it is redundant.
+    #   unmerged-work   carries a commit found nowhere else at all: the only-copy case.
+    #   pushed-work     carries a commit AS unique as unmerged-work's, but pushed to the remote,
+    #                   so only the remote-contains test proves it is safe to delete.
+    os.makedirs(BRANCHREMOTE, exist_ok=True)
+    run_vcs(BRANCHREMOTE, "init", "-q", "--bare")
+    make_repo(BRANCHREPO, {"base.txt": "base\n"})
+    run_vcs(BRANCHREPO, "remote", "add", "origin", slash(BRANCHREMOTE))
+    push = run_vcs(BRANCHREPO, "push", "-q", "origin", "main")
+    if push.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: pushing BRANCHREPO's main failed. "
+                  "stderr: %s" % push.stderr.strip())
+    run_vcs(BRANCHREPO, "remote", "set-head", "origin", "main")
+    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "ancestor-work")
+    run_vcs(BRANCHREPO, "checkout", "-q", "main")
+    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "rebased-work")
+    write(os.path.join(BRANCHREPO, "r.txt"), "same patch\n")
+    run_vcs(BRANCHREPO, "add", "r.txt")
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "add r.txt on rebased-work")
+    run_vcs(BRANCHREPO, "checkout", "-q", "main")
+    write(os.path.join(BRANCHREPO, "r.txt"), "same patch\n")  # identical content, own commit
+    run_vcs(BRANCHREPO, "add", "r.txt")
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "add r.txt directly on main")
+    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "unmerged-work")
+    write(os.path.join(BRANCHREPO, "u.txt"), "found nowhere else\n")
+    run_vcs(BRANCHREPO, "add", "u.txt")
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "unmerged-work's only copy")
+    run_vcs(BRANCHREPO, "checkout", "-q", "main")
+    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "pushed-work")
+    write(os.path.join(BRANCHREPO, "p.txt"), "pushed to the remote\n")
+    run_vcs(BRANCHREPO, "add", "p.txt")
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "pushed-work's commit")
+    pushb = run_vcs(BRANCHREPO, "push", "-q", "origin", "pushed-work")
+    if pushb.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: pushing pushed-work failed. "
+                  "stderr: %s" % pushb.stderr.strip())
+    run_vcs(BRANCHREPO, "checkout", "-q", "main")
+    pushm = run_vcs(BRANCHREPO, "push", "-q", "origin", "main")
+    if pushm.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: re-pushing main failed. "
+                  "stderr: %s" % pushm.stderr.strip())
+    fetch = run_vcs(BRANCHREPO, "fetch", "-q", "origin")
+    if fetch.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: fetching origin failed. "
+                  "stderr: %s" % fetch.stderr.strip())
+    base_check = run_vcs(BRANCHREPO, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD")
+    if base_check.returncode != 0 or base_check.stdout.strip() != "origin/main":
+        sys.exit(
+            "fixture setup failed in build_fixtures: origin/HEAD in BRANCHREPO does not resolve "
+            "to origin/main. git answers: %r, stderr: %s"
+            % (base_check.stdout.strip(), base_check.stderr.strip())
+        )
+    cherry_check = run_vcs(BRANCHREPO, "cherry", "origin/main", "rebased-work")
+    if any(line.startswith("+") for line in cherry_check.stdout.splitlines()):
+        sys.exit(
+            "fixture setup failed in build_fixtures: rebased-work still carries a `+` against "
+            "origin/main, so it does not prove the patch-id test. git cherry says: %r"
+            % cherry_check.stdout
+        )
+
+    # A fallback base with no remote at all: only local `main` answers, proving the SECOND step
+    # of the resolve order (`origin/HEAD`, then local `main`, then local `master`).
+    make_repo(BRANCHFALLBACKMAIN, {"base.txt": "base\n"})
+    run_vcs(BRANCHFALLBACKMAIN, "checkout", "-q", "-b", "ancestor-fallback")
+    run_vcs(BRANCHFALLBACKMAIN, "checkout", "-q", "main")
+    # A branch that only a REAL fallback to local `main` can deny: if the fallback silently gave
+    # up instead, the base would read as unreadable and this branch would wrongly pass.
+    run_vcs(BRANCHFALLBACKMAIN, "checkout", "-q", "-b", "unmerged-fallback")
+    write(os.path.join(BRANCHFALLBACKMAIN, "uf.txt"), "found nowhere else, no remote at all\n")
+    run_vcs(BRANCHFALLBACKMAIN, "add", "uf.txt")
+    run_vcs(BRANCHFALLBACKMAIN, *IDENT, "commit", "-q", "-m", "unmerged-fallback's only copy")
+    run_vcs(BRANCHFALLBACKMAIN, "checkout", "-q", "main")
+
+    # A fallback base with only local `master`, no `main` and no remote, proving the THIRD step.
+    os.makedirs(BRANCHFALLBACKMASTER, exist_ok=True)
+    run_vcs(BRANCHFALLBACKMASTER, "init", "-q", "-b", "master", ".")
+    write(os.path.join(BRANCHFALLBACKMASTER, "base.txt"), "base\n")
+    run_vcs(BRANCHFALLBACKMASTER, "add", "-A")
+    run_vcs(BRANCHFALLBACKMASTER, *IDENT, "commit", "-q", "-m", "first")
+    run_vcs(BRANCHFALLBACKMASTER, "checkout", "-q", "-b", "ancestor-fallback-master")
+    run_vcs(BRANCHFALLBACKMASTER, "checkout", "-q", "master")
+    run_vcs(BRANCHFALLBACKMASTER, "checkout", "-q", "-b", "unmerged-fallback-master")
+    write(os.path.join(BRANCHFALLBACKMASTER, "uf.txt"), "found nowhere else, no remote at all\n")
+    run_vcs(BRANCHFALLBACKMASTER, "add", "uf.txt")
+    run_vcs(BRANCHFALLBACKMASTER, *IDENT, "commit", "-q", "-m",
+            "unmerged-fallback-master's only copy")
+    run_vcs(BRANCHFALLBACKMASTER, "checkout", "-q", "master")
+
+    # No `origin/HEAD`, no local `main`, no local `master`: none of the three steps answers, so
+    # the base is UNREADABLE and the delete must be allowed and logged, never denied and never
+    # silently passed.
+    os.makedirs(BRANCHNOBASE, exist_ok=True)
+    run_vcs(BRANCHNOBASE, "init", "-q", "-b", "trunk", ".")
+    write(os.path.join(BRANCHNOBASE, "base.txt"), "base\n")
+    run_vcs(BRANCHNOBASE, "add", "-A")
+    run_vcs(BRANCHNOBASE, *IDENT, "commit", "-q", "-m", "first")
+    run_vcs(BRANCHNOBASE, "checkout", "-q", "-b", "orphan-work")
+    write(os.path.join(BRANCHNOBASE, "o.txt"), "irrelevant to the unreadable case\n")
+    run_vcs(BRANCHNOBASE, "add", "o.txt")
+    run_vcs(BRANCHNOBASE, *IDENT, "commit", "-q", "-m", "orphan-work's commit")
+    run_vcs(BRANCHNOBASE, "checkout", "-q", "trunk")
+    base_check2 = run_vcs(BRANCHNOBASE, "rev-parse", "--verify", "-q", "refs/heads/main")
+    if base_check2.returncode == 0:
+        sys.exit("fixture setup failed in build_fixtures: BRANCHNOBASE unexpectedly has a "
+                  "local main")
+
+    # ----------------------------------------------------------------- worktree remove/prune
+    #
+    # WTMAIN carries real tracked files, the same `keep.txt`/`f.txt` shape SUBJDIRTY uses above,
+    # so `_require_dirty` can prove WTDIRTY really is dirty and `keep.txt` really is clean.
+    make_repo(WTMAIN, {"f.txt": "base\n", "keep.txt": "base\n"})
+    run_vcs(WTMAIN, "worktree", "add", "-q", WTCLEAN, "-b", "wtclean-branch")
+    _require_clean(WTCLEAN)
+    run_vcs(WTMAIN, "worktree", "add", "-q", WTDIRTY, "-b", "wtdirty-branch")
+    write(os.path.join(WTDIRTY, "f.txt"), "uncommitted\n")
+    write(os.path.join(WTDIRTY, "new.txt"), "untracked\n")
+    _require_dirty(WTDIRTY, "f.txt", "new.txt", "keep.txt")
+    run_vcs(WTMAIN, "worktree", "add", "-q", WTLOCKED, "-b", "wtlocked-branch")
+    _require_clean(WTLOCKED)
+    lock = run_vcs(WTMAIN, "worktree", "lock", WTLOCKED, "--reason", "fixture")
+    if lock.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: locking WTLOCKED failed. stderr: %s"
+                  % lock.stderr.strip())
+    lock_check = run_vcs(WTMAIN, "worktree", "list", "--porcelain")
+    locked_ok = False
+    for block in lock_check.stdout.split("\n\n"):
+        lines = block.splitlines()
+        if not lines or not lines[0].startswith("worktree "):
+            continue
+        path = lines[0][len("worktree "):].strip()
+        if os.path.realpath(path) != os.path.realpath(WTLOCKED):
+            continue
+        locked_ok = any(line == "locked" or line.startswith("locked ") for line in lines[1:])
+        break
+    if not locked_ok:
+        sys.exit(
+            "fixture setup failed in build_fixtures: WTLOCKED is not registered as locked. "
+            "git worktree list --porcelain says: %r" % lock_check.stdout
+        )
+    run_vcs(WTMAIN, "worktree", "add", "-q", WTLIVE, "-b", "wtlive-branch")
+    _require_clean(WTLIVE)
+    run_vcs(WTMAIN, "worktree", "add", "-q", WTDEADSESSION, "-b", "wtdead-branch")
+    _require_clean(WTDEADSESSION)
+    run_vcs(WTMAIN, "worktree", "add", "-q", WTSTALESTART, "-b", "wtstalestart-branch")
+    _require_clean(WTSTALESTART)
+
+    # A live session record, built against THIS TEST RUNNER'S OWN pid, which stays alive for the
+    # whole run. `startedAt` is read with `_real_process_start_ms`, a second, independent
+    # implementation of the same `ps`-plus-`mktime` read the guard makes, so the fixture cannot
+    # share a bug with the code it proves.
+    self_pid = os.getpid()
+    self_start_ms = _real_process_start_ms(self_pid)
+    os.makedirs(os.path.join(WTLIVECFG, "sessions"), exist_ok=True)
+    write(
+        os.path.join(WTLIVECFG, "sessions", "%d.json" % self_pid),
+        json.dumps({"pid": self_pid, "cwd": slash(WTLIVE), "startedAt": self_start_ms}),
+    )
+
+    # A DEAD pid: a real short-lived process, started and waited on here, so its pid is not
+    # running by the time any case reads it. The record still names the RIGHT start time for
+    # that pid; only the process itself is gone, which is the exact case the plan names: "the
+    # id is alive AND its recorded start time still matches".
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead_pid = dead.pid
+    dead.wait(timeout=10)
+    os.makedirs(os.path.join(WTDEADCFG, "sessions"), exist_ok=True)
+    write(
+        os.path.join(WTDEADCFG, "sessions", "%d.json" % dead_pid),
+        json.dumps({"pid": dead_pid, "cwd": slash(WTDEADSESSION), "startedAt": 0}),
+    )
+
+    # A RECYCLED-PID shape: the pid IS alive (this runner, again) and the cwd sits inside the
+    # target tree, but the recorded start time does not match the live process's real start
+    # time. A pid can be reused by an unrelated process after the session that recorded it
+    # exited, and this is exactly the claim that must not read as live.
+    os.makedirs(os.path.join(WTSTALESTARTCFG, "sessions"), exist_ok=True)
+    write(
+        os.path.join(WTSTALESTARTCFG, "sessions", "%d.json" % self_pid),
+        json.dumps({
+            "pid": self_pid, "cwd": slash(WTSTALESTART), "startedAt": self_start_ms - 999999999,
+        }),
+    )
+
+    # WTPRUNE is its own repository, so pruning it can never touch WTMAIN's own worktrees.
+    # WTPRUNESTALE is added and then its directory is removed out from under git, the same shape
+    # `is_worktree`'s own comment measures elsewhere in this file: a stale administrative record
+    # with no directory behind it.
+    make_repo(WTPRUNE, {"base.txt": "base\n"})
+    run_vcs(WTPRUNE, "worktree", "add", "-q", WTPRUNESTALE, "-b", "wtprune-branch")
+    shutil.rmtree(WTPRUNESTALE)
+    prune_check = run_vcs(WTPRUNE, "worktree", "prune", "-n")
+    if not (prune_check.stdout.strip() or prune_check.stderr.strip()):
+        sys.exit(
+            "fixture setup failed in build_fixtures: WTPRUNE has nothing to prune after "
+            "WTPRUNESTALE's directory was removed. git answers stdout=%r stderr=%r"
+            % (prune_check.stdout, prune_check.stderr)
+        )
+    prune_clean_check = run_vcs(WTMAIN, "worktree", "prune", "-n")
+    if prune_clean_check.stdout.strip() or prune_clean_check.stderr.strip():
+        sys.exit(
+            "fixture setup failed in build_fixtures: WTMAIN unexpectedly has something to "
+            "prune. git answers stdout=%r stderr=%r"
+            % (prune_clean_check.stdout, prune_clean_check.stderr)
+        )
 
 
 build_fixtures()
@@ -838,6 +1110,90 @@ sh("work-tree: a dirty cwd pointed at a clean tree passes on the empty subject",
 sh("work-tree: the spaced form is read the same way",
    VCS + " --work-tree " + slash(SUBJDIRTY) + " reset --hard", "deny", "shared-tree",
    cwd=SUBJCLEAN)
+
+
+# ============================================================ 1. branch delete / worktree remove/prune
+#
+# The three git forms the machine-wide janitor plan named as a hole in this rule: `git branch
+# -d/-D`, `git worktree remove`, `git worktree prune`. Each is judged on the STATE OF ITS SUBJECT,
+# the same shape every other arm of this rule already uses, never a name list.
+#
+# BOTH `-d` AND `-D` ARE READ THE SAME WAY. Neither creates, renames nor lists a branch, so a
+# non-delete `git branch` call must keep allowing, unchanged.
+sh("branch: a plain branch call only lists, no delete flag", VCS + " branch", "allow", cwd=NOGIT)
+sh("branch: creating a branch is not a delete", VCS + " branch newname", "allow", cwd=NOGIT)
+sh("branch: renaming a branch is not a delete", VCS + " branch -m old new", "allow", cwd=NOGIT)
+
+# THE THREE TESTS THAT MAKE A BRANCH'S SUBJECT EMPTY, each proven with real history pushed to a
+# real bare remote (BRANCHREPO), so `git cherry` and `git for-each-ref --contains` answer for
+# real, never a mock.
+sh("branch: an ancestor of origin/main deletes clean with -d",
+   VCS + " branch -d ancestor-work", "allow", cwd=BRANCHREPO)
+sh("branch: the same ancestor deletes clean with -D",
+   VCS + " branch -D ancestor-work", "allow", cwd=BRANCHREPO)
+sh("branch: a rebased commit's patch already sits on origin/main, cherry proves it",
+   VCS + " branch -D rebased-work", "allow", cwd=BRANCHREPO)
+sh("branch: a commit pushed to the remote is not the only copy",
+   VCS + " branch -D pushed-work", "allow", cwd=BRANCHREPO)
+# THE ONLY-COPY CASE. unmerged-work is not an ancestor, its patch is not on origin/main, and no
+# remote ref contains it: this is the defect the plan measured against the live hook.
+sh("branch: a commit found nowhere else is the only copy, and the rule denies",
+   VCS + " branch -D unmerged-work", "deny", "shared-tree", cwd=BRANCHREPO)
+sh("branch: -d over the same only-copy branch still denies",
+   VCS + " branch -d unmerged-work", "deny", "shared-tree", cwd=BRANCHREPO)
+# TWO NAMES IN ONE CALL. One safe and one unsafe name still denies: one held-only-copy makes the
+# whole call's subject non-empty.
+sh("branch: one safe name and one only-copy name in the same call still denies",
+   VCS + " branch -D ancestor-work unmerged-work", "deny", "shared-tree", cwd=BRANCHREPO)
+
+# THE RESOLVE ORDER'S OTHER TWO STEPS. BRANCHFALLBACKMAIN and BRANCHFALLBACKMASTER carry no
+# remote at all, so each proves its own step answers when the step before it cannot.
+sh("branch: local main answers when there is no origin/HEAD",
+   VCS + " branch -D ancestor-fallback", "allow", cwd=BRANCHFALLBACKMAIN)
+sh("branch: local master answers when there is no main and no origin/HEAD",
+   VCS + " branch -D ancestor-fallback-master", "allow", cwd=BRANCHFALLBACKMASTER)
+# THE FALLBACK MUST DENY TOO, not just pass. A base that silently gave up would read as
+# unreadable and let an only-copy branch through; these prove the fallback is a real read.
+sh("branch: local main's fallback still denies an only-copy branch",
+   VCS + " branch -D unmerged-fallback", "deny", "shared-tree", cwd=BRANCHFALLBACKMAIN)
+sh("branch: local master's fallback still denies an only-copy branch",
+   VCS + " branch -D unmerged-fallback-master", "deny", "shared-tree", cwd=BRANCHFALLBACKMASTER)
+# NONE OF THE THREE ANSWERS. The base is unreadable, so the call is allowed and logged, never
+# denied and never silently passed over an unproven subject.
+sh("branch: no origin/HEAD, no local main, no local master: unreadable, allowed",
+   VCS + " branch -D orphan-work", "allow", cwd=BRANCHNOBASE)
+
+# `git worktree remove <path>`. The subject lives at PATH, not at the checkout the command runs
+# in, so every case below runs from WTMAIN and names one of its own linked worktrees.
+sh("worktree remove: a clean, unlocked tree with no live session passes",
+   VCS + " worktree remove " + slash(WTCLEAN), "allow", cwd=WTMAIN)
+sh("worktree remove: uncommitted and untracked work denies",
+   VCS + " worktree remove " + slash(WTDIRTY), "deny", "shared-tree", cwd=WTMAIN)
+sh("worktree remove: the force flag does not skip the subject read",
+   VCS + " worktree remove --force " + slash(WTDIRTY), "deny", "shared-tree", cwd=WTMAIN)
+sh("worktree remove: a locked tree denies even though it is clean",
+   VCS + " worktree remove " + slash(WTLOCKED), "deny", "shared-tree", cwd=WTMAIN)
+# A LIVE SESSION. WTLIVECFG's one record names THIS TEST RUNNER'S OWN pid and its real start
+# time, read back with `ps` exactly as the guard reads it, so the process really is alive and
+# the start time really does match.
+sh("worktree remove: a live session standing in a clean tree still denies",
+   VCS + " worktree remove " + slash(WTLIVE), "deny", "shared-tree", cwd=WTMAIN,
+   config=WTLIVECFG)
+# A RECYCLED PID CANNOT INHERIT A DEAD SESSION'S CLAIM. Two ways a record goes stale: the pid no
+# longer runs at all, or the pid runs but its start time no longer matches (another process now
+# holds that number).
+sh("worktree remove: a session record for a pid that is no longer running does not deny",
+   VCS + " worktree remove " + slash(WTDEADSESSION), "allow", cwd=WTMAIN, config=WTDEADCFG)
+sh("worktree remove: a live pid whose recorded start time does not match does not deny",
+   VCS + " worktree remove " + slash(WTSTALESTART), "allow", cwd=WTMAIN, config=WTSTALESTARTCFG)
+
+# `git worktree prune`. This deletes NO FILES, only an administrative record, so the worst case
+# is an ASK, never a deny, whatever the run location.
+sh("worktree prune: a stale record asks, never denies",
+   VCS + " worktree prune", "ask", "shared-tree", cwd=WTPRUNE)
+sh("worktree prune: nothing to prune passes", VCS + " worktree prune", "allow", cwd=WTMAIN)
+sh("worktree prune: -n itself is a read, not a discard, so it passes unconditionally",
+   VCS + " worktree prune -n", "allow", cwd=WTPRUNE)
 
 
 # =========================================================================== 1b. the pointer HEAD
@@ -2040,6 +2396,45 @@ def subject_unread_log_case():
     return True, "one noted/subject-unread line, distinct from a refusal"
 
 
+def branch_base_unread_log_case():
+    """`git branch -D` over a repository with no `origin/HEAD`, no local `main` and no local
+    `master` is allowed, and logged as `noted`/`subject-unread`, the same shape as an unreadable
+    working-tree subject above.
+
+    Unlike `subject_unread_log_case`, this needs no blind stand-in `git`: BRANCHNOBASE really
+    answers none of the three resolve steps, so the read is genuinely unreadable, not simulated.
+    """
+    folder = os.path.join(ROOT, "branchnobaselog")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "guard.log")
+    if os.path.exists(path):
+        os.remove(path)
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    result = subprocess.run(
+        [sys.executable, GUARD],
+        input=json.dumps({"tool_name": "Bash",
+                          "tool_input": {"command": VCS + " branch -D orphan-work"},
+                          "cwd": BRANCHNOBASE}),
+        capture_output=True, text=True, env=env, timeout=60,
+    )
+    if result.stdout.strip():
+        return False, "expected a silent allow, got %r" % result.stdout.strip()[:120]
+    if not os.path.exists(path):
+        return False, "no log file was written for the unresolved base"
+    with open(path, encoding="utf-8") as handle:
+        lines = [line for line in handle.read().splitlines() if line.strip()]
+    if len(lines) != 1:
+        return False, "expected one line, found %d" % len(lines)
+    fields = lines[0].split("\t")
+    if len(fields) != 5 or fields[2] != "noted" or fields[3] != "subject-unread":
+        return False, "line does not read noted/subject-unread: %r" % lines[0]
+    if "branch" not in fields[4]:
+        return False, "the line does not carry the matched command: %r" % fields[4]
+    return True, "one noted/subject-unread line for the unresolved base"
+
+
 # --------------------------------------------------------------------------- the reason hygiene
 #
 # CLAUDE.md: "A refusal's printed remedy never names the forbidden target." The WHOLE printed
@@ -2285,6 +2680,8 @@ LOG_CHECKS = (
     ("log: a merge into main is allowed and noted where the base is unsafe", merge_log_case),
     ("log: a conflict-side checkout is allowed and noted", conflict_resolve_log_case),
     ("log: an unreadable subject is allowed and noted", subject_unread_log_case),
+    ("log: a branch delete with no resolvable base is allowed and noted",
+     branch_base_unread_log_case),
     ("stack: the refusal never names the action it refused", stack_reason_hygiene_case),
     ("split_segments: a comment starting a word ends its line, "
      "letter-before-# and quoted-# stay literal", split_segments_comment_case),
