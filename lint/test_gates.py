@@ -536,21 +536,96 @@ class ConfigReportTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0)
         self.assertEqual(run.stdout.strip(), "")
 
-    def test_19_merge_into_main_after_last_human_names_it(self):
+    def test_19_merge_into_main_after_last_human_names_it_by_pr_number(self):
+        # The report gate is a CHECK now (decisions/merge-notice-checks-the-report.md): when
+        # the reply's own report block does not already name the merge, it fires, by PR
+        # number, never by the raw command line.
         records = [
             human("merge it"),
             tool_use_msg("Bash", {"command": "gh pr merge 7 --squash"}),
             tool_result_msg(),
-            assistant_text("done"),
+            assistant_text("> **Done** shipped it"),
         ]
         path = write_transcript(records, self.tmp.name)
         run = run_gate(CONFIG_REPORT, self.hook_for(path))
         self.assertEqual(run.returncode, 0)
         out = json.loads(run.stdout)
         self.assertIn("systemMessage", out)
-        self.assertIn("Merges into main this turn:", out["systemMessage"])
-        self.assertIn("gh pr merge 7 --squash", out["systemMessage"])
+        self.assertIn("Merges into main this turn: #7.", out["systemMessage"])
+        self.assertNotIn("--squash", out["systemMessage"])
         self.assertIn("Name them in the report.", out["systemMessage"])
+
+    def test_19a_merge_named_in_the_report_stays_silent(self):
+        records = [
+            human("merge it"),
+            tool_use_msg("Bash", {"command": "gh pr merge 75 --squash"}),
+            tool_result_msg(),
+            assistant_text("> **Done** BUILT, merged #75\n> **Next** none"),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(CONFIG_REPORT, self.hook_for(path))
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_19b_merge_omitted_from_the_report_still_fires(self):
+        records = [
+            human("merge it"),
+            tool_use_msg("Bash", {"command": "gh pr merge 75 --squash"}),
+            tool_result_msg(),
+            assistant_text("> **Done** BUILT the fix\n> **Next** none"),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(CONFIG_REPORT, self.hook_for(path))
+        self.assertEqual(run.returncode, 0)
+        out = json.loads(run.stdout)
+        self.assertIn("Merges into main this turn: #75.", out["systemMessage"])
+
+    def test_19c_chained_gh_pr_view_does_not_ride_along(self):
+        records = [
+            human("merge it"),
+            tool_use_msg("Bash", {
+                "command": "gh pr merge 75 --squash ; gh pr view 75 --json state,mergedAt",
+            }),
+            tool_result_msg(),
+            assistant_text("no report yet"),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(CONFIG_REPORT, self.hook_for(path))
+        self.assertEqual(run.returncode, 0)
+        out = json.loads(run.stdout)
+        self.assertIn("Merges into main this turn: #75.", out["systemMessage"])
+        self.assertNotIn("gh pr view", out["systemMessage"])
+        self.assertNotIn("--json", out["systemMessage"])
+
+    def test_19d_several_merges_in_one_turn_are_all_named(self):
+        records = [
+            human("merge both"),
+            tool_use_msg("Bash", {"command": "gh pr merge 75 --squash"}),
+            tool_result_msg(),
+            tool_use_msg("Bash", {"command": "gh pr merge 76 --squash"}),
+            tool_result_msg(),
+            assistant_text("> **Done** merged #75\n> **Next** none"),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(CONFIG_REPORT, self.hook_for(path))
+        self.assertEqual(run.returncode, 0)
+        out = json.loads(run.stdout)
+        # #75 is already named in the report; #76 is not, so only #76 fires.
+        self.assertIn("Merges into main this turn: #76.", out["systemMessage"])
+        self.assertNotIn("#75", out["systemMessage"])
+
+    def test_19e_unreadable_pr_number_falls_back(self):
+        records = [
+            human("merge it"),
+            tool_use_msg("Bash", {"command": "gh pr merge --auto --squash"}),
+            tool_result_msg(),
+            assistant_text("no report yet"),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(CONFIG_REPORT, self.hook_for(path))
+        self.assertEqual(run.returncode, 0)
+        out = json.loads(run.stdout)
+        self.assertIn("Merges into main this turn: an unnumbered merge.", out["systemMessage"])
 
     def test_18_stop_hook_active_no_output(self):
         target = os.path.join(self.tmp.name, ".claude", "hooks", "x.py")
