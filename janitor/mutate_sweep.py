@@ -317,7 +317,7 @@ MUTATIONS = [
      '        result["branches"].append(decision)\n'
      '        if decision["action"] == "reap":\n'
      '            reap_branch(root, branch, decision, restore_log_path)',
-     "test_reap_writes_a_tombstone_and_a_restore_log_line_before_deleting"),
+     "test_preview_names_reapable_subjects_but_touches_neither"),
 ]
 
 
