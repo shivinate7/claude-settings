@@ -68,7 +68,8 @@ Drop the narration.<!-- rule:tokens-compacting-keep-essentials -->
 
 **Building.** Never guess an answer the code should give you.<!-- rule:building-never-guess-answer --> Surface ambiguity instead
 of resolving it silently.<!-- rule:building-surface-ambiguity --> Never drop an item without saying so.<!-- rule:building-never-drop-item-silently --> Check whether the
-primitive exists before building a workaround.<!-- rule:building-check-primitive-first --> Fix the cause, not the symptom.<!-- rule:building-fix-cause-not-symptom --> Name a
+primitive exists before building a workaround.<!-- rule:building-check-primitive-first --> A gate's allow list must point at the constant
+the code emits, never a copy of it.<!-- rule:building-allow-list-is-the-constant --> Fix the cause, not the symptom.<!-- rule:building-fix-cause-not-symptom --> Name a
 fix as a bandaid when a bandaid is the right call.<!-- rule:building-name-bandaid --> A capability no user can reach is not built. A design living
 only in chat is not done. Land the design in a spec or decision entry now, or declare
 the design abandoned.<!-- rule:building-land-design-or-abandon -->
