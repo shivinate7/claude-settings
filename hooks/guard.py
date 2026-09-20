@@ -750,7 +750,19 @@ def _segment_cd_target(tokens):
 
 def _segment_git_c_target(tokens):
     """Return a tokenized segment's `git -C <path>` target, or None when it names none, or
-    when the segment's command word is not `git`."""
+    when the segment's command word is not `git`.
+
+    ONLY THE SPACED FORM, `-C <path>`, IS READ. MEASURED against the real binary: `git
+    -C/some/path status` and `git -C=/some/path status` both fail with `unknown option:
+    -C/some/path` (or `-C=...`) and never run. An earlier version of this function also
+    accepted an attached `-C<path>` as if it named a tree, which let a command text attach any
+    path it liked to `-C` and have `_run_dir` read that path as though it were real, even
+    though git itself refused the call and the command ran wherever the shell's own cwd (or an
+    earlier, real `cd`) put it. Found in review of PR #75, reproduced against real git and
+    against the live guard: the attached form ALLOWED a `git reset --hard HEAD` that ran in a
+    real dirty checkout, because the fake `-C<path>` pointed the subject read at an unrelated
+    clean one.
+    """
     index = resolve_command(tokens)
     if index is None or basename(tokens[index]) not in ("git", "git.exe"):
         return None
@@ -759,8 +771,6 @@ def _segment_git_c_target(tokens):
         token = tokens[cursor]
         if token == "-C":
             return tokens[cursor + 1] if cursor + 1 < len(tokens) else None
-        if token.startswith("-C") and len(token) > 2:
-            return token[2:]
         if token in GIT_OPT_WITH_VALUE:
             cursor += 2
             continue
@@ -783,6 +793,38 @@ def _absolute(where: str, shell_cwd: str) -> str:
     return where
 
 
+def _strip_heredoc_bodies_unconditionally(cmd: str) -> str:
+    """Drop the body of every heredoc, header line kept, even one fed to an interpreter.
+
+    `strip_heredoc_bodies` keeps an INTERPRETER heredoc's body under inspection, on purpose,
+    because that body may be executed. But "may be executed" means the INTERPRETER runs it, not
+    the outer shell: a `cd` inside a `python3 <<'EOF'` body changes python's notion of a
+    directory, never the outer shell's cwd, so `_run_dir` must never read it as a live segment.
+    Found in review of PR #75, reproduced against the live guard: a `cd <clean checkout>` line
+    inside such a body ALLOWED a `git reset --hard HEAD` that actually ran in a real dirty
+    checkout named by the command's own cwd, because `_run_dir` read the heredoc body's `cd` as
+    though the outer shell had run it. This is a dedicated copy for `_run_dir` alone; every
+    other caller of `strip_heredoc_bodies` still needs the interpreter body kept for its OWN
+    question, which is what a write or a refused command might say, not where the shell sits.
+    """
+    lines = cmd.split("\n")
+    kept = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        kept.append(line)
+        match = HEREDOC_HEADER.search(line)
+        index += 1
+        if not match:
+            continue
+        delimiter = match.group(2)
+        while index < len(lines) and lines[index].strip() != delimiter:
+            index += 1
+        if index < len(lines):
+            index += 1  # drop the closing delimiter line too
+    return "\n".join(kept)
+
+
 def _run_dir(cmd: str, shell_cwd: str) -> str:
     """Return the directory the command RUNS in: a `git -C`, else the last `cd`, else the cwd.
 
@@ -796,7 +838,12 @@ def _run_dir(cmd: str, shell_cwd: str) -> str:
     quote) is skipped, the same fail-open stance `segment_tokens` documents elsewhere. The FIRST
     `git -C` found, across all segments in order, still wins over every `cd`, matching this
     function's behaviour before this fix; failing that, the LAST `cd` found wins.
+
+    HEREDOC BODIES ARE STRIPPED FIRST, unconditionally, even an interpreter body that
+    `strip_heredoc_bodies` keeps for other callers: a `cd` line inside one never moves the
+    OUTER shell, which is the tree this function answers about.
     """
+    cmd = _strip_heredoc_bodies_unconditionally(cmd)
     where = None
     last_cd = None
     for segment in split_segments(cmd):
