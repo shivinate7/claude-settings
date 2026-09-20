@@ -20,12 +20,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from ste_gate import last_reply  # noqa: E402
 
-# guard.py owns the one shell tokenizer this repo trusts: quote-aware segment splitting,
-# heredoc-body stripping, and command-word resolution through wrappers like `sudo`. lint/ and
-# hooks/ land side by side, both under the repo root and under ~/.claude, so the hop from one
-# to its sibling holds in both places. MEASURED: the old regex `LANDING_COMMAND.search(cmd)`
-# read the raw command text and could not tell a quoted probe string, or a heredoc body, from
-# an actual git write. See decisions/predicate-is-the-act.md.
+# guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
+# heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
+# and past the pre-subcommand options that take a value (`-C <dir>`, `--git-dir=<path>`, and
+# the rest of `GIT_OPT_WITH_VALUE`) to the subcommand it actually runs. lint/ and hooks/ land
+# side by side, both under the repo root and under ~/.claude, so the hop from one to its
+# sibling holds in both places. MEASURED: the old regex `LANDING_COMMAND.search(cmd)` read
+# the raw command text and could not tell a quoted probe string, or a heredoc body, from an
+# actual git write. See decisions/predicate-is-the-act.md.
 sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 try:
     import guard
@@ -89,22 +91,19 @@ def tool_uses(rec):
 
 
 def _segment_lands_a_git_write(segment):
-    """True when a shell segment's own command word is `git` and its own first argument
-    (after resolving wrappers like `sudo`) is `commit`, `push`, or `merge`.
+    """True when one of the segment's own `git` calls resolves to `commit`, `push`, or `merge`.
 
-    Tokenizing per segment, after `strip_heredoc_bodies` and `split_segments` already ran on
-    the whole command, is what keeps a quoted probe string or a heredoc body from reading as a
-    command. `git merge-base` is a different word than `merge` and never matches.
+    `guard.git_calls` is the parser every git rule in guard.py already trusts: it walks past
+    `sudo`, and past the pre-subcommand options that take a value (`-C <dir>`,
+    `--git-dir=<path>`, and the rest of `GIT_OPT_WITH_VALUE`), to the subcommand a call would
+    actually run. Reusing it, rather than a second hand-rolled skip, is what keeps
+    `git -C /path commit` counted as a landing. `git merge-base` resolves to the subcommand
+    `merge-base`, a different word than `merge`, and never matches.
     """
-    tokens = guard.segment_tokens(segment)
-    if not tokens:
-        return False
-    index = guard.resolve_command(tokens)
-    if index is None or guard.basename(tokens[index]) != "git":
-        return False
-    if index + 1 >= len(tokens):
-        return False
-    return tokens[index + 1] in GIT_LANDING_SUBCOMMANDS
+    for subcommand, _args in guard.git_calls(segment):
+        if subcommand in GIT_LANDING_SUBCOMMANDS:
+            return True
+    return False
 
 
 def turn_landed(records):

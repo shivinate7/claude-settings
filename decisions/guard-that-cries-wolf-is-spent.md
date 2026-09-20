@@ -56,6 +56,11 @@ reading it.
 
 A predicate that matches text is not a predicate on the act. Resolve the act
 instead. `hooks/guard.py` already does this, with `split_segments`,
-`strip_heredoc_bodies`, and `resolve_command`. Or gate on identity before
-content, the way the fixed `session_start.sh` now compares
-`git remote get-url origin` in both trees, before it reads either file.
+`strip_heredoc_bodies`, and `git_calls`, which walks past `sudo` and past
+options like `-C <dir>` to the subcommand a call actually runs. The first
+report-gate fix hand-rolled its own, narrower skip, past only `git`'s own
+next token. That missed `git -C /path commit`, a real landing, unreported.
+The lesson holds twice over: import the resolver, do not re-derive a part of
+it. Or gate on identity before content, the way the fixed `session_start.sh`
+now compares `git remote get-url origin` in both trees, before it reads
+either file.
