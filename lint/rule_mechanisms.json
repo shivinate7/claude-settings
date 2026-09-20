@@ -464,6 +464,13 @@
         "kind": "unmechanized",
         "reason": "No check reads a green result and reports which platforms and fixture states it did not cover. The CI matrix runs three platforms, which is coverage, not a check on how a reader treats the green."
       }
+    },
+    "building-allow-list-is-the-constant": {
+      "mechanism": {
+        "kind": "gate",
+        "ref": "lint/check_landed_dirs.py",
+        "needle": "CONFIG_FROZEN_DIRS"
+      }
     }
   }
 }
