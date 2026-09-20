@@ -192,6 +192,14 @@ def split_segments(cmd: str):
     Quoted text, single or double, is copied whole into the current segment, so a delimiter
     inside a quote never starts a new one. An unterminated quote runs to the end of the string,
     which keeps the remainder inside it rather than guessing where it would have closed.
+
+    THE COMMENT RULE, measured before it was written: without it, the `'` in `# the driver's
+    shape` opens a quote that runs to the end of the text, and `guard-shell-selftest.sh`'s
+    runaway-driver fixture — a script whose second line is exactly that comment — went from
+    refused to ALLOWED once the parent's per-line reader was replaced by this function. An
+    unquoted `#` that STARTS A WORD (index 0, or the previous character is space, tab,
+    newline, `;`, `|`, `&`, or `(`) is a comment to the end of its line — the shell's own
+    rule. `fix#3` and `'#300'` are not comments under it.
     """
     segments = []
     current = []
@@ -205,6 +213,10 @@ def split_segments(cmd: str):
             if char == quote:
                 quote = ""
             index += 1
+            continue
+        if char == "#" and (index == 0 or cmd[index - 1] in " \t\n;|&("):
+            while index < length and cmd[index] != "\n":
+                index += 1
             continue
         if char in ("'", '"'):
             quote = char
@@ -1122,6 +1134,21 @@ STACK_DENY_REASON = (
     "Remedy: read the entry with `git stash list` and `git stash show -p stash@{N}`, commit any "
     "patch you need on a branch of your own, and leave the entry for its owner. "
     "Set your own work aside with a commit on your own branch, never on the stack."
+)
+# `push`, `save` and a bare `git stash` PUT work onto that same one ref. A worktree limits a
+# `reset --hard` or a `restore`, because those write the WORKTREE's own tree. They do not limit
+# a stash push, because `refs/stash` is not the worktree's own ref: it is the one the primary
+# checkout and every other linked worktree already share (MEASURED above, TREE_ASK_REASON's own
+# comment). A push from a worktree lands on the same branchless, one-entry-wide stack a `pop` or
+# an `apply` would take from, so the worktree exemption that TREE_ASK_REASON grants never
+# applies here.
+PUSH_DENY_REASON = (
+    "Rule (shared trees): this command puts work onto the stash stack, and that stack is one "
+    "ref shared by the whole clone, not by this tree alone, so a worktree does not limit the "
+    "loss. "
+    "Remedy: commit the work on a branch of your own instead. "
+    "Set work aside with a commit on your own branch, never a stash: a stash entry belongs to "
+    "no branch, and it outlives no session that holds its tag."
 )
 
 
@@ -2365,6 +2392,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
             continue
         if subcommand == "stash" and stash_takes_the_stack(args):
             refuse(tool, "deny", "shared-tree", STACK_DENY_REASON, matched)
+        # A stash PUT reaches here only when it would discard (state is not True above), and its
+        # subject is `refs/stash`, the one ref every worktree of this clone already shares. The
+        # worktree "ask" below is earned only for a subject that lives in THIS tree alone, so a
+        # push denies here instead of falling into that ask.
+        if subcommand == "stash":
+            refuse(tool, "deny", "shared-tree", PUSH_DENY_REASON, matched)
         worktree = is_worktree(root)
         if worktree is True:
             refuse(tool, "ask", "shared-tree", TREE_ASK_REASON, matched)

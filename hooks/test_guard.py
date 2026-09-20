@@ -743,6 +743,24 @@ sh("worktree: -C naming the worktree asks, from the shared checkout",
    VCS + " -C " + slash(GITWT) + " reset --hard", "ask", "shared-tree", cwd=GITMAIN)
 sh("worktree: a cd into the worktree asks, from the shared checkout",
    "cd " + slash(GITWT) + " && " + VCS + " reset --hard", "ask", "shared-tree", cwd=GITMAIN)
+sh("worktree: restore of a dirty path still asks, unchanged", VCS + " restore f.txt", "ask",
+   "shared-tree", cwd=GITWT)
+sh("worktree: checkout -- of a dirty path still asks, unchanged", VCS + " checkout -- f.txt",
+   "ask", "shared-tree", cwd=GITWT)
+
+# THE PUSH ARM. `refs/stash` lives in the COMMON git directory (MEASURED above, next to
+# SUBJSTASHWT), so a push from a worktree lands on the SAME one-entry-wide stack the primary
+# checkout and every other lane share. The worktree "ask" that `reset --hard` and `restore` earn
+# just above never applies to this arm: it is earned for a subject that lives in THIS tree
+# alone, and a stash push's subject does not.
+sh("worktree: a stash push in a dirty worktree denies, the stack is clone-wide",
+   VCS + " stash push -u -m lane", "deny", "shared-tree", cwd=GITWT)
+sh("worktree: a bare stash in a dirty worktree denies, the stack is clone-wide",
+   VCS + " stash", "deny", "shared-tree", cwd=GITWT)
+sh("worktree: stash save in a dirty worktree denies, the stack is clone-wide",
+   VCS + " stash save lane", "deny", "shared-tree", cwd=GITWT)
+sh("worktree: a stash push in the shared checkout still denies, unchanged",
+   VCS + " stash push -u -m lane", "deny", "shared-tree", cwd=GITMAIN)
 
 # THE TABLE'S ALLOW ROWS, checked in both a shared checkout and a worktree, so an allow is proven
 # to hold regardless of which tree the call runs in — a read or a restore never needed the
@@ -2169,6 +2187,71 @@ def log_env_case():
     return True, "generic on stdout, named in the log"
 
 
+def _load_guard_module():
+    """Import GUARD (respecting GUARD_UNDER_TEST) as a module, for a direct unit check.
+
+    Every other case in this file drives the guard as a subprocess, one JSON object on
+    stdin. `split_segments` has no JSON-shaped entry point of its own, so this loads the
+    file under test directly, the same way `python3 -c "import guard; guard.split_segments(...)"`
+    in the bug report does.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("guard_under_test", GUARD)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def split_segments_comment_case():
+    """A `#` is a comment only where the shell would read it as one.
+
+    MEASURED regression, 2026-09-19: without the comment rule, the `'` in
+    `# the driver's shape` opens a quote that runs to end of text, and everything after it
+    — including `while true; do sleep 5; done` — collapses into one segment. Rule 1 never
+    sees the real command. `guard-shell-selftest.sh`'s runaway-driver fixture went from
+    refused to ALLOWED the moment a per-line reader was swapped in ahead of this fix.
+
+    `fix#3` and `'#300'` must stay non-comments: a `#` after a letter, or inside quotes, is
+    an ordinary character.
+    """
+    guard = _load_guard_module()
+    problems = []
+
+    got = guard.split_segments("# the driver's shape\nwhile true; do sleep 5; done")
+    want = ["", "while true", " do sleep 5", " done"]
+    if got != want:
+        problems.append("apostrophe-in-comment: got %r want %r" % (got, want))
+    if len(got) < 2:
+        problems.append(
+            "apostrophe-in-comment collapsed to one segment: got %r" % (got,))
+
+    got = guard.split_segments("echo fix#3; ls")
+    want = ["echo fix#3", " ls"]
+    if got != want:
+        problems.append("fix#3 (no quotes): got %r want %r" % (got, want))
+
+    got = guard.split_segments("echo '#300'; ls")
+    want = ["echo '#300'", " ls"]
+    if got != want:
+        problems.append("quoted hash '#300': got %r want %r" % (got, want))
+
+    # A comment at index 0, and one after each of `;`, `|`, `&`, `(`.
+    for prefix, sep in (
+        ("", ""),
+        ("true;", ";"),
+        ("true|", "|"),
+        ("true&", "&"),
+        ("(", "("),
+    ):
+        cmd = prefix + "# comment after %r" % sep
+        got = guard.split_segments(cmd)
+        joined = "".join(got)
+        if "comment after" in joined:
+            problems.append("comment after %r was not dropped: %r" % (sep, got))
+
+    return (not problems), "; ".join(problems) if problems else "comment rule holds"
+
+
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
 # literal count drifts the moment a case is added, and a suite that miscounts its own cases is a
 # suite a reader stops trusting.
@@ -2183,6 +2266,8 @@ LOG_CHECKS = (
     ("log: a conflict-side checkout is allowed and noted", conflict_resolve_log_case),
     ("log: an unreadable subject is allowed and noted", subject_unread_log_case),
     ("stack: the refusal never names the action it refused", stack_reason_hygiene_case),
+    ("split_segments: a comment starting a word ends its line, "
+     "letter-before-# and quoted-# stay literal", split_segments_comment_case),
 )
 
 
