@@ -2391,6 +2391,10 @@ CONFIG_FROZEN_DIRS = (
     os.path.normcase("hooks"),
     os.path.normcase("lint"),
     os.path.normcase("agents"),
+    # janitor/sweep.py deletes branches and worktrees. A session must not rewrite a program that
+    # deletes things, same reasoning as hooks/lint/agents, so it lands here too (plan:
+    # janitor-build-plan.md, "The code lands in a new janitor/ directory").
+    os.path.normcase("janitor"),
     # `state` holds the baseline `hooks/config_watch.py` restores a reverted file from. A session
     # that could rewrite the baseline could launder a cap lift into it, so the store is frozen on
     # the same terms as the hooks themselves. Rule 7 needs only the PATH, never the value, so this
