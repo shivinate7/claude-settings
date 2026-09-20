@@ -63,7 +63,7 @@ CI_STEP_RE = re.compile(r'^\s*-\s*name:\s*(.+?)\s*$', re.MULTILINE)
 # is deliberately removed. Update UNMECHANIZED_EXPECTED in the SAME commit that builds a
 # mechanism (lower it) or adds an unmechanized rule (raise it, and say why in the message).
 RULE_FLOOR = 76
-UNMECHANIZED_EXPECTED = 53
+UNMECHANIZED_EXPECTED = 52
 REASON_MIN_WORDS = 8
 
 KINDS = {"guard", "gate", "ci", "unmechanized"}

@@ -198,6 +198,69 @@ before the tool call runs. The request never reaches the permission layer, so
 no hook can ask about it. The only prompt left is the one on the settings
 write, and that is where the approval now lives.
 
+## The expiry (2026-09-20)
+
+CLAUDE.md said the orchestrator removes the grant file when the work is done.
+Nothing checked that. `lint/rule_mechanisms.json` recorded rule
+`roles-remove-override-file` as `unmechanized` for exactly this reason. An
+approved lift stayed lifted, with no clock on it.
+
+### What was protecting the outcome, and what protects it now
+
+Before this entry, the only control was the orchestrator's own memory. It had
+to remember to delete a file. Nothing enforced that. Nothing noticed when it
+was skipped. That is what `roles-remove-override-file` named as ungoverned.
+
+Now `.claude/settings.local.json` carries a second, repo-owned field. It sits
+outside the `env` block: `_subagentCapUntil`, an ISO-8601 instant. It must be
+no more than 24 hours ahead of the write. `hooks/config_watch.py` already
+hashes this file at every `PostToolUse` and `Stop`. It already holds the
+pre-lift baseline needed to restore it. It now also reads this field on every
+sweep. A deadline can be missing, unparseable, already passed, or more than 24
+hours out. Any of those gets the file reverted to its pre-lift content. A
+systemMessage names the file and what was wrong. The outcome protected is the
+one `roles-remove-override-file` named. A worker above Sonnet does not run
+forever on one yes. What protects it now is a hook that reads a clock, not a
+person's memory.
+
+### A rejected spelling, and why
+
+A proposal named an env var: `CLAUDE_CODE_SUBAGENT_MODEL_UNTIL`. It was
+rejected, for three measured reasons. Claude Code reads no such setting. The
+name lies about who enforces it. Nothing in the harness honors an expiring env
+var on its own. It would be prose with no mechanism. That is the shape this
+file's own first section already argued against once. And a key spelled
+inside `env` is read by `guard.SUBAGENT_CAP_KEY`. That is the same pattern the
+cap variables match.
+
+MEASURED: `guard._cap_reading('"CLAUDE_CODE_SUBAGENT_MODEL_UNTIL": "..."')`
+returns `{'CLAUDE_CODE_SUBAGENT_MODEL': ''}`. A write that touched only that
+line would ask the owner to approve something. That something is a cap lift
+that is not really happening.
+
+`_subagentCapUntil` avoids all three problems. It sits outside `env`. It is
+never exported into a subagent's shell. It never matches
+`guard.SUBAGENT_CAP_KEY`. MEASURED: `guard._cap_reading('"_subagentCapUntil":
+"2026-09-21T00:00:00Z"')` returns `{}`. The PreToolUse guard stays silent on
+it. Only `hooks/config_watch.py` reads and enforces it. The name is honest
+about who reads it. The watch is what this repository ships. It is not a
+Claude Code setting.
+
+### The baseline store now carries a `prior`
+
+Before this entry, an approved cap change re-baselined straight to the lifted
+content: `save_baseline(path, current)`. The pre-lift bytes were gone by the
+time a deadline could be checked. `hooks/config_watch.py`'s baseline entries
+now carry a third field, `prior`. It holds the content last seen before the
+current lift began. It is carried forward through any later edit that keeps
+the reading lifted. `load_baseline` reads a missing `prior` key the same as an
+explicit absence. That is the shape every entry written before this change
+carries. An old entry never crashes the new reader. When no `prior` is on
+record, the expiry rule does not invent a replacement file. It does not leave
+the override running in silence either. It reports the file as UNKNOWN. That
+is the same way a first sight of the cap with no baseline already does. It
+asks the owner to check the file by hand.
+
 ## Where this lives
 
 This repository had no `decisions/` folder before this entry. This file starts

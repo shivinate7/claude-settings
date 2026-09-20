@@ -68,10 +68,16 @@
         "ref": "subagent-model-cap"
       }
     },
+    "roles-override-carries-expiry": {
+      "mechanism": {
+        "kind": "guard",
+        "ref": "subagent-model-cap"
+      }
+    },
     "roles-remove-override-file": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "Nothing checks that the settings.local.json cap override was deleted once the subagent work finished."
+        "kind": "guard",
+        "ref": "subagent-model-cap"
       }
     },
     "roles-workers-never-spawn": {
