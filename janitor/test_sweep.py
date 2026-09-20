@@ -426,6 +426,18 @@ class DiscoveryTests(unittest.TestCase):
 # --------------------------------------------------------------------------- the opt-out file
 
 
+def make_optout_repo(name, optout_json=None):
+    """A repository with one reapable branch ("feature", an ancestor of main): the subject a
+    sweep would touch if it were not refused. Real git, no mocking."""
+    root = os.path.join(ROOT, name)
+    make_repo(root, {"f.txt": "x\n"})
+    run_vcs(root, "checkout", "-q", "-b", "feature")
+    run_vcs(root, "checkout", "-q", "main")
+    if optout_json is not None:
+        write(os.path.join(root, ".claude", "janitor.json"), optout_json)
+    return root
+
+
 class OptOutTests(unittest.TestCase):
     def test_absent_file_means_swept_with_the_default_prefix(self):
         root = os.path.join(ROOT, "optout-absent")
@@ -441,6 +453,20 @@ class OptOutTests(unittest.TestCase):
         write(os.path.join(root, ".claude", "janitor.json"), json.dumps({"sweep": False}))
         result = sweep.sweep_repo(root, confirm=False, restore_log_path=os.path.join(ROOT, "x2.log"))
         self.assertEqual(result["refused"], "opted-out")
+
+    def test_sweep_true_explicitly_still_sweeps(self):
+        root = make_optout_repo("optout-sweep-true", json.dumps({"sweep": True}))
+        branches = sweep.list_local_branches(root)
+        self.assertTrue(len(branches) > 0, "branch list must not be empty before any verdict")
+        self.assertIn("feature", branches)
+        enabled, prefixes, ok = sweep.load_optout(root)
+        self.assertTrue(ok)
+        self.assertTrue(enabled)
+        result = sweep.sweep_repo(root, confirm=False,
+                                   restore_log_path=os.path.join(ROOT, "x-true.log"))
+        self.assertIsNone(result["refused"])
+        reaped = [b for b in result["branches"] if b["action"] == "reap"]
+        self.assertTrue(len(reaped) > 0, "a real reapable branch must show up as reaped")
 
     def test_protected_prefixes_extend_the_default(self):
         root = os.path.join(ROOT, "optout-prefixes")
@@ -459,6 +485,62 @@ class OptOutTests(unittest.TestCase):
         write(os.path.join(root, ".claude", "janitor.json"), "{ not json at all")
         result = sweep.sweep_repo(root, confirm=False, restore_log_path=os.path.join(ROOT, "x3.log"))
         self.assertEqual(result["refused"], "unreadable-optout")
+
+    # --------------------- a present key whose value is malformed refuses, not defaults ---------
+
+    def test_sweep_string_false_refuses_the_whole_repository(self):
+        # The exact regression this build guards: `"sweep": "false"`, the STRING, must never be
+        # treated as truthy-and-swept. It must refuse the repository the way an unreadable file
+        # does, not fall through to the permissive default.
+        root = make_optout_repo("optout-sweep-string-false", json.dumps({"sweep": "false"}))
+        branches = sweep.list_local_branches(root)
+        self.assertTrue(len(branches) > 0, "branch list must not be empty before any verdict")
+        self.assertIn("feature", branches)
+        enabled, prefixes, ok = sweep.load_optout(root)
+        self.assertFalse(ok, "a non-boolean sweep value must not read as ok")
+        result = sweep.sweep_repo(root, confirm=False,
+                                   restore_log_path=os.path.join(ROOT, "x-str.log"))
+        self.assertEqual(result["refused"], "unreadable-optout")
+        self.assertEqual(result["branches"], [], "a refused repository must decide on nothing")
+
+    def test_sweep_zero_refuses_the_whole_repository(self):
+        root = make_optout_repo("optout-sweep-zero", json.dumps({"sweep": 0}))
+        branches = sweep.list_local_branches(root)
+        self.assertTrue(len(branches) > 0, "branch list must not be empty before any verdict")
+        self.assertIn("feature", branches)
+        enabled, prefixes, ok = sweep.load_optout(root)
+        self.assertFalse(ok, "0 is not a bool in Python's own sense here: it must refuse")
+        result = sweep.sweep_repo(root, confirm=False,
+                                   restore_log_path=os.path.join(ROOT, "x-zero.log"))
+        self.assertEqual(result["refused"], "unreadable-optout")
+        self.assertEqual(result["branches"], [])
+
+    def test_sweep_null_refuses_the_whole_repository(self):
+        root = make_optout_repo("optout-sweep-null", json.dumps({"sweep": None}))
+        branches = sweep.list_local_branches(root)
+        self.assertTrue(len(branches) > 0, "branch list must not be empty before any verdict")
+        self.assertIn("feature", branches)
+        enabled, prefixes, ok = sweep.load_optout(root)
+        self.assertFalse(ok, "null is present and is not a boolean: it must refuse")
+        result = sweep.sweep_repo(root, confirm=False,
+                                   restore_log_path=os.path.join(ROOT, "x-null.log"))
+        self.assertEqual(result["refused"], "unreadable-optout")
+        self.assertEqual(result["branches"], [])
+
+    def test_protected_prefixes_bare_string_refuses_the_whole_repository(self):
+        # "archive/" the bare string is not a list, so the intended protection can be neither
+        # read nor safely ignored: refuse the repository rather than silently protect nothing.
+        root = make_optout_repo("optout-prefixes-bare-string",
+                                 json.dumps({"protectedPrefixes": "archive/"}))
+        branches = sweep.list_local_branches(root)
+        self.assertTrue(len(branches) > 0, "branch list must not be empty before any verdict")
+        self.assertIn("feature", branches)
+        enabled, prefixes, ok = sweep.load_optout(root)
+        self.assertFalse(ok, "a bare string is not a list of strings: it must refuse")
+        result = sweep.sweep_repo(root, confirm=False,
+                                   restore_log_path=os.path.join(ROOT, "x-prefstr.log"))
+        self.assertEqual(result["refused"], "unreadable-optout")
+        self.assertEqual(result["branches"], [])
 
 
 # --------------------------------------------------------------------------- the tombstone

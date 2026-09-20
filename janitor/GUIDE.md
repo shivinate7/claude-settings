@@ -61,10 +61,12 @@ Write `.claude/janitor.json` at the root of your repository:
     }
 
 `sweep` must be the JSON literal `false` to opt out. A string, a number or a
-null is not a `false`, and the sweep then treats your repository as swept.
+null is not a `false`. The sweep then refuses your whole repository, the same
+direction as an unreadable file, not a guess at what you meant.
 
-`protectedPrefixes` is a list of strings. The sweep adds them to `backup/`, and
-it never drops the default.
+`protectedPrefixes` is a list of strings. The sweep adds them to `backup/`,
+and it never drops the default. A value that is not a list of strings also
+refuses your whole repository, instead of silently protecting nothing.
 
 Both keys are optional. A file that holds only `protectedPrefixes` stays swept,
 and protects more names.

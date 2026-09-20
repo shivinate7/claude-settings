@@ -91,8 +91,18 @@ def discover_repos(root: str):
 def load_optout(root: str):
     """Return (sweep_enabled, protected_prefixes, ok).
 
-    ok is False when the file exists but could not be read as one JSON object; the caller then
-    refuses the whole repository rather than trust a default.
+    ok is False when the file exists but could not be read as one JSON object, or when a key it
+    DOES hold is not shaped the way that key means: a `sweep` value that is not a boolean, or a
+    `protectedPrefixes` value that is not a list of strings. In every one of those cases the
+    caller refuses the whole repository rather than trust a default.
+
+    A key that is ABSENT is different: an absent key states nothing, and the owner's choice was
+    auto-on, so the default still applies. But a key that IS present and malformed states a
+    wish the sweep cannot read. Guessing at that wish is the one error that costs work: guess
+    wrong on `sweep` and a repository that opted out gets swept and loses branches; guess wrong
+    on `protectedPrefixes` and a repository silently protects nothing. Refusing the repository
+    costs one rerun after the owner fixes the file. Guessing costs branches that do not come
+    back.
     """
     path = os.path.join(root, OPTOUT_FILENAME)
     if not os.path.isfile(path):
@@ -104,15 +114,18 @@ def load_optout(root: str):
         return False, (), False
     if not isinstance(data, dict):
         return False, (), False
+    if "sweep" in data and not isinstance(data["sweep"], bool):
+        return False, (), False
     sweep_enabled = data.get("sweep", True)
-    if not isinstance(sweep_enabled, bool):
-        sweep_enabled = True
-    extra = data.get("protectedPrefixes", [])
-    if not isinstance(extra, list):
+    if "protectedPrefixes" in data:
+        extra = data["protectedPrefixes"]
+        if not isinstance(extra, list) or not all(isinstance(item, str) for item in extra):
+            return False, (), False
+    else:
         extra = []
     prefixes = list(DEFAULT_PROTECTED_PREFIXES)
     for item in extra:
-        if isinstance(item, str) and item:
+        if item:
             prefixes.append(item)
     return sweep_enabled, tuple(prefixes), True
 
