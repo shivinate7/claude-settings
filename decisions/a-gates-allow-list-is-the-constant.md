@@ -23,11 +23,24 @@ violation of this rule.
 
 **1. Import the constant.** The default. When a gate runs in the same
 language and the same process as the code it checks, it imports the value
-instead of re-deriving it. `lint/report_gate.py` now imports
-`hooks/guard.py`'s own tokenizer, `git_calls`, rather than matching command
-text with its own regex. The regex version produced a false negative: it
-counted `git -C <dir> commit` as a landing when the argument shifted the
-subcommand past what the pattern expected.
+instead of re-deriving it.
+
+`lint/report_gate.py` first matched a git write with a regex over the raw
+command text. That regex read the words `git commit` inside a quoted
+probe list as a real landing, a false positive. That false alarm is the
+reason anyone touched this file.
+
+The first fix required the subcommand to sit right after `git` in the
+segment's own tokens. It killed the false positive. It also missed
+`git -C /path commit`, because `-C /path` sits between the command word
+and the subcommand. A real landing then went unreported, a false
+negative, and a gate that stays silent says nothing.
+
+The second fix imported `hooks/guard.py`'s own `git_calls`, which already
+walks past `sudo` and every value-taking option, `-C` included, to the
+real subcommand. The hand-rolled fix had re-derived one piece of that
+resolver, and re-derived it short. Importing the whole resolver is what
+closed both failures.
 
 **2. Make the build emit the constant, and read what it emitted.** For a
 boundary an import cannot cross. `landed-dirs.txt` is the one file
