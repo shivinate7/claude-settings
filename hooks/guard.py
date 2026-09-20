@@ -20,6 +20,12 @@ one fixed order, and the first match wins.
   1b pointer-head      a command that moves HEAD off `main` in the POINTER checkout, the one
                        checkout every session on this machine runs its hooks and its lint from.
                        Always denied. A move TO `main` restores the invariant and passes.
+  1c silent-write      a `commit`, `push`, `merge`, `tag`, `rebase`, or `cherry-pick` whose own
+                       trace is silenced, by a redirect of either stream to a null device, or,
+                       on `push`/`merge`/`rebase` only (MEASURED), by git's own `-q`/`--quiet`
+                       flag alone. `commit`, `tag`, and `cherry-pick`'s own flags are measured
+                       carve-outs. `merge --abort` is carved out, and every read subcommand is
+                       untouched.
   2 machine-wide-kill  a kill by name or by pattern
   3 live-stream        a command that follows a stream and never ends on its own
   3 waiter             a shell segment whose command word is a sleep-and-poll
@@ -74,6 +80,35 @@ revert is unresolved in the tree picks a conflict side; it does not discard work
 git itself already holds the tree open. That one call is allowed and logged as
 `noted`/`conflict-resolve`. Any other `git checkout` that names a path keeps rule 1's
 ordinary deny or ask.
+
+Rule 1c, `silent-write`, mechanizes CLAUDE.md's "Never discard a command's output" for
+git. pkmnscan's `scripts/silent-write-guard.py` carries the measurement this rule ports:
+a coordinator reported work as landed twice in one session when it had not, once because
+a pre-commit refusal went to `/dev/null`, and once because the `git log` that followed
+showed the PREVIOUS commit, indistinguishable at a glance from the one that should have
+landed. A discarding redirect reproduces that on any of the six subcommands below: the
+shell throws the stream away before git gets a say, so a refusal and a proof of landing
+are both gone, together.
+
+git's OWN quiet flag is judged separately, because it is git's choice of what to print,
+not the shell's, and the choice is not the same for every subcommand. MEASURED
+2026-09-19 and 2026-09-20, in throwaway repos, never a shared checkout, all six: `commit`
+carves out, because a hook's refusal and a no-op's message both keep their own stream and
+a nonzero exit, so a silent exit-0 commit is already unambiguous. `push`, `merge`, and
+`rebase` do not carve out: each one's success and its own no-op are BOTH silent at exit 0,
+so the flag erases the one line that told a real write from one that moved nothing. `tag`
+carves out for a sharper reason: it has no `-q` or `--quiet` at all, so the flag is always
+a loud, immediate option-parsing failure, never a silent write. `cherry-pick` carves out
+too: its short form is invalid the same way `tag`'s is, and its long form still prints a
+full commit summary, a full conflict, or a full "nothing to commit" in every state, so
+nothing is silenced either way. A discarding redirect still denies any of the six.
+
+The carve-outs are pinned by fixtures, not left to judgement. `git fetch -q`, every read
+subcommand, and the test-by-exit-code shape `git rev-parse -q --verify <ref> >/dev/null
+2>&1` that rule 1b already relies on, all stay allowed, because none of them is in
+`SILENT_WRITE_SUBCOMMANDS`. `git merge --abort` is carved out inside the rule itself: an
+abort lands nothing, so it has no landing to prove. No environment hatch. The permission
+prompt is the grant here, the same as everywhere else in this file.
 
 Every refusal names its rule and says what to do instead. A remedy never names
 the refused command or the refused path, because a remedy that repeats the
@@ -405,6 +440,141 @@ def push_is_forced(args) -> bool:
         if arg.startswith("-") and not arg.startswith("--") and "f" in arg:
             return True
     return False
+
+
+# ------------------------------------------------------------------ the silent write
+#
+# Rule 1c. CLAUDE.md (Git): "Never discard a command's output." A discarding REDIRECT is denied on
+# every one of these six subcommands, whatever the subcommand does with its own output: the shell
+# throws the stream away before git ever gets a say, so a hook's refusal and git's own proof of
+# landing are both gone, together, always.
+SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick")
+
+# git's OWN `-q`/`--quiet` flag is a narrower claim, and it does not read the same for every
+# subcommand. MEASURED 2026-09-19 and 2026-09-20, in throwaway repos under this session's
+# scratchpad, never in a shared checkout, `-q`/`--quiet` alone, no redirect, three states each: a
+# write that succeeds, one a hook refuses (a `pre-commit`/`pre-receive` hook, or the conflict
+# `merge`, `rebase`, and `cherry-pick` raise on their own), and a no-op (nothing staged or to
+# push, an already-merged branch, nothing left to replay, a change already present).
+#
+#   git commit -q       success        exit 0, stdout '',                stderr ''
+#                        hook refusal   exit 1, stdout '',                stderr the hook's own line
+#                        no-op          exit 1, stdout "nothing to        stderr ''
+#                                                commit ...",
+#
+#   git push --quiet    success        exit 0, stdout '',                stderr ''
+#                        hook refusal   exit 1, stdout '',                stderr the full rejection
+#                        no-op          exit 0, stdout '',                stderr ''
+#
+#   git merge -q         success        exit 0, stdout '',                stderr ''
+#                        conflict       exit 1, stdout the full           stderr ''
+#                                                CONFLICT message,
+#                        no-op          exit 0, stdout '',                stderr ''
+#
+#   git rebase -q       success        exit 0, stdout '',                stderr ''
+#                        conflict       exit 1, stdout the CONFLICT       stderr the apply error
+#                                                message,                 and its hints,
+#                        no-op          exit 0, stdout '',                stderr ''
+#
+#   git tag -q          every state    exit 129, stdout '',              stderr "error: unknown
+#                                                                                switch `q'" plus
+#                                                                                the full usage
+#
+#   git cherry-pick -q  every state    exit 129, stdout '',              stderr the full usage
+#                                                                                ("-q" is not a
+#                                                                                cherry-pick option)
+#   git cherry-pick
+#     --quiet            success        exit 0, stdout the full commit    stderr ''
+#                                                summary line,
+#                        conflict       exit 1, stdout the CONFLICT       stderr the apply error
+#                                                message,                 and its hints,
+#                        no-op          exit 1, stdout "nothing to        stderr "previous
+#                                                commit ...",              cherry-pick is now
+#                                                                          empty" and its hint
+#
+# `commit -q` hides nothing a session could not already read: a refusal keeps its own message on
+# stderr, a no-op keeps its own message on stdout, and both keep a nonzero exit code, so silence
+# at exit 0 is unambiguous proof of a landed commit. `commit` drops out of the quiet-flag arm.
+#
+# `push -q` and `merge -q` and `rebase -q` measure the same way as each other, and differently
+# from `commit`. Each one's own refusal (a hook, or a real conflict) stays fully readable. But
+# each one's success and its own no-op are BOTH silent and BOTH exit 0 (without `-q` they already
+# differ: `push` prints "Everything up-to-date" against the `sha..sha  branch -> branch` summary,
+# `merge` and `rebase` print their own "up to date"/"nothing to replay" line against a diffstat or
+# a "Successfully rebased" line). `-q` erases the one line that told a real write from a no-op, so
+# a session cannot read whether the write it just ran moved anything. All three keep the
+# quiet-flag arm on this measurement, not on the flag's name.
+#
+# `tag` has NO `-q` and NO `--quiet` at all (git 2.39.3): both spellings exit 129 with "error:
+# unknown switch" before git reads the tag name, the message, or the repository state. Every
+# state measures identically, because the flag never gets past option parsing. `tag` therefore
+# cannot use `-q`/`--quiet` to hide a success from a no-op or a refusal: the attempt is always a
+# loud, immediate failure. `tag` drops out of the quiet-flag arm.
+#
+# `cherry-pick`'s short form, `-q`, is ALSO not a valid option (exit 129, the same shape as
+# `tag`). Its long form, `--quiet`, IS valid, and measures as the least silent of the six: a
+# success still prints the full one-line commit summary to stdout, a conflict prints its own
+# CONFLICT message and hints in full, and a no-op (an already-applied change) prints "nothing to
+# commit" and "previous cherry-pick is now empty" in full, at its own distinct nonzero exit. No
+# state is silent, so nothing is lost by allowing either spelling. `cherry-pick` drops out of the
+# quiet-flag arm.
+QUIET_FLAG_SUBCOMMANDS = ("push", "merge", "rebase")
+
+# A null-device target, on either stream, in the three shells this guard reads a command from:
+# POSIX (`/dev/null`), Windows cmd (`NUL`), and PowerShell (`$null`). `2>&1` duplicates one stream
+# onto another file descriptor and is not this: the line still reaches a stream the session reads.
+SILENT_WRITE_REDIRECT = re.compile(
+    r"(?:&>>?|\d?>>?)\s*(['\"]?)(?:/dev/null|NUL|\$null)\1(?=$|[\s;&|])",
+    re.IGNORECASE,
+)
+
+
+def discards_output(segment: str) -> bool:
+    """True when the segment redirects stdout or stderr, on any descriptor, to a null device."""
+    return bool(SILENT_WRITE_REDIRECT.search(segment))
+
+
+def quiet_write(args) -> bool:
+    """True when a git call carries `-q` or `--quiet`."""
+    return "-q" in args or "--quiet" in args
+
+
+def silent_write_hit(segment: str):
+    """Return (matched text, mechanism) for a write whose own trace is silenced, else ("", "").
+
+    `mechanism` is `"redirect"` or `"quiet"`, so the caller can print the reason that matches
+    what actually fired: a redirect can hide a refusal AND a proof of landing on any of the six
+    subcommands, while the quiet flag is judged per subcommand against `QUIET_FLAG_SUBCOMMANDS`,
+    the measured set. Only `SILENT_WRITE_SUBCOMMANDS` are judged at all. `fetch`, `rev-parse`, and
+    every other read subcommand fall outside it, which is what keeps `git fetch -q` and the
+    test-by-exit-code shape `git rev-parse -q --verify <ref> >/dev/null 2>&1` allowed. `merge
+    --abort` is carved out inside the loop: it lands nothing, so it has no landing to prove.
+    """
+    for subcommand, args in git_calls(segment):
+        if subcommand not in SILENT_WRITE_SUBCOMMANDS:
+            continue
+        if subcommand == "merge" and "--abort" in args:
+            continue
+        matched = ("git " + subcommand + " " + " ".join(args)).strip()
+        if discards_output(segment):
+            return matched, "redirect"
+        if subcommand in QUIET_FLAG_SUBCOMMANDS and quiet_write(args):
+            return matched, "quiet"
+    return "", ""
+
+
+SILENT_WRITE_REDIRECT_REASON = (
+    "Rule (Git): a redirect silences this write's own output, so neither a refusal nor "
+    "the line that proves it landed would reach the session. "
+    "Remedy: run the same write without silencing either stream, and read what it "
+    "prints before you say it landed."
+)
+SILENT_WRITE_QUIET_REASON = (
+    "Rule (Git): this write's own quiet flag drops the one line that told a real update "
+    "apart from one that moved nothing, so the session cannot read which one just ran. "
+    "Remedy: run the same write without the quiet flag, and read what it prints before "
+    "you say it landed."
+)
 
 
 STASH_READ_ACTIONS = {"list", "show"}
@@ -2204,6 +2374,19 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
         matched = pointer_head_hit(segment, head_where)
         if matched:
             refuse(tool, "deny", "pointer-head", POINTER_HEAD_REASON, matched)
+
+    # 1c. A git write whose own trace is silenced, by a redirect of either stream to a null
+    # device, or, on the measured subcommands, by git's own quiet flag alone. Placed after the
+    # pointer-head rule and before every rule below, so a silenced write is caught on its own
+    # defect before anything else judges the same segment.
+    for segment in split_segments(stripped):
+        if not segment.strip():
+            continue
+        matched, mechanism = silent_write_hit(segment)
+        if matched:
+            reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"
+                      else SILENT_WRITE_QUIET_REASON)
+            refuse(tool, "deny", "silent-write", reason, matched)
 
     # 2. A machine-wide kill. Judged in COMMAND POSITION, from the segment's own tokens, never
     # by the word appearing anywhere in the text. A segment shlex cannot parse fails open:

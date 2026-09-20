@@ -342,6 +342,54 @@ MUTATIONS = [
      '    os.path.normcase("state"),',
      '    os.path.normcase("state_unfrozen"),', "guard", 'frozen: Write of the config-watch baseline store'),
 
+    # ---- Rule 1c, the silent write (Decision, silent-write-leaves-a-trace). One mutant per arm:
+    # the rule disabled outright, each of the two silencing detectors on its own, the two
+    # in-loop carve-outs, and each subcommand set a carve-out depends on staying the shape it was
+    # measured to be.
+    # REQUIRED CASE NAMES, for the fifth `mutation_parts` field once it lands: each label below
+    # names the silent-write test case its own red line must carry.
+    #   "silent-write: the rule never denies at all"
+    #     -> "silent-write: push's own quiet flag needs no redirect at all"
+    #   "silent-write: the quiet-flag arm no longer fires for any subcommand"
+    #     -> "silent-write: push's own quiet flag needs no redirect at all"
+    #   "silent-write: a discarding redirect no longer silences anything"
+    #     -> "silent-write: a discarded proof of landing, stdout alone"
+    #   "silent-write: the merge --abort carve-out is gone"
+    #     -> "silent-write: an abort lands nothing, so it is carved out"
+    #   "silent-write: fetch joins the denied subcommands"
+    #     -> "silent-write: fetch's own quiet flag is a carve-out"
+    #   "silent-write: commit, tag, and cherry-pick rejoin the quiet-flag arm, the measured
+    #   carve-outs undone"
+    #     -> "silent-write: commit's own quiet flag is a carve-out, MEASURED 2026-09-19"
+    ("silent-write: the rule never denies at all",
+     '        matched, mechanism = silent_write_hit(segment)\n'
+     '        if matched:\n'
+     '            reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"\n'
+     '                      else SILENT_WRITE_QUIET_REASON)\n'
+     '            refuse(tool, "deny", "silent-write", reason, matched)',
+     '        matched, mechanism = silent_write_hit(segment)\n'
+     '        if False:\n'
+     '            reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"\n'
+     '                      else SILENT_WRITE_QUIET_REASON)\n'
+     '            refuse(tool, "deny", "silent-write", reason, matched)'),
+    ("silent-write: the quiet-flag arm no longer fires for any subcommand",
+     '        if subcommand in QUIET_FLAG_SUBCOMMANDS and quiet_write(args):',
+     '        if False and quiet_write(args):'),
+    ("silent-write: a discarding redirect no longer silences anything",
+     '        if discards_output(segment):\n            return matched, "redirect"',
+     '        if False:\n            return matched, "redirect"'),
+    ("silent-write: the merge --abort carve-out is gone",
+     '        if subcommand == "merge" and "--abort" in args:\n            continue',
+     '        if False:\n            continue'),
+    ("silent-write: fetch joins the denied subcommands",
+     'SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick")',
+     'SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick", '
+     '"fetch")'),
+    ("silent-write: commit, tag, and cherry-pick rejoin the quiet-flag arm, the measured "
+     "carve-outs undone",
+     'QUIET_FLAG_SUBCOMMANDS = ("push", "merge", "rebase")',
+     'QUIET_FLAG_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick")'),
+
     # ---- the PostToolUse watch. These break `hooks/config_watch.py` and must be killed by
     # `hooks/test_config_watch.py`, which writes the cap for real and reads the file back.
     ("watch: never restore, only report",
