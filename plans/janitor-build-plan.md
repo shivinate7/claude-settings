@@ -68,7 +68,17 @@ repository where long-lived local branches are normal work. It loses them on
 the first sweep, unless somebody adds the file first. The tombstone below makes
 that loss recoverable.
 
-**The opt-out file is `.claude/janitor.json`, inside the repository.** The
+**The opt-out file is `.claude/janitor.json`, inside the repository.** It holds
+two optional keys. `"sweep": false` opts the whole repository out.
+`"protectedPrefixes"` names more branch prefixes to protect, beside the default
+`backup/`. A file that holds only `protectedPrefixes` stays swept, and protects
+more names. An absent file means swept, which is the auto-on default.
+
+Three constraints pick this name. The file travels with a clone, so it does not
+sit in `.git/`. The sweep reads it as data, and never runs it. It carries more
+than a yes or a no, so a bare marker file cannot do the job.
+
+The
 repository that pays the cost holds its own consent. The file travels with a
 clone. The sweep reads the file as data. The sweep never runs code that a
 repository supplies. A repository that supplies code to a frozen tool can do
@@ -84,9 +94,17 @@ the installer refuses to run from a linked worktree.
 `refs/janitor/reaped/<branch>` at the tip before it deletes the branch. It also
 appends one line to a restore log: repository, branch, commit id, time. The
 commits stay reachable, so `git gc` can never take them. A later purge step
-drops tombstones older than a set age. Git's own reflog expires an unreachable
-entry after 30 days, which is too short for a sweep that runs while nobody
-watches.
+drops a tombstone after 90 days.
+
+The 90 comes from git itself, and not from a fresh guess. Git expires an
+unreachable reflog entry after 30 days, and it prunes a loose object after two
+weeks. A tombstone under 30 days buys nothing. The reflog already gives that
+much. Git keeps a reachable reflog entry for 90 days, so 90 is a number this
+machine already uses. It also covers a long absence.
+
+The purge reads the age from the restore log's own timestamp, and never from
+the mtime of the ref. An mtime changes for reasons that have nothing to do with
+the reap.
 
 **Worktree removal is automatic too.** The refusals decide, not a name list.
 

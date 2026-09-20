@@ -32,6 +32,9 @@ jobs:
       - name: Guard mutation harness
         run: python3 hooks/mutate_guard.py
 
+      - name: Janitor sweep fixture suite
+        run: python3 janitor/test_sweep.py
+
       - name: Stop-hook gate fixture suite
         run: python3 lint/test_gates.py
 
