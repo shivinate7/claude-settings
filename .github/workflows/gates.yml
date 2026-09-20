@@ -47,6 +47,9 @@ jobs:
       - name: install.sh checkout-detection suite
         run: sh hooks/test_install_src.sh
 
+      - name: Unknown-read contract (guard + session_start)
+        run: python3 lint/check_unknown_reads_contract.py
+
       - name: Landed-directory manifest agreement
         run: python3 lint/check_landed_dirs.py
 
