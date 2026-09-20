@@ -206,6 +206,14 @@ ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 # the rest: the token after it, once its own flags are skipped, is what actually runs.
 COMMAND_WRAPPERS = {"sudo", "env", "command", "nohup", "nice", "time", "doas", "xargs"}
 
+# A leading shell keyword that opens or joins a control-flow block, never a command itself.
+# `split_segments` cuts on `;`, so the segment after a loop's own semicolon starts with `do`, and
+# the word after THAT is the command. MEASURED against the live guard: `while ! pgrep -f server;
+# do sleep 1; done` allowed the sleep, because the segment `do sleep 1` resolved to `do` as its
+# command word. Skip a keyword the same way a wrapper is skipped, so every rule that reads a
+# command word sees the command inside the block, never the keyword that opens it.
+LOOP_KEYWORDS = {"do", "then", "else", "elif", "while", "until", "if", "{", "("}
+
 
 def segment_tokens(segment: str):
     """Tokenize one segment with shlex, or return None when it cannot be parsed.
@@ -222,14 +230,15 @@ def segment_tokens(segment: str):
 def resolve_command(tokens):
     """Return the index of the command word in a tokenized segment, or None when it names none.
 
-    Skips leading `VAR=value` assignments, then unwraps command wrappers (`sudo`, `env`,
+    Skips leading `VAR=value` assignments and leading loop keywords (`do`, `then`, `else`,
+    `elif`, `while`, `until`, `if`, `{`, `(`), then unwraps command wrappers (`sudo`, `env`,
     `command`, `nohup`, `nice`, `time`, `doas`, `xargs`) along with each wrapper's own flags and
     any assignment it takes ahead of the program name, so the index returned is the program that
-    actually runs, never the wrapper carrying it there.
+    actually runs, never the keyword or the wrapper carrying it there.
     """
     index = 0
     end = len(tokens)
-    while index < end and ASSIGNMENT.match(tokens[index]):
+    while index < end and (ASSIGNMENT.match(tokens[index]) or tokens[index] in LOOP_KEYWORDS):
         index += 1
     while index < end and basename(tokens[index]) in COMMAND_WRAPPERS:
         index += 1
@@ -1343,22 +1352,28 @@ LIVE_STREAM_REASON = (
 # waiting into a loop of turns that each print a word. Placed beside the live-stream rule, because
 # both are about a command that should not be how a session waits.
 #
-# THE COMMAND WORD is the segment's first token, so an unrelated later argument never matches. The
-# Windows `timeout /t` form is the one case where the wait is the SECOND word, so it is read apart:
-# `timeout /t 5` waits, `timeout /help` (no `/t`) does not.
+# THE COMMAND WORD is read through `resolve_command`, wrappers and leading loop keywords skipped,
+# not the segment's raw first token: `split_segments` cuts a loop's `while COND; do sleep 1;
+# done` into `do sleep 1` as its own segment, and the command inside that block is `sleep`, not
+# `do`. A segment `shlex` cannot parse fails open, this file's standing rule. The Windows
+# `timeout /t` form is the one case where the wait is the SECOND word after the command, so it is
+# read apart: `timeout /t 5` waits, `timeout /help` (no `/t`) does not.
 WAITER_COMMANDS = ("sleep", "start-sleep")
 
 
 def waiter_hit(segment: str) -> str:
     """Return the matched text when one segment's command word is a sleep-and-poll, else ''."""
-    tokens = segment.split()
+    tokens = segment_tokens(segment)
     if not tokens:
         return ""
-    word = basename(tokens[0])
+    index = resolve_command(tokens)
+    if index is None:
+        return ""
+    word = basename(tokens[index])
     if word in WAITER_COMMANDS:
-        return tokens[0]
-    if word == "timeout" and any(t.lower() == "/t" for t in tokens[1:]):
-        return tokens[0] + " /t"
+        return tokens[index]
+    if word == "timeout" and any(t.lower() == "/t" for t in tokens[index + 1:]):
+        return tokens[index] + " /t"
     return ""
 
 
@@ -1368,6 +1383,41 @@ WAITER_REASON = (
     "or use a tool that waits once, such as gh run watch <id> --exit-status. Avoid "
     "gh pr checks --watch, which serves a cached status. For a server warm-up, use a "
     "readiness check such as curl --retry."
+)
+
+
+# ------------------------------------------------------------------ a waiter loop over a pattern
+#
+# Ported from pkmnscan's `scripts/guard-shell.py:800-990` (predicate and wording only, not the
+# file, and no override token: this repo ships none). MEASURED there, twice on 2026-09-12: a
+# session wrote `until ! pgrep -f 'scratchpad/drive.sh'` to wait out its own driver script, and
+# the condition never went false, because `pgrep -f` matches every process whose command line
+# names the pattern, including that very invocation of itself. A second copy of the driver then
+# raced the live one.
+#
+# THE CONDITION IS READ WHOLE, not only in command position: a negation (`while ! pgrep ...`) or
+# a subshell can sit ahead of the poller, the same reason `live_stream_hit` below reads every
+# token of its segment rather than only the first.
+PATTERN_POLLERS = {"pgrep", "pkill", "lsof"}
+
+
+def loop_condition_polls_a_pattern(segment: str) -> str:
+    """Return the matched tool when a `while`/`until` segment's condition polls a pattern."""
+    tokens = segment.split()
+    if not tokens or tokens[0] not in ("while", "until"):
+        return ""
+    for token in tokens[1:]:
+        if basename(token) in PATTERN_POLLERS:
+            return token
+    return ""
+
+
+PATTERN_POLLER_REASON = (
+    "the loop's own condition polls for a process by name or by pattern. That pattern can match "
+    "every process whose command line names it, including this session's own wrapper for the "
+    "same wait, so the condition can stay true long after the work is done. "
+    "Remedy: wait on one pid this session started, such as `kill -0 $PID`, or use a tool that "
+    "waits once, such as gh run watch <id> --exit-status."
 )
 
 
@@ -2168,13 +2218,19 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
         if matched:
             refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
 
-    # 3. A live stream that never ends, or a waiter loop (Rule 9).
+    # 3. A live stream that never ends, or a waiter loop (Rule 9). A waiter loop whose own
+    # condition polls a pattern gets the more specific reason: the pattern can match the loop's
+    # own command line and never go false.
+    poller = ""
     for segment in split_segments(stripped):
         matched = live_stream_hit(segment)
         if matched:
             refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)
+        poller = loop_condition_polls_a_pattern(segment) or poller
         matched = waiter_hit(segment)
         if matched:
+            if poller:
+                refuse(tool, "deny", "waiter", PATTERN_POLLER_REASON, poller + " " + matched)
             refuse(tool, "deny", "waiter", WAITER_REASON, matched)
 
     # 4. A wide delete denies, and a force push asks.
