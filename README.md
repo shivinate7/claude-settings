@@ -362,6 +362,12 @@ in `lint/rule_mechanisms.json`. A row names the guard rule, gate file, or CI ste
 enforces it, or the token `unmechanized` plus a reason. CI runs the audit and its own
 fixture suite, `lint/test_rule_audit.py`, on every push and pull request.
 
+`lint/check_unknown_reads_contract.py` mechanizes one CLAUDE.md rule behaviorally: a read
+that could not run must be reported as unknown, never as clear or broken. It makes a read
+genuinely fail, in `hooks/guard.py` and in `hooks/session_start.sh`, and asserts the code's
+own answer names the unknown state. Its docstring states the contract, so a later case
+joins it by fixture, not by a new grep pattern.
+
 Manual dispatch takes one input, `full_ste_audit`. Enable it from the Actions tab to lint
 the whole tree in report mode. That run never fails the build. It only writes a summary.
 

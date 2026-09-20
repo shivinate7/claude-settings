@@ -274,8 +274,9 @@
     },
     "verification-report-unknown-reads": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No check distinguishes a report of unknown from a report wrongly marked clear or broken."
+        "kind": "gate",
+        "ref": "lint/check_unknown_reads_contract.py",
+        "needle": "THE CONTRACT'S MEMBERS"
       }
     },
     "tokens-never-load-whole-doc": {
