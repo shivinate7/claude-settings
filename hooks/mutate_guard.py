@@ -496,6 +496,31 @@ MUTATIONS = [
     ("watch: a missing baseline is read as clear rather than recorded",
      '    if baseline is None:\n        save_baseline(path, current)',
      '    if baseline is None:\n        save_baseline(path, None)', "watch", 'a write to an unrelated file triggers nothing'),
+
+    # ---- the expiry rule, added 2026-09-20. Nothing killed a mutant here before this block:
+    # every case below is new, exercising `cap_lift_value`, `next_prior`, `expiry_problem`, and
+    # the expiry tail of `judge_path` that `hooks/test_config_watch.py`'s "expiry" cases guard.
+    ("watch: the 24-hour ceiling runs backwards, so only a SAFE deadline reads as too far ahead",
+     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:',
+     '    if ahead < EXPIRY_MAX_AHEAD_HOURS * 3600:', "watch",
+     'more than 24h ahead is revoked'),
+    ("watch: the 24-hour bound is negated, so even a one-hour deadline reads as too far ahead",
+     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:',
+     '    if ahead > -(EXPIRY_MAX_AHEAD_HOURS * 3600):', "watch",
+     'a valid, current _subagentCapUntil is NOT reverted'),
+    ("watch: the passed-deadline test is inverted, so an expired deadline reads as current",
+     '    if ahead < 0:\n        return "already passed"',
+     '    if ahead > 0:\n        return "already passed"', "watch",
+     'already passed is revoked'),
+    ("watch: the missing-expiry branch is turned off, so a lift with no deadline survives",
+     '    if where is None:\n        return "missing"',
+     '    if False:\n        return "missing"', "watch",
+     'a missing _subagentCapUntil is revoked'),
+    ("watch: next_prior carries the first lift's own content forward, so a later revert "
+     "installs an override instead of the true baseline",
+     '    if cap_lift_value(was):\n        return baseline.get("prior")',
+     '    if cap_lift_value(was):\n        return baseline["content"]', "watch",
+     "keeps the ORIGINAL pre-lift content as prior"),
 ]
 
 

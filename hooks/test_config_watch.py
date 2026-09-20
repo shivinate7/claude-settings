@@ -71,6 +71,15 @@ def cap_json(model=None, force=None, until=None, extra=None):
     return json.dumps(body)
 
 
+def cap_json_until_in_env(model, force, until):
+    """Build one settings.local.json body with `_subagentCapUntil` mis-typed INSIDE `env`.
+
+    The mistake this tests: an owner reaching for `_subagentCapUntil` types it next to the
+    keys it is meant to bound. The message must say where it belongs, not read it as absent.
+    """
+    return json.dumps({"env": {KEY: model, KEY_FORCE: force, EXPIRY_FIELD: until}})
+
+
 # LIFT now carries a valid, current expiry: a lift with none is, since this change, exactly what
 # the new "bad expiry" cases below test. The bypass cases reuse LIFT too, and are unaffected: they
 # are reverted for being UNASKED, a check that runs before the expiry rule ever does.
@@ -339,6 +348,31 @@ def approved_case(name, content, kind):
     return run_case
 
 
+def chain_case(name):
+    """Two approved lifts in a row, then a third write that is not: `next_prior` must carry
+    the ORIGINAL pre-lift content forward through the second lift, never the first lift's own
+    lifted bytes, or the eventual revert restores an override instead of the true baseline."""
+    @case(name, "expiry", kind="bad")
+    def run_case(project):
+        project.settle()  # baseline: SONNET
+        first = cap_json(model="opus", force="1", until=VALID_UNTIL)
+        project.pre("Write", {"file_path": project.settings, "content": first})
+        write(project.settings, first)
+        project.post("Write", {"file_path": project.settings, "content": first})
+
+        second = cap_json(model="opus", force="1", until=_iso(2))
+        project.pre("Write", {"file_path": project.settings, "content": second})
+        write(project.settings, second)
+        project.post("Write", {"file_path": project.settings, "content": second})
+
+        bad = cap_json(model="opus", force="1")  # missing expiry: must be reverted
+        decision = project.pre("Write", {"file_path": project.settings, "content": bad})
+        write(project.settings, bad)
+        message = project.post("Write", {"file_path": project.settings, "content": bad})
+        return {"pre": decision, "lifted": project.lifted(), "message": message}
+    return run_case
+
+
 approved_case("an approved lift with a missing _subagentCapUntil is revoked",
               cap_json(model="opus", force="1"), "bad")
 approved_case("an approved lift with an unparseable _subagentCapUntil is revoked",
@@ -351,6 +385,12 @@ approved_case("an approved lift with a valid, current _subagentCapUntil is NOT r
               "and stays silent", cap_json(model="opus", force="1", until=VALID_UNTIL), "valid")
 approved_case("a file with no lift above Sonnet and a stray _subagentCapUntil does nothing",
               cap_json(model="sonnet", force="1", until=VALID_UNTIL), "nocap")
+approved_case("an approved lift with _subagentCapUntil misplaced inside env is revoked, "
+              "and says where it belongs",
+              cap_json_until_in_env("opus", "1", VALID_UNTIL), "wrong_place")
+
+chain_case("a second approved lift keeps the ORIGINAL pre-lift content as prior, so a later "
+           "revert never installs the first lift's own content")
 
 
 # --------------------------------------------------------------------------- the old shape
@@ -430,6 +470,13 @@ def expectation(entry, result):
             return ((not lifted) and not message,
                     "untouched and silent" if (not lifted and not message)
                     else "a stray field with no lift above Sonnet should never speak")
+        if kind == "wrong_place":
+            if lifted:
+                return (False, "cap STILL LIFTED with a misplaced expiry: the watch missed it")
+            if "env" not in message:
+                return (False, "reverted, but the message never says the field is in env: "
+                        "it reads as plain 'missing' instead -- got: %r" % message)
+            return (True, "reverted, and the message names the env block")
     if group == "compat":
         if BASELINE:
             return (lifted, "cap LIFTED on main" if lifted

@@ -78,9 +78,12 @@ and its own measurement.
 An override whose current reading sets the model above Sonnet is now judged on every sweep, not
 only on the sweep that changed it, because a deadline passes with no write of its own: the file
 never changes again and only the clock moves. The deadline is bad when `_subagentCapUntil` is
-missing, unparseable, already passed, or more than 24 hours ahead of now. A bad deadline is
-revoked the same way an unasked write is: the pre-lift content goes back, the lifted content is
-kept beside the store, and a systemMessage names the file and what was wrong with the expiry.
+missing, unparseable, already passed, or more than 24 hours ahead of now. A field written
+INSIDE `env` by mistake reads as its own problem, not as "missing": the owner can see the
+field, so the message says where it belongs instead of pretending it is absent. A bad
+deadline is revoked the same way an unasked write is: the pre-lift content goes back, the
+lifted content is kept beside the store, and a systemMessage names the file and what was
+wrong with the expiry.
 
 THE ONE HARD PART. `save_baseline` used to re-baseline an APPROVED cap change straight to the
 lifted content, so the pre-lift bytes were gone by the time a deadline could be checked against
@@ -387,30 +390,46 @@ def next_prior(reading, was, baseline):
     return baseline["content"]
 
 
-def cap_expiry_text(content):
-    """Return the top-level `_subagentCapUntil` string from a file's content, or None.
+EXPIRY_WRONG_PLACE = (
+    "inside the env block, not at the top level -- env keys are exported into every "
+    "subagent's shell"
+)
 
-    Read from the PARSED document, so a value living inside `env` -- which this field is
-    deliberately kept out of -- is never mistaken for it, and content that is not a JSON object
-    reads as no expiry at all, the same as a missing field.
+
+def cap_expiry_location(content):
+    """Return (where, value) for `_subagentCapUntil`, read from the PARSED document only.
+
+    `where` is "top" when the field sits where it belongs, "env" when it sits inside the
+    `env` block instead -- a mistake, not an absence, and the message must say so rather than
+    read as "missing" -- or None when the field is nowhere in the file. Content that is not a
+    JSON object reads the same as a file with no expiry at all: (None, None).
     """
     if content is None:
-        return None
+        return (None, None)
     try:
         parsed = json.loads(content.decode("utf-8", "replace"))
     except Exception:
-        return None
+        return (None, None)
     if not isinstance(parsed, dict):
-        return None
+        return (None, None)
     value = parsed.get(EXPIRY_FIELD)
-    return value if isinstance(value, str) else None
+    if isinstance(value, str):
+        return ("top", value)
+    env = parsed.get("env")
+    if isinstance(env, dict):
+        value = env.get(EXPIRY_FIELD)
+        if isinstance(value, str):
+            return ("env", value)
+    return (None, None)
 
 
 def expiry_problem(content) -> str:
     """Return why `_subagentCapUntil` fails, or '' when it names a valid, current deadline."""
-    raw = cap_expiry_text(content)
-    if raw is None:
+    where, raw = cap_expiry_location(content)
+    if where is None:
         return "missing"
+    if where == "env":
+        return EXPIRY_WRONG_PLACE
     text = raw.strip()
     if text[-1:] in ("Z", "z"):
         text = text[:-1] + "+00:00"
