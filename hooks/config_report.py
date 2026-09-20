@@ -28,6 +28,20 @@ Decision 8 ("Merge into main: allow and report") makes this hook also surface a 
 landed this turn: a `Bash`/`PowerShell` tool_use whose command matches `gh pr merge`, and any
 `mcp__github__merge_pull_request` tool_use. The guard already allows and logs these; this hook is
 how the owner still SEES them at turn end, so the reply can name them under Done.
+
+The merge notice is a CHECK, not a blind reminder (decisions/merge-notice-checks-the-report.md).
+It stays quiet when the reply's own report block already names the merge, so a turn that named it
+under Done does not also get told to name it. That "does the report already say this" read reuses
+`lint/report_gate.py`'s `block_text`, the same blockquote extraction `report_gate.py`'s own shape
+check runs on, rather than a second hand-rolled parser (CLAUDE.md, "a gate's allow list must point
+at the constant the code emits"). It also identifies each merge by PR NUMBER, pulled from the `gh
+pr merge` call's own arguments (never from the raw command line, so a command chained onto it with
+`;` or `&&` cannot ride along), or from the MCP tool's pull-number input. A merge whose number
+cannot be read falls back to a short, fixed label instead of the raw command text.
+
+Importing `report_gate` pulls in its own import of `hooks/guard.py` (the same module this hook
+already imports for the config-path test below), so this hook keeps no separate copy of that
+dependency; it still avoids `lint/ste_gate.py` and the STE lint package, which it never needed.
 """
 import json
 import os
@@ -36,13 +50,17 @@ import sys
 from datetime import datetime, timedelta
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+LINT_DIR = os.path.join(HERE, "..", "lint")
 sys.path.insert(0, HERE)
+sys.path.insert(0, LINT_DIR)
 
 FILE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 SHELL_TOOLS = {"Bash", "PowerShell"}
 MERGE_TOOLS = {"mcp__github__merge_pull_request"}
 
 GH_PR_MERGE = re.compile(r"\bgh\s+pr\s+merge\b")
+PR_NUM_TOKEN = re.compile(r"^(\d+)$")
+PR_NUM_URL = re.compile(r"/pull/(\d+)")
 
 CONFIG_MESSAGE = "Config files changed this turn: %s."
 MERGE_MESSAGE = "Merges into main this turn: %s."
@@ -51,6 +69,13 @@ UNREAD_MESSAGE = (
 )
 TAIL = " Name them in the report."
 UNREAD_RULE = "subject-unread"
+
+# Fallback label for a merge whose PR number this hook could not read from the command or the
+# MCP tool's own input (for example `gh pr merge` run with no number and no PR checked out by
+# convention this hook can resolve). Short and fixed, never the raw command line.
+UNNUMBERED_MERGE = "an unnumbered merge"
+
+MCP_PR_NUMBER_KEYS = ("pullNumber", "pull_number", "prNumber", "pr_number", "number", "pr")
 
 
 # ------------------------------------------------------------------ transcript walking
@@ -162,13 +187,55 @@ def collect_paths(records, cwd):
     return seen
 
 
+def _pr_number_from_segment(segment):
+    """Return the PR number a `gh pr merge` call in `segment` names, else None.
+
+    Reads only the tokens that follow the call's own `gh pr merge` words, so a command chained
+    onto it with `;` or `&&` (already split into its own segment by the caller) can never
+    supply the number for this call.
+    """
+    m = GH_PR_MERGE.search(segment)
+    if not m:
+        return None
+    for tok in segment[m.end():].split():
+        if tok.startswith("-"):
+            continue
+        num = PR_NUM_TOKEN.match(tok)
+        if num:
+            return num.group(1)
+        url = PR_NUM_URL.search(tok)
+        if url:
+            return url.group(1)
+    return None
+
+
+def _pr_number_from_mcp_input(inp):
+    for key in MCP_PR_NUMBER_KEYS:
+        value = inp.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            return str(value)
+        if isinstance(value, str) and value.strip().isdigit():
+            return value.strip()
+    return None
+
+
 def collect_merges(records):
-    """Return the merges into main this turn's tools named, in first-seen order."""
+    """Return the merges into main this turn's tools named, as display labels, in first-seen
+    order: `#<N>` when a PR number could be read, else UNNUMBERED_MERGE.
+    """
+    try:
+        import guard  # PreToolUse guard.py, same directory
+    except Exception:
+        guard = None
+
     seen = []
 
-    def note(text):
-        if text and text not in seen:
-            seen.append(text)
+    def note(number):
+        label = "#%s" % number if number else UNNUMBERED_MERGE
+        if label not in seen:
+            seen.append(label)
 
     for rec in records:
         for b in tool_uses(rec):
@@ -177,12 +244,45 @@ def collect_merges(records):
             if not isinstance(inp, dict):
                 continue
             if name in MERGE_TOOLS:
-                note(name)
+                note(_pr_number_from_mcp_input(inp))
             elif name in SHELL_TOOLS:
                 cmd = inp.get("command") or ""
-                if isinstance(cmd, str) and GH_PR_MERGE.search(cmd):
-                    note(cmd.strip())
+                if not isinstance(cmd, str) or not cmd.strip():
+                    continue
+                if guard is not None:
+                    try:
+                        stripped = guard.strip_heredoc_bodies(cmd)
+                        segments = guard.split_segments(stripped)
+                    except Exception:
+                        segments = [cmd]
+                else:
+                    segments = [cmd]
+                for segment in segments:
+                    if GH_PR_MERGE.search(segment):
+                        note(_pr_number_from_segment(segment))
     return seen
+
+
+def already_named(labels, report_block):
+    """Return the labels from `labels` that `report_block` does not already name.
+
+    `#75` is looked for both as written and as `PR 75` / `PR#75` (case-insensitive), since a
+    report is free to spell it either way. UNNUMBERED_MERGE is looked for verbatim: it is
+    already the short, fixed string a report would have to repeat to name it.
+    """
+    if not report_block:
+        return list(labels)
+    remaining = []
+    for label in labels:
+        if label in report_block:
+            continue
+        if label.startswith("#"):
+            num = label[1:]
+            alt = re.compile(r"\bpr\s*#?\s*" + re.escape(num) + r"\b", re.IGNORECASE)
+            if alt.search(report_block):
+                continue
+        remaining.append(label)
+    return remaining
 
 
 def last_human_stamp(records):
@@ -279,6 +379,17 @@ def main():
 
     hits = collect_paths(after, cwd)
     merges = collect_merges(after)
+    if merges:
+        try:
+            import report_gate  # lint/report_gate.py, same-repo sibling package
+            from ste_gate import last_reply  # lint/ste_gate.py
+            reply_text = last_reply(hook)
+            block = report_gate.block_text(reply_text)
+            merges = already_named(merges, block)
+        except Exception:
+            # Cannot tell whether the report already named the merge: fail open the same way
+            # this hook fails open elsewhere, by still naming it, not by going quiet.
+            pass
     unread = collect_unread(last_human_stamp(records))
     if not hits and not merges and not unread:
         return
