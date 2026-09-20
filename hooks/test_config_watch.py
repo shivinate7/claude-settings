@@ -52,6 +52,29 @@ VALID_UNTIL = _iso(1)     # one hour ahead: current
 PASSED_UNTIL = _iso(-1)   # one hour ago: expired
 TOO_FAR_UNTIL = _iso(48)  # two days ahead: over the 24-hour ceiling
 
+# TEST_CLOCK_ENV must match `config_watch.TEST_CLOCK_ENV`. It is the only way a fixture can put
+# `_subagentCapUntil` EXACTLY on the 24-hour boundary: `datetime.now()` called once to build the
+# fixture and once more, later, inside `expiry_problem`, are never the same instant on their own,
+# so the watch under test must read a clock the fixture also controls.
+TEST_CLOCK_ENV = "CONFIG_WATCH_TEST_CLOCK"
+
+# One fixed instant, seconds only (no microseconds, so formatting and re-parsing round-trips
+# exactly), that every boundary case below both builds its `_subagentCapUntil` from and pins as
+# the watch's own clock. Same reference on both sides: the boundary is exact, not approximate.
+REFERENCE_NOW = datetime.now(timezone.utc).replace(microsecond=0)
+
+
+def _fmt(when: datetime) -> str:
+    return when.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+CLOCK_AT_REFERENCE = _fmt(REFERENCE_NOW)
+BOUNDARY_24H_UNTIL = _fmt(REFERENCE_NOW + timedelta(hours=24))           # ahead == 86400s: accepted
+BOUNDARY_INSIDE_UNTIL = _fmt(REFERENCE_NOW + timedelta(seconds=86399))   # ahead == 86399s: accepted
+BOUNDARY_OUTSIDE_UNTIL = _fmt(REFERENCE_NOW + timedelta(seconds=86401))  # ahead == 86401s: revoked
+BOUNDARY_AT_DEADLINE_UNTIL = _fmt(REFERENCE_NOW)                         # ahead == 0s: accepted
+BOUNDARY_PAST_UNTIL = _fmt(REFERENCE_NOW - timedelta(seconds=1))         # ahead == -1s: revoked
+
 
 def cap_json(model=None, force=None, until=None, extra=None):
     """Build one settings.local.json body. `until`, when given, sits OUTSIDE `env` on purpose:
@@ -150,11 +173,20 @@ class Project(object):
         except Exception:
             return "allow"
 
-    def post(self, tool, tool_input) -> str:
-        """Run the PostToolUse watch and return its systemMessage, or ''."""
+    def post(self, tool, tool_input, clock=None) -> str:
+        """Run the PostToolUse watch and return its systemMessage, or ''.
+
+        `clock`, an ISO-8601 string, pins the expiry rule's "now" through `TEST_CLOCK_ENV`. It
+        is unset in every case that does not name it, so those cases read the real clock, the
+        same as production. `main`'s old script (--baseline) never reads the variable at all,
+        so it is harmless to set there too.
+        """
         if BASELINE:
             return ""  # `main` has no watch: this is the red run
-        out = run(WATCH, self.payload(tool, tool_input), self.env())
+        env = self.env()
+        if clock is not None:
+            env[TEST_CLOCK_ENV] = clock
+        out = run(WATCH, self.payload(tool, tool_input), env)
         if not out.strip():
             return ""
         try:
@@ -218,7 +250,19 @@ bypass("cp from another file",
 bypass("mv from another file",
        lambda p: "mv /tmp/lift_case2.json .claude/settings.local.json")
 bypass("sed -i in place",
-       lambda p: "sed -i '' s/sonnet/opus/ .claude/settings.local.json")
+       # `sed -i ''` is BSD syntax: GNU sed's `-i` takes its suffix only ATTACHED, so a
+       # SEPARATE `''` argument is read as the script instead, `s/sonnet/opus/` is then read
+       # as a missing filename (an error, not a write), and the target is edited with an EMPTY
+       # script -- no bytes change. MEASURED: on GNU sed (gsed 4.10), `sed -i '' s/sonnet/opus/
+       # <path>` prints "can't read s/sonnet/opus/: No such file or directory" and leaves
+       # <path> byte-for-byte the same; the case was a false pass on Linux CI for exactly that
+       # reason, never a defect in the watch (CI run 35525705259, `Config watch fixture suite`).
+       # `-i.bak` attaches a REAL suffix, which both dialects parse the same way, so this edits
+       # in place identically on BSD and GNU. Verified locally against both `/usr/bin/sed`
+       # (BSD) and Homebrew's `gnu-sed` (GNU, as `gsed`): both produce {"opus", ...} and leave
+       # `s/sonnet/opus/` alone as a file that never existed, never as a stray argument.
+       lambda p: "sed -i.bak -e s/sonnet/opus/ .claude/settings.local.json "
+                 "&& rm -f .claude/settings.local.json.bak")
 bypass("python3 -c writes the path",
        lambda p: "python3 -c \"open('.claude/settings.local.json','w')"
                  ".write(open('/tmp/lift_case3.json').read())\"")
@@ -337,13 +381,14 @@ def empty_then_absent(project):
 # says.
 
 
-def approved_case(name, content, kind):
+def approved_case(name, content, kind, clock=None):
     @case(name, "expiry", kind=kind)
     def run_case(project):
         project.settle()
         decision = project.pre("Write", {"file_path": project.settings, "content": content})
         write(project.settings, content)
-        message = project.post("Write", {"file_path": project.settings, "content": content})
+        message = project.post(
+            "Write", {"file_path": project.settings, "content": content}, clock)
         return {"pre": decision, "lifted": project.lifted(), "message": message}
     return run_case
 
@@ -391,6 +436,29 @@ approved_case("an approved lift with _subagentCapUntil misplaced inside env is r
 
 chain_case("a second approved lift keeps the ORIGINAL pre-lift content as prior, so a later "
            "revert never installs the first lift's own content")
+
+# The 24-hour boundary, pinned exactly with TEST_CLOCK_ENV (see REFERENCE_NOW above). The code
+# accepts a deadline AT the ceiling and AT the deadline instant itself: both `ahead > 24h` and
+# `ahead < 0` are strict, so `ahead == 86400` and `ahead == 0` both read as "no problem".
+approved_case("an approved lift with _subagentCapUntil exactly 24 hours ahead is accepted "
+              "(the ceiling is inclusive)",
+              cap_json(model="opus", force="1", until=BOUNDARY_24H_UNTIL), "valid",
+              clock=CLOCK_AT_REFERENCE)
+approved_case("an approved lift with _subagentCapUntil one second inside the 24h bound is "
+              "accepted",
+              cap_json(model="opus", force="1", until=BOUNDARY_INSIDE_UNTIL), "valid",
+              clock=CLOCK_AT_REFERENCE)
+approved_case("an approved lift with _subagentCapUntil one second outside the 24h bound is "
+              "revoked",
+              cap_json(model="opus", force="1", until=BOUNDARY_OUTSIDE_UNTIL), "bad",
+              clock=CLOCK_AT_REFERENCE)
+approved_case("an approved lift with _subagentCapUntil exactly at the deadline instant is "
+              "accepted (not yet passed)",
+              cap_json(model="opus", force="1", until=BOUNDARY_AT_DEADLINE_UNTIL), "valid",
+              clock=CLOCK_AT_REFERENCE)
+approved_case("an approved lift with _subagentCapUntil one second past the deadline is revoked",
+              cap_json(model="opus", force="1", until=BOUNDARY_PAST_UNTIL), "bad",
+              clock=CLOCK_AT_REFERENCE)
 
 
 # --------------------------------------------------------------------------- the old shape

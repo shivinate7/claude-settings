@@ -423,8 +423,17 @@ def cap_expiry_location(content):
     return (None, None)
 
 
-def expiry_problem(content) -> str:
-    """Return why `_subagentCapUntil` fails, or '' when it names a valid, current deadline."""
+def expiry_problem(content, clock=None) -> str:
+    """Return why `_subagentCapUntil` fails, or '' when it names a valid, current deadline.
+
+    `clock` lets a caller inject the instant this check reads as "now". It defaults to None,
+    and a None reads the real clock, `datetime.now(timezone.utc)`, AT CALL TIME. Production
+    never passes anything else, so production always reads the live clock, exactly as before
+    this parameter existed. Only a test pins `clock` to a fixed instant, which is the only way
+    a fixture can sit exactly on the 24-hour boundary: `datetime.now()` called once to build
+    the fixture and once more, later, inside this function, are never the same instant, so no
+    fixture could otherwise land ON the boundary rather than near it.
+    """
     where, raw = cap_expiry_location(content)
     if where is None:
         return "missing"
@@ -439,7 +448,9 @@ def expiry_problem(content) -> str:
         return "not a parseable ISO-8601 time"
     if deadline.tzinfo is None:
         deadline = deadline.replace(tzinfo=timezone.utc)
-    ahead = (deadline - datetime.now(timezone.utc)).total_seconds()
+    if clock is None:
+        clock = datetime.now(timezone.utc)
+    ahead = (deadline - clock).total_seconds()
     if ahead < 0:
         return "already passed"
     if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:
@@ -532,7 +543,7 @@ def command_text(tool: str, tool_input) -> str:
     return safe(str(target) or "(none)", MAX_COMMAND) if target else "(none)"
 
 
-def judge_path(path: str, tool: str, tool_input, cwd: str, explained: str):
+def judge_path(path: str, tool: str, tool_input, cwd: str, explained: str, clock=None):
     """Judge one watched path. Return a message to print, or ''.
 
     Five answers, in order:
@@ -591,7 +602,7 @@ def judge_path(path: str, tool: str, tool_input, cwd: str, explained: str):
     reading = cap_reading(baseline["content"])
     if not cap_lift_value(reading):
         return ""
-    problem = expiry_problem(baseline["content"])
+    problem = expiry_problem(baseline["content"], clock)
     if not problem:
         return ""
 
@@ -613,7 +624,7 @@ def judge_path(path: str, tool: str, tool_input, cwd: str, explained: str):
         kept=safe(kept or "(not kept)", guard.CAP_MAX_PATH))
 
 
-def sweep(payload):
+def sweep(payload, clock=None):
     """Judge every watched path for this payload. Return the messages, in path order."""
     tool = payload.get("tool_name", "") or ""
     tool_input = payload.get("tool_input", {}) or {}
@@ -625,10 +636,35 @@ def sweep(payload):
     explained = explained_path(tool, tool_input, cwd)
     messages = []
     for path in watched_paths(cwd):
-        message = judge_path(path, tool, tool_input, cwd, explained)
+        message = judge_path(path, tool, tool_input, cwd, explained, clock)
         if message:
             messages.append(message)
     return messages
+
+
+# TEST_CLOCK_ENV lets `hooks/test_config_watch.py` pin the expiry rule's clock to a fixed
+# instant, the only way a fixture can sit exactly on the 24-hour boundary (see
+# `expiry_problem`'s own docstring). Production never sets this variable, so `main` always
+# passes `clock=None` there, and `expiry_problem` always reads the live clock: the injection
+# cannot drift from what runs, because it IS what runs, absent the variable.
+TEST_CLOCK_ENV = "CONFIG_WATCH_TEST_CLOCK"
+
+
+def _test_clock():
+    """Return the instant `TEST_CLOCK_ENV` pins, or None when it is unset or unreadable."""
+    raw = os.environ.get(TEST_CLOCK_ENV)
+    if not raw:
+        return None
+    try:
+        text = raw.strip()
+        if text[-1:] in ("Z", "z"):
+            text = text[:-1] + "+00:00"
+        clock = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if clock.tzinfo is None:
+        clock = clock.replace(tzinfo=timezone.utc)
+    return clock
 
 
 def main() -> None:
@@ -640,7 +676,7 @@ def main() -> None:
     if not isinstance(payload, dict):
         sys.exit(0)  # fail open on a payload that is not an object
     try:
-        messages = sweep(payload)
+        messages = sweep(payload, _test_clock())
     except Exception:
         sys.exit(0)  # fail open on a watch defect
     if messages:

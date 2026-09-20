@@ -521,6 +521,31 @@ MUTATIONS = [
      '    if cap_lift_value(was):\n        return baseline.get("prior")',
      '    if cap_lift_value(was):\n        return baseline["content"]', "watch",
      "keeps the ORIGINAL pre-lift content as prior"),
+
+    # ---- the 24-hour boundary itself, added 2026-09-20 (round 3). `expiry_problem` now takes
+    # an injectable `clock`, so `hooks/test_config_watch.py`'s boundary cases can pin a
+    # fixture's `_subagentCapUntil` and the watch's own "now" to the SAME instant, and an
+    # off-by-one at the exact edge is no longer invisible to this harness.
+    ("watch: the too-far-ahead check admits its own edge, so a deadline exactly 24h out is "
+     "wrongly revoked",
+     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:',
+     '    if ahead >= EXPIRY_MAX_AHEAD_HOURS * 3600:', "watch",
+     "exactly 24 hours ahead is accepted"),
+    ("watch: the passed-deadline check admits its own edge, so the deadline instant itself "
+     "reads as already passed",
+     '    if ahead < 0:',
+     '    if ahead <= 0:', "watch",
+     "exactly at the deadline instant is accepted"),
+    ("watch: the 24-hour ceiling is one second too loose, so a deadline one second over is "
+     "wrongly accepted",
+     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:',
+     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600 + 1:', "watch",
+     "one second outside the 24h bound is revoked"),
+    ("watch: the 24-hour ceiling is one second too tight, so a deadline exactly on it is "
+     "wrongly revoked",
+     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:',
+     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600 - 1:', "watch",
+     "exactly 24 hours ahead is accepted"),
 ]
 
 
