@@ -29,10 +29,12 @@ session touched, and calls the same program a person would call by hand.
 """
 import inspect
 import json
+import math
 import os
 import re
 import subprocess
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
@@ -46,6 +48,12 @@ try:
     SWEEP_TIMEOUT_SECONDS = float(os.environ.get("JANITOR_SWEEP_TIMEOUT") or 25)
 except (TypeError, ValueError):
     SWEEP_TIMEOUT_SECONDS = 25.0
+
+# NO environment seam for elapsed time, on purpose (PR #84 review). A hook that is now live on
+# this machine and deletes branches unattended must never let an inherited shell variable change
+# its own timing: `elapsed_seconds` reaches `handle` only as an explicit argument (see `handle`
+# and `main` below), which a test can pass directly by calling the function in-process. There is
+# no name here for an environment to carry.
 
 
 def _guard_git_call_timeout_seconds() -> float:
@@ -65,6 +73,27 @@ def _guard_git_call_timeout_seconds() -> float:
     except Exception:
         pass
     return 10.0  # guard._git's own timeout as of this writing; used only if the read above fails
+
+
+def _session_end_ceiling_seconds() -> float:
+    """The timeout settings.json's own SessionEnd entry gives THIS hook end to end -- read back
+    from the real file next to this one, the same reasoning as `_guard_git_call_timeout_seconds`
+    above (CLAUDE.md, "building-allow-list-is-the-constant": point at the constant the code
+    emits, never a copy of it). Falls back to the number below, LOUDLY only in the sense that a
+    missing or malformed settings.json would otherwise silently change the hook's real time
+    budget; the fallback exists so this function itself never raises past its caller."""
+    try:
+        with open(os.path.join(REPO_ROOT, "settings.json"), encoding="utf-8") as handle:
+            settings = json.load(handle)
+        for entry in settings.get("hooks", {}).get("SessionEnd", []):
+            for h in entry.get("hooks", []):
+                if "session_end_sweep.py" in (h.get("command") or ""):
+                    timeout = h.get("timeout")
+                    if isinstance(timeout, (int, float)) and not isinstance(timeout, bool):
+                        return float(timeout)
+    except Exception:
+        pass
+    return 55.0  # settings.json's SessionEnd timeout for this hook, as of this writing
 
 
 # THE BUDGET ARITHMETIC (checked against the real settings.json by
@@ -92,6 +121,77 @@ HOOK_WORST_CASE_SECONDS = RESOLVE_ROOT_WORST_CASE_SECONDS + SWEEP_TIMEOUT_SECOND
 # worst case above. Changing SWEEP_TIMEOUT_SECONDS (or a future change to guard._git's own
 # timeout) without also widening that settings.json entry is exactly the drift
 # HookBudgetFitsUnderItsHostCeiling exists to catch.
+
+# THE UPPER EDGE. HookBudgetFitsUnderItsHostCeiling's floor arm above refuses a ceiling that
+# leaves LESS than SESSION_END_TIMEOUT_MIN_HEADROOM_SECONDS over the worst case. Nothing stopped
+# it leaving unlimited MORE: a later change that quietly doubled SWEEP_TIMEOUT_SECONDS, or halved
+# it while settings.json's 55 stayed put, would still pass every arm above, because only the
+# lower bound was guarded. State the ceiling on that margin here, beside the arithmetic it
+# checks. When the arm that reads this constant goes red, do ONE of two things, on purpose:
+# either SHRINK THE WORK (bring SWEEP_TIMEOUT_SECONDS or the git-call budget back down toward
+# this margin), or MOVE THE CEILING ON PURPOSE (widen settings.json's SessionEnd timeout, and
+# widen this constant in the same commit, with a reason).
+SESSION_END_TIMEOUT_MIN_HEADROOM_SECONDS = 5.0
+SESSION_END_TIMEOUT_MAX_HEADROOM_SECONDS = 20.0
+
+
+def headroom_within_bounds(ceiling_seconds: float, worst_case_seconds: float) -> bool:
+    """True when `ceiling_seconds - worst_case_seconds` (settings.json's margin over this hook's
+    own worst case) sits inside [SESSION_END_TIMEOUT_MIN_HEADROOM_SECONDS,
+    SESSION_END_TIMEOUT_MAX_HEADROOM_SECONDS]. Too little margin means a ceiling that could cut
+    the hook off before its own fail-open exit; too much margin means the worst-case arithmetic
+    or the ceiling drifted without the other one following -- both are the same kind of silent
+    drift, just on opposite sides of the number."""
+    margin = ceiling_seconds - worst_case_seconds
+    return (
+        SESSION_END_TIMEOUT_MIN_HEADROOM_SECONDS
+        <= margin
+        <= SESSION_END_TIMEOUT_MAX_HEADROOM_SECONDS
+    )
+
+
+# SPENDING WHAT REMAINS, NOT WHAT WAS GUESSED. HOOK_WORST_CASE_SECONDS above is a STATIC bound,
+# checked once against settings.json by HookBudgetFitsUnderItsHostCeiling; it says nothing about
+# how long resolve_repo_root actually took on THIS run. Most runs resolve the repository root in
+# milliseconds, not GUARD_GIT_CALL_TIMEOUT_SECONDS * RESOLVE_ROOT_GIT_CALLS -- handing the sweep
+# a fixed SWEEP_TIMEOUT_SECONDS regardless spends a number that was guessed at design time, not
+# the time this run actually has left. SESSION_END_CEILING_SECONDS is the real ceiling this run
+# is held to; EXIT_MARGIN_SECONDS is reserved, after the sweep subprocess returns, for this
+# hook's own interpreter teardown; MIN_USEFUL_SWEEP_SECONDS is the floor below which a sweep is
+# more likely to be killed mid-write than to finish, so the hook skips it instead of starting one
+# the harness will cut off partway (module docstring above: "a sweep the harness kills part way
+# is worse than a sweep that never started").
+SESSION_END_CEILING_SECONDS = _session_end_ceiling_seconds()
+EXIT_MARGIN_SECONDS = 3.0
+MIN_USEFUL_SWEEP_SECONDS = 2.0
+
+
+def remaining_sweep_timeout_seconds(elapsed_seconds):
+    """How much of the sweep's own subprocess.run timeout to give it, given `elapsed_seconds`
+    already spent since this hook started. Never more than SWEEP_TIMEOUT_SECONDS -- that cap is
+    what HOOK_WORST_CASE_SECONDS and the ceiling arms above assume, so this function must never
+    hand the sweep more than the static worst-case arithmetic already accounts for. Returns None
+    when what is left, after EXIT_MARGIN_SECONDS, does not clear MIN_USEFUL_SWEEP_SECONDS: the
+    caller must not run the sweep at all in that case.
+
+    AN ELAPSED READING THIS FUNCTION CANNOT TRUST IS ALSO "TOO LITTLE TIME LEFT" (PR #84 review).
+    Negative, non-finite (`nan`/`inf`), or otherwise non-numeric `elapsed_seconds` is refused the
+    same way an elapsed_seconds so large it eats the whole ceiling is refused: this function
+    hands out real time only when it can actually measure how much is left, never when handed a
+    number it cannot make sense of. A caller that cannot supply a trustworthy elapsed reading
+    gets the same answer as a caller that ran out of budget: None, sweep nothing."""
+    if (
+        not isinstance(elapsed_seconds, (int, float))
+        or isinstance(elapsed_seconds, bool)
+        or not math.isfinite(elapsed_seconds)
+        or elapsed_seconds < 0
+    ):
+        return None
+    remaining = SESSION_END_CEILING_SECONDS - elapsed_seconds - EXIT_MARGIN_SECONDS
+    sweep_timeout = min(SWEEP_TIMEOUT_SECONDS, remaining)
+    if sweep_timeout < MIN_USEFUL_SWEEP_SECONDS:
+        return None
+    return sweep_timeout
 
 
 def resolve_repo_root(cwd: str):
@@ -132,8 +232,21 @@ def resolve_repo_root(cwd: str):
     return primary
 
 
-def handle(hook) -> None:
-    """Run the sweep for the repository `hook` names, or do nothing. Never raises."""
+def handle(hook, start=None, elapsed_seconds=None) -> None:
+    """Run the sweep for the repository `hook` names, or do nothing. Never raises.
+
+    `start` is the `time.monotonic()` reading this hook's own process began at; `main` passes
+    the real one, taken before stdin is even read, so the elapsed time computed below counts the
+    whole run, not just the part inside this function. A caller that omits it (direct unit-
+    testing of this function, for example) gets one taken right here instead.
+
+    `elapsed_seconds`, when given, is used INSTEAD of measuring `start`: an explicit argument a
+    test can pass by calling this function in-process, never an environment variable a hook that
+    is live on this machine would otherwise have to trust (PR #84 review: a test seam that
+    production reads from the environment is a control surface, not a seam). `main` never passes
+    it; only tests do."""
+    if start is None:
+        start = time.monotonic()
     if not isinstance(hook, dict):
         return
     if hook.get("hook_event_name") != "SessionEnd":
@@ -152,10 +265,18 @@ def handle(hook) -> None:
     if not os.path.isfile(SWEEP_PATH):
         return  # the sweep this checkout ships is missing; nothing runs, nothing is denied
 
+    if elapsed_seconds is None:
+        elapsed_seconds = time.monotonic() - start
+    sweep_timeout = remaining_sweep_timeout_seconds(elapsed_seconds)
+    if sweep_timeout is None:
+        # too little of this hook's own budget is left: a sweep the harness kills part way
+        # through is worse than a sweep that never started (module docstring above)
+        return
+
     try:
         subprocess.run(
             [sys.executable, SWEEP_PATH, root, "--confirm"],
-            capture_output=True, text=True, timeout=SWEEP_TIMEOUT_SECONDS,
+            capture_output=True, text=True, timeout=sweep_timeout,
         )
     except Exception:
         # Covers subprocess.TimeoutExpired (the sweep hung) and every other way the call could
@@ -167,6 +288,7 @@ def handle(hook) -> None:
 
 
 def main() -> None:
+    start = time.monotonic()
     try:
         raw = sys.stdin.read()
     except Exception:
@@ -176,7 +298,7 @@ def main() -> None:
     except Exception:
         return
     try:
-        handle(hook)
+        handle(hook, start)
     except Exception:
         return
 
