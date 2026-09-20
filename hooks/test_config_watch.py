@@ -243,6 +243,46 @@ def stop_backstop(project):
     return {"pre": "n/a", "lifted": project.lifted(), "message": message}
 
 
+# ------------------------------------------------------------------ absent, never merely empty
+#
+# `digest()`'s own docstring draws a line between a file that is ABSENT and one that is merely
+# EMPTY: "a cap lift that CREATES settings.local.json must read as a change and its restore must
+# remove the file again." Every other case above starts from `start=SONNET` and never deletes the
+# file, so that line is never read at all: a `digest()` that hashed an absent file the same as an
+# empty one would pass every case above unnoticed (MEASURED: it did, 0 red lines, once an
+# unrelated crash that had been masking this gap was fixed — see
+# decisions/mutant-cause-of-death.md).
+#
+# ONE MORE STEP THAN IT LOOKS LIKE IT NEEDS, and each one is load-bearing. `load_baseline`
+# recomputes `"digest": ""` by hand whenever a stored baseline's content is `None` (a genuinely
+# absent file), rather than trusting the digest that was written for it. So a baseline that goes
+# straight from "no baseline yet" to "absent" never asks `digest(None)` an interesting question:
+# that first branch is a dead end for this bug, no matter how the fixture is built. The bug only
+# shows through a baseline that starts REAL AND EMPTY (`digest()` is trusted and verified there),
+# and is THEN deleted by an ordinary, non-cap event. A `digest()` confusing absent with empty
+# makes that deletion invisible to the watch's own baseline, so a later cap lift reverts to an
+# EMPTY file instead of removing it -- the file's true last-known-good state.
+
+
+@case("a file goes from empty to absent before a lift, so the revert removes it, not empties it",
+      "absent")
+def empty_then_absent(project):
+    # This one case starts from a real, empty file, though `main` below hands every case one that
+    # already carries SONNET.
+    write(project.settings, "")
+    project.settle()
+    # It disappears through no cap-bearing call at all -- an ordinary event, and the watch must
+    # fold it into its own baseline exactly as Decision 7 asks of any project edit.
+    os.remove(project.settings)
+    project.settle()
+    command = "cp /tmp/lift_case.json .claude/settings.local.json"
+    decision = project.pre("Bash", {"command": command})
+    shell(project, command)
+    message = project.post("Bash", {"command": command})
+    return {"pre": decision, "lifted": project.lifted(), "message": message,
+            "settings": project.content()}
+
+
 # --------------------------------------------------------------------------- the run
 
 BASELINE = "--baseline" in sys.argv
@@ -270,6 +310,20 @@ def expectation(entry, result):
     if entry["name"].startswith("an ordinary project config edit"):
         return ((not lifted) and not message and result["settings"] == UNRELATED,
                 "kept and silent" if not message else "reverted an ordinary edit")
+    if group == "absent":
+        if BASELINE:
+            return (lifted, "cap LIFTED on main" if lifted
+                    else "the case never lifted the cap: the fixture is wrong")
+        if lifted:
+            return (False, "cap STILL LIFTED: the watch missed it")
+        if not message:
+            return (False, "reverted but said nothing")
+        settings = result["settings"]
+        if settings == "":
+            return (False, "reverted to EMPTY: the file's last known-good state was absent")
+        if settings is not None:
+            return (False, "reverted but did not land on absent")
+        return (True, "reverted to its own last known-good state, absent, not merely empty")
     if BASELINE:
         return (lifted, "landed on main")
     return (lifted and not message,

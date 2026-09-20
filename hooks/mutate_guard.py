@@ -68,13 +68,6 @@ TARGETS = {
 # a change to carry this. Each name was MEASURED against this file's own mutants, not guessed: a
 # label's prose is a claim about which rule breaks, and the required name is the proof that some
 # case actually reads that break, not a different one nearby.
-#
-# ONE GAP, NAMED RATHER THAN HIDDEN: "watch: an absent file reads the same as an empty one..."
-# carries a required name that will not be found. No case in `hooks/test_config_watch.py` ever
-# leaves the watched settings file absent before writing it, so nothing here can tell that
-# mutation's `digest(None)` from `digest(b"")`. It is flagged as a survivor on purpose rather
-# than pinned to a name that would falsely read as proof. Closing it needs a new case in that
-# file, which sits outside this file's own one-file scope.
 MUTATIONS = [
     # THE TWO ROOTS. `--work-tree` names whose FILES a call discards, and `--git-dir` names whose
     # HEAD it moves. Each mutant makes one of them unread, or makes one root answer the other's
@@ -349,12 +342,10 @@ MUTATIONS = [
     ("watch: watch settings.json alone, so the local file is unwatched",
      'WATCHED_NAMES = tuple(name.lstrip("/") for name in guard.PROJECT_FROZEN_FILES)',
      'WATCHED_NAMES = ("\x2eclaude/settings.json",)', "watch", 'python3 -c writes the path'),
-    # KNOWN SURVIVOR, see the note above MUTATIONS: no fixture leaves the file absent, so this
-    # dies of nothing at all (SURVIVED, not WRONG CAUSE). The name below is the closest bypass
-    # shape, kept so the field is never blank, not a claim that it will be found.
     ("watch: an absent file reads the same as an empty one, so a created file is not a change",
      '    if content is None:\n        return ""\n    return hashlib.sha256(content).hexdigest()',
-     '    return hashlib.sha256(content or b"").hexdigest()', "watch", 'cp from another file'),
+     '    return hashlib.sha256(content or b"").hexdigest()', "watch",
+     'a file goes from empty to absent before a lift, so the revert removes it, not empties it'),
     ("watch: a missing baseline is read as clear rather than recorded",
      '    if baseline is None:\n        save_baseline(path, current)',
      '    if baseline is None:\n        save_baseline(path, None)', "watch", 'a write to an unrelated file triggers nothing'),
