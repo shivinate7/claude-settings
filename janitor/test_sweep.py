@@ -561,6 +561,77 @@ class WorktreeRemovalTests(unittest.TestCase):
         self.assertFalse(os.path.isdir(target))
 
 
+# --------------------------------------------------------------------------- the --confirm gate
+#
+# Every OTHER confirm=False call in this file (BaseResolutionRefusalTests,
+# OptOutTests.test_sweep_false_..., OptOutTests.test_unparseable_file_...) hits a REFUSED
+# repository before either loop in sweep_repo ever runs, so none of them can prove anything about
+# the gate itself: a refused repository never reaches `if confirm and decision["action"] ==
+# "reap":` at all. This class is the one arm that puts a REAPABLE branch and a REMOVABLE worktree
+# in front of a confirm=False sweep and checks that preview leaves both alone. Its absence is a
+# MEASURED hole: janitor/mutate_sweep.py's `--confirm: reap branches for real with no --confirm
+# on the line` mutant (the `confirm and` dropped from that same line) passed all 31 cases in this
+# file before this class existed.
+class ConfirmGateTests(unittest.TestCase):
+    def test_preview_names_reapable_subjects_but_touches_neither(self):
+        root = os.path.join(ROOT, "confirm-gate-repo")
+        make_repo(root, {"f.txt": "x\n"})
+        # A branch identical to main's own tip: the ancestor test alone proves it empty, so it is
+        # REAPABLE, not merely present.
+        run_vcs(root, "checkout", "-q", "-b", "preview-should-not-touch")
+        run_vcs(root, "checkout", "-q", "main")
+        # A clean, unlocked worktree with no live session recorded against it: REMOVABLE, not
+        # merely registered.
+        target = os.path.join(ROOT, "confirm-gate-worktree")
+        run_vcs(root, "worktree", "add", "-q", target, "-b", "lane-confirm-gate")
+
+        # THE SUBJECT SET MUST NOT BE EMPTY before any verdict about it means anything (the same
+        # rule every other case in this file follows; see the module docstring).
+        branches_before = sweep.list_local_branches(root)
+        self.assertTrue(len(branches_before) > 0, "branch list must not be empty")
+        self.assertIn("preview-should-not-touch", branches_before)
+        entries_before = sweep.parse_worktree_list(root)
+        self.assertTrue(entries_before is not None and len(entries_before) > 0,
+                         "worktree list must not be empty")
+        self.assertTrue(any(
+            os.path.normcase(os.path.realpath(e["path"]))
+            == os.path.normcase(os.path.realpath(target)) for e in entries_before
+        ))
+
+        log_path = os.path.join(ROOT, "confirm-gate.log")
+        result = sweep.sweep_repo(root, confirm=False, restore_log_path=log_path)
+        self.assertIsNone(result["refused"])
+
+        # The preview must have NAMED both subjects as reapable. A preview that silently reported
+        # nothing at all -- as empty a result as an empty subject set -- would pass a weaker
+        # assertion than this one just as wrongly.
+        branch_decision = next(
+            (b for b in result["branches"] if b["name"] == "preview-should-not-touch"), None)
+        self.assertIsNotNone(branch_decision, "the branch must appear in the preview at all")
+        self.assertEqual(branch_decision["action"], "reap")
+
+        worktree_decision = next(
+            (w for w in result["worktrees"]
+             if os.path.normcase(os.path.realpath(w["path"]))
+             == os.path.normcase(os.path.realpath(target))), None)
+        self.assertIsNotNone(worktree_decision, "the worktree must appear in the preview at all")
+        self.assertEqual(worktree_decision["action"], "reap")
+
+        # And PREVIEW MUST NOT HAVE TOUCHED EITHER ONE: this is the assertion the gate itself
+        # lives or dies on.
+        branches_after = sweep.list_local_branches(root)
+        self.assertIn("preview-should-not-touch", branches_after,
+                       "a preview run with confirm=False deleted a branch")
+        entries_after = sweep.parse_worktree_list(root)
+        self.assertTrue(entries_after is not None)
+        self.assertTrue(any(
+            os.path.normcase(os.path.realpath(e["path"]))
+            == os.path.normcase(os.path.realpath(target)) for e in entries_after
+        ), "a preview run with confirm=False removed a worktree")
+        self.assertTrue(os.path.isdir(target),
+                         "a preview run with confirm=False deleted a worktree's directory")
+
+
 # --------------------------------------------------------------------------- the purge
 
 
