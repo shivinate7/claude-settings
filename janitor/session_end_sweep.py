@@ -58,8 +58,15 @@ except (TypeError, ValueError):
 # `hooks/guard.py._git`'s own per-call subprocess timeout, and settings.json's own SessionEnd
 # entry timeout for THIS hook, end to end. Plain constants, not a read of either real file:
 # THEY MUST STAY IN SYNC BY HAND with `guard._git`'s `timeout=` and with settings.json's
-# `hooks.SessionEnd[].hooks[].timeout` for `session_end_sweep.py` (HookBudgetFitsUnderItsHostCeiling
-# pins both numbers below against that file, so a drift here goes red there).
+# `hooks.SessionEnd[].hooks[].timeout` for `session_end_sweep.py`.
+# WHAT ACTUALLY PINS EACH NUMBER, as of the SessionEnd disarm:
+#   GUARD_GIT_CALL_TIMEOUT_SECONDS is pinned live. HookBudgetFitsUnderItsHostCeiling reads
+#   `guard._git`'s own source and goes red when the two drift apart. MEASURED: raising
+#   `_git`'s timeout to 15 fails that arm.
+#   SESSION_END_CEILING_SECONDS is NOT pinned while the hook is disarmed. Its arm reads
+#   settings.json, which no longer carries a SessionEnd entry, so that arm SKIPS. This
+#   number is on the hand-sync comment alone until the hook is re-armed. See
+#   decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md.
 GUARD_GIT_CALL_TIMEOUT_SECONDS = 10.0
 SESSION_END_CEILING_SECONDS = 55.0
 
