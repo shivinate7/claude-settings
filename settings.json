@@ -100,17 +100,6 @@
         ]
       }
     ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "w=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/run_hook.sh\"; [ -f \"$w\" ] && exec sh \"$w\" janitor/session_end_sweep.py; exit 0",
-            "timeout": 55
-          }
-        ]
-      }
-    ],
     "PreToolUse": [
       {
         "matcher": "Bash|PowerShell|Read|Grep|Edit|Write|MultiEdit|NotebookEdit|mcp__github__merge_pull_request",
