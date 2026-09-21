@@ -103,4 +103,27 @@ if [ -n "$d" ] && [ -d "$d/.git" ]; then
   fi
 fi
 
+# The SessionEnd sweep is disarmed. The record is
+# decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md, and it holds the two
+# conditions that re-arm it. This notice reads the installed config, never a date and never a
+# flag a person must clear, so it stops on its own the day the hook returns.
+#
+# Three answers, never two, the contract lint/check_unknown_reads_contract.py states. grep
+# exits 0 when the hook is present, 1 when the file is readable and the hook is absent, and
+# above 1 when the read itself failed. An unreadable config is reported as unknown. It is
+# never folded into the armed answer, which would hide the disarm, and never into the
+# disarmed answer, which would cry wolf on a machine whose config was simply unreadable.
+settings_json="$config_dir/settings.json"
+if [ -r "$settings_json" ]; then
+  grep -q '"SessionEnd"' "$settings_json" 2>/dev/null
+  sessionend_rc=$?
+  if [ "$sessionend_rc" -eq 1 ]; then
+    printf 'claude-settings: SessionEnd sweep is DISARMED. See decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md\n'
+  elif [ "$sessionend_rc" -gt 1 ]; then
+    printf 'claude-settings: cannot read %s. SessionEnd sweep state unknown\n' "$settings_json"
+  fi
+else
+  printf 'claude-settings: cannot read %s. SessionEnd sweep state unknown\n' "$settings_json"
+fi
+
 exit 0
