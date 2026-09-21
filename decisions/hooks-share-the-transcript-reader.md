@@ -49,23 +49,43 @@ report at all, and does not learn that a report is absent.
 
 ## What protects that outcome now
 
-Two mechanisms, not a comment.
+Two mechanisms, not a comment. Neither one is the fail-open path, and the first
+draft of this entry claimed wrongly that it was. The correction is recorded below.
 
-Each hook keeps its own fail-open `try`/`except` in `main`. An import error or a raised
-exception inside one hook exits 0 and prints nothing. It does not take the sibling hooks
-down with it, because each hook is its own process.
+`lint/test_gates.py` runs each gate as a subprocess, at line 58. An import error in
+`lint/_transcript.py` therefore shows as a failure in the gate suite, and the gate
+suite runs in CI. The suite reads 97 tests green after this change, and it covers all
+four hooks. A reviewer broke the import for real, in a scratch copy of the tree, and
+measured the suite at 76 failures and 18 errors. The guard goes red on the defect it
+guards.
 
-`lint/test_gates.py` runs each gate as a subprocess. An import error in
-`lint/_transcript.py` therefore shows as a failure in the gate suite, and the gate suite
-runs in CI. The suite reads 97 tests green after this change, and it covers all four
-hooks.
+A break in the shared module is also LOUD, not quiet. The same reviewer ran
+`hooks/config_report.py` directly against the broken module. It exited 1 and printed a
+Python traceback. The shared import sits at the top of each hook file, above `main`.
+The fail-open `try` and `except` inside `main` never sees an import-time error. The
+owner therefore gets a visible failure, not silence.
+
+## The correction
+
+The first draft of this entry made a false claim. It said that each hook's fail-open
+`try` and `except` catches an import error, and that the hook then exits 0 and prints
+nothing. The measurement above is what shows the claim false. The `try` and `except` in `main` guards
+the code that `main` calls. It cannot guard an import that already ran.
+
+The fail-open path still does its own job. It catches a bad transcript, a missing file
+or a parse error inside a running hook. The hook then exits 0 and prints nothing. That
+is the case it was written for. This change does not touch it.
 
 ## The accepted risk
 
-One bad edit to `lint/_transcript.py` that still passes CI can mute all four reporters at
-once. The fail-open path is what makes this quiet. A hook that fails open prints nothing,
-and nothing is also what a clean turn prints. The reader cannot tell the two apart.
+One bad edit to `lint/_transcript.py` that still passes CI can break all four reporters at
+the same time. Before this change it could break only one.
 
-The owner accepts this risk. This change does not close it. The trade is 167 lines of copy against one shared
-file with a CI gate on it. No measurement here shows how often a bad edit passes CI.
-This entry reports that number as unmeasured.
+The risk is smaller than a silent mute, because the break is loud. Each hook is its own
+process. A broken import takes that process down, and prints a traceback the owner reads.
+The reader can tell a crash from a clean turn. The reader cannot tell a fail-open exit
+from a clean turn, and that case is unchanged by this entry.
+
+The owner accepts this risk. This change does not close it. The trade is 167 lines of copy
+against one shared file with a CI gate on it. No measurement here shows how often a bad
+edit passes CI. This entry reports that number as unmeasured.
