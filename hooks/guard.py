@@ -1336,7 +1336,17 @@ def worktree_locked(where: str, target: str):
 # A directory that exists but cannot be LISTED is unreadable, and a bad individual record is
 # skipped rather than treated as a read failure, so one corrupt file cannot make an otherwise
 # readable directory look unreadable.
-SESSION_LIVE_TOLERANCE_MS = 5000
+#
+# MEASURED on Windows: a session record's `startedAt` is written 1.7 to 3.2 seconds after the
+# kernel's own process-creation time. A correct read can fall outside a 5-second window under
+# load, so the tolerance widens to 60 seconds on every platform.
+SESSION_LIVE_TOLERANCE_MS = 60000
+
+# `_process_start_ms` returns this sentinel, never `None`, when the read itself could not tell
+# whether the process is alive or dead. `None` stays reserved for a CONFIRMED dead pid, so a
+# caller can never coerce "I could not tell" into "it is dead." See
+# `decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md`.
+PROCESS_START_UNREADABLE = object()
 
 
 def session_records():
@@ -1361,30 +1371,87 @@ def session_records():
     return records
 
 
-def _process_start_ms(pid: int):
-    """Return a live process's start time in epoch milliseconds, or None when the pid is not
-    running, or the read failed.
+def _process_start_ms_windows(pid: int):
+    """Windows arm of `_process_start_ms`. Only called when `sys.platform` says Windows, so the
+    Windows-only `ctypes` import stays out of every Linux gate run.
 
-    `ps -o lstart=` prints the start time in THIS machine's own local clock, with no timezone
-    marker at all. Read it with `time.mktime`, which turns a naive `struct_time` into an epoch
-    by treating it as LOCAL time on THIS SAME machine, so the number it returns lines up with the
-    epoch millisecond a session record already carries (written by `Date.now()`, the same local
-    machine).
-    MEASURED trap, named in the plan this task comes from: parsing the identical string as UTC
-    (`calendar.timegm`, or `datetime.fromisoformat(...).timestamp()` after tagging it UTC)
-    introduced a five-hour offset and made a live session look expired. `mktime` is the read that
-    does not carry that trap, because it never assumes a zone the string never named.
+    `OpenProcess` with `PROCESS_QUERY_LIMITED_INFORMATION` (0x1000) asks for the least a read
+    needs. A NULL handle is read through `GetLastError`. Code 87 (`ERROR_INVALID_PARAMETER`)
+    means no process at all exists at this pid, the CONFIRMED dead case, matched to
+    `_process_start_ms`'s existing `None` contract. Code 5 (`ERROR_ACCESS_DENIED`) means the
+    process exists but this read cannot see into it. Any other code is also unreadable: this
+    function never guesses a code it has not measured into a definite dead or alive answer.
+
+    A valid handle's `GetProcessTimes` creation FILETIME is UTC-anchored by definition. `ps
+    -o lstart=` below prints local time with no zone marker at all. FILETIME carries no such
+    trap: no zone is assumed, because none is ever ambiguous.
+
+    MEASURED cost on the reference machine: 0.137 ms per call.
+    """
+    import ctypes
+    import ctypes.wintypes
+
+    kernel32 = ctypes.windll.kernel32
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        error = ctypes.GetLastError()
+        if error == 87:  # ERROR_INVALID_PARAMETER: no such process
+            return None
+        return PROCESS_START_UNREADABLE  # 5 (ERROR_ACCESS_DENIED) or any other code
+    try:
+        creation = ctypes.wintypes.FILETIME()
+        exit_time = ctypes.wintypes.FILETIME()
+        kernel_time = ctypes.wintypes.FILETIME()
+        user_time = ctypes.wintypes.FILETIME()
+        ok = kernel32.GetProcessTimes(
+            handle, ctypes.byref(creation), ctypes.byref(exit_time),
+            ctypes.byref(kernel_time), ctypes.byref(user_time),
+        )
+        if not ok:
+            return PROCESS_START_UNREADABLE
+        value = (creation.dwHighDateTime << 32) | creation.dwLowDateTime
+        return value // 10000 - 11644473600000
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _process_start_ms(pid: int):
+    """Return a live process's start time in epoch milliseconds. Return `None` when the pid is
+    CONFIRMED not running (dead). Return `PROCESS_START_UNREADABLE` when the read could not
+    tell either way. A caller must never fold the third state into the second: an unreadable
+    read is not proof of death. See
+    `decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md`.
+
+    POSIX: `ps -o lstart=` prints the start time in THIS machine's own local clock, with no
+    timezone marker at all. Read it with `time.mktime`. That call turns a naive `struct_time`
+    into an epoch by treating it as LOCAL time on THIS SAME machine. The number it returns then
+    lines up with the epoch millisecond a session record already carries, written by
+    `Date.now()` on the same local machine.
+    MEASURED trap, named in the plan this task comes from. Parsing the identical string as UTC
+    introduced a five-hour offset and made a live session look expired. `calendar.timegm` and
+    `datetime.fromisoformat(...).timestamp()` after tagging the string UTC both carry that trap.
+    `mktime` does not, because it never assumes a zone the string never named.
+
+    Windows has no such trap: see `_process_start_ms_windows`, called below when `sys.platform`
+    says Windows.
     """
     if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
         return None
+    if sys.platform.startswith("win"):
+        return _process_start_ms_windows(pid)
     try:
         answer = subprocess.run(
             ["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=5,
         )
     except Exception:
-        return None
+        return PROCESS_START_UNREADABLE  # exec failed or timed out, not a dead-pid answer
     if answer.returncode != 0:
-        return None
+        # `ps` answers exit code 1 with empty stdout for "no such pid": CONFIRMED dead. Any
+        # other nonzero code is a read failure, not a death, and stays unreadable.
+        if answer.returncode == 1 and not answer.stdout.strip():
+            return None
+        return PROCESS_START_UNREADABLE
     text = answer.stdout.strip()
     if not text:
         return None
@@ -1392,14 +1459,18 @@ def _process_start_ms(pid: int):
         parsed = time.strptime(text, "%a %b %d %H:%M:%S %Y")
         return int(time.mktime(parsed) * 1000)
     except Exception:
-        return None
+        return PROCESS_START_UNREADABLE  # output that does not parse is not a death either
 
 
-def session_is_live(record) -> bool:
-    """True only when the record's process id is alive AND its recorded start time still
-    matches that live process's own start time, within a small tolerance for `ps`'s
-    one-second granularity. A recycled pid then cannot inherit a dead session's claim: the
-    process at that pid today started at a different moment than the one the record names."""
+def session_is_live(record):
+    """True when the record's process id is alive AND its recorded start time still matches
+    that live process's own start time, within a tolerance for the read's own granularity.
+    False when the pid is CONFIRMED dead, or the record itself is malformed. None when the
+    liveness read could not tell either way (`_process_start_ms` returned
+    `PROCESS_START_UNREADABLE`), which a caller must treat as "cannot tell," never as False.
+
+    A recycled pid then cannot inherit a dead session's claim. The process at that pid today
+    started at a different moment than the one the record names."""
     if not isinstance(record, dict):
         return False
     pid = record.get("pid")
@@ -1407,14 +1478,23 @@ def session_is_live(record) -> bool:
     if not isinstance(started, (int, float)) or isinstance(started, bool):
         return False
     actual = _process_start_ms(pid)
+    if actual is PROCESS_START_UNREADABLE:
+        return None
     if actual is None:
         return False
     return abs(actual - started) <= SESSION_LIVE_TOLERANCE_MS
 
 
 def worktree_live_session(target: str):
-    """True when a live session's cwd sits at or under TARGET, False when none does, None when
-    the session directory itself could not be read."""
+    """True when a live session's cwd sits at or under TARGET. False when every session under
+    TARGET is confirmed not live, or none has a cwd under TARGET at all. None when the session
+    directory itself could not be read. None also when some session's cwd sits under TARGET,
+    but its own liveness read came back unreadable rather than confirmed dead.
+
+    A record with an unreadable liveness read is never dropped by `continue` as though it were
+    confirmed dead. Doing so would fold "could not tell" back into "not live," the exact bug
+    this read exists to avoid. See
+    `decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md`."""
     records = session_records()
     if records is None:
         return None
@@ -1422,21 +1502,25 @@ def worktree_live_session(target: str):
         target_real = os.path.normcase(os.path.realpath(target)) + os.sep
     except Exception:
         return None
+    saw_unreadable = False
     for record in records:
         if not isinstance(record, dict):
             continue
         cwd = record.get("cwd")
         if not isinstance(cwd, str) or not cwd:
             continue
-        if not session_is_live(record):
-            continue
         try:
             cwd_real = os.path.normcase(os.path.realpath(cwd)) + os.sep
         except Exception:
             continue
-        if cwd_real.startswith(target_real):
+        if not cwd_real.startswith(target_real):
+            continue
+        live = session_is_live(record)
+        if live is True:
             return True
-    return False
+        if live is None:
+            saw_unreadable = True
+    return None if saw_unreadable else False
 
 
 def worktree_remove_subject(args, where: str):

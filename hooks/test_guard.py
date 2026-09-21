@@ -2667,6 +2667,209 @@ def split_segments_comment_case():
     return (not problems), "; ".join(problems) if problems else "comment rule holds"
 
 
+def process_start_ms_case():
+    """`_process_start_ms` must tell apart three outcomes: alive, CONFIRMED dead, and
+    unreadable. A regression that folds unreadable back into dead would let a live session's
+    worktree look removable, the defect this whole PR fixes. POSIX only: this machine has no
+    Windows kernel32 to call, so the Windows arm is proven by `process_start_ms_windows_case`
+    with a stubbed `ctypes.windll` instead.
+    """
+    guard = _load_guard_module()
+    problems = []
+
+    self_pid = os.getpid()
+    want_alive = _real_process_start_ms(self_pid)
+    got_alive = guard._process_start_ms(self_pid)
+    if not isinstance(got_alive, int) or isinstance(got_alive, bool):
+        problems.append("alive: did not return an int: %r" % (got_alive,))
+    elif abs(got_alive - want_alive) > 2000:
+        problems.append("alive: got %r want near %r" % (got_alive, want_alive))
+
+    # A process this test starts and waits on is CONFIRMED dead the moment `wait()` returns.
+    finished = subprocess.Popen([sys.executable, "-c", "pass"])
+    finished.wait()
+    dead_pid = finished.pid
+    got_dead = guard._process_start_ms(dead_pid)
+    if got_dead is not None:
+        problems.append("dead: got %r want None" % (got_dead,))
+
+    # Unreadable, arm 1: `ps` answers with a nonzero exit code that is NOT 1. That is a read
+    # failure, never a death, and must not collapse to the same `None` a confirmed-dead pid gets.
+    fake_dir = tempfile.mkdtemp(prefix="fake-ps-bad-exit-")
+    old_path = os.environ.get("PATH", "")
+    try:
+        fake_ps = os.path.join(fake_dir, "ps")
+        write(fake_ps, "#!/bin/sh\nexit 2\n")
+        os.chmod(fake_ps, 0o755)
+        os.environ["PATH"] = fake_dir + os.pathsep + old_path
+        got_bad_exit = guard._process_start_ms(self_pid)
+    finally:
+        os.environ["PATH"] = old_path
+        shutil.rmtree(fake_dir, ignore_errors=True)
+    if got_bad_exit is not guard.PROCESS_START_UNREADABLE:
+        problems.append(
+            "unreadable (bad exit code): got %r want PROCESS_START_UNREADABLE" % (got_bad_exit,))
+
+    # Unreadable, arm 2: no `ps` on PATH at all, so the exec itself fails.
+    empty_dir = tempfile.mkdtemp(prefix="fake-ps-missing-")
+    try:
+        os.environ["PATH"] = empty_dir
+        got_missing = guard._process_start_ms(self_pid)
+    finally:
+        os.environ["PATH"] = old_path
+        shutil.rmtree(empty_dir, ignore_errors=True)
+    if got_missing is not guard.PROCESS_START_UNREADABLE:
+        problems.append(
+            "unreadable (ps missing): got %r want PROCESS_START_UNREADABLE" % (got_missing,))
+
+    return (not problems), "; ".join(problems) if problems else "alive/dead/unreadable read apart"
+
+
+def _fake_kernel32(open_process_result, get_last_error=0, get_process_times_ok=True,
+                    creation_high=0, creation_low=0):
+    """A stand-in for `ctypes.windll.kernel32`, built the same way `make_blind_git` stands in
+    for a real `git`: the real target (Windows) is unavailable on this machine, so the CALL
+    SURFACE is stubbed instead, which still drives the Windows arm's own branching logic."""
+    closed = []
+
+    class Kernel32:
+        def OpenProcess(self, access, inherit, pid):
+            return open_process_result
+
+        def GetProcessTimes(self, handle, creation_ref, exit_ref, kernel_ref, user_ref):
+            if not get_process_times_ok:
+                return 0
+            import ctypes
+            import ctypes.wintypes
+            ptr = ctypes.cast(creation_ref, ctypes.POINTER(ctypes.wintypes.FILETIME))
+            ptr.contents.dwHighDateTime = creation_high
+            ptr.contents.dwLowDateTime = creation_low
+            return 1
+
+        def CloseHandle(self, handle):
+            closed.append(handle)
+            return 1
+
+    class Windll:
+        kernel32 = Kernel32()
+
+    return Windll(), closed, (lambda: get_last_error)
+
+
+def process_start_ms_windows_case():
+    """Drive `_process_start_ms_windows`'s own branches with a stubbed `ctypes.windll`, since
+    this machine has no real kernel32. A NULL handle with error 87 (no such process) reads as
+    CONFIRMED dead. A NULL handle with error 5 (access denied) reads as unreadable, never as
+    dead. A valid handle's FILETIME converts to the same epoch millisecond the formula in the
+    code names.
+    """
+    import ctypes
+
+    guard = _load_guard_module()
+    problems = []
+    real_windll = getattr(ctypes, "windll", None)
+    real_get_last_error = getattr(ctypes, "GetLastError", None)
+
+    def run(open_result, error, times_ok=True, high=0, low=0):
+        fake_windll, closed, get_last_error = _fake_kernel32(
+            open_result, error, times_ok, high, low)
+        ctypes.windll = fake_windll
+        ctypes.GetLastError = get_last_error
+        try:
+            return guard._process_start_ms_windows(4321), closed
+        finally:
+            if real_windll is None:
+                del ctypes.windll
+            else:
+                ctypes.windll = real_windll
+            if real_get_last_error is None:
+                del ctypes.GetLastError
+            else:
+                ctypes.GetLastError = real_get_last_error
+
+    # error 87, ERROR_INVALID_PARAMETER: no such process at all -> CONFIRMED dead.
+    got, closed = run(open_result=0, error=87)
+    if got is not None:
+        problems.append("windows dead (error 87): got %r want None" % (got,))
+    if closed:
+        problems.append("windows dead (error 87): CloseHandle called on a NULL handle")
+
+    # error 5, ERROR_ACCESS_DENIED: the process exists, but this read cannot see into it.
+    got, closed = run(open_result=0, error=5)
+    if got is not guard.PROCESS_START_UNREADABLE:
+        problems.append(
+            "windows access-denied (error 5): got %r want PROCESS_START_UNREADABLE" % (got,))
+
+    # A valid handle: 10,000 100ns ticks past the epoch-zero FILETIME (1601-01-01 UTC) is one
+    # millisecond past that same instant, so this converts to epoch millisecond 1.
+    ticks = 11644473600000 * 10000 + 10000
+    high = (ticks >> 32) & 0xFFFFFFFF
+    low = ticks & 0xFFFFFFFF
+    got, closed = run(open_result=99, error=0, times_ok=True, high=high, low=low)
+    if got != 1:
+        problems.append("windows alive: FILETIME converted to %r want %r" % (got, 1))
+    if not closed:
+        problems.append("windows alive: CloseHandle was never called on the valid handle")
+
+    return (not problems), "; ".join(problems) if problems else "windows arm splits dead/unreadable/alive"
+
+
+def session_is_live_case():
+    """`session_is_live` must carry `_process_start_ms`'s three states through as True, False,
+    and None, never coercing the unreadable third state into False. The module's own
+    `_process_start_ms` is stubbed here so this case proves `session_is_live`'s own wiring, not
+    a real process's real state.
+    """
+    guard = _load_guard_module()
+    problems = []
+    record = {"pid": 4321, "startedAt": 1_000_000}
+
+    guard._process_start_ms = lambda pid: 1_000_000
+    live = guard.session_is_live(record)
+    if live is not True:
+        problems.append("live: got %r want True" % (live,))
+
+    guard._process_start_ms = lambda pid: None
+    dead = guard.session_is_live(record)
+    if dead is not False:
+        problems.append("dead: got %r want False" % (dead,))
+
+    guard._process_start_ms = lambda pid: guard.PROCESS_START_UNREADABLE
+    try:
+        unreadable = guard.session_is_live(record)
+    except Exception as e:
+        problems.append(
+            "unreadable: session_is_live raised %r instead of answering None (not False)" % (e,))
+    else:
+        if unreadable is not None:
+            problems.append("unreadable: got %r want None (not False)" % (unreadable,))
+
+    return (not problems), "; ".join(problems) if problems else "session_is_live carries all three states"
+
+
+def worktree_live_session_unreadable_case():
+    """`worktree_live_session` must answer None, not False, when a record's cwd sits under
+    TARGET but that record's own liveness read is unreadable, and no OTHER record under TARGET
+    is confirmed live. Returning False here would make an unreadable-but-maybe-live session's
+    worktree look removable to `worktree_remove_subject` and `janitor/sweep.py`'s
+    `decide_worktree`, both of which already keep on None.
+    """
+    guard = _load_guard_module()
+    problems = []
+    target = tempfile.mkdtemp(prefix="wt-live-unreadable-")
+    try:
+        guard.session_records = lambda: [{"pid": 1, "startedAt": 1, "cwd": target}]
+        guard.session_is_live = lambda record: None
+        got = guard.worktree_live_session(target)
+        if got is not None:
+            problems.append(
+                "unreadable record under target: got %r want None, not False" % (got,))
+    finally:
+        shutil.rmtree(target, ignore_errors=True)
+
+    return (not problems), "; ".join(problems) if problems else "unreadable record propagates as None"
+
+
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
 # literal count drifts the moment a case is added, and a suite that miscounts its own cases is a
 # suite a reader stops trusting.
@@ -2685,6 +2888,13 @@ LOG_CHECKS = (
     ("stack: the refusal never names the action it refused", stack_reason_hygiene_case),
     ("split_segments: a comment starting a word ends its line, "
      "letter-before-# and quoted-# stay literal", split_segments_comment_case),
+    ("liveness: process_start_ms splits alive/dead/unreadable apart", process_start_ms_case),
+    ("liveness: windows arm splits dead (error 87) from unreadable (error 5)",
+     process_start_ms_windows_case),
+    ("liveness: session_is_live carries True/False/None, never coercing unreadable to False",
+     session_is_live_case),
+    ("liveness: worktree_live_session answers None on an unreadable record under target",
+     worktree_live_session_unreadable_case),
 )
 
 

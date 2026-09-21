@@ -546,6 +546,33 @@ MUTATIONS = [
      '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:',
      '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600 - 1:', "watch",
      "exactly 24 hours ahead is accepted"),
+
+    # ---- the liveness oracle's alive/dead/unreadable split, added for Windows parity. Each
+    # mutant here folds the new third state back into one of the other two, the exact shape of
+    # the bug this whole change fixes.
+    ("liveness: a bad ps exit code reads as CONFIRMED dead instead of unreadable",
+     '        if answer.returncode == 1 and not answer.stdout.strip():\n            return None\n'
+     '        return PROCESS_START_UNREADABLE',
+     '        return None',
+     "guard", "liveness: process_start_ms splits alive/dead/unreadable apart"),
+    ("liveness: session_is_live folds the unreadable third state back into False",
+     '    if actual is PROCESS_START_UNREADABLE:\n        return None\n    if actual is None:',
+     '    if actual is None:',
+     "guard", "liveness: session_is_live carries True/False/None, never coercing unreadable to False"),
+    ("liveness: worktree_live_session drops an unreadable record instead of answering None",
+     '        live = session_is_live(record)\n        if live is True:\n            return True\n'
+     '        if live is None:\n            saw_unreadable = True',
+     '        if not session_is_live(record):\n            continue',
+     "guard", "liveness: worktree_live_session answers None on an unreadable record under target"),
+    ("liveness: the windows arm reads access-denied (error 5) as CONFIRMED dead",
+     '        if error == 87:  # ERROR_INVALID_PARAMETER: no such process\n            return None',
+     '        if error in (87, 5):\n            return None',
+     "guard", "liveness: windows arm splits dead (error 87) from unreadable (error 5)"),
+    ("liveness: the windows arm reads no-such-process (error 87) as unreadable, not dead",
+     '        if error == 87:  # ERROR_INVALID_PARAMETER: no such process\n            return None\n'
+     '        return PROCESS_START_UNREADABLE  # 5 (ERROR_ACCESS_DENIED) or any other code',
+     '        return PROCESS_START_UNREADABLE',
+     "guard", "liveness: windows arm splits dead (error 87) from unreadable (error 5)"),
 ]
 
 
