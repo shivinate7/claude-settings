@@ -17,10 +17,16 @@ names three copied helpers. Its sentence, verbatim:
 `lint/ste_gate.py:64` carried the same claim in its own words. So did
 `lint/md_sweep.py:116`. This change rewrites those two code comments.
 
-The owner repealed that sentence on 2026-09-21, and the repeal lands in this
-branch. The scope rule in that entry survives. Only the example went, because
-the example is measured false. The orchestrator proposed the repeal first and
-did not land it alone.
+This branch does NOT touch that sentence. CLAUDE.md says: "Never repeal an
+argument on your own." A repeal is the owner's act. The owner has not made it.
+The entry and the code therefore disagree while this branch stands, and this
+paragraph is the record of that gap.
+
+THE PROPOSED REPEAL, for the owner to accept or refuse. Replace the three
+sentences that name the copied helpers with the scope rule alone. The scope
+rule survives either way. A transcript helper is still not a permit list. Only
+the example is wrong. Both anchors it cites are retired by this branch, and the
+reason it gives was already false. The next section is the measurement.
 
 ## What this change measured
 
