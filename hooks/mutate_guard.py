@@ -39,10 +39,10 @@ the REDIRECTION strip in git_calls, and the Decision 7 config-edit log line.
 
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
-from concurrent.futures import ThreadPoolExecutor
+
+import mutate_lib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GUARD = os.path.join(HERE, "guard.py")
@@ -196,8 +196,13 @@ MUTATIONS = [
     ("env-file: read only the bare environment basename",
      'ENV_BASENAME = re.compile(r"^\\.env(\\.[A-Za-z0-9_.\\-]+)?$")',
      'ENV_BASENAME = re.compile(r"^\\.env$")', "guard", 'env: a path token wherever the path puts it, cat .env.local'),
+    ("env-file: drop the background-`&` sub-split, so `ls` before a real `& cat .env` reads as "
+     "the whole segment's command",
+     'for segment in (sub for piece in split_segments(cmd) for sub in split_background(piece)):',
+     'for segment in split_segments(cmd):', "guard",
+     'env: a lone background `&` is its own command'),
     ("shared-tree: drop the interpreter heredoc exception",
-     '    if INTERPRETER_HEREDOC.search(cmd):\n        return cmd',
+     '    if keep_interpreter_bodies and INTERPRETER_HEREDOC.search(cmd):\n        return cmd',
      '    if False:\n        return cmd', "guard", 'heredoc: a body fed to a shell stays under inspection'),
     ("frozen-path: freeze nothing",
      '    if not path:\n        return False\n    try:\n        target = _resolved(path, cwd)\n'
@@ -549,70 +554,44 @@ MUTATIONS = [
 ]
 
 
-def run_suite(suite: str, variable: str, copy_path: str, config_dir: str):
-    """Run one fixture suite against one mutated copy. Return (exit code, FAIL lines)."""
+def mutation_parts(entry):
+    """Return (label, old, new, target, required) for one mutation.
+
+    EVERY ENTRY CARRIES FIVE FIELDS. `required` is MANDATORY: a mutation with no required case
+    name is as unproven as one that dies wrong, since nothing then checks that the suite's own
+    red line is about the rule the label claims to break. A short entry is refused outright
+    rather than defaulted, so a future port that drops a field fails loudly instead of silently
+    losing the check.
+    """
+    if len(entry) != 5:
+        raise ValueError("mutation carries the wrong number of fields: %r" % (entry,))
+    label, old, new, target, required = entry
+    if not required:
+        raise ValueError("mutation carries no required case name: %s" % label)
+    return label, old, new, target, required
+
+
+def run_mutant(sources, entry, work: str):
+    """Apply one mutation, run its suite against it, and return (label, code, FAIL lines, required).
+
+    `required` is the case name (or a distinctive fragment of it) the caller must find among the
+    FAIL lines before trusting this mutant's death: see `mutate_lib.run_mutants`.
+    """
+    label, old, new, target, required = mutation_parts(entry)
+    _path, suite, variable, stem = TARGETS[target]
+    mutated = sources[target].replace(old, new, 1)
+    copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_lib.safe_name(label)))
+    with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(mutated)
+    config_dir = os.path.join(work, "cfg_%s" % mutate_lib.safe_name(label))
+    os.makedirs(config_dir, exist_ok=True)
     env = dict(os.environ)
     env.pop("GUARD_UNDER_TEST", None)
     env.pop("WATCH_UNDER_TEST", None)
     env[variable] = copy_path
     env["CLAUDE_CONFIG_DIR"] = config_dir
-    result = subprocess.run(
-        [sys.executable, suite], capture_output=True, text=True, env=env, timeout=1200,
-    )
-    red = [line for line in result.stdout.splitlines() if line.startswith("FAIL")]
-    return result.returncode, red
-
-
-def safe_name(label: str) -> str:
-    return "".join(ch if ch.isalnum() else "_" for ch in label)[:60]
-
-
-def mutation_parts(entry):
-    """Return (label, old, new, target, required) for one mutation.
-
-    `target` defaults to "guard" for a 3-element entry, which is the shape every mutation
-    written before the watch target existed still carries on disk until it is ported. `required`
-    reads the same way for the port: absent on a 3- or 4-element entry.
-
-    ONCE EVERY ENTRY CARRIES FIVE FIELDS, as they all do now, `required` is MANDATORY. A mutation
-    with no required case name is as unproven as one that dies wrong: it says which rule breaks,
-    but nothing checks that the suite's own red line is about THAT rule. The tolerant read above
-    stays only so a future port has somewhere to land mid-edit; a caller that wants the field
-    enforced asserts `len(entry) == 5` itself, which `run_mutant` below does.
-    """
-    label, old, new = entry[0], entry[1], entry[2]
-    target = entry[3] if len(entry) > 3 else "guard"
-    required = entry[4] if len(entry) > 4 else None
-    return label, old, new, target, required
-
-
-def run_mutant(sources, work: str, entry):
-    """Apply one mutation, run its suite against it, and return (label, code, FAIL lines, required).
-
-    `required` is the case name (or a distinctive fragment of it) the caller must find among the
-    FAIL lines before trusting this mutant's death: see the verdict loop in `main`.
-    """
-    label, old, new, target, required = mutation_parts(entry)
-    if required is None:
-        raise ValueError("mutation carries no required case name: %s" % label)
-    _path, suite, variable, stem = TARGETS[target]
-    mutated = sources[target].replace(old, new, 1)
-    copy_path = os.path.join(work, "%s_%s.py" % (stem, safe_name(label)))
-    with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
-        handle.write(mutated)
-    config_dir = os.path.join(work, "cfg_%s" % safe_name(label))
-    os.makedirs(config_dir, exist_ok=True)
-    code, red = run_suite(suite, variable, copy_path, config_dir)
+    code, red = mutate_lib.run_suite([sys.executable, suite], env)
     return label, code, red, required
-
-
-def job_count() -> int:
-    """How many suites to run at once: MUTATE_JOBS, else the CPU count, at least one."""
-    try:
-        wanted = int(os.environ.get("MUTATE_JOBS", "") or 0)
-    except ValueError:
-        wanted = 0
-    return max(1, wanted or os.cpu_count() or 1)
 
 
 def main() -> int:
@@ -626,17 +605,12 @@ def main() -> int:
     # whose anchor sits in the WRONG file is stale too, which is what the target lookup catches.
     # The required-name field is checked here too: every entry must carry one, not just the ones
     # a reviewer remembered to fill in.
-    for entry in MUTATIONS:
-        label, old, _new, target, required = mutation_parts(entry)
-        if target not in TARGETS:
-            print("ERROR unknown mutation target %r: %s" % (target, label))
-            return 1
-        if old not in sources[target]:
-            print("ERROR stale mutation, anchor text not found: %s" % label)
-            return 1
-        if not required:
-            print("ERROR mutation carries no required case name: %s" % label)
-            return 1
+    entries_info = [
+        (label, target, old, required)
+        for label, old, _new, target, required in (mutation_parts(e) for e in MUTATIONS)
+    ]
+    if not mutate_lib.check_stale(entries_info, sources):
+        return 1
 
     work = tempfile.mkdtemp(prefix="mutate_guard_")
     # A "watch" mutant is a copy of config_watch.py that runs OUTSIDE hooks/, as its own
@@ -651,27 +625,10 @@ def main() -> int:
     with open(os.path.join(work, "guard.py"), "w", encoding="utf-8", newline="\n") as handle:
         handle.write(sources["guard"])
 
-    survivors = 0
-    wrong_cause = 0
-    jobs = job_count()
-    print("%d mutations, %d at a time" % (len(MUTATIONS), jobs))
     try:
-        with ThreadPoolExecutor(max_workers=jobs) as pool:
-            results = pool.map(lambda entry: run_mutant(sources, work, entry), MUTATIONS)
-            for label, code, red, required in results:
-                if code == 0 or not red:
-                    survivors += 1
-                    print("SURVIVED    %-62s %2d red" % (label, len(red)), flush=True)
-                elif not any(required in line for line in red):
-                    wrong_cause += 1
-                    print("WRONG CAUSE %-62s %2d red, missing %r" % (
-                        label, len(red), required), flush=True)
-                else:
-                    print("KILLED      %-62s %2d red" % (label, len(red)), flush=True)
-        print()
-        killed = len(MUTATIONS) - survivors - wrong_cause
-        print("%d of %d mutations killed (%d survived, %d wrong cause)" % (
-            killed, len(MUTATIONS), survivors, wrong_cause))
+        survivors, wrong_cause = mutate_lib.run_mutants(
+            MUTATIONS, lambda entry, w: run_mutant(sources, entry, w), work,
+        )
         return 1 if (survivors or wrong_cause) else 0
     finally:
         shutil.rmtree(work, ignore_errors=True)

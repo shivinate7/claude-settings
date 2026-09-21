@@ -316,9 +316,21 @@ INTERPRETER_HEREDOC = re.compile(
 )
 
 
-def strip_heredoc_bodies(cmd: str) -> str:
-    """Drop the body of every heredoc, and keep every header line."""
-    if INTERPRETER_HEREDOC.search(cmd):
+def strip_heredoc_bodies(cmd: str, keep_interpreter_bodies: bool = True) -> str:
+    """Drop the body of every heredoc, and keep every header line.
+
+    `keep_interpreter_bodies` (the default) leaves an INTERPRETER heredoc's body under
+    inspection, because that body may be executed. `_run_dir` passes `False`: "may be executed"
+    means the INTERPRETER runs it, not the outer shell, so a `cd` inside a `python3 <<'EOF'`
+    body changes python's notion of a directory, never the outer shell's cwd, and must never be
+    read as a live segment there. Found in review of PR #75, reproduced against the live guard:
+    a `cd <clean checkout>` line inside such a body ALLOWED a `git reset --hard HEAD` that
+    actually ran in a real dirty checkout named by the command's own cwd, because `_run_dir` read
+    the heredoc body's `cd` as though the outer shell had run it. Every other caller still wants
+    the interpreter body kept, for its OWN question -- what a write or a refused command might
+    say, not where the shell sits -- which is what the default preserves.
+    """
+    if keep_interpreter_bodies and INTERPRETER_HEREDOC.search(cmd):
         return cmd  # the body may be executed, so keep it under inspection
     lines = cmd.split("\n")
     kept = []
@@ -834,38 +846,6 @@ def _absolute(where: str, shell_cwd: str) -> str:
     return where
 
 
-def _strip_heredoc_bodies_unconditionally(cmd: str) -> str:
-    """Drop the body of every heredoc, header line kept, even one fed to an interpreter.
-
-    `strip_heredoc_bodies` keeps an INTERPRETER heredoc's body under inspection, on purpose,
-    because that body may be executed. But "may be executed" means the INTERPRETER runs it, not
-    the outer shell: a `cd` inside a `python3 <<'EOF'` body changes python's notion of a
-    directory, never the outer shell's cwd, so `_run_dir` must never read it as a live segment.
-    Found in review of PR #75, reproduced against the live guard: a `cd <clean checkout>` line
-    inside such a body ALLOWED a `git reset --hard HEAD` that actually ran in a real dirty
-    checkout named by the command's own cwd, because `_run_dir` read the heredoc body's `cd` as
-    though the outer shell had run it. This is a dedicated copy for `_run_dir` alone; every
-    other caller of `strip_heredoc_bodies` still needs the interpreter body kept for its OWN
-    question, which is what a write or a refused command might say, not where the shell sits.
-    """
-    lines = cmd.split("\n")
-    kept = []
-    index = 0
-    while index < len(lines):
-        line = lines[index]
-        kept.append(line)
-        match = HEREDOC_HEADER.search(line)
-        index += 1
-        if not match:
-            continue
-        delimiter = match.group(2)
-        while index < len(lines) and lines[index].strip() != delimiter:
-            index += 1
-        if index < len(lines):
-            index += 1  # drop the closing delimiter line too
-    return "\n".join(kept)
-
-
 def _run_dir(cmd: str, shell_cwd: str) -> str:
     """Return the directory the command RUNS in: a `git -C`, else the last `cd`, else the cwd.
 
@@ -884,7 +864,7 @@ def _run_dir(cmd: str, shell_cwd: str) -> str:
     `strip_heredoc_bodies` keeps for other callers: a `cd` line inside one never moves the
     OUTER shell, which is the tree this function answers about.
     """
-    cmd = _strip_heredoc_bodies_unconditionally(cmd)
+    cmd = strip_heredoc_bodies(cmd, keep_interpreter_bodies=False)
     where = None
     last_cd = None
     for segment in split_segments(cmd):
@@ -2225,12 +2205,54 @@ ENV_TOOL_REASON = (
     "in the session"
 )
 
-# One shell segment for the environment layer, ported whole. It breaks on `&` as well, because a
-# background job is its own command.
-SEGMENT_BREAK = re.compile(r"\|\||&&|[;\n|&]")
 # A redirect operator, spaced into a word of its own before the words are read.
 REDIRECT = re.compile(r"(\d?>>?)")
 # ASSIGNMENT (a leading `VAR=value`) is defined once, above, and shared with `resolve_command`.
+
+
+def split_background(segment: str):
+    """Split one shell segment on a lone `&`, quote-aware.
+
+    `split_segments` already breaks on unquoted `;`, `|`, `||`, `&&` and newline, but leaves a
+    lone `&` inside its segments: a background job is its own command, the same as a `;`-joined
+    one, so `env_refusal` needs one more pass here. Kept WHOLE, never split on: `&&`, `&>`,
+    `>&`, `<&`, and `|&` -- none of those five is job control. Quoted text, single or double, is
+    copied through untouched, the same rule `split_segments` follows, so a `&` inside a quoted
+    argument never starts a new piece.
+    """
+    parts = []
+    current = []
+    quote = ""
+    index = 0
+    length = len(segment)
+    while index < length:
+        char = segment[index]
+        if quote:
+            current.append(char)
+            if char == quote:
+                quote = ""
+            index += 1
+            continue
+        if char in ("'", '"'):
+            quote = char
+            current.append(char)
+            index += 1
+            continue
+        if char == "&":
+            nxt = segment[index + 1:index + 2]
+            prev = segment[index - 1:index]
+            if nxt in ("&", ">") or prev in (">", "|", "<", "&"):
+                current.append(char)
+                index += 1
+                continue
+            parts.append("".join(current))
+            current = []
+            index += 1
+            continue
+        current.append(char)
+        index += 1
+    parts.append("".join(current))
+    return parts
 
 
 def env_reference(word: str) -> str:
@@ -2267,7 +2289,7 @@ def env_refusal(cmd: str):
     The command arrives with its own separators intact. Normalizing them is what made a search for
     the environment accessor read as a path.
     """
-    for segment in SEGMENT_BREAK.split(cmd):
+    for segment in (sub for piece in split_segments(cmd) for sub in split_background(piece)):
         words = REDIRECT.sub(r" \1 ", segment).split()
         if not words:
             continue
@@ -2779,25 +2801,23 @@ LOG_PATH_MARK = "..."
 LOG_MIN_PATH = LOG_MAX_MATCHED - 1 - 82
 
 
-def log_cut(text: str, limit: int) -> str:
+def log_field(text: str, limit: int, mark: str, head: bool = False) -> str:
     """Return one log field, whitespace folded to spaces, no longer than `limit`, cut MARKED.
 
     The mark is inside the limit, never added past it, so a caller can budget a field by adding up
-    the parts and trust the sum.
+    the parts and trust the sum. `head=False` (the default) cuts from the TAIL and appends the
+    mark -- right for a command, which says what it is in its first words. `head=True` cuts from
+    the HEAD instead and prepends the mark -- right for a path: the tail names the project, the
+    folder and the file, which is what a reader needs, and the head names only the machine's
+    temporary or home root, which no reader needs.
     """
     text = re.sub(r"\s+", " ", text or "")
     if len(text) <= limit:
         return text
-    return (text[:max(limit - len(LOG_CUT_MARK), 0)] + LOG_CUT_MARK)[:limit]
-
-
-def log_path(path: str, limit: int) -> str:
-    """Return a path as a log field of at most `limit` characters, shortened from the HEAD."""
-    path = re.sub(r"\s+", " ", path or "")
-    if len(path) <= limit:
-        return path
-    keep = max(limit - len(LOG_PATH_MARK), 0)
-    return (LOG_PATH_MARK + path[len(path) - keep:])[:limit]
+    keep = max(limit - len(mark), 0)
+    if head:
+        return (mark + text[len(text) - keep:])[:limit]
+    return (text[:keep] + mark)[:limit]
 
 
 def log_path_and_text(where: str, text: str) -> str:
@@ -2821,8 +2841,8 @@ def log_path_and_text(where: str, text: str) -> str:
     for_path = min(len(re.sub(r"\s+", " ", where or "")),
                    max(LOG_MIN_PATH, room - len(text)))
     for_path = max(0, min(for_path, room))
-    short = log_path(where, for_path)
-    return short + " " + log_cut(text, room - len(short))
+    short = log_field(where, for_path, LOG_PATH_MARK, head=True)
+    return short + " " + log_field(text, room - len(short), LOG_CUT_MARK)
 
 
 def record(tool: str, decision: str, rule: str, matched: str) -> None:
@@ -2834,7 +2854,7 @@ def record(tool: str, decision: str, rule: str, matched: str) -> None:
             tool or "",
             decision,
             rule,
-            log_cut(matched, LOG_MAX_MATCHED),
+            log_field(matched, LOG_MAX_MATCHED, LOG_CUT_MARK),
         ])
         with open(os.path.join(folder, "guard.log"), "a", encoding="utf-8") as handle:
             handle.write(line + "\n")

@@ -70,10 +70,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
+import mutate_lib  # noqa: E402
 SWEEP = os.path.join(HERE, "sweep.py")
 SUITE = os.path.join(HERE, "test_sweep.py")
 GUARD = os.path.join(REPO_ROOT, "hooks", "guard.py")
@@ -436,10 +437,6 @@ MUTATIONS = [
 ]
 
 
-def safe_name(label: str) -> str:
-    return "".join(ch if ch.isalnum() else "_" for ch in label)[:60]
-
-
 def mutation_parts(entry):
     """Return (label, target, old, new, required) for one mutation, enforcing the fifth field
     the same way hooks/mutate_guard.py's mutation_parts does: a mutation with no required case
@@ -492,50 +489,32 @@ def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_te
         h.write(sources["settings_json"])
 
 
-def run_suite(suite_path: str, config_dir: str):
-    """Run one scaffold's test_sweep.py. Return (exit code, FAIL lines from stdout+stderr).
-
-    janitor/test_sweep.py is a plain `unittest.main(verbosity=2)`, which writes its per-case
-    progress and its failure headings to STDERR by default -- unlike hooks/test_guard.py's own
-    hand-rolled PASS/FAIL runner, which prints to stdout. Both streams are scanned here so a red
-    line is never missed because of which stream unittest chose. `CLAUDE_CONFIG_DIR` is set only
-    as a floor: setUpModule immediately overwrites it with its own fresh tempfile.mkdtemp()
-    directory, so this value is never actually read once the suite is under way, and is set here
-    only so nothing accidentally falls back to a real `~/.claude` before that line runs."""
-    env = dict(os.environ)
-    env["CLAUDE_CONFIG_DIR"] = config_dir
-    result = subprocess.run(
-        [sys.executable, suite_path], capture_output=True, text=True, env=env, timeout=1200,
-    )
-    red = [line for line in (result.stdout + result.stderr).splitlines() if "FAIL" in line]
-    return result.returncode, red
-
-
-def run_mutant(sources, work: str, index: int, entry):
+def run_mutant(sources, entry, work: str):
     """Apply one mutation in its own scaffold, run the suite there, and return
-    (label, code, FAIL lines, required)."""
+    (label, code, FAIL lines, required).
+
+    janitor/test_sweep.py (and test_session_end_sweep.py) are plain `unittest.main(verbosity=2)`,
+    which writes per-case progress and failure headings to STDERR by default -- unlike
+    hooks/test_guard.py's own hand-rolled PASS/FAIL runner, which prints to stdout.
+    `mutate_lib.run_suite` scans both streams, so a red line is never missed for that reason.
+    `CLAUDE_CONFIG_DIR` is set only as a floor: setUpModule immediately overwrites it with its
+    own fresh tempfile.mkdtemp() directory, so this value is never actually read once the suite
+    is under way, and is set here only so nothing accidentally falls back to a real `~/.claude`
+    before that line runs."""
     label, target, old, new, required = mutation_parts(entry)
     mutated_text = sources[target].replace(old, new, 1)
-    scaffold = os.path.join(work, "m_%03d_%s" % (index, safe_name(label)))
+    scaffold = os.path.join(work, "m_%s" % mutate_lib.safe_name(label))
     config_dir = os.path.join(scaffold, "cfg")
     os.makedirs(config_dir, exist_ok=True)
     try:
         build_scaffold(scaffold, sources, target, mutated_text)
         suite_path = os.path.join(scaffold, "janitor", SUITE_FOR_TARGET[target])
-        code, red = run_suite(suite_path, config_dir)
+        env = dict(os.environ)
+        env["CLAUDE_CONFIG_DIR"] = config_dir
+        code, red = mutate_lib.run_suite([sys.executable, suite_path], env)
         return label, code, red, required
     finally:
         shutil.rmtree(scaffold, ignore_errors=True)
-
-
-def job_count() -> int:
-    """How many suites to run at once: MUTATE_JOBS, else the CPU count, at least one. Same
-    knob hooks/mutate_guard.py exposes, kept under the same name for one reader to know both."""
-    try:
-        wanted = int(os.environ.get("MUTATE_JOBS", "") or 0)
-    except ValueError:
-        wanted = 0
-    return max(1, wanted or os.cpu_count() or 1)
 
 
 def main() -> int:
@@ -552,41 +531,18 @@ def main() -> int:
 
     # Every anchor is checked before any suite runs, so a stale mutation fails in the first
     # second, not after the mutants ahead of it in the list have spent their minutes.
-    for entry in MUTATIONS:
-        label, target, old, _new, required = mutation_parts(entry)
-        if old not in sources[target]:
-            print("ERROR stale mutation, anchor text not found in %s: %s" % (target, label))
-            return 1
-        if not required:
-            print("ERROR mutation carries no required case name: %s" % label)
-            return 1
+    entries_info = [
+        (label, target, old, required)
+        for label, target, old, _new, required in (mutation_parts(e) for e in MUTATIONS)
+    ]
+    if not mutate_lib.check_stale(entries_info, sources):
+        return 1
 
     work = tempfile.mkdtemp(prefix="mutate_sweep_")
-    survivors = 0
-    wrong_cause = 0
-    jobs = job_count()
-    print("%d mutations, %d at a time" % (len(MUTATIONS), jobs))
     try:
-        with ThreadPoolExecutor(max_workers=jobs) as pool:
-            futures = [
-                pool.submit(run_mutant, sources, work, i, entry)
-                for i, entry in enumerate(MUTATIONS)
-            ]
-            for future in futures:
-                label, code, red, required = future.result()
-                if code == 0 or not red:
-                    survivors += 1
-                    print("SURVIVED    %-62s %2d red" % (label, len(red)), flush=True)
-                elif not any(required in line for line in red):
-                    wrong_cause += 1
-                    print("WRONG CAUSE %-62s %2d red, missing %r" % (
-                        label, len(red), required), flush=True)
-                else:
-                    print("KILLED      %-62s %2d red" % (label, len(red)), flush=True)
-        print()
-        killed = len(MUTATIONS) - survivors - wrong_cause
-        print("%d of %d mutations killed (%d survived, %d wrong cause)" % (
-            killed, len(MUTATIONS), survivors, wrong_cause))
+        survivors, wrong_cause = mutate_lib.run_mutants(
+            MUTATIONS, lambda entry, w: run_mutant(sources, entry, w), work,
+        )
         return 1 if (survivors or wrong_cause) else 0
     finally:
         shutil.rmtree(work, ignore_errors=True)

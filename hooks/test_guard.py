@@ -1600,6 +1600,12 @@ for accessor in (
 ):
     sh("env: the accessor never matches, " + accessor[:44], accessor, "allow", cwd=NOGIT)
 
+sh("env: a quoted pipe is not a segment break", 'grep "a|' + ENV + '" file', "allow", cwd=NOGIT)
+sh("env: a lone background `&` is its own command", "ls & cat " + ENV, "deny", "env-file",
+   cwd=NOGIT)
+sh("env: `&&` still splits into its own command", "ls && cat " + ENV, "deny", "env-file",
+   cwd=NOGIT)
+
 sh("env: an absolute Windows path is still a path", "cat C:\\Users\\me\\" + ENV, "deny",
    "env-file", cwd=NOGIT)
 sh("env: a dot-slash Windows path is still a path", "cat .\\" + ENV, "deny", "env-file", cwd=NOGIT)
