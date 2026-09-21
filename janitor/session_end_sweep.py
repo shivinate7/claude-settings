@@ -3,8 +3,9 @@
 
 Reads one JSON object on stdin (the SessionEnd hook payload: `cwd` is the ending session's own
 working directory). Resolves the git repository that `cwd` sits in -- the PRIMARY checkout, not
-a linked worktree's own path, see `resolve_repo_root` below for why that distinction matters --
-and runs `janitor/sweep.py <that root> --confirm` there. Nothing else is swept. Always exits 0.
+a linked worktree's own path, see `guard.primary_checkout`'s own docstring for why that
+distinction matters -- and runs `janitor/sweep.py <that root> --confirm` there. Nothing else is
+swept. Always exits 0.
 
 FAILS OPEN, ON PURPOSE (plan: "Two triggers", CLAUDE.md rule:verification-recovery-not-gated-on-
 own-state's sibling posture for a hook rather than a recovery control). This script's own job is
@@ -27,11 +28,9 @@ per-repository opt-out (`.claude/janitor.json`, plan: "the sweep is automatic, a
 opts out"). This hook adds no new judgment call: it locates the one repository the ending
 session touched, and calls the same program a person would call by hand.
 """
-import inspect
 import json
 import math
 import os
-import re
 import subprocess
 import sys
 import time
@@ -56,53 +55,21 @@ except (TypeError, ValueError):
 # no name here for an environment to carry.
 
 
-def _guard_git_call_timeout_seconds() -> float:
-    """The per-call timeout `hooks/guard.py._git` actually enforces on every git subprocess it
-    runs. This hook is not allowed to touch `guard.py` (out of scope, and freezing it is the
-    whole point of `CONFIG_FROZEN_DIRS`), so it cannot turn that literal into a shared named
-    constant there. Reading it back out of `guard._git`'s own source, instead of writing `10.0`
-    here by hand, is the next best thing: a copy of the number could drift the day someone
-    changes guard.py's own timeout, silently making the arithmetic below wrong; this can only
-    go stale LOUDLY, by falling back to the number below when the read fails (CLAUDE.md,
-    "building-allow-list-is-the-constant": point at the real constant, never a copy of it)."""
-    try:
-        source = inspect.getsource(guard._git)
-        match = re.search(r"timeout\s*=\s*(\d+)", source)
-        if match:
-            return float(match.group(1))
-    except Exception:
-        pass
-    return 10.0  # guard._git's own timeout as of this writing; used only if the read above fails
-
-
-def _session_end_ceiling_seconds() -> float:
-    """The timeout settings.json's own SessionEnd entry gives THIS hook end to end -- read back
-    from the real file next to this one, the same reasoning as `_guard_git_call_timeout_seconds`
-    above (CLAUDE.md, "building-allow-list-is-the-constant": point at the constant the code
-    emits, never a copy of it). Falls back to the number below, LOUDLY only in the sense that a
-    missing or malformed settings.json would otherwise silently change the hook's real time
-    budget; the fallback exists so this function itself never raises past its caller."""
-    try:
-        with open(os.path.join(REPO_ROOT, "settings.json"), encoding="utf-8") as handle:
-            settings = json.load(handle)
-        for entry in settings.get("hooks", {}).get("SessionEnd", []):
-            for h in entry.get("hooks", []):
-                if "session_end_sweep.py" in (h.get("command") or ""):
-                    timeout = h.get("timeout")
-                    if isinstance(timeout, (int, float)) and not isinstance(timeout, bool):
-                        return float(timeout)
-    except Exception:
-        pass
-    return 55.0  # settings.json's SessionEnd timeout for this hook, as of this writing
+# `hooks/guard.py._git`'s own per-call subprocess timeout, and settings.json's own SessionEnd
+# entry timeout for THIS hook, end to end. Plain constants, not a read of either real file:
+# THEY MUST STAY IN SYNC BY HAND with `guard._git`'s `timeout=` and with settings.json's
+# `hooks.SessionEnd[].hooks[].timeout` for `session_end_sweep.py` (HookBudgetFitsUnderItsHostCeiling
+# pins both numbers below against that file, so a drift here goes red there).
+GUARD_GIT_CALL_TIMEOUT_SECONDS = 10.0
+SESSION_END_CEILING_SECONDS = 55.0
 
 
 # THE BUDGET ARITHMETIC (checked against the real settings.json by
 # test_session_end_sweep.py's HookBudgetFitsUnderItsHostCeiling arm):
 #
-#   resolve_repo_root makes exactly two guard._git calls (--show-toplevel, then
+#   guard.primary_checkout makes exactly two guard._git calls (--show-toplevel, then
 #   --git-common-dir), each bounded by guard._git's own subprocess timeout. Worst case, both
 #   hang out their full timeout before guard._git gives up and returns None:
-GUARD_GIT_CALL_TIMEOUT_SECONDS = _guard_git_call_timeout_seconds()
 RESOLVE_ROOT_GIT_CALLS = 2
 RESOLVE_ROOT_WORST_CASE_SECONDS = GUARD_GIT_CALL_TIMEOUT_SECONDS * RESOLVE_ROOT_GIT_CALLS
 #
@@ -152,16 +119,15 @@ def headroom_within_bounds(ceiling_seconds: float, worst_case_seconds: float) ->
 
 # SPENDING WHAT REMAINS, NOT WHAT WAS GUESSED. HOOK_WORST_CASE_SECONDS above is a STATIC bound,
 # checked once against settings.json by HookBudgetFitsUnderItsHostCeiling; it says nothing about
-# how long resolve_repo_root actually took on THIS run. Most runs resolve the repository root in
-# milliseconds, not GUARD_GIT_CALL_TIMEOUT_SECONDS * RESOLVE_ROOT_GIT_CALLS -- handing the sweep
-# a fixed SWEEP_TIMEOUT_SECONDS regardless spends a number that was guessed at design time, not
-# the time this run actually has left. SESSION_END_CEILING_SECONDS is the real ceiling this run
-# is held to; EXIT_MARGIN_SECONDS is reserved, after the sweep subprocess returns, for this
-# hook's own interpreter teardown; MIN_USEFUL_SWEEP_SECONDS is the floor below which a sweep is
-# more likely to be killed mid-write than to finish, so the hook skips it instead of starting one
-# the harness will cut off partway (module docstring above: "a sweep the harness kills part way
-# is worse than a sweep that never started").
-SESSION_END_CEILING_SECONDS = _session_end_ceiling_seconds()
+# how long guard.primary_checkout actually took on THIS run. Most runs resolve the repository
+# root in milliseconds, not GUARD_GIT_CALL_TIMEOUT_SECONDS * RESOLVE_ROOT_GIT_CALLS -- handing
+# the sweep a fixed SWEEP_TIMEOUT_SECONDS regardless spends a number that was guessed at design
+# time, not the time this run actually has left. SESSION_END_CEILING_SECONDS (above) is the real
+# ceiling this run is held to; EXIT_MARGIN_SECONDS is reserved, after the sweep subprocess
+# returns, for this hook's own interpreter teardown; MIN_USEFUL_SWEEP_SECONDS is the floor below
+# which a sweep is more likely to be killed mid-write than to finish, so the hook skips it
+# instead of starting one the harness will cut off partway (module docstring above: "a sweep the
+# harness kills part way is worse than a sweep that never started").
 EXIT_MARGIN_SECONDS = 3.0
 MIN_USEFUL_SWEEP_SECONDS = 2.0
 
@@ -194,44 +160,6 @@ def remaining_sweep_timeout_seconds(elapsed_seconds):
     return sweep_timeout
 
 
-def resolve_repo_root(cwd: str):
-    """Return the PRIMARY checkout that `cwd` belongs to, or None when it could not be read.
-
-    `git rev-parse --show-toplevel` answers "cwd" itself when `cwd` sits inside an ordinary
-    checkout, but it answers the WORKTREE's own path when `cwd` sits inside a linked worktree.
-    Sweeping a linked worktree path directly would be wrong two ways at once: the linked
-    worktree's `.claude/janitor.json` may not be the one the repository's owner set, and
-    `janitor/sweep.py`'s own "never touch the primary checkout" exclusion compares against
-    the root IT was given -- pass it a worktree path and the primary checkout stops being
-    excluded, and could itself be evaluated as a removable worktree entry. See
-    `janitor/sweep.py`'s discovery docstring for the same reasoning applied to `--discover`.
-
-    `git rev-parse --git-common-dir` names the ONE `.git` directory every worktree of a clone
-    shares; its parent is always the primary checkout, ordinary checkout or linked worktree
-    alike, so resolving through it answers the same repository root either way.
-    """
-    top = guard._git(cwd, "rev-parse", "--show-toplevel")
-    if top is None or top.returncode != 0:
-        return None
-    toplevel = top.stdout.strip()
-    if not toplevel:
-        return None
-    common = guard._git(toplevel, "rev-parse", "--git-common-dir")
-    if common is None or common.returncode != 0:
-        return None
-    common_dir = common.stdout.strip()
-    if not common_dir:
-        return None
-    try:
-        common_abs = os.path.realpath(os.path.join(toplevel, common_dir))
-        primary = os.path.dirname(common_abs)
-    except Exception:
-        return None
-    if not primary or not os.path.isdir(primary):
-        return None
-    return primary
-
-
 def handle(hook, start=None, elapsed_seconds=None) -> None:
     """Run the sweep for the repository `hook` names, or do nothing. Never raises.
 
@@ -255,8 +183,15 @@ def handle(hook, start=None, elapsed_seconds=None) -> None:
     if not isinstance(cwd, str) or not cwd or not os.path.isdir(cwd):
         return
 
+    # `guard.primary_checkout` resolves `cwd` to the PRIMARY checkout, never a linked worktree's
+    # own path. Sweeping a linked worktree path directly would be wrong two ways at once: the
+    # linked worktree's `.claude/janitor.json` may not be the one the repository's owner set,
+    # and `janitor/sweep.py`'s own "never touch the primary checkout" exclusion compares against
+    # the root IT was given -- pass it a worktree path and the primary checkout stops being
+    # excluded, and could itself be evaluated as a removable worktree entry. See
+    # `janitor/sweep.py`'s discovery docstring for the same reasoning applied to `--discover`.
     try:
-        root = resolve_repo_root(cwd)
+        root = guard.primary_checkout(cwd)
     except Exception:
         root = None
     if not root:

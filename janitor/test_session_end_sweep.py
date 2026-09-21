@@ -13,7 +13,7 @@ Claude Code only sees the process's own exit code, so that is the fact each arm 
 
 Every fixture repository is a REAL git repository built with real git calls, the same way
 janitor/test_sweep.py's own fixtures are: a fake or mocked git would prove nothing about
-`resolve_repo_root`, which shells out to git twice.
+`guard.primary_checkout`, which shells out to git twice.
 """
 import json
 import os
@@ -363,9 +363,11 @@ class HeadroomWithinBoundsUnit(unittest.TestCase):
 
 
 class ResolveRepoRootUnit(unittest.TestCase):
-    """Direct unit coverage of the one piece of new logic this hook adds beyond calling the
-    sweep: resolving `cwd` to a primary checkout, in-process (cheap; the subprocess arms above
-    already prove the end-to-end exit-0 contract)."""
+    """Direct unit coverage of the one piece of new logic this hook relies on beyond calling
+    the sweep: resolving `cwd` to a primary checkout, in-process (cheap; the subprocess arms
+    above already prove the end-to-end exit-0 contract). The resolution itself lives in
+    `guard.primary_checkout` now, shared with `janitor/install_launchd.py`; this hook's own
+    `handle` just calls it (see `session_end_sweep.py`)."""
 
     def setUp(self):
         import session_end_sweep
@@ -375,7 +377,7 @@ class ResolveRepoRootUnit(unittest.TestCase):
         repo = os.path.join(ROOT, "unit_ordinary")
         make_repo(repo)
         self.assertEqual(
-            os.path.realpath(self.mod.resolve_repo_root(repo)), os.path.realpath(repo)
+            os.path.realpath(self.mod.guard.primary_checkout(repo)), os.path.realpath(repo)
         )
 
     def test_subdirectory_resolves_to_the_checkout_root(self):
@@ -384,12 +386,12 @@ class ResolveRepoRootUnit(unittest.TestCase):
         sub = os.path.join(repo, "a", "b")
         os.makedirs(sub, exist_ok=True)
         self.assertEqual(
-            os.path.realpath(self.mod.resolve_repo_root(sub)), os.path.realpath(repo)
+            os.path.realpath(self.mod.guard.primary_checkout(sub)), os.path.realpath(repo)
         )
 
     def test_no_repository_returns_none(self):
         empty = tempfile.mkdtemp(prefix="unit_no_repo_", dir=ROOT)
-        self.assertIsNone(self.mod.resolve_repo_root(empty))
+        self.assertIsNone(self.mod.guard.primary_checkout(empty))
 
 
 class SweepReceivesTheRemainingBudgetNotAFixedNumber(unittest.TestCase):
@@ -458,7 +460,7 @@ class HookSweepsNothingWhenTooLittleBudgetRemains(unittest.TestCase):
         def record_call(*args, **kwargs):
             # `session_end_sweep.subprocess` is the SAME module object `guard.py` imports too --
             # patching its `.run` patches it everywhere, including the real git calls
-            # `resolve_repo_root` still needs to make. Record, and short-circuit, only the one
+            # `guard.primary_checkout` still needs to make. Record, and short-circuit, only the one
             # shape `handle` uses for the sweep subprocess itself; let every other call (git)
             # through to the real `subprocess.run` untouched.
             argv = args[0] if args else kwargs.get("args")
