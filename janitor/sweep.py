@@ -26,9 +26,14 @@ Usage:
     python3 janitor/sweep.py --purge                     # preview which tombstones are past 90 days
     python3 janitor/sweep.py --purge --confirm           # actually drop tombstones past 90 days
 
-With no ROOT and no `--discover`, the sweep discovers under `~/Developer` when that directory
-exists, else under the current directory. Discovery lists a directory's immediate children whose
-`.git` is a DIRECTORY (an ordinary checkout), never a FILE (a linked worktree of some other
+With no ROOT and no `--discover`, the sweep reads `janitor.roots` from this repository's own
+settings.json. Absent, it discovers under every one of `~/Developer`, `~/Clones`, `~/src`,
+`~/code`, and `~/repos` that exists on this machine, combined into one list. A measured default
+run once printed "no repositories found" while five real clones sat in `~/Clones`, not
+`~/Developer`. Present but malformed, not a list of strings, the sweep refuses to discover
+anything and says why. It never guesses at a wish it cannot read. `--discover DIR` bypasses
+`janitor.roots` and the default list entirely. Discovery lists a directory's immediate children
+whose `.git` is a DIRECTORY (an ordinary checkout), never a FILE (a linked worktree of some other
 checkout): a linked worktree's branches already belong to its primary checkout's sweep, and
 sweeping it a second time as its own "repository" would apply the keep rule against the wrong
 tree entirely.
@@ -54,13 +59,6 @@ TOMBSTONE_TTL_MS = 90 * 24 * 60 * 60 * 1000  # git's own reflog-retention number
 # ------------------------------------------------------------------ discovery
 
 
-def default_discover_root() -> str:
-    developer = os.path.expanduser("~/Developer")
-    if os.path.isdir(developer):
-        return developer
-    return os.getcwd()
-
-
 def discover_repos(root: str):
     """Return ROOT's immediate children that are ordinary checkouts (`.git` a directory).
 
@@ -75,6 +73,78 @@ def discover_repos(root: str):
         if os.path.isdir(os.path.join(path, ".git")):
             found.append(path)
     return found
+
+
+def discover_repos_multi(roots):
+    """Combine `discover_repos` across every root in ROOTS into one de-duplicated, sorted list.
+    A default or configured root LIST then behaves like one search, instead of stopping at the
+    first root that happens to exist."""
+    found = set()
+    for root in roots:
+        found.update(discover_repos(root))
+    return sorted(found)
+
+
+# ------------------------------------------------------------------ `janitor.roots` (settings.json)
+#
+# `janitor.roots`, inside THIS repository's own settings.json, read as DATA (json.load) and
+# never executed. ABSENT (no settings.json, no `janitor` object, or no `roots` key inside it)
+# states nothing. The caller then falls back to `default_discover_roots()`.
+#
+# PRESENT but malformed states a wish this function cannot read. "Malformed" means not a list,
+# or a list holding a non-string. This is the same direction `load_optout` above already takes
+# for `.claude/janitor.json`. Guessing wrong costs branches or checkouts that never get swept,
+# and nobody notices. Refusing costs one rerun after the owner fixes the file.
+
+DEFAULT_DISCOVER_ROOT_CANDIDATES = ("~/Developer", "~/Clones", "~/src", "~/code", "~/repos")
+
+
+def default_discover_roots():
+    """Every one of DEFAULT_DISCOVER_ROOT_CANDIDATES that exists on this machine, in that fixed
+    order. Replaces the old single-root guess. This module's docstring names the measured
+    problem. A real machine can have clones split across more than one of these directories.
+    Stopping at the first hit missed the rest."""
+    return [path for path in (os.path.expanduser(c) for c in DEFAULT_DISCOVER_ROOT_CANDIDATES)
+            if os.path.isdir(path)]
+
+
+def default_settings_path() -> str:
+    return os.path.join(REPO_ROOT, "settings.json")
+
+
+def load_janitor_roots_setting(settings_path=None):
+    """Return (roots, ok).
+
+    `roots` is None when the `janitor.roots` key is ABSENT: the caller then falls back to
+    `default_discover_roots()`. `roots` is the configured list, each entry `os.path.expanduser`
+    -ed, when the key is present and well shaped.
+
+    `ok` is False when settings.json exists but cannot be parsed as one JSON object. It is also
+    False when the top-level `janitor` value is present but is not an object. It is False too
+    when `janitor.roots` IS present but is not a list of strings. In every one of those cases
+    the caller refuses to discover anything rather than trust a default it was not asked for.
+    """
+    path = settings_path or default_settings_path()
+    if not os.path.isfile(path):
+        return None, True
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except Exception:
+        return None, False
+    if not isinstance(data, dict):
+        return None, False
+    janitor_cfg = data.get("janitor")
+    if janitor_cfg is None:
+        return None, True
+    if not isinstance(janitor_cfg, dict):
+        return None, False
+    if "roots" not in janitor_cfg:
+        return None, True
+    roots = janitor_cfg["roots"]
+    if not isinstance(roots, list) or not all(isinstance(item, str) for item in roots):
+        return None, False
+    return [os.path.expanduser(item) for item in roots], True
 
 
 # ------------------------------------------------------------------ the opt-out file
@@ -535,6 +605,8 @@ def main(argv=None) -> int:
                          help="purge tombstones past 90 days instead of sweeping")
     parser.add_argument("--restore-log", metavar="PATH",
                          help="override the restore log path (default: under the config dir)")
+    parser.add_argument("--settings-path", metavar="PATH",
+                         help="testing only: overrides the settings.json read for janitor.roots")
     args = parser.parse_args(argv)
 
     restore_log_path = args.restore_log or default_restore_log_path()
@@ -546,11 +618,27 @@ def main(argv=None) -> int:
 
     roots = [os.path.abspath(r) for r in args.roots]
     if not roots:
-        discover_root = args.discover or default_discover_root()
-        roots = discover_repos(discover_root)
-        if not roots:
-            print("janitor: no repositories found under %s" % discover_root, file=sys.stderr)
-            return 1
+        if args.discover:
+            discover_root = os.path.abspath(args.discover)
+            roots = discover_repos(discover_root)
+            if not roots:
+                print("janitor: no repositories found under %s" % discover_root, file=sys.stderr)
+                return 1
+        else:
+            configured, ok = load_janitor_roots_setting(args.settings_path)
+            if not ok:
+                print(
+                    "janitor: refusing to discover -- settings.json's janitor.roots is "
+                    "malformed. Fix it, or pass ROOT/--discover explicitly", file=sys.stderr,
+                )
+                return 1
+            search_roots = configured if configured is not None else default_discover_roots()
+            roots = discover_repos_multi(search_roots)
+            if not roots:
+                where = ", ".join(search_roots) if search_roots else \
+                    "any default root (~/Developer, ~/Clones, ~/src, ~/code, ~/repos)"
+                print("janitor: no repositories found under %s" % where, file=sys.stderr)
+                return 1
 
     results = [sweep_repo(root, args.confirm, restore_log_path) for root in roots]
     print_sweep_report(results, args.confirm)

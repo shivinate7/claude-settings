@@ -498,6 +498,127 @@ class DiscoveryTests(unittest.TestCase):
         self.assertNotIn(os.path.join(self.dir, "not-a-repo"), found)
 
 
+# --------------------------------------------------------------------------- janitor.roots
+
+
+class DefaultDiscoverRootsTests(unittest.TestCase):
+    """`sweep.default_discover_roots()` reads `~/...` candidates. This drives a fake HOME
+    holding two of the five candidate directories, each with a real checkout. It restores the
+    real HOME afterward, no matter what."""
+
+    def test_every_existing_default_root_is_combined_not_just_the_first(self):
+        home = os.path.join(ROOT, "fake-home-multi")
+        developer = os.path.join(home, "Developer")
+        clones = os.path.join(home, "Clones")
+        os.makedirs(developer, exist_ok=True)
+        os.makedirs(clones, exist_ok=True)
+        repo_a = os.path.join(developer, "repoA")
+        repo_b = os.path.join(clones, "repoB")
+        make_repo(repo_a, {"f.txt": "x\n"})
+        make_repo(repo_b, {"f.txt": "x\n"})
+        old_home = os.environ.get("HOME")
+        os.environ["HOME"] = home
+        try:
+            roots = sweep.default_discover_roots()
+            self.assertTrue(len(roots) >= 2, "must find both roots just created")
+            self.assertIn(developer, roots)
+            self.assertIn(clones, roots)
+            found = sweep.discover_repos_multi(roots)
+        finally:
+            if old_home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = old_home
+        self.assertTrue(len(found) > 0, "combined discovery must not come back empty")
+        self.assertIn(repo_a, found)
+        self.assertIn(repo_b, found)
+
+
+class JanitorRootsSettingTests(unittest.TestCase):
+    """`sweep.load_janitor_roots_setting` reads `janitor.roots` from a settings.json passed by
+    path, never the real repository one. This class must not touch the checkout's own
+    settings.json, which real hooks also depend on."""
+
+    def test_missing_settings_file_reads_as_no_configured_roots(self):
+        roots, ok = sweep.load_janitor_roots_setting(os.path.join(ROOT, "no-such-settings.json"))
+        self.assertTrue(ok)
+        self.assertIsNone(roots)
+
+    def test_absent_janitor_key_reads_as_no_configured_roots(self):
+        path = os.path.join(ROOT, "settings-roots-absent.json")
+        write(path, json.dumps({"hooks": {}}))
+        roots, ok = sweep.load_janitor_roots_setting(path)
+        self.assertTrue(ok)
+        self.assertIsNone(roots)
+
+    def test_explicit_roots_list_is_honored_and_discoverable(self):
+        explicit_dir = os.path.join(ROOT, "explicit-roots-dir")
+        os.makedirs(explicit_dir, exist_ok=True)
+        repo = os.path.join(explicit_dir, "repoC")
+        make_repo(repo, {"f.txt": "x\n"})
+        path = os.path.join(ROOT, "settings-roots-explicit.json")
+        write(path, json.dumps({"janitor": {"roots": [explicit_dir]}}))
+        roots, ok = sweep.load_janitor_roots_setting(path)
+        self.assertTrue(ok)
+        self.assertEqual(roots, [explicit_dir])
+        found = sweep.discover_repos_multi(roots)
+        self.assertTrue(len(found) > 0, "discovery from the explicit root must not be empty")
+        self.assertIn(repo, found)
+
+    def test_malformed_roots_not_a_list_refuses(self):
+        path = os.path.join(ROOT, "settings-roots-not-list.json")
+        write(path, json.dumps({"janitor": {"roots": "~/Developer"}}))
+        roots, ok = sweep.load_janitor_roots_setting(path)
+        self.assertFalse(ok, "a bare string is not a list of strings: it must refuse")
+        self.assertIsNone(roots)
+
+    def test_malformed_roots_non_string_item_refuses(self):
+        path = os.path.join(ROOT, "settings-roots-bad-item.json")
+        write(path, json.dumps({"janitor": {"roots": ["~/Developer", 7]}}))
+        roots, ok = sweep.load_janitor_roots_setting(path)
+        self.assertFalse(ok, "a non-string item must refuse, not be silently dropped")
+
+    def test_malformed_janitor_key_not_an_object_refuses(self):
+        path = os.path.join(ROOT, "settings-janitor-not-object.json")
+        write(path, json.dumps({"janitor": "nope"}))
+        roots, ok = sweep.load_janitor_roots_setting(path)
+        self.assertFalse(ok)
+
+    def test_unparseable_settings_file_refuses(self):
+        path = os.path.join(ROOT, "settings-roots-broken.json")
+        write(path, "{ not json at all")
+        roots, ok = sweep.load_janitor_roots_setting(path)
+        self.assertFalse(ok)
+
+    def test_cli_refuses_to_discover_when_roots_is_malformed_and_no_root_given(self):
+        """Traces the caller path the brief names: no explicit ROOT, no --discover, and a
+        malformed janitor.roots. main() must refuse and say why. It never falls back to a
+        default. Uses --settings-path so the real repository settings.json is never touched."""
+        path = os.path.join(ROOT, "settings-roots-cli-malformed.json")
+        write(path, json.dumps({"janitor": {"roots": [1, 2]}}))
+        result = subprocess.run(
+            [sys.executable, os.path.join(HERE, "sweep.py"), "--settings-path", path],
+            capture_output=True, text=True, timeout=20,
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("malformed", result.stderr.lower())
+
+    def test_cli_uses_the_explicit_roots_list_when_no_root_or_discover_given(self):
+        explicit_dir = os.path.join(ROOT, "cli-explicit-roots-dir")
+        os.makedirs(explicit_dir, exist_ok=True)
+        repo = os.path.join(explicit_dir, "repoD")
+        make_repo(repo, {"f.txt": "x\n"})
+        settings_path = os.path.join(ROOT, "settings-roots-cli-explicit.json")
+        write(settings_path, json.dumps({"janitor": {"roots": [explicit_dir]}}))
+        result = subprocess.run(
+            [sys.executable, os.path.join(HERE, "sweep.py"), "--settings-path", settings_path,
+             "--restore-log", os.path.join(ROOT, "cli-explicit.log")],
+            capture_output=True, text=True, timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(repo, result.stdout)
+
+
 # --------------------------------------------------------------------------- the opt-out file
 
 

@@ -34,6 +34,30 @@ The sweep resolves your default branch in this order: `origin/HEAD`, then local
 `main`, then local `master`. If none of the three answers, the sweep refuses
 your whole repository and reaps nothing in it.
 
+## How it picks repositories
+
+Pass roots on the command line, or `--discover DIR` to sweep one directory's
+own checkouts.
+
+With neither, the sweep reads `janitor.roots` from this repository's own
+`settings.json`. Set it to a list of paths, and the sweep discovers only
+those:
+
+    {
+      "janitor": {
+        "roots": ["~/Developer", "~/Clones"]
+      }
+    }
+
+Leave the key out, and the sweep discovers under every one of `~/Developer`,
+`~/Clones`, `~/src`, `~/code` and `~/repos` that exists on this machine. It
+combines all of them into one list, instead of stopping at the first one it
+finds.
+
+When a `janitor.roots` value is not a list of strings, the sweep refuses
+discovery. It names the problem, and finds nothing, instead of guessing a
+default you did not ask for.
+
 ## What it refuses
 
 The sweep keeps a branch under a protected prefix. `backup/` is the default.
@@ -89,6 +113,27 @@ Restore a branch with one command:
 
 The tombstone lives 90 days. Until the purge step drops it, `git gc` cannot
 take the commits.
+
+## How you run it every day
+
+Two installers write a scheduled job that runs the sweep with `--confirm`.
+Neither one runs that job itself.
+
+`janitor/install_launchd.py` writes a `launchd` `.plist` under
+`~/Library/LaunchAgents`, for macOS. It prints the `launchctl load` command
+that actually turns the job on.
+
+`janitor/install_schtasks.py` writes a Windows Task Scheduler XML task
+definition, under the Claude config directory by default. It prints the
+`schtasks /create` command that actually registers the task.
+
+Both installers refuse to run from a linked worktree. When they cannot tell
+whether they stand in one, they refuse too. A job generated from a worktree
+would name a directory the sweep can remove. Nobody would then notice the
+break. Run either installer from your main checkout.
+
+Both installers write a fixed, generic name for the job: never a path, never
+a branch. Only one job must exist per machine.
 
 ## How you add a tier of your own
 
