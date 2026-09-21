@@ -180,6 +180,109 @@ case3() {
   rm -rf "$h"
 }
 
+# Unlike make_checkout (a bare-bones fake with empty landed-dir stubs, built for the
+# pointer/origin-detection cases), this uses the real tracked file tree already built into
+# $work/tarsrc for the curl stub, so the local (symlink) install path is exercised against
+# hooks/run_hook.sh's actual tracked content, not a stand-in.
+case_run_hook_lands() {
+  name="case_run_hook_lands: local install.sh symlinks hooks/run_hook.sh into CLAUDE_CONFIG_DIR"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"
+  co="$work/run-hook-lands-checkout"; rm -rf "$co"; mkdir -p "$co"
+  cp -R "$work/tarsrc/claude-settings-main/." "$co/"
+  ( cd "$co" && git init -q && git config user.email t@example.com && git config user.name t \
+      && git add -A && git commit -q -m init ) >/dev/null 2>&1
+
+  out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+        bash ./install.sh 2>&1)
+  rc=$?
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ ! -e "$cfg/hooks/run_hook.sh" ]; then
+    bad "$name" "\$CLAUDE_CONFIG_DIR/hooks/run_hook.sh missing after install"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+# ---- run_hook.sh reachability: prove the shared wrapper is not a silent no-op -----------
+# CLAUDE.md: "Trust a guard only once it goes red on the defect it guards." All 8 command
+# hooks in settings.json now resolve through hooks/run_hook.sh. If that file goes missing
+# on an installed machine, every one of the 8 command hooks (including hooks/guard.py at
+# PreToolUse and hooks/config_watch.py) silently no-ops, and nothing before this caught
+# that. This reads the 8 "type":"command" strings that call run_hook.sh straight out of
+# settings.json (never a hand-copied list, so the case stays honest if a command
+# changes), and runs each one twice: once against a scratch CLAUDE_CONFIG_DIR with no
+# run_hook.sh (must exit 0, print nothing -- the intended fail-open), and once with
+# run_hook.sh plus a stub target file in place (must actually run the target, proving
+# the wrapper is reachable at all, not just quiet).
+RUN_HOOK_SH_DEFAULT="${RUN_HOOK_SH_UNDER_TEST:-$REPO_ROOT/hooks/run_hook.sh}"
+
+hook_commands_calling_run_hook() {
+  python3 - "$REPO_ROOT/settings.json" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1]))
+def walk(node):
+    if isinstance(node, dict):
+        if node.get("type") == "command" and "run_hook.sh" in node.get("command", ""):
+            print(node["command"])
+        for v in node.values():
+            walk(v)
+    elif isinstance(node, list):
+        for v in node:
+            walk(v)
+walk(data["hooks"])
+PY
+}
+
+case_run_hook_reachability() {
+  cmds_file="$work/run-hook-commands.txt"
+  hook_commands_calling_run_hook > "$cmds_file"
+
+  n=0
+  count=$(wc -l < "$cmds_file" | tr -d ' ')
+  if [ "$count" -eq 0 ]; then
+    bad "run_hook_reachability" "found no settings.json command hook calling run_hook.sh"
+    return
+  fi
+
+  while IFS= read -r cmd; do
+    n=$((n + 1))
+    target=$(printf '%s\n' "$cmd" | sed -n 's#.*exec sh "\$w" \([^;]*\); exit 0.*#\1#p')
+    if [ -z "$target" ]; then
+      bad "run_hook_reachability#$n" "could not parse target path from: $cmd"
+      continue
+    fi
+
+    # -- absent: no run_hook.sh under CLAUDE_CONFIG_DIR, must fail open silently --
+    h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; mkdir -p "$cfg"
+    out=$(env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" sh -c "$cmd" 2>&1)
+    rc=$?
+    if [ $rc -ne 0 ] || [ -n "$out" ]; then
+      bad "run_hook_reachability-absent-$target" "expected exit 0 + empty output with run_hook.sh missing, got rc=$rc out=[$out]"
+    else
+      ok "run_hook_reachability-absent-$target"
+    fi
+    rm -rf "$h"
+
+    # -- present: run_hook.sh and a stub target both in place, must actually run it --
+    h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"
+    mkdir -p "$cfg/hooks" "$cfg/$(dirname "$target")"
+    cp "$RUN_HOOK_SH_DEFAULT" "$cfg/hooks/run_hook.sh"
+    marker="RUN_HOOK_REACHED_$n"
+    printf 'print("%s")\n' "$marker" > "$cfg/$target"
+    out=$(env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" sh -c "$cmd" 2>&1)
+    rc=$?
+    if [ $rc -eq 0 ] && printf '%s' "$out" | grep -qF "$marker"; then
+      ok "run_hook_reachability-present-$target"
+    else
+      bad "run_hook_reachability-present-$target" "expected marker [$marker] with wrapper+target present, got rc=$rc out=[$out]"
+    fi
+    rm -rf "$h"
+  done < "$cmds_file"
+}
+
 # ---- Origin-matching cases: exact owner/name, not substring ------------------------------
 # Each drives a piped cloud install with a checkout at the given origin, and asserts
 # whether that checkout is accepted (SRC = checkout, no fetch) or rejected (falls through
@@ -992,6 +1095,8 @@ caseF5() {
 case1
 case2
 case3
+case_run_hook_lands
+case_run_hook_reachability
 case_origins
 case7
 case8
