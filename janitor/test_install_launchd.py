@@ -73,9 +73,9 @@ def make_blind_git(folder):
     """A `git` stand-in that fails to answer everything, the same trick
     janitor/test_sweep.py's own make_blind_git uses, kept local to this file.
 
-    Writes both a POSIX `git` script and a Windows `git.cmd` sibling: a bare, extensionless
-    `git` file never shadows `git.exe` there, since PATHEXT resolution only looks at
-    `.cmd` and similar. Both must exist so the shadowing works on either platform."""
+    Writes a POSIX `git` script and a Windows `git.cmd` sibling. PATHEXT resolution
+    only looks at `.cmd` and similar, so a bare, extensionless `git` file never shadows
+    `git.exe` there. Both must exist so the shadowing works on either platform."""
     os.makedirs(folder, exist_ok=True)
     script = os.path.join(folder, "git")
     write(script, "#!/bin/sh\necho 'blind git: no answer' >&2\nexit 128\n")
