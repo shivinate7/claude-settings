@@ -261,6 +261,28 @@ class HookBudgetFitsUnderItsHostCeiling(unittest.TestCase):
                     return h.get("timeout")
         return None
 
+    def _wired_timeout(self):
+        """Return the timeout settings.json gives this hook, or skip when the hook is disarmed.
+
+        Two different states reach this point, and folding them together would hide one of
+        them. An ABSENT `SessionEnd` key is the disarm recorded in
+        decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md. There is no
+        ceiling to check, so the three arms below have nothing to say, and they skip. The skip
+        reads the config itself, so these arms come back on their own the day the hook returns.
+        Nobody has to remember to remove a marker.
+
+        A `SessionEnd` key that IS present but names no entry for this hook is the other state.
+        That is a real defect, never the disarm, so it fails the way it always did.
+        """
+        timeout = self._session_end_timeout(self.settings)
+        if timeout is None and "SessionEnd" not in self.settings.get("hooks", {}):
+            raise unittest.SkipTest(
+                "the SessionEnd hook is disarmed, see "
+                "decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md"
+            )
+        self.assertIsNotNone(timeout, "no SessionEnd entry in settings.json calls this hook")
+        return timeout
+
     def setUp(self):
         import session_end_sweep
         self.mod = session_end_sweep
@@ -274,8 +296,7 @@ class HookBudgetFitsUnderItsHostCeiling(unittest.TestCase):
         self.assertEqual(self.mod.HOOK_WORST_CASE_SECONDS, 45.0)
 
     def test_settings_json_gives_this_hook_a_timeout_strictly_above_its_worst_case(self):
-        timeout = self._session_end_timeout(self.settings)
-        self.assertIsNotNone(timeout, "no SessionEnd entry in settings.json calls this hook")
+        timeout = self._wired_timeout()
         self.assertGreater(
             timeout, self.mod.HOOK_WORST_CASE_SECONDS,
             "settings.json's SessionEnd timeout (%r) must exceed this hook's own worst-case "
@@ -288,8 +309,7 @@ class HookBudgetFitsUnderItsHostCeiling(unittest.TestCase):
         leaves no room for process-start and interpreter-import overhead neither number above
         counts. Require at least SESSION_END_TIMEOUT_MIN_HEADROOM_SECONDS of headroom -- the real
         constant the module states beside its arithmetic, never a copy of the number."""
-        timeout = self._session_end_timeout(self.settings)
-        self.assertIsNotNone(timeout)
+        timeout = self._wired_timeout()
         self.assertGreaterEqual(
             timeout - self.mod.HOOK_WORST_CASE_SECONDS,
             self.mod.SESSION_END_TIMEOUT_MIN_HEADROOM_SECONDS,
@@ -306,8 +326,7 @@ class HookBudgetFitsUnderItsHostCeiling(unittest.TestCase):
         SWEEP_TIMEOUT_SECONDS or the git-call budget back down), or move the ceiling on purpose
         (widen settings.json's SessionEnd timeout AND this module's max-headroom constant, in
         the same commit, with a reason)."""
-        timeout = self._session_end_timeout(self.settings)
-        self.assertIsNotNone(timeout)
+        timeout = self._wired_timeout()
         self.assertTrue(
             self.mod.headroom_within_bounds(timeout, self.mod.HOOK_WORST_CASE_SECONDS),
             "settings.json's SessionEnd timeout (%r) leaves a margin over "
