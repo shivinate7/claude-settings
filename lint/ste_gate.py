@@ -31,6 +31,10 @@ import subprocess
 import sys
 import tempfile
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from _transcript import paragraph_blocks, format_finding  # noqa: E402
+
 MD_SUFFIXES = (".md", ".markdown")
 NOTE = "Code in backticks or a fence is exempt. Errors only: sentence length, semicolon, Latin abbreviation, contraction."
 
@@ -52,33 +56,12 @@ def lint(linter, text):
     return [f for f in data.get("findings", []) if f.get("severity") == "error"]
 
 
-def format_finding(f):
-    return "line %s: %s %s" % (f.get("line"), f.get("code"), f.get("message"))
-
+# paragraph_blocks and format_finding live in lint/_transcript.py, imported above. This hook,
+# lint/md_sweep.py, lint/report_gate.py, and hooks/config_report.py share that one copy;
+# hooks/config_report.py already imports lint/report_gate.py, which already imports this
+# module, so the readers these hooks share are no longer split one-per-file.
 
 # ------------------------------------------------------------------ scoping to changed blocks
-
-def paragraph_blocks(text):
-    """Return (start_line, end_line) 1-indexed ranges, one per run of non-blank lines.
-
-    A block is a paragraph: lines bounded by blank lines. Copied from lint/md_sweep.py, not
-    imported, the way that hook's own transcript helpers are copied from hooks/config_report.py:
-    each hook fired by its own event stays in one file.
-    """
-    lines = text.split("\n")
-    blocks = []
-    start = None
-    for i, line in enumerate(lines, start=1):
-        if line.strip() == "":
-            if start is not None:
-                blocks.append((start, i - 1))
-                start = None
-        elif start is None:
-            start = i
-    if start is not None:
-        blocks.append((start, len(lines)))
-    return blocks
-
 
 def changed_new_lines(old_text, new_text):
     """Return the 1-indexed lines of `new_text` that differ from `old_text`.

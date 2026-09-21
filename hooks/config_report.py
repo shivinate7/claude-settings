@@ -53,6 +53,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LINT_DIR = os.path.join(HERE, "..", "lint")
 sys.path.insert(0, HERE)
 sys.path.insert(0, LINT_DIR)
+from _transcript import is_last_human, tool_uses, records_after_last_human, read_transcript  # noqa: E402
 
 FILE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 SHELL_TOOLS = {"Bash", "PowerShell"}
@@ -80,61 +81,10 @@ MCP_PR_NUMBER_KEYS = ("pullNumber", "pull_number", "prNumber", "pr_number", "num
 
 # ------------------------------------------------------------------ transcript walking
 #
-# Copied from lint/report_gate.py rather than imported, so this hook has no dependency on the STE
-# lint package.
-
-def is_last_human(rec):
-    if rec.get("type") != "user":
-        return False
-    if rec.get("isSidechain"):
-        return False
-    msg = rec.get("message") or {}
-    content = msg.get("content")
-    if isinstance(content, str):
-        return True
-    if isinstance(content, list):
-        has_text = any(isinstance(b, dict) and b.get("type") == "text" for b in content)
-        has_tool_result = any(
-            isinstance(b, dict) and b.get("type") == "tool_result" for b in content
-        )
-        return has_text and not has_tool_result
-    return False
-
-
-def tool_uses(rec):
-    msg = rec.get("message") or {}
-    content = msg.get("content")
-    if not isinstance(content, list):
-        return
-    for b in content:
-        if isinstance(b, dict) and b.get("type") == "tool_use":
-            yield b
-
-
-def records_after_last_human(records):
-    last_human_idx = None
-    for i, rec in enumerate(records):
-        if is_last_human(rec):
-            last_human_idx = i
-    if last_human_idx is None:
-        return []
-    return records[last_human_idx + 1:]
-
-
-def read_transcript(path):
-    records = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rec = json.loads(line)
-            except Exception:
-                continue
-            if isinstance(rec, dict):
-                records.append(rec)
-    return records
+# is_last_human, tool_uses, records_after_last_human, and read_transcript live in
+# lint/_transcript.py, imported above. This hook already imports lint/report_gate.py (which
+# already imports lint/ste_gate.py) for the merge-notice check below, so importing
+# lint/_transcript.py adds no new dependency.
 
 
 # ------------------------------------------------------------------ the path test
