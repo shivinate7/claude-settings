@@ -71,11 +71,17 @@ def run_installer(args, cfg_dir=None, env_extra=None):
 
 def make_blind_git(folder):
     """A `git` stand-in that fails to answer everything, the same trick
-    janitor/test_sweep.py's own make_blind_git uses, kept local to this file."""
+    janitor/test_sweep.py's own make_blind_git uses, kept local to this file.
+
+    Writes a POSIX `git` script and a Windows `git.cmd` sibling. PATHEXT resolution
+    only looks at `.cmd` and similar, so a bare, extensionless `git` file never shadows
+    `git.exe` there. Both must exist so the shadowing works on either platform."""
     os.makedirs(folder, exist_ok=True)
     script = os.path.join(folder, "git")
     write(script, "#!/bin/sh\necho 'blind git: no answer' >&2\nexit 128\n")
     os.chmod(script, 0o755)
+    cmd_script = os.path.join(folder, "git.cmd")
+    write(cmd_script, "@echo blind git: no answer 1>&2\n@exit /b 128\n")
 
 
 class GeneratesPlistForAnOrdinaryCheckout(unittest.TestCase):

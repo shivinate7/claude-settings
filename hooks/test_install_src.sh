@@ -32,6 +32,24 @@ bad() { FAIL=$((FAIL + 1)); printf 'FAIL - %s: %s\n' "$1" "$2"; }
 # write, with no separate resolve step needed at each comparison.
 realpwd() { ( cd "$1" 2>/dev/null && pwd -P ); }
 
+# Normalize a Windows-style path (C:/Users/... or C:\Users\...) to the POSIX/MSYS form
+# (/c/Users/...). install.sh, run under bash on Windows, can write either form into the
+# pointer, depending on which tool built it. The values this script builds itself
+# (mktemp, pwd -P) already come out in POSIX form. Routing BOTH sides of a comparison
+# through this makes each case robust to either input form, instead of assuming the two
+# already agree. A no-op on an already-POSIX path.
+normalize_path() {
+  p=$(printf '%s' "$1" | tr '\\' '/')
+  case "$p" in
+    [A-Za-z]:/*)
+      drive=$(printf '%s' "${p%%:*}" | tr 'A-Z' 'a-z')
+      rest=${p#*:}
+      p="/$drive$rest"
+      ;;
+  esac
+  printf '%s' "$p"
+}
+
 # The directories install.sh lands, read from the same manifest install.sh itself reads
 # (landed-dirs.txt at the repo root), not a hand-kept list here. Keeps case8 honest about
 # every landed directory, not just the two it happened to name by hand.
@@ -112,7 +130,7 @@ case1() {
 
   if [ $rc -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $out"
-  elif [ "$pointer" != "$co" ]; then
+  elif [ "$(normalize_path "$pointer")" != "$(normalize_path "$co")" ]; then
     bad "$name" "pointer target [$pointer] != checkout [$co]"
   elif [ -d "$h/claude-settings" ]; then
     bad "$name" "$h/claude-settings was created; a mirror should not have been fetched"
@@ -146,7 +164,7 @@ case2() {
 
   if [ $rc -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $out"
-  elif [ "$pointer" != "$expect" ]; then
+  elif [ "$(normalize_path "$pointer")" != "$(normalize_path "$expect")" ]; then
     bad "$name" "pointer target [$pointer] != fallback mirror [$expect]"
   elif [ ! -f "$expect/CLAUDE.md" ]; then
     bad "$name" "fallback mirror CLAUDE.md was not fetched"
@@ -172,7 +190,7 @@ case3() {
 
   if [ $rc -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $out"
-  elif [ "$pointer" != "$co" ]; then
+  elif [ "$(normalize_path "$pointer")" != "$(normalize_path "$co")" ]; then
     bad "$name" "pointer target [$pointer] != clone [$co]"
   else
     ok "$name"
@@ -207,13 +225,13 @@ origin_case() {
   if [ $rc -ne 0 ]; then
     bad "$case_name" "install.sh exited $rc: $out"
   elif [ "$should_match" = "yes" ]; then
-    if [ "$pointer" = "$co" ]; then ok "$case_name"; else
+    if [ "$(normalize_path "$pointer")" = "$(normalize_path "$co")" ]; then ok "$case_name"; else
       bad "$case_name" "expected checkout accepted, pointer=[$pointer] checkout=[$co]"
     fi
   else
-    if [ "$pointer" = "$co" ]; then
+    if [ "$(normalize_path "$pointer")" = "$(normalize_path "$co")" ]; then
       bad "$case_name" "adversarial origin [$origin_url] was wrongly accepted as shivinate7/claude-settings"
-    elif [ "$pointer" = "$h/claude-settings" ] && [ -f "$h/claude-settings/CLAUDE.md" ]; then
+    elif [ "$(normalize_path "$pointer")" = "$(normalize_path "$h/claude-settings")" ] && [ -f "$h/claude-settings/CLAUDE.md" ]; then
       ok "$case_name"
     else
       bad "$case_name" "expected fallback mirror, got pointer=[$pointer]"
@@ -258,7 +276,7 @@ case7() {
 
   if [ $rc -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $out"
-  elif [ "$pointer" != "$co" ]; then
+  elif [ "$(normalize_path "$pointer")" != "$(normalize_path "$co")" ]; then
     bad "$name" "pointer target [$pointer] != checkout [$co] (cwd-only detection would miss this)"
   elif [ -d "$h/claude-settings" ]; then
     bad "$name" "$h/claude-settings was created; a mirror should not have been fetched"
@@ -336,7 +354,7 @@ pointer_case1() {
 
   if [ $rc -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $out"
-  elif [ "$pointer" != "$co" ]; then
+  elif [ "$(normalize_path "$pointer")" != "$(normalize_path "$co")" ]; then
     bad "$name" "pointer target [$pointer] != checkout [$co] (root scan alone would miss this)"
   elif [ -d "$h/claude-settings" ]; then
     bad "$name" "$h/claude-settings was created; a mirror should not have been fetched"
@@ -364,7 +382,7 @@ pointer_case2() {
 
   if [ $rc -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $out"
-  elif [ "$pointer" != "$expect" ]; then
+  elif [ "$(normalize_path "$pointer")" != "$(normalize_path "$expect")" ]; then
     bad "$name" "pointer target [$pointer] != fallback mirror [$expect]"
   else
     ok "$name"
@@ -391,7 +409,7 @@ pointer_case3() {
 
   if [ $rc -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $out"
-  elif [ "$pointer" != "$expect" ]; then
+  elif [ "$(normalize_path "$pointer")" != "$(normalize_path "$expect")" ]; then
     bad "$name" "pointer target [$pointer] != fallback mirror [$expect]"
   else
     ok "$name"
@@ -419,9 +437,9 @@ pointer_case4() {
 
   if [ $rc -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $out"
-  elif [ "$pointer" = "$co" ]; then
+  elif [ "$(normalize_path "$pointer")" = "$(normalize_path "$co")" ]; then
     bad "$name" "pointer to a rejected-origin checkout was wrongly accepted"
-  elif [ "$pointer" != "$expect" ]; then
+  elif [ "$(normalize_path "$pointer")" != "$(normalize_path "$expect")" ]; then
     bad "$name" "pointer target [$pointer] != fallback mirror [$expect]"
   else
     ok "$name"
@@ -445,7 +463,7 @@ pointer_case5() {
 
   if [ $rc -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $out"
-  elif [ "$pointer" != "$co" ]; then
+  elif [ "$(normalize_path "$pointer")" != "$(normalize_path "$co")" ]; then
     bad "$name" "pointer target [$pointer] != checkout [$co]"
   else
     ok "$name"
@@ -472,7 +490,7 @@ pointer_case6() {
 
   if [ $rc -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $out"
-  elif [ "$pointer" != "$co" ]; then
+  elif [ "$(normalize_path "$pointer")" != "$(normalize_path "$co")" ]; then
     bad "$name" "pointer target [$pointer] != checkout [$co]"
   else
     ok "$name"

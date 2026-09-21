@@ -31,6 +31,33 @@ from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GUARD = os.path.join(HERE, "guard.py")
+
+# FIXTURE_TMP is where the indirection fixtures below live: `tempfile.gettempdir()`, never a
+# literal "/tmp". On Windows, Python resolves "/tmp" to "C:\tmp". Bash (MSYS) resolves the
+# same literal to a different directory instead, such as "C:\Users\x\AppData\Local\Temp".
+# A fixture Python writes at the literal path then never lands where the command under
+# test, run through bash, reads it. `gettempdir()` gives Python's own real answer.
+# `to_bash_path` below converts that answer to the POSIX form bash needs, wherever a
+# command string names it.
+FIXTURE_TMP = os.path.join(tempfile.gettempdir(), "config_watch_fixtures")
+
+
+def to_bash_path(path):
+    """Convert a native path to the POSIX/MSYS form bash expects inside a command string.
+
+    On POSIX, a path is already in that form, so this is a no-op. On Windows, bash
+    (MSYS/Git Bash) never resolves a drive-letter path like "C:\\Users\\x\\y". It wants
+    "/c/Users/x/y" instead. Only a path PASSED INTO a bash command or script needs this.
+    A path Python itself opens (json.load, open()) must stay in its native form.
+    """
+    if os.name != "nt":
+        return path
+    drive, rest = os.path.splitdrive(path)
+    if not drive:
+        return path.replace("\\", "/")
+    return "/" + drive[0].lower() + rest.replace("\\", "/")
+
+
 # WATCH_UNDER_TEST points the suite at another copy of the watch, such as a copy carrying one
 # mutation, the same contract GUARD_UNDER_TEST holds for the guard. A mutation test then needs no
 # second copy of this file, so the cases cannot drift from the cases that pass.
@@ -246,9 +273,11 @@ def bypass(name, build):
 # measured command would put the cap value ON the command line, and rule 8 reads the whole line, so
 # the case would measure the heredoc shape under a `cp` name and report a pass that is not there.
 bypass("cp from another file",
-       lambda p: "cp /tmp/lift_case.json .claude/settings.local.json")
+       lambda p: "cp %s .claude/settings.local.json"
+                 % to_bash_path(os.path.join(FIXTURE_TMP, "lift_case.json")))
 bypass("mv from another file",
-       lambda p: "mv /tmp/lift_case2.json .claude/settings.local.json")
+       lambda p: "mv %s .claude/settings.local.json"
+                 % to_bash_path(os.path.join(FIXTURE_TMP, "lift_case2.json")))
 bypass("sed -i in place",
        # `sed -i ''` is BSD syntax: GNU sed's `-i` takes its suffix only ATTACHED, so a
        # SEPARATE `''` argument is read as the script instead, `s/sonnet/opus/` is then read
@@ -265,7 +294,7 @@ bypass("sed -i in place",
                  "&& rm -f .claude/settings.local.json.bak")
 bypass("python3 -c writes the path",
        lambda p: "python3 -c \"open('.claude/settings.local.json','w')"
-                 ".write(open('/tmp/lift_case3.json').read())\"")
+                 ".write(open(%r).read())\"" % os.path.join(FIXTURE_TMP, "lift_case3.json"))
 bypass("python3 runs a script file",
        lambda p: "python3 gen.py")
 bypass("bash runs a script file",
@@ -274,7 +303,8 @@ bypass("bash runs a script file",
 # The two indirection shapes the brief's table does not cover. Neither names the path in the
 # command, so no shell reading can reach them, and both must be caught by the hash.
 bypass("a path held in a shell variable",
-       lambda p: "f=.claude/settings.local.json; cp /tmp/lift_case4.json \"$f\"")
+       lambda p: "f=.claude/settings.local.json; cp %s \"$f\""
+                 % to_bash_path(os.path.join(FIXTURE_TMP, "lift_case4.json")))
 bypass("a script file that never names the path in the command",
        lambda p: "sh write.sh")
 
@@ -315,7 +345,8 @@ def unrelated_file(project):
 @case("an ordinary project config edit is allowed and not reverted", "pass")
 def ordinary_edit(project):
     project.settle()
-    command = "cp /tmp/lift_case5.json .claude/settings.local.json"
+    command = "cp %s .claude/settings.local.json" % to_bash_path(
+        os.path.join(FIXTURE_TMP, "lift_case5.json"))
     decision = project.pre("Bash", {"command": command})
     shell(project, command)
     message = project.post("Bash", {"command": command})
@@ -328,7 +359,8 @@ def stop_backstop(project):
     project.settle()
     # No PostToolUse fires for a FAILED tool call, so the watch never sees the write. The Stop
     # sweep is what closes that hole.
-    shell(project, "cp /tmp/lift_case6.json .claude/settings.local.json")
+    shell(project, "cp %s .claude/settings.local.json" % to_bash_path(
+        os.path.join(FIXTURE_TMP, "lift_case6.json")))
     message = project.stop()
     return {"pre": "n/a", "lifted": project.lifted(), "message": message}
 
@@ -365,7 +397,8 @@ def empty_then_absent(project):
     # fold it into its own baseline exactly as Decision 7 asks of any project edit.
     os.remove(project.settings)
     project.settle()
-    command = "cp /tmp/lift_case.json .claude/settings.local.json"
+    command = "cp %s .claude/settings.local.json" % to_bash_path(
+        os.path.join(FIXTURE_TMP, "lift_case.json"))
     decision = project.pre("Bash", {"command": command})
     shell(project, command)
     message = project.post("Bash", {"command": command})
@@ -480,7 +513,8 @@ def old_shape_baseline(project):
     }
     with open(os.path.join(store_dir, key), "w", encoding="utf-8") as handle:
         json.dump(entry, handle)
-    command = "cp /tmp/lift_case.json .claude/settings.local.json"
+    command = "cp %s .claude/settings.local.json" % to_bash_path(
+        os.path.join(FIXTURE_TMP, "lift_case.json"))
     decision = project.pre("Bash", {"command": command})
     shell(project, command)
     message = project.post("Bash", {"command": command})
@@ -588,16 +622,22 @@ def main() -> int:
             # for each case because `mv` consumes its source.
             for name in ("lift_case.json", "lift_case2.json", "lift_case3.json",
                          "lift_case4.json", "lift_case6.json"):
-                write(os.path.join("/tmp", name), LIFT)
-            write("/tmp/lift_case5.json", UNRELATED)
+                write(os.path.join(FIXTURE_TMP, name), LIFT)
+            write(os.path.join(FIXTURE_TMP, "lift_case5.json"), UNRELATED)
             project = Project(root, start=SONNET)
+            # gen.py is run as `python3 gen.py`: the path inside it is read by PYTHON's own
+            # open(), so it stays in native form, never bash-converted.
             write(os.path.join(project.proj, "gen.py"),
-                  "open('.claude/settings.local.json','w').write(open('/tmp/lift_case.json')"
-                  ".read())\n")
+                  "open('.claude/settings.local.json','w').write(open(%r).read())\n"
+                  % os.path.join(FIXTURE_TMP, "lift_case.json"))
+            # gen.sh and write.sh are run as `bash gen.sh` / `sh write.sh`: the path inside them
+            # is read by BASH, so it must be in POSIX/MSYS form.
             write(os.path.join(project.proj, "gen.sh"),
-                  "cp /tmp/lift_case.json .claude/settings.local.json\n")
+                  "cp %s .claude/settings.local.json\n"
+                  % to_bash_path(os.path.join(FIXTURE_TMP, "lift_case.json")))
             write(os.path.join(project.proj, "write.sh"),
-                  "t=.claude/settings.local.json\ncp /tmp/lift_case.json \"$t\"\n")
+                  "t=.claude/settings.local.json\ncp %s \"$t\"\n"
+                  % to_bash_path(os.path.join(FIXTURE_TMP, "lift_case.json")))
             result = entry["run"](project)
             ok, note = expectation(entry, result)
         finally:

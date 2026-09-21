@@ -70,11 +70,17 @@ def require(condition, message):
 def make_blind_git(folder):
     """A `git` stand-in that fails to answer everything. Drives the unreadable-subject arms:
     the same trick hooks/test_guard.py's make_blind_git uses, kept local because this file's
-    fixtures and that one's must not depend on each other."""
+    fixtures and that one's must not depend on each other.
+
+    Writes a POSIX `git` script and a Windows `git.cmd` sibling. PATHEXT resolution
+    only looks at `.cmd` and similar, so a bare, extensionless `git` file never shadows
+    `git.exe` there. Both must exist so the shadowing works on either platform."""
     os.makedirs(folder, exist_ok=True)
     script = os.path.join(folder, "git")
     write(script, "#!/bin/sh\necho 'blind git: no answer' >&2\nexit 128\n")
     os.chmod(script, 0o755)
+    cmd_script = os.path.join(folder, "git.cmd")
+    write(cmd_script, "@echo blind git: no answer 1>&2\n@exit /b 128\n")
 
 
 def write_session(session_id, pid, started_ms, cwd):
