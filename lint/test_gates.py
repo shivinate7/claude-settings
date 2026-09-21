@@ -955,7 +955,13 @@ class MdSweepTests(unittest.TestCase):
             with open(real, "w", encoding="utf-8") as f:
                 f.write(self.ERROR_TEXT)
             link = os.path.join(self.tmp.name, "outside.md")
-            os.symlink(real, link)
+            try:
+                os.symlink(real, link)
+            except OSError:
+                # Windows needs Developer Mode or admin rights to create a symlink. Skip
+                # rather than fail, so the suite still runs everywhere else this holds.
+                raise unittest.SkipTest(
+                    "os.symlink needs elevated privilege or Developer Mode on this platform")
             run = self.run_sweep()
             self.assert_no_block(run)
 
