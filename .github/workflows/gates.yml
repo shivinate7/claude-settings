@@ -110,3 +110,117 @@ jobs:
         run: bash -n install.sh
       - name: install.sh checkout-detection suite
         run: sh hooks/test_install_src.sh
+
+  # Six python suites in the gates job are known to fail on windows-latest, and CI
+  # could not show that before this job existed. This job runs those suites on
+  # Windows and reports the environment first, so later work can fix them with real
+  # evidence. The failures are expected, so continue-on-error keeps this job from
+  # blocking the rest of the workflow while it stays advisory.
+  gates-windows:
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Report the Windows environment
+        shell: bash
+        run: |
+          echo "== python --version =="
+          python --version
+
+          echo "== ps on PATH, and ps -o lstart= -p <pid> =="
+          python - <<'PY'
+          import os
+          import shutil
+          import subprocess
+          import tempfile
+
+          ps_path = shutil.which("ps")
+          print("shutil.which('ps'):", ps_path)
+
+          pid = os.getpid()
+          try:
+              result = subprocess.run(
+                  ["ps", "-o", "lstart=", "-p", str(pid)],
+                  capture_output=True,
+                  text=True,
+              )
+              print("ps exit code:", result.returncode)
+              print("ps stdout:", repr(result.stdout))
+              print("ps stderr:", repr(result.stderr))
+          except Exception as exc:
+              print("ps invocation raised:", repr(exc))
+
+          print("== os.symlink, unprivileged ==")
+          tmp_dir = tempfile.gettempdir()
+          target = os.path.join(tmp_dir, "gates_windows_symlink_target.txt")
+          link = os.path.join(tmp_dir, "gates_windows_symlink_link.txt")
+          try:
+              with open(target, "w") as handle:
+                  handle.write("scratch")
+              if os.path.exists(link):
+                  os.remove(link)
+              os.symlink(target, link)
+              print("os.symlink succeeded:", link, "->", target)
+          except Exception as exc:
+              print("os.symlink failed:", repr(exc))
+          finally:
+              for path in (link, target):
+                  try:
+                      os.remove(path)
+                  except OSError:
+                      pass
+
+          print("== tempfile.gettempdir(), read from Python ==")
+          print(tempfile.gettempdir())
+          PY
+
+          echo "== \$TMPDIR, read from Git Bash =="
+          echo "${TMPDIR:-<unset>}"
+
+          echo "== mktemp -d, read from Git Bash =="
+          mktemp -d
+
+      - name: Guard fixture suite
+        run: python hooks/test_guard.py
+
+      - name: Guard mutation harness
+        run: python hooks/mutate_guard.py
+
+      - name: Janitor sweep fixture suite
+        run: python janitor/test_sweep.py
+
+      - name: Janitor sweep mutation harness
+        run: python janitor/mutate_sweep.py
+
+      - name: Config watch fixture suite
+        run: python hooks/test_config_watch.py
+
+      - name: Stop-hook gate fixture suite
+        run: python lint/test_gates.py
+
+      - name: Rule audit fixture suite
+        run: python lint/test_rule_audit.py
+
+      - name: Rule mechanization audit
+        run: python lint/rule_audit.py
+
+      - name: Unknown-read contract (guard + session_start)
+        run: python lint/check_unknown_reads_contract.py
+
+      - name: Landed-directory manifest agreement
+        run: python lint/check_landed_dirs.py
+
+      - name: Janitor triggers fixture suite (SessionEnd hook)
+        run: python janitor/test_session_end_sweep.py
+
+      - name: Janitor triggers fixture suite (launchd installer)
+        run: python janitor/test_install_launchd.py
+
+      - name: install.sh checkout-detection suite
+        shell: bash
+        run: sh hooks/test_install_src.sh
