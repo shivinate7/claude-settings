@@ -9,15 +9,36 @@ This rule governs one shape only. A gate holds a permit list, a set of what
 it lets through. Somewhere else, code holds the set it actually emits or
 reads. Those are two objects that must say the same thing.
 
-This rule does not govern code duplication in general. Three functions in
-this repo are copied on purpose, and none of them is a permit list.
-`is_last_human` sits in `lint/md_sweep.py:116` and in
-`hooks/config_report.py:58`. It is copied so each Stop hook stays in one
-file, with no import between two hooks fired by the same event.
-`paragraph_blocks` sits in `lint/ste_gate.py:64`, copied for the same reason
-from `lint/md_sweep.py`. Each is a transcript or text helper. None decides
-what a gate lets through. A reader must not point at those three files as a
-violation of this rule.
+This rule does not govern code duplication in general. It governs permit
+lists only. A transcript or text helper is not a permit list. It decides
+nothing about what a gate lets through. A reader must not point at a copied
+helper as a violation of this rule.
+
+**Repealed, 2026-09-21.** This section named three helpers as copied on
+purpose. It said, verbatim: "It is copied so each Stop hook stays in one
+file, with no import between two hooks fired by the same event." That
+sentence was already false when the repeal landed. `hooks/config_report.py`
+imported `lint/report_gate.py`, and `report_gate` imported `lint/ste_gate.py`.
+Three of the four hooks were linked by import already. The helpers now sit in
+one module, `lint/_transcript.py`, and the four hooks import it. The outcome
+the sentence protected, and the two mechanisms that protect it now, are
+recorded in `hooks-share-the-transcript-reader`. The scope rule above survives
+the repeal unchanged. Only the example went.
+
+WHO MADE THIS CALL. The orchestrator did, not the owner. The owner did not name
+this paragraph. The authority is one instruction, given in the session of
+2026-09-21, verbatim:
+
+```text
+Execute the plan to completion. If you reach a fork that needs a decision, I
+trust you to make the right one, but still record it for me to potentially
+revise at a later time.
+```
+
+That instruction is a session grant. It is not a rule in CLAUDE.md. It does not
+survive the session. It is quoted here so a later reader can weigh it, rather
+than take the orchestrator's word. The owner can revise this repeal at any
+time. The original sentence is quoted above for that purpose.
 
 ## Three patterns, not one
 

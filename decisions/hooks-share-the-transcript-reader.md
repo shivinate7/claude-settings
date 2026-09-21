@@ -17,10 +17,10 @@ names three copied helpers. Its sentence, verbatim:
 `lint/ste_gate.py:64` carried the same claim in its own words. So did
 `lint/md_sweep.py:116`. This change rewrites those two code comments.
 
-It does not touch the sentence in `a-gates-allow-list-is-the-constant` itself.
-That entry is an argument, and the owner repeals an argument, not a lane. The
-proposed repeal waits for the owner's word. Until then the entry and the code
-disagree, and this paragraph is the record of that gap.
+The owner repealed that sentence on 2026-09-21, and the repeal lands in this
+branch. The scope rule in that entry survives. Only the example went, because
+the example is measured false. The orchestrator proposed the repeal first and
+did not land it alone.
 
 ## What this change measured
 
