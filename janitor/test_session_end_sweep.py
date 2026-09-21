@@ -295,6 +295,30 @@ class HookBudgetFitsUnderItsHostCeiling(unittest.TestCase):
         self.assertEqual(self.mod.RESOLVE_ROOT_WORST_CASE_SECONDS, 20.0)
         self.assertEqual(self.mod.HOOK_WORST_CASE_SECONDS, 45.0)
 
+    def test_guard_git_call_timeout_constant_matches_the_real_guard_git(self):
+        """session_end_sweep.GUARD_GIT_CALL_TIMEOUT_SECONDS is now a plain, hand-typed constant
+        (the owner asked for it, and for `inspect` to leave session_end_sweep.py). A plain
+        constant carries no guard of its own against `guard._git`'s real subprocess timeout
+        drifting away from it -- so THIS TEST reads the real number back out of `guard._git`'s
+        own source, the same way the deleted `_guard_git_call_timeout_seconds()` did, and pins
+        it against the module's constant. MEASURED: bumping `guard._git`'s `timeout=` from 10 to
+        15 turns this arm red while the three arithmetic/settings.json arms above and below stay
+        green, because none of them re-reads guard.py at all (CLAUDE.md, "trust a guard only
+        once it goes red on the defect it guards")."""
+        import inspect
+        import re
+        source = inspect.getsource(guard._git)
+        match = re.search(r"timeout\s*=\s*(\d+)", source)
+        self.assertIsNotNone(match, "could not find guard._git's own timeout= in its source")
+        real_timeout = float(match.group(1))
+        self.assertEqual(
+            real_timeout, self.mod.GUARD_GIT_CALL_TIMEOUT_SECONDS,
+            "guard._git's real subprocess timeout (%r) no longer matches "
+            "session_end_sweep.GUARD_GIT_CALL_TIMEOUT_SECONDS (%r); update the hand-typed "
+            "constant (and RESOLVE_ROOT_WORST_CASE_SECONDS / HOOK_WORST_CASE_SECONDS follow it)"
+            % (real_timeout, self.mod.GUARD_GIT_CALL_TIMEOUT_SECONDS),
+        )
+
     def test_settings_json_gives_this_hook_a_timeout_strictly_above_its_worst_case(self):
         timeout = self._wired_timeout()
         self.assertGreater(
