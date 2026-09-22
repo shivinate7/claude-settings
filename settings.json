@@ -1,11 +1,19 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "enabledPlugins": {},
+  "enabledPlugins": {
+    "ponytail@ponytail": true
+  },
   "extraKnownMarketplaces": {
     "compass-claude-plugins": {
       "source": {
         "source": "git",
         "url": "https://github.com/ssemwal-cdc/claude-sharables.git"
+      }
+    },
+    "ponytail": {
+      "source": {
+        "source": "github",
+        "repo": "DietrichGebert/ponytail"
       }
     }
   },
