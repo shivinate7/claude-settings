@@ -65,3 +65,12 @@ The `Stop` guardrail agent in `settings.json` reads the turn's transcript and
 judges the act. It caught this rule's own breach on 2026-09-22 and asked for the
 owner's word. That agent is this rule's check. The fix is the rule it judges
 against, never a new hook.
+
+The check depends on the session's permission mode. MEASURED the same day. In a
+mode that denies the agent `Read` and `Bash`, it cannot open the transcript. It
+then reports that it could not verify. That answer is unknown, which is the
+honest one, and `CLAUDE.md` asks for exactly that. It is not a pass.
+
+So read an unknown verdict as a cue to look yourself. A run of them means this
+rule has no working check in that session, whether the denial was deliberate or
+not.
