@@ -29,7 +29,14 @@ Usage:
     python3 janitor/install_schtasks.py                 # write <output-dir>/<TaskName>.xml
     python3 janitor/install_schtasks.py --hour 3 --minute 17
 
-Testing overrides (never used by a real install): --repo-root, --output-dir, --discover-root.
+THE GENERATED COMMAND CARRIES NO `--discover` ROOT. `janitor/sweep.py`, called with no ROOT and
+no `--discover`, already resolves its own roots at run time: `janitor.roots` from settings.json,
+falling back to `default_discover_roots()`. An installer-side root would be a second, stale copy
+of that same list (this file once hard-coded `~/Developer`, a path that does not exist on every
+machine and is not where this repository's own clones live). Reading roots at run time means
+the registered task never needs re-registering when `janitor.roots` changes.
+
+Testing overrides (never used by a real install): --repo-root, --output-dir.
 """
 import argparse
 import os
@@ -43,10 +50,6 @@ import guard  # noqa: E402
 
 TASK_NAME = "claude-settings-janitor-daily-sweep"
 TASK_XML_NAMESPACE = "http://schemas.microsoft.com/windows/2004/02/mit/task"
-
-
-def default_discover_root() -> str:
-    return os.path.expanduser("~/Developer")
 
 
 def resolve_primary_checkout(where: str):
@@ -71,17 +74,15 @@ def resolve_primary_checkout(where: str):
         return None
 
 
-def build_task_xml(repo_root: str, discover_root: str, hour: int, minute: int) -> bytes:
+def build_task_xml(repo_root: str, hour: int, minute: int) -> bytes:
     """Return a minimal, valid Task Scheduler XML task definition as bytes.
 
-    Mirrors `install_launchd.py.build_plist`'s `ProgramArguments` shape: the command is
-    `python <repo>/janitor/sweep.py --discover <root> --confirm`, split into Task Scheduler's own
-    `<Command>` (the interpreter) and `<Arguments>` (everything else) fields.
+    The command is `python <repo>/janitor/sweep.py --confirm`, split into Task Scheduler's own
+    `<Command>` (the interpreter) and `<Arguments>` (everything else) fields. No `--discover`
+    root: `sweep.py` resolves its own roots at run time (see the module docstring above).
     """
     sweep_py = os.path.join(repo_root, "janitor", "sweep.py")
-    arguments = "%s --discover %s --confirm" % (
-        _quote_arg(sweep_py), _quote_arg(discover_root),
-    )
+    arguments = "%s --confirm" % _quote_arg(sweep_py)
     ET.register_namespace("", TASK_XML_NAMESPACE)
     task = ET.Element("{%s}Task" % TASK_XML_NAMESPACE, attrib={"version": "1.2"})
 
@@ -108,7 +109,12 @@ def build_task_xml(repo_root: str, discover_root: str, hour: int, minute: int) -
     ET.SubElement(exec_action, "{%s}Command" % TASK_XML_NAMESPACE).text = sys.executable
     ET.SubElement(exec_action, "{%s}Arguments" % TASK_XML_NAMESPACE).text = arguments
 
-    return ET.tostring(task, encoding="utf-8", xml_declaration=True)
+    # `schtasks /create /xml` requires UTF-16. Measured here, same document, unchanged structure:
+    #   UTF-8, no BOM      -> "malformed" at (1,40), cannot switch encoding. Exit code 1.
+    #   UTF-8, with BOM    -> "malformed" at (1,2), incorrect document syntax. Exit code 1.
+    #   UTF-16 LE, with BOM -> the task is created, then deletes cleanly. Exit code 0.
+    # This is a requirement of the real tool, not a style choice.
+    return ET.tostring(task, encoding="UTF-16", xml_declaration=True)
 
 
 def _quote_arg(value: str) -> str:
@@ -129,14 +135,10 @@ def main(argv=None) -> int:
                          help="testing only: the checkout to treat as this installer's own")
     parser.add_argument("--output-dir", default=None,
                          help="testing only: overrides where the task XML is written")
-    parser.add_argument("--discover-root", default=None,
-                         help="testing only: overrides ~/Developer as the sweep's --discover root")
     args = parser.parse_args(argv)
 
     repo_root = os.path.abspath(args.repo_root) if args.repo_root else REPO_ROOT
     output_dir = os.path.abspath(args.output_dir) if args.output_dir else default_output_dir()
-    discover_root = os.path.abspath(args.discover_root) if args.discover_root \
-        else default_discover_root()
 
     worktree = guard.is_worktree(repo_root)
     if worktree is not False:
@@ -153,7 +155,7 @@ def main(argv=None) -> int:
 
     os.makedirs(output_dir, exist_ok=True)
 
-    xml_bytes = build_task_xml(repo_root, discover_root, args.hour, args.minute)
+    xml_bytes = build_task_xml(repo_root, args.hour, args.minute)
     xml_path = os.path.join(output_dir, TASK_NAME + ".xml")
     with open(xml_path, "wb") as handle:
         handle.write(xml_bytes)
