@@ -32,7 +32,7 @@
     "baseRef": "head"
   },
   "permissions": {
-    "allow": ["Bash(gh pr merge:*)"],
+    "allow": ["Bash(gh pr merge:*)", "Read(~/.claude/projects/**)"],
     "deny": ["Monitor"]
   },
   "hooks": {
