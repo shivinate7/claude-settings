@@ -99,6 +99,9 @@ import sys
 from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from _transcript import is_last_human, read_transcript, paragraph_blocks, format_finding  # noqa: E402
+
 LINTER = os.path.join(HERE, "ste_lint.py")
 
 MD_SUFFIXES = (".md", ".markdown")
@@ -113,42 +116,10 @@ NOTE = ("Code in backticks or a fence is exempt. Errors only: sentence length, s
 
 # ------------------------------------------------------------------ transcript walking
 #
-# Copied from hooks/config_report.py, not imported. This keeps the hook in one file, with no
-# import between two hooks fired by the same Stop event.
-
-def is_last_human(rec):
-    if rec.get("type") != "user":
-        return False
-    if rec.get("isSidechain"):
-        return False
-    msg = rec.get("message") or {}
-    content = msg.get("content")
-    if isinstance(content, str):
-        return True
-    if isinstance(content, list):
-        has_text = any(isinstance(b, dict) and b.get("type") == "text" for b in content)
-        has_tool_result = any(
-            isinstance(b, dict) and b.get("type") == "tool_result" for b in content
-        )
-        return has_text and not has_tool_result
-    return False
-
-
-def read_transcript(path):
-    records = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rec = json.loads(line)
-            except Exception:
-                continue
-            if isinstance(rec, dict):
-                records.append(rec)
-    return records
-
+# is_last_human and read_transcript live in lint/_transcript.py, imported above. This hook,
+# lint/ste_gate.py, lint/report_gate.py, and hooks/config_report.py share that one copy;
+# hooks/config_report.py already imports lint/report_gate.py, which already imports
+# lint/ste_gate.py, so the readers these hooks share are no longer split one-per-file.
 
 def last_human_stamp(records):
     """Return the `timestamp` field of the last human message, else an empty string.
@@ -372,29 +343,6 @@ class _DropFile:
 DROP_FILE = _DropFile()
 
 
-def paragraph_blocks(text):
-    """Return (start_line, end_line) 1-indexed ranges, one per run of non-blank lines.
-
-    A block is a paragraph: lines bounded by blank lines. A blank line is one that is empty
-    or holds only whitespace. This is the same unit ste_lint.py's own `segment_markdown`
-    flushes a paragraph at, which is why a multi-line STE001 sentence, reported at the line
-    it starts on, always lands inside the one block its later lines also belong to.
-    """
-    lines = text.split("\n")
-    blocks = []
-    start = None
-    for i, line in enumerate(lines, start=1):
-        if line.strip() == "":
-            if start is not None:
-                blocks.append((start, i - 1))
-                start = None
-        elif start is None:
-            start = i
-    if start is not None:
-        blocks.append((start, len(lines)))
-    return blocks
-
-
 def git_diff_changed_lines(cwd, path):
     """Return the 1-indexed lines of `path` ON DISK that `git diff HEAD --unified=0` marks
     changed, or None when the git call itself fails.
@@ -484,10 +432,6 @@ def lint_files(paths, exclude):
             continue
         by_path.setdefault(f.get("path"), []).append(f)
     return by_path
-
-
-def format_finding(f):
-    return "line %s: %s %s" % (f.get("line"), f.get("code"), f.get("message"))
 
 
 def main():

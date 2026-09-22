@@ -9,15 +9,9 @@ This rule governs one shape only. A gate holds a permit list, a set of what
 it lets through. Somewhere else, code holds the set it actually emits or
 reads. Those are two objects that must say the same thing.
 
-This rule does not govern code duplication in general. Three functions in
-this repo are copied on purpose, and none of them is a permit list.
-`is_last_human` sits in `lint/md_sweep.py:116` and in
-`hooks/config_report.py:58`. It is copied so each Stop hook stays in one
-file, with no import between two hooks fired by the same event.
-`paragraph_blocks` sits in `lint/ste_gate.py:64`, copied for the same reason
-from `lint/md_sweep.py`. Each is a transcript or text helper. None decides
-what a gate lets through. A reader must not point at those three files as a
-violation of this rule.
+This rule does not govern code duplication in general. A transcript reader
+or a text helper is not a permit list, however many copies of it exist. Only
+a set that a gate consults to decide what passes falls under this rule.
 
 ## Three patterns, not one
 
@@ -92,3 +86,22 @@ against.
 
 `lint/check_landed_dirs.py` is the mechanism for this rule, pinned by its
 `CONFIG_FROZEN_DIRS` needle in `lint/rule_mechanisms.json`.
+
+## Amended, 2026-09-22
+
+This entry once named three copied helpers as its example of duplication the
+rule does not govern. The owner repealed those sentences on 2026-09-22. The
+scope rule above is unchanged and it still holds.
+
+The owner repealed the example because its stated reason no longer held. It
+said each hook keeps its own copy "so each Stop hook stays in one file, with
+no import between two hooks fired by the same event". A read of the code
+showed that claim false.
+`lint/report_gate.py:21` imports `ste_gate` at module level, which couples two
+Stop hooks at import time. `hooks/config_report.py:384` imports `report_gate`
+inside a function, a real link taken lazily. Only `lint/md_sweep.py` stood
+alone, on the standard library alone.
+
+The outcome the example protected still matters. One bad edit must mute one
+reporter, never all four. See `hooks-share-the-transcript-reader` for the
+mechanisms that carry that outcome now.
