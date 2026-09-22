@@ -50,6 +50,10 @@ SUITE = os.path.join(HERE, "test_guard.py")
 WATCH = os.path.join(HERE, "config_watch.py")
 WATCH_SUITE = os.path.join(HERE, "test_config_watch.py")
 
+# How many red lines a wrong cause prints before it stops. A wrong cause usually carries one or
+# two, and the bound keeps a mutation that breaks half the suite from burying the rest of the run.
+WRONG_CAUSE_LINES_SHOWN = 10
+
 # A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
 # every mutation written before the watch existed reads unchanged.
 TARGETS = {
@@ -731,6 +735,18 @@ def main() -> int:
                     wrong_cause += 1
                     print("WRONG CAUSE %-62s %2d red, missing %r" % (
                         label, len(red), required), flush=True)
+                    # The lines it DID see, never the count alone. A wrong cause says the suite
+                    # went red somewhere else, and the count says nothing about where. MEASURED
+                    # on real Windows CI, run 35678689541: this mutant reported "1 red" and
+                    # nothing more, so which case broke stayed unknown, and
+                    # decisions/branch-delete-wrong-cause-on-windows-unexplained.md was written
+                    # against a fact nobody could read. A bounded print is the difference
+                    # between one CI run and a guessing round.
+                    for line in red[:WRONG_CAUSE_LINES_SHOWN]:
+                        print("            saw: %s" % line.strip(), flush=True)
+                    if len(red) > WRONG_CAUSE_LINES_SHOWN:
+                        print("            saw: ... and %d more" % (
+                            len(red) - WRONG_CAUSE_LINES_SHOWN), flush=True)
                 else:
                     print("KILLED      %-62s %2d red" % (label, len(red)), flush=True)
         print()
