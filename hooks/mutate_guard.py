@@ -344,13 +344,20 @@ MUTATIONS = [
     ("subject: a clean exclude pattern is read as a pathspec, so the read narrows wrongly",
      'CLEAN_OPT_WITH_VALUE = {"-e", "--exclude"}',
      'CLEAN_OPT_WITH_VALUE = set()', "guard", 'subject: an exclude pattern is not a pathspec'),
+    # POSIX-only mutant: its required case ("subject: a git that cannot answer the status read
+    # allows, rather than guess") is itself gated `if os.name != "nt":` in test_guard.py, because
+    # `make_blind_git`'s own docstring records a Windows measurement (2026-09-16): CreateProcess
+    # appends `.exe` and never reads PATHEXT, so a `git.cmd` stand-in is skipped and the real
+    # `git.exe` further on PATH answers instead, which would make the case pass for the wrong
+    # reason. The case is therefore SKIPPED on Windows entirely, so the required name can never
+    # appear among that platform's FAIL lines, whatever else the run turns up.
     ("subject: an unreadable subject is refused instead of allowed and logged",
      '        if state is None:\n'
      '            record(tool, "noted", "subject-unread", matched)\n'
      '            continue',
      '        if False:\n'
      '            record(tool, "noted", "subject-unread", matched)\n'
-     '            continue', "guard", 'subject: a git that cannot answer the status read allows, rather than guess'),
+     '            continue', "guard", 'subject: a git that cannot answer the status read allows, rather than guess', "posix"),
     ("scratchpad: this session's own scratchpad stops being private",
      'def under_session_scratchpad(where: str, session_id: str) -> bool:',
      'def under_session_scratchpad(where: str, session_id: str) -> bool:\n    return False', "guard", "scratchpad: a discard in this session's own scratchpad is private"),
@@ -550,11 +557,17 @@ MUTATIONS = [
     # ---- the liveness oracle's alive/dead/unreadable split, added for Windows parity. Each
     # mutant here folds the new third state back into one of the other two, the exact shape of
     # the bug this whole change fixes.
+    # POSIX-only mutant: it breaks `_process_start_ms`'s `ps`-exit-code arm, which
+    # `_process_start_ms` never reaches on Windows (it routes straight to the ctypes Windows arm
+    # instead, see guard.py's `_process_start_ms`). `process_start_ms_case` in test_guard.py
+    # already skips its dead/unreadable POSIX-only sub-cases on Windows (`os.name == "nt"`), so
+    # nothing on that platform can ever observe this mutation. The sixth field marks it
+    # posix-only so the run loop skips it there instead of reporting a false survivor.
     ("liveness: a bad ps exit code reads as CONFIRMED dead instead of unreadable",
      '        if answer.returncode == 1 and not answer.stdout.strip():\n            return None\n'
      '        return PROCESS_START_UNREADABLE',
      '        return None',
-     "guard", "liveness: process_start_ms splits alive/dead/unreadable apart"),
+     "guard", "liveness: process_start_ms splits alive/dead/unreadable apart", "posix"),
     ("liveness: session_is_live folds the unreadable third state back into False",
      '    if actual is PROCESS_START_UNREADABLE:\n        return None\n    if actual is None:',
      '    if actual is None:',
@@ -595,7 +608,7 @@ def safe_name(label: str) -> str:
 
 
 def mutation_parts(entry):
-    """Return (label, old, new, target, required) for one mutation.
+    """Return (label, old, new, target, required, only_on) for one mutation.
 
     `target` defaults to "guard" for a 3-element entry, which is the shape every mutation
     written before the watch target existed still carries on disk until it is ported. `required`
@@ -606,22 +619,43 @@ def mutation_parts(entry):
     but nothing checks that the suite's own red line is about THAT rule. The tolerant read above
     stays only so a future port has somewhere to land mid-edit; a caller that wants the field
     enforced asserts `len(entry) == 5` itself, which `run_mutant` below does.
+
+    `only_on` is a SIXTH, optional field: "posix" or "windows", for a mutation whose broken code
+    path only exists on one platform (e.g. `_process_start_ms`'s POSIX `ps` arm, never reached
+    on Windows). Absent on every other entry, which runs on every platform as before.
     """
     label, old, new = entry[0], entry[1], entry[2]
     target = entry[3] if len(entry) > 3 else "guard"
     required = entry[4] if len(entry) > 4 else None
-    return label, old, new, target, required
+    only_on = entry[5] if len(entry) > 5 else None
+    return label, old, new, target, required, only_on
+
+
+def skip_reason(only_on):
+    """Return why a mutation marked `only_on` does not run on this platform, or None to run it."""
+    if only_on is None:
+        return None
+    here = "windows" if sys.platform.startswith("win") else "posix"
+    if only_on == here:
+        return None
+    return "%s-only, this platform is %s" % (only_on, here)
 
 
 def run_mutant(sources, work: str, entry):
-    """Apply one mutation, run its suite against it, and return (label, code, FAIL lines, required).
+    """Apply one mutation, run its suite against it, and return (label, code, FAIL lines,
+    required, skip).
 
     `required` is the case name (or a distinctive fragment of it) the caller must find among the
-    FAIL lines before trusting this mutant's death: see the verdict loop in `main`.
+    FAIL lines before trusting this mutant's death: see the verdict loop in `main`. `skip`, when
+    not None, is why this mutant did not run on this platform at all: the caller reports it and
+    counts it as neither killed, survived, nor wrong cause.
     """
-    label, old, new, target, required = mutation_parts(entry)
+    label, old, new, target, required, only_on = mutation_parts(entry)
     if required is None:
         raise ValueError("mutation carries no required case name: %s" % label)
+    skip = skip_reason(only_on)
+    if skip:
+        return label, None, [], required, skip
     _path, suite, variable, stem = TARGETS[target]
     mutated = sources[target].replace(old, new, 1)
     copy_path = os.path.join(work, "%s_%s.py" % (stem, safe_name(label)))
@@ -630,7 +664,7 @@ def run_mutant(sources, work: str, entry):
     config_dir = os.path.join(work, "cfg_%s" % safe_name(label))
     os.makedirs(config_dir, exist_ok=True)
     code, red = run_suite(suite, variable, copy_path, config_dir)
-    return label, code, red, required
+    return label, code, red, required, None
 
 
 def job_count() -> int:
@@ -654,7 +688,7 @@ def main() -> int:
     # The required-name field is checked here too: every entry must carry one, not just the ones
     # a reviewer remembered to fill in.
     for entry in MUTATIONS:
-        label, old, _new, target, required = mutation_parts(entry)
+        label, old, _new, target, required, _only_on = mutation_parts(entry)
         if target not in TARGETS:
             print("ERROR unknown mutation target %r: %s" % (target, label))
             return 1
@@ -680,13 +714,17 @@ def main() -> int:
 
     survivors = 0
     wrong_cause = 0
+    skipped = 0
     jobs = job_count()
     print("%d mutations, %d at a time" % (len(MUTATIONS), jobs))
     try:
         with ThreadPoolExecutor(max_workers=jobs) as pool:
             results = pool.map(lambda entry: run_mutant(sources, work, entry), MUTATIONS)
-            for label, code, red, required in results:
-                if code == 0 or not red:
+            for label, code, red, required, skip in results:
+                if skip:
+                    skipped += 1
+                    print("SKIPPED     %-62s %s" % (label, skip), flush=True)
+                elif code == 0 or not red:
                     survivors += 1
                     print("SURVIVED    %-62s %2d red" % (label, len(red)), flush=True)
                 elif not any(required in line for line in red):
@@ -696,9 +734,10 @@ def main() -> int:
                 else:
                     print("KILLED      %-62s %2d red" % (label, len(red)), flush=True)
         print()
-        killed = len(MUTATIONS) - survivors - wrong_cause
-        print("%d of %d mutations killed (%d survived, %d wrong cause)" % (
-            killed, len(MUTATIONS), survivors, wrong_cause))
+        ran = len(MUTATIONS) - skipped
+        killed = ran - survivors - wrong_cause
+        print("%d of %d mutations killed (%d survived, %d wrong cause, %d skipped)" % (
+            killed, ran, survivors, wrong_cause, skipped))
         return 1 if (survivors or wrong_cause) else 0
     finally:
         shutil.rmtree(work, ignore_errors=True)
