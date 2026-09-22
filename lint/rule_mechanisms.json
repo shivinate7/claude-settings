@@ -41,7 +41,7 @@
     "roles-orchestrator-never-builds": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No hook classifies a session's own act as orchestration versus building, or counts a fix against the ten-line exception."
+        "reason": "No hook classifies a session's own act as orchestration versus building, or judges whether a change can move a verdict. The Stop guardrail agent reads the transcript and judges the act, which is this rule's check."
       }
     },
     "roles-one-role-per-worker": {
