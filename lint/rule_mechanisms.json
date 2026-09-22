@@ -50,10 +50,17 @@
         "reason": "Nothing inspects which role, builder, reviewer, or Explore, a spawned agent holds at runtime, or catches a worker that carries two."
       }
     },
-    "roles-workers-run-sonnet": {
+    "roles-sonnet-is-the-default": {
       "mechanism": {
-        "kind": "guard",
-        "ref": "subagent-model-cap"
+        "kind": "gate",
+        "ref": "settings.json",
+        "needle": "CLAUDE_CODE_SUBAGENT_MODEL"
+      }
+    },
+    "roles-tier-matches-lane": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No hook classifies a lane's shape as retrieval, pattern-matching, or diagnosis. The Stop guardrail reads the transcript and judges the tier choice after the fact."
       }
     },
     "roles-opus-shaped-say-so": {
