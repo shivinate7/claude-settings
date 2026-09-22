@@ -2701,9 +2701,15 @@ def split_segments_comment_case():
 def process_start_ms_case():
     """`_process_start_ms` must tell apart three outcomes: alive, CONFIRMED dead, and
     unreadable. A regression that folds unreadable back into dead would let a live session's
-    worktree look removable, the defect this whole PR fixes. POSIX only: this machine has no
-    Windows kernel32 to call, so the Windows arm is proven by `process_start_ms_windows_case`
-    with a stubbed `ctypes.windll` instead.
+    worktree look removable, the defect this whole PR fixes.
+
+    The alive check runs on every platform: it only compares against `_real_process_start_ms`,
+    which itself has a Windows arm. The dead and unreadable sub-cases below are POSIX-only
+    TECHNIQUES, not POSIX-only outcomes: a just-exited pid is reused fast enough on Windows that
+    it reads back alive, and faking a broken `ps` on PATH does nothing there, since the Windows
+    arm never calls `ps`. Both are skipped on non-POSIX. The Windows arm's own correctness is
+    proven separately and deterministically by `process_start_ms_windows_case`, which stubs
+    `ctypes.windll` instead of depending on real OS timing.
     """
     guard = _load_guard_module()
     problems = []
@@ -2715,6 +2721,14 @@ def process_start_ms_case():
         problems.append("alive: did not return an int: %r" % (got_alive,))
     elif abs(got_alive - want_alive) > 2000:
         problems.append("alive: got %r want near %r" % (got_alive, want_alive))
+
+    if os.name == "nt":
+        if problems:
+            return False, "; ".join(problems)
+        return True, (
+            "alive read matches; skipped: dead-pid and ps-faking techniques are POSIX-only; "
+            "the Windows arm is proven separately by process_start_ms_windows_case"
+        )
 
     # A process this test starts and waits on is CONFIRMED dead the moment `wait()` returns.
     finished = subprocess.Popen([sys.executable, "-c", "pass"])
