@@ -286,6 +286,113 @@ def case_incident_cap_same_session():
             os.environ["CLAUDE_CONFIG_DIR"] = prior
 
 
+# --------------------------------------------------------------------------- case 9
+# invoke_model's real argv and kwargs, against a fake subprocess.run: the explicit empty
+# tool set, --permission-mode plan, and an isolated cwd/env are actually on the command
+# line, not only claimed in a docstring. Added against a reviewer finding that an earlier
+# version claimed "no tools" while its argv granted every tool, in this project's own
+# directory, inheriting this project's own permissions.allow.
+
+class _FakeCompletedProcess:
+    def __init__(self, returncode=0, stdout="", stderr=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def case_invoke_model_argv():
+    captured = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        captured["kwargs"] = kwargs
+        envelope = json.dumps({"result": json.dumps({"verdict": "ALLOW"})})
+        return _FakeCompletedProcess(0, envelope, "")
+
+    real_subprocess_run = dw.subprocess.run
+    dw.subprocess.run = fake_run
+    try:
+        verdict, error = dw.invoke_model("JUDGE THIS PROMPT")
+    finally:
+        dw.subprocess.run = real_subprocess_run
+
+    check("invoke_model_argv: no error", error is None, error)
+    check("invoke_model_argv: verdict is ALLOW", verdict == {"verdict": "ALLOW"}, verdict)
+
+    argv = captured.get("argv") or []
+    expected = [
+        "claude", "-p", "JUDGE THIS PROMPT",
+        "--model", dw.MODEL,
+        "--output-format", "json",
+        "--allowedTools", "",
+        "--permission-mode", "plan",
+    ]
+    print("invoke_model argv: %r" % argv)
+    check("invoke_model_argv: matches the expected restricted command line", argv == expected, argv)
+
+    kwargs = captured.get("kwargs") or {}
+    judge_cwd = kwargs.get("cwd")
+    check("invoke_model_argv: cwd is set", bool(judge_cwd), judge_cwd)
+    check("invoke_model_argv: cwd is not this repository", judge_cwd != HERE and judge_cwd != os.path.dirname(HERE), judge_cwd)
+    env = kwargs.get("env") or {}
+    check(
+        "invoke_model_argv: CLAUDE_CONFIG_DIR is isolated under the judge cwd",
+        env.get("CLAUDE_CONFIG_DIR", "").startswith(judge_cwd or "\x00"),
+        env.get("CLAUDE_CONFIG_DIR"),
+    )
+    check(
+        "invoke_model_argv: CLAUDE_CONFIG_DIR differs from this process's own",
+        env.get("CLAUDE_CONFIG_DIR") != os.environ.get("CLAUDE_CONFIG_DIR"),
+        env.get("CLAUDE_CONFIG_DIR"),
+    )
+
+
+# --------------------------------------------------------------------------- case 10
+# main() itself, invoked exactly as the harness invokes it: a real subprocess, JSON on
+# stdin, and its stdout/exit code read back. Added against a reviewer finding that every
+# other case stubbed model_call, so main()'s own contract (stdin parsing, stop_hook_active,
+# the printed systemMessage envelope, exit 0) was never actually exercised end to end.
+
+def _run_main(hook_payload, timeout=30):
+    return subprocess.run(
+        [sys.executable, MODULE_PATH],
+        input=json.dumps(hook_payload), capture_output=True, text=True, timeout=timeout,
+    )
+
+
+def case_main_ordinary_turn():
+    repo = make_repo("main_ordinary_turn")
+    write(os.path.join(repo, "src", "app.py"), "print('hello')\n")
+    commit_all(repo)
+    write(os.path.join(repo, "src", "app.py"), "print('hello world')\n")
+    records = [
+        human_record("say hello world instead", T0),
+        assistant_record(text="Updated src/app.py."),
+    ]
+    path = write_transcript(repo, records)
+    result = _run_main({"transcript_path": path, "cwd": repo})
+    check("main_ordinary_turn: exit 0", result.returncode == 0, result.returncode)
+    check("main_ordinary_turn: nothing printed", result.stdout.strip() == "", result.stdout)
+
+
+def case_main_missing_transcript():
+    repo = make_repo("main_missing_transcript")
+    result = _run_main({"transcript_path": os.path.join(repo, "nope.jsonl"), "cwd": repo})
+    check("main_missing_transcript: exit 0", result.returncode == 0, result.returncode)
+    try:
+        payload = json.loads(result.stdout.strip())
+    except Exception:
+        payload = None
+    message = (payload or {}).get("systemMessage", "")
+    check("main_missing_transcript: prints an UNKNOWN systemMessage", message.startswith(dw.UNKNOWN_PREFIX), result.stdout)
+
+
+def case_main_stop_hook_active_stays_quiet():
+    result = _run_main({"transcript_path": "/does/not/matter", "cwd": ".", "stop_hook_active": True})
+    check("main_stop_hook_active: exit 0", result.returncode == 0, result.returncode)
+    check("main_stop_hook_active: nothing printed", result.stdout.strip() == "", result.stdout)
+
+
 def main():
     case_flag_unapproved()
     case_allow_approved()
@@ -295,6 +402,10 @@ def main():
     case_not_a_repo()
     case_model_failure()
     case_incident_cap_same_session()
+    case_invoke_model_argv()
+    case_main_ordinary_turn()
+    case_main_missing_transcript()
+    case_main_stop_hook_active_stays_quiet()
 
     if FAILED:
         print("test_decision_watch FAIL: %d failing check(s)" % len(FAILED))

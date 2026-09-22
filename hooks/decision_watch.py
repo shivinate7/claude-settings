@@ -46,13 +46,14 @@ WHEN NOTHING PROTECTED IS TOUCHED. No model call. Print nothing. Exit 0. This is
 case and it must stay fast: a `git status` and a scan of records already read for other
 Stop hooks.
 
-WHEN SOMETHING PROTECTED IS TOUCHED. `invoke_model` runs `claude -p` with no tools, fed the
-diff (or, for a new file, its full text) and the chat text since the last human message
-directly, never a path for the model to `Read` itself: reading a path is exactly the step
-that fails in `auto` mode. It asks for the same ALLOW/FLAG judgment the old prompt asked
-for, on the same criteria: additive or consistent, or surfaced as a question and approved,
-is ALLOW; silently changed, weakened, removed, or reversed with no visible approval is
-FLAG.
+WHEN SOMETHING PROTECTED IS TOUCHED. `invoke_model` runs `claude -p` with an explicit
+empty tool set and an isolated `cwd`/`CLAUDE_CONFIG_DIR` (see "THE ISOLATION" below), fed
+the diff (or, for a new file, its full text) and the chat text since the last human
+message directly, never a path for the model to `Read` itself: reading a path is exactly
+the step that fails in `auto` mode. It asks for the same ALLOW/FLAG judgment the old
+prompt asked for, on the same criteria: additive or consistent, or surfaced as a question
+and approved, is ALLOW; silently changed, weakened, removed, or reversed with no visible
+approval is FLAG.
 
 THE PER-INCIDENT, PER-SESSION CAP, ADDED 2026-09-22. The same audit found 34 raw flags
 collapsing to 8 real incidents: one unresolved finding re-flagged at every Stop while the
@@ -80,8 +81,10 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -99,8 +102,20 @@ if _GUARD_PATH:
 else:
     import guard
 
+# THE TIME BUDGET. settings.json's Stop entry for this hook carries `"timeout": 170`.
+# Every git call below uses GIT_TIMEOUT (10s). At most MAX_DIFFED_FILES protected files
+# are diffed; the rest are still named in the evidence, but with no git call, so the
+# count of protected files can grow unbounded with no matching growth in wall time.
+# Worst case, computed here rather than assumed: one `git status`
+# (GIT_TIMEOUT) + MAX_DIFFED_FILES `git diff` calls (MAX_DIFFED_FILES * GIT_TIMEOUT) +
+# one model call (MODEL_TIMEOUT) = 10 + 8*10 + 60 = 150 seconds, against a 170-second
+# hook timeout: 20 seconds of margin, not zero. Lowering any of these three numbers
+# without re-deriving this sum, or raising settings.json's own timeout to match, breaks
+# the proof, not just the comment.
 MODEL = "claude-sonnet-5"
-MODEL_TIMEOUT = 90
+MODEL_TIMEOUT = 60
+GIT_TIMEOUT = 10
+MAX_DIFFED_FILES = 8
 
 PEER_MESSAGE_TOOLS = ("SendMessage", "Task")
 
@@ -249,7 +264,7 @@ def chat_text_after(records, idx, limit=6000):
 # hook's job is a security read, not a lint, and an unscoped walk over a non-repo directory
 # is not an honest substitute for "what did this turn change".
 
-def _run_git(cwd, args, timeout=20):
+def _run_git(cwd, args, timeout=GIT_TIMEOUT):
     try:
         return subprocess.run(
             ["git", "-C", cwd] + args, capture_output=True, text=True, timeout=timeout,
@@ -463,21 +478,70 @@ JUDGE_INSTRUCTIONS = (
 )
 
 
+# THE ISOLATION, ADDED AFTER A REVIEWER FLAG. The evidence handed to the model is this
+# turn's diff text and chat text, and both are reachable by whoever can land text in a
+# diff or a message this repo carries. A prior version of this function ran `claude -p`
+# with no `--allowedTools`, no `--permission-mode`, and no `cwd`: omitting every
+# restriction flag defaults to every tool, in this project's own directory, inheriting
+# whatever this project's own `.claude/settings.json` grants in `permissions.allow` at
+# the time, `Bash(gh pr merge:*)` included. An injected instruction in the diff could
+# have driven that nested, fully-tooled call to use a granted permission, then folded
+# whatever it read into the `why` field this hook prints back into the parent session: an
+# injection and exfiltration channel inside the guard built to catch exactly that class of
+# thing.
+#
+# Two independent layers now close it, on purpose, rather than one flag this function
+# alone must get right. `--allowedTools ""` is a positive, explicit empty allow set: the
+# model has no tool to reach for, never a deny list of names this repo would have to keep
+# growing. `_judge_isolation` then gives the call a `cwd` and a `CLAUDE_CONFIG_DIR` that
+# are neither this project. There is no `.claude/settings.json` there to inherit
+# `permissions.allow` from, and no `hooks/` wired to a Stop event there either, so a
+# nested call cannot fire this same hook at its own turn end: the isolation removes the
+# object a recursive call would need, rather than counting spawn depth the way
+# `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` counts `Task`-tool spawns (a raw `subprocess.run`
+# is neither a `Task` spawn nor governed by that cap).
+
+
+def _judge_isolation():
+    """Return (cwd, env) for the judgment subprocess: an empty directory that is not this
+    project, and a config directory that is not this project's, so there is nothing here
+    for a tool call to inherit or write into even if one somehow ran."""
+    root = tempfile.mkdtemp(prefix="decision_watch_judge_")
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = os.path.join(root, "config")
+    os.makedirs(env["CLAUDE_CONFIG_DIR"], exist_ok=True)
+    return root, env
+
+
 def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT):
-    """Run the judgment prompt through `claude -p`, no tools. Return (verdict_dict, error).
+    """Run the judgment prompt through `claude -p`, isolated. Return (verdict_dict, error).
 
     `verdict_dict` is `{"verdict": "ALLOW"}` or `{"verdict": "FLAG", "why": "..."}` on
     success, and `error` is None. On any failure -- the binary missing, a timeout, a
     non-zero exit, or output that is not the JSON verdict asked for -- `verdict_dict` is
     None and `error` names why, for the caller to report as UNKNOWN rather than guess.
     """
+    root, env = _judge_isolation()
     try:
         run = subprocess.run(
-            ["claude", "-p", prompt, "--model", model, "--output-format", "json"],
+            [
+                "claude", "-p", prompt,
+                "--model", model,
+                "--output-format", "json",
+                "--allowedTools", "",
+                "--permission-mode", "plan",
+            ],
             input="", capture_output=True, text=True, timeout=timeout,
+            cwd=root, env=env,
         )
     except Exception as exc:
         return None, "model subprocess failed to start: %s" % exc
+    finally:
+        try:
+            import shutil
+            shutil.rmtree(root, ignore_errors=True)
+        except Exception:
+            pass
     if run.returncode != 0:
         return None, "model exited %s: %s" % (run.returncode, (run.stderr or "")[:200])
     try:
@@ -536,12 +600,18 @@ def run(hook, model_call=invoke_model):
     if not protected:
         return ""
 
+    # MAX_DIFFED_FILES bounds the number of `git diff` calls, so this loop's wall time
+    # cannot grow past the fixed sum the module docstring proves against the hook's own
+    # timeout, no matter how many protected paths one turn touches. A path past the cap
+    # is still named in the evidence, with no git call spent on it.
     evidence = []
-    for rel in protected:
+    for rel in protected[:MAX_DIFFED_FILES]:
         piece = file_evidence(cwd, rel, untracked.get(rel, False))
         if piece is None:
             return UNKNOWN_PREFIX + "git diff could not be read for %s." % rel
         evidence.append(piece)
+    for rel in protected[MAX_DIFFED_FILES:]:
+        evidence.append("%s (name only, over the per-Stop diff budget)" % rel)
 
     # Outbound SendMessage/Task calls only ENRICH the evidence once a real change has
     # already gated the call; they cannot gate it by themselves.

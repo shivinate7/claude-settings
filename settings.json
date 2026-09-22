@@ -32,7 +32,7 @@
     "baseRef": "head"
   },
   "permissions": {
-    "allow": ["Bash(gh pr merge:*)", "Read(~/.claude/projects/**)"],
+    "allow": ["Bash(gh pr merge:*)"],
     "deny": ["Monitor"]
   },
   "hooks": {
@@ -42,7 +42,7 @@
           {
             "type": "command",
             "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/decision_watch.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
-            "timeout": 100
+            "timeout": 170
           }
         ]
       },

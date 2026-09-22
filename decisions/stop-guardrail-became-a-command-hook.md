@@ -34,9 +34,31 @@ looks protected, plus `guard.is_settings_file` for the one case with a real
 constant to import.
 
 When nothing on disk looks protected, the hook prints nothing and never
-spawns a model. When something does, it runs `claude -p` with no tools. It
+spawns a model. When something does, it runs `claude -p`, isolated. It
 hands that call the diff, or the new file's text, and the chat text
 directly. It asks for the same ALLOW/FLAG judgment the old prompt asked for.
+
+## The judge subprocess, isolated against a reviewer flag
+
+The evidence handed to the model is this turn's diff and chat text. Both
+are reachable by anyone who can land text in a diff or a message this
+repo carries. A first version of `invoke_model` ran `claude -p` with no
+`--allowedTools`, no `--permission-mode`, and no `cwd`. Every omitted flag
+defaults to every tool, in this project's own directory, inheriting
+whatever `permissions.allow` grants at the time. A reviewer found this. An
+injected instruction in a diff could drive that nested, fully-tooled call
+to spend a granted permission. It could then fold what it read into the
+`why` field this hook prints back to the parent session. An injection and
+exfiltration channel, inside the guard built to catch that exact class of
+thing.
+
+Two layers close it now. `--allowedTools ""` is a positive, explicit
+empty allow set, never a deny list of tool names this repo would have to
+keep growing. `cwd` and `CLAUDE_CONFIG_DIR` both point at a fresh, empty
+directory, never this project. There is no `.claude/settings.json` there
+to inherit a permission from, and no `hooks/` wired to a Stop event there
+either. A nested call cannot fire this same hook at its own turn end. The
+object a recursive call would need is not there to find.
 
 ## The gate, corrected against an independent audit
 
@@ -69,6 +91,22 @@ session, with unchanged evidence, stays quiet at the next Stop. A finding
 whose evidence moved further is a new incident, and is reported once more.
 This cap never applies to an UNKNOWN read, which is always reported again.
 
+## The time budget, proved rather than assumed
+
+A reviewer also found the timeouts did not fit their own hook entry.
+`settings.json` gave this hook 100 seconds. `GIT_TIMEOUT` (20) ran once for
+`git status` and once per protected file for `git diff`, and `MODEL_TIMEOUT`
+was 90. One protected file alone summed to 130 seconds. A harness kill at
+100 prints nothing at all, which reads exactly like "nothing protected
+changed," the failure this whole rewrite exists to prevent.
+
+`GIT_TIMEOUT` is now 10 and `MODEL_TIMEOUT` is now 60. `MAX_DIFFED_FILES`
+(8) bounds how many `git diff` calls one Stop spends. The sum then cannot
+grow past a fixed number, no matter how many protected paths one turn
+touches: 10 + 8 * 10 + 60 = 150 seconds. `settings.json`'s own entry for
+this hook is now 170. That is twenty seconds of margin over the proved
+sum, not zero.
+
 ## What stayed the same
 
 The judgment criteria did not change. Additive or consistent is ALLOW.
@@ -93,14 +131,12 @@ something other than the asked JSON verdict. Each one prints a
 silence or into a flag. This is `CLAUDE.md`'s Verification rule, applied to
 the hook's own failure branches.
 
-## What this leaves thin
+## What this hook needs no permission for
 
-`permissions.allow` in `settings.json` now also carries
-`Read(~/.claude/projects/**)`. That entry exists mainly for the interim, and
-for any future `type: agent` hook that still needs it. A command hook never
-passes through the permission system. So this hook needs no permission at
-all to read `transcript_path`. The allow rule is not load-bearing for this
-hook's own operation.
+A command hook never passes through the permission system. This hook needs
+no `permissions.allow` entry at all to read `transcript_path` or to run
+`git`. A separate `Read(~/.claude/projects/**)` grant, if the owner adds
+one, is not for this hook: see the standalone entry that proposes it.
 
 ## The mechanism
 
