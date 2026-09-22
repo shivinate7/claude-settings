@@ -709,6 +709,7 @@ def main() -> int:
     # the exact label, so this must not happen (see its docstring). Trust a guard only after
     # it goes red on the defect it guards. So this check recomputes the real file name for
     # each mutant, case-folded the way Windows reads names, instead of trusting the fix alone.
+
     seen_paths = {}
     for index, entry in enumerate(MUTATIONS):
         label, old, _new, target, required, _only_on = mutation_parts(entry)
@@ -721,6 +722,7 @@ def main() -> int:
         if not required:
             print("ERROR mutation carries no required case name: %s" % label)
             return 1
+
         _tpath, _tsuite, _tvariable, stem = TARGETS[target]
         safed = safe_name(label)
         # Two different entries land here. The same entry never returns twice. `index` marks
@@ -771,10 +773,10 @@ def main() -> int:
                     # The lines it DID see, never the count alone. A wrong cause says the suite
                     # went red somewhere else, and the count says nothing about where. MEASURED
                     # on real Windows CI, run 35678689541: this mutant reported "1 red" and
-                    # nothing more, so which case broke stayed unknown, and
+                    # nothing more. Nobody could tell which case broke.
                     # decisions/branch-delete-wrong-cause-was-a-filename-collision.md was written
-                    # against a fact nobody could read. A bounded print is the difference
-                    # between one CI run and a guessing round.
+                    # against that gap. A bounded print is the difference between one CI run
+                    # and a guessing round.
                     for line in red[:WRONG_CAUSE_LINES_SHOWN]:
                         print("            saw: %s" % line.strip(), flush=True)
                     if len(red) > WRONG_CAUSE_LINES_SHOWN:
