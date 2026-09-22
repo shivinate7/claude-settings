@@ -26,7 +26,6 @@
   "outputStyle": "Concise",
   "env": {
     "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
-    "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1",
     "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "1"
   },
   "worktree": {

@@ -13,15 +13,19 @@ verdict, one bounded command proves it, and the report names both. A change that
 rule's behaviour, a gate's verdict, or product code a reviewer must see goes to a lane, at
 any size. Keep a fix under 40 lines, against reading cost alone.<!-- rule:roles-orchestrator-never-builds --> Each worker is one role: builder, reviewer,
 or Explore,
-never two.<!-- rule:roles-one-role-per-worker --> A workflow agent takes the builder or reviewer role through `agentType`. Workers
-run Sonnet. The cap in user settings holds that. Never spawn a worker above Sonnet.<!-- rule:roles-workers-run-sonnet --> When a
+never two.<!-- rule:roles-one-role-per-worker --> A workflow agent takes the builder or reviewer role through `agentType`. Match
+the worker tier to the lane. Sonnet is the default and needs no word.<!-- rule:roles-sonnet-is-the-default --> A lane that
+retrieves, matches a pattern, or edits to a shape the brief spells out is Haiku-shaped. A lane
+that diagnoses, or that may find what the brief did not anticipate, takes Sonnet or
+more.<!-- rule:roles-tier-matches-lane --> When a
 task is Opus-shaped (long-horizon, whole-codebase, or many-hour autonomous work), say so in
 one line before you dispatch, name why, and offer the switch.<!-- rule:roles-opus-shaped-say-so --> On my word, write the repo's
-`.claude/settings.local.json` with an `env` block that sets `CLAUDE_CODE_SUBAGENT_MODEL` to
-`opus` and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` to `1`. The guard asks before that write lands.<!-- rule:roles-opus-override-guarded -->
+`.claude/settings.local.json` with an `env` block that raises `CLAUDE_CODE_SUBAGENT_MODEL` to
+`opus`. The raise moves the default. It does not pin every spawn to it. The guard asks before
+that write lands.<!-- rule:roles-opus-override-guarded -->
 The file also carries `_subagentCapUntil`, an ISO-8601 time no more than 24 hours ahead. The
-watch removes the override once that time passes.<!-- rule:roles-override-carries-expiry -->
-Remove the file when the work is done.<!-- rule:roles-remove-override-file --> Workers never spawn: nested reports misroute (Sept 2026).
+watch reverts the raise once that time passes.<!-- rule:roles-override-carries-expiry -->
+Remove the file when the raise is no longer needed.<!-- rule:roles-remove-override-file --> Workers never spawn: nested reports misroute (Sept 2026).
 A repo that needs nesting raises depth in its settings and records the risk.<!-- rule:roles-workers-never-spawn --> A brief carries
 the task, files, governing decisions quoted verbatim, and the check that proves the task
 done.<!-- rule:roles-brief-contents --> Resume a dead agent by name, never fresh.<!-- rule:roles-resume-by-name -->
