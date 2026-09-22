@@ -37,6 +37,7 @@ guard.py grew since that run: the live-stream rule, the waiter rule (Rule 9),
 the REDIRECTION strip in git_calls, and the Decision 7 config-edit log line.
 """
 
+import hashlib
 import os
 import shutil
 import subprocess
@@ -49,6 +50,10 @@ GUARD = os.path.join(HERE, "guard.py")
 SUITE = os.path.join(HERE, "test_guard.py")
 WATCH = os.path.join(HERE, "config_watch.py")
 WATCH_SUITE = os.path.join(HERE, "test_config_watch.py")
+
+# How many red lines a wrong cause prints before it stops. A wrong cause usually carries one or
+# two, and the bound keeps a mutation that breaks half the suite from burying the rest of the run.
+WRONG_CAUSE_LINES_SHOWN = 10
 
 # A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
 # every mutation written before the watch existed reads unchanged.
@@ -604,7 +609,19 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str):
 
 
 def safe_name(label: str) -> str:
-    return "".join(ch if ch.isalnum() else "_" for ch in label)[:60]
+    """Turn a mutation label into a filesystem stem that stays unique, even case-insensitively.
+
+    MEASURED: two real labels here differ only in the case of one letter. One reads "-D",
+    the other reads "-d", inside the branch-delete flags. The old alnum-to-underscore
+    mapping kept letter case. Both then produced the identical name on a case-insensitive
+    filesystem (Windows). One file. One config directory. Two mutant runs raced to write it.
+    The digest covers the exact label text. It does not depend on letter case. It does not
+    depend on where the mutation sits in MUTATIONS. Two different labels collide here only
+    if their digests also collide.
+    """
+    base = "".join(ch if ch.isalnum() else "_" for ch in label)[:60]
+    digest = hashlib.sha1(label.encode("utf-8")).hexdigest()[:8]
+    return "%s_%s" % (base, digest)
 
 
 def mutation_parts(entry):
@@ -687,7 +704,14 @@ def main() -> int:
     # whose anchor sits in the WRONG file is stale too, which is what the target lookup catches.
     # The required-name field is checked here too: every entry must carry one, not just the ones
     # a reviewer remembered to fill in.
-    for entry in MUTATIONS:
+
+    # Two mutants must never write to the same path. safe_name already appends a digest of
+    # the exact label, so this must not happen (see its docstring). Trust a guard only after
+    # it goes red on the defect it guards. So this check recomputes the real file name for
+    # each mutant, case-folded the way Windows reads names, instead of trusting the fix alone.
+
+    seen_paths = {}
+    for index, entry in enumerate(MUTATIONS):
         label, old, _new, target, required, _only_on = mutation_parts(entry)
         if target not in TARGETS:
             print("ERROR unknown mutation target %r: %s" % (target, label))
@@ -698,6 +722,21 @@ def main() -> int:
         if not required:
             print("ERROR mutation carries no required case name: %s" % label)
             return 1
+
+        _tpath, _tsuite, _tvariable, stem = TARGETS[target]
+        safed = safe_name(label)
+        # Two different entries land here. The same entry never returns twice. `index` marks
+        # identity, not `label`. A literal duplicate label is still caught. That case is worse
+        # than a case-only match, and the check treats it as a real collision, not a repeat
+        # visit.
+        for candidate in ("%s_%s.py" % (stem, safed), "cfg_%s" % safed):
+            key = candidate.lower()
+            other = seen_paths.get(key)
+            if other is not None and other[0] != index:
+                print("ERROR two mutations share one path on a case-insensitive filesystem: "
+                      "%r and %r both produce %s" % (other[1], label, candidate))
+                return 1
+            seen_paths[key] = (index, label)
 
     work = tempfile.mkdtemp(prefix="mutate_guard_")
     # A "watch" mutant is a copy of config_watch.py that runs OUTSIDE hooks/, as its own
@@ -731,6 +770,18 @@ def main() -> int:
                     wrong_cause += 1
                     print("WRONG CAUSE %-62s %2d red, missing %r" % (
                         label, len(red), required), flush=True)
+                    # The lines it DID see, never the count alone. A wrong cause says the suite
+                    # went red somewhere else, and the count says nothing about where. MEASURED
+                    # on real Windows CI, run 35678689541: this mutant reported "1 red" and
+                    # nothing more. Nobody could tell which case broke.
+                    # decisions/branch-delete-wrong-cause-was-a-filename-collision.md was written
+                    # against that gap. A bounded print is the difference between one CI run
+                    # and a guessing round.
+                    for line in red[:WRONG_CAUSE_LINES_SHOWN]:
+                        print("            saw: %s" % line.strip(), flush=True)
+                    if len(red) > WRONG_CAUSE_LINES_SHOWN:
+                        print("            saw: ... and %d more" % (
+                            len(red) - WRONG_CAUSE_LINES_SHOWN), flush=True)
                 else:
                     print("KILLED      %-62s %2d red" % (label, len(red)), flush=True)
         print()
