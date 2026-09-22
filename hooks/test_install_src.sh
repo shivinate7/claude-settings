@@ -20,9 +20,29 @@ SESSION_START_SH_DEFAULT="${SESSION_START_SH_UNDER_TEST:-$REPO_ROOT/hooks/sessio
 
 PASS=0
 FAIL=0
+SKIP=0
 
 ok() { PASS=$((PASS + 1)); printf 'ok   - %s\n' "$1"; }
 bad() { FAIL=$((FAIL + 1)); printf 'FAIL - %s: %s\n' "$1" "$2"; }
+skip() { SKIP=$((SKIP + 1)); printf 'SKIP - %s: %s\n' "$1" "$2"; }
+
+# Detect once whether this account can create a real symbolic link, and reuse the answer
+# everywhere below. Windows needs SeCreateSymbolicLinkPrivilege for `ln -s`. Developer Mode,
+# or an elevated account, grants it. Without that privilege, MSYS/git-bash's `ln -sfn` still
+# exits 0. It copies the target's bytes into a plain file instead of linking it. A case that
+# only checks the exit code never sees this. Checking `[ -L ]` on the result does. This is a
+# capability probe, never an OS-name check. A Windows machine with Developer Mode on still
+# runs every case below for real.
+probe_dir=$(mktemp -d)
+printf 'probe\n' > "$probe_dir/target"
+ln -sfn "$probe_dir/target" "$probe_dir/link" 2>/dev/null
+if [ -L "$probe_dir/link" ]; then
+  SYMLINK_CAPABLE=1
+else
+  SYMLINK_CAPABLE=0
+fi
+rm -rf "$probe_dir"
+NO_SYMLINK_REASON="this account cannot create a real symlink (SeCreateSymbolicLinkPrivilege is not held, turn on Developer Mode or run elevated on Windows)"
 
 # Canonicalize: on macOS, mktemp -d returns a /var/folders/... path where /var is itself
 # a symlink to /private/var. install.sh's checkout detection goes through
@@ -636,6 +656,10 @@ run_local_install() {
 
 prune_case1() {
   name="prune1: source file removed leaves no destination entry"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then
+    skip "$name" "$NO_SYMLINK_REASON"
+    return
+  fi
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/prune1-checkout"
   make_checkout "$co" "# prune1 content"
   cp "$INSTALL_SH" "$co/install.sh"
@@ -680,6 +704,10 @@ prune_case2() {
 
 prune_case3() {
   name="prune3: symlink pointing outside \$SRC/\$sub survives prune"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then
+    skip "$name" "$NO_SYMLINK_REASON"
+    return
+  fi
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/prune3-checkout"
   make_checkout "$co" "# prune3 content"
   cp "$INSTALL_SH" "$co/install.sh"
@@ -737,6 +765,10 @@ prune_case4() {
 
 prune_case5() {
   name="prune5: source file still present keeps its link, and it still resolves"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then
+    skip "$name" "$NO_SYMLINK_REASON"
+    return
+  fi
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/prune5-checkout"
   make_checkout "$co" "# prune5 content"
   cp "$INSTALL_SH" "$co/install.sh"
@@ -1037,5 +1069,5 @@ caseF4
 caseF5
 caseF6
 
-printf '%s passed, %s failed\n' "$PASS" "$FAIL"
+printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
