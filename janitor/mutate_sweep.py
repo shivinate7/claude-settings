@@ -266,6 +266,8 @@ MUTATIONS = [
      '    if not isinstance(started, (int, float)) or isinstance(started, bool):\n'
      '        return False\n'
      '    actual = _process_start_ms(pid)\n'
+     '    if actual is PROCESS_START_UNREADABLE:\n'
+     '        return None\n'
      '    if actual is None:\n'
      '        return False\n'
      '    return abs(actual - started) <= SESSION_LIVE_TOLERANCE_MS',

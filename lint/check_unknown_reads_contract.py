@@ -29,6 +29,13 @@ token, never a bare allow or a bare deny:
     remote that does not exist, and `caseF6` kills the `git fetch` mid-flight with
     `CLAUDE_SETTINGS_FETCH_TIMEOUT=0`. Both must print the line ending "freshness unknown"
     rather than staying silent or reporting a stale/fresh verdict they never confirmed.
+  - liveness: hooks/test_guard.py's `process_start_ms_case` puts a `ps` on PATH that exits 2
+    with no output, so `guard._process_start_ms` genuinely cannot tell whether the pid is
+    alive or dead. This member's "unknown" token is not a string: it is the distinct sentinel
+    `guard.PROCESS_START_UNREADABLE`, never `None` (the CONFIRMED-dead answer) and never an
+    int (the alive answer). A read that folds this sentinel into either neighbor is the
+    defect this contract exists to catch. The token stays a return value here, not a log
+    line.
 
 TO ADD A THIRD MEMBER: write a fixture that makes some other read genuinely fail (not a
 string that names failure), have the code under test answer with a token that contains
@@ -91,11 +98,25 @@ def session_start_freshness_unknown_member() -> Tuple[bool, str]:
     return True, "caseF4 and caseF6 both report freshness unknown"
 
 
+def liveness_unreadable_member() -> Tuple[bool, str]:
+    """Reuse hooks/test_guard.py's own fixture. Do not re-implement it. The fake-`ps` setup
+    lives there. It makes the read genuinely fail."""
+    try:
+        import test_guard
+    except ImportError as e:
+        return False, "could not import hooks/test_guard.py: %s" % e
+    ok, detail = test_guard.process_start_ms_case()
+    return ok, detail
+
+
 MEMBERS = (
     ("guard: an unreadable git-status subject logs noted/subject-unread, not a bare allow",
      guard_subject_unread_member),
     ("session_start: an unreachable or timed-out origin fetch prints freshness unknown",
      session_start_freshness_unknown_member),
+    ("liveness: an unreadable ps read answers PROCESS_START_UNREADABLE, "
+     "distinct from alive and confirmed-dead",
+     liveness_unreadable_member),
 )
 
 
