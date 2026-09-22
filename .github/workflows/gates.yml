@@ -114,11 +114,11 @@ jobs:
       - name: install.sh checkout-detection suite
         run: sh hooks/test_install_src.sh
 
-  # Six python suites in the gates job are known to fail on windows-latest, and CI
-  # could not show that before this job existed. This job runs those suites on
-  # Windows and reports the environment first, so later work can fix them with real
-  # evidence. The failures are expected, so continue-on-error keeps this job from
-  # blocking the rest of the workflow while it stays advisory.
+  # Six python suites in the gates job need a real Windows box to prove: no other
+  # job in this workflow can show whether they pass there. This job runs those
+  # suites on Windows and reports the environment first. It is blocking: run
+  # 35766479009 went green here for the first time, on its own merit, not through
+  # continue-on-error.
   # Every step below carries `if: ${{ !cancelled() }}`. Without it, GitHub Actions
   # skips every step after the first failure, even inside a job marked
   # continue-on-error. This job stayed advisory-red at its first failing step for a
@@ -126,7 +126,6 @@ jobs:
   # job that stops at its first red step proves nothing about the suites behind it.
   gates-windows:
     runs-on: windows-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
