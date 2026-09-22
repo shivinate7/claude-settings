@@ -441,6 +441,20 @@ MUTATIONS = [
      '    remaining = SESSION_END_CEILING_SECONDS - elapsed_seconds - EXIT_MARGIN_SECONDS  '
      '# MUTANT: no validation',
      "test_negative_elapsed_is_refused_not_treated_as_extra_time"),
+
+    # 4. Command-line argv coverage (found 2026-09-22): the hook's own reap call,
+    # `[sys.executable, SWEEP_PATH, root, "--confirm"]`, is the one subprocess.run in this whole
+    # program that actually deletes a branch for real, and no mutant here ever changed its argv
+    # before this one. Dropping `--confirm` turns the reap silently into a preview: sweep.py's own
+    # `if confirm and decision["action"] == "reap":` (janitor/sweep.py) then never fires, so
+    # `reap-me-a` survives. `test_sweeps_repo_a_leaves_repo_b_untouched` runs the REAL sweep.py
+    # against a REAL git repository, unmocked, and asserts the branch is gone -- proven against a
+    # `.bak` copy before this mutant was written.
+    ("confirm: the sweep call drops --confirm, so a reap silently becomes a preview",
+     "session_end_sweep",
+     '            [sys.executable, SWEEP_PATH, root, "--confirm"],',
+     '            [sys.executable, SWEEP_PATH, root],',
+     "test_sweeps_repo_a_leaves_repo_b_untouched"),
 ]
 
 

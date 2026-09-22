@@ -591,6 +591,56 @@ MUTATIONS = [
      '        return PROCESS_START_UNREADABLE  # 5 (ERROR_ACCESS_DENIED) or any other code',
      '        return PROCESS_START_UNREADABLE',
      "guard", "liveness: windows arm splits dead (error 87) from unreadable (error 5)"),
+
+    # ---- command-line argv coverage (found 2026-09-22: zero of the mutations above ever change
+    # the argv of a subprocess.run call this file's guard.py itself builds). Each mutant here
+    # makes one such call read the WRONG tree or the wrong pointer HEAD, never a stubbed call.
+    #
+    # `_git` drops `-C where`. Every internal git read this file makes (`git_dir_of`, ancestor and
+    # remote-contains checks, the main/master existence probe, ...) then runs against whatever
+    # directory the guard.py PROCESS happens to stand in, never `where`. `git_dir_of` is called on
+    # both sides of `in_pointer_checkout` (`mine = git_dir_of(root)`, `theirs =
+    # git_dir_of(pointer)`), so once the process's own ambient directory answers
+    # `--absolute-git-dir` at all, `mine == theirs` holds for EVERY root, and a checkout that is
+    # not the pointer checkout is judged as if it were. MEASURED against this mutant: the case
+    # named below is the one where that flips the answer, from `mine != theirs` (allow) to `mine
+    # == theirs` (wrongly denied).
+    ("root-scope: _git drops -C, so it reads whichever tree the guard process happens to stand "
+     "in, not the tree it was asked about",
+     '        return subprocess.run(\n'
+     '            ["git", "-C", where, *args], capture_output=True, text=True, timeout=10\n'
+     '        )',
+     '        return subprocess.run(\n'
+     '            ["git", *args], capture_output=True, text=True, timeout=10\n'
+     '        )',
+     "guard", 'pointer: checkout of a branch in another checkout is allowed'),
+
+    # `merge_base`'s `gh pr view ... --json baseRefName` read gets a timeout so small the call can
+    # never finish, exactly the shape a real flaky sandbox gh call takes. `TimeoutExpired` is
+    # caught the same as every other failure and answers "" (unreadable), which the caller notes
+    # the same as a merge into main (decision 8's own "an unreadable base is not a safe answer").
+    # A merge into `dev` is the one scenario this turns from "not noted" into "noted", because a
+    # base that WAS readable now reads as unreadable purely because the read could not finish in
+    # time.
+    ("timeout: the merge-base read cannot finish, so a merge into a safe branch is wrongly noted "
+     "as unread",
+     'answer = subprocess.run(query, capture_output=True, text=True, timeout=10)',
+     'answer = subprocess.run(query, capture_output=True, text=True, timeout=0.0001)',
+     "guard", "log: a merge into main is allowed and noted where the base is unsafe"),
+
+    # `_process_start_ms`'s POSIX `ps -o lstart=` read gets the same treatment: a timeout so small
+    # the read can never finish, so a live session's own liveness probe comes back
+    # PROCESS_START_UNREADABLE instead of a real start time. POSIX-only: `_process_start_ms`
+    # routes straight past this line on Windows (`if sys.platform.startswith("win"): return
+    # _process_start_ms_windows(pid)`), and `process_start_ms_case` already skips its POSIX-only
+    # sub-cases there (`os.name == "nt"`), so nothing on that platform can ever observe this
+    # mutant. Marked posix-only for the same reason the bad-exit-code mutant above is.
+    ("timeout: the POSIX ps liveness read cannot finish, so a live pid reads unreadable",
+     '            ["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, '
+     'timeout=5,',
+     '            ["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, '
+     'timeout=0.0001,',
+     "guard", "liveness: process_start_ms splits alive/dead/unreadable apart", "posix"),
 ]
 
 
