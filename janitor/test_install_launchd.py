@@ -102,8 +102,7 @@ class GeneratesPlistForAnOrdinaryCheckout(unittest.TestCase):
         lib_dir = os.path.join(ROOT, "lib_happy")
         cfg = os.path.join(ROOT, "cfg_happy")
         result = run_installer(
-            ["--repo-root", self.repo, "--library-dir", lib_dir,
-             "--discover-root", os.path.join(ROOT, "discover_happy")],
+            ["--repo-root", self.repo, "--library-dir", lib_dir],
             cfg_dir=cfg,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -116,7 +115,10 @@ class GeneratesPlistForAnOrdinaryCheckout(unittest.TestCase):
         args_joined = " ".join(data["ProgramArguments"])
         self.assertIn("sweep.py", args_joined)
         self.assertIn("--confirm", data["ProgramArguments"])
-        self.assertIn("--discover", data["ProgramArguments"])
+        # No --discover root: sweep.py resolves its own roots at run time (janitor.roots,
+        # falling back to its own default candidate list). See the module docstring.
+        self.assertNotIn("--discover", data["ProgramArguments"])
+        self.assertNotIn("Developer", args_joined)
         self.assertIn("StartCalendarInterval", data)
         self.assertFalse(data["RunAtLoad"])
 
@@ -133,8 +135,7 @@ class GeneratesPlistForAnOrdinaryCheckout(unittest.TestCase):
         require(before.returncode == 0, "git status before install")
         lib_dir = os.path.join(ROOT, "lib_status_check")
         result = run_installer(
-            ["--repo-root", self.repo, "--library-dir", lib_dir,
-             "--discover-root", os.path.join(ROOT, "discover_status_check")],
+            ["--repo-root", self.repo, "--library-dir", lib_dir],
             cfg_dir=os.path.join(ROOT, "cfg_status_check"),
         )
         self.assertEqual(result.returncode, 0, result.stderr)
