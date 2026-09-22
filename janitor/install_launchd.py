@@ -25,11 +25,19 @@ mistake the refusal above exists to prevent.
 This installer only WRITES the plist and prints how to load it. It never calls `launchctl`
 itself: loading a machine-wide daily job is a separate, later act, on the owner's own word.
 
+THE GENERATED PLIST CARRIES NO `--discover` ROOT. `janitor/sweep.py`, called with no ROOT and no
+`--discover`, already resolves its own roots at run time: `janitor.roots` from settings.json,
+falling back to `default_discover_roots()`. An installer-side root would be a second, stale copy
+of that same list (this file once hard-coded `~/Developer`, a path that does not exist on every
+machine and is not where this repository's own clones live). Reading roots at run time means the
+loaded agent never needs re-installing when `janitor.roots` changes. See
+`janitor/install_schtasks.py`, which carries the identical fix for the same reason.
+
 Usage:
     python3 janitor/install_launchd.py                 # write ~/Library/LaunchAgents/<label>.plist
     python3 janitor/install_launchd.py --hour 3 --minute 17
 
-Testing overrides (never used by a real install): --repo-root, --library-dir, --discover-root.
+Testing overrides (never used by a real install): --repo-root, --library-dir.
 """
 import argparse
 import os
@@ -42,10 +50,6 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
 import guard  # noqa: E402
 
 LABEL = "com.claude-settings.janitor.daily-sweep"
-
-
-def default_discover_root() -> str:
-    return os.path.expanduser("~/Developer")
 
 
 def resolve_primary_checkout(where: str):
@@ -69,11 +73,12 @@ def resolve_primary_checkout(where: str):
         return None
 
 
-def build_plist(repo_root: str, discover_root: str, hour: int, minute: int, log_dir: str):
+def build_plist(repo_root: str, hour: int, minute: int, log_dir: str):
+    # No --discover root here: see the module docstring above.
     sweep_py = os.path.join(repo_root, "janitor", "sweep.py")
     return {
         "Label": LABEL,
-        "ProgramArguments": [sys.executable, sweep_py, "--discover", discover_root, "--confirm"],
+        "ProgramArguments": [sys.executable, sweep_py, "--confirm"],
         "StartCalendarInterval": {"Hour": hour, "Minute": minute},
         "RunAtLoad": False,
         "StandardOutPath": os.path.join(log_dir, "launchd-sweep.log"),
@@ -89,15 +94,11 @@ def main(argv=None) -> int:
                          help="testing only: the checkout to treat as this installer's own")
     parser.add_argument("--library-dir", default=None,
                          help="testing only: overrides ~/Library")
-    parser.add_argument("--discover-root", default=None,
-                         help="testing only: overrides ~/Developer as the sweep's --discover root")
     args = parser.parse_args(argv)
 
     repo_root = os.path.abspath(args.repo_root) if args.repo_root else REPO_ROOT
     library_dir = os.path.abspath(args.library_dir) if args.library_dir \
         else os.path.expanduser("~/Library")
-    discover_root = os.path.abspath(args.discover_root) if args.discover_root \
-        else default_discover_root()
 
     worktree = guard.is_worktree(repo_root)
     if worktree is not False:
@@ -115,7 +116,7 @@ def main(argv=None) -> int:
     log_dir = os.path.join(guard.config_dir(), "janitor")
     os.makedirs(log_dir, exist_ok=True)
 
-    data = build_plist(repo_root, discover_root, args.hour, args.minute, log_dir)
+    data = build_plist(repo_root, args.hour, args.minute, log_dir)
     launch_agents_dir = os.path.join(library_dir, "LaunchAgents")
     os.makedirs(launch_agents_dir, exist_ok=True)
     plist_path = os.path.join(launch_agents_dir, LABEL + ".plist")
