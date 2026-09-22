@@ -61,16 +61,17 @@ It stays unmechanized on purpose. A hook can count lines. It cannot tell
 orchestration from building. The only file-based version is the test Decision 13
 already threw out, for misfiring on a decision entry.
 
-The `Stop` guardrail agent in `settings.json` reads the turn's transcript and
-judges the act. It caught this rule's own breach on 2026-09-22 and asked for the
-owner's word. That agent is this rule's check. The fix is the rule it judges
+The `Stop` guardrail in `settings.json` read the turn's transcript and judged
+the act. It caught this rule's own breach on 2026-09-22 and asked for the
+owner's word. That was this rule's check. The fix is the rule it judges
 against, never a new hook.
 
-The check depends on the session's permission mode. MEASURED the same day. In a
-mode that denies the agent `Read` and `Bash`, it cannot open the transcript. It
-then reports that it could not verify. That answer is unknown, which is the
-honest one, and `CLAUDE.md` asks for exactly that. It is not a pass.
+`decisions/stop-guardrail-became-a-command-hook.md` records what replaced it
+on 2026-09-22. Read that entry for the new mechanism.
 
-So read an unknown verdict as a cue to look yourself. A run of them means this
-rule has no working check in that session, whether the denial was deliberate or
-not.
+This rule's own check is still a human read of the act. A command hook passes
+through no permission check at all. It cannot go silent for that reason.
+
+So read an UNKNOWN systemMessage from the new hook as a cue to look yourself.
+A run of them means the hook itself is failing. It never means nothing
+protected changed.

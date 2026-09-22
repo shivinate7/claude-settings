@@ -41,7 +41,7 @@
     "roles-orchestrator-never-builds": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No hook classifies a session's own act as orchestration versus building, or judges whether a change can move a verdict. The Stop guardrail agent reads the transcript and judges the act, which is this rule's check."
+        "reason": "No hook classifies a session's own act as orchestration versus building, or judges whether a change can move a verdict. hooks/decision_watch.py, a Stop command hook, reads the transcript and this turn's git diff and judges the act, escalating to a model only for the residual judgment a diff cannot make, which is this rule's check."
       }
     },
     "roles-one-role-per-worker": {
