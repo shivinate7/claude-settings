@@ -83,6 +83,9 @@ jobs:
           python3 janitor/test_session_end_sweep.py
           python3 janitor/test_install_launchd.py
 
+      - name: Janitor triggers fixture suite (schtasks installer)
+        run: python3 janitor/test_install_schtasks.py
+
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.
   pointer-windows:
@@ -111,14 +114,18 @@ jobs:
       - name: install.sh checkout-detection suite
         run: sh hooks/test_install_src.sh
 
-  # Six python suites in the gates job are known to fail on windows-latest, and CI
-  # could not show that before this job existed. This job runs those suites on
-  # Windows and reports the environment first, so later work can fix them with real
-  # evidence. The failures are expected, so continue-on-error keeps this job from
-  # blocking the rest of the workflow while it stays advisory.
+  # Six python suites in the gates job need a real Windows box to prove: no other
+  # job in this workflow can show whether they pass there. This job runs those
+  # suites on Windows and reports the environment first. It is blocking: run
+  # 35766479009 went green here for the first time, on its own merit, not through
+  # continue-on-error.
+  # Every step below carries `if: ${{ !cancelled() }}`. Without it, GitHub Actions
+  # skips every step after the first failure, even inside a job marked
+  # continue-on-error. This job stayed advisory-red at its first failing step for a
+  # while, and that hid eleven suites behind it that never ran on Windows at all. A
+  # job that stops at its first red step proves nothing about the suites behind it.
   gates-windows:
     runs-on: windows-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -127,6 +134,7 @@ jobs:
           python-version: "3.11"
 
       - name: Report the Windows environment
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           echo "== python --version =="
@@ -186,41 +194,62 @@ jobs:
           mktemp -d
 
       - name: Guard fixture suite
+        if: ${{ !cancelled() }}
         run: python hooks/test_guard.py
 
+      # 39m12s of this job's 46m50s. The gates job's own Guard mutation harness
+      # (16m47s, Linux) still runs on every pull request and catches almost every
+      # mutation regression, so a pull request keeps that signal. Accepted risk: a
+      # Windows-only mutation regression is now caught after merge, not before.
       - name: Guard mutation harness
+        if: ${{ !cancelled() && github.event_name != 'pull_request' }}
         run: python hooks/mutate_guard.py
 
       - name: Janitor sweep fixture suite
+        if: ${{ !cancelled() }}
         run: python janitor/test_sweep.py
 
       - name: Janitor sweep mutation harness
+        if: ${{ !cancelled() }}
         run: python janitor/mutate_sweep.py
 
       - name: Config watch fixture suite
+        if: ${{ !cancelled() }}
         run: python hooks/test_config_watch.py
 
       - name: Stop-hook gate fixture suite
+        if: ${{ !cancelled() }}
         run: python lint/test_gates.py
 
       - name: Rule audit fixture suite
+        if: ${{ !cancelled() }}
         run: python lint/test_rule_audit.py
 
       - name: Rule mechanization audit
+        if: ${{ !cancelled() }}
         run: python lint/rule_audit.py
 
       - name: Unknown-read contract (guard + session_start)
+        if: ${{ !cancelled() }}
         run: python lint/check_unknown_reads_contract.py
 
       - name: Landed-directory manifest agreement
+        if: ${{ !cancelled() }}
         run: python lint/check_landed_dirs.py
 
       - name: Janitor triggers fixture suite (SessionEnd hook)
+        if: ${{ !cancelled() }}
         run: python janitor/test_session_end_sweep.py
 
       - name: Janitor triggers fixture suite (launchd installer)
+        if: ${{ !cancelled() }}
         run: python janitor/test_install_launchd.py
 
+      - name: Janitor triggers fixture suite (schtasks installer)
+        if: ${{ !cancelled() }}
+        run: python janitor/test_install_schtasks.py
+
       - name: install.sh checkout-detection suite
+        if: ${{ !cancelled() }}
         shell: bash
         run: sh hooks/test_install_src.sh

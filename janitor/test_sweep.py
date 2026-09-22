@@ -17,6 +17,7 @@ Destructive git calls this suite drives (`git branch -D`, `git worktree remove`,
 itself, never typed by hand through a shell, the same way hooks/test_guard.py drives its own
 fixtures.
 """
+import hashlib
 import json
 import os
 import shutil
@@ -72,9 +73,17 @@ def make_blind_git(folder):
     the same trick hooks/test_guard.py's make_blind_git uses, kept local because this file's
     fixtures and that one's must not depend on each other.
 
-    Writes a POSIX `git` script and a Windows `git.cmd` sibling. PATHEXT resolution
-    only looks at `.cmd` and similar, so a bare, extensionless `git` file never shadows
-    `git.exe` there. Both must exist so the shadowing works on either platform."""
+    Writes a POSIX `git` script and a Windows `git.cmd` sibling. The sibling does NOT shadow
+    real git on Windows.
+
+    `hooks/guard.py`'s `_git` calls `subprocess.run(["git", ...])`, list form. Windows
+    `CreateProcess` resolves a bare command from a list by appending only `.exe`. It never
+    consults `PATHEXT`. The `.cmd` sibling stays invisible to that call. The real `git.exe`
+    further down PATH answers instead.
+
+    See decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md for the measurement.
+    The `.cmd` sibling stays only for parity with a shell-form caller. It proves nothing here.
+    """
     os.makedirs(folder, exist_ok=True)
     script = os.path.join(folder, "git")
     write(script, "#!/bin/sh\necho 'blind git: no answer' >&2\nexit 128\n")
@@ -273,6 +282,13 @@ class BranchDecisionTests(unittest.TestCase):
         self.assertEqual(decision["reason"], "default-branch")
 
     # ------------------------------------------------------------- refusal 7: unreadable subject
+    @unittest.skipIf(
+        os.name == "nt",
+        "Windows CreateProcess resolves a list-form subprocess call by appending only .exe, so "
+        "this PATH-shadowing git.cmd stand-in is never reached, and the real git answers "
+        "instead of blind git. See "
+        "decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md.",
+    )
     def test_refusal_unreadable_subject_is_kept(self):
         blind = os.path.join(ROOT, "blind-branch")
         make_blind_git(blind)
@@ -386,6 +402,13 @@ class WorktreeDecisionTests(unittest.TestCase):
         self.assertEqual(decision["reason"], "removable")
 
     # ------------------------------------------------------------- refusal 7: unreadable subject
+    @unittest.skipIf(
+        os.name == "nt",
+        "Windows CreateProcess resolves a list-form subprocess call by appending only .exe, so "
+        "this PATH-shadowing git.cmd stand-in is never reached, and the real git answers "
+        "instead of blind git. See "
+        "decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md.",
+    )
     def test_refusal_unreadable_subject_worktree(self):
         blind = os.path.join(ROOT, "blind-worktree")
         make_blind_git(blind)
@@ -422,16 +445,33 @@ class PrimaryCheckoutExclusionTests(unittest.TestCase):
     # to prove -- an empty-subject case exactly like the ones CLAUDE.md and this suite's own
     # module docstring warn against, just introduced from the test side this time.
     def setUp(self):
-        tag = self.id().rsplit(".", 1)[-1]
+        # A SHORT tag, not the full test method name. An earlier version used
+        # `self.id().rsplit(".", 1)[-1]` directly. This suite's method names are full
+        # sentences.
+
+        # MEASURED on a real Windows machine: git names its worktree admin directory after
+        # the worktree's own basename. Here that basename is
+        # `primary-checkout-linked-<full test name>`. The combined path tripped Windows' own
+        # path-length ceiling: "fatal: could not create directory of
+        # '.git/worktrees/...': Filename too long". The identical fixture shape works on
+        # POSIX, whose path limits are far looser.
+
+        # No production code builds a worktree name from a test's own description. This is a
+        # fixture-only defect. The fix hashes the id down to something short instead.
+
+        tag = hashlib.md5(self.id().encode("utf-8")).hexdigest()[:12]
+        self.tag = tag
         self.primary = os.path.join(ROOT, "primary-checkout-%s" % tag)
         make_repo(self.primary, {"f.txt": "base\n"})
+
         self.linked = os.path.join(ROOT, "primary-checkout-linked-%s" % tag)
-        require(run_vcs(self.primary, "worktree", "add", "-q", self.linked, "-b", "lane-x")
-                .returncode == 0, "worktree add for the exclusion fixture")
+        result = run_vcs(self.primary, "worktree", "add", "-q", self.linked, "-b", "lane-x")
+        require(result.returncode == 0,
+                "worktree add for the exclusion fixture: %s" % result.stderr.strip())
         require(os.path.isdir(self.linked), "fixture: linked worktree exists")
 
     def _decisions(self, root, confirm):
-        log_path = os.path.join(ROOT, "primary-exclusion-%s.log" % self.id().rsplit(".", 1)[-1])
+        log_path = os.path.join(ROOT, "primary-exclusion-%s.log" % self.tag)
         return sweep.sweep_repo(root, confirm=confirm, restore_log_path=log_path)
 
     def _primary_recorded(self, result):
@@ -502,9 +542,29 @@ class DiscoveryTests(unittest.TestCase):
 
 
 class DefaultDiscoverRootsTests(unittest.TestCase):
-    """`sweep.default_discover_roots()` reads `~/...` candidates. This drives a fake HOME
-    holding two of the five candidate directories, each with a real checkout. It restores the
-    real HOME afterward, no matter what."""
+    """`sweep.default_discover_roots()` reads `~/...` candidates, expanded by
+    `os.path.expanduser`. This drives a fake home directory holding two of the five candidate
+    directories, each with a real checkout. It restores the real environment afterward, no
+    matter what.
+
+    BOTH `HOME` AND `USERPROFILE` ARE PATCHED, not `HOME` alone. This is measured, not
+    assumed. `ntpath.expanduser` is the code `os.path.expanduser` runs on Windows. It reads
+    `USERPROFILE` first. It never reads `HOME` at all.
+
+    A fixture that patches only `HOME` expands `~` against the real machine's profile
+    directory on Windows. It finds fewer than two roots there. It fails with "must find both
+    roots just created". That is a fixture gap. It is not a defect in
+    `default_discover_roots()`, which calls the correct stdlib primitive for the platform it
+    runs on.
+
+    A SEPARATE, REAL DEFECT surfaced once that fixture gap closed. This case's own
+    `os.path.join(home, "Developer")` is backslash-joined on Windows. It did not equal what
+    `default_discover_roots()` returned for the same directory. That function substitutes `~`
+    with a backslash path, then glues on the literal `/Developer` suffix unchanged. The two
+    separators mixed. `default_discover_roots()` now runs each candidate through
+    `os.path.normpath`. That is the fix, not this assertion. See that function's own
+    docstring.
+    """
 
     def test_every_existing_default_root_is_combined_not_just_the_first(self):
         home = os.path.join(ROOT, "fake-home-multi")
@@ -517,7 +577,9 @@ class DefaultDiscoverRootsTests(unittest.TestCase):
         make_repo(repo_a, {"f.txt": "x\n"})
         make_repo(repo_b, {"f.txt": "x\n"})
         old_home = os.environ.get("HOME")
+        old_userprofile = os.environ.get("USERPROFILE")
         os.environ["HOME"] = home
+        os.environ["USERPROFILE"] = home
         try:
             roots = sweep.default_discover_roots()
             self.assertTrue(len(roots) >= 2, "must find both roots just created")
@@ -529,6 +591,10 @@ class DefaultDiscoverRootsTests(unittest.TestCase):
                 os.environ.pop("HOME", None)
             else:
                 os.environ["HOME"] = old_home
+            if old_userprofile is None:
+                os.environ.pop("USERPROFILE", None)
+            else:
+                os.environ["USERPROFILE"] = old_userprofile
         self.assertTrue(len(found) > 0, "combined discovery must not come back empty")
         self.assertIn(repo_a, found)
         self.assertIn(repo_b, found)

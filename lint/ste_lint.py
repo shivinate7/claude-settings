@@ -19,11 +19,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import ast
 import fnmatch
+import io
 import json
 import os
 import re
 import sys
+import tokenize
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -869,6 +872,187 @@ def segment_markdown(lines: Sequence[str], default_mode: str) -> Tuple[List[Para
 
 
 # --------------------------------------------------------------------------
+# Source comment and docstring extraction
+#
+# Off by default everywhere: nothing below runs unless a caller builds
+# paragraphs through `source_prose_paragraphs` or calls `Linter.check_source`
+# instead of `Linter.check_text`. `check_text` and its Markdown segmentation
+# above are untouched.
+# --------------------------------------------------------------------------
+
+# Extensions this module can pull prose from, and how. Python gets the real
+# parser: `tokenize` for comments, `ast` for docstrings. Neither one ever
+# looks inside a string literal as prose, so a semicolon in code text can
+# never surface as a finding. Shell has no standard-library tokenizer, so it
+# gets a small hand-rolled scanner instead.
+SOURCE_LANGS = {".py": "python", ".sh": "shell", ".bash": "shell"}
+
+QUOTE_PREFIX = re.compile(r'^[a-zA-Z]{0,2}("""|\'\'\'|"|\')')
+
+
+def _is_shebang(text_after_hash: str, lineno: int, col: int) -> bool:
+    return lineno == 1 and col == 0 and text_after_hash.startswith("!")
+
+
+def _comment_segment(lineno: int, col: int, raw: str) -> Segment:
+    """Build one Segment for a `#`-comment body, at the comment's real column."""
+    body = raw[1:]
+    prefix = col + 1
+    if body.startswith(" "):
+        body = body[1:]
+        prefix += 1
+    masker = Masker(body)
+    return Segment(lineno, masker.text, "comment", "descriptive", prefix, masker)
+
+
+def _flush_run(paragraphs: List[Paragraph], run: List[Segment], kind: str) -> None:
+    if run:
+        paragraphs.append(Paragraph(segments=list(run), kind=kind, mode="descriptive"))
+    del run[:]
+
+
+def _python_prose_paragraphs(text: str) -> List[Paragraph]:
+    """Pull comments and docstrings out of Python source, as prose paragraphs.
+
+    Consecutive-line comments join into one paragraph, the way a Markdown
+    paragraph joins lines, so a sentence spanning several comment lines is
+    still one sentence for the length rule. Unparsable source yields comments
+    from as much of the file as `tokenize` managed, and no docstrings.
+    """
+    paragraphs: List[Paragraph] = []
+    run: List[Segment] = []
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+            if tok.type != tokenize.COMMENT:
+                continue
+            lineno, col = tok.start
+            if _is_shebang(tok.string[1:], lineno, col):
+                continue
+            if run and run[-1].lineno != lineno - 1:
+                _flush_run(paragraphs, run, "comment")
+            run.append(_comment_segment(lineno, col, tok.string))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        pass
+    _flush_run(paragraphs, run, "comment")
+
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return paragraphs
+
+    nodes = [tree] + [n for n in ast.walk(tree)
+                       if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))]
+    for node in nodes:
+        if not node.body or not isinstance(node.body[0], ast.Expr):
+            continue
+        value = node.body[0].value
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            paragraphs.extend(_docstring_paragraphs(text, value))
+    return paragraphs
+
+
+def _docstring_paragraphs(text: str, value: ast.Constant) -> List[Paragraph]:
+    """Turn one docstring literal into prose paragraphs, split on its blank lines.
+
+    `ast.get_source_segment` returns the literal exactly as written, quotes
+    included. Stripping the quote characters removes no newline, so every
+    remaining line keeps the physical source's own line number.
+    """
+    source = ast.get_source_segment(text, value)
+    if not source:
+        return []
+    match = QUOTE_PREFIX.match(source)
+    if not match:
+        return []
+    quote = match.group(1)
+    body = source[match.end():]
+    if body.endswith(quote):
+        body = body[: -len(quote)]
+    start_line = value.lineno
+    start_col = value.col_offset + match.end()
+
+    paragraphs: List[Paragraph] = []
+    run: List[Segment] = []
+    for i, line in enumerate(body.split("\n")):
+        lineno = start_line + i
+        stripped = line.strip()
+        if not stripped:
+            _flush_run(paragraphs, run, "docstring")
+            continue
+        col = start_col if i == 0 else 0
+        prefix = col + (len(line) - len(line.lstrip()))
+        masker = Masker(stripped)
+        run.append(Segment(lineno, masker.text, "docstring", "descriptive", prefix, masker))
+    _flush_run(paragraphs, run, "docstring")
+    return paragraphs
+
+
+def _find_unquoted_hash(line: str) -> Optional[int]:
+    """Find a `#` that single or double quotes do not cover, or None.
+
+    Tracks quote state within one line only. A quoted string that spans
+    several lines (a heredoc, a multi-line quote) is not resolved across the
+    line break: the rare `#` inside one still reports, the bandaid this
+    scanner accepts in place of a full shell tokenizer.
+    """
+    in_single = in_double = False
+    i, n = 0, len(line)
+    while i < n:
+        ch = line[i]
+        if in_single:
+            in_single = ch != "'"
+        elif in_double:
+            if ch == "\\" and i + 1 < n:
+                i += 1
+            elif ch == '"':
+                in_double = False
+        elif ch == "\\" and i + 1 < n:
+            i += 1
+        elif ch == "'":
+            in_single = True
+        elif ch == '"':
+            in_double = True
+        elif ch == "#":
+            return i
+        i += 1
+    return None
+
+
+def _shell_prose_paragraphs(text: str) -> List[Paragraph]:
+    """Pull `#` comments out of shell source, as prose paragraphs.
+
+    A `#` inside single or double quotes is not a comment, per
+    `_find_unquoted_hash`. Consecutive-line comments join into one paragraph,
+    same as the Python extractor above.
+    """
+    paragraphs: List[Paragraph] = []
+    run: List[Segment] = []
+    for index, line in enumerate(text.splitlines()):
+        lineno = index + 1
+        col = _find_unquoted_hash(line)
+        if col is None:
+            _flush_run(paragraphs, run, "comment")
+            continue
+        if _is_shebang(line[col + 1:], lineno, col):
+            continue
+        if run and run[-1].lineno != lineno - 1:
+            _flush_run(paragraphs, run, "comment")
+        run.append(_comment_segment(lineno, col, line[col:]))
+    _flush_run(paragraphs, run, "comment")
+    return paragraphs
+
+
+def source_prose_paragraphs(path: str, text: str) -> Optional[List[Paragraph]]:
+    """Return prose paragraphs for a source file, or None for an unknown extension."""
+    lang = SOURCE_LANGS.get(os.path.splitext(path)[1].lower())
+    if lang == "python":
+        return _python_prose_paragraphs(text)
+    if lang == "shell":
+        return _shell_prose_paragraphs(text)
+    return None
+
+
+# --------------------------------------------------------------------------
 # The checker
 # --------------------------------------------------------------------------
 
@@ -1074,7 +1258,27 @@ class Linter:
         lines = text.splitlines()
         paragraphs, suppressed, file_disable = segment_markdown(
             lines, "procedural" if self.config["mode"] == "procedural" else "descriptive")
+        findings = self._check_paragraphs(paragraphs)
+        for finding in findings:
+            finding.path = path
+        return self._filter(findings, suppressed, file_disable)
 
+    def check_source(self, path: str, text: str) -> List[Finding]:
+        """Lint only the comments and docstrings of a source file, never its code.
+
+        A path this module has no extractor for (anything but `.py`, `.sh`,
+        `.bash`) falls back to `check_text`, today's Markdown behavior,
+        unchanged.
+        """
+        paragraphs = source_prose_paragraphs(path, text)
+        if paragraphs is None:
+            return self.check_text(path, text)
+        findings = self._check_paragraphs(paragraphs)
+        for finding in findings:
+            finding.path = path
+        return self._filter(findings, {}, None)
+
+    def _check_paragraphs(self, paragraphs: List[Paragraph]) -> List[Finding]:
         findings: List[Finding] = []
         for paragraph in paragraphs:
             if paragraph.kind in ("heading", "table"):
@@ -1091,7 +1295,7 @@ class Linter:
             for offset, sentence in sentences:
                 findings.extend(self.check_sentence(
                     block, offset, sentence, paragraph.mode))
-            if (paragraph.kind == "prose"
+            if (paragraph.kind in ("prose", "comment", "docstring")
                     and len(sentences) > self.config["max_sentences_per_paragraph"]):
                 self._add(findings, block, 0, "STE014",
                           "The paragraph holds %d sentences. The limit is %d."
@@ -1099,10 +1303,7 @@ class Linter:
                           "Split the paragraph. One topic per paragraph.")
 
         findings.extend(self.check_terminology(paragraphs))
-
-        for finding in findings:
-            finding.path = path
-        return self._filter(findings, suppressed, file_disable)
+        return findings
 
     def check_terminology(self, paragraphs: Iterable[Paragraph]) -> List[Finding]:
         out: List[Finding] = []
@@ -1265,9 +1466,13 @@ def summarize(findings: List[Finding]) -> Dict[str, int]:
 # --------------------------------------------------------------------------
 
 TEXT_SUFFIXES = {".md", ".markdown", ".mdx", ".txt", ".rst", ".adoc"}
+# Only reached when a caller passes `suffixes=` explicitly, from `--source-prose`.
+SOURCE_SUFFIXES = {".py", ".sh", ".bash"}
 
 
-def collect_paths(inputs: Sequence[str], exclude: Sequence[str]) -> List[str]:
+def collect_paths(inputs: Sequence[str], exclude: Sequence[str],
+                  suffixes: Optional[Sequence[str]] = None) -> List[str]:
+    allowed = set(suffixes) if suffixes else TEXT_SUFFIXES
     out: List[str] = []
     for item in inputs:
         if os.path.isdir(item):
@@ -1276,7 +1481,7 @@ def collect_paths(inputs: Sequence[str], exclude: Sequence[str]) -> List[str]:
                            if d not in {".git", "node_modules", ".venv", "venv",
                                         "__pycache__", "dist", "build", ".tox"}]
                 for name in sorted(files):
-                    if os.path.splitext(name)[1].lower() in TEXT_SUFFIXES:
+                    if os.path.splitext(name)[1].lower() in allowed:
                         out.append(os.path.join(root, name))
         else:
             out.append(item)
@@ -1338,6 +1543,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--disable", default="", help="comma-separated rule codes to skip")
     parser.add_argument("--enable", default="", help="comma-separated rule codes to run alone")
     parser.add_argument("--exclude", default="", help="comma-separated glob patterns to skip")
+    parser.add_argument("--source-prose", action="store_true",
+                        help="lint only comments and docstrings of .py/.sh/.bash files "
+                             "(off by default; unknown extensions still lint as text)")
     parser.add_argument("--fix", action="store_true",
                         help="rewrite the files with the substitutions that are always safe")
     parser.add_argument("--stats", action="store_true", help="print sentence statistics")
@@ -1391,7 +1599,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     exclude = list(config.get("exclude", [])) + \
         [p.strip() for p in args.exclude.split(",") if p.strip()]
 
-    paths = collect_paths(args.paths, exclude)
+    source_suffixes = (TEXT_SUFFIXES | SOURCE_SUFFIXES) if args.source_prose else None
+    paths = collect_paths(args.paths, exclude, source_suffixes)
     if not paths:
         sys.stderr.write("ste-lint: no file matched\n")
         return 2
@@ -1428,7 +1637,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         except (OSError, UnicodeDecodeError) as exc:
             sys.stderr.write("ste-lint: cannot read %s: %s\n" % (path, exc))
             return 2
-        findings.extend(linter.check_text(path, text))
+        if args.source_prose:
+            findings.extend(linter.check_source(path, text))
+        else:
+            findings.extend(linter.check_text(path, text))
         if args.stats:
             row = file_stats(text, config)
             row["path"] = path

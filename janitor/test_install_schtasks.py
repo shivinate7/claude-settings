@@ -68,8 +68,13 @@ def run_installer(args, env_extra=None):
 
 
 def make_blind_git(folder):
-    """A `git` (and `git.cmd`, for Windows PATHEXT) stand-in that fails to answer everything,
-    the same trick janitor/test_sweep.py's own make_blind_git uses, kept local to this file."""
+    """A `git` (and `git.cmd`, for a shell-form call) stand-in that fails to answer
+    everything. It is the same trick janitor/test_sweep.py's own make_blind_git uses,
+    kept local to this file.
+
+    A list-form `subprocess.run(["git", ...])` never reaches `git.cmd` on Windows,
+    because CreateProcess appends only `.exe` when it resolves a bare command from a
+    list. See decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md."""
     os.makedirs(folder, exist_ok=True)
     script = os.path.join(folder, "git")
     write(script, "#!/bin/sh\necho 'blind git: no answer' >&2\nexit 128\n")
@@ -93,10 +98,7 @@ class GeneratesTaskXmlForAnOrdinaryCheckout(unittest.TestCase):
 
     def test_writes_well_formed_xml_with_the_expected_task_and_command(self):
         out_dir = os.path.join(ROOT, "out_happy")
-        result = run_installer(
-            ["--repo-root", self.repo, "--output-dir", out_dir,
-             "--discover-root", os.path.join(ROOT, "discover_happy")],
-        )
+        result = run_installer(["--repo-root", self.repo, "--output-dir", out_dir])
         self.assertEqual(result.returncode, 0, result.stderr)
         xml_path = os.path.join(out_dir, install_schtasks.TASK_NAME + ".xml")
         self.assertTrue(os.path.isfile(xml_path), result.stdout + result.stderr)
@@ -113,17 +115,17 @@ class GeneratesTaskXmlForAnOrdinaryCheckout(unittest.TestCase):
         self.assertEqual(command.text, sys.executable)
         self.assertIn("sweep.py", arguments.text)
         self.assertIn("--confirm", arguments.text)
-        self.assertIn("--discover", arguments.text)
+        # No --discover root: sweep.py resolves its own roots at run time (janitor.roots,
+        # falling back to its own default candidate list). See the module docstring.
+        self.assertNotIn("--discover", arguments.text)
+        self.assertNotIn("Developer", arguments.text)
 
         trigger = root.find("%sTriggers/%sCalendarTrigger" % (NS, NS))
         self.assertIsNotNone(trigger, "must schedule a daily CalendarTrigger")
 
     def test_prints_the_real_schtasks_command_and_never_calls_it(self):
         out_dir = os.path.join(ROOT, "out_print_check")
-        result = run_installer(
-            ["--repo-root", self.repo, "--output-dir", out_dir,
-             "--discover-root", os.path.join(ROOT, "discover_print_check")],
-        )
+        result = run_installer(["--repo-root", self.repo, "--output-dir", out_dir])
         self.assertEqual(result.returncode, 0, result.stderr)
         xml_path = os.path.join(out_dir, install_schtasks.TASK_NAME + ".xml")
         self.assertIn("schtasks /create /tn", result.stdout)
@@ -137,10 +139,7 @@ class GeneratesTaskXmlForAnOrdinaryCheckout(unittest.TestCase):
         )
         require(before.returncode == 0, "git status before install")
         out_dir = os.path.join(ROOT, "out_status_check")
-        result = run_installer(
-            ["--repo-root", self.repo, "--output-dir", out_dir,
-             "--discover-root", os.path.join(ROOT, "discover_status_check")],
-        )
+        result = run_installer(["--repo-root", self.repo, "--output-dir", out_dir])
         self.assertEqual(result.returncode, 0, result.stderr)
         after = subprocess.run(
             [VCS, "-C", self.repo, "status", "--porcelain"],
@@ -188,6 +187,12 @@ class RefusesALinkedWorktree(unittest.TestCase):
 class RefusesWhenWorktreeStatusIsUnreadable(unittest.TestCase):
     """Same conservative direction as a linked worktree, when the read itself fails."""
 
+    @unittest.skipIf(
+        os.name == "nt",
+        "Windows CreateProcess resolves a list-form subprocess call by appending "
+        "only .exe, so this PATH-shadowing git.cmd stand-in is never reached. "
+        "See decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md.",
+    )
     def test_unreadable_worktree_status_refuses_too(self):
         repo = os.path.join(ROOT, "unreadable_repo")
         make_repo(repo)
@@ -203,6 +208,37 @@ class RefusesWhenWorktreeStatusIsUnreadable(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         xml_path = os.path.join(out_dir, install_schtasks.TASK_NAME + ".xml")
         self.assertFalse(os.path.isfile(xml_path))
+
+
+class WritesXmlEncodingRealSchtasksAccepts(unittest.TestCase):
+    """`schtasks /create /xml` was measured on this machine, against three encodings of one
+    document. UTF-8, with or without a BOM, fails with "The task XML is malformed". UTF-16 LE
+    with a BOM succeeds and deletes cleanly. These cases read the written bytes. They run on
+    any platform, and never call `schtasks`."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.repo = os.path.join(ROOT, "encoding_checkout")
+        make_repo(cls.repo)
+
+    def _write(self):
+        out_dir = os.path.join(ROOT, "out_encoding")
+        result = run_installer(["--repo-root", self.repo, "--output-dir", out_dir])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        xml_path = os.path.join(out_dir, install_schtasks.TASK_NAME + ".xml")
+        with open(xml_path, "rb") as handle:
+            return handle.read()
+
+    def test_written_file_begins_with_a_utf16_le_bom(self):
+        raw = self._write()
+        self.assertTrue(raw.startswith(b"\xff\xfe"),
+                         "the file must open with a UTF-16 LE byte order mark, or real "
+                         "schtasks.exe refuses it with 'The task XML is malformed'")
+
+    def test_declaration_names_utf16(self):
+        raw = self._write()
+        declaration = raw[:100].decode("utf-16")
+        self.assertIn("UTF-16", declaration.upper())
 
 
 if __name__ == "__main__":

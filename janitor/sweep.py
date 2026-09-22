@@ -103,8 +103,22 @@ def default_discover_roots():
     """Every one of DEFAULT_DISCOVER_ROOT_CANDIDATES that exists on this machine, in that fixed
     order. Replaces the old single-root guess. This module's docstring names the measured
     problem. A real machine can have clones split across more than one of these directories.
-    Stopping at the first hit missed the rest."""
-    return [path for path in (os.path.expanduser(c) for c in DEFAULT_DISCOVER_ROOT_CANDIDATES)
+    Stopping at the first hit missed the rest.
+
+    `os.path.normpath` fixes a real defect, measured on Windows. Each candidate is written
+    POSIX-style, like `~/Developer`. `os.path.expanduser` only replaces the leading `~`. It
+    never touches the rest of the string.
+
+    On Windows, the `~` becomes a backslash path. The literal `/Developer` suffix stays a
+    forward slash. The result mixes both separators in one path. The same directory, built
+    through `os.path.join` anywhere else in this codebase, uses backslash throughout. Plain
+    string equality then sees two different paths for the same directory.
+
+    `discover_repos_multi` removes duplicates with a `set()`. That is the same plain string
+    match. `normpath` fixes every candidate once, at the one place they all pass through.
+    """
+    return [os.path.normpath(path)
+            for path in (os.path.expanduser(c) for c in DEFAULT_DISCOVER_ROOT_CANDIDATES)
             if os.path.isdir(path)]
 
 

@@ -48,19 +48,14 @@ lines containing "FAIL", and a mutant's death only counts when the required case
 in one of them: a mutant that crashes the suite, or that some UNRELATED case happens to catch,
 is WRONG CAUSE, not KILLED, kept distinct exactly as hooks/mutate_guard.py keeps it distinct.
 
-ONE KNOWN SURVIVOR, NAMED ON PURPOSE: "sweep_repo: reap branches without --confirm". No case in
-janitor/test_sweep.py calls `sweep.sweep_repo` with `confirm=False` against a repository that
-actually holds a reapable branch or worktree (its three `confirm=False` calls all hit a
-REFUSED repository -- no-default-base, opted-out, unreadable-optout -- before either loop
-runs; its two `confirm=True` calls never have a `confirm=False` twin). This mutant --
-`if confirm and decision["action"] == "reap":` with the `confirm and` dropped -- is MEASURED
-against the current suite (see the build report) to run every branch decision for real, with
-no `--confirm` on the command line, and 31 of 31 cases still pass. That is not a bug in this
-harness: rule 1 below says a mutant no arm kills is a survivor and the run must say so, not
-quietly drop the mutant or swap in an easier one. It stays in MUTATIONS, it is named as a
-SURVIVOR, and the run exits 1 for it. Fixing the gap means adding a case to
-janitor/test_sweep.py, which sits outside this build's fence; the build report raises it as
-Input Needed instead of silently filing past it.
+A FORMER KNOWN SURVIVOR, NOW CLOSED. "--confirm: reap branches for real with no --confirm on
+the line" (`if confirm and decision["action"] == "reap":` with the `confirm and` dropped) once
+survived: no case called `sweep.sweep_repo` with `confirm=False` against a repository holding
+a reapable subject. `janitor/test_sweep.py`'s `ConfirmGateTests.test_preview_names_reapable_
+subjects_but_touches_neither` closes that gap. MEASURED here: this mutant is KILLED, required
+case included. This paragraph stays as a record that the gap was real, found, and closed, not
+as a live warning: rule 1 below still says a mutant no arm kills is a survivor, and the run
+still exits 1 the day a future edit reopens this gap.
 
 Run:
     python3 janitor/mutate_sweep.py
@@ -150,6 +145,11 @@ MUTATIONS = [
      '    if branch in ("no-such-default-branch",):\n'
      '        return {"name": branch, "action": "keep", "reason": "default-branch"}',
      "test_refusal_default_branch_itself"),
+    # only_on="posix": test_refusal_unreadable_subject_is_kept drives its subject through a
+    # blind-git PATH stand-in. MEASURED on Windows (decisions/list-form-subprocess-ignores-a-
+    # path-shim-on-windows.md): a list-form subprocess call never reaches a PATH-shadowing
+    # .cmd shim there, so the real git answers instead of blind git, `empty` never comes back
+    # None, and the case is skipped on that platform -- it cannot prove this mutant either way.
     ("refusal: an unreadable branch subject reaps instead of keeping",
      "sweep",
      '    empty = guard.branch_is_empty(where, base, branch)\n'
@@ -158,7 +158,8 @@ MUTATIONS = [
      '    empty = guard.branch_is_empty(where, base, branch)\n'
      '    if False:\n'
      '        return {"name": branch, "action": "keep", "reason": "unreadable-subject"}',
-     "test_refusal_unreadable_subject_is_kept"),
+     "test_refusal_unreadable_subject_is_kept",
+     "posix"),
     # decide_worktree reads "unreadable" three times over (dirty, locked, live), each one its
     # own `is None` guard: hooks/test_guard.py's own blind-git fixture makes EVERY git call fail
     # at once, so knocking out only the FIRST guard is masked by the second (still None, for the
@@ -167,6 +168,10 @@ MUTATIONS = [
     # against the same blind git also came back None and returned "unreadable-subject" anyway.
     # This mutant instead drops all three guards at once, the only way to make this protection
     # (an unreadable subject KEEPS, never reaps) actually absent under that fixture.
+    # only_on="posix": same measured platform fact as the branch mutant above --
+    # test_refusal_unreadable_subject_worktree's blind-git PATH stand-in is never reached by a
+    # list-form subprocess call on Windows, so this suite's case is skipped there and cannot
+    # prove this mutant.
     ("refusal: no unreadable worktree subject keeps any more (all three reads)",
      "sweep",
      'def decide_worktree(where: str, entry: dict):\n'
@@ -209,7 +214,8 @@ MUTATIONS = [
      '    if live:\n'
      '        return {"path": path, "action": "keep", "reason": "live-session"}\n'
      '    return {"path": path, "action": "reap", "reason": "removable"}',
-     "test_refusal_unreadable_subject_worktree"),
+     "test_refusal_unreadable_subject_worktree",
+     "posix"),
 
     # ---- the keep rule, both directions (plan, "Phase 2") ----
     ("keep rule: the ancestry test never proves a branch empty",
@@ -443,17 +449,33 @@ def safe_name(label: str) -> str:
 
 
 def mutation_parts(entry):
-    """Return (label, target, old, new, required) for one mutation, enforcing the fifth field
-    the same way hooks/mutate_guard.py's mutation_parts does: a mutation with no required case
-    name is as unproven as one that dies wrong, so it is refused outright."""
-    if len(entry) != 5:
+    """Return (label, target, old, new, required, only_on) for one mutation, enforcing the
+    fifth field the same way hooks/mutate_guard.py's mutation_parts does: a mutation with no
+    required case name is as unproven as one that dies wrong, so it is refused outright.
+
+    `only_on` is a SIXTH, optional field: "posix" or "windows", for a mutation whose one
+    proving case cannot be driven on the other platform. Absent on every other entry, which
+    runs everywhere as before. Same shape as hooks/mutate_guard.py's own `only_on`."""
+    if len(entry) not in (5, 6):
         raise ValueError("mutation carries the wrong number of fields: %r" % (entry,))
-    label, target, old, new, required = entry
+    label, target, old, new, required = entry[:5]
+    only_on = entry[5] if len(entry) > 5 else None
     if target not in SOURCES:
         raise ValueError("mutation names an unknown target %r: %s" % (target, label))
     if not required:
         raise ValueError("mutation carries no required case name: %s" % label)
-    return label, target, old, new, required
+    return label, target, old, new, required, only_on
+
+
+def skip_reason(only_on):
+    """Return why a mutation marked `only_on` does not run on this platform, or None to run it.
+    Same rule hooks/mutate_guard.py's own skip_reason applies."""
+    if only_on is None:
+        return None
+    here = "windows" if sys.platform.startswith("win") else "posix"
+    if only_on == here:
+        return None
+    return "%s-only, this platform is %s" % (only_on, here)
 
 
 def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_text: str):
@@ -515,8 +537,15 @@ def run_suite(suite_path: str, config_dir: str):
 
 def run_mutant(sources, work: str, index: int, entry):
     """Apply one mutation in its own scaffold, run the suite there, and return
-    (label, code, FAIL lines, required)."""
-    label, target, old, new, required = mutation_parts(entry)
+    (label, code, FAIL lines, required, skip).
+
+    `skip`, when not None, is why this mutant did not run on this platform at all: its one
+    proving case cannot be driven here (see `skip_reason`). The caller reports it and counts it
+    as neither killed, survived, nor wrong cause."""
+    label, target, old, new, required, only_on = mutation_parts(entry)
+    skip = skip_reason(only_on)
+    if skip:
+        return label, None, [], required, skip
     mutated_text = sources[target].replace(old, new, 1)
     scaffold = os.path.join(work, "m_%03d_%s" % (index, safe_name(label)))
     config_dir = os.path.join(scaffold, "cfg")
@@ -525,7 +554,7 @@ def run_mutant(sources, work: str, index: int, entry):
         build_scaffold(scaffold, sources, target, mutated_text)
         suite_path = os.path.join(scaffold, "janitor", SUITE_FOR_TARGET[target])
         code, red = run_suite(suite_path, config_dir)
-        return label, code, red, required
+        return label, code, red, required, None
     finally:
         shutil.rmtree(scaffold, ignore_errors=True)
 
@@ -555,7 +584,7 @@ def main() -> int:
     # Every anchor is checked before any suite runs, so a stale mutation fails in the first
     # second, not after the mutants ahead of it in the list have spent their minutes.
     for entry in MUTATIONS:
-        label, target, old, _new, required = mutation_parts(entry)
+        label, target, old, _new, required, _only_on = mutation_parts(entry)
         if old not in sources[target]:
             print("ERROR stale mutation, anchor text not found in %s: %s" % (target, label))
             return 1
@@ -566,6 +595,7 @@ def main() -> int:
     work = tempfile.mkdtemp(prefix="mutate_sweep_")
     survivors = 0
     wrong_cause = 0
+    skipped = 0
     jobs = job_count()
     print("%d mutations, %d at a time" % (len(MUTATIONS), jobs))
     try:
@@ -575,8 +605,11 @@ def main() -> int:
                 for i, entry in enumerate(MUTATIONS)
             ]
             for future in futures:
-                label, code, red, required = future.result()
-                if code == 0 or not red:
+                label, code, red, required, skip = future.result()
+                if skip:
+                    skipped += 1
+                    print("SKIPPED     %-62s %s" % (label, skip), flush=True)
+                elif code == 0 or not red:
                     survivors += 1
                     print("SURVIVED    %-62s %2d red" % (label, len(red)), flush=True)
                 elif not any(required in line for line in red):
@@ -586,9 +619,10 @@ def main() -> int:
                 else:
                     print("KILLED      %-62s %2d red" % (label, len(red)), flush=True)
         print()
-        killed = len(MUTATIONS) - survivors - wrong_cause
-        print("%d of %d mutations killed (%d survived, %d wrong cause)" % (
-            killed, len(MUTATIONS), survivors, wrong_cause))
+        ran = len(MUTATIONS) - skipped
+        killed = ran - survivors - wrong_cause
+        print("%d of %d mutations killed (%d survived, %d wrong cause, %d skipped)" % (
+            killed, ran, survivors, wrong_cause, skipped))
         return 1 if (survivors or wrong_cause) else 0
     finally:
         shutil.rmtree(work, ignore_errors=True)
