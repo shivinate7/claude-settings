@@ -8,8 +8,10 @@ defer to a rotted argument.<!-- rule:outcomes-never-defer-rotted --> Never repea
 into a hook or check. This file is the fallback, not the enforcement.<!-- rule:outcomes-mechanize-rules -->
 
 **Roles, if this session can spawn agents.** This session orchestrates: plan, brief, verify,
-report. It writes records, docs, and briefs, and never builds with one exception: the fix is
-small (under 10 lines) and is named in the report.<!-- rule:roles-orchestrator-never-builds --> Each worker is one role: builder, reviewer,
+report. It writes records, docs, and briefs. It builds only when the change cannot move a
+verdict, one bounded command proves it, and the report names both. A change that touches a
+rule's behaviour, a gate's verdict, or product code a reviewer must see goes to a lane, at
+any size. Keep a fix under 40 lines, against reading cost alone.<!-- rule:roles-orchestrator-never-builds --> Each worker is one role: builder, reviewer,
 or Explore,
 never two.<!-- rule:roles-one-role-per-worker --> A workflow agent takes the builder or reviewer role through `agentType`. Workers
 run Sonnet. The cap in user settings holds that. Never spawn a worker above Sonnet.<!-- rule:roles-workers-run-sonnet --> When a
