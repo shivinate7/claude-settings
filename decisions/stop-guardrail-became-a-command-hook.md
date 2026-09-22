@@ -38,27 +38,79 @@ spawns a model. When something does, it runs `claude -p`, isolated. It
 hands that call the diff, or the new file's text, and the chat text
 directly. It asks for the same ALLOW/FLAG judgment the old prompt asked for.
 
-## The judge subprocess, isolated against a reviewer flag
+## The judge subprocess, isolated and tightened across three review passes
 
 The evidence handed to the model is this turn's diff and chat text. Both
 are reachable by anyone who can land text in a diff or a message this
 repo carries. A first version of `invoke_model` ran `claude -p` with no
-`--allowedTools`, no `--permission-mode`, and no `cwd`. Every omitted flag
-defaults to every tool, in this project's own directory, inheriting
-whatever `permissions.allow` grants at the time. A reviewer found this. An
-injected instruction in a diff could drive that nested, fully-tooled call
-to spend a granted permission. It could then fold what it read into the
-`why` field this hook prints back to the parent session. An injection and
-exfiltration channel, inside the guard built to catch that exact class of
-thing.
+restriction flag and no `cwd`. Every omitted flag defaults to every tool,
+in this project's own directory, inheriting whatever `permissions.allow`
+grants at the time. A reviewer found this. An injected instruction in a
+diff could drive that nested, fully-tooled call to spend a granted
+permission. It could then fold what it read into the `why` field this
+hook prints back to the parent session. An injection and exfiltration
+channel, inside the guard built to catch that exact class of thing.
 
-Two layers close it now. `--allowedTools ""` is a positive, explicit
-empty allow set, never a deny list of tool names this repo would have to
-keep growing. `cwd` and `CLAUDE_CONFIG_DIR` both point at a fresh, empty
-directory, never this project. There is no `.claude/settings.json` there
-to inherit a permission from, and no `hooks/` wired to a Stop event there
-either. A nested call cannot fire this same hook at its own turn end. The
-object a recursive call would need is not there to find.
+**The tool flag.** A second pass asked whether `--allowedTools ""`
+actually blocks every tool, rather than trusting the flag. `claude
+--help` settled it without a live call: a separate flag, `--tools`,
+documents `""` as disabling all tools. `--allowedTools`'s own help names
+no such meaning for an empty value. A security control must not rest on
+an undocumented parse. The hook now passes `--tools ""`, plus
+`--safe-mode`, documented to disable every plugin, MCP server, hook,
+skill, and custom command for the session. That closes the surface
+`--tools` alone does not claim to cover.
+
+**What a live call could still not confirm.** Asked to verify this by
+watching the model's own behavior, not the flag, the call was run for
+real. The prompt was built to use a tool if it could. It never reached
+that question. Authentication failed first, with "OAuth session expired
+and could not be refreshed". A bare `claude -p "Say hello"`, with no
+restriction flags and the real config directory, gave the SAME failure.
+`CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH=1` says the host refreshes tokens
+for its own calls. A detached subprocess gets no such refresh. This
+sandbox cannot show whether tools are blocked at runtime. It shows only
+that a raw subprocess call cannot authenticate here at all. That result
+is UNKNOWN, not PASS, and stays recorded as exactly that.
+
+**What the same testing did confirm, and fix.** The first isolation
+pointed `CLAUDE_CONFIG_DIR` at an empty directory. Run for real, that
+failed with "Not logged in", a different and earlier failure than the
+sandbox's own auth ceiling above. Proof, not assumption, that wiping the
+config directory wipes the login credential too, on any machine. The
+hook now copies only the credential file into the isolated directory.
+The same test confirmed this moves the failure from "Not logged in" to
+the sandbox's own "OAuth session expired" ceiling.
+
+**The environment.** A third pass found the child process still
+inherited this session's own environment, minus one overridden key.
+That carried through the host IPC socket and token, the host session
+id, the OAuth scope list, and an API key when one is set. Copying the
+parent's environment and subtracting cannot be complete. That is the
+same shape `decisions/predicate-is-the-act.md` names for a shape list.
+The hook now builds the child's environment from a named allow list
+instead. It holds only the handful of variables the runtime needs to
+execute and reach the API host, and nothing else. A session that
+authenticates by API key, rather than the credential file, now sees the
+isolated call fail closed. That reads as an UNKNOWN, never silently
+carried through.
+
+**What remains.** `cwd` and `CLAUDE_CONFIG_DIR` both point at a fresh,
+empty directory, never this project. There is no `.claude/settings.json`
+there to inherit a permission from, and no `hooks/` wired to a Stop
+event either. A nested call cannot fire this same hook at its own turn
+end. The object a recursive call would need is not there to find.
+
+## The `why` field is capped, cleaned, and attributed
+
+A third pass also found the model's own `why` text printed straight into
+the parent session's transcript. It carried no length cap and no
+control-character stripping. It also carried no wording to tell a
+reader the text came from the judge model reading attacker-influenced
+content, not from this hook itself. The text is now bounded to 300
+characters. It is cleaned the same way `hooks/guard.py`'s own printed
+reasons are, and quoted as "the judge model reported" rather than
+stated plainly.
 
 ## The gate, corrected against an independent audit
 

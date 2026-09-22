@@ -140,6 +140,23 @@ ACTION_WORDS = (
 UNKNOWN_PREFIX = "Decision watch: UNKNOWN, could not verify this turn against recorded decisions/gates/settings. "
 FLAG_PREFIX = "Decision watch: FLAG. "
 
+# WHY_MAX_LEN bounds the model's own `why` text before it is printed into the parent
+# session's transcript. That text is the judge model's summary of a diff built from
+# attacker-influenced content (the whole point of asking a model to read it), so it is
+# capped and control-character-stripped the same way `hooks/guard.py`'s own printed
+# reasons are (`cap_safe`), and wrapped so a reader can tell it is quoted, attributed
+# text describing the change, never this hook's own statement. Added against a reviewer
+# finding: an uncapped, unattributed `why` field is an open channel for whoever can land
+# text in a diff to steer what appears in the owner's transcript.
+WHY_MAX_LEN = 300
+
+
+def _safe_why(text):
+    """Return the model's `why` text, fit to print: control characters cleaned, length
+    bounded with a cut mark, whitespace collapsed. Never trusted as this hook's own
+    words."""
+    return guard.cap_safe(re.sub(r"\s+", " ", text or "").strip(), WHY_MAX_LEN)
+
 
 # ------------------------------------------------------------------ transcript walking
 #
@@ -478,38 +495,111 @@ JUDGE_INSTRUCTIONS = (
 )
 
 
-# THE ISOLATION, ADDED AFTER A REVIEWER FLAG. The evidence handed to the model is this
-# turn's diff text and chat text, and both are reachable by whoever can land text in a
-# diff or a message this repo carries. A prior version of this function ran `claude -p`
-# with no `--allowedTools`, no `--permission-mode`, and no `cwd`: omitting every
+# THE ISOLATION, ADDED AFTER A REVIEWER FLAG, THEN TIGHTENED TWICE MORE. The evidence
+# handed to the model is this turn's diff text and chat text, and both are reachable by
+# whoever can land text in a diff or a message this repo carries. A prior version of this
+# function ran `claude -p` with no restriction flag and no `cwd` at all: omitting every
 # restriction flag defaults to every tool, in this project's own directory, inheriting
-# whatever this project's own `.claude/settings.json` grants in `permissions.allow` at
-# the time, `Bash(gh pr merge:*)` included. An injected instruction in the diff could
-# have driven that nested, fully-tooled call to use a granted permission, then folded
-# whatever it read into the `why` field this hook prints back into the parent session: an
-# injection and exfiltration channel inside the guard built to catch exactly that class of
-# thing.
+# whatever this project's own `.claude/settings.json` grants in `permissions.allow` at the
+# time, `Bash(gh pr merge:*)` included. An injected instruction in the diff could have
+# driven that nested, fully-tooled call to use a granted permission, then folded whatever
+# it read into the `why` field this hook prints back into the parent session.
 #
-# Two independent layers now close it, on purpose, rather than one flag this function
-# alone must get right. `--allowedTools ""` is a positive, explicit empty allow set: the
-# model has no tool to reach for, never a deny list of names this repo would have to keep
-# growing. `_judge_isolation` then gives the call a `cwd` and a `CLAUDE_CONFIG_DIR` that
-# are neither this project. There is no `.claude/settings.json` there to inherit
-# `permissions.allow` from, and no `hooks/` wired to a Stop event there either, so a
-# nested call cannot fire this same hook at its own turn end: the isolation removes the
-# object a recursive call would need, rather than counting spawn depth the way
+# THE TOOL FLAG, VERIFIED AGAINST DOCUMENTATION RATHER THAN GUESSED. A first fix used
+# `--allowedTools ""`. `claude --help` documents a SEPARATE flag, `--tools`, whose help
+# text says plainly: `""` disables all tools, `"default"` uses all tools, or name specific
+# tools. `--allowedTools`'s own help text says only "list of tool names to allow" and says
+# nothing about what an empty value means, so resting a security control on an
+# undocumented parse of an empty string was not acceptable. This hook now passes
+# `--tools ""`, the documented empty-disables-all form, plus `--safe-mode`, documented to
+# disable every plugin, MCP server, hook, skill and custom command for the session, which
+# `--tools` alone does not claim to reach.
+#
+# WHAT COULD AND COULD NOT BE VERIFIED LIVE, 2026-09-22. Asked to confirm this empirically
+# by watching the model's own behavior, not by trusting a flag, this call was run for real
+# against a prompt built to use a tool if it could (`Read` a known file and quote it
+# back). It never reached that question: authentication itself failed first, in this
+# sandbox, with "OAuth session expired and could not be refreshed" -- and the SAME
+# failure, at the SAME stage, came back from a bare `claude -p "Say hello"` with NO
+# restriction flags and the real, un-isolated `CLAUDE_CONFIG_DIR`.
+# `CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH=1` in this environment says the host refreshes
+# the token for calls the host itself makes; a detached `subprocess.run` gets no such
+# refresh. So this sandbox cannot show whether tools are actually blocked at runtime, only
+# that a raw subprocess call cannot authenticate here at all, before tool permission is
+# ever evaluated. That result is UNKNOWN, not PASS, and is recorded as exactly that rather
+# than folded into a claim this fix was verified end to end. `--tools ""` is trusted here
+# because its documentation states the exact behavior needed, not because a live call
+# confirmed it.
+#
+# THE SAME TESTING DID CONFIRM, AND FIX, A REAL DEFECT. The first isolation attempt
+# pointed `CLAUDE_CONFIG_DIR` at an empty directory with nothing in it. Run for real, that
+# failed with "Not logged in", a DIFFERENT and earlier failure than the sandbox's own
+# auth-refresh ceiling above -- proof, not assumption, that wiping the config directory
+# also wipes the credential the subprocess needs to authenticate at all, on any machine,
+# not only this one. `_judge_isolation` now copies only `CREDENTIALS_FILENAME` into the
+# isolated directory, confirmed by the same test to move the failure from "Not logged in"
+# to the sandbox's own "OAuth session expired" ceiling: the credential is read, nothing
+# else about this project is.
+#
+# THE ENVIRONMENT, TIGHTENED AGAINST A SECOND REVIEWER PASS. `_judge_isolation` used to
+# build the child's environment by copying `os.environ` and overriding one key, so every
+# other variable passed through unfiltered: `CLAUDE_CODE_MESSAGING_SOCKET` and
+# `CLAUDE_CODE_MESSAGING_TOKEN` (the host IPC channel), `CLAUDE_CODE_HOST_SESSION_ID`,
+# `CLAUDE_CODE_OAUTH_SCOPES`, and `ANTHROPIC_API_KEY` when set. Copy-then-subtract cannot
+# be complete, the same shape `decisions/predicate-is-the-act.md` already names for a
+# shape list that can only grow. `JUDGE_ENV_ALLOWLIST` inverts it: the child's environment
+# holds only the named variables the runtime genuinely needs to execute and reach the API
+# host, built fresh, never copied from the parent and never carrying a name this list does
+# not say. A session authenticated by `ANTHROPIC_API_KEY` rather than the OAuth credential
+# file will see the isolated call fail closed, reported as UNKNOWN like any other model-
+# call failure, never silently allowed through with the key attached.
+#
+# WHAT REMAINS. `_judge_isolation`'s `cwd`/`CLAUDE_CONFIG_DIR` is the layer that does not
+# depend on any flag or env entry being right at all: there is no `.claude/settings.json`
+# there to inherit `permissions.allow` from, and no `hooks/` wired to a Stop event there
+# either, so a nested call cannot fire this same hook at its own turn end. That removes
+# the object a recursive call would need, rather than counting spawn depth the way
 # `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` counts `Task`-tool spawns (a raw `subprocess.run`
 # is neither a `Task` spawn nor governed by that cap).
+
+CREDENTIALS_FILENAME = ".credentials.json"
+
+# The only variables the judgment subprocess's environment is built from -- never a copy
+# of the parent's environment with entries removed. `PATH` to find the `claude` binary and
+# any interpreter it shells to. `SystemRoot`/`windir` because Windows subprocess creation
+# and DLL loading rely on them being present. `HOME`/`USERPROFILE`/`APPDATA`/
+# `LOCALAPPDATA`/`TEMP`/`TMP` because a Node-based CLI resolves its own cache, npm config,
+# and scratch files from them, on whichever of Windows/POSIX the host is running.
+# `ANTHROPIC_BASE_URL` because an organization behind a custom API endpoint needs it to
+# reach the right host at all; it names a destination, never a secret. Deliberately
+# absent: `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`,
+# `CLAUDE_CODE_HOST_SESSION_ID`, `CLAUDE_CODE_OAUTH_SCOPES`, and `ANTHROPIC_API_KEY`: the
+# host IPC channel, the session identifier, and a secret this call does not need to do its
+# one job of reading text and returning a verdict.
+JUDGE_ENV_ALLOWLIST = (
+    "PATH", "SystemRoot", "windir", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+    "TEMP", "TMP", "ANTHROPIC_BASE_URL",
+)
 
 
 def _judge_isolation():
     """Return (cwd, env) for the judgment subprocess: an empty directory that is not this
-    project, and a config directory that is not this project's, so there is nothing here
-    for a tool call to inherit or write into even if one somehow ran."""
+    project, holding only a copy of the login credential, and an environment built from
+    `JUDGE_ENV_ALLOWLIST` alone, never copied from this process's own environment, so
+    there is nothing here for a tool call to inherit, write into, or signal back to, even
+    if one somehow ran, and the call can still authenticate and reach the API host."""
     root = tempfile.mkdtemp(prefix="decision_watch_judge_")
-    env = dict(os.environ)
-    env["CLAUDE_CONFIG_DIR"] = os.path.join(root, "config")
-    os.makedirs(env["CLAUDE_CONFIG_DIR"], exist_ok=True)
+    config_dir = os.path.join(root, "config")
+    os.makedirs(config_dir, exist_ok=True)
+    real_config_dir = guard.config_dir()
+    creds = os.path.join(real_config_dir, CREDENTIALS_FILENAME)
+    if os.path.isfile(creds):
+        try:
+            shutil.copyfile(creds, os.path.join(config_dir, CREDENTIALS_FILENAME))
+        except Exception:
+            pass  # no credential to copy: the call below fails closed, as an auth error
+    env = {name: os.environ[name] for name in JUDGE_ENV_ALLOWLIST if name in os.environ}
+    env["CLAUDE_CONFIG_DIR"] = config_dir
     return root, env
 
 
@@ -528,7 +618,8 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT):
                 "claude", "-p", prompt,
                 "--model", model,
                 "--output-format", "json",
-                "--allowedTools", "",
+                "--tools", "",
+                "--safe-mode",
                 "--permission-mode", "plan",
             ],
             input="", capture_output=True, text=True, timeout=timeout,
@@ -538,7 +629,6 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT):
         return None, "model subprocess failed to start: %s" % exc
     finally:
         try:
-            import shutil
             shutil.rmtree(root, ignore_errors=True)
         except Exception:
             pass
@@ -645,7 +735,8 @@ def run(hook, model_call=invoke_model):
         return UNKNOWN_PREFIX + "the model judgment could not be completed (%s)." % error
     if verdict.get("verdict") == "FLAG":
         _mark_seen(session_id, key)
-        return FLAG_PREFIX + (verdict.get("why") or "unapproved change to a protected file.")
+        why = _safe_why(verdict.get("why") or "an unapproved change to a protected file")
+        return FLAG_PREFIX + 'the judge model reported: "%s"' % why
     return ""
 
 

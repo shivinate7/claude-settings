@@ -13,6 +13,7 @@ case spawns a real `claude` subprocess; one case asserts it is never even called
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -130,6 +131,31 @@ def case_flag_unapproved():
     message = dw.run(hook, model_call=stub({"verdict": "FLAG", "why": "reversed silently"}))
     check("flag_unapproved: non-empty systemMessage", bool(message), message)
     check("flag_unapproved: reads as FLAG", message.startswith(dw.FLAG_PREFIX), message)
+
+
+# --------------------------------------------------------------------------- case 1a
+# The model's `why` text is attacker-influenced (it is the judge's summary of a diff this
+# hook fed it) and is capped, control-character-stripped, and clearly attributed before it
+# reaches the parent session's transcript. Added against a reviewer finding that an
+# uncapped, unattributed `why` field was an open channel for whoever can land text in a
+# diff to steer what appears there.
+
+def case_why_field_is_sanitized():
+    repo = make_repo("why_field_sanitized")
+    write(os.path.join(repo, "CLAUDE.md"), "# Rules\n\nAlways X.\n")
+    commit_all(repo)
+    write(os.path.join(repo, "CLAUDE.md"), "# Rules\n\nAlways Y.\n")
+    records = [human_record("edit claude.md", T0), assistant_record(text="Done.")]
+    path = write_transcript(repo, records)
+    hook = {"transcript_path": path, "cwd": repo}
+
+    hostile_why = "line one\x07\x1b[31m" + ("PADDING " * 100) + "end"
+    message = dw.run(hook, model_call=stub({"verdict": "FLAG", "why": hostile_why}))
+
+    check("why_field: reads as FLAG", message.startswith(dw.FLAG_PREFIX), message)
+    check("why_field: attributed as the judge model's own words", "judge model reported" in message, message)
+    check("why_field: no control characters survive", "\x07" not in message and "\x1b" not in message, repr(message))
+    check("why_field: bounded length", len(message) < len(dw.FLAG_PREFIX) + dw.WHY_MAX_LEN + 60, len(message))
 
 
 # --------------------------------------------------------------------------- case 2
@@ -300,6 +326,42 @@ class _FakeCompletedProcess:
         self.stderr = stderr
 
 
+# --------------------------------------------------------------------------- case 9a
+# _judge_isolation copies the real login credential into the isolated config dir. Added
+# against a real, empirically found defect: an earlier version left the isolated config
+# dir empty, which a real run failed with "Not logged in" -- a DIFFERENT, earlier failure
+# than an expired-token error, proving the wipe took the credential down with it, on any
+# machine, not only a sandboxed one.
+
+def case_judge_isolation_copies_credentials():
+    fake_home_config = os.path.join(ROOT, "fake_home_config")
+    os.makedirs(fake_home_config, exist_ok=True)
+    creds_path = os.path.join(fake_home_config, dw.CREDENTIALS_FILENAME)
+    write(creds_path, '{"fake": "credential-content"}')
+
+    real_config_dir = dw.guard.config_dir
+    dw.guard.config_dir = lambda: fake_home_config
+    try:
+        judge_cwd, judge_env = dw._judge_isolation()
+    finally:
+        dw.guard.config_dir = real_config_dir
+
+    try:
+        copied = os.path.join(judge_env["CLAUDE_CONFIG_DIR"], dw.CREDENTIALS_FILENAME)
+        check("judge_isolation: credential file was copied in", os.path.isfile(copied), copied)
+        if os.path.isfile(copied):
+            with open(copied, "r", encoding="utf-8") as f:
+                check("judge_isolation: copied credential matches the real one",
+                      f.read() == '{"fake": "credential-content"}')
+        check(
+            "judge_isolation: isolated config dir is not the real one",
+            judge_env["CLAUDE_CONFIG_DIR"] != fake_home_config,
+            judge_env["CLAUDE_CONFIG_DIR"],
+        )
+    finally:
+        shutil.rmtree(judge_cwd, ignore_errors=True)
+
+
 def case_invoke_model_argv():
     captured = {}
 
@@ -324,7 +386,8 @@ def case_invoke_model_argv():
         "claude", "-p", "JUDGE THIS PROMPT",
         "--model", dw.MODEL,
         "--output-format", "json",
-        "--allowedTools", "",
+        "--tools", "",
+        "--safe-mode",
         "--permission-mode", "plan",
     ]
     print("invoke_model argv: %r" % argv)
@@ -344,6 +407,25 @@ def case_invoke_model_argv():
         "invoke_model_argv: CLAUDE_CONFIG_DIR differs from this process's own",
         env.get("CLAUDE_CONFIG_DIR") != os.environ.get("CLAUDE_CONFIG_DIR"),
         env.get("CLAUDE_CONFIG_DIR"),
+    )
+
+    # FIX 5: the env is built from JUDGE_ENV_ALLOWLIST alone, never os.environ copied and
+    # subtracted. Every allowed name that this process itself carries must survive, and
+    # the host-IPC/session/secret names must never appear, whether or not this process
+    # happens to carry them.
+    for name in dw.JUDGE_ENV_ALLOWLIST:
+        if name in os.environ:
+            check("invoke_model_argv: allowlisted %s carried through" % name, name in env, env)
+    excluded = (
+        "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+        "CLAUDE_CODE_HOST_SESSION_ID", "CLAUDE_CODE_OAUTH_SCOPES", "ANTHROPIC_API_KEY",
+    )
+    for name in excluded:
+        check("invoke_model_argv: %s is not in the isolated env" % name, name not in env, env.get(name))
+    check(
+        "invoke_model_argv: env holds only allowlisted names plus CLAUDE_CONFIG_DIR",
+        set(env) <= set(dw.JUDGE_ENV_ALLOWLIST) | {"CLAUDE_CONFIG_DIR"},
+        sorted(env),
     )
 
 
@@ -395,6 +477,7 @@ def case_main_stop_hook_active_stays_quiet():
 
 def main():
     case_flag_unapproved()
+    case_why_field_is_sanitized()
     case_allow_approved()
     case_outbound_alone_no_disk_change()
     case_missing_transcript()
@@ -402,6 +485,7 @@ def main():
     case_not_a_repo()
     case_model_failure()
     case_incident_cap_same_session()
+    case_judge_isolation_copies_credentials()
     case_invoke_model_argv()
     case_main_ordinary_turn()
     case_main_missing_transcript()
