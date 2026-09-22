@@ -74,3 +74,30 @@ config with no `SessionEnd` hook. It printed nothing against that same config
 with the hook put back.
 
 This entry is the fallback. The notice is the enforcement.
+
+## Both conditions are now met
+
+MEASURED, not re-derived.
+
+Condition 1, three-state liveness: landed in pull request #93. `hooks/guard.py`
+reads a process start time through `kernel32.OpenProcess` then
+`GetProcessTimes` on Windows. Unreadable reaches the caller as `None`. Both
+callers treat that as keep-or-refuse. Error 87 means dead. Error 5 means
+unreadable.
+
+Condition 2, a green Windows job: run 35766479009 on pull request #107, job
+106877189687. Conclusion success, 21 steps. Zero steps had a conclusion other
+than success. That run carried the guard suite, the guard mutation harness,
+the janitor sweep suite, and the janitor sweep mutation harness. The step list
+was checked through the GitHub API directly. The green is genuine, not
+`continue-on-error` reporting success over a failed step.
+
+The `SessionEnd` hook is restored in `settings.json`. It is recovered from its
+exact prior content in commit 2e2b708 and its parent. The "What re-arms it"
+section above stays as written. It is the argument this evidence answers, not
+a claim to revise.
+
+`janitor/test_session_end_sweep.py` has three budget-headroom arms. Each skips
+when `SessionEnd` is absent from `settings.json`. On main, with `SessionEnd`
+absent, the suite skips 3. On this branch, with the hook restored, the suite
+skips 0. All 27 tests pass.
