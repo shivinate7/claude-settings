@@ -1344,5 +1344,86 @@ class SteGatePreToolUseTests(unittest.TestCase):
         self.assert_allowed(run)
 
 
+class SourceProseLintTests(unittest.TestCase):
+    """Fixtures for ste_lint.py's source-prose mode: `Linter.check_source` lints only
+    the comments and docstrings of a .py or .sh file, never its code. The mode is off
+    by default; nothing here touches `check_text` or the Markdown path.
+
+    `check_source` picks its extractor from the `path` extension and never reads the
+    disk, so these fixtures pass inline text under a plain file name.
+    """
+
+    def check(self, path, text):
+        config = dict(ste_lint.DEFAULT_CONFIG)
+        linter = ste_lint.Linter(config)
+        return linter.check_source(path, text)
+
+    def test_68_semicolon_in_python_string_literal_not_reported(self):
+        text = 'CMD = "a; b"  # no problem on this line\n'
+        findings = self.check("sample.py", text)
+        self.assertNotIn("STE006", [f.code for f in findings])
+
+    def test_69_semicolon_in_python_comment_reported(self):
+        text = "# this comment holds a semicolon; and that trips the rule\n"
+        findings = self.check("sample.py", text)
+        self.assertIn("STE006", [f.code for f in findings])
+
+    def test_70_long_sentence_across_comment_lines_reported(self):
+        words = ["word"] * 30
+        text = "\n".join("# " + w for w in words) + "\n"
+        findings = self.check("sample.py", text)
+        self.assertIn("STE001", [f.code for f in findings])
+
+    def test_71_long_code_line_not_reported(self):
+        text = "x = " + " + ".join(["1"] * 40) + "  # ok\n"
+        findings = self.check("sample.py", text)
+        self.assertEqual([f.code for f in findings], [])
+
+    def test_72_reported_line_numbers_match_source(self):
+        text = (
+            "x = 1\n"
+            "# a short first comment line\n"
+            "# and this comment run keeps going to make the sentence long enough "
+            "that it holds more than twenty five words in total across these lines\n"
+        )
+        findings = self.check("sample.py", text)
+        lines = {f.line for f in findings}
+        self.assertIn("STE001", [f.code for f in findings])
+        self.assertNotIn(1, lines)
+        self.assertTrue(lines and lines.issubset({2, 3}))
+
+    def test_73_hash_inside_shell_quotes_is_not_a_comment(self):
+        # No unquoted '#' exists on this line. A scanner that finds '#' without
+        # tracking quote state would treat "b; c" as a comment body and report the
+        # semicolon. The quote-aware scanner must find no comment at all here.
+        text = 'VAR="a # b; c"\n'
+        findings = self.check("sample.sh", text)
+        self.assertEqual(findings, [])
+
+    def test_74_semicolon_in_shell_comment_reported(self):
+        text = "# this comment holds a semicolon; and that trips the rule\n"
+        findings = self.check("sample.sh", text)
+        self.assertIn("STE006", [f.code for f in findings])
+
+    def test_75_unknown_extension_falls_back_to_check_text(self):
+        text = "This sentence holds a semicolon; and that trips the rule.\n"
+        findings = self.check("notes.md", text)
+        self.assertIn("STE006", [f.code for f in findings])
+
+    def test_76_docstring_semicolon_reported_at_its_own_line(self):
+        text = (
+            "def f():\n"
+            '    """Summary line.\n'
+            "\n"
+            "    This body line holds a semicolon; and should be reported here.\n"
+            '    """\n'
+            "    return 1\n"
+        )
+        findings = self.check("sample.py", text)
+        matches = [f for f in findings if f.code == "STE006"]
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0].line, 4)
+
+
 if __name__ == "__main__":
     unittest.main()
