@@ -73,9 +73,11 @@ def make_blind_git(folder):
     """A `git` stand-in that fails to answer everything, the same trick
     janitor/test_sweep.py's own make_blind_git uses, kept local to this file.
 
-    Writes a POSIX `git` script and a Windows `git.cmd` sibling. PATHEXT resolution
-    only looks at `.cmd` and similar, so a bare, extensionless `git` file never shadows
-    `git.exe` there. Both must exist so the shadowing works on either platform."""
+    Writes a POSIX `git` script and a Windows `git.cmd` sibling. The sibling only
+    shadows a shell-form call. A list-form `subprocess.run(["git", ...])` never reaches
+    it on Windows, because CreateProcess appends only `.exe` when it resolves a bare
+    command from a list. See decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md
+    for the measurement. Both files stay here for parity with the POSIX arm."""
     os.makedirs(folder, exist_ok=True)
     script = os.path.join(folder, "git")
     write(script, "#!/bin/sh\necho 'blind git: no answer' >&2\nexit 128\n")
@@ -189,6 +191,12 @@ class RefusesALinkedWorktree(unittest.TestCase):
 class RefusesWhenWorktreeStatusIsUnreadable(unittest.TestCase):
     """Same conservative direction as a linked worktree, when the read itself fails."""
 
+    @unittest.skipIf(
+        os.name == "nt",
+        "Windows CreateProcess resolves a list-form subprocess call by appending "
+        "only .exe, so this PATH-shadowing git.cmd stand-in is never reached. "
+        "See decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md.",
+    )
     def test_unreadable_worktree_status_refuses_too(self):
         repo = os.path.join(ROOT, "unreadable_repo")
         make_repo(repo)

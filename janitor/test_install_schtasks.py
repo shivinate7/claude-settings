@@ -68,8 +68,13 @@ def run_installer(args, env_extra=None):
 
 
 def make_blind_git(folder):
-    """A `git` (and `git.cmd`, for Windows PATHEXT) stand-in that fails to answer everything,
-    the same trick janitor/test_sweep.py's own make_blind_git uses, kept local to this file."""
+    """A `git` (and `git.cmd`, for a shell-form call) stand-in that fails to answer
+    everything. It is the same trick janitor/test_sweep.py's own make_blind_git uses,
+    kept local to this file.
+
+    A list-form `subprocess.run(["git", ...])` never reaches `git.cmd` on Windows,
+    because CreateProcess appends only `.exe` when it resolves a bare command from a
+    list. See decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md."""
     os.makedirs(folder, exist_ok=True)
     script = os.path.join(folder, "git")
     write(script, "#!/bin/sh\necho 'blind git: no answer' >&2\nexit 128\n")
@@ -188,6 +193,12 @@ class RefusesALinkedWorktree(unittest.TestCase):
 class RefusesWhenWorktreeStatusIsUnreadable(unittest.TestCase):
     """Same conservative direction as a linked worktree, when the read itself fails."""
 
+    @unittest.skipIf(
+        os.name == "nt",
+        "Windows CreateProcess resolves a list-form subprocess call by appending "
+        "only .exe, so this PATH-shadowing git.cmd stand-in is never reached. "
+        "See decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md.",
+    )
     def test_unreadable_worktree_status_refuses_too(self):
         repo = os.path.join(ROOT, "unreadable_repo")
         make_repo(repo)
