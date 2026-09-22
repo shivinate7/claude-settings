@@ -37,23 +37,19 @@ guard.py grew since that run: the live-stream rule, the waiter rule (Rule 9),
 the REDIRECTION strip in git_calls, and the Decision 7 config-edit log line.
 """
 
-import hashlib
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
-from concurrent.futures import ThreadPoolExecutor
+
+import mutate_shared
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GUARD = os.path.join(HERE, "guard.py")
 SUITE = os.path.join(HERE, "test_guard.py")
 WATCH = os.path.join(HERE, "config_watch.py")
 WATCH_SUITE = os.path.join(HERE, "test_config_watch.py")
-
-# How many red lines a wrong cause prints before it stops. A wrong cause usually carries one or
-# two, and the bound keeps a mutation that breaks half the suite from burying the rest of the run.
-WRONG_CAUSE_LINES_SHOWN = 10
 
 # A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
 # every mutation written before the watch existed reads unchanged.
@@ -608,22 +604,6 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str):
     return result.returncode, red
 
 
-def safe_name(label: str) -> str:
-    """Turn a mutation label into a filesystem stem that stays unique, even case-insensitively.
-
-    MEASURED: two real labels here differ only in the case of one letter. One reads "-D",
-    the other reads "-d", inside the branch-delete flags. The old alnum-to-underscore
-    mapping kept letter case. Both then produced the identical name on a case-insensitive
-    filesystem (Windows). One file. One config directory. Two mutant runs raced to write it.
-    The digest covers the exact label text. It does not depend on letter case. It does not
-    depend on where the mutation sits in MUTATIONS. Two different labels collide here only
-    if their digests also collide.
-    """
-    base = "".join(ch if ch.isalnum() else "_" for ch in label)[:60]
-    digest = hashlib.sha1(label.encode("utf-8")).hexdigest()[:8]
-    return "%s_%s" % (base, digest)
-
-
 def mutation_parts(entry):
     """Return (label, old, new, target, required, only_on) for one mutation.
 
@@ -648,49 +628,30 @@ def mutation_parts(entry):
     return label, old, new, target, required, only_on
 
 
-def skip_reason(only_on):
-    """Return why a mutation marked `only_on` does not run on this platform, or None to run it."""
-    if only_on is None:
-        return None
-    here = "windows" if sys.platform.startswith("win") else "posix"
-    if only_on == here:
-        return None
-    return "%s-only, this platform is %s" % (only_on, here)
-
-
 def run_mutant(sources, work: str, entry):
     """Apply one mutation, run its suite against it, and return (label, code, FAIL lines,
     required, skip).
 
     `required` is the case name (or a distinctive fragment of it) the caller must find among the
-    FAIL lines before trusting this mutant's death: see the verdict loop in `main`. `skip`, when
-    not None, is why this mutant did not run on this platform at all: the caller reports it and
-    counts it as neither killed, survived, nor wrong cause.
+    FAIL lines before trusting this mutant's death: see `mutate_shared.report_verdict`. `skip`,
+    when not None, is why this mutant did not run on this platform at all: the caller reports it
+    and counts it as neither killed, survived, nor wrong cause.
     """
     label, old, new, target, required, only_on = mutation_parts(entry)
     if required is None:
         raise ValueError("mutation carries no required case name: %s" % label)
-    skip = skip_reason(only_on)
+    skip = mutate_shared.skip_reason(only_on)
     if skip:
         return label, None, [], required, skip
     _path, suite, variable, stem = TARGETS[target]
     mutated = sources[target].replace(old, new, 1)
-    copy_path = os.path.join(work, "%s_%s.py" % (stem, safe_name(label)))
+    copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(label)))
     with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(mutated)
-    config_dir = os.path.join(work, "cfg_%s" % safe_name(label))
+    config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(label))
     os.makedirs(config_dir, exist_ok=True)
     code, red = run_suite(suite, variable, copy_path, config_dir)
     return label, code, red, required, None
-
-
-def job_count() -> int:
-    """How many suites to run at once: MUTATE_JOBS, else the CPU count, at least one."""
-    try:
-        wanted = int(os.environ.get("MUTATE_JOBS", "") or 0)
-    except ValueError:
-        wanted = 0
-    return max(1, wanted or os.cpu_count() or 1)
 
 
 def main() -> int:
@@ -724,7 +685,7 @@ def main() -> int:
             return 1
 
         _tpath, _tsuite, _tvariable, stem = TARGETS[target]
-        safed = safe_name(label)
+        safed = mutate_shared.safe_name(label)
         # Two different entries land here. The same entry never returns twice. `index` marks
         # identity, not `label`. A literal duplicate label is still caught. That case is worse
         # than a case-only match, and the check treats it as a real collision, not a repeat
@@ -751,45 +712,9 @@ def main() -> int:
     with open(os.path.join(work, "guard.py"), "w", encoding="utf-8", newline="\n") as handle:
         handle.write(sources["guard"])
 
-    survivors = 0
-    wrong_cause = 0
-    skipped = 0
-    jobs = job_count()
-    print("%d mutations, %d at a time" % (len(MUTATIONS), jobs))
     try:
-        with ThreadPoolExecutor(max_workers=jobs) as pool:
-            results = pool.map(lambda entry: run_mutant(sources, work, entry), MUTATIONS)
-            for label, code, red, required, skip in results:
-                if skip:
-                    skipped += 1
-                    print("SKIPPED     %-62s %s" % (label, skip), flush=True)
-                elif code == 0 or not red:
-                    survivors += 1
-                    print("SURVIVED    %-62s %2d red" % (label, len(red)), flush=True)
-                elif not any(required in line for line in red):
-                    wrong_cause += 1
-                    print("WRONG CAUSE %-62s %2d red, missing %r" % (
-                        label, len(red), required), flush=True)
-                    # The lines it DID see, never the count alone. A wrong cause says the suite
-                    # went red somewhere else, and the count says nothing about where. MEASURED
-                    # on real Windows CI, run 35678689541: this mutant reported "1 red" and
-                    # nothing more. Nobody could tell which case broke.
-                    # decisions/branch-delete-wrong-cause-was-a-filename-collision.md was written
-                    # against that gap. A bounded print is the difference between one CI run
-                    # and a guessing round.
-                    for line in red[:WRONG_CAUSE_LINES_SHOWN]:
-                        print("            saw: %s" % line.strip(), flush=True)
-                    if len(red) > WRONG_CAUSE_LINES_SHOWN:
-                        print("            saw: ... and %d more" % (
-                            len(red) - WRONG_CAUSE_LINES_SHOWN), flush=True)
-                else:
-                    print("KILLED      %-62s %2d red" % (label, len(red)), flush=True)
-        print()
-        ran = len(MUTATIONS) - skipped
-        killed = ran - survivors - wrong_cause
-        print("%d of %d mutations killed (%d survived, %d wrong cause, %d skipped)" % (
-            killed, ran, survivors, wrong_cause, skipped))
-        return 1 if (survivors or wrong_cause) else 0
+        return mutate_shared.run_mutants(
+            MUTATIONS, lambda entry: run_mutant(sources, work, entry))
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

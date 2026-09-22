@@ -65,10 +65,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
+import mutate_shared  # noqa: E402
+
 SWEEP = os.path.join(HERE, "sweep.py")
 SUITE = os.path.join(HERE, "test_sweep.py")
 GUARD = os.path.join(REPO_ROOT, "hooks", "guard.py")
@@ -444,10 +446,6 @@ MUTATIONS = [
 ]
 
 
-def safe_name(label: str) -> str:
-    return "".join(ch if ch.isalnum() else "_" for ch in label)[:60]
-
-
 def mutation_parts(entry):
     """Return (label, target, old, new, required, only_on) for one mutation, enforcing the
     fifth field the same way hooks/mutate_guard.py's mutation_parts does: a mutation with no
@@ -465,17 +463,6 @@ def mutation_parts(entry):
     if not required:
         raise ValueError("mutation carries no required case name: %s" % label)
     return label, target, old, new, required, only_on
-
-
-def skip_reason(only_on):
-    """Return why a mutation marked `only_on` does not run on this platform, or None to run it.
-    Same rule hooks/mutate_guard.py's own skip_reason applies."""
-    if only_on is None:
-        return None
-    here = "windows" if sys.platform.startswith("win") else "posix"
-    if only_on == here:
-        return None
-    return "%s-only, this platform is %s" % (only_on, here)
 
 
 def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_text: str):
@@ -543,11 +530,11 @@ def run_mutant(sources, work: str, index: int, entry):
     proving case cannot be driven here (see `skip_reason`). The caller reports it and counts it
     as neither killed, survived, nor wrong cause."""
     label, target, old, new, required, only_on = mutation_parts(entry)
-    skip = skip_reason(only_on)
+    skip = mutate_shared.skip_reason(only_on)
     if skip:
         return label, None, [], required, skip
     mutated_text = sources[target].replace(old, new, 1)
-    scaffold = os.path.join(work, "m_%03d_%s" % (index, safe_name(label)))
+    scaffold = os.path.join(work, "m_%03d_%s" % (index, mutate_shared.safe_name(label)))
     config_dir = os.path.join(scaffold, "cfg")
     os.makedirs(config_dir, exist_ok=True)
     try:
@@ -557,16 +544,6 @@ def run_mutant(sources, work: str, index: int, entry):
         return label, code, red, required, None
     finally:
         shutil.rmtree(scaffold, ignore_errors=True)
-
-
-def job_count() -> int:
-    """How many suites to run at once: MUTATE_JOBS, else the CPU count, at least one. Same
-    knob hooks/mutate_guard.py exposes, kept under the same name for one reader to know both."""
-    try:
-        wanted = int(os.environ.get("MUTATE_JOBS", "") or 0)
-    except ValueError:
-        wanted = 0
-    return max(1, wanted or os.cpu_count() or 1)
 
 
 def main() -> int:
@@ -593,37 +570,10 @@ def main() -> int:
             return 1
 
     work = tempfile.mkdtemp(prefix="mutate_sweep_")
-    survivors = 0
-    wrong_cause = 0
-    skipped = 0
-    jobs = job_count()
-    print("%d mutations, %d at a time" % (len(MUTATIONS), jobs))
     try:
-        with ThreadPoolExecutor(max_workers=jobs) as pool:
-            futures = [
-                pool.submit(run_mutant, sources, work, i, entry)
-                for i, entry in enumerate(MUTATIONS)
-            ]
-            for future in futures:
-                label, code, red, required, skip = future.result()
-                if skip:
-                    skipped += 1
-                    print("SKIPPED     %-62s %s" % (label, skip), flush=True)
-                elif code == 0 or not red:
-                    survivors += 1
-                    print("SURVIVED    %-62s %2d red" % (label, len(red)), flush=True)
-                elif not any(required in line for line in red):
-                    wrong_cause += 1
-                    print("WRONG CAUSE %-62s %2d red, missing %r" % (
-                        label, len(red), required), flush=True)
-                else:
-                    print("KILLED      %-62s %2d red" % (label, len(red)), flush=True)
-        print()
-        ran = len(MUTATIONS) - skipped
-        killed = ran - survivors - wrong_cause
-        print("%d of %d mutations killed (%d survived, %d wrong cause, %d skipped)" % (
-            killed, ran, survivors, wrong_cause, skipped))
-        return 1 if (survivors or wrong_cause) else 0
+        return mutate_shared.run_mutants(
+            list(enumerate(MUTATIONS)),
+            lambda item: run_mutant(sources, work, item[0], item[1]))
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
