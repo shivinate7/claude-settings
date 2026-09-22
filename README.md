@@ -260,7 +260,7 @@ errors often, and a background command with a completion notice does the same jo
 
 12. Shared trees, `stash`/`reset`/`restore`: **judge the act, not the subcommand name.** `git stash list` and `git stash show` read and always allow. `git stash apply` and `git stash pop` allow: they put work back, and git refuses to overwrite a modified file rather than clobber it (MEASURED against a real conflicting change, 2026-09-17). `git stash`, `stash push`, and `stash save` keep the deny-or-ask split, because git does not refuse them and the moved work leaves the working tree. `stash drop` and `stash clear` keep deny-or-ask: they destroy stashed work with no way back. `git reset` allows with no flag, `--soft`, `--mixed`, `--keep`, `--merge`, or a pathspec. None of these can lose an uncommitted change. MEASURED the same day. A bare reset and `--soft` leave the working tree file untouched. `--keep` and `--merge` abort with "Entry not up to date" against a modified file, rather than overwrite it. A path-scoped reset touches only the index, and git itself refuses to combine `--hard` with a path. `git reset --hard` keeps deny-or-ask: it rewrites the working tree unconditionally. MEASURED: an uncommitted line was gone after it. `git restore --staged` alone allows: it writes only the index (MEASURED: an uncommitted line survived). `git restore` with neither flag, with `--worktree`, or with both, keeps deny-or-ask: the working tree is the default write target, and MEASURED runs of each form lost the uncommitted line. Reason: the guard denied `git stash list`, a read, and the owner's `git stash apply stash@{0} 2>&1 | tail -10`, which puts work back, because `shared_tree_hit` matched the subcommand name alone. The same defect, one name standing in for every act under it, had already produced the `pkill` false positive and the conflict-side checkout fix (Decision 9, Decision 10). This closes the third instance for `stash`, `reset`, and `restore` together, table above.
 
-13. The orchestrator and product code: **judge the act, not the file.** This session writes records, docs, and briefs. Building goes to a lane, with one exception: a small fix, under 10 lines, named in the report. Reason, measured here: "It never edits product code" read as a file test. It blocked a decision entry, which is orchestration, and charged a whole lane for one comment.
+13. The orchestrator and product code: **judge the act, not the file.** This session writes records, docs, and briefs. Building goes to a lane, with one exception: a small fix, under 10 lines, named in the report. Reason, measured here: "It never edits product code" read as a file test. It blocked a decision entry, which is orchestration, and charged a whole lane for one comment. Superseded by Decision 16.
 14. Setting work aside: **commit it, never stash it.** A lane that must park uncommitted work makes a commit on its own branch. Reason: a stash entry belongs to no branch. Only the session that holds the tag can find it again, and that session can die. The work is then unreachable in a tree where the next reader sees an empty stack. A commit survives the session, pushes with the branch, and any reader of the branch can see it. This states the remedy the guard already owed: `git stash push` is denied in a shared checkout (Decision 12), and the refusal now names the commit as the way out.
 
 15. Shared trees, the subject: **read it before you refuse over
@@ -338,6 +338,16 @@ In the clean tree, `git reset --hard HEAD~1`, `origin/main`, and a raw sha each 
   the measurement above told them apart. No number is claimed here. The
   entry is a slug, and the number waits for merge (CLAUDE.md: never allocate
   a numbered record on a branch).
+
+16. The orchestrator and building: **judge the verdict, not the line count.** Supersedes 13.
+This session builds when the change cannot move a verdict and one bounded command proves it.
+The report names both. A change that touches a rule's behaviour, a gate's verdict, or product
+code a reviewer must see goes to a lane, at any size. A 40-line ceiling stays, against reading
+cost alone. Reason, measured 2026-09-22: the size test called an 11-line deletion a borderline
+deviation, and that deletion disarmed a machine-wide reaper. The same test would have passed
+one flipped comparison in the liveness read, unreviewed. That is the defect this repository
+spent two days fixing. Full record:
+`decisions/the-orchestrator-builds-by-verdict-not-by-line-count.md`.
 
 Every deny or ask appends one line to `~/.claude/guard.log`: timestamp, tool,
 decision, rule, and the matched text cut at 120 characters. Allows are never
