@@ -24,6 +24,13 @@ inputs:
       a generated file the linter should never see.
     required: false
     default: ""
+  changed_paths:
+    description: >
+      Pathspec passed to `git diff --name-only` when scope is 'changed', selecting which
+      changed files count. Same style as 'paths'. The default keeps today's Markdown-only
+      behavior for every existing caller.
+    required: false
+    default: "*.md"
 runs:
   using: composite
   steps:
@@ -38,6 +45,7 @@ runs:
         FAIL: ${{ inputs.fail }}
         PATHS_GLOB: ${{ inputs.paths }}
         EXCLUDE: ${{ inputs.exclude }}
+        CHANGED_PATHS_GLOB: ${{ inputs.changed_paths }}
       run: |
         set -euo pipefail
         # Needs actions/checkout with fetch-depth 0: scope 'changed' diffs against the
@@ -84,10 +92,10 @@ runs:
           fi
           while IFS= read -r f; do
             [ -n "$f" ] && RAW_FILES+=("$f")
-          done < <(git diff --name-only --diff-filter=AMR "$RANGE" -- '*.md')
+          done < <(git diff --name-only --diff-filter=AMR "$RANGE" -- "$CHANGED_PATHS_GLOB")
           while IFS= read -r f; do
             [ -n "$f" ] && FILES+=("$f")
-          done < <(git diff --name-only --diff-filter=AMR "$RANGE" -- '*.md' "${EXCLUDE_PATHSPECS[@]}")
+          done < <(git diff --name-only --diff-filter=AMR "$RANGE" -- "$CHANGED_PATHS_GLOB" "${EXCLUDE_PATHSPECS[@]}")
         fi
 
         # In-script fallback: a caller that passes a plain glob (no ':(exclude)' magic
