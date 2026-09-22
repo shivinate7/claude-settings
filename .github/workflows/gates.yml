@@ -197,8 +197,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: python hooks/test_guard.py
 
+      # 39m12s of this job's 46m50s. The gates job's own Guard mutation harness
+      # (16m47s, Linux) still runs on every pull request and catches almost every
+      # mutation regression, so a pull request keeps that signal. Accepted risk: a
+      # Windows-only mutation regression is now caught after merge, not before.
       - name: Guard mutation harness
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name != 'pull_request' }}
         run: python hooks/mutate_guard.py
 
       - name: Janitor sweep fixture suite
