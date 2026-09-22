@@ -19,6 +19,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from ste_gate import last_reply  # noqa: E402
+from _transcript import is_last_human, tool_uses  # noqa: E402
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
@@ -64,30 +65,7 @@ BLOCK_REASON_PREFIX_OK = (
 )
 
 
-def is_last_human(rec):
-    if rec.get("type") != "user":
-        return False
-    if rec.get("isSidechain"):
-        return False
-    msg = rec.get("message") or {}
-    content = msg.get("content")
-    if isinstance(content, str):
-        return True
-    if isinstance(content, list):
-        has_text = any(isinstance(b, dict) and b.get("type") == "text" for b in content)
-        has_tool_result = any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content)
-        return has_text and not has_tool_result
-    return False
-
-
-def tool_uses(rec):
-    msg = rec.get("message") or {}
-    content = msg.get("content")
-    if not isinstance(content, list):
-        return
-    for b in content:
-        if isinstance(b, dict) and b.get("type") == "tool_use":
-            yield b
+# is_last_human and tool_uses live in lint/_transcript.py, imported above.
 
 
 def _segment_lands_a_git_write(segment):
