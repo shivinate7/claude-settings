@@ -31,14 +31,43 @@ It answers the cheap part itself. `git status` against HEAD, scoped to this
 turn by mtime the same way `lint/md_sweep.py` already does, gives the files
 this turn touched. A broad keyword net over each path decides whether a file
 looks protected, plus `guard.is_settings_file` for the one case with a real
-constant to import. The same net runs over this turn's outbound
-`SendMessage`/`Task` calls. That is how the fifth flag shape stays caught
-with no file edit at all.
+constant to import.
 
-When nothing looks protected, the hook prints nothing and never spawns a
-model. When something does, it runs `claude -p` with no tools. It hands
-that call the diff, or the new file's text, and the chat text directly.
-It asks for the same ALLOW/FLAG judgment the old prompt asked for.
+When nothing on disk looks protected, the hook prints nothing and never
+spawns a model. When something does, it runs `claude -p` with no tools. It
+hands that call the diff, or the new file's text, and the chat text
+directly. It asks for the same ALLOW/FLAG judgment the old prompt asked for.
+
+## The gate, corrected against an independent audit
+
+An earlier version of this hook also spawned a model call on an outbound
+`SendMessage`/`Task` alone, with no matching disk change. That was meant to
+catch the fifth flag shape above. An independent audit of all 34 historical
+flags found that shape gave a false positive of its own. A peer was told to
+act on something that had not run yet. Two more of the audit's three false
+positives shared the same root cause. A role question, and a probe of a
+scratch copy, neither one a write to the real protected path.
+
+The gate now reads: an ACTUAL on-disk change to a protected path, full
+stop. An outbound message can still enrich the evidence once a real change
+already triggered the call. It cannot trigger the call by itself. Being
+told to do something is not the act this hook exists to catch. Doing it is.
+
+## The per-incident, per-session cap
+
+The same audit found 34 raw flags collapsing to 8 real incidents. One
+unresolved finding was re-flagged at every Stop while the owner had not yet
+answered, ten times in one case. `decisions/guard-that-cries-wolf-is-
+spent.md` names this shape. A guard that fires when nothing new is wrong is
+spent.
+
+`hooks/decision_watch.py` now hashes the protected paths plus their
+evidence into one incident key. It persists seen keys per session under
+`<config dir>/state/decision-watch/`, the same frozen `state` subtree
+`hooks/config_watch.py` already uses. A finding already flagged this
+session, with unchanged evidence, stays quiet at the next Stop. A finding
+whose evidence moved further is a new incident, and is reported once more.
+This cap never applies to an UNKNOWN read, which is always reported again.
 
 ## What stayed the same
 

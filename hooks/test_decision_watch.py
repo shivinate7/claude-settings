@@ -83,15 +83,26 @@ def write_transcript(repo, records):
 T0 = "2026-09-22T10:00:00.000Z"
 
 
-def never_called(*_args, **_kwargs):
-    FAILED.append("model_call was invoked when it should not have been")
-    return None, "model_call should not have been invoked"
+class Spy:
+    """A model_call stub that counts its own invocations, so a case can assert zero calls
+    without scanning shared failure text for another case's message."""
+
+    def __init__(self, verdict_dict=None, error="model_call should not have been invoked"):
+        self.calls = 0
+        self.verdict_dict = verdict_dict
+        self.error = error
+
+    def __call__(self, prompt, model=None, timeout=None):
+        self.calls += 1
+        return self.verdict_dict, self.error
+
+
+def never_called():
+    return Spy()
 
 
 def stub(verdict_dict, error=None):
-    def _call(prompt, model=None, timeout=None):
-        return verdict_dict, error
-    return _call
+    return Spy(verdict_dict, error)
 
 
 def check(name, condition, detail=""):
@@ -140,10 +151,13 @@ def case_allow_approved():
 
 
 # --------------------------------------------------------------------------- case 3
-# No file changed at all, but an outbound SendMessage instructs a peer to delete a rule.
+# No file changed at all, only an outbound SendMessage instructing a peer to delete a
+# rule that has not executed yet. Corrected by the independent audit: this shape alone
+# produced a false positive, so it must not gate a model call by itself. Silent, and the
+# model is never even called.
 
-def case_outbound_only():
-    repo = make_repo("outbound_only")
+def case_outbound_alone_no_disk_change():
+    repo = make_repo("outbound_alone")
     write(os.path.join(repo, "notes.txt"), "unrelated\n")
     commit_all(repo)
     tool_use = {
@@ -160,9 +174,10 @@ def case_outbound_only():
     ]
     path = write_transcript(repo, records)
     hook = {"transcript_path": path, "cwd": repo}
-    message = dw.run(hook, model_call=stub({"verdict": "FLAG", "why": "peer told to delete a gate rule"}))
-    check("outbound_only: non-empty systemMessage", bool(message), message)
-    check("outbound_only: reads as FLAG", message.startswith(dw.FLAG_PREFIX), message)
+    spy = never_called()
+    message = dw.run(hook, model_call=spy)
+    check("outbound_alone_no_disk_change: silent", message == "", message)
+    check("outbound_alone_no_disk_change: model never called", spy.calls == 0)
 
 
 # --------------------------------------------------------------------------- case 4
@@ -171,7 +186,7 @@ def case_outbound_only():
 def case_missing_transcript():
     repo = make_repo("missing_transcript")
     hook = {"transcript_path": os.path.join(repo, "does-not-exist.jsonl"), "cwd": repo}
-    message = dw.run(hook, model_call=never_called)
+    message = dw.run(hook, model_call=never_called())
     check("missing_transcript: reads as UNKNOWN", message.startswith(dw.UNKNOWN_PREFIX), message)
     check("missing_transcript: not silent", message != "", message)
     check("missing_transcript: not a flag", not message.startswith(dw.FLAG_PREFIX), message)
@@ -192,9 +207,10 @@ def case_ordinary_turn():
     ]
     path = write_transcript(repo, records)
     hook = {"transcript_path": path, "cwd": repo}
-    message = dw.run(hook, model_call=never_called)
+    spy = never_called()
+    message = dw.run(hook, model_call=spy)
     check("ordinary_turn: silent", message == "", message)
-    check("ordinary_turn: model never called", "model_call was invoked" not in FAILED)
+    check("ordinary_turn: model never called", spy.calls == 0)
 
 
 # --------------------------------------------------------------------------- case 6
@@ -206,7 +222,7 @@ def case_not_a_repo():
     records = [human_record("hi", T0)]
     path = write_transcript(plain, records)
     hook = {"transcript_path": path, "cwd": plain}
-    message = dw.run(hook, model_call=never_called)
+    message = dw.run(hook, model_call=never_called())
     check("not_a_repo: reads as UNKNOWN", message.startswith(dw.UNKNOWN_PREFIX), message)
     check("not_a_repo: not silent", message != "", message)
 
@@ -229,14 +245,56 @@ def case_model_failure():
     check("model_failure: not a flag", not message.startswith(dw.FLAG_PREFIX), message)
 
 
+# --------------------------------------------------------------------------- case 8
+# The same unresolved finding, in the same session, at a second Stop with nothing
+# changed further: the first Stop flags it, the second stays quiet. A third Stop, after
+# the file moves further, flags again. Isolates CLAUDE_CONFIG_DIR to a scratch dir so the
+# per-session store never touches a real one.
+
+def case_incident_cap_same_session():
+    repo = make_repo("incident_cap")
+    write(os.path.join(repo, "decisions", "cap-rule.md"), "# A rule\n\nAlways check X.\n")
+    commit_all(repo)
+    write(os.path.join(repo, "decisions", "cap-rule.md"), "# A rule\n\nNever check X.\n")
+    records = [
+        human_record("fix the typo elsewhere", T0),
+        assistant_record(text="Also flipped the cap rule while in there."),
+    ]
+    path = write_transcript(repo, records)
+    hook = {"transcript_path": path, "cwd": repo, "session_id": "same-session-abc"}
+
+    scratch_cfg = os.path.join(ROOT, "cfg_incident_cap")
+    os.makedirs(scratch_cfg, exist_ok=True)
+    prior = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = scratch_cfg
+    try:
+        first = dw.run(hook, model_call=stub({"verdict": "FLAG", "why": "unresolved"}))
+        check("incident_cap: first Stop flags", first.startswith(dw.FLAG_PREFIX), first)
+
+        second_spy = never_called()
+        second = dw.run(hook, model_call=second_spy)
+        check("incident_cap: second Stop, same finding, silent", second == "", second)
+        check("incident_cap: second Stop never calls the model", second_spy.calls == 0)
+
+        write(os.path.join(repo, "decisions", "cap-rule.md"), "# A rule\n\nNever check X or Y.\n")
+        third = dw.run(hook, model_call=stub({"verdict": "FLAG", "why": "moved further"}))
+        check("incident_cap: finding that moved further flags again", third.startswith(dw.FLAG_PREFIX), third)
+    finally:
+        if prior is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = prior
+
+
 def main():
     case_flag_unapproved()
     case_allow_approved()
-    case_outbound_only()
+    case_outbound_alone_no_disk_change()
     case_missing_transcript()
     case_ordinary_turn()
     case_not_a_repo()
     case_model_failure()
+    case_incident_cap_same_session()
 
     if FAILED:
         print("test_decision_watch FAIL: %d failing check(s)" % len(FAILED))

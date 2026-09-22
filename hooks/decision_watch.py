@@ -29,10 +29,18 @@ order"/"rule"/"policy" name) has no such constant to import, because no code in 
 defines what a gate or a build-order file IS. That half stays a deliberately broad keyword
 match: a triage filter that decides whether to spend a model call, never the verdict
 itself, so a false positive costs one subprocess call and a false negative skips judgment
-entirely. `looks_concerning` runs the same keyword net over this turn's outbound
-`SendMessage`/`Task` calls, paired with an action word (delete, remove, weaken, ...),
-because one of the 34 measured flags carried no local file edit at all: a message telling a
-peer session to remove a rule from a skill file.
+entirely.
+
+THE GATE, CORRECTED 2026-09-22 AGAINST AN INDEPENDENT AUDIT. An earlier version of this
+hook also spent a model call on an outbound `SendMessage`/`Task` alone, with no matching
+disk change, to catch one measured flag with no local file edit: a message telling a peer
+session to remove a rule from a skill file. The audit of all 34 historical flags found
+that shape produced a false positive of its own (a peer instructed to do something that
+had not yet executed), and named the same shape in two more of the three false positives
+(a role question, and a probe of a scratch copy rather than the real file). `run` now
+gates every model call on `protected`, an ACTUAL on-disk change to a protected path,
+full stop. `looks_concerning`'s outbound scan still runs, but only to enrich the evidence
+a real change already triggered on, never to trigger by itself.
 
 WHEN NOTHING PROTECTED IS TOUCHED. No model call. Print nothing. Exit 0. This is the common
 case and it must stay fast: a `git status` and a scan of records already read for other
@@ -46,17 +54,29 @@ for, on the same criteria: additive or consistent, or surfaced as a question and
 is ALLOW; silently changed, weakened, removed, or reversed with no visible approval is
 FLAG.
 
+THE PER-INCIDENT, PER-SESSION CAP, ADDED 2026-09-22. The same audit found 34 raw flags
+collapsing to 8 real incidents: one unresolved finding re-flagged at every Stop while the
+owner had not yet answered, ten times in one case. `decisions/guard-that-cries-wolf-is-
+spent.md` names this exact shape. `incident_key` hashes the protected paths plus their
+evidence; `_load_seen`/`_mark_seen` persist that hash per session under
+`<config dir>/state/decision-watch/`, the same frozen `state` subtree
+`hooks/config_watch.py` already uses for its own baseline. A finding already flagged this
+session, with unchanged evidence, stays quiet. A finding whose evidence moved is a new
+incident and is reported once more.
+
 UNKNOWN IS A FIRST-CLASS OUTPUT. Per CLAUDE.md's Verification rule, a read that could not
 run is reported as unknown, never as clear and never as a flag. `transcript_path` missing
 or unreadable, `git` unavailable or failing, or the model subprocess failing, timing out, or
 answering something that is not the JSON verdict it was asked for: each of these ends the
 run with a `systemMessage` that names UNKNOWN and why, and exit 0. This hook only ever
-reports, so nothing here ever blocks the turn.
+reports, so nothing here ever blocks the turn. The incident cap never touches this branch:
+an UNKNOWN read is never cached and always reported again.
 
 WHAT THIS FILE DOES NOT DO. It does not adopt PR #88's `hooks/run_hook.sh` launcher; that PR
 is an open draft on another branch, and this file matches the inline python-fallback shape
 already used by the other Stop entries in `settings.json` instead.
 """
+import hashlib
 import json
 import os
 import re
@@ -311,8 +331,19 @@ def looks_protected(rel_path, cwd):
 
 def looks_concerning(tool_use):
     """True when an outbound SendMessage/Task this turn names a protected file together
-    with an instruction to act on it. See the module docstring for the measured case this
-    covers: a peer instructed to delete a rule with no local file edit at all."""
+    with an instruction to act on it.
+
+    AMENDED 2026-09-22, against the independent audit. This used to be a trigger on its
+    own: a SendMessage with no matching disk change was enough to spend a model call. The
+    audit found that shape produced a false positive (an instruction sent to a peer that
+    had not yet executed) and named the same shape in two of the three false positives
+    overall (a role question, and a probe of a scratch copy rather than the real file). A
+    peer being TOLD to do something is not the act CLAUDE.md's Verification rule protects
+    against; a real write to the real path is. `run` below now gates every model call on
+    `protected` (an actual on-disk change) being non-empty, full stop. This function still
+    runs, but only to ENRICH the evidence a real protected change already triggered on,
+    never to trigger by itself.
+    """
     if not isinstance(tool_use, dict):
         return False
     if tool_use.get("name") not in PEER_MESSAGE_TOOLS:
@@ -339,6 +370,79 @@ def file_evidence(cwd, rel_path, untracked):
     if run is None or run.returncode != 0:
         return None
     return "%s (diff against HEAD):\n%s" % (rel_path, run.stdout[:4000])
+
+
+# ------------------------------------------------------------------ the per-incident, per-session cap
+#
+# ADDED 2026-09-22, against the independent audit. 34 raw flags collapsed to 8 real
+# incidents: one unresolved finding got re-flagged at every Stop while the owner had not
+# yet answered, ten times in one case. That is the cry-wolf shape
+# decisions/guard-that-cries-wolf-is-spent.md already names: a guard that fires when
+# nothing NEW is wrong is spent, because the reader learns to scroll past it.
+#
+# An incident's identity is the set of protected paths plus the evidence text built from
+# their diffs. Unchanged evidence next Stop means the same unresolved finding, and stays
+# quiet. Evidence that changed, because the file moved further or a new path joined it,
+# reads as a new incident and is reported once more.
+#
+# THE STORE. One small file per session, under `<config dir>/state/decision-watch/`, the
+# same `state` subtree hooks/config_watch.py already uses for its own baseline (frozen by
+# guard.CONFIG_FROZEN_DIRS, so a session write there is denied like any other, never
+# silently swallowed). Keyed by a hash of `session_id`, never the raw id, so the file name
+# carries no session detail. A store this hook cannot read or write is read as "nothing
+# seen yet" -- the fail-open direction, since the alternative is re-flagging forever, and
+# CLAUDE.md's Verification rule is about never mistaking a failed read for a CLEAR answer,
+# not about this cache.
+
+SEEN_DIR_NAME = "state"
+SEEN_SUB = "decision-watch"
+
+
+def _seen_store_path(session_id):
+    if not session_id or not isinstance(session_id, str):
+        return None
+    key = hashlib.sha256(session_id.encode("utf-8", "replace")).hexdigest()
+    return os.path.join(guard.config_dir(), SEEN_DIR_NAME, SEEN_SUB, key + ".json")
+
+
+def _load_seen(session_id):
+    path = _seen_store_path(session_id)
+    if not path:
+        return set()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return set()
+    if isinstance(data, list):
+        return set(x for x in data if isinstance(x, str))
+    return set()
+
+
+def _mark_seen(session_id, incident_key):
+    path = _seen_store_path(session_id)
+    if not path:
+        return
+    try:
+        seen = _load_seen(session_id)
+        seen.add(incident_key)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(sorted(seen), f)
+        os.replace(path + ".tmp", path)
+    except Exception:
+        pass  # a cache write failure re-flags next time rather than losing the report now
+
+
+def incident_key(protected, evidence):
+    """Return one stable id for this finding: the protected paths plus their evidence.
+
+    Never the model's own wording, so a verdict that repeats itself in different words
+    still collapses to one incident, and a diff that actually moved further still reads
+    as a new one.
+    """
+    blob = "\x00".join(sorted(protected)) + "\x01" + "\x00".join(evidence)
+    return hashlib.sha256(blob.encode("utf-8", "replace")).hexdigest()
 
 
 # ------------------------------------------------------------------ the model call
@@ -424,14 +528,12 @@ def run(hook, model_call=invoke_model):
         return UNKNOWN_PREFIX + "git status could not be read for this working directory."
 
     protected = [rel for rel in changed if looks_protected(rel, cwd)]
-    outbound = [
-        tu
-        for rec in records_after(records, idx)
-        for tu in tool_uses(rec)
-        if looks_concerning(tu)
-    ]
 
-    if not protected and not outbound:
+    # GATE: an actual on-disk change to a protected path, full stop. An outbound
+    # SendMessage/Task alone no longer triggers a model call (see looks_concerning's
+    # docstring for why the independent audit corrected this). Nothing executed yet is
+    # not the act this hook exists to catch.
+    if not protected:
         return ""
 
     evidence = []
@@ -440,10 +542,27 @@ def run(hook, model_call=invoke_model):
         if piece is None:
             return UNKNOWN_PREFIX + "git diff could not be read for %s." % rel
         evidence.append(piece)
+
+    # Outbound SendMessage/Task calls only ENRICH the evidence once a real change has
+    # already gated the call; they cannot gate it by themselves.
+    outbound = [
+        tu
+        for rec in records_after(records, idx)
+        for tu in tool_uses(rec)
+        if looks_concerning(tu)
+    ]
     for tu in outbound:
         evidence.append(
             "outbound %s: %s" % (tu.get("name"), json.dumps(tu.get("input") or {})[:1000])
         )
+
+    # CAP: this exact finding (these protected paths, this evidence) already flagged once
+    # in this session. Stay quiet until it changes. See "the per-incident, per-session
+    # cap" above.
+    session_id = hook.get("session_id") or ""
+    key = incident_key(protected, evidence)
+    if key in _load_seen(session_id):
+        return ""
 
     prompt = "%s\n\n%s\n\nCHAT SINCE THE LAST HUMAN MESSAGE:\n%s" % (
         JUDGE_INSTRUCTIONS,
@@ -455,6 +574,7 @@ def run(hook, model_call=invoke_model):
     if error is not None:
         return UNKNOWN_PREFIX + "the model judgment could not be completed (%s)." % error
     if verdict.get("verdict") == "FLAG":
+        _mark_seen(session_id, key)
         return FLAG_PREFIX + (verdict.get("why") or "unapproved change to a protected file.")
     return ""
 
