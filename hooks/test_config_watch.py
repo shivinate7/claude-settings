@@ -32,6 +32,47 @@ from datetime import datetime, timedelta, timezone
 HERE = os.path.dirname(os.path.abspath(__file__))
 GUARD = os.path.join(HERE, "guard.py")
 
+
+def _find_git_bash():
+    """Resolve the real Git-for-Windows bash by full path. Never hand subprocess a bare "bash".
+
+    Both this machine and the CI runner list `C:\\Windows\\System32` ahead of Git's
+    own `bin` folder on PATH. `System32\\bash.exe` is a WSL launcher stub, not Git
+    Bash. It mounts drives at "/mnt/c", never at "/c". `to_bash_path` below builds
+    the "/c" form. A path handed to that stub never resolves. `shutil.which("bash")`
+    does not help. It is a plain PATH scan. On this PATH order it returns the same
+    stub.
+
+    MEASURED on this machine, and under the CI job's own PowerShell shell. A bare
+    "bash" printed "/mnt/c/Users/..." there, from the WSL stub. The full path to
+    Git's own bash.exe printed "C:/Users/..." instead, the real MINGW64 mount.
+    `.github\\workflows\\gates.yml`'s own `shell: bash` steps already report that
+    same Git bash.exe path, in their "Report the Windows environment" log line.
+    This is not a guess.
+    """
+    if os.name != "nt":
+        return shutil.which("bash") or "bash"
+    for var in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"):
+        base = os.environ.get(var)
+        if base:
+            candidate = os.path.join(base, "Git", "bin", "bash.exe")
+            if os.path.isfile(candidate):
+                return candidate
+    # Fall back to a PATH scan that skips the System32 stub, in case Git sits
+    # somewhere else. Whatever PATH still finds beats a bare "bash".
+    system_root = os.path.normcase(os.path.join(
+        os.environ.get("SystemRoot", r"C:\Windows"), "System32"))
+    for folder in os.environ.get("PATH", "").split(os.pathsep):
+        if os.path.normcase(folder).startswith(system_root):
+            continue
+        candidate = os.path.join(folder, "bash.exe")
+        if os.path.isfile(candidate):
+            return candidate
+    return shutil.which("bash") or "bash"
+
+
+BASH = _find_git_bash()
+
 # FIXTURE_TMP is where the indirection fixtures below live: `tempfile.gettempdir()`, never a
 # literal "/tmp". On Windows, Python resolves "/tmp" to "C:\tmp". Bash (MSYS) resolves the
 # same literal to a different directory instead, such as "C:\Users\x\AppData\Local\Temp".
@@ -56,6 +97,28 @@ def to_bash_path(path):
     if not drive:
         return path.replace("\\", "/")
     return "/" + drive[0].lower() + rest.replace("\\", "/")
+
+
+def to_python_literal_path(path):
+    """Convert a native path for a Python literal a bash string carries first.
+
+    The "python3 -c writes the path" case builds a Python `open(...)` call. It then
+    embeds that call inside a bash double-quoted string. A native Windows path there
+    crosses two escapers in a row.
+
+    Bash's own double-quote rule turns `\\\\` into one `\\`. The surviving single
+    backslash then starts a Python string escape, such as `\\U`. `\\U` demands eight
+    hex digits next. "Users" fails that check. The inner python3 then raised a
+    SyntaxError. It wrote nothing. This bypass case measured a fixture that never ran
+    (MEASURED: CI's own "reverted but said nothing" line for this case).
+
+    `to_bash_path`'s MSYS form, "/c/Users/...", fixes the bash side. The inner
+    python3 is native Windows Python. It has no "/c" drive. Forward slashes are the
+    one form both readers accept. Bash passes a plain `/` through untouched. Windows
+    Python opens a drive-letter path with forward slashes the same as with
+    backslashes. On POSIX this is already a no-op.
+    """
+    return path.replace("\\", "/")
 
 
 # WATCH_UNDER_TEST points the suite at another copy of the watch, such as a copy carrying one
@@ -246,7 +309,7 @@ def run(script, payload, env) -> str:
 
 def shell(project, command):
     """Run one shell command inside the project, as the Bash tool would."""
-    subprocess.run(["bash", "-c", command], cwd=project.proj, capture_output=True, text=True)
+    subprocess.run([BASH, "-c", command], cwd=project.proj, capture_output=True, text=True)
 
 
 # --------------------------------------------------------------------------- the bypass shapes
@@ -294,7 +357,8 @@ bypass("sed -i in place",
                  "&& rm -f .claude/settings.local.json.bak")
 bypass("python3 -c writes the path",
        lambda p: "python3 -c \"open('.claude/settings.local.json','w')"
-                 ".write(open(%r).read())\"" % os.path.join(FIXTURE_TMP, "lift_case3.json"))
+                 ".write(open(%r).read())\"" % to_python_literal_path(
+                     os.path.join(FIXTURE_TMP, "lift_case3.json")))
 bypass("python3 runs a script file",
        lambda p: "python3 gen.py")
 bypass("bash runs a script file",
