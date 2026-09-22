@@ -52,27 +52,6 @@ import guard  # noqa: E402
 LABEL = "com.claude-settings.janitor.daily-sweep"
 
 
-def resolve_primary_checkout(where: str):
-    """Same read `session_end_sweep.py.resolve_repo_root` does: the parent of the one `.git`
-    directory every worktree of a clone shares. Used only to NAME the remedy when refusing."""
-    top = guard._git(where, "rev-parse", "--show-toplevel")
-    if top is None or top.returncode != 0:
-        return None
-    toplevel = top.stdout.strip()
-    if not toplevel:
-        return None
-    common = guard._git(toplevel, "rev-parse", "--git-common-dir")
-    if common is None or common.returncode != 0:
-        return None
-    common_dir = common.stdout.strip()
-    if not common_dir:
-        return None
-    try:
-        return os.path.dirname(os.path.realpath(os.path.join(toplevel, common_dir)))
-    except Exception:
-        return None
-
-
 def build_plist(repo_root: str, hour: int, minute: int, log_dir: str):
     # No --discover root here: see the module docstring above.
     sweep_py = os.path.join(repo_root, "janitor", "sweep.py")
@@ -102,7 +81,7 @@ def main(argv=None) -> int:
 
     worktree = guard.is_worktree(repo_root)
     if worktree is not False:
-        primary = resolve_primary_checkout(repo_root)
+        primary = guard.primary_checkout(repo_root)
         if worktree is True:
             head = "janitor: refusing to install from a linked worktree (%s)." % repo_root
         else:

@@ -951,6 +951,43 @@ def is_worktree(where: str):
     return own != common
 
 
+def primary_checkout(where: str):
+    """Return the PRIMARY checkout that `where` belongs to, or None when it could not be read.
+
+    `git rev-parse --show-toplevel` answers `where` itself when `where` sits inside an ordinary
+    checkout, but it answers the WORKTREE's own path when `where` sits inside a linked worktree.
+    `git rev-parse --git-common-dir` names the ONE `.git` directory every worktree of a clone
+    shares; its parent (`dirname(realpath(...))`) is always the primary checkout, ordinary
+    checkout or linked worktree alike, so resolving through it answers the same repository root
+    either way. Two `_git` calls, on purpose: the toplevel, then `--git-common-dir` run FROM that
+    toplevel.
+
+    Callers that need this to name a remedy (`janitor/install_launchd.py`) or to sweep the right
+    repository (`janitor/session_end_sweep.py`) both used to carry their own copy of this same
+    read; this is the one constant they now both point at (CLAUDE.md,
+    "building-allow-list-is-the-constant").
+    """
+    top = _git(where, "rev-parse", "--show-toplevel")
+    if top is None or top.returncode != 0:
+        return None
+    toplevel = top.stdout.strip()
+    if not toplevel:
+        return None
+    common = _git(toplevel, "rev-parse", "--git-common-dir")
+    if common is None or common.returncode != 0:
+        return None
+    common_dir = common.stdout.strip()
+    if not common_dir:
+        return None
+    try:
+        primary = os.path.dirname(os.path.realpath(os.path.join(toplevel, common_dir)))
+    except Exception:
+        return None
+    if not primary or not os.path.isdir(primary):
+        return None
+    return primary
+
+
 # ------------------------------------------------------------------ reading the subject
 #
 # READ THE SUBJECT BEFORE REFUSING OVER IT. The rule above judges the ACT of a git call. This
