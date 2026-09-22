@@ -289,14 +289,45 @@ def _require_pointer_branch(where, branch):
 
 def _real_process_start_ms(pid):
     """Return `pid`'s real start time in epoch milliseconds, read the same way the guard reads
-    it: `ps -o lstart=`, parsed with `time.mktime` as this machine's own local clock.
+    it: `ps -o lstart=` on POSIX, parsed with `time.mktime` as this machine's own local clock;
+    `OpenProcess`/`GetProcessTimes` on Windows, called below when `sys.platform` says Windows.
 
     A session-liveness fixture built from ANY OTHER read (a rendered string compared by eye, a
     guessed offset) could drift from what `hooks/guard.py` itself computes and pass or fail the
     live-session cases for the wrong reason. This is a second, independent implementation of the
     same read, not a call into the guard's own function, so a fixture and the code it proves
-    cannot share one bug.
+    cannot share one bug. That holds on Windows too: the arm below copies guard.py's own
+    `_process_start_ms_windows` logic rather than calling it.
     """
+    if sys.platform.startswith("win"):
+        import ctypes
+        import ctypes.wintypes
+
+        kernel32 = ctypes.windll.kernel32
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            sys.exit(
+                "fixture setup failed in build_fixtures: OpenProcess(%d) answered no handle. "
+                "GetLastError: %d" % (pid, ctypes.GetLastError())
+            )
+        try:
+            creation = ctypes.wintypes.FILETIME()
+            exit_time = ctypes.wintypes.FILETIME()
+            kernel_time = ctypes.wintypes.FILETIME()
+            user_time = ctypes.wintypes.FILETIME()
+            ok = kernel32.GetProcessTimes(
+                handle, ctypes.byref(creation), ctypes.byref(exit_time),
+                ctypes.byref(kernel_time), ctypes.byref(user_time),
+            )
+            if not ok:
+                sys.exit(
+                    "fixture setup failed in build_fixtures: GetProcessTimes(%d) failed." % pid
+                )
+            value = (creation.dwHighDateTime << 32) | creation.dwLowDateTime
+            return value // 10000 - 11644473600000
+        finally:
+            kernel32.CloseHandle(handle)
     result = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)],
                              capture_output=True, text=True, timeout=5)
     text = result.stdout.strip()
