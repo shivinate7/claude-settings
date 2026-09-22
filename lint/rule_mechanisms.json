@@ -60,7 +60,7 @@
     "roles-tier-matches-lane": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No hook classifies a lane's shape as retrieval, pattern-matching, or diagnosis. The Stop guardrail reads the transcript and judges the tier choice after the fact."
+        "reason": "No hook classifies a lane's shape as retrieval, pattern-matching, or diagnosis. hooks/decision_watch.py, a Stop command hook, reads the transcript and this turn's git diff and judges the tier choice after the fact, escalating to a model only for the residual judgment a diff cannot make."
       }
     },
     "roles-opus-shaped-say-so": {
