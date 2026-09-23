@@ -104,6 +104,14 @@ PRIVREPO = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "priv")
 GHMAIN = os.path.join(ROOT, "ghmain")      # a fake command line tool answering "main"
 GHDEV = os.path.join(ROOT, "ghdev")        # the same, answering "dev"
 GHNONE = os.path.join(ROOT, "ghnone")      # an empty directory, so the tool is missing
+# The WHOLE PATH of every "gh missing" case: GHNONE and nothing else, never PY_PATH beside it.
+# MEASURED on WSL Ubuntu: with the interpreter at /usr/bin/python3, PY_PATH is /usr/bin, which also
+# holds apt's real, logged-in /usr/bin/gh, so the "missing" case made a live GitHub call and read a
+# real pull request's base. That masked the mutant "merge-main: trust an unreadable merge base" in
+# 3 of 3 runs. CI's setup-python folder holds no gh, so CI cannot see it. The guard needs nothing
+# else on PATH to run: the GITBLIND cases run it on a one-folder PATH too. build_fixtures fails
+# setup if gh resolves here.
+GHNONE_PATH = GHNONE
 # THE POINTER CHECKOUT. `PTRCFG` is a config directory whose global rules file points at
 # `PTRMAIN`, which stands in for the machine's primary checkout: the one every session runs its
 # hooks and its lint from. `PTRWT` is a real linked worktree of it, which must stay allowed.
@@ -491,6 +499,10 @@ def build_fixtures():
     # _verify_fake_gh_delay's docstring for the defect this catches.
     _verify_fake_gh_delay(GHDEV, delay=1)
     os.makedirs(GHNONE, exist_ok=True)
+    found = shutil.which("gh", path=GHNONE_PATH)
+    if found:
+        sys.exit("fixture check failed: the 'gh missing' PATH %r resolves a real gh at %r"
+                 % (GHNONE_PATH, found))
     # A real checkout and a real linked worktree of it. The shared-tree rule asks git which is
     # which, so no fake will do.
     #
@@ -1810,7 +1822,7 @@ sh("merge: a base of main is allowed", "gh pr merge 12 --squash", "allow", cwd=N
 sh("merge: a base of dev is allowed", "gh pr merge 12 --squash", "allow", cwd=NOGIT,
    env_path=GHDEV + os.pathsep + PY_PATH)
 sh("merge: an unreadable base is allowed", "gh pr merge 12 --squash", "allow",
-   cwd=NOGIT, env_path=GHNONE + os.pathsep + PY_PATH)
+   cwd=NOGIT, env_path=GHNONE_PATH)
 sh("merge: no number is allowed", "gh pr merge", "allow",
    cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
 sh("merge: reading a pull request is untouched", "gh pr view 75 --json baseRefName", "allow",
@@ -2602,18 +2614,18 @@ def merge_log_case():
     dev is allowed and logs nothing.
     """
     scenarios = [
-        ("gh pr merge 12", GHMAIN, True, "base main"),
-        ("gh pr merge 12", GHDEV, False, "base dev"),
-        ("gh pr merge 12", GHNONE, True, "base unreadable"),
+        ("gh pr merge 12", GHMAIN + os.pathsep + PY_PATH, True, "base main"),
+        ("gh pr merge 12", GHDEV + os.pathsep + PY_PATH, False, "base dev"),
+        ("gh pr merge 12", GHNONE_PATH, True, "base unreadable"),
     ]
     problems = []
-    for index, (command, ghdir, expect_logged, label) in enumerate(scenarios):
+    for index, (command, env_path, expect_logged, label) in enumerate(scenarios):
         folder = os.path.join(ROOT, "mlog%d" % index)
         os.makedirs(folder, exist_ok=True)
         path = os.path.join(folder, "guard.log")
         env = dict(os.environ)
         env["CLAUDE_CONFIG_DIR"] = folder
-        env["PATH"] = ghdir + os.pathsep + PY_PATH
+        env["PATH"] = env_path
         result = subprocess.run(
             [sys.executable, GUARD],
             input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command},
