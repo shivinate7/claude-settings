@@ -1951,10 +1951,42 @@ try:
     CAP_ALIAS_MADE = True
 except Exception:
     CAP_ALIAS_MADE = False
-add("cap: a symlink to a project settings file resolves and asks",
+add("cap: a symlink to a project settings file resolves and asks [resolve-branch proof]",
     "ask" if CAP_ALIAS_MADE else "allow", "subagent-model-cap" if CAP_ALIAS_MADE else None,
     tool="Write", cwd=NOGIT, file_path=CAP_ALIAS, content=cap_settings(),
     carries=(OPUS,) if CAP_ALIAS_MADE else ())
+
+# THE SYMLINK CASE ABOVE PROVES NOTHING ON THIS ACCOUNT: it holds no SeCreateSymbolicLinkPrivilege,
+# `os.symlink` raises `OSError: A required privilege is not held by the client`, `CAP_ALIAS_MADE`
+# is False, and the case degrades to an ordinary "allow" that the resolve branch's own removal
+# cannot touch. MEASURED: `python hooks/mutate_guard.py` reports the resolved-basename mutant
+# SURVIVED, 0 red lines, on exactly this machine.
+#
+# A TRAILING DOT REACHES THE SAME BRANCH WITHOUT A SYMLINK, on Windows only. NTFS drops a
+# trailing dot (or space) from a leaf name at open time, so "settings.json." and "settings.json"
+# name the one file already on disk: no second directory entry, no privilege, nothing to create.
+# Its basename fails the direct SETTINGS_BASENAMES test the same way the symlink's alias name
+# does, and only the resolve (`_resolved`, the same call the symlink case exercises) reads the
+# real name back. MEASURED on this machine: `os.path.realpath` of the trailing-dot spelling of an
+# existing `settings.json` returns the path without the dot.
+#
+# POSIX has no such quirk: a trailing dot is an ordinary character in a leaf name there, so the
+# spelling names a different, nonexistent file and the case is an honest "allow".
+#
+# BOTH CASES CARRY THE SAME "[resolve-branch proof]" TAG, and the mutations below require that
+# tag, not either case's full name. MEASURED: on this account only the trailing-dot case goes
+# red for the resolved-basename mutant (the symlink case degrades to allow, so it never turns
+# red at all); on a CI runner that can make a real symlink (Linux, and a privileged Windows
+# runner), only the symlink case goes red, since a trailing dot on POSIX names an ordinary,
+# different, nonexistent file and never reaches the resolve. A required field pinned to either
+# case BY ITS FULL NAME reads as WRONG CAUSE on whichever platform the OTHER case is the one
+# that actually fires. The shared tag is what a mutant on this exact branch prints on every
+# platform, whichever spelling gets there.
+CAP_TRAILING_DOT = slash(os.path.join(PROJ, ".claude", "settings.json."))
+add("cap: a trailing-dot spelling resolves to the real settings file and asks [resolve-branch proof]",
+    "ask" if os.name == "nt" else "allow", "subagent-model-cap" if os.name == "nt" else None,
+    tool="Write", cwd=NOGIT, file_path=CAP_TRAILING_DOT, content=cap_settings(),
+    carries=(OPUS,) if os.name == "nt" else ())
 
 # A JSON ESCAPE IN THE KEY. The text pattern reads no key here, so the JSON walk is what answers.
 CAP_ESCAPED_KEY = '\\u0043LAUDE_CODE_SUBAGENT_MODEL'

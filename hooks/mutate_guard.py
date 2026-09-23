@@ -377,11 +377,19 @@ MUTATIONS = [
     ("cap: the edit-count cap comes back, so 200 no-op edits hide a lift",
      '    if isinstance(edits, list):\n        for edit in edits:',
      '    if isinstance(edits, list):\n        for edit in edits[:200]:', "guard", 'cap: the lift in the last of 400 edits still asks'),
+    # MEASURED 2026-09-22: on an account with no SeCreateSymbolicLinkPrivilege (this box, and any
+    # ordinary non-developer-mode Windows account), `os.symlink` raises and the symlink case below
+    # degrades to allow, so it never turns red and this mutant SURVIVED, 0 red lines. On a runner
+    # that can make a real symlink (Linux, and a privileged Windows runner), the symlink case is
+    # what turns red instead, and the trailing-dot case is the one that does not (POSIX has no
+    # trailing-dot quirk). The required field names the TAG both cases carry for exactly this
+    # reason, not either case's own name: see the comment beside the trailing-dot case in
+    # hooks/test_guard.py.
     ("cap: the resolved-basename branch is gone, so a symlink to a settings file walks past",
      '        return basename(_resolved(path, cwd)) in SETTINGS_BASENAMES\n'
      '    except Exception:\n        return False',
      '        return False\n'
-     '    except Exception:\n        return False', "guard", 'cap: a symlink to a project settings file resolves and asks'),
+     '    except Exception:\n        return False', "guard", '[resolve-branch proof]'),
     ("cap: the JSON key walk is gone, so a JSON-escaped key walks past",
      '    for key, value in json_cap_values(text).items():',
      '    for key, value in ():', "guard", 'cap: a JSON-escaped key in the content asks'),
@@ -638,6 +646,48 @@ MUTATIONS = [
      '            ["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, '
      'timeout=0.0001,',
      "guard", "liveness: process_start_ms splits alive/dead/unreadable apart", "posix"),
+
+    # Added: four fail-open reads an audit found, each an `except Exception:` that answers a
+    # confident value with no log line. Each mutant FORCES its try to raise, unconditionally,
+    # so it exercises the fallback itself rather than merely deleting the branch the fallback
+    # guards (that weaker shape is what the resolved-basename cap mutant above already does, and
+    # it is why that one survived: 0 red lines). A forced raise turns the predicate off for every
+    # input, so any existing case that depends on the predicate's normal answer is the proof.
+    ("fail-open: is_frozen's resolve is forced to raise, so every frozen write is missed",
+     '    try:\n        target = _resolved(path, cwd)\n'
+     '        root = os.path.normcase(os.path.realpath(config_dir()))\n    except Exception:\n'
+     '        return False',
+     '    try:\n        raise Exception("mutant")\n        target = _resolved(path, cwd)\n'
+     '        root = os.path.normcase(os.path.realpath(config_dir()))\n    except Exception:\n'
+     '        return False',
+     "guard", "frozen: Write of the global CLAUDE.md"),
+    ("fail-open: is_project_config's resolve is forced to raise, so no edit is ever noted",
+     '    try:\n        target = _resolved(path, cwd)\n    except Exception:\n        return False\n'
+     '    posix = norm(target)',
+     '    try:\n        raise Exception("mutant")\n        target = _resolved(path, cwd)\n'
+     '    except Exception:\n        return False\n    posix = norm(target)',
+     "guard", "log: a project config edit is allowed and noted"),
+    # required is the shared "[resolve-branch proof]" tag, not a direct-basename cap case: a
+    # direct-basename hit (e.g. PROJ_LOCAL's "settings.local.json") returns True on the FIRST
+    # check in is_settings_file and never reaches this try at all, so no such case could ever be
+    # the one that turns red here. Only a case whose literal spelling fails the direct test needs
+    # the resolve this raise disables, which is exactly what the tag names (see the comment beside
+    # the trailing-dot case in hooks/test_guard.py).
+    ("fail-open: is_settings_file's resolve is forced to raise, degrading to a basename-only match",
+     '    try:\n        return basename(_resolved(path, cwd)) in SETTINGS_BASENAMES\n'
+     '    except Exception:\n        return False',
+     '    try:\n        raise Exception("mutant")\n'
+     '        return basename(_resolved(path, cwd)) in SETTINGS_BASENAMES\n'
+     '    except Exception:\n        return False',
+     "guard", "[resolve-branch proof]"),
+    ("fail-open: pointer_checkout's read is forced to raise, silencing the whole pointer-head rule",
+     '    try:\n        with open(os.path.join(config_dir(), "CLAUDE.md"), encoding="utf-8-sig") '
+     'as handle:\n            text = handle.read(POINTER_READ_MAX)\n    except Exception:\n'
+     '        return ""',
+     '    try:\n        raise Exception("mutant")\n'
+     '        with open(os.path.join(config_dir(), "CLAUDE.md"), encoding="utf-8-sig") as handle:\n'
+     '            text = handle.read(POINTER_READ_MAX)\n    except Exception:\n        return ""',
+     "guard", "pointer: checkout of a branch in the pointer checkout is refused"),
 ]
 
 
