@@ -599,6 +599,26 @@ def find_decisions_dir(config: dict) -> Optional[str]:
     return None
 
 
+def _degloss_for_mode(text: str) -> str:
+    """Strip a collapsed citation-and-gloss span before a MODE heuristic reads
+    the text, so a generated title cannot pick a section's word budget.
+
+    `PROCEDURAL_HEADINGS` and `IMPERATIVE_STARTERS`, below, read raw heading
+    or list-item text for a trigger word. A gloss inserts the target entry's
+    own title next to the id it cites. That title is not always a wording
+    choice the section's author made. `D-448, The operator tiers run
+    themselves` carries `run`, a `PROCEDURAL_HEADINGS` trigger word, and
+    turns a whole section procedural on that account alone.
+
+    A span is replaced with one space, not removed outright, so the words on
+    each side of it never fuse into a new one. `_GLOSS_PATTERN` is None on a
+    repository with no decisions folder. This then changes nothing.
+    """
+    if _GLOSS_PATTERN is None:
+        return text
+    return _GLOSS_PATTERN.sub(" ", text)
+
+
 # --------------------------------------------------------------------------
 # Sentence handling
 # --------------------------------------------------------------------------
@@ -818,7 +838,9 @@ def segment_markdown(lines: Sequence[str], default_mode: str) -> Tuple[List[Para
         if heading:
             flush()
             title = heading.group(2).strip()
-            heading_mode = "procedural" if PROCEDURAL_HEADINGS.search(title) else default_mode
+            heading_mode = ("procedural"
+                            if PROCEDURAL_HEADINGS.search(_degloss_for_mode(title))
+                            else default_mode)
             prefix = len(content) - len(title)
             paragraphs.append(Paragraph(
                 segments=[Segment(lineno, Masker(title).text, "heading",

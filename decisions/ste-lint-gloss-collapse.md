@@ -14,18 +14,11 @@ comment records the same defect in that checker's own history. A gloss run once 
 sentence-length count from 0 to 165 over-long sentences. Every one was pushed over by an
 inserted title. None was touched by a person.
 
-This change ran `STE001` over q_max's tracked `*.md` files, before and after. Before, it
-reported 715 errors. After, with `docs/decisions` present, it reported 270. Of the 715,
-checking every over-long sentence's own text found exactly one that even names a decision
-id. That one names a range, `D-332 to D-334`, not a gloss, so it is left alone, correctly.
-The rest of the drop is citation gloss, collapsed.
-
-Those two counts sit below the 644 and 180 the request that started this work expected.
-Excluding the vendored `.claude/skills/**` tree, wording this repository does not own,
-drops the "before" count further, to 550. That undershoots the expectation the other way.
-The likely cause is a different exact file set, or a different linter commit, at
-measurement time. It is not a defect in the collapse. The per-sentence check above shows
-the collapse removes almost every citation-caused case it exists to fix.
+This change ran `STE001` over q_max's tracked `*.md` files on `main`, before and after.
+Before, it reported 715 errors. After, with `docs/decisions` present, it reported 254.
+Of the 715, checking every over-long sentence's own text found exactly one that even
+names a decision id. That one names a range, `D-332 to D-334`, not a gloss, so it is
+left alone, correctly. The rest of the drop is citation gloss, collapsed.
 
 ## What this decision does
 
@@ -53,9 +46,40 @@ input. The whole existing `lint/test_gates.py` suite also stays green, 121 tests
 passes the value straight through to the script. No existing caller changes its own
 inputs. No existing caller's behavior changes.
 
-## What remains open
+## A second path: the section's own word budget
 
-The counts above do not match the numbers the request that started this decision
-expected. The collapse itself checks out: one non-gloss id mention sits among 715
-over-long sentences, and that one is correctly left alone. The gap in the raw totals
-stays unexplained. It is worth a second look if it matters to a future reader.
+The word count was not the only place a generated gloss could change a verdict. A
+heading picks its section's word budget, procedural (20 words) or descriptive (25).
+It picks that by scanning the heading's raw text for a trigger word, such as `run`
+or `test`, in `PROCEDURAL_HEADINGS`. That scan ran before the collapse above.
+
+q_max's real `D-448` is titled "The operator tiers run themselves". A heading citing
+it as `(D-448, The operator tiers run themselves)` carries `run`. The whole section
+under that heading then measured at 20 words, not 25. Nobody who wrote the heading
+chose that word. Reproduced with one fixed 23-word body, under three otherwise
+identical headings: no citation gives no error. A citation whose gloss carries `run`
+gives one. A citation whose gloss carries no trigger word gives none.
+
+The fix reads `_degloss_for_mode`. It folds a collapsed citation span into one space,
+wherever a heading's mode gets decided. It changes nothing when no decisions folder
+is set. `_GLOSS_PATTERN` stays `None` then, so the function is a no-op there.
+
+The list-item path was checked too. Its own first-word scan reads only the letters
+starting at the text's first character, through `re.match(r"([A-Za-z]+)", body)`. An
+id such as `D-448` stops that scan one letter in, at its own hyphen. It never reaches
+the gloss. That path needed no fix. A test proves it, sized so a wrong classification
+would have failed the test.
+
+## What this closes
+
+The 715-to-270 count this decision first reported did not match the 644-to-180 the
+request expected. Both gaps are now explained, not merely defended.
+
+First, that estimate came from a different branch, one that already carried about
+174 earlier sentence splits. A different total was expected on that account alone.
+
+Second, on `main` itself, a finding-by-finding diff against an independent count of
+254 found this decision's own result a strict superset. Sixteen sentences carried
+the difference, every one under a heading whose gloss held a trigger word. That is
+exactly the defect fixed above. `main`'s own count is now 254, the independent count,
+exactly.
