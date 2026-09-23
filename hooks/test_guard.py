@@ -378,21 +378,34 @@ def make_blind_git(folder):
     os.chmod(script, 0o755)
 
 
-def make_fake_gh(folder, base):
+def make_fake_gh(folder, base, delay=0):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
     MEASURED on Windows 2026-09-16: a call of "gh" through CreateProcess appends `.exe` and never
     reads PATHEXT, so a `gh.cmd` earlier on PATH was skipped and the real `gh.exe` further along
     answered instead. The guard resolves the program with shutil.which for that reason, and this
     stand-in is a `.cmd` file to keep the case honest on this machine.
+
+    `delay` whole seconds run before the answer. merge_base's real subprocess.run carries a real
+    10s timeout that one mutant shrinks to 0.0001s (mutate_guard.py, "timeout: the merge-base read
+    cannot finish"). An instant answer races that shrink instead of losing it: Python's timeout
+    clock starts only once communicate() itself runs, and a busy runner can delay THAT call long
+    enough for an already-finished child to be read back with no TimeoutExpired at all, whatever
+    the nominal timeout was. That is why the mutant SURVIVED on a loaded shared runner (CI run
+    35883652442) though the fixture suite was green an hour earlier: the kill depended on wall-clock
+    luck, not on the mutant's own defect. A deliberate delay, far past the mutant's 0.0001s and far
+    under the real 10s, removes the race instead of hoping the real timeout stays small enough to
+    lose it every time.
     """
     os.makedirs(folder, exist_ok=True)
     body = '{"baseRefName":"%s"}' % base
     if os.name == "nt":
-        write(os.path.join(folder, "gh.cmd"), "@echo off\r\necho " + body + "\r\n")
+        wait = ("ping -n %d 127.0.0.1 >nul\r\n" % (delay + 1)) if delay else ""
+        write(os.path.join(folder, "gh.cmd"), "@echo off\r\n" + wait + "echo " + body + "\r\n")
     else:
         script = os.path.join(folder, "gh")
-        write(script, "#!/bin/sh\necho '" + body + "'\n")
+        wait = ("sleep %d\n" % delay) if delay else ""
+        write(script, "#!/bin/sh\n" + wait + "echo '" + body + "'\n")
         os.chmod(script, 0o755)
 
 
@@ -413,7 +426,10 @@ def build_fixtures():
     write(os.path.join(CLONE, "settings.json"), "{}\n")
     write(os.path.join(CLONE, "install.ps1"), "# install\n")
     make_fake_gh(GHMAIN, "main")
-    make_fake_gh(GHDEV, "dev")
+    # GHDEV alone gets the delay: it is the one base whose logged/not-logged answer the timeout
+    # mutant can flip (GHMAIN and GHNONE both expect "logged" either way), so it is the one fixture
+    # whose instant reply could race that mutant's shrunk timeout. See make_fake_gh's docstring.
+    make_fake_gh(GHDEV, "dev", delay=1)
     os.makedirs(GHNONE, exist_ok=True)
     # A real checkout and a real linked worktree of it. The shared-tree rule asks git which is
     # which, so no fake will do.
