@@ -217,8 +217,7 @@ python3 ~/.claude/lint/ste_lint.py --explain STE007
 ```
 
 The linter approximates ASD-STE100, whose dictionary is not open. Verified before
-merge: the old Roles paragraph with its semicolon goes red, the current CLAUDE.md is clean at
-error level.
+merge: the current CLAUDE.md is clean at error level.
 
 ## Guard
 
