@@ -31,6 +31,13 @@ inputs:
       behavior for every existing caller.
     required: false
     default: "*.md"
+  decisions-dir:
+    description: >
+      Folder of D-nnn decision entries. STE001 then stops counting the words a gloss
+      tool inserts after a citation. Optional: the collapse turns on only when the
+      folder exists, so a repository with none sees no change. Pass '' to turn it off.
+    required: false
+    default: "docs/decisions"
 runs:
   using: composite
   steps:
@@ -46,6 +53,7 @@ runs:
         PATHS_GLOB: ${{ inputs.paths }}
         EXCLUDE: ${{ inputs.exclude }}
         CHANGED_PATHS_GLOB: ${{ inputs.changed_paths }}
+        DECISIONS_DIR: ${{ inputs.decisions-dir }}
       run: |
         set -euo pipefail
         # Needs actions/checkout with fetch-depth 0: scope 'changed' diffs against the
@@ -137,7 +145,8 @@ runs:
         printf '  %s\n' "${FILES[@]}"
 
         JSON_OUT="$(mktemp)"
-        python3 "$LINTER" --no-color --format json --fail-on never "${FILES[@]}" > "$JSON_OUT"
+        python3 "$LINTER" --no-color --format json --fail-on never \
+          --decisions-dir "$DECISIONS_DIR" "${FILES[@]}" > "$JSON_OUT"
 
         if [ "$SCOPE" = "all" ]; then
           # Report-mode audit: whole-file findings, never fails the build.

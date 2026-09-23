@@ -670,6 +670,165 @@ class SentenceSplitBoldTests(unittest.TestCase):
         self.assertIn("STE001", codes)
 
 
+class DecisionGlossCollapseTests(unittest.TestCase):
+    """STE001 must not count the words a gloss tool inserts after a citation
+    (decisions/ste-lint-gloss-collapse.md). A hermetic fixture folder stands
+    in for a real `docs/decisions/`, so this needs no other repository.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.decisions_dir = os.path.join(self.tmp.name, "decisions")
+        os.makedirs(self.decisions_dir)
+        self.addCleanup(self.tmp.cleanup)
+        self.addCleanup(ste_lint.set_gloss_pattern, None)
+
+    def write_entry(self, filename, id_, title, body="Some prose.\n"):
+        with open(os.path.join(self.decisions_dir, filename), "w", encoding="utf-8") as fh:
+            fh.write(
+                "---\nid: %s\nslug: %s\ntitle: %s\ndate: 2026-01-01\n---\n\n%s"
+                % (id_, os.path.splitext(filename)[0], title, body))
+
+    def lint(self, text, use_gloss):
+        pattern = ste_lint.build_gloss_pattern(self.decisions_dir) if use_gloss else None
+        ste_lint.set_gloss_pattern(pattern)
+        linter = ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG))
+        return linter.check_text("t.md", text)
+
+    def test_genuinely_long_sentence_without_citation_still_ste001(self):
+        self.write_entry("d-001.md", "D-001", "A short title")
+        words = ["word"] * 30
+        text = " ".join(words).capitalize() + ".\n"
+        codes = [f.code for f in self.lint(text, use_gloss=True)]
+        self.assertIn("STE001", codes)
+
+    def test_gloss_only_overflow_is_not_ste001_once_collapsed(self):
+        self.write_entry("d-001.md", "D-001", "A title of exactly six whole words")
+        text = (
+            "The team agreed today that this long sentence about D-001, A title "
+            "of exactly six whole words still carries plenty of authored words "
+            "for the sentence count today.\n")
+        uncollapsed = [f.code for f in self.lint(text, use_gloss=False)]
+        self.assertIn("STE001", uncollapsed, "fixture sentence was not actually over budget")
+        collapsed = [f.code for f in self.lint(text, use_gloss=True)]
+        self.assertNotIn("STE001", collapsed)
+
+    def test_wrong_gloss_for_a_real_id_is_not_collapsed(self):
+        self.write_entry("d-001.md", "D-001", "A title of exactly six whole words")
+        text = (
+            "The team agreed today that this long sentence about D-001, some "
+            "text that is not entry one real title still carries plenty of "
+            "authored words for the count today.\n")
+        codes = [f.code for f in self.lint(text, use_gloss=True)]
+        self.assertIn("STE001", codes)
+
+    def test_reversed_entry_gloss_suffix_also_collapses(self):
+        self.write_entry("d-001.md", "D-001", "A title of exactly six whole words")
+        self.write_entry("d-002.md", "D-002", "The newer rule", body="reverses: D-001\n")
+        text = (
+            "The team agreed that this sentence about D-001, A title of exactly six "
+            "whole words (reversed by D-002, The newer rule) still carries words today.\n")
+        codes = [f.code for f in self.lint(text, use_gloss=True)]
+        self.assertNotIn("STE001", codes)
+
+    def test_heading_gloss_trigger_word_does_not_force_procedural_mode(self):
+        # D-448's real title in q_max, "The operator tiers run themselves", carries
+        # `run`, a `PROCEDURAL_HEADINGS` trigger word. 23 authored words in the body:
+        # under the 25-word descriptive limit, over the 20-word procedural one.
+        self.write_entry("d-001.md", "D-001", "The operator tiers run themselves")
+        text = (
+            "## A loopback server is the first target here (D-001, The operator "
+            "tiers run themselves)\n\n"
+            "The server brings Postgres up on the machine own loopback interface, "
+            "and a scratch database on it is the best possible subject here.\n")
+        codes = [f.code for f in self.lint(text, use_gloss=True)]
+        self.assertNotIn("STE001", codes)
+
+    def test_authored_procedural_heading_still_selects_procedural_limit(self):
+        # Check 5: the fix must not blind the heuristic to a real procedural heading.
+        self.write_entry("d-001.md", "D-001", "The operator tiers run themselves")
+        text = (
+            "## Running the probes\n\n"
+            "The server brings Postgres up on the machine own loopback interface, "
+            "and a scratch database on it is the best possible subject here.\n")
+        codes = [f.code for f in self.lint(text, use_gloss=True)]
+        self.assertIn("STE001", codes)
+
+    def test_heading_with_no_citation_is_unaffected(self):
+        # Check 7: a heading naming no id behaves exactly as it did before this fix.
+        self.write_entry("d-001.md", "D-001", "The operator tiers run themselves")
+        text = (
+            "## A loopback server is the first target here today\n\n"
+            "The server brings Postgres up on the machine own loopback interface, "
+            "and a scratch database on it is the best possible subject here.\n")
+        with_dir = [f.code for f in self.lint(text, use_gloss=True)]
+        without_feature = [f.code for f in self.lint(text, use_gloss=False)]
+        self.assertEqual(with_dir, without_feature)
+
+    def test_three_file_heading_reproducer_agrees_after_the_fix(self):
+        # Check 6. Same 23-word body in all three. Only the heading's gloss differs:
+        # no gloss, a trigger word in the gloss, and a gloss with no trigger word.
+        self.write_entry("d-001.md", "D-001", "The operator tiers run themselves")
+        body = (
+            "\n\nThe server brings Postgres up on the machine own loopback "
+            "interface, and a scratch database on it is the best possible "
+            "subject here.\n")
+        bare = "## A loopback server is the first target, and Neon is the second (D-001)" + body
+        with_trigger = (
+            "## A loopback server is the first target, and Neon is the second "
+            "(D-001, The operator tiers run themselves)" + body)
+        no_trigger_gloss_text = "The operator tiers manage themselves"
+        no_trigger = (
+            "## A loopback server is the first target, and Neon is the second "
+            "(D-001, %s)" % no_trigger_gloss_text + body)
+        # `no_trigger` cites a title this fixture never defines for D-001. That is
+        # fine here. The point is only that none of the three carries a STE001.
+        results = {
+            "bare": [f.code for f in self.lint(bare, use_gloss=True)],
+            "with_trigger": [f.code for f in self.lint(with_trigger, use_gloss=True)],
+            "no_trigger": [f.code for f in self.lint(no_trigger, use_gloss=True)],
+        }
+        for name, codes in results.items():
+            self.assertNotIn("STE001", codes, "%s: %r" % (name, codes))
+
+    def test_list_item_opening_with_a_citation_stays_descriptive(self):
+        # The list-item path reads its first word through `IMPERATIVE_STARTERS`,
+        # through `re.match(r"([A-Za-z]+)", body)`. An id such as "D-001" stops that
+        # match at its own hyphen. The gloss's words are never reached. No fix was
+        # needed here, and this proves it. The body holds 21 words, over the
+        # 20-word procedural limit, under the 25-word descriptive one. A wrong
+        # classification would fail this test.
+        self.write_entry("d-001.md", "D-001", "The operator tiers run themselves")
+        text = (
+            "- D-001, The operator tiers run themselves, so nothing else here "
+            "needs a restart or a rebuild ever for any reason today.\n")
+        codes = [f.code for f in self.lint(text, use_gloss=True)]
+        self.assertNotIn("STE001", codes)
+
+    def test_pending_entry_has_no_id_to_collapse(self):
+        self.write_entry("d-003.md", "pending", "Not stamped yet")
+        pattern = ste_lint.build_gloss_pattern(self.decisions_dir)
+        self.assertIsNone(pattern)
+
+    def test_absent_decisions_dir_gives_no_pattern(self):
+        pattern = ste_lint.build_gloss_pattern(os.path.join(self.tmp.name, "no-such-dir"))
+        self.assertIsNone(pattern)
+
+    def test_absent_decisions_dir_output_is_byte_identical(self):
+        text = (
+            "The team agreed that this sentence about D-001, A title of exactly "
+            "six whole words still carries plenty of authored words for the count today.\n")
+        config = dict(ste_lint.DEFAULT_CONFIG)
+        config["decisions_dir"] = os.path.join(self.tmp.name, "no-such-dir")
+        decisions_dir = ste_lint.find_decisions_dir(config)
+        self.assertIsNone(decisions_dir)
+        without_feature = self.lint(text, use_gloss=False)
+        with_feature_off = self.lint(text, use_gloss=False)
+        self.assertEqual(
+            ste_lint.report_text(without_feature, False, False),
+            ste_lint.report_text(with_feature_off, False, False))
+
+
 class PromotedRuleTests(unittest.TestCase):
     """The owner's ruling (decisions/every-lint-rule-blocks-or-goes.md): a rule either
     blocks or does not exist. Seven rules were promoted to error. Each case here proves
