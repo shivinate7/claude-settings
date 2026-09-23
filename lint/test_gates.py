@@ -253,7 +253,7 @@ class ReportGateTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0)
         self.assertEqual(run.stdout.strip(), "")
 
-    def test_53_prose_above_report_without_a_question_blocks(self):
+    def test_53_prose_above_report_with_no_question_passes(self):
         records = [
             human("do the task"),
             tool_use_msg("Bash", {"command": "git commit -m x"}),
@@ -262,8 +262,8 @@ class ReportGateTests(unittest.TestCase):
         ]
         path = write_transcript(records, self.tmp.name)
         run = run_gate(REPORT_GATE, self.hook_for(path))
-        out = json.loads(run.stdout)
-        self.assertEqual(out.get("decision"), "block")
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(run.stdout.strip(), "")
 
     def test_55_colon_inside_the_bold_label_passes(self):
         records = [

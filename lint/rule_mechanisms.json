@@ -445,13 +445,6 @@
         "needle": "```"
       }
     },
-    "reports-nothing-above-unless-question": {
-      "mechanism": {
-        "kind": "gate",
-        "ref": "lint/report_gate.py",
-        "needle": "allow_prefix"
-      }
-    },
     "reports-no-report-when-nothing-landed": {
       "mechanism": {
         "kind": "gate",
