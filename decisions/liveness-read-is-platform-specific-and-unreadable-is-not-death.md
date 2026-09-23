@@ -84,3 +84,67 @@ own branching logic is proven with a stubbed `ctypes.windll` in
 versus error 5 versus a valid handle. A green Windows CI job is still the
 read that proves this arm against the real platform. That job lands in a
 parallel change to this same Windows-parity sequence.
+
+## Two more holes closed: path spelling and clock direction
+
+An audit found the split above still failed toward deletion. Two spots,
+both inside this same oracle.
+
+`worktree_live_session` compared `os.path.normcase(os.path.realpath(...))`
+strings. MEASURED: mapping a Windows drive letter to `\\localhost\c$` left
+`os.path.realpath` naming the UNC path for one spelling. It named the local
+`C:\...` path for the other. The two strings never compared equal.
+`os.stat`'s `(st_dev, st_ino)` agreed for both. A `subst` drive or a mapped
+network drive can split a live session's `cwd` from the sweep's target this
+same way. The string compare then answers "not under target." That folds
+into "not live." The sweep reaps it. `_path_identity` and
+`_under_by_identity` now fall back to file identity when the strings
+disagree. They answer None, never "not under," when that fallback itself
+cannot tell.
+
+`session_is_live` compared two absolute epoch-millisecond values against one
+flat, two-sided `SESSION_LIVE_TOLERANCE_MS` band. `actual` is the kernel's
+own process-creation FILETIME. It is fixed forever once recorded. `started`
+is `Date.now()`, written 1.7 to 3.2 seconds later (measured above). A clock
+stepping backwards in that gap makes `started` read too small. Then
+`actual - started` grows past the tolerance for a process that never died.
+That is the exact shape a recycled pid also produces. One reading cannot
+tell the two apart. The tolerance is now one-sided. That direction (`actual`
+far ahead of `started`) answers None, not a confident False. The other
+direction (`started` far ahead of `actual`) has no legitimate same-process
+reading. `started` is always written after `actual`. That side stays
+unchanged.
+
+Neither gap was tested before. Every fixture in `hooks/test_guard.py` sat
+under one `tempfile.mkdtemp`, one drive, one clock reading. The new cases
+(`worktree_live_session_two_spellings_case`,
+`worktree_live_session_path_unresolvable_case`,
+`session_is_live_backwards_clock_step_case`) drive both fallbacks at the
+seam. Two genuinely different temp directories stand in for two spellings.
+`_path_identity` is stubbed to say they are one file. This repository
+cannot depend on loopback SMB sharing, or an elevated `subst`, on whatever
+machine runs the suite. That proves the fallback WIRING. It does not
+re-prove that `os.stat` agrees for every real subst or mapped-drive pair, on
+every Windows build. That half was checked by hand, against a real mapped
+drive, during development. It matched the production code's own assumption
+exactly.
+
+## A real trade-off the clock fix forces
+
+`janitor/test_sweep.py`'s own recycled-pid fixture names the cost. It
+records a REAL, live pid. Its `startedAt` reads ten thousand seconds BEHIND
+that pid's real creation time. A backwards clock step produces that exact
+shape too. Before this fix, the suite asserted this fixture reaps: a
+confident dead. After this fix, `session_is_live` cannot tell the two
+apart, by design. The correct answer is now unreadable. `decide_worktree`
+keeps the worktree, reason `unreadable-subject`. The test now asserts
+that. A recycled pid in this direction can no longer be confidently reaped
+by this read alone. Keep is the safer trade. This paragraph states it once,
+so a future reader does not wonder why a "recycled pid" test stopped
+expecting a reap.
+
+`hooks/guard.py`'s OWN `worktree-remove` path absorbs this cost for free.
+An unreadable subject there already allows the git command through. It
+logs `noted`/`subject-unread`, the same path any other unreadable subject
+takes. No test there needed a change. Only the janitor's automated SWEEP
+did. It must decide alone, with nobody to log a note for.

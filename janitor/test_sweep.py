@@ -349,8 +349,13 @@ class WorktreeDecisionTests(unittest.TestCase):
 
         cls.dead = os.path.join(ROOT, "wt-dead")
         run_vcs(cls.root, "worktree", "add", "-q", cls.dead, "-b", "lane-dead")
-        # A record naming THIS SAME live pid, but a startedAt that does not match it: a
-        # recycled-pid shape. This arm must read the session as DEAD.
+        # A record naming THIS SAME live pid, but a startedAt far BEHIND the real creation time:
+        # the recycled-pid shape (a new process, created well after some old record's claimed
+        # start). A backwards clock step between a session's own two original measurements
+        # produces the exact same shape for a process that never died -- the two are
+        # indistinguishable from this reading alone (decisions/liveness-read-is-platform-
+        # specific-and-unreadable-is-not-death.md). So this arm must read as UNREADABLE, not a
+        # confident dead, and the sweep must keep it rather than reap it.
         write_session("mismatched-start-case", os.getpid(), started - 10_000_000, cls.dead)
 
         cls.removable = os.path.join(ROOT, "wt-removable")
@@ -389,12 +394,18 @@ class WorktreeDecisionTests(unittest.TestCase):
         self.assertEqual(decision["action"], "keep")
         self.assertEqual(decision["reason"], "live-session")
 
-    def test_mismatched_start_time_reads_as_dead_and_is_reapable(self):
-        """A record whose stored start time does not match the live process's own start time
-        must NOT block the removal: a recycled pid cannot inherit a dead session's claim."""
+    def test_mismatched_start_time_reads_as_unreadable_not_dead(self):
+        """A record whose stored start time reads far BEHIND the live process's own start time
+        is the recycled-pid shape -- but a backwards clock step between a session's own two
+        original measurements produces that exact same shape for a process that never died.
+        The two are indistinguishable from this one reading, so the sweep must keep the
+        worktree as unreadable, never confidently reap it. This test's NAME is also what
+        janitor/mutate_sweep.py's liveness mutant requires as its kill proof: the mutant
+        (matching pid alone, ignoring the recorded start time) answers "live-session" here
+        instead of "unreadable-subject", so this case still catches it."""
         decision = sweep.decide_worktree(self.root, self.entry_for(self.dead))
-        self.assertEqual(decision["action"], "reap")
-        self.assertEqual(decision["reason"], "removable")
+        self.assertEqual(decision["action"], "keep")
+        self.assertEqual(decision["reason"], "unreadable-subject")
 
     def test_clean_unlocked_no_session_worktree_is_removable(self):
         decision = sweep.decide_worktree(self.root, self.entry_for(self.removable))

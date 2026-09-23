@@ -175,7 +175,7 @@ MUTATIONS = [
      '    if False:\n        return False', "guard",
      'worktree remove: a live session standing in a clean tree still denies'),
     ("worktree-remove: any session record counts as live, recycled pid included",
-     '    return abs(actual - started) <= SESSION_LIVE_TOLERANCE_MS',
+     '    return diff >= -SESSION_LIVE_TOLERANCE_MS',
      '    return True', "guard", 'does not deny'),
 
     ("worktree-prune: reads only stdout, missing git's own stderr message",
