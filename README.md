@@ -104,6 +104,12 @@ the environment.
 Verify in a cloud session: `/context` for the memory file, and ask Claude to run
 `echo $CLAUDE_CODE_SUBAGENT_MODEL` (expect `sonnet`).
 
+The VM also ships tools that `install.sh` does not write. Playwright is a global npm package,
+under `npm root -g`. Its browsers are in `/opt/pw-browsers`, which is where `chromium` is. Node
+is on the PATH. These paths belong to the sandbox, not to this repo, so Anthropic can change
+them at any snapshot. Read a version with `node -v` or `npm ls -g --depth 0` in the session
+that needs it. Do not trust a number written here.
+
 ## Local auto-pull
 
 `settings.json` carries a `SessionStart` hook that runs at every local session start. It reads
