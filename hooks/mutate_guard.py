@@ -637,6 +637,42 @@ MUTATIONS = [
      '            ["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, '
      'timeout=0.0001,',
      "guard", "liveness: process_start_ms splits alive/dead/unreadable apart", "posix"),
+
+    # Added: four fail-open reads an audit found, each an `except Exception:` that answers a
+    # confident value with no log line. Each mutant FORCES its try to raise, unconditionally,
+    # so it exercises the fallback itself rather than merely deleting the branch the fallback
+    # guards (that weaker shape is what the resolved-basename cap mutant above already does, and
+    # it is why that one survived: 0 red lines). A forced raise turns the predicate off for every
+    # input, so any existing case that depends on the predicate's normal answer is the proof.
+    ("fail-open: is_frozen's resolve is forced to raise, so every frozen write is missed",
+     '    try:\n        target = _resolved(path, cwd)\n'
+     '        root = os.path.normcase(os.path.realpath(config_dir()))\n    except Exception:\n'
+     '        return False',
+     '    try:\n        raise Exception("mutant")\n        target = _resolved(path, cwd)\n'
+     '        root = os.path.normcase(os.path.realpath(config_dir()))\n    except Exception:\n'
+     '        return False',
+     "guard", "frozen: Write of the global CLAUDE.md"),
+    ("fail-open: is_project_config's resolve is forced to raise, so no edit is ever noted",
+     '    try:\n        target = _resolved(path, cwd)\n    except Exception:\n        return False\n'
+     '    posix = norm(target)',
+     '    try:\n        raise Exception("mutant")\n        target = _resolved(path, cwd)\n'
+     '    except Exception:\n        return False\n    posix = norm(target)',
+     "guard", "log: a project config edit is allowed and noted"),
+    ("fail-open: is_settings_file's resolve is forced to raise, degrading to a basename-only match",
+     '    try:\n        return basename(_resolved(path, cwd)) in SETTINGS_BASENAMES\n'
+     '    except Exception:\n        return False',
+     '    try:\n        raise Exception("mutant")\n'
+     '        return basename(_resolved(path, cwd)) in SETTINGS_BASENAMES\n'
+     '    except Exception:\n        return False',
+     "guard", "cap: Write of a project local settings file setting an opus model asks"),
+    ("fail-open: pointer_checkout's read is forced to raise, silencing the whole pointer-head rule",
+     '    try:\n        with open(os.path.join(config_dir(), "CLAUDE.md"), encoding="utf-8-sig") '
+     'as handle:\n            text = handle.read(POINTER_READ_MAX)\n    except Exception:\n'
+     '        return ""',
+     '    try:\n        raise Exception("mutant")\n'
+     '        with open(os.path.join(config_dir(), "CLAUDE.md"), encoding="utf-8-sig") as handle:\n'
+     '            text = handle.read(POINTER_READ_MAX)\n    except Exception:\n        return ""',
+     "guard", "pointer: checkout of a branch in the pointer checkout is refused"),
 ]
 
 

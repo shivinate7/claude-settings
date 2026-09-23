@@ -1956,6 +1956,28 @@ add("cap: a symlink to a project settings file resolves and asks",
     tool="Write", cwd=NOGIT, file_path=CAP_ALIAS, content=cap_settings(),
     carries=(OPUS,) if CAP_ALIAS_MADE else ())
 
+# THE SYMLINK CASE ABOVE PROVES NOTHING ON THIS ACCOUNT: it holds no SeCreateSymbolicLinkPrivilege,
+# `os.symlink` raises `OSError: A required privilege is not held by the client`, `CAP_ALIAS_MADE`
+# is False, and the case degrades to an ordinary "allow" that the resolve branch's own removal
+# cannot touch. MEASURED: `python hooks/mutate_guard.py` reports the resolved-basename mutant
+# SURVIVED, 0 red lines, on exactly this machine.
+#
+# A TRAILING DOT REACHES THE SAME BRANCH WITHOUT A SYMLINK, on Windows only. NTFS drops a
+# trailing dot (or space) from a leaf name at open time, so "settings.json." and "settings.json"
+# name the one file already on disk: no second directory entry, no privilege, nothing to create.
+# Its basename fails the direct SETTINGS_BASENAMES test the same way the symlink's alias name
+# does, and only the resolve (`_resolved`, the same call the symlink case exercises) reads the
+# real name back. MEASURED on this machine: `os.path.realpath` of the trailing-dot spelling of an
+# existing `settings.json` returns the path without the dot.
+#
+# POSIX has no such quirk: a trailing dot is an ordinary character in a leaf name there, so the
+# spelling names a different, nonexistent file and the case is an honest "allow".
+CAP_TRAILING_DOT = slash(os.path.join(PROJ, ".claude", "settings.json."))
+add("cap: a trailing-dot spelling resolves to the real settings file and asks",
+    "ask" if os.name == "nt" else "allow", "subagent-model-cap" if os.name == "nt" else None,
+    tool="Write", cwd=NOGIT, file_path=CAP_TRAILING_DOT, content=cap_settings(),
+    carries=(OPUS,) if os.name == "nt" else ())
+
 # A JSON ESCAPE IN THE KEY. The text pattern reads no key here, so the JSON walk is what answers.
 CAP_ESCAPED_KEY = '\\u0043LAUDE_CODE_SUBAGENT_MODEL'
 add("cap: a JSON-escaped key in the content asks", "ask", "subagent-model-cap", tool="Write",
