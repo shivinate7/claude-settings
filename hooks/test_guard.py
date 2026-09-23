@@ -396,17 +396,73 @@ def make_fake_gh(folder, base, delay=0):
     luck, not on the mutant's own defect. A deliberate delay, far past the mutant's 0.0001s and far
     under the real 10s, removes the race instead of hoping the real timeout stays small enough to
     lose it every time.
+
+    The delay tool (`sleep` or `ping`) is resolved to an ABSOLUTE PATH here, with shutil.which on
+    this test process's own full PATH, and that absolute path is written into the fake's body. The
+    fake itself runs under a narrow PATH the guard builds (its own folder, then only the Python
+    interpreter's folder — see PY_PATH), and calling the tool by bare name there is a silent
+    no-op on machines where that narrow PATH has no `sleep`/`ping` of its own: MEASURED in CI run
+    (gates job, PR #124) setup-python's toolcache folder has no `sleep`, and MEASURED locally
+    `C:\\Python314` has no `ping`. Both print a "not found" line to stderr and return instantly, so
+    the delay never runs and the race make_fake_gh exists to remove comes right back. A missing
+    tool is a raise, not a silent skip: a delay fixture that cannot delay is a defect in the
+    fixture, not a fact to route around.
     """
     os.makedirs(folder, exist_ok=True)
     body = '{"baseRefName":"%s"}' % base
     if os.name == "nt":
-        wait = ("ping -n %d 127.0.0.1 >nul\r\n" % (delay + 1)) if delay else ""
+        tool = shutil.which("ping", path=os.environ.get("PATH")) if delay else None
+        if delay and not tool:
+            raise RuntimeError(
+                "make_fake_gh: delay=%d requested but 'ping' is not on this process's PATH" % delay
+            )
+        wait = ('"%s" -n %d 127.0.0.1 >nul\r\n' % (tool, delay + 1)) if delay else ""
         write(os.path.join(folder, "gh.cmd"), "@echo off\r\n" + wait + "echo " + body + "\r\n")
     else:
         script = os.path.join(folder, "gh")
-        wait = ("sleep %d\n" % delay) if delay else ""
+        tool = shutil.which("sleep", path=os.environ.get("PATH")) if delay else None
+        if delay and not tool:
+            raise RuntimeError(
+                "make_fake_gh: delay=%d requested but 'sleep' is not on this process's PATH" % delay
+            )
+        wait = ("%s %d\n" % (tool, delay)) if delay else ""
         write(script, "#!/bin/sh\n" + wait + "echo '" + body + "'\n")
         os.chmod(script, 0o755)
+
+
+def _verify_fake_gh_delay(ghdir, delay):
+    """Fail fixture setup if the delayed gh fake in `ghdir` does not actually delay.
+
+    Runs the fake under the exact PATH the guard itself gets when it is asked about that base
+    (`ghdir` first, then only the Python interpreter's own folder — see merge_log_case and
+    PY_PATH). This is the check that goes red on the defect make_fake_gh's absolute-path fix
+    repairs: a delay tool resolved by bare name can silently vanish on that narrow PATH, and the
+    fake then answers instantly with an error on stderr instead of raising or waiting.
+    """
+    py_path = os.path.dirname(sys.executable)
+    env = dict(os.environ)
+    env["PATH"] = ghdir + os.pathsep + py_path
+    program = shutil.which("gh", path=env["PATH"])
+    if not program:
+        sys.exit(
+            "fixture check failed in _verify_fake_gh_delay: no 'gh' fake resolvable on "
+            "PATH=%r" % env["PATH"]
+        )
+    started = time.time()
+    result = subprocess.run([program], capture_output=True, text=True, env=env, timeout=60)
+    elapsed = time.time() - started
+    if result.stderr.strip():
+        sys.exit(
+            "fixture check failed in _verify_fake_gh_delay: the delayed gh fake in %r wrote to "
+            "stderr instead of delaying %ds (PATH=%r): %r"
+            % (ghdir, delay, env["PATH"], result.stderr.strip())
+        )
+    if elapsed < delay:
+        sys.exit(
+            "fixture check failed in _verify_fake_gh_delay: the delayed gh fake in %r answered "
+            "in %.3fs, under its %ds delay (PATH=%r) -- the delay tool resolved to nothing "
+            "real on this PATH" % (ghdir, elapsed, delay, env["PATH"])
+        )
 
 
 def build_fixtures():
@@ -430,6 +486,10 @@ def build_fixtures():
     # mutant can flip (GHMAIN and GHNONE both expect "logged" either way), so it is the one fixture
     # whose instant reply could race that mutant's shrunk timeout. See make_fake_gh's docstring.
     make_fake_gh(GHDEV, "dev", delay=1)
+    # Trust this delay only once it is proven, not assumed: run it now, under the guard's own
+    # narrow PATH, and fail fixture setup outright if it does not really delay. See
+    # _verify_fake_gh_delay's docstring for the defect this catches.
+    _verify_fake_gh_delay(GHDEV, delay=1)
     os.makedirs(GHNONE, exist_ok=True)
     # A real checkout and a real linked worktree of it. The shared-tree rule asks git which is
     # which, so no fake will do.
