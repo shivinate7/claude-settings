@@ -73,5 +73,5 @@ This rule's own check is still a human read of the act. A command hook passes
 through no permission check at all. It cannot go silent for that reason.
 
 So read an UNKNOWN systemMessage from the new hook as a cue to look yourself.
-A run of them means the hook itself is failing. It never means nothing
+A run of them means that the hook itself is failing. It never means that nothing
 protected changed.

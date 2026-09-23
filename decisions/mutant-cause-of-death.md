@@ -36,7 +36,7 @@ FAIL  [bypass]  pre=allow  mv from another file  (cap STILL LIFTED: the watch mi
 The cause was not the mutation. A `watch` mutant is written to a temp directory outside
 `hooks/`, then run as its own subprocess. `config_watch.py` does a plain `import guard`
 there. That is deliberate. `test_config_watch.py`'s `Project.env()` strips
-`GUARD_UNDER_TEST` before it spawns the copy. So a mutation of the watch is never judged
+`GUARD_UNDER_TEST` before it spawns the copy. So a watch mutation is never judged
 against a guard that moved with it. Without the real `guard.py` beside the copy, that
 import raised `ModuleNotFoundError` on every mutant. It crashed before any watch logic
 ran. The crash read as "the watch missed every case," regardless of what had been

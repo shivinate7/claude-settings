@@ -1,6 +1,6 @@
 # Subagent model cap
 
-CLAUDE.md says: "Once set up, turn each rule below into a hook or check." This entry
+CLAUDE.md says: "Once ready, turn each rule below into a hook or check." This entry
 records how the worker-model rule is mechanized after
 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is dropped. The owner dropped it. That is settled
 and this entry does not reopen it.
@@ -16,8 +16,8 @@ The sub-agents documentation gives this order. The first entry that names a mode
 wins.
 
 1. The per-invocation `model` parameter.
-2. The subagent definition's `model` frontmatter. A value of `inherit` means the
-   main conversation's model.
+2. The subagent definition's `model` frontmatter. A value of `inherit` means that the
+   main conversation's model applies.
 3. `CLAUDE_CODE_SUBAGENT_MODEL`.
 4. The main conversation's model.
 
@@ -77,7 +77,7 @@ context, so two retries can triple a session's cost. A June 2026 preprint catalo
 named failure class. Static routing breaks when task complexity varies inside one
 role.
 
-Observed in this repository, same day. Lanes are not uniform. Two lanes were
+Observed in this repository, same day. Lanes vary. Two lanes were
 mechanical. Two needed real diagnosis, and both caught errors their brief did not
 anticipate. A lane runs 25 to 60 minutes of wall-clock time. A rework cycle therefore
 costs far more than over-provisioning one lane by 2.5 times the tokens.

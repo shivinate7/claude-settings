@@ -52,7 +52,7 @@ whose subject is the stack.
 
 ## The predicate
 
-Not a longer list of action words. The predicate is the DIRECTION of the act.
+Not a longer list of action words. The predicate is the act's DIRECTION.
 
 A `git stash` call reads the stack, puts work onto it, or takes an entry off it.
 `list` and `show` read. `push`, `save` and a bare `git stash` put work on. Every

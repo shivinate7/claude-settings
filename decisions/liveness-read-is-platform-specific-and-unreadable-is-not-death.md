@@ -32,9 +32,9 @@ already treats an unreadable session directory. Keep it. Never reap it.
 ## The fix
 
 `_process_start_ms` now returns three distinguishable values. An int epoch
-millisecond means a live process. `None` means a CONFIRMED dead pid. The
-module-level sentinel `PROCESS_START_UNREADABLE` means the read could not
-tell either way. `session_is_live` carries that split through as `True`,
+millisecond means that the process is live. `None` means that the pid is
+CONFIRMED dead. The module-level sentinel `PROCESS_START_UNREADABLE` means
+that the read could not tell either way. `session_is_live` carries that split through as `True`,
 `False`, and `None`. `worktree_live_session` no longer folds an unreadable
 record's own liveness read into "not live" by a bare `continue`. It answers
 `None` when some session's cwd sits under the target and that record's own
@@ -56,10 +56,10 @@ code is unreadable, never death. So is an exec failure, a timeout, or output
 that fails to parse.
 
 Windows asks `kernel32.OpenProcess` directly, through `ctypes`. A NULL
-handle with `GetLastError` code 87 (`ERROR_INVALID_PARAMETER`) means no such
-process exists, the same CONFIRMED dead case. Code 5
-(`ERROR_ACCESS_DENIED`) means the process exists but this read cannot see
-into it. That is unreadable. Any other code is also unreadable. A valid
+handle with `GetLastError` code 87 (`ERROR_INVALID_PARAMETER`) means that no
+such process exists, the same CONFIRMED dead case. Code 5
+(`ERROR_ACCESS_DENIED`) means that the process exists but this read cannot
+see into it. That is unreadable. Any other code is also unreadable. A valid
 handle's `GetProcessTimes` creation FILETIME converts straight to epoch
 milliseconds. It needs no timezone handling at all. FILETIME is UTC-anchored
 by definition. `ps -o lstart=` prints local time with no zone marker, and it

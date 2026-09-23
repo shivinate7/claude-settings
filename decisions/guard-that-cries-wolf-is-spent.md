@@ -8,8 +8,8 @@ spent. The reader learns to scroll past it.
 ## The shared shape
 
 Both false alarms below matched text instead of resolving the act. Neither
-looked at what a command would actually run. Each treated the presence of a
-substring as proof of an act. That argument, and why it fails, is recorded
+looked at what a command would actually run. Each treated a substring's
+presence as proof of an act. That argument, and why it fails, is recorded
 already. See decisions/predicate-is-the-act.md. This entry does not restate
 it. It adds two more measurements of the same shape, from a different file.
 

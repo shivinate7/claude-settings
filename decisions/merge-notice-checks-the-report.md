@@ -15,7 +15,7 @@ Merges into main this turn: gh pr merge 75 --squash --delete-branch ; gh pr
 view 75 --json state,mergedAt --jq .mergedAt. Name them in the report.
 ```
 
-His words: "I already see when things merge under the done section, this is
+The owner's words: "I already see when things merge under the done section, this is
 kinda unnecessary." Two faults, one turn. The notice never read the reply.
 It fired even when the report already said the same thing. It also quoted
 the RAW command line, including the `gh pr view` chained onto it with `;`.

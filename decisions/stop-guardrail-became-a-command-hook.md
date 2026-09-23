@@ -3,7 +3,7 @@
 The `type: agent` Stop hook in `settings.json` judged every turn for a silent
 change to a decision, gate, build-order, CLAUDE.md rule, or setting. It read
 `transcript_path` through the permission system. An agent hook's own tool
-calls go through it like any other.
+calls pass through it like any other.
 
 ## The measurement
 
@@ -12,7 +12,7 @@ and about 60 "Unable to verify" answers. The unverifiable answers track the
 desktop app's `auto` permission mode. There, the transcript path sits outside
 the working directory. A hook agent cannot prompt to cross that. In
 `bypassPermissions`, where the hook works, it still spends a full model turn
-on every Stop, whether or not anything protected changed.
+each Stop, whether or not anything protected changed.
 
 Sorting the 34 real flags by hand gave five shapes. A gate or decision file
 changed with no visible chat approval. A decision entry widened and
