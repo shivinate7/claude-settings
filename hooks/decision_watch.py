@@ -117,6 +117,16 @@ MODEL_TIMEOUT = 60
 GIT_TIMEOUT = 10
 MAX_DIFFED_FILES = 8
 
+# `invoke_model` puts the whole prompt in one argv element. Windows caps a process's
+# command line around 32,767 characters total; a run touching several protected files, or
+# one large legitimate rewrite of a decision file (exactly the case this hook exists to
+# judge), can build a prompt past that on its own, and `subprocess.run` would then fail to
+# start there -- UNKNOWN, per this hook's own fail-closed contract, but silently so, on the
+# one platform this repo runs Windows parity CI for. Capped well under the limit, with the
+# cut named in the prompt itself so the judge (and anyone reading its "why") knows evidence
+# was dropped rather than concluding nothing else changed.
+PROMPT_MAX_LEN = 20000
+
 PEER_MESSAGE_TOOLS = ("SendMessage", "Task")
 
 # Deliberately broad: a substring match against a lowercased relative path, on top of
@@ -339,7 +349,14 @@ def changed_this_turn(cwd, baseline):
     kept = []
     for rel, status in entries.items():
         abs_path = os.path.join(cwd, *rel.split("/"))
-        if baseline is not None:
+        # A deleted path (status has "D" in either column) has no mtime to check --
+        # there's nothing left to stat. Skipping the mtime filter for it is the same
+        # broad-net call this function already makes for a missing baseline: a file git
+        # reports gone this turn stays in scope rather than dropping out through the
+        # getmtime except below, which is for a file that's unreadable but still THERE
+        # (e.g. a permissions error), not one that's gone.
+        deleted = "D" in status[:2]
+        if baseline is not None and not deleted:
             try:
                 if os.path.getmtime(abs_path) <= baseline:
                     continue
@@ -729,6 +746,12 @@ def run(hook, model_call=invoke_model):
         "\n\n".join(evidence),
         chat_text_after(records, idx),
     )
+    if len(prompt) > PROMPT_MAX_LEN:
+        cut = len(prompt) - PROMPT_MAX_LEN
+        prompt = prompt[:PROMPT_MAX_LEN] + (
+            "\n\n[TRUNCATED: %d characters cut here to stay under the command-line "
+            "length this prompt is passed with.]" % cut
+        )
 
     verdict, error = model_call(prompt)
     if error is not None:

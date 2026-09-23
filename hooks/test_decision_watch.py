@@ -133,6 +133,30 @@ def case_flag_unapproved():
     check("flag_unapproved: reads as FLAG", message.startswith(dw.FLAG_PREFIX), message)
 
 
+# --------------------------------------------------------------------------- case 1z
+# A protected file DELETED this turn must still flag. Regression for a bug where
+# `changed_this_turn` called os.path.getmtime on a path git reports as deleted, got
+# FileNotFoundError every time (not a race), and silently dropped the file from the
+# changed set -- an empty "protected" set reads as a clean pass, not even UNKNOWN, on
+# exactly the case the judge prompt names as a FLAG criterion ("removed").
+
+def case_flag_deleted_protected_file():
+    repo = make_repo("flag_deleted_protected")
+    rule_path = os.path.join(repo, "decisions", "some-other-rule.md")
+    write(rule_path, "# A rule\n\nAlways check X.\n")
+    commit_all(repo)
+    os.remove(rule_path)
+    records = [
+        human_record("please fix the typo in the readme", T0),
+        assistant_record(text="Removed the stale rule doc too while I was in there."),
+    ]
+    path = write_transcript(repo, records)
+    hook = {"transcript_path": path, "cwd": repo}
+    message = dw.run(hook, model_call=stub({"verdict": "FLAG", "why": "removed silently"}))
+    check("flag_deleted_protected_file: non-empty systemMessage", bool(message), message)
+    check("flag_deleted_protected_file: reads as FLAG", message.startswith(dw.FLAG_PREFIX), message)
+
+
 # --------------------------------------------------------------------------- case 1a
 # The model's `why` text is attacker-influenced (it is the judge's summary of a diff this
 # hook fed it) and is capped, control-character-stripped, and clearly attributed before it
@@ -477,6 +501,7 @@ def case_main_stop_hook_active_stays_quiet():
 
 def main():
     case_flag_unapproved()
+    case_flag_deleted_protected_file()
     case_why_field_is_sanitized()
     case_allow_approved()
     case_outbound_alone_no_disk_change()
