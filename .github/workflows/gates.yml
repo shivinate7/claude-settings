@@ -41,6 +41,9 @@ jobs:
       - name: Config watch fixture suite
         run: python3 hooks/test_config_watch.py
 
+      - name: Decision watch fixture suite
+        run: python3 hooks/test_decision_watch.py
+
       - name: Stop-hook gate fixture suite
         run: python3 lint/test_gates.py
 
@@ -216,6 +219,10 @@ jobs:
       - name: Config watch fixture suite
         if: ${{ !cancelled() }}
         run: python hooks/test_config_watch.py
+
+      - name: Decision watch fixture suite
+        if: ${{ !cancelled() }}
+        run: python hooks/test_decision_watch.py
 
       - name: Stop-hook gate fixture suite
         if: ${{ !cancelled() }}

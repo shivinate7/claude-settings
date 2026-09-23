@@ -41,6 +41,15 @@
         "hooks": [
           {
             "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/decision_watch.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
+            "timeout": 170
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
             "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/lint/report_gate.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
             "timeout": 20
           }
