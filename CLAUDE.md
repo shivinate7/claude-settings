@@ -96,5 +96,4 @@ Bring my decisions as a question with options and a recommendation.<!-- rule:out
 **Reports, in order:** Done, Deviations, Input Needed, Next.<!-- rule:reports-order-of-labels --> Done: one line per item, BUILT,
 RECORDED, or OTHER, with its PR or commit.<!-- rule:reports-done-format --> One item inline, several as bullets.<!-- rule:reports-item-count-format --> Drop a label
 that does not apply.<!-- rule:reports-drop-unused-label --> Your report to me: bold labels in one blockquote, never a code fence,
-nothing below.<!-- rule:reports-blockquote-no-fence --> Put nothing above it, unless I asked a question that turn. Then answer above
-the report.<!-- rule:reports-nothing-above-unless-question --> No report when nothing landed.<!-- rule:reports-no-report-when-nothing-landed -->
+nothing below.<!-- rule:reports-blockquote-no-fence --> No report when nothing landed.<!-- rule:reports-no-report-when-nothing-landed -->

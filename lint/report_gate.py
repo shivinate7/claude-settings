@@ -7,8 +7,7 @@ transcript, or a parse error.
 Stop: when this turn ran `git commit`, `git push`, `git merge`, or a GitHub MCP write tool
 after the last human message, block once unless the reply ends with one blockquote holding
 the bold labels Done, Deviations, Input Needed, Next, in that order (CLAUDE.md, "Reports, in
-order"). When the last human message asks a question, prose may sit above the report, so the
-answer does not have to hide inside it. Nothing may follow the report either way. When
+order"). Prose may sit above the report on any turn. Nothing may follow the report. When
 stop_hook_active is set, the reply is already a rewrite, so the gate stays quiet.
 """
 import json
@@ -55,13 +54,9 @@ BLOCK_REASON_HEAD = (
     "with the report. One blockquote, bold labels Done, Deviations, Input Needed, Next in "
     "that order, drop a label that does not apply, no code fence, nothing after it."
 )
-BLOCK_REASON_NO_PREFIX = (
-    " Nothing may sit above the report on this turn. Write the whole reply again as the "
-    "report alone. Do not repeat the prose you already wrote."
-)
-BLOCK_REASON_PREFIX_OK = (
-    " The last human message asks a question, so prose may sit above the report. Write the "
-    "whole reply again: the answer first, then the report last."
+BLOCK_REASON_TAIL = (
+    " Prose may sit above the report. Write the whole reply again with the report last, and "
+    "nothing after it."
 )
 
 
@@ -103,19 +98,6 @@ def turn_landed(records):
     return False
 
 
-def asked_question(rec):
-    """True when the last human message holds a question mark."""
-    msg = rec.get("message") or {}
-    content = msg.get("content")
-    if isinstance(content, str):
-        return "?" in content
-    if isinstance(content, list):
-        for b in content:
-            if isinstance(b, dict) and b.get("type") == "text" and "?" in (b.get("text") or ""):
-                return True
-    return False
-
-
 def find_block_start(lines):
     """Return the index of the first blockquote line, else None.
 
@@ -132,8 +114,8 @@ def find_block_start(lines):
 def block_text(text):
     """Return the reply's report block, quote markers stripped, or "" when there is none.
 
-    This does not judge shape (label order, fencing, a prefix where none is allowed): that is
-    `report_shape_ok`'s job. It only hands back the block's own text, so a caller that needs to
+    This does not judge shape (label order, fencing, trailing text): that is `report_shape_ok`'s
+    job. It only hands back the block's own text, so a caller that needs to
     know whether the block already SAYS something (such as a PR number) can search it without
     hand-rolling a second blockquote parser.
     """
@@ -152,12 +134,10 @@ def block_text(text):
     return "\n".join(out)
 
 
-def report_shape_ok(text, allow_prefix=False):
+def report_shape_ok(text):
     lines = text.splitlines()
     start = find_block_start(lines)
     if start is None:
-        return False
-    if start > 0 and not allow_prefix:
         return False
     seen = []
     any_label = False
@@ -234,12 +214,10 @@ def main():
     if not turn_landed(after):
         return
 
-    allow_prefix = asked_question(records[last_human_idx])
     text = last_reply(hook)
-    if report_shape_ok(text, allow_prefix):
+    if report_shape_ok(text):
         return
-    tail = BLOCK_REASON_PREFIX_OK if allow_prefix else BLOCK_REASON_NO_PREFIX
-    print(json.dumps({"decision": "block", "reason": BLOCK_REASON_HEAD + tail}))
+    print(json.dumps({"decision": "block", "reason": BLOCK_REASON_HEAD + BLOCK_REASON_TAIL}))
 
 
 if __name__ == "__main__":
