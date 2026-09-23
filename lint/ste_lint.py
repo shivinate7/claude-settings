@@ -314,6 +314,8 @@ DEFAULT_CONFIG = {
     "fail_on": "error",
     "allow_words": [],
     "exclude": [],
+    # Off for a repository with no folder at this path: see `find_decisions_dir`.
+    "decisions_dir": "docs/decisions",
 }
 
 
@@ -399,6 +401,13 @@ class Masker:
         return core
 
     def _mask(self, text: str) -> str:
+        # A gloss span is matched RAW, against the title text as written.
+        # It runs before any substitution below, or a code word inside a
+        # title would lose its match to a token of its own first.
+        # `_GLOSS_PATTERN` is None on a repository with no decisions folder
+        # in the shape this expects. This line then changes nothing.
+        if _GLOSS_PATTERN is not None:
+            text = _GLOSS_PATTERN.sub(lambda m: self._token(m.group(0)), text)
         # A link keeps its label, so the prose stays readable. The label is
         # padded back to the original length to keep the columns stable.
         def link_repl(match):
@@ -422,6 +431,172 @@ class Masker:
 
 def strip_placeholders(text: str) -> str:
     return _PH_RE.sub("CODE", text).replace(NUL, "")
+
+
+# --------------------------------------------------------------------------
+# Decision-citation gloss collapse
+#
+# A citation reads `D-nnn, title`. The mandate's rule: cite an entry by id
+# plus a short gloss, never a bare id. A tool such as `harness/decision-
+# refs.mjs` writes that gloss FROM the target entry's own title. The author
+# types one token. The gloss grows it to six words or more. STE001 counts
+# words in authored prose, and must not punish text nobody typed.
+#
+# `harness/decision-refs.mjs`'s `glossSpanPattern` solved this for its own
+# checker. It pairs each id with the title of the entry THAT id names, read
+# from a decisions folder, and collapses only that exact pairing. Text after
+# a comma that matches no title stays prose. This section is the same rule,
+# ported to Python, with no dependency on Node: it reads the decision files
+# directly.
+#
+# OFF BY DEFAULT for a repository with no decisions folder in the shape this
+# expects. `--decisions-dir` (default "docs/decisions", the same path
+# `decision-refs.mjs` uses) turns it on only when that folder exists.
+# --------------------------------------------------------------------------
+
+_FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.S)
+_FIELD_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*):[ \t]*(.*)$")
+_ID_RE = re.compile(r"D-(\d{3,})")
+_REVERSES_LINE_RE = re.compile(
+    r"^reverses:[ \t]*(D-\d{3,}(?:[ \t]*,[ \t]*D-\d{3,})*)[ \t]*$", re.I | re.M)
+
+_GLOSS_PATTERN: Optional[re.Pattern] = None
+
+
+def set_gloss_pattern(pattern: Optional[re.Pattern]) -> None:
+    """Set (or clear, with None) the compiled gloss-span pattern for this run."""
+    global _GLOSS_PATTERN
+    _GLOSS_PATTERN = pattern
+
+
+def _pad_id(n: int) -> str:
+    return "D-%03d" % n
+
+
+def ids_from(spec: str) -> List[str]:
+    """Every id a front-matter `id:` field names. Mirrors `idsFrom` in decision-refs.mjs.
+
+    `D-044 to D-046` is a RANGE, and it defines the id in the middle too. A
+    list such as `D-048 and D-053` names only the ids written.
+    """
+    if not spec or spec.strip() == "pending":
+        return []
+    numbers = [int(m.group(1)) for m in _ID_RE.finditer(spec)]
+    if not numbers:
+        return []
+    if re.search(r"\bto\b", spec):
+        return [_pad_id(n) for n in range(min(numbers), max(numbers) + 1)]
+    return [_pad_id(n) for n in numbers]
+
+
+def _unquote_value(value: str) -> str:
+    if len(value) >= 2 and value.startswith('"') and value.endswith('"'):
+        try:
+            return json.loads(value)
+        except ValueError:
+            return value
+    return value
+
+
+def _parse_frontmatter_fields(text: str) -> Dict[str, str]:
+    match = _FRONTMATTER_RE.match(text)
+    if not match:
+        return {}
+    fields: Dict[str, str] = {}
+    for line in match.group(1).split("\n"):
+        kv = _FIELD_LINE_RE.match(line)
+        if kv:
+            fields[kv.group(1)] = _unquote_value(kv.group(2).strip())
+    return fields
+
+
+def _parse_reverses(text: str) -> List[str]:
+    """Every id an entry's own prose declares, through the explicit `reverses:` marker."""
+    ids: List[str] = []
+    for match in _REVERSES_LINE_RE.finditer(text):
+        for id_match in _ID_RE.finditer(match.group(1)):
+            ids.append(_pad_id(int(id_match.group(1))))
+    return ids
+
+
+def _decision_entries(decisions_dir: str) -> List[dict]:
+    """Read every `*.md` file in `decisions_dir`, one entry per file.
+
+    Best-effort: a file this cannot parse is skipped rather than raised, so
+    one malformed entry never breaks the lint run over every other file.
+    """
+    entries = []
+    try:
+        names = sorted(n for n in os.listdir(decisions_dir) if n.endswith(".md"))
+    except OSError:
+        return entries
+    for name in names:
+        path = os.path.join(decisions_dir, name)
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                text = handle.read()
+        except OSError:
+            continue
+        fields = _parse_frontmatter_fields(text)
+        slug = fields.get("slug") or os.path.splitext(name)[0]
+        entries.append({
+            "defines": ids_from(fields.get("id", "")),
+            "title": (fields.get("title") or "").strip(),
+            "slug": slug,
+            "reverses": _parse_reverses(text),
+        })
+    return entries
+
+
+def build_gloss_pattern(decisions_dir: str) -> Optional[re.Pattern]:
+    """Compile the pattern that collapses every real `D-nnn, <that entry's title>`
+    span, read from `decisions_dir`, into one token. Returns None when the
+    folder holds no entry to collapse (an empty or absent folder included).
+    """
+    entries = _decision_entries(decisions_dir)
+    defined = {id_ for e in entries for id_ in e["defines"]}
+
+    # The back-link: who reverses which id, keyed by the REVERSED id, each
+    # value the reversing entry's own "id, title" (or "[[slug]]" while
+    # pending). Mirrors `buildIndex`'s third pass in decision-refs.mjs.
+    reversed_by: Dict[str, Dict[str, str]] = {}
+    for e in entries:
+        label = e["defines"][0] if e["defines"] else "[[%s]]" % e["slug"]
+        glossed = "%s, %s" % (e["defines"][0], e["title"]) if e["defines"] else label
+        for rid in e["reverses"]:
+            if rid not in defined:
+                continue
+            reversed_by.setdefault(rid, {})[label] = glossed
+
+    alternatives = []
+    for e in entries:
+        if not e["title"] or not e["defines"]:
+            continue
+        title = e["title"]
+        merged: Dict[str, str] = {}
+        for id_ in e["defines"]:
+            if id_ in reversed_by:
+                merged.update(reversed_by[id_])
+        if merged:
+            title = "%s (reversed by %s)" % (title, "; ".join(sorted(merged.values())))
+        words = r"\s+".join(re.escape(w) for w in title.split())
+        for id_ in e["defines"]:
+            alternatives.append("%s,\\s*%s" % (re.escape(id_), words))
+
+    if not alternatives:
+        return None
+    return re.compile(r"\b(?:%s)" % "|".join(alternatives))
+
+
+def find_decisions_dir(config: dict) -> Optional[str]:
+    """The configured decisions folder, resolved against the current working
+    directory (a repository's own root, the way this linter is always
+    invoked), or None when it names no real directory.
+    """
+    decisions_dir = config.get("decisions_dir") or ""
+    if decisions_dir and os.path.isdir(decisions_dir):
+        return decisions_dir
+    return None
 
 
 # --------------------------------------------------------------------------
@@ -1246,6 +1421,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--disable", default="", help="comma-separated rule codes to skip")
     parser.add_argument("--enable", default="", help="comma-separated rule codes to run alone")
     parser.add_argument("--exclude", default="", help="comma-separated glob patterns to skip")
+    parser.add_argument("--decisions-dir", default=None,
+                        help="folder of D-nnn decision entries, for gloss collapse in STE001 "
+                             "(default: docs/decisions; pass '' to turn the collapse off)")
     parser.add_argument("--source-prose", action="store_true",
                         help="lint only comments and docstrings of .py/.sh/.bash files "
                              "(off by default; unknown extensions still lint as text)")
@@ -1301,6 +1479,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         config["enable"] = [c.strip().upper() for c in args.enable.split(",") if c.strip()]
     exclude = list(config.get("exclude", [])) + \
         [p.strip() for p in args.exclude.split(",") if p.strip()]
+    if args.decisions_dir is not None:
+        config["decisions_dir"] = args.decisions_dir
+    decisions_dir = find_decisions_dir(config)
+    set_gloss_pattern(build_gloss_pattern(decisions_dir) if decisions_dir else None)
 
     source_suffixes = (TEXT_SUFFIXES | SOURCE_SUFFIXES) if args.source_prose else None
     paths = collect_paths(args.paths, exclude, source_suffixes)

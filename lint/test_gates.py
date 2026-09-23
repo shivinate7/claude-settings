@@ -670,6 +670,91 @@ class SentenceSplitBoldTests(unittest.TestCase):
         self.assertIn("STE001", codes)
 
 
+class DecisionGlossCollapseTests(unittest.TestCase):
+    """STE001 must not count the words a gloss tool inserts after a citation
+    (decisions/ste-lint-gloss-collapse.md). A hermetic fixture folder stands
+    in for a real `docs/decisions/`, so this needs no other repository.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.decisions_dir = os.path.join(self.tmp.name, "decisions")
+        os.makedirs(self.decisions_dir)
+        self.addCleanup(self.tmp.cleanup)
+        self.addCleanup(ste_lint.set_gloss_pattern, None)
+
+    def write_entry(self, filename, id_, title, body="Some prose.\n"):
+        with open(os.path.join(self.decisions_dir, filename), "w", encoding="utf-8") as fh:
+            fh.write(
+                "---\nid: %s\nslug: %s\ntitle: %s\ndate: 2026-01-01\n---\n\n%s"
+                % (id_, os.path.splitext(filename)[0], title, body))
+
+    def lint(self, text, use_gloss):
+        pattern = ste_lint.build_gloss_pattern(self.decisions_dir) if use_gloss else None
+        ste_lint.set_gloss_pattern(pattern)
+        linter = ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG))
+        return linter.check_text("t.md", text)
+
+    def test_genuinely_long_sentence_without_citation_still_ste001(self):
+        self.write_entry("d-001.md", "D-001", "A short title")
+        words = ["word"] * 30
+        text = " ".join(words).capitalize() + ".\n"
+        codes = [f.code for f in self.lint(text, use_gloss=True)]
+        self.assertIn("STE001", codes)
+
+    def test_gloss_only_overflow_is_not_ste001_once_collapsed(self):
+        self.write_entry("d-001.md", "D-001", "A title of exactly six whole words")
+        text = (
+            "The team agreed today that this long sentence about D-001, A title "
+            "of exactly six whole words still carries plenty of authored words "
+            "for the sentence count today.\n")
+        uncollapsed = [f.code for f in self.lint(text, use_gloss=False)]
+        self.assertIn("STE001", uncollapsed, "fixture sentence was not actually over budget")
+        collapsed = [f.code for f in self.lint(text, use_gloss=True)]
+        self.assertNotIn("STE001", collapsed)
+
+    def test_wrong_gloss_for_a_real_id_is_not_collapsed(self):
+        self.write_entry("d-001.md", "D-001", "A title of exactly six whole words")
+        text = (
+            "The team agreed today that this long sentence about D-001, some "
+            "text that is not entry one real title still carries plenty of "
+            "authored words for the count today.\n")
+        codes = [f.code for f in self.lint(text, use_gloss=True)]
+        self.assertIn("STE001", codes)
+
+    def test_reversed_entry_gloss_suffix_also_collapses(self):
+        self.write_entry("d-001.md", "D-001", "A title of exactly six whole words")
+        self.write_entry("d-002.md", "D-002", "The newer rule", body="reverses: D-001\n")
+        text = (
+            "The team agreed that this sentence about D-001, A title of exactly six "
+            "whole words (reversed by D-002, The newer rule) still carries words today.\n")
+        codes = [f.code for f in self.lint(text, use_gloss=True)]
+        self.assertNotIn("STE001", codes)
+
+    def test_pending_entry_has_no_id_to_collapse(self):
+        self.write_entry("d-003.md", "pending", "Not stamped yet")
+        pattern = ste_lint.build_gloss_pattern(self.decisions_dir)
+        self.assertIsNone(pattern)
+
+    def test_absent_decisions_dir_gives_no_pattern(self):
+        pattern = ste_lint.build_gloss_pattern(os.path.join(self.tmp.name, "no-such-dir"))
+        self.assertIsNone(pattern)
+
+    def test_absent_decisions_dir_output_is_byte_identical(self):
+        text = (
+            "The team agreed that this sentence about D-001, A title of exactly "
+            "six whole words still carries plenty of authored words for the count today.\n")
+        config = dict(ste_lint.DEFAULT_CONFIG)
+        config["decisions_dir"] = os.path.join(self.tmp.name, "no-such-dir")
+        decisions_dir = ste_lint.find_decisions_dir(config)
+        self.assertIsNone(decisions_dir)
+        without_feature = self.lint(text, use_gloss=False)
+        with_feature_off = self.lint(text, use_gloss=False)
+        self.assertEqual(
+            ste_lint.report_text(without_feature, False, False),
+            ste_lint.report_text(with_feature_off, False, False))
+
+
 class PromotedRuleTests(unittest.TestCase):
     """The owner's ruling (decisions/every-lint-rule-blocks-or-goes.md): a rule either
     blocks or does not exist. Seven rules were promoted to error. Each case here proves
