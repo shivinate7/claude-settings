@@ -1501,7 +1501,17 @@ def session_is_live(record):
     `PROCESS_START_UNREADABLE`), which a caller must treat as "cannot tell," never as False.
 
     A recycled pid then cannot inherit a dead session's claim. The process at that pid today
-    started at a different moment than the one the record names."""
+    started at a different moment than the one the record names.
+
+    The tolerance is one-sided. `actual` (read now, fixed forever once the kernel records a
+    process's creation FILETIME) more than the tolerance AHEAD of `started` (written 1.7-3.2s
+    later by `Date.now()`, MEASURED) is the recycled-pid signature -- but a clock stepping
+    BACKWARDS between those two original measurements produces the exact same shape for a
+    process that never died: `started` reads too small because it was captured after the step.
+    The two are indistinguishable from this reading alone, so that direction answers None
+    (cannot tell), never a confident False. The other direction (`started` far AHEAD of
+    `actual`) has no such legitimate reading -- `started` is always written strictly after
+    `actual` -- so it stays a confident False, unchanged."""
     if not isinstance(record, dict):
         return False
     pid = record.get("pid")
@@ -1513,14 +1523,59 @@ def session_is_live(record):
         return None
     if actual is None:
         return False
-    return abs(actual - started) <= SESSION_LIVE_TOLERANCE_MS
+    diff = actual - started
+    if diff > SESSION_LIVE_TOLERANCE_MS:
+        return None
+    return diff >= -SESSION_LIVE_TOLERANCE_MS
+
+
+def _path_identity(path: str):
+    """A key identifying PATH's underlying file, stable across different path spellings of one
+    physical location (a Windows `subst` drive or a mapped network drive against its UNC or
+    local equivalent). `None` when the identity itself could not be read.
+
+    MEASURED: `os.path.realpath` does not reliably canonicalise such a spelling to the same
+    string as its equivalent -- mapping drive `T:` to a UNC share left `realpath` naming
+    the UNC path for one spelling and the local path for the other, so they never compared
+    equal as strings. `os.stat`'s `(st_dev, st_ino)` agreed for both. That pair, not the path
+    string, is the identity this function reports."""
+    try:
+        info = os.stat(path)
+        return (info.st_dev, info.st_ino)
+    except Exception:
+        return None
+
+
+def _under_by_identity(cwd_resolved: str, target_identity):
+    """True when some ancestor of CWD_RESOLVED (itself included) is the same underlying file as
+    TARGET_IDENTITY. False when every ancestor's own identity resolves and none matches. None
+    when TARGET_IDENTITY itself is unreadable, or some ancestor's identity could not be read
+    without another ancestor already matching -- that leaves the question open, never "no"."""
+    if target_identity is None:
+        return None
+    ancestor = cwd_resolved
+    unresolved = False
+    while True:
+        identity = _path_identity(ancestor)
+        if identity is None:
+            unresolved = True
+        elif identity == target_identity:
+            return True
+        parent = os.path.dirname(ancestor)
+        if parent == ancestor:
+            break
+        ancestor = parent
+    return None if unresolved else False
 
 
 def worktree_live_session(target: str):
     """True when a live session's cwd sits at or under TARGET. False when every session under
     TARGET is confirmed not live, or none has a cwd under TARGET at all. None when the session
     directory itself could not be read. None also when some session's cwd sits under TARGET,
-    but its own liveness read came back unreadable rather than confirmed dead.
+    but its own liveness read came back unreadable rather than confirmed dead. None also when a
+    record's cwd cannot be MATCHED against TARGET at all: neither the string compare nor the
+    file-identity fallback (`_under_by_identity`) could tell, so it might be an unmatched
+    spelling of a live session's own worktree.
 
     A record with an unreadable liveness read is never dropped by `continue` as though it were
     confirmed dead. Doing so would fold "could not tell" back into "not live," the exact bug
@@ -1530,9 +1585,11 @@ def worktree_live_session(target: str):
     if records is None:
         return None
     try:
-        target_real = os.path.normcase(os.path.realpath(target)) + os.sep
+        target_resolved = os.path.realpath(target)
     except Exception:
         return None
+    target_real = os.path.normcase(target_resolved) + os.sep
+    target_identity = _path_identity(target_resolved)
     saw_unreadable = False
     for record in records:
         if not isinstance(record, dict):
@@ -1541,10 +1598,19 @@ def worktree_live_session(target: str):
         if not isinstance(cwd, str) or not cwd:
             continue
         try:
-            cwd_real = os.path.normcase(os.path.realpath(cwd)) + os.sep
+            cwd_resolved = os.path.realpath(cwd)
         except Exception:
             continue
-        if not cwd_real.startswith(target_real):
+        cwd_real = os.path.normcase(cwd_resolved) + os.sep
+        under = cwd_real.startswith(target_real)
+        if not under:
+            # The string spellings differ. Before concluding "not under," check whether they
+            # are two spellings of the one physical location (see `_path_identity`).
+            under = _under_by_identity(cwd_resolved, target_identity)
+        if under is None:
+            saw_unreadable = True
+            continue
+        if not under:
             continue
         live = session_is_live(record)
         if live is True:

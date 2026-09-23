@@ -2915,6 +2915,122 @@ def worktree_live_session_unreadable_case():
     return (not problems), "; ".join(problems) if problems else "unreadable record propagates as None"
 
 
+def worktree_live_session_two_spellings_case():
+    """A live session's cwd and TARGET can name one physical directory in two strings that
+    `os.path.normcase(os.path.realpath(...))` never makes equal. MEASURED by hand on this
+    machine: mapping drive `T:` to `\\\\localhost\\c$` left `os.path.realpath` naming the UNC
+    path for one spelling and the local `C:\\...` path for the other -- they never compared
+    equal as strings -- while `os.stat` gave both the identical `(st_dev, st_ino)`. That is the
+    exact split a Windows `subst` drive or a mapped network drive can produce against the
+    worktree path `janitor/sweep.py` hands the sweep.
+
+    This case does not depend on that mapped drive existing on whatever machine runs the
+    suite (loopback SMB sharing is not guaranteed on every CI image), so it simulates the same
+    split at the `_path_identity` seam instead: two genuinely different temp directories stand
+    in for the two spellings, and `_path_identity` is stubbed to answer as if they were one
+    file. That proves `worktree_live_session` FOLDS a matching identity into "under target" and
+    returns True for a live session there. It does NOT re-prove that `os.stat` truly agrees
+    across every real subst/mapped-drive pair on every Windows build -- that half was checked
+    against the real mapped drive above, not by this automated case.
+    """
+    guard = _load_guard_module()
+    problems = []
+    target = tempfile.mkdtemp(prefix="wt-live-target-")
+    other_spelling = tempfile.mkdtemp(prefix="wt-live-other-spelling-")
+    real_identity = guard._path_identity
+    try:
+        guard.session_records = lambda: [{"pid": 1, "startedAt": 1, "cwd": other_spelling}]
+        guard.session_is_live = lambda record: True
+        target_resolved = os.path.realpath(target)
+        other_resolved = os.path.realpath(other_spelling)
+        shared = ("same-underlying-file",)
+
+        def fake_identity(path):
+            if path in (target_resolved, other_resolved):
+                return shared
+            return real_identity(path)
+
+        guard._path_identity = fake_identity
+        got = guard.worktree_live_session(target)
+        if got is not True:
+            problems.append(
+                "two spellings, one identity, live session: got %r want True" % (got,))
+    finally:
+        guard._path_identity = real_identity
+        shutil.rmtree(target, ignore_errors=True)
+        shutil.rmtree(other_spelling, ignore_errors=True)
+
+    return (not problems), "; ".join(problems) if problems else "matching identity is under target"
+
+
+def worktree_live_session_path_unresolvable_case():
+    """When the string spellings differ AND the identity fallback itself cannot tell (target's
+    own identity is unreadable), the record must count as unresolvable, never as "not under
+    target." Folding it into "not under" would let a live session's worktree, reached through a
+    spelling `realpath` never collapses, look removable. Keep is the safe direction, so the
+    answer must be None, not False.
+    """
+    guard = _load_guard_module()
+    problems = []
+    target = tempfile.mkdtemp(prefix="wt-live-target-unresolvable-")
+    other_spelling = tempfile.mkdtemp(prefix="wt-live-other-unresolvable-")
+    real_identity = guard._path_identity
+    try:
+        guard.session_records = lambda: [{"pid": 1, "startedAt": 1, "cwd": other_spelling}]
+        guard.session_is_live = lambda record: True  # must not even matter: identity is unresolvable
+        guard._path_identity = lambda path: None
+        got = guard.worktree_live_session(target)
+        if got is not None:
+            problems.append(
+                "identity unresolvable, differing spellings: got %r want None, not False" % (got,))
+    finally:
+        guard._path_identity = real_identity
+        shutil.rmtree(target, ignore_errors=True)
+        shutil.rmtree(other_spelling, ignore_errors=True)
+
+    return (not problems), "; ".join(problems) if problems else "unresolvable identity propagates as None"
+
+
+def session_is_live_backwards_clock_step_case():
+    """A backwards clock step landing between the two ORIGINAL measurements (the kernel's own
+    process-creation FILETIME, fixed forever once recorded, and the record's `startedAt`,
+    written 1.7-3.2s later by `Date.now()`) can leave `actual` (read now) more than the
+    tolerance AHEAD of `started`. That is also the recycled-pid signature (a new process at
+    this pid, created well after the old record's startedAt) -- the two are indistinguishable
+    from this reading alone. `session_is_live` must answer None (cannot tell), never False
+    (confirmed dead), for that direction, because a confident False here is exactly what let a
+    genuinely live, clock-glitched session get reaped. The opposite direction (`started` far
+    AHEAD of `actual`, which no legitimate same-process reading ever produces, since `started`
+    is always written strictly after `actual`) stays a confident False, unchanged.
+    """
+    guard = _load_guard_module()
+    problems = []
+    record = {"pid": 4321, "startedAt": 1_000_000}
+
+    # actual is 5 minutes AFTER started: the ambiguous, must-not-be-confident-False direction.
+    guard._process_start_ms = lambda pid: 1_000_000 + 300_000
+    implied_backwards = guard.session_is_live(record)
+    if implied_backwards is not None:
+        problems.append(
+            "actual far ahead of started (implies a backwards step): got %r want None" % (
+                implied_backwards,))
+
+    # actual is 5 minutes BEFORE started: never produced by the same live process, stays False.
+    guard._process_start_ms = lambda pid: 1_000_000 - 300_000
+    still_dead = guard.session_is_live(record)
+    if still_dead is not False:
+        problems.append(
+            "actual far behind started: got %r want False (unchanged)" % (still_dead,))
+
+    # within tolerance, either side: unaffected by the fix.
+    guard._process_start_ms = lambda pid: 1_000_000 + 2_000
+    within = guard.session_is_live(record)
+    if within is not True:
+        problems.append("within tolerance: got %r want True (unaffected)" % (within,))
+
+    return (not problems), "; ".join(problems) if problems else "backwards-step direction reads unreadable"
+
+
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
 # literal count drifts the moment a case is added, and a suite that miscounts its own cases is a
 # suite a reader stops trusting.
@@ -2940,6 +3056,12 @@ LOG_CHECKS = (
      session_is_live_case),
     ("liveness: worktree_live_session answers None on an unreadable record under target",
      worktree_live_session_unreadable_case),
+    ("liveness: worktree_live_session matches two spellings of one identity as under target",
+     worktree_live_session_two_spellings_case),
+    ("liveness: worktree_live_session answers None when the identity fallback can't tell",
+     worktree_live_session_path_unresolvable_case),
+    ("liveness: session_is_live reads an implied backwards clock step as unreadable, not dead",
+     session_is_live_backwards_clock_step_case),
 )
 
 

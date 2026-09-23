@@ -278,13 +278,16 @@ MUTATIONS = [
      '        return None\n'
      '    if actual is None:\n'
      '        return False\n'
-     '    return abs(actual - started) <= SESSION_LIVE_TOLERANCE_MS',
+     '    diff = actual - started\n'
+     '    if diff > SESSION_LIVE_TOLERANCE_MS:\n'
+     '        return None\n'
+     '    return diff >= -SESSION_LIVE_TOLERANCE_MS',
      '    if not isinstance(record, dict):\n'
      '        return False\n'
      '    pid = record.get("pid")\n'
      '    actual = _process_start_ms(pid)\n'
      '    return actual is not None',
-     "test_mismatched_start_time_reads_as_dead_and_is_reapable"),
+     "test_mismatched_start_time_reads_as_unreadable_not_dead"),
 
     # ---- the tombstone (plan, "Phase 2") ----
     ("tombstone: write the ref AFTER the delete instead of before",
