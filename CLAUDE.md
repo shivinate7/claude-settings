@@ -4,7 +4,7 @@
 the software serves.<!-- rule:outcomes-judge-by-outcome --> Treat a recorded decision as an argument, not a law.<!-- rule:outcomes-decision-is-argument --> When a decision looks
 stale, name the entry and the sentence. Measure the claim, or say "unmeasured". Name the
 outcome the decision protected and what protects it now. Propose a fix. Wait for my word.<!-- rule:outcomes-stale-decision-protocol --> Never
-defer to a rotted argument.<!-- rule:outcomes-never-defer-rotted --> Never repeal an argument on your own.<!-- rule:outcomes-never-repeal-alone --> Once set up, turn each rule below
+defer to a rotted argument.<!-- rule:outcomes-never-defer-rotted --> Never repeal an argument on your own.<!-- rule:outcomes-never-repeal-alone --> Once ready, turn each rule below
 into a hook or check. This file is the fallback, not the enforcement.<!-- rule:outcomes-mechanize-rules -->
 
 **Roles, if this session can spawn agents.** This session orchestrates: plan, brief, verify,

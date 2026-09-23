@@ -670,6 +670,73 @@ class SentenceSplitBoldTests(unittest.TestCase):
         self.assertIn("STE001", codes)
 
 
+class PromotedRuleTests(unittest.TestCase):
+    """The owner's ruling (decisions/every-lint-rule-blocks-or-goes.md): a rule either
+    blocks or does not exist. Seven rules were promoted to error. Each case here proves
+    the promoted rule actually fires at error severity, the thing a table-row edit alone
+    cannot prove. The eight deleted rules get one companion case: their codes are gone
+    from RULES entirely, not merely downgraded.
+    """
+
+    def lint(self, text, mode=None):
+        config = dict(ste_lint.DEFAULT_CONFIG)
+        if mode:
+            config["mode"] = mode
+        linter = ste_lint.Linter(config)
+        return linter.check_text("t.md", text)
+
+    def assert_blocks(self, text, code, mode=None):
+        findings = self.lint(text, mode=mode)
+        hit = [f for f in findings if f.code == code]
+        self.assertTrue(hit, "%s did not fire on %r" % (code, text))
+        self.assertEqual(hit[0].severity, "error")
+
+    def test_ste003_nominalization_blocks(self):
+        self.assert_blocks(
+            "The team performs a validation of the payload before it saves the record.\n",
+            "STE003")
+
+    def test_ste009_phrasal_verb_blocks(self):
+        self.assert_blocks(
+            "Do not set up the server unless you read the runbook first.\n",
+            "STE009")
+
+    def test_ste011_bloat_blocks(self):
+        self.assert_blocks(
+            "In order to fix the bug, read the log file first.\n",
+            "STE011")
+
+    def test_ste013_double_negative_blocks(self):
+        self.assert_blocks(
+            "The setting is not unavailable after the restart finishes.\n",
+            "STE013")
+
+    def test_ste015_condition_order_blocks(self):
+        self.assert_blocks(
+            "Restart the service if the health check fails.\n",
+            "STE015", mode="procedural")
+
+    def test_ste017_omitted_that_blocks(self):
+        self.assert_blocks(
+            "The linter ensures the file is valid before it runs.\n",
+            "STE017")
+
+    def test_ste018_gendered_language_blocks(self):
+        self.assert_blocks(
+            "When a user signs in, he sees the dashboard.\n",
+            "STE018")
+
+    def test_deleted_rules_have_no_row(self):
+        deleted = {"STE002", "STE004", "STE005", "STE010", "STE012", "STE014",
+                   "STE016", "STE019"}
+        self.assertEqual(deleted & set(ste_lint.RULES), set())
+
+    def test_every_remaining_rule_is_error(self):
+        severities = {code: rule.severity for code, rule in ste_lint.RULES.items()}
+        self.assertTrue(severities)
+        self.assertEqual(set(severities.values()), {"error"})
+
+
 class MdSweepTests(unittest.TestCase):
     """Fixtures for lint/md_sweep.py (Stop): the markdown sweep that judges the ACT, not the
     command shape. A file counts when its mtime is newer than the last human message and,

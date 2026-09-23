@@ -181,9 +181,12 @@ The first `Stop` hook is a Sonnet agent guardrail that checks the turn against r
 decisions, gates, build-orders, CLAUDE.md rules, and settings values. It reports a finding as
 a system message and never blocks the turn.
 
-Errors are: a sentence over the STE budget (STE001), a semicolon (STE006), a Latin
-abbreviation such as `i.e.` (STE007), a contraction (STE008). Warnings such as passive voice
-and paragraph length are not gated. Fenced code and inline code are exempt. Table cells are not.
+Errors are STE001 (a sentence over the budget), STE003 (a nominalization), STE006 (a
+semicolon), STE007 (a Latin abbreviation such as `i.e.`), STE008 (a contraction), STE009
+(a phrasal verb), STE011 (bloat), STE013 (a double negative), STE015 (a condition placed
+after the instruction), STE017 (a missing `that`), and STE018 (a gendered pronoun). Every
+other rule was deleted. Its guidance survives as style, not as a gate. Fenced code and
+inline code are exempt. Table cells are not.
 
 The linter is `lint/ste_lint.py`, vendored from
 [DotDebian/asd-ste100-skill](https://github.com/DotDebian/asd-ste100-skill) at commit
@@ -206,7 +209,7 @@ python3 ~/.claude/lint/ste_lint.py --fail-on error docs/  # what the gate checks
 python3 ~/.claude/lint/ste_lint.py --explain STE006
 ```
 
-The linter is an approximation of ASD-STE100, whose dictionary is not open. Verified before
+The linter approximates ASD-STE100, whose dictionary is not open. Verified before
 merge: the old Roles paragraph with its semicolon goes red, the current CLAUDE.md is clean at
 error level.
 
@@ -244,13 +247,13 @@ errors often, and a background command with a completion notice does the same jo
 ### Decisions
 
 1. Discards and force push: **ask or deny, no tokens.** Deny `git stash`, `git reset`, `git restore`, `git clean -f`, and a `git checkout` that names a path when the cwd is a shared checkout. Answer `ask` for the same commands when the cwd is a git worktree, and `ask` for `git push --force` or `-f` anywhere. The user's click in the permission prompt is the grant. Reason: q_max's `GIT_DISCARD_OK=1` and `DESTRUCTIVE_OK=1` tokens pass silently and are typed by the agent, so nothing proves the user was asked.
-2. Merge into main: **ask always.** `gh pr merge` whose PR base is `main` (read with `gh pr view <n> --json baseRefName`, and `ask` when unreadable), and every call of the `mcp__github__merge_pull_request` tool. A merge into any other base passes. No `OWNER_MERGE=1` token. Superseded by Decision 8.
+2. Merge into main: **ask always.** `gh pr merge` whose PR base is `main` (when unreadable, `ask`, otherwise read with `gh pr view <n> --json baseRefName`), and every call of the `mcp__github__merge_pull_request` tool. A merge into any other base passes. No `OWNER_MERGE=1` token. Superseded by Decision 8.
 3. Composite action pin for callers: **`@main`.**
 4. STE in CI, refined: **changed lines only** against the PR base by default. A finding counts only when its line sits in an added or changed hunk of the diff. Findings on untouched lines of a changed file show in the step summary and never fail the build. A `scope: all` input runs the whole tree in report mode and never fails the build, for manual audits from the Actions tab. Reason, measured on q_max: whole-file scope made the first branch to touch an old document pay that document's whole backlog.
 5. Stamping of decision records: **stays local** in each repo. Formats differ (`D100_<slug>.md` per kind by date in job-cost-reporting, `<slug>.md` with `id: pending` in first-parent order in q_max). Do not touch it.
 6. Extras: add the SessionStart checkout line. No scheduled audit, dispatch only. No stamp work.
 7. Project config edits: **allow and report.** An edit to a project's `.claude/hooks/*`, `.claude/settings.json`, or `.claude/settings.local.json` is allowed in any checkout. It is logged in `guard.log`, listed in a system message at the end of the turn, and named under Deviations in the report. Paths under `~/.claude` stay denied, the clone of claude-settings is the way. Reason: the owner is often away from the desk. The work is not sensitive enough for a hard wall, and a change seen at turn end is enough.
-8. Merge into main: **allow and report.** Supersedes 2. `gh pr merge` into `main` and the `mcp__github__merge_pull_request` tool are allowed, logged in `guard.log` as `noted merge-main`. Both are listed in the system message at turn end and named under Done in the report. `Bash(gh pr merge:*)` sits in `permissions.allow` so the harness does not prompt either. CLAUDE.md's "merged only when I name the act" stays the model's rule. Reason: the owner says merge in chat and the guard cannot read chat. The prompt only repeats a decision already made.
+8. Merge into main: **allow and report.** Supersedes 2. `gh pr merge` into `main` and the `mcp__github__merge_pull_request` tool are allowed, logged in `guard.log` as `noted merge-main`. Both are listed in the system message at turn end and named under Done in the report. `Bash(gh pr merge:*)` sits in `permissions.allow` so the harness does not prompt either. CLAUDE.md's "merged only when I name the act" stays the model's rule. Reason: the owner says merge in chat and the guard cannot read chat. The prompt only repeats a decision already made. <!-- ste-disable-line STE015 -->
 
 9. Command resolution: **resolve the act, never match the spelling.** A rule that names a program fires only when that program sits in command position in a segment. Segments come from `split_segments`, which tracks quotes. Tokens come from `shlex`. Wrappers such as `sudo`, `env`, `xargs`, and `nohup` are unwrapped, so `xargs pkill` still denies. A command the tokenizer cannot parse fails open. Reason, measured: a bare `\bpkill\b` over the whole command string denied `grep -n -i "...|make reap|pkill..." CLAUDE.md`, a search for the word. The file already held the right standard in its flag-aware helper. That helper told `lsof -ti` from `lsof -i :3000`. The four regexes above it skipped the step.
 

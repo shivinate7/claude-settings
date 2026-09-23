@@ -28,7 +28,7 @@ import re
 import sys
 import tokenize
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 __version__ = "1.0.0"
 
@@ -65,30 +65,10 @@ _rule(
     "hyphenated word each count as one word.",
 )
 _rule(
-    "STE002", "passive-voice", "warning", "[3.6]",
-    "The sentence uses the passive voice.",
-    "Passive voice hides the agent. Name the thing that acts. Passive voice is\n"
-    "allowed in descriptive text only when the agent is genuinely unknown.",
-)
-_rule(
-    "STE003", "nominalization", "warning", "[3.7]",
+    "STE003", "nominalization", "error", "[3.7]",
     "An action is written as a noun.",
     "Keep the action in the verb. 'Perform a validation of the payload' becomes\n"
     "'Validate the payload'.",
-)
-_rule(
-    "STE004", "complex-verb", "warning", "[3.2] [3.4]",
-    "The verb form is not simple.",
-    "Allowed forms: infinitive, imperative, simple present, simple past, simple\n"
-    "future, and the past participle used as an adjective. No perfect tenses, no\n"
-    "continuous tenses, no conditional chains.",
-)
-_rule(
-    "STE005", "noun-cluster", "warning", "[2.1]",
-    "The noun group holds more than three words.",
-    "A long chain of nouns forces the reader to guess how the words attach to\n"
-    "each other. Write three words at most, or hyphenate the parts that belong\n"
-    "together.",
 )
 _rule(
     "STE006", "semicolon", "error", "[8.1]",
@@ -108,66 +88,38 @@ _rule(
     "Contractions hide a word. Write the full form.",
 )
 _rule(
-    "STE009", "phrasal-verb", "warning", "[9.3]",
+    "STE009", "phrasal-verb", "error", "[9.3]",
     "The text uses a phrasal verb.",
     "The particle changes the meaning of the verb in a way that is not\n"
     "predictable. Non-native readers and machine translation both fail on it.",
 )
 _rule(
-    "STE010", "ambiguous-word", "warning", "[1.11]",
-    "The word has more than one meaning in this position.",
-    "Choose the word that carries one meaning. See references/word-substitutions.md.",
-)
-_rule(
-    "STE011", "bloat", "warning", "[4.1]",
+    "STE011", "bloat", "error", "[4.1]",
     "The phrase is longer than it needs to be.",
     "Shorter is clearer. The replacement carries the same meaning.",
 )
 _rule(
-    "STE012", "vague-verb", "info", "[1.11]",
-    "The verb does not say what happens.",
-    "'Handle', 'process', and 'manage' describe a category of action, not an\n"
-    "action. Name the action.",
-)
-_rule(
-    "STE013", "double-negative", "warning", "[4.1]",
+    "STE013", "double-negative", "error", "[4.1]",
     "The sentence states a negative of a negative.",
     "State the positive. The reader then needs one step instead of two.",
 )
 _rule(
-    "STE014", "paragraph-length", "warning", "[6.6]",
-    "The paragraph holds more than six sentences.",
-    "One topic per paragraph, six sentences at most. Split the paragraph.",
-)
-_rule(
-    "STE015", "condition-order", "warning", "[5.4]",
+    "STE015", "condition-order", "error", "[5.4]",
     "The condition comes after the instruction.",
     "The reader acts before the reader reaches the condition. Put the condition\n"
     "first and separate it with a comma.",
 )
 _rule(
-    "STE016", "ambiguous-this", "warning", "[GR-4]",
-    "A demonstrative starts the sentence and points at a clause.",
-    "'This can fail' makes the reader reconstruct what 'this' is. Repeat the\n"
-    "noun: 'The write operation can fail'.",
-)
-_rule(
-    "STE017", "omitted-that", "warning", "[GR-1]",
+    "STE017", "omitted-that", "error", "[GR-1]",
     "The conjunction 'that' is missing.",
     "'that' marks where the main clause ends. Many languages cannot omit it, so\n"
     "translation of the sentence becomes ambiguous.",
 )
 _rule(
-    "STE018", "gendered-language", "warning", "[GR-7]",
+    "STE018", "gendered-language", "error", "[GR-7]",
     "The text uses a gendered pronoun.",
     "Address the reader as 'you'. Use 'they' for an unspecified person, or\n"
     "restructure the sentence to remove the pronoun.",
-)
-_rule(
-    "STE019", "terminology-drift", "info", "[1.11] [9.4]",
-    "One concept appears under more than one name.",
-    "Choose one term and use it everywhere, in the code and in the prose. Define\n"
-    "the choice in the glossary of .ste.json to turn this into an error.",
 )
 
 # --------------------------------------------------------------------------
@@ -281,39 +233,6 @@ PHRASAL = [
     (r"\bhold off\b", "wait"),
 ]
 
-AMBIGUOUS = [
-    (r"\bshould\b", "Write 'must' for a requirement, or 'we recommend that you' for advice."),
-    (r"\bmay\b", "Write 'can' for an ability, or 'is permitted to' for permission."),
-    (r"\bonce\b", "Write 'after' or 'when'."),
-    (r"\bsimply\b", "Delete it. It implies that the reader should already know."),
-    (r"\bjust\b", "Delete it. It implies that the reader should already know."),
-    (r"\bobviously\b", "Delete it."),
-    (r"\bclearly\b", "Delete it."),
-    (r"\bcurrently\b", "Delete it, or give a version."),
-    (r"\band/or\b", "Write 'A, B, or both'."),
-    (r"\bN/A\b", "Write 'not applicable' or 'none'."),
-    (r"\bas needed\b", "State the condition."),
-    (r"\bif necessary\b", "State the condition."),
-    (r"\bas appropriate\b", "State the condition."),
-]
-
-VAGUE_VERBS = [
-    (r"\bhandle(?:s|d)?\b", "validate, retry, log, reject, or transform"),
-    (r"\bprocess(?:es|ed)?\b", "read, parse, write, or transform"),
-    (r"\bmanage(?:s|d)?\b", "create, update, delete, or monitor"),
-    (r"\bleverage(?:s|d)?\b", "use"),
-    (r"\butilize(?:s|d)?\b", "use"),
-    (r"\bfacilitate(?:s|d)?\b", "help or allow"),
-    (r"\bensure(?:s|d)?\b", "make sure that"),
-    (r"\bterminate(?:s|d)?\b", "stop or end"),
-    (r"\bcommence(?:s|d)?\b", "start"),
-    (r"\binitiate(?:s|d)?\b", "start"),
-    (r"\bobtain(?:s|ed)?\b", "get"),
-    (r"\bacquire(?:s|d)?\b", "get"),
-    (r"\bindicate(?:s|d)?\b", "show"),
-    (r"\bassist(?:s|ed)?\b", "help"),
-]
-
 DOUBLE_NEGATIVE = [
     (r"\bnot\s+un\w+", "State the positive."),
     (r"\bnot\s+in(?:correct|complete|valid|frequent|significant)\w*", "State the positive."),
@@ -324,91 +243,11 @@ DOUBLE_NEGATIVE = [
 
 GENDERED = r"\b(?:he|she|him|his|her|hers|himself|herself|s/he|he/she|his/her)\b"
 
-# Verb-like words that make a leading demonstrative point at a clause.
-THIS_VERBS = (
-    "is|was|are|were|can|could|will|would|means|meant|causes|caused|allows|"
-    "allowed|makes|made|happens|happened|fails|failed|works|worked|does|did|"
-    "has|have|had|prevents|breaks|broke|requires|required|leads|led|results|"
-    "resulted|affects|affected|avoids|avoided|removes|removed|adds|added|"
-    "gives|gave|creates|created|returns|returned|produces|produced"
-)
-
 THAT_TRIGGERS = (
     r"\b(make sure|makes sure|ensure|ensures|assume|assumes|assumed|means|"
     r"meant|implies|implied|indicates|indicated|guarantees|guaranteed)\s+"
     r"(the|a|an|you|it|this|these|those|we|they|your|its|all|each|every|no|there)\b"
 )
-
-BE = r"(?:is|are|was|were|be|been|being|am)"
-ADVERBS = r"(?:not|also|already|then|never|always|only|now|still|automatically|silently|safely|\w+ly)"
-
-IRREGULAR_PARTICIPLES = {
-    "done", "made", "sent", "built", "written", "given", "taken", "kept",
-    "held", "put", "set", "read", "found", "lost", "left", "chosen", "thrown",
-    "drawn", "known", "shown", "grown", "seen", "gone", "begun", "broken",
-    "spoken", "run", "cut", "hit", "let", "split", "spread", "shut", "cast",
-    "torn", "worn", "won", "paid", "said", "sold", "told", "brought",
-    "bought", "caught", "taught", "thought", "sought", "dealt", "meant",
-    "felt", "kept", "slept", "swept", "spent", "sent", "lent", "bent",
-}
-
-# Past participles that read as plain adjectives. They are not flagged.
-PARTICIPIAL_ADJECTIVES = {
-    "enabled", "disabled", "required", "deprecated", "based", "related",
-    "supported", "expected", "unchanged", "undefined", "unavailable",
-    "available", "ready", "done", "closed", "locked", "empty", "missing",
-    "present", "limited", "detailed", "advanced", "reserved", "restricted",
-    "sorted", "nested", "shared", "signed", "unsigned", "typed", "named",
-    "known", "used", "allowed", "permitted", "intended", "designed",
-    "supposed", "concerned", "involved", "interested", "pleased", "tired",
-}
-
-FUNCTION_WORDS = {
-    "a", "an", "the", "and", "or", "but", "if", "when", "then", "than", "that",
-    "this", "these", "those", "of", "in", "on", "at", "to", "for", "with",
-    "from", "by", "as", "is", "are", "was", "were", "be", "been", "being",
-    "am", "do", "does", "did", "has", "have", "had", "can", "could", "will",
-    "would", "shall", "should", "may", "might", "must", "not", "no", "yes",
-    "it", "its", "you", "your", "we", "our", "they", "their", "he", "she",
-    "his", "her", "i", "my", "me", "us", "them", "him", "so", "because",
-    "while", "after", "before", "during", "until", "unless", "into", "onto",
-    "over", "under", "above", "below", "between", "through", "about",
-    "against", "each", "every", "all", "any", "some", "both", "more", "most",
-    "less", "least", "only", "also", "very", "such", "same", "other",
-    "another", "there", "here", "where", "which", "who", "whom", "whose",
-    "what", "how", "why", "now", "always", "never", "often", "again", "up",
-    "down", "out", "off", "per", "via", "one", "two", "three", "first",
-    "second", "third", "next", "last", "new", "old",
-}
-
-# A noun group ends at a verb. The list holds the verb forms that appear most
-# often in software documentation, without a part-of-speech tagger.
-COMMON_VERBS = {
-    "accept", "accepts", "add", "adds", "allow", "allows", "apply", "applies",
-    "become", "becomes", "break", "breaks", "build", "builds", "call",
-    "calls", "cannot", "carry", "carries", "change", "changes", "check",
-    "checks", "choose", "chooses", "come", "comes", "contain", "contains",
-    "cost", "costs", "cover", "covers", "create", "creates", "cut", "cuts",
-    "define", "defines", "delete", "deletes", "depend", "depends",
-    "describe", "describes", "drop", "drops", "end", "ends", "exist",
-    "exists", "explain", "explains", "fail", "fails", "find", "finds",
-    "fix", "fixes", "follow", "follows", "force", "forces", "get", "gets",
-    "give", "gives", "go", "goes", "hide", "hides", "hold", "holds",
-    "include", "includes", "keep", "keeps", "know", "knows", "let", "lets",
-    "list", "lists", "look", "looks", "lose", "loses", "make", "makes",
-    "mark", "marks", "match", "matches", "mean", "means", "meet", "meets",
-    "miss", "misses", "move", "moves", "must", "name", "names", "need",
-    "needs", "omit", "omits", "open", "opens", "own", "owns", "pass",
-    "passes", "pay", "pays", "pick", "picks", "point", "points", "put",
-    "puts", "read", "reads", "reach", "reaches", "remove", "removes",
-    "repeat", "repeats", "replace", "replaces", "report", "reports",
-    "return", "returns", "run", "runs", "save", "saves", "say", "says",
-    "see", "sees", "send", "sends", "set", "sets", "show", "shows",
-    "split", "splits", "start", "starts", "state", "states", "stay",
-    "stays", "stop", "stops", "take", "takes", "tell", "tells", "turn",
-    "turns", "use", "uses", "wait", "waits", "want", "wants", "work",
-    "works", "write", "writes", "count", "counts", "fire", "fires",
-}
 
 UNITS = (
     "ms|s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|"
@@ -416,17 +255,6 @@ UNITS = (
     "byte|bit|bits|px|pt|em|rem|%|percent|rps|qps|req|reqs|requests|times|"
     "cores|vCPU|CPU|GHz|MHz|Hz|USD|EUR"
 )
-
-DRIFT_GROUPS = [
-    ("the billing entity", ["tenant", "tenants", "workspace", "workspaces", "org", "orgs", "organisation", "organization"]),
-    ("the API address", ["endpoint", "endpoints", "route", "routes"]),
-    ("the unit of work", ["job", "jobs", "task", "tasks", "worker", "workers"]),
-    ("the settings", ["config", "configuration", "settings", "options"]),
-    ("the runtime target", ["environment", "environments", "stage", "stages", "tier", "tiers"]),
-    ("the failure", ["error", "errors", "failure", "failures", "fault", "faults"]),
-    ("the removal", ["delete", "deletes", "remove", "removes", "destroy", "destroys", "purge", "purges"]),
-    ("the read", ["fetch", "fetches", "retrieve", "retrieves", "load", "loads"]),
-]
 
 PROCEDURAL_HEADINGS = re.compile(
     r"\b(install|installation|setup|set-up|usage|quick ?start|getting started|"
@@ -481,12 +309,9 @@ DEFAULT_CONFIG = {
     "mode": "auto",
     "max_words_procedural": 20,
     "max_words_descriptive": 25,
-    "max_sentences_per_paragraph": 6,
-    "max_noun_cluster": 3,
     "disable": [],
     "enable": [],
     "fail_on": "error",
-    "glossary": {},
     "allow_words": [],
     "exclude": [],
 }
@@ -1112,11 +937,6 @@ class Linter:
                                  "Delete it." if not e[1] else "Write %r." % e[1]))
         self._scan(out, seg, PHRASAL, "STE009",
                    lambda e, w: ("%r is a phrasal verb." % w, "Write %r." % e[1]))
-        self._scan(out, seg, VAGUE_VERBS, "STE012",
-                   lambda e, w: ("%r does not say what happens." % w,
-                                 "Write %s." % e[1]))
-        self._scan(out, seg, AMBIGUOUS, "STE010",
-                   lambda e, w: ("%r has more than one meaning here." % w, e[1]))
         self._scan(out, seg, DOUBLE_NEGATIVE, "STE013",
                    lambda e, w: ("%r states a negative of a negative." % w, e[1]))
         self._scan(out, seg, NOMINALIZATION_PHRASES, "STE003",
@@ -1148,46 +968,6 @@ class Linter:
                       "%r turns an action into a noun." % match.group(0),
                       "Use the verb that the noun comes from.", match.group(0))
 
-        # Complex verb forms.
-        for pattern, label in (
-                (r"\b(?:has|have|had)\s+(?:%s\s+)?been\b" % ADVERBS, "perfect tense"),
-                (r"\b(?:has|have|had)\s+(?:%s\s+)?\w+(?:ed|en)\b" % ADVERBS, "perfect tense"),
-                (r"\b(?:is|are|was|were|am)\s+(?:%s\s+)?\w+ing\b" % ADVERBS, "continuous tense"),
-                (r"\bwill\s+(?:%s\s+)?(?:have|be)\s+\w+(?:ed|en|ing)\b" % ADVERBS, "compound future"),
-                (r"\b(?:would|could|should|might)\s+have\b", "conditional chain"),
-                (r"\bis\s+being\b|\bare\s+being\b|\bwas\s+being\b|\bwere\s+being\b",
-                 "continuous passive"),
-        ):
-            for match in re.finditer(pattern, text, re.I):
-                self._add(out, seg, match.start(), "STE004",
-                          "%r is a %s." % (match.group(0), label),
-                          "Use the simple present, the simple past, or the simple future.",
-                          match.group(0))
-
-        # Passive voice.
-        for match in re.finditer(
-                r"\b(%s)\s+(?:%s\s+)?([a-z]+(?:ed|en))\b" % (BE, ADVERBS), text, re.I):
-            participle = match.group(2).lower()
-            if participle in PARTICIPIAL_ADJECTIVES:
-                continue
-            if participle.endswith("ed") and len(participle) < 5:
-                continue
-            tail = text[match.end():match.end() + 4]
-            severity_note = " The agent is named after 'by'." if tail.strip().startswith("by") else ""
-            self._add(out, seg, match.start(), "STE002",
-                      "%r is passive.%s" % (match.group(0), severity_note),
-                      "Name the thing that acts, and use the active voice.",
-                      match.group(0))
-        for match in re.finditer(r"\b(%s)\s+(?:%s\s+)?(%s)\b"
-                                 % (BE, ADVERBS, "|".join(sorted(IRREGULAR_PARTICIPLES))),
-                                 text, re.I):
-            if match.group(2).lower() in PARTICIPIAL_ADJECTIVES:
-                continue
-            self._add(out, seg, match.start(), "STE002",
-                      "%r is passive." % match.group(0),
-                      "Name the thing that acts, and use the active voice.",
-                      match.group(0))
-
         return out
 
     # -- sentence-level rules ---------------------------------------------
@@ -1205,12 +985,6 @@ class Linter:
                       "Split the sentence, or cut the words that carry no meaning.",
                       strip_placeholders(sentence)[:120])
 
-        if re.match(r"^(This|That|These|Those)\s+(?:%s)\b" % THIS_VERBS, sentence):
-            self._add(out, seg, offset, "STE016",
-                      "The sentence starts with a demonstrative that points at a clause.",
-                      "Repeat the noun instead.",
-                      strip_placeholders(sentence)[:80])
-
         if mode == "procedural":
             for match in re.finditer(r"[a-z\x00]\s+\b(if|when|unless)\b\s", sentence):
                 before = sentence[:match.start()].lower().split()
@@ -1225,31 +999,6 @@ class Linter:
                           strip_placeholders(sentence)[:100])
                 break
 
-        cluster = self.config.get("max_noun_cluster", 3)
-        run: List[str] = []
-        start_index = 0
-
-        def flush_run():
-            if len(run) > cluster:
-                self._add(out, seg, offset + start_index, "STE005",
-                          "The noun group %r holds %d words."
-                          % (" ".join(run), len(run)),
-                          "Write %d words at most, or hyphenate the parts that "
-                          "belong together." % cluster, " ".join(run))
-            del run[:]
-
-        for token in re.finditer(r"[A-Za-z][A-Za-z-]*|[^\sA-Za-z]+", sentence):
-            word = token.group(0)
-            low = word.lower()
-            if (not word[0].isalpha() or low in FUNCTION_WORDS
-                    or low in COMMON_VERBS or word[0].isupper() or "-" in word
-                    or len(word) < 3 or low.endswith("ly")):
-                flush_run()
-                continue
-            if not run:
-                start_index = token.start()
-            run.append(word)
-        flush_run()
         return out
 
     # -- file ------------------------------------------------------------
@@ -1295,54 +1044,8 @@ class Linter:
             for offset, sentence in sentences:
                 findings.extend(self.check_sentence(
                     block, offset, sentence, paragraph.mode))
-            if (paragraph.kind in ("prose", "comment", "docstring")
-                    and len(sentences) > self.config["max_sentences_per_paragraph"]):
-                self._add(findings, block, 0, "STE014",
-                          "The paragraph holds %d sentences. The limit is %d."
-                          % (len(sentences), self.config["max_sentences_per_paragraph"]),
-                          "Split the paragraph. One topic per paragraph.")
 
-        findings.extend(self.check_terminology(paragraphs))
         return findings
-
-    def check_terminology(self, paragraphs: Iterable[Paragraph]) -> List[Finding]:
-        out: List[Finding] = []
-        if "STE019" not in self.enabled:
-            return out
-        counts: Dict[str, int] = {}
-        first: Dict[str, Tuple[int, int]] = {}
-        for paragraph in paragraphs:
-            for seg in paragraph.segments:
-                for match in re.finditer(r"[A-Za-z][A-Za-z-]+", seg.text):
-                    low = match.group(0).lower()
-                    counts[low] = counts.get(low, 0) + 1
-                    first.setdefault(low, (seg.lineno, seg.prefix + match.start()))
-
-        glossary = self.config.get("glossary") or {}
-        for preferred, banned in glossary.items():
-            for word in banned:
-                low = word.lower()
-                if counts.get(low):
-                    line, col = first[low]
-                    out.append(Finding(
-                        path="", line=line, col=col + 1, code="STE019",
-                        severity="error",
-                        message="The glossary maps %r to %r." % (word, preferred),
-                        suggestion="Write %r everywhere." % preferred,
-                        excerpt=word))
-
-        for concept, group in DRIFT_GROUPS:
-            present = [(w, counts[w]) for w in group if counts.get(w, 0) >= 2]
-            stems = {w.rstrip("s") for w, _ in present}
-            if len(stems) >= 2:
-                line, col = min(first[w] for w, _ in present)
-                names = ", ".join("%s (%d)" % (w, c) for w, c in present)
-                out.append(Finding(
-                    path="", line=line, col=col + 1, code="STE019",
-                    severity="info",
-                    message="More than one name for %s: %s." % (concept, names),
-                    suggestion="Choose one term and use it everywhere."))
-        return out
 
     def _filter(self, findings, suppressed, file_disable):
         kept = []

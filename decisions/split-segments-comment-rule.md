@@ -32,7 +32,7 @@ was run GREEN after.
 
 The predicate is the shell's own rule. Nothing here is shape-specific. An
 unquoted `#` that STARTS A WORD opens a comment. It runs to the end of its
-line. "Starts a word" means the character is at index 0. It can also mean the
+line. "Starts a word" means that the character is at index 0. It can also mean the
 previous character is a space, a tab, a newline, or one of `|`, `&`, `(`. It
 can also mean the previous character is `;`.
 
