@@ -19,10 +19,6 @@ A file that does not exist on disk yet is entirely new, so it lints in full. So 
 or Edit this hook cannot replay onto disk content alone, an Edit whose `old_string` is not on
 disk, or matched more than once without `replace_all`: rather than guess which blocks
 changed, it lints the whole proposed text, the strict, no-worse-than-before default.
-
-Stop: warn once when the last reply has STE errors. The warning is a systemMessage, not a
-block, so the turn ends anyway. When stop_hook_active is set, the reply is already a rewrite,
-so the gate stays quiet.
 """
 import difflib
 import json
@@ -216,19 +212,6 @@ def main():
             "permissionDecision": "deny",
             "permissionDecisionReason": reason,
         }}))
-        return
-
-    if event == "Stop":
-        if hook.get("stop_hook_active"):
-            return
-        text = last_reply(hook)
-        if not text.strip():
-            return
-        findings = lint(linter, text)
-        if not findings:
-            return
-        msg = "STE: %d error(s) in the reply. %s" % (len(findings), format_finding(findings[0]))
-        print(json.dumps({"systemMessage": msg}))
 
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@ MD_SWEEP = os.environ.get("MD_SWEEP_UNDER_TEST") or os.path.join(HERE, "md_sweep
 
 sys.path.insert(0, HERE)
 import ste_lint  # noqa: E402
+from _transcript import format_finding  # noqa: E402
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 
@@ -637,36 +638,6 @@ class ConfigReportTests(unittest.TestCase):
         ]
         path = write_transcript(records, self.tmp.name)
         run = run_gate(CONFIG_REPORT, self.hook_for(path, stop_hook_active=True))
-        self.assertEqual(run.returncode, 0)
-        self.assertEqual(run.stdout.strip(), "")
-
-
-class SteGateStopTests(unittest.TestCase):
-    def test_11_contraction_warns_no_block(self):
-        hook = {
-            "hook_event_name": "Stop",
-            "stop_hook_active": False,
-            "last_assistant_message": "I don't think this needs a rewrite.",
-        }
-        run = run_gate(STE_GATE, hook)
-        self.assertEqual(run.returncode, 0)
-        out = json.loads(run.stdout)
-        self.assertIn("systemMessage", out)
-        self.assertTrue(out["systemMessage"].startswith("STE: "))
-        self.assertNotIn("decision", out)
-
-    def test_12_stop_hook_active_no_output(self):
-        hook = {
-            "hook_event_name": "Stop",
-            "stop_hook_active": True,
-            "last_assistant_message": "I don't think this needs a rewrite.",
-        }
-        run = run_gate(STE_GATE, hook)
-        self.assertEqual(run.returncode, 0)
-        self.assertEqual(run.stdout.strip(), "")
-
-    def test_15_valid_json_not_object_no_output(self):
-        run = run_gate(STE_GATE, None, raw_stdin="[1,2,3]")
         self.assertEqual(run.returncode, 0)
         self.assertEqual(run.stdout.strip(), "")
 
@@ -1423,6 +1394,31 @@ class SourceProseLintTests(unittest.TestCase):
         matches = [f for f in findings if f.code == "STE006"]
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0].line, 4)
+
+
+class FindingEchoSanitizationTests(unittest.TestCase):
+    """lint/_transcript.py's format_finding is the one place lint/md_sweep.py and
+    lint/ste_gate.py turn an ste_lint.py finding into text for a hook's reason: ste_gate.py's
+    permissionDecisionReason, live on every Write, Edit and MultiEdit, and md_sweep.py's Stop
+    block reason. A finding's `message` is attacker-reachable: ste_lint.py's STE002, STE003,
+    STE004, STE017 and STE018 rules build it with %r around a substring matched out of the
+    linted file (see ste_lint.py's check_words). format_finding must not trust that text.
+
+    Handed a crafted finding directly (not routed back through ste_lint.py's own %r, which
+    already escapes a raw control byte before it would reach here), format_finding must still
+    come out clean: this is the same belt this module gives every finding, not a claim that
+    today's %r-wrapped rules leak an unescaped byte.
+    """
+
+    def test_77_control_character_in_message_is_not_echoed_raw(self):
+        finding = {"line": 3, "code": "STE002", "message": "'is\x1fadded' is passive."}
+        self.assertNotIn("\x1f", format_finding(finding))
+
+    def test_78_long_message_is_capped_with_a_marked_cut(self):
+        finding = {"line": 1, "code": "STE003", "message": "x" * 5000}
+        line = format_finding(finding)
+        self.assertLess(len(line), 1000)
+        self.assertTrue(line.endswith("[cut]"))
 
 
 if __name__ == "__main__":

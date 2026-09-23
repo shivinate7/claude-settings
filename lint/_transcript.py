@@ -8,8 +8,33 @@ hook is retired, so this module holds the one copy and the four hooks import it.
 read_transcript / is_last_human / tool_uses / records_after_last_human walk the JSONL transcript
 and its `content` blocks. paragraph_blocks / format_finding are the STE-lint-result helpers
 `lint/ste_gate.py` and `lint/md_sweep.py` both used to carry.
+
+format_finding is also the one place both of those hooks turn a finding's `message` into text
+for a reason a person or the model reads: ste_gate.py's permissionDecisionReason, live on every
+Write, Edit and MultiEdit, and md_sweep.py's Stop block reason. That text is attacker-reachable:
+ste_lint.py's STE002, STE003, STE004, STE017 and STE018 rules build a finding's message with
+%r around a substring matched out of the file under lint, so a turn that copies untrusted
+content into a markdown file puts that content into the next finding. `safe_finding_text` gives
+it the same treatment hooks/guard.py's `cap_safe` gives a tool-supplied reason, so a crafted
+value cannot print a line of its own that reads like an approval, and copied rather than
+imported: lint/ste_gate.py and lint/md_sweep.py do not otherwise depend on hooks/guard.py, and
+importing it here would give them that dependency for the first time.
 """
 import json
+import re
+
+FINDING_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+FINDING_MAX = 300
+FINDING_CUT_MARK = " [cut]"
+
+
+def safe_finding_text(text):
+    """Return `text` fit to print inside a finding's line: control characters cleared,
+    length capped with a marked cut. See the module docstring."""
+    clean = FINDING_CONTROL.sub(" ", text or "")
+    if len(clean) > FINDING_MAX:
+        return clean[:FINDING_MAX] + FINDING_CUT_MARK
+    return clean
 
 
 def read_transcript(path):
@@ -90,4 +115,4 @@ def paragraph_blocks(text):
 
 
 def format_finding(f):
-    return "line %s: %s %s" % (f.get("line"), f.get("code"), f.get("message"))
+    return "line %s: %s %s" % (f.get("line"), f.get("code"), safe_finding_text(f.get("message")))
