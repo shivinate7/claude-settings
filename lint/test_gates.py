@@ -833,8 +833,10 @@ class PromotedRuleTests(unittest.TestCase):
     """The owner's ruling (decisions/every-lint-rule-blocks-or-goes.md): a rule either
     blocks or does not exist. Seven rules were promoted to error. Each case here proves
     the promoted rule actually fires at error severity, the thing a table-row edit alone
-    cannot prove. The eight deleted rules get one companion case: their codes are gone
-    from RULES entirely, not merely downgraded.
+    cannot prove. The deleted rules get one companion case each: their codes are gone
+    from RULES entirely, not merely downgraded. STE006 and STE018, deleted later (the
+    owner's ruling of 2026-09-23), get their own no-finding cases instead, since a
+    deleted rule has no severity left to assert.
     """
 
     def lint(self, text, mode=None):
@@ -880,14 +882,30 @@ class PromotedRuleTests(unittest.TestCase):
             "The linter ensures the file is valid before it runs.\n",
             "STE017")
 
-    def test_ste018_gendered_language_blocks(self):
-        self.assert_blocks(
-            "When a user signs in, he sees the dashboard.\n",
-            "STE018")
+    def test_gendered_pronoun_produces_no_finding(self):
+        # The owner's ruling (2026-09-23): STE018 is deleted outright, not merely
+        # downgraded. A gendered pronoun must raise nothing at all.
+        findings = self.lint("When a user signs in, he sees the dashboard.\n")
+        self.assertEqual(findings, [])
+
+    def test_semicolon_produces_no_finding(self):
+        # The owner's ruling (2026-09-23): STE006 is prose-only, with no mechanism.
+        # A semicolon must raise nothing at all.
+        findings = self.lint("This sentence uses a semicolon; and continues here.\n")
+        self.assertEqual(findings, [])
+
+    def test_semicolon_joined_pair_over_budget_still_trips_ste001(self):
+        # split_sentences only splits at . ! ?, never at ;. A semicolon-joined pair
+        # that together cross the word budget is one sentence to the counter, and
+        # must still trip STE001.
+        text = ("w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12 w13; "
+                "w14 w15 w16 w17 w18 w19 w20 w21 w22 w23 w24 w25 w26.\n")
+        findings = self.lint(text)
+        self.assertIn("STE001", [f.code for f in findings])
 
     def test_deleted_rules_have_no_row(self):
-        deleted = {"STE002", "STE004", "STE005", "STE010", "STE012", "STE014",
-                   "STE016", "STE019"}
+        deleted = {"STE002", "STE004", "STE005", "STE006", "STE010", "STE012",
+                   "STE014", "STE016", "STE018", "STE019"}
         self.assertEqual(deleted & set(ste_lint.RULES), set())
 
     def test_every_remaining_rule_is_error(self):
@@ -912,7 +930,7 @@ class MdSweepTests(unittest.TestCase):
     the new predicate opens.
     """
 
-    ERROR_TEXT = "This sentence holds a semicolon; and that trips the STE006 rule.\n"
+    ERROR_TEXT = "This sentence isn't clean, and that trips the STE008 rule.\n"
     CLEAN_TEXT = "This is a short clean sentence.\nHere is one more short clean sentence.\n"
 
     def setUp(self):
@@ -1003,7 +1021,7 @@ class MdSweepTests(unittest.TestCase):
         self._write_md("notes.md", self.ERROR_TEXT)
         run = self.run_sweep()
         self.assert_blocks(run, "notes.md")
-        self.assertIn("STE006", json.loads(run.stdout).get("reason", ""))
+        self.assertIn("STE008", json.loads(run.stdout).get("reason", ""))
 
     def test_24_second_new_error_file_blocks_and_names_it(self):
         self._write_md("guide.md", self.ERROR_TEXT)
@@ -1279,26 +1297,26 @@ class MdSweepTests(unittest.TestCase):
     # ---------------------------------------------------------- scoping to changed blocks
 
     THREE_ERRORS_ONE_CLEAN = (
-        "This sentence holds a semicolon; and that trips the STE006 rule.\n"
+        "This sentence isn't clean, and that trips the STE008 rule.\n"
         "\n"
-        "This one also holds a semicolon; right here for good measure.\n"
+        "This one also isn't clean, right here for good measure.\n"
         "\n"
-        "A third sentence with a semicolon; sits in its own paragraph.\n"
+        "A third sentence that isn't clean sits in its own paragraph.\n"
         "\n"
         "This is the clean block that gets edited later.\n"
     )
     THREE_ERRORS_ONE_CLEAN_EDITED = (
-        "This sentence holds a semicolon; and that trips the STE006 rule.\n"
+        "This sentence isn't clean, and that trips the STE008 rule.\n"
         "\n"
-        "This one also holds a semicolon; right here for good measure.\n"
+        "This one also isn't clean, right here for good measure.\n"
         "\n"
-        "A third sentence with a semicolon; sits in its own paragraph.\n"
+        "A third sentence that isn't clean sits in its own paragraph.\n"
         "\n"
         "This is the clean block that gets edited later today.\n"
     )
 
     def test_59_pre_existing_errors_elsewhere_edited_clean_block_no_block(self):
-        # THE HEADLINE CASE. HEAD already holds 3 STE006 errors in 3 untouched blocks. This
+        # THE HEADLINE CASE. HEAD already holds 3 STE008 errors in 3 untouched blocks. This
         # turn edits only the last, clean block, and keeps it clean. Against the pre-scoping
         # gate this blocks and names all 3 pre-existing errors (see redgreen.py in the task
         # report). Scoped to the changed block, it must not block at all.
@@ -1314,7 +1332,7 @@ class MdSweepTests(unittest.TestCase):
         # must still block, even while 3 other, untouched blocks also hold errors.
         edited_with_new_error = self.THREE_ERRORS_ONE_CLEAN.replace(
             "This is the clean block that gets edited later.\n",
-            "This is the block that gets edited later; and now holds a semicolon too.\n",
+            "This is the block that gets edited later, and now isn't clean either.\n",
         )
         self._init_git()
         self._write_md("notes.md", self.THREE_ERRORS_ONE_CLEAN)
@@ -1323,10 +1341,10 @@ class MdSweepTests(unittest.TestCase):
         run = self.run_sweep()
         out = json.loads(run.stdout)
         self.assertEqual(out.get("decision"), "block")
-        # Only the edited block's own STE006 finding surfaces, at its own line 7. The 3
+        # Only the edited block's own STE008 finding surfaces, at its own line 7. The 3
         # pre-existing errors, in untouched blocks, stay out of scope.
-        self.assertIn("line 7: STE006", out["reason"])
-        self.assertEqual(out["reason"].count("STE006"), 1)
+        self.assertIn("line 7: STE008", out["reason"])
+        self.assertEqual(out["reason"].count("STE008"), 1)
 
     def test_61_multiline_sentence_crossing_a_changed_line_still_blocks(self):
         # THE TRAP. A sentence starts on the paragraph's first line (unchanged this turn) and
@@ -1374,7 +1392,7 @@ class MdSweepTests(unittest.TestCase):
 
     def test_63_untracked_file_blocks_on_every_pre_existing_error(self):
         # Item 5: an untracked file has no HEAD baseline to diff against, so it lints in
-        # full. All 3 STE006 errors in it must surface, not only one.
+        # full. All 3 STE008 errors in it must surface, not only one.
         self._init_git()
         self._write_md("README.md", self.CLEAN_TEXT)
         self._git_commit_all()
@@ -1382,7 +1400,7 @@ class MdSweepTests(unittest.TestCase):
         run = self.run_sweep()
         out = json.loads(run.stdout)
         self.assertEqual(out.get("decision"), "block")
-        self.assertEqual(out["reason"].count("STE006"), 3)
+        self.assertEqual(out["reason"].count("STE008"), 3)
 
     def test_64_staged_new_file_blocks_on_every_error(self):
         # Item 4: a brand new file, `git add`-ed but not yet committed, has no content in
@@ -1397,7 +1415,7 @@ class MdSweepTests(unittest.TestCase):
         run = self.run_sweep()
         out = json.loads(run.stdout)
         self.assertEqual(out.get("decision"), "block")
-        self.assertEqual(out["reason"].count("STE006"), 3)
+        self.assertEqual(out["reason"].count("STE008"), 3)
 
 
 class SteGatePreToolUseTests(unittest.TestCase):
@@ -1406,15 +1424,15 @@ class SteGatePreToolUseTests(unittest.TestCase):
     differ from disk. See ste_gate.py's own module docstring, "SCOPING TO CHANGED BLOCKS".
     """
 
-    ERROR_LINE = "This sentence holds a semicolon; and that trips the STE006 rule.\n"
+    ERROR_LINE = "This sentence isn't clean, and that trips the STE008 rule.\n"
     CLEAN_LINE = "This is a short clean sentence.\n"
 
     THREE_ERRORS_ONE_CLEAN = (
-        "This sentence holds a semicolon; and that trips the STE006 rule.\n"
+        "This sentence isn't clean, and that trips the STE008 rule.\n"
         "\n"
-        "This one also holds a semicolon; right here for good measure.\n"
+        "This one also isn't clean, right here for good measure.\n"
         "\n"
-        "A third sentence with a semicolon; sits in its own paragraph.\n"
+        "A third sentence that isn't clean sits in its own paragraph.\n"
         "\n"
         "This is the clean block that gets edited.\n"
     )
@@ -1461,10 +1479,10 @@ class SteGatePreToolUseTests(unittest.TestCase):
         run = self.run_pretooluse("Edit", {
             "file_path": target,
             "old_string": "This is the clean block that gets edited.\n",
-            "new_string": "This block now holds a semicolon; right in the edit itself.\n",
+            "new_string": "This block now isn't clean, right in the edit itself.\n",
         })
         reason = self.assert_denied(run)
-        self.assertIn("semicolon", reason.lower())
+        self.assertIn("contraction", reason.lower())
 
     # ---------------------------------------------------------- the multi-line trap (item 3)
 
@@ -1489,7 +1507,7 @@ class SteGatePreToolUseTests(unittest.TestCase):
         target = os.path.join(self.tmp.name, "new.md")  # never created: Write makes it
         run = self.run_pretooluse("Write", {"file_path": target, "content": self.THREE_ERRORS_ONE_CLEAN})
         reason = self.assert_denied(run)
-        self.assertEqual(reason.count("STE006"), 3)
+        self.assertEqual(reason.count("STE008"), 3)
 
     # ---------------------------------------------------------- MultiEdit and Write scoping
 
@@ -1514,26 +1532,26 @@ class SteGatePreToolUseTests(unittest.TestCase):
         target = self._write("notes.md", self.THREE_ERRORS_ONE_CLEAN)
         proposed = self.THREE_ERRORS_ONE_CLEAN.replace(
             "This is the clean block that gets edited.\n",
-            "This block now holds a semicolon; right in the edit itself.\n",
+            "This block now isn't clean, right in the edit itself.\n",
         )
         run = self.run_pretooluse("Write", {"file_path": target, "content": proposed})
         reason = self.assert_denied(run)
-        self.assertIn("semicolon", reason.lower())
+        self.assertIn("contraction", reason.lower())
 
     # ---------------------------------------------------------- fail-open on an unresolved edit
 
     def test_66_old_string_not_found_falls_back_to_linting_the_new_text_in_full(self):
         # The edit cannot be replayed: `old_string` is not in the file on disk. Rather than
         # guess which blocks changed, the gate lints the proposed new_string in full. The
-        # STE006 semicolon in it must still be caught.
+        # STE008 contraction in it must still be caught.
         target = self._write("notes.md", self.THREE_ERRORS_ONE_CLEAN)
         run = self.run_pretooluse("Edit", {
             "file_path": target,
             "old_string": "text that is not actually in the file",
-            "new_string": "This new text holds a semicolon; introduced here.",
+            "new_string": "This new text isn't clean, introduced here.",
         })
         reason = self.assert_denied(run)
-        self.assertIn("semicolon", reason.lower())
+        self.assertIn("contraction", reason.lower())
 
     def test_67_non_markdown_path_allowed(self):
         target = self._write("notes.py", "print('a; b')\n")
@@ -1555,15 +1573,15 @@ class SourceProseLintTests(unittest.TestCase):
         linter = ste_lint.Linter(config)
         return linter.check_source(path, text)
 
-    def test_68_semicolon_in_python_string_literal_not_reported(self):
-        text = 'CMD = "a; b"  # no problem on this line\n'
+    def test_68_contraction_in_python_string_literal_not_reported(self):
+        text = "CMD = \"can't fix this\"  # no problem on this line\n"
         findings = self.check("sample.py", text)
-        self.assertNotIn("STE006", [f.code for f in findings])
+        self.assertNotIn("STE008", [f.code for f in findings])
 
-    def test_69_semicolon_in_python_comment_reported(self):
-        text = "# this comment holds a semicolon; and that trips the rule\n"
+    def test_69_contraction_in_python_comment_reported(self):
+        text = "# this comment isn't clean and that trips the rule\n"
         findings = self.check("sample.py", text)
-        self.assertIn("STE006", [f.code for f in findings])
+        self.assertIn("STE008", [f.code for f in findings])
 
     def test_70_long_sentence_across_comment_lines_reported(self):
         words = ["word"] * 30
@@ -1597,27 +1615,27 @@ class SourceProseLintTests(unittest.TestCase):
         findings = self.check("sample.sh", text)
         self.assertEqual(findings, [])
 
-    def test_74_semicolon_in_shell_comment_reported(self):
-        text = "# this comment holds a semicolon; and that trips the rule\n"
+    def test_74_contraction_in_shell_comment_reported(self):
+        text = "# this comment isn't clean and that trips the rule\n"
         findings = self.check("sample.sh", text)
-        self.assertIn("STE006", [f.code for f in findings])
+        self.assertIn("STE008", [f.code for f in findings])
 
     def test_75_unknown_extension_falls_back_to_check_text(self):
-        text = "This sentence holds a semicolon; and that trips the rule.\n"
+        text = "This sentence isn't clean and that trips the rule.\n"
         findings = self.check("notes.md", text)
-        self.assertIn("STE006", [f.code for f in findings])
+        self.assertIn("STE008", [f.code for f in findings])
 
-    def test_76_docstring_semicolon_reported_at_its_own_line(self):
+    def test_76_docstring_contraction_reported_at_its_own_line(self):
         text = (
             "def f():\n"
             '    """Summary line.\n'
             "\n"
-            "    This body line holds a semicolon; and should be reported here.\n"
+            "    This body line isn't clean and should be reported here.\n"
             '    """\n'
             "    return 1\n"
         )
         findings = self.check("sample.py", text)
-        matches = [f for f in findings if f.code == "STE006"]
+        matches = [f for f in findings if f.code == "STE008"]
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0].line, 4)
 
@@ -1626,9 +1644,10 @@ class FindingEchoSanitizationTests(unittest.TestCase):
     """lint/_transcript.py's format_finding is the one place lint/md_sweep.py and
     lint/ste_gate.py turn an ste_lint.py finding into text for a hook's reason: ste_gate.py's
     permissionDecisionReason, live on every Write, Edit and MultiEdit, and md_sweep.py's Stop
-    block reason. A finding's `message` is attacker-reachable: ste_lint.py's STE002, STE003,
-    STE004, STE017 and STE018 rules build it with %r around a substring matched out of the
-    linted file (see ste_lint.py's check_words). format_finding must not trust that text.
+    block reason. A finding's `message` is attacker-reachable: ste_lint.py's STE003, STE007,
+    STE008, STE009, STE011, STE013, STE015 and STE017 rules build it with %r around a substring
+    matched out of the linted file (see ste_lint.py's check_words). format_finding must not
+    trust that text.
 
     Handed a crafted finding directly (not routed back through ste_lint.py's own %r, which
     already escapes a raw control byte before it would reach here), format_finding must still

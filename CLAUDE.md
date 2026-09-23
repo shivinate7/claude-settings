@@ -87,7 +87,7 @@ records". Never cite a bare id.<!-- rule:speak-cite-id-plus-gloss --> Never expl
 "explain it like I'm five", the message failed.
 
 **Output.** Write in Simplified Technical English by default, to me and between agents,
-unless told otherwise.<!-- rule:output-write-in-ste --> Start every reply with the point. Give no preamble.<!-- rule:output-start-with-point -->
+unless told otherwise.<!-- rule:output-write-in-ste --> Never use a semicolon. Write two sentences.<!-- rule:output-no-semicolon --> Start every reply with the point. Give no preamble.<!-- rule:output-start-with-point -->
 Once an objective is underway, assume nobody reads until I return. A turn that only tracks running work
 gets one line, or none.<!-- rule:output-tracking-turn-one-line --> Never echo a worker's report or describe a screenshot.<!-- rule:output-never-echo-worker-report -->
 Never paste a passing run's output into a report. Give the verdict.<!-- rule:output-never-paste-passing-output -->

@@ -187,12 +187,13 @@ The first `Stop` hook is a Sonnet agent guardrail that checks the turn against r
 decisions, gates, build-orders, CLAUDE.md rules, and settings values. It reports a finding as
 a system message and never blocks the turn.
 
-Errors are STE001 (a sentence over the budget), STE003 (a nominalization), STE006 (a
-semicolon), STE007 (a Latin abbreviation such as `i.e.`), STE008 (a contraction), STE009
-(a phrasal verb), STE011 (bloat), STE013 (a double negative), STE015 (a condition placed
-after the instruction), STE017 (a missing `that`), and STE018 (a gendered pronoun). Every
-other rule was deleted. Its guidance survives as style, not as a gate. Fenced code and
-inline code are exempt. Table cells are not.
+Errors are STE001 (a sentence over the budget), STE003 (a nominalization), STE007 (a Latin
+abbreviation such as `i.e.`), STE008 (a contraction), STE009 (a phrasal verb), STE011 (bloat),
+STE013 (a double negative), STE015 (a condition placed after the instruction), and STE017
+(a missing `that`). Every other rule was deleted, the semicolon rule and the gendered-pronoun
+rule included. Their guidance survives as style, not as a gate: CLAUDE.md itself says to avoid
+a semicolon, unmechanized on the owner's own ruling. Fenced code and inline code are exempt.
+Table cells are not.
 
 The linter is `lint/ste_lint.py`, vendored from
 [DotDebian/asd-ste100-skill](https://github.com/DotDebian/asd-ste100-skill) at commit
@@ -212,7 +213,7 @@ Run it by hand:
 ```bash
 python3 ~/.claude/lint/ste_lint.py CLAUDE.md            # all severities
 python3 ~/.claude/lint/ste_lint.py --fail-on error docs/  # what the gate checks
-python3 ~/.claude/lint/ste_lint.py --explain STE006
+python3 ~/.claude/lint/ste_lint.py --explain STE007
 ```
 
 The linter approximates ASD-STE100, whose dictionary is not open. Verified before

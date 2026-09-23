@@ -12,13 +12,14 @@ and its `content` blocks. paragraph_blocks / format_finding are the STE-lint-res
 format_finding is also the one place both of those hooks turn a finding's `message` into text
 for a reason a person or the model reads: ste_gate.py's permissionDecisionReason, live on every
 Write, Edit and MultiEdit, and md_sweep.py's Stop block reason. That text is attacker-reachable:
-ste_lint.py's STE002, STE003, STE004, STE017 and STE018 rules build a finding's message with
-%r around a substring matched out of the file under lint, so a turn that copies untrusted
-content into a markdown file puts that content into the next finding. `safe_finding_text` gives
-it the same treatment hooks/guard.py's `cap_safe` gives a tool-supplied reason, so a crafted
-value cannot print a line of its own that reads like an approval, and copied rather than
-imported: lint/ste_gate.py and lint/md_sweep.py do not otherwise depend on hooks/guard.py, and
-importing it here would give them that dependency for the first time.
+ste_lint.py's STE003, STE007, STE008, STE009, STE011, STE013, STE015 and STE017 rules build a
+finding's message with %r around a substring matched out of the file under lint, so a turn that
+copies untrusted content into a markdown file puts that content into the next finding.
+`safe_finding_text` gives it the same treatment hooks/guard.py's `cap_safe` gives a
+tool-supplied reason, so a crafted value cannot print a line of its own that reads like an
+approval, and copied rather than imported: lint/ste_gate.py and lint/md_sweep.py do not
+otherwise depend on hooks/guard.py, and importing it here would give them that dependency
+for the first time.
 """
 import json
 import re

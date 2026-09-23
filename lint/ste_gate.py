@@ -33,8 +33,8 @@ from _transcript import paragraph_blocks, format_finding  # noqa: E402
 
 MD_SUFFIXES = (".md", ".markdown")
 NOTE = ("Code in backticks or a fence is exempt. Errors only: sentence length, nominalization, "
-        "semicolon, Latin abbreviation, contraction, phrasal verb, bloat, double negative, "
-        "condition order, omitted 'that', gendered language.")
+        "Latin abbreviation, contraction, phrasal verb, bloat, double negative, "
+        "condition order, omitted 'that'.")
 
 
 def lint(linter, text):
