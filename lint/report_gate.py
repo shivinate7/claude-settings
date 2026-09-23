@@ -55,8 +55,8 @@ BLOCK_REASON_HEAD = (
     "that order, drop a label that does not apply, no code fence, nothing after it."
 )
 BLOCK_REASON_TAIL = (
-    " Prose may sit above the report. Write the whole reply again with the report last, and "
-    "nothing after it."
+    " Prose may sit above the report. Send the report now, as the next thing you write. Keep "
+    "the reply above it as it stands. Do not write it again."
 )
 
 
