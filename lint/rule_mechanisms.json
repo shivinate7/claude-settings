@@ -249,14 +249,14 @@
     "verification-trust-guard-after-red": {
       "mechanism": {
         "kind": "gate",
-        "ref": "hooks/mutate_guard.py",
+        "ref": "hooks/mutate_shared.py",
         "needle": "SURVIVED"
       }
     },
     "verification-verify-against-repo": {
       "mechanism": {
         "kind": "gate",
-        "ref": "hooks/mutate_guard.py",
+        "ref": "hooks/mutate_shared.py",
         "needle": "WRONG CAUSE"
       }
     },

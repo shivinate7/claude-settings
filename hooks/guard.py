@@ -316,10 +316,11 @@ INTERPRETER_HEREDOC = re.compile(
 )
 
 
-def strip_heredoc_bodies(cmd: str) -> str:
-    """Drop the body of every heredoc, and keep every header line."""
-    if INTERPRETER_HEREDOC.search(cmd):
-        return cmd  # the body may be executed, so keep it under inspection
+def _drop_heredoc_bodies(cmd: str) -> str:
+    """Drop the body of every heredoc, keeping every header line. The one loop
+    `strip_heredoc_bodies` and `_strip_heredoc_bodies_unconditionally` both need: the first
+    guards it with the interpreter exception, the second never does, and neither re-implements
+    the walk itself."""
     lines = cmd.split("\n")
     kept = []
     index = 0
@@ -336,6 +337,13 @@ def strip_heredoc_bodies(cmd: str) -> str:
         if index < len(lines):
             index += 1  # drop the closing delimiter line too
     return "\n".join(kept)
+
+
+def strip_heredoc_bodies(cmd: str) -> str:
+    """Drop the body of every heredoc, and keep every header line."""
+    if INTERPRETER_HEREDOC.search(cmd):
+        return cmd  # the body may be executed, so keep it under inspection
+    return _drop_heredoc_bodies(cmd)
 
 
 # ------------------------------------------------------------------ git call parsing
@@ -844,26 +852,12 @@ def _strip_heredoc_bodies_unconditionally(cmd: str) -> str:
     Found in review of PR #75, reproduced against the live guard: a `cd <clean checkout>` line
     inside such a body ALLOWED a `git reset --hard HEAD` that actually ran in a real dirty
     checkout named by the command's own cwd, because `_run_dir` read the heredoc body's `cd` as
-    though the outer shell had run it. This is a dedicated copy for `_run_dir` alone; every
-    other caller of `strip_heredoc_bodies` still needs the interpreter body kept for its OWN
-    question, which is what a write or a refused command might say, not where the shell sits.
+    though the outer shell had run it. `_run_dir` is the only caller that wants the interpreter
+    body dropped this way; every other caller of `strip_heredoc_bodies` still needs that body
+    kept for its OWN question, which is what a write or a refused command might say, not where
+    the shell sits. The walk itself is `_drop_heredoc_bodies`, shared with that function.
     """
-    lines = cmd.split("\n")
-    kept = []
-    index = 0
-    while index < len(lines):
-        line = lines[index]
-        kept.append(line)
-        match = HEREDOC_HEADER.search(line)
-        index += 1
-        if not match:
-            continue
-        delimiter = match.group(2)
-        while index < len(lines) and lines[index].strip() != delimiter:
-            index += 1
-        if index < len(lines):
-            index += 1  # drop the closing delimiter line too
-    return "\n".join(kept)
+    return _drop_heredoc_bodies(cmd)
 
 
 def _run_dir(cmd: str, shell_cwd: str) -> str:
@@ -2346,12 +2340,41 @@ ENV_TOOL_REASON = (
     "in the session"
 )
 
-# One shell segment for the environment layer, ported whole. It breaks on `&` as well, because a
-# background job is its own command.
-SEGMENT_BREAK = re.compile(r"\|\||&&|[;\n|&]")
 # A redirect operator, spaced into a word of its own before the words are read.
 REDIRECT = re.compile(r"(\d?>>?)")
 # ASSIGNMENT (a leading `VAR=value`) is defined once, above, and shared with `resolve_command`.
+
+
+def _ampersand_split(segment: str):
+    """Split one `split_segments` segment further, on a bare, unquoted `&`.
+
+    `split_segments` cuts on `;`, `|`, `||`, `&&` and newline, but not on a LONE `&`, because
+    that splitter serves callers for whom a backgrounded command is still one segment. The
+    environment layer needs the opposite: a background job is its own command, so `cat .env &`
+    must not let the backgrounding operator hide the read behind an empty tail. This is the one
+    genuinely different rule env_refusal needs on top of `split_segments`, kept small and
+    quote-aware the same way: text inside a quote is never split, whatever character it holds.
+    """
+    parts = []
+    current = []
+    quote = ""
+    for char in segment:
+        if quote:
+            current.append(char)
+            if char == quote:
+                quote = ""
+            continue
+        if char in ("'", '"'):
+            quote = char
+            current.append(char)
+            continue
+        if char == "&":
+            parts.append("".join(current))
+            current = []
+            continue
+        current.append(char)
+    parts.append("".join(current))
+    return parts
 
 
 def env_reference(word: str) -> str:
@@ -2388,45 +2411,46 @@ def env_refusal(cmd: str):
     The command arrives with its own separators intact. Normalizing them is what made a search for
     the environment accessor read as a path.
     """
-    for segment in SEGMENT_BREAK.split(cmd):
-        words = REDIRECT.sub(r" \1 ", segment).split()
-        if not words:
-            continue
-        # The command is the first word that is not a `VAR=value` assignment.
-        position = 0
-        while position < len(words) and ASSIGNMENT.match(words[position]):
-            position += 1
-        head = words[position] if position < len(words) else ""
-        command = head.strip("'\"").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-        for index, word in enumerate(words):
-            prefix, assigned, rest = word.partition("=")
-            flag = prefix if assigned and prefix.startswith("-") else ""
-            named = env_reference(rest if assigned else word)
-            if not named:
+    for piece in split_segments(cmd):
+        for segment in _ampersand_split(piece):
+            words = REDIRECT.sub(r" \1 ", segment).split()
+            if not words:
                 continue
-            previous = words[index - 1] if index else ""
-            # A redirect onto the file overwrites it, whatever the command turns out to be.
-            if REDIRECT.fullmatch(previous):
-                return (ENV_REDIRECT_REASON,
-                        "a redirect onto '%s' would overwrite the file" % named)
-            # A shell variable holding the path. The assignment reads nothing, but the guard cannot
-            # follow the variable to its use, so `E=.env; cat $E` would be a one-line way past this
-            # whole layer.
-            if assigned and not flag:
-                return (ENV_VARIABLE_REASON,
-                        "a shell variable holds '%s'" % named)
-            loaded = flag in ENV_LOADER_FLAGS or previous in ENV_LOADER_FLAGS
-            if loaded and command.lower() in ENV_LOADER_COMMANDS:
-                continue  # a runner loading it into its own environment prints nothing
-            if loaded:
-                return (ENV_RUNNER_REASON,
-                        "only a runner may be handed '%s' with %s, and '%s' is not one" % (
-                            named, flag or previous, command))
-            if command in ENV_EXISTENCE_COMMANDS:
-                continue  # asking whether the file is there reads none of it
-            actor = "'%s'" % command if command else "this command"
-            return (ENV_CONTENTS_REASON,
-                    "%s would read, write or commit the contents of '%s'" % (actor, named))
+            # The command is the first word that is not a `VAR=value` assignment.
+            position = 0
+            while position < len(words) and ASSIGNMENT.match(words[position]):
+                position += 1
+            head = words[position] if position < len(words) else ""
+            command = head.strip("'\"").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+            for index, word in enumerate(words):
+                prefix, assigned, rest = word.partition("=")
+                flag = prefix if assigned and prefix.startswith("-") else ""
+                named = env_reference(rest if assigned else word)
+                if not named:
+                    continue
+                previous = words[index - 1] if index else ""
+                # A redirect onto the file overwrites it, whatever the command turns out to be.
+                if REDIRECT.fullmatch(previous):
+                    return (ENV_REDIRECT_REASON,
+                            "a redirect onto '%s' would overwrite the file" % named)
+                # A shell variable holding the path. The assignment reads nothing, but the guard
+                # cannot follow the variable to its use, so `E=.env; cat $E` would be a one-line
+                # way past this whole layer.
+                if assigned and not flag:
+                    return (ENV_VARIABLE_REASON,
+                            "a shell variable holds '%s'" % named)
+                loaded = flag in ENV_LOADER_FLAGS or previous in ENV_LOADER_FLAGS
+                if loaded and command.lower() in ENV_LOADER_COMMANDS:
+                    continue  # a runner loading it into its own environment prints nothing
+                if loaded:
+                    return (ENV_RUNNER_REASON,
+                            "only a runner may be handed '%s' with %s, and '%s' is not one" % (
+                                named, flag or previous, command))
+                if command in ENV_EXISTENCE_COMMANDS:
+                    continue  # asking whether the file is there reads none of it
+                actor = "'%s'" % command if command else "this command"
+                return (ENV_CONTENTS_REASON,
+                        "%s would read, write or commit the contents of '%s'" % (actor, named))
     return "", ""
 
 
