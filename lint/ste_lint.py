@@ -71,12 +71,6 @@ _rule(
     "'Validate the payload'.",
 )
 _rule(
-    "STE006", "semicolon", "error", "[8.1]",
-    "The semicolon is not permitted.",
-    "The semicolon joins long sentences, which is what the rules prevent. Write\n"
-    "two sentences.",
-)
-_rule(
     "STE007", "latin-abbreviation", "error", "[GR-6]",
     "The text uses a Latin abbreviation.",
     "Latin abbreviations are read differently by different readers, and machine\n"
@@ -114,12 +108,6 @@ _rule(
     "The conjunction 'that' is missing.",
     "'that' marks where the main clause ends. Many languages cannot omit it, so\n"
     "translation of the sentence becomes ambiguous.",
-)
-_rule(
-    "STE018", "gendered-language", "error", "[GR-7]",
-    "The text uses a gendered pronoun.",
-    "Address the reader as 'you'. Use 'they' for an unspecified person, or\n"
-    "restructure the sentence to remove the pronoun.",
 )
 
 # --------------------------------------------------------------------------
@@ -240,8 +228,6 @@ DOUBLE_NEGATIVE = [
     (r"\bunless\b[^.]*\bnot\b", "Rewrite as a positive condition."),
     (r"\bnever\s+not\b", "State the positive."),
 ]
-
-GENDERED = r"\b(?:he|she|him|his|her|hers|himself|herself|s/he|he/she|his/her)\b"
 
 THAT_TRIGGERS = (
     r"\b(make sure|makes sure|ensure|ensures|assume|assumes|assumed|means|"
@@ -1119,10 +1105,6 @@ class Linter:
         out: List[Finding] = []
         text = seg.text
 
-        for match in re.finditer(r";", text):
-            self._add(out, seg, match.start(), "STE006",
-                      "The semicolon is not permitted. Write two sentences.")
-
         self._scan(out, seg, LATIN, "STE007",
                    lambda e, w: ("Do not write %r." % w,
                                  e[2] or "Write %r." % e[1]))
@@ -1139,11 +1121,6 @@ class Linter:
         self._scan(out, seg, NOMINALIZATION_PHRASES, "STE003",
                    lambda e, w: ("%r turns an action into a noun." % w,
                                  e[2] or "Write %r." % e[1]))
-
-        for match in re.finditer(GENDERED, text, re.I):
-            self._add(out, seg, match.start(), "STE018",
-                      "%r is a gendered pronoun." % match.group(0),
-                      "Address the reader as 'you', or use 'they'.", match.group(0))
 
         for match in re.finditer(THAT_TRIGGERS, text, re.I):
             self._add(out, seg, match.start(), "STE017",

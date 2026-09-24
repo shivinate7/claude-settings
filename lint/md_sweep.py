@@ -110,8 +110,9 @@ SKIP_DIR_NAMES = {"node_modules"}
 DISABLE_VAR = "MD_SWEEP_DISABLE"
 EXCLUDE_VAR = "MD_SWEEP_EXCLUDE"
 
-NOTE = ("Code in backticks or a fence is exempt. Errors only: sentence length, semicolon, "
-        "Latin abbreviation, contraction.")
+NOTE = ("Code in backticks or a fence is exempt. Errors only: sentence length, nominalization, "
+        "Latin abbreviation, contraction, phrasal verb, bloat, double negative, "
+        "condition order, omitted 'that'.")
 
 
 # ------------------------------------------------------------------ transcript walking
