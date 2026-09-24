@@ -1675,6 +1675,70 @@ sh("delete: the PowerShell twin of a named folder", "Remove-Item -Recurse -Force
    "allow", tool="PowerShell", cwd=NOGIT)
 sh("delete: one scratch file", "rm -f /tmp/scratch.txt", "allow", cwd=NOGIT)
 
+# THE CMD.EXE VERBS. `rd`/`rmdir` and `del`/`erase` take `/s` (recurse) and `/q` (quiet,
+# optional, never required), never `rm`'s or `Remove-Item`'s dash flags. Each denied case here
+# has an rm or Remove-Item twin above that already denies, so the verdict carries over. Checked
+# under BOTH tool names, since the guard reads the command TEXT, not which shell claims to run
+# it.
+sh("delete: rd /s /q at a drive root, Bash", "rd /s /q C:\\", "deny", "destructive-delete",
+   cwd=NOGIT)
+sh("delete: rd /s /q at a drive root, PowerShell", "rd /s /q C:\\", "deny",
+   "destructive-delete", tool="PowerShell", cwd=NOGIT)
+sh("delete: rmdir /s (no /q) at a glob", "rmdir /s *", "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: del /s at the home variable", "del /s $HOME", "deny", "destructive-delete",
+   cwd=NOGIT)
+sh("delete: erase /s /q at a drive root", "erase /s /q C:/", "deny", "destructive-delete",
+   cwd=NOGIT)
+sh("delete: flags are case-insensitive", "RD /S /Q ~", "deny", "destructive-delete", cwd=NOGIT)
+
+# THE THREE MEASURED COMMANDS (2026-09-24), two of the three. `%USERPROFILE%` and
+# `$env:USERPROFILE` are the home directory, same as `$HOME` and `~` above. `C:\*` is a glob
+# at a drive root, same shape as the bare glob and the bare drive root above, just combined.
+sh("delete: cmd /c rd /s /q %USERPROFILE%, Bash", "cmd /c rd /s /q %USERPROFILE%", "deny",
+   "destructive-delete", cwd=NOGIT)
+sh("delete: cmd /c rd /s /q %USERPROFILE%, PowerShell", "cmd /c rd /s /q %USERPROFILE%",
+   "deny", "destructive-delete", tool="PowerShell", cwd=NOGIT)
+sh("delete: cmd.exe /c rmdir /s /q $env:USERPROFILE", "cmd.exe /c rmdir /s /q $env:USERPROFILE",
+   "deny", "destructive-delete", tool="PowerShell", cwd=NOGIT)
+sh("delete: del /s /q C:\\*, Bash", "del /s /q C:\\*", "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: del /s /q C:\\*, PowerShell", "del /s /q C:\\*", "deny", "destructive-delete",
+   tool="PowerShell", cwd=NOGIT)
+
+# THE THIRD MEASURED COMMAND, `rd /s /q C:\Users\x`, is NOT a case here. `C:\Users\x` is a
+# literal path to one user's profile, not one of the recognized root/home/glob shapes
+# (`%USERPROFILE%`, `$env:USERPROFILE`, `$HOME`, `~`, a bare drive root, or a glob), the same
+# way `rm -rf /home/x` (a literal path to a home) is not a case above either. Matching it would
+# widen what counts as a root to "any path under C:\Users", which the brief this rule was built
+# from rules out. See the PARITY case just below.
+sh("delete: rd /s /q at a literal user path is not a recognized root, home or glob",
+   "rd /s /q C:\\Users\\x", "allow", cwd=NOGIT)
+sh("delete: its POSIX twin is allowed today for the same reason",
+   "rm -rf /home/x", "allow", cwd=NOGIT)
+
+# THE POWERSHELL ALIASES. `remove-item`, `ri`, `rd` and `rmdir` already matched the dash-flag
+# pattern before this change. `del`, `erase` and `rm` did not: PowerShell's own aliases for
+# Remove-Item, taking its `-Recurse`/`-Force` parameters rather than `rm`'s combined `-rf`.
+sh("delete: del -Recurse -Force at the home directory", "del -Recurse -Force ~", "deny",
+   "destructive-delete", tool="PowerShell", cwd=NOGIT)
+sh("delete: erase -r -fo at a glob", "erase -r -fo *", "deny", "destructive-delete",
+   tool="PowerShell", cwd=NOGIT)
+sh("delete: rm -Recurse -Force at the home directory, the PowerShell alias, not the POSIX flag",
+   "rm -Recurse -Force ~", "deny", "destructive-delete", tool="PowerShell", cwd=NOGIT)
+
+# GREEN: the forms that stay allowed, parity with the rm/Remove-Item cases above.
+sh("delete: a non-recursive del", "del file.txt", "allow", cwd=NOGIT)
+sh("delete: rd with no /s", "rd emptydir", "allow", cwd=NOGIT)
+sh("delete: rd /s /q at a plain relative subdir, parity with rm -rf build/", "rd /s /q build",
+   "allow", cwd=NOGIT)
+
+# QUOTED AND GREP FORMS. The command word is read in COMMAND POSITION off a quote-aware
+# tokenizer, the same defect class rule 2's kill check was built to avoid: text sitting inside a
+# quoted argument, or inside a grep pattern, never calls anything.
+sh("delete: a quoted echo of the cmd.exe form calls nothing", 'echo "rd /s /q"', "allow",
+   cwd=NOGIT)
+sh("delete: a grep pattern naming the cmd.exe form calls nothing",
+   'grep "del /s" notes.md', "allow", cwd=NOGIT)
+
 
 # =========================================================================== 4. environment files
 #

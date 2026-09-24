@@ -293,6 +293,13 @@ MUTATIONS = [
     ("destructive-delete: blind the wide-delete patterns",
      "    for pattern in DESTRUCTIVE_DELETE:\n        found = pattern.search(cmd)",
      "    for pattern in ():\n        found = pattern.search(cmd)", "guard", 'delete: the root'),
+    # Added 2026-09-24 with the cmd.exe verbs (`rd`/`rmdir`/`del`/`erase` and their `/s` flag),
+    # the Windows twin of the mutant just above. Drops the new forms back to the gap they fixed:
+    # `rd /s /q C:\` denied nothing before this rule existed.
+    ("destructive-delete: drop the cmd.exe verbs, the Windows forms this rule adds",
+     'CMD_EXE_DELETE_WORDS = {"rd", "rmdir", "del", "erase"}',
+     "CMD_EXE_DELETE_WORDS = set()", "guard",
+     'delete: rd /s /q at a drive root, Bash'),
     ("git-call parsing: drop the redirect strip before tokenizing",
      '    tokens = REDIRECTION.sub(" ", segment).split()',
      '    tokens = segment.split()', "guard", 'checkout: a start point survives a merged-output redirect'),
