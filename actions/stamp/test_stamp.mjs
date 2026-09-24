@@ -1,0 +1,261 @@
+#!/usr/bin/env node
+// Runnable self-test for stamp.mjs. `node actions/stamp/test_stamp.mjs`. No framework: each
+// test is a function that throws via `node:assert` on failure. Every test builds its own
+// throwaway directory under the OS temp dir and removes it when done, so tests never touch this
+// repository's own tree and never share state with each other.
+
+import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { stamp, check, loadConfig, currentBranch } from "./stamp.mjs";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+
+const tests = [];
+const test = (name, fn) => tests.push({ name, fn });
+
+function withTempDir(fn) {
+  const dir = mkdtempSync(join(tmpdir(), "stamp-test-"));
+  try {
+    return fn(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function write(root, rel, content) {
+  const abs = join(root, rel);
+  mkdirSync(join(abs, ".."), { recursive: true });
+  writeFileSync(abs, content);
+}
+
+function read(root, rel) {
+  return readFileSync(join(root, rel), "utf8");
+}
+
+function git(root, ...args) {
+  return execFileSync("git", args, { cwd: root, encoding: "utf8" });
+}
+
+function initRepo(root) {
+  git(root, "init", "-q", "-b", "main");
+  git(root, "config", "user.email", "test@example.com");
+  git(root, "config", "user.name", "test");
+  git(root, "config", "core.autocrlf", "false"); // quiet; this suite writes LF and reads it back
+}
+
+function commit(root, message) {
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "-m", message);
+}
+
+// ---------------------------------------------------------------- format 1: frontmatter only,
+// max_plus_one, merge order (q_max's own shape)
+const qmaxConfig = () => loadConfig(join(HERE, "examples/qmax.stamp.json"));
+
+test("frontmatter-only: pending records get distinct, sequential numbers in merge order", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    write(root, "docs/decisions/first.md", "---\nid: D-001\nslug: first\ntitle: First\ndate: 2026-01-01\n---\n\nBody.\n");
+    commit(root, "add first");
+    write(root, "docs/decisions/second.md", "---\nid: pending\nslug: second\ntitle: Second\ndate: 2026-01-02\n---\n\nCites [[third]].\n");
+    write(root, "docs/decisions/third.md", "---\nid: pending\nslug: third\ntitle: Third\ndate: 2026-01-03\n---\n\nBody.\n");
+    commit(root, "two branches merge in one run: second, then third");
+
+    const config = qmaxConfig();
+    const result = stamp(root, config);
+    assert.equal(result.problems.length, 0);
+    assert.equal(result.assigned.length, 2);
+    // Merge order is read from git, oldest add first: second's file was added before third's, in
+    // the same commit, and the two-branches case this test names is exactly "more than one
+    // pending record land before the stamp runs" — they must not collide.
+    const bySlug = new Map(result.assigned.map((a) => [a.slug, a.id]));
+    assert.equal(bySlug.get("second"), "D-002");
+    assert.equal(bySlug.get("third"), "D-003");
+    assert.equal(read(root, "docs/decisions/second.md").includes("id: D-002"), true);
+    // The cite rewrite ran: [[third]] became "D-003, Third".
+    assert.equal(read(root, "docs/decisions/second.md").includes("Cites D-003, Third."), true);
+  }));
+
+test("frontmatter-only: an existing range is parsed for the max, never produced", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    write(root, "docs/decisions/ranged.md", "---\nid: D-044 to D-046\nslug: ranged\ntitle: Ranged\ndate: 2026-01-01\n---\n\nBody.\n");
+    write(root, "docs/decisions/next.md", "---\nid: pending\nslug: next\ntitle: Next\ndate: 2026-01-02\n---\n\nBody.\n");
+    commit(root, "add ranged and next");
+
+    const result = stamp(root, qmaxConfig());
+    assert.equal(result.problems.length, 0);
+    assert.equal(result.assigned[0].id, "D-047");
+  }));
+
+// ---------------------------------------------------------------- format 1: lowest_free
+// (sharables' own shape)
+const sharablesConfig = () => loadConfig(join(HERE, "examples/sharables.stamp.json"));
+
+test("frontmatter-only, lowest_free: a gap in the taken numbers is filled before the max", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    write(root, "decisions/one.md", "---\nid: D1\nslug: one\nkind: decision\nstatus: open\ndate: 2026-01-01\n---\n\nBody.\n");
+    write(root, "decisions/three.md", "---\nid: D3\nslug: three\nkind: decision\nstatus: open\ndate: 2026-01-02\n---\n\nBody.\n");
+    write(root, "decisions/pending-one.md", "---\nid: pending\nslug: gap-fill\nkind: decision\nstatus: open\ndate: 2026-01-03\n---\n\nCited as D‹gap-fill›.\n");
+    commit(root, "one, three, and a pending record");
+
+    const result = stamp(root, sharablesConfig());
+    assert.equal(result.problems.length, 0);
+    assert.equal(result.assigned[0].id, "D2");
+    // sharables' own cite rewrite writes the bare id, no gloss.
+    assert.equal(read(root, "decisions/pending-one.md").includes("Cited as D2."), true);
+  }));
+
+test("frontmatter-only cite: a citation naming the wrong kind's letter is left unresolved", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    write(root, "decisions/one.md", "---\nid: D1\nslug: shared-slug\nkind: decision\nstatus: open\ndate: 2026-01-01\n---\n\nBody.\n");
+    write(root, "findings/two.md", "---\nid: pending\nslug: other-slug\nkind: finding\nstatus: observed\ndate: 2026-01-02\n---\n\nCited wrongly as F‹shared-slug›.\n");
+    commit(root, "mismatched prefix");
+
+    stamp(root, sharablesConfig());
+    // "shared-slug" is a D record. "F<shared-slug>" names the wrong letter, so it is left as
+    // text rather than resolved to the D record's id.
+    assert.equal(read(root, "findings/two.md").includes("Cited wrongly as F‹shared-slug›."), true);
+  }));
+
+// ---------------------------------------------------------------- format 2: frontmatter AND
+// filename, lowest_free, date order (job-cost-reporting's own shape)
+const jcrConfig = () => loadConfig(join(HERE, "examples/jcr.stamp.json"));
+
+test("frontmatter+filename: a pending record is renamed and its cite gains its gloss", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    write(root, "docs/decisions/_2026-01-05-widgets.md",
+      '---\nid:\nslug: widgets\ngloss: "widgets ship in v2"\ndate: 2026-01-05\n---\n\nBody.\n');
+    write(root, "README.md", "See [[widgets]] for the plan.\n");
+    commit(root, "add a pending jcr-shaped record");
+
+    const result = stamp(root, jcrConfig());
+    assert.equal(result.problems.length, 0);
+    assert.equal(result.assigned[0].id, "D1");
+    assert.equal(existsSync(join(root, "docs/decisions/D1_2026-01-05-widgets.md")), true);
+    assert.equal(existsSync(join(root, "docs/decisions/_2026-01-05-widgets.md")), false);
+    assert.equal(read(root, "docs/decisions/D1_2026-01-05-widgets.md").includes("id: D1"), true);
+    assert.equal(read(root, "README.md").includes("See D1, widgets ship in v2 for the plan."), true);
+  }));
+
+test("frontmatter+filename: a pending record missing a required field refuses --stamp and writes nothing", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    write(root, "docs/decisions/_no-date.md", '---\nid:\nslug: no-date\ngloss: "no date here"\n---\n\nBody.\n');
+    commit(root, "add a malformed pending record");
+
+    const before = read(root, "docs/decisions/_no-date.md");
+    const result = stamp(root, jcrConfig());
+    assert.equal(result.problems.length > 0, true);
+    assert.equal(result.assigned.length, 0);
+    assert.equal(read(root, "docs/decisions/_no-date.md"), before);
+    assert.equal(existsSync(join(root, "docs/decisions/D1_no-date.md")), false);
+  }));
+
+// ---------------------------------------------------------------- --check, structural
+test("--check refuses a duplicate id", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    write(root, "docs/decisions/a.md", "---\nid: D-001\nslug: a\ntitle: A\ndate: 2026-01-01\n---\n\nBody.\n");
+    write(root, "docs/decisions/b.md", "---\nid: D-001\nslug: b\ntitle: B\ndate: 2026-01-02\n---\n\nBody.\n");
+    commit(root, "two records, one id");
+
+    const problems = check(root, qmaxConfig());
+    assert.equal(problems.some((p) => p.includes("duplicate id D-001")), true);
+  }));
+
+test("--check refuses a cite that points at no record", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    write(root, "docs/decisions/a.md", "---\nid: D-001\nslug: a\ntitle: A\ndate: 2026-01-01\n---\n\nBody.\n");
+    write(root, "README.md", "See [[does-not-exist]].\n");
+    commit(root, "a dangling cite");
+
+    const problems = check(root, qmaxConfig());
+    assert.equal(problems.some((p) => p.includes("does-not-exist")), true);
+  }));
+
+test("--check refuses a malformed record (neither pending nor numbered)", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    write(root, "docs/decisions/a.md", "---\nid: not-a-number\nslug: a\ntitle: A\ndate: 2026-01-01\n---\n\nBody.\n");
+    commit(root, "a malformed record");
+
+    const problems = check(root, qmaxConfig());
+    assert.equal(problems.some((p) => p.includes("malformed record")), true);
+  }));
+
+test("--check is silent on a well-formed tree", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    write(root, "docs/decisions/a.md", "---\nid: D-001\nslug: a\ntitle: A\ndate: 2026-01-01\n---\n\nBody.\n");
+    write(root, "README.md", "See D-001, A.\n");
+    commit(root, "a clean tree");
+
+    assert.deepEqual(check(root, qmaxConfig()), []);
+  }));
+
+// ---------------------------------------------------------------- --check, the branch question
+// (D-478's own defect: a pending entry the stamp has not had its TURN on yet must not be
+// refused, but one an older commit added — the stamp did not run, or its push was rejected — must)
+test("--check on the default branch refuses a pending record older than HEAD", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    write(root, "docs/decisions/old.md", "---\nid: pending\nslug: old\ntitle: Old\ndate: 2026-01-01\n---\n\nBody.\n");
+    commit(root, "add old, still pending");
+    write(root, "docs/decisions/unrelated.md", "---\nid: D-001\nslug: unrelated\ntitle: Unrelated\ndate: 2026-01-02\n---\n\nBody.\n");
+    commit(root, "an unrelated later commit");
+
+    assert.equal(currentBranch(root), "main");
+    const config = qmaxConfig(); // defaultBranch: "main"
+    const problems = check(root, config);
+    assert.equal(problems.some((p) => p.includes("docs/decisions/old.md") && p.includes("pending")), true);
+  }));
+
+test("--check on the default branch does not refuse a pending record HEAD itself just added", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    write(root, "docs/decisions/settled.md", "---\nid: D-001\nslug: settled\ntitle: Settled\ndate: 2026-01-01\n---\n\nBody.\n");
+    commit(root, "a settled record");
+    write(root, "docs/decisions/fresh.md", "---\nid: pending\nslug: fresh\ntitle: Fresh\ndate: 2026-01-02\n---\n\nBody.\n");
+    commit(root, "fresh, waiting its turn");
+
+    const problems = check(root, qmaxConfig());
+    assert.equal(problems.length, 0);
+  }));
+
+test("--check off the default branch never asks the branch question", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    write(root, "docs/decisions/old.md", "---\nid: pending\nslug: old\ntitle: Old\ndate: 2026-01-01\n---\n\nBody.\n");
+    commit(root, "add old, still pending");
+    git(root, "checkout", "-q", "-b", "wt/lane");
+    write(root, "docs/decisions/newer.md", "---\nid: pending\nslug: newer\ntitle: Newer\ndate: 2026-01-02\n---\n\nBody.\n");
+    commit(root, "another pending record on a branch");
+
+    assert.equal(currentBranch(root), "wt/lane");
+    assert.deepEqual(check(root, qmaxConfig()), []);
+  }));
+
+// ---------------------------------------------------------------- run
+let failed = 0;
+for (const { name, fn } of tests) {
+  try {
+    fn();
+    console.log(`ok - ${name}`);
+  } catch (err) {
+    failed += 1;
+    console.error(`FAIL - ${name}`);
+    console.error(err.stack ?? err);
+  }
+}
+console.log(`${tests.length - failed} of ${tests.length} passed.`);
+if (failed) process.exit(1);
