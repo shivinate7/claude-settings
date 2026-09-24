@@ -1,0 +1,46 @@
+{
+  "format": "heading",
+  "defaultBranch": "main",
+  "regenerate": "python3 scripts/index-decisions.py --write",
+  "slugRegex": "[a-z][a-z0-9]*(?:-[a-z0-9]+)+",
+  "kinds": [
+    {
+      "id": "decision",
+      "prefix": "D",
+      "folder": "docs/decisions",
+      "manifest": "docs/decisions/ORDER.json",
+      "manifestKey": "order",
+      "pendingRegex": "^##\\s+D([0-9-]\\S*)",
+      "numberedRegex": "^##\\s+D([1-9][0-9]{0,2})(?![\\p{L}\\p{N}_])",
+      "idTemplate": "{prefix}{n}",
+      "pad": 0,
+      "filenameTemplate": "{prefix}{n}-{rest}.md",
+      "filenamePad": 3,
+      "pathCite": "`?docs/decisions/{token}[-\\p{L}\\p{N}_]*\\.md`?",
+      "numbering": "max_plus_one"
+    },
+    {
+      "id": "codes",
+      "prefix": "C",
+      "file": "docs/CODES-DECISIONS.md",
+      "pendingRegex": "^##\\s+C([0-9-]\\S*)",
+      "numberedRegex": "^##\\s+C([1-9][0-9]{0,2})(?![\\p{L}\\p{N}_])",
+      "idTemplate": "{prefix}{n}",
+      "pad": 0,
+      "numbering": "max_plus_one"
+    }
+  ],
+  "cite": {
+    "before": "(?<![-\\p{L}\\p{N}_])",
+    "after": "(?![-\\p{L}\\p{N}_])"
+  },
+  "walk": {
+    "textSuffixes": [".md", ".py", ".ts", ".tsx", ".css", ".html", ".json", ".txt", ".yml",
+                     ".yaml", ".sh", ".js", ".mjs", ".toml"],
+    "skipDirs": [".git", "node_modules", "dist", "dist-demo", "captures", "inventory", "runs",
+                 "__pycache__", ".venv", "venv", "test-results", "playwright-report", ".serve",
+                 "worktrees", "demo-assets", "harness/images"],
+    "skipDotDirs": true,
+    "extensionlessDirs": ["scripts/githooks"]
+  }
+}

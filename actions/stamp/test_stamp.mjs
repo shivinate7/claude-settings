@@ -5,7 +5,7 @@
 // repository's own tree and never share state with each other.
 
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -243,6 +243,170 @@ test("--check off the default branch never asks the branch question", () =>
 
     assert.equal(currentBranch(root), "wt/lane");
     assert.deepEqual(check(root, qmaxConfig()), []);
+  }));
+
+// ---------------------------------------------------------------- format 3: the number in a
+// heading, and for a split corpus in the filename too (banchi's own shape, read off its
+// scripts/claim-ids.py). The fixture is a small tree of banchi's shape, never banchi's own tree.
+const banchiConfig = () => loadConfig(join(HERE, "examples/banchi.stamp.json"));
+
+// Python's json.dumps(indent=2), which is the byte shape banchi's ORDER.json holds.
+const manifestText = (order) => JSON.stringify({ order }, null, 2) + "\n";
+
+function banchiTree(root, { order = ["_preamble.md", "D001-one.md", "D003-three.md"] } = {}) {
+  write(root, "docs/decisions/ORDER.json", manifestText(order));
+  write(root, "docs/decisions/_preamble.md", "# Settled decisions\n");
+  write(root, "docs/decisions/D001-one.md", "## D1 — One\n\nBody.\n");
+  // D2 is a hole, on purpose: claim-ids.py never reuses one (its own D80 ruling).
+  write(root, "docs/decisions/D003-three.md", "## D3 — Three\n\nBody.\n");
+  write(root, "docs/CODES-DECISIONS.md", "# Codes\n\n## C1 — First\n\nBody.\n");
+}
+
+// Every file under root, as text, for a "nothing was written" assertion.
+function snapshot(root) {
+  const out = {};
+  (function go(dir, rel) {
+    for (const name of readdirSync(dir)) {
+      if (name === ".git") continue;
+      const abs = join(dir, name);
+      const r = rel ? `${rel}/${name}` : name;
+      if (statSync(abs).isDirectory()) go(abs, r);
+      else out[r] = readFileSync(abs, "utf8");
+    }
+  })(root, "");
+  return out;
+}
+
+test("heading: the filename pads to 3 digits and the heading does not", () =>
+  withTempDir((root) => {
+    banchiTree(root);
+    write(root, "docs/decisions/D-two-thing.md", "## D-two-thing — Two thing\n\nBody.\n");
+    write(root, "README.md", "See D-two-thing.\n");
+
+    const result = stamp(root, banchiConfig());
+    assert.deepEqual(result.problems, []);
+    assert.equal(result.assigned[0].id, "D4");
+    assert.equal(existsSync(join(root, "docs/decisions/D-two-thing.md")), false);
+    assert.equal(read(root, "docs/decisions/D004-two-thing.md").split("\n")[0], "## D4 — Two thing");
+    assert.equal(read(root, "README.md"), "See D4.\n");
+  }));
+
+test("heading: ORDER.json gets the new name in the old name's own place", () =>
+  withTempDir((root) => {
+    banchiTree(root, { order: ["_preamble.md", "D001-one.md", "D-two-thing.md", "D003-three.md"] });
+    write(root, "docs/decisions/D-two-thing.md", "## D-two-thing — Two thing\n\nBody.\n");
+
+    stamp(root, banchiConfig());
+    assert.equal(read(root, "docs/decisions/ORDER.json"),
+      manifestText(["_preamble.md", "D001-one.md", "D004-two-thing.md", "D003-three.md"]));
+  }));
+
+test("heading: an unlisted entry leaves ORDER.json alone, for regenerate to append", () =>
+  withTempDir((root) => {
+    banchiTree(root);
+    write(root, "docs/decisions/D-two-thing.md", "## D-two-thing — Two thing\n\nBody.\n");
+    const before = read(root, "docs/decisions/ORDER.json");
+
+    stamp(root, banchiConfig());
+    assert.equal(read(root, "docs/decisions/ORDER.json"), before);
+  }));
+
+test("heading: a gap in the sequence is never reused", () =>
+  withTempDir((root) => {
+    banchiTree(root); // D1 and D3, no D2
+    write(root, "docs/decisions/D-two-thing.md", "## D-two-thing — Two thing\n\nBody.\n");
+    write(root, "docs/decisions/D-zed-thing.md", "## D-zed-thing — Zed thing\n\nBody.\n");
+
+    const result = stamp(root, banchiConfig());
+    assert.deepEqual(result.assigned.map((a) => a.id), ["D4", "D5"]);
+    assert.equal(existsSync(join(root, "docs/decisions/D002-two-thing.md")), false);
+  }));
+
+test("heading: a pending heading in the flat corpus is numbered in place, and cites follow", () =>
+  withTempDir((root) => {
+    banchiTree(root);
+    write(root, "docs/CODES-DECISIONS.md", "# Codes\n\n## C1 — First\n\n## C-new-code — New code\n\nBody.\n");
+    write(root, "docs/specs/a.md",
+      "C-new-code, C-new-code-longer, and `docs/decisions/D-two-thing.md` by path. D-two-thing too.\n");
+    write(root, "docs/decisions/D-two-thing.md", "## D-two-thing — Two thing\n");
+    write(root, "node_modules/x.md", "C-new-code\n");
+    write(root, ".github/x.md", "C-new-code\n");
+    write(root, "docs/x.csv", "C-new-code\n");
+
+    const result = stamp(root, banchiConfig());
+    assert.deepEqual(result.problems, []);
+    assert.equal(read(root, "docs/CODES-DECISIONS.md"), "# Codes\n\n## C1 — First\n\n## C2 — New code\n\nBody.\n");
+    assert.equal(read(root, "docs/specs/a.md"), "C2, C-new-code-longer, and D4 by path. D4 too.\n");
+    // Not walked, by claim-ids.py's own rules: a SKIP dir, a dot dir, a suffix outside its set.
+    assert.equal(read(root, "node_modules/x.md"), "C-new-code\n");
+    assert.equal(read(root, ".github/x.md"), "C-new-code\n");
+    assert.equal(read(root, "docs/x.csv"), "C-new-code\n");
+  }));
+
+test("heading: a malformed pending heading is refused and nothing is written", () =>
+  withTempDir((root) => {
+    banchiTree(root);
+    write(root, "docs/decisions/D-two-thing.md", "## D-two-thing — Two thing\n");
+    write(root, "docs/decisions/D-Bad_Slug.md", "## D-Bad_Slug — Mixed case and an underscore\n");
+    write(root, "README.md", "See D-two-thing and D-Bad_Slug.\n");
+    const before = snapshot(root);
+
+    const result = stamp(root, banchiConfig());
+    assert.equal(result.problems.some((p) => p.includes("malformed pending heading") && p.includes("D-Bad_Slug")), true);
+    assert.equal(result.assigned.length, 0);
+    assert.deepEqual(snapshot(root), before);
+  }));
+
+test("heading --check refuses a record numbered on a branch", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    banchiTree(root);
+    commit(root, "main");
+    git(root, "checkout", "-q", "-b", "wt/lane");
+    write(root, "docs/decisions/D004-four.md", "## D4 — Four, numbered on the branch\n");
+    write(root, "docs/CODES-DECISIONS.md", "# Codes\n\n## C1 — First\n\n## C2 — Numbered here too\n");
+    commit(root, "a branch that numbered its own records");
+
+    const problems = check(root, banchiConfig());
+    assert.equal(problems.some((p) => p.includes("docs/decisions/D004-four.md") && p.includes("on a branch")), true);
+    assert.equal(problems.some((p) => p.includes("C2") && p.includes("on a branch")), true);
+  }));
+
+test("heading --check is silent on a branch that only adds pending records", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    banchiTree(root);
+    commit(root, "main");
+    git(root, "checkout", "-q", "-b", "wt/lane");
+    write(root, "docs/decisions/D-four-thing.md", "## D-four-thing — Four\n");
+    write(root, "docs/CODES-DECISIONS.md", "# Codes\n\n## C1 — First\n\n## C-two-code — Two\n");
+    commit(root, "a branch that writes slugs");
+
+    assert.deepEqual(check(root, banchiConfig()), []);
+  }));
+
+test("heading --check on the default branch refuses a pending heading older than HEAD", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    banchiTree(root);
+    write(root, "docs/CODES-DECISIONS.md", "# Codes\n\n## C1 — First\n\n## C-old-code — Old\n");
+    commit(root, "a pending code entry the stamp never claimed");
+    write(root, "docs/decisions/D-fresh-thing.md", "## D-fresh-thing — Fresh\n");
+    commit(root, "a pending decision, waiting its turn");
+
+    const problems = check(root, banchiConfig());
+    assert.equal(problems.some((p) => p.includes("C-old-code") && p.includes("added before HEAD")), true);
+    assert.equal(problems.some((p) => p.includes("D-fresh-thing")), false);
+  }));
+
+test("heading: a pending slug main already claimed under a number is refused", () =>
+  withTempDir((root) => {
+    banchiTree(root);
+    write(root, "docs/decisions/D004-two-thing.md", "## D4 — Two thing\n");
+    write(root, "docs/decisions/D-two-thing.md", "## D-two-thing — Two thing\n");
+
+    const result = stamp(root, banchiConfig());
+    assert.equal(result.problems.some((p) => p.includes("already claimed as D4")), true);
   }));
 
 // ---------------------------------------------------------------- run

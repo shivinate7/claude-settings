@@ -7,16 +7,13 @@
 // its slug to the numbered form. It never renumbers an existing record and never rewrites a
 // repo's record shape: the shape is a config file the calling repo owns (see README.md).
 //
-// Formats covered (see docs/decisions/one-shared-record-stamp.md for the design and what is
-// out of scope):
+// Formats covered (see decisions/one-shared-record-stamp.md for the design and what is out of
+// scope):
 //   1. number in frontmatter only            (q_max docs/decisions, sharables decisions/findings/gaps)
 //   2. number in frontmatter AND filename     (job-cost-reporting docs/decisions, docs/build, ...)
-// Format 3, a number in a heading with a flat per-kind file and an ORDER.json/step list (banchi),
-// is NOT built. Its own tool is 1727 lines and reshapes headings in a single flat markdown file
-// per kind, a shape neither of the two above covers, and the brief's own description of it
-// (per-file records, ORDER.json) does not match what banchi's tree actually holds today (three
-// flat files, no ORDER.json). Guessing that shape from a stale description is the thing this
-// tool exists to refuse doing.
+//   3. number in a heading, and for a split corpus in the filename too (banchi docs/decisions and
+//      docs/CODES-DECISIONS.md). Its own module, formats/heading.mjs, picked by
+//      `"format": "heading"` in the config. This file only dispatches to it.
 //
 // Modes:
 //   --stamp   number every pending record and rewrite cites. Writes the tree.
@@ -29,6 +26,7 @@ import { readFileSync, writeFileSync, unlinkSync, readdirSync, statSync, existsS
 import { execFileSync } from "node:child_process";
 import { join, resolve, posix } from "node:path";
 import { fileURLToPath } from "node:url";
+import * as headingFormat from "./formats/heading.mjs";
 
 // ---------------------------------------------------------------- config
 
@@ -37,6 +35,8 @@ export function loadConfig(path) {
   if (!Array.isArray(config.kinds) || !config.kinds.length) {
     throw new Error("config.kinds must be a non-empty array");
   }
+  if (config.format === "heading") return headingFormat.normalizeConfig(config);
+  if (config.format !== undefined) throw new Error(`config.format "${config.format}" is not a format this tool builds`);
   for (const kind of config.kinds) {
     for (const field of ["id", "folder", "prefix", "pendingRegex", "idTemplate"]) {
       if (!kind[field]) throw new Error(`kind ${kind.id ?? "(unnamed)"} is missing "${field}"`);
@@ -461,7 +461,11 @@ function validate(root, config) {
 }
 
 // ---------------------------------------------------------------- --stamp
+// The helpers format 3 shares with the other two, so all three read EOL and git the same way.
+const HELPERS = { readFileEol, withEol, addedByHead, currentBranch };
+
 export function stamp(root, config) {
+  if (config.format === "heading") return headingFormat.stamp(root, config, HELPERS);
   const { problems, byKind } = validate(root, config);
   if (problems.length) {
     return { problems, assigned: [], glossed: 0 };
@@ -486,6 +490,7 @@ export function stamp(root, config) {
 
 // ---------------------------------------------------------------- --check
 export function check(root, config) {
+  if (config.format === "heading") return headingFormat.check(root, config, HELPERS);
   const { problems, byKind } = validate(root, config);
   const branch = currentBranch(root);
   const onDefault = config.defaultBranch ? branch === config.defaultBranch : false;
@@ -537,6 +542,8 @@ if (isMain) {
       for (const p of problems) console.error(p);
       process.exit(1);
     }
-    console.log("every pending record is in order, every id is unique, every cite resolves.");
+    console.log(config.format === "heading"
+      ? "every pending heading is well formed, every id is unique, nothing is numbered out of turn."
+      : "every pending record is in order, every id is unique, every cite resolves.");
   }
 }
