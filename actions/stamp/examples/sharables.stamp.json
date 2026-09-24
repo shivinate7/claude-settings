@@ -1,0 +1,51 @@
+{
+  "defaultBranch": "main",
+  "kinds": [
+    {
+      "id": "decision",
+      "folder": "decisions",
+      "prefix": "D",
+      "pad": 0,
+      "idTemplate": "{prefix}{n}",
+      "pendingRegex": "^id:[ \\t]*pending[ \\t]*$",
+      "order": "date",
+      "numbering": "lowest_free",
+      "slugField": "slug",
+      "dateField": "date",
+      "excludeFiles": ["_index.md"]
+    },
+    {
+      "id": "finding",
+      "folder": "findings",
+      "prefix": "F",
+      "pad": 0,
+      "idTemplate": "{prefix}{n}",
+      "pendingRegex": "^id:[ \\t]*pending[ \\t]*$",
+      "order": "date",
+      "numbering": "lowest_free",
+      "slugField": "slug",
+      "dateField": "date",
+      "excludeFiles": ["_index.md"]
+    },
+    {
+      "id": "gap",
+      "folder": "gaps",
+      "prefix": "G",
+      "pad": 0,
+      "idTemplate": "{prefix}{n}",
+      "pendingRegex": "^id:[ \\t]*pending[ \\t]*$",
+      "order": "date",
+      "numbering": "lowest_free",
+      "slugField": "slug",
+      "dateField": "date",
+      "excludeFiles": ["_index.md"]
+    }
+  ],
+  "cite": {
+    "pattern": "\\b([DFG])\u2039([a-z0-9-]+)\u203a",
+    "prefixGroup": 1,
+    "slugGroup": 2,
+    "template": "{id}",
+    "scanGlobs": ["**/*.md"]
+  }
+}

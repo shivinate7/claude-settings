@@ -89,6 +89,13 @@ jobs:
       - name: Janitor triggers fixture suite (schtasks installer)
         run: python3 janitor/test_install_schtasks.py
 
+      - name: Record stamp engine fixture suite
+        run: node actions/stamp/test_stamp.mjs
+
+      - name: Record stamp action fixture suite
+        shell: bash
+        run: bash actions/stamp/test_action.sh
+
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.
   pointer-windows:
@@ -260,3 +267,12 @@ jobs:
         if: ${{ !cancelled() }}
         shell: bash
         run: sh hooks/test_install_src.sh
+
+      - name: Record stamp engine fixture suite
+        if: ${{ !cancelled() }}
+        run: node actions/stamp/test_stamp.mjs
+
+      - name: Record stamp action fixture suite
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: bash actions/stamp/test_action.sh

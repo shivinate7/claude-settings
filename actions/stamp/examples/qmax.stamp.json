@@ -1,0 +1,25 @@
+{
+  "defaultBranch": "main",
+  "kinds": [
+    {
+      "id": "decision",
+      "folder": "docs/decisions",
+      "prefix": "D",
+      "pad": 3,
+      "idTemplate": "{prefix}-{n}",
+      "pendingRegex": "^id:[ \\t]*pending[ \\t]*$",
+      "allowRanges": true,
+      "order": "merge",
+      "numbering": "max_plus_one",
+      "slugField": "slug",
+      "glossField": "title"
+    }
+  ],
+  "cite": {
+    "pattern": "\\[\\[([a-z0-9][a-z0-9-]*)\\]\\]",
+    "slugGroup": 1,
+    "template": "{id}, {title}",
+    "scanGlobs": ["**/*.md"],
+    "excludeGlobs": [".claude/skills/**"]
+  }
+}
