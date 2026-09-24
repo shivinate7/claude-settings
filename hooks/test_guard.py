@@ -1502,7 +1502,82 @@ sh("kill: a pkill inside an if's then-block, MEASURED wrongly allowed",
    "if true; then pkill -f server; fi", "deny", "machine-wide-kill", cwd=NOGIT)
 
 
-# =========================================================================== 2b. live streams
+# =========================================================================== 2b. detached launches
+#
+# MEASURED 2026-09-23 (macOS): a subagent ran `(python3 -m http.server 8000
+# >/tmp/http_server_wtweb.log 2>&1 &)`. The subshell exited at once, pid 1 adopted the server,
+# the harness never tracked it, and no pid was kept, so rule 2's own remedy had no pid to name.
+
+sh("detached: the incident's exact command orphans to pid 1",
+   "(python3 -m http.server 8000 >/tmp/http_server_wtweb.log 2>&1 &)", "deny",
+   "detached-launch", cwd=NOGIT)
+sh("detached: the same shape, spaced",
+   "( python3 -m http.server 8000 & )", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: nohup survives a session close, with a background job",
+   "nohup python3 -m http.server 8000 &", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: nohup alone, no background job, still detaches from the session",
+   "nohup npm run build", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: setsid starts its own session",
+   "setsid python3 server.py &", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: disown right after a background job",
+   "python3 server.py & disown", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: a bare trailing background job with no pid captured, MEASURED zero harmless "
+   "matches in 16571 local Bash commands",
+   "python3 server.py &", "deny", "detached-launch", cwd=NOGIT)
+
+sh("detached: run_in_background style is a plain foreground command, nothing to catch",
+   "python3 server.py", "allow", cwd=NOGIT)
+sh("detached: the printed pid is kept, the session can stop it later",
+   "python3 server.py & echo $!", "allow", cwd=NOGIT)
+sh("detached: a quoted echo of the shape prints text and starts nothing",
+   'echo "nohup foo &"', "allow", cwd=NOGIT)
+sh("detached: a grep for the word disown is not a call to it",
+   'grep -n "disown" file.txt', "allow", cwd=NOGIT)
+sh("detached: a quoted subshell-and-background shape inside echo's argument",
+   'echo "(x &)"', "allow", cwd=NOGIT)
+sh("detached: nohup wrapping a real kill still hits rule 2, not this rule",
+   "nohup pkill foo", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("detached: the shape inside a heredoc body is data, not a command",
+   "cat <<'EOF' > notes.txt\nnohup python3 server.py &\nEOF", "allow", cwd=NOGIT)
+
+# THE WINDOWS FORMS, the owner's scope change: the same protection PowerShell needs, since
+# guard.py judges Bash and PowerShell alike (SHELL_TOOLS). MEASURED 2026-09-24 against local
+# transcripts: 4 real `Start-Process` calls, all through the PowerShell tool, all already
+# carrying `-PassThru`. 0 `Start-Job` calls. 0 `cmd /c start` calls, from either shell.
+sh("detached: Start-Job hands the work to a job object with no pid here at all",
+   "Start-Job -ScriptBlock { python server.py }", "deny", "detached-launch",
+   tool="PowerShell", cwd=NOGIT)
+sh("detached: Start-Process with neither -Wait nor -PassThru",
+   'Start-Process npx -ArgumentList "server.js"', "deny", "detached-launch",
+   tool="PowerShell", cwd=NOGIT)
+sh("detached: Start-Process -WindowStyle Hidden still denies without -Wait or -PassThru",
+   "Start-Process notepad.exe -WindowStyle Hidden", "deny", "detached-launch",
+   tool="PowerShell", cwd=NOGIT)
+sh("detached: a PowerShell assignment ahead of Start-Process is still read, MEASURED wrongly "
+   "missed before _skip_assignments_and_keywords learned $name =",
+   '$bad = Start-Process npx -ArgumentList "server.js"', "deny", "detached-launch",
+   tool="PowerShell", cwd=NOGIT)
+sh("detached: cmd /c start opens an untracked window, from PowerShell",
+   "cmd /c start python server.py", "deny", "detached-launch", tool="PowerShell", cwd=NOGIT)
+sh("detached: cmd.exe /c start opens an untracked window, from Bash",
+   "cmd.exe /c start notepad.exe", "deny", "detached-launch", cwd=NOGIT)
+
+sh("detached: Start-Process -Wait blocks until the child exits",
+   "Start-Process notepad.exe -Wait", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached: Start-Process -PassThru hands back the pid to stop later",
+   "Start-Process notepad.exe -PassThru", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached: the real measured launch, -PassThru kept in $p for cleanup",
+   '$p = Start-Process npx -ArgumentList @("-y","supergateway@3.4.3") -PassThru '
+   "-WindowStyle Hidden", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached: cmd with no start subcommand runs and exits, nothing to catch",
+   "cmd /c echo hello", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached: a quoted mention of the shape prints text and starts nothing",
+   'echo "cmd /c start something"', "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached: a grep for Start-Job is not a call to it",
+   'grep -n "Start-Job" file.txt', "allow", tool="PowerShell", cwd=NOGIT)
+
+
+# =========================================================================== 2c. live streams
 #
 # CLAUDE.md: "Never pipe a live stream through `tail`." A follow flag never ends on its own, so
 # it outlives the turn and the agent that started it.
