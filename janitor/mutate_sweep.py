@@ -176,8 +176,6 @@ MUTATIONS = [
     # prove this mutant.
     ("refusal: no unreadable worktree subject keeps any more (all three reads)",
      "sweep",
-     'def decide_worktree(where: str, entry: dict):\n'
-     '    """Return one decision dict: {"path", "action": "reap"|"keep", "reason"}."""\n'
      '    path = entry["path"]\n'
      '    dirty = guard.porcelain(path)\n'
      '    if dirty is None:\n'
@@ -194,10 +192,7 @@ MUTATIONS = [
      '    if live is None:\n'
      '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}\n'
      '    if live:\n'
-     '        return {"path": path, "action": "keep", "reason": "live-session"}\n'
-     '    return {"path": path, "action": "reap", "reason": "removable"}',
-     'def decide_worktree(where: str, entry: dict):\n'
-     '    """Return one decision dict: {"path", "action": "reap"|"keep", "reason"}."""\n'
+     '        return {"path": path, "action": "keep", "reason": "live-session"}',
      '    path = entry["path"]\n'
      '    dirty = guard.porcelain(path)\n'
      '    if False:\n'
@@ -214,8 +209,7 @@ MUTATIONS = [
      '    if False:\n'
      '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}\n'
      '    if live:\n'
-     '        return {"path": path, "action": "keep", "reason": "live-session"}\n'
-     '    return {"path": path, "action": "reap", "reason": "removable"}',
+     '        return {"path": path, "action": "keep", "reason": "live-session"}',
      "test_refusal_unreadable_subject_worktree",
      "posix"),
 
@@ -460,6 +454,45 @@ MUTATIONS = [
      '            [sys.executable, SWEEP_PATH, root, "--confirm"],',
      '            [sys.executable, SWEEP_PATH, root],',
      "test_sweeps_repo_a_leaves_repo_b_untouched"),
+
+    # ---- orphaned TCP listeners (this build, 2026-09-24) ----
+    #
+    # `decide_listener`'s own three refusals, same shape as the branch/worktree refusals
+    # above: each one is a keep this sweep must never lose, proven by mutating it out and
+    # watching a REAL fixture listener (janitor/test_sweep.py's ListenerDecisionTests, a real
+    # process this suite starts itself) reap where it must not.
+    ("listener: a non-orphaned process is no longer refused, and reaps anyway",
+     "sweep",
+     '    if not orphan:\n'
+     '        return {**base, "action": "keep", "reason": "not-orphaned"}',
+     '    if False:\n'
+     '        return {**base, "action": "keep", "reason": "not-orphaned"}',
+     "test_non_orphaned_listener_is_kept"),
+    ("listener: a live Claude session in the same checkout no longer keeps its listener",
+     "sweep",
+     '    if live:\n'
+     '        return {**base, "action": "keep", "reason": "live-session"}',
+     '    if False:\n'
+     '        return {**base, "action": "keep", "reason": "live-session"}',
+     "test_orphaned_listener_with_live_session_is_kept"),
+    ("listener: a listener owned by someone else is no longer refused, and reaps anyway",
+     "sweep",
+     '    if not owner:\n'
+     '        return {**base, "action": "keep", "reason": "not-current-user"}',
+     '    if False:\n'
+     '        return {**base, "action": "keep", "reason": "not-current-user"}',
+     "test_owner_mismatch_is_kept"),
+
+    # ---- the worktree pre-removal process check (this build, 2026-09-24) ----
+    ("pre-check: a process sitting inside the worktree no longer keeps it",
+     "sweep",
+     '    if inside:\n'
+     '        return {"path": path, "action": "keep",\n'
+     '                "reason": "process-inside: pid %s" % ", ".join(str(p) for p in sorted(inside))}',
+     '    if False:\n'
+     '        return {"path": path, "action": "keep",\n'
+     '                "reason": "process-inside: pid %s" % ", ".join(str(p) for p in sorted(inside))}',
+     "test_a_process_inside_the_worktree_keeps_it_and_names_the_pid"),
 ]
 
 

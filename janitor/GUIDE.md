@@ -4,15 +4,19 @@ This guide is for the owner of a repository on this machine. It states what
 the sweep does to your repository, how you change that, and how you add a tier
 of your own.
 
-`janitor/sweep.py` reaps local branches that hold no unique work, and removes
-worktrees that no session still uses. It runs against every repository on this
-machine.
+`janitor/sweep.py` reaps local branches that hold no unique work. It removes
+worktrees that no session still uses. It also signals an orphaned TCP listener
+left behind inside a repository it covers. It runs against every repository on
+this machine.
 
 ## What it never does
 
 The sweep never touches a remote. It runs no push, and no fetch.
 
-The sweep never stops a running program.
+The sweep never stops a program a live session still needs. It can stop one
+program only: a TCP listener that is orphaned. That listener must also sit
+inside a repository or worktree this sweep covers. It must also be owned by
+the account running the sweep. See "Orphaned TCP listeners" below.
 
 The sweep never runs code that your repository supplies. It reads one file
 from your repository, and it reads that file as data.
@@ -54,6 +58,15 @@ Leave the key out, and the sweep discovers under every one of `~/Developer`,
 combines all of them into one list, instead of stopping at the first one it
 finds.
 
+The default list also adds Claude's own scratch-workspace root. On macOS,
+that is `~/Library/Application Support/Claude/scratch-workspaces`. On
+Windows, that is `%APPDATA%\Claude\scratch-workspaces`. MEASURED on a real
+Windows machine: this root holds scratch files today, and no `.git` at all.
+Discovery finds nothing under it right now. The root still costs nothing
+empty. It is ready the day a scratch workspace does hold a real linked
+worktree, the shape the 2026-09-23 incident found on macOS. Linux has no
+measured layout here, so nothing is added for it.
+
 When a `janitor.roots` value is not a list of strings, the sweep refuses
 discovery. It names the problem, and finds nothing, instead of guessing a
 default you did not ask for.
@@ -72,8 +85,39 @@ The sweep keeps a worktree that a live session stands in.
 
 The sweep keeps a worktree that holds a lock, and it names the holder.
 
+The sweep keeps a worktree that any process sits inside, not only a
+listener. It names the pids. This check runs right before the removal
+itself. On Windows, that is what stops a partial delete: files gone, an
+empty folder left, and git still listing the worktree.
+
 The sweep keeps any subject that it cannot read. An unreadable session record,
 a `git worktree list` that fails, or a `git status` that fails each mean keep.
+
+## Orphaned TCP listeners
+
+The sweep also finds a TCP listener whose current directory sits inside a
+repository or worktree it covers. It signals that listener, by process id
+alone, only when every one of these reads a confirmed yes:
+
+- The listener is orphaned. On Linux and macOS, its parent process id is 1.
+  On Windows, its parent process is dead. Or a different, newer process now
+  holds that same process id.
+- No live Claude session has a current directory in the same checkout.
+- The listener is owned by the account running the sweep.
+
+An unreadable answer to any one of these means keep. The sweep never turns
+"could not tell" into a confident yes.
+
+`--confirm` sends one signal. That is SIGTERM on Linux and macOS. On Windows,
+that is `TerminateProcess`. Both go by process id, never by a name or a
+pattern. The sweep waits a short grace period. It then reports which
+signalled pids are still alive. It never sends a second, stronger signal on
+its own.
+
+A single process this sweep cannot read is out of scope. That covers a
+process owned by another account, or one that is otherwise access-protected.
+The sweep counts it. It never acts on it. It never blocks a decision about
+anything else because of it.
 
 ## How you opt out
 
