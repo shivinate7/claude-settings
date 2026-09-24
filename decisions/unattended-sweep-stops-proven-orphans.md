@@ -35,6 +35,34 @@ have required a person to pass `--confirm` by hand, every time, for this
 one new capability. The owner decided against that gate. The three reads
 above are the gate.
 
+## Scope: every checkout, not only worktrees and scratch-workspaces
+
+On 2026-09-24 the owner was told what "everywhere" can mean. A `nohup` dev
+server in a PRIMARY checkout, left running after its terminal closed, can
+be orphaned too. The owner's own Banchi server can be orphaned the same
+way, if it runs from its own checkout with no Claude session open there.
+Either one can be stopped, the same as a listener left behind in a
+worktree.
+
+Two narrower options were offered instead:
+
+- Cover linked worktrees and scratch-workspaces only. Leave a primary
+  checkout alone.
+- Cover every checkout, but only behind a manual flag. Drop the
+  unattended paths.
+
+The owner kept "everywhere," with no new flag and no narrower scope. The
+three reads in this entry are still the whole gate. A primary checkout
+gets no separate exemption.
+
+## What reopens it, added
+
+A stopped process the owner started ON PURPOSE also reopens this. That
+process must still answer the three reads above as a real orphan, with no
+session open in its checkout. A report that this happened to a process
+the owner meant to keep running is the same reopen trigger already named,
+not a new one.
+
 ## The pre-check rule, measured alongside this
 
 `decide_worktree`'s own pre-removal check asks whether any process sits
