@@ -30,14 +30,28 @@ writes nothing either way.
    job-cost-reporting's `docs/decisions`, `docs/build`, `docs/findings` and
    `docs/questions` folders.
 
-**Not covered in this PR:** banchi's shape, where the number lives in both the
-filename and the heading (`docs/decisions/D-<slug>.md` becomes
-`docs/decisions/D001-<slug>.md`, 3-digit filename pad, `## D1 —` heading with no
-pad), tracked by an `ORDER.json` per corpus. This is deferred to a follow-up lane,
-not skipped for a shape mismatch. See the decision record for what that lane must
-handle, and for why an earlier draft of this note described a different, stale
-shape. Any repo not shaped like format 1 or format 2 keeps its own claim tool for
-now.
+3. **Number in a heading, and for a split corpus in the filename too.** This is
+   banchi's shape, read off its own `scripts/claim-ids.py`. A file
+   `docs/decisions/D-<slug>.md` whose first line is `## D-<slug> — Title` becomes
+   `docs/decisions/D258-<slug>.md` with `## D258 — Title`. The filename pads to 3 digits.
+   The heading does not. A heading `## C-<slug> — Title` inside the flat
+   `docs/CODES-DECISIONS.md` becomes `## C12 — Title`, with no rename. The config sets
+   `"format": "heading"`. The code is its own module, `formats/heading.mjs`.
+   `examples/banchi.stamp.json` holds banchi's config.
+
+**Format 3 leaves these out.** Each is named in `decisions/one-shared-record-stamp.md`.
+
+- Build steps. claim-ids.py reads a pending step only from `docs/GATES.md`, which is
+  now a pointer file. It cannot see a step in `docs/gates/steps/`. The owner picks
+  what the engine does here.
+- Debts. claim-ids.py has no debt kind, so there is no rule to copy.
+- claim-ids.py's branch-side reads: `--stale`, `--unclaim`, `--landed` and
+  `--porcelain`. A stamp that claims only on the default branch does not need them.
+  `--check` refuses a number written on a branch instead.
+- The ORDER.json append and the CLAUDE.md index. banchi's own
+  `scripts/index-decisions.py` writes both. It runs as the `regenerate` input.
+
+Any repo not shaped like one of these three keeps its own claim tool for now.
 
 ## The config file
 
@@ -80,9 +94,31 @@ code should give you.
 }
 ```
 
-Three real configs sit in `examples/`. Each was read off a real repo's own tool:
-`qmax.stamp.json`, `sharables.stamp.json`, `jcr.stamp.json`. Start from whichever is
-closest to your own repo's shape.
+Four real configs sit in `examples/`. Each was read off a real repo's own tool:
+`qmax.stamp.json`, `sharables.stamp.json`, `jcr.stamp.json`, `banchi.stamp.json`. Start
+from whichever is closest to your own repo's shape.
+
+**Format 3 has its own fields.** Read `examples/banchi.stamp.json` beside this list.
+
+- `slugRegex`: the slug grammar. A pending token must be `<prefix>-<slug>` exactly.
+- Per kind, `folder` (one file per record, heading on the first line) or `file` (one
+  flat file, every heading is a record). Never both.
+- `pendingRegex`: the heading line that may hold a pending id. Group 1 is the token. A
+  token that is neither a clean number nor `-<slug>` is refused as malformed.
+- `numberedRegex`: every numbered heading. Group 1 is the number. The next id is the
+  highest match plus one, over every line of every file of the kind. A gap is never
+  reused.
+- `idTemplate` and `pad`: the heading and cite form. `filenameTemplate` and
+  `filenamePad`: the filename form, for a `folder` kind only.
+- `manifest` and `manifestKey`: a JSON list of filenames. A listed pending name is
+  renamed in place. Nothing is appended here. Use `regenerate` for that.
+- `pathCite`: a path cite of a pending file, rewritten to the bare id. `{token}` is the
+  slug.
+- `cite.before` and `cite.after`: the boundary around a slug token. banchi's is
+  `(?<![-\w])` and `(?![-\w])`, with Python's Unicode `\w` written as
+  `[\p{L}\p{N}_]`.
+- `walk`: which files a cite rewrite opens. `textSuffixes`, `skipDirs` (matched by
+  directory name), `skipDotDirs`, and `extensionlessDirs`. Symlinks are never walked.
 
 **Read `numbering` off your own tool. Never guess this field.** q_max's own `--stamp`
 takes the highest existing number, per kind, and adds one. It never fills a gap.
@@ -170,6 +206,10 @@ nothing was pending. Read off each repo's own tool:
 - job-cost-reporting: `python3 toolchain/build_decision_index.py >
   docs/Decision_Index.md && python3 harness/owner_corrections.py >
   docs/Owner_Corrections.md`.
+- banchi: `python3 scripts/index-decisions.py --write`. It appends each new entry to
+  `docs/decisions/ORDER.json` and regenerates the decision index in `CLAUDE.md`. The
+  same string sits in `examples/banchi.stamp.json` as `"regenerate"`. `stamp.mjs` does
+  not read that field. It is there so the config and the workflow input stay together.
 
 `run.sh` holds the action's own logic. It sits in its own file so it can run and be
 tested directly. `test_action.sh` does exactly that, against a throwaway git remote,
