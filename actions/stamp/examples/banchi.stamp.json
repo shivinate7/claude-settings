@@ -1,7 +1,6 @@
 {
   "format": "heading",
   "defaultBranch": "main",
-  "regenerate": "python3 scripts/index-decisions.py --write",
   "slugRegex": "[a-z][a-z0-9]*(?:-[a-z0-9]+)+",
   "kinds": [
     {

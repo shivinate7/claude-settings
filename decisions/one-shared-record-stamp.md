@@ -70,8 +70,9 @@ input. It appends to `ORDER.json` and rewrites the `CLAUDE.md` index.
 
 **Parity, MEASURED 2026-09-24.** Two untouched copies of banchi main got the same
 pending records: 2 decisions, 1 code card, 1 step, and cites from 8 other files. One
-copy ran `claim-ids.py --write`. The other ran `stamp.mjs --stamp` and then the
-regenerate command. The two trees matched byte for byte, 1245 of 1245 files. A second
+copy ran `claim-ids.py --write`. The other ran the action's own `run.sh`, with the
+env `action.yml` passes it and `REGENERATE_COMMAND` set to banchi's command. The two
+trees matched byte for byte, 1245 of 1245 files. A second
 run, with one pending name listed in `ORDER.json`, matched 1245 of 1245 too.
 
 **Left out, on purpose:**
@@ -86,13 +87,18 @@ run, with one pending name listed in `ORDER.json`, matched 1245 of 1245 too.
   `"n"` field, `docs/gates/ORDER.json`). That is a named difference from claim-ids.py.
   Option 2: steps stay out, and banchi numbers them by hand.
 - **Debts.** claim-ids.py has no debt kind. There is no rule to copy.
+- **The flat-file fallback.** With no `ORDER.json`, claim-ids.py reads decisions from
+  the flat `docs/DECISIONS.md`. That serves commits before the split. banchi main has
+  the manifest.
+- **No rename without a manifest.** claim-ids.py renames no file when `ORDER.json` is
+  missing. The engine renames a claimed file whether or not a manifest exists.
 - **The branch-side reads.** `--stale`, `--unclaim`, `--landed`, `--porcelain` and
   `merging()` serve a claim made on a branch before the merge. This stamp claims only
   on the default branch. `--check` refuses a number written on a branch instead.
 
-**Deliberate differences from claim-ids.py.** Each one is reachable only in a state
-claim-ids.py gets wrong or never meets on banchi's tree today. Parity above is not
-changed by any of them.
+**Deliberate differences from claim-ids.py.** Parity above is not changed by any of
+them. All but the last two come up only in a state claim-ids.py gets wrong, or one
+banchi's tree does not hold today. The last two come up in banchi's normal flow.
 
 - A malformed pending heading (`## D012`, `## D-Bad_Slug`) is refused. MEASURED:
   claim-ids.py claims it as an id.
@@ -105,8 +111,20 @@ changed by any of them.
   tree is main.
 - A rewritten file keeps its own line ending. Python's `write_text` writes the
   platform's. On banchi today, no text file the walk opens has a CRLF.
+- A rename onto a file that already exists is refused before anything is written.
+  claim-ids.py's `Path.rename` replaces that file on POSIX and fails on Windows.
+- A ref and HEAD with no merge base: claim-ids.py refuses, exit 2. `--stamp` reads no
+  ref and never asks. `--check` off the default branch prints "NOT ASKED" and does
+  not refuse.
+- A failed `regenerate` stops the run and nothing is pushed. claim-ids.py's
+  `settle_corpus` ignores a failed generator, and the claim still lands.
 - `--check` refuses a record numbered on a branch. claim-ids.py claims on the branch,
-  so its `--stale` passes a branch number that main has not taken.
+  so its `--stale` passes a branch number that main has not taken. This one is in
+  banchi's normal flow: `make merge` (`scripts/merge-pr.py`, which calls
+  `scripts/claim-ids.py`) claims numbers on the branch for every pull request.
+  **Adoption step:** banchi must retire the branch-side claim in `make merge` before it
+  runs this action's `--check`. Until then, `--check` is red on every pull request
+  `make merge` claims.
 
 Two more shapes stay unmechanized everywhere. q_max's `docs/decisions/B*` and `G*`
 folders have no pending form today. Neither do banchi's `docs/debts` folder or its `T`

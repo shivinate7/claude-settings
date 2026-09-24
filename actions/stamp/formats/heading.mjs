@@ -135,13 +135,15 @@ function readKind(root, config, kind, h) {
 // claim-ids.py `rename_claimed_entries`: the FIRST name in corpus order that starts with
 // `<slug>-` or equals `<slug>.md`, and each rename replaces its name in that order before the
 // next claim looks. Replayed here in claim order, so a lookup that lands on another record's file
-// is refused before anything is written, where claim-ids.py would rename the wrong file.
+// is refused before anything is written, where claim-ids.py would rename the wrong file. Keyed
+// by the record's own file, never by slug: two records can share a slug, and that state has its
+// own refusal.
 function planRenames(kind, order, pending) {
   const live = [...order];
   const out = new Map();
   for (const rec of pending) {
     const found = live.find((n) => n.startsWith(rec.slug + "-") || n === rec.slug + ".md");
-    out.set(rec.slug, found ?? null);
+    out.set(rec.rel, found ?? null);
     if (found) live[live.indexOf(found)] = `\0claimed:${found}`;
   }
   return out;
@@ -173,14 +175,20 @@ function validate(root, config, h) {
     for (const [n, rels] of byNumber) {
       if (rels.length > 1) problems.push(`duplicate id ${renderId(kind, n)}: ${rels.length} headings carry it (${[...new Set(rels)].join(", ")})`);
     }
+    const doubled = new Set();
     for (const rec of k.pending) {
-      if (slugsSeen.has(rec.slug)) problems.push(`duplicate pending slug ${rec.slug}: ${slugsSeen.get(rec.slug)} and ${rec.rel}`);
+      if (slugsSeen.has(rec.slug)) {
+        problems.push(`duplicate pending slug ${rec.slug}: ${slugsSeen.get(rec.slug)} and ${rec.rel}`);
+        doubled.add(rec.slug);
+      }
       slugsSeen.set(rec.slug, rec.rel);
     }
     if (kind.folder) {
       const renames = planRenames(kind, k.order, k.pending);
       for (const rec of k.pending) {
-        const found = renames.get(rec.slug);
+        // A doubled slug is already refused above. Its filename lookup can only report noise.
+        if (doubled.has(rec.slug)) continue;
+        const found = renames.get(rec.rel);
         if (found !== rec.name) {
           problems.push(`${rec.rel}: slug ${rec.slug} resolves to ${found ? `${kind.folder}/${found}` : "no file"} by ` +
             `claim-ids.py's filename rule. Name the file ${rec.slug}.md or ${rec.slug}-<tail>.md.`);
@@ -261,9 +269,11 @@ function substitute(text, config, claims) {
 }
 
 // Python's `json.dumps(obj, indent=2)`, which is how claim-ids.py writes ORDER.json. JSON.stringify
-// gives the same bytes except that Python escapes every non-ASCII character.
-function pythonJson(obj) {
-  return JSON.stringify(obj, null, 2).replace(/[\u0080-￿]/g,
+// gives the same bytes except for `ensure_ascii`: Python escapes every character outside
+// U+0020 to U+007E, so U+007F (DEL) and everything above it become `\uXXXX`. A character above
+// U+FFFF is a surrogate pair in both, so each half is escaped on its own, as Python does.
+export function pythonJson(obj) {
+  return JSON.stringify(obj, null, 2).replace(/[\u007f-\uffff]/g,
     (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
 }
 
@@ -278,8 +288,21 @@ export function stamp(root, config, h) {
     let n = Math.max(0, ...k.numbers.map((x) => x.n));
     for (const rec of k.pending) {
       n += 1;
-      claims.push({ kind: k.kind, token: rec.slug, n, id: renderId(k.kind, n), rec });
+      const target = k.kind.folder
+        ? `${k.kind.folder}/${render(k.kind.filenameTemplate, k.kind, n, k.kind.filenamePad, tailOf(k.kind, rec.slug, rec.name))}`
+        : null;
+      claims.push({ kind: k.kind, token: rec.slug, n, id: renderId(k.kind, n), rec, target });
     }
+  }
+  // A rename never lands on a file that exists. claim-ids.py's `Path.rename` replaces it on
+  // POSIX, silently, and fails on Windows. Here the run is refused before anything is written.
+  const blocked = claims.filter((c) => c.target && c.target !== c.rec.rel && existsSync(join(root, c.target)));
+  if (blocked.length) {
+    return {
+      problems: blocked.map((c) => `${c.rec.rel}: ${c.token} would be renamed to ${c.target}, which already exists. ` +
+        `Refusing, nothing written.`),
+      assigned: [], glossed: 0,
+    };
   }
   for (const c of claims) console.log(`stamped ${c.id}  ${c.token}  ${c.rec.title}`.trimEnd());
   if (!claims.length) {
@@ -303,11 +326,10 @@ export function stamp(root, config, h) {
     const renamed = new Map();
     for (const c of mine) {
       let rel = c.rec.rel;
-      if (k.kind.folder) {
-        const name = render(k.kind.filenameTemplate, k.kind, c.n, k.kind.filenamePad, tailOf(k.kind, c.token, c.rec.name));
-        renameSync(join(root, c.rec.rel), join(root, k.kind.folder, name));
-        renamed.set(c.rec.name, name);
-        rel = `${k.kind.folder}/${name}`;
+      if (c.target) {
+        renameSync(join(root, c.rec.rel), join(root, c.target));
+        renamed.set(c.rec.name, c.target.slice(k.kind.folder.length + 1));
+        rel = c.target;
       }
       assigned.push({ id: c.id, n: c.n, prefix: k.kind.prefix, slug: c.token, title: c.rec.title, rel, oldRel: c.rec.rel });
     }
@@ -353,7 +375,7 @@ function branchNumbered(root, config, kinds, notes) {
   for (const k of kinds) {
     const kind = k.kind;
     if (kind.folder) {
-      const out = git(root, ["diff", "--name-only", "--no-renames", "--diff-filter=A", base, "HEAD", "--", kind.folder]);
+      const out = git(root, ["-c", "core.quotePath=false", "diff", "--name-only", "--no-renames", "--diff-filter=A", base, "HEAD", "--", kind.folder]);
       if (out === null) { notes.push(`branch question NOT ASKED for ${kind.id}: git diff failed.`); continue; }
       const added = new Set(out.split("\n").map((l) => l.trim()).filter(Boolean));
       const numberedRe = new RegExp(kind.numberedRegex, "u");

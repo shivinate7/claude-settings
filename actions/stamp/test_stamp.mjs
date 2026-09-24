@@ -409,6 +409,87 @@ test("heading: a pending slug main already claimed under a number is refused", (
     assert.equal(result.problems.some((p) => p.includes("already claimed as D4")), true);
   }));
 
+test("heading --check refuses a branch number that main took after the cut", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    banchiTree(root);
+    commit(root, "main, at the cut");
+    git(root, "checkout", "-q", "-b", "wt/lane");
+    write(root, "docs/decisions/D004-four.md", "## D4 — Four, numbered on the branch\n");
+    write(root, "docs/CODES-DECISIONS.md", "# Codes\n\n## C1 — First\n\n## C2 — Numbered on the branch\n");
+    commit(root, "the branch numbers D4 and C2");
+    // main moves: it takes D4 (same filename) and C2 for other records after the cut. Measured
+    // against main's TIP, both numbers read as "already there" and the defect hides.
+    git(root, "checkout", "-q", "main");
+    write(root, "docs/decisions/D004-four.md", "## D4 — Four, claimed on main\n");
+    write(root, "docs/CODES-DECISIONS.md", "# Codes\n\n## C1 — First\n\n## C2 — Claimed on main\n");
+    commit(root, "main takes D4 and C2");
+    git(root, "checkout", "-q", "wt/lane");
+
+    const problems = check(root, banchiConfig());
+    assert.equal(problems.some((p) => p.includes("docs/decisions/D004-four.md") && p.includes("on a branch")), true);
+    assert.equal(problems.some((p) => p.includes("C2") && p.includes("on a branch")), true);
+  }));
+
+test("heading: a rename onto a file that already exists is refused and nothing is written", () =>
+  withTempDir((root) => {
+    write(root, "docs/decisions/ORDER.json", manifestText(["_preamble.md", "D001-one.md"]));
+    write(root, "docs/decisions/_preamble.md", "# Settled decisions\n");
+    write(root, "docs/decisions/D001-one.md", "## D1 — One\n");
+    // No numbered heading, so it does not raise the ceiling, but it holds the name D2 would take.
+    write(root, "docs/decisions/D002-extra.md", "Stray notes. No heading.\n");
+    write(root, "docs/decisions/D-foo-bar-extra.md", "## D-foo-bar — Foo bar\n");
+    const before = snapshot(root);
+
+    const result = stamp(root, banchiConfig());
+    assert.equal(result.problems.some((p) => p.includes("docs/decisions/D002-extra.md") && p.includes("already exists")), true);
+    assert.equal(result.assigned.length, 0);
+    assert.deepEqual(snapshot(root), before);
+  }));
+
+test("heading: ORDER.json is written with Python json.dumps's escapes, U+007F included", () =>
+  withTempDir((root) => {
+    banchiTree(root);
+    write(root, "docs/decisions/ORDER.json",
+      '{\n  "order": [\n    "_preamble.md",\n    "ghost\\u007f \\u00e9\\ud83d\\ude00.md",\n    "D-two-thing.md"\n  ]\n}\n');
+    write(root, "docs/decisions/D-two-thing.md", "## D-two-thing — Two thing\n");
+
+    stamp(root, banchiConfig());
+    // The bytes Python 3 prints for json.dumps({"order": [...]}, indent=2) on the same data.
+    assert.equal(read(root, "docs/decisions/ORDER.json"),
+      '{\n  "order": [\n    "_preamble.md",\n    "ghost\\u007f \\u00e9\\ud83d\\ude00.md",\n    "D004-two-thing.md"\n  ]\n}\n');
+  }));
+
+test("heading: a duplicate pending slug is refused with the one true message", () =>
+  withTempDir((root) => {
+    banchiTree(root);
+    write(root, "docs/decisions/D-two-thing.md", "## D-two-thing — Two thing\n");
+    write(root, "docs/decisions/D-two-thing-copy.md", "## D-two-thing — Two thing, again\n");
+    const before = snapshot(root);
+
+    const result = stamp(root, banchiConfig());
+    assert.deepEqual(result.problems.filter((p) => !p.startsWith("duplicate pending slug D-two-thing")), []);
+    assert.equal(result.problems.length, 1);
+    assert.deepEqual(snapshot(root), before);
+  }));
+
+test("heading --check reads a non-ASCII filename git added, on and off the default branch", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    banchiTree(root);
+    commit(root, "main");
+    write(root, "docs/decisions/D-two-thing-café.md", "## D-two-thing — Two thing\n");
+    commit(root, "HEAD adds a pending record with a non-ASCII filename");
+    // On main: HEAD itself added it, so it waits its turn and is not refused.
+    assert.deepEqual(check(root, banchiConfig()), []);
+
+    git(root, "checkout", "-q", "-b", "wt/lane");
+    write(root, "docs/decisions/D004-café.md", "## D4 — Numbered on the branch\n");
+    commit(root, "a branch numbers a record with a non-ASCII filename");
+    const problems = check(root, banchiConfig());
+    assert.equal(problems.some((p) => p.includes("D004-café.md") && p.includes("on a branch")), true);
+  }));
+
 // ---------------------------------------------------------------- run
 let failed = 0;
 for (const { name, fn } of tests) {

@@ -50,6 +50,17 @@ writes nothing either way.
   `--check` refuses a number written on a branch instead.
 - The ORDER.json append and the CLAUDE.md index. banchi's own
   `scripts/index-decisions.py` writes both. It runs as the `regenerate` input.
+- The flat-file fallback. With no `ORDER.json`, claim-ids.py reads decisions from the
+  flat `docs/DECISIONS.md`. That serves commits before the split. banchi main has the
+  manifest.
+- No rename without a manifest. claim-ids.py renames no file when `ORDER.json` is
+  missing. The engine renames a claimed file whether or not a manifest exists.
+
+**Before banchi runs `--check`, it must retire its branch-side claim.** banchi's `make
+merge` (`scripts/merge-pr.py`, which calls `scripts/claim-ids.py`) numbers records on
+the branch, before the merge. `--check` refuses every number written on a branch. So
+banchi must remove the claim step from `make merge` first, and let this action claim at
+merge instead. Until then, `--check` goes red on every pull request `make merge` claims.
 
 Any repo not shaped like one of these three keeps its own claim tool for now.
 
@@ -206,10 +217,11 @@ nothing was pending. Read off each repo's own tool:
 - job-cost-reporting: `python3 toolchain/build_decision_index.py >
   docs/Decision_Index.md && python3 harness/owner_corrections.py >
   docs/Owner_Corrections.md`.
-- banchi: `python3 scripts/index-decisions.py --write`. It appends each new entry to
-  `docs/decisions/ORDER.json` and regenerates the decision index in `CLAUDE.md`. The
-  same string sits in `examples/banchi.stamp.json` as `"regenerate"`. `stamp.mjs` does
-  not read that field. It is there so the config and the workflow input stay together.
+- banchi: `regenerate: "python3 scripts/index-decisions.py --write"`. It appends each
+  new entry to `docs/decisions/ORDER.json` and regenerates the decision index in
+  `CLAUDE.md`. One difference from claim-ids.py: its `settle_corpus` ignores a failed
+  generator and the claim still lands. `run.sh` stops on a failed `regenerate` and
+  pushes nothing.
 
 `run.sh` holds the action's own logic. It sits in its own file so it can run and be
 tested directly. `test_action.sh` does exactly that, against a throwaway git remote,

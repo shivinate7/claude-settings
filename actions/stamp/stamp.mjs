@@ -241,6 +241,7 @@ function mergeOrder(root, folder) {
 function addedByHead(root, folder) {
   try {
     const out = execFileSync("git", [
+      "-c", "core.quotePath=false",
       "diff-tree", "-r", "-m", "--first-parent", "--root", "--no-commit-id", "--diff-filter=A", "--name-only",
       "HEAD", "--", folder,
     ], { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
