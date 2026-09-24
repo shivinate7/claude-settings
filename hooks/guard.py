@@ -29,6 +29,14 @@ one fixed order, and the first match wins.
                        carve-outs. `merge --abort` is carved out, and every read subcommand is
                        untouched.
   2 machine-wide-kill  a kill by name or by pattern
+  2b detached-launch   a command that starts a process and detaches it from the session: a
+                       background job inside a subshell (`( cmd & )`), a `nohup`/`setsid`
+                       wrapper, `disown` right after a background job, a bare trailing
+                       background job whose pid nothing in the command captures, PowerShell's
+                       `Start-Job`, `Start-Process` with neither `-Wait` nor `-PassThru`, or
+                       `cmd`/`cmd.exe /c start ...` from either shell. Always denied, the same
+                       as rule 2, because a detached process leaves no pid this session can
+                       name to stop it later.
   3 live-stream        a command that follows a stream and never ends on its own
   3 waiter             a shell segment whose command word is a sleep-and-poll
   4 force-push         a rewrite of a published branch
@@ -251,6 +259,13 @@ def split_segments(cmd: str):
 # environment layer below, so the two never drift into judging an assignment two different ways.
 ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
+# PowerShell's own assignment, `$name = value`, two tokens under shlex rather than one: `$sg`
+# then `=`. MEASURED against a real launch, `$sg = Start-Process npx ... -PassThru`, the exact
+# shape PowerShell's own remedy for rule 2b recommends. Before this, `resolve_command` read
+# `$sg` itself as the command word on that line, which matches no rule's tool name, so every
+# command-word rule silently missed the real command sitting right after it.
+POWERSHELL_ASSIGNMENT = re.compile(r"^\$[A-Za-z_][A-Za-z0-9_]*$")
+
 # A wrapper that runs another program in its place, so the CALLED program is a segment's real
 # command word, not the wrapper. `xargs pkill foo` runs pkill, so `xargs` unwraps the same as
 # the rest: the token after it, once its own flags are skipped, is what actually runs.
@@ -277,6 +292,24 @@ def segment_tokens(segment: str):
         return None
 
 
+def _skip_assignments_and_keywords(tokens, index=0):
+    """Return the index of the first token that is neither an assignment (POSIX `VAR=value` or
+    PowerShell `$name` `=`) nor a leading loop keyword, starting from `index`. Shared by
+    `resolve_command`, which then unwraps wrappers from there, and by the detached-launch
+    checks below, which must see a wrapper such as `nohup` BEFORE any unwrap, not after."""
+    end = len(tokens)
+    while index < end:
+        if ASSIGNMENT.match(tokens[index]) or tokens[index] in LOOP_KEYWORDS:
+            index += 1
+            continue
+        if (POWERSHELL_ASSIGNMENT.match(tokens[index]) and index + 1 < end
+                and tokens[index + 1] == "="):
+            index += 2
+            continue
+        break
+    return index
+
+
 def resolve_command(tokens):
     """Return the index of the command word in a tokenized segment, or None when it names none.
 
@@ -286,10 +319,8 @@ def resolve_command(tokens):
     any assignment it takes ahead of the program name, so the index returned is the program that
     actually runs, never the keyword or the wrapper carrying it there.
     """
-    index = 0
     end = len(tokens)
-    while index < end and (ASSIGNMENT.match(tokens[index]) or tokens[index] in LOOP_KEYWORDS):
-        index += 1
+    index = _skip_assignments_and_keywords(tokens)
     while index < end and basename(tokens[index]) in COMMAND_WRAPPERS:
         index += 1
         while index < end and tokens[index].startswith("-"):
@@ -2168,7 +2199,165 @@ KILL_REASON = (
     "Rule (shared trees): this stops every process matching a name or a pattern, "
     "machine-wide. This machine runs other agents' servers and the owner's own editor. "
     "Remedy: name one process id that this session started, and stop that one process. "
+    "Get that pid from the $! this session's own launch printed, or stop a run_in_background "
+    "job through the harness's own stop tool. "
     "Leave any other process alone."
+)
+
+
+# ------------------------------------------------------------------ a detached launch
+#
+# MEASURED 2026-09-23 on macOS: a subagent ran a background job inside a subshell,
+# `(python3 -m http.server 8000 >/tmp/http_server_wtweb.log 2>&1 &)`. The subshell exited at
+# once, pid 1 adopted the server, the harness never tracked it, and no pid was kept. Rule 2
+# above then correctly refused `pkill -f` and `lsof -t`, but its own remedy asks for "one
+# process id that this session started" and gives no way to get one, so the agent left the
+# server running. This rule closes that gap: it denies the LAUNCH, before a session can ever
+# reach a machine-wide kill trying to clean one up.
+#
+# THE SAME "resolve, not match" STANCE as rule 2 (see the comment above `KILL_COMMAND_WORDS`):
+# every check below reads a segment's OWN tokens, from `segment_tokens`, quote-aware and
+# heredoc-safe (the caller already ran `strip_heredoc_bodies`), never the raw text. A quoted
+# `"nohup foo &"` passed to `echo` or `grep` is one token to shlex, never equal to the bare
+# tokens `nohup`, `&`, or `disown` this file checks for, so it never fires here either.
+#
+# `nohup`/`setsid` MUST be read BEFORE `resolve_command` unwraps them: `nohup pkill foo` names a
+# real kill in command position, and rule 2 above already denies that on its own, unwrapped
+# reading. This rule reads the wrapper word ITSELF, with `_skip_assignments_and_keywords`, the
+# same prefix skip `resolve_command` uses before it unwraps, so a plain detached launch such as
+# `nohup python3 server.py &` is caught here without duplicating rule 2's kill list.
+DETACH_WRAPPERS = {"nohup", "setsid"}
+
+
+def _ends_in_background_paren(tokens) -> bool:
+    """Return True when a tokenized segment's last token closes a subshell right after a bare
+    background job: `( cmd & )` (spaced, two trailing tokens) or `(cmd &)` (fused, one)."""
+    if len(tokens) < 2:
+        return False
+    last = tokens[-1]
+    if last == ")":
+        return tokens[-2] == "&"
+    return last.endswith(")") and last[:-1].endswith("&")
+
+
+def detach_wrapper_hit(tokens) -> str:
+    """Return the matched word when a segment's own head, BEFORE any wrapper unwrap, is `nohup`
+    or `setsid`, else ''."""
+    index = _skip_assignments_and_keywords(tokens)
+    if index >= len(tokens):
+        return ""
+    word = tokens[index]
+    return word if basename(word) in DETACH_WRAPPERS else ""
+
+
+def disown_after_background_hit(tokens) -> str:
+    """Return "& disown" when a bare background job (`&` in token position) in this segment is
+    followed by `disown` in command position, else ''."""
+    for i, tok in enumerate(tokens):
+        if tok != "&":
+            continue
+        rest = tokens[i + 1:]
+        j = _skip_assignments_and_keywords(rest)
+        if j < len(rest) and basename(rest[j]) == "disown":
+            return "& disown"
+    return ""
+
+
+def windows_detach_hit(tokens) -> str:
+    """Return the matched word when a segment's command word is a PowerShell launch the
+    harness cannot track, else ''.
+
+    `Start-Job` always denies: it hands the work to a job object in a separate PowerShell
+    process, and this session never holds a pid for it at all. `Start-Process` denies only
+    when neither `-Wait` (blocks until the child exits, so nothing outlives the turn) nor
+    `-PassThru` (hands back the process object, whose `.Id` is the pid the remedy needs) is
+    present, whatever else it carries, `-WindowStyle Hidden` included. MEASURED 2026-09-24
+    against local transcripts: every real `Start-Process` call found (4, all through the
+    PowerShell tool) already carries `-PassThru`, and `Start-Job` never appears at all, so
+    this condition refuses none of them.
+    """
+    index = resolve_command(tokens)
+    if index is None:
+        return ""
+    word = tokens[index]
+    tool = basename(word)
+    if tool == "start-job":
+        return word
+    if tool == "start-process":
+        rest = {t.lower() for t in tokens[index + 1:]}
+        if "-wait" in rest or "-passthru" in rest:
+            return ""
+        return word
+    return ""
+
+
+def cmd_start_hit(tokens) -> str:
+    """Return the matched text when a segment's command word is `cmd`/`cmd.exe` and its `/c`
+    or `/k` flag runs `start`, else ''.
+
+    Windows' own `start` opens a new, untracked window the same way a subshell background job
+    does on POSIX: the launched program outlives `cmd.exe`'s own exit, and no rule here ever
+    gets a pid for it. Checked from EITHER shell: PowerShell can call `cmd.exe /c start ...`
+    exactly as Bash can. MEASURED 2026-09-24 against local transcripts: 0 occurrences, so this
+    shape refuses no harmless command this session has actually seen run.
+    """
+    index = resolve_command(tokens)
+    if index is None:
+        return ""
+    if basename(tokens[index]) not in ("cmd", "cmd.exe"):
+        return ""
+    rest = tokens[index + 1:]
+    for i in range(len(rest) - 1):
+        if rest[i].lower() in ("/c", "/k") and rest[i + 1].lower() == "start":
+            return tokens[index] + " " + rest[i] + " start"
+    return ""
+
+
+def bare_background_hit(cmd: str) -> str:
+    """Return the matched text when the command's LAST segment ends in a bare background job
+    with no pid captured anywhere in the command, else ''.
+
+    MEASURED 2026-09-24 against this machine's own local transcripts (`~/.claude/projects/*/
+    *.jsonl`, read-only): 16571 Bash commands across 116 sessions, 0 ended in a bare trailing
+    `&`. This shape refuses no harmless command this session has actually seen run.
+    """
+    segments = [s for s in split_segments(cmd) if s.strip()]
+    if not segments:
+        return ""
+    tokens = segment_tokens(segments[-1])
+    if not tokens or tokens[-1] != "&" or "$!" in cmd:
+        return ""
+    return (tokens[-2] if len(tokens) >= 2 else "cmd") + " &"
+
+
+def detached_launch_hit(cmd: str) -> str:
+    """Return the matched text when the command starts a process and detaches it from the
+    session, else ''. Checked per segment first (the subshell, the wrapper, and disown), then
+    once over the whole command (the bare trailing background job, whose "no pid captured"
+    half of the test is not a per-segment question)."""
+    for segment in split_segments(cmd):
+        if not segment.strip():
+            continue
+        tokens = segment_tokens(segment)
+        if not tokens:
+            continue
+        if tokens[0].startswith("(") and _ends_in_background_paren(tokens):
+            return tokens[0] + " ... " + tokens[-1]
+        matched = (detach_wrapper_hit(tokens) or disown_after_background_hit(tokens)
+                   or windows_detach_hit(tokens) or cmd_start_hit(tokens))
+        if matched:
+            return matched
+    return bare_background_hit(cmd)
+
+
+DETACHED_LAUNCH_REASON = (
+    "this starts a process and detaches it from the session, so no rule here can later name a "
+    "pid to stop it. "
+    "Remedy: use the Bash or PowerShell tool's run_in_background so the harness tracks the "
+    "process. Or capture a pid yourself: `cmd & echo $!` in Bash, or `$p = Start-Process ... "
+    "-PassThru` in PowerShell, then stop it later with `kill <pid>` or `Stop-Process -Id "
+    "<id>`. Take a free port, such as port 0 or a random high port, never a port another "
+    "project may own, such as 8000, 5173, 3000, or 8080."
 )
 
 
@@ -3201,6 +3390,14 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
         matched = kill_hit(tokens)
         if matched:
             refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
+
+    # 2b. A detached launch: a subshell background job, a nohup/setsid wrapper, disown right
+    # after a background job, or a bare trailing background job with no pid captured anywhere
+    # in the command. Same decision as rule 2, deny, for the same reason: no pid survives to
+    # stop it later.
+    matched = detached_launch_hit(stripped)
+    if matched:
+        refuse(tool, "deny", "detached-launch", DETACHED_LAUNCH_REASON, matched)
 
     # 3. A live stream that never ends, or a waiter loop (Rule 9). A waiter loop whose own
     # condition polls a pattern gets the more specific reason: the pattern can match the loop's

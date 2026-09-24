@@ -236,7 +236,8 @@ deny, ask, or nothing. It fails open on bad input.
 | A directory that is no git tree | `Bash`, `PowerShell` | deny in a shared checkout, ask in a git worktree | nothing was read there, so the refusal stands |
 | Conflict side: `git checkout --ours`, `--theirs`, `--merge`, with a merge, rebase, cherry-pick, or revert in progress | `Bash`, `PowerShell` | allow, logged `noted`/`conflict-resolve` | nothing to do. The call picks a side, it discards no uncommitted work |
 | Silent write: `commit`, `push`, `merge`, `tag`, `rebase`, or `cherry-pick` with a redirect of either stream to `/dev/null`, `NUL`, or `$null`, or `push`, `merge`, or `rebase` (MEASURED) with `-q`/`--quiet` alone | `Bash`, `PowerShell` | deny | run the same write without silencing either stream, and read what it prints. `commit -q`, `tag -q`, `cherry-pick -q`/`--quiet` alone, `merge --abort`, `fetch`, and every read subcommand pass |
-| Machine-wide kills: `pkill`, `killall`, `lsof -t`, `taskkill /IM`, `Stop-Process -Name`, in command position only | `Bash`, `PowerShell` | deny | name one PID this session started |
+| Machine-wide kills: `pkill`, `killall`, `lsof -t`, `taskkill /IM`, `Stop-Process -Name`, in command position only | `Bash`, `PowerShell` | deny | name one PID this session started. Get it from the `$!` a launch printed, or stop a `run_in_background` job with the harness's own stop tool |
+| Detached launches: `( cmd & )`, `nohup`/`setsid` in command position (read before the wrapper unwraps), `disown` right after a background job, a trailing `cmd &` with no `$!` captured anywhere in the command, PowerShell's `Start-Job`, `Start-Process` with neither `-Wait` nor `-PassThru`, or `cmd`/`cmd.exe /c start ...` from either shell | `Bash`, `PowerShell` | deny | use `run_in_background`, `cmd & echo $!`, or `$p = Start-Process ... -PassThru` and keep the pid. Take a free port, never one another project may own |
 | Force push: `--force`, `-f`, `--force-with-lease` | `Bash`, `PowerShell` | ask | the click in the prompt is the grant |
 | Recursive delete at `/`, `~`, `.`, `*`, or a drive root | `Bash`, `PowerShell` | deny | name the folder |
 | Environment files: any `.env*` except `.env.example` | `Read`, `Grep`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and shell text | deny | ask the user for the value. Loader flags such as `--env-file` and existence checks with `ls` or `test` pass |
@@ -357,6 +358,22 @@ deviation, and that deletion disarmed a machine-wide reaper. The same test would
 one flipped comparison in the liveness read, unreviewed. That is the defect this repository
 spent two days fixing. Full record:
 `decisions/the-orchestrator-builds-by-verdict-not-by-line-count.md`.
+
+17. Detached launches: **deny, same as rule 2, no override token.** A background job inside a
+subshell (`( cmd & )`) denies. `nohup` or `setsid` in command position denies too, read BEFORE
+the wrapper unwraps, so `nohup pkill foo` still hits rule 2. `disown` right after a background
+job denies. A `cmd &` last segment with no `$!` anywhere in the command denies as well.
+MEASURED 2026-09-23 (macOS): a subshell background job orphaned its server to pid 1. The
+harness never tracked it. Rule 2's own remedy asked for a pid the session never had. MEASURED
+2026-09-24 against this machine's own local transcripts (`~/.claude/projects/*/*.jsonl`): 16571
+Bash commands across 116 sessions, 0 ended in a bare trailing `&`. So the last shape refuses no
+observed harmless command. The same day, on the Windows forms: `Start-Job` denies always.
+`Start-Process` denies only with neither `-Wait` nor `-PassThru`. `cmd`/`cmd.exe /c start ...`
+denies from either shell. MEASURED against the same transcripts: 4 real `Start-Process` calls,
+all through the PowerShell tool, all already carrying `-PassThru`. 0 `Start-Job` calls. 0
+`cmd /c start` calls. So these three shapes refuse no observed harmless command either. Reason:
+rule 2 catches the kill after the fact. This rule denies the launch that leaves nothing to
+catch.
 
 Every deny or ask appends one line to `~/.claude/guard.log`: timestamp, tool,
 decision, rule, and the matched text cut at 120 characters. Allows are never
