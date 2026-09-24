@@ -1502,7 +1502,82 @@ sh("kill: a pkill inside an if's then-block, MEASURED wrongly allowed",
    "if true; then pkill -f server; fi", "deny", "machine-wide-kill", cwd=NOGIT)
 
 
-# =========================================================================== 2b. live streams
+# =========================================================================== 2b. detached launches
+#
+# MEASURED 2026-09-23 (macOS): a subagent ran `(python3 -m http.server 8000
+# >/tmp/http_server_wtweb.log 2>&1 &)`. The subshell exited at once, pid 1 adopted the server,
+# the harness never tracked it, and no pid was kept, so rule 2's own remedy had no pid to name.
+
+sh("detached: the incident's exact command orphans to pid 1",
+   "(python3 -m http.server 8000 >/tmp/http_server_wtweb.log 2>&1 &)", "deny",
+   "detached-launch", cwd=NOGIT)
+sh("detached: the same shape, spaced",
+   "( python3 -m http.server 8000 & )", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: nohup survives a session close, with a background job",
+   "nohup python3 -m http.server 8000 &", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: nohup alone, no background job, still detaches from the session",
+   "nohup npm run build", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: setsid starts its own session",
+   "setsid python3 server.py &", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: disown right after a background job",
+   "python3 server.py & disown", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: a bare trailing background job with no pid captured, MEASURED zero harmless "
+   "matches in 16571 local Bash commands",
+   "python3 server.py &", "deny", "detached-launch", cwd=NOGIT)
+
+sh("detached: run_in_background style is a plain foreground command, nothing to catch",
+   "python3 server.py", "allow", cwd=NOGIT)
+sh("detached: the printed pid is kept, the session can stop it later",
+   "python3 server.py & echo $!", "allow", cwd=NOGIT)
+sh("detached: a quoted echo of the shape prints text and starts nothing",
+   'echo "nohup foo &"', "allow", cwd=NOGIT)
+sh("detached: a grep for the word disown is not a call to it",
+   'grep -n "disown" file.txt', "allow", cwd=NOGIT)
+sh("detached: a quoted subshell-and-background shape inside echo's argument",
+   'echo "(x &)"', "allow", cwd=NOGIT)
+sh("detached: nohup wrapping a real kill still hits rule 2, not this rule",
+   "nohup pkill foo", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("detached: the shape inside a heredoc body is data, not a command",
+   "cat <<'EOF' > notes.txt\nnohup python3 server.py &\nEOF", "allow", cwd=NOGIT)
+
+# THE WINDOWS FORMS, the owner's scope change: the same protection PowerShell needs, since
+# guard.py judges Bash and PowerShell alike (SHELL_TOOLS). MEASURED 2026-09-24 against local
+# transcripts: 4 real `Start-Process` calls, all through the PowerShell tool, all already
+# carrying `-PassThru`. 0 `Start-Job` calls. 0 `cmd /c start` calls, from either shell.
+sh("detached: Start-Job hands the work to a job object with no pid here at all",
+   "Start-Job -ScriptBlock { python server.py }", "deny", "detached-launch",
+   tool="PowerShell", cwd=NOGIT)
+sh("detached: Start-Process with neither -Wait nor -PassThru",
+   'Start-Process npx -ArgumentList "server.js"', "deny", "detached-launch",
+   tool="PowerShell", cwd=NOGIT)
+sh("detached: Start-Process -WindowStyle Hidden still denies without -Wait or -PassThru",
+   "Start-Process notepad.exe -WindowStyle Hidden", "deny", "detached-launch",
+   tool="PowerShell", cwd=NOGIT)
+sh("detached: a PowerShell assignment ahead of Start-Process is still read, MEASURED wrongly "
+   "missed before _skip_assignments_and_keywords learned $name =",
+   '$bad = Start-Process npx -ArgumentList "server.js"', "deny", "detached-launch",
+   tool="PowerShell", cwd=NOGIT)
+sh("detached: cmd /c start opens an untracked window, from PowerShell",
+   "cmd /c start python server.py", "deny", "detached-launch", tool="PowerShell", cwd=NOGIT)
+sh("detached: cmd.exe /c start opens an untracked window, from Bash",
+   "cmd.exe /c start notepad.exe", "deny", "detached-launch", cwd=NOGIT)
+
+sh("detached: Start-Process -Wait blocks until the child exits",
+   "Start-Process notepad.exe -Wait", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached: Start-Process -PassThru hands back the pid to stop later",
+   "Start-Process notepad.exe -PassThru", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached: the real measured launch, -PassThru kept in $p for cleanup",
+   '$p = Start-Process npx -ArgumentList @("-y","supergateway@3.4.3") -PassThru '
+   "-WindowStyle Hidden", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached: cmd with no start subcommand runs and exits, nothing to catch",
+   "cmd /c echo hello", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached: a quoted mention of the shape prints text and starts nothing",
+   'echo "cmd /c start something"', "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached: a grep for Start-Job is not a call to it",
+   'grep -n "Start-Job" file.txt', "allow", tool="PowerShell", cwd=NOGIT)
+
+
+# =========================================================================== 2c. live streams
 #
 # CLAUDE.md: "Never pipe a live stream through `tail`." A follow flag never ends on its own, so
 # it outlives the turn and the agent that started it.
@@ -1674,6 +1749,70 @@ sh("delete: a named dependency folder", "rm -rf node_modules", "allow", cwd=NOGI
 sh("delete: the PowerShell twin of a named folder", "Remove-Item -Recurse -Force node_modules",
    "allow", tool="PowerShell", cwd=NOGIT)
 sh("delete: one scratch file", "rm -f /tmp/scratch.txt", "allow", cwd=NOGIT)
+
+# THE CMD.EXE VERBS. `rd`/`rmdir` and `del`/`erase` take `/s` (recurse) and `/q` (quiet,
+# optional, never required), never `rm`'s or `Remove-Item`'s dash flags. Each denied case here
+# has an rm or Remove-Item twin above that already denies, so the verdict carries over. Checked
+# under BOTH tool names, since the guard reads the command TEXT, not which shell claims to run
+# it.
+sh("delete: rd /s /q at a drive root, Bash", "rd /s /q C:\\", "deny", "destructive-delete",
+   cwd=NOGIT)
+sh("delete: rd /s /q at a drive root, PowerShell", "rd /s /q C:\\", "deny",
+   "destructive-delete", tool="PowerShell", cwd=NOGIT)
+sh("delete: rmdir /s (no /q) at a glob", "rmdir /s *", "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: del /s at the home variable", "del /s $HOME", "deny", "destructive-delete",
+   cwd=NOGIT)
+sh("delete: erase /s /q at a drive root", "erase /s /q C:/", "deny", "destructive-delete",
+   cwd=NOGIT)
+sh("delete: flags are case-insensitive", "RD /S /Q ~", "deny", "destructive-delete", cwd=NOGIT)
+
+# THE THREE MEASURED COMMANDS (2026-09-24), two of the three. `%USERPROFILE%` and
+# `$env:USERPROFILE` are the home directory, same as `$HOME` and `~` above. `C:\*` is a glob
+# at a drive root, same shape as the bare glob and the bare drive root above, just combined.
+sh("delete: cmd /c rd /s /q %USERPROFILE%, Bash", "cmd /c rd /s /q %USERPROFILE%", "deny",
+   "destructive-delete", cwd=NOGIT)
+sh("delete: cmd /c rd /s /q %USERPROFILE%, PowerShell", "cmd /c rd /s /q %USERPROFILE%",
+   "deny", "destructive-delete", tool="PowerShell", cwd=NOGIT)
+sh("delete: cmd.exe /c rmdir /s /q $env:USERPROFILE", "cmd.exe /c rmdir /s /q $env:USERPROFILE",
+   "deny", "destructive-delete", tool="PowerShell", cwd=NOGIT)
+sh("delete: del /s /q C:\\*, Bash", "del /s /q C:\\*", "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: del /s /q C:\\*, PowerShell", "del /s /q C:\\*", "deny", "destructive-delete",
+   tool="PowerShell", cwd=NOGIT)
+
+# THE THIRD MEASURED COMMAND, `rd /s /q C:\Users\x`, is NOT a case here. `C:\Users\x` is a
+# literal path to one user's profile, not one of the recognized root/home/glob shapes
+# (`%USERPROFILE%`, `$env:USERPROFILE`, `$HOME`, `~`, a bare drive root, or a glob), the same
+# way `rm -rf /home/x` (a literal path to a home) is not a case above either. Matching it would
+# widen what counts as a root to "any path under C:\Users", which the brief this rule was built
+# from rules out. See the PARITY case just below.
+sh("delete: rd /s /q at a literal user path is not a recognized root, home or glob",
+   "rd /s /q C:\\Users\\x", "allow", cwd=NOGIT)
+sh("delete: its POSIX twin is allowed today for the same reason",
+   "rm -rf /home/x", "allow", cwd=NOGIT)
+
+# THE POWERSHELL ALIASES. `remove-item`, `ri`, `rd` and `rmdir` already matched the dash-flag
+# pattern before this change. `del`, `erase` and `rm` did not: PowerShell's own aliases for
+# Remove-Item, taking its `-Recurse`/`-Force` parameters rather than `rm`'s combined `-rf`.
+sh("delete: del -Recurse -Force at the home directory", "del -Recurse -Force ~", "deny",
+   "destructive-delete", tool="PowerShell", cwd=NOGIT)
+sh("delete: erase -r -fo at a glob", "erase -r -fo *", "deny", "destructive-delete",
+   tool="PowerShell", cwd=NOGIT)
+sh("delete: rm -Recurse -Force at the home directory, the PowerShell alias, not the POSIX flag",
+   "rm -Recurse -Force ~", "deny", "destructive-delete", tool="PowerShell", cwd=NOGIT)
+
+# GREEN: the forms that stay allowed, parity with the rm/Remove-Item cases above.
+sh("delete: a non-recursive del", "del file.txt", "allow", cwd=NOGIT)
+sh("delete: rd with no /s", "rd emptydir", "allow", cwd=NOGIT)
+sh("delete: rd /s /q at a plain relative subdir, parity with rm -rf build/", "rd /s /q build",
+   "allow", cwd=NOGIT)
+
+# QUOTED AND GREP FORMS. The command word is read in COMMAND POSITION off a quote-aware
+# tokenizer, the same defect class rule 2's kill check was built to avoid: text sitting inside a
+# quoted argument, or inside a grep pattern, never calls anything.
+sh("delete: a quoted echo of the cmd.exe form calls nothing", 'echo "rd /s /q"', "allow",
+   cwd=NOGIT)
+sh("delete: a grep pattern naming the cmd.exe form calls nothing",
+   'grep "del /s" notes.md', "allow", cwd=NOGIT)
 
 
 # =========================================================================== 4. environment files

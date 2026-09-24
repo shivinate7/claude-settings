@@ -104,6 +104,44 @@ test_failed_gate_blocks_commit() {
   return 0
 }
 
+test_regenerate_runs_before_gate_in_same_commit() {
+  local remote local_dir
+  remote="$(new_bare_remote)"
+  local_dir="$(clone_with_pending_record "$remote")"
+
+  # The gate checks for a file only the regenerate command writes, so a gate that passes is
+  # proof the regenerate command already ran, on the stamped tree, before the gate looked.
+  if ! REF="refs/heads/main" DEFAULT_BRANCH="main" CONFIG="$local_dir/stamp.json" \
+     REGENERATE_COMMAND="echo generated > generated.txt" \
+     GATE_COMMAND="test -f generated.txt" SUBJECT_TEMPLATE="Stamp {ids}" BOT_NAME=bot \
+     BOT_EMAIL=bot@example.com STAMP_JS="$STAMP_JS" \
+     bash -c "cd '$local_dir' && bash '$RUN_SH'" >/dev/null 2>&1; then
+    echo "  expected success"
+    return 1
+  fi
+  git -C "$remote" show main:generated.txt >/dev/null 2>&1 || { echo "  generated.txt did not reach the pushed commit"; return 1; }
+  return 0
+}
+
+test_failed_regenerate_blocks_commit() {
+  local remote local_dir
+  remote="$(new_bare_remote)"
+  local_dir="$(clone_with_pending_record "$remote")"
+  local before_head
+  before_head="$(git -C "$local_dir" rev-parse HEAD)"
+
+  if REF="refs/heads/main" DEFAULT_BRANCH="main" CONFIG="$local_dir/stamp.json" \
+     REGENERATE_COMMAND="false" GATE_COMMAND="true" SUBJECT_TEMPLATE="Stamp {ids}" BOT_NAME=bot \
+     BOT_EMAIL=bot@example.com STAMP_JS="$STAMP_JS" \
+     bash -c "cd '$local_dir' && bash '$RUN_SH'" >/dev/null 2>&1; then
+    echo "  expected the regenerate failure to block the run, got exit 0"
+    return 1
+  fi
+  [ "$(git -C "$local_dir" rev-parse HEAD)" = "$before_head" ] || { echo "  a commit landed despite the failed regenerate command"; return 1; }
+  [ "$(git -C "$remote" rev-parse main)" = "$before_head" ] || { echo "  the remote moved despite the failed regenerate command"; return 1; }
+  return 0
+}
+
 test_succeeds_and_pushes() {
   local remote local_dir
   remote="$(new_bare_remote)"
@@ -160,6 +198,8 @@ HOOK
 
 run_test "refuses off the default branch" test_refuses_off_default_branch
 run_test "a failed gate blocks the commit" test_failed_gate_blocks_commit
+run_test "regenerate runs before the gate, in the same commit" test_regenerate_runs_before_gate_in_same_commit
+run_test "a failed regenerate command blocks the commit" test_failed_regenerate_blocks_commit
 run_test "stamps, gates, commits and pushes" test_succeeds_and_pushes
 run_test "a push rejected every time gives up after the configured attempts" test_gives_up_after_max_attempts
 

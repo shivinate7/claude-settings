@@ -21,6 +21,8 @@ import hashlib
 import json
 import os
 import shutil
+import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -105,6 +107,237 @@ def this_process_start_ms():
     started = guard._process_start_ms(os.getpid())
     require(started is not None, "could not read this test process's own start time from `ps`")
     return started
+
+
+# --------------------------------------------------------------------------- listener fixtures
+#
+# Every fixture below is a REAL process this test file starts itself (never a process it did
+# not start -- CLAUDE.md: "Never kill a process you did not start"), that binds a REAL loopback
+# TCP listener and sleeps, so `sweep.list_listeners()` finds a real LISTEN row for it the same
+# way it would find the incident's own `python3 -m http.server`. Two shapes, per OS:
+#
+#   "plain"   -- a direct child, with THIS test process staying its real, live parent. Not
+#                orphaned. Proves `decide_listener`'s "not-orphaned" refusal.
+#   "orphan"  -- POSIX: a double fork (the brief's own incident shape: "pid 1 adopted it").
+#                Windows: an intermediate process spawns a DETACHED grandchild and exits at
+#                once; Windows never re-parents, so "orphaned" there means exactly what
+#                `sweep._is_orphan_windows` checks -- the parent pid this grandchild still
+#                remembers is no longer a genuinely running process.
+#
+# Every fixture returns a plain (pid, port) pair plus a zero-argument CLEANUP callable the
+# caller runs in a `finally` -- never a bare pid a caller might forget to signal.
+
+_LISTENER_CHILD_SRC = (
+    "import socket, sys, time, os\n"
+    "sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
+    "sock.bind(('127.0.0.1', 0))\n"
+    "sock.listen(1)\n"
+    "port = sock.getsockname()[1]\n"
+    "with open(sys.argv[1], 'w') as f:\n"
+    "    f.write('%d,%d' % (os.getpid(), port))\n"
+    "time.sleep(120)\n"
+)
+
+_DETACHED_SPAWN_SRC = (
+    "import subprocess, sys\n"
+    "subprocess.Popen([sys.executable, '-c', sys.argv[2], sys.argv[1]],\n"
+    "                  creationflags=subprocess.DETACHED_PROCESS"
+    " | subprocess.CREATE_NEW_PROCESS_GROUP,\n"
+    "                  close_fds=True)\n"
+)
+
+
+def _wait_for_pidport_file(path, timeout=10.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            with open(path, encoding="utf-8") as handle:
+                data = handle.read()
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            pid_text, port_text = data.split(",")
+            return int(pid_text), int(port_text)
+        time.sleep(0.05)
+    require(False, "listener fixture never wrote its pid/port file: %r" % path)
+
+
+def _real_ppid_posix(pid):
+    """PID's real parent process id, read INDEPENDENTLY of sweep.py's own `is_orphan` --
+    this fixture-integrity check must never trust the code under test to grade itself.
+    Linux: `/proc/PID/status`. macOS: `ps -o ppid=`. `None` on any read failure (the pid
+    already exited, most likely)."""
+    if sys.platform.startswith("linux"):
+        try:
+            with open("/proc/%d/status" % pid, encoding="utf-8") as handle:
+                for line in handle:
+                    if line.startswith("PPid:"):
+                        return int(line.split(":", 1)[1].strip())
+        except Exception:
+            return None
+        return None
+    try:
+        answer = subprocess.run(
+            ["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True, timeout=5,
+        )
+    except Exception:
+        return None
+    text = answer.stdout.strip()
+    return int(text) if text.isdigit() else None
+
+
+def spawn_plain_listener(cwd):
+    """A listener whose real parent (this test process) stays alive throughout: the
+    NOT-orphaned shape. Returns (pid, port, cleanup)."""
+    if os.name == "nt":
+        outfile = tempfile.mktemp(dir=ROOT)
+        popen = subprocess.Popen(
+            [sys.executable, "-c", _LISTENER_CHILD_SRC, outfile], cwd=cwd,
+        )
+        pid, port = _wait_for_pidport_file(outfile)
+
+        def cleanup():
+            popen.terminate()
+            popen.wait(timeout=10)
+
+        return pid, port, cleanup
+
+    read_fd, write_fd = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        os.close(read_fd)
+        os.chdir(cwd)
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(1)
+        port = sock.getsockname()[1]
+        os.write(write_fd, str(port).encode())
+        os.close(write_fd)
+        time.sleep(120)
+        os._exit(0)
+    os.close(write_fd)
+    port = int(os.read(read_fd, 32).decode())
+    os.close(read_fd)
+
+    def cleanup():
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+
+    return pid, port, cleanup
+
+
+def spawn_orphaned_listener(cwd):
+    """An orphaned listener, per this OS's own real shape (see the section docstring above).
+    Returns (pid, port, cleanup)."""
+    if os.name == "nt":
+        outfile = tempfile.mktemp(dir=ROOT)
+        parent = subprocess.Popen(
+            [sys.executable, "-c", _DETACHED_SPAWN_SRC, outfile, _LISTENER_CHILD_SRC], cwd=cwd,
+        )
+        parent.wait(timeout=10)
+        del parent  # drop this process's own last handle so the parent pid is not left a
+                    # zombie -- see sweep.py's `_is_orphan_windows` docstring for why a held
+                    # handle would otherwise make the parent read back as "still running"
+        pid, port = _wait_for_pidport_file(outfile)
+
+        def cleanup():
+            sweep.send_signal(pid)
+
+        return pid, port, cleanup
+
+    read_fd, write_fd = os.pipe()
+    child = os.fork()
+    if child == 0:
+        os.close(read_fd)
+        os.chdir(cwd)
+        grandchild = os.fork()
+        if grandchild == 0:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.bind(("127.0.0.1", 0))
+            sock.listen(1)
+            port = sock.getsockname()[1]
+            os.write(write_fd, ("%d,%d" % (os.getpid(), port)).encode())
+            os.close(write_fd)
+            time.sleep(120)
+            os._exit(0)
+        os.close(write_fd)
+        os._exit(0)  # the immediate child exits now; pid 1 adopts the grandchild
+    os.close(write_fd)
+    data = os.read(read_fd, 64).decode()
+    os.close(read_fd)
+    os.waitpid(child, 0)  # reap the immediate child so it never lingers as a zombie
+    pid_text, port_text = data.split(",")
+    pid = int(pid_text)
+    port = int(port_text)
+
+    # MEASURED, 2026-09-24, under `wsl -e python3 ...` invoked from Windows: WSL2's own
+    # "Relay" process sits between this fixture and real init, and it adopts the orphan
+    # itself (a genuine subreaper -- PR_SET_CHILD_SUBREAPER -- not a defect). The brief's own
+    # rule ("Do not treat a subreaper as orphaned, stricter is safe") means
+    # `sweep.is_orphan_linux` is RIGHT to answer "not orphaned" for that shape. This fixture
+    # cannot exercise the true-orphan path on an invocation like that, so it checks its own
+    # result independently of sweep.py (never trusting the code under test to grade itself)
+    # and skips with a named reason instead of asserting a false failure.
+    real_ppid = _real_ppid_posix(pid)
+    if real_ppid not in (1, None):
+        os.kill(pid, signal.SIGKILL)
+        raise unittest.SkipTest(
+            "the fork-orphan fixture was adopted by pid %d, not init (pid 1) -- a subreaper "
+            "sits between this process and init on this invocation (see this function's own "
+            "comment). sweep.is_orphan is correct to answer 'not orphaned' here, so this "
+            "fixture cannot prove the true-orphan path this way, on this platform right now."
+            % real_ppid
+        )
+
+    def cleanup():
+        os.kill(pid, signal.SIGKILL)
+
+    return pid, port, cleanup
+
+
+def _platform_read_name(kind: str) -> str:
+    """The module-level `sweep.<name>` this platform's dispatcher (`process_cwd` / `is_orphan`
+    / `is_current_user_process`) actually calls for its real per-OS read, so a test can
+    monkeypatch THAT read alone -- the lsof/proc read on POSIX, the PEB read on Windows --
+    while the dispatcher itself keeps running for real."""
+    if kind == "cwd":
+        if sys.platform == "darwin":
+            return "_process_cwd_macos"
+        if sys.platform.startswith("linux"):
+            return "_process_cwd_linux"
+        return "_process_cwd_windows"
+    if kind == "orphan":
+        if sys.platform == "darwin":
+            return "_is_orphan_posix_ppid"
+        if sys.platform.startswith("linux"):
+            return "_is_orphan_linux"
+        return "_is_orphan_windows"
+    if kind == "owner":
+        if sys.platform == "darwin":
+            return "_is_current_user_posix_uid"
+        if sys.platform.startswith("linux"):
+            return "_is_current_user_linux"
+        return "_is_current_user_windows"
+    raise ValueError(kind)
+
+
+class _BreakRead:
+    """Context manager: monkeypatches `sweep.<name>` (a real per-OS read primitive) to always
+    answer `None` -- "could not tell", never a guessed confident answer -- restoring the
+    original afterward even if the body raises."""
+
+    def __init__(self, name: str):
+        self.name = name
+
+    def __enter__(self):
+        self.original = getattr(sweep, self.name)
+        setattr(sweep, self.name, lambda *a, **k: None)
+        return self
+
+    def __exit__(self, *exc_info):
+        setattr(sweep, self.name, self.original)
+        return False
 
 
 # --------------------------------------------------------------------------- shared fixtures
@@ -429,6 +662,276 @@ class WorktreeDecisionTests(unittest.TestCase):
             decision = sweep.decide_worktree(self.root, self.entry_for(self.removable))
         finally:
             os.environ["PATH"] = old_path
+        self.assertEqual(decision["action"], "keep")
+        self.assertEqual(decision["reason"], "unreadable-subject")
+
+
+class ListenerDecisionTests(unittest.TestCase):
+    """`sweep.find_swept_listeners` / `sweep.decide_listener`, this build's own subject. Every
+    listener here is a REAL process this suite starts itself (`spawn_plain_listener` /
+    `spawn_orphaned_listener`, defined above) -- never a mock, for the same reason
+    hooks/test_guard.py and this file's own git fixtures never mock git."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.root = os.path.join(ROOT, "listener-repo")
+        make_repo(cls.root, {"f.txt": "base\n"})
+
+        cls.reap_wt = os.path.join(ROOT, "wt-listener-reap")
+        run_vcs(cls.root, "worktree", "add", "-q", cls.reap_wt, "-b", "lane-listener-reap")
+        cls.live_wt = os.path.join(ROOT, "wt-listener-live")
+        run_vcs(cls.root, "worktree", "add", "-q", cls.live_wt, "-b", "lane-listener-live")
+        cls.plain_wt = os.path.join(ROOT, "wt-listener-plain")
+        run_vcs(cls.root, "worktree", "add", "-q", cls.plain_wt, "-b", "lane-listener-plain")
+
+        cls.cleanups = []
+        cls.reap_pid, cls.reap_port, reap_cleanup = spawn_orphaned_listener(cls.reap_wt)
+        cls.cleanups.append(reap_cleanup)
+        # Also orphaned: the ONLY difference from reap_wt is the live-session record below.
+        # Without that, this fixture would reach the same "orphaned-listener" verdict, and
+        # would prove nothing about the live-session refusal specifically.
+        cls.live_pid, cls.live_port, live_cleanup = spawn_orphaned_listener(cls.live_wt)
+        cls.cleanups.append(live_cleanup)
+        cls.plain_pid, cls.plain_port, plain_cleanup = spawn_plain_listener(cls.plain_wt)
+        cls.cleanups.append(plain_cleanup)
+
+        started = this_process_start_ms()
+        write_session("listener-live-session-case", os.getpid(), started, cls.live_wt)
+
+        cls.checkout_paths = [cls.root, cls.reap_wt, cls.live_wt, cls.plain_wt]
+
+        cls.outside_root = os.path.join(ROOT, "listener-outside-repo")
+        make_repo(cls.outside_root, {"f.txt": "base\n"})
+
+    @classmethod
+    def tearDownClass(cls):
+        for cleanup in reversed(cls.cleanups):
+            try:
+                cleanup()
+            except Exception:
+                pass
+
+    def _entry_for(self, pid):
+        found = sweep.find_swept_listeners(self.checkout_paths)
+        self.assertIsNotNone(found, "listener enumeration must not fail on a real machine")
+        self.assertTrue(len(found) > 0, "listener list must not be empty before any verdict")
+        for entry in found:
+            if entry["pid"] == pid:
+                return entry
+        self.fail("pid %r not found among swept listeners: %r"
+                  % (pid, [e["pid"] for e in found]))
+
+    def test_orphaned_listener_no_live_session_is_reaped(self):
+        decision = sweep.decide_listener(self._entry_for(self.reap_pid))
+        self.assertEqual(decision["action"], "reap")
+        self.assertEqual(decision["reason"], "orphaned-listener")
+
+    def test_orphaned_listener_with_live_session_is_kept(self):
+        decision = sweep.decide_listener(self._entry_for(self.live_pid))
+        self.assertEqual(decision["action"], "keep")
+        self.assertEqual(decision["reason"], "live-session")
+
+    def test_non_orphaned_listener_is_kept(self):
+        decision = sweep.decide_listener(self._entry_for(self.plain_pid))
+        self.assertEqual(decision["action"], "keep")
+        self.assertEqual(decision["reason"], "not-orphaned")
+
+    def test_owner_mismatch_is_kept(self):
+        """No account switch is available to this suite (no admin privilege to run a fixture
+        process as a genuinely different user), so this stubs `sweep.is_current_user_process`
+        itself -- the same seam `hooks/test_guard.py` already stubs `ctypes.windll` at, for a
+        Windows arm no fixture can drive for real either (decisions/liveness-read-is-platform-
+        specific-and-unreadable-is-not-death.md, "Holes, named"). `self.reap_pid`'s entry is
+        otherwise the exact reap shape (orphaned, no live session), so a confirmed "not ours"
+        answer is the ONLY thing standing between it and a reap here."""
+        original = sweep.is_current_user_process
+        sweep.is_current_user_process = lambda pid: False
+        try:
+            decision = sweep.decide_listener(self._entry_for(self.reap_pid))
+        finally:
+            sweep.is_current_user_process = original
+        self.assertEqual(decision["action"], "keep")
+        self.assertEqual(decision["reason"], "not-current-user")
+
+    def test_listener_outside_every_swept_repo_is_never_listed(self):
+        # self.outside_root is a real, swept-shaped repository, but it is not in
+        # self.checkout_paths -- the same shape a repository the CURRENT sweep run was not
+        # pointed at would have. None of this suite's own fixture listeners live under it.
+        found = sweep.find_swept_listeners([self.outside_root])
+        self.assertIsNotNone(found)
+        self.assertEqual(found, [],
+                          "a listener whose cwd sits outside every checkout must never be "
+                          "listed, not merely kept")
+
+    def test_sweep_repo_lists_and_reaps_the_orphan_but_keeps_the_others(self):
+        """End-to-end through `sweep_repo` itself, confirm=True, against a REAL machine --
+        proves the wiring in `sweep_repo` (checkout_paths, `find_swept_listeners`,
+        `decide_listener`, `reap_listener`), not only the two functions above in isolation."""
+        result = sweep.sweep_repo(self.root, confirm=True, restore_log_path=os.path.join(
+            ROOT, "listener-restore.log"))
+        self.assertIsNone(result["refused"])
+        self.assertIsNotNone(result["listeners"])
+        self.assertTrue(len(result["listeners"]) > 0)
+        by_pid = {entry["pid"]: entry for entry in result["listeners"]}
+        self.assertIn(self.reap_pid, by_pid)
+        self.assertEqual(by_pid[self.reap_pid]["action"], "reap")
+        self.assertIn(self.live_pid, by_pid)
+        self.assertEqual(by_pid[self.live_pid]["action"], "keep")
+        self.assertIn(self.plain_pid, by_pid)
+        self.assertEqual(by_pid[self.plain_pid]["action"], "keep")
+        # The reap really happened: give it a moment, the same grace period `main` itself
+        # gives, then check the real OS-level pid.
+        deadline = time.time() + 5
+        while time.time() < deadline and sweep.pid_alive(self.reap_pid):
+            time.sleep(0.2)
+        self.assertFalse(sweep.pid_alive(self.reap_pid),
+                          "sweep_repo(confirm=True) must have actually signalled the orphan")
+        # Respawn it under the SAME worktree so tearDownClass's cleanup still has something
+        # real to clean up, and so a second run of this same test class (unlikely, but cheap
+        # to guard) is not left holding a dead pid.
+        self.reap_pid, self.reap_port, new_cleanup = spawn_orphaned_listener(self.reap_wt)
+        self.cleanups[0] = new_cleanup
+
+
+class UnreadableListenerReadTests(unittest.TestCase):
+    """Coordinator parity note, 2026-09-24: a listener's cwd/orphan/owner read, refused on
+    THIS platform's OWN read path (`_platform_read_name`, above), must be kept and never
+    reaped -- the same outcome on POSIX and on Windows. One real, genuinely orphaned listener
+    with no live session is reused for every injection: unmodified, it reaps (see
+    `test_baseline_is_reaped`), so any one of these three injected failures is exactly what
+    must flip that outcome away from "reap"."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.root = os.path.join(ROOT, "listener-unreadable-repo")
+        make_repo(cls.root, {"f.txt": "base\n"})
+        cls.wt = os.path.join(ROOT, "wt-listener-unreadable")
+        run_vcs(cls.root, "worktree", "add", "-q", cls.wt, "-b", "lane-listener-unreadable")
+        cls.pid, cls.port, cls.cleanup = spawn_orphaned_listener(cls.wt)
+        cls.checkout_paths = [cls.root, cls.wt]
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.cleanup()
+        except Exception:
+            pass
+
+    def _entry(self):
+        found = sweep.find_swept_listeners(self.checkout_paths)
+        self.assertIsNotNone(found)
+        self.assertTrue(len(found) > 0, "listener list must not be empty")
+        for entry in found:
+            if entry["pid"] == self.pid:
+                return entry
+        self.fail("fixture pid not found among swept listeners")
+
+    def test_baseline_is_reaped(self):
+        decision = sweep.decide_listener(self._entry())
+        self.assertEqual(decision["action"], "reap")
+        self.assertEqual(decision["reason"], "orphaned-listener")
+
+    def test_unreadable_cwd_read_means_never_matched_never_reaped(self):
+        """`find_swept_listeners` reads cwd BEFORE a listener can be matched to any checkout
+        at all -- a cwd this sweep cannot read cannot be told apart from a listener outside
+        every checkout, and this build's own docstring (`find_swept_listeners`) chooses the
+        same silent-drop direction for both, rather than name every unreadable system process
+        on the machine against every repository being swept. Either way, the outcome this
+        test pins is the one that matters: NEVER reaped."""
+        with _BreakRead(_platform_read_name("cwd")):
+            found = sweep.find_swept_listeners(self.checkout_paths)
+        self.assertIsNotNone(found)
+        self.assertFalse(any(entry["pid"] == self.pid for entry in found),
+                          "a listener whose cwd could not be read must never be matched, "
+                          "and therefore never reaped")
+
+    def test_unreadable_orphan_read_is_kept(self):
+        entry = self._entry()
+        with _BreakRead(_platform_read_name("orphan")):
+            decision = sweep.decide_listener(entry)
+        self.assertEqual(decision["action"], "keep")
+        self.assertEqual(decision["reason"], "unreadable-subject")
+
+    def test_unreadable_owner_read_is_kept(self):
+        entry = self._entry()
+        with _BreakRead(_platform_read_name("owner")):
+            decision = sweep.decide_listener(entry)
+        self.assertEqual(decision["action"], "keep")
+        self.assertEqual(decision["reason"], "unreadable-subject")
+
+
+class WorktreeProcessPreCheckTests(unittest.TestCase):
+    """`decide_worktree`'s pre-removal check (this build's brief, point 4): ANY process at
+    all, not only a listener, sitting inside a worktree must keep it, naming the pids. Reuses
+    `spawn_plain_listener` purely as a convenient real, long-lived process with a known cwd --
+    what it listens on is irrelevant to this check."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.root = os.path.join(ROOT, "precheck-repo")
+        make_repo(cls.root, {"f.txt": "base\n"})
+        cls.occupied = os.path.join(ROOT, "wt-precheck-occupied")
+        run_vcs(cls.root, "worktree", "add", "-q", cls.occupied, "-b", "lane-precheck-occupied")
+        cls.empty = os.path.join(ROOT, "wt-precheck-empty")
+        run_vcs(cls.root, "worktree", "add", "-q", cls.empty, "-b", "lane-precheck-empty")
+        cls.pid, cls.port, cls.cleanup = spawn_plain_listener(cls.occupied)
+        entries = sweep.parse_worktree_list(cls.root)
+        require(entries is not None and len(entries) >= 2, "worktree list did not build")
+        cls.entries = {e["path"]: e for e in entries}
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.cleanup()
+        except Exception:
+            pass
+
+    def entry_for(self, path):
+        target = os.path.normcase(os.path.realpath(path))
+        for p, e in self.entries.items():
+            if os.path.normcase(os.path.realpath(p)) == target:
+                return e
+        self.fail("no worktree-list entry found for %r" % path)
+
+    def test_a_process_inside_the_worktree_keeps_it_and_names_the_pid(self):
+        decision = sweep.decide_worktree(self.root, self.entry_for(self.occupied))
+        self.assertEqual(decision["action"], "keep")
+        self.assertTrue(decision["reason"].startswith("process-inside:"))
+        self.assertIn(str(self.pid), decision["reason"])
+
+    def test_an_empty_worktree_is_still_removable(self):
+        decision = sweep.decide_worktree(self.root, self.entry_for(self.empty))
+        self.assertEqual(decision["action"], "reap")
+        self.assertEqual(decision["reason"], "removable")
+
+    def test_unreadable_pre_check_cwd_read_is_out_of_scope_not_a_keep(self):
+        """Coordinator parity note, 2026-09-24, resolved by measurement: a refused cwd read
+        for ONE pid during this pre-check does NOT keep the worktree, on POSIX or on Windows
+        (`decide_worktree` has no OS branch here at all -- both dispatch through the same
+        `process_cwd`). MEASURED, not the first guess: with EVERY pid's cwd read broken (this
+        test's own injection), a real Windows machine still has ~580 running processes, and
+        NONE of them can be told apart from "the one process actually inside this worktree"
+        -- so treating a single unreadable pid as a keep reason would make this pre-check
+        refuse to ever reap anything, on any real machine. That is a worse outcome than the
+        leak it exists to prevent, and the same direction the ORIGINAL brief already named
+        for a different read: "A single process ... that refuses access is out of scope.
+        Count it in the report, never act on it." Only the WHOLE enumeration failing (the
+        next test below) still means keep-everything."""
+        with _BreakRead(_platform_read_name("cwd")):
+            decision = sweep.decide_worktree(self.root, self.entry_for(self.empty))
+        self.assertEqual(decision["action"], "reap")
+        self.assertEqual(decision["reason"], "removable")
+
+    def test_unreadable_pid_enumeration_keeps_the_worktree(self):
+        """The OTHER half of the pre-check's own unreadable contract: the brief's own words,
+        "if the whole listing ... or the pre-check enumeration fails, KEEP everything and
+        remove no worktree" -- this is the whole PID listing itself failing, not one pid's cwd."""
+        original = sweep.list_all_pids
+        sweep.list_all_pids = lambda: None
+        try:
+            decision = sweep.decide_worktree(self.root, self.entry_for(self.empty))
+        finally:
+            sweep.list_all_pids = original
         self.assertEqual(decision["action"], "keep")
         self.assertEqual(decision["reason"], "unreadable-subject")
 

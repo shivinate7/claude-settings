@@ -2,10 +2,11 @@ name: Record stamp
 description: >
   Number every record still pending in this tree (CLAUDE.md rule git-slug-then-claim-number:
   "Never allocate a numbered record on a branch. Write a slug. Claim the number at merge."),
-  rewrite its cites, run the caller's own gate, and push. Refuses to run off the default
-  branch. On a rejected push it rebases, re-stamps and re-gates, and retries up to 3 times.
-  The caller owns the config file (stamp.mjs's schema, see README.md) and the concurrency
-  lock — a composite action cannot hold one, so the caller's workflow needs
+  rewrite its cites, run the caller's own generator and gate, and push. Refuses to run off
+  the default branch. On a rejected push it re-derives from the fresh tree and re-gates,
+  up to 3 times, never a rebase of an already-gated commit. The caller owns the config file
+  (stamp.mjs's schema, see README.md) and the concurrency lock — a composite action cannot
+  hold one, so the caller's workflow needs
   `concurrency: {group: <name>, cancel-in-progress: false}` on the job that runs this.
 inputs:
   config:
@@ -16,6 +17,14 @@ inputs:
       The command that must pass on the stamped tree before it is pushed, e.g.
       "npm test && npm run lint". Run through `bash -c`, so `&&` and `;` both work.
     required: true
+  regenerate:
+    description: >
+      Optional command that runs after --stamp writes the tree and before the gate, in the
+      same commit — the caller's own generator (a refs/pointer pass, an index table, a
+      lookup file). Each repo keeps its own generator; this input only decides when it runs.
+      Skipped when nothing was pending, the same as the gate. Run through `bash -c`.
+    required: false
+    default: ""
   commit-subject:
     description: >
       Template for the commit subject. "{ids}" expands to the space-separated ids this run
@@ -37,6 +46,7 @@ runs:
         REF: ${{ github.ref }}
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         CONFIG: ${{ inputs.config }}
+        REGENERATE_COMMAND: ${{ inputs.regenerate }}
         GATE_COMMAND: ${{ inputs.gate-command }}
         SUBJECT_TEMPLATE: ${{ inputs.commit-subject }}
         BOT_NAME: ${{ inputs.bot-name }}

@@ -3,15 +3,18 @@
 # directly (test_action.sh does exactly that, against a throwaway git remote) rather than only
 # ever exercised inside a GitHub Actions runner.
 #
-# Env vars, all required except MAX_ATTEMPTS:
-#   REF              e.g. "refs/heads/main" ($GITHUB_REF)
-#   DEFAULT_BRANCH   e.g. "main"
-#   STAMP_JS         path to stamp.mjs
-#   CONFIG           path to the stamp config, passed through to stamp.mjs
-#   GATE_COMMAND     shell command that must pass on the stamped tree before it is pushed
-#   SUBJECT_TEMPLATE commit subject template, "{ids}" expands to the stamped ids
+# Env vars, all required except MAX_ATTEMPTS and REGENERATE_COMMAND:
+#   REF                e.g. "refs/heads/main" ($GITHUB_REF)
+#   DEFAULT_BRANCH     e.g. "main"
+#   STAMP_JS           path to stamp.mjs
+#   CONFIG             path to the stamp config, passed through to stamp.mjs
+#   REGENERATE_COMMAND optional, empty means skip. Runs after --stamp, before the gate, in
+#                      the same commit — the caller's own generator (a refs/pointer pass, an
+#                      index table). Each repo keeps its own generator; this only times it.
+#   GATE_COMMAND       shell command that must pass on the stamped tree before it is pushed
+#   SUBJECT_TEMPLATE   commit subject template, "{ids}" expands to the stamped ids
 #   BOT_NAME, BOT_EMAIL
-#   MAX_ATTEMPTS     default 3
+#   MAX_ATTEMPTS       default 3
 set -euo pipefail
 
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-3}"
@@ -39,6 +42,18 @@ while :; do
     echo "stamp: nothing pending. Nothing to push."
     rm -f "$OUT"
     exit 0
+  fi
+
+  # THE CALLER'S OWN GENERATOR, IN THE SAME COMMIT. A repo that regenerates a refs block, an
+  # index table, or a lookup file from its records must keep doing so — the owner's bar is
+  # that adopting this action changes nothing else about the tree. It runs on the stamped
+  # tree, before the gate, so the gate checks what the commit will actually carry.
+  if [ -n "${REGENERATE_COMMAND:-}" ]; then
+    if ! bash -c "$REGENERATE_COMMAND"; then
+      echo "stamp: the regenerate command failed. Not pushing. Entries stay pending."
+      rm -f "$OUT"
+      exit 1
+    fi
   fi
 
   # THE GATE RUNS ON THE STAMPED TREE, BEFORE THE PUSH — the same reason q_max's stamp.yml runs

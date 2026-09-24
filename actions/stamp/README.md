@@ -30,12 +30,14 @@ writes nothing either way.
    job-cost-reporting's `docs/decisions`, `docs/build`, `docs/findings` and
    `docs/questions` folders.
 
-**Not covered:** a number that lives in a heading, inside one flat file per kind. This is
-banchi's shape: `docs/DECISIONS.md`, `docs/CODES-DECISIONS.md`, and `docs/GATES.md`. Its
-own claim tool is 1727 lines. It reshapes headings, not files. It also does not match the
-ORDER.json shape this brief describes. Banchi's tree holds three flat files today, and no
-ORDER.json. See the decision record for the full reasoning. Any repo not shaped like
-format 1 or format 2 keeps its own claim tool for now.
+**Not covered in this PR:** banchi's shape, where the number lives in both the
+filename and the heading (`docs/decisions/D-<slug>.md` becomes
+`docs/decisions/D001-<slug>.md`, 3-digit filename pad, `## D1 —` heading with no
+pad), tracked by an `ORDER.json` per corpus. This is deferred to a follow-up lane,
+not skipped for a shape mismatch. See the decision record for what that lane must
+handle, and for why an earlier draft of this note described a different, stale
+shape. Any repo not shaped like format 1 or format 2 keeps its own claim tool for
+now.
 
 ## The config file
 
@@ -152,8 +154,22 @@ jobs:
       - uses: shivinate7/claude-settings/actions/stamp@<sha>
         with:
           config: .github/stamp.json
+          regenerate: "node harness/decision-refs.mjs --gloss --write"
           gate-command: "npm test && npm run lint"
 ```
+
+**`regenerate`** is optional. It runs after `--stamp`, before the gate, in the same
+commit. A repo's own generator (a refs block, an index table, a lookup file) keeps
+running. Adopting this action must change nothing else about the tree. Skipped when
+nothing was pending. Read off each repo's own tool:
+
+- q_max: `node harness/decision-refs.mjs --gloss --write`. This already exists as a
+  standalone pair of flags, and reproduces `stamp()`'s own tail exactly — same two
+  functions, same order. No change to q_max's tool needed.
+- sharables: `python3 scripts/check_records.py --write-index`.
+- job-cost-reporting: `python3 toolchain/build_decision_index.py >
+  docs/Decision_Index.md && python3 harness/owner_corrections.py >
+  docs/Owner_Corrections.md`.
 
 `run.sh` holds the action's own logic. It sits in its own file so it can run and be
 tested directly. `test_action.sh` does exactly that, against a throwaway git remote,
@@ -167,5 +183,5 @@ bash actions/stamp/test_action.sh   # the action's own shell logic, against a re
 ```
 
 Both are plain and assert-based. Both build their own throwaway directories. Neither
-reads or writes this repository's own tree. Both are wired into the `gates` and
-`gates-windows` jobs in `.github/workflows/gates.yml`.
+reads or writes this repository's own tree. Both are wired into `gates`,
+`gates-windows` and `gates-macos` in `.github/workflows/gates.yml`.

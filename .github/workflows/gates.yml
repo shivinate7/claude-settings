@@ -108,8 +108,8 @@ jobs:
 
   # /bin/bash on macOS is 3.2.57 (2007) and /var is a symlink to /private/var. The
   # checkout-detection suite is the only gate whose result depends on either, and it
-  # was once green on Linux while 8 of its 18 cases failed on a real Mac. The rest of
-  # the gates job gains no signal from a second OS, so only these steps run here.
+  # was once green on Linux while 8 of its 18 cases failed on a real Mac. gates-macos
+  # below covers the rest of the suite, so this job stays narrow, on purpose.
   shell-macos:
     runs-on: macos-latest
     steps:
@@ -123,6 +123,89 @@ jobs:
         run: bash -n install.sh
       - name: install.sh checkout-detection suite
         run: sh hooks/test_install_src.sh
+
+  # The owner runs this repo on macOS. Before this job, every Python suite in the gates
+  # and gates-windows jobs above proved itself only on Linux and Windows, never on a real
+  # Mac, so janitor/install_launchd.py -- the one installer built for the Mac -- had no
+  # macOS signal at all. This job mirrors gates-windows: same suites, same order, and the
+  # same `if: ${{ !cancelled() }}` on every step, for the reason gates-windows documents
+  # above -- a job that stops at its first red step proves nothing about the suites
+  # behind it.
+  gates-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Guard fixture suite
+        if: ${{ !cancelled() }}
+        run: python3 hooks/test_guard.py
+
+      # Same time trade-off gates-windows makes for the same reason: the gates job's own
+      # Guard mutation harness (Linux) still runs on every pull request. Accepted risk: a
+      # macOS-only mutation regression is caught after merge, not before.
+      - name: Guard mutation harness
+        if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+        run: python3 hooks/mutate_guard.py
+
+      - name: Janitor sweep fixture suite
+        if: ${{ !cancelled() }}
+        run: python3 janitor/test_sweep.py
+
+      - name: Janitor sweep mutation harness
+        if: ${{ !cancelled() }}
+        run: python3 janitor/mutate_sweep.py
+
+      - name: Config watch fixture suite
+        if: ${{ !cancelled() }}
+        run: python3 hooks/test_config_watch.py
+
+      - name: Decision watch fixture suite
+        if: ${{ !cancelled() }}
+        run: python3 hooks/test_decision_watch.py
+
+      - name: Stop-hook gate fixture suite
+        if: ${{ !cancelled() }}
+        run: python3 lint/test_gates.py
+
+      - name: Rule audit fixture suite
+        if: ${{ !cancelled() }}
+        run: python3 lint/test_rule_audit.py
+
+      - name: Rule mechanization audit
+        if: ${{ !cancelled() }}
+        run: python3 lint/rule_audit.py
+
+      - name: Unknown-read contract (guard + session_start)
+        if: ${{ !cancelled() }}
+        run: python3 lint/check_unknown_reads_contract.py
+
+      - name: Landed-directory manifest agreement
+        if: ${{ !cancelled() }}
+        run: python3 lint/check_landed_dirs.py
+
+      - name: Janitor triggers fixture suite (SessionEnd hook)
+        if: ${{ !cancelled() }}
+        run: python3 janitor/test_session_end_sweep.py
+
+      - name: Janitor triggers fixture suite (launchd installer)
+        if: ${{ !cancelled() }}
+        run: python3 janitor/test_install_launchd.py
+
+      - name: Janitor triggers fixture suite (schtasks installer)
+        if: ${{ !cancelled() }}
+        run: python3 janitor/test_install_schtasks.py
+
+      - name: Record stamp engine fixture suite
+        if: ${{ !cancelled() }}
+        run: node actions/stamp/test_stamp.mjs
+
+      - name: Record stamp action fixture suite
+        if: ${{ !cancelled() }}
+        run: bash actions/stamp/test_action.sh
 
   # Six python suites in the gates job need a real Windows box to prove: no other
   # job in this workflow can show whether they pass there. This job runs those
