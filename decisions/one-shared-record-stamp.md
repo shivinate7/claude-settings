@@ -23,9 +23,15 @@ Four repos, four record shapes, all serving the same one-sentence rule:
 - job-cost-reporting: the number lives in the frontmatter and in the filename.
   `_<date>-<slug>.md` becomes `D12_<date>-<slug>.md`. Four kinds: `docs/decisions`,
   `docs/build`, `docs/findings`, `docs/questions`.
-- banchi: the number lives in a heading, inside one flat file per kind
-  (`docs/DECISIONS.md`, `docs/CODES-DECISIONS.md`, `docs/GATES.md`). Its own tool is
-  1727 lines.
+- banchi: the number lives in the filename AND the heading, in a per-file corpus.
+  MEASURED on `main`, 2026-09-24: `docs/decisions/D-<slug>.md` becomes
+  `docs/decisions/D001-<slug>.md` (261 files, 3-digit filename pad, `## D1 —` in the
+  heading, no pad there), tracked by `docs/decisions/ORDER.json`. `docs/debts/` (34
+  files) and `docs/gates/steps/` (25 files) carry their own `ORDER.json` the same way.
+  Flat files `docs/DECISIONS.md`, `docs/DEBTS.md`, `docs/CODES-DECISIONS.md` sit
+  beside them; `scripts/split-debts.py` and `scripts/debts_corpus.py` suggest these are
+  generated or legacy rather than the source of truth. Its own claim tool,
+  `scripts/claim-ids.py`, is 1727 lines.
 
 ## The choice
 
@@ -51,15 +57,22 @@ workflow over, on its own schedule.
 1. Number in frontmatter only (q_max, sharables).
 2. Number in frontmatter and in the filename (job-cost-reporting).
 
-Banchi's shape is not built. Its own tool is 1727 lines. It reshapes headings inside
-three flat files, not filenames or per-record frontmatter. That is a third, genuinely
-different mechanism. It is not a variant of the first two. Reading its source also
-showed something else: the brief's own description of banchi (per-file records, an
-`ORDER.json`) does not match banchi's tree today. Banchi holds three flat files, and
-no `ORDER.json`. Guessing that shape from a stale description is the exact failure
-this tool exists to refuse. A repo shaped like banchi keeps its own claim tool. That
-stays true until someone reads its current source and writes a third engine for it,
-on purpose, against what the tree actually holds.
+Banchi's shape is not built in this PR. It is deferred to a follow-up lane, not
+skipped for a shape mismatch. The number lives in both the filename and the heading,
+a third location neither shape above covers. Its own claim tool is 1727 lines.
+
+That lane must handle three things. A filename-plus-heading number: the filename
+pads to 3 digits, the heading does not. `ORDER.json`, one per corpus
+(`docs/decisions/ORDER.json`, `docs/debts/ORDER.json`, `docs/gates/ORDER.json`), read
+and written alongside the rename. And the flat files (`docs/DECISIONS.md`,
+`docs/DEBTS.md`, `docs/CODES-DECISIONS.md`). These may turn out to need only a
+`regenerate` job calling banchi's own scripts, not a fourth shape this engine must
+reproduce.
+
+A repo shaped like banchi keeps its own claim tool until that lane runs. That lane
+reads `scripts/claim-ids.py` and `main` in full. The partial read this entry first
+drew on described an older, flat-file-only design. That design no longer matches the
+corpus banchi runs today.
 
 Two more shapes stay unmechanized everywhere. q_max's `docs/decisions/B*` and `G*`
 folders have no pending form today. Neither do banchi's `docs/debts` folder or its `T`
@@ -105,6 +118,24 @@ again. It never re-runs the gate on the rebased tree. `actions/stamp`'s retry
 re-derives the whole stamp from the fresh tree instead. It re-gates every time, up to
 three attempts.
 
+## The owner's bar: adopting this changes nothing else
+
+q_max's own `writeBlocks`/gloss pass, sharables' `_index.md`, and job-cost-reporting's
+`docs/Decision_Index.md` and `docs/Owner_Corrections.md` are all generators. Each
+repo's own tool runs one right after it claims a number. This engine's job is not to
+reproduce that. A repo that adopts it must not lose it either. `action.yml` takes one
+more optional input, `regenerate`: a command that runs on the stamped tree, after
+`--stamp`, before the gate, in the same commit. Each repo keeps its own generator.
+This input only decides when it runs.
+
+MEASURED: q_max's own `harness/decision-refs.mjs --gloss --write` already exists as a
+standalone pair of flags. Running it right after `--stamp` reproduces `stamp()`'s own
+tail exactly, because it calls the same two functions in the same order. No change to
+q_max's tool was needed. Same for sharables (`scripts/check_records.py
+--write-index`) and job-cost-reporting (its two generator scripts, run in sequence,
+each redirected to its own target file). All three are named in
+`actions/stamp/README.md`, and proven against each repo's own real tree.
+
 ## The mechanism
 
 This entry adds no new CLAUDE.md rule anchor. `lint/rule_mechanisms.json` keeps
@@ -112,8 +143,8 @@ This entry adds no new CLAUDE.md rule anchor. `lint/rule_mechanisms.json` keeps
 `actions/ste-lint`, which carries no anchor of its own either. A reusable action lives
 here, but it enforces nothing until another repo's own workflow calls it. Fixtures:
 `actions/stamp/test_stamp.mjs` for the engine, and `actions/stamp/test_action.sh` for
-the composite action's own shell logic. Both are wired into `gates` and
-`gates-windows` in `.github/workflows/gates.yml`.
+the composite action's own shell logic. Both are wired into `gates`, `gates-windows`
+and `gates-macos` in `.github/workflows/gates.yml`.
 
 ## What would reopen this
 

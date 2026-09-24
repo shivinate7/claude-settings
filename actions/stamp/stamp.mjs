@@ -392,10 +392,13 @@ function rewriteCites(root, config, byId, files) {
   for (const rel of files.filter((f) => scan(f) && !exclude(f))) {
     const abs = join(root, rel);
     const { text, eol } = readFileEol(abs);
-    const guarded = protectedRanges(text);
+    // UNGUARDED, on purpose, matching q_max's own `stamp()` rewrite exactly: a real citation of
+    // a slug THIS run assigns is rewritten whether or not it sits inside a backtick span (a
+    // stylistic choice some entries make). Only the DANGLING-cite check below needs to tell an
+    // example apart from a citation, because only it can otherwise refuse to write over nothing
+    // wrong. The rewrite itself never invents a match: `resolveCite` already requires the slug
+    // to be one this run actually assigned.
     const next = text.replace(pattern, (whole, ...args) => {
-      const offset = args[args.length - 2];
-      if (inSpans(guarded, offset)) return whole;
       const a = resolveCite(config, byId, args);
       return a ? renderCite(config.cite.template, a) : whole;
     });

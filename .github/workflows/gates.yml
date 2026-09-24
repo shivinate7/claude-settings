@@ -199,6 +199,14 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 janitor/test_install_schtasks.py
 
+      - name: Record stamp engine fixture suite
+        if: ${{ !cancelled() }}
+        run: node actions/stamp/test_stamp.mjs
+
+      - name: Record stamp action fixture suite
+        if: ${{ !cancelled() }}
+        run: bash actions/stamp/test_action.sh
+
   # Six python suites in the gates job need a real Windows box to prove: no other
   # job in this workflow can show whether they pass there. This job runs those
   # suites on Windows and reports the environment first. It is blocking: run
