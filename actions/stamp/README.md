@@ -42,8 +42,11 @@ writes nothing either way.
 **Format 3 leaves these out.** Each is named in `decisions/one-shared-record-stamp.md`.
 
 - Build steps. claim-ids.py reads a pending step only from `docs/GATES.md`, which is
-  now a pointer file. It cannot see a step in `docs/gates/steps/`. The owner picks
-  what the engine does here.
+  now a pointer file. It cannot see a step in `docs/gates/steps/`. The owner chose, on
+  2026-09-25, to leave steps out rather than copy claim-ids.py's stale rule. Banchi
+  numbers a step by hand. So neither `--check` nor `--stamp` silently lets a pending
+  step slip past. Both refuse a tree that holds one, naming the file, the step's slug,
+  and `deferred/banchi-build-steps.md`. See `config.unclaimed`, below.
 - Debts. claim-ids.py has no debt kind, so there is no rule to copy.
 - claim-ids.py's branch-side reads: `--stale`, `--unclaim`, `--landed` and
   `--porcelain`. A stamp that claims only on the default branch does not need them.
@@ -130,6 +133,15 @@ from whichever is closest to your own repo's shape.
   `[\p{L}\p{N}_]`.
 - `walk`: which files a cite rewrite opens. `textSuffixes`, `skipDirs` (matched by
   directory name), `skipDotDirs`, and `extensionlessDirs`. Symlinks are never walked.
+- `unclaimed`: markers this engine refuses to number at all, because it has no rule to
+  copy for them. A list of `{ folder, pattern, message }`. Both `--check` and `--stamp`
+  refuse when a `.md` file directly in `folder` matches `pattern` — `--stamp` refuses
+  before writing anything. `pattern` runs with `gmu` flags and must carry a named group
+  `(?<slug>...)` for the problem message. Banchi's own entry catches a pending build
+  step, `` ^0\.(\s+`step (?<slug>[a-z][a-z0-9]*(?:-[a-z0-9]+)+)`) ``, banchi's own
+  `scripts/claim-ids.py` `GATES_PENDING` grammar, expanded and quoted verbatim. See
+  `examples/banchi.stamp.json` and `deferred/banchi-build-steps.md`. Omit this key and
+  nothing changes: it never fires.
 
 **Read `numbering` off your own tool. Never guess this field.** q_max's own `--stamp`
 takes the highest existing number, per kind, and adds one. It never fills a gap.

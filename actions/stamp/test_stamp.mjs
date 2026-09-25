@@ -493,6 +493,59 @@ test("heading --check reads a non-ASCII filename git added, on and off the defau
     assert.equal(problems.some((p) => p.includes("D004-café.md") && p.includes("on a branch")), true);
   }));
 
+// ---------------------------------------------------------------- unclaimed: deferred/banchi-build-steps.md.
+// A pending Banchi build step (`0. \`step <slug>\`` under docs/gates/steps/) has no rule to copy
+// from claim-ids.py (it is stale for steps — see decisions/one-shared-record-stamp.md, "Left out,
+// on purpose"). This engine never numbers one. It only refuses, in both modes, naming the file
+// and the slug.
+const pendingStep = "# Steps\n\n0. `step add-widget`\n";
+
+test("unclaimed: --check refuses a pending build step, naming the file and its slug", () =>
+  withTempDir((root) => {
+    banchiTree(root);
+    write(root, "docs/gates/steps/some-file.md", pendingStep);
+
+    const problems = check(root, banchiConfig());
+    assert.equal(problems.some((p) =>
+      p.includes("docs/gates/steps/some-file.md") &&
+      p.includes("add-widget") &&
+      p.includes("deferred/banchi-build-steps.md")), true);
+  }));
+
+test("unclaimed: --stamp refuses a pending build step, and writes nothing", () =>
+  withTempDir((root) => {
+    banchiTree(root);
+    write(root, "docs/gates/steps/some-file.md", pendingStep);
+    write(root, "docs/decisions/D-two-thing.md", "## D-two-thing — Two thing\n"); // would stamp, if not refused first
+    const before = snapshot(root);
+
+    const result = stamp(root, banchiConfig());
+    assert.equal(result.problems.some((p) => p.includes("docs/gates/steps/some-file.md") && p.includes("add-widget")), true);
+    assert.equal(result.assigned.length, 0);
+    assert.deepEqual(snapshot(root), before);
+  }));
+
+test("unclaimed: a numbered step line, and prose that mentions a step, stay silent", () =>
+  withTempDir((root) => {
+    banchiTree(root);
+    write(root, "docs/gates/steps/numbered.md", "# Steps\n\n2. `step add-widget`\n");
+    write(root, "docs/gates/steps/prose.md", "# Steps\n\nSee step add-widget for details.\n");
+
+    assert.deepEqual(check(root, banchiConfig()), []);
+    assert.deepEqual(stamp(root, banchiConfig()).problems, []);
+  }));
+
+test("unclaimed: a config without the key stays silent on the same tree", () =>
+  withTempDir((root) => {
+    banchiTree(root);
+    write(root, "docs/gates/steps/some-file.md", pendingStep);
+    const config = banchiConfig();
+    delete config.unclaimed;
+
+    assert.deepEqual(check(root, config), []);
+    assert.deepEqual(stamp(root, config).problems, []);
+  }));
+
 // ---------------------------------------------------------------- run
 let failed = 0;
 for (const { name, fn } of tests) {

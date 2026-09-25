@@ -158,10 +158,35 @@ function tailOf(kind, slug, name) {
   return slug.startsWith(kind.prefix + "-") ? slug.slice(kind.prefix.length + 1) : slug;
 }
 
+// ---------------------------------------------------------------- unclaimed markers
+//
+// A marker this engine does not number at all, because it has no rule to copy for it (see
+// decisions/one-shared-record-stamp.md, "Left out, on purpose"). config.unclaimed:
+// [{ folder, pattern, message }]. `pattern` runs with the "gmu" flags over each ".md" file
+// directly in `folder`, and must carry a named group `slug` for the message. Nothing here is
+// numbered, renamed, or rewritten — only refused, in both `--check` and `--stamp`, before either
+// writes anything. Absent config.unclaimed, this is a no-op, same as before it existed.
+function unclaimedProblems(root, config) {
+  const problems = [];
+  for (const spec of config.unclaimed ?? []) {
+    const dir = join(root, spec.folder);
+    if (!existsSync(dir)) continue;
+    const re = new RegExp(spec.pattern, "gmu");
+    for (const name of readdirSync(dir).sort()) {
+      if (!name.endsWith(".md") || !lstatSync(join(dir, name)).isFile()) continue;
+      const text = readFileSync(join(dir, name), "utf8");
+      for (const m of text.matchAll(re)) {
+        problems.push(`${spec.folder}/${name}: step ${m.groups.slug}. ${spec.message}`);
+      }
+    }
+  }
+  return problems;
+}
+
 // ---------------------------------------------------------------- validation, shared by both modes
 
 function validate(root, config, h) {
-  const problems = [];
+  const problems = [...unclaimedProblems(root, config)];
   const kinds = config.kinds.map((kind) => readKind(root, config, kind, h));
   const slugsSeen = new Map();
   for (const k of kinds) {
