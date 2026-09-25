@@ -3,8 +3,9 @@
 
 See decisions/memory-is-never-a-rulings-only-home.md (on branch claude/ruling-home) for the
 finding this counts. It reads Claude Code transcripts under a projects root. It writes no
-file and makes no network call. Its only outside call is a local `git log`, per repo, to run
-the reach test.
+file. Its only outside call is a local `git log`, per repo, to run the reach test. On a
+partial clone, `git log -S` can make git fetch a missing blob over the network, so this is
+not a blanket claim of "no network call": it depends on the repo `git log` runs against.
 
 Run it from the repository root:
 
@@ -12,17 +13,32 @@ Run it from the repository root:
     python3 lint/ruling_census.py --root ~/.claude/projects --since 2026-09-01
     python3 lint/ruling_census.py --json
 
-Columns: project, sessions, answers, memory writes, scratchpad writes, "ruling" lines,
-process-only lines, reach found, reach not found, unknown.
+Columns: project, sessions, worker transcripts, answers, memory writes, scratchpad writes,
+"ruling" lines, process-only lines, reach found, reach not found, unknown.
 
-A "session" is one `*.jsonl` file directly inside a project folder. A file nested deeper
-(for example under a project folder's own `subagents/`) is a child transcript of that
-session, not a second session.
+A "session" is one `*.jsonl` file directly inside a project folder. A "worker transcript" is
+a `*.jsonl` file under that session's own `subagents/` folder
+(`<project>/<session-id>/subagents/*.jsonl`), one per sub-agent the session spawned. A worker
+transcript's memory writes, scratchpad writes and answers are folded into its project's own
+counts (with their own reach-test verdicts, since that test runs wherever a memory write or
+an answer does). Its `sessions` and `"ruling" lines` are not: sessions stays a count of
+top-level transcripts, and "ruling" is read as a note to the person a session answers to, a
+frame a worker's own transcript does not carry the same way.
 
 The reach test takes each memory-write line and each AskUserQuestion answer with 8 or more
 words, collapses its whitespace, and asks `git log --all -S<text>` in the transcript's own
 `cwd`. A "not found" is a verbatim miss, not proof that a ruling was lost: the same idea in
 different words, a paraphrase, or a squashed commit all read as "not found" here.
+
+"Scratchpad writes" counts only Write, Edit and MultiEdit tool uses whose `file_path`
+contains "/scratchpad/" (backslashes normalized to `/` first, so a Windows path still
+matches). Bash is left out: a shell command string does not reliably say whether it reads or
+writes, and counting every Bash call that names a scratchpad path would count reads too.
+
+A transcript that is not valid UTF-8, a memory file that is not valid UTF-8, or a
+Write/Edit/MultiEdit tool use whose `file_path` is not a string, each count toward `unknown`
+for that one file or item. The census keeps going rather than crash. A memory folder can
+hold non-text litter such as `.DS_Store`, so only `.md` files there are read at all.
 
 Two assumptions this script makes, because the source data does not spell them out:
   - "contains the word ruling" is read as a case-insensitive substring, so it also
@@ -46,16 +62,33 @@ GIT_TIMEOUT_SECONDS = 10
 REACH_WORD_MIN = 8
 MEMORY_WRITE_NAMES = ("Write", "Edit", "MultiEdit")
 
+# A file was not a memory write we could classify: its file_path was not a usable string.
+# Distinct from None ("this tool use is not a memory write at all").
+BAD_FILE_PATH = object()
+
 ASK_ANSWER_RE = re.compile(r'"([^"]*)"="([^"]*)"')
-PROCESS_ONLY_RE = re.compile(r"^\s*home:\s*process-only\s*$", re.IGNORECASE)
+
+# The hook's own line pattern (hooks/ruling_home.py's HOME_RE), reused so the two readers
+# agree on what a `home:` line looks like. The key match is case-insensitive. The value must
+# equal "process-only" exactly, once one pair of surrounding backticks or quotes is stripped.
+HOME_LINE_RE = re.compile(r"^\s*[-*]?\s*home:\s*(.+?)\s*$", re.IGNORECASE)
+PROCESS_ONLY = "process-only"
+FENCE_PAIRS = (("`", "`"), ('"', '"'), ("'", "'"))
 
 COLUMNS = (
-    "project", "sessions", "answers", "memory writes", "scratchpad writes",
-    '"ruling" lines', "process-only lines", "reach found", "reach not found", "unknown",
+    "project", "sessions", "worker transcripts", "answers", "memory writes",
+    "scratchpad writes", '"ruling" lines', "process-only lines", "reach found",
+    "reach not found", "unknown",
 )
 COUNT_KEYS = (
-    "sessions", "answers", "memory_writes", "scratchpad_writes", "ruling_lines",
-    "process_only_lines", "reach_found", "reach_not_found", "unknown",
+    "sessions", "worker_transcripts", "answers", "memory_writes", "scratchpad_writes",
+    "ruling_lines", "process_only_lines", "reach_found", "reach_not_found", "unknown",
+)
+# Fields folded into a project's totals from a worker transcript's own counts. Not
+# "sessions" (stays top-level only) and not "ruling_lines" (see the module docstring).
+WORKER_FOLDED_KEYS = (
+    "answers", "memory_writes", "scratchpad_writes",
+    "reach_found", "reach_not_found", "unknown",
 )
 
 NOT_FOUND_NOTE = 'a "not found" is a verbatim miss, not proof that a ruling was lost.'
@@ -75,32 +108,45 @@ def add_counts(into, other):
         into[k] += other[k]
 
 
-def _strings(value):
-    """Yield every string value nested inside a tool_use `input`, dict or list."""
-    if isinstance(value, str):
-        yield value
-    elif isinstance(value, dict):
-        for v in value.values():
-            yield from _strings(v)
-    elif isinstance(value, list):
-        for v in value:
-            yield from _strings(v)
+def strip_one_fence(value):
+    for open_c, close_c in FENCE_PAIRS:
+        if len(value) >= 2 and value.startswith(open_c) and value.endswith(close_c):
+            return value[1:-1]
+    return value
 
 
-def is_scratchpad_tool_use(block):
+def is_process_only_line(line):
+    m = HOME_LINE_RE.match(line)
+    if not m:
+        return False
+    return strip_one_fence(m.group(1).strip()) == PROCESS_ONLY
+
+
+def is_scratchpad_write(block):
+    if block.get("name") not in MEMORY_WRITE_NAMES:
+        return False
     inp = block.get("input") or {}
-    return any("/scratchpad/" in s for s in _strings(inp))
+    file_path = inp.get("file_path")
+    if not isinstance(file_path, str):
+        return False
+    return "/scratchpad/" in file_path.replace("\\", "/")
 
 
 def memory_write_texts(block, project_dir):
-    """Return the list of new-text strings a memory write puts on disk, or None if `block`
-    is not a Write/Edit/MultiEdit tool use under `project_dir`'s own memory/ folder.
+    """Return the list of new-text strings a memory write puts on disk, None if `block` is
+    not a Write/Edit/MultiEdit tool use under `project_dir`'s own memory/ folder, or the
+    BAD_FILE_PATH sentinel when it is one of those tool names but `file_path` is not a
+    string (so we cannot tell where it points).
     """
     name = block.get("name")
     if name not in MEMORY_WRITE_NAMES:
         return None
     inp = block.get("input") or {}
     file_path = inp.get("file_path")
+    if file_path is None:
+        return None
+    if not isinstance(file_path, str):
+        return BAD_FILE_PATH
     if not file_path:
         return None
     norm = file_path.replace("\\", "/")
@@ -188,29 +234,49 @@ def reach_test(cwd, text, timeouts):
 
 
 def scan_memory_folder(project_dir):
-    """Count `home: process-only` lines across the project's current memory files."""
+    """Count `home: process-only` lines across the project's current memory files. Returns
+    (process_only_count, unknown_count). Only `.md` files are read. A file that cannot be
+    read as UTF-8, or at all, adds to unknown_count instead of crashing the census.
+    """
     memory_dir = os.path.join(project_dir, "memory")
     if not os.path.isdir(memory_dir):
-        return 0
-    count = 0
+        return 0, 0
+    process_only = 0
+    unknown = 0
     for dirpath, _dirs, files in os.walk(memory_dir):
         for name in files:
+            if not name.endswith(".md"):
+                continue
             path = os.path.join(dirpath, name)
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     text = f.read()
-            except OSError:
+            except (OSError, UnicodeDecodeError):
+                unknown += 1
                 continue
             for line in text.splitlines():
-                if PROCESS_ONLY_RE.match(line):
-                    count += 1
-    return count
+                if is_process_only_line(line):
+                    process_only += 1
+    return process_only, unknown
+
+
+def safe_read_transcript(path):
+    """read_transcript, except a transcript that is not valid UTF-8 (or unreadable outright)
+    returns None instead of crashing the whole census.
+    """
+    try:
+        return read_transcript(path)
+    except (UnicodeDecodeError, OSError):
+        return None
 
 
 def scan_transcript(path, project_dir, timeouts):
     counts = zero_counts()
     counts["sessions"] = 1
-    records = read_transcript(path)
+    records = safe_read_transcript(path)
+    if records is None:
+        counts["unknown"] += 1
+        return counts
     cwd = find_cwd(records)
 
     ask_ids = set()
@@ -218,10 +284,12 @@ def scan_transcript(path, project_dir, timeouts):
         for block in tool_uses(rec):
             if block.get("name") == "AskUserQuestion":
                 ask_ids.add(block.get("id"))
-            if is_scratchpad_tool_use(block):
+            if is_scratchpad_write(block):
                 counts["scratchpad_writes"] += 1
             mem_texts = memory_write_texts(block, project_dir)
-            if mem_texts is not None:
+            if mem_texts is BAD_FILE_PATH:
+                counts["unknown"] += 1
+            elif mem_texts is not None:
                 counts["memory_writes"] += 1
                 for text in mem_texts:
                     for line in text.splitlines():
@@ -254,6 +322,20 @@ def scan_transcript(path, project_dir, timeouts):
     return counts
 
 
+def worker_transcript_paths(project_dir, session_stem):
+    """`*.jsonl` files directly under a session's own subagents/ folder."""
+    subdir = os.path.join(project_dir, session_stem, "subagents")
+    if not os.path.isdir(subdir):
+        return []
+    paths = []
+    for entry in sorted(os.listdir(subdir)):
+        if entry.endswith(".jsonl"):
+            full = os.path.join(subdir, entry)
+            if os.path.isfile(full):
+                paths.append(full)
+    return paths
+
+
 def transcript_date(path):
     ts = os.path.getmtime(path)
     return datetime.fromtimestamp(ts, tz=timezone.utc).date()
@@ -279,7 +361,16 @@ def run_census(root, since, timeouts):
             if since is not None and transcript_date(path) < since:
                 continue
             add_counts(counts, scan_transcript(path, project_dir, timeouts))
-        counts["process_only_lines"] = scan_memory_folder(project_dir)
+
+            session_stem = entry[:-len(".jsonl")]
+            for worker_path in worker_transcript_paths(project_dir, session_stem):
+                counts["worker_transcripts"] += 1
+                worker_counts = scan_transcript(worker_path, project_dir, timeouts)
+                for key in WORKER_FOLDED_KEYS:
+                    counts[key] += worker_counts[key]
+        process_only, mem_unknown = scan_memory_folder(project_dir)
+        counts["process_only_lines"] = process_only
+        counts["unknown"] += mem_unknown
         rows.append((name, counts))
         add_counts(total, counts)
     return rows, total
@@ -326,6 +417,7 @@ def parse_args(argv):
     args = parser.parse_args(argv)
     if args.root is None:
         args.root = default_root()
+    args.root = os.path.abspath(args.root)
     return args
 
 

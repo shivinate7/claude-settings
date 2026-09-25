@@ -105,8 +105,11 @@ class RulingCensusTests(unittest.TestCase):
                 'Your questions have been answered: "Q1?"="%s", "Q2?"="Yes". '
                 "You can now continue." % long_answer,
             ),
-            tool_use_msg("Bash", {"command": "cat /tmp/x/scratchpad/notes.txt"}, id_="bash_1"),
-            tool_result_msg("bash_1"),
+            tool_use_msg("Write", {
+                "file_path": "/tmp/x/scratchpad/notes.txt",
+                "content": "a scratch note",
+            }, id_="write_2"),
+            tool_result_msg("write_2"),
             assistant_text("This RULING changes things.\nA line about rulings, plural.\n"
                             "Nothing notable here."),
         ]
@@ -129,8 +132,9 @@ class RulingCensusTests(unittest.TestCase):
         self.assertEqual(counts["unknown"], 0)
         self.assertEqual(timeouts[0], 0)
 
-        process_only = ruling_census.scan_memory_folder(project_dir)
+        process_only, mem_unknown = ruling_census.scan_memory_folder(project_dir)
         self.assertEqual(process_only, 2)
+        self.assertEqual(mem_unknown, 0)
 
     def test_02_missing_cwd_counts_as_unknown_never_not_found(self):
         project_dir = self.make_project("proj_no_cwd")
@@ -233,9 +237,9 @@ class RulingCensusTests(unittest.TestCase):
         self.assertEqual(out["total"]["project"], "TOTAL")
         names = [p["project"] for p in out["projects"]]
         self.assertIn("proj_json", names)
-        for key in ("sessions", "answers", "memory_writes", "scratchpad_writes",
-                    "ruling_lines", "process_only_lines", "reach_found",
-                    "reach_not_found", "unknown"):
+        for key in ("sessions", "worker_transcripts", "answers", "memory_writes",
+                    "scratchpad_writes", "ruling_lines", "process_only_lines",
+                    "reach_found", "reach_not_found", "unknown"):
             self.assertIn(key, out["total"])
 
     def test_05_table_run_prints_header_total_and_note(self):
@@ -247,6 +251,7 @@ class RulingCensusTests(unittest.TestCase):
         )
         self.assertEqual(run.returncode, 0)
         self.assertIn("project", run.stdout)
+        self.assertIn("worker transcripts", run.stdout)
         self.assertIn("TOTAL", run.stdout)
         self.assertIn(ruling_census.NOT_FOUND_NOTE, run.stdout)
         self.assertIn("Timed out:", run.stdout)
@@ -260,18 +265,177 @@ class RulingCensusTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0)
         self.assertIn("TOTAL", run.stdout)
 
-    def test_07_nested_subagent_jsonl_is_not_a_second_session(self):
-        # A project folder's own subagents/ subfolder holds child transcripts. Only the
-        # `*.jsonl` files directly inside the project folder are sessions.
+    def test_07_worker_transcript_folds_in_but_is_not_a_session(self):
+        # A worker transcript lives at <project>/<session-id>/subagents/*.jsonl. Its memory
+        # writes, scratchpad writes and answers count. Its own session slot does not: only
+        # the top-level *.jsonl files are sessions. Its "ruling" lines are not folded in
+        # either (see the module docstring).
         project_dir = self.make_project("proj_nested")
-        write_transcript([human("top", cwd=self.repo)], os.path.join(project_dir, "top.jsonl"))
-        nested_dir = os.path.join(project_dir, "subagents")
-        os.makedirs(nested_dir, exist_ok=True)
-        write_transcript([human("child", cwd=self.repo)],
-                          os.path.join(nested_dir, "child.jsonl"))
+        write_transcript([human("top", cwd=self.repo)],
+                          os.path.join(project_dir, "top.jsonl"))
+        worker_dir = os.path.join(project_dir, "top", "subagents")
+        os.makedirs(worker_dir, exist_ok=True)
+        worker_records = [
+            human("child", cwd=self.repo),
+            tool_use_msg("Write", {
+                "file_path": "/tmp/scratchpad/child.txt",
+                "content": "a worker scratch note",
+            }, id_="w_write_1"),
+            tool_result_msg("w_write_1"),
+            tool_use_msg("AskUserQuestion", {"questions": [{"question": "Q?"}]},
+                         id_="w_ask_1"),
+            tool_result_msg("w_ask_1",
+                             'Your questions have been answered: "Q?"="Yes". Continue.'),
+            assistant_text("A worker line about a ruling that should not be folded in."),
+        ]
+        write_transcript(worker_records, os.path.join(worker_dir, "child.jsonl"))
+
         timeouts = [0]
         rows, _total = ruling_census.run_census(self.root, None, timeouts)
-        self.assertEqual(dict(rows)["proj_nested"]["sessions"], 1)
+        counts = dict(rows)["proj_nested"]
+        self.assertEqual(counts["sessions"], 1)
+        self.assertEqual(counts["worker_transcripts"], 1)
+        self.assertEqual(counts["scratchpad_writes"], 1)
+        self.assertEqual(counts["answers"], 1)
+        self.assertEqual(counts["ruling_lines"], 0)
+
+    # ---------------------------------------------------------- fix 1: no crash on bad input
+
+    def test_10_non_utf8_transcript_counts_unknown_and_keeps_going(self):
+        project_dir = self.make_project("proj_bad_transcript")
+        bad_path = os.path.join(project_dir, "bad.jsonl")
+        with open(bad_path, "wb") as f:
+            f.write(b'{"type": "user", "message": {"content": "\xff\xfe broken"}}\n')
+        good_path = write_transcript([human("ok", cwd=self.repo)],
+                                      os.path.join(project_dir, "good.jsonl"))
+        del good_path
+
+        timeouts = [0]
+        rows, total = ruling_census.run_census(self.root, None, timeouts)
+        counts = dict(rows)["proj_bad_transcript"]
+        self.assertEqual(counts["sessions"], 2)
+        self.assertEqual(counts["unknown"], 1)
+
+    def test_11_non_utf8_memory_file_and_ds_store_are_skipped_not_crashed(self):
+        project_dir = self.make_project("proj_bad_memory")
+        memory_dir = os.path.join(project_dir, "memory")
+        os.makedirs(memory_dir, exist_ok=True)
+        with open(os.path.join(memory_dir, ".DS_Store"), "wb") as f:
+            f.write(b"\x00\x01\xff\xfe binary junk, not utf-8 and not markdown")
+        with open(os.path.join(memory_dir, "bad.md"), "wb") as f:
+            f.write(b"home: \xff\xfe process-only broken bytes")
+        with open(os.path.join(memory_dir, "good.md"), "w", encoding="utf-8") as f:
+            f.write("home: process-only\n")
+
+        process_only, unknown = ruling_census.scan_memory_folder(project_dir)
+        self.assertEqual(process_only, 1)
+        self.assertEqual(unknown, 1)  # only bad.md, .DS_Store is never opened (not .md)
+
+    def test_12_tool_use_file_path_not_a_string_counts_unknown(self):
+        project_dir = self.make_project("proj_bad_path")
+        os.makedirs(os.path.join(project_dir, "memory"), exist_ok=True)
+        records = [
+            human("start", cwd=self.repo),
+            tool_use_msg("Write", {"file_path": ["not", "a", "string"], "content": "x"},
+                         id_="write_1"),
+            tool_result_msg("write_1"),
+        ]
+        path = write_transcript(records, os.path.join(project_dir, "s1.jsonl"))
+        timeouts = [0]
+        counts = ruling_census.scan_transcript(path, project_dir, timeouts)
+        self.assertEqual(counts["memory_writes"], 0)
+        self.assertEqual(counts["unknown"], 1)
+
+    # ---------------------------------------------------------- fix 2: relative --root
+
+    def test_13_relative_root_still_finds_memory_writes(self):
+        project_dir = self.make_project("proj_relative")
+        memory_dir = os.path.join(project_dir, "memory")
+        os.makedirs(memory_dir, exist_ok=True)
+        records = [
+            human("start", cwd=self.repo),
+            tool_use_msg("Write", {
+                "file_path": os.path.join(memory_dir, "plan.md"),
+                "content": "short note",
+            }, id_="write_1"),
+            tool_result_msg("write_1"),
+        ]
+        write_transcript(records, os.path.join(project_dir, "s1.jsonl"))
+
+        parent = os.path.dirname(self.root)
+        rel_root = os.path.relpath(self.root, parent)
+        run = subprocess.run(
+            [sys.executable, CENSUS, "--root", rel_root, "--json"],
+            capture_output=True, text=True, timeout=30, cwd=parent,
+        )
+        self.assertEqual(run.returncode, 0)
+        out = json.loads(run.stdout)
+        self.assertTrue(os.path.isabs(out["root"]))
+        proj = dict((p["project"], p) for p in out["projects"])["proj_relative"]
+        self.assertEqual(proj["memory_writes"], 1)
+
+    # ---------------------------------------------------------- fix 3: scratchpad is writes only
+
+    def test_14_bash_touching_scratchpad_is_not_counted(self):
+        project_dir = self.make_project("proj_bash_scratchpad")
+        records = [
+            human("start", cwd=self.repo),
+            tool_use_msg("Bash", {"command": "cat /tmp/x/scratchpad/notes.txt"}, id_="bash_1"),
+            tool_result_msg("bash_1"),
+        ]
+        path = write_transcript(records, os.path.join(project_dir, "s1.jsonl"))
+        timeouts = [0]
+        counts = ruling_census.scan_transcript(path, project_dir, timeouts)
+        self.assertEqual(counts["scratchpad_writes"], 0)
+
+    def test_15_windows_scratchpad_path_is_normalized(self):
+        project_dir = self.make_project("proj_windows_scratchpad")
+        records = [
+            human("start", cwd=self.repo),
+            tool_use_msg("Write", {
+                "file_path": r"C:\Users\x\scratchpad\notes.txt",
+                "content": "a note",
+            }, id_="write_1"),
+            tool_result_msg("write_1"),
+        ]
+        path = write_transcript(records, os.path.join(project_dir, "s1.jsonl"))
+        timeouts = [0]
+        counts = ruling_census.scan_transcript(path, project_dir, timeouts)
+        self.assertEqual(counts["scratchpad_writes"], 1)
+
+    def test_16_read_tool_touching_scratchpad_is_not_counted(self):
+        project_dir = self.make_project("proj_read_scratchpad")
+        records = [
+            human("start", cwd=self.repo),
+            tool_use_msg("Read", {"file_path": "/tmp/x/scratchpad/notes.txt"}, id_="read_1"),
+            tool_result_msg("read_1"),
+        ]
+        path = write_transcript(records, os.path.join(project_dir, "s1.jsonl"))
+        timeouts = [0]
+        counts = ruling_census.scan_transcript(path, project_dir, timeouts)
+        self.assertEqual(counts["scratchpad_writes"], 0)
+
+    # ---------------------------------------------------------- fix 5: the hook's home: pattern
+
+    def test_17_process_only_line_shapes(self):
+        good = [
+            "home: process-only",
+            "home:process-only",
+            "- home: process-only",
+            "* home: `process-only`",
+            '* home: "process-only"',
+            "HOME: process-only",
+        ]
+        for line in good:
+            self.assertTrue(ruling_census.is_process_only_line(line), line)
+        bad = [
+            "home: Process-Only",  # value case must match exactly
+            "home: decisions/real.md",
+            "not a home line",
+            "home: ``process-only``",  # more than one pair of fences
+        ]
+        for line in bad:
+            self.assertFalse(ruling_census.is_process_only_line(line), line)
 
 
 if __name__ == "__main__":
