@@ -420,6 +420,11 @@ fetch a missing blob over the network. Run it against a Claude Code projects roo
     python3 lint/ruling_census.py
     python3 lint/ruling_census.py --root ~/.claude/projects --since 2026-09-01 --json
 
+`--sample N` prints N AskUserQuestion answers as JSON Lines. A judge reads them. Each line
+checks whether one ruling reached a tracked file. `--seed` (default 0) repeats a pick. The
+output can hold private text from a transcript. Keep it out of every repo. Hand it to the
+judge directly. Never commit it. Never paste it into an issue or a PR.
+
 Its own fixture suite is `lint/test_ruling_census.py`.
 
 Manual dispatch takes one input, `full_ste_audit`. Enable it from the Actions tab to lint

@@ -490,6 +490,140 @@ class RulingCensusTests(unittest.TestCase):
         counts = ruling_census.scan_transcript(path, project_dir_via_link, timeouts)
         self.assertEqual(counts["memory_writes"], 1)
 
+    # ---------------------------------------------------------- --sample
+
+    def test_20_sample_pairs_answer_with_its_own_question(self):
+        # Two questions in one AskUserQuestion call. The result string carries both
+        # "question"="answer" pairs. The right pairing is positional (answer i with
+        # question i), read from the tool_use's own input, not by re-parsing the
+        # flattened result text.
+        project_dir = self.make_project("proj_sample_pair")
+        records = [
+            human("start", cwd=self.repo),
+            tool_use_msg("AskUserQuestion", {
+                "questions": [{"question": "Q_A?"}, {"question": "Q_B?"}],
+            }, id_="ask_1"),
+            tool_result_msg(
+                "ask_1",
+                'The user answered: "Q_A?"="Answer A", "Q_B?"="Answer B". Continue.',
+            ),
+        ]
+        write_transcript(records, os.path.join(project_dir, "s1.jsonl"))
+        pools = ruling_census.collect_sample_pools(self.root)
+        items = pools["proj_sample_pair"]
+        self.assertEqual(len(items), 2)
+        by_answer = {item["answer"]: item["question"] for item in items}
+        self.assertEqual(by_answer["Answer A"], "Q_A?")
+        self.assertEqual(by_answer["Answer B"], "Q_B?")
+
+    def test_21_same_seed_gives_the_same_sample(self):
+        for i in range(6):
+            project_dir = self.make_project("proj_seed_%d" % i)
+            records = [
+                human("start", cwd=self.repo),
+                tool_use_msg("AskUserQuestion", {"questions": [{"question": "Q?"}]},
+                             id_="ask_1"),
+                tool_result_msg("ask_1", 'Answered: "Q?"="Answer %d". Continue.' % i),
+            ]
+            write_transcript(records, os.path.join(project_dir, "s1.jsonl"))
+        pools = ruling_census.collect_sample_pools(self.root)
+        first = ruling_census.pick_sample(pools, 4, seed=7)
+        second = ruling_census.pick_sample(pools, 4, seed=7)
+        self.assertEqual(first, second)
+        third = ruling_census.pick_sample(pools, 4, seed=8)
+        self.assertNotEqual(first, third)
+
+    def test_22_picks_spread_across_two_projects(self):
+        # Distinct answer text per project (the folder name is baked into it), so a pick
+        # can be traced back to its own project without relying on dict identity.
+        for name in ("proj_spread_a", "proj_spread_b"):
+            project_dir = self.make_project(name)
+            records = [human("start", cwd=self.repo)]
+            for i in range(3):
+                records.append(tool_use_msg(
+                    "AskUserQuestion", {"questions": [{"question": "Q %s %d?" % (name, i)}]},
+                    id_="ask_%d" % i))
+                records.append(tool_result_msg(
+                    "ask_%d" % i,
+                    'Answered: "Q %s %d?"="A %s %d". Continue.' % (name, i, name, i)))
+            write_transcript(records, os.path.join(project_dir, "s1.jsonl"))
+        pools = ruling_census.collect_sample_pools(self.root)
+        picked = ruling_census.pick_sample(pools, 4, seed=1)
+        self.assertEqual(len(picked), 4)
+        projects_seen = {item["project"] for item in picked}
+        self.assertEqual(projects_seen, {self.repo})
+        # both fixture projects contributed at least one of the four picks
+        sessions_seen = {"proj_spread_a" if "proj_spread_a" in item["answer"]
+                          else "proj_spread_b" for item in picked}
+        self.assertEqual(sessions_seen, {"proj_spread_a", "proj_spread_b"})
+
+    def test_23_missing_cwd_gives_remote_null(self):
+        project_dir = self.make_project("proj_sample_no_cwd")
+        records = [
+            human("start"),  # no cwd anywhere
+            tool_use_msg("AskUserQuestion", {"questions": [{"question": "Q?"}]},
+                         id_="ask_1"),
+            tool_result_msg("ask_1", 'Answered: "Q?"="Yes". Continue.'),
+        ]
+        write_transcript(records, os.path.join(project_dir, "s1.jsonl"))
+        pools = ruling_census.collect_sample_pools(self.root)
+        item = pools["proj_sample_no_cwd"][0]
+        self.assertIsNone(item["project"])
+        self.assertIsNone(item["remote"])
+
+    def test_24_long_field_is_cut(self):
+        long_answer = "x" * 2500
+        self.assertEqual(len(ruling_census.cap_text(long_answer)),
+                          ruling_census.SAMPLE_TEXT_MAX + len(ruling_census.SAMPLE_CUT_MARK))
+        self.assertTrue(ruling_census.cap_text(long_answer).endswith(
+            ruling_census.SAMPLE_CUT_MARK))
+        short = "short text"
+        self.assertEqual(ruling_census.cap_text(short), short)
+        self.assertIsNone(ruling_census.cap_text(None))
+
+    def test_25_sample_cli_prints_capped_jsonl(self):
+        project_dir = self.make_project("proj_sample_cli")
+        long_answer = "y" * 2500
+        records = [
+            human("start", cwd=self.repo),
+            tool_use_msg("AskUserQuestion", {"questions": [{"question": "Q?"}]},
+                         id_="ask_1"),
+            tool_result_msg("ask_1", 'Answered: "Q?"="%s". Continue.' % long_answer),
+        ]
+        write_transcript(records, os.path.join(project_dir, "s1.jsonl"))
+        run = subprocess.run(
+            [sys.executable, CENSUS, "--root", self.root, "--sample", "1"],
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(run.returncode, 0)
+        lines = [ln for ln in run.stdout.splitlines() if ln.strip()]
+        self.assertEqual(len(lines), 1)
+        row = json.loads(lines[0])
+        for key in ("project", "remote", "session", "timestamp", "question", "answer"):
+            self.assertIn(key, row)
+        self.assertEqual(row["project"], self.repo)
+        self.assertEqual(row["question"], "Q?")
+        self.assertTrue(row["answer"].endswith(ruling_census.SAMPLE_CUT_MARK))
+        self.assertEqual(len(row["answer"]),
+                          ruling_census.SAMPLE_TEXT_MAX + len(ruling_census.SAMPLE_CUT_MARK))
+
+    def test_26_sample_includes_worker_transcript_answers(self):
+        project_dir = self.make_project("proj_sample_worker")
+        write_transcript([human("top", cwd=self.repo)],
+                          os.path.join(project_dir, "top.jsonl"))
+        worker_dir = os.path.join(project_dir, "top", "subagents")
+        os.makedirs(worker_dir, exist_ok=True)
+        worker_records = [
+            human("child", cwd=self.repo),
+            tool_use_msg("AskUserQuestion", {"questions": [{"question": "WQ?"}]},
+                         id_="w_ask_1"),
+            tool_result_msg("w_ask_1", 'Answered: "WQ?"="Worker answer". Continue.'),
+        ]
+        write_transcript(worker_records, os.path.join(worker_dir, "child.jsonl"))
+        pools = ruling_census.collect_sample_pools(self.root)
+        answers = {item["answer"] for item in pools["proj_sample_worker"]}
+        self.assertIn("Worker answer", answers)
+
     def test_19_root_via_real_path_file_path_via_symlink_still_matches(self):
         # The mirror case: the project folder passed in is the real path, but the tool
         # use's own file_path is spelled through the symlink.

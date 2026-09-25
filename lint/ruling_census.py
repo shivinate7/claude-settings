@@ -12,9 +12,19 @@ Run it from the repository root:
     python3 lint/ruling_census.py
     python3 lint/ruling_census.py --root ~/.claude/projects --since 2026-09-01
     python3 lint/ruling_census.py --json
+    python3 lint/ruling_census.py --sample 20 --seed 1
 
 Columns: project, sessions, worker transcripts, answers, memory writes, scratchpad writes,
 "ruling" lines, process-only lines, reach found, reach not found, unknown.
+
+`--sample N` prints N AskUserQuestion answers as JSON Lines instead of the table, for a judge
+to read whether each ruling reached a tracked file. One line per answer: project (the
+transcript's `cwd`), remote (`git -C <cwd> remote get-url origin`, or null when unknown),
+session (the transcript's file name), timestamp (the record's own `timestamp`, or null),
+question, and answer. The pick spreads across projects (round-robin by project, in random
+order under `--seed`, default 0, so a run repeats) and includes worker transcripts. Each text
+field is capped at 2,000 characters, with a cut marked ` [cut]`. `--sample` writes no file.
+Its own git call is `git remote get-url origin`, a read of local config, never the network.
 
 A "session" is one `*.jsonl` file directly inside a project folder. A "worker transcript" is
 a `*.jsonl` file under that session's own `subagents/` folder
@@ -54,6 +64,7 @@ Two assumptions this script makes, because the source data does not spell them o
 import argparse
 import json
 import os
+import random
 import re
 import subprocess
 import sys
@@ -97,6 +108,9 @@ WORKER_FOLDED_KEYS = (
 )
 
 NOT_FOUND_NOTE = 'a "not found" is a verbatim miss, not proof that a ruling was lost.'
+
+SAMPLE_TEXT_MAX = 2000
+SAMPLE_CUT_MARK = " [cut]"
 
 
 def default_root():
@@ -182,6 +196,51 @@ def memory_write_texts(block, project_dir):
         if isinstance(edit, dict):
             texts.append(edit.get("new_string") or "")
     return texts
+
+
+def ask_question_texts(block):
+    """Question text for each entry in an AskUserQuestion tool_use's own `input["questions"]`
+    list, in order. `None` in a slot whose entry is not a dict or has no string `question`
+    field. Empty list when `input` is not a dict or `questions` is not a list. Never raises.
+    """
+    inp = block.get("input")
+    if not isinstance(inp, dict):
+        return []
+    questions = inp.get("questions")
+    if not isinstance(questions, list):
+        return []
+    texts = []
+    for q in questions:
+        if isinstance(q, dict) and isinstance(q.get("question"), str):
+            texts.append(q.get("question"))
+        else:
+            texts.append(None)
+    return texts
+
+
+def iter_ask_answers(records):
+    """Yield (rec, question, answer) for every AskUserQuestion answer found in `records`, in
+    transcript order. `rec` is the tool_result's own top-level record, so `rec["timestamp"]`
+    is the answer's timestamp. `question` is read positionally from the matching tool_use's
+    own input (`ask_question_texts`), not parsed back out of the flattened result string:
+    when a question itself quotes another string, a `"key"="value"` split of that string
+    breaks on the inner quotes, though it still leaves the answers' own order and text
+    intact, which is why counting and pairing key off of them here is safe.
+    """
+    ask_questions = {}
+    for rec in records:
+        for block in tool_uses(rec):
+            if block.get("name") == "AskUserQuestion":
+                ask_questions[block.get("id")] = ask_question_texts(block)
+        for block in tool_results(rec):
+            tool_use_id = block.get("tool_use_id")
+            if tool_use_id not in ask_questions:
+                continue
+            texts = ask_questions[tool_use_id]
+            for i, (_question, answer) in enumerate(
+                    ASK_ANSWER_RE.findall(result_text(block))):
+                question = texts[i] if i < len(texts) else None
+                yield rec, question, answer
 
 
 def tool_results(rec):
@@ -299,11 +358,8 @@ def scan_transcript(path, project_dir, timeouts):
         return counts
     cwd = find_cwd(records)
 
-    ask_ids = set()
     for rec in records:
         for block in tool_uses(rec):
-            if block.get("name") == "AskUserQuestion":
-                ask_ids.add(block.get("id"))
             if is_scratchpad_write(block):
                 counts["scratchpad_writes"] += 1
             mem_texts = memory_write_texts(block, project_dir)
@@ -321,24 +377,21 @@ def scan_transcript(path, project_dir, timeouts):
                                 counts["reach_not_found"] += 1
                             else:
                                 counts["unknown"] += 1
-        for block in tool_results(rec):
-            if block.get("tool_use_id") not in ask_ids:
-                continue
-            text = result_text(block)
-            for _question, answer in ASK_ANSWER_RE.findall(text):
-                counts["answers"] += 1
-                if reach_words(answer) >= REACH_WORD_MIN:
-                    verdict = reach_test(cwd, answer, timeouts)
-                    if verdict == "found":
-                        counts["reach_found"] += 1
-                    elif verdict == "not_found":
-                        counts["reach_not_found"] += 1
-                    else:
-                        counts["unknown"] += 1
         for text in assistant_texts(rec):
             for line in text.splitlines():
                 if "ruling" in line.lower():
                     counts["ruling_lines"] += 1
+
+    for _rec, _question, answer in iter_ask_answers(records):
+        counts["answers"] += 1
+        if reach_words(answer) >= REACH_WORD_MIN:
+            verdict = reach_test(cwd, answer, timeouts)
+            if verdict == "found":
+                counts["reach_found"] += 1
+            elif verdict == "not_found":
+                counts["reach_not_found"] += 1
+            else:
+                counts["unknown"] += 1
     return counts
 
 
@@ -396,6 +449,121 @@ def run_census(root, since, timeouts):
     return rows, total
 
 
+def get_remote(cwd, cache):
+    """`git -C <cwd> remote get-url origin`, or None when `cwd` is falsy, git cannot resolve
+    it, or the call fails outright. Reads local git config only, so it never reaches the
+    network. Memoized in `cache` (one lookup per distinct cwd, across the whole sample).
+    """
+    if not cwd:
+        return None
+    if cwd in cache:
+        return cache[cwd]
+    remote = None
+    try:
+        run = subprocess.run(
+            ["git", "-C", cwd, "remote", "get-url", "origin"],
+            capture_output=True, text=True, timeout=GIT_TIMEOUT_SECONDS,
+        )
+        if run.returncode == 0:
+            remote = run.stdout.strip() or None
+    except (subprocess.TimeoutExpired, OSError):
+        remote = None
+    cache[cwd] = remote
+    return remote
+
+
+def collect_transcript_answers(path, items, remote_cache):
+    """Append one dict per AskUserQuestion answer in the transcript at `path` to `items`."""
+    records = safe_read_transcript(path)
+    if records is None:
+        return
+    cwd = find_cwd(records)
+    remote = get_remote(cwd, remote_cache)
+    session = os.path.basename(path)
+    for rec, question, answer in iter_ask_answers(records):
+        items.append({
+            "project": cwd,
+            "remote": remote,
+            "session": session,
+            "timestamp": rec.get("timestamp"),
+            "question": question,
+            "answer": answer,
+        })
+
+
+def collect_sample_pools(root):
+    """Return {project folder name: [answer dict, ...]}, in the same project and session
+    order `run_census` walks, folder names with no answer left out. Worker transcripts'
+    answers are folded into their own project's list, same as their other counts.
+    """
+    pools = {}
+    remote_cache = {}
+    if not os.path.isdir(root):
+        return pools
+    for name in sorted(os.listdir(root)):
+        project_dir = os.path.join(root, name)
+        if not os.path.isdir(project_dir):
+            continue
+        items = []
+        for entry in sorted(os.listdir(project_dir)):
+            if not entry.endswith(".jsonl"):
+                continue
+            path = os.path.join(project_dir, entry)
+            if not os.path.isfile(path):
+                continue
+            collect_transcript_answers(path, items, remote_cache)
+            session_stem = entry[:-len(".jsonl")]
+            for worker_path in worker_transcript_paths(project_dir, session_stem):
+                collect_transcript_answers(worker_path, items, remote_cache)
+        if items:
+            pools[name] = items
+    return pools
+
+
+def pick_sample(pools, n, seed):
+    """Pick up to `n` answers out of `pools` ({project name: [answer dict, ...]}),
+    round-robin by project, in random order under `seed`: the project order is shuffled
+    once, each project's own answer list is shuffled once, then one item is taken from each
+    project in turn, cycling, until `n` are picked or every list runs out. Same `pools` and
+    `seed` always give the same pick.
+    """
+    rng = random.Random(seed)
+    names = sorted(pools)
+    rng.shuffle(names)
+    buckets = {name: list(pools[name]) for name in names}
+    for name in names:
+        rng.shuffle(buckets[name])
+    picked = []
+    while len(picked) < n and any(buckets[name] for name in names):
+        for name in names:
+            if len(picked) >= n:
+                break
+            if buckets[name]:
+                picked.append(buckets[name].pop(0))
+    return picked
+
+
+def cap_text(text):
+    """`text` cut to SAMPLE_TEXT_MAX characters, cut marked with SAMPLE_CUT_MARK. Passes a
+    non-string value (None included) through unchanged.
+    """
+    if not isinstance(text, str):
+        return text
+    if len(text) > SAMPLE_TEXT_MAX:
+        return text[:SAMPLE_TEXT_MAX] + SAMPLE_CUT_MARK
+    return text
+
+
+def sample_row(item):
+    return {k: cap_text(v) for k, v in item.items()}
+
+
+def run_sample(root, n, seed):
+    pools = collect_sample_pools(root)
+    for item in pick_sample(pools, n, seed):
+        print(json.dumps(sample_row(item)))
+
+
 def counts_row(project, counts):
     return [project] + [str(counts[k]) for k in COUNT_KEYS]
 
@@ -434,6 +602,11 @@ def parse_args(argv):
                               "plus /projects)")
     parser.add_argument("--since", default=None, help="Only sessions on or after YYYY-MM-DD")
     parser.add_argument("--json", action="store_true", help="Machine-readable output")
+    parser.add_argument("--sample", type=int, default=None,
+                         help="Print N AskUserQuestion answers as JSON Lines, for a judge "
+                              "to read, instead of the table or --json")
+    parser.add_argument("--seed", type=int, default=0,
+                         help="Seed for --sample's pick, so a run can be repeated (default 0)")
     args = parser.parse_args(argv)
     if args.root is None:
         args.root = default_root()
@@ -443,6 +616,9 @@ def parse_args(argv):
 
 def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
+    if args.sample is not None:
+        run_sample(args.root, args.sample, args.seed)
+        return 0
     since = None
     if args.since:
         since = datetime.strptime(args.since, "%Y-%m-%d").date()
