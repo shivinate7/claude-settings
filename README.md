@@ -412,6 +412,15 @@ genuinely fail, in `hooks/guard.py` and in `hooks/session_start.sh`, and asserts
 own answer names the unknown state. Its docstring states the contract, so a later case
 joins it by fixture, not by a new grep pattern.
 
+`lint/ruling_census.py` is a read-only counter for where a ruling lands: memory, scratchpad,
+or a tracked file (decisions/memory-is-never-a-rulings-only-home.md). It writes no file and
+makes no network call. Run it against a Claude Code projects root:
+
+    python3 lint/ruling_census.py
+    python3 lint/ruling_census.py --root ~/.claude/projects --since 2026-09-01 --json
+
+Its own fixture suite is `lint/test_ruling_census.py`.
+
 Manual dispatch takes one input, `full_ste_audit`. Enable it from the Actions tab to lint
 the whole tree in report mode. That run never fails the build. It only writes a summary.
 
