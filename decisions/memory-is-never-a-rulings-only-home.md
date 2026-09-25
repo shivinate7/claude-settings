@@ -75,7 +75,8 @@ the transcripts. Until that runs, the rate is unmeasured.
    cannot make it cry wolf.
 9. When git cannot resolve one value, that value does not resolve. A missing git, a timeout,
    a repo that git cannot read or an unreadable transcript makes the hook stand down, with no
-   block. A control must not depend on the state it checks
+   block. A memory file that the hook cannot read is skipped, and the other files are still
+   checked. A control must not depend on the state it checks
    (`decisions/recovery-must-not-gate-on-its-own-state.md`).
 
 Process state stays in memory by design, with `home: process-only`. This covers merge order,
