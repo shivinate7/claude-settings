@@ -13,6 +13,9 @@ import { fileURLToPath } from "node:url";
 
 import { stamp, check, loadConfig, currentBranch } from "./stamp.mjs";
 
+// Each fixture builds its own git repo. A push run's GITHUB_REF names the runner's branch, not the fixture's.
+delete process.env.GITHUB_REF;
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 const tests = [];
