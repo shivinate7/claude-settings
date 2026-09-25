@@ -454,6 +454,64 @@ class RulingCensusTests(unittest.TestCase):
         for line in bad:
             self.assertFalse(ruling_census.is_process_only_line(line), line)
 
+    # ------------------------------------------ fix: symlinked root vs. real file_path
+    # macOS puts TMPDIR under /var, itself a symlink to /private/var. A plain string
+    # prefix match can see the project folder spelled one way and a memory write's own
+    # file_path spelled the other way, and count a real memory write as none at all.
+
+    def _make_symlink_pair(self, real_name, link_name):
+        real_base = os.path.join(self.tmp.name, real_name)
+        os.makedirs(real_base)
+        link_base = os.path.join(self.tmp.name, link_name)
+        try:
+            os.symlink(real_base, link_base)
+        except OSError:
+            raise unittest.SkipTest(
+                "os.symlink needs elevated privilege or Developer Mode on this platform")
+        return real_base, link_base
+
+    def test_18_root_via_symlink_file_path_via_real_path_still_matches(self):
+        real_base, link_base = self._make_symlink_pair("real_projects", "link_projects")
+        project_dir_via_link = os.path.join(link_base, "proj_symlink")
+        os.makedirs(project_dir_via_link)
+        memory_dir_via_real = os.path.join(real_base, "proj_symlink", "memory")
+        os.makedirs(memory_dir_via_real)
+
+        records = [
+            human("start", cwd=self.repo),
+            tool_use_msg("Write", {
+                "file_path": os.path.join(memory_dir_via_real, "plan.md"),
+                "content": "a short note",
+            }, id_="write_1"),
+            tool_result_msg("write_1"),
+        ]
+        path = write_transcript(records, os.path.join(project_dir_via_link, "s1.jsonl"))
+        timeouts = [0]
+        counts = ruling_census.scan_transcript(path, project_dir_via_link, timeouts)
+        self.assertEqual(counts["memory_writes"], 1)
+
+    def test_19_root_via_real_path_file_path_via_symlink_still_matches(self):
+        # The mirror case: the project folder passed in is the real path, but the tool
+        # use's own file_path is spelled through the symlink.
+        real_base, link_base = self._make_symlink_pair("real_projects2", "link_projects2")
+        project_dir_real = os.path.join(real_base, "proj_symlink2")
+        os.makedirs(project_dir_real)
+        memory_dir_via_link = os.path.join(link_base, "proj_symlink2", "memory")
+        os.makedirs(memory_dir_via_link)
+
+        records = [
+            human("start", cwd=self.repo),
+            tool_use_msg("Write", {
+                "file_path": os.path.join(memory_dir_via_link, "plan.md"),
+                "content": "a short note",
+            }, id_="write_1"),
+            tool_result_msg("write_1"),
+        ]
+        path = write_transcript(records, os.path.join(project_dir_real, "s1.jsonl"))
+        timeouts = [0]
+        counts = ruling_census.scan_transcript(path, project_dir_real, timeouts)
+        self.assertEqual(counts["memory_writes"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

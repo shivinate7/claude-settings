@@ -40,6 +40,11 @@ Write/Edit/MultiEdit tool use whose `file_path` is not a string, each count towa
 for that one file or item. The census keeps going rather than crash. A memory folder can
 hold non-text litter such as `.DS_Store`, so only `.md` files there are read at all.
 
+A memory write's `file_path` is matched against the project folder through
+`os.path.realpath` plus `os.path.normcase` on both sides, not a plain string prefix. A
+symlinked temp directory (macOS puts `TMPDIR` under `/var`, itself a symlink to
+`/private/var`) can otherwise give the two sides different spellings of the same folder.
+
 Two assumptions this script makes, because the source data does not spell them out:
   - "contains the word ruling" is read as a case-insensitive substring, so it also
     catches "rulings" and "overruling".
@@ -108,6 +113,16 @@ def add_counts(into, other):
         into[k] += other[k]
 
 
+def comparison_path(path):
+    """A path spelling stable across a symlinked temp dir (macOS puts TMPDIR under /var,
+    itself a symlink to /private/var) and across / vs \\ separators. Backslashes normalize
+    to / first, since os.path.realpath does not treat them as separators on a POSIX host.
+    Used wherever a tool-use path is matched against a memory folder or project folder,
+    never for display: the caller's own path stays whatever spelling it was given.
+    """
+    return os.path.normcase(os.path.realpath(path.replace("\\", "/")))
+
+
 def strip_one_fence(value):
     for open_c, close_c in FENCE_PAIRS:
         if len(value) >= 2 and value.startswith(open_c) and value.endswith(close_c):
@@ -154,8 +169,8 @@ def memory_write_texts(block, project_dir):
         return BAD_FILE_PATH
     if not file_path:
         return None
-    norm = file_path.replace("\\", "/")
-    prefix = os.path.normpath(project_dir).replace("\\", "/") + "/memory/"
+    norm = comparison_path(file_path)
+    prefix = comparison_path(project_dir) + os.sep + "memory" + os.sep
     if not norm.startswith(prefix):
         return None
     if name == "Write":
