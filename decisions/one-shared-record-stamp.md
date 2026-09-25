@@ -81,11 +81,10 @@ run, with one pending name listed in `ORDER.json`, matched 1245 of 1245 too.
   is now a pointer file. MEASURED: a pending step in `docs/gates/steps/` gets no claim.
   The same step written into `docs/GATES.md` is claimed as `step 1`, because that file
   holds no numbered step, so the ceiling reads 0. Step 1 already exists. banchi's own
-  tool is stale for steps. This engine copies no stale rule. The owner picks one of two
-  options. Option 1: the engine claims steps in `docs/gates/steps/` with claim-ids.py's
-  own grammar (`` 0. `step <slug>` ``, the ceiling from the step files, `docs/map.py`'s
-  `"n"` field, `docs/gates/ORDER.json`). That is a named difference from claim-ids.py.
-  Option 2: steps stay out, and banchi numbers them by hand.
+  tool is stale for steps. This engine copies no stale rule. On 2026-09-25 the owner
+  chose to leave steps out. Banchi numbers them by hand. `deferred/banchi-build-steps.md`
+  holds the item and the trigger that brings it back. The engine refuses a tree that
+  holds a pending step marker, and the refusal names that file.
 - **Debts.** claim-ids.py has no debt kind. There is no rule to copy.
 - **The flat-file fallback.** With no `ORDER.json`, claim-ids.py reads decisions from
   the flat `docs/DECISIONS.md`. That serves commits before the split. banchi main has
@@ -200,7 +199,8 @@ and `gates-macos` in `.github/workflows/gates.yml`.
 
 ## What would reopen this
 
-banchi asks to adopt this tool. The owner picks a step option above. A fifth repo
+banchi asks to adopt this tool. Banchi's own tool learns to claim a step in
+`docs/gates/steps/` (see `deferred/banchi-build-steps.md`). A fifth repo
 turns up with a shape none of the three formats covers. Either the `numbering` or the
 `cite` assumption above turns out wrong for a repo nobody has read yet. Any of these is
 a reason to come back to this entry before writing a fourth format into `stamp.mjs`.

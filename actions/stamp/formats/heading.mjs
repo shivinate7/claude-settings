@@ -31,6 +31,13 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // ---------------------------------------------------------------- config
 
+// Names captured by every `(?<name>...)` GROUP in a regex source string, never a lookbehind
+// (`(?<=` or `(?<!`): the character class right after `<` excludes both `=` and `!` already, by
+// construction, so this needs no separate lookbehind exclusion.
+function namedGroups(source) {
+  return [...source.matchAll(/\(\?<([A-Za-z_$][\w$]*)>/g)].map((m) => m[1]);
+}
+
 export function normalizeConfig(config) {
   if (!config.slugRegex) throw new Error('format "heading" needs "slugRegex"');
   const walk = (config.walk ??= {});
@@ -41,6 +48,22 @@ export function normalizeConfig(config) {
   const cite = (config.cite ??= {});
   cite.before ??= `(?<![-\\p{L}\\p{N}_])`;
   cite.after ??= `(?![-\\p{L}\\p{N}_])`;
+  // A bad `unclaimed` entry is a config error, caught here, before any tree is read — never a
+  // TypeError mid-walk from a pattern with no "slug" group, and never a run that silently walks
+  // right past an unparseable pattern.
+  for (const spec of config.unclaimed ?? []) {
+    for (const field of ["folder", "pattern", "message"]) {
+      if (!spec[field]) throw new Error(`config.unclaimed entry is missing "${field}"`);
+    }
+    try {
+      new RegExp(spec.pattern, "gmu");
+    } catch (e) {
+      throw new Error(`config.unclaimed entry's "pattern" is not a valid regex: ${e.message}`);
+    }
+    if (!namedGroups(spec.pattern).includes("slug")) {
+      throw new Error(`config.unclaimed entry's "pattern" needs a named group "(?<slug>...)"`);
+    }
+  }
   for (const kind of config.kinds) {
     for (const field of ["id", "prefix", "pendingRegex", "numberedRegex", "idTemplate"]) {
       if (!kind[field]) throw new Error(`kind ${kind.id ?? "(unnamed)"} is missing "${field}"`);
@@ -158,10 +181,40 @@ function tailOf(kind, slug, name) {
   return slug.startsWith(kind.prefix + "-") ? slug.slice(kind.prefix.length + 1) : slug;
 }
 
+// ---------------------------------------------------------------- unclaimed markers
+//
+// A marker this engine does not number at all, because it has no rule to copy for it (see
+// decisions/one-shared-record-stamp.md, "Left out, on purpose"). config.unclaimed:
+// [{ folder, pattern, message, label }]. `pattern` runs with the "gmu" flags over each ".md"
+// file directly in `folder`, and must carry a named group `slug` (normalizeConfig refuses a
+// pattern without one, before any tree is read). The problem names the matched line, trimmed,
+// unless `label` is set, in which case it names `<label> <slug>` instead (Banchi's own config
+// sets `label: "step"`, so its refusal reads "step add-widget", not the raw matched line).
+// Nothing here is numbered, renamed, or rewritten — only refused, in both `--check` and
+// `--stamp`, before either writes anything. Absent config.unclaimed, this is a no-op, same as
+// before it existed.
+function unclaimedProblems(root, config) {
+  const problems = [];
+  for (const spec of config.unclaimed ?? []) {
+    const dir = join(root, spec.folder);
+    if (!existsSync(dir)) continue;
+    const re = new RegExp(spec.pattern, "gmu");
+    for (const name of readdirSync(dir).sort()) {
+      if (!name.endsWith(".md") || !lstatSync(join(dir, name)).isFile()) continue;
+      const text = readFileSync(join(dir, name), "utf8");
+      for (const m of text.matchAll(re)) {
+        const detail = spec.label ? `${spec.label} ${m.groups.slug}` : m[0].trim();
+        problems.push(`${spec.folder}/${name}: ${detail}. ${spec.message}`);
+      }
+    }
+  }
+  return problems;
+}
+
 // ---------------------------------------------------------------- validation, shared by both modes
 
 function validate(root, config, h) {
-  const problems = [];
+  const problems = [...unclaimedProblems(root, config)];
   const kinds = config.kinds.map((kind) => readKind(root, config, kind, h));
   const slugsSeen = new Map();
   for (const k of kinds) {
