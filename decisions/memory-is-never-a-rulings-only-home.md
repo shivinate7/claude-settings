@@ -61,6 +61,12 @@ So the rate of loss is still unmeasured. The census measured the size of each ch
 measure of loss needs a judged sample: pick answers, and read whether each ruling reached a
 tracked file in any words.
 
+On 2026-09-25 the owner chose the judged sample as the next step, before any answer check is
+built. `lint/ruling_census.py --sample` prints a sample of answers, with the question, the
+repo and the date. The owner runs it and hands the output over. The output stays out of the
+repo, because a transcript can hold private text. A Sonnet lane then judges each answer
+against the repo it names.
+
 ## The causes
 
 1. **Memory costs nothing, and nothing checks it.** A worker's only lasting output is a commit,
