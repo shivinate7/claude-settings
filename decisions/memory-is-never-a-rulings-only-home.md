@@ -50,27 +50,42 @@ the transcripts. Until that runs, the rate is unmeasured.
 `hooks/ruling_home.py`, a Stop hook. It keys on an act, not on prose, as
 `decisions/predicate-is-the-act.md` requires.
 
-1. It finds each memory file that this turn wrote. The memory folder is the `memory` folder
-   beside the session's own transcript.
-2. It splits each file into sections at its markdown headings. `MEMORY.md`, the index, is
-   exempt.
-3. Each section must carry one `home:` line.
-4. The value is a repo path that some git ref holds, an existing absolute path to a brief, or
-   `process-only`.
-5. The hook checks only that the value resolves. It never compares text, so a paraphrase
+1. It finds each memory file that this session's own tool uses wrote since the last human
+   message. That is a Write, Edit or MultiEdit on the file, or a Bash command that names the
+   memory folder. The memory folder is the `memory` folder beside the session's own
+   transcript.
+2. It reads no mtime. All sessions of one project share the memory folder. An mtime check
+   would block this session for a peer session's write.
+3. It splits each file into sections at its markdown headings. A heading inside a fenced code
+   block is not a heading. `MEMORY.md`, the index, is exempt.
+4. Each section must carry a `home:` line in its body. A line inside a fenced code block does
+   not count. For the section before the first heading, a `home:` key in the frontmatter also
+   counts.
+5. The value is `process-only`, or a repo-relative path that the tree of some branch holds
+   now. A local branch that is not pushed counts. A deleted path does not count. A path that
+   leaves the repo does not count.
+6. A brief does not count. A brief is not tracked, and Row 1 below lived in a brief and still
+   did not reach the repo.
+7. The hook checks only that the value resolves. It never compares text, so a paraphrase
    cannot make it cry wolf.
+8. When git cannot resolve one value, that value does not resolve. Only a missing git, a
+   timeout or an unreadable transcript makes the hook stand down, with no block.
 
 Process state stays in memory by design, with `home: process-only`. This covers merge order,
 which agent holds which branch, a merge approval for one act, and a personal preference.
 
 ## What the mechanism covers, and what it does not
 
-- Rows 1, 2 and 4 are memory writes. The hook catches each one.
+- Rows 1, 2 and 4 are memory writes. The hook catches each one. Row 1's brief is not a home,
+  so the hook catches Row 1 too.
 - Row 6 is the correct case. The hook stays silent.
 - Row 3 is a different defect: a promise in a record that no lane or debt owns. That check
   belongs in Banchi's own record lint. This change does not touch Banchi.
-- Row 5 is a scratchpad write. The census counts scratchpad writes first. A check follows only
-  if the count shows the need.
+- Row 5 is a scratchpad write. The census counts scratchpad writes first, in worker
+  transcripts too. It counts writes, not reads. A check follows only if the count shows the
+  need.
+- A memory write that this session did not make is out of scope. A peer session's hook checks
+  its own writes.
 - A ruling typed in chat that nobody writes anywhere leaves no act to key on. A cloud session
   with no memory folder is the same case. The hook does not catch either one.
 - An AskUserQuestion answer is a ruling with a clear act. A check for it needs a place in the
