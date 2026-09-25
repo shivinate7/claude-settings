@@ -3,49 +3,62 @@
 
 `decisions/memory-is-never-a-rulings-only-home.md`, "The mechanism", names the defect this
 closes: an orchestrator's auto-memory can hold an owner ruling that reaches no tracked file in
-the repo. This hook is that mechanism. It matches that section's 8 numbered items exactly.
+the repo. This hook is that mechanism. It matches that section's 9 numbered items exactly.
 
 WHAT IT CHECKS. The memory folder is `<dirname(transcript_path)>/memory`. If that folder does
 not exist, this hook does nothing. It keys on an ACT, not on prose
-(`decisions/predicate-is-the-act.md`), and never on mtime: all sessions of one project share
-the memory folder, and an mtime check would block this session for a peer session's write. A
-`.md` file in the folder (`MEMORY.md`, the index, excepted) counts as written THIS SESSION when
-a `Write`, `Edit`, or `MultiEdit` tool use since the last human message names it, or a `Bash`
-tool use since the last human message names the memory folder in its command text -- that Bash
-use writes every file it also names, or, when it names only the folder, every file in it.
+(`decisions/predicate-is-the-act.md`): a `.md` file in the folder (`MEMORY.md`, the index,
+excepted) counts as written THIS SESSION when a `Write`, `Edit`, or `MultiEdit` tool use since
+the last human message names it, OR a `Bash` tool use since the last human message names the
+memory folder in its command text (item 1). All sessions of one project share the memory
+folder, so a Bash-named file counts only when its own mtime is after the last human message: a
+read does not change mtime, so `cat`/`ls` never blocks, and a peer session's write this session
+never named never blocks either (item 2). A Bash command names the folder when its text holds
+the folder's absolute path, its `~` form, or its `$HOME` form; a name it also holds is matched
+as a whole path component, never a bare substring, so a write to `data.md` can never mark
+`a.md` (item 3). A write through `cd` and a relative path, a shell variable, a script, or
+`python -c` is out of this hook's reach on purpose (item 3).
 
 Each written file is split into sections at its own `#` headings, a heading inside a fenced
 code block (a line starting with ``` or ~~~ toggles the fence) is not a heading, and a file
-with no heading is one section. A section with no non-blank line is skipped. Every other
-section needs a `home:` line in its body (the key read case-insensitively, a line inside a
-fence does not count); for the section before the first heading, a `home:` key in the YAML
-frontmatter also counts. The value, unwrapped of one surrounding pair of backticks or quotes,
-is `process-only` (exact case) or a repo-relative path: refused outright if absolute, if it
-normalizes to `.` or `..`, or if it leaves the repository tree; otherwise resolved by asking
-whether ANY local or remote branch's tree holds it right now
-(`git for-each-ref` over `refs/heads`/`refs/remotes`, then `git cat-file -e <ref>:<path>` per
-ref, both run with `--literal-pathspecs` so a value like `*` or `:(glob)**` is looked up as a
-literal path, never expanded). A deleted path resolves through no ref. A brief does not count:
-this hook only ever looks inside THIS repository's own tree. The hook checks only that the
-value RESOLVES. It never compares text, so a paraphrase of an already-recorded ruling cannot
-make it cry wolf (`decisions/guard-that-cries-wolf-is-spent.md`): "A guard that goes red when
-nothing is wrong is spent, because the reader learns to scroll past it."
+with no heading is one section (item 4). A section with no non-blank line is skipped. Every
+other section needs a `home:` line in its body (the key read case-insensitively, a line inside
+a fence does not count); for the section before the first heading, a `home:` key in the YAML
+frontmatter also counts (item 5). The value, unwrapped of one surrounding pair of backticks or
+quotes, is `process-only` (exact case) or a repo-relative path to a FILE, never a directory,
+that the tree of some branch holds now: refused outright if absolute, if it normalizes to `.`
+or `..`, or if it leaves the repository tree; otherwise resolved by asking whether any local or
+remote branch's tree holds a BLOB (never a tree) at that path right now (item 6). A brief does
+not count: this hook only ever looks inside THIS repository's own tree (item 7). The hook
+checks only that the value RESOLVES, never comparing text, so a paraphrase of an
+already-recorded ruling cannot make it cry wolf (item 8;
+`decisions/guard-that-cries-wolf-is-spent.md`): "A guard that goes red when nothing is wrong is
+spent, because the reader learns to scroll past it."
+
+RESOLUTION, ONE GIT PROCESS PER VALUE. `git for-each-ref` lists every `refs/heads` and
+`refs/remotes` ref once per run; each home: value then asks about every ref at once with one
+`git cat-file --batch-check` call fed `<ref>:<path>` lines on stdin, never one process per ref,
+and reads the type back for each: only a `blob` answer resolves, so a directory (`tree`) never
+does. Both calls run with `--literal-pathspecs`, so a value like `*` or `:(glob)**` is looked up
+as a literal path, never expanded. A deleted path resolves through no ref.
 
 WHAT IT DOES ON A MISS. Blocks once: `{"decision": "block", "reason": "..."}`, naming each
 offending file and section heading and saying what a valid `home:` value is. The reason never
 prints the bad value itself (CLAUDE.md, "a refusal's printed remedy never names the forbidden
 target").
 
-FAIL OPEN, NARROWLY. `stop_hook_active` set means this Stop firing is already a rewrite, so the
-hook stays quiet. Otherwise it stands down (exit 0, no block) only for an unreadable transcript,
-a missing `git` binary, or a `git` call that times out: per
-`decisions/recovery-must-not-gate-on-its-own-state.md`, a recovery control (here, the owner's
-own path to seeing a ruling was not filed) must not depend on the very state it is meant to
-recover from. It never stands down over one value's own git failure (a non-zero `git cat-file`
-or `for-each-ref` exit for that value alone): that value simply does not resolve, and every
-other finding this turn still reports. `lint/_transcript.py`'s import is deferred to inside
-`run()`, itself inside `main()`'s fail-open `try`, so a missing or broken copy of that shared
-module also stands down rather than crashing the hook before `main()` can catch anything.
+FAIL OPEN, NARROWLY (item 9). `stop_hook_active` set means this Stop firing is already a
+rewrite, so the hook stays quiet. Otherwise it stands down (exit 0, no block) only for an
+unreadable transcript, a missing `git` binary, a `git` call that times out, or a repository git
+itself cannot read (`for-each-ref` exiting non-zero, e.g. a `.git` file pointing at a missing
+gitdir): per `decisions/recovery-must-not-gate-on-its-own-state.md`, a recovery control (here,
+the owner's own path to seeing a ruling was not filed) must not depend on the very state it is
+meant to recover from. It never stands down over one value's own git answer (`cat-file
+--batch-check` exiting non-zero, or simply answering "not a blob"): that value alone does not
+resolve, and every other finding this turn still reports. `lint/_transcript.py`'s import is
+deferred to inside `run()`, itself inside `main()`'s fail-open `try`, so a missing or broken
+copy of that shared module also stands down rather than crashing the hook before `main()` can
+catch anything.
 
 Windows: paths are built with `os.path` throughout, and every path comparison runs
 `os.path.normcase(os.path.normpath(...))` first, so a case-insensitive filesystem and a mixed
@@ -64,6 +77,7 @@ FILE_TOOLS = ("Write", "Edit", "MultiEdit")
 GIT_TIMEOUT = 10
 FENCE_MARKERS = ("```", "~~~")
 WRAP_CHARS = ("`", '"', "'")
+FS_NAME_CHAR = re.compile(r"[A-Za-z0-9_.\-]")
 
 HOME_RE = re.compile(r"^\s*[-*]?\s*home:\s*(.+?)\s*$", re.IGNORECASE)
 PROCESS_ONLY = "process-only"
@@ -74,35 +88,66 @@ REMEDY = (
 )
 
 # Set by _ensure_transcript_helpers(), called at the top of run(). Kept as module globals so
-# every other function below can call tool_uses/records_after_last_human/read_transcript as
-# plain names, the same as if they had been imported at module load time -- the only thing
-# that changed is WHEN the import runs, so a missing lint/_transcript.py raises from inside
-# run(), which main() already wraps in a fail-open try (see the module docstring).
+# every other function below can call is_last_human/tool_uses/records_after_last_human/
+# read_transcript as plain names, the same as if they had been imported at module load time --
+# the only thing that changed is WHEN the import runs, so a missing lint/_transcript.py raises
+# from inside run(), which main() already wraps in a fail-open try (see the module docstring).
+is_last_human = None
 tool_uses = None
 records_after_last_human = None
 read_transcript = None
 
 
 def _ensure_transcript_helpers():
-    global tool_uses, records_after_last_human, read_transcript
+    global is_last_human, tool_uses, records_after_last_human, read_transcript
     if tool_uses is not None:
         return
     here = os.path.dirname(os.path.abspath(__file__))
     lint_dir = os.path.join(here, "..", "lint")
     if lint_dir not in sys.path:
         sys.path.insert(0, lint_dir)
-    from _transcript import tool_uses as _tu, records_after_last_human as _rah, read_transcript as _rt
-    tool_uses, records_after_last_human, read_transcript = _tu, _rah, _rt
+    from _transcript import (
+        is_last_human as _ilh, tool_uses as _tu,
+        records_after_last_human as _rah, read_transcript as _rt,
+    )
+    is_last_human, tool_uses, records_after_last_human, read_transcript = _ilh, _tu, _rah, _rt
 
 
 class _GitFailure(Exception):
-    """`git` itself could not be trusted to answer: the binary is missing, or the call timed
-    out. The caller stands the whole check down. A plain non-zero EXIT from a `git` call that
-    ran is never this -- see value_resolves and the module docstring's FAIL OPEN section."""
+    """`git` itself could not be trusted to answer, or the repository itself could not be
+    read: the binary is missing, the call timed out, or `for-each-ref` -- a repository-wide
+    listing, never a per-value lookup -- exited non-zero (item 9). The caller stands the whole
+    check down. A plain non-zero exit from `cat-file --batch-check`, a per-VALUE lookup, is
+    never this -- see value_resolves and the module docstring's FAIL OPEN section."""
 
 
 def _norm(path):
     return os.path.normcase(os.path.normpath(path))
+
+
+def _parse_utc_timestamp(text):
+    from datetime import datetime, timezone
+    text = (text or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        moment = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.timestamp()
+
+
+def _last_human_baseline(records):
+    stamp = ""
+    for rec in records:
+        if is_last_human(rec):
+            value = rec.get("timestamp") or ""
+            stamp = value if isinstance(value, str) else ""
+    return _parse_utc_timestamp(stamp)
 
 
 # ------------------------------------------------------------------ which memory files exist
@@ -121,19 +166,64 @@ def find_memory_files(memory_dir):
     return out
 
 
-# ------------------------------------------------------------------ written-this-session (no mtime)
+# ------------------------------------------------------------------ written-this-session
 
-def _written_names(after_records, memory_dir, candidate_names):
+def _folder_mentions(memory_dir):
+    """Return the literal strings that count as "naming this folder" in a Bash command: the
+    folder's absolute path, and, when it sits under the user's home directory, its `~` and
+    `$HOME` forms (item 3)."""
+    mentions = [memory_dir]
+    home = os.environ.get("HOME") or os.path.expanduser("~")
+    if not home or home == "~" or not os.path.isabs(home):
+        return mentions
+    home_norm = os.path.normpath(home)
+    dir_norm = os.path.normpath(memory_dir)
+    if dir_norm == home_norm:
+        rest = ""
+    elif dir_norm.startswith(home_norm + os.sep):
+        rest = dir_norm[len(home_norm):]
+    else:
+        return mentions
+    rest_posix = rest.replace(os.sep, "/")
+    mentions.append("~" + rest_posix)
+    mentions.append("$HOME" + rest_posix)
+    return mentions
+
+
+def _names_folder(cmd, memory_dir):
+    return any(mention and mention in cmd for mention in _folder_mentions(memory_dir))
+
+
+def _names_whole_component(cmd, name):
+    """True when `name` appears in `cmd` as a whole path component: never preceded or
+    followed by another filename character, so a write to `data.md` can never match `a.md`
+    (item 3)."""
+    start = 0
+    while True:
+        idx = cmd.find(name, start)
+        if idx == -1:
+            return False
+        before = cmd[idx - 1] if idx > 0 else ""
+        after = cmd[idx + len(name)] if idx + len(name) < len(cmd) else ""
+        if not FS_NAME_CHAR.match(before) and not FS_NAME_CHAR.match(after):
+            return True
+        start = idx + 1
+
+
+def _written_names(after_records, baseline, memory_dir, candidate_names):
     """Return the subset of `candidate_names` (memory-folder .md basenames) that THIS
     session's own tool uses wrote since the last human message.
 
-    A Write/Edit/MultiEdit naming a file directly in `memory_dir` writes that one name. A Bash
-    tool use whose command text names `memory_dir` writes every candidate name its command
-    text also names, or, when it names only the folder, every candidate name. mtime plays no
-    part: a peer session's fresh write, with no tool use of this session's own, never counts.
+    A Write/Edit/MultiEdit naming a file directly in `memory_dir` writes that one name,
+    regardless of mtime. A Bash tool use whose command text names `memory_dir` (item 3) marks
+    every candidate name its command text also names as a whole path component, or, when it
+    names only the folder, every candidate name -- but a Bash-marked name counts only when its
+    own mtime is after `baseline` (item 2): with no baseline at all, no Bash-marked name counts,
+    the same narrow, never-guess direction as every other fail-open branch in this hook.
     """
     norm_dir = _norm(memory_dir)
     written = set()
+    bash_marked = set()
     for rec in after_records:
         for tu in tool_uses(rec):
             name = tu.get("name")
@@ -151,10 +241,21 @@ def _written_names(after_records, memory_dir, candidate_names):
                     written.add(base)
             elif name == "Bash":
                 cmd = inp.get("command")
-                if not isinstance(cmd, str) or memory_dir not in cmd:
+                if not isinstance(cmd, str) or not cmd:
                     continue
-                named = [n for n in candidate_names if n in cmd]
-                written.update(named if named else candidate_names)
+                if not _names_folder(cmd, memory_dir):
+                    continue
+                named = [n for n in candidate_names if _names_whole_component(cmd, n)]
+                bash_marked.update(named if named else candidate_names)
+
+    if baseline is not None:
+        for name in bash_marked:
+            full = os.path.join(memory_dir, name)
+            try:
+                if os.path.getmtime(full) > baseline:
+                    written.add(name)
+            except OSError:
+                continue
     return written
 
 
@@ -244,33 +345,55 @@ def is_git_work_tree(path):
         current = parent
 
 
-def _run_git(cwd, args):
+def _run_git(cwd, args, input_text=None):
     """Run one git call, `--literal-pathspecs` always set. Return the finished process.
 
     Raises _GitFailure only when git itself could not be trusted to answer at all: the binary
     is missing, or the call timed out. A plain non-zero exit is returned to the caller like
-    any other result, never raised -- see value_resolves.
+    any other result, never raised here -- see _list_refs and _resolve_value for which of
+    those callers turns a non-zero exit into a stand-down and which reads it as "no answer".
     """
     try:
         return subprocess.run(
             ["git", "--literal-pathspecs", "-C", cwd] + args,
-            capture_output=True, text=True, timeout=GIT_TIMEOUT,
+            input=input_text, capture_output=True, text=True, timeout=GIT_TIMEOUT,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
         raise _GitFailure(str(exc)) from exc
 
 
 def _list_refs(cwd):
-    """Return every `refs/heads` and `refs/remotes` ref name, or [] on a plain git failure."""
+    """Return every `refs/heads` and `refs/remotes` ref name.
+
+    A non-zero exit here means the REPOSITORY itself could not be read (a `.git` file
+    pointing at a missing gitdir, for one) -- item 9 names this as a stand-down, not a
+    per-value miss, so it raises _GitFailure rather than returning an empty list.
+    """
     run = _run_git(cwd, ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"])
     if run.returncode != 0:
-        return []
+        raise _GitFailure("for-each-ref exited %s: %s" % (run.returncode, (run.stderr or "")[:200]))
     return [line for line in run.stdout.splitlines() if line.strip()]
 
 
-def _blob_exists(cwd, ref, git_path):
-    run = _run_git(cwd, ["cat-file", "-e", "%s:%s" % (ref, git_path)])
-    return run.returncode == 0
+def _resolve_value(cwd, refs, git_path):
+    """True when ANY ref's tree holds a blob (never a tree/directory) at `git_path`.
+
+    One `git cat-file --batch-check` call answers for every ref at once, fed `<ref>:<path>`
+    lines on stdin, rather than one process per ref (the performance fix this exists for). A
+    non-zero exit, or an object that batch-check reports missing or of any type but `blob`,
+    reads as "this value does not resolve" -- never a stand-down: see the module docstring.
+    """
+    if not refs:
+        return False
+    stdin_text = "".join("%s:%s\n" % (ref, git_path) for ref in refs)
+    run = _run_git(cwd, ["cat-file", "--batch-check"], input_text=stdin_text)
+    if run.returncode != 0:
+        return False
+    for line in run.stdout.splitlines():
+        fields = line.split()
+        if len(fields) >= 2 and fields[1] == "blob":
+            return True
+    return False
 
 
 def value_resolves(value, cwd):
@@ -287,10 +410,8 @@ def value_resolves(value, cwd):
     if not cwd or not os.path.isdir(cwd) or not is_git_work_tree(cwd):
         return False
     git_path = normalized.replace(os.sep, "/")
-    for ref in _list_refs(cwd):
-        if _blob_exists(cwd, ref, git_path):
-            return True
-    return False
+    refs = _list_refs(cwd)  # a repo git cannot read raises _GitFailure: see _list_refs
+    return _resolve_value(cwd, refs, git_path)
 
 
 # ------------------------------------------------------------------ per-file check
@@ -342,13 +463,14 @@ def run(hook):
 
     records = read_transcript(path)
     after = records_after_last_human(records)
+    baseline = _last_human_baseline(records)
 
     cwd = hook.get("cwd") or ""
     if not isinstance(cwd, str):
         cwd = ""
 
     candidate_names = find_memory_files(memory_dir)
-    written = _written_names(after, memory_dir, candidate_names)
+    written = _written_names(after, baseline, memory_dir, candidate_names)
 
     findings = []
     for name in candidate_names:
@@ -375,8 +497,9 @@ def main():
     try:
         reason = run(hook)
     except Exception:
-        # An unreadable transcript, a missing git binary, a git timeout, or a missing
-        # lint/_transcript.py: exit 0, no block. See the module docstring's FAIL OPEN section.
+        # An unreadable transcript, a missing git binary, a git timeout, a repository git
+        # cannot read, or a missing lint/_transcript.py: exit 0, no block. See the module
+        # docstring's FAIL OPEN section.
         sys.exit(0)
 
     if reason:
