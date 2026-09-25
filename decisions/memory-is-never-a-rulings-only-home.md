@@ -54,22 +54,29 @@ the transcripts. Until that runs, the rate is unmeasured.
    message. That is a Write, Edit or MultiEdit on the file, or a Bash command that names the
    memory folder. The memory folder is the `memory` folder beside the session's own
    transcript.
-2. It reads no mtime. All sessions of one project share the memory folder. An mtime check
-   would block this session for a peer session's write.
-3. It splits each file into sections at its markdown headings. A heading inside a fenced code
+2. All sessions of one project share the memory folder. So the hook reads mtime only for a
+   file that this session's own Bash command named. Such a file counts only when its mtime is
+   after the last human message. A read does not change mtime, so a Bash read does not block.
+   A peer session's write that this session never named does not block.
+3. A Bash command names the folder when its text holds the folder's absolute path, its `~`
+   form or its `$HOME` form. A write through `cd` and a relative path, a shell variable, a
+   script or `python -c` is out of reach. The hook does not catch it.
+4. It splits each file into sections at its markdown headings. A heading inside a fenced code
    block is not a heading. `MEMORY.md`, the index, is exempt.
-4. Each section must carry a `home:` line in its body. A line inside a fenced code block does
+5. Each section must carry a `home:` line in its body. A line inside a fenced code block does
    not count. For the section before the first heading, a `home:` key in the frontmatter also
    counts.
-5. The value is `process-only`, or a repo-relative path that the tree of some branch holds
-   now. A local branch that is not pushed counts. A deleted path does not count. A path that
+6. The value is `process-only`, or a repo-relative path to a file that the tree of some
+   branch holds now. A directory does not count. A local branch that is not pushed counts. A deleted path does not count. A path that
    leaves the repo does not count.
-6. A brief does not count. A brief is not tracked, and Row 1 below lived in a brief and still
+7. A brief does not count. A brief is not tracked, and Row 1 below lived in a brief and still
    did not reach the repo.
-7. The hook checks only that the value resolves. It never compares text, so a paraphrase
+8. The hook checks only that the value resolves. It never compares text, so a paraphrase
    cannot make it cry wolf.
-8. When git cannot resolve one value, that value does not resolve. Only a missing git, a
-   timeout or an unreadable transcript makes the hook stand down, with no block.
+9. When git cannot resolve one value, that value does not resolve. A missing git, a timeout,
+   a repo that git cannot read or an unreadable transcript makes the hook stand down, with no
+   block. A control must not depend on the state it checks
+   (`decisions/recovery-must-not-gate-on-its-own-state.md`).
 
 Process state stays in memory by design, with `home: process-only`. This covers merge order,
 which agent holds which branch, a merge approval for one act, and a personal preference.
@@ -84,6 +91,9 @@ which agent holds which branch, a merge approval for one act, and a personal pre
 - Row 5 is a scratchpad write. The census counts scratchpad writes first, in worker
   transcripts too. It counts writes, not reads. A check follows only if the count shows the
   need.
+- A Bash write that does not name the memory folder is out of reach (mechanism item 3). One
+  rare false block stays: this session's Bash command reads the folder while a peer session
+  writes a file in it.
 - A memory write that this session did not make is out of scope. A peer session's hook checks
   its own writes.
 - A ruling typed in chat that nobody writes anywhere leaves no act to key on. A cloud session
