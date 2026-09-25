@@ -24,12 +24,42 @@ down. A ruling that the orchestrator only noted went to memory and stayed there.
 `rule:building-land-design-or-abandon` already forbids this: "A design living only in chat is
 not done." It had no mechanism.
 
-## How often: unmeasured
+## How often: the census, 2026-09-25
 
-The claude-settings session that took this finding ran in a cloud container. That container
-held one transcript and no memory folder. So it could not count rulings across sessions.
-`lint/ruling_census.py` is the read-only counter. The owner runs it on the machine that holds
-the transcripts. Until that runs, the rate is unmeasured.
+The owner ran `lint/ruling_census.py` on the machine that holds the transcripts. Totals:
+
+| Count | Value |
+|---|---|
+| Worker transcripts | 1,079 |
+| Answers to questions | 3,185 |
+| Memory writes | 37 |
+| Scratchpad writes | 3,008 |
+| Lines that say "ruling" | 1,073 |
+| `home: process-only` lines | 0 |
+| Reach: found in the repo | 7 |
+| Reach: not found | 762 |
+| Reach: unknown | 1,175 |
+
+The largest project is the old iCloud pkmnscan path: 52 sessions, 379 answers and 58
+"ruling" lines.
+
+What the numbers show:
+
+- **Memory is a small channel.** There are 37 memory writes against 3,185 answers. The hook
+  guards the channel that leaked in Banchi, but most rulings never pass through memory.
+- **Chat answers are the large channel.** `rule:output-answer-has-a-home` covers them. It has
+  no mechanism yet.
+- **The reach ratio undercounts.** The reach test takes only items of 8 words or more. Most
+  answers are an option label, and a label is never in a repo word for word, even when the
+  ruling landed. So 7 found against 762 not found measures verbatim reach, not loss.
+- **Unknown is mostly old paths.** The census cannot open a repo at a path that moved, such
+  as the old iCloud path. It counts those items as unknown, never as lost.
+- **Zero process-only lines is expected.** The hook merged on 2026-09-25. It was not installed
+  on that machine when the census ran.
+
+So the rate of loss is still unmeasured. The census measured the size of each channel. A
+measure of loss needs a judged sample: pick answers, and read whether each ruling reached a
+tracked file in any words.
 
 ## The causes
 
