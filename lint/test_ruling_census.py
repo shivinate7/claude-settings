@@ -624,6 +624,41 @@ class RulingCensusTests(unittest.TestCase):
         answers = {item["answer"] for item in pools["proj_sample_worker"]}
         self.assertIn("Worker answer", answers)
 
+    def test_27_present_only_keeps_only_the_present_project(self):
+        # proj_present_missing's cwd points at a directory that does not exist on this
+        # machine. proj_present_real's cwd is self.repo, a real git repo. --present-only
+        # must keep every pick from proj_present_real and skip both of the other project's
+        # answers, and report the skip count on stderr.
+        gone_cwd = os.path.join(self.tmp.name, "gone-repo")
+        for name, cwd, tag in (
+            ("proj_present_missing", gone_cwd, "missing"),
+            ("proj_present_real", self.repo, "real"),
+        ):
+            project_dir = self.make_project(name)
+            records = [human("start", cwd=cwd)]
+            for i in range(2):
+                records.append(tool_use_msg(
+                    "AskUserQuestion", {"questions": [{"question": "Q %s %d?" % (tag, i)}]},
+                    id_="ask_%d" % i))
+                records.append(tool_result_msg(
+                    "ask_%d" % i, 'Answered: "Q %s %d?"="A %s %d". Continue.' % (
+                        tag, i, tag, i)))
+            write_transcript(records, os.path.join(project_dir, "s1.jsonl"))
+
+        run = subprocess.run(
+            [sys.executable, CENSUS, "--root", self.root, "--sample", "4",
+             "--present-only"],
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(run.returncode, 0)
+        lines = [ln for ln in run.stdout.splitlines() if ln.strip()]
+        self.assertEqual(len(lines), 2)  # only proj_present_real's 2 answers are present
+        for line in lines:
+            row = json.loads(line)
+            self.assertEqual(row["project"], self.repo)
+            self.assertIn("real", row["answer"])
+        self.assertIn("Skipped 2 candidate answer(s)", run.stderr)
+
     def test_19_root_via_real_path_file_path_via_symlink_still_matches(self):
         # The mirror case: the project folder passed in is the real path, but the tool
         # use's own file_path is spelled through the symlink.

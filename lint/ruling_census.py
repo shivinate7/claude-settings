@@ -26,6 +26,11 @@ order under `--seed`, default 0, so a run repeats) and includes worker transcrip
 field is capped at 2,000 characters, with a cut marked ` [cut]`. `--sample` writes no file.
 Its own git call is `git remote get-url origin`, a read of local config, never the network.
 
+`--sample --present-only` keeps only answers whose transcript `cwd` exists on this machine
+and is a readable git repo (`git -C <cwd> rev-parse --git-dir` succeeds), for a machine that
+holds only some of the repos. It prints how many candidate answers it skipped as not present
+to stderr, as its last line. Without the flag, `--sample` behaves as documented above.
+
 A "session" is one `*.jsonl` file directly inside a project folder. A "worker transcript" is
 a `*.jsonl` file under that session's own `subagents/` folder
 (`<project>/<session-id>/subagents/*.jsonl`), one per sub-agent the session spawned. A worker
@@ -472,6 +477,45 @@ def get_remote(cwd, cache):
     return remote
 
 
+def cwd_present(cwd, cache):
+    """True when `cwd` exists on this machine and git can read a repo there
+    (`git -C <cwd> rev-parse --git-dir` succeeds). False for a falsy `cwd`, a path that does
+    not exist, or any git failure. Uses `os.path.isdir`, not a string check, so a Windows-style
+    `cwd` (`C:\\Users\\x\\repo`) works on the machine it names. Memoized in `cache`.
+    """
+    if not cwd:
+        return False
+    if cwd in cache:
+        return cache[cwd]
+    present = False
+    if os.path.isdir(cwd):
+        try:
+            run = subprocess.run(
+                ["git", "-C", cwd, "rev-parse", "--git-dir"],
+                capture_output=True, text=True, timeout=GIT_TIMEOUT_SECONDS,
+            )
+            present = run.returncode == 0
+        except (subprocess.TimeoutExpired, OSError):
+            present = False
+    cache[cwd] = present
+    return present
+
+
+def filter_present_pools(pools):
+    """Return (pools with every answer whose transcript cwd is not present here removed,
+    the number of answers removed). A project left with no answer is dropped entirely.
+    """
+    cache = {}
+    filtered = {}
+    skipped = 0
+    for name, items in pools.items():
+        kept = [item for item in items if cwd_present(item["project"], cache)]
+        skipped += len(items) - len(kept)
+        if kept:
+            filtered[name] = kept
+    return filtered, skipped
+
+
 def collect_transcript_answers(path, items, remote_cache):
     """Append one dict per AskUserQuestion answer in the transcript at `path` to `items`."""
     records = safe_read_transcript(path)
@@ -558,10 +602,16 @@ def sample_row(item):
     return {k: cap_text(v) for k, v in item.items()}
 
 
-def run_sample(root, n, seed):
+def run_sample(root, n, seed, present_only=False):
     pools = collect_sample_pools(root)
+    skipped = 0
+    if present_only:
+        pools, skipped = filter_present_pools(pools)
     for item in pick_sample(pools, n, seed):
         print(json.dumps(sample_row(item)))
+    if present_only:
+        print("Skipped %d candidate answer(s): transcript cwd not present here."
+              % skipped, file=sys.stderr)
 
 
 def counts_row(project, counts):
@@ -607,6 +657,9 @@ def parse_args(argv):
                               "to read, instead of the table or --json")
     parser.add_argument("--seed", type=int, default=0,
                          help="Seed for --sample's pick, so a run can be repeated (default 0)")
+    parser.add_argument("--present-only", action="store_true",
+                         help="With --sample, keep only answers whose transcript cwd "
+                              "exists here and is a readable git repo")
     args = parser.parse_args(argv)
     if args.root is None:
         args.root = default_root()
@@ -617,7 +670,7 @@ def parse_args(argv):
 def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
     if args.sample is not None:
-        run_sample(args.root, args.sample, args.seed)
+        run_sample(args.root, args.sample, args.seed, args.present_only)
         return 0
     since = None
     if args.since:

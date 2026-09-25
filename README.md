@@ -423,7 +423,8 @@ fetch a missing blob over the network. Run it against a Claude Code projects roo
 `--sample N` prints N AskUserQuestion answers as JSON Lines. A judge reads them. Each line
 checks whether one ruling reached a tracked file. `--seed` (default 0) repeats a pick. The
 output can hold private text from a transcript. Keep it out of every repo. Hand it to the
-judge directly. Never commit it. Never paste it into an issue or a PR.
+judge directly. Never commit it. Never paste it into an issue or a PR. Add `--present-only`
+on a machine that holds only some of the repos, to keep only answers whose repo is here.
 
 Its own fixture suite is `lint/test_ruling_census.py`.
 
