@@ -30,6 +30,7 @@ FAILED = []
 
 T0 = "2026-09-24T10:00:00.000Z"
 OLD_MTIME = 946684800  # 2000-01-01, well before T0 regardless of the machine's real clock
+FRESH_MTIME = 1790244010  # 2026-09-24T10:00:10Z, 10 seconds after T0
 
 
 def check(name, condition, detail=""):
@@ -99,14 +100,18 @@ def write_transcript(session_dir, records):
     return path
 
 
-def new_session(name):
+def _new_session_at(base, name):
     """A transcript directory, separate from any git repo, the way a real Claude Code
     session lays it out: transcript.jsonl beside a memory/ folder."""
-    session_dir = os.path.join(ROOT, name)
+    session_dir = os.path.join(base, name)
     os.makedirs(session_dir, exist_ok=True)
     memory_dir = os.path.join(session_dir, "memory")
     os.makedirs(memory_dir, exist_ok=True)
     return session_dir, memory_dir
+
+
+def new_session(name):
+    return _new_session_at(ROOT, name)
 
 
 # --------------------------------------------------------------------------- case a
@@ -278,7 +283,7 @@ def case_tool_use_alone_old_mtime_blocks():
 
 
 # --------------------------------------------------------------------------- finding 1
-# The Bash path, naming a specific file: an OLD mtime, a Bash command naming that one
+# The Bash path, naming a specific file: a FRESH mtime, a Bash command naming that one
 # file, blocks that file and only that file.
 
 def case_bash_names_specific_file():
@@ -287,8 +292,8 @@ def case_bash_names_specific_file():
     other_path = os.path.join(memory_dir, "other.md")
     write(named_path, "# Note\n\nNo home line.\n")
     write(other_path, "# Note\n\nNo home line either.\n")
-    os.utime(named_path, (OLD_MTIME, OLD_MTIME))
-    os.utime(other_path, (OLD_MTIME, OLD_MTIME))
+    os.utime(named_path, (FRESH_MTIME, FRESH_MTIME))
+    os.utime(other_path, (FRESH_MTIME, FRESH_MTIME))
     records = [
         human_record("update the named note", T0),
         assistant_record(tool_use=bash_tool_use("cat %s" % named_path)),
@@ -302,7 +307,8 @@ def case_bash_names_specific_file():
 
 
 # --------------------------------------------------------------------------- finding 1
-# The Bash path, naming only the folder: every .md file in it counts.
+# The Bash path, naming only the folder: every .md file in it counts, each still gated on
+# its own FRESH mtime.
 
 def case_bash_names_folder_only():
     session_dir, memory_dir = new_session("case_bash_folder")
@@ -310,8 +316,8 @@ def case_bash_names_folder_only():
     has_home = os.path.join(memory_dir, "has_home.md")
     write(missing_home, "# Note\n\nNo home line.\n")
     write(has_home, "# Note\n\nhome: process-only\n")
-    os.utime(missing_home, (OLD_MTIME, OLD_MTIME))
-    os.utime(has_home, (OLD_MTIME, OLD_MTIME))
+    os.utime(missing_home, (FRESH_MTIME, FRESH_MTIME))
+    os.utime(has_home, (FRESH_MTIME, FRESH_MTIME))
     records = [
         human_record("look through the memory folder", T0),
         assistant_record(tool_use=bash_tool_use("ls %s" % memory_dir)),
@@ -322,6 +328,106 @@ def case_bash_names_folder_only():
     check("bash_folder: blocks", bool(reason), reason)
     check("bash_folder: names the file missing a home", "missing.md" in reason, reason)
     check("bash_folder: does not name the resolved file", "has_home.md" not in reason, reason)
+
+
+# --------------------------------------------------------------------------- finding 1 / 2
+# A read (`cat`/`ls`) never changes mtime. An OLD file a Bash command reads must stay
+# silent, whether named specifically or only through the folder.
+
+def case_bash_read_only_old_file_silent():
+    session_dir, memory_dir = new_session("case_bash_read_only")
+    mem_path = os.path.join(memory_dir, "old.md")
+    write(mem_path, "# Note\n\nNo home line.\n")
+    os.utime(mem_path, (OLD_MTIME, OLD_MTIME))
+    records = [
+        human_record("check the note", T0),
+        assistant_record(tool_use=bash_tool_use("cat %s" % mem_path)),
+    ]
+    path = write_transcript(session_dir, records)
+    hook = {"transcript_path": path, "cwd": ROOT}
+    reason = rh.run(hook)
+    check("bash_read_only_named: silent", reason == "", reason)
+
+
+def case_bash_ls_folder_old_files_silent():
+    session_dir, memory_dir = new_session("case_bash_ls_old")
+    mem_path = os.path.join(memory_dir, "old.md")
+    write(mem_path, "# Note\n\nNo home line.\n")
+    os.utime(mem_path, (OLD_MTIME, OLD_MTIME))
+    records = [
+        human_record("look around", T0),
+        assistant_record(tool_use=bash_tool_use("ls %s" % memory_dir)),
+    ]
+    path = write_transcript(session_dir, records)
+    hook = {"transcript_path": path, "cwd": ROOT}
+    reason = rh.run(hook)
+    check("bash_ls_folder_old_files: silent", reason == "", reason)
+
+
+# --------------------------------------------------------------------------- finding 3
+# The folder is also named through its ~ and $HOME forms.
+
+def case_bash_names_folder_tilde_and_home_forms():
+    fake_home = os.path.join(ROOT, "fake_home_for_tilde")
+    os.makedirs(fake_home, exist_ok=True)
+    prior_home = os.environ.get("HOME")
+    os.environ["HOME"] = fake_home
+    try:
+        for label, form in (("tilde", "~"), ("dollar_home", "$HOME")):
+            session_dir, memory_dir = _new_session_at(fake_home, "case_%s" % label)
+            mem_path = os.path.join(memory_dir, "notes.md")
+            write(mem_path, "# Note\n\nNo home line.\n")
+            os.utime(mem_path, (FRESH_MTIME, FRESH_MTIME))
+            rel = os.path.relpath(memory_dir, fake_home).replace(os.sep, "/")
+            records = [
+                human_record("check it", T0),
+                assistant_record(tool_use=bash_tool_use("ls %s/%s" % (form, rel))),
+            ]
+            path = write_transcript(session_dir, records)
+            hook = {"transcript_path": path, "cwd": ROOT}
+            reason = rh.run(hook)
+            check("bash_folder_%s: blocks" % label, bool(reason), reason)
+            check("bash_folder_%s: names the file" % label, "notes.md" in reason, reason)
+    finally:
+        if prior_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = prior_home
+
+
+# --------------------------------------------------------------------------- finding 3
+# A file-name match is a whole path component, never a bare substring: a Bash write to
+# data.md must not mark a.md.
+
+def case_bash_whole_component_not_substring():
+    check(
+        "whole_component: unit, a.md does not match inside data.md",
+        not rh._names_whole_component("cat memory/data.md", "a.md"),
+    )
+    check(
+        "whole_component: unit, data.md matches itself",
+        rh._names_whole_component("cat memory/data.md", "data.md"),
+    )
+
+    session_dir, memory_dir = new_session("case_whole_component")
+    a_path = os.path.join(memory_dir, "a.md")
+    data_path = os.path.join(memory_dir, "data.md")
+    write(a_path, "# Note\n\nNo home line.\n")
+    write(data_path, "# Note\n\nNo home line either.\n")
+    os.utime(a_path, (FRESH_MTIME, FRESH_MTIME))
+    os.utime(data_path, (FRESH_MTIME, FRESH_MTIME))
+    records = [
+        human_record("update data", T0),
+        assistant_record(tool_use=bash_tool_use("cat %s" % data_path)),
+    ]
+    path = write_transcript(session_dir, records)
+    hook = {"transcript_path": path, "cwd": ROOT}
+    reason = rh.run(hook)
+    prefix = "Ruling home: this turn's memory names no tracked home for "
+    check("whole_component: reason has the expected shape", reason.startswith(prefix), reason)
+    named_part = reason[len(prefix):].split(". Each written section")[0]
+    entries = named_part.split("; ")
+    check("whole_component: exactly data.md named, not a.md", entries == ["data.md (Note)"], entries)
 
 
 # --------------------------------------------------------------------------- finding 3
@@ -371,6 +477,28 @@ def case_refuses_dot_dotdot_and_glob():
         check("refuses_%s: blocks" % label, bool(reason), reason)
 
 
+# --------------------------------------------------------------------------- decision item 6
+# A directory is not a home, with or without a trailing slash.
+
+def case_directory_is_not_a_home():
+    repo = make_repo("case_dir_not_home_repo")
+    write(os.path.join(repo, "decisions", "real.md"), "# Real\n")
+    commit_all(repo)
+
+    for label, value in (("no_slash", "decisions"), ("trailing_slash", "decisions/")):
+        session_dir, memory_dir = new_session("case_dir_%s" % label)
+        mem_path = os.path.join(memory_dir, "notes.md")
+        write(mem_path, "# Note\n\nhome: %s\n" % value)
+        records = [
+            human_record("file it", T0),
+            assistant_record(tool_use=write_tool_use(mem_path)),
+        ]
+        path = write_transcript(session_dir, records)
+        hook = {"transcript_path": path, "cwd": repo}
+        reason = rh.run(hook)
+        check("dir_not_home_%s: blocks" % label, bool(reason), reason)
+
+
 # --------------------------------------------------------------------------- finding 5
 # A fenced code block can hold text that LOOKS like a heading and a home-less section. A
 # fence-blind reader would split on it and wrongly block; the real, single section already
@@ -396,6 +524,31 @@ def case_fence_hides_fake_content():
     hook = {"transcript_path": path, "cwd": ROOT}
     reason = rh.run(hook)
     check("fence: silent, the fenced fake heading is not a real section", reason == "", reason)
+
+
+# --------------------------------------------------------------------------- finding 5 (2nd shape)
+# A home: line that exists ONLY inside a fence, with real prose outside it, must still
+# block: a fenced home never counts as the section's own home.
+
+def case_home_only_inside_fence_blocks():
+    session_dir, memory_dir = new_session("case_fence_only_home")
+    mem_path = os.path.join(memory_dir, "notes.md")
+    write(
+        mem_path,
+        "# Note\n\nSome real prose here, but the only home: line is fenced below.\n\n"
+        "```\n"
+        "home: process-only\n"
+        "```\n",
+    )
+    records = [
+        human_record("do the thing", T0),
+        assistant_record(tool_use=write_tool_use(mem_path)),
+    ]
+    path = write_transcript(session_dir, records)
+    hook = {"transcript_path": path, "cwd": ROOT}
+    reason = rh.run(hook)
+    check("home_only_inside_fence: blocks", bool(reason), reason)
+    check("home_only_inside_fence: names the section", "Note" in reason, reason)
 
 
 # --------------------------------------------------------------------------- finding 6
@@ -515,6 +668,38 @@ def case_deleted_path_and_unpushed_branch():
     check("unpushed_branch: side.md resolves, not named", "side.md" not in reason, reason)
 
 
+# --------------------------------------------------------------------------- finding 4
+# One value, several refs, ONE git process (a batch-check call), not one process per ref.
+
+def case_batch_check_single_process_call():
+    repo = make_repo("case_batch_repo")
+    write(os.path.join(repo, "x.md"), "hello\n")
+    commit_all(repo)
+    _git(repo, "checkout", "-q", "-b", "side-branch-2")
+    write(os.path.join(repo, "y.md"), "hello2\n")
+    commit_all(repo, "side add")
+    _git(repo, "checkout", "-q", "-")
+
+    refs = rh._list_refs(repo)
+    check("batch_check: at least two refs to test with", len(refs) >= 2, refs)
+
+    calls = {"cat_file": 0}
+    real_run_git = rh._run_git
+
+    def counting_run_git(cwd, args, input_text=None):
+        if args and args[0] == "cat-file":
+            calls["cat_file"] += 1
+        return real_run_git(cwd, args, input_text=input_text)
+
+    rh._run_git = counting_run_git
+    try:
+        resolved = rh._resolve_value(repo, refs, "x.md")
+    finally:
+        rh._run_git = real_run_git
+    check("batch_check: resolves", resolved is True, resolved)
+    check("batch_check: exactly one cat-file process for every ref", calls["cat_file"] == 1, calls["cat_file"])
+
+
 # --------------------------------------------------------------------------- main(), end to end
 
 def _run_main(hook_payload, env=None, timeout=30):
@@ -581,6 +766,28 @@ def case_main_missing_git_binary_stands_down():
     check("main_missing_git: nothing printed", result.stdout.strip() == "", result.stdout)
 
 
+# --------------------------------------------------------------------------- finding 2 / item 9
+# A repo git itself cannot read -- a `.git` file pointing at a missing gitdir -- stands the
+# hook down silently, even with a correct-looking home: value in the memory file.
+
+def case_main_repo_git_cannot_read_stands_down():
+    broken = os.path.join(ROOT, "broken_git_repo")
+    os.makedirs(broken, exist_ok=True)
+    write(os.path.join(broken, ".git"), "gitdir: /this/does/not/exist\n")
+
+    session_dir, memory_dir = new_session("case_broken_git")
+    mem_path = os.path.join(memory_dir, "notes.md")
+    write(mem_path, "# Note\n\nhome: some/plausible/path.md\n")
+    records = [
+        human_record("file it", T0),
+        assistant_record(tool_use=write_tool_use(mem_path)),
+    ]
+    path = write_transcript(session_dir, records)
+    result = _run_main({"transcript_path": path, "cwd": broken})
+    check("main_broken_git_repo: exit 0", result.returncode == 0, result.returncode)
+    check("main_broken_git_repo: nothing printed", result.stdout.strip() == "", result.stdout)
+
+
 def main():
     case_a_no_home_line()
     case_b_process_only_passes()
@@ -593,16 +800,24 @@ def main():
     case_tool_use_alone_old_mtime_blocks()
     case_bash_names_specific_file()
     case_bash_names_folder_only()
+    case_bash_read_only_old_file_silent()
+    case_bash_ls_folder_old_files_silent()
+    case_bash_names_folder_tilde_and_home_forms()
+    case_bash_whole_component_not_substring()
     case_absolute_value_refused()
     case_refuses_dot_dotdot_and_glob()
+    case_directory_is_not_a_home()
     case_fence_hides_fake_content()
+    case_home_only_inside_fence_blocks()
     case_frontmatter_home_passes()
     case_wrapped_value_and_remedy_wording()
     case_git_failure_for_one_value_keeps_other_findings()
     case_deleted_path_and_unpushed_branch()
+    case_batch_check_single_process_call()
     case_main_silent_no_memory_folder()
     case_main_blocks()
     case_main_missing_git_binary_stands_down()
+    case_main_repo_git_cannot_read_stands_down()
 
     if FAILED:
         print("test_ruling_home FAIL: %d failing check(s)" % len(FAILED))
