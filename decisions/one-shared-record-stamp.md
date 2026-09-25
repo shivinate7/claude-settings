@@ -23,15 +23,18 @@ Four repos, four record shapes, all serving the same one-sentence rule:
 - job-cost-reporting: the number lives in the frontmatter and in the filename.
   `_<date>-<slug>.md` becomes `D12_<date>-<slug>.md`. Four kinds: `docs/decisions`,
   `docs/build`, `docs/findings`, `docs/questions`.
-- banchi: the number lives in the filename AND the heading, in a per-file corpus.
-  MEASURED on `main`, 2026-09-24: `docs/decisions/D-<slug>.md` becomes
-  `docs/decisions/D001-<slug>.md` (261 files, 3-digit filename pad, `## D1 —` in the
-  heading, no pad there), tracked by `docs/decisions/ORDER.json`. `docs/debts/` (34
-  files) and `docs/gates/steps/` (25 files) carry their own `ORDER.json` the same way.
-  Flat files `docs/DECISIONS.md`, `docs/DEBTS.md`, `docs/CODES-DECISIONS.md` sit
-  beside them; `scripts/split-debts.py` and `scripts/debts_corpus.py` suggest these are
-  generated or legacy rather than the source of truth. Its own claim tool,
-  `scripts/claim-ids.py`, is 1727 lines.
+- banchi: the number lives in a heading. For `docs/decisions` it also lives in the
+  filename. MEASURED on banchi `main` (053acf0), 2026-09-24. `docs/decisions` holds 262
+  entries: 257 numbered files, 4 `_*.md` section files, and `ORDER.json`.
+  `docs/decisions/D-<slug>.md`, first line `## D-<slug> — Title`, becomes
+  `D258-<slug>.md` with `## D258 — Title`. The filename pads to 3 digits. The heading
+  does not. `docs/CODES-DECISIONS.md` is a live flat corpus, `C1` to `C11`, one heading
+  per record, no rename. `docs/DECISIONS.md`, `docs/GATES.md` and `docs/DEBTS.md` are
+  pointer files. Each says so on its own first lines. `docs/debts` holds 35 entries
+  (33 numbered, `_preamble.md`, `ORDER.json`). `docs/gates/steps` holds 25 (23 steps and
+  2 `_*.md`), with no `ORDER.json` of its own. `docs/gates/ORDER.json` lists them.
+  `docs/gates/contract` holds 11. Its own claim tool, `scripts/claim-ids.py`, is 1727
+  lines.
 
 ## The choice
 
@@ -52,27 +55,76 @@ workflow over, on its own schedule.
 
 ## Formats built, and left out
 
-`actions/stamp/stamp.mjs` covers two shapes:
+`actions/stamp/stamp.mjs` covers three shapes:
 
 1. Number in frontmatter only (q_max, sharables).
 2. Number in frontmatter and in the filename (job-cost-reporting).
+3. Number in a heading, and for a split corpus in the filename too (banchi). Its own
+   module, `actions/stamp/formats/heading.mjs`. `stamp.mjs` only dispatches to it.
 
-Banchi's shape is not built in this PR. It is deferred to a follow-up lane, not
-skipped for a shape mismatch. The number lives in both the filename and the heading,
-a third location neither shape above covers. Its own claim tool is 1727 lines.
+Format 3 was read rule by rule off `scripts/claim-ids.py`, `scripts/index-decisions.py`
+and `scripts/decisions_corpus.py`. The numbered rule list, each rule marked covered or
+left out, is in the pull request body. The engine takes banchi's decisions and code
+cards. banchi's own `scripts/index-decisions.py --write` runs as the `regenerate`
+input. It appends to `ORDER.json` and rewrites the `CLAUDE.md` index.
 
-That lane must handle three things. A filename-plus-heading number: the filename
-pads to 3 digits, the heading does not. `ORDER.json`, one per corpus
-(`docs/decisions/ORDER.json`, `docs/debts/ORDER.json`, `docs/gates/ORDER.json`), read
-and written alongside the rename. And the flat files (`docs/DECISIONS.md`,
-`docs/DEBTS.md`, `docs/CODES-DECISIONS.md`). These may turn out to need only a
-`regenerate` job calling banchi's own scripts, not a fourth shape this engine must
-reproduce.
+**Parity, MEASURED 2026-09-24.** Two untouched copies of banchi main got the same
+pending records: 2 decisions, 1 code card, 1 step, and cites from 8 other files. One
+copy ran `claim-ids.py --write`. The other ran the action's own `run.sh`, with the
+env `action.yml` passes it and `REGENERATE_COMMAND` set to banchi's command. The two
+trees matched byte for byte, 1245 of 1245 files. A second
+run, with one pending name listed in `ORDER.json`, matched 1245 of 1245 too.
 
-A repo shaped like banchi keeps its own claim tool until that lane runs. That lane
-reads `scripts/claim-ids.py` and `main` in full. The partial read this entry first
-drew on described an older, flat-file-only design. That design no longer matches the
-corpus banchi runs today.
+**Left out, on purpose:**
+
+- **Build steps.** claim-ids.py reads a pending step only from `docs/GATES.md`, which
+  is now a pointer file. MEASURED: a pending step in `docs/gates/steps/` gets no claim.
+  The same step written into `docs/GATES.md` is claimed as `step 1`, because that file
+  holds no numbered step, so the ceiling reads 0. Step 1 already exists. banchi's own
+  tool is stale for steps. This engine copies no stale rule. The owner picks one of two
+  options. Option 1: the engine claims steps in `docs/gates/steps/` with claim-ids.py's
+  own grammar (`` 0. `step <slug>` ``, the ceiling from the step files, `docs/map.py`'s
+  `"n"` field, `docs/gates/ORDER.json`). That is a named difference from claim-ids.py.
+  Option 2: steps stay out, and banchi numbers them by hand.
+- **Debts.** claim-ids.py has no debt kind. There is no rule to copy.
+- **The flat-file fallback.** With no `ORDER.json`, claim-ids.py reads decisions from
+  the flat `docs/DECISIONS.md`. That serves commits before the split. banchi main has
+  the manifest.
+- **No rename without a manifest.** claim-ids.py renames no file when `ORDER.json` is
+  missing. The engine renames a claimed file whether or not a manifest exists.
+- **The branch-side reads.** `--stale`, `--unclaim`, `--landed`, `--porcelain` and
+  `merging()` serve a claim made on a branch before the merge. This stamp claims only
+  on the default branch. `--check` refuses a number written on a branch instead.
+
+**Deliberate differences from claim-ids.py.** Parity above is not changed by any of
+them. All but the last two come up only in a state claim-ids.py gets wrong, or one
+banchi's tree does not hold today. The last two come up in banchi's normal flow.
+
+- A malformed pending heading (`## D012`, `## D-Bad_Slug`) is refused. MEASURED:
+  claim-ids.py claims it as an id.
+- A duplicate pending slug, or a pending file claim-ids.py's filename rule cannot find,
+  is refused. claim-ids.py claims it and leaves two headings on one number, or leaves
+  the file unrenamed.
+- Path cites run longest slug first. MEASURED: claim-ids.py rewrote a path cite of
+  `D-probe-foo-bar.md` to the id of `D-probe-foo`, because the shorter slug ran first.
+- The ceiling is read off the tree being stamped, not off `--ref`. At the merge, that
+  tree is main.
+- A rewritten file keeps its own line ending. Python's `write_text` writes the
+  platform's. On banchi today, no text file the walk opens has a CRLF.
+- A rename onto a file that already exists is refused before anything is written.
+  claim-ids.py's `Path.rename` replaces that file on POSIX and fails on Windows.
+- A ref and HEAD with no merge base: claim-ids.py refuses, exit 2. `--stamp` reads no
+  ref and never asks. `--check` off the default branch prints "NOT ASKED" and does
+  not refuse.
+- A failed `regenerate` stops the run and nothing is pushed. claim-ids.py's
+  `settle_corpus` ignores a failed generator, and the claim still lands.
+- `--check` refuses a record numbered on a branch. claim-ids.py claims on the branch,
+  so its `--stale` passes a branch number that main has not taken. This one is in
+  banchi's normal flow: `make merge` (`scripts/merge-pr.py`, which calls
+  `scripts/claim-ids.py`) claims numbers on the branch for every pull request.
+  **Adoption step:** banchi must retire the branch-side claim in `make merge` before it
+  runs this action's `--check`. Until then, `--check` is red on every pull request
+  `make merge` claims.
 
 Two more shapes stay unmechanized everywhere. q_max's `docs/decisions/B*` and `G*`
 folders have no pending form today. Neither do banchi's `docs/debts` folder or its `T`
@@ -148,8 +200,8 @@ and `gates-macos` in `.github/workflows/gates.yml`.
 
 ## What would reopen this
 
-A repo shaped like banchi asks to adopt this tool. A fifth repo turns up with a sixth
-shape neither format here, nor banchi's own, covers. Either the `numbering` or the
+banchi asks to adopt this tool. The owner picks a step option above. A fifth repo
+turns up with a shape none of the three formats covers. Either the `numbering` or the
 `cite` assumption above turns out wrong for a repo nobody has read yet. Any of these is
-a reason to come back to this entry before writing a third format into `stamp.mjs`.
+a reason to come back to this entry before writing a fourth format into `stamp.mjs`.
 None of them is a reason to guess one in.
