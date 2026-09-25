@@ -125,7 +125,9 @@ def is_process_only_line(line):
 def is_scratchpad_write(block):
     if block.get("name") not in MEMORY_WRITE_NAMES:
         return False
-    inp = block.get("input") or {}
+    inp = block.get("input")
+    if not isinstance(inp, dict):
+        return False
     file_path = inp.get("file_path")
     if not isinstance(file_path, str):
         return False
@@ -135,13 +137,16 @@ def is_scratchpad_write(block):
 def memory_write_texts(block, project_dir):
     """Return the list of new-text strings a memory write puts on disk, None if `block` is
     not a Write/Edit/MultiEdit tool use under `project_dir`'s own memory/ folder, or the
-    BAD_FILE_PATH sentinel when it is one of those tool names but `file_path` is not a
-    string (so we cannot tell where it points).
+    BAD_FILE_PATH sentinel when it is one of those tool names but its `input` is not an
+    object (for example a list) or its `file_path` is not a string (so we cannot tell
+    where it points).
     """
     name = block.get("name")
     if name not in MEMORY_WRITE_NAMES:
         return None
-    inp = block.get("input") or {}
+    inp = block.get("input")
+    if not isinstance(inp, dict):
+        return BAD_FILE_PATH
     file_path = inp.get("file_path")
     if file_path is None:
         return None

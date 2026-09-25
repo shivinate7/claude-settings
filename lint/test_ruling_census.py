@@ -346,6 +346,23 @@ class RulingCensusTests(unittest.TestCase):
         self.assertEqual(counts["memory_writes"], 0)
         self.assertEqual(counts["unknown"], 1)
 
+    def test_12b_tool_use_input_not_an_object_counts_unknown_not_crash(self):
+        # A tool use whose `input` is a list, not an object, must not crash the census
+        # with AttributeError on `inp.get(...)`. It is skipped and counted as unknown.
+        project_dir = self.make_project("proj_bad_input")
+        os.makedirs(os.path.join(project_dir, "memory"), exist_ok=True)
+        records = [
+            human("start", cwd=self.repo),
+            tool_use_msg("Write", ["not", "an", "object"], id_="write_1"),
+            tool_result_msg("write_1"),
+        ]
+        path = write_transcript(records, os.path.join(project_dir, "s1.jsonl"))
+        timeouts = [0]
+        counts = ruling_census.scan_transcript(path, project_dir, timeouts)
+        self.assertEqual(counts["memory_writes"], 0)
+        self.assertEqual(counts["scratchpad_writes"], 0)
+        self.assertEqual(counts["unknown"], 1)
+
     # ---------------------------------------------------------- fix 2: relative --root
 
     def test_13_relative_root_still_finds_memory_writes(self):
