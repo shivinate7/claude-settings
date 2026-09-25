@@ -413,8 +413,9 @@ own answer names the unknown state. Its docstring states the contract, so a late
 joins it by fixture, not by a new grep pattern.
 
 `lint/ruling_census.py` is a read-only counter for where a ruling lands: memory, scratchpad,
-or a tracked file (decisions/memory-is-never-a-rulings-only-home.md). It writes no file and
-makes no network call. Run it against a Claude Code projects root:
+or a tracked file (decisions/memory-is-never-a-rulings-only-home.md). It writes no file. Its
+only outside call is a local `git log -S`, per repo. On a partial clone that call can itself
+fetch a missing blob over the network. Run it against a Claude Code projects root:
 
     python3 lint/ruling_census.py
     python3 lint/ruling_census.py --root ~/.claude/projects --since 2026-09-01 --json
