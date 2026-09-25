@@ -47,6 +47,12 @@ jobs:
       - name: Stop-hook gate fixture suite
         run: python3 lint/test_gates.py
 
+      - name: Ruling home fixture suite
+        run: python3 hooks/test_ruling_home.py
+
+      - name: Ruling census fixture suite
+        run: python3 lint/test_ruling_census.py
+
       - name: Rule audit fixture suite
         run: python3 lint/test_rule_audit.py
 
@@ -170,6 +176,14 @@ jobs:
       - name: Stop-hook gate fixture suite
         if: ${{ !cancelled() }}
         run: python3 lint/test_gates.py
+
+      - name: Ruling home fixture suite
+        if: ${{ !cancelled() }}
+        run: python3 hooks/test_ruling_home.py
+
+      - name: Ruling census fixture suite
+        if: ${{ !cancelled() }}
+        run: python3 lint/test_ruling_census.py
 
       - name: Rule audit fixture suite
         if: ${{ !cancelled() }}
@@ -317,6 +331,14 @@ jobs:
       - name: Stop-hook gate fixture suite
         if: ${{ !cancelled() }}
         run: python lint/test_gates.py
+
+      - name: Ruling home fixture suite
+        if: ${{ !cancelled() }}
+        run: python hooks/test_ruling_home.py
+
+      - name: Ruling census fixture suite
+        if: ${{ !cancelled() }}
+        run: python lint/test_ruling_census.py
 
       - name: Rule audit fixture suite
         if: ${{ !cancelled() }}
