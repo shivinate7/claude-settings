@@ -525,10 +525,14 @@ test("unclaimed: --stamp refuses a pending build step, and writes nothing", () =
     assert.deepEqual(snapshot(root), before);
   }));
 
-test("unclaimed: a numbered step line, and prose that mentions a step, stay silent", () =>
+test("unclaimed: a numbered line, a number ending in 0, an indented marker, and prose, all stay silent", () =>
   withTempDir((root) => {
     banchiTree(root);
     write(root, "docs/gates/steps/numbered.md", "# Steps\n\n2. `step add-widget`\n");
+    // The anchor is "^0\.", not "0\.": a number that merely ENDS in 0 must not match either.
+    write(root, "docs/gates/steps/numbered-ten.md", "# Steps\n\n10. `step add-widget`\n");
+    // The anchor is line START, not "somewhere on the line after leading space".
+    write(root, "docs/gates/steps/indented.md", "# Steps\n\n   0. `step add-gadget`\n");
     write(root, "docs/gates/steps/prose.md", "# Steps\n\nSee step add-widget for details.\n");
 
     assert.deepEqual(check(root, banchiConfig()), []);
@@ -544,6 +548,33 @@ test("unclaimed: a config without the key stays silent on the same tree", () =>
 
     assert.deepEqual(check(root, config), []);
     assert.deepEqual(stamp(root, config).problems, []);
+  }));
+
+test("unclaimed: a config entry whose pattern has no \"slug\" group is a config error, before any tree read", () =>
+  withTempDir((root) => {
+    write(root, "actions/stamp/examples/bad.stamp.json", JSON.stringify({
+      ...JSON.parse(readFileSync(join(HERE, "examples/banchi.stamp.json"), "utf8")),
+      unclaimed: [{ folder: "docs/gates/steps", pattern: "^0\\.(\\s+`step ([a-z-]+)`)", message: "x" }],
+    }));
+    assert.throws(() => loadConfig(join(root, "actions/stamp/examples/bad.stamp.json")), /named group.*slug/);
+  }));
+
+test("unclaimed: a config entry with an invalid regex pattern is a config error", () =>
+  withTempDir((root) => {
+    write(root, "actions/stamp/examples/bad.stamp.json", JSON.stringify({
+      ...JSON.parse(readFileSync(join(HERE, "examples/banchi.stamp.json"), "utf8")),
+      unclaimed: [{ folder: "docs/gates/steps", pattern: "(unterminated", message: "x" }],
+    }));
+    assert.throws(() => loadConfig(join(root, "actions/stamp/examples/bad.stamp.json")), /not a valid regex/);
+  }));
+
+test("unclaimed: a config entry missing a required field is a config error", () =>
+  withTempDir((root) => {
+    write(root, "actions/stamp/examples/bad.stamp.json", JSON.stringify({
+      ...JSON.parse(readFileSync(join(HERE, "examples/banchi.stamp.json"), "utf8")),
+      unclaimed: [{ folder: "docs/gates/steps", pattern: "^0\\.(?<slug>x)" }], // no "message"
+    }));
+    assert.throws(() => loadConfig(join(root, "actions/stamp/examples/bad.stamp.json")), /missing "message"/);
   }));
 
 // ---------------------------------------------------------------- run

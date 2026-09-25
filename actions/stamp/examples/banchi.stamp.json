@@ -37,6 +37,7 @@
     {
       "folder": "docs/gates/steps",
       "pattern": "^0\\.(\\s+`step (?<slug>[a-z][a-z0-9]*(?:-[a-z0-9]+)+)`)",
+      "label": "step",
       "message": "Banchi build steps are not claimed by this engine. Number this step by hand. See deferred/banchi-build-steps.md."
     }
   ],

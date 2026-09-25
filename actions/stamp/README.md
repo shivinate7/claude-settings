@@ -134,14 +134,17 @@ from whichever is closest to your own repo's shape.
 - `walk`: which files a cite rewrite opens. `textSuffixes`, `skipDirs` (matched by
   directory name), `skipDotDirs`, and `extensionlessDirs`. Symlinks are never walked.
 - `unclaimed`: markers this engine refuses to number at all, because it has no rule to
-  copy for them. A list of `{ folder, pattern, message }`. Both `--check` and `--stamp`
-  refuse when a `.md` file directly in `folder` matches `pattern` — `--stamp` refuses
-  before writing anything. `pattern` runs with `gmu` flags and must carry a named group
-  `(?<slug>...)` for the problem message. Banchi's own entry catches a pending build
-  step, `` ^0\.(\s+`step (?<slug>[a-z][a-z0-9]*(?:-[a-z0-9]+)+)`) ``, banchi's own
-  `scripts/claim-ids.py` `GATES_PENDING` grammar, expanded and quoted verbatim. See
-  `examples/banchi.stamp.json` and `deferred/banchi-build-steps.md`. Omit this key and
-  nothing changes: it never fires.
+  copy for them. A list of `{ folder, pattern, message, label }`, `label` optional.
+  Both `--check` and `--stamp` refuse when a `.md` file directly in `folder` matches
+  `pattern` — `--stamp` refuses before writing anything. `pattern` runs with `gmu`
+  flags and must carry a named group `(?<slug>...)`. `normalizeConfig` refuses a
+  malformed `pattern`, or one with no `slug` group, when the config loads, before any
+  tree is read. The problem names the matched line, trimmed, unless `label` is set, in
+  which case it names `<label> <slug>` instead. Banchi's own entry catches a pending
+  build step, `` ^0\.(\s+`step (?<slug>[a-z][a-z0-9]*(?:-[a-z0-9]+)+)`) `` — banchi's
+  own `scripts/claim-ids.py` `GATES_PENDING` grammar, with a named `slug` group — and
+  sets `label: "step"`. See `examples/banchi.stamp.json` and
+  `deferred/banchi-build-steps.md`. Omit this key and nothing changes: it never fires.
 
 **Read `numbering` off your own tool. Never guess this field.** q_max's own `--stamp`
 takes the highest existing number, per kind, and adds one. It never fills a gap.
