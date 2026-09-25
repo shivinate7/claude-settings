@@ -108,12 +108,21 @@ which agent holds which branch, a merge approval for one act, and a personal pre
 A `home: process-only` line can become a reflex. The census counts `process-only` lines, so a
 reader can see if the label hides rulings.
 
-## Waiting on the owner
+## The owner's rulings, 2026-09-25
 
-These change CLAUDE.md text, so they wait for the owner's word:
+These change CLAUDE.md text. The owner answered each one:
 
 - Reword `rule:tokens-compacting-keep-essentials` to keep each ruling's home, not the ruling.
+  Adopted.
 - Add the rule "A memory entry may point to a ruling. It is never the ruling's only home."
-- Give each AskUserQuestion answer a home in the round's report.
-- Name a standing `records/<session>` branch that the orchestrator may commit records to at
-  any time.
+  Adopted, as `rule:building-memory-never-only-home`. `hooks/ruling_home.py` is its
+  mechanism.
+- Give each answer to a question a home. Adopted, as `rule:output-answer-has-a-home`. In the
+  owner's view, the report is a scratchpad. Each ruling in it moves to its real home, a
+  decision entry or a deferred item. Nothing checks this rule yet.
+- A standing `records/<session>` branch for the orchestrator's records. Not yet. This
+  session landed each record on a work branch with no trouble. The census must first show
+  that the cost of a record is the real cause.
+
+The owner also named the home for a deferred item: the `deferred/` folder, one file per item.
+Some repos call this kind "debts".

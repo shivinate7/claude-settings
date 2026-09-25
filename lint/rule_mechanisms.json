@@ -483,6 +483,19 @@
         "ref": "lint/check_landed_dirs.py",
         "needle": "CONFIG_FROZEN_DIRS"
       }
+    },
+    "building-memory-never-only-home": {
+      "mechanism": {
+        "kind": "gate",
+        "ref": "hooks/ruling_home.py",
+        "needle": "Claude Code hook: ruling-home check (Stop)."
+      }
+    },
+    "output-answer-has-a-home": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Nothing checks that an answer given in chat reached a decision entry or a deferred item before the work it governs merged. A check would have to pair each AskUserQuestion answer with a tracked path that a later report names."
+      }
     }
   }
 }

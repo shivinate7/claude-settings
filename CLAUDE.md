@@ -71,7 +71,7 @@ report a read that could not run as unknown, never as clear or broken.<!-- rule:
 rendered view.<!-- rule:tokens-never-load-whole-doc --> A verification command's answer is its verdict, not its stream. Get the
 verdict with one bounded command. Never scroll a log to find out whether something
 passed.<!-- rule:tokens-verdict-not-stream --> Point a brief at files. Never paste them in.<!-- rule:tokens-point-brief-at-files --> Read a sub-agent's report,
-never its transcript.<!-- rule:tokens-read-report-not-transcript --> When compacting, keep the files, the commands, and the rulings.
+never its transcript.<!-- rule:tokens-read-report-not-transcript --> When compacting, keep the files, the commands, and each ruling's home.
 Drop the narration.<!-- rule:tokens-compacting-keep-essentials -->
 
 **Building.** Never guess an answer the code should give you.<!-- rule:building-never-guess-answer --> Surface ambiguity instead
@@ -80,7 +80,7 @@ primitive exists before building a workaround.<!-- rule:building-check-primitive
 the code emits, never a copy of it.<!-- rule:building-allow-list-is-the-constant --> Fix the cause, not the symptom.<!-- rule:building-fix-cause-not-symptom --> Name a
 fix as a bandaid when a bandaid is the right call.<!-- rule:building-name-bandaid --> A capability no user can reach is not built. A design living
 only in chat is not done. Land the design in a spec or decision entry now, or declare
-the design abandoned.<!-- rule:building-land-design-or-abandon -->
+the design abandoned.<!-- rule:building-land-design-or-abandon --> A memory entry may point to a ruling. It is never the ruling's only home.<!-- rule:building-memory-never-only-home -->
 
 **Speak plainly.** Cite a record by id plus a short gloss, like "D12, short titles for
 records". Never cite a bare id.<!-- rule:speak-cite-id-plus-gloss --> Never explain a rule in a paragraph.<!-- rule:speak-never-explain-in-paragraph --> If I ask
@@ -91,7 +91,7 @@ unless told otherwise.<!-- rule:output-write-in-ste --> Never use a semicolon. W
 Once an objective is underway, assume nobody reads until I return. A turn that only tracks running work
 gets one line, or none.<!-- rule:output-tracking-turn-one-line --> Never echo a worker's report or describe a screenshot.<!-- rule:output-never-echo-worker-report -->
 Never paste a passing run's output into a report. Give the verdict.<!-- rule:output-never-paste-passing-output -->
-Bring my decisions as a question with options and a recommendation.<!-- rule:output-bring-decisions-as-question -->
+Bring my decisions as a question with options and a recommendation.<!-- rule:output-bring-decisions-as-question --> An answer to a question I bring is a ruling. The report may hold it as a scratch note. Move it to its real home, a decision entry or a deferred item. Cite that home before the work it governs merges. Mark a process answer process-only.<!-- rule:output-answer-has-a-home -->
 
 **Reports, in order:** Done, Deviations, Input Needed, Next.<!-- rule:reports-order-of-labels --> Done: one line per item, BUILT,
 RECORDED, or OTHER, with its PR or commit.<!-- rule:reports-done-format --> One item inline, several as bullets.<!-- rule:reports-item-count-format --> Drop a label
