@@ -58,7 +58,9 @@ meant to recover from. It never stands down over one value's own git answer (`ca
 resolve, and every other finding this turn still reports. `lint/_transcript.py`'s import is
 deferred to inside `run()`, itself inside `main()`'s fail-open `try`, so a missing or broken
 copy of that shared module also stands down rather than crashing the hook before `main()` can
-catch anything.
+catch anything. A single memory FILE this hook cannot read -- not UTF-8, a permission error,
+or one that vanished between the folder listing and the open -- also never stands the hook
+down: `run()` skips only that one file and still reports every other file's own findings.
 
 Windows: paths are built with `os.path` throughout, and every path comparison runs
 `os.path.normcase(os.path.normpath(...))` first, so a case-insensitive filesystem and a mixed
@@ -378,22 +380,25 @@ def _list_refs(cwd):
 def _resolve_value(cwd, refs, git_path):
     """True when ANY ref's tree holds a blob (never a tree/directory) at `git_path`.
 
-    One `git cat-file --batch-check` call answers for every ref at once, fed `<ref>:<path>`
-    lines on stdin, rather than one process per ref (the performance fix this exists for). A
-    non-zero exit, or an object that batch-check reports missing or of any type but `blob`,
-    reads as "this value does not resolve" -- never a stand-down: see the module docstring.
+    One `git cat-file --batch-check=%(objecttype)` call answers for every ref at once, fed
+    `<ref>:<path>` lines on stdin, rather than one process per ref (the performance fix this
+    exists for). The custom format prints the bare type (`blob`, `tree`, ...) and nothing else
+    for a found object, so a whole-line `== "blob"` test is exact. Plain `--batch-check`
+    prints `<ref>:<path> missing` for a missing object, echoing the input verbatim -- a value
+    like `nothere blob` would then put `blob` in that ECHOED text, and splitting the line by
+    whitespace and reading field [1] would misread that as a resolved blob. The custom format
+    still echoes `<input> missing` for a miss, so the same value still ends a line in
+    `... missing`, never in the four bare letters `blob` alone; only a real found blob does.
+    A non-zero exit, or an object of any type but `blob` or missing outright, reads as "this
+    value does not resolve" -- never a stand-down: see the module docstring.
     """
     if not refs:
         return False
     stdin_text = "".join("%s:%s\n" % (ref, git_path) for ref in refs)
-    run = _run_git(cwd, ["cat-file", "--batch-check"], input_text=stdin_text)
+    run = _run_git(cwd, ["cat-file", "--batch-check=%(objecttype)"], input_text=stdin_text)
     if run.returncode != 0:
         return False
-    for line in run.stdout.splitlines():
-        fields = line.split()
-        if len(fields) >= 2 and fields[1] == "blob":
-            return True
-    return False
+    return any(line.strip() == "blob" for line in run.stdout.splitlines())
 
 
 def value_resolves(value, cwd):
@@ -477,7 +482,14 @@ def run(hook):
         if name not in written:
             continue
         full = os.path.join(memory_dir, name)
-        findings.extend(check_file(full, name, cwd))
+        try:
+            findings.extend(check_file(full, name, cwd))
+        except (OSError, UnicodeDecodeError):
+            # This one file could not be read (not UTF-8, permission denied, vanished
+            # since find_memory_files listed it, ...). Skip only it, per the FAIL OPEN
+            # section: a read failure on one file must never lose every other file's own
+            # findings this turn, and must never itself stand the whole hook down either.
+            continue
 
     if not findings:
         return ""

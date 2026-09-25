@@ -700,6 +700,51 @@ def case_batch_check_single_process_call():
     check("batch_check: exactly one cat-file process for every ref", calls["cat_file"] == 1, calls["cat_file"])
 
 
+# --------------------------------------------------------------------------- post-review fix 1
+# One memory file that is not UTF-8 must not lose the other written file's own findings, and
+# must not stand the whole hook down either.
+
+def case_unreadable_file_skipped_others_still_reported():
+    session_dir, memory_dir = new_session("case_unreadable")
+    bad_path = os.path.join(memory_dir, "bad.md")
+    good_path = os.path.join(memory_dir, "notes.md")
+    with open(bad_path, "wb") as f:
+        f.write(b"# Note\n\n\xff\xfe not valid utf-8 \x80\x81\n")
+    write(good_path, "# Note\n\nNo home line.\n")
+    records = [
+        human_record("file both", T0),
+        assistant_record(tool_use=write_tool_use(bad_path)),
+        assistant_record(tool_use=write_tool_use(good_path)),
+    ]
+    path = write_transcript(session_dir, records)
+    hook = {"transcript_path": path, "cwd": ROOT}
+    reason = rh.run(hook)
+    check("unreadable_file_skipped: blocks on the readable file", bool(reason), reason)
+    check("unreadable_file_skipped: names the good file", "notes.md" in reason, reason)
+
+
+# --------------------------------------------------------------------------- post-review fix 2
+# batch-check's "missing" line echoes the input verbatim. A home: value that itself contains
+# the word "blob" must not be misread as a resolved blob.
+
+def case_batch_check_missing_echo_not_mistaken_for_blob():
+    repo = make_repo("case_missing_echo_repo")
+    write(os.path.join(repo, "x.md"), "hello\n")
+    commit_all(repo)
+
+    session_dir, memory_dir = new_session("case_missing_echo")
+    mem_path = os.path.join(memory_dir, "notes.md")
+    write(mem_path, "# Note\n\nhome: nothere blob\n")
+    records = [
+        human_record("file it", T0),
+        assistant_record(tool_use=write_tool_use(mem_path)),
+    ]
+    path = write_transcript(session_dir, records)
+    hook = {"transcript_path": path, "cwd": repo}
+    reason = rh.run(hook)
+    check("missing_echo_not_blob: blocks", bool(reason), reason)
+
+
 # --------------------------------------------------------------------------- main(), end to end
 
 def _run_main(hook_payload, env=None, timeout=30):
@@ -814,6 +859,8 @@ def main():
     case_git_failure_for_one_value_keeps_other_findings()
     case_deleted_path_and_unpushed_branch()
     case_batch_check_single_process_call()
+    case_unreadable_file_skipped_others_still_reported()
+    case_batch_check_missing_echo_not_mistaken_for_blob()
     case_main_silent_no_memory_folder()
     case_main_blocks()
     case_main_missing_git_binary_stands_down()
