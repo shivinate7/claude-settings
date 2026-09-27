@@ -121,6 +121,9 @@ Once merged:
   hosts above.
 * **The subagent model cap needs a temporary raise.** See CLAUDE.md's Roles section and
   `decisions/subagent-model-cap.md` for the guarded override and its required expiry field.
+* **Other repositories cannot use `actions/` after this repository becomes private.** Open
+  Settings, then Actions, then General, then Access. Set "Accessible from repositories owned by
+  the user".
 
 ## Details worth knowing but not part of setup
 
