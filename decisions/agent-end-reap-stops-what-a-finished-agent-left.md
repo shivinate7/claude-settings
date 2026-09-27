@@ -35,8 +35,16 @@ judged against the live sessions of that worktree, not those of the
 primary checkout. No session record names a subagent. So a running
 subagent's worktree reads as "not live". The orphan read still keeps each
 server whose parent is alive. A server whose parent died, such as one from
-`Start-Process -PassThru`, can now be stopped by the sweep while its agent
-still runs. The owner must accept this or reject it.
+`Start-Process -PassThru`, could then be stopped by the sweep while its agent
+still runs.
+
+Owner ruling 2, 2026-09-27: the sweep skips each process whose cwd is under
+a `.claude/worktrees/*` checkout. It leaves those folders to
+janitor/agent_end_reap.py. `find_swept_listeners` in janitor/sweep.py
+applies the skip. The case
+`test_the_sweep_leaves_an_orphan_in_an_agent_worktree_to_the_reaper` went
+red on a `.bak` copy without the skip. janitor/mutate_sweep.py carries one
+mutant for it.
 
 ## Part 3. The reaper
 
@@ -81,6 +89,9 @@ The owner's constraints hold:
 - A worktree that a live session uses is never touched.
 - A process that a live parent outside the worktree holds is never touched.
 
+Owner ruling 3, 2026-09-27: this scope is accepted. The reaper stops each
+orphaned tree inside an ended agent's worktree, not only listeners.
+
 ## Payload log
 
 Each run appends one JSON line to
@@ -94,6 +105,9 @@ The hooks reference says that WorktreeRemove "Replaces default git
 behavior". A hook on that event would stop the harness from removing agent
 worktrees. So settings.json wires only SubagentStop. Read from docs, on
 2026-09-26, unmeasured.
+
+Owner ruling 1, 2026-09-27: WorktreeRemove stays unwired. SubagentStop
+covers the agent end.
 
 ## Proof
 

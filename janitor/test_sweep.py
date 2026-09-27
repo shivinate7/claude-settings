@@ -1644,6 +1644,17 @@ class AgentEndReapTests(unittest.TestCase):
             os.remove(record)
             cleanup()
 
+    def test_the_sweep_leaves_an_orphan_in_an_agent_worktree_to_the_reaper(self):
+        # Owner ruling 2, 2026-09-27: no session record names a subagent, so the sweep
+        # skips every `.claude/worktrees/*` cwd, even a proven orphan.
+        pid, _port, cleanup = spawn_orphaned_listener(self.wts["reapB"])
+        try:
+            found = sweep.find_swept_listeners([self.repo, self.wts["reapB"]])
+            self.assertIsNotNone(found)
+            self.assertNotIn(pid, [entry["pid"] for entry in found])
+        finally:
+            cleanup()
+
     def test_junk_on_stdin_names_no_target_and_raises_nothing(self):
         for raw in ("", "not json", "[1]", json.dumps({"hook_event_name": "SubagentStop"})):
             self.assertIsNone(self.reap.handle(raw).get("target"))
