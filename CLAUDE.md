@@ -71,7 +71,7 @@ report a read that could not run as unknown, never as clear or broken.<!-- rule:
 rendered view.<!-- rule:tokens-never-load-whole-doc --> A verification command's answer is its verdict, not its stream. Get the
 verdict with one bounded command. Never scroll a log to find out whether something
 passed.<!-- rule:tokens-verdict-not-stream --> Point a brief at files. Never paste them in.<!-- rule:tokens-point-brief-at-files --> Read a sub-agent's report,
-never its transcript.<!-- rule:tokens-read-report-not-transcript --> When compacting, keep the files, the commands, and each ruling's home.
+never its transcript.<!-- rule:tokens-read-report-not-transcript --> When compacting, keep the files, the commands, each ruling's home, and the pid and port of each server still running.
 Drop the narration.<!-- rule:tokens-compacting-keep-essentials -->
 
 **Building.** Never guess an answer the code should give you.<!-- rule:building-never-guess-answer --> Surface ambiguity instead
