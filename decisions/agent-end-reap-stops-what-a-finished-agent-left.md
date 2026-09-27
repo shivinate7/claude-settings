@@ -143,6 +143,15 @@ The deepest-checkout case in janitor/test_sweep.py went red on the old
 sweep. hooks/mutate_guard.py and janitor/mutate_sweep.py carry one mutant
 for each new rule and for each reaper refusal.
 
+CI on 4864d83 found one survivor: the mutant that drops the `& disown`
+clause. The any-segment `&` read also denies `cmd & disown`, so that case
+did not prove the clause. The mutant now requires the case
+`python3 server.py & disown $!`. The `$!` satisfies the `&` read, so only
+the `& disown` clause denies it. MEASURED 2026-09-27: that mutant alone
+gives 1 of 596 cases wrong, and that case is the only one. The full
+harness ran past its 1200 s suite timeout on this machine, so its local
+count is unmeasured.
+
 ## What reopens it
 
 - A payload in the log that disagrees with the fields above.

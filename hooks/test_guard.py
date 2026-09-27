@@ -1521,6 +1521,8 @@ sh("detached: setsid starts its own session",
    "setsid python3 server.py &", "deny", "detached-launch", cwd=NOGIT)
 sh("detached: disown right after a background job",
    "python3 server.py & disown", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: disown right after a job whose pid is captured",
+   "python3 server.py & disown $!", "deny", "detached-launch", cwd=NOGIT)
 sh("detached: a bare trailing background job with no pid captured, MEASURED zero harmless "
    "matches in 16571 local Bash commands",
    "python3 server.py &", "deny", "detached-launch", cwd=NOGIT)

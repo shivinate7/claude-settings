@@ -247,7 +247,7 @@ MUTATIONS = [
     ("detached-launch: disown right after a background job no longer denies",
      '        if j < len(rest) and basename(rest[j]) == "disown":\n            return "& disown"',
      '        if False:\n            return "& disown"', "guard",
-     "detached: disown right after a background job"),
+     "detached: disown right after a job whose pid is captured"),
     ("detached-launch: a bare trailing background job no longer denies",
      '            if tokens[i] == "&":\n                return tokens[i - 1] + " &"',
      '            if False:\n                return tokens[i - 1] + " &"', "guard",
