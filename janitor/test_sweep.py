@@ -1599,12 +1599,10 @@ class AgentEndReapTests(unittest.TestCase):
             self.assertIsNone(self.reap.target_worktree(
                 {"hook_event_name": "SubagentStop", "agent_id": agent_id, "cwd": self.repo}))
 
-    def test_worktree_remove_names_its_path_only_in_the_agent_worktree_shape(self):
-        self.same(self.reap.target_worktree(
-            {"hook_event_name": "WorktreeRemove", "worktree_path": self.wts["reapA"]}),
-            self.wts["reapA"])
+    def test_only_subagent_stop_names_a_target(self):
+        # Owner ruling 1, 2026-09-27: WorktreeRemove stays unwired and names nothing.
         self.assertIsNone(self.reap.target_worktree(
-            {"hook_event_name": "WorktreeRemove", "worktree_path": self.repo}))
+            {"hook_event_name": "WorktreeRemove", "worktree_path": self.wts["reapA"]}))
         self.assertIsNone(self.reap.target_worktree({"hook_event_name": "Stop", "cwd": self.repo}))
 
     def test_the_primary_checkout_is_never_a_target(self):

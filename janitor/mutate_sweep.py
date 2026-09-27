@@ -471,10 +471,8 @@ MUTATIONS = [
      "test_the_deepest_checkout_wins_over_the_primary_that_contains_it"),
     ("agent worktrees: the sweep judges a listener in `.claude/worktrees/*` again",
      "sweep",
-     '        if cwd is None or _under_agent_worktree(cwd):
-            continue',
-     '        if cwd is None:
-            continue',
+     '        if cwd is None or _under_agent_worktree(cwd):\n            continue',
+     '        if cwd is None:\n            continue',
      "test_the_sweep_leaves_an_orphan_in_an_agent_worktree_to_the_reaper"),
     ("agent-end reap: the primary checkout is no longer refused as a target",
      "agent_end_reap",

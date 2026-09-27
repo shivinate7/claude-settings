@@ -54,8 +54,9 @@ mutant for it.
   `agent-<agent_id>`. The reaper looks for
   `<primary>/.claude/worktrees/agent-<agent_id>`. It finds the primary
   checkout from the payload `cwd` with `guard.primary_checkout`.
-- **WorktreeRemove** gives `worktree_path`. The reaper reads it, but
-  settings.json does not wire this event. See "Not wired" below.
+- **WorktreeRemove** names no target. The reaper had a branch for it with
+  no agent-id check. Review removed that branch on 2026-09-27, after
+  ruling 1. See "Not wired" below.
 
 The target must have the shape `.claude/worktrees/<name>`. It must exist.
 It must not be a primary checkout. An agent id must match

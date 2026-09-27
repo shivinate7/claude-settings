@@ -10,8 +10,8 @@ reads the live stub and keeps the server forever.
 
 Reads one hook payload on stdin. SubagentStop names the agent by `agent_id`. The harness names
 that agent's worktree `.claude/worktrees/agent-<agent_id>` under the primary checkout.
-WorktreeRemove names the path as `worktree_path`. The target must have that
-`.claude/worktrees/<name>` shape and must not be a primary checkout.
+Only SubagentStop names a target (owner ruling 1, 2026-09-27: WorktreeRemove stays
+unwired). The target must have the `.claude/worktrees/<name>` shape and must not be a primary checkout.
 
 A process is stopped only when all of these answer a confirmed yes:
 - its cwd sits inside the target worktree
@@ -66,9 +66,7 @@ def is_agent_worktree_shape(path: str) -> bool:
 def target_worktree(payload: dict):
     """The agent worktree this payload names, or None."""
     event = payload.get("hook_event_name")
-    if event == "WorktreeRemove":
-        path = payload.get("worktree_path")
-    elif event == "SubagentStop":
+    if event == "SubagentStop":
         agent_id, cwd = payload.get("agent_id"), payload.get("cwd")
         if not isinstance(agent_id, str) or not AGENT_ID.match(agent_id) or not isinstance(cwd, str):
             return None
