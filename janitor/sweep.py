@@ -1188,12 +1188,17 @@ def _cwd_under_checkout(cwd: str, checkout_path: str) -> bool:
 
 
 def _matching_checkout(cwd: str, checkout_paths):
-    """The first entry of CHECKOUT_PATHS that CWD sits under, or `None` when it sits under
-    none of them."""
-    for path in checkout_paths:
-        if _cwd_under_checkout(cwd, path):
-            return path
-    return None
+    """The DEEPEST entry of CHECKOUT_PATHS that CWD sits under, or `None` when it sits under
+    none of them.
+
+    MEASURED 2026-09-26 on Windows (the start-shapes entry, PR #144): agent worktrees sit
+    under `.claude/worktrees/` INSIDE the primary checkout, and `parse_worktree_list` names the
+    primary first. An earlier version took the first match, so every listener in an agent
+    worktree was judged against the primary checkout and its live session."""
+    matches = [path for path in checkout_paths if _cwd_under_checkout(cwd, path)]
+    if not matches:
+        return None
+    return max(matches, key=lambda path: len(os.path.normcase(os.path.realpath(path))))
 
 
 def find_swept_listeners(checkout_paths):

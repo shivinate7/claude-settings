@@ -1525,6 +1525,37 @@ sh("detached: a bare trailing background job with no pid captured, MEASURED zero
    "matches in 16571 local Bash commands",
    "python3 server.py &", "deny", "detached-launch", cwd=NOGIT)
 
+# MEASURED 2026-09-26 on Windows (the start-shapes entry, PR #144): each shape below was allowed,
+# and each server outlived its call. `cmd &` then another line also outlived its agent.
+sh("detached: a background job followed by another line, MEASURED to outlive the agent",
+   "python -m http.server 8781 &\necho started", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: a background job mid-line, followed by another command",
+   "python3 server.py & echo started", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: disown on its own line after a background job",
+   "python3 server.py &\ndisown", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: disown on its own line, even with a pid printed first",
+   "python3 server.py & echo $!\ndisown", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: a background job inside sh -c",
+   "sh -c 'python3 -m http.server 8782 &'", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: a background job inside bash -lc, then another line",
+   "bash -lc 'python3 server.py &\necho started'", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: nohup inside sh -c",
+   "sh -c 'nohup python3 server.py'", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: sh -c with no background job runs and exits",
+   "sh -c 'echo hi; ls'", "allow", cwd=NOGIT)
+sh("detached: sh -c that prints the pid of its job",
+   "sh -c 'python3 server.py & echo $!'", "allow", cwd=NOGIT)
+sh("detached: a quoted ampersand is text, not a job",
+   "echo 'a & b'", "allow", cwd=NOGIT)
+sh("detached: PowerShell's call operator is a leading ampersand, not a job",
+   '& "C:\\Program Files\\Git\\bin\\git.exe" status', "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached: PowerShell's call operator after an assignment",
+   "$out = & git status", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached: stderr to stdout is a redirect, not a job",
+   "python3 build.py 2>&1\necho done", "allow", cwd=NOGIT)
+sh("detached: an ampersand in a python heredoc body is Python, MEASURED 6 such local commands",
+   "python3 - <<'PY'\nprint(6 & 3)\nPY\necho done", "allow", cwd=NOGIT)
+
 sh("detached: run_in_background style is a plain foreground command, nothing to catch",
    "python3 server.py", "allow", cwd=NOGIT)
 sh("detached: the printed pid is kept, the session can stop it later",
