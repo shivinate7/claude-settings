@@ -40,6 +40,20 @@ the installed copy, before the call ran.
 | `run_in_background: true`, then TaskStop, PowerShell | allowed | no | python <- powershell <- cmd <- claude.exe | not listening |
 | `cmd &` inside a `run_in_background: true` call that exits | allowed | yes | python <- bash stub (alive) <- task shell (dead) | KEEP, not-orphaned |
 
+## MEASURED at a real agent end
+
+The orchestrator ran two fixtures on 2026-09-26. In each, a Haiku
+subagent started a server in its own worktree and then finished.
+
+| Shape | Survives agent end | Evidence |
+|---|---|---|
+| `run_in_background: true`, no `&` (8765) | no | nothing listened, curl returned 000 |
+| `cmd &` then `echo started`, one foreground Bash call (8781) | yes | pid 57072 still listened and answered 200 |
+
+After the second fixture, the worktree
+`.claude/worktrees/agent-a86223211c1e48e4f` still existed. The
+orchestrator stopped pid 57072 by its pid.
+
 All five survivors had the worktree as cwd. The builder stopped each one
 by its own pid. Then `netstat -ano` showed no listener on 8770 to 8790,
 and no stub pid was left.
@@ -79,17 +93,18 @@ and no stub pid was left.
 
 ## Which shapes need a real agent-end fixture
 
-This builder cannot end itself and then look. The table proves survival
-at call end and at TaskStop, not at agent end. These shapes need the
-orchestrator's fixture, one per shape:
+This builder cannot end itself and then look. The first table proves
+survival at call end and at TaskStop. A real agent end is measured for
+two shapes only (see above). The shape `cmd &` followed by another line
+survived agent end. These shapes still need the orchestrator's fixture,
+one per shape:
 
-- `cmd &` followed by another line, foreground Bash
 - `cmd &` then `disown` on the next line
 - `sh -c 'cmd &'`
 - `$p = Start-Process ... -PassThru`
 - `cmd &` inside a `run_in_background: true` call
 
-Expected, from finding 1: all five survive agent end. This is unmeasured.
+Expected, from finding 1: all four survive agent end. This is unmeasured.
 The fixture also must record whether the harness removes a worktree that
 still holds a running process. The sweep's pre-check refuses that
 removal, but the harness does not run the sweep.
