@@ -1551,5 +1551,112 @@ class PurgeTests(unittest.TestCase):
         self.assertEqual(decisions[0]["reason"], "unreadable-entry")
 
 
+class AgentEndReapTests(unittest.TestCase):
+    """janitor/agent_end_reap.py and the deepest-checkout match it depends on. Real repo, real
+    worktrees under `.claude/worktrees/`, real listener processes this suite starts itself."""
+
+    @classmethod
+    def setUpClass(cls):
+        import agent_end_reap
+        cls.reap = agent_end_reap
+        cls.repo = os.path.join(ROOT, "reap-primary")
+        make_repo(cls.repo, {"f.txt": "base\n"})
+        cls.wts = {}
+        for name in ("reapA", "reapB", "reapLive"):
+            path = os.path.join(cls.repo, ".claude", "worktrees", "agent-" + name)
+            run_vcs(cls.repo, "worktree", "add", "-q", path, "-b", "lane-" + name)
+            require(os.path.isdir(path), "worktree %s was not created" % path)
+            cls.wts[name] = path
+
+    def same(self, a, b):
+        self.assertEqual(os.path.normcase(os.path.realpath(a)), os.path.normcase(os.path.realpath(b)))
+
+    def decision_for(self, target, pid):
+        reason, decisions = self.reap.decide(target)
+        self.assertIsNone(reason)
+        self.assertTrue(len(decisions) > 0, "no process found inside %s" % target)
+        for decision in decisions:
+            if decision["pid"] == pid:
+                return decision
+        self.fail("pid %r not among %r" % (pid, [d["pid"] for d in decisions]))
+
+    def test_the_deepest_checkout_wins_over_the_primary_that_contains_it(self):
+        cwd = os.path.join(self.wts["reapA"], "sub")
+        self.same(sweep._matching_checkout(cwd, [self.repo, self.wts["reapA"]]), self.wts["reapA"])
+        self.same(sweep._matching_checkout(os.path.join(self.repo, "f"), [self.repo, self.wts["reapA"]]),
+                  self.repo)
+
+    def test_subagent_stop_names_the_agent_worktree_from_any_cwd(self):
+        for cwd in (self.wts["reapA"], self.repo):
+            target = self.reap.target_worktree(
+                {"hook_event_name": "SubagentStop", "agent_id": "reapA", "cwd": cwd})
+            self.assertIsNotNone(target)
+            self.same(target, self.wts["reapA"])
+
+    def test_an_unsafe_or_unknown_agent_id_names_nothing(self):
+        # "reapA/../agent-reapB" would name agent B's worktree if the id were not checked.
+        for agent_id in ("../reapA", "reapA/..", "reapA/../agent-reapB", "", "nosuchagent", None):
+            self.assertIsNone(self.reap.target_worktree(
+                {"hook_event_name": "SubagentStop", "agent_id": agent_id, "cwd": self.repo}))
+
+    def test_only_subagent_stop_names_a_target(self):
+        # Owner ruling 1, 2026-09-27: WorktreeRemove stays unwired and names nothing.
+        self.assertIsNone(self.reap.target_worktree(
+            {"hook_event_name": "WorktreeRemove", "worktree_path": self.wts["reapA"]}))
+        self.assertIsNone(self.reap.target_worktree({"hook_event_name": "Stop", "cwd": self.repo}))
+
+    def test_the_primary_checkout_is_never_a_target(self):
+        self.assertEqual(self.reap.decide(self.repo)[0], "primary-checkout")
+
+    def test_an_orphan_inside_the_ended_agent_worktree_is_reaped(self):
+        pid, _port, cleanup = spawn_orphaned_listener(self.wts["reapA"])
+        try:
+            decision = self.decision_for(self.wts["reapA"], pid)
+            self.assertEqual((decision["action"], decision["reason"]), ("reap", "agent-ended"))
+        finally:
+            cleanup()
+
+    def test_a_process_whose_live_parent_sits_outside_is_kept(self):
+        pid, _port, cleanup = spawn_plain_listener(self.wts["reapA"])
+        try:
+            decision = self.decision_for(self.wts["reapA"], pid)
+            self.assertEqual((decision["action"], decision["reason"]), ("keep", "not-orphaned"))
+        finally:
+            cleanup()
+
+    def test_an_orphan_in_another_worktree_is_not_even_considered(self):
+        pid, _port, cleanup = spawn_orphaned_listener(self.wts["reapB"])
+        try:
+            _reason, decisions = self.reap.decide(self.wts["reapA"])
+            self.assertNotIn(pid, [d["pid"] for d in decisions])
+        finally:
+            cleanup()
+
+    def test_a_live_session_in_the_worktree_keeps_everything(self):
+        pid, _port, cleanup = spawn_orphaned_listener(self.wts["reapLive"])
+        record = os.path.join(CFG, "sessions", "reap-live-case.json")
+        try:
+            write_session("reap-live-case", os.getpid(), this_process_start_ms(), self.wts["reapLive"])
+            self.assertEqual(self.reap.decide(self.wts["reapLive"]), ("live-session", []))
+        finally:
+            os.remove(record)
+            cleanup()
+
+    def test_the_sweep_leaves_an_orphan_in_an_agent_worktree_to_the_reaper(self):
+        # Owner ruling 2, 2026-09-27: no session record names a subagent, so the sweep
+        # skips every `.claude/worktrees/*` cwd, even a proven orphan.
+        pid, _port, cleanup = spawn_orphaned_listener(self.wts["reapB"])
+        try:
+            found = sweep.find_swept_listeners([self.repo, self.wts["reapB"]])
+            self.assertIsNotNone(found)
+            self.assertNotIn(pid, [entry["pid"] for entry in found])
+        finally:
+            cleanup()
+
+    def test_junk_on_stdin_names_no_target_and_raises_nothing(self):
+        for raw in ("", "not json", "[1]", json.dumps({"hook_event_name": "SubagentStop"})):
+            self.assertIsNone(self.reap.handle(raw).get("target"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

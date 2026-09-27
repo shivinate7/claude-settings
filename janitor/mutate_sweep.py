@@ -83,7 +83,12 @@ SESSION_END_SWEEP = os.path.join(HERE, "session_end_sweep.py")
 SESSION_END_SUITE = os.path.join(HERE, "test_session_end_sweep.py")
 SETTINGS_JSON = os.path.join(REPO_ROOT, "settings.json")
 
-SOURCES = {"sweep": SWEEP, "guard": GUARD, "session_end_sweep": SESSION_END_SWEEP}
+# A fourth target: the agent-end reaper. Its cases live in test_sweep.py (AgentEndReapTests), and
+# that suite imports it, so every scaffold carries a copy, mutated or not.
+AGENT_END_REAP = os.path.join(HERE, "agent_end_reap.py")
+
+SOURCES = {"sweep": SWEEP, "guard": GUARD, "session_end_sweep": SESSION_END_SWEEP,
+           "agent_end_reap": AGENT_END_REAP}
 
 # Which suite proves a mutation of a given target. Every "sweep"/"guard" mutant is proven against
 # test_sweep.py, exactly as before; "session_end_sweep" mutants are proven against the hook's own
@@ -92,6 +97,7 @@ SUITE_FOR_TARGET = {
     "sweep": "test_sweep.py",
     "guard": "test_sweep.py",
     "session_end_sweep": "test_session_end_sweep.py",
+    "agent_end_reap": "test_sweep.py",
 }
 
 # (label, target, anchor text found once in the source, its mutated replacement, the case name
@@ -457,6 +463,42 @@ MUTATIONS = [
 
     # ---- orphaned TCP listeners (this build, 2026-09-24) ----
     #
+    # ---- the agent-end reaper and the deepest-checkout match it depends on ----
+    ("deepest checkout: the first containing checkout wins again, the primary over its worktree",
+     "sweep",
+     '    return max(matches, key=lambda path: len(os.path.normcase(os.path.realpath(path))))',
+     '    return matches[0]',
+     "test_the_deepest_checkout_wins_over_the_primary_that_contains_it"),
+    ("agent worktrees: the sweep judges a listener in `.claude/worktrees/*` again",
+     "sweep",
+     '        if cwd is None or _under_agent_worktree(cwd):\n            continue',
+     '        if cwd is None:\n            continue',
+     "test_the_sweep_leaves_an_orphan_in_an_agent_worktree_to_the_reaper"),
+    ("agent-end reap: the primary checkout is no longer refused as a target",
+     "agent_end_reap",
+     '    if primary:\n        return "primary-checkout", []',
+     '    if False:\n        return "primary-checkout", []',
+     "test_the_primary_checkout_is_never_a_target"),
+    ("agent-end reap: a live session in the worktree no longer keeps everything",
+     "agent_end_reap",
+     '    if live:\n        return "live-session", []',
+     '    if False:\n        return "live-session", []',
+     "test_a_live_session_in_the_worktree_keeps_everything"),
+    ("agent-end reap: a live parent outside the worktree no longer keeps the process",
+     "agent_end_reap",
+     '        if not sweep._cwd_under_checkout(cwd, target):\n            return False',
+     '        if not sweep._cwd_under_checkout(cwd, target):\n            return True',
+     "test_a_process_whose_live_parent_sits_outside_is_kept"),
+    ("agent-end reap: a process outside the target worktree is considered too",
+     "agent_end_reap",
+     '        if cwd is None or not sweep._cwd_under_checkout(cwd, target):\n            continue',
+     '        if cwd is None:\n            continue',
+     "test_an_orphan_in_another_worktree_is_not_even_considered"),
+    ("agent-end reap: an agent id is no longer checked, so a path in it escapes the worktrees",
+     "agent_end_reap",
+     'AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")',
+     'AGENT_ID = re.compile(r"^.{1,64}$")',
+     "test_an_unsafe_or_unknown_agent_id_names_nothing"),
     # `decide_listener`'s own three refusals, same shape as the branch/worktree refusals
     # above: each one is a keep this sweep must never lose, proven by mutating it out and
     # watching a REAL fixture listener (janitor/test_sweep.py's ListenerDecisionTests, a real
@@ -540,6 +582,10 @@ def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_te
         h.write(sweep_text)
     with open(os.path.join(janitor_dir, "test_sweep.py"), "w", encoding="utf-8", newline="\n") as h:
         h.write(sources["test_sweep"])
+    reap_text = mutated_text if mutated_target == "agent_end_reap" else sources["agent_end_reap"]
+    with open(os.path.join(janitor_dir, "agent_end_reap.py"), "w", encoding="utf-8",
+              newline="\n") as h:
+        h.write(reap_text)
     with open(
         os.path.join(janitor_dir, "session_end_sweep.py"), "w", encoding="utf-8", newline="\n"
     ) as h:

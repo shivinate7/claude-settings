@@ -31,8 +31,9 @@ one fixed order, and the first match wins.
   2 machine-wide-kill  a kill by name or by pattern
   2b detached-launch   a command that starts a process and detaches it from the session: a
                        background job inside a subshell (`( cmd & )`), a `nohup`/`setsid`
-                       wrapper, `disown` right after a background job, a bare trailing
-                       background job whose pid nothing in the command captures, PowerShell's
+                       wrapper, `disown` in command position, a bare background job in
+                       any segment whose pid nothing in the command captures, the same
+                       shapes inside a `sh -c`/`bash -c` script, PowerShell's
                        `Start-Job`, `Start-Process` with neither `-Wait` nor `-PassThru`, or
                        `cmd`/`cmd.exe /c start ...` from either shell. Always denied, the same
                        as rule 2, because a detached process leaves no pid this session can
@@ -2252,7 +2253,13 @@ def detach_wrapper_hit(tokens) -> str:
 
 def disown_after_background_hit(tokens) -> str:
     """Return "& disown" when a bare background job (`&` in token position) in this segment is
-    followed by `disown` in command position, else ''."""
+    followed by `disown` in command position, else ''. Also "disown" when the segment's OWN
+    command word is `disown`: MEASURED 2026-09-26 on Windows, `cmd &` then `disown` on the next
+    line was allowed, and the server outlived the agent (the start-shapes entry, PR #144).
+    `disown` has no use but to detach a job, so it denies in command position anywhere."""
+    j = _skip_assignments_and_keywords(tokens)
+    if j < len(tokens) and basename(tokens[j]) == "disown":
+        return "disown"
     for i, tok in enumerate(tokens):
         if tok != "&":
             continue
@@ -2314,20 +2321,55 @@ def cmd_start_hit(tokens) -> str:
 
 
 def bare_background_hit(cmd: str) -> str:
-    """Return the matched text when the command's LAST segment ends in a bare background job
-    with no pid captured anywhere in the command, else ''.
+    """Return the matched text when ANY segment holds a bare background job (`&` as its own
+    token, after the command word) with no pid captured anywhere in the command, else ''.
 
     MEASURED 2026-09-24 against this machine's own local transcripts (`~/.claude/projects/*/
     *.jsonl`, read-only): 16571 Bash commands across 116 sessions, 0 ended in a bare trailing
     `&`. This shape refuses no harmless command this session has actually seen run.
+
+    MEASURED 2026-09-26 on Windows (the start-shapes entry, PR #144): an earlier version read
+    the LAST segment only, so `cmd &` followed by another line was allowed, and that server
+    outlived the agent. The `&` must come AFTER the command word: a leading `&` is
+    PowerShell's call operator, never a background job.
+
+    MEASURED 2026-09-26 against 13312 distinct local Bash commands in 118 sessions: the
+    any-segment read refused 6 that the old rule allowed. All 6 were an `&` inside a python
+    heredoc body, Python code, not a shell job. So this read drops every heredoc body first.
     """
-    segments = [s for s in split_segments(cmd) if s.strip()]
-    if not segments:
+    cmd = _strip_heredoc_bodies_unconditionally(cmd)
+    if "$!" in cmd:
         return ""
-    tokens = segment_tokens(segments[-1])
-    if not tokens or tokens[-1] != "&" or "$!" in cmd:
+    for segment in split_segments(cmd):
+        tokens = segment_tokens(segment) if segment.strip() else None
+        if not tokens:
+            continue
+        start = _skip_assignments_and_keywords(tokens)
+        for i in range(start + 1, len(tokens)):
+            if tokens[i] == "&":
+                return tokens[i - 1] + " &"
+    return ""
+
+
+# A shell that runs its `-c` argument as a script. The script is judged by this same rule.
+# MEASURED 2026-09-26 on Windows (PR #144): `sh -c 'cmd &'` was allowed, and the server outlived
+# its call. The `&` sat inside one quoted token, where no per-segment read above can see it.
+INLINE_SCRIPT_SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "sh.exe", "bash.exe"}
+_C_FLAG = re.compile(r"^-[A-Za-z]*c[A-Za-z]*$")
+
+
+def inline_script(tokens) -> str:
+    """Return the script a `sh -c SCRIPT` segment runs, else ''."""
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]) not in INLINE_SCRIPT_SHELLS:
         return ""
-    return (tokens[-2] if len(tokens) >= 2 else "cmd") + " &"
+    has_c = False
+    for tok in tokens[index + 1:]:
+        if tok.startswith("-"):
+            has_c = has_c or bool(_C_FLAG.match(tok))
+            continue
+        return tok if has_c else ""
+    return ""
 
 
 def detached_launch_hit(cmd: str) -> str:
@@ -2347,6 +2389,10 @@ def detached_launch_hit(cmd: str) -> str:
                    or windows_detach_hit(tokens) or cmd_start_hit(tokens))
         if matched:
             return matched
+        script = inline_script(tokens)
+        if script and detached_launch_hit(script):
+            return basename(tokens[resolve_command(tokens)]) + " -c '" + detached_launch_hit(
+                script) + "'"
     return bare_background_hit(cmd)
 
 
