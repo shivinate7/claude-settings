@@ -168,7 +168,7 @@
       }
     }
   },
-  "outputStyle": "Concise",
+  "outputStyle": "shiv-stylisms",
   "autoUpdatesChannel": "latest",
   "tui": "fullscreen",
   "skipWorkflowUsageWarning": true,

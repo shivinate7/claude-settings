@@ -191,7 +191,7 @@ class RuleAuditTests(unittest.TestCase):
     def test_the_real_claude_md_and_map_pass_together(self):
         """The check this repo actually ships, over the files it actually ships, at its
         actual pinned floor and unmechanized count -- no override."""
-        claude_text = rule_audit.read(rule_audit.CLAUDE_MD)
+        claude_text = rule_audit.rule_text()
         rule_map = __import__("json").loads(rule_audit.read(rule_audit.MAP_FILE))
         guard_text = rule_audit.read(rule_audit.GUARD_PY)
         workflow_text = rule_audit.read(rule_audit.WORKFLOW)

@@ -65,7 +65,7 @@ with `/<sha>/`, or set `CLAUDE_SETTINGS_REF=<sha>` as an environment variable.
 
 * `/context`, in any session, lists `~/.claude/CLAUDE.md` and the imported file under
   **Memory files**.
-* `/status` shows the Concise output style.
+* `/status` shows the `shiv-stylisms` output style.
 * In a cloud session, ask Claude to run `echo $CLAUDE_CODE_SUBAGENT_MODEL`. Expect `sonnet`.
 * On Windows in copy mode, check `~\.claude\claude-settings-install.log` for a dated line from
   the last run.

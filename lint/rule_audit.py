@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""CI check: every CLAUDE.md rule anchor maps to a mechanism, or an argued `unmechanized`.
+"""CI check: every rule anchor maps to a mechanism, or an argued `unmechanized`.
+
+RULE_FILES names the files read for anchors: CLAUDE.md, and the output style that holds the
+rules for the main session's replies. The anchors of all files form one list, so a slug
+used in two files reads as a duplicate.
 
 CLAUDE.md says to turn each rule into a hook or a check, and calls itself "the fallback, not
 the enforcement". Nothing measured that claim. This is the measurement. It runs in CI only,
 never at Stop: the map does not change turn to turn, so there is nothing to gain from paying
 its cost on every reply.
 
-WHAT COUNTS AS A RULE. Each prescriptive sentence in CLAUDE.md carries an inline anchor,
+WHAT COUNTS AS A RULE. Each prescriptive sentence in a rule file carries an inline anchor,
 `<!-- rule:<slug> -->`, placed right after the sentence it names. The anchor is the stable
 key. A rule's wording can be reworded around its anchor without breaking this check; only
 deleting or renaming the anchor comment does. Purely descriptive or argumentative sentences
@@ -35,9 +39,9 @@ for a rule and lower this pin in the same commit, or add a rule with no mechanis
 and say why.
 
 WHAT THIS CANNOT SEE, BY NAME. It reads a citation, not the coverage behind it: a row can name
-a real guard rule that does not actually cover what the CLAUDE.md sentence demands, and this
+a real guard rule that does not actually cover what the rule sentence demands, and this
 check passes it anyway. It cannot judge whether an `unmechanized` reason is a good argument,
-only whether one was written at length. And it governs only CLAUDE.md's own text: a rule
+only whether one was written at length. And it governs only the RULE_FILES text: a rule
 recorded in a decision file or an agent prompt is a different surface, ungoverned here.
 """
 from __future__ import annotations
@@ -50,6 +54,8 @@ from typing import Dict, List
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CLAUDE_MD = os.path.join(ROOT, "CLAUDE.md")
+STYLE_MD = os.path.join(ROOT, "output-styles", "shiv-stylisms.md")
+RULE_FILES = [CLAUDE_MD, STYLE_MD]
 MAP_FILE = os.path.join(ROOT, "lint", "rule_mechanisms.json")
 GUARD_PY = os.path.join(ROOT, "hooks", "guard.py")
 WORKFLOW = os.path.join(ROOT, ".github", "workflows", "gates.yml")
@@ -62,8 +68,8 @@ CI_STEP_RE = re.compile(r'^\s*-\s*name:\s*(.+?)\s*$', re.MULTILINE)
 # module docstring, "NON-VACUITY, TWO WAYS", for the argument. Update RULE_FLOOR when a rule
 # is deliberately removed. Update UNMECHANIZED_EXPECTED in the SAME commit that builds a
 # mechanism (lower it) or adds an unmechanized rule (raise it, and say why in the message).
-RULE_FLOOR = 82
-UNMECHANIZED_EXPECTED = 57
+RULE_FLOOR = 92
+UNMECHANIZED_EXPECTED = 67
 REASON_MIN_WORDS = 8
 
 KINDS = {"guard", "gate", "ci", "unmechanized"}
@@ -76,6 +82,11 @@ def read(path: str) -> str:
 
 def claude_md_anchors(text: str) -> List[str]:
     return [m.group(1) for m in ANCHOR_RE.finditer(text)]
+
+
+def rule_text() -> str:
+    """The text of every RULE_FILES entry, joined. One list of anchors, from all of them."""
+    return "\n".join(read(p) for p in RULE_FILES)
 
 
 def guard_rule_names(text: str):
@@ -105,7 +116,7 @@ def check(
     anchors = claude_md_anchors(claude_text)
     if len(anchors) < rule_floor:
         problems.append(
-            f"found {len(anchors)} rule anchors in CLAUDE.md, fewer than the pinned floor "
+            f"found {len(anchors)} rule anchors in the rule files, fewer than the pinned floor "
             f"{rule_floor}. An anchor was likely deleted, or this reader broke on a reword. "
             f"Lower RULE_FLOOR in lint/rule_audit.py deliberately if a rule genuinely went. "
             f"Never let a shrinking reader report clean."
@@ -113,7 +124,7 @@ def check(
 
     dupes = sorted({a for a in anchors if anchors.count(a) > 1})
     if dupes:
-        problems.append("duplicate rule anchors in CLAUDE.md: " + ", ".join(dupes))
+        problems.append("duplicate rule anchors across the rule files: " + ", ".join(dupes))
 
     anchor_set = set(anchors)
     rules = rule_map.get("rules") if isinstance(rule_map, dict) else None
@@ -123,12 +134,12 @@ def check(
 
     missing = sorted(anchor_set - rules.keys())
     for slug in missing:
-        problems.append(f"CLAUDE.md rule `{slug}` has no row in lint/rule_mechanisms.json.")
+        problems.append(f"rule `{slug}` has no row in lint/rule_mechanisms.json.")
 
     orphaned = sorted(rules.keys() - anchor_set)
     for slug in orphaned:
         problems.append(
-            f"lint/rule_mechanisms.json row `{slug}` names no rule anchor left in CLAUDE.md. "
+            f"lint/rule_mechanisms.json row `{slug}` names no rule anchor left in the rule files. "
             f"Remove the row, or restore the anchor."
         )
 
@@ -200,14 +211,15 @@ def check(
 
 
 def main() -> None:
-    if not os.path.exists(CLAUDE_MD):
-        print("rule_audit: FAIL\n - CLAUDE.md does not exist.")
-        sys.exit(1)
+    for path in RULE_FILES:
+        if not os.path.exists(path):
+            print(f"rule_audit: FAIL\n - {os.path.relpath(path, ROOT)} does not exist.")
+            sys.exit(1)
     if not os.path.exists(MAP_FILE):
         print("rule_audit: FAIL\n - lint/rule_mechanisms.json does not exist.")
         sys.exit(1)
 
-    claude_text = read(CLAUDE_MD)
+    claude_text = rule_text()
     try:
         rule_map = json.loads(read(MAP_FILE))
     except Exception as e:
