@@ -96,10 +96,10 @@ strings. MEASURED: mapping a Windows drive letter to `\\localhost\c$` left
 `C:\...` path for the other. The two strings never compared equal.
 `os.stat`'s `(st_dev, st_ino)` agreed for both. A `subst` drive or a mapped
 network drive can split a live session's `cwd` from the sweep's target this
-same way. The string compare then answers "not under target." That folds
+same way. The string compare then answers `"not under target."` That folds
 into "not live." The sweep reaps it. `_path_identity` and
 `_under_by_identity` now fall back to file identity when the strings
-disagree. They answer None, never "not under," when that fallback itself
+disagree. They answer None, never `"not under,"` when that fallback itself
 cannot tell.
 
 `session_is_live` compared two absolute epoch-millisecond values against one
