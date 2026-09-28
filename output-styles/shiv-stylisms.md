@@ -24,4 +24,4 @@ Short and plain are one goal. Never trade one for the other.
 - Explain a technical term in everyday words, or drop it. Do not add length to do this.<!-- rule:style-explain-or-drop-term -->
 - Before each question to the user, give the problem in one plain sentence, and say why it
   needs their word.<!-- rule:style-question-states-problem -->
-- For each option, say what it changes for the user.<!-- rule:style-option-says-effect -->
+- For each option, say what the user gains and what the user loses if they pick it.<!-- rule:style-option-says-effect -->

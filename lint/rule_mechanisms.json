@@ -566,7 +566,7 @@
     "style-option-says-effect": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No check reads whether each option in a question says what it changes for the user."
+        "reason": "No check reads whether each option in a question says what the user gains and what the user loses."
       }
     }
   }
