@@ -9,7 +9,7 @@ gh run view <run-id> --json jobs --jq '
   | sort -rn | head
 ```
 
-## 3. Gate a slow check on its inputs
+## 3a. Gate a slow check on its inputs
 
 ```yaml
 on:
@@ -33,7 +33,7 @@ jobs:
           slow=true                                   # fail safe: run
           if [ "$EVENT" = push ] || [ "$EVENT" = pull_request ]; then
             if files=$(git diff --name-only "$BASE" HEAD 2>/dev/null) && [ -n "$files" ]; then
-              echo "$files" | grep -Eq '^(src/|slow-check/)' || slow=false
+              grep -Eq '^(src/|slow-check/)' <<< "$files" || slow=false
             fi
           fi
           echo "slow=$slow" >> "$GITHUB_OUTPUT"
@@ -47,7 +47,7 @@ jobs:
 Replace the grep pattern with the paths the check reads. Schedule and manual runs skip
 detection, so `slow` stays true.
 
-## Required jobs that skip
+## 3b. Required jobs that skip
 
 ```sh
 gh api repos/<owner>/<repo>/branches/<branch>/protection
@@ -61,7 +61,7 @@ a path filter on the whole workflow, blocks the merge. Prefer `if:` on the job.
 ```yaml
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}   # a push must not cancel the nightly or manual run
 ```
 
 ## 5. Pin and audit
@@ -71,7 +71,7 @@ concurrency:
   with: {persist-credentials: false}
 ```
 
-Same-repo action: `uses: ./path/to/action`.
+Same-repo action: `uses: $/path` (GitHub changelog 2026-07-30) or `uses: ./path`.
 
 `.github/dependabot.yml`:
 

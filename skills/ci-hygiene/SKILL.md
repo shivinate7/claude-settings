@@ -1,6 +1,6 @@
 ---
 name: ci-hygiene
-description: Use when a session creates or edits CI config (.github/workflows, other CI files), or when the user says CI is slow, queued, or flaky, or says "ci-hygiene". Not for ordinary code edits. Keeps CI fast, cheap, and trusted.
+description: Use when a session creates or edits CI config (GitHub Actions, workflow files, .github/workflows, other CI files), or when the user says CI is slow, queued, or flaky, or says "ci-hygiene". Not for ordinary code edits. Keeps CI fast, cheap, and trusted.
 ---
 
 Written for GitHub Actions. The same ideas apply to other CI systems. Commands and YAML are in
@@ -13,7 +13,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 2. **Check what exists.** Read the current workflow and the log before you build a speedup. The
    step may already run in parallel, or be cached.
 3. **Gate slow checks on their inputs.** Run a slow check after a change to the files it reads.
-   Detect the change with `git diff` against the merge base. Add a nightly full run and a manual
+   Detect the change with `git diff` against the base commit. Add a nightly full run and a manual
    trigger. If detection cannot read the diff, run the check (fail safe).
 4. **Cancel superseded runs.** Set `concurrency` with `cancel-in-progress`, so a new push to a
    ref cancels the old run on that ref. Runners with a low concurrency cap, such as hosted
