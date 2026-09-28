@@ -14,6 +14,12 @@ necessary. Prefer one word over a phrase or a sentence. This counts most in fron
 - The reviewer agent flags front-end copy that is not needed. That part is a judgment, so it
   does not block.
 
+- UI copy gets every STE rule, with no exemption. On 2026-09-28 the owner removed the UI
+  skip for STE008, contraction, and for STE015, condition order. The owner's words on
+  STE008: "if ste008 is explicitly mandated, it can be removed, but dont explicitly
+  authorize a pass for ste008." STE008 is a blocking rule in
+  `every-lint-rule-blocks-or-does-not-exist`, so it is mandated.
+
 ## Why Vale does not replace `ste_lint`
 
 MEASURED only by reading, not by a run. Vale uses the same kind of fixed lookup as STE011,
