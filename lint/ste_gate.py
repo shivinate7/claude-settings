@@ -43,8 +43,8 @@ MD_SUFFIXES = (".md", ".markdown")
 NOTE = ("Code in backticks or a fence is exempt. Errors only: sentence length, nominalization, "
         "Latin abbreviation, contraction, phrasal verb, bloat, double negative, "
         "condition order, omitted 'that'.")
-UI_NOTE = ("UI file: only the copy a user sees is read. Contraction and condition order do not "
-           "apply. A button, label or aria-label holds 4 words at most.")
+UI_NOTE = ("UI file: only the copy a user sees is read. Every STE rule applies. "
+           "A button, label or aria-label holds 4 words at most.")
 
 
 def lint(linter, text, suffix=".md", config_from=None):

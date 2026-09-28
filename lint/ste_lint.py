@@ -1183,8 +1183,6 @@ UI_ATTRS = {"aria-label", "title", "placeholder", "alt", "label"}
 # name other tags under the config key "label_tags" (see DEFAULT_CONFIG).
 LABEL_TAGS = LABEL_TAGS_DEFAULT
 LABEL_MAX_WORDS = 4
-# Rules that do not fit short UI text. See `Linter.check_ui`.
-UI_SKIP = {"STE008", "STE015"}
 # Text inside these tags is code, not copy, the same as a Markdown code span.
 UI_CODE_TAGS = {"script", "style", "code", "kbd", "pre", "samp"}
 # Text inside these tags is a control's value, not a label's own words.
@@ -1755,15 +1753,10 @@ class Linter:
     def check_ui(self, path: str, text: str) -> List[Finding]:
         """Lint only the copy a user sees in a .tsx, .jsx, .html or .vue file.
 
-        Two rules do not fit short UI text and are skipped (UI_SKIP). STE008,
-        contraction: UI style guides ask for "Don't" and "Can't", so the rule
-        would go red on copy that is correct. STE015, condition order: it runs
-        only in procedural mode, which Markdown headings and list items select,
-        and UI copy has neither. STE020, the label cap, runs here only.
+        UI copy gets every STE rule. STE020, the label cap, runs here only.
         """
         copy = ui_copy(path, text, self.config.get("label_tags") or LABEL_TAGS)
-        findings = [f for f in self._check_paragraphs(copy.paragraphs)
-                    if f.code not in UI_SKIP]
+        findings = self._check_paragraphs(copy.paragraphs)
         if "STE020" in self.enabled:
             for line, col, label in copy.labels:
                 findings.append(Finding(

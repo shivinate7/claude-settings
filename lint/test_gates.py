@@ -1752,8 +1752,13 @@ class UICopyLintTests(unittest.TestCase):
         findings = self.check("a.html", text)
         self.assertEqual([(f.code, f.line, f.col) for f in findings], [("STE011", 3, 39)])
 
-    def test_93_contraction_is_skipped_for_ui(self):
-        self.assertEqual(self.codes("a.tsx", "const x = <p>You can't undo it.</p>;\n"), [])
+    def test_93_contraction_is_reported_for_ui(self):
+        self.assertEqual(self.codes("a.tsx", "const x = <p>You can't undo it.</p>;\n"),
+                         ["STE008"])
+
+    def test_93b_dont_in_tsx_copy_gives_ste008(self):
+        self.assertEqual(self.codes("a.tsx", "const x = <p>Don't save the file.</p>;\n"),
+                         ["STE008"])
 
     def test_94_disable_comment_is_honored(self):
         text = ("const x = (\n  // ste-disable-next-line STE020: brand name\n"
