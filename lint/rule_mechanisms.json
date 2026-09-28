@@ -355,7 +355,7 @@
     "building-one-home-per-capability": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "A hook would have to see two implementations of one capability — the same logic duplicated across the repo — and flag it as a violation. Detecting identical or parallel logic needs code structure and semantic analysis beyond parsing."
+        "reason": "A hook would have to see two implementations of one capability in the repo."
       }
     },
     "building-fix-cause-not-symptom": {
