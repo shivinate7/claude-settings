@@ -3051,6 +3051,7 @@ CONFIG_FROZEN_DIRS = (
 # could grant itself tools the same way it could through a rewritten hook. lint/check_landed_dirs.py
 # checks by hand that this set matches the repo's own skills/*/ subdirectories.
 CONFIG_FROZEN_SKILLS = (
+    os.path.normcase("ci-hygiene"),
     os.path.normcase("fresh-prose"),
 )
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
