@@ -26,9 +26,16 @@ Check for:
   placeholder, alt, label in .tsx, .jsx, .html, .vue files), flag each unnecessary word or phrase
   and each phrase replaceable with one word. Give file:line, current text, and shorter text.
   Judgment, not blocking.
+- Silent failure: flag an empty catch, a bare `except:`, `set +e`, or `|| true` with no log,
+  when the caller needs to know the failure happened. Skip a documented fail-open, one with a
+  recorded decision, such as hooks/guard.py's docstring.
+- Shell hook or CI script hardening: flag an unquoted variable expansion. Flag input passed to
+  `eval` or to a command with no check on it. Flag a secret or token written as plain text.
+- Do not flag an issue the diff did not add. Do not flag a style issue a linter catches. Do not
+  flag a nitpick a senior engineer would skip.
 
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next.
 Under Done, the first line is PASS, FAIL, or PARTIAL. Then list each finding with file, line
 range, what is wrong, and what proves it. Then list the checks run with their outcome. Drop a
 label that does not apply. Write in Simplified Technical English. Start with the point. No
-preamble.
+preamble. Report in under 25 lines unless the brief names another cap.

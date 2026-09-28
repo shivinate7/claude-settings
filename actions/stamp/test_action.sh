@@ -196,6 +196,64 @@ HOOK
   return 1
 }
 
+test_retry_reconciles_after_a_real_push_race() {
+  local remote local_dir_a
+  remote="$(new_bare_remote)"
+  local_dir_a="$(clone_with_pending_record "$remote")"
+
+  # While clone A's run is in flight, a second, unrelated clone merges its own new pending
+  # record "second" straight to the remote — a merged PR, not a stamp run, so it lands
+  # unstamped. Clone A never fetched it: A's tree still shows only "first" pending.
+  local local_dir_b="$WORK/local-$RANDOM"
+  git clone -q "$remote" "$local_dir_b" >/dev/null 2>/dev/null
+  (
+    cd "$local_dir_b" || exit 1
+    git config user.email test@example.com
+    git config user.name test
+    printf -- '---\nid: pending\nslug: second\ntitle: Second\ndate: 2026-01-02\n---\n\nBody.\n' > docs/decisions/second.md
+    git add -A
+    git commit -q -m "add a pending record"
+    git push -q origin main
+  )
+
+  # Clone A's stamp run derives D-001 for "first" against its now-stale tree, commits, and its
+  # push collides with the real, moved remote — a genuine non-fast-forward rejection, not a
+  # mocked hook. run.sh must then fetch, reset, and re-derive against the tree as it now
+  # stands — which has grown a second pending record it never knew about — and retry (see
+  # run.sh's "RE-DERIVE, NEVER REBASE" comment, and README.md's concurrency rule: "Two runs at
+  # the same time could otherwise claim the same number").
+  local out="$WORK/race-a.log"
+  if ! REF="refs/heads/main" DEFAULT_BRANCH="main" CONFIG="$local_dir_a/stamp.json" \
+     GATE_COMMAND="true" SUBJECT_TEMPLATE="Stamp {ids}" BOT_NAME=bot BOT_EMAIL=bot@example.com \
+     STAMP_JS="$STAMP_JS" bash -c "cd '$local_dir_a' && bash '$RUN_SH'" >"$out" 2>&1; then
+    echo "  clone A's run was expected to survive the race and succeed"; cat "$out"; return 1
+  fi
+  grep -q "push rejected" "$out" || { echo "  clone A never hit a real push rejection; the race was not exercised"; cat "$out"; return 1; }
+  grep -q "attempt 2" "$out" || { echo "  clone A never retried"; cat "$out"; return 1; }
+
+  # Final origin state: both records numbered by the retry, unique, no gap, one stamp commit —
+  # the re-derive picked up "second" and gave it a real number instead of dropping it, and gave
+  # "first" whatever its fresh, reconciled position turned out to be, instead of replaying the
+  # stale D-001 it computed before it knew "second" existed.
+  local first_id second_id
+  first_id="$(git -C "$remote" show main:docs/decisions/first.md | sed -n 's/^id: //p')"
+  second_id="$(git -C "$remote" show main:docs/decisions/second.md | sed -n 's/^id: //p')"
+  [ -n "$first_id" ] || { echo "  first.md was never numbered"; return 1; }
+  [ -n "$second_id" ] || { echo "  second.md was never numbered"; return 1; }
+  [ "$first_id" != "$second_id" ] || { echo "  first and second share an id: '$first_id'"; return 1; }
+  local n1 n2 lo hi
+  n1="${first_id#D-}"; n2="${second_id#D-}"
+  n1=$((10#$n1)); n2=$((10#$n2))
+  if [ "$n1" -lt "$n2" ]; then lo=$n1; hi=$n2; else lo=$n2; hi=$n1; fi
+  [ "$lo" -eq 1 ] || { echo "  numbering does not start at 1: got $first_id and $second_id"; return 1; }
+  [ "$hi" -eq 2 ] || { echo "  a gap between the two ids: got $first_id and $second_id"; return 1; }
+
+  local stamp_commits
+  stamp_commits="$(git -C "$remote" log --format=%s main | grep -c '^Stamp ')"
+  [ "$stamp_commits" -eq 1 ] || { echo "  expected exactly one stamp commit from clone A's run, found $stamp_commits"; return 1; }
+  return 0
+}
+
 test_refuses_empty_gate() {
   local remote local_dir
   remote="$(new_bare_remote)"
@@ -327,6 +385,7 @@ run_test "regenerate runs before the gate, in the same commit" test_regenerate_r
 run_test "a failed regenerate command blocks the commit" test_failed_regenerate_blocks_commit
 run_test "stamps, gates, commits and pushes" test_succeeds_and_pushes
 run_test "a push rejected every time gives up after the configured attempts" test_gives_up_after_max_attempts
+run_test "a real push race is resolved by retry: no duplicate, no gap" test_retry_reconciles_after_a_real_push_race
 run_test "stamp mode refuses an empty gate command" test_refuses_empty_gate
 run_test "check mode passes a pending record on a feature branch, and writes nothing" test_check_mode_passes_pending_on_feature_branch
 run_test "check mode refuses a record numbered on a feature branch" test_check_mode_refuses_number_on_feature_branch

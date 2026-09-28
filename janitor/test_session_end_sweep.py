@@ -362,6 +362,26 @@ class HookBudgetFitsUnderItsHostCeiling(unittest.TestCase):
         )
 
 
+class PermissionsDenyCarriesTheStateFreeGuardRules(unittest.TestCase):
+    """The second permissions.deny layer must keep every entry it shipped with, so a missing
+    interpreter still blocks pkill/killall, .env*, and the frozen config paths (see settings.json,
+    "permissions.deny")."""
+
+    EXPECTED = (
+        "Bash(pkill:*)", "Bash(killall:*)", "Read(.env)", "Edit(.env)", "Read(.env.*)",
+        "Edit(.env.*)", "Read(!.env.example)", "Edit(!.env.example)",
+        "Edit(~/.claude/settings.json)", "Edit(~/.claude/CLAUDE.md)",
+        "Edit(~/.claude/hooks/**)", "Edit(~/.claude/lint/**)", "Edit(~/.claude/agents/**)",
+        "Edit(~/.claude/janitor/**)", "Edit(~/.claude/state/**)",
+    )
+
+    def test_deny_list_has_every_state_free_rule(self):
+        with open(os.path.join(REPO_ROOT, "settings.json"), encoding="utf-8") as handle:
+            deny = json.load(handle)["permissions"]["deny"]
+        missing = [e for e in self.EXPECTED if e not in deny]
+        self.assertFalse(missing, "settings.json permissions.deny is missing: %r" % missing)
+
+
 class HeadroomWithinBoundsUnit(unittest.TestCase):
     """Direct, synthetic-number coverage of `headroom_within_bounds`, proving the upper-edge arm
     goes red in BOTH directions -- not just against the one real settings.json this checkout
