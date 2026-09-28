@@ -9,6 +9,7 @@
       "folder": "docs/decisions",
       "manifest": "docs/decisions/ORDER.json",
       "manifestKey": "order",
+      "manifestAscii": true,
       "pendingRegex": "^##\\s+D([0-9-]\\S*)",
       "numberedRegex": "^##\\s+D([1-9][0-9]{0,2})(?![\\p{L}\\p{N}_])",
       "idTemplate": "{prefix}{n}",
@@ -19,9 +20,9 @@
       "numbering": "max_plus_one"
     },
     {
-      "id": "codes",
+      "id": "code",
       "prefix": "C",
-      "file": "docs/CODES-DECISIONS.md",
+      "file": "docs/codes.md",
       "pendingRegex": "^##\\s+C([0-9-]\\S*)",
       "numberedRegex": "^##\\s+C([1-9][0-9]{0,2})(?![\\p{L}\\p{N}_])",
       "idTemplate": "{prefix}{n}",
@@ -35,18 +36,15 @@
   },
   "unclaimed": [
     {
-      "folder": "docs/gates/steps",
+      "folder": "docs/steps",
       "pattern": "^0\\.(\\s+`step (?<slug>[a-z][a-z0-9]*(?:-[a-z0-9]+)+)`)",
       "label": "step",
-      "message": "Banchi build steps are not claimed by this engine. Number this step by hand. See deferred/banchi-build-steps.md."
+      "message": "This engine does not number a step. Number it by hand, the way this repo's own rule says."
     }
   ],
   "walk": {
-    "textSuffixes": [".md", ".py", ".ts", ".tsx", ".css", ".html", ".json", ".txt", ".yml",
-                     ".yaml", ".sh", ".js", ".mjs", ".toml"],
-    "skipDirs": [".git", "node_modules", "dist", "dist-demo", "captures", "inventory", "runs",
-                 "__pycache__", ".venv", "venv", "test-results", "playwright-report", ".serve",
-                 "worktrees", "demo-assets", "harness/images"],
+    "textSuffixes": [".md", ".py", ".ts", ".json", ".txt", ".yml", ".sh", ".js", ".mjs"],
+    "skipDirs": [".git", "node_modules", "dist", "__pycache__", ".venv", "worktrees"],
     "skipDotDirs": true,
     "extensionlessDirs": ["scripts/githooks"]
   }

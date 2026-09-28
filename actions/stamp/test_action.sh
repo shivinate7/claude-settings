@@ -4,6 +4,9 @@
 # prints "ok - <name>" and returns 0, or prints "FAIL - <name>" with the reason and returns 1.
 set -uo pipefail
 
+# A CI run's own refs name the runner's branch, not a fixture's.
+unset GITHUB_REF GITHUB_BASE_REF MODE
+
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN_SH="$HERE/run.sh"
 STAMP_JS="$HERE/stamp.mjs"
@@ -192,6 +195,104 @@ HOOK
   return 1
 }
 
+test_refuses_empty_gate() {
+  local remote local_dir
+  remote="$(new_bare_remote)"
+  local_dir="$(clone_with_pending_record "$remote")"
+  local before_head
+  before_head="$(git -C "$local_dir" rev-parse HEAD)"
+
+  if REF="refs/heads/main" DEFAULT_BRANCH="main" CONFIG="$local_dir/stamp.json" \
+     GATE_COMMAND="" SUBJECT_TEMPLATE="Stamp {ids}" BOT_NAME=bot BOT_EMAIL=bot@example.com \
+     STAMP_JS="$STAMP_JS" bash -c "cd '$local_dir' && bash '$RUN_SH'" >/dev/null 2>&1; then
+    echo "  expected a refusal of an empty gate, got exit 0"
+    return 1
+  fi
+  [ "$(git -C "$remote" rev-parse main)" = "$before_head" ] || { echo "  the remote moved with no gate"; return 1; }
+  grep -q "id: pending" "$local_dir/docs/decisions/first.md" || { echo "  the tree was stamped with no gate"; return 1; }
+  return 0
+}
+
+# A feature branch off the fixture's main, pushed, so origin/main is the base check mode reads.
+feature_branch() {
+  local local_dir="$1"
+  (
+    cd "$local_dir" || exit 1
+    git switch -q -c feature
+  )
+}
+
+run_check() {
+  local local_dir="$1"
+  # Check mode gets only what it needs: no REF, no DEFAULT_BRANCH, no gate, no bot.
+  MODE=check CONFIG="$local_dir/stamp.json" STAMP_JS="$STAMP_JS" \
+    bash -c "cd '$local_dir' && bash '$RUN_SH'" >"$WORK/check.log" 2>&1
+}
+
+test_check_mode_passes_pending_on_feature_branch() {
+  local remote local_dir
+  remote="$(new_bare_remote)"
+  local_dir="$(clone_with_pending_record "$remote")"
+  feature_branch "$local_dir"
+  printf -- '---\nid: pending\nslug: second\ntitle: Second\ndate: 2026-01-02\n---\n\nBody.\n' > "$local_dir/docs/decisions/second.md"
+  git -C "$local_dir" add -A
+  git -C "$local_dir" commit -q -m "a pending record on a branch"
+  local before_head remote_before
+  before_head="$(git -C "$local_dir" rev-parse HEAD)"
+  remote_before="$(git -C "$remote" rev-parse main)"
+
+  run_check "$local_dir" || { echo "  expected exit 0"; cat "$WORK/check.log"; return 1; }
+  [ "$(git -C "$local_dir" rev-parse HEAD)" = "$before_head" ] || { echo "  check mode made a commit"; return 1; }
+  [ "$(git -C "$remote" rev-parse main)" = "$remote_before" ] || { echo "  check mode pushed"; return 1; }
+  git -C "$local_dir" diff --quiet || { echo "  check mode wrote the tree"; return 1; }
+  grep -q "id: pending" "$local_dir/docs/decisions/second.md" || { echo "  check mode stamped"; return 1; }
+  return 0
+}
+
+test_check_mode_refuses_number_on_feature_branch() {
+  local remote local_dir
+  remote="$(new_bare_remote)"
+  local_dir="$(clone_with_pending_record "$remote")"
+  feature_branch "$local_dir"
+  printf -- '---\nid: D-002\nslug: second\ntitle: Second\ndate: 2026-01-02\n---\n\nBody.\n' > "$local_dir/docs/decisions/second.md"
+  git -C "$local_dir" add -A
+  git -C "$local_dir" commit -q -m "a record numbered on a branch"
+
+  if run_check "$local_dir"; then
+    echo "  expected a refusal, got exit 0"
+    return 1
+  fi
+  grep -q "D-002 on a branch" "$WORK/check.log" || { echo "  the refusal did not name the record"; cat "$WORK/check.log"; return 1; }
+  return 0
+}
+
+test_check_mode_refuses_unreadable_base() {
+  local remote local_dir
+  remote="$(new_bare_remote)"
+  local_dir="$(clone_with_pending_record "$remote")"
+  feature_branch "$local_dir"
+  git -C "$local_dir" update-ref -d refs/remotes/origin/main
+
+  if run_check "$local_dir"; then
+    echo "  expected a refusal when origin/main is gone, got exit 0"
+    return 1
+  fi
+  grep -q "could not run" "$WORK/check.log" || { echo "  the refusal did not say the read could not run"; cat "$WORK/check.log"; return 1; }
+  return 0
+}
+
+test_refuses_unknown_mode() {
+  local remote local_dir
+  remote="$(new_bare_remote)"
+  local_dir="$(clone_with_pending_record "$remote")"
+  if MODE=bogus CONFIG="$local_dir/stamp.json" STAMP_JS="$STAMP_JS" \
+     bash -c "cd '$local_dir' && bash '$RUN_SH'" >/dev/null 2>&1; then
+    echo "  expected a refusal of an unknown mode, got exit 0"
+    return 1
+  fi
+  return 0
+}
+
 # clone_with_pending_record's local clone (the initial "add a pending record" push) needs a
 # remote that accepts pushes even in the exhaustion test's setup phase, so the rejecting hook is
 # installed AFTER that clone/push, not before. See test_gives_up_after_max_attempts.
@@ -202,6 +303,11 @@ run_test "regenerate runs before the gate, in the same commit" test_regenerate_r
 run_test "a failed regenerate command blocks the commit" test_failed_regenerate_blocks_commit
 run_test "stamps, gates, commits and pushes" test_succeeds_and_pushes
 run_test "a push rejected every time gives up after the configured attempts" test_gives_up_after_max_attempts
+run_test "stamp mode refuses an empty gate command" test_refuses_empty_gate
+run_test "check mode passes a pending record on a feature branch, and writes nothing" test_check_mode_passes_pending_on_feature_branch
+run_test "check mode refuses a record numbered on a feature branch" test_check_mode_refuses_number_on_feature_branch
+run_test "check mode refuses to pass when the base cannot be read" test_check_mode_refuses_unreadable_base
+run_test "an unknown mode is refused" test_refuses_unknown_mode
 
 echo "$((total - failed)) of $total passed."
 [ "$failed" -eq 0 ]

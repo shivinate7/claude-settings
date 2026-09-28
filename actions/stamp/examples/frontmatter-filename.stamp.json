@@ -19,43 +19,9 @@
       "requireFieldsOnPending": ["date", "gloss"]
     },
     {
-      "id": "build",
-      "folder": "docs/build",
-      "prefix": "B",
-      "pad": 0,
-      "location": "frontmatter+filename",
-      "filenamePendingPrefix": "_",
-      "filenameTemplate": "{prefix}{n}_{rest}.md",
-      "idTemplate": "{prefix}{n}",
-      "pendingRegex": "^id:[ \\t]*$",
-      "order": "date",
-      "numbering": "lowest_free",
-      "slugField": "slug",
-      "dateField": "date",
-      "glossField": "gloss",
-      "requireFieldsOnPending": ["date", "gloss"]
-    },
-    {
       "id": "finding",
       "folder": "docs/findings",
       "prefix": "F",
-      "pad": 0,
-      "location": "frontmatter+filename",
-      "filenamePendingPrefix": "_",
-      "filenameTemplate": "{prefix}{n}_{rest}.md",
-      "idTemplate": "{prefix}{n}",
-      "pendingRegex": "^id:[ \\t]*$",
-      "order": "date",
-      "numbering": "lowest_free",
-      "slugField": "slug",
-      "dateField": "date",
-      "glossField": "gloss",
-      "requireFieldsOnPending": ["date", "gloss"]
-    },
-    {
-      "id": "question",
-      "folder": "docs/questions",
-      "prefix": "Q",
       "pad": 0,
       "location": "frontmatter+filename",
       "filenamePendingPrefix": "_",
@@ -75,10 +41,6 @@
     "slugGroup": 1,
     "template": "{id}, {gloss}",
     "scanGlobs": ["**/*.md", "**/*.py", "**/*.csv"],
-    "excludeGlobs": [
-      "harness/fixtures/**",
-      "docs/Records_Model.md",
-      "docs/history/Questions_Findings_Split_Backticked_Cites_*.csv"
-    ]
+    "excludeGlobs": ["test/fixtures/**", "docs/citation-syntax.md"]
   }
 }

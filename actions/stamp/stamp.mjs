@@ -5,26 +5,29 @@
 // A branch writes a record with a PENDING marker instead of a number. This tool numbers every
 // pending record, in order, from the next free number for its kind, then rewrites every cite of
 // its slug to the numbered form. It never renumbers an existing record and never rewrites a
-// repo's record shape: the shape is a config file the calling repo owns (see README.md).
+// repo's record shape: the shape is a config file the calling repo owns (see README.md). This
+// file names no repo. Each repo reads its own fields off its own tree.
 //
-// Formats covered (see decisions/one-shared-record-stamp.md for the design and what is out of
-// scope):
-//   1. number in frontmatter only            (q_max docs/decisions, sharables decisions/findings/gaps)
-//   2. number in frontmatter AND filename     (job-cost-reporting docs/decisions, docs/build, ...)
-//   3. number in a heading, and for a split corpus in the filename too (banchi docs/decisions and
-//      docs/CODES-DECISIONS.md). Its own module, formats/heading.mjs, picked by
-//      `"format": "heading"` in the config. This file only dispatches to it.
+// Shapes covered:
+//   1. number in frontmatter only
+//   2. number in frontmatter AND filename
+//   3. number in a heading, and for a split corpus in the filename too. Its own module,
+//      formats/heading.mjs, picked by `"format": "heading"` in the config. This file dispatches
+//      to it, and asks the off-branch question for it.
 //
 // Modes:
 //   --stamp   number every pending record and rewrite cites. Writes the tree.
-//   --check   refuse a record numbered on a branch, a malformed record, a duplicate id, or a
-//             cite that points at no record. Touches nothing.
+//   --check   refuse a malformed record, a duplicate id, or a cite that points at no record. On
+//             the default branch, also refuse a pending record HEAD did not add. Off it, refuse a
+//             record numbered on the branch, against the base branch's tree. Touches nothing.
 //
-// Both take --config <path> (required) and --root <path> (default: cwd).
+// Both take --config <path> (required) and --root <path> (default: cwd). --check also takes
+// --base <ref> (default: origin/$GITHUB_BASE_REF, else origin/<defaultBranch>).
 
-import { readFileSync, writeFileSync, unlinkSync, readdirSync, statSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync, readdirSync, statSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { join, resolve, posix } from "node:path";
+import { join, resolve, posix, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as headingFormat from "./formats/heading.mjs";
 
@@ -58,9 +61,9 @@ export function loadConfig(path) {
   return config;
 }
 
-// ---------------------------------------------------------------- small utilities shared with
-// q_max's harness/decision-refs.mjs: EOL is a property of the file on disk, never of the tool
-// (D-338 in that log). Read the file's own ending, match it back on write.
+// ---------------------------------------------------------------- small utilities
+// EOL is a property of the file on disk, never of the tool. Read the file's own ending, match it
+// back on write, so a stamp never rewrites every line of a CRLF file.
 function readFileEol(abs) {
   const raw = readFileSync(abs, "utf8");
   const crlf = (raw.match(/\r\n/g) ?? []).length;
@@ -96,8 +99,7 @@ function templateToPattern(template, extra) {
   return new RegExp("^" + re + "$");
 }
 
-// A minimal glob: `*` inside one segment, `**` across segments, matched the way q_max's
-// globToSource reads .gitignore syntax. Good enough for the exclude/scan lists this schema asks
+// A minimal glob: `*` inside one segment, `**` across segments, in .gitignore syntax. Good enough for the exclude/scan lists this schema asks
 // for, without pulling in a dependency for it (this tool is Node stdlib only, no npm).
 function globToRegExp(pattern) {
   let re = "";
@@ -117,8 +119,8 @@ function makeMatcher(globs) {
 }
 
 // Every file under root, posix-relative, skipping `.git` and a nested checkout (a directory
-// holding its own `.git`, e.g. a worktree) the same way q_max's walk does — a nested checkout's
-// files belong to another commit, not this one.
+// holding its own `.git`, e.g. a worktree). A nested checkout's files belong to another commit,
+// not this one.
 function walk(root) {
   const out = [];
   (function go(dir, prefix) {
@@ -161,12 +163,11 @@ function splitFrontMatter(text) {
   return m ? m[1] : null;
 }
 
-// A record's id value may name MORE than one number: q_max writes "D-044 to D-046" for a range
-// and "D-048 and D-053" for a list (brief point 7). This tool never PRODUCES either shape — it
-// only ever assigns a single number to a pending record — but it must still count every number
-// such a value already defines, or the running "highest so far" undercounts and the next
-// assignment collides. Only a kind that opts in with `allowRanges: true` pays for this; jcr and
-// sharables never write a multi-id value, so their kinds skip it.
+// A record's id value may name MORE than one number: "D-044 to D-046" for a range and "D-048 and
+// D-053" for a list. This tool never PRODUCES either shape. It only ever assigns a single number
+// to a pending record. But it must still count every number such a value already defines, or the
+// running "highest so far" undercounts and the next assignment collides. Only a kind that opts in
+// with `allowRanges: true` pays for this.
 function idsFromValue(kind, idVal) {
   if (!idVal) return [];
   if (!kind.allowRanges) {
@@ -189,14 +190,13 @@ function loadRecord(root, kind, rel) {
   const front = splitFrontMatter(text) ?? "";
   const name = rel.split("/").pop();
   // The numbers, when this record already carries at least one: read from the id field for a
-  // frontmatter-only kind, or from the filename for a kind that also renames (which never
-  // carries a range — jcr's own tool has no such shape).
+  // frontmatter-only kind, or from the filename for a kind that also renames (a filename never
+  // carries a range).
   //
   // PENDING is a different question for each location. A frontmatter-only kind reads it off the
-  // id field, via `pendingRegex` (q_max and sharables both write `id: pending`). A kind that also
-  // renames reads it off the FILENAME instead: jcr's own tool decides pending by the leading `_`
-  // alone, never by the id field's content (`toolchain/claim_ids.py`'s `survey()`), so a stray
-  // value there is not this tool's business either.
+  // id field, via `pendingRegex`. A kind that also renames reads it off the FILENAME instead, by
+  // `filenamePendingPrefix` alone. The filename is the one place such a kind's number lives, so
+  // the filename is the one place its pending state can live too.
   let numbers = [];
   let pending;
   if (kind.location === "frontmatter+filename") {
@@ -219,10 +219,9 @@ function loadRecord(root, kind, rel) {
   };
 }
 
-// ---------------------------------------------------------------- git order (only path in this
-// file that spawns git, and only asked for a kind whose order is "merge" or whose check runs on
-// the default branch — matching q_max's own boundary for the same reason: every other mode must
-// run on a tree with no git at all)
+// ---------------------------------------------------------------- git order. Asked only for a
+// kind whose order is "merge", or by --check's branch questions. --stamp on any other order runs
+// on a tree with no git at all.
 function mergeOrder(root, folder) {
   const out = execFileSync("git", [
     "log", "--first-parent", "--diff-filter=A", "--name-only", "--reverse", "--format=%x00", "--", folder,
@@ -281,7 +280,7 @@ function orderPending(root, kind, pending) {
   if (kind.order === "filename") {
     return [...pending].sort((a, b) => a.rel.localeCompare(b.rel));
   }
-  // "date": the order jcr and sharables both claim in. A record with no date sorts as "", which
+  // "date": a record with no date sorts as "", which
   // `--check`'s malformed-record refusal below catches when the kind requires the field.
   return [...pending].sort((a, b) =>
     (a.date ?? "").localeCompare(b.date ?? "") || a.slug.localeCompare(b.slug));
@@ -338,11 +337,10 @@ function finishStamp(root, kind, rec, n) {
 
 // ---------------------------------------------------------------- protected ranges
 // A citation SYNTAX is usually explained somewhere, in prose, with the literal placeholder
-// spelled out as an example — q_max's own README does this for "[[slug]]" itself, inside a code
-// span. That example is not a citation of a record named "slug", and neither the rewrite nor
-// the dangling-cite refusal may treat it as one. Lifted from q_max's own `protectedRanges`
-// (harness/decision-refs.mjs), which exists for exactly this reason, over frontmatter, a fenced
-// block, an inline code span, or a markdown link target.
+// spelled out as an example, such as "[[slug]]" inside a code span. That example is not a
+// citation of a record named "slug", so the dangling-cite refusal must not treat it as one. The
+// protected spans are frontmatter, a fenced block, an inline code span, and a markdown link
+// target.
 const FM_RE = /^---\r?\n[\s\S]*?\r?\n---\r?\n/;
 function protectedRanges(text) {
   const spans = [];
@@ -372,10 +370,9 @@ function renderCite(template, a) {
     .replace(/\{title\}/g, a.title ?? "");
 }
 
-// A citation may name its own prefix beside the slug (sharables' `D‹slug›`): resolve it only when
-// that prefix matches the record the slug actually belongs to, the way sharables' own
-// `assigned.get((letter, slug))` refuses a mismatched pair rather than guessing which kind was
-// meant.
+// A citation may name its own prefix beside the slug (`D‹slug›`): resolve it only when that
+// prefix matches the record the slug actually belongs to. A mismatched pair is left as text,
+// never a guess at which kind was meant.
 function resolveCite(config, byId, groups) {
   const slug = groups[(config.cite.slugGroup ?? 1) - 1];
   const a = byId.get(slug);
@@ -393,9 +390,8 @@ function rewriteCites(root, config, byId, files) {
   for (const rel of files.filter((f) => scan(f) && !exclude(f))) {
     const abs = join(root, rel);
     const { text, eol } = readFileEol(abs);
-    // UNGUARDED, on purpose, matching q_max's own `stamp()` rewrite exactly: a real citation of
-    // a slug THIS run assigns is rewritten whether or not it sits inside a backtick span (a
-    // stylistic choice some entries make). Only the DANGLING-cite check below needs to tell an
+    // UNGUARDED, on purpose: a real citation of a slug THIS run assigns is rewritten whether or
+    // not it sits inside a backtick span (a stylistic choice some entries make). Only the DANGLING-cite check below needs to tell an
     // example apart from a citation, because only it can otherwise refuse to write over nothing
     // wrong. The rewrite itself never invents a match: `resolveCite` already requires the slug
     // to be one this run actually assigned.
@@ -493,33 +489,151 @@ export function stamp(root, config) {
 }
 
 // ---------------------------------------------------------------- --check
-export function check(root, config) {
-  if (config.format === "heading") return headingFormat.check(root, config, HELPERS);
-  const { problems, byKind } = validate(root, config);
-  const branch = currentBranch(root);
-  const onDefault = config.defaultBranch ? branch === config.defaultBranch : false;
-  if (onDefault) {
-    for (const kind of config.kinds) {
-      const pending = byKind.get(kind).filter((r) => r.pending);
-      if (!pending.length) continue;
-      const added = addedByHead(root, kind.folder);
-      for (const rec of pending) {
-        if (added && !added.has(rec.rel)) {
-          problems.push(`${rec.rel} is still pending on ${branch}, added before HEAD — the stamp did not run, or its push was rejected`);
-        }
+
+// A pull_request checkout is a detached merge commit, so it is never the default branch, whatever
+// its first parent is. GitHub sets GITHUB_BASE_REF only on a pull_request event, and names the
+// ref refs/pull/<n>/merge.
+export function onDefaultBranch(root, config) {
+  if (process.env.GITHUB_BASE_REF) return false;
+  if ((process.env.GITHUB_REF ?? "").startsWith("refs/pull/")) return false;
+  return Boolean(config.defaultBranch) && currentBranch(root) === config.defaultBranch;
+}
+
+export function baseRef(config, opts = {}) {
+  if (opts.base) return opts.base;
+  if (process.env.GITHUB_BASE_REF) return `origin/${process.env.GITHUB_BASE_REF}`;
+  if (config.defaultBranch) return `origin/${config.defaultBranch}`;
+  return null;
+}
+
+function gitOut(root, args, input) {
+  return execFileSync("git", args, {
+    cwd: root, input, maxBuffer: 256 * 1024 * 1024, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+  });
+}
+
+// Write the record paths of one commit into a new temp dir, from git's own objects, so the
+// engine's own loader can read the base tree the same way it reads this one. No second parser.
+// Only regular files are written. A symlink is not a record file here either.
+function materializeTree(root, commit, paths) {
+  const dir = mkdtempSync(join(tmpdir(), "stamp-base-"));
+  const listing = gitOut(root, ["--literal-pathspecs", "ls-tree", "-r", "-z", commit, "--", ...paths]).toString("utf8");
+  const files = [];
+  for (const entry of listing.split("\0")) {
+    const m = /^(\d+) blob ([0-9a-f]+)\t(.+)$/s.exec(entry);
+    if (m && (m[1] === "100644" || m[1] === "100755")) files.push({ oid: m[2], rel: m[3] });
+  }
+  if (!files.length) return dir;
+  const out = gitOut(root, ["cat-file", "--batch"], files.map((f) => f.oid).join("\n") + "\n");
+  let at = 0;
+  for (const f of files) {
+    const nl = out.indexOf(0x0a, at);
+    const size = Number(out.subarray(at, nl).toString("utf8").split(" ")[2]);
+    const body = out.subarray(nl + 1, nl + 1 + size);
+    at = nl + 1 + size + 1;
+    mkdirSync(dirname(join(dir, f.rel)), { recursive: true });
+    writeFileSync(join(dir, f.rel), body);
+  }
+  return dir;
+}
+
+// Every numbered record in one tree, keyed so the same record in two trees has the same key. A
+// frontmatter kind keys a record by its slug, since the slug is the record's own name before and
+// after its number. heading.mjs keys its own.
+function numberedRecords(root, config) {
+  if (config.format === "heading") return headingFormat.numberedRecords(root, config, HELPERS);
+  const out = [];
+  for (const kind of config.kinds) {
+    for (const rel of listRecordFiles(root, kind)) {
+      const rec = loadRecord(root, kind, rel);
+      for (const n of rec.numbers) out.push({ key: `${kind.id}\0${rec.slug}\0${n}`, rel, id: renderId(kind, n), prefix: kind.prefix });
+    }
+  }
+  return out;
+}
+
+const recordPaths = (config) =>
+  config.format === "heading" ? headingFormat.recordPaths(config) : config.kinds.map((k) => k.folder);
+
+// Off the default branch: every record that carries a number in this tree must carry that same
+// number in the base tree. A new record with a number fails, and so does a record that was
+// pending on the base and has a number now. The base tree is the merge base of HEAD and the base
+// ref, never the ref's tip: the tip may have taken the same number since, for another record, and
+// that reads as "already there" and hides the defect. In a pull_request merge commit the merge
+// base IS the base ref's tip, so both read the same tree there.
+//
+// A base that cannot be read is a refusal, never a pass. A check that did not run is not green.
+function branchNumbered(root, config, opts) {
+  const ref = baseRef(config, opts);
+  const remedy = "Fetch the base branch with its history (actions/checkout with fetch-depth: 0), or pass --base <ref>.";
+  if (!ref) {
+    return [`branch question could not run: no base ref. Set "defaultBranch" in the config, or pass --base <ref>.`];
+  }
+  let base;
+  try {
+    base = gitOut(root, ["merge-base", "HEAD", ref]).toString("utf8").trim();
+  } catch {
+    base = "";
+  }
+  if (!base) return [`branch question could not run: git cannot read a merge base of HEAD and ${ref}. ${remedy}`];
+  let dir;
+  try {
+    dir = materializeTree(root, base, recordPaths(config));
+    const known = new Set(numberedRecords(dir, config).map((r) => r.key));
+    const problems = [];
+    for (const r of numberedRecords(root, config)) {
+      if (!known.has(r.key)) {
+        problems.push(`${r.rel} is numbered ${r.id} on a branch, and ${ref} does not number it so. ` +
+          `Write the pending marker and let the stamp claim the number at merge.`);
+      }
+    }
+    return [...new Set(problems)];
+  } catch (e) {
+    return [`branch question could not run: git cannot read the tree of ${base} (${String(e.message).split("\n")[0]}). ${remedy}`];
+  } finally {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// On the default branch: a pending record HEAD did not itself add means the stamp did not run,
+// or its push was rejected. The question is asked only while something is pending.
+function defaultPendingOld(root, config, byKind, branch) {
+  const problems = [];
+  for (const kind of config.kinds) {
+    const pending = byKind.get(kind).filter((r) => r.pending);
+    if (!pending.length) continue;
+    const added = addedByHead(root, kind.folder);
+    for (const rec of pending) {
+      if (added && !added.has(rec.rel)) {
+        problems.push(`${rec.rel} is still pending on ${branch}, added before HEAD — the stamp did not run, or its push was rejected`);
       }
     }
   }
   return problems;
 }
 
+export function check(root, config, opts = {}) {
+  const onDefault = onDefaultBranch(root, config);
+  let problems;
+  if (config.format === "heading") {
+    problems = headingFormat.check(root, config, HELPERS, onDefault);
+  } else {
+    const v = validate(root, config);
+    problems = v.problems;
+    if (onDefault) problems.push(...defaultPendingOld(root, config, v.byKind, config.defaultBranch));
+  }
+  if (!onDefault) problems.push(...branchNumbered(root, config, opts));
+  return problems;
+}
+
 // ---------------------------------------------------------------- CLI
 function parseArgv(argv) {
-  const out = { mode: null, config: null, root: process.cwd() };
+  const out = { mode: null, config: null, root: process.cwd(), base: null };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--stamp" || argv[i] === "--check") out.mode = argv[i].slice(2);
     else if (argv[i] === "--config") out.config = argv[++i];
     else if (argv[i] === "--root") out.root = argv[++i];
+    else if (argv[i] === "--base") out.base = argv[++i];
   }
   return out;
 }
@@ -529,7 +643,7 @@ const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(imp
 if (isMain) {
   const args = parseArgv(process.argv.slice(2));
   if (!args.mode || !args.config) {
-    console.error("usage: node stamp.mjs --stamp|--check --config <path> [--root <path>]");
+    console.error("usage: node stamp.mjs --stamp|--check --config <path> [--root <path>] [--base <ref>]");
     process.exit(2);
   }
   const config = loadConfig(args.config);
@@ -541,7 +655,7 @@ if (isMain) {
       process.exit(1);
     }
   } else {
-    const problems = check(args.root, config);
+    const problems = check(args.root, config, { base: args.base });
     if (problems.length) {
       for (const p of problems) console.error(p);
       process.exit(1);
