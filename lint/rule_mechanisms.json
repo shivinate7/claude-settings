@@ -103,7 +103,7 @@
     "roles-brief-contents": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No check parses a brief for the task, files, decisions quoted verbatim, and a done-check. Brief quality is read by a human."
+        "reason": "No check parses a brief for the task, files, governing rulings, and a done-check. Brief quality is read by a human."
       }
     },
     "roles-resume-by-name": {
@@ -386,6 +386,12 @@
       "mechanism": {
         "kind": "unmechanized",
         "reason": "Judging whether a rule explanation ran to a paragraph is a style read, not a parsed structure."
+      }
+    },
+    "speak-rewrite-superseded-in-place": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No hook diffs an edit to a record and judges whether superseded text was rewritten in place versus left beside a story, an old quote, or the owner's verbatim words. Judging what is still true is a human read."
       }
     },
     "output-write-in-ste": {

@@ -28,8 +28,8 @@ The file also carries `_subagentCapUntil`, an ISO-8601 time no more than 24 hour
 watch reverts the raise once that time passes.<!-- rule:roles-override-carries-expiry -->
 Remove the file when the raise is no longer needed.<!-- rule:roles-remove-override-file --> Workers never spawn: nested reports misroute (Sept 2026).
 A repo that needs nesting raises depth in its settings and records the risk.<!-- rule:roles-workers-never-spawn --> A brief carries
-the task, files, governing decisions quoted verbatim, and the check that proves the task
-done.<!-- rule:roles-brief-contents --> Resume a dead agent by name, never fresh.<!-- rule:roles-resume-by-name -->
+the task, the files, the governing rulings in the fewest words, and the check that proves
+the task done.<!-- rule:roles-brief-contents --> Resume a dead agent by name, never fresh.<!-- rule:roles-resume-by-name -->
 
 **Parallelism, two tiers.** Fan tasks out to workers now, each in its own checkout.<!-- rule:parallelism-each-own-checkout --> A
 workflow run, the ultracode path, is a fan-out too. Give each workflow agent that writes
@@ -86,7 +86,9 @@ only in chat is not done. Land the design in a spec or decision entry now, or de
 the design abandoned.<!-- rule:building-land-design-or-abandon --> A memory entry may point to a ruling. It is never the ruling's only home.<!-- rule:building-memory-never-only-home -->
 
 **Speak plainly.** Cite a record by id plus a short gloss, like "D12, short titles for
-records". Never cite a bare id.<!-- rule:speak-cite-id-plus-gloss --> Never explain a rule in a paragraph.<!-- rule:speak-never-explain-in-paragraph --> If I ask
+records". Never cite a bare id.<!-- rule:speak-cite-id-plus-gloss --> Never explain a rule in a paragraph.<!-- rule:speak-never-explain-in-paragraph --> Rewrite
+superseded text in place. Keep only what is true now, in the fewest words. Git keeps
+the history.<!-- rule:speak-rewrite-superseded-in-place --> If I ask
 "explain it like I'm five", the message failed.
 
 **Output.** Write in Simplified Technical English by default, to me and between agents,
