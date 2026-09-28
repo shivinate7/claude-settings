@@ -3535,7 +3535,11 @@ def main():
     print("fixtures under " + ROOT)
     print()
     failed = 0
+    # MUTATE_ONLY: set by hooks/mutate_shared.py's first stage, run only the named cases.
+    only = os.environ.get("MUTATE_ONLY")
     for case in CASES:
+        if only and only not in case["name"]:
+            continue
         got, reason = decide(case)
         ok = got == case["expected"]
         note = ""
@@ -3556,6 +3560,8 @@ def main():
         print("%s  %-6s(want %-6s)  [%-11s] %s%s" % (
             "PASS" if ok else "FAIL", got, case["expected"], case["tool"], case["name"], note))
     for label, checker in LOG_CHECKS:
+        if only and only not in label:
+            continue
         ok, note = checker()
         failed += 0 if ok else 1
         print("%s  %-6s(want %-6s)  [%-11s] %s  (%s)" % (

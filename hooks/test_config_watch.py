@@ -677,7 +677,10 @@ def main() -> int:
                                                else ""))
     print()
     failed = 0
+    only = os.environ.get("MUTATE_ONLY")  # first stage of hooks/mutate_shared.py: named cases only
     for entry in CASES:
+        if only and only not in entry["name"]:
+            continue
         root = tempfile.mkdtemp(prefix="config_watch_")
         try:
             # The files the indirection cases read. They sit OUTSIDE the project and outside the
