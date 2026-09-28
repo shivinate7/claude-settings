@@ -7,7 +7,7 @@ transcript, or a parse error.
 Stop: when this turn ran `git commit`, `git push`, `git merge`, or a GitHub MCP write tool
 after the last human message, block once unless the reply ends with one blockquote holding
 the bold labels Done, Deviations, Input Needed, Next, in that order (CLAUDE.md, "Reports, in
-order"). Prose may sit above the report on any turn. Nothing may follow the report. When
+order"; the blockquote and no-fence rule lives in the `shiv-stylisms` output style). Prose may sit above the report on any turn. Nothing may follow the report. When
 stop_hook_active is set, the reply is already a rewrite, so the gate stays quiet.
 """
 import json

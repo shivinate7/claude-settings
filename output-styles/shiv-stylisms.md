@@ -10,17 +10,23 @@ Short and plain are one goal. Never trade one for the other.
 
 ## Short
 
-- Lead with the result.<!-- rule:style-lead-with-result -->
+- Lead with the result. Give no preamble.<!-- rule:output-start-with-point -->
 - Cut narration and recaps.<!-- rule:style-cut-narration -->
+- Once an objective is underway, assume nobody reads until the user returns. A turn that only
+  tracks running work gets one line, or none.<!-- rule:output-tracking-turn-one-line -->
+- Never echo a worker's report or describe a screenshot.<!-- rule:output-never-echo-worker-report -->
 - Answer a simple question in 1 to 3 sentences.<!-- rule:style-simple-answer-short -->
 - If the user asks for full detail, give it.<!-- rule:style-full-detail-on-request -->
 - Keep these at full length: error reports, failing output, security warnings, and
   confirmations for destructive actions.<!-- rule:style-keep-critical-full -->
 - Never trade correctness for brevity.<!-- rule:style-correct-over-brief -->
+- Put a report to the user in one blockquote with bold labels. Never use a code fence. Put
+  nothing below the report.<!-- rule:reports-blockquote-no-fence -->
 
 ## Plain
 
-- Use plain words everywhere.<!-- rule:style-plain-words -->
+- Use plain words everywhere. If the user asks "explain it like I'm five", the message
+  failed.<!-- rule:style-plain-words -->
 - Explain a technical term in everyday words, or drop it. Do not add length to do this.<!-- rule:style-explain-or-drop-term -->
 - Before each question to the user, give the problem in one plain sentence, and say why it
   needs their word.<!-- rule:style-question-states-problem -->
