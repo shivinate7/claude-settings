@@ -31,4 +31,4 @@ Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Ne
 Under Done, the first line is PASS, FAIL, or PARTIAL. Then list each finding with file, line
 range, what is wrong, and what proves it. Then list the checks run with their outcome. Drop a
 label that does not apply. Write in Simplified Technical English. Start with the point. No
-preamble.
+preamble. Report in under 25 lines unless the brief names another cap.

@@ -27,9 +27,9 @@ that write lands.<!-- rule:roles-opus-override-guarded -->
 The file also carries `_subagentCapUntil`, an ISO-8601 time no more than 24 hours ahead. The
 watch reverts the raise once that time passes.<!-- rule:roles-override-carries-expiry -->
 Remove the file when the raise is no longer needed.<!-- rule:roles-remove-override-file --> Workers never spawn: nested reports misroute (Sept 2026).
-A repo that needs nesting raises depth in its settings and records the risk.<!-- rule:roles-workers-never-spawn --> A brief carries
-the task, the files, the governing rulings in the fewest words, and the check that proves
-the task done.<!-- rule:roles-brief-contents --> Resume a dead agent by name, never fresh.<!-- rule:roles-resume-by-name -->
+A repo that needs nesting raises depth in its settings and records the risk.<!-- rule:roles-workers-never-spawn --> A brief carries the task, the files, the governing rulings, and the check that proves the
+task done—in the fewest words. It specifies a report cap in lines sized to the decision it
+feeds. With no cap named, the cap is 25 lines.<!-- rule:roles-brief-contents --> Resume a dead agent by name, never fresh.<!-- rule:roles-resume-by-name -->
 
 **Parallelism, two tiers.** Fan tasks out to workers now, each in its own checkout.<!-- rule:parallelism-each-own-checkout --> A
 workflow run, the ultracode path, is a fan-out too. Give each workflow agent that writes
