@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """ste-lint - a Simplified Technical English checker for software documentation.
 
-The checker reads Markdown, plain text, or source-code comments and reports the
-sentences that break the rules of the simplified-technical-english skill.
+The checker reads Markdown, plain text, source-code comments, or the copy a user
+sees in a .tsx, .jsx, .html or .vue file, and reports the sentences that break
+the rules of the simplified-technical-english skill.
 
 It needs Python 3.9 or later. It has no dependencies outside the standard
 library.
@@ -20,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import bisect
 import fnmatch
 import io
 import json
@@ -28,6 +30,7 @@ import re
 import sys
 import tokenize
 from dataclasses import dataclass, field
+from html.parser import HTMLParser
 from typing import Dict, List, Optional, Sequence, Tuple
 
 __version__ = "1.0.0"
@@ -109,6 +112,21 @@ _rule(
     "'that' marks where the main clause ends. Many languages cannot omit it, so\n"
     "translation of the sentence becomes ambiguous.",
 )
+_rule(
+    "STE020", "label-length", "error", "[4.1]",
+    "The button, label or aria-label holds more than 4 words.",
+    "Front-end copy only. The text of a <button> or a <label>, and each aria-label\n"
+    "value, holds 4 words at most. Words are counted on whitespace, after markup\n"
+    "and {expressions} are removed. A label that is only an expression is skipped.\n"
+    "The config key label_tags names the tags. The default is button and label.",
+)
+_rule(
+    "STE021", "bad-escape", "error", "[GR]",
+    "A UI escape comment does not name a rule and a reason.",
+    "Front-end copy only. An escape is 'ste-disable-line STE020: reason' or\n"
+    "'ste-disable-next-line STE020: reason', inside a comment. There is no\n"
+    "file-level escape for UI files.",
+)
 
 # --------------------------------------------------------------------------
 # Word tables
@@ -180,6 +198,92 @@ BLOAT = [
     (r"\bin spite of the fact that\b", "although"),
     (r"\bon a regular basis\b", "regularly"),
     (r"\bof the order of\b", "about"),
+    # Copied from the Vale style packs, errata-ai/Microsoft (MIT, Wordiness.yml),
+    # errata-ai/Google (MIT, WordListCase.yml) and errata-ai/proselint (BSD-3-Clause,
+    # Needless.yml and RASSyndrome.yml). Their notices are in lint/LICENSE-ste_lint.
+    # Only a pair whose short form keeps the meaning in every context is here.
+    (r"\ba sufficient number of\b", "enough"),
+    (r"\bprevious to\b", "before"),
+    (r"\butilize\b", "use"),
+    (r"\ba myriad of\b", "myriad"),
+    (r"\badversely impact\b", "hurt"),
+    (r"\ball of a sudden\b", "suddenly"),
+    (r"\balong the lines of\b", "similar to"),
+    (r"\ban adequate number of\b", "enough"),
+    (r"\ban appreciable number of\b", "many"),
+    (r"\bany and all\b", "all"),
+    (r"\bare in agreement\b", "agree"),
+    (r"\bas a matter of fact\b", "in fact"),
+    (r"\bas a result of\b", "because of"),
+    (r"\bas of yet\b", "yet"),
+    (r"\bas per\b", "per"),
+    (r"\bat a later date\b", "later"),
+    (r"\bat all times\b", "always"),
+    (r"\bbasic necessity\b", "necessity"),
+    (r"\bbecause of the fact that\b", "because"),
+    (r"\bcame to a realization\b", "realized"),
+    (r"\bcame to an abrupt end\b", "ended abruptly"),
+    (r"\bcarry out an evaluation of\b", "evaluate"),
+    (r"\bclose down\b", "close"),
+    (r"\bclosed down\b", "closed"),
+    (r"\bcomplete stranger\b", "stranger"),
+    (r"\bconcerning the matter of\b", "regarding"),
+    (r"\bconduct a review of\b", "review"),
+    (r"\bconduct experiments\b", "experiment"),
+    (r"\bdespite the fact that\b", "although"),
+    (r"\bdisappear from sight\b", "disappear"),
+    (r"\bdoomed to fail\b", "doomed"),
+    (r"\bduring the period of\b", "during"),
+    (r"\bduring the time that\b", "while"),
+    (r"\bemergency situation\b", "emergency"),
+    (r"\bestablish connectivity\b", "connect"),
+    (r"\bexcept when\b", "unless"),
+    (r"\bfor the duration of\b", "during"),
+    (r"\bgather together\b", "gather"),
+    (r"\bhas the capacity to\b", "can"),
+    (r"\bhold a meeting\b", "meet"),
+    (r"\bif this is not the case\b", "if not"),
+    (r"\bin a careful manner\b", "carefully"),
+    (r"\bin a thoughtful manner\b", "thoughtfully"),
+    (r"\bin addition\b(?! to\b)", "also"),
+    (r"\bin an effort to\b", "to"),
+    (r"\bin between\b", "between"),
+    (r"\bin lieu of\b", "instead of"),
+    (r"\bin spite of\b", "despite"),
+    (r"\bin the (?:very )?near future\b", "soon"),
+    (r"\bit would appear that\b", "apparently"),
+    (r"\blift up\b", "lift"),
+    (r"\bmade reference to\b", "referred to"),
+    (r"\bmake reference to\b", "refer to"),
+    (r"\bmix together\b", "mix"),
+    (r"\bnone at all\b", "none"),
+    (r"\bnot in a position to\b", "unable to"),
+    (r"\bnot possible\b", "impossible"),
+    (r"\bof major importance\b", "important"),
+    (r"\bperform an assessment of\b", "assess"),
+    (r"\bpertaining to\b", "about"),
+    (r"\bspan across\b", "span"),
+    (r"\btake into account\b", "consider"),
+    (r"\bthe question as to whether\b", "whether"),
+    (r"\bthere is no doubt but that\b", "doubtless"),
+    (r"\bthis is a subject that\b", "this subject"),
+    (r"\bunder the provisions of\b", "under"),
+    (r"\buntil such time as\b", "until"),
+    (r"\bused for fuel purposes\b", "used for fuel"),
+    (r"\bwith the exception of\b", "except for"),
+    (r"\bclick on\b", "click"),
+    (r"\bcatch on fire\b", "catch fire"),
+    # The acronym stays case-sensitive, so "pin number" on a circuit board passes.
+    (r"\b(?-i:ATM) machine\b", "ATM"),
+    (r"\b(?-i:CD) disc\b", "CD"),
+    (r"\b(?-i:CPI) index\b", "CPI"),
+    (r"\b(?-i:GPS) system\b", "GPS"),
+    (r"\b(?-i:GUI) interface\b", "GUI"),
+    (r"\b(?-i:HIV) virus\b", "HIV"),
+    (r"\b(?-i:ISBN) number\b", "ISBN"),
+    (r"\b(?-i:LCD) display\b", "LCD"),
+    (r"\b(?-i:PIN) number\b", "PIN"),
+    (r"\bplease (?-i:RSVP)\b", "RSVP"),
 ]
 
 NOMINALIZATION_PHRASES = [
@@ -291,6 +395,8 @@ class Finding:
 # Configuration
 # --------------------------------------------------------------------------
 
+LABEL_TAGS_DEFAULT = ("button", "label")
+
 DEFAULT_CONFIG = {
     "mode": "auto",
     "max_words_procedural": 20,
@@ -302,6 +408,8 @@ DEFAULT_CONFIG = {
     "exclude": [],
     # Off for a repository with no folder at this path: see `find_decisions_dir`.
     "decisions_dir": "docs/decisions",
+    # The tags whose text the STE020 label cap reads, in UI files.
+    "label_tags": list(LABEL_TAGS_DEFAULT),
 }
 
 
@@ -1061,6 +1169,449 @@ def source_prose_paragraphs(path: str, text: str) -> Optional[List[Paragraph]]:
 
 
 # --------------------------------------------------------------------------
+# Front-end copy extraction
+#
+# A .tsx, .jsx, .html or .vue file is never read as Markdown. Only the text a
+# user sees is read: JSX and HTML text nodes, and the string values of the
+# attributes in UI_ATTRS. Class names, keys, URLs, imports and code are never
+# read. `.html` and `.vue` go through `html.parser`. JSX gets `_jsx_copy`.
+# --------------------------------------------------------------------------
+
+UI_SUFFIXES = {".tsx", ".jsx", ".html", ".vue"}
+UI_ATTRS = {"aria-label", "title", "placeholder", "alt", "label"}
+# The owner's ruling: cap a button, label or aria-label at 4 words. A repo can
+# name other tags under the config key "label_tags" (see DEFAULT_CONFIG).
+LABEL_TAGS = LABEL_TAGS_DEFAULT
+LABEL_MAX_WORDS = 4
+# Rules that do not fit short UI text. See `Linter.check_ui`.
+UI_SKIP = {"STE008", "STE015"}
+# Text inside these tags is code, not copy, the same as a Markdown code span.
+UI_CODE_TAGS = {"script", "style", "code", "kbd", "pre", "samp"}
+# Text inside these tags is a control's value, not a label's own words.
+UI_NOCOUNT_TAGS = {"select", "option", "optgroup", "datalist", "textarea"}
+# A tag in this set does not end the sentence around it: "Click <b>here</b> now".
+UI_INLINE_TAGS = {"a", "abbr", "b", "bdi", "bdo", "cite", "data", "dfn", "em", "i",
+                  "mark", "q", "s", "small", "span", "strong", "sub", "sup", "time", "u"}
+# The owner's ruling: a UI escape is line-level, and names a rule and a reason.
+UI_DISABLE = re.compile(r"ste-disable-(file|next-line|line)\b([^\n]*)")
+UI_DISABLE_OK = re.compile(r"^\s+(STE\d{3}(?:\s*,\s*STE\d{3})*)\s*:\s*\w")
+MUSTACHE = re.compile(r"\{\{.*?\}\}", re.S)
+
+
+class _UICopy:
+    """Collect the copy of one UI file as Paragraphs, plus the label-cap findings.
+
+    `label_tags` is compared exactly for JSX. With `fold_case`, for .html and
+    .vue, it is compared without case, because html.parser lowercases names.
+    """
+
+    def __init__(self, label_tags=LABEL_TAGS, fold_case=False):
+        self.fold = fold_case
+        self.label_tags = {t.lower() for t in label_tags} if fold_case else set(label_tags)
+        self.paragraphs: List[Paragraph] = []
+        self.run: List[Segment] = []
+        self.labels: List[Tuple[int, int, str]] = []   # (line, col, text) over the cap
+        self.open: List[list] = []                     # [tag, words, first line, first col]
+        self.comments: List[Tuple[int, str]] = []      # (line, text) of each comment line
+        self.code = 0
+        self.nocount = 0
+
+    def snapshot(self):
+        return (len(self.paragraphs), list(self.run), len(self.labels),
+                [list(o) for o in self.open], len(self.comments), self.code, self.nocount)
+
+    def restore(self, snap):
+        del self.paragraphs[snap[0]:]
+        self.run[:] = snap[1]
+        del self.labels[snap[2]:]
+        self.open[:] = snap[3]
+        del self.comments[snap[4]:]
+        self.code, self.nocount = snap[5], snap[6]
+
+    def boundary(self):
+        _flush_run(self.paragraphs, self.run, "prose")
+
+    def comment(self, lineno: int, raw: str):
+        for i, line in enumerate(raw.split("\n")):
+            self.comments.append((lineno + i, line))
+
+    def text(self, lineno: int, col: int, raw: str, count: bool = True):
+        """Add a text node. It can run over several lines. `count` feeds the label cap."""
+        if self.code:
+            return
+        for i, line in enumerate(raw.split("\n")):
+            body = line.strip()
+            if not body:
+                continue
+            prefix = (col if i == 0 else 0) + len(line) - len(line.lstrip())
+            masker = Masker(body)
+            self.run.append(Segment(lineno + i, masker.text, "prose", "descriptive",
+                                    prefix, masker))
+            for entry in (self.open if count and not self.nocount else ()):
+                if entry[2] is None:
+                    entry[2], entry[3] = lineno + i, prefix
+                entry[1].extend(body.split())
+
+    def expr(self, lineno: int, col: int):
+        """An {expression} in a text node. It counts as one word for STE001, and a
+        phrase rule never matches across it. The label cap ignores it."""
+        if not self.code:
+            self.run.append(Segment(lineno, NUL, "prose", "descriptive", col, Masker("")))
+
+    def attr(self, lineno: int, col: int, name: str, value: str):
+        if name not in UI_ATTRS or self.code:
+            return
+        saved, self.run = self.run, []
+        self.text(lineno, col, value, count=False)
+        self.boundary()
+        self.run = saved
+        if name == "aria-label":
+            self._cap(lineno, col, value.split())
+
+    def start(self, tag: str):
+        if tag not in UI_INLINE_TAGS:
+            self.boundary()
+        if tag in UI_CODE_TAGS:
+            self.code += 1
+        if tag in UI_NOCOUNT_TAGS:
+            self.nocount += 1
+        if (tag.lower() if self.fold else tag) in self.label_tags:
+            self.open.append([tag, [], None, None])
+
+    def end(self, tag: str):
+        if tag not in UI_INLINE_TAGS:
+            self.boundary()
+        if tag in UI_CODE_TAGS and self.code:
+            self.code -= 1
+        if tag in UI_NOCOUNT_TAGS and self.nocount:
+            self.nocount -= 1
+        for index in range(len(self.open) - 1, -1, -1):
+            if self.open[index][0] == tag:
+                entry = self.open.pop(index)
+                if entry[2] is not None:
+                    self._cap(entry[2], entry[3], entry[1])
+                break
+
+    def _cap(self, lineno: int, col: int, words: List[str]):
+        if len(words) > LABEL_MAX_WORDS:
+            self.labels.append((lineno, col, " ".join(words)))
+
+
+class _HTMLCopy(HTMLParser):
+    """Read .html, and the <template> of a .vue file, with the standard parser.
+
+    ponytail: an attribute is located by a text search in its start tag, and a
+    character reference shifts the column of the text after it. Both only move
+    a reported column. Use a parser that keeps source offsets if that matters.
+    """
+
+    def __init__(self, copy: _UICopy):
+        super().__init__(convert_charrefs=True)
+        self.copy = copy
+
+    def handle_starttag(self, tag, attrs):
+        lineno, col = self.getpos()
+        raw = self.get_starttag_text() or ""
+        for name, value in attrs:
+            # A Vue binding (`:title`, `v-bind:title`) is an expression, not copy.
+            if value and name in UI_ATTRS:
+                at = raw.find(value)
+                if at < 0:
+                    at = 0
+                line_off = raw.count("\n", 0, at)
+                vcol = at - (raw.rfind("\n", 0, at) + 1) if line_off else col + at
+                self.copy.attr(lineno + line_off, vcol, name, value)
+        self.copy.start(tag)
+
+    def handle_endtag(self, tag):
+        self.copy.end(tag)
+
+    def handle_comment(self, data):
+        self.copy.comment(self.getpos()[0], data)
+
+    def handle_data(self, data):
+        if self.copy.code:
+            return
+        lineno, col = self.getpos()
+        position = 0
+        for match in MUSTACHE.finditer(data):
+            self._piece(lineno, col, data, position, match.start())
+            line, c = _advance(lineno, col, data, match.start())
+            self.copy.expr(line, c)
+            position = match.end()
+        self._piece(lineno, col, data, position, len(data))
+
+    def _piece(self, lineno, col, data, begin, end):
+        if end > begin:
+            line, c = _advance(lineno, col, data, begin)
+            self.copy.text(line, c, data[begin:end])
+
+
+def _advance(lineno: int, col: int, text: str, offset: int) -> Tuple[int, int]:
+    """Return the (line, col) of `offset` in `text`, which starts at (lineno, col)."""
+    breaks = text.count("\n", 0, offset)
+    if not breaks:
+        return lineno, col + offset
+    return lineno + breaks, offset - text.rfind("\n", 0, offset) - 1
+
+
+class _NotJSX(Exception):
+    """A `<` that looked like JSX was not. The scan backs out of it."""
+
+
+# The character before a `<` that opens JSX: an expression can start there.
+_JSX_BEFORE = set("(,=:?&|!{}[;>") | {""}
+_NAME = re.compile(r"[A-Za-z_$][\w$.:-]*")
+_ATTR_NAME = re.compile(r"[A-Za-z_$][\w$:-]*")
+
+
+def _jsx_copy(text: str, copy: _UICopy) -> None:
+    """Read JSX text nodes and string attributes from .tsx or .jsx source.
+
+    It scans the code, and skips strings, template literals, comments and
+    regex literals. A `<` opens JSX only where an expression can start, and
+    only before a tag name or `>`. A `<` that turns out not to be JSX (a
+    generic, a comparison) is backed out, and its text is dropped.
+
+    ponytail: a hand-rolled scanner, not a TypeScript parser. Known ceilings:
+    a tag with an `extends` attribute and no `=` is read as a generic, a `/` after `)` is read as division, never as a regex, and
+    an attribute string in braces, `title={"Close"}`, is an expression and is
+    not read, a character reference such as `&amp;` stays as written, and JSX
+    nested past a few hundred levels hits the Python recursion limit. Swap in
+    a real parser (the TypeScript compiler through Node, or
+    tree-sitter) if one of those starts to miss copy or to cry wolf.
+    """
+    n = len(text)
+    starts = [0] + [m.end() for m in re.finditer("\n", text)]
+
+    def pos(k):
+        line = bisect.bisect_right(starts, k)
+        return line, k - starts[line - 1]
+
+    def prev_char(j):
+        """The last code character at index j, which comments and spaces never move."""
+        if j < 0:
+            return ""
+        # `return <div/>` and `yield <div/>`: a keyword, not an identifier.
+        m = re.search(r"(?:^|[^\w$])(return|yield|default)$", text[max(0, j - 8):j + 1])
+        return "(" if m else text[j]
+
+    def skip_string(k, quote):
+        k += 1
+        while k < n and text[k] != quote:
+            if text[k] == "\\":
+                k += 1
+            elif text[k] == "\n" and quote != "`":
+                return k
+            elif quote == "`" and text.startswith("${", k):
+                k = js(k + 2, "}")
+                continue
+            k += 1
+        return k + 1
+
+    def js(k, stop):
+        """Scan code from k. Return the index after the `stop` brace, or n."""
+        depth = 0
+        last = k - 1
+        while k < n:
+            ch = text[k]
+            if ch in " \t\r\n":
+                k += 1
+                continue
+            if ch in "\"'`":
+                k = skip_string(k, ch)
+                last = k - 1
+                continue
+            if text.startswith("//", k):
+                end = text.find("\n", k)
+                end = n if end < 0 else end
+                copy.comment(pos(k)[0], text[k + 2:end])
+                k = end
+                continue
+            if text.startswith("/*", k):
+                end = text.find("*/", k + 2)
+                end = n if end < 0 else end
+                copy.comment(pos(k)[0], text[k + 2:end])
+                k = min(n, end + 2)
+                continue
+            if ch == "/" and prev_char(last) in _JSX_BEFORE:
+                k = skip_regex(k)
+                last = k - 1
+                continue
+            if ch == "<" and prev_char(last) in _JSX_BEFORE and \
+                    (text.startswith("<>", k) or _NAME.match(text, k + 1)):
+                snap = copy.snapshot()
+                try:
+                    k = element(k)
+                except _NotJSX:
+                    copy.restore(snap)
+                    k += 1
+                last = k - 1
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                if depth == 0 and stop == "}":
+                    return k + 1
+                depth -= 1
+            last = k
+            k += 1
+        return n
+
+    def skip_regex(k):
+        k += 1
+        in_class = False
+        while k < n and text[k] != "\n":
+            ch = text[k]
+            if ch == "\\":
+                k += 1
+            elif ch == "[":
+                in_class = True
+            elif ch == "]":
+                in_class = False
+            elif ch == "/" and not in_class:
+                return k + 1
+            k += 1
+        return k
+
+    def skip_ws(k):
+        while k < n and text[k] in " \t\r\n":
+            k += 1
+        return k
+
+    def element(k):
+        """Read one element that starts at `<`. Return the index after it."""
+        if text.startswith("<>", k):
+            name, k = "", k + 2
+        else:
+            m = _NAME.match(text, k + 1)
+            name, k = m.group(0), m.end()
+            saw_extends = saw_eq = False
+            while True:
+                k = skip_ws(k)
+                if k >= n:
+                    raise _NotJSX()
+                if text.startswith("/>", k):
+                    copy.start(name)
+                    copy.end(name)
+                    return k + 2
+                if text[k] == ">":
+                    k += 1
+                    # `<T extends X>` is a generic, not a tag. Back out here, at
+                    # once: a scan to the end of the file for each generic makes
+                    # the time grow as the square of the size. A top-level `,`
+                    # (`<T,>`, `<K, V>`) already fails at the attribute name.
+                    if saw_extends and not saw_eq:
+                        raise _NotJSX()
+                    break
+                if text[k] == "{":
+                    k = js(k + 1, "}")
+                    continue
+                m = _ATTR_NAME.match(text, k)
+                if not m:
+                    raise _NotJSX()
+                attr, k = m.group(0), skip_ws(m.end())
+                saw_extends = saw_extends or attr == "extends"
+                if not text.startswith("=", k):
+                    continue
+                saw_eq = True
+                k = skip_ws(k + 1)
+                if k < n and text[k] in "\"'":
+                    end = text.find(text[k], k + 1)
+                    if end < 0:
+                        raise _NotJSX()
+                    line, col = pos(k + 1)
+                    copy.attr(line, col, attr, text[k + 1:end])
+                    k = end + 1
+                elif text.startswith("{", k):
+                    k = js(k + 1, "}")
+                elif text.startswith("<", k) and _NAME.match(text, k + 1):
+                    k = element(k)
+                else:
+                    raise _NotJSX()
+        copy.start(name)
+        while k < n:
+            nxt = min((i for i in (text.find("<", k), text.find("{", k)) if i >= 0),
+                      default=n)
+            if nxt > k:
+                line, col = pos(k)
+                copy.text(line, col, text[k:nxt])
+            k = nxt
+            if k >= n:
+                break
+            if text[k] == "{":
+                line, col = pos(k)
+                copy.expr(line, col)
+                k = js(k + 1, "}")
+            elif text.startswith("</", k):
+                end = text.find(">", k)
+                if end < 0 or text[k + 2:end].strip() != name:
+                    raise _NotJSX()
+                copy.end(name)
+                return end + 1
+            elif text.startswith("<>", k) or _NAME.match(text, k + 1):
+                k = element(k)
+            else:
+                raise _NotJSX()
+        raise _NotJSX()
+
+    js(0, None)
+
+
+def ui_copy(path: str, text: str, label_tags=LABEL_TAGS) -> _UICopy:
+    """Return the collected copy of a .tsx, .jsx, .html or .vue file."""
+    ext = os.path.splitext(path)[1].lower()
+    copy = _UICopy(label_tags, fold_case=ext not in (".tsx", ".jsx"))
+    if ext in (".tsx", ".jsx"):
+        _jsx_copy(text, copy)
+    else:
+        if ext == ".vue":
+            # Only the <template> is copy. Blank out the rest and keep the line numbers.
+            start, end = text.find("<template"), text.rfind("</template>")
+            if start < 0 or end < 0:
+                start = end = len(text)
+            else:
+                end += len("</template>")
+            text = (re.sub(r"[^\n]", " ", text[:start]) + text[start:end]
+                    + re.sub(r"[^\n]", " ", text[end:]))
+        parser = _HTMLCopy(copy)
+        parser.feed(text)
+        parser.close()
+    copy.boundary()
+    return copy
+
+
+def ui_units(path: str, text: str) -> List[Tuple[str, set]]:
+    """Return (text, lines) for each copy unit of a UI file: a text block, an
+    attribute value, a comment line. The write gate scopes an edit with it."""
+    copy = ui_copy(path, text)
+    units = [(" ".join(seg.text for seg in p.segments), {seg.lineno for seg in p.segments})
+             for p in copy.paragraphs]
+    units += [("\x00comment " + line.strip(), {lineno}) for lineno, line in copy.comments]
+    return units
+
+
+def ui_suppressions(copy: _UICopy) -> Tuple[Dict[int, Optional[List[str]]], List[Tuple[int, str]]]:
+    """Read `ste-disable-line` and `ste-disable-next-line` from the comments only.
+
+    The owner's ruling: each escape names a rule and a reason, as in
+    `ste-disable-line STE020: brand name`. Return the suppressed lines, and
+    the (line, directive) of each escape that is not valid.
+    """
+    suppressed: Dict[int, Optional[List[str]]] = {}
+    bad: List[Tuple[int, str]] = []
+    for lineno, line in copy.comments:
+        for match in UI_DISABLE.finditer(line):
+            ok = UI_DISABLE_OK.match(match.group(2))
+            if match.group(1) == "file" or not ok:
+                bad.append((lineno, match.group(0).strip()[:120]))
+                continue
+            target = lineno + (match.group(1) == "next-line")
+            suppressed[target] = _codes_from(ok.group(1))
+    return suppressed, bad
+
+
+# --------------------------------------------------------------------------
 # The checker
 # --------------------------------------------------------------------------
 
@@ -1200,6 +1751,42 @@ class Linter:
         for finding in findings:
             finding.path = path
         return self._filter(findings, {}, None)
+
+    def check_ui(self, path: str, text: str) -> List[Finding]:
+        """Lint only the copy a user sees in a .tsx, .jsx, .html or .vue file.
+
+        Two rules do not fit short UI text and are skipped (UI_SKIP). STE008,
+        contraction: UI style guides ask for "Don't" and "Can't", so the rule
+        would go red on copy that is correct. STE015, condition order: it runs
+        only in procedural mode, which Markdown headings and list items select,
+        and UI copy has neither. STE020, the label cap, runs here only.
+        """
+        copy = ui_copy(path, text, self.config.get("label_tags") or LABEL_TAGS)
+        findings = [f for f in self._check_paragraphs(copy.paragraphs)
+                    if f.code not in UI_SKIP]
+        if "STE020" in self.enabled:
+            for line, col, label in copy.labels:
+                findings.append(Finding(
+                    path="", line=line, col=col + 1, code="STE020",
+                    severity=RULES["STE020"].severity,
+                    message="The label holds %d words. The limit is %d."
+                    % (len(label.split()), LABEL_MAX_WORDS),
+                    suggestion="Cut the words that carry no meaning.",
+                    excerpt=label[:120]))
+        suppressed, bad = ui_suppressions(copy)
+        findings = self._filter(findings, suppressed, None)
+        if "STE021" in self.enabled:
+            for line, directive in bad:
+                findings.append(Finding(
+                    path="", line=line, col=1, code="STE021",
+                    severity=RULES["STE021"].severity,
+                    message="The escape %r does not name a rule and a reason." % directive,
+                    suggestion="Write 'ste-disable-line STE020: reason' or "
+                               "'ste-disable-next-line STE020: reason'.",
+                    excerpt=directive))
+        for finding in findings:
+            finding.path = path
+        return sorted(findings, key=lambda f: (f.line, f.col, f.code))
 
     def _check_paragraphs(self, paragraphs: List[Paragraph]) -> List[Finding]:
         findings: List[Finding] = []
@@ -1423,6 +2010,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--decisions-dir", default=None,
                         help="folder of D-nnn decision entries, for gloss collapse in STE001 "
                              "(default: docs/decisions; pass '' to turn the collapse off)")
+    parser.add_argument("--config-from", default=None, metavar="PATH",
+                        help="find .ste.json or .ste.toml from PATH upwards "
+                             "(default: the first path to check)")
     parser.add_argument("--source-prose", action="store_true",
                         help="lint only comments and docstrings of .py/.sh/.bash files "
                              "(off by default; unknown extensions still lint as text)")
@@ -1466,7 +2056,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         sys.stderr.write("ste-lint: give at least one file or directory\n")
         return 2
 
-    config = load_config(args.paths[0])
+    config = load_config(args.config_from or args.paths[0])
     if args.mode:
         config["mode"] = args.mode
     if args.fail_on:
@@ -1495,6 +2085,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         changed = 0
         replacements = 0
         for path in paths:
+            if os.path.splitext(path)[1].lower() in UI_SUFFIXES:
+                # `apply_fixes` reads Markdown. On source it would rewrite code.
+                sys.stderr.write("ste-lint: --fix skips UI file %s\n" % path)
+                continue
             try:
                 with open(path, "r", encoding="utf-8") as handle:
                     text = handle.read()
@@ -1521,7 +2115,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         except (OSError, UnicodeDecodeError) as exc:
             sys.stderr.write("ste-lint: cannot read %s: %s\n" % (path, exc))
             return 2
-        if args.source_prose:
+        if os.path.splitext(path)[1].lower() in UI_SUFFIXES:
+            findings.extend(linter.check_ui(path, text))
+        elif args.source_prose:
             findings.extend(linter.check_source(path, text))
         else:
             findings.extend(linter.check_text(path, text))

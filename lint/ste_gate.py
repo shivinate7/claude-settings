@@ -4,8 +4,10 @@
 Reads the hook JSON on stdin. Runs the vendored ste_lint.py next to this file at error
 severity only. Prints JSON when there is something to say. Always exits 0.
 
-PreToolUse on Write, Edit, MultiEdit for a *.md path: deny the write when the new text has
-STE errors, and hand the findings back so the writer fixes them first.
+PreToolUse on Write, Edit, MultiEdit for a *.md path, or a UI file (ste_lint.UI_SUFFIXES:
+.tsx, .jsx, .html, .vue): deny the write when the new text has STE errors, and hand the
+findings back so the writer fixes them first. For a UI file ste_lint reads only the copy a
+user sees, never the code.
 
 SCOPING TO CHANGED BLOCKS. This hook sees the proposed content before the write lands. It
 replays the tool's own edit onto the file currently on disk to get the FULL proposed text,
@@ -30,27 +32,39 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import paragraph_blocks, format_finding  # noqa: E402
+try:
+    import ste_lint  # noqa: E402
+    from ste_lint import UI_SUFFIXES  # noqa: E402
+except Exception:
+    ste_lint = None
+    UI_SUFFIXES = set()  # no linter next to this file: main() returns before it lints
 
 MD_SUFFIXES = (".md", ".markdown")
 NOTE = ("Code in backticks or a fence is exempt. Errors only: sentence length, nominalization, "
         "Latin abbreviation, contraction, phrasal verb, bloat, double negative, "
         "condition order, omitted 'that'.")
+UI_NOTE = ("UI file: only the copy a user sees is read. Contraction and condition order do not "
+           "apply. A button, label or aria-label holds 4 words at most.")
 
 
-def lint(linter, text):
-    """Return the error-level findings of ste_lint.py on text, as finding dicts."""
+def lint(linter, text, suffix=".md", config_from=None):
+    """Return the error-level findings of ste_lint.py on text, as finding dicts, or None
+    when the lint could not run (a timeout, a crash, output that is not JSON). `suffix`
+    picks the reader: ste_lint reads a UI suffix as UI copy, and anything else as Markdown.
+    `config_from` is the real target path, so the repo's .ste.json still applies."""
     with tempfile.TemporaryDirectory() as d:
-        path = os.path.join(d, "gate.md")
+        path = os.path.join(d, "gate" + suffix)
         with open(path, "w", encoding="utf-8") as f:
             f.write(text)
         try:
             run = subprocess.run(
-                [sys.executable, linter, "--no-color", "--format", "json", "--fail-on", "never", path],
+                [sys.executable, linter, "--no-color", "--format", "json", "--fail-on", "never"]
+                + (["--config-from", config_from] if config_from else []) + [path],
                 capture_output=True, text=True, timeout=15,
             )
-            data = json.loads(run.stdout or "{}")
+            data = json.loads(run.stdout)
         except Exception:
-            return []
+            return None
     return [f for f in data.get("findings", []) if f.get("severity") == "error"]
 
 
@@ -95,6 +109,23 @@ def scope_of_change(old_text, new_text):
         if any(n in changed for n in range(start, end + 1)):
             in_scope.update(range(start, end + 1))
     return in_scope
+
+
+def ui_scope_of_change(old_text, new_text, suffix):
+    """For a UI file: return the lines of every copy unit (a text block, an attribute
+    value, a comment line) of `new_text` whose text is not a unit of `old_text`. Code
+    lines and old copy the edit did not touch are never in scope. A block-level scope
+    does not work here: a component often holds no blank line at all."""
+    old = [t for t, _ in ste_lint.ui_units("x" + suffix, old_text)]
+    new = ste_lint.ui_units("x" + suffix, new_text)
+    # Compare by position: a new unit that repeats old text elsewhere is still new.
+    matcher = difflib.SequenceMatcher(None, old, [t for t, _ in new], autojunk=False)
+    scope = set()
+    for tag, _, _, j1, j2 in matcher.get_opcodes():
+        if tag != "equal":
+            for _, lines in new[j1:j2]:
+                scope.update(lines)
+    return scope
 
 
 def apply_edit(text, old_string, new_string, replace_all):
@@ -157,7 +188,8 @@ def main():
         tool = hook.get("tool_name")
         ti = hook.get("tool_input") or {}
         path = ti.get("file_path") or ""
-        if not path.lower().endswith(MD_SUFFIXES):
+        suffix = os.path.splitext(path)[1].lower()
+        if not path.lower().endswith(MD_SUFFIXES) and suffix not in UI_SUFFIXES:
             return
 
         try:
@@ -199,16 +231,26 @@ def main():
             full_text = resolved if resolved is not None else text
         else:
             full_text = resolved
-            scope = scope_of_change(old_text, full_text)
+            if suffix in UI_SUFFIXES:
+                scope = ui_scope_of_change(old_text, full_text, suffix)
+            else:
+                scope = scope_of_change(old_text, full_text)
 
-        findings = lint(linter, full_text)
+        findings = lint(linter, full_text, suffix if suffix in UI_SUFFIXES else ".md", path)
+        if findings is None:
+            # "Report a read that could not run as unknown, never as clear or broken."
+            # The write goes ahead, and the message says that nobody checked it.
+            print(json.dumps({"systemMessage": (
+                "STE lint could not run on the text for %s. The result is unknown: the "
+                "write was not checked." % os.path.basename(path))}))
+            return
         if scope is not None:
             findings = [f for f in findings if f.get("line") in scope]
         if not findings:
             return
         lines = [format_finding(f) for f in findings]
         reason = "STE lint on the text for %s:\n%s\n%s Fix the text, then write again." % (
-            os.path.basename(path), "\n".join(lines), NOTE)
+            os.path.basename(path), "\n".join(lines), UI_NOTE if suffix in UI_SUFFIXES else NOTE)
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
