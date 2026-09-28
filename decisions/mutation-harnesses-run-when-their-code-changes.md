@@ -16,6 +16,14 @@ other step took under 2 min. A pull request that changed one sentence in
 - Janitor harness runs when `janitor/**`, `hooks/guard.py`, `hooks/mutate_shared.py`
   or `settings.json` changes. The janitor imports guard, the harness imports
   `mutate_shared`, and the session-end suite reads `settings.json`.
+- Both harnesses also run when `.github/scripts/harness-scope.sh` or
+  `.github/workflows/gates.yml` changes. A break in the scope logic then shows on the
+  pull request, not only in the nightly run.
+- `lint/_transcript.py` is in the guard set because the ruling names it. No harness
+  imports it.
+- The diff uses `--no-renames`. A move out of a trigger path then lists the old path.
+- An empty base SHA on a pull request runs every harness. So does an empty or
+  all-zeros `before` SHA on a push.
 - A nightly `schedule:` run on main and `workflow_dispatch` run every harness on every OS.
 - A diff that cannot be read runs both harnesses.
 - The earlier choices stay: macOS and Windows skip the Guard harness on pull requests.
