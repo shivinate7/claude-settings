@@ -3,7 +3,8 @@
 **Outcomes first.** Judge every rule, check, and design by the outcome for the person
 the software serves.<!-- rule:outcomes-judge-by-outcome --> Treat a recorded decision as an argument, not a law.<!-- rule:outcomes-decision-is-argument --> When a decision looks
 stale, name the entry and the sentence. Measure the claim, or say "unmeasured". Name the
-outcome the decision protected and what protects it now. Propose a fix. Wait for my word.<!-- rule:outcomes-stale-decision-protocol --> Never
+outcome the decision protected and what protects it now. Propose a fix. Wait for my word.<!-- rule:outcomes-stale-decision-protocol --> My
+word covers the act it names, never a variant of it.<!-- rule:outcomes-word-covers-named-act --> Never
 defer to a rotted argument.<!-- rule:outcomes-never-defer-rotted --> Never repeal an argument on your own.<!-- rule:outcomes-never-repeal-alone --> Once ready, turn each rule below
 into a hook or check. This file is the fallback, not the enforcement.<!-- rule:outcomes-mechanize-rules -->
 
@@ -27,8 +28,8 @@ The file also carries `_subagentCapUntil`, an ISO-8601 time no more than 24 hour
 watch reverts the raise once that time passes.<!-- rule:roles-override-carries-expiry -->
 Remove the file when the raise is no longer needed.<!-- rule:roles-remove-override-file --> Workers never spawn: nested reports misroute (Sept 2026).
 A repo that needs nesting raises depth in its settings and records the risk.<!-- rule:roles-workers-never-spawn --> A brief carries
-the task, files, governing decisions quoted verbatim, and the check that proves the task
-done.<!-- rule:roles-brief-contents --> Resume a dead agent by name, never fresh.<!-- rule:roles-resume-by-name -->
+the task, the files, the governing rulings in the fewest words, and the check that proves
+the task done.<!-- rule:roles-brief-contents --> Resume a dead agent by name, never fresh.<!-- rule:roles-resume-by-name -->
 
 **Parallelism, two tiers.** Fan tasks out to workers now, each in its own checkout.<!-- rule:parallelism-each-own-checkout --> A
 workflow run, the ultracode path, is a fan-out too. Give each workflow agent that writes
@@ -57,15 +58,17 @@ each PR's own commit. Close the originals as superseded once the integration bra
 
 **Verification.** If the repo has screens, check each screen at every size and theme it
 ships in. Give a verdict per screen, never a description.<!-- rule:verification-screens-verdict -->
-Use my browser login only when needed.<!-- rule:verification-browser-login-only-needed --> Trust a guard only once it goes red on
+Prefer a headless or isolated browser over my own, and use my login only when needed.<!-- rule:verification-browser-login-only-needed --> Before
+a window or a screen capture lands on my screen, say so in one line.<!-- rule:verification-announce-own-screen --> Trust a guard only once it goes red on
 the defect it guards.<!-- rule:verification-trust-guard-after-red --> A guard that goes red when nothing is wrong is
 spent, because the reader learns to scroll past it.<!-- rule:verification-cry-wolf-guard-is-spent --> A green check proves only its platform
 and the states its fixtures build.<!-- rule:verification-green-proves-only-its-fixtures --> A recovery control must not depend
 on the state it recovers, or it fails on the one day it is needed.<!-- rule:verification-recovery-not-gated-on-own-state --> Verify long work against the repo, not your status line.<!-- rule:verification-verify-against-repo --> Never write
 a waiter loop.<!-- rule:verification-never-waiter-loop --> Never dry-run a block-list.<!-- rule:verification-never-dry-run-blocklist --> Bump a dependency to the first version
 fixing the problem, never the latest.<!-- rule:verification-bump-first-fix-version --> If this repo lints markdown, give every
-published number and path a checked reader.<!-- rule:verification-checked-reader-for-numbers --> Verify a claim before you rely on it, and
-report a read that could not run as unknown, never as clear or broken.<!-- rule:verification-report-unknown-reads -->
+published number and path a checked reader.<!-- rule:verification-checked-reader-for-numbers --> Verify a claim before you
+rely on it, a document's own claims too. Report a read that could not run as unknown,
+never as clear or broken.<!-- rule:verification-report-unknown-reads -->
 
 **Tokens.** Never load a long document whole. Read one entry, one section, or a
 rendered view.<!-- rule:tokens-never-load-whole-doc --> A verification command's answer is its verdict, not its stream. Get the
@@ -83,7 +86,9 @@ only in chat is not done. Land the design in a spec or decision entry now, or de
 the design abandoned.<!-- rule:building-land-design-or-abandon --> A memory entry may point to a ruling. It is never the ruling's only home.<!-- rule:building-memory-never-only-home -->
 
 **Speak plainly.** Cite a record by id plus a short gloss, like "D12, short titles for
-records". Never cite a bare id.<!-- rule:speak-cite-id-plus-gloss --> Never explain a rule in a paragraph.<!-- rule:speak-never-explain-in-paragraph --> If I ask
+records". Never cite a bare id.<!-- rule:speak-cite-id-plus-gloss --> Never explain a rule in a paragraph.<!-- rule:speak-never-explain-in-paragraph --> Rewrite
+superseded text in place. Keep only what is true now, in the fewest words. Git keeps
+the history.<!-- rule:speak-rewrite-superseded-in-place --> If I ask
 "explain it like I'm five", the message failed.
 
 **Output.** Write in Simplified Technical English by default, to me and between agents,
