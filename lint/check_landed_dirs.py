@@ -9,7 +9,9 @@ runtime, so they cannot drift from it by construction; this check instead confir
 still wired to the manifest and has not quietly reverted to a hardcoded list. hooks/guard.py
 keeps CONFIG_FROZEN_DIRS as a literal on purpose (see the comment beside it there), so this
 check parses that literal and compares it against the manifest directly, `state` excepted as a
-documented guard-only extra.
+documented guard-only extra and `skills` excepted as a documented manifest-only partial freeze
+(landed whole, but frozen per-entry through CONFIG_FROZEN_SKILLS, checked against the repo's
+own skills/*/ subdirectories instead).
 
 Run it from the repository root:
 
@@ -34,6 +36,14 @@ GUARD_PY_PATH = os.path.join(REPO_ROOT, "hooks", "guard.py")
 # drifts from the reason it excuses is itself a failure, not a silent pass.
 KNOWN_GUARD_ONLY_EXTRAS = {
     "state": "holds the baseline `hooks/config_watch.py` restores a reverted file from",
+}
+
+# landed-dirs.txt names this dir, but CONFIG_FROZEN_DIRS deliberately leaves it out: it is
+# frozen per-entry (CONFIG_FROZEN_SKILLS) instead of whole, so a person's own skills stay
+# writable. The reason string must appear verbatim beside CONFIG_FROZEN_SKILLS in
+# hooks/guard.py, same contract as KNOWN_GUARD_ONLY_EXTRAS above.
+KNOWN_MANIFEST_ONLY_PARTIAL_FREEZE = {
+    "skills": "is NOT frozen whole",
 }
 
 
@@ -76,6 +86,31 @@ def parse_guard_frozen_dirs(text):
                 "the exception and its reason must not drift apart" % (extra, reason_fragment)
             )
     return entries
+
+
+def parse_guard_frozen_skills(text):
+    m = re.search(r"CONFIG_FROZEN_SKILLS\s*=\s*\((.*?)\n\)", text, re.DOTALL)
+    if not m:
+        fail("hooks/guard.py: could not find a CONFIG_FROZEN_SKILLS = (...) literal to parse")
+    body = m.group(1)
+    for skill, reason_fragment in KNOWN_MANIFEST_ONLY_PARTIAL_FREEZE.items():
+        if reason_fragment not in body and reason_fragment not in text[: m.start()]:
+            fail(
+                "hooks/guard.py: CONFIG_FROZEN_SKILLS has no comment saying %r near it; the "
+                "per-skill freeze and its reason must not drift apart" % reason_fragment
+            )
+    return set(re.findall(r'os\.path\.normcase\("([^"]+)"\)', body))
+
+
+def repo_skills(repo_root):
+    skills_dir = os.path.join(repo_root, "skills")
+    if not os.path.isdir(skills_dir):
+        return set()
+    return {
+        name
+        for name in os.listdir(skills_dir)
+        if os.path.isfile(os.path.join(skills_dir, name, "SKILL.md"))
+    }
 
 
 def check_install_sh(text, manifest_dirs):
@@ -128,10 +163,11 @@ def main():
     guard_text = read(GUARD_PY_PATH)
     guard_dirs = parse_guard_frozen_dirs(guard_text)
     guard_set = set(guard_dirs) - set(KNOWN_GUARD_ONLY_EXTRAS)
+    manifest_set_for_dirs = manifest_set - set(KNOWN_MANIFEST_ONLY_PARTIAL_FREEZE)
 
-    if guard_set != manifest_set:
-        missing_from_guard = manifest_set - guard_set
-        extra_in_guard = guard_set - manifest_set
+    if guard_set != manifest_set_for_dirs:
+        missing_from_guard = manifest_set_for_dirs - guard_set
+        extra_in_guard = guard_set - manifest_set_for_dirs
         detail = []
         if missing_from_guard:
             detail.append(
@@ -145,6 +181,25 @@ def main():
                 % sorted(extra_in_guard)
             )
         fail("; ".join(detail))
+
+    if "skills" in manifest_set:
+        frozen_skills = parse_guard_frozen_skills(guard_text)
+        shipped_skills = repo_skills(REPO_ROOT)
+        if frozen_skills != shipped_skills:
+            missing = shipped_skills - frozen_skills
+            extra = frozen_skills - shipped_skills
+            detail = []
+            if missing:
+                detail.append(
+                    "skills/ ships %s that hooks/guard.py's CONFIG_FROZEN_SKILLS does not"
+                    % sorted(missing)
+                )
+            if extra:
+                detail.append(
+                    "hooks/guard.py's CONFIG_FROZEN_SKILLS has %s that skills/ does not ship"
+                    % sorted(extra)
+                )
+            fail("; ".join(detail))
 
     check_install_sh(read(INSTALL_SH_PATH), manifest_dirs)
     check_install_ps1(read(INSTALL_PS1_PATH))
