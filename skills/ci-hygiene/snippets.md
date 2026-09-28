@@ -84,6 +84,8 @@ updates:
     cooldown: {default-days: 7}
 ```
 
+Check the local tool first: `command -v zizmor && zizmor --version` (must match the CI pin).
+
 Audit with zizmor. Run it locally with the same command and path set as CI, and include
 `dependabot.yml`:
 

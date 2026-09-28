@@ -21,6 +21,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 5. **Pin and audit actions.** Pin each third-party action by full commit SHA, with the version as
    a comment. Let a bot keep the pins current. Disable credential persistence on checkout. Run
    an audit tool in CI, and run it locally with the exact CI command and paths.
+   If the installed tool's `--version` matches the CI pin, use it. If it does not, install a copy.
 6. **Batch green PRs.** Merge PRs that are green together through one integration branch. One CI
    run then covers the combined code. "No conflicts" does not prove they work together.
 7. **Wait without loops.** Watch a run once, in the background, and keep its output. Never poll
