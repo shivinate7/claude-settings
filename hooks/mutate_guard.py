@@ -202,10 +202,15 @@ MUTATIONS = [
      '    if INTERPRETER_HEREDOC.search(cmd):\n        return cmd',
      '    if False:\n        return cmd', "guard", 'heredoc: a body fed to a shell stays under inspection'),
     ("frozen-path: freeze nothing",
-     '    if not path:\n        return False\n    try:\n        target = _resolved(path, cwd)\n'
-     '        root = os.path.normcase(os.path.realpath(config_dir()))',
-     '    if path:\n        return False\n    try:\n        target = _resolved(path, cwd)\n'
-     '        root = os.path.normcase(os.path.realpath(config_dir()))', "guard", 'frozen: Write of the global CLAUDE.md'),
+     '    if not path:\n        return False\n    try:\n        literal = _literal_resolved(path, cwd)\n'
+     '        resolved = _resolved(path, cwd)',
+     '    if path:\n        return False\n    try:\n        literal = _literal_resolved(path, cwd)\n'
+     '        resolved = _resolved(path, cwd)', "guard", 'frozen: Write of the global CLAUDE.md'),
+    ("frozen-path: never check the literal, un-resolved path (misses the installed symlink)",
+     '    for target, root in ((literal, literal_root), (resolved, resolved_root)):',
+     '    for target, root in ((resolved, resolved_root),):', "guard",
+     'frozen: the live path stays frozen even though it is a real symlink into the clone '
+     '[resolve-branch proof]'),
     ("force-push: forget the force push",
      'def push_is_forced(args) -> bool:',
      'def push_is_forced(args) -> bool:\n    return False', "guard", 'push: the long force flag'),
@@ -722,12 +727,16 @@ MUTATIONS = [
     # it is why that one survived: 0 red lines). A forced raise turns the predicate off for every
     # input, so any existing case that depends on the predicate's normal answer is the proof.
     ("fail-open: is_frozen's resolve is forced to raise, so every frozen write is missed",
-     '    try:\n        target = _resolved(path, cwd)\n'
-     '        root = os.path.normcase(os.path.realpath(config_dir()))\n    except Exception:\n'
-     '        return False',
-     '    try:\n        raise Exception("mutant")\n        target = _resolved(path, cwd)\n'
-     '        root = os.path.normcase(os.path.realpath(config_dir()))\n    except Exception:\n'
-     '        return False',
+     '    try:\n        literal = _literal_resolved(path, cwd)\n'
+     '        resolved = _resolved(path, cwd)\n'
+     '        literal_root = os.path.normcase(os.path.normpath(config_dir()))\n'
+     '        resolved_root = os.path.normcase(os.path.realpath(config_dir()))\n'
+     '    except Exception:\n        return False',
+     '    try:\n        raise Exception("mutant")\n        literal = _literal_resolved(path, cwd)\n'
+     '        resolved = _resolved(path, cwd)\n'
+     '        literal_root = os.path.normcase(os.path.normpath(config_dir()))\n'
+     '        resolved_root = os.path.normcase(os.path.realpath(config_dir()))\n'
+     '    except Exception:\n        return False',
      "guard", "frozen: Write of the global CLAUDE.md"),
     ("fail-open: is_project_config's resolve is forced to raise, so no edit is ever noted",
      '    try:\n        target = _resolved(path, cwd)\n    except Exception:\n        return False\n'

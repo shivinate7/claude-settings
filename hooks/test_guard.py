@@ -2070,6 +2070,41 @@ add("frozen: an ordinary source file", "allow", tool="Edit", cwd=NOGIT, file_pat
 add("frozen: an ordinary project file by absolute path", "allow", tool="Write", cwd=NOGIT,
     file_path=slash(os.path.join(PROJ, "src", "app.py")))
 
+# THE INSTALLED SYMLINK ITSELF STAYS FROZEN. `install.sh` lands every frozen file under the
+# config directory as a real symlink into the clone (`~/.claude/hooks/guard.py -> <clone>/
+# hooks/guard.py`). A realpath-only read follows that link OUT of the config directory and
+# wrongly allows the write; `is_frozen` also checks the literal, un-followed path, which stays
+# under the config directory. Found in passing by a reviewer of PR #158.
+SYMFROZEN = os.path.join(ROOT, "symfrozen")
+SYM_CLONE_HOOK = os.path.join(SYMFROZEN, "clone", "hooks", "guard.py")
+SYM_CFG_HOOK = os.path.join(SYMFROZEN, "cfg", "hooks", "guard.py")
+SYM_CFG_NOTES = slash(os.path.join(SYMFROZEN, "cfg", "notes.md"))
+os.makedirs(os.path.dirname(SYM_CLONE_HOOK), exist_ok=True)
+os.makedirs(os.path.dirname(SYM_CFG_HOOK), exist_ok=True)
+with open(SYM_CLONE_HOOK, "w") as f:
+    f.write("# stand-in guard.py, in the clone\n")
+try:
+    os.symlink(SYM_CLONE_HOOK, SYM_CFG_HOOK)
+    SYM_MADE = True
+except Exception:
+    SYM_MADE = False
+add("frozen: the live path stays frozen even though it is a real symlink into the clone "
+    "[resolve-branch proof]",
+    "deny" if SYM_MADE else "allow", "frozen-path" if SYM_MADE else None,
+    tool="Edit", cwd=NOGIT, config=os.path.join(SYMFROZEN, "cfg"), file_path=slash(SYM_CFG_HOOK),
+    old_string="# stand-in", new_string="# rewritten by a session")
+# THE CLONE PATH BEHIND THAT SYMLINK STAYS EDITABLE (decisions/recovery-must-not-gate-on-its-
+# own-state.md, "the clone is not frozen"): the literal-path check must not freeze the clone
+# just because a symlink elsewhere happens to point at it.
+add("frozen: the clone file the symlink points at is still editable directly",
+    "allow", tool="Edit", cwd=NOGIT, config=os.path.join(SYMFROZEN, "cfg"),
+    file_path=slash(SYM_CLONE_HOOK), old_string="# stand-in", new_string="# rewritten by hand")
+# A USER'S OWN, UNSHIPPED FILE under the config directory is not on CONFIG_FROZEN_FILES or
+# CONFIG_FROZEN_DIRS, so the literal-path check must not freeze the whole config directory.
+add("frozen: a user's own unshipped file under the config directory is allowed",
+    "allow", tool="Edit", cwd=NOGIT, config=os.path.join(SYMFROZEN, "cfg"),
+    file_path=SYM_CFG_NOTES, old_string="a", new_string="b")
+
 sh("config-edit: a redirect onto a project settings file is allowed",
    "echo '{}' > " + PROJ_SETTINGS, "allow", cwd=NOGIT)
 sh("config-edit: an append onto a project settings file is allowed",
@@ -3424,51 +3459,6 @@ def worktree_home_case():
     return True, "orchestrator, no-record, home, outside-home, removed-home, unreadable all correct"
 
 
-def clone_symlink_frozen_path_case():
-    """A live config path that is a REAL symlink into the clone must still be frozen.
-
-    Found in passing by a reviewer of PR #158, pre-existing there. `install.sh` lands every
-    hook, lint script and agent file as a symlink from the config dir into the clone (for
-    example `~/.claude/hooks/guard.py -> <clone>/hooks/guard.py`). `is_frozen`'s `_resolved`
-    calls `os.path.realpath`, which follows that link INTO the clone, so the resolved path no
-    longer starts with the config dir and `is_frozen` answers False. An Edit through the live
-    symlinked path is then allowed, not refused. The fixtures elsewhere in this file use plain
-    files, never a real symlink, so none of them catch this.
-
-    XFAIL: this must not be fixed as a side effect of this task, so a correct "deny" stays a
-    FAILURE here (the canary that says "go update this case") and the current, wrong "allow"
-    is the case's OWN passing condition, printed as an explicit XFAIL rather than a silent
-    skip.
-    """
-    root = tempfile.mkdtemp(prefix="guard_clone_symlink_")
-    clone_hooks = os.path.join(root, "clone", "hooks")
-    cfg_hooks = os.path.join(root, "cfg", "hooks")
-    os.makedirs(clone_hooks, exist_ok=True)
-    os.makedirs(cfg_hooks, exist_ok=True)
-    clone_guard = os.path.join(clone_hooks, "guard.py")
-    with open(clone_guard, "w") as f:
-        f.write("# stand-in guard.py, in the clone\n")
-    live_guard = os.path.join(cfg_hooks, "guard.py")
-    try:
-        os.symlink(clone_guard, live_guard)
-    except Exception as exc:
-        shutil.rmtree(root, ignore_errors=True)
-        return True, "skipped: cannot create a real symlink on this account/platform (%s)" % exc
-    case = {
-        "raw": None, "tool": "Edit", "cwd": NOGIT, "session": None, "agent_id": None,
-        "env_path": None, "config": os.path.join(root, "cfg"),
-        "tool_input": {"file_path": slash(live_guard), "old_string": "# stand-in",
-                        "new_string": "# rewritten by a session"},
-    }
-    got, _reason = decide(case)
-    shutil.rmtree(root, ignore_errors=True)
-    if got == "deny":
-        return False, ("guard now denies this: the clone-symlink frozen-path bug looks fixed, "
-                        "replace this XFAIL with a real 'deny' assertion")
-    return True, ("XFAIL clone-symlink-live-path (PR #158 review finding): got %r, want deny "
-                  "-- realpath follows the install symlink into the clone" % got)
-
-
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
 # literal count drifts the moment a case is added, and a suite that miscounts its own cases is a
 # suite a reader stops trusting.
@@ -3504,17 +3494,9 @@ LOG_CHECKS = (
      "unreadable", worktree_home_case),
 )
 
-# Known, named failures: NOT fixed here on purpose, kept green by asserting the wrong-but-
-# current behaviour rather than by silently skipping. Each one flips to a real assertion (and
-# moves out of this list) once its bug is actually fixed.
-XFAIL_CHECKS = (
-    ("xfail: a live path that is a real symlink into the clone stays frozen",
-     clone_symlink_frozen_path_case),
-)
-
 
 def main():
-    total = len(CASES) + len(LOG_CHECKS) + len(XFAIL_CHECKS)
+    total = len(CASES) + len(LOG_CHECKS)
     print("guard cases, %d in all" % total)
     print("fixtures under " + ROOT)
     print()
@@ -3544,11 +3526,6 @@ def main():
         failed += 0 if ok else 1
         print("%s  %-6s(want %-6s)  [%-11s] %s  (%s)" % (
             "PASS" if ok else "FAIL", "logged" if ok else "wrong", "logged", "Bash", label, note))
-    for label, checker in XFAIL_CHECKS:
-        ok, note = checker()
-        failed += 0 if ok else 1
-        print("%s  %-6s(want %-6s)  [%-11s] %s  (%s)" % (
-            "PASS" if ok else "FAIL", "xfail" if ok else "fixed?", "xfail", "Edit", label, note))
     print()
     shutil.rmtree(ROOT, ignore_errors=True)
     if failed:
