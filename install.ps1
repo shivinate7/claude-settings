@@ -80,6 +80,19 @@ while IFS= read -r sub || [ -n "`$sub" ]; do
   [ -n "`$sub" ] || continue
   [ -d "`$repo/`$sub" ] || continue
   mkdir -p "`$cfg/`$sub"
+  if [ "`$sub" = "skills" ]; then
+    for d in "`$repo/`$sub"/*; do
+      [ -d "`$d" ] || continue
+      dest="`$cfg/`$sub/`$(basename "`$d")"
+      if [ -L "`$dest" ]; then continue; fi
+      if [ -e "`$dest" ]; then
+        bak="`$dest.bak.`$(date +%Y%m%d%H%M%S)"
+        mv "`$dest" "`$bak" && echo "claude-settings: existing `$dest moved to `$bak"
+      fi
+      cp -r "`$d" "`$dest" && echo "claude-settings: refreshed `$dest"
+    done
+    continue
+  fi
   for f in "`$repo/`$sub"/*; do
     [ -f "`$f" ] || continue
     d="`$cfg/`$sub/`$(basename "`$f")"
@@ -147,6 +160,43 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
     $srcDir  = Join-Path $RepoDir $sub
     $destDir = Join-Path $ClaudeDir $sub
     New-Item -ItemType Directory -Force -Path $destDir | Out-Null
+
+    # skills/ lands differently: each skills/<name>/ is ONE whole-directory symlink, never
+    # a per-file link, since a per-file loop skips a directory entry outright (Get-ChildItem
+    # -File never returns it) and a landed skill would never appear at all. A pre-existing
+    # entry this repo does not ship (a person's own skill) is never touched: the loop only
+    # ever looks at names under $srcDir, so a name absent there is never a candidate.
+    if ($sub -eq 'skills') {
+        foreach ($src in @(Get-ChildItem -Path $srcDir -Directory -ErrorAction SilentlyContinue)) {
+            $dest = Join-Path $destDir $src.Name
+            $cur  = Get-Item $dest -ErrorAction SilentlyContinue
+            if ($cur -and $cur.LinkType -eq 'SymbolicLink' -and $cur.Target -eq $src.FullName) { continue }
+            if ($cur) {
+                $bak = "$dest.bak.$(Get-Date -Format yyyyMMddHHmmss)"
+                Move-Item $dest $bak
+                Log "existing $dest moved to $bak"
+            }
+            try {
+                New-Item -ItemType SymbolicLink -Path $dest -Target $src.FullName -ErrorAction Stop | Out-Null
+                Log "linked $dest -> $($src.FullName)"
+            } catch {
+                Copy-Item -Recurse $src.FullName $dest
+                $AgentCopied = $true
+                Log "copied $dest (symlink not permitted)"
+            }
+        }
+        foreach ($entry in @(Get-ChildItem -Path $destDir -Directory -ErrorAction SilentlyContinue)) {
+            if ($entry.LinkType -ne 'SymbolicLink') { continue }
+            $tgt = @($entry.Target)[0]
+            if (-not $tgt) { continue }
+            if ((Split-Path $tgt -Parent) -ne $srcDir) { continue }
+            if (Test-Path $tgt) { continue }
+            Remove-Item $entry.FullName
+            Log "removed stale $($entry.FullName) (source $tgt no longer exists)"
+        }
+        continue
+    }
+
     foreach ($src in @(Get-ChildItem -Path $srcDir -File -ErrorAction SilentlyContinue)) {
         $dest = Join-Path $destDir $src.Name
         $cur  = Get-Item $dest -ErrorAction SilentlyContinue

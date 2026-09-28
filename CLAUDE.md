@@ -27,9 +27,9 @@ that write lands.<!-- rule:roles-opus-override-guarded -->
 The file also carries `_subagentCapUntil`, an ISO-8601 time no more than 24 hours ahead. The
 watch reverts the raise once that time passes.<!-- rule:roles-override-carries-expiry -->
 Remove the file when the raise is no longer needed.<!-- rule:roles-remove-override-file --> Workers never spawn: nested reports misroute (Sept 2026).
-A repo that needs nesting raises depth in its settings and records the risk.<!-- rule:roles-workers-never-spawn --> A brief carries
-the task, the files, the governing rulings in the fewest words, and the check that proves
-the task done.<!-- rule:roles-brief-contents --> Resume a dead agent by name, never fresh.<!-- rule:roles-resume-by-name -->
+A repo that needs nesting raises depth in its settings and records the risk.<!-- rule:roles-workers-never-spawn --> A brief carries the task, the files, the governing rulings, and the check that proves the
+task done—in the fewest words. It specifies a report cap in lines sized to the decision it
+feeds. With no cap named, the cap is 25 lines.<!-- rule:roles-brief-contents --> Resume a dead agent by name, never fresh.<!-- rule:roles-resume-by-name -->
 
 **Parallelism, two tiers.** Fan tasks out to workers now, each in its own checkout.<!-- rule:parallelism-each-own-checkout --> A
 workflow run, the ultracode path, is a fan-out too. Give each workflow agent that writes
@@ -53,7 +53,7 @@ when I name the act, or under a repo grant.<!-- rule:git-main-only-by-pr --> Wai
 Never merge failing CI.<!-- rule:git-never-merge-failing-ci --> Never discard a command's output.<!-- rule:git-never-discard-output --> A refusal's printed remedy
 never names the forbidden target.<!-- rule:git-remedy-never-names-target --> Never allocate a numbered record on a branch.
 Write a slug. Claim the number at merge.<!-- rule:git-slug-then-claim-number --> Cite by id, never by path.<!-- rule:git-cite-by-id --> Give each record its
-own file, one folder per kind.<!-- rule:git-record-own-file-per-kind --> Merge overlapping PRs into one integration branch. Keep
+own file, one folder per kind.<!-- rule:git-record-own-file-per-kind --> Merge PRs that are green together into one integration branch. Keep
 each PR's own commit. Close the originals as superseded once the integration branch merges.<!-- rule:git-integration-branch-merge -->
 
 **Verification.** If the repo has screens, check each screen at every size and theme it

@@ -24,3 +24,4 @@ Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Ne
 Under Done, the first line is BUILT, PARTIAL, or OTHER. Then list the worktree path and
 branch, the files touched with line ranges, and the checks run with their outcome. Drop a label
 that does not apply. Write in Simplified Technical English. Start with the point. No preamble.
+Report in under 25 lines unless the brief names another cap.

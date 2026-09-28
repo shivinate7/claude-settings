@@ -15,7 +15,7 @@ One source of truth for my user-level Claude Code config. Local sessions and clo
 | `janitor/`      | A machine-wide sweep for orphaned worktrees, branches, and listeners. See `janitor/GUIDE.md` | not installed to `~/.claude`, runs from the clone |
 | `decisions/`    | One file per ruling, cited by slug                          | stays in the repo |
 | `deferred/`, `plans/` | Open questions and plans, not yet a ruling             | stay in the repo |
-| `actions/`      | Composite GitHub Actions this repo publishes (`stamp`, `ste-lint`) | callers pin them at `@main` |
+| `actions/`      | Composite GitHub Actions this repo publishes (`stamp`, `ste-lint`) | callers pin them by commit SHA |
 | `.github/`      | `gates.yml`, the CI that checks this repo                   | runs here only, never installed |
 
 `agents/`, `hooks/`, and `lint/` are the folders `landed-dirs.txt` names. Both installers read
