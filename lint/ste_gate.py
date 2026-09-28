@@ -33,8 +33,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import paragraph_blocks, format_finding  # noqa: E402
 try:
+    import ste_lint  # noqa: E402
     from ste_lint import UI_SUFFIXES  # noqa: E402
 except Exception:
+    ste_lint = None
     UI_SUFFIXES = set()  # no linter next to this file: main() returns before it lints
 
 MD_SUFFIXES = (".md", ".markdown")
@@ -45,21 +47,24 @@ UI_NOTE = ("UI file: only the copy a user sees is read. Contraction and conditio
            "apply. A button, label or aria-label holds 4 words at most.")
 
 
-def lint(linter, text, suffix=".md"):
-    """Return the error-level findings of ste_lint.py on text, as finding dicts. `suffix`
-    picks the reader: ste_lint reads a UI suffix as UI copy, and anything else as Markdown."""
+def lint(linter, text, suffix=".md", config_from=None):
+    """Return the error-level findings of ste_lint.py on text, as finding dicts, or None
+    when the lint could not run (a timeout, a crash, output that is not JSON). `suffix`
+    picks the reader: ste_lint reads a UI suffix as UI copy, and anything else as Markdown.
+    `config_from` is the real target path, so the repo's .ste.json still applies."""
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "gate" + suffix)
         with open(path, "w", encoding="utf-8") as f:
             f.write(text)
         try:
             run = subprocess.run(
-                [sys.executable, linter, "--no-color", "--format", "json", "--fail-on", "never", path],
+                [sys.executable, linter, "--no-color", "--format", "json", "--fail-on", "never"]
+                + (["--config-from", config_from] if config_from else []) + [path],
                 capture_output=True, text=True, timeout=15,
             )
-            data = json.loads(run.stdout or "{}")
+            data = json.loads(run.stdout)
         except Exception:
-            return []
+            return None
     return [f for f in data.get("findings", []) if f.get("severity") == "error"]
 
 
@@ -104,6 +109,19 @@ def scope_of_change(old_text, new_text):
         if any(n in changed for n in range(start, end + 1)):
             in_scope.update(range(start, end + 1))
     return in_scope
+
+
+def ui_scope_of_change(old_text, new_text, suffix):
+    """For a UI file: return the lines of every copy unit (a text block, an attribute
+    value, a comment line) of `new_text` whose text is not a unit of `old_text`. Code
+    lines and old copy the edit did not touch are never in scope. A block-level scope
+    does not work here: a component often holds no blank line at all."""
+    old_units = {t for t, _ in ste_lint.ui_units("x" + suffix, old_text)}
+    scope = set()
+    for unit, lines in ste_lint.ui_units("x" + suffix, new_text):
+        if unit not in old_units:
+            scope.update(lines)
+    return scope
 
 
 def apply_edit(text, old_string, new_string, replace_all):
@@ -209,9 +227,19 @@ def main():
             full_text = resolved if resolved is not None else text
         else:
             full_text = resolved
-            scope = scope_of_change(old_text, full_text)
+            if suffix in UI_SUFFIXES:
+                scope = ui_scope_of_change(old_text, full_text, suffix)
+            else:
+                scope = scope_of_change(old_text, full_text)
 
-        findings = lint(linter, full_text, suffix if suffix in UI_SUFFIXES else ".md")
+        findings = lint(linter, full_text, suffix if suffix in UI_SUFFIXES else ".md", path)
+        if findings is None:
+            # "Report a read that could not run as unknown, never as clear or broken."
+            # The write goes ahead, and the message says that nobody checked it.
+            print(json.dumps({"systemMessage": (
+                "STE lint could not run on the text for %s. The result is unknown: the "
+                "write was not checked." % os.path.basename(path))}))
+            return
         if scope is not None:
             findings = [f for f in findings if f.get("line") in scope]
         if not findings:

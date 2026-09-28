@@ -1756,7 +1756,7 @@ class UICopyLintTests(unittest.TestCase):
         self.assertEqual(self.codes("a.tsx", "const x = <p>You can't undo it.</p>;\n"), [])
 
     def test_94_disable_comment_is_honored(self):
-        text = ("const x = (\n  // ste-disable-next-line STE020\n"
+        text = ("const x = (\n  // ste-disable-next-line STE020: brand name\n"
                 "  <button>Save the file right now</button>\n);\n")
         self.assertEqual(self.codes("a.tsx", text), [])
 
@@ -1818,6 +1818,173 @@ class SteGateUICopyTests(unittest.TestCase):
         run = self.pretooluse("Write", {"file_path": self.target("index.html"),
                                         "content": "<p>Wait prior to the launch.</p>\n"})
         self.assertIn("STE011", run.stdout)
+
+
+class UICopyRoundTwoTests(unittest.TestCase):
+    """Round 2 of the front-end copy lint: the owner's rulings R1 (label tags from a
+    per-repo config key) and R2 (a UI escape is line-level and names a rule and a
+    reason), and the reviewer's findings on 8209f62."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def check(self, path, text, **config):
+        return [f.code for f in ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG, **config))
+                .check_ui(path, text)]
+
+    def md(self, text):
+        return [f.code for f in ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG)).check_text("t.md", text)]
+
+    def cli(self, name, text, config=None):
+        sub = os.path.join(self.tmp.name, "src")
+        os.makedirs(sub, exist_ok=True)
+        if config is not None:
+            with open(os.path.join(self.tmp.name, ".ste.json"), "w", encoding="utf-8") as f:
+                json.dump(config, f)
+        path = os.path.join(sub, name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        run = subprocess.run([sys.executable, os.path.join(HERE, "ste_lint.py"), "--format",
+                              "json", "--fail-on", "never", path],
+                             capture_output=True, text=True, timeout=15)
+        return [f["code"] for f in json.loads(run.stdout)["findings"]]
+
+    # R1 -------------------------------------------------------------------------
+
+    def test_101_label_tags_come_from_repo_config(self):
+        text = "const x = <Button>Save the file right now</Button>;\n"
+        self.assertEqual(self.cli("a.tsx", text), [])
+        self.assertEqual(self.cli("a.tsx", text, {"label_tags": ["Button"]}), ["STE020"])
+
+    def test_102_jsx_tag_compare_is_exact(self):
+        text = "const x = <button>Save the file right now</button>;\n"
+        self.assertEqual(self.check("a.tsx", text, label_tags=["Button"]), [])
+
+    def test_103_html_tag_compare_ignores_case(self):
+        text = "<button>Save the file right now</button>\n"
+        self.assertEqual(self.check("a.html", text, label_tags=["Button"]), ["STE020"])
+
+    # R2 -------------------------------------------------------------------------
+
+    def test_104_escape_without_reason_is_an_error(self):
+        text = "const x = (\n  // ste-disable-next-line STE020\n  <button>Save the file right now</button>\n);\n"
+        self.assertEqual(sorted(self.check("a.tsx", text)), ["STE020", "STE021"])
+
+    def test_105_escape_without_rule_is_an_error(self):
+        text = "<!-- ste-disable-next-line: brand name -->\n<button>Save the file right now</button>\n"
+        self.assertEqual(sorted(self.check("a.html", text)), ["STE020", "STE021"])
+
+    def test_106_file_escape_is_an_error_for_ui(self):
+        text = "// ste-disable-file STE020: all\nconst x = <button>Save the file right now</button>;\n"
+        self.assertEqual(sorted(self.check("a.tsx", text)), ["STE020", "STE021"])
+
+    def test_107_escape_in_visible_copy_does_not_count(self):
+        text = "const x = <button>ste-disable-line STE020: why not here</button>;\n"
+        self.assertIn("STE020", self.check("a.tsx", text))
+
+    def test_108_valid_same_line_escape_in_jsx_comment(self):
+        text = "const x = <button>Save the file right now</button>; {/* ste-disable-line STE020: brand */}\n"
+        self.assertEqual(self.check("a.tsx", text), [])
+
+    # Finding 1 and item 10 -------------------------------------------------------
+
+    def test_109_adverb_and_ui_pairs_are_gone(self):
+        for text in ("Completely separate the two cables.\n",
+                     "The job did not successfully complete.\n",
+                     "The cause is readily apparent from the log.\n",
+                     "Put the parts in some cases on the shelf.\n",
+                     "In most cases the rack holds two units.\n",
+                     "Place an order for the parts.\n",
+                     "Take action on the alert.\n"):
+            self.assertNotIn("STE011", self.md(text), text)
+
+    # Finding 3 ------------------------------------------------------------------
+
+    def test_110_jsx_code_tags_are_skipped(self):
+        text = ("const x = (<div>\n<code>in order to</code>\n<pre>prior to</pre>\n"
+                "<kbd>in order to</kbd>\n<samp>prior to</samp>\n<p>Go now.</p>\n</div>);\n")
+        self.assertEqual(self.check("a.tsx", text), [])
+
+    # Finding 4 ------------------------------------------------------------------
+
+    def test_111_label_cap_blocks_in_jsx(self):
+        text = "const x = <label>Your primary email address here</label>;\n"
+        self.assertEqual(self.check("a.tsx", text), ["STE020"])
+
+    # Finding 5 ------------------------------------------------------------------
+
+    def test_112_vue_reads_only_the_template(self):
+        text = ('<template><p>Hi</p></template>\n<i18n>\n{"en": {"a": "In order to go prior to it"}}\n'
+                "</i18n>\n")
+        self.assertEqual(self.check("a.vue", text), [])
+
+    # Finding 8 ------------------------------------------------------------------
+
+    def test_113_label_does_not_count_select_options(self):
+        text = ("const x = <label>Size <select><option>Small size box</option>"
+                "<option>Large size box</option></select></label>;\n")
+        self.assertEqual(self.check("a.tsx", text), [])
+
+    # Finding 9 ------------------------------------------------------------------
+
+    def test_114_many_generics_lint_in_linear_time(self):
+        import time
+        lines = []
+        for i in range(600):
+            lines.append("const f%d = <T extends X>(a: T): T => a;" % i)
+            lines.extend(["const v%d_%d = %d;" % (i, j, j) for j in range(7)])
+        lines.append("const y = <p>In order to go.</p>;")
+        text = "\n".join(lines) + "\n"
+        self.assertGreaterEqual(len(lines), 4800)
+        started = time.monotonic()
+        codes = self.check("a.tsx", text)
+        self.assertLess(time.monotonic() - started, 2.0)
+        self.assertEqual(codes, ["STE011"])
+
+
+class SteGateUIScopeTests(unittest.TestCase):
+    """Finding 2: a UI edit is scoped to the copy it changed, never to a blank-line block."""
+
+    COMPONENT = ("export function A() {\n  const count = 1;\n  const other = 2;\n"
+                 "  return (\n    <button>Save all the open files now</button>\n  );\n}\n")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = os.path.join(self.tmp.name, "A.tsx")
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(self.COMPONENT)
+
+    def edit(self, old, new):
+        return run_gate(STE_GATE, {"hook_event_name": "PreToolUse", "tool_name": "Edit",
+                                   "tool_input": {"file_path": self.path, "old_string": old,
+                                                  "new_string": new}})
+
+    def test_115_code_edit_near_old_long_button_allowed(self):
+        run = self.edit("const count = 1;", "const count = 2;")
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_116_button_text_edit_to_six_words_denied(self):
+        run = self.edit("Save all the open files now", "Save all of the open files now")
+        self.assertIn("STE020", run.stdout)
+
+    def test_117_lint_that_cannot_run_is_reported_unknown(self):
+        # A copy of the gate next to a linter that prints no JSON: the gate must say the
+        # result is unknown, for .md and for UI files, never pass in silence.
+        d = os.path.join(self.tmp.name, "gate")
+        os.makedirs(d)
+        for name in ("ste_gate.py", "_transcript.py"):
+            with open(os.path.join(HERE, name), encoding="utf-8") as src, \
+                    open(os.path.join(d, name), "w", encoding="utf-8") as dst:
+                dst.write(src.read())
+        with open(os.path.join(d, "ste_lint.py"), "w", encoding="utf-8") as f:
+            f.write("UI_SUFFIXES = {'.tsx'}\nif __name__ == '__main__':\n    print('not json')\n")
+        for name in ("n.md", "n.tsx"):
+            run = run_gate(os.path.join(d, "ste_gate.py"), {
+                "hook_event_name": "PreToolUse", "tool_name": "Write",
+                "tool_input": {"file_path": os.path.join(self.tmp.name, name), "content": "x\n"}})
+            self.assertIn("unknown", json.loads(run.stdout)["systemMessage"], name)
 
 
 if __name__ == "__main__":
