@@ -53,7 +53,7 @@ when I name the act, or under a repo grant.<!-- rule:git-main-only-by-pr --> Wai
 Never merge failing CI.<!-- rule:git-never-merge-failing-ci --> Never discard a command's output.<!-- rule:git-never-discard-output --> A refusal's printed remedy
 never names the forbidden target.<!-- rule:git-remedy-never-names-target --> Never allocate a numbered record on a branch.
 Write a slug. Claim the number at merge.<!-- rule:git-slug-then-claim-number --> Cite by id, never by path.<!-- rule:git-cite-by-id --> Give each record its
-own file, one folder per kind.<!-- rule:git-record-own-file-per-kind --> Merge overlapping PRs into one integration branch. Keep
+own file, one folder per kind.<!-- rule:git-record-own-file-per-kind --> Merge PRs that are green together into one integration branch. Keep
 each PR's own commit. Close the originals as superseded once the integration branch merges.<!-- rule:git-integration-branch-merge -->
 
 **Verification.** If the repo has screens, check each screen at every size and theme it
