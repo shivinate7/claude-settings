@@ -12,11 +12,11 @@ steps out on 2026-09-25. See `decisions/one-shared-record-stamp.md`, "Left out, 
 **What keeps it from being lost.** The engine's `--check` and `--stamp` can refuse a tree
 that holds a pending step marker. The repo's own config must have an `unclaimed` entry for it.
 Since 2026-09-28 the parent names no repo (`record-stamp-stays-generic`). So Banchi's own
-config must carry that entry, with a message that names this file. Banchi's adoption brief
-carries that step. So on the first day Banchi writes a
-pending step, the tool itself brings this item back. A marker inside a fenced code block is
-refused too. A byte-order mark before a line-1 marker hides it. Both match claim-ids.py's own
-grammar.
+config must carry that entry, with a message that names this file. No adoption brief
+carries that step yet. Until Banchi's config has the entry, a pending step passes in
+silence. With the entry, the tool itself brings this item back on the first day Banchi writes a
+pending step. The `pattern` in Banchi's own entry now decides two cases. One is a marker in a fenced
+code block. The other is a marker after a byte-order mark.
 
 **Trigger that brings it back.** Banchi's `claim-ids.py` claims a step in
 `docs/gates/steps/`. Then copy its step rules into the engine, and prove parity the same way

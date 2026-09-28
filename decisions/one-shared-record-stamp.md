@@ -118,8 +118,8 @@ banchi's tree does not hold today. The last two come up in banchi's normal flow.
 - A rename onto a file that already exists is refused before anything is written.
   claim-ids.py's `Path.rename` replaces that file on POSIX and fails on Windows.
 - A ref and HEAD with no merge base: claim-ids.py refuses, exit 2. `--stamp` reads no
-  ref and never asks. `--check` off the default branch fails in CI when it cannot
-  read the base. Outside CI it prints `UNKNOWN:` and exits 0.
+  ref and never asks. `--check` off the default branch fails in GitHub Actions when it
+  cannot read the base. Everywhere else it prints `UNKNOWN:` and exits 0.
 - A failed `regenerate` stops the run and nothing is pushed. claim-ids.py's
   `settle_corpus` ignores a failed generator, and the claim still lands.
 - `--check` refuses a record numbered on a branch. claim-ids.py claims on the branch,
@@ -156,7 +156,10 @@ It exists to tell apart two states q_max's own log once conflated, in its own `D
 the stamp checks its own tree. One state is a pending record waiting its normal turn.
 The other is a pending record whose stamp run failed, or whose push was rejected
 twice. The question is asked only on the default branch, and only while something is
-pending. Every other run reads no git history at all. `stamp.mjs`'s own `addedByHead`
+pending. Off the default branch, `--check` asks a different question. It reads the merge
+base of HEAD and the base ref, and it refuses a number that the branch added, renamed or
+removed. So that run reads git history, and a check job needs `fetch-depth: 0`. Only
+`--stamp` and a default-branch run with nothing pending read no history at all. `stamp.mjs`'s own `addedByHead`
 and merge-order reader are lifted from `harness/decision-refs.mjs` nearly unchanged.
 That logic was already measured against q_max's real history. Rewriting it a second
 way would only add a second chance to get it wrong.
