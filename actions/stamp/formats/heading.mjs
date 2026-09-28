@@ -412,14 +412,15 @@ function git(root, args) {
 
 // Every numbered record in this tree, keyed for stamp.mjs's branch question. A folder kind keys
 // a number by its file, since a file keeps its name once numbered. A flat-file kind has no stable
-// per-record key but the number itself, so it keys by the file and the number.
+// per-record key but the number itself, so it keys by the kind and the number. stamp.mjs refuses
+// a removed number, so a swap under the same number can only be an in-place edit.
 export function numberedRecords(root, config, h) {
   const out = [];
   for (const kind of config.kinds) {
     const k = readKind(root, config, kind, h);
     for (const { n, rel } of k.numbers) {
       const key = kind.folder ? `${kind.id}\0${rel}\0${n}` : `${kind.id}\0${n}`;
-      out.push({ key, rel, id: renderId(kind, n), prefix: kind.prefix });
+      out.push({ key, name: kind.folder ? rel : renderId(kind, n), kind: kind.id, n, rel, id: renderId(kind, n), prefix: kind.prefix });
     }
   }
   return out;

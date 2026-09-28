@@ -19,7 +19,9 @@
 //   --stamp   number every pending record and rewrite cites. Writes the tree.
 //   --check   refuse a malformed record, a duplicate id, or a cite that points at no record. On
 //             the default branch, also refuse a pending record HEAD did not add. Off it, refuse a
-//             record numbered on the branch, against the base branch's tree. Touches nothing.
+//             record numbered on the branch, a renamed numbered record, and a removed number,
+//             against the base branch's tree. Touches nothing. A base it cannot read fails the
+//             check when GITHUB_ACTIONS is "true", and prints UNKNOWN and exits 0 elsewhere.
 //
 // Both take --config <path> (required) and --root <path> (default: cwd). --check also takes
 // --base <ref> (default: origin/$GITHUB_BASE_REF, else origin/<defaultBranch>).
@@ -546,7 +548,9 @@ function numberedRecords(root, config) {
   for (const kind of config.kinds) {
     for (const rel of listRecordFiles(root, kind)) {
       const rec = loadRecord(root, kind, rel);
-      for (const n of rec.numbers) out.push({ key: `${kind.id}\0${rec.slug}\0${n}`, rel, id: renderId(kind, n), prefix: kind.prefix });
+      for (const n of rec.numbers) {
+        out.push({ key: `${kind.id}\0${rec.slug}\0${n}`, name: rec.slug, kind: kind.id, n, rel, id: renderId(kind, n), prefix: kind.prefix });
+      }
     }
   }
   return out;
@@ -555,19 +559,27 @@ function numberedRecords(root, config) {
 const recordPaths = (config) =>
   config.format === "heading" ? headingFormat.recordPaths(config) : config.kinds.map((k) => k.folder);
 
-// Off the default branch: every record that carries a number in this tree must carry that same
-// number in the base tree. A new record with a number fails, and so does a record that was
-// pending on the base and has a number now. The base tree is the merge base of HEAD and the base
-// ref, never the ref's tip: the tip may have taken the same number since, for another record, and
-// that reads as "already there" and hides the defect. In a pull_request merge commit the merge
-// base IS the base ref's tip, so both read the same tree there.
+// Off the default branch, against the base tree:
+//   - every record that carries a number in this tree must carry that same number, under the
+//     same key, in the base tree. A new record with a number fails, and so does a record that was
+//     pending on the base and has a number now. A record whose number the base holds under
+//     another key was renamed, and gets its own message.
+//   - every number the base tree holds, per kind, must still be held by a record of this tree.
+//     Numbers are permanent. A record is retired through its own status, never by deletion. This
+//     also closes a same-number swap in a kind keyed by its number alone: the swap can only be an
+//     in-place edit now.
+// The base tree is the merge base of HEAD and the base ref, never the ref's tip: the tip may have
+// taken the same number since, for another record, and that reads as "already there" and hides
+// the defect. In a pull_request merge commit the merge base IS the base ref's tip, so both read
+// the same tree there.
 //
-// A base that cannot be read is a refusal, never a pass. A check that did not run is not green.
+// A base that cannot be read comes back as `unknown`, never as a pass. check() decides whether
+// that fails the run. A check that did not run is not green.
 function branchNumbered(root, config, opts) {
   const ref = baseRef(config, opts);
   const remedy = "Fetch the base branch with its history (actions/checkout with fetch-depth: 0), or pass --base <ref>.";
   if (!ref) {
-    return [`branch question could not run: no base ref. Set "defaultBranch" in the config, or pass --base <ref>.`];
+    return { problems: [], unknown: `branch question could not run: no base ref. Set "defaultBranch" in the config, or pass --base <ref>.` };
   }
   let base;
   try {
@@ -575,21 +587,39 @@ function branchNumbered(root, config, opts) {
   } catch {
     base = "";
   }
-  if (!base) return [`branch question could not run: git cannot read a merge base of HEAD and ${ref}. ${remedy}`];
+  if (!base) return { problems: [], unknown: `branch question could not run: git cannot read a merge base of HEAD and ${ref}. ${remedy}` };
   let dir;
   try {
     dir = materializeTree(root, base, recordPaths(config));
-    const known = new Set(numberedRecords(dir, config).map((r) => r.key));
+    const before = numberedRecords(dir, config);
+    const now = numberedRecords(root, config);
+    const numberOf = (r) => `${r.kind}\0${r.n}`;
+    const baseKeys = new Set(before.map((r) => r.key));
+    const nowKeys = new Set(now.map((r) => r.key));
+    const held = new Set(now.map(numberOf));
+    const baseByNumber = new Map();
+    for (const r of before) if (!baseByNumber.has(numberOf(r))) baseByNumber.set(numberOf(r), r);
     const problems = [];
-    for (const r of numberedRecords(root, config)) {
-      if (!known.has(r.key)) {
+    for (const r of now) {
+      if (baseKeys.has(r.key)) continue;
+      const old = baseByNumber.get(numberOf(r));
+      if (old && !nowKeys.has(old.key)) {
+        problems.push(`${r.rel}: ${r.id} was renamed on a branch. ${ref} holds it under the key "${old.name}", and this tree ` +
+          `holds it under "${r.name}". A numbered record keeps its key. Restore "${old.name}".`);
+      } else {
         problems.push(`${r.rel} is numbered ${r.id} on a branch, and ${ref} does not number it so. ` +
           `Write the pending marker and let the stamp claim the number at merge.`);
       }
     }
-    return [...new Set(problems)];
+    for (const r of before) {
+      if (!held.has(numberOf(r))) {
+        problems.push(`${r.id} (${r.rel} in ${ref}) is removed on a branch, and no record of this tree holds it. ` +
+          `Numbers are permanent. Retire a record through its own status, never by deletion.`);
+      }
+    }
+    return { problems: [...new Set(problems)], unknown: null };
   } catch (e) {
-    return [`branch question could not run: git cannot read the tree of ${base} (${String(e.message).split("\n")[0]}). ${remedy}`];
+    return { problems: [], unknown: `branch question could not run: git cannot read the tree of ${base} (${String(e.message).split("\n")[0]}). ${remedy}` };
   } finally {
     if (dir) rmSync(dir, { recursive: true, force: true });
   }
@@ -612,6 +642,10 @@ function defaultPendingOld(root, config, byKind, branch) {
   return problems;
 }
 
+// Returns the problems. When the off-branch question could not read the base, the verdict
+// depends on where it runs. In GitHub Actions (GITHUB_ACTIONS is "true") that is a problem, so
+// CI fails. Elsewhere it is set on the array as `unknown`, a line that starts with "UNKNOWN:",
+// and it is not a problem: a local run warns and exits 0, and never claims the tree is in order.
 export function check(root, config, opts = {}) {
   const onDefault = onDefaultBranch(root, config);
   let problems;
@@ -622,7 +656,12 @@ export function check(root, config, opts = {}) {
     problems = v.problems;
     if (onDefault) problems.push(...defaultPendingOld(root, config, v.byKind, config.defaultBranch));
   }
-  if (!onDefault) problems.push(...branchNumbered(root, config, opts));
+  if (!onDefault) {
+    const branch = branchNumbered(root, config, opts);
+    problems.push(...branch.problems);
+    if (branch.unknown && process.env.GITHUB_ACTIONS === "true") problems.push(branch.unknown);
+    else if (branch.unknown) problems.unknown = `UNKNOWN: ${branch.unknown}`;
+  }
   return problems;
 }
 
@@ -656,10 +695,12 @@ if (isMain) {
     }
   } else {
     const problems = check(args.root, config, { base: args.base });
+    if (problems.unknown) console.error(problems.unknown);
     if (problems.length) {
       for (const p of problems) console.error(p);
       process.exit(1);
     }
+    if (problems.unknown) process.exit(0);
     console.log(config.format === "heading"
       ? "every pending heading is well formed, every id is unique, nothing is numbered out of turn."
       : "every pending record is in order, every id is unique, every cite resolves.");

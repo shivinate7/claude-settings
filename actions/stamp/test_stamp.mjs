@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, statSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,9 +14,11 @@ import { fileURLToPath } from "node:url";
 import { stamp, check, loadConfig, currentBranch, onDefaultBranch } from "./stamp.mjs";
 
 // Each fixture builds its own git repo. A CI run's GITHUB_REF and GITHUB_BASE_REF name the
-// runner's branch, not the fixture's.
+// runner's branch, not the fixture's. GITHUB_ACTIONS picks a hard refusal or an UNKNOWN line
+// for an unreadable base, so each test that reads one sets it itself.
 delete process.env.GITHUB_REF;
 delete process.env.GITHUB_BASE_REF;
+delete process.env.GITHUB_ACTIONS;
 
 // A fixture repo has no remote. The off-branch question reads the local default branch instead.
 const LOCAL = { base: "main" };
@@ -59,6 +61,25 @@ function initRepo(root) {
 function commit(root, message) {
   git(root, "add", "-A");
   git(root, "commit", "-q", "-m", message);
+}
+
+// The CLI's --check, with GITHUB_ACTIONS set to `actions` ("true") or left out (undefined).
+function runCheck(root, configPath, actions, extra = []) {
+  const env = { ...process.env };
+  delete env.GITHUB_ACTIONS;
+  if (actions !== undefined) env.GITHUB_ACTIONS = actions;
+  return spawnSync("node", [join(HERE, "stamp.mjs"), "--check", ...extra, "--config", configPath], { cwd: root, encoding: "utf8", env });
+}
+
+function withEnv(name, value, fn) {
+  const old = process.env[name];
+  process.env[name] = value;
+  try {
+    return fn();
+  } finally {
+    if (old === undefined) delete process.env[name];
+    else process.env[name] = old;
+  }
 }
 
 // ---------------------------------------------------------------- format 1: frontmatter only,
@@ -322,7 +343,7 @@ test("frontmatter+filename --check passes a pending record on a feature branch",
     assert.deepEqual(check(root, filenameConfig(), LOCAL), []);
   }));
 
-test("--check refuses to pass when the base ref cannot be read, and the CLI exits non-zero", () =>
+test("--check in GitHub Actions refuses to pass when the base ref cannot be read, and the CLI exits non-zero", () =>
   withTempDir((root) => {
     initRepo(root);
     write(root, "docs/decisions/a.md", "---\nid: D-001\nslug: a\ntitle: A\ndate: 2026-01-01\n---\n\nBody.\n");
@@ -330,24 +351,55 @@ test("--check refuses to pass when the base ref cannot be read, and the CLI exit
     git(root, "checkout", "-q", "-b", "wt/lane");
 
     // No remote, so the default base, origin/main, does not exist.
-    const problems = check(root, frontmatterConfig());
+    const problems = withEnv("GITHUB_ACTIONS", "true", () => check(root, frontmatterConfig()));
     assert.equal(problems.length, 1);
     assert.equal(problems[0].includes("could not run") && problems[0].includes("origin/main") && problems[0].includes("fetch-depth: 0"), true);
 
-    let status = 0;
-    let stderr = "";
-    try {
-      execFileSync("node", [join(HERE, "stamp.mjs"), "--check", "--config", join(HERE, "examples/frontmatter.stamp.json")],
-        { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-    } catch (e) {
-      status = e.status;
-      stderr = e.stderr;
-    }
-    assert.equal(status, 1);
-    assert.equal(stderr.includes("could not run"), true);
+    const cfg = join(HERE, "examples/frontmatter.stamp.json");
+    const run = runCheck(root, cfg, "true");
+    assert.equal(run.status, 1);
+    assert.equal(run.stderr.includes("could not run"), true);
     // --base names a ref git can read, and the same tree passes.
-    execFileSync("node", [join(HERE, "stamp.mjs"), "--check", "--base", "main", "--config", join(HERE, "examples/frontmatter.stamp.json")],
-      { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    assert.equal(runCheck(root, cfg, "true", ["--base", "main"]).status, 0);
+  }));
+
+// Every way the base can be unreadable: a ref git cannot read, no defaultBranch and no --base,
+// and a tree with no git. In GitHub Actions each fails. Elsewhere each prints UNKNOWN and exits 0,
+// and never claims the tree is in order.
+test("--check with an unreadable base fails in GitHub Actions, and prints UNKNOWN and exits 0 elsewhere", () =>
+  withTempDir((root) => {
+    const record = "---\nid: D-001\nslug: a\ntitle: A\ndate: 2026-01-01\n---\n\nBody.\n";
+    const noDefault = JSON.parse(read(HERE, "examples/frontmatter.stamp.json"));
+    delete noDefault.defaultBranch;
+    const cases = {
+      "unreadable ref": { repo: true, config: JSON.parse(read(HERE, "examples/frontmatter.stamp.json")), remedy: "fetch-depth: 0" },
+      "no defaultBranch, no --base": { repo: true, config: noDefault, remedy: "pass --base <ref>" },
+      "no git": { repo: false, config: JSON.parse(read(HERE, "examples/frontmatter.stamp.json")), remedy: "fetch-depth: 0" },
+    };
+    for (const [name, c] of Object.entries(cases)) {
+      const dir = join(root, name.replace(/[^a-z]+/g, "-"));
+      mkdirSync(dir);
+      write(dir, "docs/decisions/a.md", record);
+      if (c.repo) {
+        initRepo(dir);
+        commit(dir, "main");
+        git(dir, "checkout", "-q", "-b", "wt/lane");
+      }
+      const cfg = join(root, `${name.replace(/[^a-z]+/g, "-")}.json`);
+      writeFileSync(cfg, JSON.stringify(c.config));
+
+      const ci = runCheck(dir, cfg, "true");
+      assert.equal(ci.status, 1, `${name}: CI exit`);
+      assert.equal(ci.stderr.includes("could not run") && ci.stderr.includes(c.remedy), true, `${name}: CI names the remedy`);
+      assert.equal(ci.stderr.includes("UNKNOWN"), false, `${name}: CI prints no UNKNOWN`);
+
+      const local = runCheck(dir, cfg, undefined);
+      assert.equal(local.status, 0, `${name}: local exit`);
+      const lines = local.stderr.split("\n").filter(Boolean);
+      assert.equal(lines.length, 1, `${name}: one line`);
+      assert.equal(lines[0].startsWith("UNKNOWN:") && lines[0].includes(c.remedy), true, `${name}: the UNKNOWN line names the remedy`);
+      assert.equal(local.stdout.includes("in order"), false, `${name}: no in-order line`);
+    }
   }));
 
 test("--check reads GITHUB_BASE_REF for the base, and a pull_request checkout is off the default branch", () =>
@@ -797,6 +849,128 @@ test("heading manifestKey and manifestAscii: another key is renamed, and false w
     stamp(root, config);
     assert.equal(read(root, "docs/decisions/ORDER.json"),
       JSON.stringify({ files: ["_preamble.md", "caf\u00e9.md", "D004-two-thing.md"] }, null, 2) + "\n");
+  }));
+
+// ---------------------------------------------------------------- --check off the default
+// branch: a renamed numbered record, a removed number, and a title edit, in every shape.
+const renamed = (p) => p.includes("was renamed") && !p.includes("numbered D") && !p.includes("pending marker");
+
+test("--check refuses a renamed numbered record, and names the old key and the new key, in every shape", () =>
+  withTempDir((root) => {
+    const shapes = [
+      {
+        name: "frontmatter", config: frontmatterConfig,
+        base: (d) => write(d, "docs/decisions/a.md", "---\nid: D-001\nslug: a\ntitle: A\ndate: 2026-01-01\n---\n\nBody.\n"),
+        branch: (d) => write(d, "docs/decisions/a.md", "---\nid: D-001\nslug: a-new\ntitle: A\ndate: 2026-01-01\n---\n\nBody.\n"),
+        oldKey: '"a"', newKey: '"a-new"',
+      },
+      {
+        name: "frontmatter+filename", config: filenameConfig,
+        base: (d) => write(d, "docs/decisions/D1_one.md", '---\nid: D1\nslug: one\ngloss: "one"\ndate: 2026-01-01\n---\n\nBody.\n'),
+        branch: (d) => { git(d, "mv", "docs/decisions/D1_one.md", "docs/decisions/D1_uno.md"); write(d, "docs/decisions/D1_uno.md", '---\nid: D1\nslug: uno\ngloss: "one"\ndate: 2026-01-01\n---\n\nBody.\n'); },
+        oldKey: '"one"', newKey: '"uno"',
+      },
+      {
+        name: "heading", config: headingConfig,
+        base: (d) => headingTree(d),
+        branch: (d) => git(d, "mv", "docs/decisions/D001-one.md", "docs/decisions/D001-uno.md"),
+        oldKey: '"docs/decisions/D001-one.md"', newKey: '"docs/decisions/D001-uno.md"',
+      },
+    ];
+    for (const sh of shapes) {
+      const dir = join(root, sh.name.replace(/[^a-z]+/g, "-"));
+      mkdirSync(dir);
+      initRepo(dir);
+      sh.base(dir);
+      commit(dir, "main");
+      git(dir, "checkout", "-q", "-b", "wt/lane");
+      sh.branch(dir);
+      commit(dir, "a branch renames a numbered record");
+
+      const problems = check(dir, sh.config(), LOCAL);
+      assert.equal(problems.length, 1, `${sh.name}: ${problems.join(" | ")}`);
+      assert.equal(renamed(problems[0]) && problems[0].includes(sh.oldKey) && problems[0].includes(sh.newKey), true, `${sh.name}: ${problems[0]}`);
+    }
+  }));
+
+test("--check refuses a branch that removes a numbered record, in every shape", () =>
+  withTempDir((root) => {
+    const shapes = [
+      {
+        name: "frontmatter", config: frontmatterConfig, ids: ["D-002"],
+        base: (d) => {
+          write(d, "docs/decisions/a.md", "---\nid: D-001\nslug: a\ntitle: A\ndate: 2026-01-01\n---\n\nBody.\n");
+          write(d, "docs/decisions/b.md", "---\nid: D-002\nslug: b\ntitle: B\ndate: 2026-01-02\n---\n\nBody.\n");
+        },
+        branch: (d) => git(d, "rm", "-q", "docs/decisions/b.md"),
+      },
+      {
+        name: "frontmatter+filename", config: filenameConfig, ids: ["D2"],
+        base: (d) => {
+          write(d, "docs/decisions/D1_one.md", '---\nid: D1\nslug: one\ngloss: "one"\ndate: 2026-01-01\n---\n\nBody.\n');
+          write(d, "docs/decisions/D2_two.md", '---\nid: D2\nslug: two\ngloss: "two"\ndate: 2026-01-02\n---\n\nBody.\n');
+        },
+        branch: (d) => git(d, "rm", "-q", "docs/decisions/D2_two.md"),
+      },
+      {
+        // Both corpus shapes: a folder record, and a heading in the flat file, keyed by its number.
+        name: "heading", config: headingConfig, ids: ["D3", "C2"],
+        base: (d) => { headingTree(d); write(d, "docs/codes.md", "# Codes\n\n## C1 — First\n\n## C2 — Second\n"); },
+        branch: (d) => { git(d, "rm", "-q", "docs/decisions/D003-three.md"); write(d, "docs/codes.md", "# Codes\n\n## C1 — First\n"); },
+      },
+    ];
+    for (const sh of shapes) {
+      const dir = join(root, sh.name.replace(/[^a-z]+/g, "-"));
+      mkdirSync(dir);
+      initRepo(dir);
+      sh.base(dir);
+      commit(dir, "main");
+      git(dir, "checkout", "-q", "-b", "wt/lane");
+      sh.branch(dir);
+      commit(dir, "a branch deletes a numbered record");
+
+      const problems = check(dir, sh.config(), LOCAL);
+      assert.equal(problems.length, sh.ids.length, `${sh.name}: ${problems.join(" | ")}`);
+      for (const id of sh.ids) {
+        assert.equal(problems.some((p) => p.startsWith(`${id} `) && p.includes("Numbers are permanent") && p.includes("its own status, never by deletion")), true, `${sh.name}: ${id}`);
+      }
+    }
+  }));
+
+test("--check passes a branch that fixes a typo in a numbered record's title, in every shape", () =>
+  withTempDir((root) => {
+    const shapes = [
+      {
+        name: "frontmatter", config: frontmatterConfig,
+        base: (d) => write(d, "docs/decisions/a.md", "---\nid: D-001\nslug: a\ntitle: Teh title\ndate: 2026-01-01\n---\n\nBody.\n"),
+        branch: (d) => write(d, "docs/decisions/a.md", "---\nid: D-001\nslug: a\ntitle: The title\ndate: 2026-01-01\n---\n\nBody.\n"),
+      },
+      {
+        name: "frontmatter+filename", config: filenameConfig,
+        base: (d) => write(d, "docs/decisions/D1_one.md", '---\nid: D1\nslug: one\ngloss: "teh one"\ndate: 2026-01-01\n---\n\nBody.\n'),
+        branch: (d) => write(d, "docs/decisions/D1_one.md", '---\nid: D1\nslug: one\ngloss: "the one"\ndate: 2026-01-01\n---\n\nBody.\n'),
+      },
+      {
+        name: "heading", config: headingConfig,
+        base: (d) => headingTree(d),
+        branch: (d) => {
+          write(d, "docs/decisions/D001-one.md", "## D1 — One, fixed\n\nBody.\n");
+          write(d, "docs/codes.md", "# Codes\n\n## C1 — First, fixed\n\nBody.\n");
+        },
+      },
+    ];
+    for (const sh of shapes) {
+      const dir = join(root, sh.name.replace(/[^a-z]+/g, "-"));
+      mkdirSync(dir);
+      initRepo(dir);
+      sh.base(dir);
+      commit(dir, "main");
+      git(dir, "checkout", "-q", "-b", "wt/lane");
+      sh.branch(dir);
+      commit(dir, "a branch fixes a title");
+
+      assert.deepEqual(check(dir, sh.config(), LOCAL), [], sh.name);
+    }
   }));
 
 // ---------------------------------------------------------------- run

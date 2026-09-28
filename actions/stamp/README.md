@@ -62,10 +62,18 @@ It asks one more question, and the question depends on the branch.
 - **On the default branch**, it refuses a pending record that HEAD did not add. Such a
   record means that the stamp did not run, or that its push was rejected. A record that
   HEAD added waits for its turn. It is not refused.
-- **Off the default branch**, it refuses a record whose number in this tree is not its
-  number in the base tree. This catches a new record with a number. It also catches a
-  record that was pending on the base and has a number now. It asks the question for all
-  three shapes, with the same loader that reads this tree.
+- **Off the default branch**, it compares this tree with the base tree. It asks the
+  question for all three shapes, with the same loader that reads this tree. It refuses
+  these states:
+  - A record whose number in this tree is not its number in the base tree. This catches a
+    new record with a number. It also catches a record that was pending on the base and
+    has a number now.
+  - A renamed record. The base holds the same number under another key. The message says
+    that the record was renamed, and it names the old key and the new key. The fix is to
+    restore the old key.
+  - A removed record. A number is removed when the base tree holds it and no record of this
+    tree holds it, for the same kind. Numbers are permanent. Retire a record through its own
+    status, never by deletion.
 
 A pull request checkout is always off the default branch. The engine knows it is one when
 `GITHUB_BASE_REF` is set, or when `GITHUB_REF` starts with `refs/pull/`.
@@ -75,16 +83,30 @@ The base ref is the first of these that is set: `--base <ref>`,
 HEAD and that ref. The tip of the ref is not used. The tip can hold the same number for a
 different record, and then the defect does not show.
 
-**A base that cannot be read is a refusal, not a pass.** Off the default branch, `--check`
-exits 1 if the ref is missing or has no merge base with HEAD. The message says that the
-read could not run. The remedy is to fetch the base branch with its history. With
-`actions/checkout`, set `fetch-depth: 0`.
+**A base that cannot be read is never a pass.** These states make the base unreadable. The
+ref is missing, or it has no merge base with HEAD. The config has no `defaultBranch` and no
+`--base` is given. The tree has no git. The result then depends on where the check runs:
+
+- **In GitHub Actions** (`GITHUB_ACTIONS` is `true`), `--check` exits 1. The message says that
+  the read could not run, and it names the remedy.
+- **Everywhere else**, `--check` prints a line that starts with `UNKNOWN:` and names the same
+  remedy. It exits 0. It does not print the line that says the records are in order.
+
+The remedy is to fetch the base branch with its history, or to pass `--base <ref>`. A check
+job needs `actions/checkout` with `fetch-depth: 0`. A shallow fetch of the base is not
+enough, because git must find the merge base of HEAD and the base ref.
 
 **Record identity across the two trees.** A frontmatter record is the same record when it
-has the same kind and slug. A `folder` heading record is the same record when it has the
-same file. A `file` heading record has no key but its number. So a branch that renames a
-numbered `folder` heading file is refused too. So is a branch that changes the slug of a
-numbered frontmatter record. A rename of a frontmatter file with the same slug passes.
+has the same kind and slug. Its key is the slug. A `folder` heading record is the same
+record when it has the same file. Its key is the file path. A `file` heading record has no
+key but its number. So a branch that renames a numbered `folder` heading file is refused
+too. So is a branch that changes the slug of a numbered frontmatter record. A rename of a
+frontmatter file with the same slug passes. An edit to a title passes in every shape.
+
+**A same-number swap.** A branch can delete a `file` heading record and write a different
+record with the same number. That is now the same as an edit in place, because the removal
+refusal catches each number that no record holds. The engine does not compare titles or
+content.
 
 ## The config file
 
@@ -195,14 +217,17 @@ uses: shivinate7/claude-settings/actions/stamp@<sha>
 |---|---|---|
 | `mode` | `stamp` | `stamp` or `check`. |
 | `config` | required | The config path, from the repository root. |
+| `base` | empty | Mode `check` only. The base ref, passed to `stamp.mjs` as `--base`, and only when it is set. When it is empty, the engine picks the base itself. |
 | `gate-command` | empty | Mode `stamp` only, and required there. Your own full check. It must pass on the stamped tree before the push. |
 | `regenerate` | empty | Mode `stamp` only. Your own generator. It runs after `--stamp` and before the gate, in the same commit. |
 | `commit-subject` | `Stamp {ids}` | The commit subject. `{ids}` becomes the ids that the run stamped. |
 | `bot-name` | `record-stamp[bot]` | The commit author name. |
 | `bot-email` | `record-stamp@users.noreply.github.com` | The commit author email. |
 
-**Mode `check`** runs `stamp.mjs --check --config <config>` and nothing else. It needs no
-default branch, no gate, no commit, and no push. It works with `contents: read`.
+**Mode `check`** runs `stamp.mjs --check --config <config>` and nothing else. When `base` is
+set, it adds `--base <base>`. It needs no default branch, no gate, no commit, and no push.
+It works with `contents: read`. Its checkout needs `fetch-depth: 0`. A shallow fetch of the
+base is not enough.
 
 **Mode `stamp`** refuses to run off the default branch. It refuses an empty
 `gate-command`. It stamps, runs `regenerate`, runs the gate, commits, and pushes. When

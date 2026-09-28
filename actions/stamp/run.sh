@@ -6,6 +6,7 @@
 # MODE picks one of two runs. Default "stamp".
 #   check  run `stamp.mjs --check`. Needs only STAMP_JS and CONFIG. No default branch, no gate, no
 #          commit, no push, so it runs with `contents: read` on any branch or pull request.
+#          BASE is optional. When set, it passes through as `--base`. When empty, it is left out.
 #   stamp  the env vars below. All are required except MAX_ATTEMPTS and REGENERATE_COMMAND.
 #
 #   REF                e.g. "refs/heads/main" ($GITHUB_REF)
@@ -26,9 +27,9 @@ MAX_ATTEMPTS="${MAX_ATTEMPTS:-3}"
 
 case "$MODE" in
   check)
-    # The engine picks the base itself: origin/$GITHUB_BASE_REF on a pull request, else
-    # origin/<defaultBranch>. Its exit code is this run's verdict.
-    exec node "$STAMP_JS" --check --config "$CONFIG"
+    # BASE, when set, names the base. Else the engine picks it: origin/$GITHUB_BASE_REF on a pull
+    # request, else origin/<defaultBranch>. Its exit code is this run's verdict.
+    exec node "$STAMP_JS" --check ${BASE:+--base "$BASE"} --config "$CONFIG"
     ;;
   stamp) ;;
   *)

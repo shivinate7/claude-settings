@@ -21,6 +21,13 @@ inputs:
   config:
     description: Path to the stamp config file, relative to the repository root.
     required: true
+  base:
+    description: >
+      Mode "check" only. The ref the branch question reads as the base, passed to stamp.mjs as
+      `--base`, and only when it is set. When empty, the engine uses origin/$GITHUB_BASE_REF on
+      a pull request, else origin/<defaultBranch>.
+    required: false
+    default: ""
   gate-command:
     description: >
       Mode "stamp" only, and required there. The command that must pass on the stamped tree
@@ -57,6 +64,7 @@ runs:
         REF: ${{ github.ref }}
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         CONFIG: ${{ inputs.config }}
+        BASE: ${{ inputs.base }}
         REGENERATE_COMMAND: ${{ inputs.regenerate }}
         GATE_COMMAND: ${{ inputs.gate-command }}
         SUBJECT_TEMPLATE: ${{ inputs.commit-subject }}

@@ -4,8 +4,9 @@
 # prints "ok - <name>" and returns 0, or prints "FAIL - <name>" with the reason and returns 1.
 set -uo pipefail
 
-# A CI run's own refs name the runner's branch, not a fixture's.
-unset GITHUB_REF GITHUB_BASE_REF MODE
+# A CI run's own refs name the runner's branch, not a fixture's. GITHUB_ACTIONS picks a hard
+# refusal or an UNKNOWN line for an unreadable base, so each test that reads one sets it itself.
+unset GITHUB_REF GITHUB_BASE_REF GITHUB_ACTIONS MODE BASE
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN_SH="$HERE/run.sh"
@@ -273,11 +274,33 @@ test_check_mode_refuses_unreadable_base() {
   feature_branch "$local_dir"
   git -C "$local_dir" update-ref -d refs/remotes/origin/main
 
-  if run_check "$local_dir"; then
+  if GITHUB_ACTIONS=true run_check "$local_dir"; then
     echo "  expected a refusal when origin/main is gone, got exit 0"
     return 1
   fi
   grep -q "could not run" "$WORK/check.log" || { echo "  the refusal did not say the read could not run"; cat "$WORK/check.log"; return 1; }
+  return 0
+}
+
+# The same unreadable default base, but the base input names a ref git can read. The check runs
+# against it: a record numbered on the branch is refused. So the input reached --base.
+test_check_mode_base_input_passes_through() {
+  local remote local_dir
+  remote="$(new_bare_remote)"
+  local_dir="$(clone_with_pending_record "$remote")"
+  git -C "$local_dir" branch base-here
+  feature_branch "$local_dir"
+  git -C "$local_dir" update-ref -d refs/remotes/origin/main
+  printf -- '---\nid: D-002\nslug: second\ntitle: Second\ndate: 2026-01-02\n---\n\nBody.\n' > "$local_dir/docs/decisions/second.md"
+  git -C "$local_dir" add -A
+  git -C "$local_dir" commit -q -m "a record numbered on a branch"
+
+  if GITHUB_ACTIONS=true BASE=base-here run_check "$local_dir"; then
+    echo "  expected a refusal against the base input, got exit 0"
+    return 1
+  fi
+  grep -q "D-002 on a branch, and base-here" "$WORK/check.log" || { echo "  the check did not read the base input"; cat "$WORK/check.log"; return 1; }
+  grep -q "could not run" "$WORK/check.log" && { echo "  the base input did not reach --base"; cat "$WORK/check.log"; return 1; }
   return 0
 }
 
@@ -307,6 +330,7 @@ run_test "stamp mode refuses an empty gate command" test_refuses_empty_gate
 run_test "check mode passes a pending record on a feature branch, and writes nothing" test_check_mode_passes_pending_on_feature_branch
 run_test "check mode refuses a record numbered on a feature branch" test_check_mode_refuses_number_on_feature_branch
 run_test "check mode refuses to pass when the base cannot be read" test_check_mode_refuses_unreadable_base
+run_test "check mode passes the base input through to --base" test_check_mode_base_input_passes_through
 run_test "an unknown mode is refused" test_refuses_unknown_mode
 
 echo "$((total - failed)) of $total passed."
