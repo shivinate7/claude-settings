@@ -1666,5 +1666,159 @@ class FindingEchoSanitizationTests(unittest.TestCase):
         self.assertTrue(line.endswith("[cut]"))
 
 
+class ValeBloatPairTests(unittest.TestCase):
+    """STE011 pairs copied from the Vale style packs (decisions/fewest-words-mandate.md)."""
+
+    def codes(self, text):
+        return [f.code for f in ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG)).check_text("t.md", text)]
+
+    def test_79_vale_pair_blocks(self):
+        self.assertIn("STE011", self.codes("Keep the service running at all times.\n"))
+
+    def test_80_acronym_pair_is_case_sensitive(self):
+        self.assertIn("STE011", self.codes("Type the PIN number again.\n"))
+        self.assertNotIn("STE011", self.codes("Read the pin number on the board.\n"))
+
+    def test_81_in_addition_to_passes(self):
+        self.assertNotIn("STE011", self.codes("It reads the log in addition to the file.\n"))
+
+
+class UICopyLintTests(unittest.TestCase):
+    """Front-end copy: ste_lint reads only the text a user sees in .tsx, .jsx, .html and
+    .vue files, and caps a button, label or aria-label at 4 words (STE020)."""
+
+    def check(self, path, text):
+        return ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG)).check_ui(path, text)
+
+    def codes(self, path, text):
+        return [f.code for f in self.check(path, text)]
+
+    def test_82_five_word_button_blocks(self):
+        findings = self.check("a.tsx", "const x = <button>Save the file right now</button>;\n")
+        hit = [f for f in findings if f.code == "STE020"]
+        self.assertTrue(hit)
+        self.assertIn("5 words", hit[0].message)
+        self.assertIn("limit is 4", hit[0].message)
+
+    def test_83_four_word_button_passes(self):
+        self.assertEqual(self.codes("a.tsx", "const x = <button>Save the file now</button>;\n"), [])
+
+    def test_84_expression_only_label_is_skipped(self):
+        self.assertEqual(self.codes("a.jsx", "const x = <label>{props.longLabelText}</label>;\n"), [])
+
+    def test_85_expression_is_not_counted(self):
+        self.assertEqual(self.codes("a.jsx", "const x = <button>Delete {count} old files</button>;\n"), [])
+
+    def test_86_aria_label_cap(self):
+        self.assertIn("STE020", self.codes(
+            "a.tsx", 'const x = <input aria-label="Close this dialog window now" />;\n'))
+        self.assertEqual(self.codes("a.tsx", 'const x = <input aria-label="Close dialog" />;\n'), [])
+
+    def test_87_class_name_with_long_text_passes(self):
+        text = ('const x = <div className="in order to make the layout wide and prior to the '
+                'grid move it">Hi</div>;\n')
+        self.assertEqual(self.codes("a.tsx", text), [])
+
+    def test_88_bloat_in_jsx_text_blocks(self):
+        findings = self.check("a.tsx", "const x = (\n  <p>In order to save, press the key.</p>\n);\n")
+        hit = [f for f in findings if f.code == "STE011"]
+        self.assertTrue(hit)
+        self.assertEqual((hit[0].line, hit[0].col), (2, 6))
+
+    def test_89_bloat_in_js_string_passes(self):
+        text = ('// in order to load it\nconst msg = "in order to save";\n'
+                "const re = /in order to/;\nconst t = `in order to ${a}`;\n")
+        self.assertEqual(self.codes("a.tsx", text), [])
+
+    def test_90_generic_and_comparison_are_not_jsx(self):
+        text = ("function f<T>(a: Array<T>) { return a.length < 3 && b > 1; }\n"
+                "const g = <T,>(x: T) => x;\n"
+                "const y = <p>In order to go.</p>;\n")
+        self.assertEqual(self.codes("a.tsx", text), ["STE011"])
+
+    def test_91_vue_template_is_read(self):
+        text = ("<template>\n  <div :title=\"dynamicTitle\">\n"
+                "    <p>In order to go, press {{ key }}.</p>\n"
+                "    <button>Delete all of the files</button>\n  </div>\n</template>\n"
+                "<script setup>\nconst s = \"in order to\";\n</script>\n")
+        findings = self.check("a.vue", text)
+        self.assertEqual(sorted((f.code, f.line) for f in findings), [("STE011", 3), ("STE020", 4)])
+
+    def test_92_html_file_is_read(self):
+        text = ('<html><head><script>var a = "in order to";</script></head><body>\n'
+                '<h1 class="prior-to">Welcome</h1>\n'
+                '<img src="x.png" alt="A picture taken prior to the launch">\n'
+                "<code>in order to</code>\n</body></html>\n")
+        findings = self.check("a.html", text)
+        self.assertEqual([(f.code, f.line, f.col) for f in findings], [("STE011", 3, 39)])
+
+    def test_93_contraction_is_skipped_for_ui(self):
+        self.assertEqual(self.codes("a.tsx", "const x = <p>You can't undo it.</p>;\n"), [])
+
+    def test_94_disable_comment_is_honored(self):
+        text = ("const x = (\n  // ste-disable-next-line STE020\n"
+                "  <button>Save the file right now</button>\n);\n")
+        self.assertEqual(self.codes("a.tsx", text), [])
+
+    def test_95_cli_reads_ui_file_as_ui(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "a.tsx")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write('const msg = "in order to save";\n')
+            run = subprocess.run([sys.executable, os.path.join(HERE, "ste_lint.py"),
+                                  "--no-color", path], capture_output=True, text=True, timeout=15)
+        self.assertEqual(run.returncode, 0, run.stdout)
+
+
+class SteGateUICopyTests(unittest.TestCase):
+    """lint/ste_gate.py blocks a Write, Edit or MultiEdit to a UI file on its copy, the
+    same way it blocks a *.md write."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def pretooluse(self, tool, tool_input):
+        return run_gate(STE_GATE, {"hook_event_name": "PreToolUse", "tool_name": tool,
+                                   "tool_input": tool_input})
+
+    def target(self, name, text=None):
+        path = os.path.join(self.tmp.name, name)
+        if text is not None:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+        return path
+
+    def test_96_tsx_write_with_five_word_button_denied(self):
+        run = self.pretooluse("Write", {
+            "file_path": self.target("App.tsx"),
+            "content": "export const A = () => <button>Save the file right now</button>;\n"})
+        reason = json.loads(run.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("STE020", reason)
+
+    def test_97_tsx_write_with_four_word_button_allowed(self):
+        run = self.pretooluse("Write", {
+            "file_path": self.target("App.tsx"),
+            "content": "export const A = () => <button>Save the file now</button>;\n"})
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_98_jsx_edit_with_bloat_denied(self):
+        path = self.target("App.jsx", "export const A = () => (\n  <p>Save it.</p>\n);\n")
+        run = self.pretooluse("Edit", {"file_path": path, "old_string": "<p>Save it.</p>",
+                                       "new_string": "<p>In order to save, press it.</p>"})
+        self.assertIn("STE011", run.stdout)
+
+    def test_99_vue_multiedit_js_string_allowed(self):
+        path = self.target("A.vue", "<template><p>Hi</p></template>\n<script>\nconst s = 1;\n</script>\n")
+        run = self.pretooluse("MultiEdit", {"file_path": path, "edits": [
+            {"old_string": "const s = 1;", "new_string": 'const s = "in order to";'}]})
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_100_html_write_with_bloat_denied(self):
+        run = self.pretooluse("Write", {"file_path": self.target("index.html"),
+                                        "content": "<p>Wait prior to the launch.</p>\n"})
+        self.assertIn("STE011", run.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
