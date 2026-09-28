@@ -19,6 +19,12 @@
         "reason": "Naming a stale decision, measuring its claim, and proposing a fix are judgment calls in prose. Nothing parses staleness or fix quality."
       }
     },
+    "outcomes-word-covers-named-act": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Whether a stated act matches the literal word given, versus a variant of it, is a judgment call on wording. No hook parses an instruction and an action for a match."
+      }
+    },
     "outcomes-never-defer-rotted": {
       "mechanism": {
         "kind": "unmechanized",
@@ -243,7 +249,13 @@
     "verification-browser-login-only-needed": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Whether a login was needed for a given check is a judgment call, not a loggable fact this repo captures."
+        "reason": "Whether a headless or isolated browser would have done, and whether a login was needed for a given check, are judgment calls, not a loggable fact this repo captures."
+      }
+    },
+    "verification-announce-own-screen": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No hook sees a browser launch, a screencapture call, or computer use before it happens and checks a one-line announcement preceded it."
       }
     },
     "verification-trust-guard-after-red": {

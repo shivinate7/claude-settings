@@ -3,7 +3,8 @@
 **Outcomes first.** Judge every rule, check, and design by the outcome for the person
 the software serves.<!-- rule:outcomes-judge-by-outcome --> Treat a recorded decision as an argument, not a law.<!-- rule:outcomes-decision-is-argument --> When a decision looks
 stale, name the entry and the sentence. Measure the claim, or say "unmeasured". Name the
-outcome the decision protected and what protects it now. Propose a fix. Wait for my word.<!-- rule:outcomes-stale-decision-protocol --> Never
+outcome the decision protected and what protects it now. Propose a fix. Wait for my word.<!-- rule:outcomes-stale-decision-protocol --> My
+word covers the act it names, never a variant of it.<!-- rule:outcomes-word-covers-named-act --> Never
 defer to a rotted argument.<!-- rule:outcomes-never-defer-rotted --> Never repeal an argument on your own.<!-- rule:outcomes-never-repeal-alone --> Once ready, turn each rule below
 into a hook or check. This file is the fallback, not the enforcement.<!-- rule:outcomes-mechanize-rules -->
 
@@ -57,15 +58,17 @@ each PR's own commit. Close the originals as superseded once the integration bra
 
 **Verification.** If the repo has screens, check each screen at every size and theme it
 ships in. Give a verdict per screen, never a description.<!-- rule:verification-screens-verdict -->
-Use my browser login only when needed.<!-- rule:verification-browser-login-only-needed --> Trust a guard only once it goes red on
+Prefer a headless or isolated browser over my own, and use my login only when needed.<!-- rule:verification-browser-login-only-needed --> Before
+a window or a screen capture lands on my screen, say so in one line.<!-- rule:verification-announce-own-screen --> Trust a guard only once it goes red on
 the defect it guards.<!-- rule:verification-trust-guard-after-red --> A guard that goes red when nothing is wrong is
 spent, because the reader learns to scroll past it.<!-- rule:verification-cry-wolf-guard-is-spent --> A green check proves only its platform
 and the states its fixtures build.<!-- rule:verification-green-proves-only-its-fixtures --> A recovery control must not depend
 on the state it recovers, or it fails on the one day it is needed.<!-- rule:verification-recovery-not-gated-on-own-state --> Verify long work against the repo, not your status line.<!-- rule:verification-verify-against-repo --> Never write
 a waiter loop.<!-- rule:verification-never-waiter-loop --> Never dry-run a block-list.<!-- rule:verification-never-dry-run-blocklist --> Bump a dependency to the first version
 fixing the problem, never the latest.<!-- rule:verification-bump-first-fix-version --> If this repo lints markdown, give every
-published number and path a checked reader.<!-- rule:verification-checked-reader-for-numbers --> Verify a claim before you rely on it, and
-report a read that could not run as unknown, never as clear or broken.<!-- rule:verification-report-unknown-reads -->
+published number and path a checked reader.<!-- rule:verification-checked-reader-for-numbers --> Verify a claim before you rely on it,
+a document's own claim about a defect, a fix, or a schedule included. Report a read
+that could not run as unknown, never as clear or broken.<!-- rule:verification-report-unknown-reads -->
 
 **Tokens.** Never load a long document whole. Read one entry, one section, or a
 rendered view.<!-- rule:tokens-never-load-whole-doc --> A verification command's answer is its verdict, not its stream. Get the
