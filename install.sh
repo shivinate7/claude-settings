@@ -9,6 +9,7 @@
 #   ~/.claude/agents/*.md    -> role definitions (builder, reviewer): local symlinks, cloud copies
 #   ~/.claude/lint/*         -> STE linter + hook gate: local symlinks, cloud copies
 #   ~/.claude/hooks/*        -> PreToolUse guard + session-start line: local symlinks, cloud copies
+#   ~/.claude/skills/<name>  -> one whole-directory symlink per shipped skill, local; cloud copies
 #   ~/.claude/settings.json  -> local: symlink to <repo>/settings.json
 #                               cloud: generated copy of settings.json plus a SessionStart hook
 #                                      that re-runs this script, so every new cloud session pulls
@@ -246,6 +247,60 @@ land_dir() {
     [ -n "$PRUNED" ] && log "$sub in $DEST_DIR: pruned (source removed):$PRUNED"
   fi
 }
+
+# skills/ lands differently from land_dir(): each skills/<name>/ is ONE whole-directory
+# symlink, ~/.claude/skills/<name> -> <clone>/skills/<name>, not a per-file symlink. The
+# skills docs allow a skill entry to be "a symlink to a directory elsewhere on disk". A
+# per-file loop like land_dir()'s `for f in "$SRC/$sub"/*; do [ -f "$f" ] || continue` would
+# skip every skill subdirectory outright, so a landed skill never appeared under
+# ~/.claude/skills at all; that is the defect this function exists to not have.
+#
+# A pre-existing entry this repo does NOT ship (a person's own skill) is never touched: the
+# loop only ever looks at names under "$SRC/skills", so a name absent there is never a
+# candidate, never backed up, never pruned.
+land_skills_dir() {
+  DEST_DIR="$CLAUDE_DIR/skills"
+  mkdir -p "$DEST_DIR"
+  LANDED=""
+  for d in "$SRC/skills"/*; do
+    [ -d "$d" ] || continue
+    name=$(basename "$d")
+    DEST="$DEST_DIR/$name"
+    if [ "$CLOUD" = 1 ]; then
+      if [ -e "$DEST" ]; then
+        BAK="$DEST.bak.$(date +%Y%m%d%H%M%S)"
+        mv "$DEST" "$BAK"
+        log "existing $DEST moved to $BAK"
+      fi
+      cp -r "$d" "$DEST"
+    else
+      if [ -L "$DEST" ] && [ "$(readlink "$DEST")" = "$d" ]; then LANDED="$LANDED $name"; continue; fi
+      if [ -e "$DEST" ]; then
+        BAK="$DEST.bak.$(date +%Y%m%d%H%M%S)"
+        mv "$DEST" "$BAK"
+        log "existing $DEST moved to $BAK"
+      fi
+      ln -sfn "$d" "$DEST"
+    fi
+    LANDED="$LANDED $name"
+  done
+  [ -n "$LANDED" ] && log "skills in $DEST_DIR:$LANDED"
+  if [ "$CLOUD" != 1 ]; then
+    PRUNED=""
+    for e in "$DEST_DIR"/*; do
+      [ -L "$e" ] || continue
+      target=$(readlink "$e")
+      case "$target" in
+        "$SRC/skills"/*) ;;
+        *) continue ;;
+      esac
+      [ -e "$target" ] && continue
+      rm -f "$e"
+      PRUNED="$PRUNED $(basename "$e")"
+    done
+    [ -n "$PRUNED" ] && log "skills in $DEST_DIR: pruned (source removed):$PRUNED"
+  fi
+}
 # The set of directories landed above comes from landed-dirs.txt at the repo root, the single
 # source install.ps1 reads too (see the comment there). hooks/guard.py's CONFIG_FROZEN_DIRS is a
 # deliberately separate literal; see the comment beside it in hooks/guard.py for why.
@@ -253,7 +308,7 @@ land_dir() {
 while IFS= read -r sub || [ -n "$sub" ]; do
   sub=$(printf '%s' "$sub" | tr -d '\r' | sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//')
   [ -n "$sub" ] || continue
-  land_dir "$sub"
+  if [ "$sub" = "skills" ]; then land_skills_dir; else land_dir "$sub"; fi
 done < "$SRC/landed-dirs.txt"
 
 # ---- ~/.claude/settings.json ------------------------------------------------------------------

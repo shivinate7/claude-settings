@@ -13,3 +13,5 @@ agents
 lint
 hooks
 janitor
+output-styles
+skills

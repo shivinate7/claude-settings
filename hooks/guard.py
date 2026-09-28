@@ -3034,6 +3034,9 @@ CONFIG_FROZEN_DIRS = (
     # deletes things, same reasoning as hooks/lint/agents, so it lands here too (plan:
     # janitor-build-plan.md, "The code lands in a new janitor/ directory").
     os.path.normcase("janitor"),
+    # output-styles/ holds the rules for the main session's replies. A session that could rewrite
+    # its own style could loosen those rules, same reasoning as agents/.
+    os.path.normcase("output-styles"),
     # `state` holds the baseline `hooks/config_watch.py` restores a reverted file from. A session
     # that could rewrite the baseline could launder a cap lift into it, so the store is frozen on
     # the same terms as the hooks themselves. Rule 7 needs only the PATH, never the value, so this
@@ -3041,6 +3044,14 @@ CONFIG_FROZEN_DIRS = (
     # included. The two shapes that hide the path from PreToolUse, `python3 -c` and a script file,
     # are not covered here and `config_watch.py` reports a lost baseline as unknown, never clear.
     os.path.normcase("state"),
+)
+# skills/ is NOT frozen whole: a person's own skills under ~/.claude/skills stay writable.
+# Only the skills this repo ships are frozen, one name per entry, because a skill's frontmatter
+# `allowed-tools` can grant tools without a prompt, so a session that could edit a landed skill
+# could grant itself tools the same way it could through a rewritten hook. lint/check_landed_dirs.py
+# checks by hand that this set matches the repo's own skills/*/ subdirectories.
+CONFIG_FROZEN_SKILLS = (
+    os.path.normcase("fresh-prose"),
 )
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
 PROJECT_FROZEN_DIR = "/.claude/hooks/"
@@ -3097,8 +3108,10 @@ def is_frozen(path: str, cwd: str) -> bool:
     catching a symlink a session creates ELSEWHERE that points INTO the config directory -- a
     symlink is a spelling of the file it points at, same as rule 8's alias case. Case and a
     trailing slash read the same either way, so a `~`, a forward slash and a backslash all
-    still read the same on Windows. A project's own `.claude` files are a separate, unfrozen
-    set: see `is_project_config`.
+    still read the same on Windows. A skill under `skills/<name>` freezes the same way: a whole
+    shipped skill directory lands as one directory symlink, so the literal reading is what
+    keeps it frozen too, while a user's own unlisted skill directory stays unfrozen. A
+    project's own `.claude` files are a separate, unfrozen set: see `is_project_config`.
     """
     if not path:
         return False
@@ -3116,6 +3129,8 @@ def is_frozen(path: str, cwd: str) -> bool:
         if len(parts) == 1 and parts[0] in CONFIG_FROZEN_FILES:
             return True
         if len(parts) > 1 and parts[0] in CONFIG_FROZEN_DIRS:
+            return True
+        if len(parts) > 1 and parts[0] == os.path.normcase("skills") and parts[1] in CONFIG_FROZEN_SKILLS:
             return True
     return False
 

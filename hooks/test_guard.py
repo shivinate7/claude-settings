@@ -835,6 +835,9 @@ CFG_CLAUDEMD = slash(os.path.join(CFG, "CLAUDE.md"))
 CFG_HOOK = slash(os.path.join(CFG, "hooks", "guard.py"))
 CFG_LINT = slash(os.path.join(CFG, "lint", "prose.py"))
 CFG_AGENT = slash(os.path.join(CFG, "agents", "builder.md"))
+# A skill this repo ships (frozen) and one it does not (a person's own, never frozen).
+CFG_SKILL = slash(os.path.join(CFG, "skills", "fresh-prose", "SKILL.md"))
+CFG_OWN_SKILL = slash(os.path.join(CFG, "skills", "my-own", "SKILL.md"))
 # The baseline store `hooks/config_watch.py` restores from. A session that could rewrite the
 # baseline could launder a cap lift into it, so it is frozen on the same terms as the hooks.
 CFG_STATE = slash(os.path.join(CFG, "state", "config-watch", "entry.json"))
@@ -2030,6 +2033,10 @@ add("frozen: Write of a config lint script", "deny", "frozen-path", tool="Write"
     file_path=CFG_LINT)
 add("frozen: Write of a config agent file", "deny", "frozen-path", tool="Write", cwd=NOGIT,
     file_path=CFG_AGENT)
+add("frozen: Write of a skill this repo ships", "deny", "frozen-path", tool="Write", cwd=NOGIT,
+    file_path=CFG_SKILL)
+add("frozen: Write of a skill this repo does not ship is allowed", "allow", tool="Write",
+    cwd=NOGIT, file_path=CFG_OWN_SKILL)
 add("frozen: Write of the config-watch baseline store", "deny", "frozen-path", tool="Write",
     cwd=NOGIT, file_path=CFG_STATE)
 # `cp` onto the store carries no readable value, so rule 8 would stay silent. Rule 7 needs only the
