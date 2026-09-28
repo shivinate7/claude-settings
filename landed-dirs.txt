@@ -13,3 +13,4 @@ agents
 lint
 hooks
 janitor
+skills

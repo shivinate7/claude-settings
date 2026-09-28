@@ -3034,6 +3034,9 @@ CONFIG_FROZEN_DIRS = (
     # deletes things, same reasoning as hooks/lint/agents, so it lands here too (plan:
     # janitor-build-plan.md, "The code lands in a new janitor/ directory").
     os.path.normcase("janitor"),
+    # skills/ holds the fresh-prose skill and any that follow. A skill's steps steer a session
+    # the same way hooks/lint/agents do, so a session must not rewrite one on its own either.
+    os.path.normcase("skills"),
     # `state` holds the baseline `hooks/config_watch.py` restores a reverted file from. A session
     # that could rewrite the baseline could launder a cap lift into it, so the store is frozen on
     # the same terms as the hooks themselves. Rule 7 needs only the PATH, never the value, so this
