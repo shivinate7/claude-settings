@@ -252,7 +252,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           fetch-depth: 0   # the base tree and the merge base
       - uses: shivinate7/claude-settings/actions/stamp@<sha>
@@ -268,7 +268,7 @@ jobs:
       group: stamp-main
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           fetch-depth: 0   # order "merge", and the default-branch question
       - uses: shivinate7/claude-settings/actions/stamp@<sha>

@@ -509,12 +509,6 @@
         "reason": "Nothing checks that an answer given in chat reached a decision entry or a deferred item before the work it governs merged. A check would have to pair each AskUserQuestion answer with a tracked path that a later report names."
       }
     },
-    "style-lead-with-result": {
-      "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No check reads whether the first sentence of a reply gives the result rather than a lead-in."
-      }
-    },
     "style-cut-narration": {
       "mechanism": {
         "kind": "unmechanized",

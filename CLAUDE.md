@@ -89,17 +89,14 @@ the design abandoned.<!-- rule:building-land-design-or-abandon --> A memory entr
 **Speak plainly.** Cite a record by id plus a short gloss, like "D12, short titles for
 records". Never cite a bare id.<!-- rule:speak-cite-id-plus-gloss --> Never explain a rule in a paragraph.<!-- rule:speak-never-explain-in-paragraph --> Rewrite
 superseded text in place. Keep only what is true now, in the fewest words. Git keeps
-the history.<!-- rule:speak-rewrite-superseded-in-place --> If I ask
-"explain it like I'm five", the message failed.
+the history.<!-- rule:speak-rewrite-superseded-in-place -->
 
 **Output.** Write in Simplified Technical English by default, to me and between agents,
-unless told otherwise.<!-- rule:output-write-in-ste --> Start every reply with the point. Give no preamble.<!-- rule:output-start-with-point -->
-Once an objective is underway, assume nobody reads until I return. A turn that only tracks running work
-gets one line, or none.<!-- rule:output-tracking-turn-one-line --> Never echo a worker's report or describe a screenshot.<!-- rule:output-never-echo-worker-report -->
+unless told otherwise.<!-- rule:output-write-in-ste --> Rules for replies to me, and not to
+agents, live in the `shiv-stylisms` output style.
 Never paste a passing run's output into a report. Give the verdict.<!-- rule:output-never-paste-passing-output -->
 Bring my decisions as a question with options and a recommendation.<!-- rule:output-bring-decisions-as-question --> An answer to a question I bring is a ruling. The report may hold it as a scratch note. Move it to its real home, a decision entry or a deferred item. Cite that home before the work it governs merges. Mark a process answer process-only.<!-- rule:output-answer-has-a-home -->
 
 **Reports, in order:** Done, Deviations, Input Needed, Next.<!-- rule:reports-order-of-labels --> Done: one line per item, BUILT,
 RECORDED, or OTHER, with its PR or commit.<!-- rule:reports-done-format --> One item inline, several as bullets.<!-- rule:reports-item-count-format --> Drop a label
-that does not apply.<!-- rule:reports-drop-unused-label --> Your report to me: bold labels in one blockquote, never a code fence,
-nothing below.<!-- rule:reports-blockquote-no-fence --> No report when nothing landed.<!-- rule:reports-no-report-when-nothing-landed -->
+that does not apply.<!-- rule:reports-drop-unused-label --> No report when nothing landed.<!-- rule:reports-no-report-when-nothing-landed -->
