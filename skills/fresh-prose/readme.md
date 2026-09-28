@@ -32,6 +32,9 @@ Drop a section that is empty.
 
 ## Applying the ladder
 
+- Rung 3, generate it: put generated text between markers, such as `<!-- gen:cli-help -->`
+  and `<!-- /gen -->`. One script regenerates every marked block from its source. CI runs the
+  script and fails if the README changes.
 - Rung 4, run it: CI runs each Quick start and Development command in a clean checkout. Mark
   which blocks run.
 - Rung 5, check it: check a repo path or relative link on every PR. Check an external link on
@@ -39,6 +42,9 @@ Drop a section that is empty.
 
 ## Proof of done
 
+- Each guard goes red once, on its own defect: break a generated block, a command, and a
+  path, one at a time, on a scratch copy, watch each guard fail, then restore it. Give the
+  verdict of each in one line.
 - The README renders cleanly on GitHub. Check the headings, tables, and code blocks.
 - List every claim you deleted, every claim you replaced with a link, and every claim you
   left unchecked, with the reason.

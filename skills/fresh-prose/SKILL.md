@@ -1,6 +1,6 @@
 ---
 name: fresh-prose
-description: Use when a session writes or updates a README, docs, CLAUDE.md, agent files, decision records, or comments that state facts about the code, or when the user says "stale docs" or "fresh-prose". Makes prose hard to go stale, by binding each claim to a check.
+description: Use when a session writes or updates a README, docs, CLAUDE.md, agent files, or decision records, or when the user says "stale docs" or "fresh-prose". Makes prose hard to go stale, by binding each claim to a check.
 ---
 
 Every claim in prose can go stale. Give each claim a checked reader, so a stale claim gets
