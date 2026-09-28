@@ -3809,4 +3809,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-# throwaway CI proof line
