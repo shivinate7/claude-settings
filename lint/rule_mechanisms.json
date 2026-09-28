@@ -352,10 +352,10 @@
         "reason": "No check compares a task's item list against a reply to catch a silently dropped item."
       }
     },
-    "building-check-primitive-first": {
+    "building-one-home-per-capability": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Whether a primitive was checked before a workaround was built needs a read of the session's own steps."
+        "reason": "A hook would have to see two implementations of one capability — the same logic duplicated across the repo — and flag it as a violation. Detecting identical or parallel logic needs code structure and semantic analysis beyond parsing."
       }
     },
     "building-fix-cause-not-symptom": {
