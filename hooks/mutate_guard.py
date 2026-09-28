@@ -823,13 +823,16 @@ MUTATIONS = [
 ]
 
 
-def run_suite(suite: str, variable: str, copy_path: str, config_dir: str):
+def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=None):
     """Run one fixture suite against one mutated copy. Return (exit code, FAIL lines)."""
     env = dict(os.environ)
     env.pop("GUARD_UNDER_TEST", None)
     env.pop("WATCH_UNDER_TEST", None)
     env[variable] = copy_path
     env["CLAUDE_CONFIG_DIR"] = config_dir
+    env.pop("MUTATE_ONLY", None)
+    if only:
+        env["MUTATE_ONLY"] = only  # the suites run just the cases whose name holds this
     result = subprocess.run(
         [sys.executable, suite], capture_output=True, text=True, env=env, timeout=1200,
     )
@@ -883,7 +886,8 @@ def run_mutant(sources, work: str, entry):
         handle.write(mutated)
     config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(label))
     os.makedirs(config_dir, exist_ok=True)
-    code, red = run_suite(suite, variable, copy_path, config_dir)
+    code, red = mutate_shared.staged_suite(
+        lambda only: run_suite(suite, variable, copy_path, config_dir, only), required)
     return label, code, red, required, None
 
 

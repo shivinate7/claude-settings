@@ -105,6 +105,23 @@ def report_verdict(label: str, code, red, required: str) -> str:
     return "killed"
 
 
+def staged_suite(run, required: str):
+    """Run one mutant's suite in two stages. `run(only) -> (code, red)`: `only` is the required
+    case fragment to run alone, or None for the full suite.
+
+    Stage 1 runs only the cases named by `required`. A nonzero exit with `required` among the red
+    lines is a kill, the same kill the full suite would report, so stop there. Anything else
+    (cases pass, none selected, red without the name) falls to the full suite, whose result is
+    the verdict, exactly as before. MUTATE_FULL=1 skips stage 1, for debugging the old mode.
+    """
+    if os.environ.get("MUTATE_FULL"):
+        return run(None)
+    code, red = run(required)
+    if code != 0 and any(required in line for line in red):
+        return code, red
+    return run(None)
+
+
 def run_mutants(entries, run_one):
     """Run every entry through `run_one`, in parallel, printing each mutant's verdict as it
     lands, then the tally line. Returns 0 when every mutant was killed (a caller's own `main`

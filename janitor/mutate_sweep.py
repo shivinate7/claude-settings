@@ -599,7 +599,7 @@ def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_te
         h.write(sources["settings_json"])
 
 
-def run_suite(suite_path: str, config_dir: str):
+def run_suite(suite_path: str, config_dir: str, only=None):
     """Run one scaffold's test_sweep.py. Return (exit code, FAIL lines from stdout+stderr).
 
     janitor/test_sweep.py is a plain `unittest.main(verbosity=2)`, which writes its per-case
@@ -612,7 +612,7 @@ def run_suite(suite_path: str, config_dir: str):
     env = dict(os.environ)
     env["CLAUDE_CONFIG_DIR"] = config_dir
     result = subprocess.run(
-        [sys.executable, suite_path], capture_output=True, text=True, env=env, timeout=1200,
+        [sys.executable, suite_path] + (["-k", only] if only else []), capture_output=True, text=True, env=env, timeout=1200,
     )
     red = [line for line in (result.stdout + result.stderr).splitlines() if "FAIL" in line]
     return result.returncode, red
@@ -636,7 +636,8 @@ def run_mutant(sources, work: str, index: int, entry):
     try:
         build_scaffold(scaffold, sources, target, mutated_text)
         suite_path = os.path.join(scaffold, "janitor", SUITE_FOR_TARGET[target])
-        code, red = run_suite(suite_path, config_dir)
+        code, red = mutate_shared.staged_suite(
+            lambda only: run_suite(suite_path, config_dir, only), required)
         return label, code, red, required, None
     finally:
         shutil.rmtree(scaffold, ignore_errors=True)
