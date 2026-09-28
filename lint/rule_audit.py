@@ -53,9 +53,8 @@ import sys
 from typing import Dict, List
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CLAUDE_MD = os.path.join(ROOT, "CLAUDE.md")
-STYLE_MD = os.path.join(ROOT, "output-styles", "shiv-stylisms.md")
-RULE_FILES = [CLAUDE_MD, STYLE_MD]
+# Paths relative to the repo root, so a fixture test reads the same list under its own root.
+RULE_FILES = ["CLAUDE.md", os.path.join("output-styles", "shiv-stylisms.md")]
 MAP_FILE = os.path.join(ROOT, "lint", "rule_mechanisms.json")
 GUARD_PY = os.path.join(ROOT, "hooks", "guard.py")
 WORKFLOW = os.path.join(ROOT, ".github", "workflows", "gates.yml")
@@ -84,9 +83,9 @@ def claude_md_anchors(text: str) -> List[str]:
     return [m.group(1) for m in ANCHOR_RE.finditer(text)]
 
 
-def rule_text() -> str:
-    """The text of every RULE_FILES entry, joined. One list of anchors, from all of them."""
-    return "\n".join(read(p) for p in RULE_FILES)
+def rule_text(root: str = ROOT) -> str:
+    """The text of every RULE_FILES entry under `root`, joined. One list of anchors."""
+    return "\n".join(read(os.path.join(root, p)) for p in RULE_FILES)
 
 
 def guard_rule_names(text: str):
@@ -212,8 +211,8 @@ def check(
 
 def main() -> None:
     for path in RULE_FILES:
-        if not os.path.exists(path):
-            print(f"rule_audit: FAIL\n - {os.path.relpath(path, ROOT)} does not exist.")
+        if not os.path.exists(os.path.join(ROOT, path)):
+            print(f"rule_audit: FAIL\n - {path} does not exist.")
             sys.exit(1)
     if not os.path.exists(MAP_FILE):
         print("rule_audit: FAIL\n - lint/rule_mechanisms.json does not exist.")
