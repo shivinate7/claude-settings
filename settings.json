@@ -9,7 +9,22 @@
       "Bash(gh pr merge:*)"
     ],
     "deny": [
-      "Monitor"
+      "Monitor",
+      "Bash(pkill:*)",
+      "Bash(killall:*)",
+      "Read(.env)",
+      "Edit(.env)",
+      "Read(.env.*)",
+      "Edit(.env.*)",
+      "Read(!.env.example)",
+      "Edit(!.env.example)",
+      "Edit(~/.claude/settings.json)",
+      "Edit(~/.claude/CLAUDE.md)",
+      "Edit(~/.claude/hooks/**)",
+      "Edit(~/.claude/lint/**)",
+      "Edit(~/.claude/agents/**)",
+      "Edit(~/.claude/janitor/**)",
+      "Edit(~/.claude/state/**)"
     ]
   },
   "hooks": {
