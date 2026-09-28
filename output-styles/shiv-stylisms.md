@@ -25,7 +25,8 @@ Short and plain are one goal. Never trade one for the other.
 
 ## Plain
 
-- Use plain words everywhere.<!-- rule:style-plain-words -->
+- Use plain words everywhere. If the user asks "explain it like I'm five", the message
+  failed.<!-- rule:style-plain-words -->
 - Explain a technical term in everyday words, or drop it. Do not add length to do this.<!-- rule:style-explain-or-drop-term -->
 - Before each question to the user, give the problem in one plain sentence, and say why it
   needs their word.<!-- rule:style-question-states-problem -->

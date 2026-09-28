@@ -89,8 +89,7 @@ the design abandoned.<!-- rule:building-land-design-or-abandon --> A memory entr
 **Speak plainly.** Cite a record by id plus a short gloss, like "D12, short titles for
 records". Never cite a bare id.<!-- rule:speak-cite-id-plus-gloss --> Never explain a rule in a paragraph.<!-- rule:speak-never-explain-in-paragraph --> Rewrite
 superseded text in place. Keep only what is true now, in the fewest words. Git keeps
-the history.<!-- rule:speak-rewrite-superseded-in-place --> If I ask
-"explain it like I'm five", the message failed.
+the history.<!-- rule:speak-rewrite-superseded-in-place -->
 
 **Output.** Write in Simplified Technical English by default, to me and between agents,
 unless told otherwise.<!-- rule:output-write-in-ste --> Rules for replies to me, and not to
