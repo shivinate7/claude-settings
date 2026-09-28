@@ -11,6 +11,7 @@ Run with:
 """
 import os
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -188,10 +189,37 @@ class RuleAuditTests(unittest.TestCase):
         problems = run(rule_map=rule_map, unmechanized_expected=0)
         self.assertTrue(any("more than the pinned 0" in p for p in problems), problems)
 
+    def _rule_files(self, claude_md, style_md):
+        """Write both RULE_FILES under a temp root and read them back through rule_text()."""
+        root = tempfile.mkdtemp()
+        for rel, body in zip(rule_audit.RULE_FILES, (claude_md, style_md)):
+            path = os.path.join(root, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(body)
+        return rule_audit.rule_text(root)
+
+    def test_anchor_only_in_the_style_file_is_read(self):
+        style = "- Lead with the result.<!-- rule:style-only-rule -->\n"
+        rules = dict(GOOD_MAP["rules"])
+        rules["style-only-rule"] = {"mechanism": {
+            "kind": "unmechanized",
+            "reason": "No check reads whether the first sentence of a reply gives the result.",
+        }}
+        problems = run(md=self._rule_files(GOOD_MD, style), rule_map={"rules": rules},
+                       rule_floor=2)
+        self.assertEqual(problems, [])
+
+    def test_duplicate_anchor_split_across_claude_md_and_style_fails(self):
+        style = GOOD_MD
+        problems = run(md=self._rule_files(GOOD_MD, style))
+        self.assertTrue(any("duplicate" in p and "shared-trees-no-destructive-git" in p
+                            for p in problems), problems)
+
     def test_the_real_claude_md_and_map_pass_together(self):
         """The check this repo actually ships, over the files it actually ships, at its
         actual pinned floor and unmechanized count -- no override."""
-        claude_text = rule_audit.read(rule_audit.CLAUDE_MD)
+        claude_text = rule_audit.rule_text()
         rule_map = __import__("json").loads(rule_audit.read(rule_audit.MAP_FILE))
         guard_text = rule_audit.read(rule_audit.GUARD_PY)
         workflow_text = rule_audit.read(rule_audit.WORKFLOW)

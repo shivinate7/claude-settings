@@ -1,5 +1,5 @@
 {
-  "_note": "Checked-in map for lint/rule_audit.py. Each key is a `<!-- rule:<slug> -->` anchor in CLAUDE.md. `mechanism.kind` is one of guard, gate, ci, unmechanized. guard.ref must name a rule string passed to refuse()/record() in hooks/guard.py. gate.ref must be a file path, relative to the repo root, that exists; gate.needle, if set, must still appear in that file. ci.ref must name a `- name:` step in .github/workflows/gates.yml. unmechanized.reason must say what a hook or check would have to see.",
+  "_note": "Checked-in map for lint/rule_audit.py. Each key is a `<!-- rule:<slug> -->` anchor in a file that lint/rule_audit.py RULE_FILES names. `mechanism.kind` is one of guard, gate, ci, unmechanized. guard.ref must name a rule string passed to refuse()/record() in hooks/guard.py. gate.ref must be a file path, relative to the repo root, that exists; gate.needle, if set, must still appear in that file. ci.ref must name a `- name:` step in .github/workflows/gates.yml. unmechanized.reason must say what a hook or check would have to see.",
   "rules": {
     "outcomes-judge-by-outcome": {
       "mechanism": {
@@ -41,7 +41,7 @@
       "mechanism": {
         "kind": "gate",
         "ref": "lint/rule_audit.py",
-        "needle": "every CLAUDE.md rule anchor maps to a mechanism"
+        "needle": "every rule anchor maps to a mechanism"
       }
     },
     "roles-orchestrator-never-builds": {
@@ -507,6 +507,66 @@
       "mechanism": {
         "kind": "unmechanized",
         "reason": "Nothing checks that an answer given in chat reached a decision entry or a deferred item before the work it governs merged. A check would have to pair each AskUserQuestion answer with a tracked path that a later report names."
+      }
+    },
+    "style-lead-with-result": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check reads whether the first sentence of a reply gives the result rather than a lead-in."
+      }
+    },
+    "style-cut-narration": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check tells narration or a recap of earlier work apart from new content in a reply."
+      }
+    },
+    "style-simple-answer-short": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Whether a question was simple, and whether the answer held to 1 to 3 sentences, is a content judgment."
+      }
+    },
+    "style-full-detail-on-request": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check reads whether the user asked for full detail and whether the reply then gave it."
+      }
+    },
+    "style-keep-critical-full": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check finds an error report, failing output, security warning, or destructive confirmation and measures whether it was cut."
+      }
+    },
+    "style-correct-over-brief": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Whether a reply dropped a true and needed fact to stay short is a judgment no check can make."
+      }
+    },
+    "style-plain-words": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check holds a list of jargon, and plain words depend on what the reader already knows."
+      }
+    },
+    "style-explain-or-drop-term": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check finds a technical term in a reply and reads whether an everyday gloss sits beside it."
+      }
+    },
+    "style-question-states-problem": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check finds a question to the user and reads whether one plain sentence before it states the problem and why it needs their word."
+      }
+    },
+    "style-option-says-effect": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check reads whether each option in a question says what the user gains and what the user loses."
       }
     }
   }
