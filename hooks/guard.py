@@ -14,6 +14,11 @@ all allow the call. A guard bug must never brick a session.
 The rules below are the owner's global CLAUDE.md made mechanical. They run in
 one fixed order, and the first match wins.
 
+  0 worktree-home      a call from a subagent (a payload carrying `agent_id`) whose shell `cwd`,
+                       or whose Write/Edit/MultiEdit/NotebookEdit target, sits outside that
+                       agent's own recorded worktree. Always denied. Read/Grep are never judged
+                       here, so a stranded agent can still read and report. No record at all
+                       (a non-isolated agent, or the orchestrator) allows everything.
   1 shared-tree        a command that throws away work, judged against the STATE OF ITS SUBJECT:
                        a working tree's uncommitted or untracked files, a deleted branch's only
                        copy, a removed worktree's files, or a pruned worktree's stale record. An
@@ -977,21 +982,16 @@ def is_worktree(where: str):
     return own != common
 
 
-def primary_checkout(where: str):
-    """Return the PRIMARY checkout that `where` belongs to, or None when it could not be read.
+def _common_dir(where: str):
+    """Return the absolute, realpath'd git COMMON directory for `where`, or None when it could
+    not be read. `git rev-parse --show-toplevel` answers `where` itself when `where` sits inside
+    an ordinary checkout, but it answers the WORKTREE's own path when `where` sits inside a
+    linked worktree. `git rev-parse --git-common-dir` names the ONE `.git` directory every
+    worktree of a clone shares. Two `_git` calls, on purpose: the toplevel, then
+    `--git-common-dir` run FROM that toplevel.
 
-    `git rev-parse --show-toplevel` answers `where` itself when `where` sits inside an ordinary
-    checkout, but it answers the WORKTREE's own path when `where` sits inside a linked worktree.
-    `git rev-parse --git-common-dir` names the ONE `.git` directory every worktree of a clone
-    shares; its parent (`dirname(realpath(...))`) is always the primary checkout, ordinary
-    checkout or linked worktree alike, so resolving through it answers the same repository root
-    either way. Two `_git` calls, on purpose: the toplevel, then `--git-common-dir` run FROM that
-    toplevel.
-
-    Callers that need this to name a remedy (`janitor/install_launchd.py`) or to sweep the right
-    repository (`janitor/session_end_sweep.py`) both used to carry their own copy of this same
-    read; this is the one constant they now both point at (CLAUDE.md,
-    "building-allow-list-is-the-constant").
+    The one read `primary_checkout` and `git_common_dir` both build on, so the two never drift
+    apart (CLAUDE.md, "building-allow-list-is-the-constant").
     """
     top = _git(where, "rev-parse", "--show-toplevel")
     if top is None or top.returncode != 0:
@@ -1006,12 +1006,156 @@ def primary_checkout(where: str):
     if not common_dir:
         return None
     try:
-        primary = os.path.dirname(os.path.realpath(os.path.join(toplevel, common_dir)))
+        return os.path.realpath(os.path.join(toplevel, common_dir))
     except Exception:
         return None
+
+
+def primary_checkout(where: str):
+    """Return the PRIMARY checkout that `where` belongs to, or None when it could not be read.
+
+    The common directory's parent (`dirname`) is always the primary checkout, ordinary checkout
+    or linked worktree alike.
+
+    Callers that need this to name a remedy (`janitor/install_launchd.py`) or to sweep the right
+    repository (`janitor/session_end_sweep.py`) both used to carry their own copy of this same
+    read; this is the one constant they now both point at (CLAUDE.md,
+    "building-allow-list-is-the-constant").
+    """
+    common_dir = _common_dir(where)
+    if not common_dir:
+        return None
+    primary = os.path.dirname(common_dir)
     if not primary or not os.path.isdir(primary):
         return None
     return primary
+
+
+def git_common_dir(where: str):
+    """Return the absolute git common directory for `where`, or None when it could not be read.
+
+    This is the directory every worktree of the clone shares, so a record written here survives
+    the removal of any one worktree. See `agent_home_record_path`.
+    """
+    return _common_dir(where)
+
+
+# ------------------------------------------------------------------ each subagent's own worktree
+#
+# MEASURED 2026-09-27, macOS, one Explore agent with `isolation: 'worktree'`: a PreToolUse payload
+# from a subagent carries `agent_id` (e.g. `a64a7f84210a8721d`) and `agent_type`. The
+# orchestrator's own payloads carry no `agent_id`. `session_id` is the SAME for the orchestrator
+# and its agents, so it never tells them apart. The subagent's `cwd` was
+# `<primary>/.claude/worktrees/agent-<agent_id>`, on branch `worktree-agent-<agent_id>`.
+#
+# An agent resumed after the harness auto-removed its worktree loses BOTH the folder and the
+# branch, so git alone cannot tell "never had a worktree" from "worktree was removed". A RECORD
+# is needed: decisions/an-agent-outside-its-home-tree-must-stop.md.
+#
+# The record lives under the CLONE's git common directory, not inside any one worktree, so it
+# survives that worktree's removal (`git_common_dir` above). Unmeasured: Windows, and the
+# Write/Edit payload shape; covered by fixture in `test_guard.py`, not by a live probe.
+AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _norm_dir(path: str):
+    """A resolved, case-folded form of `path` for a prefix compare, or None when it cannot be
+    read. `os.path.realpath` needs no existing file, so a removed worktree's path still
+    normalizes: the home record must still compare correctly once the folder is gone."""
+    if not path or not isinstance(path, str):
+        return None
+    try:
+        return os.path.normcase(os.path.realpath(path))
+    except Exception:
+        return None
+
+
+def path_is_inside(path: str, root: str):
+    """True when `path` sits at or under `root`, False when it plainly does not, None when
+    either could not be resolved. Existence of either is never required."""
+    p, r = _norm_dir(path), _norm_dir(root)
+    if p is None or r is None:
+        return None
+    if p == r:
+        return True
+    return (p + os.sep).startswith(r + os.sep)
+
+
+def agent_home_record_path(where: str, agent_id: str):
+    """Return the file that holds `agent_id`'s recorded worktree home, or None when the clone's
+    common directory could not be read. Stored under
+    `<git-common-dir>/agent-homes/<agent_id>`, so it survives the worktree's own removal."""
+    common = git_common_dir(where)
+    return os.path.join(common, "agent-homes", agent_id) if common else None
+
+
+def read_agent_home(where: str, agent_id: str):
+    """Return the recorded home for `agent_id`, `''` when no record exists yet, or None when the
+    record could not be read at all (no git, no common dir, an unreadable file). `None` is
+    UNKNOWN, never a hit: decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md."""
+    path = agent_home_record_path(where, agent_id)
+    if not path:
+        return None
+    if not os.path.exists(path):
+        return ""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read().strip()
+    except Exception:
+        return None
+
+
+def write_agent_home(where: str, agent_id: str, home: str) -> None:
+    path = agent_home_record_path(where, agent_id)
+    if not path:
+        return
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(home)
+    except Exception:
+        pass
+
+
+def agent_worktree_home(payload, cwd: str):
+    """Return (status, home, primary) for this call's agent.
+
+    status:
+      "none"      no valid `agent_id` on the payload: the orchestrator, or a call this rule does
+                  not judge at all.
+      "unknown"   an `agent_id` is present, but the home record could not be read (no git, no
+                  common directory, an unreadable file). Allowed, never a hit (Decision:
+                  liveness-read-is-platform-specific-and-unreadable-is-not-death).
+      "no-record" the record reads clean and holds nothing, and this call's own `cwd` is not the
+                  agent's worktree shape either: a non-isolated agent. Allow everything.
+      "home"      `home` names the agent's recorded worktree, whether just written on this call
+                  or read back from an earlier one.
+    """
+    agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
+    if not isinstance(agent_id, str) or not AGENT_ID.match(agent_id):
+        return "none", "", None
+    if not isinstance(cwd, str) or not cwd:
+        return "unknown", "", None
+    primary = primary_checkout(cwd)
+    if not primary:
+        return "unknown", "", None
+    candidate = os.path.join(primary, ".claude", "worktrees", "agent-" + agent_id)
+    recorded = read_agent_home(cwd, agent_id)
+    if recorded is None:
+        return "unknown", "", primary
+    if recorded:
+        return "home", recorded, primary
+    if path_is_inside(cwd, candidate) is True:
+        write_agent_home(cwd, agent_id, candidate)
+        return "home", candidate, primary
+    return "no-record", "", primary
+
+
+WORKTREE_HOME_REASON = (
+    "Rule (worktree home): this agent's own working tree is gone, or this call reaches outside "
+    "it. "
+    "Remedy: make no further change. Stop, and report this to your orchestrator."
+)
 
 
 # ------------------------------------------------------------------ reading the subject
@@ -3520,6 +3664,38 @@ def judge(payload) -> None:
     cwd = payload.get("cwd", "") or os.getcwd() or ""
     if not isinstance(cwd, str):
         cwd = ""
+
+    # 0. Each subagent stays inside its own worktree. `status` is "none" for the orchestrator
+    # (no `agent_id`) and for tools this rule does not judge; "unknown" when the record could
+    # not be read at all, which allows (an unreadable state is never a hit); "no-record" for a
+    # non-isolated agent, which allows everything; "home" once the agent's worktree is known,
+    # from this call or an earlier one. Read/Grep are never checked here: the agent must still be
+    # able to read and report (decisions/an-agent-outside-its-home-tree-must-stop.md).
+    home_status, home, home_primary = agent_worktree_home(payload, cwd)
+    if home_status == "home":
+        if tool in SHELL_TOOLS:
+            if path_is_inside(cwd, home) is False:
+                refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON,
+                       "shell cwd outside recorded agent home")
+        elif tool in WRITE_TOOLS:
+            write_target = (
+                tool_input.get("file_path", "")
+                or tool_input.get("path", "")
+                or tool_input.get("notebook_path", "")
+                or ""
+            )
+            if isinstance(write_target, str) and write_target and home_primary:
+                # A relative `file_path` resolves against the CALLER's cwd, the payload's own
+                # `cwd`, never the guard process's. `_resolved` (already used by `is_frozen` and
+                # `is_project_config` for the same reason) joins it before either check.
+                try:
+                    resolved_target = _resolved(write_target, cwd)
+                except Exception:
+                    resolved_target = write_target
+                if (path_is_inside(resolved_target, home_primary) is True
+                        and path_is_inside(resolved_target, home) is False):
+                    refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON,
+                           "write target outside recorded agent home")
 
     # A merge through the MCP tool carries no base for the guard to read, so every call is
     # allowed (Decision 8) and noted, the same as an unreadable `gh pr merge` base.

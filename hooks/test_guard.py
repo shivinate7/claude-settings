@@ -43,7 +43,7 @@ CASES = []
 
 
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
-        session=None, carries=(), config=None, **tool_input):
+        session=None, carries=(), config=None, agent_id=None, **tool_input):
     """Register one case.
 
     `carries` names fragments the printed reason MUST hold, which is how a case pins what an
@@ -52,6 +52,9 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
     A case NEVER opts out of the generic-reason check. Which fragments a reason may name is read
     from the case's RULE, through `REASON_MAY_NAME` below, so the exemption belongs to one rule and
     no case can widen it by itself.
+
+    `agent_id`, when given, rides on the payload the same way the harness sends it for a
+    subagent's own tool call: alongside `tool_name` and `tool_input`, never inside either.
     """
     CASES.append({
         "name": name,
@@ -66,13 +69,15 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         # The config directory the case runs against. It decides where the global rules file is
         # read from, so a pointer case names its own and every other case keeps the default.
         "config": config,
+        "agent_id": agent_id,
         "tool_input": tool_input,
     })
 
 
 def sh(name, command, expected, rule=None, tool="Bash", cwd=None, env_path=None, session=None,
-       carries=(), config=None):
+       carries=(), config=None, agent_id=None):
     add(name, expected, rule=rule, tool=tool, cwd=cwd, env_path=env_path, session=session,
+        agent_id=agent_id,
         carries=carries, config=config, command=command)
 
 
@@ -2400,6 +2405,8 @@ def decide(case):
             body["cwd"] = case["cwd"]
         if case["session"]:
             body["session_id"] = case["session"]
+        if case.get("agent_id"):
+            body["agent_id"] = case["agent_id"]
         payload = json.dumps(body)
     env = dict(os.environ)
     # `.get`, not `[...]`: a checker below builds a case dict by hand and names only the keys it
@@ -2417,7 +2424,7 @@ def decide(case):
         env["PATH"] = case["env_path"]
     result = subprocess.run(
         [sys.executable, GUARD], input=payload, capture_output=True, text=True, env=env,
-        timeout=120,
+        timeout=120, cwd=case.get("process_cwd") or None,
     )
     if result.returncode != 0:
         return "error", "exit %d: %s" % (result.returncode, result.stderr.strip()[:200])
@@ -3323,6 +3330,100 @@ def session_is_live_backwards_clock_step_case():
     return (not problems), "; ".join(problems) if problems else "backwards-step direction reads unreadable"
 
 
+def _decide_full(tool, cwd, agent_id=None, process_cwd=None, **tool_input):
+    """`decide`, but for a hand-built payload naming every key `decide` reads by index.
+
+    `process_cwd` sets the GUARD PROCESS's own cwd, distinct from the payload `cwd` above: a
+    relative `file_path` must resolve against the payload `cwd`, never against wherever the
+    guard subprocess happens to run from.
+    """
+    return decide({
+        "raw": None, "tool": tool, "cwd": cwd, "session": None, "env_path": None,
+        "config": None, "agent_id": agent_id, "process_cwd": process_cwd,
+        "tool_input": tool_input,
+    })
+
+
+def worktree_home_case():
+    """Rule 0, `worktree-home`: decisions/an-agent-outside-its-home-tree-must-stop.md.
+
+    Builds one real primary checkout and one real linked worktree at
+    `<primary>/.claude/worktrees/agent-<id>`, the shape the harness names. Runs the sequence a
+    real session would, in order, against that ONE on-disk record: no agent_id, no worktree yet,
+    the first call that records the home, a later call outside it, an edit outside it, an edit
+    outside the clone entirely, a read outside it, and the home folder removed outright.
+    """
+    agent_id = "wthomeagent1"
+    other_agent = "wthomeagent2"  # never given a worktree: a non-isolated agent
+    primary = os.path.join(ROOT, "wthome_primary")
+    worktree = os.path.join(primary, ".claude", "worktrees", "agent-" + agent_id)
+    inside_clone_outside_home = os.path.join(primary, "src", "app.py")
+    outside_clone = os.path.join(ROOT, "wthome_scratch", "note.txt")
+
+    make_repo(primary, {"src/app.py": "print(1)\n"})
+    run_vcs(primary, "worktree", "add", "-q", worktree, "-b", "worktree-agent-" + agent_id)
+    os.makedirs(os.path.dirname(outside_clone), exist_ok=True)
+    write(outside_clone, "hi\n")
+
+    problems = []
+
+    def check(label, expect, tool, cwd, agent=None, process_cwd=None, **tool_input):
+        got, reason = _decide_full(tool, cwd, agent_id=agent, process_cwd=process_cwd,
+                                    **tool_input)
+        if got != expect:
+            problems.append("%s: expected %s, got %s (%s)" % (label, expect, got, reason[:120]))
+
+    # The orchestrator carries no agent_id, even from a cwd shaped like an agent worktree.
+    check("orchestrator", "allow", "Bash", worktree, command="echo hi")
+
+    # A non-isolated agent: an agent_id, a cwd that never matches the worktree shape, and no
+    # record yet. Allowed, and nothing gets recorded for a cwd that names no worktree.
+    check("non-isolated agent", "allow", "Bash", primary, agent=other_agent, command="echo hi")
+
+    # An isolated agent's first call, from inside its own worktree: records the home and allows.
+    check("isolated agent in home", "allow", "Bash", worktree, agent=agent_id, command="echo hi")
+
+    record_path = os.path.join(primary, ".git", "agent-homes", agent_id)
+    if not os.path.isfile(record_path):
+        problems.append("no home record was written at %r" % record_path)
+
+    # Same agent, cwd now the primary checkout: outside its recorded home.
+    check("cwd in primary checkout", "deny", "Bash", primary, agent=agent_id, command="echo hi")
+
+    # An Edit outside the recorded home, but still inside the same clone: refused.
+    check("edit outside home inside clone", "deny", "Edit", worktree, agent=agent_id,
+          file_path=inside_clone_outside_home, old_string="a", new_string="b")
+
+    # An Edit to a path outside the clone entirely (a scratchpad file): allowed.
+    check("edit outside the clone", "allow", "Edit", worktree, agent=agent_id,
+          file_path=outside_clone, old_string="a", new_string="b")
+
+    # Read outside home: always allowed, so a stranded agent can still read and report.
+    check("read outside home", "allow", "Read", primary, agent=agent_id,
+          file_path=inside_clone_outside_home)
+
+    # A RELATIVE file_path must resolve against the PAYLOAD's own cwd (the worktree), never
+    # against wherever the guard PROCESS happens to run from. Run the guard from the primary
+    # checkout while the payload's own cwd is the worktree: the target is inside home either
+    # way it resolves, so it must allow. Before the fix, the process cwd won the join, and
+    # "src/app.py" read as primary/src/app.py: inside the clone, outside home, wrongly denied.
+    check("relative edit target resolves against payload cwd, not process cwd", "allow",
+          "Edit", worktree, agent=agent_id, process_cwd=primary,
+          file_path="src/app.py", old_string="a", new_string="b")
+
+    # The harness removes the worktree folder AND its branch together. The record must survive
+    # in the clone's common git directory: a later call from the primary checkout still refuses.
+    shutil.rmtree(worktree, ignore_errors=True)
+    check("home folder removed", "deny", "Bash", primary, agent=agent_id, command="echo hi")
+
+    # An unreadable state -- no git at all -- is unknown, never a hit: allow.
+    check("unreadable state", "allow", "Bash", NOGIT, agent="wthomeagent3", command="echo hi")
+
+    if problems:
+        return False, "; ".join(problems)
+    return True, "orchestrator, no-record, home, outside-home, removed-home, unreadable all correct"
+
+
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
 # literal count drifts the moment a case is added, and a suite that miscounts its own cases is a
 # suite a reader stops trusting.
@@ -3354,6 +3455,8 @@ LOG_CHECKS = (
      worktree_live_session_path_unresolvable_case),
     ("liveness: session_is_live reads an implied backwards clock step as unreadable, not dead",
      session_is_live_backwards_clock_step_case),
+    ("worktree-home: orchestrator, no-record, home, outside-home, edit, read, removed-home, "
+     "unreadable", worktree_home_case),
 )
 
 

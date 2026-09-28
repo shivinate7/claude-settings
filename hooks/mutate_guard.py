@@ -756,6 +756,61 @@ MUTATIONS = [
      '        with open(os.path.join(config_dir(), "CLAUDE.md"), encoding="utf-8-sig") as handle:\n'
      '            text = handle.read(POINTER_READ_MAX)\n    except Exception:\n        return ""',
      "guard", "pointer: checkout of a branch in the pointer checkout is refused"),
+
+    # RULE 0, worktree-home. Each mutant breaks one clause of
+    # decisions/an-agent-outside-its-home-tree-must-stop.md; all are caught by the single case
+    # that exercises the whole sequence, `worktree_home_case`.
+    ("worktree-home: the first call from inside the worktree never writes the home record",
+     '    if path_is_inside(cwd, candidate) is True:\n        write_agent_home(cwd, agent_id, candidate)',
+     '    if path_is_inside(cwd, candidate) is False:\n        write_agent_home(cwd, agent_id, candidate)',
+     "guard", "worktree-home:"),
+    ("worktree-home: the candidate worktree path drops the agent- prefix, so it never matches",
+     'candidate = os.path.join(primary, ".claude", "worktrees", "agent-" + agent_id)',
+     'candidate = os.path.join(primary, ".claude", "worktrees", agent_id)',
+     "guard", "worktree-home:"),
+    ("worktree-home: AGENT_ID rejects a letter, so every real agent id reads as an orchestrator",
+     'AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")',
+     'AGENT_ID = re.compile(r"^[0-9_-]{1,64}$")',
+     "guard", "worktree-home:"),
+    ("worktree-home: a shell call outside its recorded home is judged as inside it",
+     '            if path_is_inside(cwd, home) is False:',
+     '            if path_is_inside(cwd, home) is None:',
+     "guard", "worktree-home:"),
+    ("worktree-home: a write outside the recorded home, inside the clone, is allowed through",
+     '                if (path_is_inside(resolved_target, home_primary) is True\n'
+     '                        and path_is_inside(resolved_target, home) is False):',
+     '                if (path_is_inside(resolved_target, home_primary) is True\n'
+     '                        and path_is_inside(resolved_target, home) is None):',
+     "guard", "worktree-home:"),
+    ("worktree-home: Read is judged the same as a write, so a stranded agent cannot even read",
+     '        elif tool in WRITE_TOOLS:\n            write_target = (',
+     '        elif tool in WRITE_TOOLS + READ_ONLY_TOOLS:\n            write_target = (',
+     "guard", "worktree-home:"),
+    ("worktree-home: an unreadable home record denies instead of allowing",
+     '    home_status, home, home_primary = agent_worktree_home(payload, cwd)\n'
+     '    if home_status == "home":',
+     '    home_status, home, home_primary = agent_worktree_home(payload, cwd)\n'
+     '    if home_status == "unknown":\n'
+     '        refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON, "unreadable state")\n'
+     '    if home_status == "home":',
+     "guard", "worktree-home:"),
+    ("worktree-home: a non-isolated agent with no record is denied instead of allowed",
+     '    home_status, home, home_primary = agent_worktree_home(payload, cwd)\n'
+     '    if home_status == "home":',
+     '    home_status, home, home_primary = agent_worktree_home(payload, cwd)\n'
+     '    if home_status == "no-record":\n'
+     '        refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON, "no record")\n'
+     '    if home_status == "home":',
+     "guard", "worktree-home:"),
+    ("worktree-home: a relative write target drops the join onto the payload's own cwd",
+     '                try:\n                    resolved_target = _resolved(write_target, cwd)\n'
+     '                except Exception:\n                    resolved_target = write_target\n'
+     '                if (path_is_inside(resolved_target, home_primary) is True\n'
+     '                        and path_is_inside(resolved_target, home) is False):',
+     '                resolved_target = write_target\n'
+     '                if (path_is_inside(resolved_target, home_primary) is True\n'
+     '                        and path_is_inside(resolved_target, home) is False):',
+     "guard", "worktree-home:"),
 ]
 
 
