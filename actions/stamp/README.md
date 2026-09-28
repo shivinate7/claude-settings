@@ -1,254 +1,312 @@
 # actions/stamp
 
-One shared parser for CLAUDE.md's rule `git-slug-then-claim-number`. The rule: "Never
-allocate a numbered record on a branch. Write a slug. Claim the number at merge." See
-`decisions/one-shared-record-stamp.md` for why this is one tool with a config file per
-repo. No repo gets its own record shape rewritten.
+One shared engine for CLAUDE.md's rule `git-slug-then-claim-number`. The rule: "Never
+allocate a numbered record on a branch. Write a slug. Claim the number at merge." This
+folder names no repo. It states record shapes, config fields, and a contract. Each repo
+reads its own tree and writes its own config.
 
-Pin it by commit SHA. Never use `@main`. This action writes to your default branch.
+## The contract
 
-```yaml
-uses: shivinate7/claude-settings/actions/stamp@<sha>
-```
+A repo that adopts this engine meets each item below.
 
-## What it does
+1. A branch writes a record with a pending marker, never a number.
+2. The repo keeps one config file in its own tree, such as `.github/stamp.json`. Every
+   field in it is read off the repo's own claim tool or its own tree. No field is a guess.
+3. Every pull request runs mode `check`. A record numbered on the branch fails it.
+4. Every push to the default branch runs mode `stamp`. It numbers each pending record,
+   runs the repo's own generator and full gate, and pushes one commit.
+5. The workflow pins this action by commit SHA and holds the concurrency lock.
 
-A branch writes a record with a pending marker instead of a number. Some repos use `id:
-pending`. Others leave `id:` empty. `--stamp` gives every pending record the next number
-for its kind, in the order your config states. It then rewrites every cite of that
-record's slug to the numbered form. `--check` refuses a record numbered on a branch. It
-also refuses a malformed record, a duplicate id, and a cite that resolves to nothing. It
-writes nothing either way.
+## Record shapes
 
-## Formats covered
+1. **Number in frontmatter only.** `id: pending` becomes `id: D-042`. The file keeps its
+   name. See `examples/frontmatter.stamp.json` and
+   `examples/frontmatter-prefixed-cite.stamp.json`.
+2. **Number in frontmatter and in the filename.** A file `_<slug>.md` with an empty `id:`
+   becomes `D42_<slug>.md` with `id: D42`. See `examples/frontmatter-filename.stamp.json`.
+3. **Number in a heading.** The config sets `"format": "heading"`. The code is its own
+   module, `formats/heading.mjs`. See `examples/heading.stamp.json`. A kind has one of two
+   corpus shapes.
+   - `folder`: one file per record, with the heading on line 1. The file
+     `D-<slug>.md` that starts `## D-<slug> — Title` becomes `D258-<slug>.md` that starts
+     `## D258 — Title`.
+   - `file`: one flat file, and every heading is a record. `## C-<slug> — Title` becomes
+     `## C12 — Title`. The file keeps its name.
 
-1. **Number in frontmatter only.** `id: pending` becomes `id: D-042`. This covers q_max's
-   `docs/decisions` folder. It also covers sharables' `decisions`, `findings` and `gaps`
-   folders.
-2. **Number in frontmatter and in the filename.** A file named `_<slug>.md`, with an
-   empty `id:`, becomes `D42_<slug>.md` with `id: D42`. This covers
-   job-cost-reporting's `docs/decisions`, `docs/build`, `docs/findings` and
-   `docs/questions` folders.
-
-3. **Number in a heading, and for a split corpus in the filename too.** This is
-   banchi's shape, read off its own `scripts/claim-ids.py`. A file
-   `docs/decisions/D-<slug>.md` whose first line is `## D-<slug> — Title` becomes
-   `docs/decisions/D258-<slug>.md` with `## D258 — Title`. The filename pads to 3 digits.
-   The heading does not. A heading `## C-<slug> — Title` inside the flat
-   `docs/CODES-DECISIONS.md` becomes `## C12 — Title`, with no rename. The config sets
-   `"format": "heading"`. The code is its own module, `formats/heading.mjs`.
-   `examples/banchi.stamp.json` holds banchi's config.
-
-**Format 3 leaves these out.** Each is named in `decisions/one-shared-record-stamp.md`.
-
-- Build steps. claim-ids.py reads a pending step only from `docs/GATES.md`, which is
-  now a pointer file. It cannot see a step in `docs/gates/steps/`. The owner chose, on
-  2026-09-25, to leave steps out rather than copy claim-ids.py's stale rule. Banchi
-  numbers a step by hand. So neither `--check` nor `--stamp` silently lets a pending
-  step slip past. Both refuse a tree that holds one, naming the file, the step's slug,
-  and `deferred/banchi-build-steps.md`. See `config.unclaimed`, below.
-- Debts. claim-ids.py has no debt kind, so there is no rule to copy.
-- claim-ids.py's branch-side reads: `--stale`, `--unclaim`, `--landed` and
-  `--porcelain`. A stamp that claims only on the default branch does not need them.
-  `--check` refuses a number written on a branch instead.
-- The ORDER.json append and the CLAUDE.md index. banchi's own
-  `scripts/index-decisions.py` writes both. It runs as the `regenerate` input.
-- The flat-file fallback. With no `ORDER.json`, claim-ids.py reads decisions from the
-  flat `docs/DECISIONS.md`. That serves commits before the split. banchi main has the
-  manifest.
-- No rename without a manifest. claim-ids.py renames no file when `ORDER.json` is
-  missing. The engine renames a claimed file whether or not a manifest exists.
-
-**Before banchi runs `--check`, it must retire its branch-side claim.** banchi's `make
-merge` (`scripts/merge-pr.py`, which calls `scripts/claim-ids.py`) numbers records on
-the branch, before the merge. `--check` refuses every number written on a branch. So
-banchi must remove the claim step from `make merge` first, and let this action claim at
-merge instead. Until then, `--check` goes red on every pull request `make merge` claims.
-
-Any repo not shaped like one of these three keeps its own claim tool for now.
-
-## The config file
-
-A JSON file the calling repo owns and keeps in its own tree, such as
-`.github/stamp.json`. Nothing here is inferred from your repo. You read every field below
-off your own tool or your own tree. CLAUDE.md's rule is clear: never guess an answer the
-code should give you.
-
-```jsonc
-{
-  "defaultBranch": "main",       // required for --check's branch question; --stamp does not need it
-  "kinds": [
-    {
-      "id": "decision",          // a label for log lines; not read from your files
-      "folder": "docs/decisions",
-      "prefix": "D",
-      "pad": 3,                  // 0 (default) = no padding. "D-{n}" with pad 3 renders "D-042"
-      "idTemplate": "{prefix}-{n}",     // how a numbered id is RENDERED, and how one is READ back
-      "pendingRegex": "^id:[ \\t]*pending[ \\t]*$",  // the frontmatter LINE that marks a pending record
-      "location": "frontmatter",        // "frontmatter" (default) | "frontmatter+filename"
-      "filenamePendingPrefix": "_",     // frontmatter+filename only: the pending filename's marker
-      "filenameTemplate": "{prefix}{n}_{rest}.md",  // frontmatter+filename only
-      "order": "date",           // "date" (default) | "merge" (git first-parent add order) | "filename"
-      "numbering": "max_plus_one", // (default) | "lowest_free" — read this off your OWN tool, do not guess
-      "allowRanges": false,      // true if an id can name more than one number ("D-044 to D-046")
-      "slugField": "slug",       // default "slug"
-      "dateField": "date",       // default "date"; only read when order is "date"
-      "glossField": "title",     // default "title"; a frontmatter field, or "title"
-      "requireFieldsOnPending": []  // a pending record missing one of these is malformed
-    }
-  ],
-  "cite": {                      // omit entirely if your repo cites by path, not by slug
-    "pattern": "\\[\\[([a-z0-9][a-z0-9-]*)\\]\\]",  // the WHOLE span to replace — see note below
-    "slugGroup": 1,               // which capture group holds the slug
-    "prefixGroup": null,          // set this if the citation also names its own kind's prefix
-    "template": "{id}, {title}",  // {id} {gloss} {title}
-    "scanGlobs": ["**/*.md"],
-    "excludeGlobs": [".claude/skills/**"]
-  }
-}
-```
-
-Four real configs sit in `examples/`. Each was read off a real repo's own tool:
-`qmax.stamp.json`, `sharables.stamp.json`, `jcr.stamp.json`, `banchi.stamp.json`. Start
-from whichever is closest to your own repo's shape.
-
-**Format 3 has its own fields.** Read `examples/banchi.stamp.json` beside this list.
-
-- `slugRegex`: the slug grammar. A pending token must be `<prefix>-<slug>` exactly.
-- Per kind, `folder` (one file per record, heading on the first line) or `file` (one
-  flat file, every heading is a record). Never both.
-- `pendingRegex`: the heading line that may hold a pending id. Group 1 is the token. A
-  token that is neither a clean number nor `-<slug>` is refused as malformed.
-- `numberedRegex`: every numbered heading. Group 1 is the number. The next id is the
-  highest match plus one, over every line of every file of the kind. A gap is never
-  reused.
-- `idTemplate` and `pad`: the heading and cite form. `filenameTemplate` and
-  `filenamePad`: the filename form, for a `folder` kind only.
-- `manifest` and `manifestKey`: a JSON list of filenames. A listed pending name is
-  renamed in place. Nothing is appended here. Use `regenerate` for that.
-- `pathCite`: a path cite of a pending file, rewritten to the bare id. `{token}` is the
-  slug.
-- `cite.before` and `cite.after`: the boundary around a slug token. banchi's is
-  `(?<![-\w])` and `(?![-\w])`, with Python's Unicode `\w` written as
-  `[\p{L}\p{N}_]`.
-- `walk`: which files a cite rewrite opens. `textSuffixes`, `skipDirs` (matched by
-  directory name), `skipDotDirs`, and `extensionlessDirs`. Symlinks are never walked.
-- `unclaimed`: markers this engine refuses to number at all, because it has no rule to
-  copy for them. A list of `{ folder, pattern, message, label }`, `label` optional.
-  Both `--check` and `--stamp` refuse when a `.md` file directly in `folder` matches
-  `pattern` — `--stamp` refuses before writing anything. `pattern` runs with `gmu`
-  flags and must carry a named group `(?<slug>...)`. `normalizeConfig` refuses a
-  malformed `pattern`, or one with no `slug` group, when the config loads, before any
-  tree is read. The problem names the matched line, trimmed, unless `label` is set, in
-  which case it names `<label> <slug>` instead. Banchi's own entry catches a pending
-  build step, `` ^0\.(\s+`step (?<slug>[a-z][a-z0-9]*(?:-[a-z0-9]+)+)`) `` — banchi's
-  own `scripts/claim-ids.py` `GATES_PENDING` grammar, with a named `slug` group — and
-  sets `label: "step"`. See `examples/banchi.stamp.json` and
-  `deferred/banchi-build-steps.md`. Omit this key and nothing changes: it never fires.
-
-**Read `numbering` off your own tool. Never guess this field.** q_max's own `--stamp`
-takes the highest existing number, per kind, and adds one. It never fills a gap.
-sharables' and job-cost-reporting's own claim tools both take the lowest number not
-already taken. Each would fill a gap if one existed, though neither repo has ever had
-one. Guessing this field from "always max plus one" would silently change a live repo's
-numbering rule.
-
-**`cite.pattern` is the span the rewrite replaces. It is not a wider match to trim
-from.** sharables' own regex also matches an optional decorative backtick around the
-citation. Its rewrite only ever substitutes the inner `D‹slug›`, leaving any backtick in
-place. Write `pattern` to cover only that inner span. The parts around it stay in the
-text either way.
-
-**`cite.prefixGroup`** applies when a citation names its own kind's prefix beside the
-slug, the way sharables writes `D‹slug›` beside `F‹slug›`. It makes the rewrite refuse a
-citation whose prefix does not match the record the slug actually belongs to. This is the
-same refusal sharables' own code makes on a mismatched pair.
-
-**`cite.excludeGlobs` must name every file that teaches the citation syntax by
-example.** A file that explains `[[slug]]` in prose needs to write that literal text
-somewhere. `--check`'s dangling-cite refusal cannot tell that example apart from a
-real cite. It can tell only when the example sits inside a backtick span, a fenced
-block, or a markdown link. job-cost-reporting's own `docs/Records_Model.md`, and one
-of its `docs/history/*.csv` files, both write the literal string outside all three
-forms. Both needed an `excludeGlobs` entry, found by running `--check` against the
-real tree and reading each refusal. Never guess this list. Read it off a refusal.
+A shape that no config field can state is not covered. Bring it to the owner as a
+question. Do not add a repo name here to fit it.
 
 ## Modes
 
 ```
 node stamp.mjs --stamp --config <path> [--root <path>]
-node stamp.mjs --check --config <path> [--root <path>]
+node stamp.mjs --check --config <path> [--root <path>] [--base <ref>]
 ```
 
-`--root` defaults to the current directory. Both refuse and write nothing when the tree
-has a structural problem. `--stamp` runs the same validation `--check` does, first.
-`--check` asks one more question, and only on the default branch: is every pending record
-one HEAD itself just added? An older one means that the stamp did not run, or that a push
-was rejected. See `decisions/one-shared-record-stamp.md` for why that question is scoped
-this way.
+`--root` defaults to the current directory. It must be the root of the checkout.
+
+**`--stamp`** gives each pending record the next number for its kind, in the order the
+config states. Then it rewrites each cite of the record's slug to the numbered form. It
+never renumbers a record. It runs the structural checks of `--check` first. If one fails,
+it writes nothing.
+
+**`--check`** writes nothing. It refuses these states on every branch:
+
+- a malformed record, which is neither pending nor numbered
+- a duplicate id or a duplicate slug
+- a cite that resolves to no record
+- a marker that the config lists in `unclaimed`
+
+It asks one more question, and the question depends on the branch.
+
+- **On the default branch**, it refuses a pending record that HEAD did not add. Such a
+  record means that the stamp did not run, or that its push was rejected. A record that
+  HEAD added waits for its turn. It is not refused.
+- **Off the default branch**, it compares this tree with the base tree. It asks the
+  question for all three shapes, with the same loader that reads this tree. It refuses
+  these states:
+  - A record whose number in this tree is not its number in the base tree. This catches a
+    new record with a number. It also catches a record that was pending on the base and
+    has a number now.
+  - A renamed record. The base holds the same number under another key. The message says
+    that the record was renamed, and it names the old key and the new key. The fix is to
+    restore the old key.
+  - A removed record. A number is removed when the base tree holds it and no record of this
+    tree holds it, for the same kind. Numbers are permanent. Retire a record through its own
+    status, never by deletion.
+
+A pull request checkout is always off the default branch. The engine knows it is one when
+`GITHUB_BASE_REF` is set, or when `GITHUB_REF` starts with `refs/pull/`.
+
+The base ref is the first of these that is set: `--base <ref>`,
+`origin/$GITHUB_BASE_REF`, or `origin/<defaultBranch>`. The base tree is the merge base of
+HEAD and that ref. The tip of the ref is not used. The tip can hold the same number for a
+different record, and then the defect does not show.
+
+**A base that cannot be read is never a pass.** These states make the base unreadable. The
+ref is missing, or it has no merge base with HEAD. The config has no `defaultBranch` and no
+`--base` is given. The tree has no git. The result then depends on where the check runs:
+
+- **In GitHub Actions** (`GITHUB_ACTIONS` is `true`), `--check` exits 1. The message says that
+  the read could not run, and it names the remedy.
+- **Everywhere else**, `--check` prints a line that starts with `UNKNOWN:` and names the same
+  remedy. It exits 0. It does not print the line that says the records are in order.
+
+The remedy is to fetch the base branch with its history, or to pass `--base <ref>`. A check
+job needs `actions/checkout` with `fetch-depth: 0`. A shallow fetch of the base is not
+enough, because git must find the merge base of HEAD and the base ref.
+
+**Record identity across the two trees.** A frontmatter record is the same record when it
+has the same kind and slug. Its key is the slug. A `folder` heading record is the same
+record when it has the same file. Its key is the file path. A `file` heading record has no
+key but its number. So a branch that renames a numbered `folder` heading file is refused
+too. So is a branch that changes the slug of a numbered frontmatter record. A rename of a
+frontmatter file with the same slug passes. An edit to a title passes in every shape.
+
+**A same-number swap.** A branch can delete a `file` heading record and write a different
+record with the same number. That is now the same as an edit in place, because the removal
+refusal catches each number that no record holds. The engine does not compare titles or
+content.
+
+## The config file
+
+The config is JSON. `loadConfig` rejects a missing required field before it reads the
+tree. A default applies when a field is not set.
+
+### Top-level fields
+
+| Field | Shapes | Meaning |
+|---|---|---|
+| `format` | all | Not set for shapes 1 and 2. `"heading"` for shape 3. |
+| `defaultBranch` | all | The default branch name. `--check` needs it to find the branch. Without it, `--check` needs `--base` or `GITHUB_BASE_REF`. |
+| `kinds` | all | A list of record kinds. It must not be empty. |
+| `cite` | all | How a cite of a slug is found and rewritten. Omit it for shapes 1 and 2 if the repo cites by path. |
+| `slugRegex` | 3 | The slug grammar. A pending token is `<prefix>-<slug>` and nothing else. |
+| `walk` | 3 | Which files the cite rewrite opens. |
+| `unclaimed` | 3 | Markers the engine refuses and never numbers. |
+
+### Kind fields, shapes 1 and 2
+
+| Field | Default | Meaning |
+|---|---|---|
+| `id` | required | A label for log lines and record keys. It is not read from a file. |
+| `folder` | required | The folder that holds the records. Only files directly in it are read. |
+| `filePattern` | `*.md` | Which files in `folder` are records. |
+| `excludeFiles` | `[]` | Globs of files in `folder` that are not records, such as an index. |
+| `prefix` | required | The id prefix, such as `D`. |
+| `pad` | `0` | The number width. With `pad: 3`, `{prefix}-{n}` renders `D-042`. |
+| `idTemplate` | required | How an id is written and read back. It uses `{prefix}` and `{n}`. |
+| `pendingRegex` | required | The frontmatter line that marks a pending record. |
+| `location` | `frontmatter` | `frontmatter` or `frontmatter+filename`. |
+| `filenamePendingPrefix` | `_` | Shape 2. The filename marker of a pending record. Shape 2 reads the pending state from the filename only. |
+| `filenameTemplate` | required for shape 2 | The numbered filename. `{rest}` is the pending name without its marker. |
+| `order` | `date` | The claim order: `date`, `merge` (the order of first-parent adds in git), or `filename`. |
+| `numbering` | `max_plus_one` | `max_plus_one` never fills a gap. `lowest_free` fills the lowest gap first. |
+| `allowRanges` | `false` | Set it when an id can hold more than one number, such as `D-044 to D-046`. The engine counts each number. It never writes a range. |
+| `slugField` | `slug` | The frontmatter field that holds the slug. |
+| `dateField` | `date` | The frontmatter field that `order: "date"` reads. |
+| `glossField` | `title` | The frontmatter field that `{gloss}` renders. |
+| `requireFieldsOnPending` | `[]` | A pending record without one of these fields is malformed. |
+
+### Cite fields, shapes 1 and 2
+
+| Field | Default | Meaning |
+|---|---|---|
+| `pattern` | required | A regex for the full span that the rewrite replaces. Write it for that span only. Text around it stays. |
+| `slugGroup` | `1` | The capture group that holds the slug. |
+| `prefixGroup` | not set | The capture group that holds the prefix, for a cite that names its kind, such as `D‹slug›`. A cite whose prefix does not match its record stays as text. |
+| `template` | required | The numbered form. It uses `{id}`, `{gloss}`, and `{title}`. |
+| `scanGlobs` | `["**/*.md"]` | The files the rewrite and the dangling-cite check read. |
+| `excludeGlobs` | `[]` | Files that neither reads. |
+
+The dangling-cite check skips frontmatter, fenced blocks, code spans, and link targets. A
+file that teaches the cite syntax in plain text needs an `excludeGlobs` entry. Find each
+entry from a refusal of `--check` on your own tree. Do not guess the list.
+
+### Kind fields, shape 3
+
+| Field | Default | Meaning |
+|---|---|---|
+| `id` | required | A label for log lines and record keys. |
+| `prefix` | required | The id prefix. |
+| `folder` or `file` | one required | `folder` for one file per record. `file` for one flat file. Never both. |
+| `pendingRegex` | required | The heading that may hold a pending id. Group 1 is the token. A token that is not a number and not `-<slug>` is malformed. |
+| `numberedRegex` | required | Each numbered heading. Group 1 is the number. The next id is the highest match plus one. |
+| `idTemplate` | required | The heading and cite form of an id. |
+| `pad` | `0` | The number width in the id. |
+| `filenameTemplate` | required for `folder` | The numbered filename. It uses `{prefix}`, `{n}`, and `{rest}`. |
+| `filenamePad` | `0` | The number width in the filename. |
+| `manifest` | not set | A JSON file that lists the folder's filenames in order. A listed pending name is renamed in place. Nothing is appended. |
+| `manifestKey` | `order` | The key of the list in the manifest. |
+| `manifestAscii` | `true` | `true` writes the manifest as Python's `json.dumps(indent=2)` does, with each non-ASCII character escaped. `false` writes plain UTF-8. |
+| `pathCite` | not set | A regex for a path cite of a pending file. `{token}` is the slug. The match becomes the bare id. |
+| `numbering` | `max_plus_one` | Shape 3 accepts `max_plus_one` only. |
+
+A `folder` record's file is found by its slug. The first name in corpus order that is
+`<slug>.md` or starts with `<slug>-` is the file. The numbered name keeps only the text
+after `<slug>-`.
+
+### Cite, walk, and unclaimed fields, shape 3
+
+| Field | Default | Meaning |
+|---|---|---|
+| `cite.before`, `cite.after` | `(?<![-\p{L}\p{N}_])`, `(?![-\p{L}\p{N}_])` | The boundary around a slug token. Write Python's Unicode `\w` as `[\p{L}\p{N}_]`. |
+| `walk.textSuffixes` | required | The file suffixes the rewrite opens. |
+| `walk.skipDirs` | `[]` | Folder names the walk does not enter. |
+| `walk.skipDotDirs` | `true` | The walk does not enter a folder whose name starts with a dot. |
+| `walk.extensionlessDirs` | `[]` | Folders whose files without a suffix the walk opens too. |
+| `unclaimed[].folder` | required | The folder whose `.md` files are read. |
+| `unclaimed[].pattern` | required | A regex with the flags `gmu` and a named group `(?<slug>...)`. |
+| `unclaimed[].message` | required | The text of the refusal. |
+| `unclaimed[].label` | not set | When set, the refusal names `<label> <slug>`, not the matched line. |
+
+The walk never follows a symlink. Use `unclaimed` for a marker that your repo has no claim
+rule for yet. Both modes refuse it before they write anything.
 
 ## The composite action
 
-`action.yml` wraps `stamp.mjs --stamp` with the caller's own gate command, a commit, and
-a push, with up to 3 retries. It refuses to run off the default branch. On a rejected
-push it re-derives from the fresh tree and re-runs the gate. It never rebases the old,
-already-gated commit. A rebase there is the hole q_max's own `stamp.yml` left open once:
-D-478 in that log names a rebased tree that nothing ever checked.
+```yaml
+uses: shivinate7/claude-settings/actions/stamp@<sha>
+```
+
+**Pin it by commit SHA. Never use `@main`.** Mode `stamp` writes to your default branch.
+
+### Inputs
+
+| Input | Default | Meaning |
+|---|---|---|
+| `mode` | `stamp` | `stamp` or `check`. |
+| `config` | required | The config path, from the repository root. |
+| `base` | empty | Mode `check` only. The base ref, passed to `stamp.mjs` as `--base`, and only when it is set. When it is empty, the engine picks the base itself. |
+| `gate-command` | empty | Mode `stamp` only, and required there. Your own full check. It must pass on the stamped tree before the push. |
+| `regenerate` | empty | Mode `stamp` only. Your own generator. It runs after `--stamp` and before the gate, in the same commit. |
+| `commit-subject` | `Stamp {ids}` | The commit subject. `{ids}` becomes the ids that the run stamped. |
+| `bot-name` | `record-stamp[bot]` | The commit author name. |
+| `bot-email` | `record-stamp@users.noreply.github.com` | The commit author email. |
+
+**Mode `check`** runs `stamp.mjs --check --config <config>` and nothing else. When `base` is
+set, it adds `--base <base>`. It needs no default branch, no gate, no commit, and no push.
+It works with `contents: read`. Its checkout needs `fetch-depth: 0`. A shallow fetch of the
+base is not enough.
+
+**Mode `stamp`** refuses to run off the default branch. It refuses an empty
+`gate-command`. It stamps, runs `regenerate`, runs the gate, commits, and pushes. When
+nothing is pending, it stops before `regenerate`. When the push is rejected, it starts
+again from the new tree and runs the gate again, up to 3 times. It never rebases a commit
+that the gate already passed, because a rebased tree is a tree that no gate read.
+
+**The concurrency rule.** A composite action cannot hold a lock. The job that runs mode
+`stamp` must set `concurrency: {group: <name>, cancel-in-progress: false}`. Two runs at
+the same time could otherwise claim the same number.
 
 ```yaml
-name: stamp
+name: records
 on:
+  pull_request:
   push:
     branches: [main]
-permissions:
-  contents: write
-concurrency:
-  group: stamp-main       # a composite action cannot hold this lock; your workflow must
-  cancel-in-progress: false
 jobs:
-  stamp:
-    if: github.ref == 'refs/heads/main'
+  check:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # needed for order: "merge", and for --check's branch question
+          fetch-depth: 0   # the base tree and the merge base
+      - uses: shivinate7/claude-settings/actions/stamp@<sha>
+        with:
+          mode: check
+          config: .github/stamp.json
+  stamp:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: stamp-main
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # order "merge", and the default-branch question
       - uses: shivinate7/claude-settings/actions/stamp@<sha>
         with:
           config: .github/stamp.json
-          regenerate: "node harness/decision-refs.mjs --gloss --write"
-          gate-command: "npm test && npm run lint"
+          regenerate: "<your own generator>"
+          gate-command: "<your own full check>"
 ```
 
-**`regenerate`** is optional. It runs after `--stamp`, before the gate, in the same
-commit. A repo's own generator (a refs block, an index table, a lookup file) keeps
-running. Adopting this action must change nothing else about the tree. Skipped when
-nothing was pending. Read off each repo's own tool:
+## Adoption checklist
 
-- q_max: `node harness/decision-refs.mjs --gloss --write`. This already exists as a
-  standalone pair of flags, and reproduces `stamp()`'s own tail exactly — same two
-  functions, same order. No change to q_max's tool needed.
-- sharables: `python3 scripts/check_records.py --write-index`.
-- job-cost-reporting: `python3 toolchain/build_decision_index.py >
-  docs/Decision_Index.md && python3 harness/owner_corrections.py >
-  docs/Owner_Corrections.md`.
-- banchi: `regenerate: "python3 scripts/index-decisions.py --write"`. It appends each
-  new entry to `docs/decisions/ORDER.json` and regenerates the decision index in
-  `CLAUDE.md`. One difference from claim-ids.py: its `settle_corpus` ignores a failed
-  generator and the claim still lands. `run.sh` stops on a failed `regenerate` and
-  pushes nothing.
+Do each step in your own repo, from your own tree.
 
-`run.sh` holds the action's own logic. It sits in its own file so it can run and be
-tested directly. `test_action.sh` does exactly that, against a throwaway git remote,
-rather than only ever running inside a real Actions runner.
+1. Pick the shape that your records have. Start from the example with that shape.
+2. Measure each field from your own claim tool. Read `numbering`, `order`, the pending
+   marker, the id form, and the cite form from its source. Do not copy a value from an
+   example.
+3. Set `regenerate` to run your own generators, such as an index or a manifest append.
+   Adoption must change nothing else in the tree.
+4. Set `gate-command` to your own full check, the same one your pull requests run.
+5. Run `--stamp` on a copy of your tree. Compare the result with your own claim tool's
+   result on a second copy. Each difference is a field to fix, or a question for the
+   owner.
+6. Run `--check` on your tree. Read each refusal. Add an `excludeGlobs` entry only for a
+   file that teaches the cite syntax.
+7. Retire each step that claims a number on a branch, such as a claim in a merge script.
+   Mode `check` refuses each number that a branch writes.
+8. Make each local check that refuses a pending record on the default branch accept a
+   record that HEAD itself added. The stamp run for that commit has not had its turn yet.
+9. Add both jobs to your workflow. Pin the SHA. Set the concurrency lock.
 
 ## Tests
 
 ```
 node actions/stamp/test_stamp.mjs   # the engine: numbering, rename, cite rewrite, --check
-bash actions/stamp/test_action.sh   # the action's own shell logic, against a real git remote
+bash actions/stamp/test_action.sh   # run.sh, both modes, against a real git remote
 ```
 
-Both are plain and assert-based. Both build their own throwaway directories. Neither
-reads or writes this repository's own tree. Both are wired into `gates`,
-`gates-windows` and `gates-macos` in `.github/workflows/gates.yml`.
+Both build their own temporary folders. Neither reads or writes this repository's own
+tree. Both run in `gates`, `gates-windows`, and `gates-macos` in
+`.github/workflows/gates.yml`.

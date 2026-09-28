@@ -1,5 +1,9 @@
 # One shared parser, not four claim tools
 
+**Changed in part on 2026-09-28** by `record-stamp-stays-generic`, the stamp stays generic.
+The per-repo measurements below are history from 2026-09-24. The parent no longer holds
+them. Each repo measures its own fields when it adopts the action.
+
 CLAUDE.md: "Never allocate a numbered record on a branch. Write a slug. Claim the
 number at merge." (rule `git-slug-then-claim-number`.) `lint/rule_audit.py` reads that
 rule as `unmechanized` here. Its own reason: "README Decision 5 keeps id-claiming
@@ -84,7 +88,8 @@ run, with one pending name listed in `ORDER.json`, matched 1245 of 1245 too.
   tool is stale for steps. This engine copies no stale rule. On 2026-09-25 the owner
   chose to leave steps out. Banchi numbers them by hand. `deferred/banchi-build-steps.md`
   holds the item and the trigger that brings it back. The engine refuses a tree that
-  holds a pending step marker, and the refusal names that file.
+  holds a pending step marker when the repo's own config has an `unclaimed` entry for it.
+  The parent names no repo, so Banchi's own config must carry that entry and its message.
 - **Debts.** claim-ids.py has no debt kind. There is no rule to copy.
 - **The flat-file fallback.** With no `ORDER.json`, claim-ids.py reads decisions from
   the flat `docs/DECISIONS.md`. That serves commits before the split. banchi main has
@@ -113,8 +118,8 @@ banchi's tree does not hold today. The last two come up in banchi's normal flow.
 - A rename onto a file that already exists is refused before anything is written.
   claim-ids.py's `Path.rename` replaces that file on POSIX and fails on Windows.
 - A ref and HEAD with no merge base: claim-ids.py refuses, exit 2. `--stamp` reads no
-  ref and never asks. `--check` off the default branch prints "NOT ASKED" and does
-  not refuse.
+  ref and never asks. `--check` off the default branch fails in GitHub Actions when it
+  cannot read the base. Everywhere else it prints `UNKNOWN:` and exits 0.
 - A failed `regenerate` stops the run and nothing is pushed. claim-ids.py's
   `settle_corpus` ignores a failed generator, and the claim still lands.
 - `--check` refuses a record numbered on a branch. claim-ids.py claims on the branch,
@@ -135,8 +140,8 @@ prefix. There is nothing yet for a shared stamp to claim there.
 adds one. It never fills a gap. sharables' and job-cost-reporting's own claim tools
 both take the lowest number not already taken. Each fills a gap if one exists. In
 practice, neither repo has ever had a gap to fill. From the outside, this looks like
-one rule. It is two, read from two different pieces of source. `actions/stamp/README.md`
-names both. It says to check this field. Never guess it.
+one rule. It is two, read from two different pieces of source. Each repo's
+own config states it in `numbering`. Read it from the repo's own claim tool. Never guess it.
 
 **Cite rewrite.** Three repos rewrite a slug citation to a different shape. q_max
 writes `D-nnn, Title`. job-cost-reporting writes `id, gloss`. sharables writes the bare
@@ -151,7 +156,10 @@ It exists to tell apart two states q_max's own log once conflated, in its own `D
 the stamp checks its own tree. One state is a pending record waiting its normal turn.
 The other is a pending record whose stamp run failed, or whose push was rejected
 twice. The question is asked only on the default branch, and only while something is
-pending. Every other run reads no git history at all. `stamp.mjs`'s own `addedByHead`
+pending. Off the default branch, `--check` asks a different question. It reads the merge
+base of HEAD and the base ref, and it refuses a number that the branch added, renamed or
+removed. So that run reads git history, and a check job needs `fetch-depth: 0`. Only
+`--stamp` and a default-branch run with nothing pending read no history at all. `stamp.mjs`'s own `addedByHead`
 and merge-order reader are lifted from `harness/decision-refs.mjs` nearly unchanged.
 That logic was already measured against q_max's real history. Rewriting it a second
 way would only add a second chance to get it wrong.
@@ -184,8 +192,9 @@ standalone pair of flags. Running it right after `--stamp` reproduces `stamp()`'
 tail exactly, because it calls the same two functions in the same order. No change to
 q_max's tool was needed. Same for sharables (`scripts/check_records.py
 --write-index`) and job-cost-reporting (its two generator scripts, run in sequence,
-each redirected to its own target file). All three are named in
-`actions/stamp/README.md`, and proven against each repo's own real tree.
+each redirected to its own target file). Each repo names its own
+generator in its workflow's `regenerate` input. All three were proven against each repo's
+own real tree on 2026-09-24.
 
 ## The mechanism
 

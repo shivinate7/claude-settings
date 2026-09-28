@@ -1,28 +1,29 @@
 // Format 3 for stamp.mjs: the number lives in a markdown HEADING, and for a split corpus also in
-// the FILENAME. Read off banchi's own `scripts/claim-ids.py` (main 053acf0), rule by rule. The
-// rule list, and what this module covers or leaves out, is in decisions/one-shared-record-stamp.md.
+// the FILENAME. The config states every grammar. This module names no repo.
 //
 // Two corpus shapes, one per kind:
 //   folder  one file per record, the record's heading on the file's FIRST line, the number in the
-//           heading AND the filename (banchi docs/decisions: `D-<slug>.md` holding
-//           `## D-<slug> — Title` becomes `D258-<slug>.md` holding `## D258 — Title`).
-//   file    one flat file, every heading line is a record (banchi docs/CODES-DECISIONS.md:
-//           `## C-<slug> — Title` becomes `## C12 — Title`). No rename.
+//           heading AND the filename (`D-<slug>.md` holding `## D-<slug> — Title` becomes
+//           `D258-<slug>.md` holding `## D258 — Title`).
+//   file    one flat file, every heading line is a record (`## C-<slug> — Title` becomes
+//           `## C12 — Title`). No rename.
 //
-// A claim is claim-ids.py's own: max + 1 over every numbered heading the kind holds, never a gap,
-// then every bounded occurrence of the slug token in every walked text file becomes the id.
-// Banchi's generators (the ORDER.json append and the CLAUDE.md index, both owned by
-// scripts/index-decisions.py) are NOT here. They run as the action's `regenerate` command.
+// A claim is max + 1 over every numbered heading the kind holds, never a gap. Then every bounded
+// occurrence of the slug token in every walked text file becomes the id. A repo's own generators
+// (a manifest append, an index) are NOT here. They run as the action's `regenerate` command.
 //
 // stamp.mjs dispatches here when config.format is "heading". Its own helpers come in as `h`, so
-// this module shares one EOL rule and one git reader with the other two formats.
+// this module shares one EOL rule and one git reader with the other two formats. The branch
+// question off the default branch lives in stamp.mjs, for all three formats. This module gives
+// it `numberedRecords`.
 
 import { readFileSync, writeFileSync, renameSync, readdirSync, lstatSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 
 // Python's `\w` in a str pattern is Unicode: a letter, a number, or `_`, by category. JS `\w` is
-// ASCII only. claim-ids.py's boundary `(?<![-\w])...(?![-\w])` must mean the same thing here.
+// ASCII only. A boundary written for a Python tool, `(?<![-\w])...(?![-\w])`, must mean the same
+// thing here.
 export const PY_WORD = "[\\p{L}\\p{N}_]";
 
 // Every pattern here carries the `u` flag (for `\p{L}`), and `u` refuses an escaped `-` outside a
@@ -72,11 +73,12 @@ export function normalizeConfig(config) {
     if (kind.folder && !kind.filenameTemplate) throw new Error(`kind ${kind.id} has a folder but no "filenameTemplate"`);
     kind.numbering ??= "max_plus_one";
     if (kind.numbering !== "max_plus_one") {
-      throw new Error(`kind ${kind.id}: format "heading" builds "max_plus_one" only (claim-ids.py's own rule)`);
+      throw new Error(`kind ${kind.id}: format "heading" builds "max_plus_one" only`);
     }
     kind.pad ??= 0;
     kind.filenamePad ??= 0;
     kind.manifestKey ??= "order";
+    kind.manifestAscii ??= true;
   }
   return config;
 }
@@ -94,9 +96,8 @@ const renderId = (kind, n) => render(kind.idTemplate, kind, n, kind.pad);
 
 // ---------------------------------------------------------------- reading a kind
 
-// claim-ids.py `corpus_order`: the manifest's list, then every `*.md` on disk it does not name,
-// in plain sorted order. A name the manifest lists that is not on disk is skipped, the way
-// `corpus_pieces` skips it.
+// Corpus order: the manifest's list, then every `*.md` on disk it does not name, in plain sorted
+// order. A name the manifest lists that is not on disk is skipped.
 function corpusOrder(root, kind) {
   const dir = join(root, kind.folder);
   if (!existsSync(dir)) return [];
@@ -109,10 +110,8 @@ function corpusOrder(root, kind) {
   return [...listed, ...extra].filter((n) => existsSync(join(dir, n)));
 }
 
-// One heading's token, sorted three ways. claim-ids.py claims every token that is not a clean
-// number (its "complement" rule), whatever shape it has. This engine claims only a token of the
-// slug grammar and refuses the rest, so a malformed heading stops the run instead of turning
-// into an id.
+// One heading's token, sorted three ways. This engine claims only a token of the slug grammar and
+// refuses the rest, so a malformed heading stops the run instead of turning into an id.
 function classify(config, token) {
   if (/^[1-9][0-9]*$/.test(token)) return "numbered";
   if (new RegExp(`^-(?:${config.slugRegex})$`, "u").test(token)) return "pending";
@@ -155,10 +154,10 @@ function readKind(root, config, kind, h) {
   return out;
 }
 
-// claim-ids.py `rename_claimed_entries`: the FIRST name in corpus order that starts with
-// `<slug>-` or equals `<slug>.md`, and each rename replaces its name in that order before the
-// next claim looks. Replayed here in claim order, so a lookup that lands on another record's file
-// is refused before anything is written, where claim-ids.py would rename the wrong file. Keyed
+// The filename rule: the FIRST name in corpus order that starts with `<slug>-` or equals
+// `<slug>.md`, and each rename replaces its name in that order before the next claim looks.
+// Replayed here in claim order, so a lookup that lands on another record's file is refused before
+// anything is written, instead of a rename of the wrong file. Keyed
 // by the record's own file, never by slug: two records can share a slug, and that state has its
 // own refusal.
 function planRenames(kind, order, pending) {
@@ -172,10 +171,10 @@ function planRenames(kind, order, pending) {
   return out;
 }
 
-// claim-ids.py's tail rule, kept exactly: the text after `<slug>-` when the file has a longer
-// name, else the slug without its `<prefix>-`. A file `D-foo-extra.md` for slug `D-foo` becomes
-// `D258-extra.md`, so the slug's own words leave the filename. That is banchi's rule, not a
-// choice made here.
+// The tail rule: the text after `<slug>-` when the file has a longer name, else the slug without
+// its `<prefix>-`. A file `D-foo-extra.md` for slug `D-foo` becomes `D258-extra.md`, so the
+// slug's own words leave the filename. A repo that wants to keep them names its files
+// `<slug>.md`.
 function tailOf(kind, slug, name) {
   if (name.startsWith(slug + "-")) return name.slice(slug.length + 1, -3);
   return slug.startsWith(kind.prefix + "-") ? slug.slice(kind.prefix.length + 1) : slug;
@@ -183,13 +182,13 @@ function tailOf(kind, slug, name) {
 
 // ---------------------------------------------------------------- unclaimed markers
 //
-// A marker this engine does not number at all, because it has no rule to copy for it (see
-// decisions/one-shared-record-stamp.md, "Left out, on purpose"). config.unclaimed:
+// A marker this engine does not number at all, because the repo has no rule for it yet.
+// config.unclaimed:
 // [{ folder, pattern, message, label }]. `pattern` runs with the "gmu" flags over each ".md"
 // file directly in `folder`, and must carry a named group `slug` (normalizeConfig refuses a
 // pattern without one, before any tree is read). The problem names the matched line, trimmed,
-// unless `label` is set, in which case it names `<label> <slug>` instead (Banchi's own config
-// sets `label: "step"`, so its refusal reads "step add-widget", not the raw matched line).
+// unless `label` is set, in which case it names `<label> <slug>` instead (with `label: "step"`
+// the refusal reads "step add-widget", not the raw matched line).
 // Nothing here is numbered, renamed, or rewritten — only refused, in both `--check` and
 // `--stamp`, before either writes anything. Absent config.unclaimed, this is a no-op, same as
 // before it existed.
@@ -244,11 +243,11 @@ function validate(root, config, h) {
         const found = renames.get(rec.rel);
         if (found !== rec.name) {
           problems.push(`${rec.rel}: slug ${rec.slug} resolves to ${found ? `${kind.folder}/${found}` : "no file"} by ` +
-            `claim-ids.py's filename rule. Name the file ${rec.slug}.md or ${rec.slug}-<tail>.md.`);
+            `the filename rule. Name the file ${rec.slug}.md or ${rec.slug}-<tail>.md.`);
         }
       }
-      // claim-ids.py `duplicate_pending`: a pending slug whose file main already claimed under
-      // a number. Read here off this tree, which at the merge IS main.
+      // A pending slug whose file this tree already holds under a number. Read off this tree,
+      // which at the merge IS the default branch.
       const numberedName = new RegExp("^" + escapeRe(kind.filenameTemplate)
         .replace(escapeRe("{prefix}"), escapeRe(kind.prefix))
         .replace(escapeRe("{n}"), "(\\d+)")
@@ -272,8 +271,8 @@ function validate(root, config, h) {
 
 // ---------------------------------------------------------------- the walk and the substitution
 
-// claim-ids.py `text_files`: every file whose suffix is in TEXT_SUFFIXES, plus an extensionless
-// file directly under a named hook directory. Directories named in SKIP, and every directory
+// The walk: every file whose suffix is in `walk.textSuffixes`, plus an extensionless file
+// directly under a directory named in `walk.extensionlessDirs`. Directories named in `walk.skipDirs`, and every directory
 // whose name starts with ".", are not entered. A symlink is never walked: the real file is.
 function textFiles(root, walk) {
   const out = [];
@@ -295,7 +294,7 @@ function textFiles(root, walk) {
       const dot = name.lastIndexOf(".");
       const suffix = dot > 0 ? name.slice(dot) : "";
       if (suffixes.has(suffix)) { out.push(childRel); continue; }
-      // `path.parent.as_posix().endswith(HOOK_DIR)`, the same plain suffix test.
+      // A plain suffix test on the parent's posix path.
       if (!suffix && walk.extensionlessDirs.some((d) => rel.endsWith(d))) out.push(childRel);
     }
   })(root, "");
@@ -303,17 +302,16 @@ function textFiles(root, walk) {
 }
 
 function substitute(text, config, claims) {
-  // claim-ids.py `rewrite_decision_paths`: a path cite of a pending file becomes the bare id.
-  // LONGEST TOKEN FIRST, a deliberate difference. claim-ids.py runs its claims in claim order, so
-  // when one pending slug is a prefix of another, the shorter one's `[\w-]*` tail swallows the
-  // longer one's path and writes the wrong id (probe 6 in the parity notes). The order changes
-  // nothing when no token is a prefix of another.
+  // A path cite of a pending file becomes the bare id. LONGEST TOKEN FIRST: when one pending slug
+  // is a prefix of another, a claim-order pass lets the shorter one's `[\w-]*` tail swallow the
+  // longer one's path and write the wrong id. The order changes nothing when no token is a
+  // prefix of another.
   const pathClaims = claims.filter((c) => c.kind.pathCite).sort((a, b) => b.token.length - a.token.length);
   for (const c of pathClaims) {
     const re = new RegExp(c.kind.pathCite.replace("{token}", escapeRe(c.token)), "gu");
     text = text.replace(re, () => c.id);
   }
-  // claim-ids.py `apply_to_text`: every bounded occurrence of the token, in claim order.
+  // Every bounded occurrence of the token, in claim order.
   for (const c of claims) {
     const re = new RegExp(config.cite.before + escapeRe(c.token) + config.cite.after, "gu");
     text = text.replace(re, () => c.id);
@@ -321,8 +319,9 @@ function substitute(text, config, claims) {
   return text;
 }
 
-// Python's `json.dumps(obj, indent=2)`, which is how claim-ids.py writes ORDER.json. JSON.stringify
-// gives the same bytes except for `ensure_ascii`: Python escapes every character outside
+// Python's `json.dumps(obj, indent=2)`, the byte shape a Python generator writes a manifest in.
+// `kind.manifestAscii` (default true) picks it. JSON.stringify gives the same bytes except for
+// `ensure_ascii`: Python escapes every character outside
 // U+0020 to U+007E, so U+007F (DEL) and everything above it become `\uXXXX`. A character above
 // U+FFFF is a surrogate pair in both, so each half is escaped on its own, as Python does.
 export function pythonJson(obj) {
@@ -347,8 +346,8 @@ export function stamp(root, config, h) {
       claims.push({ kind: k.kind, token: rec.slug, n, id: renderId(k.kind, n), rec, target });
     }
   }
-  // A rename never lands on a file that exists. claim-ids.py's `Path.rename` replaces it on
-  // POSIX, silently, and fails on Windows. Here the run is refused before anything is written.
+  // A rename never lands on a file that exists. A plain rename replaces it on POSIX, silently, and
+  // fails on Windows. Here the run is refused before anything is written.
   const blocked = claims.filter((c) => c.target && c.target !== c.rec.rel && existsSync(join(root, c.target)));
   if (blocked.length) {
     return {
@@ -386,14 +385,15 @@ export function stamp(root, config, h) {
       }
       assigned.push({ id: c.id, n: c.n, prefix: k.kind.prefix, slug: c.token, title: c.rec.title, rel, oldRel: c.rec.rel });
     }
-    // claim-ids.py renames a listed name IN PLACE and rewrites the manifest whenever it renamed
-    // anything. It never appends: index-decisions.py's `normalize` does that, in `regenerate`.
+    // A listed name is renamed IN PLACE, and the manifest is rewritten whenever a rename ran.
+    // Nothing is appended here. A repo's own generator does that, in `regenerate`.
     const manifest = k.kind.manifest && join(root, k.kind.manifest);
     if (renamed.size && manifest && existsSync(manifest)) {
       const { text, eol } = h.readFileEol(manifest);
       const data = JSON.parse(text);
       data[k.kind.manifestKey] = (data[k.kind.manifestKey] ?? []).map((n) => renamed.get(n) ?? n);
-      writeFileSync(manifest, h.withEol(pythonJson(data) + "\n", eol));
+      const json = k.kind.manifestAscii ? pythonJson(data) : JSON.stringify(data, null, 2);
+      writeFileSync(manifest, h.withEol(json + "\n", eol));
     }
   }
   console.log(`${assigned.length} entry(ies) stamped; ${glossed} document(s) had a cite rewritten.`);
@@ -410,49 +410,29 @@ function git(root, args) {
   }
 }
 
-function numbersIn(kind, text) {
-  return new Set([...text.matchAll(new RegExp(kind.numberedRegex, "gmu"))].map((m) => Number(m[1])));
-}
-
-// Off the default branch: a record NUMBERED on the branch is the thing the rule forbids. The
-// baseline is the merge base with the default branch, never the default branch's tip (the tip
-// may have taken the number since, which reads as "already there" and hides the defect).
-function branchNumbered(root, config, kinds, notes) {
-  const def = config.defaultBranch;
-  const base = [`origin/${def}`, def].map((ref) => git(root, ["merge-base", "HEAD", ref])?.trim()).find(Boolean);
-  if (!base) {
-    notes.push(`branch question NOT ASKED: no merge base with origin/${def} or ${def}. A clone without that ref cannot say what this branch numbered.`);
-    return [];
-  }
-  const problems = [];
-  for (const k of kinds) {
-    const kind = k.kind;
-    if (kind.folder) {
-      const out = git(root, ["-c", "core.quotePath=false", "diff", "--name-only", "--no-renames", "--diff-filter=A", base, "HEAD", "--", kind.folder]);
-      if (out === null) { notes.push(`branch question NOT ASKED for ${kind.id}: git diff failed.`); continue; }
-      const added = new Set(out.split("\n").map((l) => l.trim()).filter(Boolean));
-      const numberedRe = new RegExp(kind.numberedRegex, "u");
-      for (const name of k.order) {
-        const rel = `${kind.folder}/${name}`;
-        if (!added.has(rel)) continue;
-        const first = h_first(root, rel);
-        const m = numberedRe.exec(first);
-        if (m) problems.push(`${rel} is numbered ${renderId(kind, Number(m[1]))} on a branch. Write ${kind.prefix}-<slug> and let the stamp claim it at merge.`);
-      }
-    } else {
-      const was = git(root, ["show", `${base}:${kind.file}`]) ?? "";
-      const before = numbersIn(kind, was);
-      for (const { n } of k.numbers) {
-        if (!before.has(n)) problems.push(`${kind.file}: ${renderId(kind, n)} is numbered on a branch. Write ${kind.prefix}-<slug> and let the stamp claim it at merge.`);
-      }
+// Every numbered record in this tree, keyed for stamp.mjs's branch question. A folder kind keys
+// a number by its file, since a file keeps its name once numbered. A flat-file kind has no stable
+// per-record key but the number itself, so it keys by the kind and the number. stamp.mjs refuses
+// a removed number, so a swap under the same number can only be an in-place edit.
+export function numberedRecords(root, config, h) {
+  const out = [];
+  for (const kind of config.kinds) {
+    const k = readKind(root, config, kind, h);
+    for (const { n, rel } of k.numbers) {
+      const key = kind.folder ? `${kind.id}\0${rel}\0${n}` : `${kind.id}\0${n}`;
+      out.push({ key, name: kind.folder ? rel : renderId(kind, n), kind: kind.id, n, rel, id: renderId(kind, n), prefix: kind.prefix });
     }
   }
-  return [...new Set(problems)];
+  return out;
 }
-const h_first = (root, rel) => readFileSync(join(root, rel), "utf8").replace(/\r\n/g, "\n").split("\n", 1)[0];
+
+// The paths a base-tree read must hold for readKind to run on it.
+export function recordPaths(config) {
+  return config.kinds.flatMap((kind) => [kind.folder, kind.file, kind.manifest].filter(Boolean));
+}
 
 // On the default branch: a pending record HEAD did not itself add means the stamp did not run,
-// or its push was rejected (claim-ids.py `--landed` asks the same of a landed commit).
+// or its push was rejected.
 function defaultPendingOld(root, kinds, h, notes) {
   const problems = [];
   for (const k of kinds) {
@@ -480,12 +460,13 @@ function defaultPendingOld(root, kinds, h, notes) {
   return problems;
 }
 
-export function check(root, config, h) {
+// Structural refusals always. The default-branch question only when stamp.mjs says HEAD is on
+// the default branch. The off-branch question is stamp.mjs's own, shared by every format.
+export function check(root, config, h, onDefault) {
   const { problems, kinds } = validate(root, config, h);
-  if (!config.defaultBranch) return problems;
+  if (!onDefault) return problems;
   const notes = [];
-  const onDefault = h.currentBranch(root) === config.defaultBranch;
-  problems.push(...(onDefault ? defaultPendingOld(root, kinds, h, notes) : branchNumbered(root, config, kinds, notes)));
+  problems.push(...defaultPendingOld(root, kinds, h, notes));
   for (const n of notes) console.error(`stamp --check: ${n}`);
   return problems;
 }

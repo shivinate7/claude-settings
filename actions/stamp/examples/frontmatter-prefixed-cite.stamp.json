@@ -28,21 +28,20 @@
       "excludeFiles": ["_index.md"]
     },
     {
-      "id": "gap",
-      "folder": "gaps",
-      "prefix": "G",
+      "id": "question",
+      "folder": "questions",
+      "prefix": "Q",
       "pad": 0,
       "idTemplate": "{prefix}{n}",
       "pendingRegex": "^id:[ \\t]*pending[ \\t]*$",
-      "order": "date",
+      "order": "filename",
       "numbering": "lowest_free",
       "slugField": "slug",
-      "dateField": "date",
       "excludeFiles": ["_index.md"]
     }
   ],
   "cite": {
-    "pattern": "\\b([DFG])\u2039([a-z0-9-]+)\u203a",
+    "pattern": "\\b([DFQ])\u2039([a-z0-9-]+)\u203a",
     "prefixGroup": 1,
     "slugGroup": 2,
     "template": "{id}",
