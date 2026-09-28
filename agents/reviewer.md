@@ -20,6 +20,13 @@ verbatim, and the check that proves the task done. Run that check. Trust a guard
 have seen it go red on the defect it guards. A green check proves only its platform and fixture.
 Verify a claim before you rely on it. Never guess an answer the code should give you.
 
+Check for:
+
+- Front-end copy (optional): When a diff changes user-visible text (JSX, HTML, aria-label, title,
+  placeholder, alt, label in .tsx, .jsx, .html, .vue files), flag each unnecessary word or phrase
+  and each phrase replaceable with one word. Give file:line, current text, and shorter text.
+  Judgment, not blocking.
+
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next.
 Under Done, the first line is PASS, FAIL, or PARTIAL. Then list each finding with file, line
 range, what is wrong, and what proves it. Then list the checks run with their outcome. Drop a
