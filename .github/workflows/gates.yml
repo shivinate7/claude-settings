@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "17 3 * * *"
   workflow_dispatch:
     inputs:
       full_ste_audit:
@@ -27,6 +29,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Detect which mutation harnesses this change needs
+        id: scope
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: bash .github/scripts/harness-scope.sh
+
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
@@ -38,12 +49,14 @@ jobs:
         run: python3 hooks/test_guard.py
 
       - name: Guard mutation harness
+        if: ${{ steps.scope.outputs.guard == 'true' }}
         run: python3 hooks/mutate_guard.py
 
       - name: Janitor sweep fixture suite
         run: python3 janitor/test_sweep.py
 
       - name: Janitor sweep mutation harness
+        if: ${{ steps.scope.outputs.sweep == 'true' }}
         run: python3 janitor/mutate_sweep.py
 
       - name: Config watch fixture suite
@@ -154,7 +167,17 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          fetch-depth: 0
           persist-credentials: false
+
+      - name: Detect which mutation harnesses this change needs
+        id: scope
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: bash .github/scripts/harness-scope.sh
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
@@ -165,10 +188,10 @@ jobs:
         run: python3 hooks/test_guard.py
 
       # Same time trade-off gates-windows makes for the same reason: the gates job's own
-      # Guard mutation harness (Linux) still runs on every pull request. Accepted risk: a
+      # Guard mutation harness (Linux) still runs on every pull request that changes guard code. Accepted risk: a
       # macOS-only mutation regression is caught after merge, not before.
       - name: Guard mutation harness
-        if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+        if: ${{ !cancelled() && github.event_name != 'pull_request' && steps.scope.outputs.guard == 'true' }}
         run: python3 hooks/mutate_guard.py
 
       - name: Janitor sweep fixture suite
@@ -176,7 +199,7 @@ jobs:
         run: python3 janitor/test_sweep.py
 
       - name: Janitor sweep mutation harness
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.scope.outputs.sweep == 'true' }}
         run: python3 janitor/mutate_sweep.py
 
       - name: Config watch fixture suite
@@ -250,7 +273,17 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          fetch-depth: 0
           persist-credentials: false
+
+      - name: Detect which mutation harnesses this change needs
+        id: scope
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: bash .github/scripts/harness-scope.sh
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
@@ -321,11 +354,11 @@ jobs:
         run: python hooks/test_guard.py
 
       # 39m12s of this job's 46m50s. The gates job's own Guard mutation harness
-      # (16m47s, Linux) still runs on every pull request and catches almost every
-      # mutation regression, so a pull request keeps that signal. Accepted risk: a
+      # (16m47s, Linux) still runs on every pull request that changes guard code and catches
+      # almost every mutation regression, so such a pull request keeps that signal. Accepted risk: a
       # Windows-only mutation regression is now caught after merge, not before.
       - name: Guard mutation harness
-        if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+        if: ${{ !cancelled() && github.event_name != 'pull_request' && steps.scope.outputs.guard == 'true' }}
         run: python hooks/mutate_guard.py
 
       - name: Janitor sweep fixture suite
@@ -333,7 +366,7 @@ jobs:
         run: python janitor/test_sweep.py
 
       - name: Janitor sweep mutation harness
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.scope.outputs.sweep == 'true' }}
         run: python janitor/mutate_sweep.py
 
       - name: Config watch fixture suite
