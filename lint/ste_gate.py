@@ -116,11 +116,15 @@ def ui_scope_of_change(old_text, new_text, suffix):
     value, a comment line) of `new_text` whose text is not a unit of `old_text`. Code
     lines and old copy the edit did not touch are never in scope. A block-level scope
     does not work here: a component often holds no blank line at all."""
-    old_units = {t for t, _ in ste_lint.ui_units("x" + suffix, old_text)}
+    old = [t for t, _ in ste_lint.ui_units("x" + suffix, old_text)]
+    new = ste_lint.ui_units("x" + suffix, new_text)
+    # Compare by position: a new unit that repeats old text elsewhere is still new.
+    matcher = difflib.SequenceMatcher(None, old, [t for t, _ in new], autojunk=False)
     scope = set()
-    for unit, lines in ste_lint.ui_units("x" + suffix, new_text):
-        if unit not in old_units:
-            scope.update(lines)
+    for tag, _, _, j1, j2 in matcher.get_opcodes():
+        if tag != "equal":
+            for _, lines in new[j1:j2]:
+                scope.update(lines)
     return scope
 
 

@@ -1928,6 +1928,12 @@ class UICopyRoundTwoTests(unittest.TestCase):
 
     # Finding 9 ------------------------------------------------------------------
 
+    def test_120_paren_copy_is_read(self):
+        self.assertEqual(self.check("a.tsx", "const x = <small>(optional) Click on the link in order "
+                                             "to go.</small>;\n"), ["STE011", "STE011"])
+        self.assertEqual(self.check("a.tsx", "const x = <button>(1) Save all of your changes "
+                                             "now</button>;\n"), ["STE020"])
+
     def test_114_many_generics_lint_in_linear_time(self):
         import time
         lines = []
@@ -1967,6 +1973,21 @@ class SteGateUIScopeTests(unittest.TestCase):
 
     def test_116_button_text_edit_to_six_words_denied(self):
         run = self.edit("Save all the open files now", "Save all of the open files now")
+        self.assertIn("STE020", run.stdout)
+
+    def test_118_copy_of_old_long_button_is_in_scope(self):
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(self.COMPONENT.replace("    <button>", "    <p>Bye</p>\n    <button>"))
+        run = self.edit("<p>Bye</p>", "<button>Save all the open files now</button>")
+        self.assertIn("STE020", run.stdout)
+
+    def test_119_gate_reads_repo_label_tags(self):
+        with open(os.path.join(self.tmp.name, ".ste.json"), "w", encoding="utf-8") as f:
+            json.dump({"label_tags": ["button", "Button"]}, f)
+        run = run_gate(STE_GATE, {"hook_event_name": "PreToolUse", "tool_name": "Write",
+                                  "tool_input": {"file_path": os.path.join(self.tmp.name, "B.tsx"),
+                                                 "content": "export const B = () => "
+                                                            "<Button>Save all the open files now</Button>;\n"}})
         self.assertIn("STE020", run.stdout)
 
     def test_117_lint_that_cannot_run_is_reported_unknown(self):

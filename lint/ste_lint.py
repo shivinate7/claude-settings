@@ -1374,8 +1374,7 @@ def _jsx_copy(text: str, copy: _UICopy) -> None:
     generic, a comparison) is backed out, and its text is dropped.
 
     ponytail: a hand-rolled scanner, not a TypeScript parser. Known ceilings:
-    a start tag followed by `(` is read as a generic, so the copy of
-    `<p>(optional)</p>` is not read, a `/` after `)` is read as division, never as a regex, and
+    a tag with an `extends` attribute and no `=` is read as a generic, a `/` after `)` is read as division, never as a regex, and
     an attribute string in braces, `title={"Close"}`, is an expression and is
     not read, a character reference such as `&amp;` stays as written, and JSX
     nested past a few hundred levels hits the Python recursion limit. Swap in
@@ -1487,6 +1486,7 @@ def _jsx_copy(text: str, copy: _UICopy) -> None:
         else:
             m = _NAME.match(text, k + 1)
             name, k = m.group(0), m.end()
+            saw_extends = saw_eq = False
             while True:
                 k = skip_ws(k)
                 if k >= n:
@@ -1497,10 +1497,11 @@ def _jsx_copy(text: str, copy: _UICopy) -> None:
                     return k + 2
                 if text[k] == ">":
                     k += 1
-                    # `<T extends X>(a: T) =>` is a generic, not a tag. Back out
-                    # here, at once: a scan to the end of the file for each
-                    # generic makes the time grow as the square of the size.
-                    if text.startswith("(", skip_ws(k)):
+                    # `<T extends X>` is a generic, not a tag. Back out here, at
+                    # once: a scan to the end of the file for each generic makes
+                    # the time grow as the square of the size. A top-level `,`
+                    # (`<T,>`, `<K, V>`) already fails at the attribute name.
+                    if saw_extends and not saw_eq:
                         raise _NotJSX()
                     break
                 if text[k] == "{":
@@ -1510,8 +1511,10 @@ def _jsx_copy(text: str, copy: _UICopy) -> None:
                 if not m:
                     raise _NotJSX()
                 attr, k = m.group(0), skip_ws(m.end())
+                saw_extends = saw_extends or attr == "extends"
                 if not text.startswith("=", k):
                     continue
+                saw_eq = True
                 k = skip_ws(k + 1)
                 if k < n and text[k] in "\"'":
                     end = text.find(text[k], k + 1)
