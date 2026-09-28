@@ -3045,6 +3045,14 @@ CONFIG_FROZEN_DIRS = (
     # are not covered here and `config_watch.py` reports a lost baseline as unknown, never clear.
     os.path.normcase("state"),
 )
+# skills/ is NOT frozen whole: a person's own skills under ~/.claude/skills stay writable.
+# Only the skills this repo ships are frozen, one name per entry, because a skill's frontmatter
+# `allowed-tools` can grant tools without a prompt, so a session that could edit a landed skill
+# could grant itself tools the same way it could through a rewritten hook. lint/check_landed_dirs.py
+# checks by hand that this set matches the repo's own skills/*/ subdirectories.
+CONFIG_FROZEN_SKILLS = (
+    os.path.normcase("fresh-prose"),
+)
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
 PROJECT_FROZEN_DIR = "/.claude/hooks/"
 
@@ -3091,6 +3099,8 @@ def is_frozen(path: str, cwd: str) -> bool:
     if len(parts) == 1 and parts[0] in CONFIG_FROZEN_FILES:
         return True
     if len(parts) > 1 and parts[0] in CONFIG_FROZEN_DIRS:
+        return True
+    if len(parts) > 1 and parts[0] == os.path.normcase("skills") and parts[1] in CONFIG_FROZEN_SKILLS:
         return True
     return False
 
