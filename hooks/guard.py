@@ -3070,38 +3070,68 @@ def config_dir() -> str:
     )
 
 
-def _resolved(path: str, cwd: str) -> str:
+def _expanded(path: str, cwd: str) -> str:
+    """`~`, env vars, a Git-Bash drive spelling and a relative path resolved against `cwd`. No
+    symlink is followed here, and nothing is realpath'd: see `_resolved` and `_literal_resolved`.
+    """
     target = os.path.expandvars(os.path.expanduser(path.strip("'\"")))
     if re.match(r"^/[a-zA-Z]/", target):  # Git Bash `/c/Users/...` to `C:/Users/...`
         target = target[1].upper() + ":" + target[2:]
     if not os.path.isabs(target) and cwd:
         target = os.path.join(cwd, target)
-    return os.path.normcase(os.path.realpath(target))
+    return target
+
+
+def _resolved(path: str, cwd: str) -> str:
+    return os.path.normcase(os.path.realpath(_expanded(path, cwd)))
+
+
+def _literal_resolved(path: str, cwd: str) -> str:
+    """Same reading as `_resolved`, but stops short of following a symlink: `..`, a trailing
+    slash and case are normalized, the path's own leaf is not.
+
+    `install.sh` lands every frozen file under the config directory as a symlink INTO the clone
+    (`~/.claude/hooks/guard.py -> <clone>/hooks/guard.py`). `_resolved`'s realpath follows that
+    link and reports a path that has already left the config directory, which is the live-path
+    gap `is_frozen` closes by also checking this literal reading.
+    """
+    return os.path.normcase(os.path.normpath(_expanded(path, cwd)))
 
 
 def is_frozen(path: str, cwd: str) -> bool:
     """True when the path is part of the harness configuration under the config directory.
 
-    Paths are compared after normcase and realpath, so a `~`, a forward slash, a backslash and a
-    difference of case all read the same on Windows. A project's own `.claude` files are a
-    separate, unfrozen set: see `is_project_config`.
+    A path is frozen when EITHER its literal spelling (no symlink followed) OR its fully
+    resolved spelling (every symlink followed) sits under the config directory. The literal
+    reading catches the LIVE path itself, which `install.sh` lands as a symlink into the clone:
+    realpath alone follows that link back out and misses it. The resolved reading keeps
+    catching a symlink a session creates ELSEWHERE that points INTO the config directory -- a
+    symlink is a spelling of the file it points at, same as rule 8's alias case. Case and a
+    trailing slash read the same either way, so a `~`, a forward slash and a backslash all
+    still read the same on Windows. A skill under `skills/<name>` freezes the same way: a whole
+    shipped skill directory lands as one directory symlink, so the literal reading is what
+    keeps it frozen too, while a user's own unlisted skill directory stays unfrozen. A
+    project's own `.claude` files are a separate, unfrozen set: see `is_project_config`.
     """
     if not path:
         return False
     try:
-        target = _resolved(path, cwd)
-        root = os.path.normcase(os.path.realpath(config_dir()))
+        literal = _literal_resolved(path, cwd)
+        resolved = _resolved(path, cwd)
+        literal_root = os.path.normcase(os.path.normpath(config_dir()))
+        resolved_root = os.path.normcase(os.path.realpath(config_dir()))
     except Exception:
         return False
-    if not target.startswith(root + os.sep):
-        return False
-    parts = target[len(root) + 1:].split(os.sep)
-    if len(parts) == 1 and parts[0] in CONFIG_FROZEN_FILES:
-        return True
-    if len(parts) > 1 and parts[0] in CONFIG_FROZEN_DIRS:
-        return True
-    if len(parts) > 1 and parts[0] == os.path.normcase("skills") and parts[1] in CONFIG_FROZEN_SKILLS:
-        return True
+    for target, root in ((literal, literal_root), (resolved, resolved_root)):
+        if not target.startswith(root + os.sep):
+            continue
+        parts = target[len(root) + 1:].split(os.sep)
+        if len(parts) == 1 and parts[0] in CONFIG_FROZEN_FILES:
+            return True
+        if len(parts) > 1 and parts[0] in CONFIG_FROZEN_DIRS:
+            return True
+        if len(parts) > 1 and parts[0] == os.path.normcase("skills") and parts[1] in CONFIG_FROZEN_SKILLS:
+            return True
     return False
 
 

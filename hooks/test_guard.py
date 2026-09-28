@@ -2077,6 +2077,68 @@ add("frozen: an ordinary source file", "allow", tool="Edit", cwd=NOGIT, file_pat
 add("frozen: an ordinary project file by absolute path", "allow", tool="Write", cwd=NOGIT,
     file_path=slash(os.path.join(PROJ, "src", "app.py")))
 
+# THE INSTALLED SYMLINK ITSELF STAYS FROZEN. `install.sh` lands every frozen file under the
+# config directory as a real symlink into the clone (`~/.claude/hooks/guard.py -> <clone>/
+# hooks/guard.py`). A realpath-only read follows that link OUT of the config directory and
+# wrongly allows the write; `is_frozen` also checks the literal, un-followed path, which stays
+# under the config directory. Found in passing by a reviewer of PR #158.
+SYMFROZEN = os.path.join(ROOT, "symfrozen")
+SYM_CLONE_HOOK = os.path.join(SYMFROZEN, "clone", "hooks", "guard.py")
+SYM_CFG_HOOK = os.path.join(SYMFROZEN, "cfg", "hooks", "guard.py")
+SYM_CFG_NOTES = slash(os.path.join(SYMFROZEN, "cfg", "notes.md"))
+os.makedirs(os.path.dirname(SYM_CLONE_HOOK), exist_ok=True)
+os.makedirs(os.path.dirname(SYM_CFG_HOOK), exist_ok=True)
+with open(SYM_CLONE_HOOK, "w") as f:
+    f.write("# stand-in guard.py, in the clone\n")
+try:
+    os.symlink(SYM_CLONE_HOOK, SYM_CFG_HOOK)
+    SYM_MADE = True
+except Exception:
+    SYM_MADE = False
+add("frozen: the live path stays frozen even though it is a real symlink into the clone "
+    "[resolve-branch proof]",
+    "deny" if SYM_MADE else "allow", "frozen-path" if SYM_MADE else None,
+    tool="Edit", cwd=NOGIT, config=os.path.join(SYMFROZEN, "cfg"), file_path=slash(SYM_CFG_HOOK),
+    old_string="# stand-in", new_string="# rewritten by a session")
+# THE CLONE PATH BEHIND THAT SYMLINK STAYS EDITABLE (decisions/recovery-must-not-gate-on-its-
+# own-state.md, "the clone is not frozen"): the literal-path check must not freeze the clone
+# just because a symlink elsewhere happens to point at it.
+add("frozen: the clone file the symlink points at is still editable directly",
+    "allow", tool="Edit", cwd=NOGIT, config=os.path.join(SYMFROZEN, "cfg"),
+    file_path=slash(SYM_CLONE_HOOK), old_string="# stand-in", new_string="# rewritten by hand")
+# A USER'S OWN, UNSHIPPED FILE under the config directory is not on CONFIG_FROZEN_FILES or
+# CONFIG_FROZEN_DIRS, so the literal-path check must not freeze the whole config directory.
+add("frozen: a user's own unshipped file under the config directory is allowed",
+    "allow", tool="Edit", cwd=NOGIT, config=os.path.join(SYMFROZEN, "cfg"),
+    file_path=SYM_CFG_NOTES, old_string="a", new_string="b")
+# A SHIPPED SKILL LANDS AS ONE DIRECTORY SYMLINK, not a per-file one: `~/.claude/skills/
+# fresh-prose -> <clone>/skills/fresh-prose`. The same literal-vs-resolved gap applies one
+# level up, at the directory, so the fix must cover it too.
+SYM_CLONE_SKILL_DIR = os.path.join(SYMFROZEN, "clone", "skills", "fresh-prose")
+SYM_CFG_SKILL_DIR = os.path.join(SYMFROZEN, "cfg", "skills", "fresh-prose")
+SYM_CFG_SKILL_MD = os.path.join(SYM_CFG_SKILL_DIR, "SKILL.md")
+SYM_CFG_OWN_SKILL_MD = slash(os.path.join(SYMFROZEN, "cfg", "skills", "my-own", "SKILL.md"))
+os.makedirs(SYM_CLONE_SKILL_DIR, exist_ok=True)
+os.makedirs(os.path.dirname(SYM_CFG_SKILL_DIR), exist_ok=True)
+os.makedirs(os.path.dirname(SYM_CFG_OWN_SKILL_MD), exist_ok=True)
+with open(os.path.join(SYM_CLONE_SKILL_DIR, "SKILL.md"), "w") as f:
+    f.write("# stand-in\n")
+with open(SYM_CFG_OWN_SKILL_MD, "w") as f:
+    f.write("# stand-in\n")
+try:
+    os.symlink(SYM_CLONE_SKILL_DIR, SYM_CFG_SKILL_DIR)
+    SYM_SKILL_MADE = True
+except Exception:
+    SYM_SKILL_MADE = False
+add("frozen: a shipped skill's SKILL.md stays frozen through the directory symlink into the "
+    "clone [resolve-branch proof]",
+    "deny" if SYM_SKILL_MADE else "allow", "frozen-path" if SYM_SKILL_MADE else None,
+    tool="Edit", cwd=NOGIT, config=os.path.join(SYMFROZEN, "cfg"), file_path=slash(SYM_CFG_SKILL_MD),
+    old_string="# stand-in", new_string="# rewritten by a session")
+add("frozen: a user's own, unshipped skill directory is allowed", "allow", tool="Edit",
+    cwd=NOGIT, config=os.path.join(SYMFROZEN, "cfg"), file_path=SYM_CFG_OWN_SKILL_MD,
+    old_string="# stand-in", new_string="# rewritten by hand")
+
 sh("config-edit: a redirect onto a project settings file is allowed",
    "echo '{}' > " + PROJ_SETTINGS, "allow", cwd=NOGIT)
 sh("config-edit: an append onto a project settings file is allowed",
