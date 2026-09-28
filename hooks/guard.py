@@ -3685,8 +3685,15 @@ def judge(payload) -> None:
                 or ""
             )
             if isinstance(write_target, str) and write_target and home_primary:
-                if (path_is_inside(write_target, home_primary) is True
-                        and path_is_inside(write_target, home) is False):
+                # A relative `file_path` resolves against the CALLER's cwd, the payload's own
+                # `cwd`, never the guard process's. `_resolved` (already used by `is_frozen` and
+                # `is_project_config` for the same reason) joins it before either check.
+                try:
+                    resolved_target = _resolved(write_target, cwd)
+                except Exception:
+                    resolved_target = write_target
+                if (path_is_inside(resolved_target, home_primary) is True
+                        and path_is_inside(resolved_target, home) is False):
                     refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON,
                            "write target outside recorded agent home")
 

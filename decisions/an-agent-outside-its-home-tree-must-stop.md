@@ -41,6 +41,11 @@ exists for. `primary_checkout` and `git_common_dir` (refactored out of
 the same `_common_dir` read, so the two never drift apart) are the only
 readers of git state this rule needs. Nothing here copies them.
 
+The write itself is fail-open, the same stance as the read. A record
+write can fail, for example against a read-only `.git`. Every later call
+for that `agent_id` then reads no record. The agent stays unguarded.
+This is the ceiling the fail-open design accepts.
+
 **No record.** A call whose `agent_id` never resolves to a home, and
 whose own `cwd` does not match the worktree shape either, is a
 non-isolated agent. Nothing changes for it: allow.

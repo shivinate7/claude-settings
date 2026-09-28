@@ -777,10 +777,10 @@ MUTATIONS = [
      '            if path_is_inside(cwd, home) is None:',
      "guard", "worktree-home:"),
     ("worktree-home: a write outside the recorded home, inside the clone, is allowed through",
-     '                if (path_is_inside(write_target, home_primary) is True\n'
-     '                        and path_is_inside(write_target, home) is False):',
-     '                if (path_is_inside(write_target, home_primary) is True\n'
-     '                        and path_is_inside(write_target, home) is None):',
+     '                if (path_is_inside(resolved_target, home_primary) is True\n'
+     '                        and path_is_inside(resolved_target, home) is False):',
+     '                if (path_is_inside(resolved_target, home_primary) is True\n'
+     '                        and path_is_inside(resolved_target, home) is None):',
      "guard", "worktree-home:"),
     ("worktree-home: Read is judged the same as a write, so a stranded agent cannot even read",
      '        elif tool in WRITE_TOOLS:\n            write_target = (',
@@ -801,6 +801,15 @@ MUTATIONS = [
      '    if home_status == "no-record":\n'
      '        refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON, "no record")\n'
      '    if home_status == "home":',
+     "guard", "worktree-home:"),
+    ("worktree-home: a relative write target drops the join onto the payload's own cwd",
+     '                try:\n                    resolved_target = _resolved(write_target, cwd)\n'
+     '                except Exception:\n                    resolved_target = write_target\n'
+     '                if (path_is_inside(resolved_target, home_primary) is True\n'
+     '                        and path_is_inside(resolved_target, home) is False):',
+     '                resolved_target = write_target\n'
+     '                if (path_is_inside(resolved_target, home_primary) is True\n'
+     '                        and path_is_inside(resolved_target, home) is False):',
      "guard", "worktree-home:"),
 ]
 

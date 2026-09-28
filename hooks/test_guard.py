@@ -2424,7 +2424,7 @@ def decide(case):
         env["PATH"] = case["env_path"]
     result = subprocess.run(
         [sys.executable, GUARD], input=payload, capture_output=True, text=True, env=env,
-        timeout=120,
+        timeout=120, cwd=case.get("process_cwd") or None,
     )
     if result.returncode != 0:
         return "error", "exit %d: %s" % (result.returncode, result.stderr.strip()[:200])
@@ -3330,11 +3330,17 @@ def session_is_live_backwards_clock_step_case():
     return (not problems), "; ".join(problems) if problems else "backwards-step direction reads unreadable"
 
 
-def _decide_full(tool, cwd, agent_id=None, **tool_input):
-    """`decide`, but for a hand-built payload naming every key `decide` reads by index."""
+def _decide_full(tool, cwd, agent_id=None, process_cwd=None, **tool_input):
+    """`decide`, but for a hand-built payload naming every key `decide` reads by index.
+
+    `process_cwd` sets the GUARD PROCESS's own cwd, distinct from the payload `cwd` above: a
+    relative `file_path` must resolve against the payload `cwd`, never against wherever the
+    guard subprocess happens to run from.
+    """
     return decide({
         "raw": None, "tool": tool, "cwd": cwd, "session": None, "env_path": None,
-        "config": None, "agent_id": agent_id, "tool_input": tool_input,
+        "config": None, "agent_id": agent_id, "process_cwd": process_cwd,
+        "tool_input": tool_input,
     })
 
 
@@ -3361,8 +3367,9 @@ def worktree_home_case():
 
     problems = []
 
-    def check(label, expect, tool, cwd, agent=None, **tool_input):
-        got, reason = _decide_full(tool, cwd, agent_id=agent, **tool_input)
+    def check(label, expect, tool, cwd, agent=None, process_cwd=None, **tool_input):
+        got, reason = _decide_full(tool, cwd, agent_id=agent, process_cwd=process_cwd,
+                                    **tool_input)
         if got != expect:
             problems.append("%s: expected %s, got %s (%s)" % (label, expect, got, reason[:120]))
 
@@ -3394,6 +3401,15 @@ def worktree_home_case():
     # Read outside home: always allowed, so a stranded agent can still read and report.
     check("read outside home", "allow", "Read", primary, agent=agent_id,
           file_path=inside_clone_outside_home)
+
+    # A RELATIVE file_path must resolve against the PAYLOAD's own cwd (the worktree), never
+    # against wherever the guard PROCESS happens to run from. Run the guard from the primary
+    # checkout while the payload's own cwd is the worktree: the target is inside home either
+    # way it resolves, so it must allow. Before the fix, the process cwd won the join, and
+    # "src/app.py" read as primary/src/app.py: inside the clone, outside home, wrongly denied.
+    check("relative edit target resolves against payload cwd, not process cwd", "allow",
+          "Edit", worktree, agent=agent_id, process_cwd=primary,
+          file_path="src/app.py", old_string="a", new_string="b")
 
     # The harness removes the worktree folder AND its branch together. The record must survive
     # in the clone's common git directory: a later call from the primary checkout still refuses.
