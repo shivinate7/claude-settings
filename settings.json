@@ -1,39 +1,16 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "enabledPlugins": {
-    "ponytail@ponytail": true
-  },
-  "extraKnownMarketplaces": {
-    "compass-claude-plugins": {
-      "source": {
-        "source": "git",
-        "url": "https://github.com/ssemwal-cdc/claude-sharables.git"
-      }
-    },
-    "ponytail": {
-      "source": {
-        "source": "github",
-        "repo": "DietrichGebert/ponytail"
-      }
-    }
-  },
-  "autoUpdatesChannel": "latest",
-  "tui": "fullscreen",
-  "theme": "dark",
-  "agentPushNotifEnabled": true,
-  "inputNeededNotifEnabled": true,
-  "skipWorkflowUsageWarning": true,
-  "outputStyle": "Concise",
   "env": {
     "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
     "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "1"
   },
-  "worktree": {
-    "baseRef": "head"
-  },
   "permissions": {
-    "allow": ["Bash(gh pr merge:*)"],
-    "deny": ["Monitor"]
+    "allow": [
+      "Bash(gh pr merge:*)"
+    ],
+    "deny": [
+      "Monitor"
+    ]
   },
   "hooks": {
     "Stop": [
@@ -170,5 +147,32 @@
         ]
       }
     ]
-  }
+  },
+  "worktree": {
+    "baseRef": "head"
+  },
+  "enabledPlugins": {
+    "ponytail@ponytail": true
+  },
+  "extraKnownMarketplaces": {
+    "compass-claude-plugins": {
+      "source": {
+        "source": "git",
+        "url": "https://github.com/ssemwal-cdc/claude-sharables.git"
+      }
+    },
+    "ponytail": {
+      "source": {
+        "source": "github",
+        "repo": "DietrichGebert/ponytail"
+      }
+    }
+  },
+  "outputStyle": "Concise",
+  "autoUpdatesChannel": "latest",
+  "tui": "fullscreen",
+  "skipWorkflowUsageWarning": true,
+  "theme": "dark",
+  "inputNeededNotifEnabled": true,
+  "agentPushNotifEnabled": true
 }
