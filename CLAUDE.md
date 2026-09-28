@@ -66,9 +66,9 @@ and the states its fixtures build.<!-- rule:verification-green-proves-only-its-f
 on the state it recovers, or it fails on the one day it is needed.<!-- rule:verification-recovery-not-gated-on-own-state --> Verify long work against the repo, not your status line.<!-- rule:verification-verify-against-repo --> Never write
 a waiter loop.<!-- rule:verification-never-waiter-loop --> Never dry-run a block-list.<!-- rule:verification-never-dry-run-blocklist --> Bump a dependency to the first version
 fixing the problem, never the latest.<!-- rule:verification-bump-first-fix-version --> If this repo lints markdown, give every
-published number and path a checked reader.<!-- rule:verification-checked-reader-for-numbers --> Verify a claim before you rely on it,
-a document's own claim about a defect, a fix, or a schedule included. Report a read
-that could not run as unknown, never as clear or broken.<!-- rule:verification-report-unknown-reads -->
+published number and path a checked reader.<!-- rule:verification-checked-reader-for-numbers --> Verify a claim before you
+rely on it, a document's own claims too. Report a read that could not run as unknown,
+never as clear or broken.<!-- rule:verification-report-unknown-reads -->
 
 **Tokens.** Never load a long document whole. Read one entry, one section, or a
 rendered view.<!-- rule:tokens-never-load-whole-doc --> A verification command's answer is its verdict, not its stream. Get the
