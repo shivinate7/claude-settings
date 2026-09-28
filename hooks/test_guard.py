@@ -1980,6 +1980,22 @@ for example in (
 ):
     sh("env: the example file is documentation, " + example[:34], example, "allow", cwd=NOGIT)
 
+# The name as TEXT written to a file that is not an environment file, and git check-ignore.
+for text in (
+    "printf '" + ENV + "' > .worktreeinclude",
+    "printf '" + ENV + "\\n' > .worktreeinclude && " + VCS + " add .worktreeinclude",
+    "echo " + ENV + " > .worktreeinclude", "echo " + ENV + " >> .gitignore",
+    VCS + " check-ignore -q " + ENV,
+):
+    sh("env: the name as data, " + text[:40], text, "allow", cwd=NOGIT)
+add("env: Write of .worktreeinclude", "allow", tool="Write", cwd=NOGIT,
+    file_path=slash(os.path.join(PROJ, ".worktreeinclude")))
+for held in (
+    "cat " + ENV + " > .worktreeinclude", "cp " + ENV + " x", VCS + " add " + ENV,
+    "echo x > " + ENV, "echo " + ENV + " > " + ENV, "echo " + ENV + " | tee " + ENV,
+):
+    sh("env: the data allowance does not leak, " + held[:34], held, "deny", "env-file", cwd=NOGIT)
+
 sh("env: PowerShell Get-Content", "Get-Content " + ENV, "deny", "env-file", tool="PowerShell",
    cwd=NOGIT)
 sh("env: PowerShell alias and a dot-slash path", "gc .\\" + ENV, "deny", "env-file",

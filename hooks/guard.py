@@ -2807,6 +2807,11 @@ ENV_LOADER_FLAGS = ("--env-file", "--env-file-if-exists")
 # Commands that ask whether the file is THERE. They read no contents.
 ENV_EXISTENCE_COMMANDS = ("ls", "test", "[")
 
+# Commands that only print their own arguments. With a redirect onto a file that is NOT an
+# environment file, an env name among the arguments is TEXT (`echo <name> > .worktreeinclude`),
+# and no environment file is read or written. `cat <name> > x` is not on the list, so it stays held.
+ENV_TEXT_COMMANDS = ("echo", "printf")
+
 ENV_ADVICE = (
     "Remedy: ask the user for the value and never read the file. "
     "To RUN something that needs those variables, hand the file to the runner with the "
@@ -2916,6 +2921,14 @@ def env_refusal(cmd: str):
                 position += 1
             head = words[position] if position < len(words) else ""
             command = head.strip("'\"").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+            # `git check-ignore <path>` asks git whether a path is ignored. It reads no contents.
+            rest_words = [w for w in words[position + 1:] if not w.startswith("-")]
+            names_only = command == "git" and rest_words[:1] == ["check-ignore"]
+            # A redirect onto a file that is not an environment file makes a text command's
+            # arguments data. A redirect onto an environment file is refused below, first.
+            text_to_file = command in ENV_TEXT_COMMANDS and any(
+                REDIRECT.fullmatch(words[i - 1]) and not env_reference(w)
+                for i, w in enumerate(words) if i)
             for index, word in enumerate(words):
                 prefix, assigned, rest = word.partition("=")
                 flag = prefix if assigned and prefix.startswith("-") else ""
@@ -2940,6 +2953,8 @@ def env_refusal(cmd: str):
                     return (ENV_RUNNER_REASON,
                             "only a runner may be handed '%s' with %s, and '%s' is not one" % (
                                 named, flag or previous, command))
+                if names_only or text_to_file:
+                    continue  # the name is data, and no contents are read or written
                 if command in ENV_EXISTENCE_COMMANDS:
                     continue  # asking whether the file is there reads none of it
                 actor = "'%s'" % command if command else "this command"
