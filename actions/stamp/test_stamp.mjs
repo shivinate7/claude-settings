@@ -633,6 +633,25 @@ test("heading --check refuses a branch number that main took after the cut", () 
     assert.equal(problems.some((p) => p.includes("C2") && p.includes("on a branch")), true);
   }));
 
+test("--check passes a branch when main numbered a record after the cut", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    write(root, "docs/decisions/D001-one.md", "---\nid: D-001\nslug: one\ntitle: One\ndate: 2026-01-01\n---\n\nBody.\n");
+    commit(root, "main, at the cut");
+    git(root, "checkout", "-q", "-b", "wt/lane");
+    write(root, "docs/decisions/pending.md", "---\nid: pending\nslug: pending\ntitle: Pending\ndate: 2026-01-02\n---\n\nBody.\n");
+    commit(root, "the branch adds a pending record");
+    // main moves: it takes D-005 after the cut. Measured against main's TIP, D-005 would read
+    // as "already there" and hide the defect that the branch read the tip instead of the merge base.
+    git(root, "checkout", "-q", "main");
+    write(root, "docs/decisions/D005-five.md", "---\nid: D-005\nslug: five\ntitle: Five\ndate: 2026-01-05\n---\n\nBody.\n");
+    commit(root, "main takes D-005");
+    git(root, "checkout", "-q", "wt/lane");
+
+    const problems = check(root, frontmatterConfig(), LOCAL);
+    assert.deepEqual(problems, []);
+  }));
+
 test("heading: a rename onto a file that already exists is refused and nothing is written", () =>
   withTempDir((root) => {
     write(root, "docs/decisions/ORDER.json", manifestText(["_preamble.md", "D001-one.md"]));

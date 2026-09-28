@@ -242,11 +242,12 @@ test_check_mode_passes_pending_on_feature_branch() {
   before_head="$(git -C "$local_dir" rev-parse HEAD)"
   remote_before="$(git -C "$remote" rev-parse main)"
 
-  run_check "$local_dir" || { echo "  expected exit 0"; cat "$WORK/check.log"; return 1; }
+  GITHUB_ACTIONS=true run_check "$local_dir" || { echo "  expected exit 0"; cat "$WORK/check.log"; return 1; }
   [ "$(git -C "$local_dir" rev-parse HEAD)" = "$before_head" ] || { echo "  check mode made a commit"; return 1; }
   [ "$(git -C "$remote" rev-parse main)" = "$remote_before" ] || { echo "  check mode pushed"; return 1; }
   git -C "$local_dir" diff --quiet || { echo "  check mode wrote the tree"; return 1; }
   grep -q "id: pending" "$local_dir/docs/decisions/second.md" || { echo "  check mode stamped"; return 1; }
+  grep -q "UNKNOWN:" "$WORK/check.log" && { echo "  output should not contain UNKNOWN:"; cat "$WORK/check.log"; return 1; }
   return 0
 }
 
