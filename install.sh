@@ -267,7 +267,11 @@ land_skills_dir() {
     name=$(basename "$d")
     DEST="$DEST_DIR/$name"
     if [ "$CLOUD" = 1 ]; then
-      rm -rf "$DEST"
+      if [ -e "$DEST" ]; then
+        BAK="$DEST.bak.$(date +%Y%m%d%H%M%S)"
+        mv "$DEST" "$BAK"
+        log "existing $DEST moved to $BAK"
+      fi
       cp -r "$d" "$DEST"
     else
       if [ -L "$DEST" ] && [ "$(readlink "$DEST")" = "$d" ]; then LANDED="$LANDED $name"; continue; fi

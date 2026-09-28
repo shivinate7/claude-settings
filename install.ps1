@@ -84,7 +84,12 @@ while IFS= read -r sub || [ -n "`$sub" ]; do
     for d in "`$repo/`$sub"/*; do
       [ -d "`$d" ] || continue
       dest="`$cfg/`$sub/`$(basename "`$d")"
-      [ -L "`$dest" ] || { rm -rf "`$dest" && cp -r "`$d" "`$dest" && echo "claude-settings: refreshed `$dest"; }
+      if [ -L "`$dest" ]; then continue; fi
+      if [ -e "`$dest" ]; then
+        bak="`$dest.bak.`$(date +%Y%m%d%H%M%S)"
+        mv "`$dest" "`$bak" && echo "claude-settings: existing `$dest moved to `$bak"
+      fi
+      cp -r "`$d" "`$dest" && echo "claude-settings: refreshed `$dest"
     done
     continue
   fi

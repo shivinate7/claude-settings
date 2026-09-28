@@ -1056,6 +1056,42 @@ skills_case1() {
   rm -rf "$h"
 }
 
+# ---- skills case, cloud mode: an existing real directory is backed up, never rm -rf'd ------
+skills_case2() {
+  name="skills2: cloud mode backs up a pre-existing real skill directory before overwriting it"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/skills2-checkout"
+  make_checkout "$co" "# skills2 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  mkdir -p "$co/skills/fresh-prose"
+  printf 'new content\n' > "$co/skills/fresh-prose/SKILL.md"
+  mkdir -p "$cfg/skills/fresh-prose"
+  printf 'old content a person may have edited\n' > "$cfg/skills/fresh-prose/SKILL.md"
+  mkdir -p "$cfg/skills/my-own"
+  printf 'a person wrote this skill by hand\n' > "$cfg/skills/my-own/SKILL.md"
+
+  out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+        bash ./install.sh --cloud 2>&1); rc=$?
+  bak=$(ls -d "$cfg/skills/"fresh-prose.bak.* 2>/dev/null | head -n1)
+  own_content=$(cat "$cfg/skills/my-own/SKILL.md" 2>/dev/null)
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ -z "$bak" ]; then
+    bad "$name" "no fresh-prose.bak.* directory was created; the old content was dropped"
+  elif [ "$(cat "$bak/SKILL.md" 2>/dev/null)" != "old content a person may have edited" ]; then
+    bad "$name" "backed-up directory does not hold the pre-existing content"
+  elif [ "$(cat "$cfg/skills/fresh-prose/SKILL.md" 2>/dev/null)" != "new content" ]; then
+    bad "$name" "fresh-prose was not refreshed with the new content"
+  elif [ ! -f "$cfg/skills/my-own/SKILL.md" ]; then
+    bad "$name" "my-own (not shipped by this repo) was removed"
+  elif [ "$own_content" != "a person wrote this skill by hand" ]; then
+    bad "$name" "my-own/SKILL.md content changed: $own_content"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
 caseF5() {
   name="caseF5: outside a git tree with no pointer file, stays fully silent, exit 0"
   outside="$work/caseF5-not-a-repo"; cfg="$work/caseF5-cfg"
@@ -1102,6 +1138,7 @@ prune_case4
 prune_case5
 prune_case6
 skills_case1
+skills_case2
 caseF1
 caseF2
 caseF3
