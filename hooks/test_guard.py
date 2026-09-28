@@ -3424,6 +3424,51 @@ def worktree_home_case():
     return True, "orchestrator, no-record, home, outside-home, removed-home, unreadable all correct"
 
 
+def clone_symlink_frozen_path_case():
+    """A live config path that is a REAL symlink into the clone must still be frozen.
+
+    Found in passing by a reviewer of PR #158, pre-existing there. `install.sh` lands every
+    hook, lint script and agent file as a symlink from the config dir into the clone (for
+    example `~/.claude/hooks/guard.py -> <clone>/hooks/guard.py`). `is_frozen`'s `_resolved`
+    calls `os.path.realpath`, which follows that link INTO the clone, so the resolved path no
+    longer starts with the config dir and `is_frozen` answers False. An Edit through the live
+    symlinked path is then allowed, not refused. The fixtures elsewhere in this file use plain
+    files, never a real symlink, so none of them catch this.
+
+    XFAIL: this must not be fixed as a side effect of this task, so a correct "deny" stays a
+    FAILURE here (the canary that says "go update this case") and the current, wrong "allow"
+    is the case's OWN passing condition, printed as an explicit XFAIL rather than a silent
+    skip.
+    """
+    root = tempfile.mkdtemp(prefix="guard_clone_symlink_")
+    clone_hooks = os.path.join(root, "clone", "hooks")
+    cfg_hooks = os.path.join(root, "cfg", "hooks")
+    os.makedirs(clone_hooks, exist_ok=True)
+    os.makedirs(cfg_hooks, exist_ok=True)
+    clone_guard = os.path.join(clone_hooks, "guard.py")
+    with open(clone_guard, "w") as f:
+        f.write("# stand-in guard.py, in the clone\n")
+    live_guard = os.path.join(cfg_hooks, "guard.py")
+    try:
+        os.symlink(clone_guard, live_guard)
+    except Exception as exc:
+        shutil.rmtree(root, ignore_errors=True)
+        return True, "skipped: cannot create a real symlink on this account/platform (%s)" % exc
+    case = {
+        "raw": None, "tool": "Edit", "cwd": NOGIT, "session": None, "agent_id": None,
+        "env_path": None, "config": os.path.join(root, "cfg"),
+        "tool_input": {"file_path": slash(live_guard), "old_string": "# stand-in",
+                        "new_string": "# rewritten by a session"},
+    }
+    got, _reason = decide(case)
+    shutil.rmtree(root, ignore_errors=True)
+    if got == "deny":
+        return False, ("guard now denies this: the clone-symlink frozen-path bug looks fixed, "
+                        "replace this XFAIL with a real 'deny' assertion")
+    return True, ("XFAIL clone-symlink-live-path (PR #158 review finding): got %r, want deny "
+                  "-- realpath follows the install symlink into the clone" % got)
+
+
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
 # literal count drifts the moment a case is added, and a suite that miscounts its own cases is a
 # suite a reader stops trusting.
@@ -3459,9 +3504,17 @@ LOG_CHECKS = (
      "unreadable", worktree_home_case),
 )
 
+# Known, named failures: NOT fixed here on purpose, kept green by asserting the wrong-but-
+# current behaviour rather than by silently skipping. Each one flips to a real assertion (and
+# moves out of this list) once its bug is actually fixed.
+XFAIL_CHECKS = (
+    ("xfail: a live path that is a real symlink into the clone stays frozen",
+     clone_symlink_frozen_path_case),
+)
+
 
 def main():
-    total = len(CASES) + len(LOG_CHECKS)
+    total = len(CASES) + len(LOG_CHECKS) + len(XFAIL_CHECKS)
     print("guard cases, %d in all" % total)
     print("fixtures under " + ROOT)
     print()
@@ -3491,6 +3544,11 @@ def main():
         failed += 0 if ok else 1
         print("%s  %-6s(want %-6s)  [%-11s] %s  (%s)" % (
             "PASS" if ok else "FAIL", "logged" if ok else "wrong", "logged", "Bash", label, note))
+    for label, checker in XFAIL_CHECKS:
+        ok, note = checker()
+        failed += 0 if ok else 1
+        print("%s  %-6s(want %-6s)  [%-11s] %s  (%s)" % (
+            "PASS" if ok else "FAIL", "xfail" if ok else "fixed?", "xfail", "Edit", label, note))
     print()
     shutil.rmtree(ROOT, ignore_errors=True)
     if failed:
