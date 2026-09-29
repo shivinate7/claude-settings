@@ -2014,6 +2014,50 @@ for held in (
 ):
     sh("env: a message allowance does not leak, " + held[:34], held, "deny", "env-file", cwd=NOGIT)
 
+# The contents of a command substitution or a process substitution are judged as commands, at any
+# depth, and a `<` redirect from the file is a read. A word such as `.env)` hides no name.
+for held in (
+    "echo $(cat " + ENV + ") > notes", "echo `cat " + ENV + "` > n",
+    'printf "%s" "$(< ' + ENV + ')" > x', "echo $(<" + ENV + ") > n",
+    VCS + " check-ignore $(cat " + ENV + ")", 'echo "$(base64 ' + ENV + ')" > n',
+    VCS + ' commit -m "$(cat ' + ENV + ')"', 'gh pr create --body "$(cat ' + ENV + ')"',
+    VCS + " commit -m \"$(printf '%s' \"$(cat " + ENV + ")\")\"",
+    "diff <(cat " + ENV + ") x", "cat < " + ENV, "cat $(echo $(cat " + ENV + "))",
+    "cat $(printf " + ENV + ")", "(cat " + ENV + ")",
+):
+    sh("env: a substitution is judged, " + held[:40], held, "deny", "env-file", cwd=NOGIT)
+for text in (
+    "printf '" + ENV + "\\n' > .worktreeinclude", VCS + ' commit -m "Copy ' + ENV + ' into worktrees"',
+    'gh pr create --body "Adds ' + ENV + '"', VCS + " check-ignore -q " + ENV,
+    VCS + " commit -m \"$(printf 'text with " + ENV + "')\"",
+):
+    sh("env: a substitution allowance, " + text[:40], text, "allow", cwd=NOGIT)
+
+# Words are normalized before the name match, a glob that could match a name is a name for a reader,
+# an unquoted heredoc body is judged for its substitutions, and a deep nest is refused, not skipped.
+for held in (
+    'cat .e""nv', "cat '.e'nv", "cat .e\\nv", "cat .en?", "cat .env*", "cat .e[n]v",
+    "cat .env.l*", "cat .env.s*", "cat .env.st*", "cat .env.bak*", "echo x > ./.en?", "ls <(cat " + ENV + ")", "ls `cat " + ENV + "`",
+    "ls $(cat " + ENV + ")", 'cat sub/.e""nv',
+    "cat <<EOF\n$(cat " + ENV + ")\nEOF", "cat <<EOF\n`cat " + ENV + "`\nEOF",
+    "cat <<EOF\n$(x <(cat " + ENV + "))\nEOF", "cat <<-EOF\n\t$(cat " + ENV + ")\n\tEOF",
+    "echo " + "$(" * 1200 + "cat " + ENV + ")" * 1200,
+    "echo " + "$(" * 70 + "date" + ")" * 70,
+):
+    sh("env: normalized, glob, heredoc or depth, " + held[:36].replace("\n", " "), held, "deny",
+       "env-file", cwd=NOGIT)
+for text in (
+    "ls " + ENV + "*", "ls .e?v", "test -f .e[n]v", "echo $(date) > log",
+    VCS + ' commit -m "$(' + VCS + ' log -1 --format=%s)"', 'cd "$(' + VCS + ' rev-parse --show-toplevel)"',
+    "cat <<'EOF'\n$(cat " + ENV + ")\nEOF",
+    VCS + " commit -F - <<EOF\nCopy " + ENV + " into worktrees\nEOF",
+    VCS + " commit -m \"$(cat <<'EOF'\nCopy " + ENV + " into worktrees\nEOF\n)\"",
+    VCS + " commit -m \"$(cat <<EOF\nCopy " + ENV + " into worktrees\nEOF\n)\"",
+    "grep 'process\\." + ENV[1:] + "' src/x.js", "cat " + ENV + ".example*",
+    "echo " + "$(" * 40 + "date" + ")" * 40 + " > log",
+):
+    sh("env: a normalized allowance, " + text[:36].replace("\n", " "), text, "allow", cwd=NOGIT)
+
 sh("env: PowerShell Get-Content", "Get-Content " + ENV, "deny", "env-file", tool="PowerShell",
    cwd=NOGIT)
 sh("env: PowerShell alias and a dot-slash path", "gc .\\" + ENV, "deny", "env-file",
