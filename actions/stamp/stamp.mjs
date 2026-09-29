@@ -150,6 +150,26 @@ function listRecordFiles(root, kind) {
   return readdirSync(dir).filter((n) => re.test(n) && !exclude(n)).sort().map((n) => `${kind.folder}/${n}`);
 }
 
+// The retired-numbers list: one file, RETIRED, in the kind's folder. One line per number: the id
+// as the kind renders it, then optionally its last title. A blank line is skipped. Any other line
+// that does not start with a rendered id is malformed. A retired number is taken forever.
+export const RETIRED_FILE = "RETIRED";
+function retiredNumbers(root, kind) {
+  const nums = new Set();
+  const bad = [];
+  const abs = join(root, kind.folder, RETIRED_FILE);
+  if (!existsSync(abs)) return { nums, bad };
+  const pattern = templateToPattern(kind.idTemplate, kind);
+  for (const [i, raw] of readFileEol(abs).text.split("\n").entries()) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = pattern.exec(line.split(/\s+/)[0]);
+    if (m) nums.add(Number(m[1]));
+    else bad.push(`${kind.folder}/${RETIRED_FILE} line ${i + 1} does not start with an id like ${renderId(kind, 1)}`);
+  }
+  return { nums, bad };
+}
+
 function fieldRegex(field) {
   return new RegExp(`^${field}:[ \\t]*(.*)$`, "m");
 }
@@ -290,7 +310,7 @@ function orderPending(root, kind, pending) {
 
 // ---------------------------------------------------------------- one kind, numbered
 function stampKind(root, kind, records) {
-  const takenNumbers = records.flatMap((r) => r.numbers);
+  const takenNumbers = [...records.flatMap((r) => r.numbers), ...retiredNumbers(root, kind).nums];
   const pending = orderPending(root, kind, records.filter((r) => r.pending));
   const taken = new Set(takenNumbers);
 
@@ -443,6 +463,16 @@ function validate(root, config) {
     }
   }
 
+  for (const kind of config.kinds) {
+    const { nums, bad } = retiredNumbers(root, kind);
+    problems.push(...bad);
+    for (const rec of byKind.get(kind)) {
+      for (const n of rec.numbers) {
+        if (nums.has(n)) problems.push(`${renderId(kind, n)} is in ${kind.folder}/${RETIRED_FILE} and ${rec.rel} still holds it. Remove one of them.`);
+      }
+    }
+  }
+
   if (config.cite) {
     const pattern = new RegExp(config.cite.pattern, "g");
     const scan = makeMatcher(config.cite.scanGlobs ?? ["**/*.md"]);
@@ -564,8 +594,9 @@ const recordPaths = (config) =>
 //     same key, in the base tree. A new record with a number fails, and so does a record that was
 //     pending on the base and has a number now. A record whose number the base holds under
 //     another key was renamed, and gets its own message.
-//   - every number the base tree holds, per kind, must still be held by a record of this tree.
-//     Numbers are permanent. A record is retired through its own status, never by deletion. This
+//   - every number the base tree holds, per kind, must still be held by a record of this tree, or
+//     be named in this tree's RETIRED list. Numbers are permanent. The list is append-only: a
+//     number the base list names stays named. The allocator never hands out a listed number. This
 //     also closes a same-number swap in a kind keyed by its number alone: the swap can only be an
 //     in-place edit now.
 // The base tree is the merge base of HEAD and the base ref, never the ref's tip: the tip may have
@@ -611,10 +642,23 @@ function branchNumbered(root, config, opts) {
           `Write the pending marker and let the stamp claim the number at merge.`);
       }
     }
+    // A retired-numbers list exists for the frontmatter shapes only. The heading shape reads none.
+    const listed = (dir_, kind) => (config.format === "heading" ? new Set() : retiredNumbers(dir_, kind).nums);
+    const retiredNow = new Set();
+    for (const kind of config.kinds) for (const n of listed(root, kind)) retiredNow.add(`${kind.id}\0${n}`);
     for (const r of before) {
-      if (!held.has(numberOf(r))) {
+      if (!held.has(numberOf(r)) && !retiredNow.has(numberOf(r))) {
         problems.push(`${r.id} (${r.rel} in ${ref}) is removed on a branch, and no record of this tree holds it. ` +
-          `Numbers are permanent. Retire a record through its own status, never by deletion.`);
+          `Numbers are permanent. ` + (config.format === "heading"
+            ? `The heading format has no retired list. Restore the record.`
+            : `To delete a record, list its number in its folder's ${RETIRED_FILE} file.`));
+      }
+    }
+    for (const kind of config.kinds) {
+      for (const n of listed(dir, kind)) {
+        if (!retiredNow.has(`${kind.id}\0${n}`)) {
+          problems.push(`${renderId(kind, n)} is removed from ${kind.folder}/${RETIRED_FILE} on a branch. The list is append-only. Restore the line.`);
+        }
       }
     }
     return { problems: [...new Set(problems)], unknown: null };
