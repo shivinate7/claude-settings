@@ -80,6 +80,9 @@ jobs:
       - name: Rule mechanization audit
         run: python3 lint/rule_audit.py
 
+      - name: Record slug length
+        run: python3 lint/check_record_slugs.py
+
       - name: Shell syntax check, install.sh
         run: bash -n install.sh
 
@@ -232,6 +235,10 @@ jobs:
       - name: Rule mechanization audit
         if: ${{ !cancelled() }}
         run: python3 lint/rule_audit.py
+
+      - name: Record slug length
+        if: ${{ !cancelled() }}
+        run: python3 lint/check_record_slugs.py
 
       - name: Unknown-read contract (guard + session_start)
         if: ${{ !cancelled() }}
@@ -399,6 +406,10 @@ jobs:
       - name: Rule mechanization audit
         if: ${{ !cancelled() }}
         run: python lint/rule_audit.py
+
+      - name: Record slug length
+        if: ${{ !cancelled() }}
+        run: python lint/check_record_slugs.py
 
       - name: Unknown-read contract (guard + session_start)
         if: ${{ !cancelled() }}

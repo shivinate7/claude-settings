@@ -51,8 +51,8 @@ incident.<!-- rule:shared-trees-reverify-after-incident --> On first use, instal
 when I name the act, or under a repo grant.<!-- rule:git-main-only-by-pr --> Wait for required checks after every push.<!-- rule:git-wait-for-required-checks -->
 Never merge failing CI.<!-- rule:git-never-merge-failing-ci --> Never discard a command's output.<!-- rule:git-never-discard-output --> A refusal's printed remedy
 never names the forbidden target.<!-- rule:git-remedy-never-names-target --> Never allocate a numbered record on a branch.
-Write a slug. Claim the number at merge.<!-- rule:git-slug-then-claim-number --> Cite by id, never by path.<!-- rule:git-cite-by-id --> Give each record its
-own file, one folder per kind.<!-- rule:git-record-own-file-per-kind --> Merge PRs that are green together into one integration branch. Keep
+Write a slug of 32 characters or fewer. Claim the number at merge.<!-- rule:git-slug-then-claim-number --> Cite by id, never by path.<!-- rule:git-cite-by-id --> Give each record its
+own file, one folder per kind.<!-- rule:git-record-own-file-per-kind --> One entry per question. When its ruling changes, rewrite the entry in place. Open an entry only for a new question.<!-- rule:git-one-entry-per-question --> Merge PRs that are green together into one integration branch. Keep
 each PR's own commit. Close the originals as superseded once the integration branch merges.<!-- rule:git-integration-branch-merge -->
 
 **Verification.** If the repo has screens, check each screen at every size and theme it
@@ -82,7 +82,7 @@ each capability one home, and call it from everywhere. Extend that home before y
 build a second. A duplicate needs a stated reason.<!-- rule:building-one-home-per-capability --> A gate's allow list must point at the constant
 the code emits, never a copy of it.<!-- rule:building-allow-list-is-the-constant --> Fix the cause, not the symptom.<!-- rule:building-fix-cause-not-symptom --> Name a
 fix as a bandaid when a bandaid is the right call.<!-- rule:building-name-bandaid --> A capability no user can reach is not built. A design living
-only in chat is not done. Land the design in a spec or decision entry now, or declare
+only in chat is not done. Land the design in its spec or decision entry now, or declare
 the design abandoned.<!-- rule:building-land-design-or-abandon --> A memory entry may point to a ruling. It is never the ruling's only home.<!-- rule:building-memory-never-only-home -->
 
 **Speak plainly.** Cite a record by id plus a short gloss, like "D12, short titles for
@@ -94,7 +94,7 @@ the history.<!-- rule:speak-rewrite-superseded-in-place -->
 unless told otherwise.<!-- rule:output-write-in-ste --> Rules for replies to me, and not to
 agents, live in the `shiv-stylisms` output style.
 Never paste a passing run's output into a report. Give the verdict.<!-- rule:output-never-paste-passing-output -->
-Bring my decisions as a question with options and a recommendation.<!-- rule:output-bring-decisions-as-question --> An answer to a question I bring is a ruling. The report may hold it as a scratch note. Move it to its real home, a decision entry or a deferred item. Cite that home before the work it governs merges. Mark a process answer process-only.<!-- rule:output-answer-has-a-home -->
+Bring my decisions as a question with options and a recommendation.<!-- rule:output-bring-decisions-as-question --> An answer to a question I bring is a ruling. The report may hold it as a scratch note. Move it to its question's entry, or to a deferred item. Cite that home before the work it governs merges. Mark a process answer process-only.<!-- rule:output-answer-has-a-home -->
 
 **Reports, in order:** Done, Deviations, Input Needed, Next.<!-- rule:reports-order-of-labels --> Done: one line per item, BUILT,
 RECORDED, or OTHER, with its PR or commit.<!-- rule:reports-done-format --> One item inline, several as bullets.<!-- rule:reports-item-count-format --> Drop a label

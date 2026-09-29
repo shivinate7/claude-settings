@@ -240,6 +240,12 @@
         "reason": "No check enforces one file per decision or a separate folder per record kind."
       }
     },
+    "git-one-entry-per-question": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Whether a new entry restates an open question or opens a new one is a judgment about meaning. A hook sees a new file, not its question."
+      }
+    },
     "git-integration-branch-merge": {
       "mechanism": {
         "kind": "unmechanized",
