@@ -27,11 +27,12 @@ Three places enforce it.
 
 Known limit. A built-in agent that picks its own model inside Claude Code never puts
 that model in the tool input, and it has no file here. The guard and the check cannot
-reach it. Explore is one such agent, and CLAUDE.md names Explore as a role. Explore is
-believed to default to Haiku, UNMEASURED here. Every other built-in agent is
-unmeasured too. A `model` named on the call does reach the guard, so the floor holds
-for any spawn that names one. A spawn that names none, for a built-in that picks
-Haiku itself, is not covered.
+reach it. Per the sub-agents docs, one built-in runs Haiku: `claude-code-guide`. This
+change does not cover it. Explore is not a limit: since v2.1.198 it inherits the main
+conversation's model, and the custom `Explore` in `agents/explore.md` (PR #179)
+overrides the built-in with `model: sonnet`. The other built-ins (Plan, general-purpose,
+`claude`, `statusline-setup`) inherit or run Sonnet. A `model` named on the call
+reaches the guard, so the floor holds for any spawn that names one.
 
 Other sections below keep their Haiku sentences only as evidence of the earlier
 argument. The floor overrides them.
