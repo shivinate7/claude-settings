@@ -147,6 +147,7 @@ grant, so the tokens are gone. An "ask" decision puts the answer in the owner's
 hands, which is what the tokens were reaching for.
 """
 
+import fnmatch
 import json
 import os
 import re
@@ -357,13 +358,12 @@ INTERPRETER_HEREDOC = re.compile(
 )
 
 
-def _drop_heredoc_bodies(cmd: str) -> str:
-    """Drop the body of every heredoc, keeping every header line. The one loop
-    `strip_heredoc_bodies` and `_strip_heredoc_bodies_unconditionally` both need: the first
-    guards it with the interpreter exception, the second never does, and neither re-implements
-    the walk itself."""
+def _split_heredocs(cmd: str):
+    """Return (kept lines, [(quote, body)]): every header line kept, every body set apart.
+    The one walk `_drop_heredoc_bodies` and the environment layer both need."""
     lines = cmd.split("\n")
     kept = []
+    bodies = []
     index = 0
     while index < len(lines):
         line = lines[index]
@@ -373,11 +373,21 @@ def _drop_heredoc_bodies(cmd: str) -> str:
         if not match:
             continue
         delimiter = match.group(2)
+        start = index
         while index < len(lines) and lines[index].strip() != delimiter:
             index += 1
+        bodies.append((match.group(1), "\n".join(lines[start:index])))
         if index < len(lines):
             index += 1  # drop the closing delimiter line too
-    return "\n".join(kept)
+    return kept, bodies
+
+
+def _drop_heredoc_bodies(cmd: str) -> str:
+    """Drop the body of every heredoc, keeping every header line. The one loop
+    `strip_heredoc_bodies` and `_strip_heredoc_bodies_unconditionally` both need: the first
+    guards it with the interpreter exception, the second never does, and neither re-implements
+    the walk itself."""
+    return "\n".join(_split_heredocs(cmd)[0])
 
 
 def strip_heredoc_bodies(cmd: str) -> str:
@@ -2904,71 +2914,99 @@ def _ampersand_split(segment: str):
     return parts
 
 
-def _scan(s: str, i: int, closer: str, found):
-    """Scan s from i to the unquoted `closer` (a `)` or the end when ''). Return the end index.
+# The deepest nest of substitutions the guard reads. A command nested deeper is REFUSED: a nest that
+# no honest command needs is a way to make the reader give up, and giving up must not allow it.
+ENV_MAX_DEPTH = 64
+ENV_DEPTH_REASON = "substitutions are nested too deep for the guard to read"
 
-    Each command substitution `$(...)`, backtick pair or process substitution `<(...)` `>(...)`
-    met OUTSIDE single quotes is appended to `found` as (start, end, body). A nested one is
-    skipped here and found again when its parent body is judged.
+
+def _substitutions(cmd: str, depth: int = 0):
+    """Return ([(text, in a message)], too_deep). The last text is the command itself.
+
+    One pass, no recursion. Each command substitution `$(...)`, backtick pair or process
+    substitution `<(...)` `>(...)` met OUTSIDE single quotes is its own text, and its place in the
+    text around it is `x`. Every text is then judged as a command of its own, at any depth. The
+    work is linear: a text holds only its own characters and one `x` per child.
+
+    ponytail: a backtick body is read again by a recursive call. A nested backtick needs a
+    backslash per level, so honest input never nests them, and past ENV_MAX_DEPTH it is refused.
     """
-    quote = ""
-    depth = 0
-    while i < len(s):
-        char = s[i]
+    if depth > ENV_MAX_DEPTH:
+        return [], True
+    done = []
+    # a frame: [pieces of its text, open quote, paren depth, it is a message value, its open
+    # quote holds a message value]
+    stack = [[[], "", 0, False, False]]
+    i, n = 0, len(cmd)
+
+    def close():
+        pieces, _, _, message, _ = stack.pop()
+        done.append(("".join(pieces), message))
+
+    def opens_message(pieces):
+        """True when a `"` opened now is the value of a message flag of a commit or a PR."""
+        if not re.search(r"(?:-m|--message|--title|--body)(?:=|\s+)$", "".join(pieces[-12:])):
+            return False
+        tail = []
+        for piece in reversed(pieces):
+            if piece in ";|&\n":
+                break
+            tail.append(piece)
+        return bool(ENV_MESSAGE_COMMAND.match("".join(reversed(tail))))
+
+    while i < n:
+        char = cmd[i]
+        frame = stack[-1]
+        pieces, quote = frame[0], frame[1]
         if char == "\\" and quote != "'":
+            pieces.append(cmd[i:i + 2])
             i += 2
             continue
         if quote == "'":
-            quote = "" if char == "'" else quote
-            i += 1
-            continue
-        if char == "'" and quote == "":
-            quote = "'"
+            frame[1] = "" if char == "'" else quote
+        elif char == "'" and quote == "":
+            frame[1] = "'"
         elif char == '"':
-            quote = "" if quote == '"' else '"'
+            frame[1] = "" if quote == '"' else '"'
+            frame[4] = quote == "" and opens_message(pieces)
         elif char == "`":
             j = i + 1
-            while j < len(s) and s[j] != "`":
-                j += 2 if s[j] == "\\" else 1
-            found.append((i, j + 1, s[i + 1:j].replace("\\`", "`")))
+            while j < n and cmd[j] != "`":
+                j += 2 if cmd[j] == "\\" else 1
+            inner, deep = _substitutions(cmd[i + 1:j].replace("\\`", "`"), depth + 1)
+            if deep:
+                return [], True
+            done.extend(inner)
+            pieces.append("`x`")
             i = j + 1
             continue
-        elif s[i:i + 2] == "$(" or (quote == "" and s[i:i + 2] in ("<(", ">(")):
-            inner = []
-            end = _scan(s, i + 2, ")", inner)
-            found.append((i, end + 1, s[i + 2:end]))
-            i = end + 1
+        elif cmd[i:i + 2] == "$(" or (quote == "" and cmd[i:i + 2] in ("<(", ">(")):
+            if len(stack) + depth > ENV_MAX_DEPTH:
+                return [], True
+            message = quote == '"' and frame[4]
+            pieces.append("x")
+            stack.append([[], "", 0, message, False])
+            i += 2
             continue
-        elif quote == "" and closer and char == "(":
-            depth += 1
-        elif quote == "" and closer and char == ")":
-            if depth == 0:
-                return i
-            depth -= 1
+        elif quote == "" and len(stack) > 1 and char == "(":
+            frame[2] += 1
+        elif quote == "" and len(stack) > 1 and char == ")":
+            if frame[2] == 0:
+                close()
+                i += 1
+                continue
+            frame[2] -= 1
+        pieces.append(char)
         i += 1
-    return i
+    while stack:
+        close()
+    # the outermost text closed last, so it is last
+    return done, False
 
 
-def _substitutions(cmd: str):
-    """Return (cmd with each top-level substitution replaced by `x`, [(body, in a message)]).
-
-    ponytail: a heredoc body is scanned like shell text, so a `$(` in one is judged too. That errs
-    toward refusal, and a body that names an env file in a substitution is rare.
-    """
-    found = []
-    _scan(cmd, 0, "", found)
-    outer = []
-    bodies = []
-    last = 0
-    for start, end, body in found:
-        outer.append(cmd[last:start])
-        outer.append("x")
-        head = cmd[:start]
-        tail = re.split(r"[;|&\n]", head)[-1]
-        bodies.append((body, bool(ENV_MESSAGE_COMMAND.match(tail) and ENV_IN_MESSAGE.search(tail))))
-        last = end
-    outer.append(cmd[last:])
-    return "".join(outer), bodies
+# A word that holds a glob, tried against the names an environment file goes by.
+ENV_GLOB = re.compile(r"[?*\[]")
+ENV_GLOB_NAMES = (".env", ".env.local", ".env.production", ".env.development", ".env.test")
 
 
 def env_reference(word: str) -> str:
@@ -2977,22 +3015,33 @@ def env_reference(word: str) -> str:
     A reference is the WHOLE BASENAME of the word and never a substring of it. That one property
     keeps `process.env`, `import.meta.env` and `dotenv` out, because in none of them does `.env`
     end a path segment.
+
+    The word is normalized first, the way the shell reads it: inner quotes go, so `.e""nv` and
+    `'.e'nv` are `.env`, and so does a backslash that is not an escaped dot, so `.e\\nv` is. A
+    glob that starts with a dot and could match a name, such as `.en?` or `.env*`, is the name.
     """
-    word = word.strip("'\"`()")
+    word = re.sub(r"[\"'`]", "", word).strip("()")
     for separator in ("/", "\\"):
         head, found, tail = word.rpartition(separator)
         if not found:
             continue
         if separator == "\\" and not ENV_PATH_PREFIX.match(head):
-            return ""  # `process\.env` is an escaped dot, not a Windows separator
+            break  # `process\.env` is an escaped dot, not a Windows separator
         word = tail
         break
-    if word == ENV_ALLOWED or not ENV_BASENAME.match(word):
+    word = re.sub(r"\\(?!\.)", "", word)
+    if word == ENV_ALLOWED:
+        return ""
+    if ENV_GLOB.search(word) and word.startswith("."):
+        if any(fnmatch.fnmatchcase(name, word) for name in ENV_GLOB_NAMES):
+            return word
+        return ""
+    if not ENV_BASENAME.match(word):
         return ""
     return word
 
 
-def env_refusal(cmd: str, text_ok: bool = False):
+def env_refusal(cmd: str, subs_only: bool = False):
     """Return (printed reason, logged text) when the command touches an environment file.
 
     Both are the empty string when the command is clean.
@@ -3007,13 +3056,38 @@ def env_refusal(cmd: str, text_ok: bool = False):
 
     Every substitution is cut out and judged as a command of its own, at any depth. `text_ok` is
     set for one that sits in a commit or pull request message: an `echo` or `printf` there only
-    prints text, so its arguments are data.
+    prints text, so its arguments are data. `subs_only` judges the substitutions and not the text
+    around them, for the body of a heredoc.
     """
-    cmd, bodies = _substitutions(cmd)
-    for body, in_message in bodies:
-        refusal = env_refusal(body, in_message)
+    texts, too_deep = _substitutions(cmd)
+    if too_deep:
+        return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH
+    if subs_only:
+        texts = texts[:-1]
+    for text, in_message in texts:
+        refusal = _env_flat(text, in_message)
         if refusal[0]:
             return refusal
+    return "", ""
+
+
+def env_heredoc_refusal(raw: str):
+    """`env_refusal` for the substitutions in the body of each UNQUOTED heredoc.
+
+    `strip_heredoc_bodies` drops a body before the layers run, and that is right for text. An
+    unquoted body still runs its `$(...)`, backticks and `<(...)`, so those are judged. A quoted
+    delimiter (`<<'EOF'`) makes the body text, and it stays dropped.
+    """
+    for quote, body in _split_heredocs(raw)[1]:
+        if not quote:
+            refusal = env_refusal(body, subs_only=True)
+            if refusal[0]:
+                return refusal
+    return "", ""
+
+
+def _env_flat(cmd: str, text_ok: bool = False):
+    """The segment rules over one text whose substitutions are already cut out."""
     for piece in split_segments(cmd):
         for segment in _ampersand_split(piece):
             words = READ_REDIRECT.sub(" < ", REDIRECT.sub(
@@ -3800,6 +3874,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
 
     # 5. The environment file. This layer reads the command BEFORE normalization.
     refusal, logged = env_refusal(stripped)
+    if not refusal:
+        refusal, logged = env_heredoc_refusal(raw)
     if refusal:
         refuse(tool, "deny", "env-file", refusal + ". " + ENV_ADVICE, logged)
 
