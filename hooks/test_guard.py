@@ -2852,6 +2852,8 @@ add("floor: Agent with a full haiku id is denied", "deny", "subagent-model-floor
     tool="Agent", prompt="do it", model="claude-haiku-4-5-20251001")
 add("floor: Agent with a mixed-case haiku spelling is denied", "deny", "subagent-model-floor",
     tool="Agent", prompt="do it", model="Claude-HAIKU-4-5")
+add("floor: Agent with a list model naming haiku is denied", "deny", "subagent-model-floor",
+    tool="Agent", prompt="do it", model=["haiku"])
 add("floor: Agent with model sonnet is allowed", "allow", tool="Agent", prompt="x", model="sonnet")
 add("floor: Agent with model opus is allowed", "allow", tool="Agent", prompt="x", model="opus")
 add("floor: Agent with a full opus id is allowed", "allow", tool="Agent", prompt="x",

@@ -3549,7 +3549,7 @@ MODEL_FLOOR_REASON = (
 
 
 def below_the_floor(model) -> bool:
-    return isinstance(model, str) and "haiku" in model.lower()
+    return "haiku" in str(model).lower()
 
 
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:

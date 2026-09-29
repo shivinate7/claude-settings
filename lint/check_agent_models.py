@@ -20,17 +20,18 @@ MODEL_KEY = re.compile(r"^model\s*:\s*(.*)$", re.IGNORECASE)
 
 
 def frontmatter(text: str):
+    """Return the frontmatter lines, [] with no frontmatter, None when it never closes."""
     lines = text.splitlines()
     if not lines or lines[0].strip() != "---":
         return []
     for end in range(1, len(lines)):
         if lines[end].strip() == "---":
             return lines[1:end]
-    return []
+    return None
 
 
 def haiku_model(text: str) -> str:
-    for line in frontmatter(text):
+    for line in frontmatter(text) or []:
         found = MODEL_KEY.match(line)
         if found and "haiku" in found.group(1).lower():
             return found.group(1).strip()
@@ -44,10 +45,14 @@ def main(argv) -> int:
     )
     bad = 0
     for path in files:
-        with open(path, encoding="utf-8") as handle:
-            if haiku_model(handle.read()):
-                print("%s: frontmatter sets a model below Sonnet. Sonnet is the floor." % path)
-                bad = 1
+        with open(path, encoding="utf-8-sig") as handle:
+            text = handle.read()
+        if frontmatter(text) is None:
+            print("%s: frontmatter never closes. Cannot read its model." % path)
+            bad = 1
+        elif haiku_model(text):
+            print("%s: frontmatter sets a model below Sonnet. Sonnet is the floor." % path)
+            bad = 1
     return bad
 
 
