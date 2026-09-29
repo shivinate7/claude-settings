@@ -48,6 +48,13 @@ inputs:
       stamped, e.g. "Stamp {ids}" becomes "Stamp D-042 D-043".
     required: false
     default: "Stamp {ids}"
+  token:
+    description: >
+      Mode "stamp" only, and required there. The token that pushes, e.g. secrets.GITHUB_TOKEN.
+      Only `git fetch` and `git push` receive it. The caller's regenerate and gate commands
+      never see it. The checkout must set `persist-credentials: false`, or the run refuses.
+    required: false
+    default: ""
   bot-name:
     required: false
     default: "record-stamp[bot]"
@@ -68,6 +75,7 @@ runs:
         REGENERATE_COMMAND: ${{ inputs.regenerate }}
         GATE_COMMAND: ${{ inputs.gate-command }}
         SUBJECT_TEMPLATE: ${{ inputs.commit-subject }}
+        STAMP_TOKEN: ${{ inputs.token }}
         BOT_NAME: ${{ inputs.bot-name }}
         BOT_EMAIL: ${{ inputs.bot-email }}
         STAMP_JS: ${{ github.action_path }}/stamp.mjs

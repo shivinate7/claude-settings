@@ -221,6 +221,7 @@ uses: shivinate7/claude-settings/actions/stamp@<sha>
 | `gate-command` | empty | Mode `stamp` only, and required there. Your own full check. It must pass on the stamped tree before the push. |
 | `regenerate` | empty | Mode `stamp` only. Your own generator. It runs after `--stamp` and before the gate, in the same commit. |
 | `commit-subject` | `Stamp {ids}` | The commit subject. `{ids}` becomes the ids that the run stamped. |
+| `token` | empty | Mode `stamp` only, and required there. The push token. Only `git fetch` and `git push` receive it. |
 | `bot-name` | `record-stamp[bot]` | The commit author name. |
 | `bot-email` | `record-stamp@users.noreply.github.com` | The commit author email. |
 
@@ -234,6 +235,13 @@ base is not enough.
 nothing is pending, it stops before `regenerate`. When the push is rejected, it starts
 again from the new tree and runs the gate again, up to 3 times. It never rebases a commit
 that the gate already passed, because a rebased tree is a tree that no gate read.
+
+**The token.** The checkout must set `persist-credentials: false`. Mode `stamp` refuses to
+run when `.git/config` holds a credential for the remote, and when `token` is empty. The
+action copies the token out of its environment at start. It gives the token to `git fetch`
+and `git push` only, in per-command env. Your `regenerate` and `gate-command` do not inherit
+it. Limit: the gate runs as the same user, so a determined attacker could still read process
+memory. Full isolation needs a separate push job.
 
 **The concurrency rule.** A composite action cannot hold a lock. The job that runs mode
 `stamp` must set `concurrency: {group: <name>, cancel-in-progress: false}`. Two runs at
@@ -271,8 +279,10 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           fetch-depth: 0   # order "merge", and the default-branch question
+          persist-credentials: false
       - uses: shivinate7/claude-settings/actions/stamp@<sha>
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           config: .github/stamp.json
           regenerate: "<your own generator>"
           gate-command: "<your own full check>"
