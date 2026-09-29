@@ -92,6 +92,9 @@ jobs:
       - name: Landed-directory manifest agreement
         run: python3 lint/check_landed_dirs.py
 
+      - name: Agent and skill model floor
+        run: python3 lint/check_agent_models.py
+
       - name: PowerShell syntax check, install.ps1
         shell: pwsh
         run: |

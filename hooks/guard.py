@@ -54,6 +54,10 @@ one fixed order, and the first match wins.
   8 subagent-model-cap a write to a settings file whose content sets or changes
                        `CLAUDE_CODE_SUBAGENT_MODEL` or `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`.
                        Always asked, never denied.
+  9 subagent-model-floor an `Agent` or legacy `Task` call whose `model` is a Haiku model, by alias or
+                       by any full id. Always denied. Sonnet is the floor (owner ruling 2026-09-28).
+                       An agent file's own `model:` key never reaches this rule, so
+                       lint/check_agent_models.py checks the files.
 
 A project's own `.claude/settings.json`, `.claude/settings.local.json`, and
 `.claude/hooks/*` are NOT frozen (Decision 7). They are allowed, and the guard appends
@@ -2807,6 +2811,35 @@ ENV_LOADER_FLAGS = ("--env-file", "--env-file-if-exists")
 # Commands that ask whether the file is THERE. They read no contents.
 ENV_EXISTENCE_COMMANDS = ("ls", "test", "[")
 
+# Commands that only print their own arguments. With a redirect onto a file that is NOT an
+# environment file, an env name among the arguments is TEXT (`echo <name> > .worktreeinclude`),
+# and no environment file is read or written. `cat <name> > x` is not on the list, so it stays held.
+ENV_TEXT_COMMANDS = ("echo", "printf")
+
+# The message or body of a commit or a pull request is text. Its value is blanked before the words
+# are read, so an env name in prose reads no contents. A `$(...)` in the value keeps everything but
+# the quoted argument of a `printf` or `echo`, so `-m "$(cat <name>)"` is still read as a read.
+ENV_MESSAGE_COMMAND = re.compile(r"\s*(git\s+commit|gh\s+pr\s+create)\b")
+ENV_MESSAGE_ARG = re.compile(
+    r"""(?P<flag>(?:-m|--message|--title|--body)(?:=|\s+))"""
+    r"""(?P<value>"(?:[^"\\]|\\.)*"|'[^']*')""")
+ENV_ECHOED_TEXT = re.compile(r"((?:printf|echo)\s+)'[^']*'")
+
+
+def _blank_messages(segment: str) -> str:
+    if not ENV_MESSAGE_COMMAND.match(segment):
+        return segment
+
+    def blank(match):
+        value = match.group("value")
+        if value[0] == '"' and ("$(" in value or "`" in value):
+            inner = ENV_ECHOED_TEXT.sub(r"\1'x'", value)
+        else:
+            inner = value[0] + "x" + value[0]
+        return match.group("flag") + inner
+
+    return ENV_MESSAGE_ARG.sub(blank, segment)
+
 ENV_ADVICE = (
     "Remedy: ask the user for the value and never read the file. "
     "To RUN something that needs those variables, hand the file to the runner with the "
@@ -2907,7 +2940,7 @@ def env_refusal(cmd: str):
     """
     for piece in split_segments(cmd):
         for segment in _ampersand_split(piece):
-            words = REDIRECT.sub(r" \1 ", segment).split()
+            words = REDIRECT.sub(r" \1 ", _blank_messages(segment)).split()
             if not words:
                 continue
             # The command is the first word that is not a `VAR=value` assignment.
@@ -2916,6 +2949,18 @@ def env_refusal(cmd: str):
                 position += 1
             head = words[position] if position < len(words) else ""
             command = head.strip("'\"").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+            # `git check-ignore <path>` asks git whether a path is ignored. It reads no contents.
+            rest_words = [w for w in words[position + 1:] if not w.startswith("-")]
+            # Only positional paths. `--stdin`, `-z` and a `<` redirect feed it contents to print.
+            names_only = (
+                command == "git" and rest_words[:1] == ["check-ignore"] and "<" not in segment
+                and not any(w == "--stdin" or re.fullmatch(r"-[A-Za-z]*z[A-Za-z]*", w)
+                            for w in words))
+            # A redirect onto a file that is not an environment file makes a text command's
+            # arguments data. A redirect onto an environment file is refused below, first.
+            text_to_file = command in ENV_TEXT_COMMANDS and any(
+                REDIRECT.fullmatch(words[i - 1]) and not env_reference(w)
+                for i, w in enumerate(words) if i)
             for index, word in enumerate(words):
                 prefix, assigned, rest = word.partition("=")
                 flag = prefix if assigned and prefix.startswith("-") else ""
@@ -2940,6 +2985,8 @@ def env_refusal(cmd: str):
                     return (ENV_RUNNER_REASON,
                             "only a runner may be handed '%s' with %s, and '%s' is not one" % (
                                 named, flag or previous, command))
+                if names_only or text_to_file:
+                    continue  # the name is data, and no contents are read or written
                 if command in ENV_EXISTENCE_COMMANDS:
                     continue  # asking whether the file is there reads none of it
                 actor = "'%s'" % command if command else "this command"
@@ -3537,6 +3584,17 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str) -> No
     sys.exit(0)
 
 
+SPAWN_TOOLS = ("Agent", "Task")
+MODEL_FLOOR_REASON = (
+    "Sonnet is the floor for every subagent. Start the subagent with model sonnet or opus, "
+    "or name no model and let the default apply."
+)
+
+
+def below_the_floor(model) -> bool:
+    return "haiku" in str(model).lower()
+
+
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
     stripped = strip_heredoc_bodies(raw)
     cmd = norm(stripped)
@@ -3740,6 +3798,11 @@ def judge(payload) -> None:
                         and path_is_inside(resolved_target, home) is False):
                     refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON,
                            "write target outside recorded agent home")
+
+    # 9. The subagent model floor. A spawn that names a Haiku model is denied. The reason names no
+    # model; the log holds what the call asked for.
+    if tool in SPAWN_TOOLS and below_the_floor(tool_input.get("model")):
+        refuse(tool, "deny", "subagent-model-floor", MODEL_FLOOR_REASON, str(tool_input.get("model")))
 
     # A merge through the MCP tool carries no base for the guard to read, so every call is
     # allowed (Decision 8) and noted, the same as an unreadable `gh pr merge` base.
