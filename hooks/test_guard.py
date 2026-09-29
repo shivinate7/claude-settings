@@ -2037,7 +2037,7 @@ for text in (
 # an unquoted heredoc body is judged for its substitutions, and a deep nest is refused, not skipped.
 for held in (
     'cat .e""nv', "cat '.e'nv", "cat .e\\nv", "cat .en?", "cat .env*", "cat .e[n]v",
-    "cat .env.l*", "echo x > ./.en?", "ls <(cat " + ENV + ")", "ls `cat " + ENV + "`",
+    "cat .env.l*", "cat .env.s*", "cat .env.st*", "cat .env.bak*", "echo x > ./.en?", "ls <(cat " + ENV + ")", "ls `cat " + ENV + "`",
     "ls $(cat " + ENV + ")", 'cat sub/.e""nv',
     "cat <<EOF\n$(cat " + ENV + ")\nEOF", "cat <<EOF\n`cat " + ENV + "`\nEOF",
     "cat <<EOF\n$(x <(cat " + ENV + "))\nEOF", "cat <<-EOF\n\t$(cat " + ENV + ")\n\tEOF",
@@ -2053,7 +2053,7 @@ for text in (
     VCS + " commit -F - <<EOF\nCopy " + ENV + " into worktrees\nEOF",
     VCS + " commit -m \"$(cat <<'EOF'\nCopy " + ENV + " into worktrees\nEOF\n)\"",
     VCS + " commit -m \"$(cat <<EOF\nCopy " + ENV + " into worktrees\nEOF\n)\"",
-    "grep 'process\\." + ENV[1:] + "' src/x.js", "cat " + ENV + ".exam*",
+    "grep 'process\\." + ENV[1:] + "' src/x.js", "cat " + ENV + ".example*",
     "echo " + "$(" * 40 + "date" + ")" * 40 + " > log",
 ):
     sh("env: a normalized allowance, " + text[:36].replace("\n", " "), text, "allow", cwd=NOGIT)

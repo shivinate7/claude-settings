@@ -3004,9 +3004,30 @@ def _substitutions(cmd: str, depth: int = 0):
     return done, False
 
 
-# A word that holds a glob, tried against the names an environment file goes by.
+# A word that holds a glob. It is an environment word when it could match `.env`, or `.env.` and any
+# suffix. The test is a sample of the pattern itself (each glob filled in as the shortest and a one
+# letter match), so `.env.s*` and `.env.bak*` count with no list of suffixes to keep. A word that
+# starts with the example file's name stays exempt, as the example file is.
+#
+# ACCEPTED LIMITS, each named so nobody trusts this layer past them:
+#   - a brace or variable split (`.env{,.x}`, `.e$Xnv`) cannot be read statically;
+#   - a dot glob such as `cat .*` or `tar .*` refuses, on purpose, as it sweeps in `.env`;
+#   - `find -name '.env*'` refuses, and `ls` or `git ls-files` is the way to list.
 ENV_GLOB = re.compile(r"[?*\[]")
-ENV_GLOB_NAMES = (".env", ".env.local", ".env.production", ".env.development", ".env.test")
+ENV_GLOB_PART = re.compile(r"\[[!^]?([^\]])[^\]]*\]|\?|\*")
+
+
+def _glob_could_name_env(word: str) -> bool:
+    if word.startswith(ENV_ALLOWED):
+        return False
+    if any(fnmatch.fnmatchcase(name, word) for name in (".env", ".env.x")):
+        return True
+    for fill in ("", "x"):
+        sample = ENV_GLOB_PART.sub(
+            lambda m: (m.group(1) or "a") if m.group(0) != "*" else fill, word)
+        if sample == ".env" or sample.startswith(".env."):
+            return True
+    return False
 
 
 def env_reference(word: str) -> str:
@@ -3033,9 +3054,7 @@ def env_reference(word: str) -> str:
     if word == ENV_ALLOWED:
         return ""
     if ENV_GLOB.search(word) and word.startswith("."):
-        if any(fnmatch.fnmatchcase(name, word) for name in ENV_GLOB_NAMES):
-            return word
-        return ""
+        return word if _glob_could_name_env(word) else ""
     if not ENV_BASENAME.match(word):
         return ""
     return word
