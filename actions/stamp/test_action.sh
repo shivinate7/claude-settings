@@ -7,6 +7,9 @@ set -uo pipefail
 # A CI run's own refs name the runner's branch, not a fixture's. GITHUB_ACTIONS picks a hard
 # refusal or an UNKNOWN line for an unreadable base, so each test that reads one sets it itself.
 unset GITHUB_REF GITHUB_BASE_REF GITHUB_ACTIONS MODE BASE
+# Mode "stamp" needs a token. Every stamp test gets this one unless it sets its own.
+TOKEN="tok-SECRET-0123"
+export STAMP_TOKEN="$TOKEN"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN_SH="$HERE/run.sh"
@@ -272,6 +275,96 @@ test_refuses_empty_gate() {
   return 0
 }
 
+# Run run.sh in stamp mode against a fixture. Extra env goes in as arguments: "NAME=value".
+stamp_run() {
+  local local_dir="$1" gate="$2"
+  shift 2
+  env "$@" REF="refs/heads/main" DEFAULT_BRANCH="main" CONFIG="$local_dir/stamp.json" \
+    GATE_COMMAND="$gate" SUBJECT_TEMPLATE="Stamp {ids}" BOT_NAME=bot BOT_EMAIL=bot@example.com \
+    STAMP_JS="$STAMP_JS" bash -c "cd '$local_dir' && bash '$RUN_SH'" >"$WORK/stamp-run.log" 2>&1
+}
+
+# The gate (and the regenerate command) are the caller's code. They must see the token neither in
+# their env nor in `git config --list`, and it must not be on the run's own output.
+test_caller_code_never_sees_the_token() {
+  local remote local_dir seen="$WORK/seen-$RANDOM"
+  remote="$(new_bare_remote)"
+  local_dir="$(clone_with_pending_record "$remote")"
+  local probe="{ env; git config --list; } > '$seen'"
+  if ! stamp_run "$local_dir" "$probe" REGENERATE_COMMAND="{ env; git config --list; } > '$seen.regen'"; then
+    echo "  expected success"; cat "$WORK/stamp-run.log"; return 1
+  fi
+  [ -s "$seen" ] || { echo "  the gate did not run"; return 1; }
+  local b64
+  b64="$(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\n')"
+  local f
+  for f in "$seen" "$seen.regen" "$WORK/stamp-run.log" "$local_dir/.git/config"; do
+    grep -q -e "$TOKEN" -e "$b64" "$f" && { echo "  the token is visible in $f"; return 1; }
+    grep -qi 'STAMP_TOKEN\|extraheader' "$f" && { echo "  a token variable or header is visible in $f"; return 1; }
+  done
+  return 0
+}
+
+# The fixture remote is a file path, so no HTTP header is ever read. A `git` wrapper on PATH
+# records the argv and the per-command config env of each fetch and push, then runs real git.
+# The push succeeds AND the wrapper saw the header for that exact token on the push, off argv.
+test_push_carries_the_token_off_argv() {
+  local remote local_dir bin="$WORK/bin-$RANDOM" log="$WORK/wrap-$RANDOM.log"
+  remote="$(new_bare_remote)"
+  local_dir="$(clone_with_pending_record "$remote")"
+  mkdir -p "$bin"
+  local real_git
+  real_git="$(command -v git)"
+  cat > "$bin/git" <<WRAP
+#!/usr/bin/env bash
+case "\$1" in
+  push|fetch) echo "\$1 argv=[\$*] key=[\${GIT_CONFIG_KEY_0:-}] value=[\${GIT_CONFIG_VALUE_0:-}]" >> "$log" ;;
+esac
+exec "$real_git" "\$@"
+WRAP
+  chmod +x "$bin/git"
+  if ! stamp_run "$local_dir" "true" PATH="$bin:$PATH"; then
+    echo "  expected success"; cat "$WORK/stamp-run.log"; return 1
+  fi
+  [ "$(git -C "$remote" log -1 --format=%s main)" = "Stamp D-001" ] || { echo "  the push did not land"; return 1; }
+  local b64
+  b64="$(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\n')"
+  grep -q "^push .*key=\[http\.https://github\.com/\.extraheader\] value=\[AUTHORIZATION: basic $b64\]" "$log" \
+    || { echo "  the push did not get the token header"; cat "$log"; return 1; }
+  grep -q "$TOKEN" "$log" && { echo "  the raw token was seen by git"; return 1; }
+  grep -q "$b64.*argv\|argv=\[[^]]*$b64" "$log" && { echo "  the token is on argv"; return 1; }
+  return 0
+}
+
+test_stamp_refuses_empty_token() {
+  local remote local_dir before_head
+  remote="$(new_bare_remote)"
+  local_dir="$(clone_with_pending_record "$remote")"
+  before_head="$(git -C "$remote" rev-parse main)"
+  if stamp_run "$local_dir" "true" STAMP_TOKEN=""; then
+    echo "  expected a refusal of an empty token, got exit 0"; return 1
+  fi
+  grep -q "needs a token" "$WORK/stamp-run.log" || { echo "  the refusal did not name the token"; cat "$WORK/stamp-run.log"; return 1; }
+  [ "$(git -C "$remote" rev-parse main)" = "$before_head" ] || { echo "  the remote moved with no token"; return 1; }
+  grep -q "id: pending" "$local_dir/docs/decisions/first.md" || { echo "  the tree was stamped with no token"; return 1; }
+  return 0
+}
+
+test_stamp_refuses_persisted_credential() {
+  local remote local_dir before_head
+  remote="$(new_bare_remote)"
+  local_dir="$(clone_with_pending_record "$remote")"
+  before_head="$(git -C "$remote" rev-parse main)"
+  git -C "$local_dir" config http.https://github.com/.extraheader "AUTHORIZATION: basic cGVyc2lzdGVk"
+  if stamp_run "$local_dir" "true"; then
+    echo "  expected a refusal of a persisted extraheader, got exit 0"; return 1
+  fi
+  grep -q "persist-credentials: false" "$WORK/stamp-run.log" || { echo "  the refusal did not name the remedy"; cat "$WORK/stamp-run.log"; return 1; }
+  [ "$(git -C "$remote" rev-parse main)" = "$before_head" ] || { echo "  the remote moved despite the persisted credential"; return 1; }
+  grep -q "id: pending" "$local_dir/docs/decisions/first.md" || { echo "  the tree was stamped despite the persisted credential"; return 1; }
+  return 0
+}
+
 # A feature branch off the fixture's main, pushed, so origin/main is the base check mode reads.
 feature_branch() {
   local local_dir="$1"
@@ -387,6 +480,10 @@ run_test "stamps, gates, commits and pushes" test_succeeds_and_pushes
 run_test "a push rejected every time gives up after the configured attempts" test_gives_up_after_max_attempts
 run_test "a real push race is resolved by retry: no duplicate, no gap" test_retry_reconciles_after_a_real_push_race
 run_test "stamp mode refuses an empty gate command" test_refuses_empty_gate
+run_test "caller code (gate, regenerate) never sees the token" test_caller_code_never_sees_the_token
+run_test "the push carries the token, off argv" test_push_carries_the_token_off_argv
+run_test "stamp mode refuses an empty token" test_stamp_refuses_empty_token
+run_test "stamp mode refuses a credential persisted in .git/config" test_stamp_refuses_persisted_credential
 run_test "check mode passes a pending record on a feature branch, and writes nothing" test_check_mode_passes_pending_on_feature_branch
 run_test "check mode refuses a record numbered on a feature branch" test_check_mode_refuses_number_on_feature_branch
 run_test "check mode refuses to pass when the base cannot be read" test_check_mode_refuses_unreadable_base

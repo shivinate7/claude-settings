@@ -19,8 +19,17 @@
 #   GATE_COMMAND       shell command that must pass on the stamped tree before it is pushed
 #   SUBJECT_TEMPLATE   commit subject template, "{ids}" expands to the stamped ids
 #   BOT_NAME, BOT_EMAIL
+#   STAMP_TOKEN        the push credential. Only `git fetch` and `git push` receive it.
 #   MAX_ATTEMPTS       default 3
 set -euo pipefail
+
+# THE TOKEN NEVER REACHES CALLER CODE. Copy it into a shell variable that is not exported, then
+# drop it from the environment, so no child (regenerate, gate, stamp.mjs, git commit) inherits it.
+# It goes to git only through `git_auth`, as per-command env: never argv, never .git/config.
+# Limit: the gate runs as this user, so a determined attacker can still read process memory.
+# Full isolation needs a separate push job.
+stamp_token="${STAMP_TOKEN:-}"
+unset STAMP_TOKEN
 
 MODE="${MODE:-stamp}"
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-3}"
@@ -37,6 +46,26 @@ case "$MODE" in
     exit 2
     ;;
 esac
+
+if [ -z "$stamp_token" ]; then
+  echo "stamp REFUSES: mode 'stamp' needs a token. Nothing was written."
+  exit 2
+fi
+
+# A credential that checkout persisted into .git/config is readable by the caller's code, and it
+# would make the token input pointless. Refuse and name the remedy.
+if git config --local --get-regexp '^(http\..*extraheader|credential\..*)$' >/dev/null 2>&1 \
+   || git config --local --get remote.origin.url | grep -q '://[^/]*@'; then
+  echo "stamp REFUSES: .git/config holds a credential for the remote. Set 'persist-credentials: false' on actions/checkout."
+  exit 2
+fi
+
+git_auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$stamp_token" | base64 | tr -d '\n')"
+unset stamp_token
+git_auth() {
+  GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.${GITHUB_SERVER_URL:-https://github.com}/.extraheader" \
+    GIT_CONFIG_VALUE_0="$git_auth_header" git "$@"
+}
 
 # An empty gate passes every tree. The input is optional only so that mode "check" can omit it.
 if [ -z "${GATE_COMMAND:-}" ]; then
@@ -99,7 +128,7 @@ while :; do
   git add -A
   git commit -q -m "$SUBJECT"
 
-  if git push -q; then
+  if git_auth push -q; then
     echo "stamp: pushed. $SUBJECT"
     exit 0
   fi
@@ -115,7 +144,7 @@ while :; do
   # the new HEAD without re-running the gate on the result. That leaves a pushed tree that
   # nothing ever checked.
   BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-  git fetch -q origin "$BRANCH"
+  git_auth fetch -q origin "$BRANCH"
   git reset -q --hard "origin/$BRANCH"
   attempt=$((attempt + 1))
 done
