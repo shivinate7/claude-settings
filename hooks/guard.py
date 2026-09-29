@@ -208,7 +208,7 @@ def basename(token: str) -> str:
 # owner's `grep -n -i "...|make reap|pkill..." CLAUDE.md` splits on the pipes INSIDE the quotes
 # under a blind splitter, and one fragment starts with `pkill`. A rule that then judged the
 # fragment's first word would deny a grep as if it were a kill.
-def split_segments(cmd: str):
+def split_segments(cmd: str, ends=None):
     """Split into shell segments on unquoted `;`, `|`, `||`, `&&`, and newline.
 
     Quoted text, single or double, is copied whole into the current segment, so a delimiter
@@ -222,6 +222,9 @@ def split_segments(cmd: str):
     unquoted `#` that STARTS A WORD (index 0, or the previous character is space, tab,
     newline, `;`, `|`, `&`, or `(`) is a comment to the end of its line — the shell's own
     rule. `fix#3` and `'#300'` are not comments under it.
+
+    `ends`, when a list, gets what closed each segment (`|`, `||`, `&&`, `;`, newline, or '' for
+    the last), so a caller can tell a segment whose stdout is piped onward from the rest.
     """
     segments = []
     current = []
@@ -247,22 +250,27 @@ def split_segments(cmd: str):
             continue
         if char == "&" and cmd[index:index + 2] == "&&":
             segments.append("".join(current))
+            ends is None or ends.append("&&")
             current = []
             index += 2
             continue
         if char == "|":
-            index += 2 if cmd[index:index + 2] == "||" else 1
+            width = 2 if cmd[index:index + 2] == "||" else 1
+            ends is None or ends.append(cmd[index:index + width])
+            index += width
             segments.append("".join(current))
             current = []
             continue
         if char in (";", "\n"):
             segments.append("".join(current))
+            ends is None or ends.append(char)
             current = []
             index += 1
             continue
         current.append(char)
         index += 1
     segments.append("".join(current))
+    ends is None or ends.append("")
     return segments
 
 
@@ -2819,11 +2827,11 @@ ENV_LOADER_COMMANDS = (
 ENV_LOADER_FLAGS = ("--env-file", "--env-file-if-exists")
 
 # Commands that ask whether the file is THERE. They read no contents.
-ENV_EXISTENCE_COMMANDS = ("ls", "test", "[")
+ENV_EXISTENCE_COMMANDS = ("ls", "test", "[", "[[")
 
-# Commands that only print their own arguments. With a redirect onto a file that is NOT an
-# environment file, an env name among the arguments is TEXT (`echo <name> > .worktreeinclude`),
-# and no environment file is read or written. `cat <name> > x` is not on the list, so it stays held.
+# Commands that only print their own arguments. An env name among the arguments is TEXT, printed to
+# stdout or written to a file that is NOT an environment file (`echo <name> > .worktreeinclude`),
+# and no environment file is read or written. A redirect onto an environment file is refused first. `cat <name> > x` is not on the list, so it stays held.
 ENV_TEXT_COMMANDS = ("echo", "printf")
 
 # The message or body of a commit or a pull request is text. Its value is blanked before the words
@@ -3012,7 +3020,11 @@ def _substitutions(cmd: str, depth: int = 0):
 # ACCEPTED LIMITS, each named so nobody trusts this layer past them:
 #   - a brace or variable split (`.env{,.x}`, `.e$Xnv`) cannot be read statically;
 #   - a dot glob such as `cat .*` or `tar .*` refuses, on purpose, as it sweeps in `.env`;
-#   - `find -name '.env*'` refuses, and `ls` or `git ls-files` is the way to list.
+#   - `find -name '.env*'` refuses, and `ls` or `git ls-files` is the way to list;
+#   - a relay split across two separate tool calls (write the name to a file in one, read the file
+#     in the next) cannot be seen by a per-command guard;
+#   - the relay check matches the literal path, so another spelling of the same file (`./f`, or
+#     `~/f` against `$HOME/f`) is not caught. The guard does not resolve paths.
 ENV_GLOB = re.compile(r"[?*\[]")
 ENV_GLOB_PART = re.compile(r"\[[!^]?([^\]])[^\]]*\]|\?|\*")
 
@@ -3083,11 +3095,14 @@ def env_refusal(cmd: str, subs_only: bool = False):
         return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH
     if subs_only:
         texts = texts[:-1]
-    for text, in_message in texts:
-        refusal = _env_flat(text, in_message)
+    for index, (text, in_message) in enumerate(texts):
+        # The command itself is last. Its `echo` or `printf` prints to stdout or a file, and an env
+        # name among the arguments is text. A substitution's output is an ARGUMENT of the command
+        # around it, so only a message value may treat it as text.
+        refusal = _env_flat(text, in_message or index == len(texts) - 1)
         if refusal[0]:
             return refusal
-    return "", ""
+    return _env_relay(texts)
 
 
 def env_heredoc_refusal(raw: str):
@@ -3105,20 +3120,91 @@ def env_heredoc_refusal(raw: str):
     return "", ""
 
 
+def _env_parts(piece: str):
+    """`_ampersand_split` of one segment, with an fd duplication (`2>&1`, `>&2`) taken out first.
+    Its `&` is no background operator, and left in, it cut the text command from the pipe after it.
+    `&>` and `>&file` are a plain redirect."""
+    piece = re.sub(r"\d*>&(\d+|-)", " ", piece)
+    piece = re.sub(r"&>>?|>&(?![\d-])", lambda m: m.group(0).replace("&", ""), piece)
+    return _ampersand_split(piece)
+
+
+def _env_words(segment: str):
+    """Return (words, command word) of one segment, redirects spaced into words of their own."""
+    words = READ_REDIRECT.sub(" < ", REDIRECT.sub(
+        r" \1 ", _blank_messages(segment))).split()
+    # The command is the first word that is not a `VAR=value` assignment.
+    position = 0
+    while position < len(words) and ASSIGNMENT.match(words[position]):
+        position += 1
+    head = words[position] if position < len(words) else ""
+    command = head.strip("'\"").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    if command in ENV_TEXT_COMMANDS:
+        # `printf '<name>\n'` prints the name and a newline: the escape ends the word.
+        words = re.sub(r"\\[ntr]", " ", " ".join(words)).split()
+    return words, position, command
+
+
+# Commands that take a file name and read none of its contents to run it: they ask, list or record.
+ENV_RELAY_SAFE = ENV_EXISTENCE_COMMANDS + ENV_TEXT_COMMANDS + ("git",)
+
+
+def _env_relay(texts):
+    """Return (reason, log) when a text command writes an env name into a file that another
+    segment of the SAME command reads. `echo <name> > f; cat $(cat f)` prints the name to a file
+    and then reads the file the name points at. A relay split across two separate tool calls
+    cannot be seen by a per-command guard, and that is an accepted limit.
+    """
+    segments = [[_env_words(seg) for piece in split_segments(text) for seg in _env_parts(piece)]
+                for text, _ in texts]
+
+    def gives_a_name(words, command):
+        return command in ENV_TEXT_COMMANDS and any(
+            env_reference(w) for i, w in enumerate(words)
+            if i and not REDIRECT.fullmatch(words[i - 1]))
+
+    def targets(words):
+        return {w for i, w in enumerate(words) if i and REDIRECT.fullmatch(words[i - 1])}
+
+    def reads(words, command, files):
+        return command not in ENV_RELAY_SAFE and any(
+            w in files and not (i and REDIRECT.fullmatch(words[i - 1]))
+            for i, w in enumerate(words))
+
+    # The command itself is the last text, and its segments run in order: a read before the write
+    # is the check-then-write setup, and is no relay. A substitution runs at a place this scan
+    # does not track, so a read inside one counts against every write.
+    written = set()
+    for text in segments:
+        for words, _, command in text:
+            if gives_a_name(words, command):
+                written |= targets(words)
+    for text in segments[:-1]:
+        if any(reads(words, command, written) for words, _, command in text):
+            return ENV_CONTENTS_REASON, "a substitution reads a file that was given an environment name"
+    written = set()
+    for words, _, command in segments[-1]:
+        if reads(words, command, written):
+            return (ENV_CONTENTS_REASON,
+                    "'%s' would read a file that was just given an environment name" % command)
+        if gives_a_name(words, command):
+            written |= targets(words)
+    return "", ""
+
+
 def _env_flat(cmd: str, text_ok: bool = False):
     """The segment rules over one text whose substitutions are already cut out."""
-    for piece in split_segments(cmd):
-        for segment in _ampersand_split(piece):
-            words = READ_REDIRECT.sub(" < ", REDIRECT.sub(
-                r" \1 ", _blank_messages(segment))).split()
+    ends = []
+    pieces = split_segments(cmd, ends)
+    for piece, end in zip(pieces, ends):
+        parts = _env_parts(piece)
+        for number, segment in enumerate(parts):
+            words, position, command = _env_words(segment)
             if not words:
                 continue
-            # The command is the first word that is not a `VAR=value` assignment.
-            position = 0
-            while position < len(words) and ASSIGNMENT.match(words[position]):
-                position += 1
-            head = words[position] if position < len(words) else ""
-            command = head.strip("'\"").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+            # A segment that pipes onward hands its output to another command, which may read it
+            # as a path. Only its stdout to the terminal or to a file keeps the text allowance.
+            piped = end == "|" and number == len(parts) - 1
             # `git check-ignore <path>` asks git whether a path is ignored. It reads no contents.
             rest_words = [w for w in words[position + 1:] if not w.startswith("-")]
             # Only positional paths. `--stdin`, `-z` and a `<` redirect feed it contents to print.
@@ -3126,11 +3212,9 @@ def _env_flat(cmd: str, text_ok: bool = False):
                 command == "git" and rest_words[:1] == ["check-ignore"] and "<" not in segment
                 and not any(w == "--stdin" or re.fullmatch(r"-[A-Za-z]*z[A-Za-z]*", w)
                             for w in words))
-            # A redirect onto a file that is not an environment file makes a text command's
-            # arguments data. A redirect onto an environment file is refused below, first.
-            text_to_file = command in ENV_TEXT_COMMANDS and (text_ok or any(
-                REDIRECT.fullmatch(words[i - 1]) and not env_reference(w)
-                for i, w in enumerate(words) if i))
+            # A text command's arguments are data. A redirect onto an environment file is refused
+            # below, first.
+            text_to_file = command in ENV_TEXT_COMMANDS and text_ok and not piped
             for index, word in enumerate(words):
                 prefix, assigned, rest = word.partition("=")
                 flag = prefix if assigned and prefix.startswith("-") else ""

@@ -2058,6 +2058,59 @@ for text in (
 ):
     sh("env: a normalized allowance, " + text[:36].replace("\n", " "), text, "allow", cwd=NOGIT)
 
+# An existence test reads no contents, and a fixed string that names the file is text. A read
+# through a substitution or a redirect is still a read.
+for text in (
+    "[ -f " + ENV + ' ] && echo "' + ENV + ' exists" || echo "no ' + ENV + '"',
+    "[ -e " + ENV + " ]", "[ -d " + ENV + " ]", "[ -s " + ENV + " ]", "[ -r " + ENV + " ]",
+    "[ -w " + ENV + " ]", "[ -x " + ENV + " ]", "[[ -f " + ENV + " ]]", "[[ -e " + ENV + " ]] && echo yes",
+    "test -f " + ENV, 'echo "' + ENV + ' exists"', "printf '" + ENV + " is here\\n'",
+    'echo "no ' + ENV + '" > status.txt', "printf '%s\\n' '" + ENV + "'",
+):
+    sh("env: an existence test or fixed text, " + text[:40], text, "allow", cwd=NOGIT)
+for held in (
+    '[ "$(cat ' + ENV + ')" ]', 'test -n "$(< ' + ENV + ')"', '[[ -n "$(cat ' + ENV + ')" ]]',
+    "[ -f x ] && cat " + ENV, "echo $(cat " + ENV + ")", "echo `cat " + ENV + "`",
+    "cat $(echo " + ENV + ")", "echo hi > " + ENV, "echo " + ENV + " > " + ENV,
+    "[ -f " + ENV + " ] && cat " + ENV, "cat < " + ENV, "echo " + ENV + " | tee " + ENV,
+):
+    sh("env: a test or text is no licence to read, " + held[:40], held, "deny", "env-file",
+       cwd=NOGIT)
+
+# The text allowance holds for the echo or printf segment alone, and only while its stdout goes to the
+# terminal or to a file. Piped onward, or written to a file that a later reader takes, it is a relay.
+for held in (
+    "echo " + ENV + " | xargs cat", "echo " + ENV + " | sh", "echo " + ENV + " | bash",
+    "echo " + ENV + " | source /dev/stdin",
+    "echo " + ENV + ' | while read f; do cat "$f"; done', "echo " + ENV + " | tee f",
+    "printf '" + ENV + "\\n' | xargs cat",
+    "echo " + ENV + " > f; cat $(cat f)", "echo " + ENV + " > x && xargs cat < x",
+    "echo " + ENV + " >> x && xargs cat < x", "printf '" + ENV + "\\n' > f && cat $(cat f)",
+    "echo " + ENV + " > f && sh f",
+):
+    sh("env: a relay of the text, " + held[:40], held, "deny", "env-file", cwd=NOGIT)
+for text in (
+    "[[ -e " + ENV + ".local ]]", "test -s " + ENV, "printf '" + ENV + "\\n' > .worktreeinclude",
+    "echo " + ENV + " > .worktreeinclude && test -f .worktreeinclude",
+    "echo " + ENV + " || echo no; echo done | cat",
+):
+    sh("env: text with no relay, " + text[:40], text, "allow", cwd=NOGIT)
+
+# A duplicated fd on the text segment hides no pipe, and a read that comes BEFORE the write is no relay.
+for held in (
+    "printf " + ENV + " 2>&1 | xargs cat", "echo " + ENV + " 1>&2 | xargs cat",
+    "echo " + ENV + " >&2 | sh", "echo " + ENV + " 2>&1 | tee f", "echo " + ENV + " > f; cat f",
+    "echo " + ENV + " > f && cat f",
+):
+    sh("env: fd duplication or a read after the write, " + held[:36], held, "deny", "env-file",
+       cwd=NOGIT)
+for text in (
+    "grep x .worktreeinclude; printf '" + ENV + "\\n' > .worktreeinclude",
+    "cat .worktreeinclude && echo " + ENV + " >> .worktreeinclude",
+    "echo " + ENV + " 2>&1", "echo " + ENV + " >&2",
+):
+    sh("env: check then write, " + text[:40], text, "allow", cwd=NOGIT)
+
 sh("env: PowerShell Get-Content", "Get-Content " + ENV, "deny", "env-file", tool="PowerShell",
    cwd=NOGIT)
 sh("env: PowerShell alias and a dot-slash path", "gc .\\" + ENV, "deny", "env-file",
