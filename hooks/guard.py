@@ -2819,11 +2819,11 @@ ENV_LOADER_COMMANDS = (
 ENV_LOADER_FLAGS = ("--env-file", "--env-file-if-exists")
 
 # Commands that ask whether the file is THERE. They read no contents.
-ENV_EXISTENCE_COMMANDS = ("ls", "test", "[")
+ENV_EXISTENCE_COMMANDS = ("ls", "test", "[", "[[")
 
-# Commands that only print their own arguments. With a redirect onto a file that is NOT an
-# environment file, an env name among the arguments is TEXT (`echo <name> > .worktreeinclude`),
-# and no environment file is read or written. `cat <name> > x` is not on the list, so it stays held.
+# Commands that only print their own arguments. An env name among the arguments is TEXT, printed to
+# stdout or written to a file that is NOT an environment file (`echo <name> > .worktreeinclude`),
+# and no environment file is read or written. A redirect onto an environment file is refused first. `cat <name> > x` is not on the list, so it stays held.
 ENV_TEXT_COMMANDS = ("echo", "printf")
 
 # The message or body of a commit or a pull request is text. Its value is blanked before the words
@@ -3083,8 +3083,11 @@ def env_refusal(cmd: str, subs_only: bool = False):
         return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH
     if subs_only:
         texts = texts[:-1]
-    for text, in_message in texts:
-        refusal = _env_flat(text, in_message)
+    for index, (text, in_message) in enumerate(texts):
+        # The command itself is last. Its `echo` or `printf` prints to stdout or a file, and an env
+        # name among the arguments is text. A substitution's output is an ARGUMENT of the command
+        # around it, so only a message value may treat it as text.
+        refusal = _env_flat(text, in_message or index == len(texts) - 1)
         if refusal[0]:
             return refusal
     return "", ""
@@ -3126,11 +3129,9 @@ def _env_flat(cmd: str, text_ok: bool = False):
                 command == "git" and rest_words[:1] == ["check-ignore"] and "<" not in segment
                 and not any(w == "--stdin" or re.fullmatch(r"-[A-Za-z]*z[A-Za-z]*", w)
                             for w in words))
-            # A redirect onto a file that is not an environment file makes a text command's
-            # arguments data. A redirect onto an environment file is refused below, first.
-            text_to_file = command in ENV_TEXT_COMMANDS and (text_ok or any(
-                REDIRECT.fullmatch(words[i - 1]) and not env_reference(w)
-                for i, w in enumerate(words) if i))
+            # A text command's arguments are data. A redirect onto an environment file is refused
+            # below, first.
+            text_to_file = command in ENV_TEXT_COMMANDS and text_ok
             for index, word in enumerate(words):
                 prefix, assigned, rest = word.partition("=")
                 flag = prefix if assigned and prefix.startswith("-") else ""
