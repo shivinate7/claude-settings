@@ -54,6 +54,10 @@ one fixed order, and the first match wins.
   8 subagent-model-cap a write to a settings file whose content sets or changes
                        `CLAUDE_CODE_SUBAGENT_MODEL` or `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`.
                        Always asked, never denied.
+  9 subagent-model-floor an `Agent` or legacy `Task` call whose `model` is a Haiku model, by alias or
+                       by any full id. Always denied. Sonnet is the floor (owner ruling 2026-09-28).
+                       An agent file's own `model:` key never reaches this rule, so
+                       lint/check_agent_models.py checks the files.
 
 A project's own `.claude/settings.json`, `.claude/settings.local.json`, and
 `.claude/hooks/*` are NOT frozen (Decision 7). They are allowed, and the guard appends
@@ -3537,6 +3541,17 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str) -> No
     sys.exit(0)
 
 
+SPAWN_TOOLS = ("Agent", "Task")
+MODEL_FLOOR_REASON = (
+    "Sonnet is the floor for every subagent. Start the subagent with model sonnet or opus, "
+    "or name no model and let the default apply."
+)
+
+
+def below_the_floor(model) -> bool:
+    return isinstance(model, str) and "haiku" in model.lower()
+
+
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
     stripped = strip_heredoc_bodies(raw)
     cmd = norm(stripped)
@@ -3740,6 +3755,11 @@ def judge(payload) -> None:
                         and path_is_inside(resolved_target, home) is False):
                     refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON,
                            "write target outside recorded agent home")
+
+    # 9. The subagent model floor. A spawn that names a Haiku model is denied. The reason names no
+    # model; the log holds what the call asked for.
+    if tool in SPAWN_TOOLS and below_the_floor(tool_input.get("model")):
+        refuse(tool, "deny", "subagent-model-floor", MODEL_FLOOR_REASON, str(tool_input.get("model")))
 
     # A merge through the MCP tool carries no base for the guard to read, so every call is
     # allowed (Decision 8) and noted, the same as an unreadable `gh pr merge` base.
