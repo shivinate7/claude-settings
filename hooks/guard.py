@@ -3022,7 +3022,9 @@ def _substitutions(cmd: str, depth: int = 0):
 #   - a dot glob such as `cat .*` or `tar .*` refuses, on purpose, as it sweeps in `.env`;
 #   - `find -name '.env*'` refuses, and `ls` or `git ls-files` is the way to list;
 #   - a relay split across two separate tool calls (write the name to a file in one, read the file
-#     in the next) cannot be seen by a per-command guard.
+#     in the next) cannot be seen by a per-command guard;
+#   - the relay check matches the literal path, so another spelling of the same file (`./f`, or
+#     `~/f` against `$HOME/f`) is not caught. The guard does not resolve paths.
 ENV_GLOB = re.compile(r"[?*\[]")
 ENV_GLOB_PART = re.compile(r"\[[!^]?([^\]])[^\]]*\]|\?|\*")
 
@@ -3118,6 +3120,15 @@ def env_heredoc_refusal(raw: str):
     return "", ""
 
 
+def _env_parts(piece: str):
+    """`_ampersand_split` of one segment, with an fd duplication (`2>&1`, `>&2`) taken out first.
+    Its `&` is no background operator, and left in, it cut the text command from the pipe after it.
+    `&>` and `>&file` are a plain redirect."""
+    piece = re.sub(r"\d*>&(\d+|-)", " ", piece)
+    piece = re.sub(r"&>>?|>&(?![\d-])", lambda m: m.group(0).replace("&", ""), piece)
+    return _ampersand_split(piece)
+
+
 def _env_words(segment: str):
     """Return (words, command word) of one segment, redirects spaced into words of their own."""
     words = READ_REDIRECT.sub(" < ", REDIRECT.sub(
@@ -3144,22 +3155,40 @@ def _env_relay(texts):
     and then reads the file the name points at. A relay split across two separate tool calls
     cannot be seen by a per-command guard, and that is an accepted limit.
     """
-    segments = [_env_words(seg) for text, _ in texts
-                for piece in split_segments(text) for seg in _ampersand_split(piece)]
+    segments = [[_env_words(seg) for piece in split_segments(text) for seg in _env_parts(piece)]
+                for text, _ in texts]
+
+    def gives_a_name(words, command):
+        return command in ENV_TEXT_COMMANDS and any(
+            env_reference(w) for i, w in enumerate(words)
+            if i and not REDIRECT.fullmatch(words[i - 1]))
+
+    def targets(words):
+        return {w for i, w in enumerate(words) if i and REDIRECT.fullmatch(words[i - 1])}
+
+    def reads(words, command, files):
+        return command not in ENV_RELAY_SAFE and any(
+            w in files and not (i and REDIRECT.fullmatch(words[i - 1]))
+            for i, w in enumerate(words))
+
+    # The command itself is the last text, and its segments run in order: a read before the write
+    # is the check-then-write setup, and is no relay. A substitution runs at a place this scan
+    # does not track, so a read inside one counts against every write.
     written = set()
-    for words, _, command in segments:
-        if command in ENV_TEXT_COMMANDS and any(
-                env_reference(w) for i, w in enumerate(words)
-                if i and not REDIRECT.fullmatch(words[i - 1])):
-            written.update(w for i, w in enumerate(words)
-                           if i and REDIRECT.fullmatch(words[i - 1]))
-    for words, _, command in segments:
-        if command in ENV_RELAY_SAFE:
-            continue
-        for i, w in enumerate(words):
-            if w in written and not (i and REDIRECT.fullmatch(words[i - 1])):
-                return (ENV_CONTENTS_REASON,
-                        "'%s' would read a file that was just given an environment name" % command)
+    for text in segments:
+        for words, _, command in text:
+            if gives_a_name(words, command):
+                written |= targets(words)
+    for text in segments[:-1]:
+        if any(reads(words, command, written) for words, _, command in text):
+            return ENV_CONTENTS_REASON, "a substitution reads a file that was given an environment name"
+    written = set()
+    for words, _, command in segments[-1]:
+        if reads(words, command, written):
+            return (ENV_CONTENTS_REASON,
+                    "'%s' would read a file that was just given an environment name" % command)
+        if gives_a_name(words, command):
+            written |= targets(words)
     return "", ""
 
 
@@ -3168,7 +3197,7 @@ def _env_flat(cmd: str, text_ok: bool = False):
     ends = []
     pieces = split_segments(cmd, ends)
     for piece, end in zip(pieces, ends):
-        parts = _ampersand_split(piece)
+        parts = _env_parts(piece)
         for number, segment in enumerate(parts):
             words, position, command = _env_words(segment)
             if not words:

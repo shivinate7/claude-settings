@@ -2096,6 +2096,21 @@ for text in (
 ):
     sh("env: text with no relay, " + text[:40], text, "allow", cwd=NOGIT)
 
+# A duplicated fd on the text segment hides no pipe, and a read that comes BEFORE the write is no relay.
+for held in (
+    "printf " + ENV + " 2>&1 | xargs cat", "echo " + ENV + " 1>&2 | xargs cat",
+    "echo " + ENV + " >&2 | sh", "echo " + ENV + " 2>&1 | tee f", "echo " + ENV + " > f; cat f",
+    "echo " + ENV + " > f && cat f",
+):
+    sh("env: fd duplication or a read after the write, " + held[:36], held, "deny", "env-file",
+       cwd=NOGIT)
+for text in (
+    "grep x .worktreeinclude; printf '" + ENV + "\\n' > .worktreeinclude",
+    "cat .worktreeinclude && echo " + ENV + " >> .worktreeinclude",
+    "echo " + ENV + " 2>&1", "echo " + ENV + " >&2",
+):
+    sh("env: check then write, " + text[:40], text, "allow", cwd=NOGIT)
+
 sh("env: PowerShell Get-Content", "Get-Content " + ENV, "deny", "env-file", tool="PowerShell",
    cwd=NOGIT)
 sh("env: PowerShell alias and a dot-slash path", "gc .\\" + ENV, "deny", "env-file",
