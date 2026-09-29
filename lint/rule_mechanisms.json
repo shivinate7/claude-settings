@@ -63,10 +63,16 @@
         "needle": "CLAUDE_CODE_SUBAGENT_MODEL"
       }
     },
-    "roles-tier-matches-lane": {
+    "roles-sonnet-is-the-floor": {
       "mechanism": {
         "kind": "guard",
         "ref": "subagent-model-floor"
+      }
+    },
+    "roles-sonnet-is-the-ceiling": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "The owner ruled on 2026-09-28 that prose alone enforces the ceiling and that no forcing returns, so no hook or setting blocks a model above Sonnet."
       }
     },
     "roles-opus-shaped-say-so": {

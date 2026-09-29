@@ -5,10 +5,26 @@ records how the worker-model rule is mechanized after
 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is dropped. The owner dropped it. That is settled
 and this entry does not reopen it.
 
-The short answer: the cap stops being a cap. `CLAUDE_CODE_SUBAGENT_MODEL: sonnet`
-stays as the fallback, so nothing moves by default. The settings-write ask and the
+The short answer: Sonnet is the floor and the ceiling for every agent. The ceiling is
+prose only, by owner ruling (see "The ceiling, ruled 2026-09-28").
+`CLAUDE_CODE_SUBAGENT_MODEL: sonnet` stays as the fallback, so nothing moves by default. The settings-write ask and the
 expiry both stay, because both key on the model variable and never on the force flag.
 One floor gate is added: no subagent runs Haiku (see the next section).
+
+## The ceiling, ruled 2026-09-28
+
+The owner ruled: "Every one of your agents must be on sonnet only. Opus as an agent is
+only used if I tell you." Sonnet is also the ceiling. An agent runs Opus, or any model
+above Sonnet, only on the owner's word, for the spawn the owner names. The reason: the
+owner wants Sonnet on every lane, whatever the cost.
+
+Enforcement stays prose only, by owner ruling. The owner will not bring back the
+forcings, because prose alone is strong enough to mandate it. No hook and no
+`CLAUDE_CODE_SUBAGENT_MODEL_FORCE` enforces the ceiling. CLAUDE.md
+`roles-sonnet-is-the-ceiling` states it, and `lint/rule_mechanisms.json` records it as
+`unmechanized` with the ruling as reason. The owner's word is the only path to Opus:
+the `roles-opus-shaped-say-so` line, and then the guarded
+`settings.local.json` raise, which the owner must also order.
 
 ## The floor, ruled 2026-09-28
 
@@ -23,7 +39,7 @@ Three places enforce it.
 - `lint/check_agent_models.py`, run in `.github/workflows/gates.yml`, fails when an
   `agents/*.md` or `skills/*/SKILL.md` frontmatter sets a Haiku `model:`. A file's own
   key names no model in the tool input, so the guard cannot see it.
-- CLAUDE.md `roles-tier-matches-lane` states the floor.
+- CLAUDE.md `roles-sonnet-is-the-floor` states the floor.
 
 Known limit. A built-in agent that picks its own model inside Claude Code never puts
 that model in the tool input, and it has no file here. The guard and the check cannot
@@ -62,8 +78,9 @@ Four dated behaviour changes bound any reasoning about this order.
 
 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` collapses the whole order onto entry 3. Every
 other entry is dropped before the tool call runs. That is a pin, not a ceiling. It
-held Opus back exactly as hard as it held Haiku back. Only the Opus half of that stays
-wanted. The floor now blocks Haiku on purpose, by its own rule.
+held Opus back exactly as hard as it held Haiku back. The owner wants both halves
+held, but the ceiling by prose alone, with no pin. The floor blocks Haiku by its own
+rule.
 
 The earlier version of this entry called the pin a cap. That word was wrong, and the
 wrong word hid the cost. The rule the owner wants is about matching a tier to a lane.
@@ -148,8 +165,8 @@ aliases beside it. A rank written into a hook is a copy of that list. CLAUDE.md 
 a gate's allow list must point at the constant the code emits, never a copy of it. A
 copied rank is also stale on the day a model ships.
 
-A ceiling therefore does not belong in a hook. That is not a limitation to work
-around. It is a signal that the ceiling is the wrong rule, which Question 5 answers.
+A ceiling therefore does not belong in a hook. The owner ruled the same on
+2026-09-28: the ceiling is prose only, and no forcing returns.
 
 One constant does exist, and the repository already points at it. The fallback value
 in `settings.json` is what the harness reads at entry 3. Guard rule 8 already keys on
@@ -204,20 +221,18 @@ nothing mid-fan-out, and the owner is the person doing the write.
 
 ## Question 5. The default, and the shape of the rule
 
-The default stays `sonnet`. The rule stops being a ceiling, and Sonnet is the floor.
+The default stays `sonnet`. Sonnet is the floor and the ceiling, and the ceiling is
+prose only (see "The ceiling, ruled 2026-09-28"). The words in CLAUDE.md now read:
 
-A rule that names an outcome survives better than one that names a tier. "Never spawn
-a worker above Sonnet" names a tier. The words in CLAUDE.md now read:
+> Every agent runs Sonnet, and that needs no word. Sonnet is the floor: no agent runs
+> Haiku. Sonnet is the ceiling: an agent runs Opus, or any model above Sonnet, only on
+> my word, for the spawn I name.
 
-> Match the worker tier to the lane. Sonnet is the default and needs no word, and
-> Sonnet is the floor for every lane. A lane that diagnoses, or that may find what the
-> brief did not anticipate, takes Sonnet or more.
-
-The anchor `roles-workers-run-sonnet` states the repealed rule. A stale anchor is a
-lie that a future reader will grep. Split it into two, because the two halves
+The anchor `roles-workers-run-sonnet` stated the repealed pin. A stale anchor is a
+lie that a future reader will grep. Three anchors replace it, because the parts
 mechanize differently. `roles-sonnet-is-the-default` is a gate on `settings.json`.
-`roles-tier-matches-lane` is unmechanized, for the same reason
-`roles-orchestrator-never-builds` is: no hook classifies a lane's shape.
+`roles-sonnet-is-the-floor` is a guard on rule `subagent-model-floor`.
+`roles-sonnet-is-the-ceiling` is unmechanized, by owner ruling.
 
 ## Question 6. What the orchestrator owes at dispatch time
 
@@ -228,7 +243,7 @@ and Tetlock found to work, and it is the condition the deleted gate failed. Keep
 It is not sufficient, for two reasons.
 
 It names only the up direction. With the floor, no departure below Sonnet exists, so
-the line is owed for a departure up.
+the line is owed for a departure up. The line asks; the owner's word decides.
 
 Nothing after the fact can read which tier ran. The report names every dispatch, but
 not the model. A Done line for a lane should name the tier when the tier was not
@@ -280,8 +295,9 @@ for setting both keys, which covered either merge rule for `env`, has no subject
 left.
 
 The grant is weaker than it was, and that is correct. It raises the fallback. It does
-not pin. An orchestrator that wants one Opus lane can pass the model on that one call
-instead, which is cheaper and narrower than a repository-wide raise. The grant is for
+not pin. An orchestrator that wants one Opus lane says so. On the owner's word, it can pass the
+model on that one call instead. That is cheaper and narrower than a repository-wide
+raise. The grant is for
 the case where several lanes in a row need the higher tier.
 
 That write triggers guard rule 8. The ask names the model and the file, so the raise
@@ -320,12 +336,12 @@ on a write that touches only the deadline.
 `CLAUDE_CODE_SUBAGENT_MODEL` at `sonnet`. Keep
 `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` at 1.
 
-`CLAUDE.md`. Replace the ceiling sentence with the tier-matching words in Question 5,
-under two anchors in place of `roles-workers-run-sonnet`. Drop the force key from the
+`CLAUDE.md`. Replace the ceiling sentence with the Sonnet floor-and-ceiling words in
+Question 5, under three anchors in place of `roles-workers-run-sonnet`. Drop the force key from the
 grant JSON in `roles-opus-override-guarded`. Reword `roles-opus-override-guarded` and
 `roles-override-carries-expiry` from lifting a pin to raising a default, keeping both
-anchors. Extend `roles-opus-shaped-say-so` to any departure from the default, in
-either direction.
+anchors. Make `roles-opus-shaped-say-so` and the raise rules the only path to Opus, and only on
+the owner's word.
 
 `hooks/`. `hooks/guard.py` keeps rule 8 and keeps the optional `_FORCE` group, and adds
 rule 9, `subagent-model-floor`. `hooks/config_watch.py` and
@@ -333,8 +349,9 @@ rule 9, `subagent-model-floor`. `hooks/config_watch.py` and
 
 `lint/rule_mechanisms.json`. Drop the `roles-workers-run-sonnet` key. Add
 `roles-sonnet-is-the-default`, as a gate on `settings.json` with the needle
-`CLAUDE_CODE_SUBAGENT_MODEL`. Add `roles-tier-matches-lane`, as a guard on rule
-`subagent-model-floor`. The entries for `roles-opus-override-guarded`,
+`CLAUDE_CODE_SUBAGENT_MODEL`. Add `roles-sonnet-is-the-floor`, as a guard on rule
+`subagent-model-floor`. Add `roles-sonnet-is-the-ceiling`, as `unmechanized`, with the
+owner's ruling as reason. The entries for `roles-opus-override-guarded`,
 `roles-override-carries-expiry` and `roles-remove-override-file` keep pointing at
 guard rule `subagent-model-cap`.
 
@@ -344,8 +361,9 @@ A fork runs the main conversation's model, and so does a skill run in a subagent
 `model: inherit`. Nothing here touches either. The prose rule is the only guard on
 them.
 
-Over-provisioning of one lane now passes without a prompt. The Stop guardrail reads
-it after the turn. Question 4 accepts that gap and prices it.
+Over-provisioning of one lane, a spawn above Sonnet with no word from the owner,
+passes without a prompt. Only prose forbids it, by owner ruling. The Stop guardrail
+reads it after the turn. Question 4 accepts that gap and prices it.
 
 Under-provisioning is caught by nothing before the rework cycle. That was also true
 before the pin was dropped, and it is true again under the floor, which forbids

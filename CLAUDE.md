@@ -14,12 +14,12 @@ verdict, one bounded command proves it, and the report names both. A change that
 rule's behaviour, a gate's verdict, or product code a reviewer must see goes to a lane, at
 any size. Keep a fix under 40 lines, against reading cost alone.<!-- rule:roles-orchestrator-never-builds --> Each worker is one role: builder, reviewer,
 or Explore,
-never two.<!-- rule:roles-one-role-per-worker --> A workflow agent takes the builder or reviewer role through `agentType`. Match
-the worker tier to the lane. Sonnet is the default and needs no word.<!-- rule:roles-sonnet-is-the-default --> Sonnet is the
-floor for every lane. A lane that diagnoses, or that may find what the brief did not
-anticipate, takes Sonnet or more.<!-- rule:roles-tier-matches-lane --> When a
-task is Opus-shaped (long-horizon, whole-codebase, or many-hour autonomous work), say so in
-one line before you dispatch, name why, and offer the switch.<!-- rule:roles-opus-shaped-say-so --> On my word, write the repo's
+never two.<!-- rule:roles-one-role-per-worker --> A workflow agent takes the builder or reviewer role through `agentType`. Every
+agent runs Sonnet, and that needs no word.<!-- rule:roles-sonnet-is-the-default --> Sonnet is the floor: no agent runs Haiku.<!-- rule:roles-sonnet-is-the-floor --> Sonnet is
+the ceiling: an agent runs Opus, or any model above Sonnet, only on my word, for the spawn I
+name.<!-- rule:roles-sonnet-is-the-ceiling --> When a task is Opus-shaped (long-horizon, whole-codebase, or many-hour
+autonomous work), say so in one line before you dispatch, name why, and offer the switch. Then
+wait for my word.<!-- rule:roles-opus-shaped-say-so --> Only on my word, write the repo's
 `.claude/settings.local.json` with an `env` block that raises `CLAUDE_CODE_SUBAGENT_MODEL` to
 `opus`. The raise moves the default. It does not pin every spawn to it. The guard asks before
 that write lands.<!-- rule:roles-opus-override-guarded -->
