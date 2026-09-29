@@ -2077,6 +2077,25 @@ for held in (
     sh("env: a test or text is no licence to read, " + held[:40], held, "deny", "env-file",
        cwd=NOGIT)
 
+# The text allowance holds for the echo or printf segment alone, and only while its stdout goes to the
+# terminal or to a file. Piped onward, or written to a file that a later reader takes, it is a relay.
+for held in (
+    "echo " + ENV + " | xargs cat", "echo " + ENV + " | sh", "echo " + ENV + " | bash",
+    "echo " + ENV + " | source /dev/stdin",
+    "echo " + ENV + ' | while read f; do cat "$f"; done', "echo " + ENV + " | tee f",
+    "printf '" + ENV + "\\n' | xargs cat",
+    "echo " + ENV + " > f; cat $(cat f)", "echo " + ENV + " > x && xargs cat < x",
+    "echo " + ENV + " >> x && xargs cat < x", "printf '" + ENV + "\\n' > f && cat $(cat f)",
+    "echo " + ENV + " > f && sh f",
+):
+    sh("env: a relay of the text, " + held[:40], held, "deny", "env-file", cwd=NOGIT)
+for text in (
+    "[[ -e " + ENV + ".local ]]", "test -s " + ENV, "printf '" + ENV + "\\n' > .worktreeinclude",
+    "echo " + ENV + " > .worktreeinclude && test -f .worktreeinclude",
+    "echo " + ENV + " || echo no; echo done | cat",
+):
+    sh("env: text with no relay, " + text[:40], text, "allow", cwd=NOGIT)
+
 sh("env: PowerShell Get-Content", "Get-Content " + ENV, "deny", "env-file", tool="PowerShell",
    cwd=NOGIT)
 sh("env: PowerShell alias and a dot-slash path", "gc .\\" + ENV, "deny", "env-file",

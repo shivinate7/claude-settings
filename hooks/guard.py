@@ -208,7 +208,7 @@ def basename(token: str) -> str:
 # owner's `grep -n -i "...|make reap|pkill..." CLAUDE.md` splits on the pipes INSIDE the quotes
 # under a blind splitter, and one fragment starts with `pkill`. A rule that then judged the
 # fragment's first word would deny a grep as if it were a kill.
-def split_segments(cmd: str):
+def split_segments(cmd: str, ends=None):
     """Split into shell segments on unquoted `;`, `|`, `||`, `&&`, and newline.
 
     Quoted text, single or double, is copied whole into the current segment, so a delimiter
@@ -222,6 +222,9 @@ def split_segments(cmd: str):
     unquoted `#` that STARTS A WORD (index 0, or the previous character is space, tab,
     newline, `;`, `|`, `&`, or `(`) is a comment to the end of its line — the shell's own
     rule. `fix#3` and `'#300'` are not comments under it.
+
+    `ends`, when a list, gets what closed each segment (`|`, `||`, `&&`, `;`, newline, or '' for
+    the last), so a caller can tell a segment whose stdout is piped onward from the rest.
     """
     segments = []
     current = []
@@ -247,22 +250,27 @@ def split_segments(cmd: str):
             continue
         if char == "&" and cmd[index:index + 2] == "&&":
             segments.append("".join(current))
+            ends is None or ends.append("&&")
             current = []
             index += 2
             continue
         if char == "|":
-            index += 2 if cmd[index:index + 2] == "||" else 1
+            width = 2 if cmd[index:index + 2] == "||" else 1
+            ends is None or ends.append(cmd[index:index + width])
+            index += width
             segments.append("".join(current))
             current = []
             continue
         if char in (";", "\n"):
             segments.append("".join(current))
+            ends is None or ends.append(char)
             current = []
             index += 1
             continue
         current.append(char)
         index += 1
     segments.append("".join(current))
+    ends is None or ends.append("")
     return segments
 
 
@@ -3012,7 +3020,9 @@ def _substitutions(cmd: str, depth: int = 0):
 # ACCEPTED LIMITS, each named so nobody trusts this layer past them:
 #   - a brace or variable split (`.env{,.x}`, `.e$Xnv`) cannot be read statically;
 #   - a dot glob such as `cat .*` or `tar .*` refuses, on purpose, as it sweeps in `.env`;
-#   - `find -name '.env*'` refuses, and `ls` or `git ls-files` is the way to list.
+#   - `find -name '.env*'` refuses, and `ls` or `git ls-files` is the way to list;
+#   - a relay split across two separate tool calls (write the name to a file in one, read the file
+#     in the next) cannot be seen by a per-command guard.
 ENV_GLOB = re.compile(r"[?*\[]")
 ENV_GLOB_PART = re.compile(r"\[[!^]?([^\]])[^\]]*\]|\?|\*")
 
@@ -3090,7 +3100,7 @@ def env_refusal(cmd: str, subs_only: bool = False):
         refusal = _env_flat(text, in_message or index == len(texts) - 1)
         if refusal[0]:
             return refusal
-    return "", ""
+    return _env_relay(texts)
 
 
 def env_heredoc_refusal(raw: str):
@@ -3108,20 +3118,64 @@ def env_heredoc_refusal(raw: str):
     return "", ""
 
 
+def _env_words(segment: str):
+    """Return (words, command word) of one segment, redirects spaced into words of their own."""
+    words = READ_REDIRECT.sub(" < ", REDIRECT.sub(
+        r" \1 ", _blank_messages(segment))).split()
+    # The command is the first word that is not a `VAR=value` assignment.
+    position = 0
+    while position < len(words) and ASSIGNMENT.match(words[position]):
+        position += 1
+    head = words[position] if position < len(words) else ""
+    command = head.strip("'\"").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    if command in ENV_TEXT_COMMANDS:
+        # `printf '<name>\n'` prints the name and a newline: the escape ends the word.
+        words = re.sub(r"\\[ntr]", " ", " ".join(words)).split()
+    return words, position, command
+
+
+# Commands that take a file name and read none of its contents to run it: they ask, list or record.
+ENV_RELAY_SAFE = ENV_EXISTENCE_COMMANDS + ENV_TEXT_COMMANDS + ("git",)
+
+
+def _env_relay(texts):
+    """Return (reason, log) when a text command writes an env name into a file that another
+    segment of the SAME command reads. `echo <name> > f; cat $(cat f)` prints the name to a file
+    and then reads the file the name points at. A relay split across two separate tool calls
+    cannot be seen by a per-command guard, and that is an accepted limit.
+    """
+    segments = [_env_words(seg) for text, _ in texts
+                for piece in split_segments(text) for seg in _ampersand_split(piece)]
+    written = set()
+    for words, _, command in segments:
+        if command in ENV_TEXT_COMMANDS and any(
+                env_reference(w) for i, w in enumerate(words)
+                if i and not REDIRECT.fullmatch(words[i - 1])):
+            written.update(w for i, w in enumerate(words)
+                           if i and REDIRECT.fullmatch(words[i - 1]))
+    for words, _, command in segments:
+        if command in ENV_RELAY_SAFE:
+            continue
+        for i, w in enumerate(words):
+            if w in written and not (i and REDIRECT.fullmatch(words[i - 1])):
+                return (ENV_CONTENTS_REASON,
+                        "'%s' would read a file that was just given an environment name" % command)
+    return "", ""
+
+
 def _env_flat(cmd: str, text_ok: bool = False):
     """The segment rules over one text whose substitutions are already cut out."""
-    for piece in split_segments(cmd):
-        for segment in _ampersand_split(piece):
-            words = READ_REDIRECT.sub(" < ", REDIRECT.sub(
-                r" \1 ", _blank_messages(segment))).split()
+    ends = []
+    pieces = split_segments(cmd, ends)
+    for piece, end in zip(pieces, ends):
+        parts = _ampersand_split(piece)
+        for number, segment in enumerate(parts):
+            words, position, command = _env_words(segment)
             if not words:
                 continue
-            # The command is the first word that is not a `VAR=value` assignment.
-            position = 0
-            while position < len(words) and ASSIGNMENT.match(words[position]):
-                position += 1
-            head = words[position] if position < len(words) else ""
-            command = head.strip("'\"").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+            # A segment that pipes onward hands its output to another command, which may read it
+            # as a path. Only its stdout to the terminal or to a file keeps the text allowance.
+            piped = end == "|" and number == len(parts) - 1
             # `git check-ignore <path>` asks git whether a path is ignored. It reads no contents.
             rest_words = [w for w in words[position + 1:] if not w.startswith("-")]
             # Only positional paths. `--stdin`, `-z` and a `<` redirect feed it contents to print.
@@ -3131,7 +3185,7 @@ def _env_flat(cmd: str, text_ok: bool = False):
                             for w in words))
             # A text command's arguments are data. A redirect onto an environment file is refused
             # below, first.
-            text_to_file = command in ENV_TEXT_COMMANDS and text_ok
+            text_to_file = command in ENV_TEXT_COMMANDS and text_ok and not piped
             for index, word in enumerate(words):
                 prefix, assigned, rest = word.partition("=")
                 flag = prefix if assigned and prefix.startswith("-") else ""
