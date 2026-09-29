@@ -2817,13 +2817,15 @@ ENV_EXISTENCE_COMMANDS = ("ls", "test", "[")
 ENV_TEXT_COMMANDS = ("echo", "printf")
 
 # The message or body of a commit or a pull request is text. Its value is blanked before the words
-# are read, so an env name in prose reads no contents. A `$(...)` in the value keeps everything but
-# the quoted argument of a `printf` or `echo`, so `-m "$(cat <name>)"` is still read as a read.
+# are read, so an env name in prose reads no contents. A substitution in the value is cut out
+# and judged as a command first, by `_substitutions`.
 ENV_MESSAGE_COMMAND = re.compile(r"\s*(git\s+commit|gh\s+pr\s+create)\b")
 ENV_MESSAGE_ARG = re.compile(
     r"""(?P<flag>(?:-m|--message|--title|--body)(?:=|\s+))"""
     r"""(?P<value>"(?:[^"\\]|\\.)*"|'[^']*')""")
-ENV_ECHOED_TEXT = re.compile(r"((?:printf|echo)\s+)'[^']*'")
+# The text ahead of a substitution that sits inside a message argument, so a substitution that
+# only prints text there is text.
+ENV_IN_MESSAGE = re.compile(r"(?:-m|--message|--title|--body)(?:=|\s+)\"(?:[^\"\\]|\\.)*$")
 
 
 def _blank_messages(segment: str) -> str:
@@ -2832,11 +2834,7 @@ def _blank_messages(segment: str) -> str:
 
     def blank(match):
         value = match.group("value")
-        if value[0] == '"' and ("$(" in value or "`" in value):
-            inner = ENV_ECHOED_TEXT.sub(r"\1'x'", value)
-        else:
-            inner = value[0] + "x" + value[0]
-        return match.group("flag") + inner
+        return match.group("flag") + value[0] + "x" + value[0]
 
     return ENV_MESSAGE_ARG.sub(blank, segment)
 
@@ -2869,6 +2867,8 @@ ENV_TOOL_REASON = (
 
 # A redirect operator, spaced into a word of its own before the words are read.
 REDIRECT = re.compile(r"(\d?>>?)")
+# A `<` redirect (not `<<` or `<<<`), spaced into a word of its own. The word after it is READ.
+READ_REDIRECT = re.compile(r"(?<![<])<(?![<(])")
 # ASSIGNMENT (a leading `VAR=value`) is defined once, above, and shared with `resolve_command`.
 
 
@@ -2904,6 +2904,73 @@ def _ampersand_split(segment: str):
     return parts
 
 
+def _scan(s: str, i: int, closer: str, found):
+    """Scan s from i to the unquoted `closer` (a `)` or the end when ''). Return the end index.
+
+    Each command substitution `$(...)`, backtick pair or process substitution `<(...)` `>(...)`
+    met OUTSIDE single quotes is appended to `found` as (start, end, body). A nested one is
+    skipped here and found again when its parent body is judged.
+    """
+    quote = ""
+    depth = 0
+    while i < len(s):
+        char = s[i]
+        if char == "\\" and quote != "'":
+            i += 2
+            continue
+        if quote == "'":
+            quote = "" if char == "'" else quote
+            i += 1
+            continue
+        if char == "'" and quote == "":
+            quote = "'"
+        elif char == '"':
+            quote = "" if quote == '"' else '"'
+        elif char == "`":
+            j = i + 1
+            while j < len(s) and s[j] != "`":
+                j += 2 if s[j] == "\\" else 1
+            found.append((i, j + 1, s[i + 1:j].replace("\\`", "`")))
+            i = j + 1
+            continue
+        elif s[i:i + 2] == "$(" or (quote == "" and s[i:i + 2] in ("<(", ">(")):
+            inner = []
+            end = _scan(s, i + 2, ")", inner)
+            found.append((i, end + 1, s[i + 2:end]))
+            i = end + 1
+            continue
+        elif quote == "" and closer and char == "(":
+            depth += 1
+        elif quote == "" and closer and char == ")":
+            if depth == 0:
+                return i
+            depth -= 1
+        i += 1
+    return i
+
+
+def _substitutions(cmd: str):
+    """Return (cmd with each top-level substitution replaced by `x`, [(body, in a message)]).
+
+    ponytail: a heredoc body is scanned like shell text, so a `$(` in one is judged too. That errs
+    toward refusal, and a body that names an env file in a substitution is rare.
+    """
+    found = []
+    _scan(cmd, 0, "", found)
+    outer = []
+    bodies = []
+    last = 0
+    for start, end, body in found:
+        outer.append(cmd[last:start])
+        outer.append("x")
+        head = cmd[:start]
+        tail = re.split(r"[;|&\n]", head)[-1]
+        bodies.append((body, bool(ENV_MESSAGE_COMMAND.match(tail) and ENV_IN_MESSAGE.search(tail))))
+        last = end
+    outer.append(cmd[last:])
+    return "".join(outer), bodies
+
+
 def env_reference(word: str) -> str:
     """Return the environment file that one shell word names as a path, else ''.
 
@@ -2911,7 +2978,7 @@ def env_reference(word: str) -> str:
     keeps `process.env`, `import.meta.env` and `dotenv` out, because in none of them does `.env`
     end a path segment.
     """
-    word = word.strip("'\"")
+    word = word.strip("'\"`()")
     for separator in ("/", "\\"):
         head, found, tail = word.rpartition(separator)
         if not found:
@@ -2925,7 +2992,7 @@ def env_reference(word: str) -> str:
     return word
 
 
-def env_refusal(cmd: str):
+def env_refusal(cmd: str, text_ok: bool = False):
     """Return (printed reason, logged text) when the command touches an environment file.
 
     Both are the empty string when the command is clean.
@@ -2937,10 +3004,20 @@ def env_refusal(cmd: str):
 
     The command arrives with its own separators intact. Normalizing them is what made a search for
     the environment accessor read as a path.
+
+    Every substitution is cut out and judged as a command of its own, at any depth. `text_ok` is
+    set for one that sits in a commit or pull request message: an `echo` or `printf` there only
+    prints text, so its arguments are data.
     """
+    cmd, bodies = _substitutions(cmd)
+    for body, in_message in bodies:
+        refusal = env_refusal(body, in_message)
+        if refusal[0]:
+            return refusal
     for piece in split_segments(cmd):
         for segment in _ampersand_split(piece):
-            words = REDIRECT.sub(r" \1 ", _blank_messages(segment)).split()
+            words = READ_REDIRECT.sub(" < ", REDIRECT.sub(
+                r" \1 ", _blank_messages(segment))).split()
             if not words:
                 continue
             # The command is the first word that is not a `VAR=value` assignment.
@@ -2958,9 +3035,9 @@ def env_refusal(cmd: str):
                             for w in words))
             # A redirect onto a file that is not an environment file makes a text command's
             # arguments data. A redirect onto an environment file is refused below, first.
-            text_to_file = command in ENV_TEXT_COMMANDS and any(
+            text_to_file = command in ENV_TEXT_COMMANDS and (text_ok or any(
                 REDIRECT.fullmatch(words[i - 1]) and not env_reference(w)
-                for i, w in enumerate(words) if i)
+                for i, w in enumerate(words) if i))
             for index, word in enumerate(words):
                 prefix, assigned, rest = word.partition("=")
                 flag = prefix if assigned and prefix.startswith("-") else ""

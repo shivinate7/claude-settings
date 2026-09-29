@@ -2014,6 +2014,25 @@ for held in (
 ):
     sh("env: a message allowance does not leak, " + held[:34], held, "deny", "env-file", cwd=NOGIT)
 
+# The contents of a command substitution or a process substitution are judged as commands, at any
+# depth, and a `<` redirect from the file is a read. A word such as `.env)` hides no name.
+for held in (
+    "echo $(cat " + ENV + ") > notes", "echo `cat " + ENV + "` > n",
+    'printf "%s" "$(< ' + ENV + ')" > x', "echo $(<" + ENV + ") > n",
+    VCS + " check-ignore $(cat " + ENV + ")", 'echo "$(base64 ' + ENV + ')" > n',
+    VCS + ' commit -m "$(cat ' + ENV + ')"', 'gh pr create --body "$(cat ' + ENV + ')"',
+    VCS + " commit -m \"$(printf '%s' \"$(cat " + ENV + ")\")\"",
+    "diff <(cat " + ENV + ") x", "cat < " + ENV, "cat $(echo $(cat " + ENV + "))",
+    "cat $(printf " + ENV + ")", "(cat " + ENV + ")",
+):
+    sh("env: a substitution is judged, " + held[:40], held, "deny", "env-file", cwd=NOGIT)
+for text in (
+    "printf '" + ENV + "\\n' > .worktreeinclude", VCS + ' commit -m "Copy ' + ENV + ' into worktrees"',
+    'gh pr create --body "Adds ' + ENV + '"', VCS + " check-ignore -q " + ENV,
+    VCS + " commit -m \"$(printf 'text with " + ENV + "')\"",
+):
+    sh("env: a substitution allowance, " + text[:40], text, "allow", cwd=NOGIT)
+
 sh("env: PowerShell Get-Content", "Get-Content " + ENV, "deny", "env-file", tool="PowerShell",
    cwd=NOGIT)
 sh("env: PowerShell alias and a dot-slash path", "gc .\\" + ENV, "deny", "env-file",
