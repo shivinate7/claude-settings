@@ -916,7 +916,7 @@ test("--check refuses a branch that removes a numbered record, in every shape", 
   withTempDir((root) => {
     const shapes = [
       {
-        name: "frontmatter", config: frontmatterConfig, ids: ["D-002"],
+        name: "frontmatter", config: frontmatterConfig, ids: ["D-002"], remedy: "list its number",
         base: (d) => {
           write(d, "docs/decisions/a.md", "---\nid: D-001\nslug: a\ntitle: A\ndate: 2026-01-01\n---\n\nBody.\n");
           write(d, "docs/decisions/b.md", "---\nid: D-002\nslug: b\ntitle: B\ndate: 2026-01-02\n---\n\nBody.\n");
@@ -924,7 +924,7 @@ test("--check refuses a branch that removes a numbered record, in every shape", 
         branch: (d) => git(d, "rm", "-q", "docs/decisions/b.md"),
       },
       {
-        name: "frontmatter+filename", config: filenameConfig, ids: ["D2"],
+        name: "frontmatter+filename", config: filenameConfig, ids: ["D2"], remedy: "list its number",
         base: (d) => {
           write(d, "docs/decisions/D1_one.md", '---\nid: D1\nslug: one\ngloss: "one"\ndate: 2026-01-01\n---\n\nBody.\n');
           write(d, "docs/decisions/D2_two.md", '---\nid: D2\nslug: two\ngloss: "two"\ndate: 2026-01-02\n---\n\nBody.\n');
@@ -933,7 +933,7 @@ test("--check refuses a branch that removes a numbered record, in every shape", 
       },
       {
         // Both corpus shapes: a folder record, and a heading in the flat file, keyed by its number.
-        name: "heading", config: headingConfig, ids: ["D3", "C2"],
+        name: "heading", config: headingConfig, ids: ["D3", "C2"], remedy: "no retired list",
         base: (d) => { headingTree(d); write(d, "docs/codes.md", "# Codes\n\n## C1 — First\n\n## C2 — Second\n"); },
         branch: (d) => { git(d, "rm", "-q", "docs/decisions/D003-three.md"); write(d, "docs/codes.md", "# Codes\n\n## C1 — First\n"); },
       },
@@ -951,7 +951,7 @@ test("--check refuses a branch that removes a numbered record, in every shape", 
       const problems = check(dir, sh.config(), LOCAL);
       assert.equal(problems.length, sh.ids.length, `${sh.name}: ${problems.join(" | ")}`);
       for (const id of sh.ids) {
-        assert.equal(problems.some((p) => p.startsWith(`${id} `) && p.includes("Numbers are permanent") && p.includes("its own status, never by deletion")), true, `${sh.name}: ${id}`);
+        assert.equal(problems.some((p) => p.startsWith(`${id} `) && p.includes("Numbers are permanent") && p.includes(sh.remedy)), true, `${sh.name}: ${id}`);
       }
     }
   }));
@@ -990,6 +990,79 @@ test("--check passes a branch that fixes a typo in a numbered record's title, in
 
       assert.deepEqual(check(dir, sh.config(), LOCAL), [], sh.name);
     }
+  }));
+
+// ---------------------------------------------------------------- the retired-numbers list
+const rec = (n, slug) => `---\nid: D-${String(n).padStart(3, "0")}\nslug: ${slug}\ntitle: ${slug}\ndate: 2026-01-0${n}\n---\n\nBody.\n`;
+
+// Base: D-001 and D-002 (D-002 is the top number). The branch runs `branch`, then commits.
+function retiredBranch(root, base, branch) {
+  initRepo(root);
+  write(root, "docs/decisions/a.md", rec(1, "a"));
+  write(root, "docs/decisions/b.md", rec(2, "b"));
+  base?.(root);
+  commit(root, "main");
+  git(root, "checkout", "-q", "-b", "wt/lane");
+  branch(root);
+  commit(root, "branch");
+  return check(root, frontmatterConfig(), LOCAL);
+}
+
+test("retired list: an unlisted removal fails", () =>
+  withTempDir((root) => {
+    const problems = retiredBranch(root, null, (d) => git(d, "rm", "-q", "docs/decisions/b.md"));
+    assert.equal(problems.length, 1, problems.join(" | "));
+    assert.match(problems[0], /D-002 .*removed on a branch/);
+  }));
+
+test("retired list: a removal named in RETIRED passes", () =>
+  withTempDir((root) => {
+    const problems = retiredBranch(root, null, (d) => {
+      git(d, "rm", "-q", "docs/decisions/b.md");
+      write(d, "docs/decisions/RETIRED", "D-002 b\n");
+    });
+    assert.deepEqual(problems, []);
+  }));
+
+test("retired list: a number removed from RETIRED fails, and a number added stays quiet", () =>
+  withTempDir((root) => {
+    const problems = retiredBranch(root,
+      (d) => write(d, "docs/decisions/RETIRED", "D-002 b\n"),
+      (d) => { git(d, "rm", "-q", "docs/decisions/b.md"); write(d, "docs/decisions/RETIRED", "D-003 later\n"); });
+    assert.equal(problems.length, 2, problems.join(" | "));
+    assert.equal(problems.some((p) => /D-002 is removed from .*RETIRED.*append-only/.test(p)), true, problems.join(" | "));
+    assert.equal(problems.some((p) => /D-002 .*removed on a branch/.test(p)), true, problems.join(" | "));
+  }));
+
+test("retired list: a listed top number is never allocated again, in both numbering modes", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    write(root, "docs/decisions/a.md", rec(1, "a"));
+    write(root, "docs/decisions/RETIRED", "D-002 gone\nD-003\n");
+    write(root, "docs/decisions/p.md", "---\nid: pending\nslug: p\ntitle: P\ndate: 2026-02-01\n---\n\nBody.\n");
+    commit(root, "main");
+    const result = stamp(root, frontmatterConfig());
+    assert.deepEqual(result.assigned.map((a) => a.id), ["D-004"]);
+
+    const dir = join(root, "lowest");
+    mkdirSync(dir);
+    initRepo(dir);
+    write(dir, "docs/decisions/D1_one.md", '---\nid: D1\nslug: one\ngloss: "one"\ndate: 2026-01-01\n---\n\nBody.\n');
+    write(dir, "docs/decisions/RETIRED", "D2 gone\n");
+    write(dir, "docs/decisions/_new.md", '---\nid:\nslug: new\ngloss: "new"\ndate: 2026-02-01\n---\n\nBody.\n');
+    commit(dir, "main");
+    assert.deepEqual(stamp(dir, filenameConfig()).assigned.map((a) => a.id), ["D3"]);
+  }));
+
+test("retired list: a listed number that a record still holds, and a malformed line, both fail", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    write(root, "docs/decisions/a.md", rec(1, "a"));
+    write(root, "docs/decisions/RETIRED", "D-001 a\n\nnot an id\n");
+    const { problems } = stamp(root, frontmatterConfig());
+    assert.equal(problems.length, 2, problems.join(" | "));
+    assert.equal(problems.some((p) => /D-001 is in .*RETIRED and .*still holds it/.test(p)), true);
+    assert.equal(problems.some((p) => /RETIRED line 3 does not start with an id/.test(p)), true);
   }));
 
 // ---------------------------------------------------------------- run

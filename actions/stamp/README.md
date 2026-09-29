@@ -72,8 +72,9 @@ It asks one more question, and the question depends on the branch.
     that the record was renamed, and it names the old key and the new key. The fix is to
     restore the old key.
   - A removed record. A number is removed when the base tree holds it and no record of this
-    tree holds it, for the same kind. Numbers are permanent. Retire a record through its own
-    status, never by deletion.
+    tree holds it, for the same kind. Numbers are permanent. A branch may delete a record
+    only when the kind's `RETIRED` list names its number (see "The retired-numbers list").
+  - A number removed from a `RETIRED` list. The list is append-only.
 
 A pull request checkout is always off the default branch. The engine knows it is one when
 `GITHUB_BASE_REF` is set, or when `GITHUB_REF` starts with `refs/pull/`.
@@ -107,6 +108,30 @@ frontmatter file with the same slug passes. An edit to a title passes in every s
 record with the same number. That is now the same as an edit in place, because the removal
 refusal catches each number that no record holds. The engine does not compare titles or
 content.
+
+## The retired-numbers list
+
+A kind may keep a file named `RETIRED` in its `folder`. It has no extension, so the
+`filePattern` never reads it as a record. Write one line for each retired number. A line
+starts with the id, as the kind renders it (`D-012`, or `D12`). It may then hold the last
+title, after a space. The engine skips a blank line. It refuses any other line that does not
+start with an id.
+
+```
+D-012 A decision that no longer governs
+D-013
+```
+
+The rules:
+
+- A branch may delete a numbered record when the same tree's list names its number.
+- The list is append-only. A number the base list names must stay in this list.
+- The allocator counts a listed number as taken, in both `max_plus_one` and `lowest_free`.
+  So a deleted top number is never given out again.
+- A number that is in the list and still held by a record is refused. Remove one of them.
+
+The heading format (`"format": "heading"`) does not read the list. A removal in that format
+stays refused, and the message says so.
 
 ## The config file
 
