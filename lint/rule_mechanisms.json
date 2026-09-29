@@ -557,6 +557,12 @@
         "reason": "No check finds a question to the user and reads whether one plain sentence before it states the problem and why it needs their word."
       }
     },
+    "output-never-hand-off-doable-step": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Whether a step handed to the user was doable is a judgment on the reply and the tools available. No check reads a reply and the tool list to decide that."
+      }
+    },
     "style-option-says-effect": {
       "mechanism": {
         "kind": "unmechanized",
