@@ -2877,8 +2877,26 @@ def branch_base_unread_log_case():
 # `git checkout` and `git switch` are on this list for the pointer rule, and the list is global,
 # so no rule may print either one in a remedy. The pointer rule's remedy is a worktree, and it
 # names `git worktree add` instead, which is a different command and not the refused target.
+# ---- Rule 9, the subagent model floor. Both directions: Haiku in any spelling is denied, and
+# every other model, or none, is allowed.
+for _tool in ("Agent", "Task"):
+    add("floor: %s with model haiku is denied" % _tool, "deny", "subagent-model-floor",
+        tool=_tool, prompt="do it", model="haiku")
+add("floor: Agent with a full haiku id is denied", "deny", "subagent-model-floor",
+    tool="Agent", prompt="do it", model="claude-haiku-4-5-20251001")
+add("floor: Agent with a mixed-case haiku spelling is denied", "deny", "subagent-model-floor",
+    tool="Agent", prompt="do it", model="Claude-HAIKU-4-5")
+add("floor: Agent with a list model naming haiku is denied", "deny", "subagent-model-floor",
+    tool="Agent", prompt="do it", model=["haiku"])
+add("floor: Agent with model sonnet is allowed", "allow", tool="Agent", prompt="x", model="sonnet")
+add("floor: Agent with model opus is allowed", "allow", tool="Agent", prompt="x", model="opus")
+add("floor: Agent with a full opus id is allowed", "allow", tool="Agent", prompt="x",
+    model="claude-opus-5")
+add("floor: Agent with no model is allowed", "allow", tool="Agent", prompt="x")
+add("floor: Task with no model is allowed", "allow", tool="Task", prompt="x")
+
 FORBIDDEN_IN_A_REASON = (ENV, ROOT, slash(ROOT), "settings.json", "CLAUDE.md", "guard.py",
-                         ".claude", "app.log", "sleep", VCS + " checkout", VCS + " switch")
+                         ".claude", "app.log", "sleep", "haiku", VCS + " checkout", VCS + " switch")
 
 # ONE RULE MAY NAME ITS SUBJECT, and only the fragments listed beside it. Rule 8 asks rather than
 # refuses, and the ask exists to tell an approver what is being turned on and where, so the settings

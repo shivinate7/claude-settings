@@ -6,9 +6,36 @@ records how the worker-model rule is mechanized after
 and this entry does not reopen it.
 
 The short answer: the cap stops being a cap. `CLAUDE_CODE_SUBAGENT_MODEL: sonnet`
-stays as the fallback, so nothing moves by default. No new gate is added. The
-settings-write ask and the expiry both stay, because both key on the model variable
-and never on the force flag.
+stays as the fallback, so nothing moves by default. The settings-write ask and the
+expiry both stay, because both key on the model variable and never on the force flag.
+One floor gate is added: no subagent runs Haiku (see the next section).
+
+## The floor, ruled 2026-09-28
+
+The owner ruled: "disallow haiku for anything." Sonnet is the floor for every lane.
+The reason: the owner prefers Sonnet's quality on every lane, whatever the cost. This
+reverses the part of this entry that reopened Haiku when the force pin was dropped.
+
+Three places enforce it.
+
+- Guard rule `subagent-model-floor` in `hooks/guard.py` denies an `Agent` or `Task`
+  call whose `model` holds "haiku". Any case and any full id match.
+- `lint/check_agent_models.py`, run in `.github/workflows/gates.yml`, fails when an
+  `agents/*.md` or `skills/*/SKILL.md` frontmatter sets a Haiku `model:`. A file's own
+  key names no model in the tool input, so the guard cannot see it.
+- CLAUDE.md `roles-tier-matches-lane` states the floor.
+
+Known limit. A built-in agent that picks its own model inside Claude Code never puts
+that model in the tool input, and it has no file here. The guard and the check cannot
+reach it. Per the sub-agents docs, one built-in runs Haiku: `claude-code-guide`. This
+change does not cover it. Explore is not a limit: since v2.1.198 it inherits the main
+conversation's model, and the custom `Explore` in `agents/explore.md` (PR #179)
+overrides the built-in with `model: sonnet`. The other built-ins (Plan, general-purpose,
+`claude`, `statusline-setup`) inherit or run Sonnet. A `model` named on the call
+reaches the guard, so the floor holds for any spawn that names one.
+
+Other sections below keep their Haiku sentences only as evidence of the earlier
+argument. The floor overrides them.
 
 ## The precedence, corrected
 
@@ -35,8 +62,8 @@ Four dated behaviour changes bound any reasoning about this order.
 
 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` collapses the whole order onto entry 3. Every
 other entry is dropped before the tool call runs. That is a pin, not a ceiling. It
-blocks Haiku exactly as hard as it blocks Opus. A lane that should cost a fifth as
-much was held at Sonnet by the same mechanism that held back Opus.
+held Opus back exactly as hard as it held Haiku back. Only the Opus half of that stays
+wanted. The floor now blocks Haiku on purpose, by its own rule.
 
 The earlier version of this entry called the pin a cap. That word was wrong, and the
 wrong word hid the cost. The rule the owner wants is about matching a tier to a lane.
@@ -62,7 +89,7 @@ nothing still runs Sonnet, exactly as it did under the pin.
 
 Gathered 2026-09-22. It points one way on tiering and the other way on pinning.
 
-For tiering down. Anthropic's multi-agent research reports a 90.2 percent gain over a
+For tiering down (superseded by the floor, kept as evidence). Anthropic's multi-agent research reports a 90.2 percent gain over a
 single-agent Opus run, by distributing work to Sonnet subagents with isolated
 context. The Opus 4.5 system card shows an Opus orchestrator with Sonnet 4.5
 subagents at 85.4 percent. Subagent choice moves end-to-end results. Routing guides
@@ -177,18 +204,14 @@ nothing mid-fan-out, and the owner is the person doing the write.
 
 ## Question 5. The default, and the shape of the rule
 
-The default stays `sonnet`. The rule stops being a ceiling.
+The default stays `sonnet`. The rule stops being a ceiling, and Sonnet is the floor.
 
 A rule that names an outcome survives better than one that names a tier. "Never spawn
-a worker above Sonnet" names a tier. It is already wrong in the Haiku direction,
-because the pin blocked the cheap lane as hard as the expensive one. Proposed words
-for CLAUDE.md, for the owner to accept or change:
+a worker above Sonnet" names a tier. The words in CLAUDE.md now read:
 
-> Match the worker tier to the lane. Sonnet is the default and needs no word. A lane
-> that retrieves, matches a pattern, or edits to a shape the brief spells out is
-> Haiku-shaped. A lane that diagnoses, or that may find what the brief did not
-> anticipate, takes Sonnet or more. Name the tier and the reason in one line before
-> you dispatch, whichever way you depart from the default.
+> Match the worker tier to the lane. Sonnet is the default and needs no word, and
+> Sonnet is the floor for every lane. A lane that diagnoses, or that may find what the
+> brief did not anticipate, takes Sonnet or more.
 
 The anchor `roles-workers-run-sonnet` states the repealed rule. A stale anchor is a
 lie that a future reader will grep. Split it into two, because the two halves
@@ -204,9 +227,8 @@ and Tetlock found to work, and it is the condition the deleted gate failed. Keep
 
 It is not sufficient, for two reasons.
 
-It names only the up direction. With the pin gone, a Haiku lane is now reachable, and
-a wrong Haiku call costs a rework cycle. The line is owed for any departure from the
-default, down as well as up.
+It names only the up direction. With the floor, no departure below Sonnet exists, so
+the line is owed for a departure up.
 
 Nothing after the fact can read which tier ran. The report names every dispatch, but
 not the model. A Done line for a lane should name the tier when the tier was not
@@ -305,14 +327,14 @@ grant JSON in `roles-opus-override-guarded`. Reword `roles-opus-override-guarded
 anchors. Extend `roles-opus-shaped-say-so` to any departure from the default, in
 either direction.
 
-`hooks/`. No change. `hooks/guard.py` keeps rule 8 and keeps the optional `_FORCE`
-group. `hooks/config_watch.py` and `hooks/test_config_watch.py` are untouched. No new
-hook is added.
+`hooks/`. `hooks/guard.py` keeps rule 8 and keeps the optional `_FORCE` group, and adds
+rule 9, `subagent-model-floor`. `hooks/config_watch.py` and
+`hooks/test_config_watch.py` are untouched. No new hook file is added.
 
 `lint/rule_mechanisms.json`. Drop the `roles-workers-run-sonnet` key. Add
 `roles-sonnet-is-the-default`, as a gate on `settings.json` with the needle
-`CLAUDE_CODE_SUBAGENT_MODEL`. Add `roles-tier-matches-lane`, as unmechanized, with a
-reason naming the Stop guardrail. The entries for `roles-opus-override-guarded`,
+`CLAUDE_CODE_SUBAGENT_MODEL`. Add `roles-tier-matches-lane`, as a guard on rule
+`subagent-model-floor`. The entries for `roles-opus-override-guarded`,
 `roles-override-carries-expiry` and `roles-remove-override-file` keep pointing at
 guard rule `subagent-model-cap`.
 
@@ -326,7 +348,8 @@ Over-provisioning of one lane now passes without a prompt. The Stop guardrail re
 it after the turn. Question 4 accepts that gap and prices it.
 
 Under-provisioning is caught by nothing before the rework cycle. That was also true
-under the pin, which forbade Haiku outright.
+before the pin was dropped, and it is true again under the floor, which forbids
+Haiku outright.
 
 ## Where this lives
 
