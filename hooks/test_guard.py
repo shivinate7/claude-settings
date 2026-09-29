@@ -1980,6 +1980,40 @@ for example in (
 ):
     sh("env: the example file is documentation, " + example[:34], example, "allow", cwd=NOGIT)
 
+# The name as TEXT written to a file that is not an environment file, and git check-ignore.
+for text in (
+    "printf '" + ENV + "' > .worktreeinclude",
+    "printf '" + ENV + "\\n' > .worktreeinclude && " + VCS + " add .worktreeinclude",
+    "echo " + ENV + " > .worktreeinclude", "echo " + ENV + " >> .gitignore",
+    VCS + " check-ignore -q " + ENV,
+):
+    sh("env: the name as data, " + text[:40], text, "allow", cwd=NOGIT)
+add("env: Write of .worktreeinclude", "allow", tool="Write", cwd=NOGIT,
+    file_path=slash(os.path.join(PROJ, ".worktreeinclude")))
+for held in (
+    "cat " + ENV + " > .worktreeinclude", "cp " + ENV + " x", VCS + " add " + ENV,
+    "echo x > " + ENV, "echo " + ENV + " > " + ENV, "echo " + ENV + " | tee " + ENV,
+):
+    sh("env: the data allowance does not leak, " + held[:34], held, "deny", "env-file", cwd=NOGIT)
+
+# A commit message or a pull request body is text. A read hidden in it, or a file flag, is not.
+for message in (
+    VCS + ' commit -m "Copy ' + ENV + ' into worktrees"',
+    VCS + " commit --message='Copy " + ENV + "'",
+    'gh pr create --title "Adds ' + ENV + '" --body "Adds an ' + ENV + ' line"',
+    VCS + " commit -m \"$(printf 'Copy " + ENV + " into worktrees')\"",
+    'gh pr create --body "$(printf \'Adds `.worktreeinclude` with ' + ENV + "')\"",
+):
+    sh("env: a message is text, " + message[:40], message, "allow", cwd=NOGIT)
+for held in (
+    VCS + " commit -a -m x " + ENV, VCS + " commit -F " + ENV, VCS + " add " + ENV,
+    VCS + ' commit -m "$(cat ' + ENV + ' )"', 'gh pr create --body-file ' + ENV,
+    'gh pr create --body "$(cat ' + ENV + ' )"', VCS + " check-ignore --stdin < " + ENV,
+    VCS + " check-ignore -v --stdin < " + ENV, VCS + " check-ignore -z " + ENV,
+    VCS + " check-ignore -v " + ENV + " > " + ENV,
+):
+    sh("env: a message allowance does not leak, " + held[:34], held, "deny", "env-file", cwd=NOGIT)
+
 sh("env: PowerShell Get-Content", "Get-Content " + ENV, "deny", "env-file", tool="PowerShell",
    cwd=NOGIT)
 sh("env: PowerShell alias and a dot-slash path", "gc .\\" + ENV, "deny", "env-file",
