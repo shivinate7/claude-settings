@@ -64,7 +64,13 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}   # a push must not cancel the nightly or manual run
 ```
 
-## 5. Pin and audit
+## 6. Read every run after a merge
+
+```sh
+gh run list --commit <merge-sha> --json name,conclusion
+```
+
+## 7. Pin and audit
 
 ```yaml
 - uses: actions/checkout@<full-40-char-sha>  # v4.2.2
@@ -93,7 +99,7 @@ Audit with zizmor. Run it locally with the same command and path set as CI, and 
 zizmor .github/workflows .github/dependabot.yml
 ```
 
-## 7. Wait without loops
+## 9. Wait without loops
 
 ```sh
 gh run watch <run-id> --exit-status > watch.log 2>&1   # run in the background
@@ -101,7 +107,7 @@ gh run watch <run-id> --exit-status > watch.log 2>&1   # run in the background
 
 Read `watch.log` when it exits. Never send the output to `/dev/null`.
 
-## 8. Prove a gate red
+## 10. Prove a gate red
 
 ```sh
 cp -R . "$(mktemp -d)/scratch" && cd "$_"   # scratch copy
