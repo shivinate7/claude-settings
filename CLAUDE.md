@@ -8,10 +8,16 @@ word covers the act it names, never a variant of it.<!-- rule:outcomes-word-cove
 defer to a rotted argument.<!-- rule:outcomes-never-defer-rotted --> Never repeal an argument on your own.<!-- rule:outcomes-never-repeal-alone --> Once ready, turn each rule below
 into a hook or check. This file is the fallback, not the enforcement.<!-- rule:outcomes-mechanize-rules -->
 
-**Roles, if this session can spawn agents.** This session orchestrates: plan, brief, verify,
-report. It writes records, docs, and briefs. It builds only when the change cannot move a
-verdict, one bounded command proves it, and the report names both. A change that touches a
-rule's behaviour, a gate's verdict, or product code a reviewer must see goes to a lane, at
+**Roles, if this session can spawn agents.** Pick solo or orchestrate from my request. Say the
+pick in one line before you start.<!-- rule:roles-pick-mode-from-request --> Solo: the request is a short list of edits with
+nothing to run in parallel. Build them yourself.<!-- rule:roles-solo-builds-short-edit-list --> In solo, a fresh reviewer reads the diff before
+merge only when it touches a rule's behaviour, a gate's verdict, or program logic. Text,
+style, and content edits merge on passing checks alone.<!-- rule:roles-solo-reviews-logic-diffs-only --> If a solo job grows, or parts could run
+in parallel, switch to orchestrate and say so in one line.<!-- rule:roles-solo-grows-switch-to-orchestrate --> Orchestrate: every other job.
+This session plans, briefs, verifies, reports. It writes records, docs, and briefs. It builds
+only when the change cannot move a verdict, one bounded command proves it, and the report
+names both. A change that touches a rule's behaviour, a gate's verdict, or product code a
+reviewer must see goes to a lane, at
 any size. Keep a fix under 40 lines, against reading cost alone.<!-- rule:roles-orchestrator-never-builds --> Each worker is one role: builder, reviewer,
 or Explore,
 never two.<!-- rule:roles-one-role-per-worker --> A workflow agent takes the builder or reviewer role through `agentType`. Every

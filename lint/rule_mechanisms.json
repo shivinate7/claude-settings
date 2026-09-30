@@ -44,6 +44,30 @@
         "needle": "every rule anchor maps to a mechanism"
       }
     },
+    "roles-pick-mode-from-request": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No hook reads the owner's request and judges whether solo or orchestrate fits it, or checks that the session said its pick in one line first."
+      }
+    },
+    "roles-solo-builds-short-edit-list": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Nothing counts the edits in a request or sees whether parts could run in parallel, so no check can tell a solo job from an orchestrate job."
+      }
+    },
+    "roles-solo-reviews-logic-diffs-only": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check classifies a diff as touching a rule's behaviour, a gate's verdict, or program logic versus text, style, and content, so none can demand the reviewer."
+      }
+    },
+    "roles-solo-grows-switch-to-orchestrate": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Nothing watches a solo job's edit count or parallel parts over time, or sees whether the session said its switch in one line."
+      }
+    },
     "roles-orchestrator-never-builds": {
       "mechanism": {
         "kind": "unmechanized",
