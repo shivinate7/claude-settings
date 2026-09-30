@@ -31,6 +31,10 @@ A process tier and a service teardown name one repository's own files, its own
 servers and its own launchd labels. They do not transfer. Each repository
 keeps its own tier, and this repository ships the guide for writing one.
 
+One process tier is generic, and it lives here: `find_dead_rooted`. Its subject
+is a process whose script file is gone, under a deleted checkout. That names no
+repository's own files. Each repository's own live servers stay its own.
+
 ## The sweep never runs code a repository supplies
 
 A repository states its wishes in `.claude/janitor.json`, and the sweep reads
