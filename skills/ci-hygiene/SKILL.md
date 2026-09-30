@@ -18,15 +18,19 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 4. **Cancel superseded runs.** Set `concurrency` with `cancel-in-progress`, so a new push to a
    ref cancels the old run on that ref. Runners with a low concurrency cap, such as hosted
    macOS, queue first.
-5. **Pin and audit actions.** Pin each third-party action by full commit SHA, with the version as
+5. **Cap each job's time.** Set `timeout-minutes` on each job at about 2x its slowest green run.
+   Give a network step, such as a browser install, its own short cap.
+6. **After a merge, read every run the push starts.** A deploy or nightly workflow is not a
+   required check, so its failure shows on no PR.
+7. **Pin and audit actions.** Pin each third-party action by full commit SHA, with the version as
    a comment. Let a bot keep the pins current. Disable credential persistence on checkout. Run
    an audit tool in CI, and run it locally with the exact CI command and paths.
    If the installed tool's `--version` matches the CI pin, use it. If it does not, install a copy.
-6. **Batch green PRs.** Merge PRs that are green together through one integration branch. One CI
+8. **Batch green PRs.** Merge PRs that are green together through one integration branch. One CI
    run then covers the combined code. "No conflicts" does not prove they work together.
-7. **Wait without loops.** Watch a run once, in the background, and keep its output. Never poll
+9. **Wait without loops.** Watch a run once, in the background, and keep its output. Never poll
    with a sleep loop.
-8. **Prove each new gate red once.** Break the gate's target on a scratch copy. Watch the gate
+10. **Prove each new gate red once.** Break the gate's target on a scratch copy. Watch the gate
    fail. Restore the target. A gate you did not see go red is not proven.
 
 ## Before you skip a required job
