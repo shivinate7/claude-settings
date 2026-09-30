@@ -1272,6 +1272,89 @@ def decide_listener(entry: dict):
     return {**base, "action": "reap", "reason": "orphaned-listener"}
 
 
+DEAD_ROOTED_EXTENSIONS = (".py", ".sh", ".js", ".mjs", ".ts")
+_ARGV_PATH_RE = re.compile(r"(?:[A-Za-z]:)?[\\/][^\s'\"]+")
+
+
+def _project_ancestor(path: str):
+    """The nearest EXISTING ancestor of PATH that carries `.git` or `.claude`, looking at most
+    12 levels up, or `None`. `None` too when PATH's own parent directory still exists: a
+    script missing from a live directory is not a deleted tree. A deleted checkout leaves no
+    `.git` of its own, so the test asks whether the ground it stood on is still a project."""
+    probe = os.path.dirname(path)
+    if os.path.isdir(probe):
+        return None
+    levels = 0
+    while True:
+        if os.path.isdir(probe):
+            if os.path.exists(os.path.join(probe, ".git")) or \
+                    os.path.isdir(os.path.join(probe, ".claude")):
+                return probe
+            levels += 1
+            if levels > 12:
+                return None
+        parent = os.path.dirname(probe)
+        if parent == probe:
+            return None
+        probe = parent
+
+
+def find_dead_rooted():
+    """Return one decision dict per process whose argv names a script file
+    (`DEAD_ROOTED_EXTENSIONS`) that no longer exists, whose parent directory is also
+    missing (a whole tree was deleted), and whose nearest existing ancestor carries `.git` or `.claude` (a deleted checkout or worktree). `None` when the machine
+    pid enumeration failed. Decision: {"pid", "command", "missing", "home", "action":
+    "reap"|"keep", "reason"}. Reap only when `is_orphan` and `is_current_user_process` both
+    answer a confirmed yes; `None` from either is `unreadable-subject`, keep.
+
+    The argv is the subject here, so `process_command` decides WHICH processes qualify. It never
+    decides reap-or-keep: that stays with the two reads and a pid-only signal."""
+    pids = list_all_pids()
+    if pids is None:
+        return None
+    found = []
+    for pid in pids:
+        if pid == os.getpid():
+            continue
+        command = process_command(pid)
+        if not command:
+            continue
+        hit = None
+        for raw in _ARGV_PATH_RE.findall(command):
+            if raw.lower().endswith(DEAD_ROOTED_EXTENSIONS) and not os.path.exists(raw):
+                home = _project_ancestor(raw)
+                if home:
+                    hit = (raw, home)
+                    break
+        if hit is None:
+            continue
+        base = {"pid": pid, "command": command, "missing": hit[0], "home": hit[1]}
+        orphan = is_orphan(pid)
+        owner = is_current_user_process(pid) if orphan else None
+        if orphan is None or (orphan and owner is None):
+            found.append({**base, "action": "keep", "reason": "unreadable-subject"})
+        elif not orphan:
+            found.append({**base, "action": "keep", "reason": "not-orphaned"})
+        elif not owner:
+            found.append({**base, "action": "keep", "reason": "not-current-user"})
+        else:
+            found.append({**base, "action": "reap", "reason": "dead-rooted-server"})
+    return found
+
+
+def print_dead_rooted_report(decisions, out=sys.stdout):
+    print("", file=out)
+    print("== dead-rooted servers ==", file=out)
+    if decisions is None:
+        print("  UNREADABLE -- the machine pid enumeration failed; none examined", file=out)
+        return
+    for d in decisions:
+        print("  server    %-4s pid=%-8s %-50s %s" % (
+            "REAP" if d["action"] == "reap" else "KEEP", d["pid"], d["missing"], d["reason"]),
+            file=out)
+    print("  dead-rooted servers examined: %d" % len(decisions), file=out)
+
+
 def processes_in(path: str):
     """Return `(inside_pids, unreadable_pids)`, both lists (possibly empty), for the pre-removal
     check in `decide_worktree`. `inside_pids` is `None` (with `unreadable_pids` also `None`)
@@ -1648,7 +1731,8 @@ def print_grace_period_report(reaped, out=sys.stdout):
     if still_alive:
         print("  STILL ALIVE after the grace period (never escalated further):", file=out)
         for d in still_alive:
-            print("    pid=%s port=%s %s" % (d["pid"], d["port"], d.get("cwd") or "?"), file=out)
+            print("    pid=%s port=%s %s" % (d["pid"], d.get("port", "-"),
+                                            d.get("cwd") or d.get("missing") or "?"), file=out)
     else:
         print("  every signalled listener is gone.", file=out)
 
@@ -1722,8 +1806,15 @@ def main(argv=None) -> int:
 
     results = [sweep_repo(root, args.confirm, restore_log_path) for root in roots]
     print_sweep_report(results, args.confirm)
+    dead = find_dead_rooted()
+    print_dead_rooted_report(dead)
     if args.confirm:
-        print_grace_period_report(reaped_listener_decisions(results))
+        reaped = reaped_listener_decisions(results)
+        for d in dead or []:
+            if d["action"] == "reap" and d["pid"] not in {r["pid"] for r in reaped}:
+                reap_listener(d)
+                reaped.append(d)
+        print_grace_period_report(reaped)
     return 0
 
 

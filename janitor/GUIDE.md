@@ -13,10 +13,11 @@ this machine.
 
 The sweep never touches a remote. It runs no push, and no fetch.
 
-The sweep never stops a program a live session still needs. It can stop one
-program only: a TCP listener that is orphaned. That listener must also sit
-inside a repository or worktree this sweep covers. It must also be owned by
-the account running the sweep. See "Orphaned TCP listeners" below.
+The sweep never stops a program a live session still needs. It can stop two
+kinds only: an orphaned TCP listener inside a repository or worktree this sweep
+covers, and an orphaned dead-rooted server. Both must be owned by the account
+running the sweep. See "Orphaned TCP listeners" and "Dead-rooted servers"
+below.
 
 The sweep never runs code that your repository supplies. It reads one file
 from your repository, and it reads that file as data.
@@ -118,6 +119,25 @@ A single process this sweep cannot read is out of scope. That covers a
 process owned by another account, or one that is otherwise access-protected.
 The sweep counts it. It never acts on it. It never blocks a decision about
 anything else because of it.
+
+## Dead-rooted servers
+
+A dead-rooted server is a process whose argv names a script file (`.py`, `.sh`,
+`.js`, `.mjs`, `.ts`) that no longer exists. The script's parent directory must
+be missing too, so a whole tree is gone. The nearest existing ancestor of that
+path must carry `.git` or `.claude`. A script missing from a directory that
+still exists does not qualify. Such a process is a leftover of a deleted
+checkout or worktree. It is often a restart loop that holds no port.
+
+The preview lists each one in a "dead-rooted servers" section, with a reason.
+`--confirm` signals one only when both reads answer a confirmed yes:
+
+- The process is orphaned (same read as for a listener).
+- The process is owned by the account running the sweep.
+
+An unreadable answer means keep. The signal, the grace period, and the report
+are the same as for a listener. This tier is machine-wide and not tied to a
+repository, so `janitor.roots` and `.claude/janitor.json` do not narrow it.
 
 ## How you opt out
 

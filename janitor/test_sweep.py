@@ -936,6 +936,89 @@ class WorktreeProcessPreCheckTests(unittest.TestCase):
         self.assertEqual(decision["reason"], "unreadable-subject")
 
 
+def _read_when_ready(path, timeout=10.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            with open(path, encoding="utf-8") as handle:
+                return handle.read().strip()
+        time.sleep(0.05)
+    require(False, "fixture never wrote its pid file: %r" % path)
+
+
+_LOOP = 'echo $$ > "$2"; i=0; while [ $i -lt 120 ]; do sleep 1; i=$((i+1)); done'
+
+
+@unittest.skipIf(os.name == "nt", "the sh-loop fixture is POSIX only")
+class DeadRootedServerTests(unittest.TestCase):
+    """`sweep.find_dead_rooted`. Every process is a REAL `sh` loop this suite starts. The
+    scratch checkout is a temp dir with `.git` whose `wt` folder never exists, so the
+    script path in argv is gone but its ground is still a project."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.home = tempfile.mkdtemp(dir=ROOT)
+        os.mkdir(os.path.join(cls.home, ".git"))
+        os.mkdir(os.path.join(cls.home, "wt"))
+        cls.dead_script = os.path.join(cls.home, "wt", "serve.sh")
+        write(cls.dead_script, "true\n")
+        cls.live_script = os.path.join(cls.home, "live.sh")
+        write(cls.live_script, "true\n")
+        shutil.rmtree(os.path.join(cls.home, "wt"))  # the checkout is gone
+        cls.cleanups = []
+        cls.orphan = cls._orphan(cls.dead_script)
+        cls.live = cls._orphan(cls.live_script)
+        cls.dead_parent = cls._orphan(os.path.join(cls.home, "gone.sh"))  # parent dir exists
+        cls.child_pidfile = os.path.join(ROOT, "dr-child.pid")
+        cls.child = subprocess.Popen(["sh", "-c", _LOOP, "sh", cls.dead_script, cls.child_pidfile])
+        cls.cleanups.append(cls.child.kill)
+        cls.child_pid = cls.child.pid
+
+    @classmethod
+    def _orphan(cls, script):
+        """Double fork: the outer sh exits, pid 1 adopts the loop. Returns the loop's pid."""
+        pidfile = tempfile.mktemp(dir=ROOT, suffix=".pid")
+        subprocess.run(["sh", "-c", '( sh -c "$1" sh "$2" "$3" & ) ; exit 0', "sh", _LOOP,
+                        script, pidfile], check=True)
+        pid = int(_read_when_ready(pidfile))
+        cls.cleanups.append(lambda: os.kill(pid, signal.SIGKILL))
+        if _real_ppid_posix(pid) not in (1, None):
+            raise unittest.SkipTest("a subreaper adopted the fixture, not init")
+        return pid
+
+    @classmethod
+    def tearDownClass(cls):
+        for cleanup in cls.cleanups:
+            try:
+                cleanup()
+            except Exception:
+                pass
+        shutil.rmtree(cls.home, ignore_errors=True)
+
+    def _mine(self):
+        found = sweep.find_dead_rooted()
+        self.assertIsNotNone(found)
+        return {d["pid"]: d for d in found}
+
+    def test_orphan_with_dead_script_is_found_and_reaped(self):
+        d = self._mine()[self.orphan]
+        self.assertEqual((d["action"], d["reason"]), ("reap", "dead-rooted-server"))
+        self.assertEqual(d["missing"], self.dead_script)
+
+    def test_live_script_is_ignored(self):
+        self.assertNotIn(self.live, self._mine())
+
+    def test_non_orphan_is_kept(self):
+        d = self._mine()[self.child_pid]
+        self.assertEqual((d["action"], d["reason"]), ("keep", "not-orphaned"))
+
+    def test_missing_script_in_a_live_directory_is_kept(self):
+        self.assertNotIn(self.dead_parent, self._mine())
+
+    def test_script_outside_any_project_is_ignored(self):
+        self.assertIsNone(sweep._project_ancestor("/nonexistent-root-xyz/a/b.sh"))
+
+
 class PrimaryCheckoutExclusionTests(unittest.TestCase):
     """`sweep_repo` must never record a decision against the clone's one primary checkout, NO
     MATTER WHICH WORKTREE PATH IT WAS CALLED WITH. An earlier version of this file compared

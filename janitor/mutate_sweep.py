@@ -525,6 +525,13 @@ MUTATIONS = [
      '        return {**base, "action": "keep", "reason": "not-current-user"}',
      "test_owner_mismatch_is_kept"),
 
+    ("dead-rooted: a script missing from a live directory is judged dead, and reaps",
+     "sweep",
+     '    if os.path.isdir(probe):\n        return None\n    levels = 0',
+     '    levels = 0',
+     "test_missing_script_in_a_live_directory_is_kept",
+     "posix"),
+
     # ---- the worktree pre-removal process check (this build, 2026-09-24) ----
     ("pre-check: a process sitting inside the worktree no longer keeps it",
      "sweep",
