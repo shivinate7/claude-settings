@@ -1278,28 +1278,32 @@ _ARGV_PATH_RE = re.compile(r"(?:[A-Za-z]:)?[\\/][^\s'\"]+")
 
 def _project_ancestor(path: str):
     """The nearest EXISTING ancestor of PATH that carries `.git` or `.claude`, looking at most
-    12 levels up, or `None`. A deleted checkout leaves no `.git` of its own, so the test asks
-    whether the ground it stood on is still a project."""
+    12 levels up, or `None`. `None` too when PATH's own parent directory still exists: a
+    script missing from a live directory is not a deleted tree. A deleted checkout leaves no
+    `.git` of its own, so the test asks whether the ground it stood on is still a project."""
     probe = os.path.dirname(path)
-    while probe and not os.path.isdir(probe):
+    if os.path.isdir(probe):
+        return None
+    levels = 0
+    while True:
+        if os.path.isdir(probe):
+            if os.path.exists(os.path.join(probe, ".git")) or \
+                    os.path.isdir(os.path.join(probe, ".claude")):
+                return probe
+            levels += 1
+            if levels > 12:
+                return None
         parent = os.path.dirname(probe)
         if parent == probe:
             return None
         probe = parent
-    for _ in range(12):
-        if os.path.exists(os.path.join(probe, ".git")) or os.path.isdir(os.path.join(probe, ".claude")):
-            return probe
-        parent = os.path.dirname(probe)
-        if parent == probe:
-            return None
-        probe = parent
-    return None
 
 
 def find_dead_rooted():
     """Return one decision dict per process whose argv names a script file
     (`DEAD_ROOTED_EXTENSIONS`) that no longer exists, at a path whose nearest existing ancestor
-    sits under a `.git` or `.claude` (a deleted checkout or worktree). `None` when the machine
+    has a missing parent directory (a whole tree was deleted), and whose nearest existing
+    ancestor carries `.git` or `.claude` (a deleted checkout or worktree). `None` when the machine
     pid enumeration failed. Decision: {"pid", "command", "missing", "home", "action":
     "reap"|"keep", "reason"}. Reap only when `is_orphan` and `is_current_user_process` both
     answer a confirmed yes; `None` from either is `unreadable-subject`, keep.
@@ -1808,7 +1812,7 @@ def main(argv=None) -> int:
     if args.confirm:
         reaped = reaped_listener_decisions(results)
         for d in dead or []:
-            if d["action"] == "reap":
+            if d["action"] == "reap" and d["pid"] not in {r["pid"] for r in reaped}:
                 reap_listener(d)
                 reaped.append(d)
         print_grace_period_report(reaped)

@@ -968,6 +968,7 @@ class DeadRootedServerTests(unittest.TestCase):
         cls.cleanups = []
         cls.orphan = cls._orphan(cls.dead_script)
         cls.live = cls._orphan(cls.live_script)
+        cls.dead_parent = cls._orphan(os.path.join(cls.home, "gone.sh"))  # parent dir exists
         cls.child_pidfile = os.path.join(ROOT, "dr-child.pid")
         cls.child = subprocess.Popen(["sh", "-c", _LOOP, "sh", cls.dead_script, cls.child_pidfile])
         cls.cleanups.append(cls.child.kill)
@@ -1010,6 +1011,9 @@ class DeadRootedServerTests(unittest.TestCase):
     def test_non_orphan_is_kept(self):
         d = self._mine()[self.child_pid]
         self.assertEqual((d["action"], d["reason"]), ("keep", "not-orphaned"))
+
+    def test_missing_script_in_a_live_directory_is_kept(self):
+        self.assertNotIn(self.dead_parent, self._mine())
 
     def test_script_outside_any_project_is_ignored(self):
         self.assertIsNone(sweep._project_ancestor("/nonexistent-root-xyz/a/b.sh"))
