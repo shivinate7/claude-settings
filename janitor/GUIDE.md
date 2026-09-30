@@ -139,6 +139,18 @@ An unreadable answer means keep. The signal, the grace period, and the report
 are the same as for a listener. This tier is machine-wide and not tied to a
 repository, so `janitor.roots` and `.claude/janitor.json` do not narrow it.
 
+## Loose processes
+
+A loose process is a process whose argv names a file under
+`~/.claude/shell-snapshots/`. A Claude Code Bash call starts every command
+through that path, and the argv keeps it after the session ends. The preview
+lists each one of the account's processes in a "loose processes" section, with
+an orphan answer (yes, no, or unknown). The list includes the wrappers of
+live sessions, yours too.
+
+This tier is report only. `--confirm` stops none of them. A person reads the
+list and decides.
+
 ## How you opt out
 
 Write `.claude/janitor.json` at the root of your repository:
