@@ -30,6 +30,8 @@ Short and plain are one goal. Never trade one for the other.
 - Explain a technical term in everyday words, or drop it. Do not add length to do this.<!-- rule:style-explain-or-drop-term -->
 - Before each question to the user, give the problem in one plain sentence, and say why it
   needs their word.<!-- rule:style-question-states-problem -->
+- Put all a question needs inside the question box: its text, its options, or an option's
+  preview. Text written before the box may not show.<!-- rule:style-question-inside-box -->
 - Do a step yourself before you hand it to me. First search the repo and your tools for a way
   to do it, and prove any way that is unproven. Hand me only a step that needs my decision,
   my login, or an act the safety rules keep for me. Name which one.<!-- rule:output-never-hand-off-doable-step -->

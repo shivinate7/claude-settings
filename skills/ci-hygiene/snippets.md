@@ -55,13 +55,15 @@ gh api repos/<owner>/<repo>/branches/<branch>/protection
 
 A required job that is skipped reports as passing. A required job that never starts, because of
 a path filter on the whole workflow, blocks the merge. Prefer `if:` on the job.
+Require a matrix through one fan-in job with `if: always()`. Its check name stays fixed when the
+matrix changes.
 
 ## 4. Cancel superseded runs
 
 ```yaml
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}   # a push must not cancel the nightly or manual run
+  cancel-in-progress: ${{ github.ref != format('refs/heads/{0}', github.event.repository.default_branch) && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}   # never cancel a main, nightly or manual run
 ```
 
 ## 6. Read every run after a merge
