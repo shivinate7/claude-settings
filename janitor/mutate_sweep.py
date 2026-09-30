@@ -529,7 +529,8 @@ MUTATIONS = [
      "sweep",
      'and not os.path.exists(raw):',
      'and os.path.exists(raw):',
-     "test_live_script_is_ignored"),
+     "test_live_script_is_ignored",
+     "posix"),
 
     # ---- the worktree pre-removal process check (this build, 2026-09-24) ----
     ("pre-check: a process sitting inside the worktree no longer keeps it",
