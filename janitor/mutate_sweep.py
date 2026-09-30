@@ -532,6 +532,13 @@ MUTATIONS = [
      "test_missing_script_in_a_live_directory_is_kept",
      "posix"),
 
+    ("loose: a process without the shell-snapshots mark is listed as loose",
+     "sweep",
+     '        if not command or SESSION_MARK not in command or pid == os.getpid():',
+     '        if not command or pid == os.getpid():',
+     "test_marked_process_is_listed_and_unmarked_is_not",
+     "posix"),
+
     # ---- the worktree pre-removal process check (this build, 2026-09-24) ----
     ("pre-check: a process sitting inside the worktree no longer keeps it",
      "sweep",

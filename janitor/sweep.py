@@ -1355,6 +1355,44 @@ def print_dead_rooted_report(decisions, out=sys.stdout):
     print("  dead-rooted servers examined: %d" % len(decisions), file=out)
 
 
+# A Claude Code Bash call starts every command as `zsh -c 'source ~/.claude/shell-snapshots/...
+# && <command>'`, so that path sits in the argv of the process and stays there after the
+# session is gone. Measured on this machine: 10 live processes carry it, read in 0.03 s.
+SESSION_MARK = os.path.join(".claude", "shell-snapshots")
+
+
+def find_loose_processes():
+    """Return one dict per process whose argv names a shell-snapshots file, or `None` when the
+    pid enumeration failed. REPORT ONLY: nothing here, and nothing in `main`, signals one.
+    Dict: {"pid", "command", "orphan"}, `orphan` True, False, or None (unreadable). Only
+    processes of the current user are listed; the caller's own wrapper is among them."""
+    pids = list_all_pids()
+    if pids is None:
+        return None
+    found = []
+    for pid in pids:
+        command = process_command(pid)
+        if not command or SESSION_MARK not in command or pid == os.getpid():
+            continue
+        if is_current_user_process(pid):
+            found.append({"pid": pid, "command": command, "orphan": is_orphan(pid)})
+    return found
+
+
+def print_loose_processes_report(found, out=None):
+    out = out or sys.stdout  # late-bound, so a caller's stdout redirect reaches it
+    print("", file=out)
+    print("== loose processes (report only, never stopped) ==", file=out)
+    if found is None:
+        print("  UNREADABLE -- the machine pid enumeration failed; none examined", file=out)
+        return
+    for d in found:
+        print("  process   pid=%-8s orphan=%-7s %.80s" % (
+            d["pid"], {True: "yes", False: "no"}.get(d["orphan"], "unknown"), d["command"]),
+            file=out)
+    print("  loose processes examined: %d" % len(found), file=out)
+
+
 def processes_in(path: str):
     """Return `(inside_pids, unreadable_pids)`, both lists (possibly empty), for the pre-removal
     check in `decide_worktree`. `inside_pids` is `None` (with `unreadable_pids` also `None`)
@@ -1808,6 +1846,7 @@ def main(argv=None) -> int:
     print_sweep_report(results, args.confirm)
     dead = find_dead_rooted()
     print_dead_rooted_report(dead)
+    print_loose_processes_report(find_loose_processes())
     if args.confirm:
         reaped = reaped_listener_decisions(results)
         for d in dead or []:
