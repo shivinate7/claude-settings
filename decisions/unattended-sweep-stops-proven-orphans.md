@@ -92,8 +92,8 @@ touched.
 
 ## Dead-rooted servers follow the same gate
 
-`find_dead_rooted` finds a process whose argv names a script file that no
-longer exists, under a deleted checkout or worktree. It stops that process
+`find_dead_rooted` finds a process whose argv names a script file and whose
+parent directory are both gone, under a deleted checkout or worktree. It stops that process
 only on two reads: orphaned, and owned by the account running the sweep. It
 reuses `is_orphan`, `is_current_user_process`, and `reap_listener`. It has no
 session read, because a deleted tree has no checkout left to hold a session.
@@ -106,5 +106,6 @@ tier too.
 `janitor/sweep.py`'s `decide_listener`, `find_dead_rooted`, `is_orphan`, and
 `is_current_user_process` hold the reads. `processes_in` holds the
 pre-check's own enumeration. `janitor/test_sweep.py`'s
-`ListenerDecisionTests`, `UnreadableListenerReadTests`, and
-`WorktreeProcessPreCheckTests`, and `DeadRootedServerTests` prove them, against real fixture processes.
+`ListenerDecisionTests`, `UnreadableListenerReadTests`,
+`WorktreeProcessPreCheckTests`, and `DeadRootedServerTests` prove them, against
+real fixture processes.

@@ -123,9 +123,11 @@ anything else because of it.
 ## Dead-rooted servers
 
 A dead-rooted server is a process whose argv names a script file (`.py`, `.sh`,
-`.js`, `.mjs`, `.ts`) that no longer exists. The nearest existing ancestor of
-that path must carry `.git` or `.claude`. Such a process is a leftover of a
-deleted checkout or worktree. It is often a restart loop that holds no port.
+`.js`, `.mjs`, `.ts`) that no longer exists. The script's parent directory must
+be missing too, so a whole tree is gone. The nearest existing ancestor of that
+path must carry `.git` or `.claude`. A script missing from a directory that
+still exists does not qualify. Such a process is a leftover of a deleted
+checkout or worktree. It is often a restart loop that holds no port.
 
 The preview lists each one in a "dead-rooted servers" section, with a reason.
 `--confirm` signals one only when both reads answer a confirmed yes:
