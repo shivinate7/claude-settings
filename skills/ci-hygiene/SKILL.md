@@ -16,7 +16,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    Detect the change with `git diff` against the base commit. Add a nightly full run and a manual
    trigger. If detection cannot read the diff, run the check (fail safe).
 4. **Cancel superseded runs.** Set `concurrency` with `cancel-in-progress`, so a new push to a
-   ref cancels the old run on that ref. Runners with a low concurrency cap, such as hosted
+   ref cancels the old run on that ref. Never cancel a run on the default branch: each merge
+   needs its own verdict. Runners with a low concurrency cap, such as hosted
    macOS, queue first.
 5. **Cap each job's time.** Set `timeout-minutes` on each job at about 2x its slowest green run.
    Give a network step, such as a browser install, its own short cap.

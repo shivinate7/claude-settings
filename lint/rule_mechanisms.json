@@ -580,6 +580,12 @@
         "kind": "unmechanized",
         "reason": "No check reads whether each option in a question says what the user gains and what the user loses."
       }
+    },
+    "style-question-inside-box": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check sees the text of a reply beside its question box and reads whether the question depends on text outside the box."
+      }
     }
   }
 }
