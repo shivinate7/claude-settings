@@ -526,9 +526,21 @@ MUTATIONS = [
     # only_on="posix": LooseProcessTests is skipped on Windows (its sh-loop fixture is POSIX only).
     ("loose processes: an unreadable owner is left out instead of listed",
      "sweep",
-     '        if owner is not False:\n            found.append(',
-     '        if owner is True:\n            found.append(',
+     '        if owner is False:\n            continue\n',
+     '        if owner is not True:\n            continue\n',
      "test_unreadable_owner_is_listed_as_unknown",
+     "posix"),
+    ("loose processes: a live session's wrapper is listed",
+     "sweep",
+     '        if orphan is not False:\n',
+     '        if True:\n',
+     "test_a_live_sessions_wrapper_is_not_listed",
+     "posix"),
+    ("loose processes: an unreadable orphan read is left out",
+     "sweep",
+     '        if orphan is not False:\n',
+     '        if orphan is True:\n',
+     "test_an_unreadable_orphan_read_is_listed_as_unknown",
      "posix"),
 
     # ---- orphaned TCP listeners (this build, 2026-09-24) ----
@@ -606,7 +618,7 @@ MUTATIONS = [
      "sweep",
      '        if not command or SESSION_MARK not in command or pid == os.getpid():',
      '        if not command or pid == os.getpid():',
-     "test_marked_process_is_listed_and_unmarked_is_not",
+     "test_marked_orphan_is_listed_and_unmarked_is_not",
      "posix"),
 
     ("prune: a preview prunes the stale registration for real",

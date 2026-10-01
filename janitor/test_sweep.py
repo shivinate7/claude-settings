@@ -1241,8 +1241,11 @@ class LooseProcessTests(unittest.TestCase):
         cls.home = tempfile.mkdtemp(dir=ROOT)
         snap = os.path.join(cls.home, ".claude", "shell-snapshots", "snapshot-zsh-1-fake.sh")
         cls.procs = []
-        cls.marked = cls._start(snap)
+        cls.marked = cls._start(snap)  # an orphan and a plain one: is_orphan is stubbed True for both
+        cls.live = cls._start(snap + ".live")  # a live session's wrapper: parent alive
         cls.plain = cls._start(os.path.join(cls.home, "plain.sh"))
+        cls.real_is_orphan = staticmethod(sweep.is_orphan)
+        sweep.is_orphan = lambda pid: True if pid in (cls.marked, cls.plain) else cls.real_is_orphan(pid)
 
     @classmethod
     def _start(cls, arg):
@@ -1254,15 +1257,33 @@ class LooseProcessTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        sweep.is_orphan = cls.real_is_orphan
         for proc in cls.procs:
             proc.kill()
             proc.wait()
         shutil.rmtree(cls.home, ignore_errors=True)
 
-    def test_marked_process_is_listed_and_unmarked_is_not(self):
+    def test_marked_orphan_is_listed_and_unmarked_is_not(self):
         pids = {d["pid"] for d in sweep.find_loose_processes()}
         self.assertIn(self.marked, pids)
         self.assertNotIn(self.plain, pids)
+
+    def test_a_live_sessions_wrapper_is_not_listed(self):
+        self.assertFalse(sweep.is_orphan(self.live))
+        self.assertNotIn(self.live, {d["pid"] for d in sweep.find_loose_processes()})
+
+    def test_an_unreadable_orphan_read_is_listed_as_unknown(self):
+        sweep.is_orphan = lambda pid: None if pid == self.live else True if pid in (self.marked, self.plain) \
+            else self.real_is_orphan(pid)
+        try:
+            found = sweep.find_loose_processes()
+        finally:
+            sweep.is_orphan = lambda pid: True if pid in (self.marked, self.plain) else self.real_is_orphan(pid)
+        entry = [d for d in found if d["pid"] == self.live]
+        self.assertEqual(len(entry), 1)
+        out = io.StringIO()
+        sweep.print_loose_processes_report(entry, out=out)
+        self.assertIn("orphan=unknown", out.getvalue())
 
     def test_report_lists_the_marked_process(self):
         out = io.StringIO()

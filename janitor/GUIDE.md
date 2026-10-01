@@ -181,9 +181,10 @@ A loose process is a process whose argv contains the shell-snapshots path
 (`.claude/shell-snapshots`). A Claude Code Bash call puts that path in the
 argv of its process, and the argv keeps it after the session ends. The match is
 a substring, so a command such as `ls` of that directory matches too. The
-preview lists each match in a "loose processes" section, with an orphan answer
-(yes, no, or unknown). A process whose owner cannot be read is counted as
-unknown. The list includes the wrappers of live sessions, yours too.
+preview lists each match that is an orphan in a "loose processes" section.
+The orphan answer is yes, or unknown when the read fails. A process that is not
+an orphan is not listed. This keeps out the wrappers of live sessions, yours
+too. A process whose owner cannot be read is counted as unknown.
 
 This tier is report only. `--confirm` stops none of them. A person reads the
 list and decides.

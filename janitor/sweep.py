@@ -1429,11 +1429,11 @@ SESSION_MARK = os.path.join(".claude", "shell-snapshots")
 
 
 def find_loose_processes():
-    """Return one dict per process whose argv contains a shell-snapshots path, or `None` when the
-    pid enumeration failed. REPORT ONLY: nothing here, and nothing in `main`, signals one.
-    Dict: {"pid", "command", "orphan", "owner"}; `orphan` and `owner` are True, False, or None
-    (unreadable). A process of another user is left out; an unreadable owner is listed.
-    The caller's own wrapper is among them."""
+    """Return one dict per ORPHANED process whose argv contains a shell-snapshots path, or `None`
+    when the pid enumeration failed. REPORT ONLY: nothing here, and nothing in `main`, signals
+    one. Dict: {"pid", "command", "orphan", "owner"}; `orphan` and `owner` are True or None
+    (unreadable). A process that is not an orphan (a live session's shell wrapper) is left
+    out, and so is a process of another user. An unreadable owner or orphan read is listed."""
     pids = list_all_pids()
     if pids is None:
         return None
@@ -1443,9 +1443,11 @@ def find_loose_processes():
         if not command or SESSION_MARK not in command or pid == os.getpid():
             continue
         owner = is_current_user_process(pid)
-        if owner is not False:
-            found.append({"pid": pid, "command": command, "owner": owner,
-                          "orphan": is_orphan(pid)})
+        if owner is False:
+            continue
+        orphan = is_orphan(pid)
+        if orphan is not False:
+            found.append({"pid": pid, "command": command, "owner": owner, "orphan": orphan})
     return found
 
 
