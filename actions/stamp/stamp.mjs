@@ -31,10 +31,10 @@
 // All take --config <path> (required) and --root <path> (default: cwd). --check also takes
 // --base <ref> (default: origin/$GITHUB_BASE_REF, else origin/<defaultBranch>).
 
-import { readFileSync, writeFileSync, unlinkSync, readdirSync, statSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { realpathSync, readFileSync, writeFileSync, unlinkSync, readdirSync, statSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { join, resolve, posix, dirname } from "node:path";
+import { join, resolve, posix, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as headingFormat from "./formats/heading.mjs";
 
@@ -693,8 +693,20 @@ function branchNumbered(root, config, opts) {
     const problems = [];
     const claims = claimedByTrailer(root, config, base);
     let tip; // read only when a claim needs it
+    // A record the default branch already holds, under the same number and key, is synced in, not
+    // numbered here. The old post-merge stamp numbered them on main with no trailer. Read once.
+    let onDefault; // opts.defaultRef is for tests, whose fixture has no origin
+    const defaultHas = (r) => {
+      if (!onDefault) {
+        try {
+          const d = materializeTree(root, opts.defaultRef ?? `origin/${config.defaultBranch}`, recordPaths(config));
+          try { onDefault = new Set(numberedRecords(d, config).map((x) => x.key)); } finally { rmSync(d, { recursive: true, force: true }); }
+        } catch { onDefault = new Set(); }
+      }
+      return onDefault.has(r.key);
+    };
     for (const r of now) {
-      if (baseKeys.has(r.key)) continue;
+      if (baseKeys.has(r.key) || defaultHas(r)) continue;
       if (claims.has(r.id)) {
         tip ??= tipTaken(root, config, ref);
         if (tip.get(r.kind).has(r.n)) {
@@ -808,7 +820,11 @@ function parseArgv(argv) {
   return out;
 }
 
-const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+// Compare real paths: a symlinked directory (macOS /var -> /private/var) made the two differ and the
+// CLI exit 0 with no output. The basename test is the backstop: a CLI call never falls through silent.
+const real = (p) => { try { return realpathSync(p); } catch { return resolve(p); } };
+const isMain = Boolean(process.argv[1]) &&
+  (real(process.argv[1]) === real(fileURLToPath(import.meta.url)) || basename(process.argv[1]) === "stamp.mjs");
 
 if (isMain) {
   const args = parseArgv(process.argv.slice(2));
