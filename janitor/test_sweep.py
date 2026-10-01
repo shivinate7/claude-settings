@@ -703,6 +703,102 @@ class WorktreeDecisionTests(unittest.TestCase):
         self.assertEqual(decision["reason"], "unreadable-subject")
 
 
+class StaleAgentLockTests(unittest.TestCase):
+    """A claude agent lock (`claude agent agent-<id> (pid N start <UTC date>)`) is stale when its
+    pid is dead, or alive with another start time. A stale lock no longer keeps the worktree; the
+    worktree must then be clean and fully pushed. Any other lock reason keeps."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.root = os.path.join(ROOT, "stale-lock-repo")
+        make_repo(cls.root, {"f.txt": "base\n"})
+        cls.remote = os.path.join(ROOT, "stale-lock-remote.git")
+        run_vcs(ROOT, "init", "-q", "--bare", cls.remote)
+        run_vcs(cls.root, "remote", "add", "origin", cls.remote)
+        require(run_vcs(cls.root, "push", "-q", "origin", "main").returncode == 0, "push failed")
+        run_vcs(cls.root, "fetch", "-q", "origin")
+
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        cls.dead_pid = gone.pid
+        own = time.strftime("%a %b %e %H:%M:%S %Y",
+                            time.gmtime(this_process_start_ms() / 1000))
+        cls.reasons = {
+            "dead": "claude agent agent-dead (pid %d start %s)" % (cls.dead_pid, own),
+            "running": "claude agent agent-run (pid %d start %s)" % (os.getpid(), own),
+            "reused": "claude agent agent-reuse (pid %d start Thu Jan  1 00:00:00 2015)"
+                      % os.getpid(),
+            "garbled": "claude agent agent-bad (pid %d start no-date)" % cls.dead_pid,
+        }
+        cls.wt = {}
+        for name, reason in cls.reasons.items():
+            cls.wt[name] = cls.add(name, reason)
+        cls.wt["unpushed"] = cls.add("unpushed", cls.reasons["dead"])
+        write(os.path.join(cls.wt["unpushed"], "g.txt"), "only here\n")
+        run_vcs(cls.wt["unpushed"], "add", "-A")
+        run_vcs(cls.wt["unpushed"], *IDENT, "commit", "-q", "-m", "unpushed work")
+        cls.wt["detached"] = cls.add("detached", cls.reasons["dead"], detach=True)
+        cls.wt["other"] = cls.add("other", "held by lane-x")
+        entries = sweep.parse_worktree_list(cls.root)
+        cls.entries = {os.path.normcase(os.path.realpath(e["path"])): e for e in entries}
+
+    @classmethod
+    def add(cls, name, reason, detach=False):
+        path = os.path.join(ROOT, "stale-lock-" + name)
+        args = ["worktree", "add", "-q", path]
+        args += ["--detach", "main"] if detach else ["-b", "lane-stale-" + name]
+        require(run_vcs(cls.root, *args).returncode == 0, "worktree add %s failed" % name)
+        require(run_vcs(cls.root, "worktree", "lock", path, "--reason", reason).returncode == 0,
+                "lock %s failed" % name)
+        return path
+
+    def decide(self, name):
+        entry = self.entries[os.path.normcase(os.path.realpath(self.wt[name]))]
+        return sweep.decide_worktree(self.root, entry)
+
+    def test_dead_pid_lock_is_stale_and_pushed_worktree_is_removable(self):
+        decision = self.decide("dead")
+        self.assertEqual(decision["action"], "reap")
+        self.assertTrue(decision.get("unlock"))
+
+    def test_detached_head_on_a_pushed_commit_counts_as_pushed(self):
+        self.assertEqual(self.decide("detached")["action"], "reap")
+
+    def test_reused_pid_with_other_start_time_is_stale(self):
+        self.assertEqual(self.decide("reused")["action"], "reap")
+
+    def test_running_agent_lock_keeps(self):
+        decision = self.decide("running")
+        self.assertEqual(decision["action"], "keep")
+        self.assertTrue(decision["reason"].startswith("locked:"))
+
+    def test_unreadable_lock_start_keeps(self):
+        decision = self.decide("garbled")
+        self.assertEqual(decision["action"], "keep")
+        self.assertTrue(decision["reason"].startswith("locked:"))
+
+    def test_other_lock_reason_keeps(self):
+        self.assertEqual(self.decide("other")["action"], "keep")
+
+    def test_stale_lock_with_unpushed_commit_keeps(self):
+        decision = self.decide("unpushed")
+        self.assertEqual(decision["action"], "keep")
+        self.assertTrue(decision["reason"].startswith("unpushed:"))
+
+    def test_remove_unlocks_then_removes_without_force(self):
+        path = self.add("removal", self.reasons["dead"])
+        decision = sweep.decide_worktree(
+            self.root, {"path": path, "locked_reason": self.reasons["dead"]})
+        self.assertEqual(decision["action"], "reap")
+        sweep.remove_worktree(self.root, path, decision)
+        self.assertNotIn("error", decision)
+        self.assertFalse(os.path.exists(path))
+
+    def test_preview_never_unlocks(self):
+        sweep.sweep_repo(self.root, confirm=False, restore_log_path=os.path.join(ROOT, "p.log"))
+        self.assertTrue(guard.worktree_locked(self.root, self.wt["dead"]))
+
+
 class ListenerDecisionTests(unittest.TestCase):
     """`sweep.find_swept_listeners` / `sweep.decide_listener`, this build's own subject. Every
     listener here is a REAL process this suite starts itself (`spawn_plain_listener` /
