@@ -81,6 +81,12 @@ if [ "$REF" != "refs/heads/$DEFAULT_BRANCH" ]; then
   exit 1
 fi
 
+# The config's own `regenerate` is the home for this command. The action input stays as an
+# override until the docs move to the config: a set input wins, an empty one reads the config.
+if [ -z "${REGENERATE_COMMAND:-}" ]; then
+  REGENERATE_COMMAND="$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).regenerate ?? "")' "$CONFIG")"
+fi
+
 attempt=1
 while :; do
   echo "stamp: attempt $attempt of $MAX_ATTEMPTS"

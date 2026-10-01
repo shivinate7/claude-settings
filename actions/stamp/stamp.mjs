@@ -17,13 +17,18 @@
 //
 // Modes:
 //   --stamp   number every pending record and rewrite cites. Writes the tree.
+//   --claim   --stamp before the merge, on a branch: the next number is above every number in the
+//             tree AND in the tip of --base (required), and above each RETIRED list of both. Then
+//             runs the config's `regenerate` command. Prints a last line `Record-claim: <ids>`,
+//             the trailer for the claim commit. Writes the tree.
 //   --check   refuse a malformed record, a duplicate id, or a cite that points at no record. On
-//             the default branch, also refuse a pending record HEAD did not add. Off it, refuse a
+//             the default branch, also refuse any pending record. Off it, refuse a
 //             record numbered on the branch, a renamed numbered record, and a removed number,
-//             against the base branch's tree. Touches nothing. A base it cannot read fails the
+//             against the base branch's tree. A number that a `Record-claim:` commit added is
+//             accepted, when the base tip does not hold it. Touches nothing. A base it cannot read fails the
 //             check when GITHUB_ACTIONS is "true", and prints UNKNOWN and exits 0 elsewhere.
 //
-// Both take --config <path> (required) and --root <path> (default: cwd). --check also takes
+// All take --config <path> (required) and --root <path> (default: cwd). --check also takes
 // --base <ref> (default: origin/$GITHUB_BASE_REF, else origin/<defaultBranch>).
 
 import { readFileSync, writeFileSync, unlinkSync, readdirSync, statSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -39,6 +44,9 @@ export function loadConfig(path) {
   const config = JSON.parse(readFileSync(path, "utf8"));
   if (!Array.isArray(config.kinds) || !config.kinds.length) {
     throw new Error("config.kinds must be a non-empty array");
+  }
+  if (config.regenerate !== undefined && typeof config.regenerate !== "string") {
+    throw new Error("config.regenerate must be a string: a shell command");
   }
   if (config.format === "heading") return headingFormat.normalizeConfig(config);
   if (config.format !== undefined) throw new Error(`config.format "${config.format}" is not a format this tool builds`);
@@ -259,19 +267,6 @@ function mergeOrder(root, folder) {
   return order;
 }
 
-function addedByHead(root, folder) {
-  try {
-    const out = execFileSync("git", [
-      "-c", "core.quotePath=false",
-      "diff-tree", "-r", "-m", "--first-parent", "--root", "--no-commit-id", "--diff-filter=A", "--name-only",
-      "HEAD", "--", folder,
-    ], { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
-    return new Set(out.split("\n").map((l) => l.trim()).filter((l) => l.startsWith(folder + "/")));
-  } catch {
-    return null;
-  }
-}
-
 export function currentBranch(root) {
   if (process.env.GITHUB_REF && process.env.GITHUB_REF.startsWith("refs/heads/")) {
     return process.env.GITHUB_REF.slice("refs/heads/".length);
@@ -309,8 +304,8 @@ function orderPending(root, kind, pending) {
 }
 
 // ---------------------------------------------------------------- one kind, numbered
-function stampKind(root, kind, records) {
-  const takenNumbers = [...records.flatMap((r) => r.numbers), ...retiredNumbers(root, kind).nums];
+function stampKind(root, kind, records, extra) {
+  const takenNumbers = [...records.flatMap((r) => r.numbers), ...retiredNumbers(root, kind).nums, ...(extra?.get(kind.id) ?? [])];
   const pending = orderPending(root, kind, records.filter((r) => r.pending));
   const taken = new Set(takenNumbers);
 
@@ -494,10 +489,12 @@ function validate(root, config) {
 
 // ---------------------------------------------------------------- --stamp
 // The helpers format 3 shares with the other two, so all three read EOL and git the same way.
-const HELPERS = { readFileEol, withEol, addedByHead, currentBranch };
+const HELPERS = { readFileEol, withEol, currentBranch };
 
-export function stamp(root, config) {
-  if (config.format === "heading") return headingFormat.stamp(root, config, HELPERS);
+// `extra`: Map kind.id -> numbers to treat as taken, besides the tree's own. --claim passes the
+// base tip's. Without it, the tree alone decides.
+export function stamp(root, config, extra) {
+  if (config.format === "heading") return headingFormat.stamp(root, config, HELPERS, extra);
   const { problems, byKind } = validate(root, config);
   if (problems.length) {
     return { problems, assigned: [], glossed: 0 };
@@ -505,7 +502,7 @@ export function stamp(root, config) {
 
   const allAssigned = [];
   for (const kind of config.kinds) {
-    const assigned = stampKind(root, kind, byKind.get(kind));
+    const assigned = stampKind(root, kind, byKind.get(kind), extra);
     for (const a of assigned) console.log(`stamped ${a.id}  ${a.slug}  ${a.title ?? ""}`.trimEnd());
     allAssigned.push(...assigned);
   }
@@ -589,6 +586,66 @@ function numberedRecords(root, config) {
 const recordPaths = (config) =>
   config.format === "heading" ? headingFormat.recordPaths(config) : config.kinds.map((k) => k.folder);
 
+// Every number one tree holds, per kind id: its numbered records and each RETIRED list. The
+// heading shape reads no retired list.
+function takenNumbers(root, config) {
+  const out = new Map(config.kinds.map((k) => [k.id, new Set()]));
+  for (const r of numberedRecords(root, config)) out.get(r.kind).add(r.n);
+  if (config.format !== "heading") {
+    for (const k of config.kinds) for (const n of retiredNumbers(root, k).nums) out.get(k.id).add(n);
+  }
+  return out;
+}
+
+// The numbers the tip of `ref` takes. Throws when git cannot read it.
+function tipTaken(root, config, ref) {
+  const dir = materializeTree(root, ref, recordPaths(config));
+  try {
+    return takenNumbers(dir, config);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// The (kind, number) pairs one commit's tree holds. A commit git cannot read, such as the parent
+// of a root commit, holds none.
+function numbersAt(root, config, commit) {
+  let dir;
+  try {
+    dir = materializeTree(root, commit, recordPaths(config));
+  } catch {
+    return new Set();
+  }
+  try {
+    return new Set(numberedRecords(dir, config).map((r) => `${r.kind}\0${r.n}`));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// The ids that `Record-claim:` commits of base..HEAD added. A trailer names ids. It vouches for
+// an id only when the same commit ADDED the number: the commit's parent lacks it, and the commit
+// holds it. A number a commit only edits is not vouched for.
+function claimedByTrailer(root, config, base) {
+  const out = new Set();
+  const log = gitOut(root, ["log", "--no-merges", "--format=%x01%H%n%(trailers:key=Record-claim,valueonly)", `${base}..HEAD`]).toString("utf8");
+  for (const chunk of log.split("\x01").slice(1)) {
+    const [hash, ...vals] = chunk.split("\n");
+    const ids = new Set(vals.join(" ").split(/[\s,]+/).filter(Boolean));
+    if (!ids.size) continue;
+    const before = numbersAt(root, config, `${hash}^`);
+    const after = materializeTree(root, hash, recordPaths(config));
+    try {
+      for (const r of numberedRecords(after, config)) {
+        if (ids.has(r.id) && !before.has(`${r.kind}\0${r.n}`)) out.add(r.id);
+      }
+    } finally {
+      rmSync(after, { recursive: true, force: true });
+    }
+  }
+  return out;
+}
+
 // Off the default branch, against the base tree:
 //   - every record that carries a number in this tree must carry that same number, under the
 //     same key, in the base tree. A new record with a number fails, and so does a record that was
@@ -603,6 +660,9 @@ const recordPaths = (config) =>
 // taken the same number since, for another record, and that reads as "already there" and hides
 // the defect. In a pull_request merge commit the merge base IS the base ref's tip, so both read
 // the same tree there.
+//   - one exception. A number that a `Record-claim:` commit of the branch added is accepted when
+//     the tip of the base ref does not hold it. The commit must have added the number itself (the tool claims before the merge, against the
+//     tip). A number with no such trailer stays refused, and so does one the tip took since.
 //
 // A base that cannot be read comes back as `unknown`, never as a pass. check() decides whether
 // that fails the run. A check that did not run is not green.
@@ -631,8 +691,18 @@ function branchNumbered(root, config, opts) {
     const baseByNumber = new Map();
     for (const r of before) if (!baseByNumber.has(numberOf(r))) baseByNumber.set(numberOf(r), r);
     const problems = [];
+    const claims = claimedByTrailer(root, config, base);
+    let tip; // read only when a claim needs it
     for (const r of now) {
       if (baseKeys.has(r.key)) continue;
+      if (claims.has(r.id)) {
+        tip ??= tipTaken(root, config, ref);
+        if (tip.get(r.kind).has(r.n)) {
+          problems.push(`${r.rel}: ${r.id} was claimed on this branch, and ${ref} holds ${r.id} now. ` +
+            `Merge ${ref} into the branch, write the pending marker again, and claim again.`);
+        }
+        continue;
+      }
       const old = baseByNumber.get(numberOf(r));
       if (old && !nowKeys.has(old.key)) {
         problems.push(`${r.rel}: ${r.id} was renamed on a branch. ${ref} holds it under the key "${old.name}", and this tree ` +
@@ -669,18 +739,13 @@ function branchNumbered(root, config, opts) {
   }
 }
 
-// On the default branch: a pending record HEAD did not itself add means the stamp did not run,
-// or its push was rejected. The question is asked only while something is pending.
-function defaultPendingOld(root, config, byKind, branch) {
+// On the default branch: any pending record means a record reached the branch unclaimed. The
+// claim runs before the merge, so none is expected here, HEAD's own included.
+function defaultPending(config, byKind, branch) {
   const problems = [];
   for (const kind of config.kinds) {
-    const pending = byKind.get(kind).filter((r) => r.pending);
-    if (!pending.length) continue;
-    const added = addedByHead(root, kind.folder);
-    for (const rec of pending) {
-      if (added && !added.has(rec.rel)) {
-        problems.push(`${rec.rel} is still pending on ${branch}, added before HEAD — the stamp did not run, or its push was rejected`);
-      }
+    for (const rec of byKind.get(kind).filter((r) => r.pending)) {
+      problems.push(`${rec.rel} is still pending on ${branch}. Claim the number before the merge. Run the merge tool on a pull request that carries it.`);
     }
   }
   return problems;
@@ -698,7 +763,7 @@ export function check(root, config, opts = {}) {
   } else {
     const v = validate(root, config);
     problems = v.problems;
-    if (onDefault) problems.push(...defaultPendingOld(root, config, v.byKind, config.defaultBranch));
+    if (onDefault) problems.push(...defaultPending(config, v.byKind, config.defaultBranch));
   }
   if (!onDefault) {
     const branch = branchNumbered(root, config, opts);
@@ -709,11 +774,33 @@ export function check(root, config, opts = {}) {
   return problems;
 }
 
+// ---------------------------------------------------------------- --claim
+// --stamp with the base tip's numbers taken too. Throws when git cannot read the tip: a claim made
+// without it could hand out a number the base holds. Runs the config's `regenerate` after, when
+// something was claimed. The tree is written either way.
+export function claim(root, config, baseTip) {
+  let taken;
+  try {
+    taken = tipTaken(root, config, baseTip);
+  } catch (e) {
+    throw new Error(`git cannot read ${baseTip} (${String(e.message).split("\n")[0]}). Nothing was written`);
+  }
+  const result = stamp(root, config, taken);
+  if (!result.problems.length && result.assigned.length && config.regenerate) {
+    try {
+      execFileSync("bash", ["-c", config.regenerate], { cwd: root, stdio: "inherit" });
+    } catch {
+      throw new Error("the regenerate command failed. The tree holds the claim. Discard the tree, and do not commit it");
+    }
+  }
+  return result;
+}
+
 // ---------------------------------------------------------------- CLI
 function parseArgv(argv) {
   const out = { mode: null, config: null, root: process.cwd(), base: null };
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--stamp" || argv[i] === "--check") out.mode = argv[i].slice(2);
+    if (argv[i] === "--stamp" || argv[i] === "--check" || argv[i] === "--claim") out.mode = argv[i].slice(2);
     else if (argv[i] === "--config") out.config = argv[++i];
     else if (argv[i] === "--root") out.root = argv[++i];
     else if (argv[i] === "--base") out.base = argv[++i];
@@ -726,17 +813,28 @@ const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(imp
 if (isMain) {
   const args = parseArgv(process.argv.slice(2));
   if (!args.mode || !args.config) {
-    console.error("usage: node stamp.mjs --stamp|--check --config <path> [--root <path>] [--base <ref>]");
+    console.error("usage: node stamp.mjs --stamp|--check|--claim --config <path> [--root <path>] [--base <ref>]   (--claim needs --base)");
+    process.exit(2);
+  }
+  if (args.mode === "claim" && !args.base) {
+    console.error("claim REFUSES: --claim needs --base <ref>, the ref whose tip holds the numbers already taken.");
     process.exit(2);
   }
   const config = loadConfig(args.config);
-  if (args.mode === "stamp") {
-    const result = stamp(args.root, config);
+  if (args.mode === "stamp" || args.mode === "claim") {
+    let result;
+    try {
+      result = args.mode === "claim" ? claim(args.root, config, args.base) : stamp(args.root, config);
+    } catch (e) {
+      console.error(`${args.mode} REFUSES: ${String(e.message).split("\n")[0]}.`);
+      process.exit(1);
+    }
     if (result.problems.length) {
       console.error("stamp REFUSES: the tree has a problem --check would also refuse. Nothing was written.");
       for (const p of result.problems) console.error(p);
       process.exit(1);
     }
+    if (args.mode === "claim" && result.assigned.length) console.log(`Record-claim: ${result.assigned.map((a) => a.id).join(" ")}`);
   } else {
     const problems = check(args.root, config, { base: args.base });
     if (problems.unknown) console.error(problems.unknown);

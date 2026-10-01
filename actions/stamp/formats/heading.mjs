@@ -331,13 +331,13 @@ export function pythonJson(obj) {
 
 // ---------------------------------------------------------------- --stamp
 
-export function stamp(root, config, h) {
+export function stamp(root, config, h, extra) {
   const { problems, kinds } = validate(root, config, h);
   if (problems.length) return { problems, assigned: [], glossed: 0 };
 
   const claims = [];
   for (const k of kinds) {
-    let n = Math.max(0, ...k.numbers.map((x) => x.n));
+    let n = Math.max(0, ...k.numbers.map((x) => x.n), ...(extra?.get(k.kind.id) ?? []));
     for (const rec of k.pending) {
       n += 1;
       const target = k.kind.folder
@@ -431,30 +431,14 @@ export function recordPaths(config) {
   return config.kinds.flatMap((kind) => [kind.folder, kind.file, kind.manifest].filter(Boolean));
 }
 
-// On the default branch: a pending record HEAD did not itself add means the stamp did not run,
-// or its push was rejected.
-function defaultPendingOld(root, kinds, h, notes) {
+// On the default branch: any pending record means a record reached the branch unclaimed. The
+// claim runs before the merge, so none is expected here, HEAD's own included.
+function defaultPending(kinds) {
   const problems = [];
   for (const k of kinds) {
-    if (!k.pending.length) continue;
-    const kind = k.kind;
-    if (kind.folder) {
-      const added = h.addedByHead(root, kind.folder);
-      if (!added) { notes.push(`branch question NOT ASKED for ${kind.id}: git could not read HEAD.`); continue; }
-      for (const rec of k.pending) {
-        if (!added.has(rec.rel)) problems.push(`${rec.rel} is still pending on the default branch, added before HEAD. The stamp did not run, or its push was rejected.`);
-      }
-    } else {
-      if (git(root, ["rev-parse", "--verify", "--quiet", "HEAD"]) === null) {
-        notes.push(`branch question NOT ASKED for ${kind.id}: git could not read HEAD.`);
-        continue;
-      }
-      const parent = git(root, ["show", `HEAD^1:${kind.file}`]) ?? "";
-      const pendingRe = new RegExp(kind.pendingRegex, "gmu");
-      const older = new Set([...parent.matchAll(pendingRe)].map((m) => kind.prefix + m[1]));
-      for (const rec of k.pending) {
-        if (older.has(rec.slug)) problems.push(`${kind.file}: ${rec.slug} is still pending on the default branch, added before HEAD. The stamp did not run, or its push was rejected.`);
-      }
+    for (const rec of k.pending) {
+      const where = k.kind.folder ? rec.rel : k.kind.file;
+      problems.push(`${where}: ${rec.slug} is still pending on the default branch. Claim the number before the merge. Run the merge tool on a pull request that carries it.`);
     }
   }
   return problems;
@@ -465,8 +449,6 @@ function defaultPendingOld(root, kinds, h, notes) {
 export function check(root, config, h, onDefault) {
   const { problems, kinds } = validate(root, config, h);
   if (!onDefault) return problems;
-  const notes = [];
-  problems.push(...defaultPendingOld(root, kinds, h, notes));
-  for (const n of notes) console.error(`stamp --check: ${n}`);
+  problems.push(...defaultPending(kinds));
   return problems;
 }

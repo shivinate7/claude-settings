@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { stamp, check, loadConfig, currentBranch, onDefaultBranch } from "./stamp.mjs";
+import { stamp, claim, check, loadConfig, currentBranch, onDefaultBranch } from "./stamp.mjs";
 
 // Each fixture builds its own git repo. A CI run's GITHUB_REF and GITHUB_BASE_REF name the
 // runner's branch, not the fixture's. GITHUB_ACTIONS picks a hard refusal or an UNKNOWN line
@@ -233,8 +233,8 @@ test("--check is silent on a well-formed tree", () =>
   }));
 
 // ---------------------------------------------------------------- --check, the default-branch
-// question. A pending entry the stamp has not had its TURN on yet must not be refused. One an
-// older commit added must be: the stamp did not run, or its push was rejected.
+// question. The claim runs before the merge, so a pending record on the default branch is
+// refused, whichever commit added it.
 test("--check on the default branch refuses a pending record older than HEAD", () =>
   withTempDir((root) => {
     initRepo(root);
@@ -249,16 +249,17 @@ test("--check on the default branch refuses a pending record older than HEAD", (
     assert.equal(problems.some((p) => p.includes("docs/decisions/old.md") && p.includes("pending")), true);
   }));
 
-test("--check on the default branch does not refuse a pending record HEAD itself just added", () =>
+test("--check on the default branch refuses a pending record HEAD itself just added", () =>
   withTempDir((root) => {
     initRepo(root);
     write(root, "docs/decisions/settled.md", "---\nid: D-001\nslug: settled\ntitle: Settled\ndate: 2026-01-01\n---\n\nBody.\n");
     commit(root, "a settled record");
     write(root, "docs/decisions/fresh.md", "---\nid: pending\nslug: fresh\ntitle: Fresh\ndate: 2026-01-02\n---\n\nBody.\n");
-    commit(root, "fresh, waiting its turn");
+    commit(root, "fresh, never claimed");
 
     const problems = check(root, frontmatterConfig());
-    assert.equal(problems.length, 0);
+    assert.equal(problems.length, 1);
+    assert.match(problems[0], /docs\/decisions\/fresh\.md is still pending on main/);
   }));
 
 test("frontmatter --check passes a pending record on a feature branch, and never asks the default-branch question there", () =>
@@ -597,8 +598,8 @@ test("heading --check on the default branch refuses a pending heading older than
     commit(root, "a pending decision, waiting its turn");
 
     const problems = check(root, headingConfig());
-    assert.equal(problems.some((p) => p.includes("C-old-code") && p.includes("added before HEAD")), true);
-    assert.equal(problems.some((p) => p.includes("D-fresh-thing")), false);
+    assert.equal(problems.some((p) => p.includes("C-old-code") && p.includes("still pending")), true);
+    assert.equal(problems.some((p) => p.includes("D-fresh-thing") && p.includes("still pending")), true);
   }));
 
 test("heading: a pending slug main already claimed under a number is refused", () =>
@@ -701,8 +702,8 @@ test("heading --check reads a non-ASCII filename git added, on and off the defau
     commit(root, "main");
     write(root, "docs/decisions/D-two-thing-café.md", "## D-two-thing — Two thing\n");
     commit(root, "HEAD adds a pending record with a non-ASCII filename");
-    // On main: HEAD itself added it, so it waits its turn and is not refused.
-    assert.deepEqual(check(root, headingConfig()), []);
+    // On main: any pending record is refused, a non-ASCII filename included.
+    assert.equal(check(root, headingConfig()).some((p) => p.includes("D-two-thing-café.md") && p.includes("still pending")), true);
 
     git(root, "checkout", "-q", "-b", "wt/lane");
     write(root, "docs/decisions/D004-café.md", "## D4 — Numbered on the branch\n");
@@ -813,7 +814,8 @@ test("cite.scanGlobs and cite.excludeGlobs: a scanned suffix is rewritten, an ex
     write(root, "docs/citation-syntax.md", "Write [[slug]] to cite a record.\n");
     commit(root, "a pending record, cites in three places, and a syntax example");
 
-    assert.deepEqual(check(root, filenameConfig()), []); // the syntax example is excluded
+    // the syntax example is excluded. Only the pending record itself is refused, on main.
+    assert.deepEqual(check(root, filenameConfig()).filter((p) => !p.includes("still pending")), []);
     stamp(root, filenameConfig());
     assert.equal(read(root, "data/links.csv"), "ref\nD1, widgets ship\n");
     assert.equal(read(root, "data/links.txt"), "[[widgets]]\n"); // .txt is not in scanGlobs
@@ -1063,6 +1065,169 @@ test("retired list: a listed number that a record still holds, and a malformed l
     assert.equal(problems.length, 2, problems.join(" | "));
     assert.equal(problems.some((p) => /D-001 is in .*RETIRED and .*still holds it/.test(p)), true);
     assert.equal(problems.some((p) => /RETIRED line 3 does not start with an id/.test(p)), true);
+  }));
+
+// ---------------------------------------------------------------- --claim and the Record-claim
+// exception in --check
+const pendingRec = (slug, day = "02") => `---\nid: pending\nslug: ${slug}\ntitle: ${slug}\ndate: 2026-01-${day}\n---\n\nBody.\n`;
+
+// main holds D-001. wt/lane adds a pending record `p`. `onMain` then moves main, and the repo
+// ends on wt/lane.
+function claimRepo(root, onMain) {
+  initRepo(root);
+  write(root, "docs/decisions/a.md", rec(1, "a"));
+  commit(root, "main");
+  git(root, "checkout", "-q", "-b", "wt/lane");
+  write(root, "docs/decisions/p.md", pendingRec("p"));
+  commit(root, "branch adds a pending record");
+  if (onMain) {
+    git(root, "checkout", "-q", "main");
+    onMain(root);
+    commit(root, "main moves");
+    git(root, "checkout", "-q", "wt/lane");
+  }
+}
+
+// What the merge tool does: claim, then commit with the trailer.
+function claimCommit(root, message = "claim") {
+  const r = claim(root, frontmatterConfig(), "main");
+  commit(root, `${message}\n\nRecord-claim: ${r.assigned.map((a) => a.id).join(" ")}`);
+  return r;
+}
+
+test("claim: the number is above the base tip's numbers, which --stamp alone would reuse", () =>
+  withTempDir((root) => {
+    claimRepo(root, (d) => write(d, "docs/decisions/e.md", rec(5, "e")));
+    const c = claim(root, frontmatterConfig(), "main");
+    assert.deepEqual(c.assigned.map((a) => a.id), ["D-006"]);
+    assert.equal(read(root, "docs/decisions/p.md").includes("id: D-006"), true);
+  }));
+
+test("claim: a number in the base tip's RETIRED list is taken", () =>
+  withTempDir((root) => {
+    claimRepo(root, (d) => write(d, "docs/decisions/RETIRED", "D-009 gone\n"));
+    assert.deepEqual(claim(root, frontmatterConfig(), "main").assigned.map((a) => a.id), ["D-010"]);
+  }));
+
+test("claim: a base that git cannot read is refused, and the tree stays pending", () =>
+  withTempDir((root) => {
+    claimRepo(root);
+    assert.throws(() => claim(root, frontmatterConfig(), "no-such-ref"));
+    assert.equal(read(root, "docs/decisions/p.md").includes("id: pending"), true);
+  }));
+
+test("claim, heading shape: the number is above the base tip's", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    headingTree(root);
+    commit(root, "main");
+    git(root, "checkout", "-q", "-b", "wt/lane");
+    write(root, "docs/decisions/D-two-thing.md", "## D-two-thing — Two thing\n");
+    commit(root, "branch adds a pending heading");
+    git(root, "checkout", "-q", "main");
+    write(root, "docs/decisions/D007-seven.md", "## D7 — Seven\n");
+    commit(root, "main takes D7");
+    git(root, "checkout", "-q", "wt/lane");
+    assert.deepEqual(claim(root, headingConfig(), "main").assigned.map((a) => a.id), ["D8"]);
+  }));
+
+test("claim: runs the config's regenerate when something was claimed, and not otherwise", () =>
+  withTempDir((root) => {
+    claimRepo(root);
+    const config = { ...frontmatterConfig(), regenerate: "echo ran >> regen.txt" };
+    claim(root, config, "main");
+    assert.equal(read(root, "regen.txt"), "ran\n");
+    claim(root, config, "main"); // nothing pending now
+    assert.equal(read(root, "regen.txt"), "ran\n");
+  }));
+
+test("config: regenerate must be a string", () =>
+  withTempDir((root) => {
+    const c = JSON.parse(readFileSync(join(HERE, "examples/frontmatter.stamp.json"), "utf8"));
+    c.regenerate = ["make"];
+    write(root, "c.json", JSON.stringify(c));
+    assert.throws(() => loadConfig(join(root, "c.json")), /regenerate must be a string/);
+  }));
+
+test("claim CLI: needs --base, prints the trailer line, and exits 1 on an unreadable base", () =>
+  withTempDir((root) => {
+    claimRepo(root);
+    const cfg = join(HERE, "examples/frontmatter.stamp.json");
+    const run = (...a) => spawnSync("node", [join(HERE, "stamp.mjs"), "--claim", ...a, "--config", cfg], { cwd: root, encoding: "utf8" });
+    assert.equal(run().status, 2);
+    const bad = run("--base", "no-such-ref");
+    assert.equal(bad.status, 1);
+    assert.match(bad.stderr, /claim REFUSES/);
+    const ok = run("--base", "main");
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.match(ok.stdout, /^Record-claim: D-002$/m);
+  }));
+
+test("--check accepts a number a Record-claim commit added", () =>
+  withTempDir((root) => {
+    claimRepo(root);
+    claimCommit(root);
+    assert.deepEqual(check(root, frontmatterConfig(), LOCAL), []);
+  }));
+
+test("--check refuses a claimed number whose commit has no trailer", () =>
+  withTempDir((root) => {
+    claimRepo(root);
+    claim(root, frontmatterConfig(), "main");
+    commit(root, "claim, no trailer");
+    const problems = check(root, frontmatterConfig(), LOCAL);
+    assert.equal(problems.length, 1, problems.join(" | "));
+    assert.match(problems[0], /D-002 on a branch/);
+  }));
+
+test("--check refuses a trailer that names another id, and one commit's trailer vouches only for numbers it adds", () =>
+  withTempDir((root) => {
+    claimRepo(root);
+    claim(root, frontmatterConfig(), "main");
+    commit(root, "claim\n\nRecord-claim: D-009");
+    assert.equal(check(root, frontmatterConfig(), LOCAL).length, 1);
+    write(root, "docs/decisions/note.md", "---\nid: D-003\nslug: note\ntitle: note\ndate: 2026-01-03\n---\n\nBody.\n");
+    commit(root, "later\n\nRecord-claim: D-002 D-003");
+    const problems = check(root, frontmatterConfig(), LOCAL);
+    // The trailer commit ADDED D-003, so it passes. It did not add D-002, so that stays refused.
+    assert.equal(problems.some((p) => p.includes("p.md") && p.includes("D-002")), true, problems.join(" | "));
+    assert.equal(problems.some((p) => p.includes("note.md")), false, problems.join(" | "));
+  }));
+
+test("--check refuses a number one commit hand-numbered and a later Record-claim commit only edited", () =>
+  withTempDir((root) => {
+    claimRepo(root);
+    write(root, "docs/decisions/p.md", rec(5, "p")); // commit A: numbers it by hand, no trailer
+    commit(root, "hand-numbered");
+    write(root, "docs/decisions/p.md", rec(5, "p").replace("Body.", "Edited."));
+    commit(root, "edit\n\nRecord-claim: D-005"); // commit B: edits only
+    const problems = check(root, frontmatterConfig(), LOCAL);
+    assert.equal(problems.some((p) => p.includes("p.md") && p.includes("D-005") && p.includes("on a branch")), true, problems.join(" | "));
+  }));
+
+test("--check refuses a claimed number that the base tip took after the claim", () =>
+  withTempDir((root) => {
+    claimRepo(root);
+    claimCommit(root);
+    git(root, "checkout", "-q", "main");
+    write(root, "docs/decisions/e.md", rec(2, "e"));
+    commit(root, "main takes D-002");
+    git(root, "checkout", "-q", "wt/lane");
+    const problems = check(root, frontmatterConfig(), LOCAL);
+    assert.equal(problems.some((p) => p.includes("p.md") && p.includes("claimed on this branch") && p.includes("D-002")), true, problems.join(" | "));
+  }));
+
+test("heading --check accepts a number a Record-claim commit added", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    headingTree(root);
+    commit(root, "main");
+    git(root, "checkout", "-q", "-b", "wt/lane");
+    write(root, "docs/decisions/D-two-thing.md", "## D-two-thing — Two thing\n");
+    commit(root, "branch adds a pending heading");
+    const r = claim(root, headingConfig(), "main");
+    commit(root, `claim\n\nRecord-claim: ${r.assigned.map((a) => a.id).join(" ")}`);
+    assert.deepEqual(check(root, headingConfig(), LOCAL), []);
   }));
 
 // ---------------------------------------------------------------- run
