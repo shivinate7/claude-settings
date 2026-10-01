@@ -715,7 +715,12 @@ def process_cwd(pid: int):
 def _process_cwd_macos(pid: int):
     """`lsof -a -p PID -d cwd -Fn`: one `n<path>` line for the cwd file descriptor alone (`-d
     cwd`), `-a` ANDs that with `-p PID`. Exit code 1 with empty output means lsof found no such
-    fd (pid gone, or this read is not allowed to see it) -- unreadable, not a path."""
+    fd (pid gone, or this read is not allowed to see it) -- unreadable, not a path.
+    In a preview the one cwd table answers it (the first cwd line of PID, as lsof would print)."""
+    if _RUN is not None:
+        table = _all_cwds_macos()
+        if table is not None:
+            return _memo("cwd-by-pid", lambda: _first_cwd_by_pid(table)).get(pid)
     try:
         answer = subprocess.run(
             ["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
@@ -1558,6 +1563,13 @@ def _begin_preview_cache():
         _RUN = None
         guard._git, guard.session_records = real_git, real_records
     return undo
+
+
+def _first_cwd_by_pid(table):
+    found = {}
+    for pid, cwd in table:
+        found.setdefault(pid, cwd)
+    return found
 
 
 def _all_cwds_macos():

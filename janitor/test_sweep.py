@@ -2370,7 +2370,7 @@ class PreviewCacheTests(unittest.TestCase):
         def fake(argv, *a, **k):
             self.calls.append(list(argv))
             if argv[0] == "lsof":
-                out = "p10\nn/a\n"
+                out = getattr(self, "lsof_out", "p10\nn/a\n")
             elif argv[:2] == ["ps", "-axo"] and argv[2] == "pid=":
                 out = "5\n6\n"
             elif argv[:2] == ["ps", "-axo"]:
@@ -2429,6 +2429,19 @@ class PreviewCacheTests(unittest.TestCase):
         self.begin()
         with mock.patch.object(sys, "platform", "linux"):
             self.assertIs(sweep._ps_row(5), sweep._NO_TABLE)
+
+    def test_one_cwd_table_answers_every_process_cwd_in_a_preview_on_macos(self):
+        self.lsof_out = "p10\nn/a\nn/second\np11\nn/c\n"
+        with mock.patch.object(sys, "platform", "darwin"):
+            self.begin()
+            self.assertEqual(sweep.process_cwd(10), "/a")
+            self.assertEqual(sweep.process_cwd(11), "/c")
+            self.assertIsNone(sweep.process_cwd(12))
+            self.assertEqual(len(self.calls), 1)
+            self.undo()
+            self.undo = None
+            self.assertEqual(sweep.process_cwd(10), "/a")
+            self.assertEqual(self.calls[-1][:3], ["lsof", "-a", "-p"])
 
     def test_worktree_list_is_read_once_per_repository_and_other_git_reads_are_not_cached(self):
         seen = []
