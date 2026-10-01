@@ -446,7 +446,7 @@ AGENT_LOCK_RE = re.compile(r"^claude agent agent-\w+ \(pid (\d+) start (.+)\)$")
 def stale_agent_lock_verdict(reason: str):
     """True when REASON is a claude agent lock (`claude agent agent-<id> (pid N start <date>)`,
     MEASURED from the Agent tool's own lock) whose pid is dead, or alive with a different start
-    time (pid reuse). False when the agent still runs, or the reason is any other lock. None
+    time (pid reuse). The pid is the HOST claude process, not the agent. False when it still runs, or the reason is any other lock. None
     when the start time or the process read could not tell. Only True lets a lock go."""
     found = AGENT_LOCK_RE.match(reason or "")
     if not found:
@@ -467,7 +467,8 @@ def stale_agent_lock_verdict(reason: str):
 
 def fully_pushed(path: str):
     """True when every commit on HEAD is on some remote branch (a detached HEAD counts too),
-    False when one is not, None when git could not tell."""
+    False when one is not, None when git could not tell. Every reap needs it, not only a stale
+    agent lock: a lane always commits, and a detached HEAD has no branch to tombstone."""
     answer = guard._git(path, "rev-list", "-n", "1", "HEAD", "--not", "--remotes")
     if answer is None or answer.returncode != 0:
         return None
@@ -496,6 +497,12 @@ def decide_worktree(where: str, entry: dict):
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
     if live:
         return {"path": path, "action": "keep", "reason": "live-session"}
+    pushed = fully_pushed(path)
+    if pushed is None:
+        return {"path": path, "action": "keep", "reason": "unreadable-subject"}
+    if not pushed:
+        return {"path": path, "action": "keep",
+                "reason": "unpushed: HEAD has a commit on no remote branch"}
     # The pre-removal process check (brief point 4). ANY process at all, not only a listener --
     # a plain shell sitting in this worktree is just as much a reason `git worktree remove`
     # must not run as a live Claude session is.
@@ -519,16 +526,9 @@ def decide_worktree(where: str, entry: dict):
     if inside:
         return {"path": path, "action": "keep",
                 "reason": "process-inside: pid %s" % ", ".join(str(p) for p in sorted(inside))}
-    # Every reap needs it, not only a stale agent lock: a lane always commits, and a detached
-    # HEAD has no branch to tombstone. Unreadable keeps.
-    pushed = fully_pushed(path)
-    if pushed is None:
-        return {"path": path, "action": "keep", "reason": "unreadable-subject"}
-    if not pushed:
-        return {"path": path, "action": "keep", "reason": "unpushed: HEAD has a commit on no remote branch"}
     if stale_agent_lock:
         return {"path": path, "action": "reap", "reason": "removable: stale agent lock",
-                "unlock": True}
+                "unlock": True, "lock_reason": holder}
     return {"path": path, "action": "reap", "reason": "removable"}
 
 
@@ -1643,6 +1643,13 @@ def remove_worktree(root: str, path: str, decision: dict):
         decision["error"] = "remove failed: %s" % (
             answer.stderr.strip() if answer is not None else "git gave no answer"
         )
+        if decision.get("unlock"):
+            # The lock came off for this removal only. Put it back, so the worktree is no
+            # less guarded than before, and say which way it went.
+            relock = guard._git(root, "worktree", "lock", "--reason",
+                                decision.get("lock_reason") or "locked", path)
+            decision["error"] += "; lock %s" % (
+                "restored" if relock is not None and relock.returncode == 0 else "NOT restored")
 
 
 # ------------------------------------------------------------------ the purge

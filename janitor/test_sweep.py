@@ -813,6 +813,61 @@ class StaleAgentLockTests(unittest.TestCase):
         self.assertNotIn("error", decision)
         self.assertFalse(os.path.exists(path))
 
+    def test_failed_remove_restores_the_lock(self):
+        path = self.add("failremove", self.reasons["dead"])
+        write(os.path.join(path, "dirty.txt"), "git refuses to remove this without --force\n")
+        decision = {"path": path, "action": "reap", "unlock": True,
+                    "lock_reason": self.reasons["dead"]}
+        sweep.remove_worktree(self.root, path, decision)
+        self.assertIn("remove failed", decision["error"])
+        self.assertIn("lock restored", decision["error"])
+        self.assertTrue(os.path.isdir(path))
+        self.assertTrue(guard.worktree_locked(self.root, path))
+        entry = [e for e in sweep.parse_worktree_list(self.root)
+                 if os.path.realpath(e["path"]) == os.path.realpath(path)][0]
+        self.assertEqual(entry["locked_reason"], self.reasons["dead"])
+
+    @unittest.skipIf(not hasattr(time, "tzset"), "no time.tzset on this platform")
+    def test_lock_date_is_read_as_utc_in_a_non_utc_zone(self):
+        old = os.environ.get("TZ")
+        os.environ["TZ"] = "America/Chicago"
+        time.tzset()
+        try:
+            self.assertIs(sweep.stale_agent_lock_verdict(self.reasons["running"]), False)
+        finally:
+            if old is None:
+                del os.environ["TZ"]
+            else:
+                os.environ["TZ"] = old
+            time.tzset()
+
+    def test_unreadable_process_start_is_unknown_not_stale(self):
+        real = guard._process_start_ms
+        guard._process_start_ms = lambda pid: guard.PROCESS_START_UNREADABLE
+        try:
+            self.assertIsNone(sweep.stale_agent_lock_verdict(self.reasons["dead"]))
+        finally:
+            guard._process_start_ms = real
+
+    def test_unreadable_pushed_check_keeps(self):
+        real = sweep.fully_pushed
+        sweep.fully_pushed = lambda path: None
+        try:
+            decision = self.decide("detached")
+        finally:
+            sweep.fully_pushed = real
+        self.assertEqual(decision["action"], "keep")
+        self.assertEqual(decision["reason"], "unreadable-subject")
+
+    def test_a_repository_with_no_remote_keeps_every_worktree(self):
+        root = os.path.join(ROOT, "no-remote-repo")
+        make_repo(root, {"f.txt": "base\n"})
+        path = os.path.join(ROOT, "no-remote-wt")
+        run_vcs(root, "worktree", "add", "-q", "--detach", path, "main")
+        decision = sweep.decide_worktree(root, {"path": path})
+        self.assertEqual(decision["action"], "keep")
+        self.assertTrue(decision["reason"].startswith("unpushed:"))
+
     def test_preview_never_unlocks(self):
         sweep.sweep_repo(self.root, confirm=False, restore_log_path=os.path.join(ROOT, "p.log"))
         self.assertTrue(guard.worktree_locked(self.root, self.wt["dead"]))
