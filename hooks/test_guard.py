@@ -1490,21 +1490,27 @@ sh("kill: a signal flag and a pid this session started", "kill -9 %d" % OWNED.pi
 sh("kill: a pid nothing is running under", "kill 4194303", "allow", cwd=NOGIT)
 sh("kill: a pid held in a variable cannot be read, so it passes", "kill $!", "allow", cwd=NOGIT)
 sh("kill: listing signals kills nothing", "kill -l 1", "allow", cwd=NOGIT)
-sh("kill: a pid this session did not start", "kill %d" % FOREIGN, "deny", "machine-wide-kill",
-   cwd=NOGIT, carries="did not start")
-sh("kill: a foreign pid behind a signal flag", "kill -9 %d" % FOREIGN, "deny",
-   "machine-wide-kill", cwd=NOGIT)
-sh("kill: a foreign pid behind a named signal", "kill -s TERM %d" % FOREIGN, "deny",
-   "machine-wide-kill", cwd=NOGIT)
-sh("kill: a foreign pid after the end-of-flags mark", "kill -- %d" % FOREIGN, "deny",
-   "machine-wide-kill", cwd=NOGIT)
-sh("kill: one foreign pid in a list of pids", "kill %d %d" % (OWNED.pid, FOREIGN), "deny",
-   "machine-wide-kill", cwd=NOGIT)
+if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
+    sh("kill: a pid this session did not start", "kill %d" % FOREIGN, "deny", "machine-wide-kill",
+       cwd=NOGIT, carries="did not start")
+if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
+    sh("kill: a foreign pid behind a signal flag", "kill -9 %d" % FOREIGN, "deny",
+       "machine-wide-kill", cwd=NOGIT)
+if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
+    sh("kill: a foreign pid behind a named signal", "kill -s TERM %d" % FOREIGN, "deny",
+       "machine-wide-kill", cwd=NOGIT)
+if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
+    sh("kill: a foreign pid after the end-of-flags mark", "kill -- %d" % FOREIGN, "deny",
+       "machine-wide-kill", cwd=NOGIT)
+if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
+    sh("kill: one foreign pid in a list of pids", "kill %d %d" % (OWNED.pid, FOREIGN), "deny",
+       "machine-wide-kill", cwd=NOGIT)
 sh("kill: init", "kill 1", "deny", "machine-wide-kill", cwd=NOGIT)
 sh("kill: every process", "kill -9 -- -1", "deny", "machine-wide-kill", cwd=NOGIT)
 sh("kill: the shell's own process group", "kill 0", "deny", "machine-wide-kill", cwd=NOGIT)
-sh("kill: the session's own claude process", "kill %d" % os.getpid(), "deny",
-   "machine-wide-kill", cwd=NOGIT)
+if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
+    sh("kill: the session's own claude process", "kill %d" % os.getpid(), "deny",
+       "machine-wide-kill", cwd=NOGIT)
 sh("kill: init with the root unknown", "kill 1", "deny", "machine-wide-kill", cwd=NOGIT,
    no_root=True)
 sh("kill: every process with the root unknown", "kill -9 -- -1", "deny", "machine-wide-kill",
