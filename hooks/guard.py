@@ -33,7 +33,8 @@ one fixed order, and the first match wins.
                        flag alone. `commit`, `tag`, and `cherry-pick`'s own flags are measured
                        carve-outs. `merge --abort` is carved out, and every read subcommand is
                        untouched.
-  2 machine-wide-kill  a kill by name or by pattern
+  2 machine-wide-kill  a kill by name or by pattern, or `kill <pid>` of a live process that is
+                       not a descendant of this session's own `claude` process
   2b detached-launch   a command that starts a process and detaches it from the session: a
                        background job inside a subshell (`( cmd & )`), a `nohup`/`setsid`
                        wrapper, `disown` in command position, a bare background job in
@@ -2317,8 +2318,9 @@ def pointer_head_hit(segment: str, root: str) -> str:
 # machine-wide." A kill BY NAME or BY PATTERN reaches every matching process on the machine,
 # including another agent's dev server, another person's worker, and the editor itself.
 #
-# A KILL BY PID IS NOT ON THIS LIST, deliberately. A PID names one process. `taskkill /PID` and
-# `Stop-Process -Id` are the same act under the other shell, and neither is refused.
+# A KILL BY PID NAMES ONE PROCESS, so the name rules below pass it. It is judged by OWNERSHIP
+# instead: see `foreign_pid_kill`. `taskkill /PID` and `Stop-Process -Id` are the same act under
+# the other shell, and neither is refused (unmeasured there: no `ps`).
 #
 # THE PREDICATE IS THE ACT, NOT THE TOOL OR THE SPELLING. The earlier version was four bare
 # regexes over the whole command text, so the NAME tripped it wherever it sat: inside a quoted
@@ -2361,6 +2363,145 @@ def kill_hit(tokens) -> str:
                 return word + " " + arg
     return ""
 
+
+KILL_PID_RE = re.compile(r"^-?[0-9]+$")
+ROOT_PID_RE = re.compile(r"[0-9]+")
+PID_LISTERS = {"pgrep", "pidof"}   # a kill fed by these names its target by pattern
+PID_SUBSTITUTION_RE = re.compile(r"(?:\$\(|`)\s*(?:command\s+)?(?:\S*/)?(pgrep|pidof)\b")
+KILL_SIGNAL_ARG_FLAGS = {"-s", "-n"}   # these two take the next token as a signal
+
+
+def _ps_ppid(pid: int):
+    """Parent pid of `pid`; 0 when no such process; None when `ps` could not answer.
+
+    No such process is exit 1 with no output at all. Any other failure is unknown, not death.
+    """
+    try:
+        answer = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True,
+                                text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    text = answer.stdout.strip()
+    if ROOT_PID_RE.fullmatch(text):
+        return int(text)
+    return 0 if answer.returncode == 1 and not text and not answer.stderr.strip() else None
+
+
+def session_root_pid():
+    """The pid of this session's own `claude` process, or 0 when it cannot be found.
+
+    MEASURED: every command this session runs, and every hook it fires, descends from one
+    process whose command path ends in `claude`. A process another session or the owner's editor
+    runs does not. `CLAUDE_GUARD_ROOT_PID` replaces the walk, for the test suite. The harness
+    sets the hook's environment, so a command cannot set it, but a settings.json `env` block can.
+    """
+    forced = os.environ.get("CLAUDE_GUARD_ROOT_PID", "")
+    if ROOT_PID_RE.fullmatch(forced):
+        return int(forced)
+    pid = os.getpid()
+    for _ in range(64):
+        parent = _ps_ppid(pid)
+        if not parent or parent <= 1:
+            return 0
+        try:
+            name = subprocess.run(["ps", "-o", "comm=", "-p", str(parent)], capture_output=True,
+                                  text=True, timeout=5).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return 0
+        if basename(name) == "claude":
+            return parent
+        pid = parent
+    return 0
+
+
+def pid_is_owned(pid: int, root: int):
+    """True when `pid` is dead or descends from `root`; False when it does not; None unknown.
+
+    `root` itself does not descend from `root`, so it reads False with no check of its own.
+    """
+    for _ in range(64):
+        parent = _ps_ppid(pid)
+        if parent is None:
+            return None
+        if parent <= 1:
+            return parent == 0   # dead is owned; reparented to init is not
+        if parent == root:
+            return True
+        pid = parent
+    return None
+
+
+def foreign_pid_kill(tokens) -> str:
+    """Return the first numeric pid a `kill` segment names that this session did not start.
+
+    Only literal numbers are judged. `$!`, `$PID`, `%1` and `$(...)` cannot be read here, and
+    the remedy tells the agent to kill by `$!`. When the session root or `ps` cannot be read, the
+    answer is "" (unknown, so allowed), never a guess. ponytail: a pid reused since launch, or
+    a child that reparented to init, reads as foreign; stop it through the harness.
+    """
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]) != "kill":
+        return ""
+    rest = tokens[index + 1:]
+    if any(arg == "-l" or arg == "-L" for arg in rest):
+        return ""
+    root = None
+    skip = after_dashes = False
+    for arg in rest:
+        if skip:
+            skip = False
+            continue
+        if not after_dashes and arg.startswith("-") and arg != "-":
+            after_dashes = arg == "--"
+            skip = arg in KILL_SIGNAL_ARG_FLAGS
+            continue
+        if not KILL_PID_RE.match(arg):
+            continue
+        number = int(arg)
+        if number in (0, 1, -1):   # a whole group, init, or every process: judged with no root
+            return arg
+        if root is None:
+            root = session_root_pid()
+        if not root:
+            return ""
+        if pid_is_owned(abs(number) if number < -1 else number, root) is False:
+            return arg
+    return ""
+
+
+def kill_fed_by_name(tokens) -> str:
+    """Return the matched text when `kill` takes its pids from `pgrep` or `pidof`.
+
+    Two shapes: `kill $(pgrep x)` or a backtick form, and `pgrep x | xargs kill`. Both name the
+    target by pattern, the same act as `pkill`. The pipe form reads the segment before the pipe.
+    """
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]) != "kill":
+        return ""
+    found = PID_SUBSTITUTION_RE.search(" ".join(tokens[index + 1:]))
+    return "kill " + found.group(1) if found else ""
+
+
+def kill_fed_by_pipe(tokens, previous) -> str:
+    """The `xargs kill` half of `pgrep x | xargs kill`; `previous` is the segment before it."""
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]) != "kill" or not previous:
+        return ""
+    if not any(basename(word) == "xargs" for word in tokens[:index]):
+        return ""
+    before = resolve_command(previous)
+    if before is not None and basename(previous[before]) in PID_LISTERS:
+        return "xargs kill"
+    return ""
+
+
+KILL_PID_REASON = (
+    "Rule (shared trees): this stops a process this session did not start. That process may be "
+    "another agent's server or the owner's editor. "
+    "Remedy: stop only a pid this session started, taken from the $! its own launch printed, "
+    "or stop a run_in_background job through the harness's own stop tool. "
+    "Leave any other process alone."
+)
 
 KILL_REASON = (
     "Rule (shared trees): this stops every process matching a name or a pattern, "
@@ -3927,15 +4068,21 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
     # 2. A machine-wide kill. Judged in COMMAND POSITION, from the segment's own tokens, never
     # by the word appearing anywhere in the text. A segment shlex cannot parse fails open:
     # judge nothing rather than guess what it would run.
+    previous = None
     for segment in split_segments(stripped):
         if not segment.strip():
             continue
         tokens = segment_tokens(segment)
         if tokens is None:
+            previous = None
             continue
-        matched = kill_hit(tokens)
+        matched = kill_hit(tokens) or kill_fed_by_name(tokens) or kill_fed_by_pipe(tokens, previous)
+        previous = tokens
         if matched:
             refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
+        matched = foreign_pid_kill(tokens)
+        if matched:
+            refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched)
 
     # 2b. A detached launch: a subshell background job, a nohup/setsid wrapper, disown right
     # after a background job, or a bare trailing background job with no pid captured anywhere
