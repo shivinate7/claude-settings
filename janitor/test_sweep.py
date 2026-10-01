@@ -30,6 +30,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
@@ -2350,6 +2351,126 @@ class AllCwdsMacosTests(unittest.TestCase):
             self.assertIsNone(sweep._all_cwds_macos())
         with _FakeLsof(1, ""):
             self.assertIsNone(sweep._all_cwds_macos())
+
+
+# --------------------------------------------------------------------------- the preview cache
+
+
+class PreviewCacheTests(unittest.TestCase):
+    """A preview reads each machine fact once; a run that acts, and any direct caller, never
+    caches."""
+
+    def setUp(self):
+        self.calls = []
+        self.real_run = sweep.subprocess.run
+        self.ps_out = "  5     1   %d  /bin/sh -c  echo hi \n" % os.getuid() \
+            if hasattr(os, "getuid") else ""
+        self.exit_code = 0
+
+        def fake(argv, *a, **k):
+            self.calls.append(list(argv))
+            if argv[0] == "lsof":
+                out = "p10\nn/a\n"
+            elif argv[:2] == ["ps", "-axo"] and argv[2] == "pid=":
+                out = "5\n6\n"
+            elif argv[:2] == ["ps", "-axo"]:
+                out = self.ps_out
+            else:
+                out = "9\n"  # a per-pid `ps -o X= -p PID`
+            return subprocess.CompletedProcess(argv, self.exit_code, out, "")
+        sweep.subprocess.run = fake
+        self.undo = None
+
+    def tearDown(self):
+        sweep.subprocess.run = self.real_run
+        if self.undo:
+            self.undo()
+
+    def begin(self):
+        self.undo = sweep._begin_preview_cache()
+
+    def test_cwd_table_is_read_once_per_preview_and_never_outside_one(self):
+        self.begin()
+        sweep._all_cwds_macos()
+        sweep._all_cwds_macos()
+        self.assertEqual(len(self.calls), 1)
+        self.undo()
+        self.undo = None
+        sweep._all_cwds_macos()
+        sweep._all_cwds_macos()
+        self.assertEqual(len(self.calls), 3)
+
+    @unittest.skipIf(sys.platform.startswith("win"), "POSIX uid")
+    def test_one_ps_table_answers_command_orphan_owner_and_pid_list_on_macos(self):
+        with mock.patch.object(sys, "platform", "darwin"):
+            self.begin()
+            self.assertEqual(sweep.process_command(5), "/bin/sh -c  echo hi")
+            self.assertIs(sweep.is_orphan(5), True)
+            self.assertIs(sweep.is_current_user_process(5), True)
+            self.assertEqual(sweep.list_all_pids(), [5])
+            self.assertIsNone(sweep.process_command(6))
+            self.assertIsNone(sweep.is_orphan(6))
+            self.assertEqual(len(self.calls), 1)
+
+    def test_a_failed_ps_table_falls_back_to_the_per_pid_read(self):
+        self.exit_code = 1
+        with mock.patch.object(sys, "platform", "darwin"):
+            self.begin()
+            sweep.process_command(5)
+            sweep.process_command(5)
+            self.assertEqual(self.calls[0][:2], ["ps", "-axo"])
+            self.assertEqual(self.calls[1:], [["ps", "-o", "command=", "-p", "5"]] * 2)
+
+    def test_without_a_preview_every_read_is_per_pid_and_linux_never_uses_the_table(self):
+        with mock.patch.object(sys, "platform", "darwin"):
+            sweep.process_command(5)
+            sweep.list_all_pids()
+        self.assertEqual(self.calls, [["ps", "-o", "command=", "-p", "5"], ["ps", "-axo", "pid="]])
+        self.begin()
+        with mock.patch.object(sys, "platform", "linux"):
+            self.assertIs(sweep._ps_row(5), sweep._NO_TABLE)
+
+    def test_worktree_list_is_read_once_per_repository_and_other_git_reads_are_not_cached(self):
+        seen = []
+        real = sweep.guard._git
+        sweep.guard._git = lambda where, *args: seen.append((where, args))
+        try:
+            self.begin()
+            for where in ("a", "a", "b"):
+                sweep.guard._git(where, "worktree", "list", "--porcelain")
+            sweep.guard._git("a", "status", "--porcelain")
+            sweep.guard._git("a", "status", "--porcelain")
+        finally:
+            self.undo()
+            self.undo = None
+            sweep.guard._git = real
+        self.assertEqual(len(seen), 4)
+
+    def test_session_records_are_read_once_per_preview(self):
+        seen = []
+        real = sweep.guard.session_records
+        sweep.guard.session_records = lambda: seen.append(1) or []
+        try:
+            self.begin()
+            sweep.guard.session_records()
+            sweep.guard.session_records()
+        finally:
+            self.undo()
+            self.undo = None
+            sweep.guard.session_records = real
+        self.assertEqual(len(seen), 1)
+
+    def test_only_a_preview_caches_and_the_guard_reads_come_back_after(self):
+        repo = os.path.join(ROOT, "cache-gate-repo")
+        seen = []
+        real_git, real_records = sweep.guard._git, sweep.guard.session_records
+        with _Stub("_sweep_roots", lambda *a: seen.append(sweep._RUN is not None) or 0):
+            for args in ([repo], ["--confirm", repo], ["--tier1", repo], ["--branches", repo]):
+                sweep.main(args)
+        self.assertEqual(seen, [True, False, False, True])
+        self.assertIsNone(sweep._RUN)
+        self.assertIs(sweep.guard._git, real_git)
+        self.assertIs(sweep.guard.session_records, real_records)
 
 
 # --------------------------------------------------------------------------- the purge
