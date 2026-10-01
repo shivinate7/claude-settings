@@ -907,11 +907,14 @@ MUTATIONS = [
      '    if sys.platform == "darwin" and _RUN is not None:',
      '    if sys.platform == "darwin":',
      "test_without_a_preview_every_read_is_per_pid_and_linux_never_uses_the_table"),
+    # only_on="posix": test_one_ps_table_... needs os.getuid and is skipped on Windows, so it
+    # cannot kill the two table-read mutants below (the table path is macOS only).
     ("preview cache: the orphan read ignores the table",
      "sweep",
      '            return _ppid_is_init(row[0] if row else "")',
      '            return _ppid_is_init("1")',
-     "test_one_ps_table_answers_command_orphan_owner_and_pid_list_on_macos"),
+     "test_one_ps_table_answers_command_orphan_owner_and_pid_list_on_macos",
+     "posix"),
     ("preview cache: a pid with two cwd lines answers with the last",
      "sweep",
      '        found.setdefault(pid, cwd)',
@@ -926,7 +929,8 @@ MUTATIONS = [
      "sweep",
      '            return _uid_is_mine(row[1] if row else "")',
      '            return _uid_is_mine(str(os.getuid()))',
-     "test_one_ps_table_answers_command_orphan_owner_and_pid_list_on_macos"),
+     "test_one_ps_table_answers_command_orphan_owner_and_pid_list_on_macos",
+     "posix"),
     # The parallel preview (ParallelPreviewTests).
     ("parallel preview: a run that acts gets its decisions all at once",
      "sweep",
