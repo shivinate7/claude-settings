@@ -69,6 +69,7 @@ tree entirely.
 """
 import argparse
 import calendar
+import concurrent.futures
 import json
 import os
 import re
@@ -76,6 +77,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 from collections import Counter
 
@@ -1505,12 +1507,35 @@ _NO_TABLE = object()  # `_ps_row`: no table to read, so the caller runs its own 
 _WORKTREE_LIST_ARGS = ("worktree", "list", "--porcelain")
 
 
+_RUN_LOCK = threading.RLock()  # `_pmap` workers share the cache: each read still happens once
+_POOL = None  # the per-branch and per-worktree reads of ONE repository
+_ROOT_POOL = None  # whole repositories; a separate pool, so a repository never waits on itself
+PREVIEW_WORKERS = 8
+# Windows stays serial: its ctypes reads set argtypes on the shared `kernel32` object (and rebuild
+# a Structure class) on every call, so two threads in them break each other. Measured on CI.
+PREVIEW_THREADS = not sys.platform.startswith("win")
+PREVIEW_ROOT_WORKERS = 4
+
+
 def _memo(key, compute):
     if _RUN is None:
         return compute()
-    if key not in _RUN:
-        _RUN[key] = compute()
-    return _RUN[key]
+    with _RUN_LOCK:
+        if key not in _RUN:
+            _RUN[key] = compute()
+        return _RUN[key]
+
+
+def _pmap(fn, items, acts, pool=None):
+    """`map(fn, items)` in order. In a preview the calls run on a few threads, because the
+    per-branch and per-worktree reads are many separate `git` runs that nothing can share. ACTS
+    is True when the caller acts on each result (confirm): that always gets the lazy `map`,
+    whatever the pool state, so each decision still comes before the act that follows it."""
+    items = list(items)
+    pool = pool or _POOL
+    if acts or pool is None or len(items) < 2:
+        return map(fn, items)
+    return pool.map(fn, items)
 
 
 def _read_ps_table():
@@ -1546,8 +1571,11 @@ def _ps_row(pid: int):
 def _begin_preview_cache():
     """Start the per-run cache and wrap the two guard reads that repeat per worktree. Returns the
     undo function."""
-    global _RUN
+    global _RUN, _POOL, _ROOT_POOL
     _RUN = {}
+    if PREVIEW_THREADS:
+        _POOL = concurrent.futures.ThreadPoolExecutor(max_workers=PREVIEW_WORKERS)
+        _ROOT_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=PREVIEW_ROOT_WORKERS)
     real_git, real_records = guard._git, guard.session_records
 
     def run_git(where, *args):
@@ -1559,7 +1587,11 @@ def _begin_preview_cache():
     guard.session_records = lambda: _memo("sessions", real_records)
 
     def undo():
-        global _RUN
+        global _RUN, _POOL, _ROOT_POOL
+        for pool in (_POOL, _ROOT_POOL):
+            if pool is not None:
+                pool.shutdown()
+        _POOL = _ROOT_POOL = None
         _RUN = None
         guard._git, guard.session_records = real_git, real_records
     return undo
@@ -1977,20 +2009,24 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     # entry is removed in THIS run (confirm), or would be (preview: action reap). A removal
     # that failed (decision["error"]) keeps its entry. A primary checkout is never removed.
     removed = set()
-    for entry in entries if mode == "full" else ():
+
+    def judge(entry):
+        """The decision for one entry, or None when none is ever recorded against it."""
         if entry.get("bare"):
-            continue
+            return None
         is_primary = _is_primary_checkout(entry["path"])
         if is_primary is True:
-            continue  # the clone's one primary checkout: no decision is ever recorded against it
+            return None  # the clone's one primary checkout: no decision is ever recorded
         if is_primary is None:
             # Could not tell whether this IS the primary checkout. Rule 7's direction: an
             # unreadable subject means keep, never a guess that it is safe to evaluate.
-            result["worktrees"].append(
-                {"path": entry["path"], "action": "keep", "reason": "unreadable-subject"}
-            )
+            return {"path": entry["path"], "action": "keep", "reason": "unreadable-subject"}
+        return decide_worktree(root, entry)
+
+    judged = entries if mode == "full" else []
+    for entry, decision in zip(judged, _pmap(judge, judged, confirm)):
+        if decision is None:
             continue
-        decision = decide_worktree(root, entry)
         result["worktrees"].append(decision)
         if confirm and decision["action"] == "reap":
             remove_worktree(root, entry["path"], decision)
@@ -2002,8 +2038,9 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     checked_out_branches = {e["branch"] for e in entries
                             if e.get("branch") and e["path"] not in removed}
 
-    for branch in branches:
-        decision = decide_branch(root, base, branch, protected_prefixes, checked_out_branches)
+    for branch, decision in zip(branches, _pmap(
+            lambda b: decide_branch(root, base, b, protected_prefixes, checked_out_branches),
+            branches, confirm)):
         result["branches"].append(decision)
         if confirm and decision["action"] == "reap":
             reap_branch(root, branch, decision, restore_log_path)
@@ -2269,7 +2306,8 @@ def main(argv=None) -> int:
 
 
 def _sweep_roots(args, roots, restore_log_path, mode):
-    results = [sweep_repo(root, args.confirm, restore_log_path, mode) for root in roots]
+    results = list(_pmap(lambda root: sweep_repo(root, args.confirm, restore_log_path, mode),
+                         roots, args.confirm or mode == "tier1", _ROOT_POOL))
     print_sweep_report(results, args.confirm or mode == "tier1")
     if mode != "full":
         return 0

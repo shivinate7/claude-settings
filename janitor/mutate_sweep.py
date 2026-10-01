@@ -168,8 +168,8 @@ MUTATIONS = [
      "test_tier1_prunes_stale_registrations_with_no_confirm_and_touches_nothing_else"),
     ("modes: --branches removes worktrees",
      "sweep",
-     '    for entry in entries if mode == "full" else ():\n',
-     '    for entry in entries:\n',
+     '    judged = entries if mode == "full" else []\n',
+     '    judged = entries\n',
      "test_branches_reaps_a_merged_branch_but_removes_no_worktree_and_holds_theirs"),
     ("modes: --branches prunes registrations",
      "sweep",
@@ -428,13 +428,9 @@ MUTATIONS = [
     # ---- --confirm (plan, "the refusals"). See the module docstring: MEASURED to survive. ----
     ("--confirm: reap branches for real with no --confirm on the line",
      "sweep",
-     '    for branch in branches:\n'
-     '        decision = decide_branch(root, base, branch, protected_prefixes, checked_out_branches)\n'
      '        result["branches"].append(decision)\n'
      '        if confirm and decision["action"] == "reap":\n'
      '            reap_branch(root, branch, decision, restore_log_path)',
-     '    for branch in branches:\n'
-     '        decision = decide_branch(root, base, branch, protected_prefixes, checked_out_branches)\n'
      '        result["branches"].append(decision)\n'
      '        if decision["action"] == "reap":\n'
      '            reap_branch(root, branch, decision, restore_log_path)',
@@ -471,10 +467,10 @@ MUTATIONS = [
      "sweep",
      '        is_primary = _is_primary_checkout(entry["path"])\n'
      '        if is_primary is True:\n'
-     '            continue  # the clone\'s one primary checkout: no decision is ever recorded against it',
+     '            return None  # the clone\'s one primary checkout: no decision is ever recorded',
      '        is_primary = _is_primary_checkout(entry["path"])\n'
      '        if False:\n'
-     '            continue  # MUTANT: the exclusion never fires',
+     '            return None  # MUTANT: the exclusion never fires',
      "test_no_decision_is_recorded_against_the_primary_checkout_when_swept_via_a_linked_worktree"),
 
     # ---- the SessionEnd hook's own two budget protections (this build) ----
@@ -868,8 +864,8 @@ MUTATIONS = [
      "test_only_a_preview_caches_and_the_guard_reads_come_back_after"),
     ("preview cache: a read is never stored",
      "sweep",
-     '        _RUN[key] = compute()\n    return _RUN[key]',
-     '        return compute()\n    return _RUN[key]',
+     '            _RUN[key] = compute()\n        return _RUN[key]',
+     '            return compute()\n        return _RUN[key]',
      "test_cwd_table_is_read_once_per_preview_and_never_outside_one"),
     ("preview cache: the cache is not cleared after the run",
      "sweep",
@@ -934,6 +930,68 @@ MUTATIONS = [
      '            return _uid_is_mine(row[1] if row else "")',
      '            return _uid_is_mine(str(os.getuid()))',
      "test_one_ps_table_answers_command_orphan_owner_and_pid_list_on_macos",
+     "posix"),
+    # The parallel preview (ParallelPreviewTests). only_on="posix" on all but "all at once": a
+    # Windows preview stays serial (PREVIEW_THREADS), so no test can see these there.
+    ("parallel preview: confirm no longer forces the one-at-a-time map",
+     "sweep",
+     '    if acts or pool is None or len(items) < 2:',
+     '    if pool is None or len(items) < 2:',
+     "test_a_run_that_acts_gets_one_decision_at_a_time_even_with_the_pool_open",
+     "posix"),
+    ("parallel preview: the branch loop does not say it acts",
+     "sweep",
+     '            branches, confirm)):',
+     '            branches, False)):',
+     "test_confirm_never_runs_decisions_side_by_side_even_with_the_pool_open",
+     "posix"),
+    ("parallel preview: a run that acts gets its decisions all at once",
+     "sweep",
+     '    if acts or pool is None or len(items) < 2:\n        return map(fn, items)',
+     '    if acts or pool is None or len(items) < 2:\n        return iter(list(map(fn, items)))',
+     "test_pmap_is_lazy_and_in_order_outside_a_preview"),
+    ("parallel preview: a preview runs one decision at a time",
+     "sweep",
+     '    return pool.map(fn, items)',
+     '    return map(fn, items)',
+     "test_pmap_runs_a_preview_in_parallel_and_returns_input_order",
+     "posix"),
+    ("parallel preview: results come back in finishing order",
+     "sweep",
+     '    return pool.map(fn, items)',
+     '    return reversed(list(pool.map(fn, items)))',
+     "test_pmap_runs_a_preview_in_parallel_and_returns_input_order",
+     "posix"),
+    ("parallel preview: two workers run the same cached read",
+     "sweep",
+     '    with _RUN_LOCK:\n        if key not in _RUN:',
+     '    if True:\n        if key not in _RUN:',
+     "test_a_cached_read_runs_once_when_workers_ask_together",
+     "posix"),
+    ("parallel preview: the pools stay open after the run",
+     "sweep",
+     '        _POOL = _ROOT_POOL = None',
+     '        pass',
+     "test_only_a_preview_caches_and_the_guard_reads_come_back_after",
+     "posix"),
+    ("parallel preview: whole repositories run one after another",
+     "sweep",
+     '    results = list(_pmap(lambda root: sweep_repo(root, args.confirm, restore_log_path, mode),\n'
+     '                         roots, args.confirm or mode == "tier1", _ROOT_POOL))',
+     '    results = [sweep_repo(root, args.confirm, restore_log_path, mode) for root in roots]',
+     "test_whole_repositories_run_side_by_side_in_a_preview",
+     "posix"),
+    ("parallel preview: the branch decisions run one after another",
+     "sweep",
+     '            branches, confirm)):',
+     '            branches, True)):',
+     "test_a_parallel_preview_reports_what_a_plain_one_does",
+     "posix"),
+    ("parallel preview: the worktree decisions run one after another",
+     "sweep",
+     '    for entry, decision in zip(judged, _pmap(judge, judged, confirm)):',
+     '    for entry, decision in zip(judged, map(judge, judged)):',
+     "test_a_parallel_preview_reports_what_a_plain_one_does",
      "posix"),
 ]
 

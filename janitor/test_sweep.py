@@ -28,7 +28,9 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import types
 import unittest
 from unittest import mock
 
@@ -2487,13 +2489,151 @@ class PreviewCacheTests(unittest.TestCase):
         repo = os.path.join(ROOT, "cache-gate-repo")
         seen = []
         real_git, real_records = sweep.guard._git, sweep.guard.session_records
-        with _Stub("_sweep_roots", lambda *a: seen.append(sweep._RUN is not None) or 0):
+        with _Stub("_sweep_roots", lambda *a: seen.append(
+                (sweep._RUN is not None, sweep._POOL is not None)) or 0):
             for args in ([repo], ["--confirm", repo], ["--tier1", repo], ["--branches", repo]):
                 sweep.main(args)
-        self.assertEqual(seen, [True, False, False, True])
+        on = sweep.PREVIEW_THREADS
+        self.assertEqual(seen, [(True, on), (False, False), (False, False), (True, on)])
         self.assertIsNone(sweep._RUN)
+        self.assertIsNone(sweep._POOL)
         self.assertIs(sweep.guard._git, real_git)
         self.assertIs(sweep.guard.session_records, real_records)
+
+
+class ParallelPreviewTests(unittest.TestCase):
+    """In a preview the per-branch and per-worktree reads run on threads. The report must not
+    change, and a run that acts must stay one decision at a time."""
+
+    def test_pmap_is_lazy_and_in_order_outside_a_preview(self):
+        seen = []
+        out = sweep._pmap(lambda i: seen.append(i) or i, [1, 2, 3], False)
+        self.assertEqual(seen, [])
+        self.assertEqual(next(iter(out)), 1)
+        self.assertEqual(seen, [1])
+
+    def test_a_run_that_acts_gets_one_decision_at_a_time_even_with_the_pool_open(self):
+        undo = sweep._begin_preview_cache()
+        try:
+            seen = []
+            out = sweep._pmap(lambda i: seen.append(i) or i, [1, 2, 3], True)
+            self.assertEqual(seen, [])
+            self.assertEqual(next(iter(out)), 1)
+            self.assertEqual(seen, [1])
+        finally:
+            undo()
+
+    @unittest.skipUnless(sweep.PREVIEW_THREADS, "Windows previews stay serial")
+    def test_pmap_runs_a_preview_in_parallel_and_returns_input_order(self):
+        undo = sweep._begin_preview_cache()
+        try:
+            gate = threading.Barrier(2, timeout=3)
+
+            def both(i):
+                gate.wait()  # two calls must be in flight at once, or this raises
+                time.sleep((2 - i) * 0.2)
+                return i
+            try:
+                got = list(sweep._pmap(both, [0, 1], False))
+            except threading.BrokenBarrierError:
+                self.fail("the two calls did not run at the same time")
+            self.assertEqual(got, [0, 1])
+        finally:
+            undo()
+        self.assertIsNone(sweep._POOL)
+
+    def test_a_cached_read_runs_once_when_workers_ask_together(self):
+        undo = sweep._begin_preview_cache()
+        try:
+            runs = []
+            list(sweep._pmap(lambda i: sweep._memo("k", lambda: runs.append(i) or time.sleep(0.2)),
+                             range(6), False))
+        finally:
+            undo()
+        self.assertEqual(len(runs), 1)
+
+    def test_a_parallel_preview_reports_what_a_plain_one_does(self):
+        root = os.path.join(ROOT, "parallel-preview-repo")
+        make_repo(root, {"f.txt": "x\n"})
+        give_remote(root)
+        for name in ("empty-a", "empty-b", "empty-c"):
+            run_vcs(root, "branch", name)
+        run_vcs(root, "checkout", "-q", "-b", "has-work")
+        write(os.path.join(root, "g.txt"), "y\n")
+        run_vcs(root, "add", "-A")
+        run_vcs(root, *IDENT, "commit", "-q", "-m", "work")
+        run_vcs(root, "checkout", "-q", "main")
+        for name in ("one", "two"):
+            run_vcs(root, "worktree", "add", "-q", os.path.join(ROOT, "parallel-preview-" + name),
+                    "-b", "lane-" + name)
+        log = os.path.join(ROOT, "parallel-preview.log")
+        plain = sweep.sweep_repo(root, False, log)
+        undo = sweep._begin_preview_cache()
+        try:
+            fast = sweep.sweep_repo(root, False, log)
+        finally:
+            undo()
+        self.assertTrue(len(plain["branches"]) >= 5 and len(plain["worktrees"]) == 2)
+        self.assertEqual(fast, plain)
+
+        # Each loop runs its decisions side by side in a preview.
+        for name in ("decide_branch", "decide_worktree") if sweep.PREVIEW_THREADS else ():
+            peak = self._peak_concurrency(name, lambda: sweep.sweep_repo(root, False, log))
+            self.assertTrue(peak > 1, "%s never ran twice at once" % name)
+
+    def test_confirm_never_runs_decisions_side_by_side_even_with_the_pool_open(self):
+        root = os.path.join(ROOT, "confirm-serial-repo")
+        make_repo(root, {"f.txt": "x\n"})
+        give_remote(root)
+        for name in ("empty-a", "empty-b", "empty-c"):
+            run_vcs(root, "branch", name)
+        log = os.path.join(ROOT, "confirm-serial.log")
+        peak = self._peak_concurrency(
+            "decide_branch", lambda: sweep.sweep_repo(root, True, log))
+        self.assertEqual(peak, 1)
+        self.assertNotIn("empty-a", sweep.list_local_branches(root))
+
+    def _peak_concurrency(self, name, run):
+        """Highest number of calls to `sweep.<name>` in flight at once during `run()`, in a
+        preview."""
+        real, lock, state = getattr(sweep, name), threading.Lock(), {"now": 0, "peak": 0}
+
+        def wrapped(*a, **k):
+            with lock:
+                state["now"] += 1
+                state["peak"] = max(state["peak"], state["now"])
+            time.sleep(0.2)
+            try:
+                return real(*a, **k)
+            finally:
+                with lock:
+                    state["now"] -= 1
+        undo = sweep._begin_preview_cache()
+        try:
+            with _Stub(name, wrapped):
+                run()
+        finally:
+            undo()
+        return state["peak"]
+
+    @unittest.skipUnless(sweep.PREVIEW_THREADS, "Windows previews stay serial")
+    def test_whole_repositories_run_side_by_side_in_a_preview(self):
+        class Stop(Exception):
+            pass
+
+        def stop(*a, **k):
+            raise Stop
+        args = types.SimpleNamespace(confirm=False)
+
+        def run():
+            with _Stub("print_sweep_report", stop):
+                try:
+                    sweep._sweep_roots(args, ["a", "b", "c"], "log", "full")
+                except Stop:
+                    pass
+        with _Stub("sweep_repo", lambda root, *a: {"root": root}):
+            peak = self._peak_concurrency("sweep_repo", run)
+        self.assertTrue(peak > 1, "sweep_repo never ran twice at once")
 
 
 # --------------------------------------------------------------------------- the purge
