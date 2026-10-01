@@ -1363,7 +1363,7 @@ SESSION_MARK = os.path.join(".claude", "shell-snapshots")
 
 
 def find_loose_processes():
-    """Return one dict per process whose argv names a shell-snapshots file, or `None` when the
+    """Return one dict per process whose argv contains a shell-snapshots path, or `None` when the
     pid enumeration failed. REPORT ONLY: nothing here, and nothing in `main`, signals one.
     Dict: {"pid", "command", "orphan", "owner"}; `orphan` and `owner` are True, False, or None
     (unreadable). A process of another user is left out; an unreadable owner is listed.
