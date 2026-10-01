@@ -489,7 +489,7 @@ function validate(root, config) {
 
 // ---------------------------------------------------------------- --stamp
 // The helpers format 3 shares with the other two, so all three read EOL and git the same way.
-const HELPERS = { readFileEol, withEol, currentBranch };
+const HELPERS = { readFileEol, withEol, currentBranch, makeMatcher };
 
 // `extra`: Map kind.id -> numbers to treat as taken, besides the tree's own. --claim passes the
 // base tip's. Without it, the tree alone decides.
