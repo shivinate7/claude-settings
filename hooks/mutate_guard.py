@@ -232,6 +232,12 @@ MUTATIONS = [
      '            if arg.startswith("-") and not arg.startswith("--") and "t" in arg:\n'
      '                return word + " " + arg',
      '            if False:\n                return word + " " + arg', "guard", 'kill: lsof -t feeds a kill list'),
+    ("machine-wide-kill: a kill of a pid this session did not start no longer denies",
+     '        if pid_is_owned(abs(number) if number < -1 else number, root) is False:',
+     '        if False:', "guard", 'kill: a pid this session did not start'),
+    ("machine-wide-kill: a pid with no parent chain to the session root reads as owned",
+     '    if pid <= 0 or pid == 1:',
+     '    if pid == 1:', "guard", 'kill: the shell\'s own process group'),
     ("command word: a wrapper such as xargs no longer unwraps to what it runs",
      '    while index < end and basename(tokens[index]) in COMMAND_WRAPPERS:',
      '    while False:', "guard", 'kill: xargs unwraps to the real command it runs'),

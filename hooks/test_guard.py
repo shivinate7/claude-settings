@@ -1477,7 +1477,29 @@ sh("kill: Stop-Process by name, abbreviated", "Stop-Process -n node", "deny", "m
    tool="PowerShell", cwd=NOGIT)
 
 sh("kill: asking which port is busy kills nothing", "lsof -i :3000", "allow", cwd=NOGIT)
-sh("kill: one process id in Bash", "kill 123", "allow", cwd=NOGIT)
+# OWNERSHIP of a pid. The suite is the session root (`CLAUDE_GUARD_ROOT_PID`, set in `decide`).
+# OWNED is a live child of the suite. FOREIGN is the suite's own parent: alive, not a descendant.
+OWNED = subprocess.Popen(["sleep", "300"])
+FOREIGN = os.getppid()
+sh("kill: a pid this session started", "kill %d" % OWNED.pid, "allow", cwd=NOGIT)
+sh("kill: a signal flag and a pid this session started", "kill -9 %d" % OWNED.pid, "allow",
+   cwd=NOGIT)
+sh("kill: a pid nothing is running under", "kill 4194303", "allow", cwd=NOGIT)
+sh("kill: a pid held in a variable cannot be read, so it passes", "kill $!", "allow", cwd=NOGIT)
+sh("kill: listing signals kills nothing", "kill -l 1", "allow", cwd=NOGIT)
+sh("kill: a pid this session did not start", "kill %d" % FOREIGN, "deny", "machine-wide-kill",
+   cwd=NOGIT, carries="did not start")
+sh("kill: a foreign pid behind a signal flag", "kill -9 %d" % FOREIGN, "deny",
+   "machine-wide-kill", cwd=NOGIT)
+sh("kill: a foreign pid behind a named signal", "kill -s TERM %d" % FOREIGN, "deny",
+   "machine-wide-kill", cwd=NOGIT)
+sh("kill: a foreign pid after the end-of-flags mark", "kill -- %d" % FOREIGN, "deny",
+   "machine-wide-kill", cwd=NOGIT)
+sh("kill: one foreign pid in a list of pids", "kill %d %d" % (OWNED.pid, FOREIGN), "deny",
+   "machine-wide-kill", cwd=NOGIT)
+sh("kill: init", "kill 1", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: every process", "kill -9 -- -1", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: the shell's own process group", "kill 0", "deny", "machine-wide-kill", cwd=NOGIT)
 sh("kill: one process id with taskkill", "taskkill /PID 4711 /F", "allow", cwd=NOGIT)
 sh("kill: one process id with Stop-Process", "Stop-Process -Id 123", "allow", tool="PowerShell",
    cwd=NOGIT)
@@ -2620,6 +2642,7 @@ def decide(case):
     # environment only when the payload carries none. A real session id in the runner's own
     # environment would leak into every case, so it is dropped here and each case names its own.
     env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())   # the suite stands in for `claude`
     if case["env_path"]:
         env["PATH"] = case["env_path"]
     result = subprocess.run(
@@ -3717,6 +3740,7 @@ def main():
             "PASS" if ok else "FAIL", "logged" if ok else "wrong", "logged", "Bash", label, note))
     print()
     shutil.rmtree(ROOT, ignore_errors=True)
+    OWNED.kill()
     if failed:
         print("test_guard FAIL: %d of %d cases wrong" % (failed, total))
         return 1
