@@ -1795,6 +1795,60 @@ class WorktreeRemovalTests(unittest.TestCase):
         self.assertFalse(os.path.isdir(target))
 
 
+class SameRunBranchCutTests(unittest.TestCase):
+    """A branch is released from "checked-out" only when the worktree holding it is removed in
+    this run (confirm) or would be (preview: REAP). A kept or failed removal keeps it held."""
+
+    def _repo(self, name, dirty=False):
+        root = os.path.join(ROOT, "cut-" + name)
+        make_repo(root, {"f.txt": "x\n"})
+        give_remote(root)
+        wt = os.path.join(ROOT, "cut-" + name + "-wt")
+        run_vcs(root, "worktree", "add", "-q", wt, "-b", "lane-cut")
+        if dirty:
+            write(os.path.join(wt, "new.txt"), "dirty\n")
+        return root, wt
+
+    def _branch(self, result):
+        found = [b for b in result["branches"] if b["name"] == "lane-cut"]
+        self.assertEqual(len(found), 1)
+        return found[0]
+
+    def _sweep(self, root, confirm):
+        return sweep.sweep_repo(root, confirm, os.path.join(ROOT, "cut.log"))
+
+    def test_preview_releases_the_branch_of_a_reap_worktree(self):
+        root, _wt = self._repo("preview")
+        result = self._sweep(root, False)
+        self.assertEqual(self._branch(result)["action"], "reap")
+
+    def test_confirm_removes_the_worktree_and_its_branch_in_one_run(self):
+        root, wt = self._repo("confirm")
+        result = self._sweep(root, True)
+        self.assertEqual(self._branch(result)["action"], "reap")
+        self.assertNotIn("error", self._branch(result))
+        self.assertFalse(os.path.isdir(wt))
+        self.assertNotIn("lane-cut", sweep.list_local_branches(root))
+
+    def test_a_kept_worktree_keeps_its_branch_held(self):
+        root, wt = self._repo("kept", dirty=True)
+        result = self._sweep(root, True)
+        self.assertEqual(self._branch(result)["reason"], "checked-out")
+        self.assertTrue(os.path.isdir(wt))
+        self.assertIn("lane-cut", sweep.list_local_branches(root))
+
+    def test_a_failed_removal_keeps_the_branch_held(self):
+        root, wt = self._repo("failed")
+        real = sweep.remove_worktree
+        sweep.remove_worktree = lambda r, p, d: d.__setitem__("error", "remove failed: stub")
+        try:
+            result = self._sweep(root, True)
+        finally:
+            sweep.remove_worktree = real
+        self.assertEqual(self._branch(result)["reason"], "checked-out")
+        self.assertIn("lane-cut", sweep.list_local_branches(root))
+
+
 # --------------------------------------------------------------------------- the --confirm gate
 #
 # Every OTHER confirm=False call in this file (BaseResolutionRefusalTests,

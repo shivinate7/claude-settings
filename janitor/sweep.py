@@ -1832,19 +1832,15 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str):
         # A failed real prune leaves them registered, so they stay.
         entries = [e for e in entries if not e["prunable"]]
 
-    checked_out_branches = {e["branch"] for e in entries if e.get("branch")}
-
     branches = list_local_branches(root)
     if branches is None:
         result["refused"] = "unreadable-branch-list"
         return result
 
-    for branch in branches:
-        decision = decide_branch(root, base, branch, protected_prefixes, checked_out_branches)
-        result["branches"].append(decision)
-        if confirm and decision["action"] == "reap":
-            reap_branch(root, branch, decision, restore_log_path)
-
+    # Worktrees go first: a branch is released from "checked-out" only when the worktree that
+    # holds it is removed in THIS run (confirm), or would be (preview: action reap). A removal
+    # that failed (decision["error"]) keeps its branch held. A primary checkout never releases.
+    released = set()
     for entry in entries:
         if entry.get("bare"):
             continue
@@ -1862,6 +1858,16 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str):
         result["worktrees"].append(decision)
         if confirm and decision["action"] == "reap":
             remove_worktree(root, entry["path"], decision)
+        if decision["action"] == "reap" and not decision.get("error") and entry.get("branch"):
+            released.add(entry["branch"])
+
+    checked_out_branches = {e["branch"] for e in entries if e.get("branch")} - released
+
+    for branch in branches:
+        decision = decide_branch(root, base, branch, protected_prefixes, checked_out_branches)
+        result["branches"].append(decision)
+        if confirm and decision["action"] == "reap":
+            reap_branch(root, branch, decision, restore_log_path)
 
     husk_names = optout.get("huskNames", [])
     result["husks"] = find_husks(root, entries, husk_names)
