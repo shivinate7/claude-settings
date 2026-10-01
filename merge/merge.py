@@ -105,7 +105,7 @@ class GhLock:
         cur = self.read(b)
         if cur and cur[1] > self.now():
             raise Held(f"the merge lock on {b} is held (expires in {cur[1] - self.now():.0f}s). Wait, or run: merge --unlock")
-        if cur:  # ponytail: the API has no compare-and-swap, so two breakers of one expired lock can both pass for a few ms. The create below still refuses the second.
+        if cur:  # ponytail: the API cannot delete "only if the ref is still X". Window: from this run's read of the expired lock to its delete. If another run breaks the lock and creates a live one inside that window, this delete removes the live lock, and the create below then succeeds, so both runs hold it. The window is a few API calls. Close it with a lock backend that has compare-and-swap.
             self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/refs/merge-lock/{b}")
         c, head = self.api(f"repos/{{owner}}/{{repo}}/git/ref/heads/{b}", "--jq", ".object.sha")
         c2, tree = self.api(f"repos/{{owner}}/{{repo}}/git/commits/{head}", "--jq", ".tree.sha") if not c else (c, head)
@@ -179,7 +179,8 @@ def do_claim(wt, cfgrel, base):
 
 def commit_claim(wt, trailer):
     git(wt, "add", "-A")
-    c, out = git(wt, "commit", "-q", "-m", "Claim record numbers", "-m", trailer)
+    who = [] if git(wt, "config", "user.email")[1] else ["-c", "user.name=merge", "-c", "user.email=merge@localhost"]  # a runner has no identity
+    c, out = git(wt, *who, "commit", "-q", "-m", "Claim record numbers", "-m", trailer)
     if c:
         raise Stop("cannot commit the claim: " + out)
     return git(wt, "rev-parse", "HEAD")[1]
@@ -238,8 +239,9 @@ def ff_main(root, base, commit):
         raise Stop("the local main did not move. The merge is done. " + out)
     say(f"merge: local {base} is at {commit[:9]}.")
 
-def cut_branch(root, branch):
-    """Delete the head branch on origin, and here unless a worktree holds it. Never fails the merge."""
+def cut_branch(root, branch, merged):
+    """Delete the head branch on origin, and here unless a worktree holds it or it has local-only
+    commits (its tip must be an ancestor of `merged`, the head that merged). Never fails the merge."""
     c, out = git(root, "push", "-q", "origin", "--delete", branch)
     say(f"merge: origin/{branch}: " + ("deleted." if not c else "not deleted: " + (out.splitlines() or ["?"])[-1]))
     if git(root, "rev-parse", "-q", "--verify", f"refs/heads/{branch}")[0]:
@@ -247,6 +249,8 @@ def cut_branch(root, branch):
     held = holder(root, branch)
     if held:
         say(f"merge: {branch} kept here: checked out in {held}.")
+    elif git(root, "merge-base", "--is-ancestor", f"refs/heads/{branch}", merged)[0]:
+        say(f"merge: {branch} kept here: its tip is not in the merged head {merged[:9]}, so it holds local-only commits.")
     else:
         c, out = git(root, "branch", "-D", branch)
         say(f"merge: {branch} here: " + ("deleted." if not c else "not deleted: " + out))
@@ -356,7 +360,9 @@ def confirm(root, cfg, cfgrel, n, host, lock):
         ok, why = host.wait_checks(n, sha, m["deadlineMinutes"])
         if not ok:
             fail(why)
-        git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
+        c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
+        if c:  # never check against a stale base tip
+            fail(f"cannot fetch origin {base}, so the claim cannot be proved fresh:\n" + out)
         c, out = node_stamp(wt, cfgrel, "check", base_ref)  # each claimed number must still be free on the base tip
         if c or "UNKNOWN:" in out:
             fail("the base moved and the claim is stale, or the check could not read the base:\n" + out)
@@ -370,7 +376,7 @@ def confirm(root, cfg, cfgrel, n, host, lock):
             say(f"merge: {e}")
         ok = after_merge(root, m.get("afterMerge", []))
         if m.get("deleteBranch"):
-            cut_branch(root, branch)
+            cut_branch(root, branch, sha)
         return 0 if ok else 1  # the merge landed either way; a failed afterMerge exits non-zero
     finally:
         if wt:

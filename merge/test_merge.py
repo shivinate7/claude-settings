@@ -59,6 +59,7 @@ class FakeHost:
     def merge(self, n, method, sha):
         if self.refuse:
             return None, self.refuse
+        self.merged = True
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
@@ -317,6 +318,59 @@ class Guards(Env):
         self.assertEqual(rc, 1)
         self.assertIn("stale", out)
         self.assertIn("id: pending", self.show("feat", "docs/decisions/second.md"))
+
+    def test_a_failed_base_fetch_stops_the_merge_and_never_checks_a_stale_base(self):
+        self.host.merged = False
+        self.host.on_wait = lambda: sh(self.co, "git", "remote", "set-url", "origin", os.path.join(self.t, "gone.git"))
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1)
+        self.assertIn("cannot fetch origin main", out)
+        self.assertFalse(self.host.merged)
+
+    def test_the_claim_commit_works_with_no_git_identity(self):
+        info = self.host.pr(7)
+        tmp, wt = merge.open_worktree(self.co, info, "main")
+        keep = {k: os.environ.pop(k) for k in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL")}
+        os.environ.update(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="user.useConfigOnly", GIT_CONFIG_VALUE_0="true")
+        try:
+            trailer = merge.do_claim(wt, ".github/stamp.json", "origin/main")
+            self.assertEqual(len(merge.commit_claim(wt, trailer)), 40)
+        finally:
+            for k in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"):
+                os.environ.pop(k)
+            os.environ.update(keep)
+            merge.drop_worktree(self.co, tmp, wt)
+
+class CutBranch(Env):
+    def local_branch(self, extra):
+        sh(self.co, "git", "fetch", "-q", "origin")
+        sh(self.co, "git", "branch", "feat", "origin/feat")
+        if extra:
+            sh(self.co, "git", "checkout", "-q", "feat")
+            put(os.path.join(self.co, "local-only.txt"), "x")
+            sh(self.co, "git", "add", "-A"); sh(self.co, "git", "commit", "-q", "-m", "local only")
+            sh(self.co, "git", "checkout", "-q", "main")
+        return self.head()
+
+    def cut(self, merged):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            merge.cut_branch(self.co, "feat", merged)
+        return out.getvalue()
+
+    def exists(self):
+        return subprocess.run(["git", "-C", self.co, "rev-parse", "-q", "--verify", "refs/heads/feat"], capture_output=True).returncode == 0
+
+    def test_local_branch_inside_the_merged_head_is_deleted(self):
+        out = self.cut(self.local_branch(False))
+        self.assertIn("feat here: deleted", out)
+        self.assertFalse(self.exists())
+        self.assertNotIn("refs/heads/feat", self.refs())
+
+    def test_local_only_commits_keep_the_branch(self):
+        out = self.cut(self.local_branch(True))
+        self.assertIn("local-only commits", out)
+        self.assertTrue(self.exists())
 
 class Stopped(Env):
     def test_stopped_run_resumes_then_an_expired_lock_is_broken(self):
