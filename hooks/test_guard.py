@@ -2945,7 +2945,7 @@ def conflict_resolve_log_case():
     return True, "one noted/conflict-resolve line"
 
 
-def subject_unread_log_case():
+def subject_unread_log_case(command=None, expect_note=True):
     """A subject the guard could not read is allowed, and logged as `noted`/`subject-unread`.
 
     The line must be DISTINCT from a refusal line, so a reader can tell "I could not confirm
@@ -2966,12 +2966,16 @@ def subject_unread_log_case():
     result = subprocess.run(
         [sys.executable, GUARD],
         input=json.dumps({"tool_name": "Bash",
-                          "tool_input": {"command": VCS + " reset --hard HEAD"},
+                          "tool_input": {"command": command or VCS + " reset --hard HEAD"},
                           "cwd": SUBJDIRTY}),
         capture_output=True, text=True, env=env, timeout=60,
     )
     if result.stdout.strip():
         return False, "expected a silent allow, got %r" % result.stdout.strip()[:120]
+    if not expect_note:
+        if os.path.exists(path) and open(path, encoding="utf-8").read().strip():
+            return False, "an unforced worktree remove recorded a note"
+        return True, "no note for an unforced worktree remove"
     if not os.path.exists(path):
         return False, "no log file was written for the unread subject"
     with open(path, encoding="utf-8") as handle:
@@ -2981,9 +2985,17 @@ def subject_unread_log_case():
     fields = lines[0].split("\t")
     if len(fields) != 5 or fields[2] != "noted" or fields[3] != "subject-unread":
         return False, "line does not read noted/subject-unread: %r" % lines[0]
-    if "reset" not in fields[4]:
+    if ("worktree remove" if command else "reset") not in fields[4]:
         return False, "the line does not carry the matched command: %r" % fields[4]
     return True, "one noted/subject-unread line, distinct from a refusal"
+
+
+def worktree_remove_plain_quiet_case():
+    return subject_unread_log_case(VCS + " worktree remove $w", expect_note=False)
+
+
+def worktree_remove_force_noted_case():
+    return subject_unread_log_case(VCS + " worktree remove --force $w")
 
 
 def branch_base_unread_log_case():
@@ -3715,6 +3727,10 @@ LOG_CHECKS = (
     ("log: a merge into main is allowed and noted where the base is unsafe", merge_log_case),
     ("log: a conflict-side checkout is allowed and noted", conflict_resolve_log_case),
     ("log: an unreadable subject is allowed and noted", subject_unread_log_case),
+    ("log: an unforced worktree remove with an unreadable subject records no note",
+     worktree_remove_plain_quiet_case),
+    ("log: a forced worktree remove with an unreadable subject is still noted",
+     worktree_remove_force_noted_case),
     ("log: a branch delete with no resolvable base is allowed and noted",
      branch_base_unread_log_case),
     ("stack: the refusal never names the action it refused", stack_reason_hygiene_case),
