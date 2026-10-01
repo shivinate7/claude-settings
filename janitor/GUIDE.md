@@ -6,8 +6,8 @@ of your own.
 
 `janitor/sweep.py` reaps local branches that hold no unique work. It removes
 worktrees that no session still uses. It also signals an orphaned TCP listener
-left behind inside a repository it covers. It runs against every repository on
-this machine.
+left behind inside a repository it covers. It prunes stale worktree
+registrations. It runs against every repository on this machine.
 
 ## What it never does
 
@@ -151,6 +151,17 @@ unknown. The list includes the wrappers of live sessions, yours too.
 
 This tier is report only. `--confirm` stops none of them. A person reads the
 list and decides.
+
+## Stale worktree registrations
+
+A registration is stale when git lists a worktree whose directory is gone.
+The sweep asks `git worktree prune -n -v` which registrations are stale. The
+preview lists each one as `prune WOULD`. `--confirm` then runs
+`git worktree prune`, which applies git's own staleness test again. Git alone
+decides what is stale. A
+locked worktree is never stale. If git gives no answer, the sweep prunes
+nothing and says so. This tier runs per repository, so `sweep: false` in
+`.claude/janitor.json` opts it out.
 
 ## How you opt out
 

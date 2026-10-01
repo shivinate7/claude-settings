@@ -37,6 +37,14 @@ path. `find_dead_rooted` stops only a proven orphan that the current user owns.
 Its subject is a process whose script file and its parent directory are gone,
 under a deleted checkout. That names no repository's own files. Each repository's own live servers stay its own.
 
+## Stale registrations are pruned by git's own word
+
+Branches and worktrees are git's to judge, so the prune tier asks git. It runs
+`git worktree prune -n -v` and acts only on what that names, and only under
+`--confirm`. The sweep keeps no second rule for "stale". The tier runs before
+the worktree list is read, so a pruned registration is never judged as a
+worktree.
+
 ## The sweep never runs code a repository supplies
 
 A repository states its wishes in `.claude/janitor.json`, and the sweep reads
