@@ -3476,6 +3476,8 @@ CONFIG_FROZEN_DIRS = (
     # deletes things, same reasoning as hooks/lint/agents, so it lands here too (plan:
     # janitor-build-plan.md, "The code lands in a new janitor/ directory").
     os.path.normcase("janitor"),
+    # bin/ holds the merge shim that every merge runs. Same reasoning as janitor.
+    os.path.normcase("bin"),
     # output-styles/ holds the rules for the main session's replies. A session that could rewrite
     # its own style could loosen those rules, same reasoning as agents/.
     os.path.normcase("output-styles"),

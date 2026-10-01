@@ -129,6 +129,9 @@ jobs:
         shell: bash
         run: bash actions/stamp/test_action.sh
 
+      - name: Merge launcher fixture suite
+        run: python3 merge/test_launch.py
+
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.
   pointer-windows:
