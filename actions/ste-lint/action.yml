@@ -125,7 +125,30 @@ runs:
 
         EXCLUDED_COUNT=$((${#RAW_FILES[@]} - ${#FILES[@]}))
 
+        # Log + annotate findings. One home for both scopes. GitHub workflow-command
+        # escaping: data escapes % \r \n; a property also escapes : and ,.
+        EMIT_DIR="$(mktemp -d)"
+        cat > "$EMIT_DIR/ste_emit.py" <<'PYEOF'
+        def _esc(s, prop=False):
+            s = str(s).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+            return s.replace(":", "%3A").replace(",", "%2C") if prop else s
+
+        def emit(findings, out):
+            for f in findings:
+                line = f.get("line")
+                where = "%s:%s" % (f["path"], line) if line is not None else f["path"]
+                text = "%s %s" % (f["code"], f["message"])
+                print("%s: %s" % (where, text.replace("\r", " ").replace("\n", " ")), file=out)
+                cmd = "error" if f["severity"] == "error" else "warning"
+                props = "file=%s" % _esc(f["path"], True)
+                if line is not None:
+                    props += ",line=%s" % line
+                print("::%s %s::%s" % (cmd, props, _esc(text)), file=out)
+        PYEOF
+        export PYTHONPATH="$EMIT_DIR${PYTHONPATH:+:$PYTHONPATH}"
+
         SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"
+        LOG_OUT="$(mktemp)"
 
         if [ ${#FILES[@]} -eq 0 ]; then
           echo "ste-lint: no markdown changed"
@@ -153,7 +176,8 @@ runs:
           # A single Python statement, semicolon-joined and on one physical line, so the
           # YAML block scalar's own indentation never lands inside the Python source (an
           # indented top-level statement is a Python syntax error).
-          python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); s = d["summary"]; excluded = int(sys.argv[2]); print("### STE lint"); print(); print("Files checked: %d. Excluded: %d. Errors: %d. Warnings: %d." % (d["files"], excluded, s["error"], s["warning"])); print(); print("| File | Line | Rule | Message |"); print("| --- | --- | --- | --- |"); [print("| %s | %d | %s | %s |" % (f["path"], f["line"], f["code"], f["message"].replace("|", "\\|").replace("\n", " "))) for f in d["findings"][:50]]' "$JSON_OUT" "$EXCLUDED_COUNT" >> "$SUMMARY"
+          python3 -c 'import json, sys; from ste_emit import emit; d = json.load(open(sys.argv[1])); s = d["summary"]; excluded = int(sys.argv[2]); print("### STE lint"); print(); print("Files checked: %d. Excluded: %d. Errors: %d. Warnings: %d." % (d["files"], excluded, s["error"], s["warning"])); print(); print("| File | Line | Rule | Message |"); print("| --- | --- | --- | --- |"); [print("| %s | %d | %s | %s |" % (f["path"], f["line"], f["code"], f["message"].replace("|", "\\|").replace("\n", " "))) for f in d["findings"][:50]]; o = open(sys.argv[3], "w"); emit(d["findings"], o); print("ste-lint: audit, %d error(s), %d warning(s), not gated" % (s["error"], s["warning"]), file=o)' "$JSON_OUT" "$EXCLUDED_COUNT" "$LOG_OUT" >> "$SUMMARY"
+          cat "$LOG_OUT"
           exit 0
         fi
 
@@ -192,7 +216,8 @@ runs:
         SPLIT_PY="$(mktemp)"
         cat > "$SPLIT_PY" <<'PYEOF'
         import json, sys
-        json_path, hunks_path, excluded, fail = sys.argv[1:5]
+        from ste_emit import emit
+        json_path, hunks_path, excluded, fail, log_path = sys.argv[1:6]
         d = json.load(open(json_path))
         added = set()
         with open(hunks_path, encoding="utf-8") as f:
@@ -236,12 +261,19 @@ runs:
             print()
             table(out_hunk)
 
-        sys.exit(1 if (fail == "true" and sev_count(in_hunk, "error") > 0) else 0)
+        failing = fail == "true" and sev_count(in_hunk, "error") > 0
+        with open(log_path, "w") as o:
+            emit(in_hunk, o)
+            print("ste-lint: %s, %d error(s), %d warning(s) on changed lines"
+                  % ("FAIL" if failing else "PASS", sev_count(in_hunk, "error"),
+                     sev_count(in_hunk, "warning")), file=o)
+        sys.exit(1 if failing else 0)
         PYEOF
 
         set +e
-        python3 "$SPLIT_PY" "$JSON_OUT" "$HUNKS" "$EXCLUDED_COUNT" "$FAIL" >> "$SUMMARY"
+        python3 "$SPLIT_PY" "$JSON_OUT" "$HUNKS" "$EXCLUDED_COUNT" "$FAIL" "$LOG_OUT" >> "$SUMMARY"
         GATE_EXIT=$?
         set -e
+        cat "$LOG_OUT"
 
         exit "$GATE_EXIT"
