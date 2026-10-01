@@ -1092,6 +1092,37 @@ skills_case2() {
   rm -rf "$h"
 }
 
+# ---- bin case: the shim lands, and only the three stale Banchi files go ------------------------
+bin_case1() {
+  name="bin1: claude-janitor shim lands; janitor.py, reap.py, session-teardown.sh removed; others kept"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then
+    skip "$name" "$NO_SYMLINK_REASON"
+    return
+  fi
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/bin1-checkout"
+  make_checkout "$co" "# bin1 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  cp "$REPO_ROOT/bin/claude-janitor" "$co/bin/claude-janitor"
+  mkdir -p "$cfg/bin"
+  printf 'old shim\n' > "$cfg/bin/claude-janitor"
+  for f in janitor.py reap.py session-teardown.sh keep-me.sh; do printf 'x\n' > "$cfg/bin/$f"; done
+
+  out=$(run_local_install "$co" "$h" "$cfg"); rc=$?
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ "$(readlink "$cfg/bin/claude-janitor")" != "$co/bin/claude-janitor" ]; then
+    bad "$name" "claude-janitor is not a link to the repo shim"
+  elif [ -e "$cfg/bin/janitor.py" ] || [ -e "$cfg/bin/reap.py" ] || [ -e "$cfg/bin/session-teardown.sh" ]; then
+    bad "$name" "a stale Banchi file survived"
+  elif [ ! -f "$cfg/bin/keep-me.sh" ]; then
+    bad "$name" "keep-me.sh (not on the stale list) was removed"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
 caseF5() {
   name="caseF5: outside a git tree with no pointer file, stays fully silent, exit 0"
   outside="$work/caseF5-not-a-repo"; cfg="$work/caseF5-cfg"
@@ -1139,6 +1170,7 @@ prune_case5
 prune_case6
 skills_case1
 skills_case2
+bin_case1
 caseF1
 caseF2
 caseF3

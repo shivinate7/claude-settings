@@ -311,6 +311,18 @@ while IFS= read -r sub || [ -n "$sub" ]; do
   if [ "$sub" = "skills" ]; then land_skills_dir; else land_dir "$sub"; fi
 done < "$SRC/landed-dirs.txt"
 
+# Stale files from the old Banchi janitor. Nothing runs them, and bin/claude-janitor now runs
+# janitor/sweep.py. Only these exact names are removed, and only when they are not a link into
+# this repo's bin/. Nothing else under bin/ is ever touched.
+for stale in janitor.py reap.py session-teardown.sh; do
+  f="$CLAUDE_DIR/bin/$stale"
+  [ -e "$f" ] || [ -L "$f" ] || continue
+  if [ -L "$f" ]; then
+    case "$(readlink "$f")" in "$SRC/bin"/*) continue ;; esac
+  fi
+  rm -f "$f" && log "removed stale $f (old janitor, nothing runs it)"
+done
+
 # ---- ~/.claude/settings.json ------------------------------------------------------------------
 TARGET_JSON="$CLAUDE_DIR/settings.json"
 

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Shim for the machine-wide sweep. No sweep logic lives here: it runs the landed janitor/sweep.py.
+# install.sh lands this file as ~/.claude/bin/claude-janitor and janitor/ as ~/.claude/janitor.
+exec python3 "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/janitor/sweep.py" "$@"
