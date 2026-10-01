@@ -2364,19 +2364,26 @@ def kill_hit(tokens) -> str:
     return ""
 
 
-KILL_PID_RE = re.compile(r"^-?\d+$")
+KILL_PID_RE = re.compile(r"^-?[0-9]+$")
+ROOT_PID_RE = re.compile(r"[0-9]+")
+PID_LISTERS = {"pgrep", "pidof"}   # a kill fed by these names its target by pattern
 KILL_SIGNAL_ARG_FLAGS = {"-s", "-n"}   # these two take the next token as a signal
 
 
 def _ps_ppid(pid: int):
-    """Parent pid of `pid`; 0 when no such process; None when `ps` could not answer."""
+    """Parent pid of `pid`; 0 when no such process; None when `ps` could not answer.
+
+    No such process is exit 1 with no output at all. Any other failure is unknown, not death.
+    """
     try:
         answer = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True,
                                 text=True, timeout=5)
     except (OSError, subprocess.SubprocessError):
         return None
     text = answer.stdout.strip()
-    return int(text) if text.isdigit() else (0 if answer.returncode else None)
+    if ROOT_PID_RE.fullmatch(text):
+        return int(text)
+    return 0 if answer.returncode == 1 and not text and not answer.stderr.strip() else None
 
 
 def session_root_pid():
@@ -2384,11 +2391,11 @@ def session_root_pid():
 
     MEASURED: every command this session runs, and every hook it fires, descends from one
     process whose command path ends in `claude`. A process another session or the owner's editor
-    runs does not. `CLAUDE_GUARD_ROOT_PID` replaces the walk, for the test suite only: the
-    harness sets the hook's environment, so a command cannot set it.
+    runs does not. `CLAUDE_GUARD_ROOT_PID` replaces the walk, for the test suite. The harness
+    sets the hook's environment, so a command cannot set it, but a settings.json `env` block can.
     """
     forced = os.environ.get("CLAUDE_GUARD_ROOT_PID", "")
-    if forced.isdigit():
+    if ROOT_PID_RE.fullmatch(forced):
         return int(forced)
     pid = os.getpid()
     for _ in range(64):
@@ -2408,16 +2415,16 @@ def session_root_pid():
 
 def pid_is_owned(pid: int, root: int):
     """True when `pid` is dead or descends from `root`; False when it does not; None unknown."""
-    if pid <= 0 or pid == 1:   # 0 and -1 reach a whole group or every process
+    if pid == root:   # the session's own claude process is not something it started
         return False
     for _ in range(64):
-        if pid == root:
-            return True
         parent = _ps_ppid(pid)
         if parent is None:
             return None
         if parent <= 1:
-            return pid != 1 and parent == 0   # dead is owned; reparented to init is not
+            return parent == 0   # dead is owned; reparented to init is not
+        if parent == root:
+            return True
         pid = parent
     return None
 
@@ -2448,13 +2455,44 @@ def foreign_pid_kill(tokens) -> str:
             continue
         if not KILL_PID_RE.match(arg):
             continue
+        number = int(arg)
+        if number in (0, 1, -1):   # a whole group, init, or every process: judged with no root
+            return arg
         if root is None:
             root = session_root_pid()
         if not root:
             return ""
-        number = int(arg)
         if pid_is_owned(abs(number) if number < -1 else number, root) is False:
             return arg
+    return ""
+
+
+def kill_fed_by_name(tokens) -> str:
+    """Return the matched text when `kill` takes its pids from `pgrep` or `pidof`.
+
+    Two shapes: `kill $(pgrep x)` or a backtick form, and `pgrep x | xargs kill`. Both name the
+    target by pattern, the same act as `pkill`. The pipe form reads the segment before the pipe.
+    """
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]) != "kill":
+        return ""
+    for arg in tokens[index + 1:]:
+        for lister in PID_LISTERS:
+            if "$(" + lister in arg or "`" + lister in arg:
+                return "kill " + lister
+    return ""
+
+
+def kill_fed_by_pipe(tokens, previous) -> str:
+    """The `xargs kill` half of `pgrep x | xargs kill`; `previous` is the segment before it."""
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]) != "kill" or not previous:
+        return ""
+    if not any(basename(word) == "xargs" for word in tokens[:index]):
+        return ""
+    before = resolve_command(previous)
+    if before is not None and basename(previous[before]) in PID_LISTERS:
+        return "xargs kill"
     return ""
 
 
@@ -4031,13 +4069,16 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
     # 2. A machine-wide kill. Judged in COMMAND POSITION, from the segment's own tokens, never
     # by the word appearing anywhere in the text. A segment shlex cannot parse fails open:
     # judge nothing rather than guess what it would run.
+    previous = None
     for segment in split_segments(stripped):
         if not segment.strip():
             continue
         tokens = segment_tokens(segment)
         if tokens is None:
+            previous = None
             continue
-        matched = kill_hit(tokens)
+        matched = kill_hit(tokens) or kill_fed_by_name(tokens) or kill_fed_by_pipe(tokens, previous)
+        previous = tokens
         if matched:
             refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
         matched = foreign_pid_kill(tokens)

@@ -43,7 +43,7 @@ CASES = []
 
 
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
-        session=None, carries=(), config=None, agent_id=None, **tool_input):
+        session=None, carries=(), config=None, agent_id=None, no_root=False, **tool_input):
     """Register one case.
 
     `carries` names fragments the printed reason MUST hold, which is how a case pins what an
@@ -70,14 +70,15 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         # read from, so a pointer case names its own and every other case keeps the default.
         "config": config,
         "agent_id": agent_id,
+        "no_root": no_root,
         "tool_input": tool_input,
     })
 
 
 def sh(name, command, expected, rule=None, tool="Bash", cwd=None, env_path=None, session=None,
-       carries=(), config=None, agent_id=None):
+       carries=(), config=None, agent_id=None, no_root=False):
     add(name, expected, rule=rule, tool=tool, cwd=cwd, env_path=env_path, session=session,
-        agent_id=agent_id,
+        agent_id=agent_id, no_root=no_root,
         carries=carries, config=config, command=command)
 
 
@@ -1479,6 +1480,8 @@ sh("kill: Stop-Process by name, abbreviated", "Stop-Process -n node", "deny", "m
 sh("kill: asking which port is busy kills nothing", "lsof -i :3000", "allow", cwd=NOGIT)
 # OWNERSHIP of a pid. The suite is the session root (`CLAUDE_GUARD_ROOT_PID`, set in `decide`).
 # OWNED is a live child of the suite. FOREIGN is the suite's own parent: alive, not a descendant.
+NOPS = os.path.join(ROOT, "nops")   # an empty directory: `ps` cannot be found through it
+os.makedirs(NOPS, exist_ok=True)
 OWNED = subprocess.Popen(["sleep", "300"])
 FOREIGN = os.getppid()
 sh("kill: a pid this session started", "kill %d" % OWNED.pid, "allow", cwd=NOGIT)
@@ -1500,6 +1503,27 @@ sh("kill: one foreign pid in a list of pids", "kill %d %d" % (OWNED.pid, FOREIGN
 sh("kill: init", "kill 1", "deny", "machine-wide-kill", cwd=NOGIT)
 sh("kill: every process", "kill -9 -- -1", "deny", "machine-wide-kill", cwd=NOGIT)
 sh("kill: the shell's own process group", "kill 0", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: the session's own claude process", "kill %d" % os.getpid(), "deny",
+   "machine-wide-kill", cwd=NOGIT)
+sh("kill: init with the root unknown", "kill 1", "deny", "machine-wide-kill", cwd=NOGIT,
+   no_root=True)
+sh("kill: every process with the root unknown", "kill -9 -- -1", "deny", "machine-wide-kill",
+   cwd=NOGIT, no_root=True)
+sh("kill: the process group with the root unknown", "kill 0", "deny", "machine-wide-kill",
+   cwd=NOGIT, no_root=True)
+sh("kill: any other pid with the root unknown is unknown, so it passes", "kill %d" % FOREIGN,
+   "allow", cwd=NOGIT, no_root=True)
+sh("kill: a pid list made by pgrep", "kill $(pgrep -f node)", "deny", "machine-wide-kill",
+   cwd=NOGIT)
+sh("kill: a pid list made by pidof", "kill -9 $(pidof node)", "deny", "machine-wide-kill",
+   cwd=NOGIT)
+sh("kill: a pid list made by pgrep, backtick form", "kill `pgrep node`", "deny",
+   "machine-wide-kill", cwd=NOGIT)
+sh("kill: pgrep piped into xargs kill", "pgrep -f node | xargs kill", "deny",
+   "machine-wide-kill", cwd=NOGIT)
+sh("kill: xargs kill after a pipe from a plain list is not by name", "echo 1 | xargs kill -l",
+   "allow", cwd=NOGIT)
+sh("kill: pgrep alone only reads", "pgrep -f node", "allow", cwd=NOGIT)
 sh("kill: one process id with taskkill", "taskkill /PID 4711 /F", "allow", cwd=NOGIT)
 sh("kill: one process id with Stop-Process", "Stop-Process -Id 123", "allow", tool="PowerShell",
    cwd=NOGIT)
@@ -2643,6 +2667,9 @@ def decide(case):
     # environment would leak into every case, so it is dropped here and each case names its own.
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())   # the suite stands in for `claude`
+    if case.get("no_root"):   # no forced root, and a PATH with no `ps`: the root is unknown
+        env.pop("CLAUDE_GUARD_ROOT_PID")
+        env["PATH"] = NOPS
     if case["env_path"]:
         env["PATH"] = case["env_path"]
     result = subprocess.run(
