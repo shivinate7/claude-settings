@@ -523,6 +523,8 @@ MUTATIONS = [
     ("subject: a forced worktree remove loses its unread note",
      '            if subcommand != "worktree-remove" or worktree_remove_forced(args):',
      '            if subcommand != "worktree-remove":', "guard", "log: a forced worktree remove with an unreadable subject is still noted", "posix"),
+    ("subject: a quoted force flag reads as unforced", '            tokens = shlex.split(arg)', '            tokens = [arg]', "guard", "log: a quoted or abbreviated force on a worktree remove is still noted", "posix"),
+    ("subject: an abbreviated force flag reads as unforced", '"--force".startswith(tok)', 'tok == "--force"', "guard", "log: a quoted or abbreviated force on a worktree remove is still noted", "posix"),
     ("scratchpad: this session's own scratchpad stops being private",
      'def under_session_scratchpad(where: str, session_id: str) -> bool:',
      'def under_session_scratchpad(where: str, session_id: str) -> bool:\n    return False', "guard", "scratchpad: a discard in this session's own scratchpad is private"),

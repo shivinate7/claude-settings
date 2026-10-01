@@ -1820,8 +1820,23 @@ def worktree_live_session(target: str):
 
 
 def worktree_remove_forced(args) -> bool:
-    """True when the call carries `--force` or a short `-f` flag (`-f`, `-ff`)."""
-    return any(a == "--force" or re.fullmatch(r"-f+", a) for a in args if a != "--")
+    """True when the call may carry force: `--force` or any prefix of it (`--f`, `--fo`), or a
+    short cluster holding `f` (`-f`, `-ff`). Args are unquoted like segment_tokens does. An arg
+    shlex cannot read counts as forced, so the note is kept."""
+    for arg in args:
+        try:
+            tokens = shlex.split(arg)
+        except ValueError:
+            return True
+        for tok in tokens:
+            if tok == "--":
+                return False
+            if tok.startswith("--"):
+                if len(tok) > 2 and "--force".startswith(tok):
+                    return True
+            elif tok.startswith("-") and "f" in tok[1:]:
+                return True
+    return False
 
 
 def worktree_remove_subject(args, where: str):

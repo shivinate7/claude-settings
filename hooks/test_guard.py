@@ -2998,6 +2998,14 @@ def worktree_remove_force_noted_case():
     return subject_unread_log_case(VCS + " worktree remove --force $w")
 
 
+def worktree_remove_force_forms_noted_case():
+    for flag in ("'--force'", '"-f"', "--forc", "--f", "-fq"):
+        ok, why = subject_unread_log_case(VCS + " worktree remove " + flag + " $w")
+        if not ok:
+            return False, "%s: %s" % (flag, why)
+    return True, "quoted, abbreviated and clustered force forms are still noted"
+
+
 def branch_base_unread_log_case():
     """`git branch -D` over a repository with no `origin/HEAD`, no local `main` and no local
     `master` is allowed, and logged as `noted`/`subject-unread`, the same shape as an unreadable
@@ -3731,6 +3739,8 @@ LOG_CHECKS = (
      worktree_remove_plain_quiet_case),
     ("log: a forced worktree remove with an unreadable subject is still noted",
      worktree_remove_force_noted_case),
+    ("log: a quoted or abbreviated force on a worktree remove is still noted",
+     worktree_remove_force_forms_noted_case),
     ("log: a branch delete with no resolvable base is allowed and noted",
      branch_base_unread_log_case),
     ("stack: the refusal never names the action it refused", stack_reason_hygiene_case),
