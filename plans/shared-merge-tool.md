@@ -65,9 +65,10 @@ refuses to merge for an old copy.
 3. When the checkout is on `main`, clean, and behind, fast-forward it. In any other state,
    leave it, and print one line that says why.
 4. **Warn loudly, then go on.** When the command cannot prove fresh code (no network, a fetch
-   failure, a SHA mismatch, or a dirty checkout), it runs the code it has. Before step 1 of the
-   flow, it prints a warning block. The block names the SHA it runs, how many commits that SHA
-   is behind `origin/main` when that is known, and why the update failed.
+   failure, or a SHA mismatch), it runs the code it has. Before step 1 of the flow, it prints
+   a warning block. The block names the SHA it runs, how many commits that SHA is behind
+   `origin/main` when that is known, and why the update failed. A dirty checkout is not a
+   warning: it prints one line and runs fresh code.
 
 Each run prints the claude-settings SHA it ran. `merge --dev` runs the checkout's own tree
 instead, for work on the tool itself. Only that flag does it.
@@ -202,7 +203,7 @@ Each lane is one Sonnet builder. When every lane in its "Waits for" cell has mer
 | 3 | The shim, the lookup, the fresh-code guard and `--dev`. | none | `merge/test_launch.py` covers each lookup source, a dirty checkout left untouched, and an offline fetch that warns and runs the code it has. Each guard goes red on a mutant. Wired into `gates.yml`. |
 | 3b | `merge/merge.py`, git half: the lock ref, temporary worktree, claim, push, revert, resume, `--unlock`, local main, `afterMerge`. | 1 | `merge/test_merge.py` against a local bare origin covers the race, a moved head, a refused push and a stopped run. Wired into `gates.yml`. |
 | 4 | `merge/merge.py`, GitHub half: required checks, the wait, the minute read, `gh pr merge --match-head-commit`, branch delete. | 3b | The same test, with a `gh` shim on `PATH`, covers red, DIRTY, a force-push and a protection refusal. |
-| 5 | Docs: the stamp README contract and adoption checklist, the claude-settings README, `rule_mechanisms.json` for `git-slug-then-claim-number`. | 1, 2, 3, 4 | `rule_audit.py`, `check_landed_dirs.py` and STE lint pass. |
+| 5 | Docs: the stamp README contract and adoption checklist, the claude-settings README, `rule_mechanisms.json` for `git-slug-then-claim-number`. A Windows launcher for `bin/merge` (for example `merge.cmd`), landed by `install.ps1` and run in the Windows CI job. | 1, 2, 3, 4 | `rule_audit.py`, `check_landed_dirs.py` and STE lint pass. |
 | 6 | Banchi, in Banchi: the config, mode `check` in `check.yml`, `make merge` on the tool. | 2, 3, 4 | One real merge through the tool. `make check` is green. |
 | 7 | Banchi, in Banchi: delete the ported code, the gloss stopgap and DEBT78. Rewrite D140. | 6 | `make check` is green. A search for `entry_gloss` and `gloss_first_uses` finds nothing. |
 | 8 | q_max, in q_max: the three steps above. | 3, 4 | One real merge through the tool. `stamp.yml` holds no write permission. |
