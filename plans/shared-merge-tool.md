@@ -104,7 +104,7 @@ The repo keeps one config file, the stamp config it already has or a new one at
 | `merge.method` | `merge`, `squash` or `rebase`. Read it from the repo history. Never guess it. |
 | `merge.requiredChecks` | `"protection"` reads the branch protection API. A list names the checks for a repo with no protection. |
 | `merge.deadlineMinutes` | The longest wait for the claim commit's checks. |
-| `merge.afterMerge` | Commands that run after the local main moves, such as a primary-checkout sync. Each runs in the repo root. A failure is reported, and the merge stays. |
+| `merge.afterMerge` | Commands that run after the local main moves, such as a primary-checkout sync. Each runs in the repo root. A failure is reported, the merge stays, and the command exits non-zero. |
 | `merge.deleteBranch` | Delete the head branch on origin and locally after the merge. |
 
 A repo calls the command from its own wrapper, such as a `make merge` target. The wrapper
@@ -206,8 +206,8 @@ Each lane is one Sonnet builder. When every lane in its "Waits for" cell has mer
 | 5 | Docs: the stamp README contract and adoption checklist, the claude-settings README, `rule_mechanisms.json` for `git-slug-then-claim-number`. A Windows launcher for `bin/merge` (for example `merge.cmd`), landed by `install.ps1` and run in the Windows CI job. | 1, 2, 3, 4 | `rule_audit.py`, `check_landed_dirs.py` and STE lint pass. |
 | 6 | Banchi, in Banchi: the config, mode `check` in `check.yml`, `make merge` on the tool. | 2, 3, 4 | One real merge through the tool. `make check` is green. |
 | 7 | Banchi, in Banchi: delete the ported code, the gloss stopgap and DEBT78. Rewrite D140. | 6 | `make check` is green. A search for `entry_gloss` and `gloss_first_uses` finds nothing. |
-| 8 | q_max, in q_max: the three steps above. | 3, 4 | One real merge through the tool. `stamp.yml` holds no write permission. |
-| 9 | Delete mode `stamp` from `actions/stamp`, its tests and its README. | 8 | No workflow in any repo names mode `stamp`. `test_stamp.mjs` passes, and a pending record on the default branch goes red in `check`. |
+| 8 | **On hold.** q_max, in q_max: the three steps above. | 3, 4, and the owner's word | One real merge through the tool. `stamp.yml` holds no write permission. |
+| 9 | **On hold.** Delete mode `stamp` from `actions/stamp`, its tests and its README. | 8, and the owner's word | No workflow in any repo names mode `stamp`. `test_stamp.mjs` passes, and a pending record on the default branch goes red in `check`. |
 
 ## Settled by the owner
 
@@ -222,3 +222,6 @@ Each lane is one Sonnet builder. When every lane in its "Waits for" cell has mer
    guard").
 5. **`--dev` exists, behind the explicit flag only.** It runs the checkout's own tree, for work
    on the tool itself.
+6. **Lanes 8 and 9 are on hold.** Do not start them. The owner starts them later.
+7. **A failed `afterMerge` gives a non-zero exit.** The merge stays, and the printed line says
+   that it landed.
