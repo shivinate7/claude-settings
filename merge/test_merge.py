@@ -45,6 +45,7 @@ class FakeHost:
         self.root, self.other, self.branch = root, other, branch
         self.checks, self.refuse, self.on_wait = (True, ""), None, None
         self.head_override, self.mergeable = None, "MERGEABLE"
+        self.waits, self.seq, self.state = [], None, "green"  # waits: (sha, prior) per call; seq: scripted results, then self.checks
 
     def pr(self, n):
         head = merge.origin_head(self.root, self.branch)
@@ -54,10 +55,14 @@ class FakeHost:
     def required_names(self):
         return ["gates"]
 
+    def head_state(self, n):
+        return self.state
+
     def wait_checks(self, n, sha, d, prior=None):
-        if self.on_wait:
+        self.waits.append((sha, prior))
+        if prior is not None and self.on_wait:  # on_wait plays the rival during the wait after the claim push
             self.on_wait()
-        return self.checks
+        return self.seq.pop(0) if self.seq else self.checks
 
     def merge(self, n, method, sha):
         if self.refuse:
@@ -146,6 +151,54 @@ class Flow(Env):
         self.assertIn("Record-claim: D-002", out)
         self.assertEqual(self.refs(), before)
         self.assertEqual(self.worktrees(), 1)
+
+    def test_preview_says_the_state_of_the_head_checks(self):
+        self.host.state = "red: gates: fail"
+        rc, out = self.run_merge("7")
+        self.assertIn("head checks: red: gates: fail", out)
+
+    def test_the_lock_outlives_two_waits(self):
+        ttls = []
+        acquire = self.lock.acquire
+        self.lock.acquire = lambda b, ttl: (ttls.append(ttl), acquire(b, ttl))[1]
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertGreaterEqual(ttls[0], (2 * CONFIG["merge"]["deadlineMinutes"] + 10) * 60)  # head wait, claim wait, ten spare
+
+    def test_head_red_claims_nothing_pushes_nothing_and_frees_the_lock(self):
+        before = self.refs()
+        self.host.seq = [(False, "a check is red: gates: fail")]
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1)
+        self.assertIn("a check is red: gates: fail", out)
+        self.assertEqual(self.refs(), before)  # no claim push, and the lock ref is gone
+        self.assertEqual(len(self.host.waits), 1)
+
+    def test_head_pending_then_green_claims_after_the_wait(self):
+        rc, out = self.run_merge("7", "--confirm")  # the fake wait returns green: one wait on the head, one on the claim
+        self.assertEqual(rc, 0, out)
+        (s1, p1), (s2, p2) = self.host.waits
+        self.assertIsNone(p1)  # the first wait is on the head as it stands, before any push
+        self.assertNotEqual(s1, s2)
+        self.assertEqual(p2, s1)
+        self.assertEqual(self.claims(), 1)
+
+    def test_head_pending_then_red_claims_nothing(self):
+        before = self.refs()
+        self.host.seq = [(False, "a check is red: gates: fail https://x")]  # the wait saw pending, then red
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.refs(), before)
+        self.assertEqual(self.claims(), 0)
+
+    def test_nothing_to_claim_waits_once(self):
+        sh(self.other, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(self.other, "git", "rm", "-q", "docs/decisions/second.md")
+        sh(self.other, "git", "commit", "-qm", "no pending record left"); sh(self.other, "git", "push", "-q", "origin", "feat")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("nothing to claim", out)
+        self.assertEqual(len(self.host.waits), 1)
 
     def test_full_merge_claims_pushes_merges_syncs_cleans(self):
         mark = os.path.join(self.t, "after.txt")
@@ -280,7 +333,7 @@ class Guards(Env):
         self.assertEqual(self.worktrees(), 1)
 
     def test_red_check_reverts_the_claim(self):
-        self.host.checks = (False, "required check `build` is red")
+        self.host.seq = [(True, ""), (False, "required check `build` is red")]  # the head is green, the claim run is red
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1)
         self.assertIn("`build` is red", out)
@@ -289,7 +342,7 @@ class Guards(Env):
         self.assertFalse(self.lock_ref())
 
     def test_red_check_after_a_push_in_the_wait_reverts_nothing(self):
-        self.host.checks = (False, "red")
+        self.host.seq = [(True, ""), (False, "red")]
         self.host.on_wait = self.competitor_push
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1)
@@ -422,7 +475,7 @@ class AfterPush(Env):
 class RerunAfterRevert(Env):
     def test_second_run_claims_the_same_number_again_and_merges(self):
         # Banchi #595, DEBT81: a red check reverts the claim; the rerun, after green, must claim again.
-        self.host.checks = (False, "check gates is red")
+        self.host.seq = [(True, ""), (False, "check gates is red")]
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
         self.assertIn("reverted", out)
@@ -451,7 +504,7 @@ class Stopped(Env):
         self.assertEqual(rc, 1)
         self.assertIn("held", out)
         self.assertEqual(self.head(), claim_head)
-        self.now += 16 * 60  # deadlineMinutes 5 + 10, passed
+        self.now += 21 * 60  # 2 * deadlineMinutes 5 + 10, passed
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertIn("resumed", out)
@@ -562,7 +615,7 @@ if a[:2] == ["pr", "view"]:
                           "mergeable": "CONFLICTING" if bad else "MERGEABLE", "mergeStateStatus": "DIRTY" if bad else "CLEAN"}))
     else:
         print(json.dumps({"state": "MERGED" if S.get("oid") else "OPEN", "mergeCommit": {"oid": S["oid"]} if S.get("oid") else None}))
-elif a[:2] == ["pr", "checks"] and S.get("checks_broken"):
+elif a[:2] == ["pr", "checks"] and S.get("checks_broken") and S["checks_calls"] >= S.get("broken_from", 0):
     print("HTTP 500: server error"); sys.exit(1)
 elif a[:2] == ["pr", "checks"]:
     seq = S["checks_seq"]; cur = seq.pop(0) if len(seq) > 1 else seq[0]; S["checks_calls"] += 1; save()
@@ -747,9 +800,43 @@ class GhHalf(Env):
         self.assertEqual(self.head(), before)  # nothing was pushed
         self.assertTrue(self.reverted())  # still the pending record: no claim on the branch
 
+    def test_head_red_pushes_no_claim(self):
+        before = self.head()
+        self.set(checks_seq=[[("gates", "fail", "https://x/y")]])
+        rc, out = self.go()
+        self.assertEqual(rc, 1)
+        self.assertIn("gates: fail", out)
+        self.assertEqual(self.head(), before)
+        self.assertNotIn("pr merge", self.calls())
+        self.assertFalse(self.lock_ref())
+
+    def test_head_pending_then_red_pushes_no_claim(self):
+        before = self.head()
+        self.set(checks_seq=[[("gates", "pending", "")], [("gates", "fail", "")]])
+        rc, out = self.go()
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.head(), before)
+        self.assertNotIn("pr merge", self.calls())
+
+    def test_head_pending_then_green_claims_and_waits_again(self):
+        self.set(checks_seq=[[("gates", "pending", "")], [("gates", "pass", "")]])
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.claims("main"), 1)
+        self.assertGreaterEqual(self.paused.count(60), 1)  # the head's own pending check was waited on
+
+    def test_the_preview_names_the_head_state(self):
+        for seq, want in (([("gates", "pass", "")], "head checks: green"), ([("gates", "pending", "")], "head checks: pending: gates"),
+                          ([("gates", "fail", "")], "head checks: red: gates: fail")):
+            self.set(checks_seq=[seq])
+            rc, out = self.run_merge("7", host=self.gh_host())
+            self.assertEqual(rc, 0, out)
+            self.assertIn(want, out)
+
     def test_a_failed_read_in_the_wait_reverts_the_claim(self):
         before = self.head()
-        self.set(checks_broken=True)
+        self.set(checks_broken=True, broken_from=1)  # the head reads fine, the wait after the claim push does not
+        self.set(checks_seq=[[("gates", "pass", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 1)
         self.assertIn("gh pr checks failed", out)
@@ -777,7 +864,9 @@ if __name__ == "__main__":
         # A run that dies without cleanup: os._exit at the wait, so no `finally` runs.
         class Die(FakeHost):
             def wait_checks(self, n, sha, d, prior=None):
-                os._exit(9)
+                if prior is not None:  # the wait after the claim push; the head's own wait comes first
+                    os._exit(9)
+                return True, ""
         os.chdir(sys.argv[2])
         sys.exit(merge.main(["7", "--confirm"], host=Die(sys.argv[2], None), lock=merge.GitLock(sys.argv[2])))
     unittest.main()

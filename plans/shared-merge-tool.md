@@ -122,9 +122,13 @@ passes its arguments through and adds nothing.
    touched, and the claim reads exactly the tree that merges.
 4. Run `stamp.mjs --claim --base origin/<defaultBranch>`. The ceiling is every number in the
    tree and in the base tip, plus each `RETIRED` list. Then run `regenerate`.
-5. When nothing changed, skip to step 8. Else commit with the trailer
-   `Record-claim: <ids>` and push `HEAD:<branch>` as a plain push. Never force.
-6. Wait for the required checks on the claim SHA. Each pass reads the pull request first.
+5. When nothing changed, skip to step 6 with the head as the SHA: one wait only. Else check
+   first. Wait for the required checks on the head, with the wait of step 6 (same deadline and
+   moved-head rules). Any red or cancelled check stops the run with nothing claimed and
+   nothing pushed, names the red check, and releases the lock. Pending checks are waited
+   out. Only when all are green: commit with the trailer `Record-claim: <ids>` and push
+   `HEAD:<branch>` as a plain push. Never force.
+6. Wait for the required checks on the SHA (the claim SHA after a claim). Each pass reads the pull request first.
    A head that still reads as the pre-claim SHA is GitHub lagging the push. The wait goes
    on for it until the deadline. Any other head, DIRTY or CONFLICTING ends the wait. Any failed or
    cancelled check ends the wait, required or not. Every entry of a duplicate check name is
@@ -138,6 +142,9 @@ passes its arguments through and adds nothing.
    command with `bash -c` in the repo root. A failure of either exits non-zero. The merge
    stays.
 10. Delete the head branch, remove the temporary worktree, and release the lock.
+
+The preview prints the head's check state: `head checks: green`, `pending: <names>` or
+`red: <name>`.
 
 A rerun finds its own claim at the head (the trailer, and each number still free) and resumes
 at step 6. It does not claim twice.
@@ -153,7 +160,7 @@ at step 6. It does not claim twice.
 | Someone pushes or force-pushes the branch in the wait. | The head SHA is not the claim SHA. The tool reverts nothing, because the claim commit can be gone. `--match-head-commit` refuses the merge in any case. The message says to run again. |
 | A push of the claim or of the revert is refused. | Each push is fast-forward only, so a moved branch refuses it. Nothing is on origin. The tool removes its worktree and stops. A refused revert prints the exact revert command. |
 | Protection refuses the merge. | `gh pr merge` fails. The claim is reverted, and the full gh message is printed. The tool never adds `--admin` and never pushes the default branch. |
-| The tool stops mid-run. | The lock carries an expiry of `deadlineMinutes` plus ten. A rerun breaks an expired lock. `merge --unlock` removes the lock and reads nothing first. |
+| The tool stops mid-run. | The lock carries an expiry of twice `deadlineMinutes` plus ten (a run waits twice). A rerun breaks an expired lock. `merge --unlock` removes the lock and reads nothing first. |
 
 The pull request check needs one change. Off the default branch, `check` refuses a number
 the branch added. It must accept a number that a `Record-claim` commit added, when that
@@ -238,3 +245,8 @@ Each lane is one Sonnet builder. When every lane in its "Waits for" cell has mer
 8. **Numbered records may be deleted.** There is no retired list and no stub file. The claim
    takes the next number past the highest number ever used for the kind, read from the base
    ref's history. `check` accepts a removed record. A shallow clone refuses the claim.
+9. **Check first, then claim.** Before `--confirm` pushes a claim, it reads the head's own
+   checks with the same wait. Red or cancelled: nothing is claimed or pushed, and the lock is
+   released. Pending: it waits, then claims only on green. The wait after the claim push stays.
+   With nothing to claim, one wait only. Cause: Banchi #595, a claim push cancelled a run
+   whose failure was already there, and the claim was reverted twice.
