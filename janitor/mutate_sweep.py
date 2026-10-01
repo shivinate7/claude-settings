@@ -134,8 +134,10 @@ MUTATIONS = [
      "test_refusal_dirty_worktree"),
     ("refusal: a live session no longer keeps its worktree",
      "sweep",
+     '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}\n'
      '    if live:\n'
      '        return {"path": path, "action": "keep", "reason": "live-session"}',
+     '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}\n'
      '    if False:\n'
      '        return {"path": path, "action": "keep", "reason": "live-session"}',
      "test_refusal_live_session_worktree"),
@@ -363,20 +365,13 @@ MUTATIONS = [
     ("opt-out: a malformed present sweep/protectedPrefixes value falls back to the permissive default",
      "sweep",
      '    if "sweep" in data and not isinstance(data["sweep"], bool):\n'
-     '        return False, (), False\n'
-     '    sweep_enabled = data.get("sweep", True)\n'
-     '    if "protectedPrefixes" in data:\n'
-     '        extra = data["protectedPrefixes"]\n'
-     '        if not isinstance(extra, list) or not all(isinstance(item, str) for item in extra):\n'
-     '            return False, (), False\n'
-     '    else:\n'
-     '        extra = []',
-     '    sweep_enabled = data.get("sweep", True)\n'
-     '    if not isinstance(sweep_enabled, bool):\n'
-     '        sweep_enabled = True\n'
-     '    extra = data.get("protectedPrefixes", [])\n'
-     '    if not isinstance(extra, list):\n'
-     '        extra = []',
+     '        return None\n'
+     '    for key in ("protectedPrefixes", "huskNames"):\n'
+     '        if key in data and (not isinstance(data[key], list)\n'
+     '                            or not all(isinstance(item, str) for item in data[key])):\n'
+     '            return None\n'
+     '    return data\n',
+     '    return data\n',
      "test_sweep_string_false_refuses_the_whole_repository"),
 
     # ---- the primary-checkout exclusion (review fix, PR #83) ----
