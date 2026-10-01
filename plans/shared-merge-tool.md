@@ -206,8 +206,8 @@ Each lane is one Sonnet builder. When every lane in its "Waits for" cell has mer
 | 5 | Docs: the stamp README contract and adoption checklist, the claude-settings README, `rule_mechanisms.json` for `git-slug-then-claim-number`. A Windows launcher for `bin/merge` (for example `merge.cmd`), landed by `install.ps1` and run in the Windows CI job. | 1, 2, 3, 4 | `rule_audit.py`, `check_landed_dirs.py` and STE lint pass. |
 | 6 | Banchi, in Banchi: the config, mode `check` in `check.yml`, `make merge` on the tool. | 2, 3, 4 | One real merge through the tool. `make check` is green. |
 | 7 | Banchi, in Banchi: delete the ported code, the gloss stopgap and DEBT78. Rewrite D140. | 6 | `make check` is green. A search for `entry_gloss` and `gloss_first_uses` finds nothing. |
-| 8 | q_max, in q_max: the three steps above. | 3, 4 | One real merge through the tool. `stamp.yml` holds no write permission. |
-| 9 | Delete mode `stamp` from `actions/stamp`, its tests and its README. | 8 | No workflow in any repo names mode `stamp`. `test_stamp.mjs` passes, and a pending record on the default branch goes red in `check`. |
+| 8 | **On hold.** q_max, in q_max: the three steps above. | 3, 4, and the owner's word | One real merge through the tool. `stamp.yml` holds no write permission. |
+| 9 | **On hold.** Delete mode `stamp` from `actions/stamp`, its tests and its README. | 8, and the owner's word | No workflow in any repo names mode `stamp`. `test_stamp.mjs` passes, and a pending record on the default branch goes red in `check`. |
 
 ## Settled by the owner
 
@@ -217,6 +217,7 @@ Each lane is one Sonnet builder. When every lane in its "Waits for" cell has mer
 2. **The merge lock is a ref on origin,** `refs/merge-lock/<branch>`, made by the GitHub API.
    Cloud sessions merge too, and a file lock cannot see them.
 3. **Delete mode `stamp` once q_max moves** (lane 9). One path, and no workflow writes to main.
+6. **Lanes 8 and 9 are on hold.** Do not start them. The owner starts them later.
 4. **The command updates itself before every merge.** It never refuses to merge for an old
    copy. When it cannot prove fresh code, it warns loudly and goes on (see "The fresh-code
    guard").
