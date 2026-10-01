@@ -175,7 +175,8 @@ class Flow(Env):
         sh(self.co, "git", "add", "scratch.txt")
         old = sh(self.co, "git", "rev-parse", "main")
         rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 0, out)
+        self.assertEqual(rc, 1, out)  # owner ruling: a failed local fast-forward exits non-zero
+        self.assertIn("the merge landed, but the local main did not move", out)
         self.assertIn("uncommitted", out)
         self.assertEqual(sh(self.co, "git", "rev-parse", "main"), old)
         self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))

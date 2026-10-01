@@ -370,14 +370,16 @@ def confirm(root, cfg, cfgrel, n, host, lock):
         if not commit:
             fail("the merge was refused:\n" + msg)
         say(f"merge: #{n} merged as {commit[:9]}.")
+        ok = True
         try:
             ff_main(root, base, commit)
-        except Stop as e:  # the merge is done: report, go on
-            say(f"merge: {e}")
-        ok = after_merge(root, m.get("afterMerge", []))
+        except Stop as e:  # the merge landed: report, go on, exit non-zero at the end
+            say(f"merge: the merge landed, but the local {base} did not move: {e}")
+            ok = False
+        ok = after_merge(root, m.get("afterMerge", [])) and ok
         if m.get("deleteBranch"):
             cut_branch(root, branch, sha)
-        return 0 if ok else 1  # the merge landed either way; a failed afterMerge exits non-zero
+        return 0 if ok else 1  # the merge landed either way; a failed ff or afterMerge exits non-zero
     finally:
         if wt:
             drop_worktree(root, tmp, wt)
