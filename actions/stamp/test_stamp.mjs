@@ -578,7 +578,7 @@ test("glossFirstUse: a flat-file kind has no gloss", () =>
     write(root, "docs/codes.md", "# Codes\n\n## C-new-code — New code\n");
     write(root, "CLAUDE.md", "C-new-code\n");
     stamp(root, headingConfig());
-    assert.equal(read(root, "CLAUDE.md"), "C1\n".replace("C1", "C2"));
+    assert.equal(read(root, "CLAUDE.md"), "C1\n");
   }));
 
 test("heading: a malformed pending heading is refused and nothing is written", () =>
