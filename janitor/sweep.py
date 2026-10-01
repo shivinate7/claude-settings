@@ -1304,8 +1304,9 @@ def find_dead_rooted():
     (`DEAD_ROOTED_EXTENSIONS`) that no longer exists, whose parent directory is also
     missing, and whose nearest existing ancestor carries `.git` or `.claude` (a deleted
     checkout or worktree). `None` when the machine pid enumeration failed.
-    Decision: {"pid", "command", "missing", "home", "action": "reap"|"keep", "reason"}. Reap only when `is_orphan` and `is_current_user_process` both
-    answer a confirmed yes; `None` from either is `unreadable-subject`, keep.
+    Decision: {"pid", "command", "missing", "home", "action": "reap"|"keep", "reason"}.
+    Reap only when `is_orphan` and `is_current_user_process` both answer a confirmed yes;
+    `None` from either is `unreadable-subject`, keep.
 
     The argv is the subject here, so `process_command` decides WHICH processes qualify. It never
     decides reap-or-keep: that stays with the two reads and a pid-only signal."""
