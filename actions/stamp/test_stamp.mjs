@@ -1314,6 +1314,16 @@ test("--check still refuses a record numbered on the branch itself, beside a syn
     assert.match(problems[0], /own\.md is numbered D-003 on a branch/);
   }));
 
+test("--check names an unreadable default-branch ref in the refusal, and keeps refusing", () =>
+  withTempDir((root) => {
+    syncedRepo(root);
+    const problems = check(root, frontmatterConfig(), { base: "long", defaultRef: "origin/nope" });
+    assert.equal(problems.length, 1, problems.join(" | "));
+    assert.match(problems[0], /m\.md is numbered D-002 on a branch/);
+    assert.match(problems[0], /default-branch ref origin\/nope was unreadable/);
+    assert.match(problems[0], /fetch-depth: 0.*git fetch origin main/);
+  }));
+
 test("the CLI runs, and never exits 0 silent, when reached through a symlinked directory", () =>
   withTempDir((root) => {
     const link = join(root, "link");
