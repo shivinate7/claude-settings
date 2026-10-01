@@ -1303,8 +1303,8 @@ def find_dead_rooted():
     """Return one decision dict per process whose argv names a script file
     (`DEAD_ROOTED_EXTENSIONS`) that no longer exists, whose parent directory is also
     missing, and whose nearest existing ancestor carries `.git` or `.claude` (a deleted
-    checkout or worktree). `None` when the machine pid enumeration failed. Decision: {"pid", "command", "missing", "home", "action":
-    "reap"|"keep", "reason"}. Reap only when `is_orphan` and `is_current_user_process` both
+    checkout or worktree). `None` when the machine pid enumeration failed.
+    Decision: {"pid", "command", "missing", "home", "action": "reap"|"keep", "reason"}. Reap only when `is_orphan` and `is_current_user_process` both
     answer a confirmed yes; `None` from either is `unreadable-subject`, keep.
 
     The argv is the subject here, so `process_command` decides WHICH processes qualify. It never
