@@ -35,6 +35,8 @@ A repo that adopts this engine meets each item below.
    - `file`: one flat file, and every heading is a record. `## C-<slug> — Title` becomes
      `## C12 — Title`. The file keeps its name.
 
+A repo on the merge tool follows "The merge tool contract" below. It replaces item 4 above.
+
 A shape that no config field can state is not covered. Bring it to the owner as a
 question. Do not add a repo name here to fit it.
 
@@ -353,6 +355,65 @@ Do each step in your own repo, from your own tree.
 8. `--check` on the default branch refuses any pending record. In a repo that uses mode
    `stamp`, run it after the stamp commit lands. Before that, it is red.
 9. Add both jobs to your workflow. Pin the SHA. Set the concurrency lock.
+
+## The merge tool contract
+
+The command `merge` (`merge/merge.py`, see the claude-settings README) claims before the
+merge, on the pull request branch. Main never holds a pending record. A repo that moves to it
+meets each item below.
+
+1. One config file holds everything. It is the stamp config the repo already has, or a new
+   `.github/stamp.json`. The command reads it from the repo root. A different path goes in
+   `--config`.
+2. `defaultBranch` is set. The command refuses a config without it.
+3. A `merge` block sets `method` (`merge`, `squash` or `rebase`) and `deadlineMinutes`. The
+   command refuses a config that lacks either, but only under `--confirm`. A preview does
+   not check them. It never guesses them. Read `method` from
+   the repo's own merge history.
+4. `merge.requiredChecks` is `"protection"` (the default) or a list of check names. If the
+   list is empty or cannot be read, the command stops before the claim push. A repo with no
+   branch protection must write the list.
+5. `merge.afterMerge` is a list of shell commands. Each runs with `bash -c` in the repo root,
+   after the local main moves. `merge.deleteBranch` is a boolean.
+6. Every pull request runs mode `check`, with `fetch-depth: 0`. A number that a
+   `Record-claim` commit added is accepted. Any other number a branch adds is refused.
+7. Every push to the default branch runs mode `check` too. It refuses any pending record
+   there, and needs only `contents: read`. No workflow runs mode `stamp` for this repo.
+8. A check name can repeat, such as one job in two workflows. The wait keeps every entry
+   of a name. All of them must pass, and one red entry stops the wait.
+
+The tool keeps these behaviours. The adopting repo needs no setting for them.
+
+- It takes a lock, the ref `refs/merge-lock/<defaultBranch>` on origin. The lock expires
+  after `deadlineMinutes` plus ten minutes.
+- It claims in a temporary worktree at the pull request head. It pushes the claim as a
+  plain push, never a force push.
+- The wait stops on any failed or cancelled check, required or not. This holds
+  for each entry of a duplicate check name. A DIRTY branch or a moved head stops it too.
+- A head that still reads as the pre-claim SHA is waited on until the deadline.
+- On a stop, it reverts the claim, only while the origin head is the claim commit.
+- It merges with `--match-head-commit`. It never passes `--admin`.
+
+## Adoption checklist, the merge tool
+
+Do each step in your own repo, from your own tree.
+
+1. Do steps 1 to 6 of the engine checklist above, so the config reads your tree correctly.
+2. Add the `merge` block. Read `method` from the repo's merge history. Set
+   `deadlineMinutes` to a bit more than your slowest required check.
+3. Set `requiredChecks`. For a branch with protection, use `"protection"`. Otherwise name the
+   checks in a list.
+4. Add each command that must run after the merge to `afterMerge`, such as a sync of a
+   primary checkout. Each exits 0 on a run with nothing to do.
+5. Set `regenerate` in the config, not in the workflow input. The claim runs it in the
+   same commit.
+6. Switch the workflow. Run mode `check` on every pull request, and on every push to the
+   default branch. Remove the mode `stamp` job and its write permission.
+7. Retire your own claim step, such as a claim in a merge script. Keep a wrapper that
+   passes its arguments through and adds nothing. Remove any other.
+8. Run `merge <pr>` with no flag on a real pull request. Read the preview. Then run one real
+   merge with `--confirm`.
+9. Check that the default branch holds no pending record after the merge.
 
 ## Tests
 

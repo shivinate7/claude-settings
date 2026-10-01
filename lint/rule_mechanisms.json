@@ -248,8 +248,9 @@
     },
     "git-slug-then-claim-number": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "README Decision 5 keeps id-claiming manual and per repo, on purpose. Nothing enforces a free number at merge time."
+        "kind": "gate",
+        "ref": "actions/stamp/stamp.mjs",
+        "needle": "function branchNumbered("
       }
     },
     "git-cite-by-id": {

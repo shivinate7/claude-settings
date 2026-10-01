@@ -2,7 +2,7 @@
 
 One command merges a pull request in every repo. It claims record numbers before the merge.
 It waits for CI on the claim commit. It reverts the claim when a step fails. Then it merges.
-This plan is a design. It builds nothing.
+Lanes 1 to 5 are built (see "Build lanes"). The text below states what the built code does.
 
 ## Why
 
@@ -114,21 +114,29 @@ passes its arguments through and adds nothing.
 
 1. Take the merge lock: create the ref `refs/merge-lock/<defaultBranch>` on origin through the
    GitHub API. The API refuses a ref that exists, so only one session holds it.
-2. Fetch origin. Read the pull request head SHA, base and mergeable state through `gh`.
-   Refuse a CONFLICTING or DIRTY pull request before any claim.
+2. Read the pull request head SHA, base and mergeable state through `gh`. Refuse a
+   closed or merged pull request, and a CONFLICTING or DIRTY one, before any claim. Read the
+   required check names. If the list is empty or unreadable, stop here, before anything is
+   pushed. Then fetch origin and check that origin holds the head `gh` named.
 3. Make a detached temporary worktree at the head SHA. The caller's checkout is never
    touched, and the claim reads exactly the tree that merges.
 4. Run `stamp.mjs --claim --base origin/<defaultBranch>`. The ceiling is every number in the
    tree and in the base tip, plus each `RETIRED` list. Then run `regenerate`.
 5. When nothing changed, skip to step 8. Else commit with the trailer
    `Record-claim: <ids>` and push `HEAD:<branch>` as a plain push. Never force.
-6. Wait for the required checks on the claim SHA. Each minute, read the mergeable state and
-   the head SHA.
+6. Wait for the required checks on the claim SHA. Each pass reads the pull request first.
+   A head that still reads as the pre-claim SHA is GitHub lagging the push. The wait goes
+   on for it until the deadline. Any other head, DIRTY or CONFLICTING ends the wait. Any failed or
+   cancelled check ends the wait, required or not. Every entry of a duplicate check name is
+   kept. All must pass, and one red entry ends the wait. A pending check blocks in
+   `gh run watch` for at most a minute, then the loop reads again.
 7. Fetch the base again. Run `stamp.mjs --check` against the base tip. Each claimed number
    must still be free there.
 8. Run `gh pr merge <pr> --<method> --match-head-commit <sha>`. Never `--admin`.
 9. Fast-forward the local main to the merge commit that origin holds: in the worktree that
-   holds main, or by `git fetch origin main:main` when none does. Then run `afterMerge`.
+   holds main, or by `git fetch origin main:main` when none does. Then run each `afterMerge`
+   command with `bash -c` in the repo root. A failure of either exits non-zero. The merge
+   stays.
 10. Delete the head branch, remove the temporary worktree, and release the lock.
 
 A rerun finds its own claim at the head (the trailer, and each number still free) and resumes
@@ -139,8 +147,9 @@ at step 6. It does not claim twice.
 | Failure | Guard |
 |---|---|
 | Two sessions claim against one base tip. | The merge lock serializes claim to merge for one repo. Step 7 reads the base tip again before the merge. After the merge, `check` on the default branch refuses a duplicate number. |
-| A required check on the claim commit goes red. | Revert the claim commit and push the revert. Do this only while the origin head is the claim SHA. Nothing merges. The message names the red check. |
-| The branch goes DIRTY or CONFLICTING in the wait. | The minute read sees it. The wait stops, and the claim is reverted as above. The message says to merge the base into the branch and run again. |
+| Any check on the claim commit goes red, required or not. | A failed or cancelled check ends the wait. Revert the claim commit and push the revert. Do this only while the origin head is the claim SHA. Nothing merges. The message names the red check. |
+| The required check list is empty or unreadable. | The tool stops before the claim push. Nothing is on origin. The message says to name the checks in `merge.requiredChecks`. |
+| The branch goes DIRTY or CONFLICTING in the wait. | Each pass of the wait reads it. The wait stops, and the claim is reverted as above. The message says to merge the base into the branch and run again. |
 | Someone pushes or force-pushes the branch in the wait. | The head SHA is not the claim SHA. The tool reverts nothing, because the claim commit can be gone. `--match-head-commit` refuses the merge in any case. The message says to run again. |
 | A push of the claim or of the revert is refused. | Each push is fast-forward only, so a moved branch refuses it. Nothing is on origin. The tool removes its worktree and stops. A refused revert prints the exact revert command. |
 | Protection refuses the merge. | `gh pr merge` fails. The claim is reverted, and the full gh message is printed. The tool never adds `--admin` and never pushes the default branch. |
@@ -196,18 +205,18 @@ then goes red in `check`. The fix is any pull request through the command, which
 
 Each lane is one Sonnet builder. When every lane in its "Waits for" cell has merged, a lane starts.
 
-| # | Lane | Waits for | Done when |
-|---|---|---|---|
-| 1 | `stamp.mjs`: `--claim --base`, the base-tip ceiling, the `Record-claim` exception in `check`, the default-branch refusal of any pending record, `regenerate` in the config. | none | New `test_stamp.mjs` cases pass, and each new refusal goes red on a mutant. |
-| 2 | `stamp.mjs`: the debt kind and `cite.glossFirstUse`. | 1 | `test_stamp.mjs` passes. A claim on a copy of Banchi main matches `claim-ids.py --write` byte for byte, debts and gloss included. |
-| 3 | The shim, the lookup, the fresh-code guard and `--dev`. | none | `merge/test_launch.py` covers each lookup source, a dirty checkout left untouched, and an offline fetch that warns and runs the code it has. Each guard goes red on a mutant. Wired into `gates.yml`. |
-| 3b | `merge/merge.py`, git half: the lock ref, temporary worktree, claim, push, revert, resume, `--unlock`, local main, `afterMerge`. | 1 | `merge/test_merge.py` against a local bare origin covers the race, a moved head, a refused push and a stopped run. Wired into `gates.yml`. |
-| 4 | `merge/merge.py`, GitHub half: required checks, the wait, the minute read, `gh pr merge --match-head-commit`, branch delete. | 3b | The same test, with a `gh` shim on `PATH`, covers red, DIRTY, a force-push and a protection refusal. |
-| 5 | Docs: the stamp README contract and adoption checklist, the claude-settings README, `rule_mechanisms.json` for `git-slug-then-claim-number`. A Windows launcher for `bin/merge` (for example `merge.cmd`), landed by `install.ps1` and run in the Windows CI job. | 1, 2, 3, 4 | `rule_audit.py`, `check_landed_dirs.py` and STE lint pass. |
-| 6 | Banchi, in Banchi: the config, mode `check` in `check.yml`, `make merge` on the tool. | 2, 3, 4 | One real merge through the tool. `make check` is green. |
-| 7 | Banchi, in Banchi: delete the ported code, the gloss stopgap and DEBT78. Rewrite D140. | 6 | `make check` is green. A search for `entry_gloss` and `gloss_first_uses` finds nothing. |
-| 8 | **On hold.** q_max, in q_max: the three steps above. | 3, 4, and the owner's word | One real merge through the tool. `stamp.yml` holds no write permission. |
-| 9 | **On hold.** Delete mode `stamp` from `actions/stamp`, its tests and its README. | 8, and the owner's word | No workflow in any repo names mode `stamp`. `test_stamp.mjs` passes, and a pending record on the default branch goes red in `check`. |
+| # | Lane | Status | Waits for | Done when |
+|---|---|---|---|---|
+| 1 | `stamp.mjs`: `--claim --base`, the base-tip ceiling, the `Record-claim` exception in `check`, the default-branch refusal of any pending record, `regenerate` in the config. | done | none | New `test_stamp.mjs` cases pass, and each new refusal goes red on a mutant. |
+| 2 | `stamp.mjs`: the debt kind and `cite.glossFirstUse`. | done | 1 | `test_stamp.mjs` passes. A claim on a copy of Banchi main matches `claim-ids.py --write` byte for byte, debts and gloss included. |
+| 3 | The shim, the lookup, the fresh-code guard and `--dev`. | done | none | `merge/test_launch.py` covers each lookup source, a dirty checkout left untouched, and an offline fetch that warns and runs the code it has. Each guard goes red on a mutant. Wired into `gates.yml`. |
+| 3b | `merge/merge.py`, git half: the lock ref, temporary worktree, claim, push, revert, resume, `--unlock`, local main, `afterMerge`. | done | 1 | `merge/test_merge.py` against a local bare origin covers the race, a moved head, a refused push and a stopped run. Wired into `gates.yml`. |
+| 4 | `merge/merge.py`, GitHub half: required checks, the wait, the minute read, `gh pr merge --match-head-commit`, branch delete. | done | 3b | The same test, with a `gh` shim on `PATH`, covers red, DIRTY, a force-push and a protection refusal. |
+| 5 | Docs: the stamp README contract and adoption checklist, the claude-settings README, `rule_mechanisms.json` for `git-slug-then-claim-number`. A Windows launcher, `bin/merge.cmd`. `bin` is a landed directory, so both installers land it. `merge/test_cmd.py` runs in `gates-windows`. | done | 1, 2, 3, 4 | `rule_audit.py`, `check_landed_dirs.py` and STE lint pass. |
+| 6 | Banchi, in Banchi: the config, mode `check` in `check.yml`, `make merge` on the tool. | open | 2, 3, 4 | One real merge through the tool. `make check` is green. |
+| 7 | Banchi, in Banchi: delete the ported code, the gloss stopgap and DEBT78. Rewrite D140. | open | 6 | `make check` is green. A search for `entry_gloss` and `gloss_first_uses` finds nothing. |
+| 8 | **On hold.** q_max, in q_max: the three steps above. | on hold | 3, 4, and the owner's word | One real merge through the tool. `stamp.yml` holds no write permission. |
+| 9 | **On hold.** Delete mode `stamp` from `actions/stamp`, its tests and its README. | on hold | 8, and the owner's word | No workflow in any repo names mode `stamp`. `test_stamp.mjs` passes, and a pending record on the default branch goes red in `check`. |
 
 ## Settled by the owner
 

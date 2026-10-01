@@ -5,10 +5,9 @@ The per-repo measurements below are history from 2026-09-24. The parent no longe
 them. Each repo measures its own fields when it adopts the action.
 
 CLAUDE.md: "Never allocate a numbered record on a branch. Write a slug. Claim the
-number at merge." (rule `git-slug-then-claim-number`.) `lint/rule_audit.py` reads that
-rule as `unmechanized` here. Its own reason: "README Decision 5 keeps id-claiming
-manual and per repo, on purpose." That reason still stands. This entry is not the
-mechanism for claude-settings. It is the mechanism other repos can adopt.
+number at merge." (rule `git-slug-then-claim-number`.) `lint/rule_mechanisms.json` maps
+that rule to the refusal in `actions/stamp/stamp.mjs` (`branchNumbered`). The merge tool,
+`merge/merge.py`, is the claim side. Other repos adopt both.
 
 ## What was measured, 2026-09-24
 
@@ -198,10 +197,10 @@ own real tree on 2026-09-24.
 
 ## The mechanism
 
-This entry adds no new CLAUDE.md rule anchor. `lint/rule_mechanisms.json` keeps
-`git-slug-then-claim-number` as `unmechanized` in this repo. That matches
-`actions/ste-lint`, which carries no anchor of its own either. A reusable action lives
-here, but it enforces nothing until another repo's own workflow calls it. Fixtures:
+This entry adds no new CLAUDE.md rule anchor. `lint/rule_mechanisms.json` maps
+`git-slug-then-claim-number` to `actions/stamp/stamp.mjs` (plan
+`plans/shared-merge-tool.md`). The engine enforces nothing until a repo's own workflow
+calls it. Fixtures:
 `actions/stamp/test_stamp.mjs` for the engine, and `actions/stamp/test_action.sh` for
 the composite action's own shell logic. Both are wired into `gates`, `gates-windows`
 and `gates-macos` in `.github/workflows/gates.yml`.
