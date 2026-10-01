@@ -219,9 +219,5 @@ Each lane is one Sonnet builder. When every lane in its "Waits for" cell has mer
 4. **The command updates itself before every merge.** It never refuses to merge for an old
    copy. When it cannot prove fresh code, it warns loudly and goes on (see "The fresh-code
    guard").
-
-## Open question for the owner
-
-1. **Should `--dev` exist?** It runs the checkout's own tree, for work on the tool itself.
-   A: yes, behind the explicit flag only. B: no, and the tool is tested through its own suites.
-   **Recommend A.** Without it, each edit to the tool needs a merge to main before a real run.
+5. **`--dev` exists, behind the explicit flag only.** It runs the checkout's own tree, for work
+   on the tool itself.
