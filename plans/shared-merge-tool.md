@@ -203,7 +203,7 @@ Each lane is one Sonnet builder. When every lane in its "Waits for" cell has mer
 | 3b | `merge/merge.py`, git half: the lock ref, temporary worktree, claim, push, revert, resume, `--unlock`, local main, `afterMerge`. | 1 | `merge/test_merge.py` against a local bare origin covers the race, a moved head, a refused push and a stopped run. Wired into `gates.yml`. |
 | 4 | `merge/merge.py`, GitHub half: required checks, the wait, the minute read, `gh pr merge --match-head-commit`, branch delete. | 3b | The same test, with a `gh` shim on `PATH`, covers red, DIRTY, a force-push and a protection refusal. |
 | 5 | Docs: the stamp README contract and adoption checklist, the claude-settings README, `rule_mechanisms.json` for `git-slug-then-claim-number`. | 1, 2, 3, 4 | `rule_audit.py`, `check_landed_dirs.py` and STE lint pass. |
-| 6 | Banchi, in Banchi: the config, mode `check` in `check.yml`, `make merge` on the tool. | 2, 4 | One real merge through the tool. `make check` is green. |
+| 6 | Banchi, in Banchi: the config, mode `check` in `check.yml`, `make merge` on the tool. | 2, 3, 4 | One real merge through the tool. `make check` is green. |
 | 7 | Banchi, in Banchi: delete the ported code, the gloss stopgap and DEBT78. Rewrite D140. | 6 | `make check` is green. A search for `entry_gloss` and `gloss_first_uses` finds nothing. |
 | 8 | q_max, in q_max: the three steps above. | 3, 4 | One real merge through the tool. `stamp.yml` holds no write permission. |
 | 9 | Delete mode `stamp` from `actions/stamp`, its tests and its README. | 8 | No workflow in any repo names mode `stamp`. `test_stamp.mjs` passes, and a pending record on the default branch goes red in `check`. |
