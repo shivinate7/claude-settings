@@ -1527,7 +1527,7 @@ def _read_ps_table():
         parts = line.split(None, 3)
         if len(parts) >= 3 and parts[0].isdigit():
             table[int(parts[0])] = (parts[1], parts[2], parts[3] if len(parts) > 3 else "")
-    return table or None
+    return table if table else None  # an empty table is a failed read, never "no process"
 
 
 def _ps_table():

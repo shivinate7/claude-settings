@@ -2363,8 +2363,9 @@ class PreviewCacheTests(unittest.TestCase):
     def setUp(self):
         self.calls = []
         self.real_run = sweep.subprocess.run
-        self.ps_out = "  5     1   %d  /bin/sh -c  echo hi \n" % os.getuid() \
-            if hasattr(os, "getuid") else ""
+        uid = os.getuid() if hasattr(os, "getuid") else 0
+        self.ps_out = ("  5     1   %d  /bin/sh -c  echo hi \n"
+                       "  7     1   %d  /other\n  8     4   %d  /child\n" % (uid, uid + 1, uid))
         self.exit_code = 0
 
         def fake(argv, *a, **k):
@@ -2407,7 +2408,9 @@ class PreviewCacheTests(unittest.TestCase):
             self.assertEqual(sweep.process_command(5), "/bin/sh -c  echo hi")
             self.assertIs(sweep.is_orphan(5), True)
             self.assertIs(sweep.is_current_user_process(5), True)
-            self.assertEqual(sweep.list_all_pids(), [5])
+            self.assertIs(sweep.is_current_user_process(7), False)
+            self.assertIs(sweep.is_orphan(8), False)
+            self.assertEqual(sweep.list_all_pids(), [5, 7, 8])
             self.assertIsNone(sweep.process_command(6))
             self.assertIsNone(sweep.is_orphan(6))
             self.assertEqual(len(self.calls), 1)
@@ -2420,6 +2423,13 @@ class PreviewCacheTests(unittest.TestCase):
             sweep.process_command(5)
             self.assertEqual(self.calls[0][:2], ["ps", "-axo"])
             self.assertEqual(self.calls[1:], [["ps", "-o", "command=", "-p", "5"]] * 2)
+
+    def test_an_empty_ps_table_falls_back_to_the_per_pid_read(self):
+        self.ps_out = ""
+        with mock.patch.object(sys, "platform", "darwin"):
+            self.begin()
+            self.assertEqual(sweep.process_command(5), "9")
+            self.assertEqual(self.calls[-1], ["ps", "-o", "command=", "-p", "5"])
 
     def test_without_a_preview_every_read_is_per_pid_and_linux_never_uses_the_table(self):
         with mock.patch.object(sys, "platform", "darwin"):
