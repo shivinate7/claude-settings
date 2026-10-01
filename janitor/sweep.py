@@ -1429,11 +1429,11 @@ SESSION_MARK = os.path.join(".claude", "shell-snapshots")
 
 
 def find_loose_processes():
-    """Return one dict per process whose argv contains a shell-snapshots path, or `None` when the
-    pid enumeration failed. REPORT ONLY: nothing here, and nothing in `main`, signals one.
-    Dict: {"pid", "command", "orphan", "owner"}; `orphan` and `owner` are True, False, or None
-    (unreadable). A process of another user is left out; an unreadable owner is listed.
-    The caller's own wrapper is among them."""
+    """Return one dict per ORPHANED process whose argv contains a shell-snapshots path, or `None`
+    when the pid enumeration failed. REPORT ONLY: nothing here, and nothing in `main`, signals
+    one. Dict: {"pid", "command", "orphan", "owner"}; `orphan` and `owner` are True or None
+    (unreadable). A process that is not an orphan (a live session's shell wrapper) is left
+    out, and so is a process of another user. An unreadable owner or orphan read is listed."""
     pids = list_all_pids()
     if pids is None:
         return None
@@ -1443,9 +1443,12 @@ def find_loose_processes():
         if not command or SESSION_MARK not in command or pid == os.getpid():
             continue
         owner = is_current_user_process(pid)
-        if owner is not False:
-            found.append({"pid": pid, "command": command, "owner": owner,
-                          "orphan": is_orphan(pid)})
+        if owner is False:
+            continue
+        orphan = is_orphan(pid)
+        if orphan is False:
+            continue
+        found.append({"pid": pid, "command": command, "owner": owner, "orphan": orphan})
     return found
 
 
@@ -1801,7 +1804,23 @@ def reap_husk(root: str, decision: dict, names):
         decision["error"] = "delete failed: %s" % exc
 
 
-def sweep_repo(root: str, confirm: bool, restore_log_path: str):
+def _is_toplevel(path: str) -> bool:
+    """True when the VCS says PATH is its own repository's top level."""
+    answer = guard._git(path, "rev-parse", "--show-toplevel")
+    return (answer is not None and answer.returncode == 0 and os.path.normcase(
+        os.path.realpath(answer.stdout.strip())) == os.path.normcase(os.path.realpath(path)))
+
+
+MODES = ("full", "tier1", "branches")
+
+
+def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "full"):
+    """One repository. `mode` "full" is the whole sweep. "tier1" acts for real, with no
+    --confirm, and only on stale registrations and husks: no worktree, branch or process work.
+    "branches" reaps branches only (preview without --confirm), removes no worktree, and holds
+    every branch any worktree has checked out."""
+    if mode == "tier1":
+        confirm = True
     result = {"root": root, "refused": None, "branches": [], "worktrees": [], "listeners": [],
               "pruned": None, "husks": []}
 
@@ -1815,37 +1834,40 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str):
         return result
 
     base = guard.resolve_default_base(root)
-    if base is None:
+    if base is None and mode != "tier1":
         result["refused"] = "no-default-base"
         return result
 
     # Before the worktree list is read, so a pruned registration is not judged as a worktree.
-    result["pruned"] = prune_registrations(root, confirm)
+    # "branches" prunes nothing: a stale registration then keeps its branch held.
+    if mode != "branches":
+        result["pruned"] = prune_registrations(root, confirm)
 
     entries = parse_worktree_list(root)
     if entries is None:
         result["refused"] = "unreadable-worktree-list"
         return result
 
-    if result["pruned"]["names"] and not result["pruned"]["error"]:
+    if mode == "branches" and not entries:
+        # No worktree list means no branch is held; refuse rather than reap on that.
+        result["refused"] = "unreadable-worktree-list"
+        return result
+
+    if result["pruned"] and result["pruned"]["names"] and not result["pruned"]["error"]:
         # Confirm prunes these before anything else is judged; a preview must predict that run.
         # A failed real prune leaves them registered, so they stay.
         entries = [e for e in entries if not e["prunable"]]
 
-    checked_out_branches = {e["branch"] for e in entries if e.get("branch")}
-
-    branches = list_local_branches(root)
+    branches = [] if mode == "tier1" else list_local_branches(root)
     if branches is None:
         result["refused"] = "unreadable-branch-list"
         return result
 
-    for branch in branches:
-        decision = decide_branch(root, base, branch, protected_prefixes, checked_out_branches)
-        result["branches"].append(decision)
-        if confirm and decision["action"] == "reap":
-            reap_branch(root, branch, decision, restore_log_path)
-
-    for entry in entries:
+    # Worktrees go first: a branch stays held while ANY entry that is not removed holds it. An
+    # entry is removed in THIS run (confirm), or would be (preview: action reap). A removal
+    # that failed (decision["error"]) keeps its entry. A primary checkout is never removed.
+    removed = set()
+    for entry in entries if mode == "full" else ():
         if entry.get("bare"):
             continue
         is_primary = _is_primary_checkout(entry["path"])
@@ -1862,6 +1884,22 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str):
         result["worktrees"].append(decision)
         if confirm and decision["action"] == "reap":
             remove_worktree(root, entry["path"], decision)
+        gone = decision["action"] == "reap"
+        gone = gone and not decision.get("error")
+        if gone:
+            removed.add(entry["path"])
+
+    checked_out_branches = {e["branch"] for e in entries
+                            if e.get("branch") and e["path"] not in removed}
+
+    for branch in branches:
+        decision = decide_branch(root, base, branch, protected_prefixes, checked_out_branches)
+        result["branches"].append(decision)
+        if confirm and decision["action"] == "reap":
+            reap_branch(root, branch, decision, restore_log_path)
+
+    if mode == "branches":
+        return result
 
     husk_names = optout.get("huskNames", [])
     result["husks"] = find_husks(root, entries, husk_names)
@@ -1869,6 +1907,9 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str):
         for decision in result["husks"]:
             if decision["action"] == "husk":
                 reap_husk(root, decision, husk_names)
+
+    if mode == "tier1":
+        return result
 
     checkout_paths = [root] + [e["path"] for e in entries if not e.get("bare")]
     listener_entries = find_swept_listeners(checkout_paths)
@@ -2052,6 +2093,17 @@ def main(argv=None) -> int:
                          help="purge tombstones past 90 days instead of sweeping")
     parser.add_argument("--restore-log", metavar="PATH",
                          help="override the restore log path (default: under the config dir)")
+    parser.add_argument("--root", metavar="PATH",
+                         help="sweep the one repository PATH belongs to (PATH may be a linked "
+                              "worktree or a folder inside it); adds to any ROOT given")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--tier1", action="store_true",
+                       help="only stale registrations and husks. The one mode that acts "
+                            "without --confirm: it removes only proven junk, and a hook "
+                            "runs it. No worktree, branch or process work")
+    modes.add_argument("--branches", action="store_true",
+                       help="only branches: reap those with no unique work, removing no "
+                            "worktree; a preview without --confirm")
     parser.add_argument("--settings-path", metavar="PATH",
                          help="testing only: overrides the settings.json read for janitor.roots")
     args = parser.parse_args(argv)
@@ -2064,6 +2116,17 @@ def main(argv=None) -> int:
         return 0
 
     roots = [os.path.abspath(r) for r in args.roots]
+    if args.root:
+        primary = guard.primary_checkout(os.path.abspath(args.root))
+        if primary is not None and not (
+                _is_toplevel(primary) and os.path.normcase(os.path.realpath(
+                    guard.git_common_dir(primary) or "")) == os.path.normcase(os.path.realpath(
+                        guard.git_common_dir(os.path.abspath(args.root)) or "-"))):
+            primary = None  # a submodule or a separate git dir: dirname(common dir) is wrong
+        if primary is None:
+            print("janitor: %s is not inside a repository" % args.root, file=sys.stderr)
+            return 1
+        roots.append(primary)
     if not roots:
         if args.discover:
             discover_root = os.path.abspath(args.discover)
@@ -2087,8 +2150,11 @@ def main(argv=None) -> int:
                 print("janitor: no repositories found under %s" % where, file=sys.stderr)
                 return 1
 
-    results = [sweep_repo(root, args.confirm, restore_log_path) for root in roots]
-    print_sweep_report(results, args.confirm)
+    mode = "tier1" if args.tier1 else "branches" if args.branches else "full"
+    results = [sweep_repo(root, args.confirm, restore_log_path, mode) for root in roots]
+    print_sweep_report(results, args.confirm or mode == "tier1")
+    if mode != "full":
+        return 0
     dead = find_dead_rooted()
     print_dead_rooted_report(dead)
     print_loose_processes_report(find_loose_processes())

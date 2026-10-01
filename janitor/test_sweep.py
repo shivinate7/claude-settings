@@ -1241,8 +1241,11 @@ class LooseProcessTests(unittest.TestCase):
         cls.home = tempfile.mkdtemp(dir=ROOT)
         snap = os.path.join(cls.home, ".claude", "shell-snapshots", "snapshot-zsh-1-fake.sh")
         cls.procs = []
-        cls.marked = cls._start(snap)
+        cls.marked = cls._start(snap)  # an orphan and a plain one: is_orphan is stubbed True for both
+        cls.live = cls._start(snap + ".live")  # a live session's wrapper: parent alive
         cls.plain = cls._start(os.path.join(cls.home, "plain.sh"))
+        cls.real_is_orphan = staticmethod(sweep.is_orphan)
+        sweep.is_orphan = lambda pid: True if pid in (cls.marked, cls.plain) else cls.real_is_orphan(pid)
 
     @classmethod
     def _start(cls, arg):
@@ -1254,15 +1257,33 @@ class LooseProcessTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        sweep.is_orphan = cls.real_is_orphan
         for proc in cls.procs:
             proc.kill()
             proc.wait()
         shutil.rmtree(cls.home, ignore_errors=True)
 
-    def test_marked_process_is_listed_and_unmarked_is_not(self):
+    def test_marked_orphan_is_listed_and_unmarked_is_not(self):
         pids = {d["pid"] for d in sweep.find_loose_processes()}
         self.assertIn(self.marked, pids)
         self.assertNotIn(self.plain, pids)
+
+    def test_a_live_sessions_wrapper_is_not_listed(self):
+        self.assertFalse(sweep.is_orphan(self.live))
+        self.assertNotIn(self.live, {d["pid"] for d in sweep.find_loose_processes()})
+
+    def test_an_unreadable_orphan_read_is_listed_as_unknown(self):
+        sweep.is_orphan = lambda pid: None if pid == self.live else True if pid in (self.marked, self.plain) \
+            else self.real_is_orphan(pid)
+        try:
+            found = sweep.find_loose_processes()
+        finally:
+            sweep.is_orphan = lambda pid: True if pid in (self.marked, self.plain) else self.real_is_orphan(pid)
+        entry = [d for d in found if d["pid"] == self.live]
+        self.assertEqual(len(entry), 1)
+        out = io.StringIO()
+        sweep.print_loose_processes_report(entry, out=out)
+        self.assertIn("orphan=unknown", out.getvalue())
 
     def test_report_lists_the_marked_process(self):
         out = io.StringIO()
@@ -1793,6 +1814,190 @@ class WorktreeRemovalTests(unittest.TestCase):
         self.assertEqual(matches[0]["action"], "reap")
         self.assertNotIn("error", matches[0])
         self.assertFalse(os.path.isdir(target))
+
+
+class SameRunBranchCutTests(unittest.TestCase):
+    """A branch is released from "checked-out" only when the worktree holding it is removed in
+    this run (confirm) or would be (preview: REAP). A kept or failed removal keeps it held."""
+
+    def _repo(self, name, dirty=False):
+        root = os.path.join(ROOT, "cut-" + name)
+        make_repo(root, {"f.txt": "x\n"})
+        give_remote(root)
+        wt = os.path.join(ROOT, "cut-" + name + "-wt")
+        run_vcs(root, "worktree", "add", "-q", wt, "-b", "lane-cut")
+        if dirty:
+            write(os.path.join(wt, "new.txt"), "dirty\n")
+        return root, wt
+
+    def _branch(self, result):
+        found = [b for b in result["branches"] if b["name"] == "lane-cut"]
+        self.assertEqual(len(found), 1)
+        return found[0]
+
+    def _sweep(self, root, confirm):
+        return sweep.sweep_repo(root, confirm, os.path.join(ROOT, "cut.log"))
+
+    def test_preview_releases_the_branch_of_a_reap_worktree(self):
+        root, _wt = self._repo("preview")
+        result = self._sweep(root, False)
+        self.assertEqual(self._branch(result)["action"], "reap")
+
+    def test_confirm_removes_the_worktree_and_its_branch_in_one_run(self):
+        root, wt = self._repo("confirm")
+        result = self._sweep(root, True)
+        self.assertEqual(self._branch(result)["action"], "reap")
+        self.assertNotIn("error", self._branch(result))
+        self.assertFalse(os.path.isdir(wt))
+        self.assertNotIn("lane-cut", sweep.list_local_branches(root))
+
+    def test_a_kept_worktree_keeps_its_branch_held(self):
+        root, wt = self._repo("kept", dirty=True)
+        result = self._sweep(root, True)
+        self.assertEqual(self._branch(result)["reason"], "checked-out")
+        self.assertTrue(os.path.isdir(wt))
+        self.assertIn("lane-cut", sweep.list_local_branches(root))
+
+    def test_a_second_kept_worktree_on_the_same_branch_keeps_it_held(self):
+        root, wt = self._repo("twice")
+        other = os.path.join(ROOT, "cut-twice-wt2")
+        run_vcs(root, "worktree", "add", "-q", "--force", other, "lane-cut")
+        write(os.path.join(other, "new.txt"), "dirty\n")  # this one is kept
+        result = self._sweep(root, False)
+        self.assertEqual(self._branch(result)["reason"], "checked-out")
+
+    def test_a_failed_removal_keeps_the_branch_held(self):
+        root, wt = self._repo("failed")
+        real = sweep.remove_worktree
+        sweep.remove_worktree = lambda r, p, d: d.__setitem__("error", "remove failed: stub")
+        try:
+            result = self._sweep(root, True)
+        finally:
+            sweep.remove_worktree = real
+        self.assertEqual(self._branch(result)["reason"], "checked-out")
+        self.assertIn("lane-cut", sweep.list_local_branches(root))
+
+
+class SingleTierModeTests(unittest.TestCase):
+    """`--tier1` and `--branches`, driven through `main`. Fixture per test: a stale
+    registration (`gone`), a live reapable worktree (`lane-live`), a merged branch (`merged-b`)."""
+
+    def _fixture(self, name):
+        root = os.path.join(ROOT, "mode-" + name)
+        make_repo(root, {"f.txt": "x\n"})
+        give_remote(root)
+        run_vcs(root, "branch", "merged-b")
+        live = os.path.join(ROOT, "mode-" + name + "-live")
+        run_vcs(root, "worktree", "add", "-q", live, "-b", "lane-live")
+        gone = os.path.join(ROOT, "mode-" + name + "-gone")
+        run_vcs(root, "worktree", "add", "-q", gone, "-b", "lane-gone")
+        shutil.rmtree(gone)
+        return root, live
+
+    def _main(self, *args):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            code = sweep.main(["--restore-log", os.path.join(ROOT, "mode.log")] + list(args))
+        return code, out.getvalue()
+
+    def _registered(self, root):
+        return [os.path.basename(e["path"]) for e in sweep.parse_worktree_list(root)]
+
+    def test_tier1_prunes_stale_registrations_with_no_confirm_and_touches_nothing_else(self):
+        root, live = self._fixture("tier1")
+        before = self._registered(root)
+        self.assertTrue(any(n.endswith("-gone") for n in before))
+        code, _ = self._main("--root", live, "--tier1")  # a linked worktree resolves to its clone
+        self.assertEqual(code, 0)
+        after = self._registered(root)
+        self.assertFalse(any(n.endswith("-gone") for n in after))
+        self.assertTrue(os.path.isdir(live))
+        self.assertIn("merged-b", sweep.list_local_branches(root))
+
+    def test_branches_reaps_a_merged_branch_but_removes_no_worktree_and_holds_theirs(self):
+        root, live = self._fixture("branches")
+        code, _ = self._main("--root", root, "--branches", "--confirm")
+        self.assertEqual(code, 0)
+        left = sweep.list_local_branches(root)
+        self.assertNotIn("merged-b", left)
+        self.assertIn("lane-live", left)
+        self.assertTrue(os.path.isdir(live))
+        self.assertTrue(any(n.endswith("-gone") for n in self._registered(root)))
+
+    def test_branches_previews_without_confirm(self):
+        root, _live = self._fixture("branches-preview")
+        result = sweep.sweep_repo(root, False, os.path.join(ROOT, "mode.log"), "branches")
+        self.assertEqual({b["name"]: b["action"] for b in result["branches"]}["merged-b"], "reap")
+        self.assertIn("merged-b", sweep.list_local_branches(root))
+
+    def test_branches_refuses_when_the_worktree_list_is_empty(self):
+        root, _live = self._fixture("branches-blind")
+        real = sweep.parse_worktree_list
+        sweep.parse_worktree_list = lambda where: []
+        try:
+            result = sweep.sweep_repo(root, True, os.path.join(ROOT, "mode.log"), "branches")
+        finally:
+            sweep.parse_worktree_list = real
+        self.assertEqual(result["refused"], "unreadable-worktree-list")
+        self.assertIn("merged-b", sweep.list_local_branches(root))
+
+    def test_root_resolves_a_linked_worktree_to_its_primary_checkout(self):
+        root, live = self._fixture("resolve")
+        seen = []
+        real = sweep.sweep_repo
+        sweep.sweep_repo = lambda r, *a, **k: (seen.append(r), real(r, *a, **k))[1]
+        try:
+            self._main("--root", live, "--tier1")
+        finally:
+            sweep.sweep_repo = real
+        self.assertEqual([os.path.realpath(r) for r in seen], [os.path.realpath(root)])
+
+    def test_single_tier_modes_do_no_process_work(self):
+        root, _live = self._fixture("noproc")
+        calls = []
+        stubs = {"find_dead_rooted": lambda: calls.append("dead") or [],
+                 "find_loose_processes": lambda: calls.append("loose") or [],
+                 "find_swept_listeners": lambda paths: calls.append("listeners") or []}
+        real = {k: getattr(sweep, k) for k in stubs}
+        for k, fn in stubs.items():
+            setattr(sweep, k, fn)
+        try:
+            self._main("--root", root, "--tier1")
+            self._main("--root", root, "--branches", "--confirm")
+        finally:
+            for k, fn in real.items():
+                setattr(sweep, k, fn)
+        self.assertEqual(calls, [])
+
+    def test_root_in_a_separate_git_dir_clone_exits_1(self):
+        work = os.path.join(ROOT, "mode-sepdir-work")
+        gitdir = os.path.join(ROOT, "mode-sepdir-store", "g")
+        os.makedirs(work)
+        os.makedirs(os.path.dirname(gitdir))
+        made = run_vcs(work, "init", "-q", "-b", "main", "--separate-git-dir", gitdir)
+        require(made.returncode == 0, "separate git dir fixture: %s" % made.stderr.strip())
+        require(guard.primary_checkout(work) is not None, "fixture: guard resolves a primary")
+        code, text = self._main("--root", work, "--tier1")
+        self.assertEqual(code, 1)
+        self.assertIn("not inside a repository", text)
+
+    def test_root_whose_git_dir_sits_in_another_repos_root_exits_1(self):
+        parent = os.path.join(ROOT, "mode-nested-parent")
+        make_repo(parent, {"f.txt": "x\n"})
+        work = os.path.join(ROOT, "mode-nested-work")
+        os.makedirs(work)
+        made = run_vcs(work, "init", "-q", "-b", "main", "--separate-git-dir",
+                       os.path.join(parent, "g"))
+        require(made.returncode == 0, "nested git dir fixture: %s" % made.stderr.strip())
+        require(guard.primary_checkout(work) == os.path.realpath(parent), "fixture: sees parent")
+        code, text = self._main("--root", work, "--tier1")
+        self.assertEqual(code, 1)
+        self.assertIn("not inside a repository", text)
+
+    def test_root_outside_any_repository_exits_1(self):
+        code, text = self._main("--root", ROOT, "--tier1")
+        self.assertEqual(code, 1)
+        self.assertIn("not inside a repository", text)
 
 
 # --------------------------------------------------------------------------- the --confirm gate

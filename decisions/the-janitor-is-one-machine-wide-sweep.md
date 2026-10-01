@@ -32,8 +32,8 @@ servers and its own launchd labels. They do not transfer. Each repository
 keeps its own tier, and this repository ships the guide for writing one.
 
 Two process tiers are generic, and they live here. `find_loose_processes` is
-report only: its subject is a process whose argv contains a shell-snapshots
-path. `find_dead_rooted` stops only a proven orphan that the current user owns.
+report only: its subject is an orphaned process whose argv contains a
+shell-snapshots path. A live session's wrapper is noise, so it is not listed. `find_dead_rooted` stops only a proven orphan that the current user owns.
 Its subject is a process whose script file and its parent directory are gone,
 under a deleted checkout. That names no repository's own files. Each repository's own live servers stay its own.
 
@@ -66,6 +66,23 @@ the sweep restores the lock.
 
 Unmeasured: q_max held no locked worktree when this was written, so the lock
 format is measured from the live lanes of this repository only.
+
+## A branch leaves "checked out" with its worktree, in the same run
+
+Owner ruling: if the sweep removes a worktree, the branch it held is free.
+The sweep then judges that branch by the normal no-unique-work rules, in the
+same run. A preview does this for a worktree marked REAP. A kept worktree
+keeps its branch held. A failed removal does the same. Before this ruling, the
+branch waited one day.
+
+## Two single-tier modes serve a hook
+
+Owner ruling: `--tier1` and `--branches` let a session-end hook run one tier.
+`--tier1` prunes stale registrations and deletes husks. It is the one mode
+that acts without `--confirm`. It removes only proven junk, and a hook runs it. `--branches` reaps branches only and removes no worktree.
+`--root PATH` names the repository by any path inside it. A linked worktree
+is a valid path. `--branches` holds every worktree's branch. It refuses the
+repository if git gives no worktree list.
 
 ## Leftover folders are deleted only when proven twice
 
