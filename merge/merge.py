@@ -439,7 +439,9 @@ def confirm(root, cfg, cfgrel, n, host, lock):
                     git(root, "worktree", "unlock", wt)
                     git(root, "worktree", "prune")
                     os.makedirs(tmp)
-                    git(root, "worktree", "add", "-q", "--detach", wt, claim_sha)
+                    c, out = git(root, "worktree", "add", "-q", "--detach", "--lock", "--reason", f"merge tool, pid {os.getpid()}", wt, claim_sha)
+                    if c:
+                        raise Stop(f"{why}\nmerge: the worktree is gone and cannot be rebuilt ({out}). The claim {claim_sha[:9]} stays on {branch}. Run again to resume, or revert it by hand.")
                 revert_claim(root, wt, branch, claim_sha)
             raise Stop(why)
 
@@ -458,13 +460,13 @@ def confirm(root, cfg, cfgrel, n, host, lock):
             c, out = node_stamp(wt, cfgrel, "check", base_ref)  # each claimed number must still be free on the base tip
             if c or "UNKNOWN:" in out:
                 fail("the base moved and the claim is stale, or the check could not read the base:\n" + out)
+            commit, msg = host.merge(n, m["method"], sha)
+            if not commit:
+                fail("the merge was refused:\n" + msg)
         except Stop:
             raise
         except Exception as e:
             fail(f"unexpected {type(e).__name__} after the claim was pushed: {e}")
-        commit, msg = host.merge(n, m["method"], sha)
-        if not commit:
-            fail("the merge was refused:\n" + msg)
         say(f"merge: #{n} merged as {commit[:9]}.")
         ok = True
         try:

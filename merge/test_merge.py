@@ -398,6 +398,12 @@ class AfterPush(Env):
         self.host.on_wait = boom
         self.assert_clean_stop(*self.run_merge("7", "--confirm"))
 
+    def test_an_error_in_the_merge_call_reverts_the_claim(self):
+        def boom(*a):
+            raise RuntimeError("boom")
+        self.host.merge = boom
+        self.assert_clean_stop(*self.run_merge("7", "--confirm"))
+
     def test_the_tree_is_locked_while_the_run_waits(self):
         seen = []
         self.host.on_wait = lambda: seen.append(sh(self.co, "git", "worktree", "list", "--porcelain"))
