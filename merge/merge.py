@@ -323,7 +323,9 @@ def cut_branch(root, branch, merged):
     """Delete the head branch on origin, and here unless a worktree holds it or it has local-only
     commits (its tip must be an ancestor of `merged`, the head that merged). Never fails the merge."""
     c, out = git(root, "push", "-q", "origin", "--delete", branch)
-    say(f"merge: origin/{branch}: " + ("deleted." if not c else "not deleted: " + (out.splitlines() or ["?"])[-1]))
+    # A gone remote ref is a deleted branch: the repo may set delete_branch_on_merge.
+    gone = c and "remote ref does not exist" in out
+    say(f"merge: origin/{branch}: " + ("deleted." if not c else "already deleted." if gone else "not deleted: " + (out.splitlines() or ["?"])[-1]))
     if git(root, "rev-parse", "-q", "--verify", f"refs/heads/{branch}")[0]:
         return
     held = holder(root, branch)

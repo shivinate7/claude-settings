@@ -56,9 +56,12 @@ never renumbers a record. It runs the structural checks of `--check` first. If o
 it writes nothing.
 
 **`--claim`** is `--stamp` for a branch, before the merge. It needs `--base`. The next
-number is above every number in this tree and in the tip of `--base`. It is also above each
-`RETIRED` list of both. So a number that the base took since the cut is never reused. A
-base that git cannot read stops the run before it writes. When it claimed something, it runs
+number is above every number in this tree, in the tip of `--base`, and in every commit of the
+history of `--base`. It is also above each `RETIRED` list of both. So a number that the base
+took since the cut, or that a record once held and lost, is never reused. A base that git
+cannot read stops the run before it writes. So does a shallow clone, or a history git cannot
+read: a cut-short history could hand out a low number. The message names the fix, which is
+to fetch full history (`fetch-depth: 0`). When it claimed something, it runs
 the config's `regenerate` command, and its last line is `Record-claim: <ids>`. The caller
 puts that line in the claim commit as a trailer.
 
@@ -82,16 +85,22 @@ It asks one more question, and the question depends on the branch.
   - A renamed record. The base holds the same number under another key. The message says
     that the record was renamed, and it names the old key and the new key. The fix is to
     restore the old key.
-  - A removed record. A number is removed when the base tree holds it and no record of this
-    tree holds it, for the same kind. Numbers are permanent. A branch may delete a record
-    only when the kind's `RETIRED` list names its number (see "The retired-numbers list").
   - A number removed from a `RETIRED` list. The list is append-only.
 
   One exception to the first state. A number that a commit with a `Record-claim: <ids>`
-  trailer added is accepted when the tip of the base ref does not hold it. The same commit
+  trailer added is accepted when the base ref, tip and history, never held it. The same commit
   must add the number itself: its parent lacks the number, and it holds the number. A later
   edit of a number that another commit wrote is not vouched for. A number with no trailer stays refused. A number that the
-  base tip took after the claim is refused, and the fix is to claim again.
+  base ref took after the claim, or held before it, is refused, and the fix is to claim again.
+
+  A flat-file entry keys by its number and heading title. A title change under one number is
+  refused as a rename: delete the entry and claim a new number.
+
+  A record may be deleted. The check does not refuse a removed record. Its number stays
+  taken, because the claim reads the highest number ever used from the history of the base
+  ref. A kind that keeps a `RETIRED` list works as before (see "The retired-numbers list").
+  Known gap: after a kind's folder or file is moved, numbers used under the old path are not
+  seen. Keep the old path in the kind's config, or check those numbers by hand.
 
 A pull request checkout is always off the default branch. The engine knows it is one when
 `GITHUB_BASE_REF` is set, or when `GITHUB_REF` starts with `refs/pull/`.
@@ -143,7 +152,7 @@ D-013
 
 The rules:
 
-- A branch may delete a numbered record when the same tree's list names its number.
+- The list is optional. A branch may delete a numbered record with or without it.
 - The list is append-only. A number the base list names must stay in this list.
 - The allocator counts a listed number as taken, in both `max_plus_one` and `lowest_free`.
   So a deleted top number is never given out again.
