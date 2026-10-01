@@ -201,7 +201,7 @@ function tailOf(kind, slug, name) {
 // unless `label` is set, in which case it names `<label> <slug>` instead (with `label: "step"`
 // the refusal reads "step add-widget", not the raw matched line).
 // Nothing here is numbered, renamed, or rewritten — only refused, in both `--check` and
-// `--stamp`, before either writes anything. Absent config.unclaimed, this is a no-op, same as
+// `stamp()`, before either writes anything. Absent config.unclaimed, this is a no-op, same as
 // before it existed.
 function unclaimedProblems(root, config) {
   const problems = [];
@@ -364,7 +364,7 @@ export function pythonJson(obj) {
     (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
 }
 
-// ---------------------------------------------------------------- --stamp
+// ---------------------------------------------------------------- stamp()
 
 export function stamp(root, config, h, extra) {
   const { problems, kinds } = validate(root, config, h);

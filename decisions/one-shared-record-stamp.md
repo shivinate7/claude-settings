@@ -163,41 +163,39 @@ the base tree and in the history of the base ref. It refuses a shallow or unread
 history. So that run reads git history, and a check job needs `fetch-depth: 0`. The owner ruled that a number is never reused. In a flat-file kind,
 a title change under one number is refused, because a swap looks the same. A title fix
 needs a delete and a new number. Only
-`--stamp` and a default-branch run with nothing pending read no history at all. `stamp.mjs`'s own `addedByHead`
+`stamp()` and a default-branch run with nothing pending read no history at all. `stamp.mjs`'s own `addedByHead`
 and merge-order reader are lifted from `harness/decision-refs.mjs` nearly unchanged.
 That logic was already measured against q_max's real history. Rewriting it a second
 way would only add a second chance to get it wrong.
 
-## The gap `stamp.yml` itself measured, closed here
+## The gap `stamp.yml` itself measured, and what closed it
 
-q_max's own `stamp.yml` pushes a commit with the workflow's own token. GitHub starts no
-workflow on a push made with that token. So nothing else ever checked the commit
-`stamp.yml` pushed. q_max fixed this by running its own gate commands inside
-`stamp.yml`, before the push. `actions/stamp/action.yml` carries the same fix as an
-input, `gate-command`. Every adopting repo gets it for free.
-
-It goes one step further. On a rejected push, q_max's own workflow rebases and pushes
-again. It never re-runs the gate on the rebased tree. `actions/stamp`'s retry
-re-derives the whole stamp from the fresh tree instead. It re-gates every time, up to
-three attempts.
+q_max's own `stamp.yml` pushed a commit with the workflow's own token. GitHub starts no
+workflow on a push made with that token, so nothing else checked the commit it pushed. The
+shared action once carried mode `stamp`, which gated, committed and pushed after the merge.
+Lane 9 of `plans/shared-merge-tool.md` deleted that mode on 2026-10-01. The action runs mode
+`check` only, with `contents: read`, and no workflow writes to the default branch. The claim
+runs before the merge, on the pull request branch, in `merge/merge.py`. The pull request's own
+checks read the claimed tree. The `gate-command`, `token`, `commit-subject` and bot inputs, and
+the retry that re-derived the stamp, went with the mode. A pending record on the default branch
+fails `check`. The fix is any pull request through the merge tool, which claims it.
 
 ## The owner's bar: adopting this changes nothing else
 
 q_max's own `writeBlocks`/gloss pass, sharables' `_index.md`, and job-cost-reporting's
 `docs/Decision_Index.md` and `docs/Owner_Corrections.md` are all generators. Each
 repo's own tool runs one right after it claims a number. This engine's job is not to
-reproduce that. A repo that adopts it must not lose it either. `action.yml` takes one
-more optional input, `regenerate`: a command that runs on the stamped tree, after
-`--stamp`, before the gate, in the same commit. Each repo keeps its own generator.
-This input only decides when it runs.
+reproduce that. A repo that adopts it must not lose it either. The config's `regenerate`
+is a command that `--claim` runs after the claim, in the same commit. Each repo keeps its own
+generator. The config only decides when it runs.
 
 MEASURED: q_max's own `harness/decision-refs.mjs --gloss --write` already exists as a
-standalone pair of flags. Running it right after `--stamp` reproduces `stamp()`'s own
+standalone pair of flags. Running it right after a claim reproduces `stamp()`'s own
 tail exactly, because it calls the same two functions in the same order. No change to
 q_max's tool was needed. Same for sharables (`scripts/check_records.py
 --write-index`) and job-cost-reporting (its two generator scripts, run in sequence,
 each redirected to its own target file). Each repo names its own
-generator in its workflow's `regenerate` input. All three were proven against each repo's
+generator in its config's `regenerate`. All three were proven against each repo's
 own real tree on 2026-09-24.
 
 ## The mechanism

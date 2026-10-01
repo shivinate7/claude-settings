@@ -16,8 +16,7 @@
 //      to it, and asks the off-branch question for it.
 //
 // Modes:
-//   --stamp   number every pending record and rewrite cites. Writes the tree.
-//   --claim   --stamp before the merge, on a branch: the next number is above every number in the
+//   --claim   number every pending record and rewrite cites, before the merge, on a branch: the next number is above every number in the
 //             tree, in the tip of --base (required), in every commit of the base ref's history
 //             (a deleted record keeps its number), and in each RETIRED list. A shallow clone or an
 //             unreadable history refuses. Then runs the config's `regenerate` command. Prints a last line `Record-claim: <ids>`,
@@ -251,7 +250,7 @@ function loadRecord(root, kind, rel) {
 }
 
 // ---------------------------------------------------------------- git order. Asked only for a
-// kind whose order is "merge", or by --check's branch questions. --stamp on any other order runs
+// kind whose order is "merge", or by --check's branch questions. stamp() on any other order runs
 // on a tree with no git at all.
 function mergeOrder(root, folder) {
   const out = execFileSync("git", [
@@ -423,7 +422,7 @@ function rewriteCites(root, config, byId, files) {
 }
 
 // ---------------------------------------------------------------- structural validation, shared
-// by --stamp (which refuses to write on top of it) and --check (which adds the branch question,
+// by stamp() (which refuses to write on top of it) and --check (which adds the branch question,
 // below, to it). One implementation of "is this record file sound" for both, so they cannot
 // silently disagree about what counts as malformed.
 function validate(root, config) {
@@ -488,7 +487,7 @@ function validate(root, config) {
   return { problems, bySlug, byKind };
 }
 
-// ---------------------------------------------------------------- --stamp
+// ---------------------------------------------------------------- stamp()
 // The helpers format 3 shares with the other two, so all three read EOL and git the same way.
 const HELPERS = { readFileEol, withEol, currentBranch, makeMatcher };
 
@@ -842,7 +841,7 @@ export function check(root, config, opts = {}) {
 }
 
 // ---------------------------------------------------------------- --claim
-// --stamp with the base tip's numbers taken too. Throws when git cannot read the tip: a claim made
+// stamp() with the base tip's numbers taken too. Throws when git cannot read the tip: a claim made
 // without it could hand out a number the base holds. Runs the config's `regenerate` after, when
 // something was claimed. The tree is written either way.
 export function claim(root, config, baseTip) {
@@ -867,7 +866,7 @@ export function claim(root, config, baseTip) {
 function parseArgv(argv) {
   const out = { mode: null, config: null, root: process.cwd(), base: null };
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--stamp" || argv[i] === "--check" || argv[i] === "--claim") out.mode = argv[i].slice(2);
+    if (argv[i] === "--check" || argv[i] === "--claim") out.mode = argv[i].slice(2);
     else if (argv[i] === "--config") out.config = argv[++i];
     else if (argv[i] === "--root") out.root = argv[++i];
     else if (argv[i] === "--base") out.base = argv[++i];
@@ -883,7 +882,7 @@ const isMain = Boolean(process.argv[1]) && real(process.argv[1]) === real(fileUR
 if (isMain) {
   const args = parseArgv(process.argv.slice(2));
   if (!args.mode || !args.config) {
-    console.error("usage: node stamp.mjs --stamp|--check|--claim --config <path> [--root <path>] [--base <ref>]   (--claim needs --base)");
+    console.error("usage: node stamp.mjs --check|--claim --config <path> [--root <path>] [--base <ref>]   (--claim needs --base)");
     process.exit(2);
   }
   if (args.mode === "claim" && !args.base) {
@@ -891,20 +890,20 @@ if (isMain) {
     process.exit(2);
   }
   const config = loadConfig(args.config);
-  if (args.mode === "stamp" || args.mode === "claim") {
+  if (args.mode === "claim") {
     let result;
     try {
-      result = args.mode === "claim" ? claim(args.root, config, args.base) : stamp(args.root, config);
+      result = claim(args.root, config, args.base);
     } catch (e) {
-      console.error(`${args.mode} REFUSES: ${String(e.message).split("\n")[0]}.`);
+      console.error(`claim REFUSES: ${String(e.message).split("\n")[0]}.`);
       process.exit(1);
     }
     if (result.problems.length) {
-      console.error("stamp REFUSES: the tree has a problem --check would also refuse. Nothing was written.");
+      console.error("claim REFUSES: the tree has a problem --check would also refuse. Nothing was written.");
       for (const p of result.problems) console.error(p);
       process.exit(1);
     }
-    if (args.mode === "claim" && result.assigned.length) console.log(`Record-claim: ${result.assigned.map((a) => a.id).join(" ")}`);
+    if (result.assigned.length) console.log(`Record-claim: ${result.assigned.map((a) => a.id).join(" ")}`);
   } else {
     const problems = check(args.root, config, { base: args.base });
     if (problems.unknown) console.error(problems.unknown);
