@@ -1446,8 +1446,9 @@ def find_loose_processes():
         if owner is False:
             continue
         orphan = is_orphan(pid)
-        if orphan is not False:
-            found.append({"pid": pid, "command": command, "owner": owner, "orphan": orphan})
+        if orphan is False:
+            continue
+        found.append({"pid": pid, "command": command, "owner": owner, "orphan": orphan})
     return found
 
 
@@ -1803,6 +1804,13 @@ def reap_husk(root: str, decision: dict, names):
         decision["error"] = "delete failed: %s" % exc
 
 
+def _is_toplevel(path: str) -> bool:
+    """True when the VCS says PATH is its own repository's top level."""
+    answer = guard._git(path, "rev-parse", "--show-toplevel")
+    return (answer is not None and answer.returncode == 0 and os.path.normcase(
+        os.path.realpath(answer.stdout.strip())) == os.path.normcase(os.path.realpath(path)))
+
+
 MODES = ("full", "tier1", "branches")
 
 
@@ -1855,10 +1863,10 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
         result["refused"] = "unreadable-branch-list"
         return result
 
-    # Worktrees go first: a branch is released from "checked-out" only when the worktree that
-    # holds it is removed in THIS run (confirm), or would be (preview: action reap). A removal
-    # that failed (decision["error"]) keeps its branch held. A primary checkout never releases.
-    released = set()
+    # Worktrees go first: a branch stays held while ANY entry that is not removed holds it. An
+    # entry is removed in THIS run (confirm), or would be (preview: action reap). A removal
+    # that failed (decision["error"]) keeps its entry. A primary checkout is never removed.
+    removed = set()
     for entry in entries if mode == "full" else ():
         if entry.get("bare"):
             continue
@@ -1876,10 +1884,13 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
         result["worktrees"].append(decision)
         if confirm and decision["action"] == "reap":
             remove_worktree(root, entry["path"], decision)
-        if decision["action"] == "reap" and not decision.get("error") and entry.get("branch"):
-            released.add(entry["branch"])
+        gone = decision["action"] == "reap"
+        gone = gone and not decision.get("error")
+        if gone:
+            removed.add(entry["path"])
 
-    checked_out_branches = {e["branch"] for e in entries if e.get("branch")} - released
+    checked_out_branches = {e["branch"] for e in entries
+                            if e.get("branch") and e["path"] not in removed}
 
     for branch in branches:
         decision = decide_branch(root, base, branch, protected_prefixes, checked_out_branches)
@@ -2087,8 +2098,9 @@ def main(argv=None) -> int:
                               "worktree or a folder inside it); adds to any ROOT given")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--tier1", action="store_true",
-                       help="only stale registrations and husks, done for real with no "
-                            "--confirm; no worktree, branch or process work")
+                       help="only stale registrations and husks. The one mode that acts "
+                            "without --confirm: it removes only proven junk, and a hook "
+                            "runs it. No worktree, branch or process work")
     modes.add_argument("--branches", action="store_true",
                        help="only branches: reap those with no unique work, removing no "
                             "worktree; a preview without --confirm")
@@ -2106,6 +2118,8 @@ def main(argv=None) -> int:
     roots = [os.path.abspath(r) for r in args.roots]
     if args.root:
         primary = guard.primary_checkout(os.path.abspath(args.root))
+        if primary is not None and not _is_toplevel(primary):
+            primary = None  # a submodule or a separate git dir: dirname(common dir) is wrong
         if primary is None:
             print("janitor: %s is not inside a repository" % args.root, file=sys.stderr)
             return 1

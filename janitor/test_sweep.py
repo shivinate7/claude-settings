@@ -1858,6 +1858,14 @@ class SameRunBranchCutTests(unittest.TestCase):
         self.assertTrue(os.path.isdir(wt))
         self.assertIn("lane-cut", sweep.list_local_branches(root))
 
+    def test_a_second_kept_worktree_on_the_same_branch_keeps_it_held(self):
+        root, wt = self._repo("twice")
+        other = os.path.join(ROOT, "cut-twice-wt2")
+        run_vcs(root, "worktree", "add", "-q", "--force", other, "lane-cut")
+        write(os.path.join(other, "new.txt"), "dirty\n")  # this one is kept
+        result = self._sweep(root, False)
+        self.assertEqual(self._branch(result)["reason"], "checked-out")
+
     def test_a_failed_removal_keeps_the_branch_held(self):
         root, wt = self._repo("failed")
         real = sweep.remove_worktree
@@ -1960,6 +1968,18 @@ class SingleTierModeTests(unittest.TestCase):
             for k, fn in real.items():
                 setattr(sweep, k, fn)
         self.assertEqual(calls, [])
+
+    def test_root_in_a_separate_git_dir_clone_exits_1(self):
+        work = os.path.join(ROOT, "mode-sepdir-work")
+        gitdir = os.path.join(ROOT, "mode-sepdir-store", "g")
+        os.makedirs(work)
+        os.makedirs(os.path.dirname(gitdir))
+        made = run_vcs(work, "init", "-q", "-b", "main", "--separate-git-dir", gitdir)
+        require(made.returncode == 0, "separate git dir fixture: %s" % made.stderr.strip())
+        require(guard.primary_checkout(work) is not None, "fixture: guard resolves a primary")
+        code, text = self._main("--root", work, "--tier1")
+        self.assertEqual(code, 1)
+        self.assertIn("not inside a repository", text)
 
     def test_root_outside_any_repository_exits_1(self):
         code, text = self._main("--root", ROOT, "--tier1")

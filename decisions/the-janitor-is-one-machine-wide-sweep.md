@@ -78,8 +78,8 @@ branch waited one day.
 ## Two single-tier modes serve a hook
 
 Owner ruling: `--tier1` and `--branches` let a session-end hook run one tier.
-`--tier1` prunes stale registrations and deletes husks. It acts for real, with
-no `--confirm`. `--branches` reaps branches only and removes no worktree.
+`--tier1` prunes stale registrations and deletes husks. It is the one mode
+that acts without `--confirm`. It removes only proven junk, and a hook runs it. `--branches` reaps branches only and removes no worktree.
 `--root PATH` names the repository by any path inside it. A linked worktree
 is a valid path. `--branches` holds every worktree's branch. It refuses the
 repository if git gives no worktree list.
