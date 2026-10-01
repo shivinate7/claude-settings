@@ -51,6 +51,9 @@ class FakeHost:
         return {"head": self.head_override or head, "branch": self.branch, "base": "main", "state": "OPEN",
                 "mergeable": self.mergeable, "merge_state": "CLEAN"}
 
+    def required_names(self):
+        return ["gates"]
+
     def wait_checks(self, n, sha, d, prior=None):
         if self.on_wait:
             self.on_wait()
@@ -489,6 +492,8 @@ if a[:2] == ["pr", "view"]:
                           "mergeable": "CONFLICTING" if bad else "MERGEABLE", "mergeStateStatus": "DIRTY" if bad else "CLEAN"}))
     else:
         print(json.dumps({"state": "MERGED" if S.get("oid") else "OPEN", "mergeCommit": {"oid": S["oid"]} if S.get("oid") else None}))
+elif a[:2] == ["pr", "checks"] and S.get("checks_broken"):
+    print("HTTP 500: server error"); sys.exit(1)
 elif a[:2] == ["pr", "checks"]:
     seq = S["checks_seq"]; cur = seq.pop(0) if len(seq) > 1 else seq[0]; S["checks_calls"] += 1; save()
     print(json.dumps([{"name": n, "bucket": b, "link": l} for n, b, l in cur]))
@@ -581,10 +586,13 @@ class GhHalf(Env):
         self.assertTrue(self.reverted())
 
     def test_an_empty_required_list_is_refused(self):
+        before = self.head()
         for kw, extra in (({"required": []}, {}), ({"required": "protection"}, {"contexts": []})):
             self.set(**extra)
             rc, out = self.go(**kw)
             self.assertEqual(rc, 1)
+            self.assertEqual(self.head(), before)  # nothing was pushed
+            self.assertFalse(self.lock_ref())
             self.assertIn("no required checks are named", out)
             self.assertNotIn("pr merge", self.calls())
 
@@ -661,10 +669,23 @@ class GhHalf(Env):
         self.assertTrue(self.reverted())
 
     def test_no_protection_and_no_list_stops_with_the_remedy(self):
+        before = self.head()
         self.set(contexts=None)
         rc, out = self.go(required="protection")
         self.assertEqual(rc, 1)
         self.assertIn("Set merge.requiredChecks to a list", out)
+        self.assertEqual(self.head(), before)  # nothing was pushed
+        self.assertTrue(self.reverted())  # still the pending record: no claim on the branch
+
+    def test_a_failed_read_in_the_wait_reverts_the_claim(self):
+        before = self.head()
+        self.set(checks_broken=True)
+        rc, out = self.go()
+        self.assertEqual(rc, 1)
+        self.assertIn("gh pr checks failed", out)
+        self.assertNotEqual(self.head(), before)  # the claim was pushed, then reverted
+        self.assertTrue(self.reverted())
+        self.assertFalse(self.lock_ref())
 
 class Identity(Env):
     def test_claim_commit_falls_back_when_only_the_email_is_set(self):

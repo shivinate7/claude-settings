@@ -414,6 +414,7 @@ def confirm(root, cfg, cfgrel, n, host, lock):
     try:
         info = host.pr(n)
         refuse_bad_pr(info)
+        host.required_names()  # an empty or unreadable list stops here, before anything is pushed
         branch = info["branch"]
         tmp, wt = open_worktree(root, info, base)
         resumed = own_claim(wt, cfgrel, base_ref)
@@ -435,7 +436,10 @@ def confirm(root, cfg, cfgrel, n, host, lock):
                 revert_claim(root, wt, branch, claim_sha)
             raise Stop(why)
 
-        ok, why = host.wait_checks(n, sha, m["deadlineMinutes"], info["head"] if claim_sha else None)
+        try:
+            ok, why = host.wait_checks(n, sha, m["deadlineMinutes"], info["head"] if claim_sha else None)
+        except Stop as e:  # a read that fails in the wait still reverts the claim
+            ok, why = False, str(e)
         if not ok:
             fail(why)
         c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
