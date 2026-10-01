@@ -47,5 +47,12 @@ class Launcher(unittest.TestCase):
         self.assertIn("ARGS", r.stdout)
         self.assertIn("12 --confirm", r.stdout)
 
+    def test_argument_with_a_space_stays_one_argument(self):
+        self.origin(URL)
+        with open(os.path.join(self.co, "merge", "launch.py"), "w") as f:
+            f.write("import sys\nprint('N', len(sys.argv) - 2, '|'.join(sys.argv[2:]))\n")
+        r = self.run_launcher("a b", "c")
+        self.assertIn("N 2 a b|c", r.stdout, r.stdout + r.stderr)
+
 if __name__ == "__main__":
     unittest.main()

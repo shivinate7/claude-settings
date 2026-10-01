@@ -249,8 +249,8 @@
     "git-slug-then-claim-number": {
       "mechanism": {
         "kind": "gate",
-        "ref": "merge/merge.py",
-        "needle": "Record-claim: "
+        "ref": "actions/stamp/stamp.mjs",
+        "needle": "function branchNumbered("
       }
     },
     "git-cite-by-id": {

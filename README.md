@@ -105,7 +105,8 @@ merge --dev ...         run the checkout's own tree, not origin main
 
 * **Launcher.** On macOS and Linux, `bin/merge` lands in `~/.claude/bin`. On Windows,
   `bin\merge.cmd` lands there too, and starts `bin\merge`. Both find this clone through
-  `CLAUDE_SETTINGS_DIR`, then the `@` line in `~/.claude/CLAUDE.md`. With neither, they clone
+  `CLAUDE_SETTINGS_DIR`, then the `@` line in `CLAUDE.md` under `CLAUDE_CONFIG_DIR` (default
+  `~/.claude`). With neither, they clone
   the public repo into a temporary folder. The checkout must have `origin` set to
   `shivinate7/claude-settings`. Any other result stops before a pull request read.
 * **Fresh code.** Each run fetches `origin main` and runs from a temporary worktree at that
@@ -126,7 +127,7 @@ merge --dev ...         run the checkout's own tree, not origin main
   the push, so the wait goes on until the deadline.
 * **`--unlock`.** The lock is the ref `refs/merge-lock/<defaultBranch>` on origin. It expires
   after `merge.deadlineMinutes` plus ten minutes, and a later run breaks an expired lock.
-  `--unlock` removes it at once, for a run that died. It reads no lock state first.
+  `--unlock` removes it at once, for a run that died. It reads no lock state. It still reads the git root and the config.
 
 Exit codes:
 

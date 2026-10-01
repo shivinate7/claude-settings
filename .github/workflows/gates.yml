@@ -135,7 +135,7 @@ jobs:
       - name: Merge tool git-half fixture suite
         run: python3 merge/test_merge.py
 
-      - name: Merge launcher fixture suite
+      - name: Merge launcher fixture suite (bin/merge)
         run: python3 merge/test_cmd.py
 
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.

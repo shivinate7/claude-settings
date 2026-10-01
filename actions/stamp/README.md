@@ -367,7 +367,8 @@ meets each item below.
    `--config`.
 2. `defaultBranch` is set. The command refuses a config without it.
 3. A `merge` block sets `method` (`merge`, `squash` or `rebase`) and `deadlineMinutes`. The
-   command refuses a config that lacks either. It never guesses them. Read `method` from
+   command refuses a config that lacks either, but only under `--confirm`. A preview does
+   not check them. It never guesses them. Read `method` from
    the repo's own merge history.
 4. `merge.requiredChecks` is `"protection"` (the default) or a list of check names. If the
    list is empty or cannot be read, the command stops before the claim push. A repo with no
