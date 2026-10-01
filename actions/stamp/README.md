@@ -40,6 +40,7 @@ question. Do not add a repo name here to fit it.
 
 ```
 node stamp.mjs --stamp --config <path> [--root <path>]
+node stamp.mjs --claim --base <ref> --config <path> [--root <path>]
 node stamp.mjs --check --config <path> [--root <path>] [--base <ref>]
 ```
 
@@ -50,6 +51,13 @@ config states. Then it rewrites each cite of the record's slug to the numbered f
 never renumbers a record. It runs the structural checks of `--check` first. If one fails,
 it writes nothing.
 
+**`--claim`** is `--stamp` for a branch, before the merge. It needs `--base`. The next
+number is above every number in this tree and in the tip of `--base`. It is also above each
+`RETIRED` list of both. So a number that the base took since the cut is never reused. A
+base that git cannot read stops the run before it writes. When it claimed something, it runs
+the config's `regenerate` command, and its last line is `Record-claim: <ids>`. The caller
+puts that line in the claim commit as a trailer.
+
 **`--check`** writes nothing. It refuses these states on every branch:
 
 - a malformed record, which is neither pending nor numbered
@@ -59,9 +67,8 @@ it writes nothing.
 
 It asks one more question, and the question depends on the branch.
 
-- **On the default branch**, it refuses a pending record that HEAD did not add. Such a
-  record means that the stamp did not run, or that its push was rejected. A record that
-  HEAD added waits for its turn. It is not refused.
+- **On the default branch**, it refuses any pending record, HEAD's own included. The
+  claim runs before the merge, so a pending record there was never claimed.
 - **Off the default branch**, it compares this tree with the base tree. It asks the
   question for all three shapes, with the same loader that reads this tree. It refuses
   these states:
@@ -75,6 +82,11 @@ It asks one more question, and the question depends on the branch.
     tree holds it, for the same kind. Numbers are permanent. A branch may delete a record
     only when the kind's `RETIRED` list names its number (see "The retired-numbers list").
   - A number removed from a `RETIRED` list. The list is append-only.
+
+  One exception to the first state. A number that a commit with a `Record-claim: <ids>`
+  trailer added is accepted when the tip of the base ref does not hold it. The same commit
+  must change the record's file. A number with no trailer stays refused. A number that the
+  base tip took after the claim is refused, and the fix is to claim again.
 
 A pull request checkout is always off the default branch. The engine knows it is one when
 `GITHUB_BASE_REF` is set, or when `GITHUB_REF` starts with `refs/pull/`.
@@ -143,6 +155,7 @@ tree. A default applies when a field is not set.
 | Field | Shapes | Meaning |
 |---|---|---|
 | `format` | all | Not set for shapes 1 and 2. `"heading"` for shape 3. |
+| `regenerate` | all | Your own generator, a shell command. `--claim` runs it after the claim. Mode `stamp` runs it when the `regenerate` input is empty. |
 | `defaultBranch` | all | The default branch name. `--check` needs it to find the branch. Without it, `--check` needs `--base` or `GITHUB_BASE_REF`. |
 | `kinds` | all | A list of record kinds. It must not be empty. |
 | `cite` | all | How a cite of a slug is found and rewritten. Omit it for shapes 1 and 2 if the repo cites by path. |
@@ -244,7 +257,7 @@ uses: shivinate7/claude-settings/actions/stamp@<sha>
 | `config` | required | The config path, from the repository root. |
 | `base` | empty | Mode `check` only. The base ref, passed to `stamp.mjs` as `--base`, and only when it is set. When it is empty, the engine picks the base itself. |
 | `gate-command` | empty | Mode `stamp` only, and required there. Your own full check. It must pass on the stamped tree before the push. |
-| `regenerate` | empty | Mode `stamp` only. Your own generator. It runs after `--stamp` and before the gate, in the same commit. |
+| `regenerate` | empty | Mode `stamp` only. Your own generator. An empty input reads the config's `regenerate`. It runs after `--stamp` and before the gate, in the same commit. |
 | `commit-subject` | `Stamp {ids}` | The commit subject. `{ids}` becomes the ids that the run stamped. |
 | `token` | empty | Mode `stamp` only, and required there. The push token. Only `git fetch` and `git push` receive it. |
 | `bot-name` | `record-stamp[bot]` | The commit author name. |
@@ -331,8 +344,8 @@ Do each step in your own repo, from your own tree.
    file that teaches the cite syntax.
 7. Retire each step that claims a number on a branch, such as a claim in a merge script.
    Mode `check` refuses each number that a branch writes.
-8. Make each local check that refuses a pending record on the default branch accept a
-   record that HEAD itself added. The stamp run for that commit has not had its turn yet.
+8. `--check` on the default branch refuses any pending record. In a repo that uses mode
+   `stamp`, run it after the stamp commit lands. Before that, it is red.
 9. Add both jobs to your workflow. Pin the SHA. Set the concurrency lock.
 
 ## Tests

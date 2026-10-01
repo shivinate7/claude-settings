@@ -130,6 +130,21 @@ test_regenerate_runs_before_gate_in_same_commit() {
   return 0
 }
 
+test_regenerate_read_from_config_when_input_empty() {
+  local remote local_dir
+  remote="$(new_bare_remote)"
+  local_dir="$(clone_with_pending_record "$remote")"
+  node -e 'const f=process.argv[1],c=JSON.parse(require("fs").readFileSync(f,"utf8"));c.regenerate="echo generated > generated.txt";require("fs").writeFileSync(f,JSON.stringify(c))' "$local_dir/stamp.json"
+  if ! REF="refs/heads/main" DEFAULT_BRANCH="main" CONFIG="$local_dir/stamp.json" \
+     GATE_COMMAND="test -f generated.txt" SUBJECT_TEMPLATE="Stamp {ids}" BOT_NAME=bot \
+     BOT_EMAIL=bot@example.com STAMP_JS="$STAMP_JS" \
+     bash -c "cd '$local_dir' && bash '$RUN_SH'" >/dev/null 2>&1; then
+    echo "  expected success: the config's regenerate should have run before the gate"
+    return 1
+  fi
+  return 0
+}
+
 test_failed_regenerate_blocks_commit() {
   local remote local_dir
   remote="$(new_bare_remote)"
@@ -475,6 +490,7 @@ test_refuses_unknown_mode() {
 run_test "refuses off the default branch" test_refuses_off_default_branch
 run_test "a failed gate blocks the commit" test_failed_gate_blocks_commit
 run_test "regenerate runs before the gate, in the same commit" test_regenerate_runs_before_gate_in_same_commit
+run_test "regenerate is read from the config when the input is empty" test_regenerate_read_from_config_when_input_empty
 run_test "a failed regenerate command blocks the commit" test_failed_regenerate_blocks_commit
 run_test "stamps, gates, commits and pushes" test_succeeds_and_pushes
 run_test "a push rejected every time gives up after the configured attempts" test_gives_up_after_max_attempts
