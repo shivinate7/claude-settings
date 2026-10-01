@@ -1,10 +1,12 @@
 """Runs the ste-lint step script on a fixture repo. `python3 actions/ste-lint/test_action.py`.
 Asserts the gated finding reaches the job log and the ::error annotation, both exit codes."""
-import os, subprocess, sys, tempfile, yaml
+import os, re, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-step = yaml.safe_load(open(os.path.join(HERE, "action.yml")))["runs"]["steps"][0]
-script = step["run"].replace("${{ github.action_path }}", HERE)
+# Stdlib only: the step's `run: |` block is the lines after "      run: |", indented 8 spaces.
+text = open(os.path.join(HERE, "action.yml")).read()
+block = text.split("      run: |\n", 1)[1]
+script = "\n".join(re.sub(r"^ {8}", "", l) for l in block.split("\n")).replace("${{ github.action_path }}", HERE)
 
 LONG = " ".join(["word"] * 40) + " end."
 
