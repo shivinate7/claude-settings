@@ -8,6 +8,8 @@ text = open(os.path.join(HERE, "action.yml")).read()
 block = text.split("      run: |\n", 1)[1]
 script = "\n".join(re.sub(r"^ {8}", "", l) for l in block.split("\n")).replace("${{ github.action_path }}", HERE)
 
+# /bin/bash is 3.2 on macOS: the script must survive empty arrays under set -u there.
+BASH = "/bin/bash" if os.path.exists("/bin/bash") else "bash"
 LONG = " ".join(["word"] * 40) + " end."
 
 
@@ -26,11 +28,10 @@ def run(scope, fail="true"):
         git(work, "checkout", "-q", "-b", "topic")
         open(os.path.join(work, "a.md"), "a").write("\n" + LONG + "\n")
         git(work, "commit", "-qam", "long"); git(work, "fetch", "-q", "origin")
-        # EXCLUDE is non-empty: bash 3.2 (macOS) rejects an empty array under set -u.
         env = dict(os.environ, EVENT_NAME="pull_request", BASE_REF="main", DEFAULT_BRANCH="main",
-                   REF_NAME="topic", SCOPE=scope, FAIL=fail, PATHS_GLOB="**/*.md", EXCLUDE="zz-none",
+                   REF_NAME="topic", SCOPE=scope, FAIL=fail, PATHS_GLOB="**/*.md", EXCLUDE="",
                    CHANGED_PATHS_GLOB="*.md", DECISIONS_DIR="", GITHUB_STEP_SUMMARY=os.path.join(d, "sum"))
-        p = subprocess.run(["bash", "-c", script], cwd=work, env=env, capture_output=True, text=True)
+        p = subprocess.run([BASH, "-c", script], cwd=work, env=env, capture_output=True, text=True)
         return p.returncode, p.stdout + p.stderr
 
 

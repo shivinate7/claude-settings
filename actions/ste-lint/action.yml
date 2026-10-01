@@ -82,7 +82,7 @@ runs:
           done < <(git ls-files -- ":(glob)$PATHS_GLOB")
           while IFS= read -r f; do
             [ -n "$f" ] && FILES+=("$f")
-          done < <(git ls-files -- ":(glob)$PATHS_GLOB" "${EXCLUDE_PATHSPECS[@]}")
+          done < <(git ls-files -- ":(glob)$PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"})
         else
           if [ -n "$BASE_REF" ]; then
             BASE="$BASE_REF"
@@ -103,16 +103,16 @@ runs:
           done < <(git diff --name-only --diff-filter=AMR "$RANGE" -- "$CHANGED_PATHS_GLOB")
           while IFS= read -r f; do
             [ -n "$f" ] && FILES+=("$f")
-          done < <(git diff --name-only --diff-filter=AMR "$RANGE" -- "$CHANGED_PATHS_GLOB" "${EXCLUDE_PATHSPECS[@]}")
+          done < <(git diff --name-only --diff-filter=AMR "$RANGE" -- "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"})
         fi
 
         # In-script fallback: a caller that passes a plain glob (no ':(exclude)' magic
         # understanding needed) still gets it dropped here.
         if [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ] && [ ${#FILES[@]} -gt 0 ]; then
           KEPT=()
-          for f in "${FILES[@]}"; do
+          for f in ${FILES[@]+"${FILES[@]}"}; do
             DROP=0
-            for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+            for pattern in ${EXCLUDE_PATTERNS[@]+"${EXCLUDE_PATTERNS[@]}"}; do
               if [[ "$f" == $pattern ]]; then
                 DROP=1
                 break
@@ -120,7 +120,7 @@ runs:
             done
             [ "$DROP" -eq 0 ] && KEPT+=("$f")
           done
-          FILES=("${KEPT[@]}")
+          FILES=(${KEPT[@]+"${KEPT[@]}"})
         fi
 
         EXCLUDED_COUNT=$((${#RAW_FILES[@]} - ${#FILES[@]}))
@@ -165,11 +165,11 @@ runs:
         fi
 
         echo "ste-lint: ${#FILES[@]} file(s) in scope, $EXCLUDED_COUNT excluded"
-        printf '  %s\n' "${FILES[@]}"
+        printf '  %s\n' ${FILES[@]+"${FILES[@]}"}
 
         JSON_OUT="$(mktemp)"
         python3 "$LINTER" --no-color --format json --fail-on never \
-          --decisions-dir "$DECISIONS_DIR" "${FILES[@]}" > "$JSON_OUT"
+          --decisions-dir "$DECISIONS_DIR" ${FILES[@]+"${FILES[@]}"} > "$JSON_OUT"
 
         if [ "$SCOPE" = "all" ]; then
           # Report-mode audit: whole-file findings, never fails the build.
@@ -209,7 +209,7 @@ runs:
         PYEOF
 
         HUNKS="$(mktemp)"
-        git diff -U0 "$RANGE" -- "${FILES[@]}" | python3 "$HUNK_MAP_PY" > "$HUNKS"
+        git diff -U0 "$RANGE" -- ${FILES[@]+"${FILES[@]}"} | python3 "$HUNK_MAP_PY" > "$HUNKS"
 
         # Split findings into in-hunk (gated) and out-of-hunk (pre-existing, report only).
         # A finding without a line number counts as in-hunk.
