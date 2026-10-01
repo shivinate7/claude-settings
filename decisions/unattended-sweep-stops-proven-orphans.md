@@ -103,10 +103,10 @@ tier too.
 
 ## Loose processes are never stopped
 
-`find_loose_processes` lists a process whose argv names a shell-snapshots
-file. It stops none, under any flag. The mark proves a Claude Code Bash call
-started the process. It does not prove the process is abandoned: a live session
-owns its own wrapper. No read here proves an orphan that a live session does
+`find_loose_processes` lists a process whose argv contains a shell-snapshots
+path. It stops none, under any flag. The argv containing that path does not
+prove a Claude Code Bash call started the process, and does not prove the
+process is abandoned: a live session owns its own wrapper. No read here proves an orphan that a live session does
 not claim, so the tier reports and a person decides.
 
 ## The mechanism

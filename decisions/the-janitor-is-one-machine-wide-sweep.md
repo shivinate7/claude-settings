@@ -32,11 +32,10 @@ servers and its own launchd labels. They do not transfer. Each repository
 keeps its own tier, and this repository ships the guide for writing one.
 
 Two process tiers are generic, and they live here. `find_loose_processes` is
-report only: its subject is a process whose argv names a shell-snapshots file.
-`find_dead_rooted` stops what it finds. Its subject
-is a process whose script file and its parent directory are gone, under a deleted
-checkout. That names no
-repository's own files. Each repository's own live servers stay its own.
+report only: its subject is a process whose argv contains a shell-snapshots
+path. `find_dead_rooted` stops only a proven orphan that the current user owns.
+Its subject is a process whose script file and its parent directory are gone,
+under a deleted checkout. That names no repository's own files. Each repository's own live servers stay its own.
 
 ## The sweep never runs code a repository supplies
 
