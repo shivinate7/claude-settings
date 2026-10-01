@@ -71,6 +71,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -254,30 +255,43 @@ def load_optout(root: str):
     costs one rerun after the owner fixes the file. Guessing costs branches that do not come
     back.
     """
+    return _optout_fields(read_optout(root))
+
+
+def _optout_fields(data):
+    """(sweep_enabled, protected_prefixes, ok) from `read_optout`'s dict (None means unreadable)."""
+    if data is None:
+        return False, (), False
+    sweep_enabled = data.get("sweep", True)
+    prefixes = list(DEFAULT_PROTECTED_PREFIXES)
+    for item in data.get("protectedPrefixes", []):
+        if item:
+            prefixes.append(item)
+    return sweep_enabled, tuple(prefixes), True
+
+
+def read_optout(root: str):
+    """The one reader of `.claude/janitor.json`: its keys as a dict ({} when the file is absent),
+    or None when the file is unreadable or a key it holds is mis-shaped (`sweep` not a boolean,
+    `protectedPrefixes` or `huskNames` not a list of strings). `load_optout` and `find_husks`
+    both read through this."""
     path = os.path.join(root, OPTOUT_FILENAME)
     if not os.path.isfile(path):
-        return True, DEFAULT_PROTECTED_PREFIXES, True
+        return {}
     try:
         with open(path, "r", encoding="utf-8") as handle:
             data = json.load(handle)
     except Exception:
-        return False, (), False
+        return None
     if not isinstance(data, dict):
-        return False, (), False
+        return None
     if "sweep" in data and not isinstance(data["sweep"], bool):
-        return False, (), False
-    sweep_enabled = data.get("sweep", True)
-    if "protectedPrefixes" in data:
-        extra = data["protectedPrefixes"]
-        if not isinstance(extra, list) or not all(isinstance(item, str) for item in extra):
-            return False, (), False
-    else:
-        extra = []
-    prefixes = list(DEFAULT_PROTECTED_PREFIXES)
-    for item in extra:
-        if item:
-            prefixes.append(item)
-    return sweep_enabled, tuple(prefixes), True
+        return None
+    for key in ("protectedPrefixes", "huskNames"):
+        if key in data and (not isinstance(data[key], list)
+                            or not all(isinstance(item, str) for item in data[key])):
+            return None
+    return data
 
 
 # ------------------------------------------------------------------ reading a repository's state
@@ -1400,6 +1414,30 @@ def print_loose_processes_report(found, out=sys.stdout):
         len(found), sum(1 for d in found if d["owner"] is None)), file=out)
 
 
+def _all_cwds_macos():
+    """Every process's cwd as [(pid, cwd)], from ONE `lsof -d cwd -Fpn` (the per-pid read cost
+    about 25 s per call on a real machine). `None` when lsof could not answer: any exit code
+    but 0 or 1 (1 means some process was not readable, the same out-of-scope case as a
+    per-pid `None`). An EMPTY table is also `None`: lsof printed nothing, which cannot be
+    "no process anywhere"."""
+    try:
+        answer = subprocess.run(["lsof", "-d", "cwd", "-Fpn"], capture_output=True, text=True,
+                                timeout=60)
+    except Exception:
+        return None
+    if answer.returncode not in (0, 1):
+        return None
+    table = []
+    pid = None
+    for line in answer.stdout.splitlines():
+        if line.startswith("p"):
+            pid = int(line[1:]) if line[1:].isdigit() else None
+        elif line.startswith("n") and pid is not None:
+            table.append((pid, line[1:]))
+    # A running machine always has processes; an empty table is a failed read, not "nobody".
+    return table or None
+
+
 def processes_in(path: str):
     """Return `(inside_pids, unreadable_pids)`, both lists (possibly empty), for the pre-removal
     check in `decide_worktree`. `inside_pids` is `None` (with `unreadable_pids` also `None`)
@@ -1418,6 +1456,11 @@ def processes_in(path: str):
     act on it"), extended here from the owner check to this one, for the measured reason
     above, and identical on POSIX and Windows: both dispatch through this same `process_cwd`,
     with no OS branch anywhere in this function."""
+    if sys.platform == "darwin":
+        table = _all_cwds_macos()
+        if table is None:
+            return None, None
+        return [pid for pid, cwd in table if _cwd_under_checkout(cwd, path)], []
     pids = list_all_pids()
     if pids is None:
         return None, None
@@ -1622,11 +1665,86 @@ def prune_registrations(root: str, confirm: bool):
     return result
 
 
+# Windows junctions are not seen by `os.path.islink` before Python 3.12, and `rmtree` there has no
+# symlink-attack guard, so husks are never deleted on Windows.
+HUSKS_DELETABLE = os.name != "nt"
+
+
+def husk_verdict(root: str, path: str, entries, names):
+    """One folder's verdict, or None when it is not a husk candidate. A husk is a real folder
+    directly under `<root>/.claude/worktrees/` that git does not list as a worktree, is not
+    empty, and holds only entries named in `huskNames`. Returns {"path", "action":
+    "husk"|"keep", "reason"}. A live session or any process inside is "keep": a supervisor
+    there would only recreate it. An unreadable folder or check is "keep" too. The folder's
+    parent must be the repository's own `.claude/worktrees`, not a link out of it. The check
+    sees a process by its cwd only: a process outside the folder that holds a file inside is
+    not seen."""
+    own_base = os.path.join(os.path.realpath(root), ".claude", "worktrees")
+    if os.path.normcase(os.path.realpath(os.path.dirname(path))) != os.path.normcase(own_base):
+        return None
+    if os.path.islink(path) or not os.path.isdir(path):
+        return None
+    registered = {os.path.normcase(os.path.realpath(e["path"])) for e in entries}
+    if os.path.normcase(os.path.realpath(path)) in registered:
+        return None
+    keep = {"path": path, "action": "keep", "reason": "unreadable-subject"}
+    try:
+        contents = os.listdir(path)
+    except OSError:
+        return keep
+    if not contents or not set(contents) <= set(names):
+        return None
+    live = guard.worktree_live_session(path)
+    inside, _ = processes_in(path)
+    if live is None or inside is None:
+        return keep
+    if live:
+        return {"path": path, "action": "keep", "reason": "live-session"}
+    if inside:
+        return {"path": path, "action": "keep", "reason": "process-inside: pid %s"
+                % ", ".join(str(p) for p in sorted(inside))}
+    if not HUSKS_DELETABLE:
+        return {"path": path, "action": "keep",
+                "reason": "windows: report only (no link-safe delete)"}
+    return {"path": path, "action": "husk", "reason": "only " + ", ".join(sorted(contents))}
+
+
+def find_husks(root: str, entries, names):
+    """Every husk verdict under `<root>/.claude/worktrees/` (none when `names` is empty)."""
+    base = os.path.join(root, ".claude", "worktrees")
+    if not names or not os.path.isdir(base):
+        return []
+    verdicts = (husk_verdict(root, os.path.join(base, n), entries, names)
+                for n in sorted(os.listdir(base)))
+    return [v for v in verdicts if v]
+
+
+def reap_husk(root: str, decision: dict, names):
+    """Delete one proven husk. The proof is run again right before the delete, because the
+    folder may have changed since the preview. `shutil.rmtree` never follows a link inside, and
+    a folder that is itself a link is refused. Any error keeps the folder and is reported."""
+    path = decision["path"]
+    entries = parse_worktree_list(root)
+    if entries is None:
+        decision["error"] = "worktree list unreadable"
+        return
+    again = husk_verdict(root, path, entries, names)
+    if again is None or again["action"] != "husk":
+        decision["action"] = "keep"
+        decision["reason"] = "changed before delete: " + (again["reason"] if again else "no longer a husk")
+        return
+    try:
+        shutil.rmtree(path)
+    except OSError as exc:
+        decision["error"] = "delete failed: %s" % exc
+
+
 def sweep_repo(root: str, confirm: bool, restore_log_path: str):
     result = {"root": root, "refused": None, "branches": [], "worktrees": [], "listeners": [],
-              "pruned": None}
+              "pruned": None, "husks": []}
 
-    sweep_enabled, protected_prefixes, optout_ok = load_optout(root)
+    optout = read_optout(root)  # once: protected prefixes and huskNames both come from it
+    sweep_enabled, protected_prefixes, optout_ok = _optout_fields(optout)
     if not optout_ok:
         result["refused"] = "unreadable-optout"
         return result
@@ -1683,6 +1801,13 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str):
         if confirm and decision["action"] == "reap":
             remove_worktree(root, entry["path"], decision)
 
+    husk_names = optout.get("huskNames", [])
+    result["husks"] = find_husks(root, entries, husk_names)
+    if confirm:
+        for decision in result["husks"]:
+            if decision["action"] == "husk":
+                reap_husk(root, decision, husk_names)
+
     checkout_paths = [root] + [e["path"] for e in entries if not e.get("bare")]
     listener_entries = find_swept_listeners(checkout_paths)
     if listener_entries is None:
@@ -1707,6 +1832,7 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
     branch_counts = Counter()
     worktree_counts = Counter()
     listener_counts = Counter()
+    husk_counts = Counter()
     refused_repos = []
     unreadable_listener_repos = []
 
@@ -1721,7 +1847,7 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
         pruned = result.get("pruned")
         has_prune = pruned and (pruned["names"] is None or pruned["names"])
         if not result["branches"] and not result["worktrees"] and not result["listeners"] \
-                and not has_prune:
+                and not has_prune and not result.get("husks"):
             print("  nothing to examine", file=out)
         if pruned and pruned["names"] is None:
             print("  prune     UNREADABLE -- %s; nothing pruned" % pruned["error"], file=out)
@@ -1731,6 +1857,14 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
                 if pruned["error"]:
                     line += "  [ERROR: %s]" % pruned["error"]
                 print(line, file=out)
+        for h in result.get("husks", []):
+            husk_counts[h["action"]] += 1
+            tag = "KEEP" if h.get("error") else {"husk": "REAP" if confirm else "WOULD"}.get(
+                h["action"], "KEEP")
+            line = "  husk      %-5s %-60s %s" % (tag, h["path"], h["reason"])
+            if h.get("error"):
+                line += "  [ERROR: %s]" % h["error"]
+            print(line, file=out)
         for b in result["branches"]:
             branch_counts[(b["action"], b["reason"].split(":", 1)[0])] += 1
             tag = "REAP" if b["action"] == "reap" else "KEEP"
@@ -1781,6 +1915,8 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
     print("  TCP listeners examined: %d" % total_listeners, file=out)
     for (action, reason), n in sorted(listener_counts.items()):
         print("    %-5s %-20s %d" % (action, reason, n), file=out)
+    print("  leftover folders: %d, kept: %d"
+          % (husk_counts["husk"], husk_counts["keep"]), file=out)
     print("  stale worktree registrations: %d" % sum(
         len(r["pruned"]["names"] or []) for r in results if r.get("pruned")), file=out)
     if unreadable_listener_repos:
@@ -1849,7 +1985,7 @@ def main(argv=None) -> int:
     parser.add_argument("--discover", metavar="DIR",
                          help="sweep DIR's own checkouts, used only when no ROOT is given")
     parser.add_argument("--confirm", action="store_true",
-                         help="actually delete branches/worktrees or drop tombstones")
+                         help="actually delete branches, worktrees and leftover folders (husks), or drop tombstones")
     parser.add_argument("--purge", action="store_true",
                          help="purge tombstones past 90 days instead of sweeping")
     parser.add_argument("--restore-log", metavar="PATH",

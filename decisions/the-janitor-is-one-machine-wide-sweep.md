@@ -45,6 +45,19 @@ Branches and worktrees are git's to judge, so the prune tier asks git. It runs
 the worktree list is read, so a pruned registration is never judged as a
 worktree.
 
+## Leftover folders are deleted only when proven twice
+
+`find_husks` finds a real folder under `.claude/worktrees/` that git does not
+list as a worktree and that holds only names the repository gives in
+`huskNames`. The repository knows its own build output. The sweep does not.
+Only `--confirm` deletes, and only after the proof runs again right before the
+delete. The sweep never follows a link, and it walks only the repository's own
+`.claude/worktrees`, never a link out of it. Any error keeps the folder. An
+empty process table keeps it too. The process check reads the current directory
+only, so a process outside the folder that holds a file inside is not seen.
+On Windows the tier stays report only: Python before 3.12 does not see a
+junction as a link, and `rmtree` there has no symlink-attack guard.
+
 ## The sweep never runs code a repository supplies
 
 A repository states its wishes in `.claude/janitor.json`, and the sweep reads

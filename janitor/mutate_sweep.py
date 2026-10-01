@@ -134,8 +134,10 @@ MUTATIONS = [
      "test_refusal_dirty_worktree"),
     ("refusal: a live session no longer keeps its worktree",
      "sweep",
+     '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}\n'
      '    if live:\n'
      '        return {"path": path, "action": "keep", "reason": "live-session"}',
+     '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}\n'
      '    if False:\n'
      '        return {"path": path, "action": "keep", "reason": "live-session"}',
      "test_refusal_live_session_worktree"),
@@ -363,20 +365,13 @@ MUTATIONS = [
     ("opt-out: a malformed present sweep/protectedPrefixes value falls back to the permissive default",
      "sweep",
      '    if "sweep" in data and not isinstance(data["sweep"], bool):\n'
-     '        return False, (), False\n'
-     '    sweep_enabled = data.get("sweep", True)\n'
-     '    if "protectedPrefixes" in data:\n'
-     '        extra = data["protectedPrefixes"]\n'
-     '        if not isinstance(extra, list) or not all(isinstance(item, str) for item in extra):\n'
-     '            return False, (), False\n'
-     '    else:\n'
-     '        extra = []',
-     '    sweep_enabled = data.get("sweep", True)\n'
-     '    if not isinstance(sweep_enabled, bool):\n'
-     '        sweep_enabled = True\n'
-     '    extra = data.get("protectedPrefixes", [])\n'
-     '    if not isinstance(extra, list):\n'
-     '        extra = []',
+     '        return None\n'
+     '    for key in ("protectedPrefixes", "huskNames"):\n'
+     '        if key in data and (not isinstance(data[key], list)\n'
+     '                            or not all(isinstance(item, str) for item in data[key])):\n'
+     '            return None\n'
+     '    return data\n',
+     '    return data\n',
      "test_sweep_string_false_refuses_the_whole_repository"),
 
     # ---- the primary-checkout exclusion (review fix, PR #83) ----
@@ -570,6 +565,104 @@ MUTATIONS = [
      '    if result["pruned"]["names"] and not result["pruned"]["error"]:',
      '    if result["pruned"]["names"]:',
      "test_a_failed_prune_leaves_the_registration_and_its_branch_kept"),
+
+    # ---- husks ----
+    ("husks: a folder holding a file outside huskNames is listed as a husk",
+     "sweep",
+     '    if not contents or not set(contents) <= set(names):',
+     '    if not contents:',
+     "test_a_folder_holding_anything_else_is_not_a_husk"),
+
+    ("husks: a registered worktree is listed as a husk",
+     "sweep",
+     '    if os.path.normcase(os.path.realpath(path)) in registered:\n        return None',
+     '    if False:\n        return None',
+     "test_a_registered_worktree_is_not_a_husk"),
+
+    ("husks: a preview deletes the husk",
+     "sweep",
+     '    if confirm:\n        for decision in result["husks"]:',
+     '    if True:\n        for decision in result["husks"]:',
+     "test_preview_lists_a_husk_as_would_and_deletes_nothing",
+     "posix"),
+
+    ("husks: the delete skips the re-proof and trusts the preview",
+     "sweep",
+     '    again = husk_verdict(root, path, entries, names)',
+     '    again = decision',
+     "test_confirm_keeps_a_folder_that_gained_a_foreign_file_after_the_find",
+     "posix"),
+
+    ("husks: a folder that became a link is no longer refused",
+     "sweep",
+     '    if os.path.islink(path) or not os.path.isdir(path):\n        return None\n    registered',
+     '    if not os.path.isdir(path):\n        return None\n    registered',
+     "test_confirm_refuses_a_folder_that_became_a_link",
+     "posix"),
+
+    ('husks: a worktrees folder that is a link out of the repository is walked',
+     "sweep",
+     '    if os.path.normcase(os.path.realpath(os.path.dirname(path))) != os.path.normcase(own_base):\n        return None\n',
+     '',
+     'test_a_symlinked_worktrees_base_is_never_walked_or_deleted',
+     "posix"),
+
+    ('husks: an empty process table reads as nobody inside',
+     "sweep",
+     '    return table or None\n',
+     '    return table\n',
+     'test_an_empty_table_is_unreadable'),
+
+    ('husks: a husk whose delete failed prints REAP',
+     "sweep",
+     '            tag = "KEEP" if h.get("error") else {"husk"',
+     '            tag = None if False else {"husk"',
+     'test_a_failed_delete_prints_keep_with_the_error',
+     "posix"),
+
+    ('husks: Windows deletes husks',
+     "sweep",
+     '    if not HUSKS_DELETABLE:\n',
+     '    if False:\n',
+     'test_windows_keeps_husks_report_only'),
+
+    ('macos cwd table: the pid and path lines are mis-parsed',
+     "sweep",
+     '            table.append((pid, line[1:]))',
+     '            table.append((pid, line))',
+     'test_parses_pid_and_cwd_lines'),
+
+    ('macos cwd table: lsof exit 1 is read as unreadable',
+     "sweep",
+     '    if answer.returncode not in (0, 1):\n        return None\n    table = []',
+     '    if answer.returncode not in (0,):\n        return None\n    table = []',
+     'test_exit_1_is_readable_and_other_exits_are_not'),
+
+    ('macos cwd table: any lsof exit code is read as readable',
+     "sweep",
+     '    if answer.returncode not in (0, 1):\n        return None\n    table = []',
+     '    if False:\n        return None\n    table = []',
+     'test_exit_1_is_readable_and_other_exits_are_not'),
+
+    ('macos cwd table: a lsof timeout escapes instead of reading as unknown',
+     "sweep",
+     '                                timeout=60)\n    except Exception:',
+     '                                timeout=60)\n    except OSError:',
+     'test_a_timeout_is_unreadable'),
+
+    ('macos cwd table: processes_in ignores the table',
+     "sweep",
+     '        return [pid for pid, cwd in table if _cwd_under_checkout(cwd, path)], []',
+     '        return [], []',
+     'test_darwin_processes_in_reads_one_table'),
+
+    # only_on="posix": the sleep fixture is POSIX only.
+    ("husks: a process inside no longer keeps the husk",
+     "sweep",
+     '    if inside:\n        return {"path": path, "action": "keep", "reason": "process-inside',
+     '    if False:\n        return {"path": path, "action": "keep", "reason": "process-inside',
+     "test_a_process_inside_keeps_the_husk",
+     "posix"),
 
     # ---- the worktree pre-removal process check (this build, 2026-09-24) ----
     ("pre-check: a process sitting inside the worktree no longer keeps it",
