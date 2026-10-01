@@ -85,7 +85,19 @@ The sweep keeps a worktree that holds uncommitted or untracked work.
 
 The sweep keeps a worktree that a live session stands in.
 
-The sweep keeps a worktree that holds a lock, and it names the holder.
+The sweep keeps a worktree that holds a lock, and it names the holder. One
+lock is not kept: a Claude agent lock, `claude agent agent-<id> (pid N start
+<date>)`, whose agent is gone. The date is UTC. The lock is stale when the pid
+is dead, or alive with a different start time (the pid was reused). A lock that
+is not in this form, a running agent, or a date or process read that fails
+keeps the worktree.
+
+A stale agent lock frees the worktree for the other checks, plus two more. The
+worktree must be clean. Every commit on its HEAD must be on some remote
+branch. A detached HEAD counts. A commit that is not on a remote keeps the worktree,
+and the reason is `unpushed`. `--confirm` then unlocks and runs
+`git worktree remove`, never with `--force`. The preview lists the worktree as
+`REAP` and unlocks nothing.
 
 The sweep keeps a worktree that any process sits inside, not only a
 listener. It names the pids. This check runs right before the removal

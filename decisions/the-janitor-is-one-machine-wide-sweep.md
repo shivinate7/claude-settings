@@ -45,6 +45,20 @@ Branches and worktrees are git's to judge, so the prune tier asks git. It runs
 the worktree list is read, so a pruned registration is never judged as a
 worktree.
 
+## A stale agent lock does not keep a worktree
+
+PROPOSED, owner word pending. The Agent tool locks each lane worktree with the
+reason `claude agent agent-<id> (pid N start <UTC date>)`. A lane always
+commits, so the tool never removes it, and the lock outlives the agent. The
+outcome to protect is a lane's unpushed work. The sweep frees a worktree from
+such a lock only when the pid is dead, or alive with another start time. The
+worktree must also be clean, and every commit on HEAD must be on a remote
+branch. Any other lock reason, and any unreadable fact, keeps it. `--confirm` unlocks, then
+removes, never with `--force`.
+
+Unmeasured: q_max held no locked worktree when this was written, so the lock
+format is measured from the live lanes of this repository only.
+
 ## Leftover folders are deleted only when proven twice
 
 `find_husks` finds a real folder under `.claude/worktrees/` that git does not
