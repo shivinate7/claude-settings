@@ -5,7 +5,7 @@
 // repository's own tree and never share state with each other.
 
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, statSync } from "node:fs";
+import { symlinkSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, statSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -1281,6 +1281,59 @@ test("heading --check accepts a number a Record-claim commit added", () =>
     const r = claim(root, headingConfig(), "main");
     commit(root, `claim\n\nRecord-claim: ${r.assigned.map((a) => a.id).join(" ")}`);
     assert.deepEqual(check(root, headingConfig(), LOCAL), []);
+  }));
+
+// ---------------------------------------------------------------- synced default-branch records, symlinked CLI path
+// main holds D-001. `long` is a long-lived branch off it. main then numbers D-002 (the old
+// post-merge stamp, no trailer), and a feature branch off `long` merges main in. Base is `long`.
+function syncedRepo(root) {
+  initRepo(root);
+  write(root, "docs/decisions/a.md", rec(1, "a"));
+  commit(root, "main");
+  git(root, "branch", "long");
+  write(root, "docs/decisions/m.md", rec(2, "m"));
+  commit(root, "main stamps D-002 after its merge");
+  git(root, "checkout", "-q", "-b", "wt/feature", "long");
+  git(root, "merge", "-q", "--no-edit", "main");
+}
+const SYNCED = { base: "long", defaultRef: "main" };
+
+test("--check passes a record already on the default branch, synced into a long-lived branch", () =>
+  withTempDir((root) => {
+    syncedRepo(root);
+    assert.deepEqual(check(root, frontmatterConfig(), SYNCED), []);
+  }));
+
+test("--check still refuses a record numbered on the branch itself, beside a synced one", () =>
+  withTempDir((root) => {
+    syncedRepo(root);
+    write(root, "docs/decisions/own.md", rec(3, "own"));
+    commit(root, "the branch numbers its own record");
+    const problems = check(root, frontmatterConfig(), SYNCED);
+    assert.equal(problems.length, 1, problems.join(" | "));
+    assert.match(problems[0], /own\.md is numbered D-003 on a branch/);
+  }));
+
+test("--check names an unreadable default-branch ref in the refusal, and keeps refusing", () =>
+  withTempDir((root) => {
+    syncedRepo(root);
+    const problems = check(root, frontmatterConfig(), { base: "long", defaultRef: "origin/nope" });
+    assert.equal(problems.length, 1, problems.join(" | "));
+    assert.match(problems[0], /m\.md is numbered D-002 on a branch/);
+    assert.match(problems[0], /default-branch ref origin\/nope was unreadable/);
+    assert.match(problems[0], /fetch-depth: 0.*git fetch origin main/);
+  }));
+
+test("the CLI runs, and never exits 0 silent, when reached through a symlinked directory", () =>
+  withTempDir((root) => {
+    const link = join(root, "link");
+    symlinkSync(HERE, link);
+    initRepo(root);
+    write(root, "docs/decisions/a.md", rec(1, "a"));
+    commit(root, "main");
+    const r = spawnSync("node", [join(link, "stamp.mjs"), "--check", "--config", join(HERE, "examples/frontmatter.stamp.json")], { cwd: root, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /every pending record is in order/);
   }));
 
 // ---------------------------------------------------------------- run

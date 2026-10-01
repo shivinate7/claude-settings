@@ -31,7 +31,7 @@
 // All take --config <path> (required) and --root <path> (default: cwd). --check also takes
 // --base <ref> (default: origin/$GITHUB_BASE_REF, else origin/<defaultBranch>).
 
-import { readFileSync, writeFileSync, unlinkSync, readdirSync, statSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { realpathSync, readFileSync, writeFileSync, unlinkSync, readdirSync, statSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { join, resolve, posix, dirname } from "node:path";
@@ -693,8 +693,22 @@ function branchNumbered(root, config, opts) {
     const problems = [];
     const claims = claimedByTrailer(root, config, base);
     let tip; // read only when a claim needs it
+    // A record the default branch already holds, under the same number and key, is synced in, not
+    // numbered here. The old post-merge stamp numbered them on main with no trailer. Read once.
+    let onDefault; // opts.defaultRef is for tests, whose fixture has no origin
+    let defaultUnreadable = null;
+    const defaultRef = opts.defaultRef ?? `origin/${config.defaultBranch}`;
+    const defaultHas = (r) => {
+      if (!onDefault) {
+        try {
+          const d = materializeTree(root, defaultRef, recordPaths(config));
+          try { onDefault = new Set(numberedRecords(d, config).map((x) => x.key)); } finally { rmSync(d, { recursive: true, force: true }); }
+        } catch { onDefault = new Set(); defaultUnreadable = defaultRef; }
+      }
+      return onDefault.has(r.key);
+    };
     for (const r of now) {
-      if (baseKeys.has(r.key)) continue;
+      if (baseKeys.has(r.key) || defaultHas(r)) continue;
       if (claims.has(r.id)) {
         tip ??= tipTaken(root, config, ref);
         if (tip.get(r.kind).has(r.n)) {
@@ -709,7 +723,11 @@ function branchNumbered(root, config, opts) {
           `holds it under "${r.name}". A numbered record keeps its key. Restore "${old.name}".`);
       } else {
         problems.push(`${r.rel} is numbered ${r.id} on a branch, and ${ref} does not number it so. ` +
-          `Write the pending marker and let the stamp claim the number at merge.`);
+          `Write the pending marker and let the stamp claim the number at merge.` +
+          (defaultUnreadable
+            ? ` The default-branch ref ${defaultUnreadable} was unreadable, so a record synced in from it cannot be told from one numbered here. ` +
+              `Use actions/checkout with fetch-depth: 0, or run git fetch origin ${config.defaultBranch}.`
+            : ""));
       }
     }
     // A retired-numbers list exists for the frontmatter shapes only. The heading shape reads none.
@@ -808,7 +826,10 @@ function parseArgv(argv) {
   return out;
 }
 
-const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+// Compare real paths: a symlinked directory (macOS /var -> /private/var) made the two differ and the
+// CLI exit 0 with no output.
+const real = (p) => { try { return realpathSync(p); } catch { return resolve(p); } };
+const isMain = Boolean(process.argv[1]) && real(process.argv[1]) === real(fileURLToPath(import.meta.url));
 
 if (isMain) {
   const args = parseArgv(process.argv.slice(2));

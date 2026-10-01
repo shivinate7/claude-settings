@@ -372,7 +372,7 @@ def open_worktree(root, info, base):
     got = git(root, "rev-parse", f"refs/remotes/origin/{info['branch']}")[1]
     if got != info["head"]:
         raise Stop(f"{info['branch']} moved: gh says {info['head'][:9]}, origin holds {got[:9]}. Run again. Nothing was claimed.")
-    tmp = tempfile.mkdtemp(prefix="merge-wt-")
+    tmp = os.path.realpath(tempfile.mkdtemp(prefix="merge-wt-"))  # /var is a symlink on macOS
     wt = os.path.join(tmp, "tree")
     c, out = git(root, "worktree", "add", "-q", "--detach", wt, info["head"])
     if c:

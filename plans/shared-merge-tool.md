@@ -190,8 +190,9 @@ place to name the shared tool. Its ruling does not change.
 
 ## q_max and the stamp action
 
-q_max stamps after the merge through `stamp.yml`, mode `stamp`. It moves in its own repo, by
-its own session, per `record-stamp-stays-generic`, the stamp stays generic:
+q_max stamps after the merge through `stamp.yml`, mode `stamp`. It pins `actions/stamp` at a
+claude-settings SHA. It moved in its own repo (lane 8, q_max#347), by its own session, per
+`record-stamp-stays-generic`, the stamp stays generic:
 
 1. Add the `merge` block and move `regenerate` into the config.
 2. Merge through the command.
@@ -215,7 +216,7 @@ Each lane is one Sonnet builder. When every lane in its "Waits for" cell has mer
 | 5 | Docs: the stamp README contract and adoption checklist, the claude-settings README, `rule_mechanisms.json` for `git-slug-then-claim-number`. A Windows launcher, `bin/merge.cmd`. `bin` is a landed directory, so both installers land it. `merge/test_cmd.py` runs in `gates-windows`. | done | 1, 2, 3, 4 | `rule_audit.py`, `check_landed_dirs.py` and STE lint pass. |
 | 6 | Banchi, in Banchi: the config, mode `check` in `check.yml`, `make merge` on the tool. | open | 2, 3, 4 | One real merge through the tool. `make check` is green. |
 | 7 | Banchi, in Banchi: delete the ported code, the gloss stopgap and DEBT78. Rewrite D140. | open | 6 | `make check` is green. A search for `entry_gloss` and `gloss_first_uses` finds nothing. |
-| 8 | **On hold.** q_max, in q_max: the three steps above. | on hold | 3, 4, and the owner's word | One real merge through the tool. `stamp.yml` holds no write permission. |
+| 8 | q_max, in q_max: the three steps above. The owner started it. | done (q_max#347) | 3, 4, and the owner's word | One real merge through the tool. `stamp.yml` holds no write permission. |
 | 9 | **On hold.** Delete mode `stamp` from `actions/stamp`, its tests and its README. | on hold | 8, and the owner's word | No workflow in any repo names mode `stamp`. `test_stamp.mjs` passes, and a pending record on the default branch goes red in `check`. |
 
 ## Settled by the owner
@@ -231,6 +232,6 @@ Each lane is one Sonnet builder. When every lane in its "Waits for" cell has mer
    guard").
 5. **`--dev` exists, behind the explicit flag only.** It runs the checkout's own tree, for work
    on the tool itself.
-6. **Lanes 8 and 9 are on hold.** Do not start them. The owner starts them later.
+6. **Lane 9 is on hold.** Do not start it. The owner starts it later. The owner started lane 8.
 7. **A failed `afterMerge` or a failed local-main fast-forward gives a non-zero exit.** The
    merge stays, and the printed line says that it landed.

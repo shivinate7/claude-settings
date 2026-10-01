@@ -33,7 +33,7 @@ def main(co, args):
         warn(sha, behind, "fetch of origin main failed: " + (out.splitlines() or ["no output"])[-1])
         return run(co, args)
     want = git(co, "rev-parse", "origin/main")[1]
-    tmp = tempfile.mkdtemp(prefix="merge-fresh-")
+    tmp = os.path.realpath(tempfile.mkdtemp(prefix="merge-fresh-"))  # /var is a symlink on macOS
     wt = os.path.join(tmp, "tree")
     try:
         c, o = git(co, "worktree", "add", "-q", "--detach", wt, want)
