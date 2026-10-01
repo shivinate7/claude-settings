@@ -1849,6 +1849,103 @@ class SameRunBranchCutTests(unittest.TestCase):
         self.assertIn("lane-cut", sweep.list_local_branches(root))
 
 
+class SingleTierModeTests(unittest.TestCase):
+    """`--tier1` and `--branches`, driven through `main`. Fixture per test: a stale
+    registration (`gone`), a live reapable worktree (`lane-live`), a merged branch (`merged-b`)."""
+
+    def _fixture(self, name):
+        root = os.path.join(ROOT, "mode-" + name)
+        make_repo(root, {"f.txt": "x\n"})
+        give_remote(root)
+        run_vcs(root, "branch", "merged-b")
+        live = os.path.join(ROOT, "mode-" + name + "-live")
+        run_vcs(root, "worktree", "add", "-q", live, "-b", "lane-live")
+        gone = os.path.join(ROOT, "mode-" + name + "-gone")
+        run_vcs(root, "worktree", "add", "-q", gone, "-b", "lane-gone")
+        shutil.rmtree(gone)
+        return root, live
+
+    def _main(self, *args):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            code = sweep.main(["--restore-log", os.path.join(ROOT, "mode.log")] + list(args))
+        return code, out.getvalue()
+
+    def _registered(self, root):
+        return [os.path.basename(e["path"]) for e in sweep.parse_worktree_list(root)]
+
+    def test_tier1_prunes_stale_registrations_with_no_confirm_and_touches_nothing_else(self):
+        root, live = self._fixture("tier1")
+        before = self._registered(root)
+        self.assertTrue(any(n.endswith("-gone") for n in before))
+        code, _ = self._main("--root", live, "--tier1")  # a linked worktree resolves to its clone
+        self.assertEqual(code, 0)
+        after = self._registered(root)
+        self.assertFalse(any(n.endswith("-gone") for n in after))
+        self.assertTrue(os.path.isdir(live))
+        self.assertIn("merged-b", sweep.list_local_branches(root))
+
+    def test_branches_reaps_a_merged_branch_but_removes_no_worktree_and_holds_theirs(self):
+        root, live = self._fixture("branches")
+        code, _ = self._main("--root", root, "--branches", "--confirm")
+        self.assertEqual(code, 0)
+        left = sweep.list_local_branches(root)
+        self.assertNotIn("merged-b", left)
+        self.assertIn("lane-live", left)
+        self.assertTrue(os.path.isdir(live))
+        self.assertTrue(any(n.endswith("-gone") for n in self._registered(root)))
+
+    def test_branches_previews_without_confirm(self):
+        root, _live = self._fixture("branches-preview")
+        result = sweep.sweep_repo(root, False, os.path.join(ROOT, "mode.log"), "branches")
+        self.assertEqual({b["name"]: b["action"] for b in result["branches"]}["merged-b"], "reap")
+        self.assertIn("merged-b", sweep.list_local_branches(root))
+
+    def test_branches_refuses_when_the_worktree_list_is_empty(self):
+        root, _live = self._fixture("branches-blind")
+        real = sweep.parse_worktree_list
+        sweep.parse_worktree_list = lambda where: []
+        try:
+            result = sweep.sweep_repo(root, True, os.path.join(ROOT, "mode.log"), "branches")
+        finally:
+            sweep.parse_worktree_list = real
+        self.assertEqual(result["refused"], "unreadable-worktree-list")
+        self.assertIn("merged-b", sweep.list_local_branches(root))
+
+    def test_root_resolves_a_linked_worktree_to_its_primary_checkout(self):
+        root, live = self._fixture("resolve")
+        seen = []
+        real = sweep.sweep_repo
+        sweep.sweep_repo = lambda r, *a, **k: (seen.append(r), real(r, *a, **k))[1]
+        try:
+            self._main("--root", live, "--tier1")
+        finally:
+            sweep.sweep_repo = real
+        self.assertEqual([os.path.realpath(r) for r in seen], [os.path.realpath(root)])
+
+    def test_single_tier_modes_do_no_process_work(self):
+        root, _live = self._fixture("noproc")
+        calls = []
+        stubs = {"find_dead_rooted": lambda: calls.append("dead") or [],
+                 "find_loose_processes": lambda: calls.append("loose") or [],
+                 "find_swept_listeners": lambda paths: calls.append("listeners") or []}
+        real = {k: getattr(sweep, k) for k in stubs}
+        for k, fn in stubs.items():
+            setattr(sweep, k, fn)
+        try:
+            self._main("--root", root, "--tier1")
+            self._main("--root", root, "--branches", "--confirm")
+        finally:
+            for k, fn in real.items():
+                setattr(sweep, k, fn)
+        self.assertEqual(calls, [])
+
+    def test_root_outside_any_repository_exits_1(self):
+        code, text = self._main("--root", ROOT, "--tier1")
+        self.assertEqual(code, 1)
+        self.assertIn("not inside a repository", text)
+
+
 # --------------------------------------------------------------------------- the --confirm gate
 #
 # Every OTHER confirm=False call in this file (BaseResolutionRefusalTests,

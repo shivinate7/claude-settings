@@ -73,6 +73,24 @@ When a `janitor.roots` value is not a list of strings, the sweep refuses
 discovery. It names the problem, and finds nothing, instead of guessing a
 default you did not ask for.
 
+## Single-tier modes
+
+A hook that wants one tier passes `--root PATH` with one mode. `--root PATH`
+sweeps the one repository that PATH belongs to. PATH can be a linked worktree
+or a folder inside it. The two mode flags exclude each other.
+
+    sweep.py --root PATH --tier1               stale registrations and husks
+    sweep.py --root PATH --branches --confirm  branches only
+
+`--tier1` acts for real and needs no `--confirm`. It prunes stale worktree
+registrations and deletes husks. It removes no worktree, reaps no branch, and
+stops no process. It runs no process tier.
+
+`--branches` reaps branches that hold no unique work. It previews without
+`--confirm`. It removes no worktree and prunes no registration, so every
+branch that a worktree checks out stays held. When git gives no worktree
+list, it refuses the repository.
+
 ## What it refuses
 
 The sweep keeps a branch under a protected prefix. `backup/` is the default.
