@@ -5,9 +5,9 @@
   merge <pr> --confirm    lock, claim, push, wait, merge, sync local main, clean up.
   merge --unlock          remove this repo's merge lock. Reads no lock state first.
 
-Git half (lane 3b): the merge lock, the temporary worktree, the claim, the push, the revert,
-resume, the local main, afterMerge and the branch delete. The GitHub half (required checks,
-the wait, `gh pr merge`) is lane 4. It plugs in at `Host.wait_checks` and `Host.merge`.
+Git half: the merge lock, the temporary worktree, the claim, the push, the revert, resume, the
+local main, afterMerge and the branch delete. GitHub half (`Host`): required checks, the wait,
+the minute read and `gh pr merge --match-head-commit`.
 """
 import argparse, json, os, re, shutil, subprocess, sys, tempfile, time, uuid
 
@@ -132,12 +132,12 @@ class GhLock:
 
 # ------------------------------------------------------------------ the GitHub half (the seam)
 
-class NotBuilt(Stop):
-    pass
-
 class Host:
-    """Lane 4 fills wait_checks and merge. Tests pass a fake with the same three methods."""
-    built = False
+    """The GitHub half: `gh` for the pull request, the required checks, the wait and the merge.
+    Tests pass a fake with the same pr, wait_checks and merge, or a `gh` shim on PATH."""
+
+    def __init__(self, required="protection", base="main", minute=60, now=time.time, pause=time.sleep):
+        self.required, self.base, self.minute, self.now, self.pause = required, base, minute, now, pause
 
     def pr(self, n):
         """-> {head, branch, base, state, mergeable, merge_state}"""
@@ -148,13 +148,93 @@ class Host:
         return {"head": d["headRefOid"], "branch": d["headRefName"], "base": d["baseRefName"], "state": d["state"],
                 "mergeable": d["mergeable"], "merge_state": d["mergeStateStatus"]}
 
-    def wait_checks(self, n, sha, deadline_minutes):
-        """Wait for the required checks on `sha`. -> (ok, why). Lane 4."""
-        raise NotBuilt("the GitHub half (required checks, the wait) is lane 4 and is not built")
+    def required_names(self):
+        """The required check names. Never empty: an empty list would pass the wait without a read."""
+        if isinstance(self.required, list):
+            names = self.required
+        else:
+            c, out = sh(["gh", "api", f"repos/{{owner}}/{{repo}}/branches/{self.base}/protection/required_status_checks", "--jq", ".contexts"])
+            if c:
+                raise Stop(f"cannot read the required checks of {self.base} (no branch protection?). "
+                           f"Set merge.requiredChecks to a list of check names.\n{out}")
+            names = json.loads(out)
+        if not names:
+            raise Stop(f"no required checks are named for {self.base} (merge.requiredChecks or the branch protection is empty). "
+                       "The tool never merges with nothing to wait for. Name the checks.")
+        return names
+
+    def checks(self, n):
+        """-> {check name: [(bucket, link), ...]} from `gh pr checks`, every entry kept. It exits non-zero on red or pending, so read the JSON, not the code."""
+        c, out = sh(["gh", "pr", "checks", str(n), "--json", "name,bucket,link"])
+        try:
+            rows = json.loads(out)
+        except ValueError:
+            if "no checks reported" in out:
+                return {}
+            raise Stop("gh pr checks failed: " + out)
+        got = {}
+        for d in rows:
+            got.setdefault(d["name"], []).append((d["bucket"], d.get("link") or ""))
+        return got
+
+    def wait_checks(self, n, sha, deadline_minutes, prior=None):
+        """Wait for the required checks on `sha`. -> (ok, why). `prior` is the head before this run's push.
+        Each pass reads the pull request first: a third head, DIRTY or CONFLICTING ends the wait. A head
+        that still reads as `prior` is GitHub lagging the push: keep waiting. Any red check, required or
+        not, ends the wait. No sleep: a pending check blocks in `gh run watch <id> --exit-status` for at
+        most a minute, then the loop reads again."""
+        names = self.required_names()
+        end = self.now() + deadline_minutes * 60
+        while True:
+            info = self.pr(n)
+            if info["head"] == prior and prior != sha:
+                if self.now() >= end:
+                    return False, f"the deadline of {deadline_minutes} minutes passed. GitHub still shows the head before the push."
+                self.pause(self.minute)
+                continue
+            if info["head"] != sha:
+                return False, f"the branch head moved to {info['head'][:9]} during the wait ({sha[:9]} was waited on). Run again."
+            if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
+                return False, "the pull request went DIRTY during the wait. Merge the base into the branch and run again."
+            got = self.checks(n)
+            red = [f"{k}: {b} {l}".strip() for k, rows in got.items() for b, l in rows if b in ("fail", "cancel")]
+            if red:
+                return False, "a check is red: " + "; ".join(red)
+            pending = [k for k in names if not got.get(k) or any(b not in ("pass", "skipping") for b, _ in got[k])]
+            if not pending:
+                return True, ""
+            if self.now() >= end:
+                return False, f"the deadline of {deadline_minutes} minutes passed. Still pending: " + ", ".join(pending)
+            self.block(pending, got)
+
+    def block(self, pending, got):
+        """Wait up to a minute for something to change."""
+        ids = [m.group(1) for k in pending for _, l in got.get(k, []) for m in [re.search(r"/actions/runs/(\d+)", l)] if m]
+        if not ids:  # ponytail: a check outside Actions has no run to watch, so this is a plain pause. Fine while the loop exits at the deadline.
+            self.pause(self.minute)
+            return
+        t0 = self.now()
+        try:
+            subprocess.run(["gh", "run", "watch", ids[0], "--exit-status"], capture_output=True, text=True, timeout=self.minute)
+        except subprocess.TimeoutExpired:
+            pass
+        if self.now() - t0 < 1:  # watch returned at once: do not spin on the API
+            self.pause(self.minute)
 
     def merge(self, n, method, sha):
-        """`gh pr merge --match-head-commit sha`. -> (merge commit oid or None, message). Lane 4."""
-        raise NotBuilt("the GitHub half (gh pr merge) is lane 4 and is not built")
+        """`gh pr merge --match-head-commit sha`. Never --admin, never --delete-branch (cut_branch does that).
+        -> (merge commit oid or None, message)."""
+        c, out = sh(["gh", "pr", "merge", str(n), f"--{method}", "--match-head-commit", sha])
+        if c:
+            return None, out
+        c, out = sh(["gh", "pr", "view", str(n), "--json", "state,mergeCommit"])
+        try:
+            d = json.loads(out)
+            if d["state"] == "MERGED" and d["mergeCommit"]:
+                return d["mergeCommit"]["oid"], ""
+        except (ValueError, KeyError, TypeError):
+            pass
+        return None, "gh pr merge passed, but the pull request shows no merge commit: " + out
 
 # ------------------------------------------------------------------ git steps
 
@@ -179,7 +259,7 @@ def do_claim(wt, cfgrel, base):
 
 def commit_claim(wt, trailer):
     git(wt, "add", "-A")
-    who = [] if git(wt, "config", "user.email")[1] else ["-c", "user.name=merge", "-c", "user.email=merge@localhost"]  # a runner has no identity
+    who = [] if git(wt, "config", "user.email")[1] and git(wt, "config", "user.name")[1] else ["-c", "user.name=merge", "-c", "user.email=merge@localhost"]  # a runner has no identity
     c, out = git(wt, *who, "commit", "-q", "-m", "Claim record numbers", "-m", trailer)
     if c:
         raise Stop("cannot commit the claim: " + out)
@@ -231,12 +311,12 @@ def ff_main(root, base, commit):
             raise Stop(f"{tree} is not on {base}. Nothing was moved.")
         dirty = git(tree, "status", "--porcelain")[1]
         if dirty:
-            raise Stop(f"{tree} has uncommitted changes. The merge is done. Fast-forward {base} there by hand.")
+            raise Stop(f"{tree} has uncommitted changes. Fast-forward {base} there by hand.")
         c, out = git(tree, "merge", "-q", "--ff-only", commit)
     else:
         c, out = git(root, "fetch", "-q", "origin", f"{base}:{base}")
     if c:
-        raise Stop("the local main did not move. The merge is done. " + out)
+        raise Stop("the local main did not move. " + out)
     say(f"merge: local {base} is at {commit[:9]}.")
 
 def cut_branch(root, branch, merged):
@@ -328,14 +408,13 @@ def confirm(root, cfg, cfgrel, n, host, lock):
     for k in ("method", "deadlineMinutes"):
         if k not in m:
             raise Stop(f"{cfgrel} has no merge.{k}. Read it from the repo; the tool never guesses it.")
-    if not host.built:
-        raise Stop("the GitHub half (lane 4) is not built, so --confirm cannot finish a merge. Use the preview.")
     base, base_ref = cfg["defaultBranch"], f"origin/{cfg['defaultBranch']}"
     token = lock.acquire(base, (m["deadlineMinutes"] + 10) * 60)
     tmp = wt = claim_sha = None
     try:
         info = host.pr(n)
         refuse_bad_pr(info)
+        host.required_names()  # an empty or unreadable list stops here, before anything is pushed
         branch = info["branch"]
         tmp, wt = open_worktree(root, info, base)
         resumed = own_claim(wt, cfgrel, base_ref)
@@ -357,7 +436,10 @@ def confirm(root, cfg, cfgrel, n, host, lock):
                 revert_claim(root, wt, branch, claim_sha)
             raise Stop(why)
 
-        ok, why = host.wait_checks(n, sha, m["deadlineMinutes"])
+        try:
+            ok, why = host.wait_checks(n, sha, m["deadlineMinutes"], info["head"] if claim_sha else None)
+        except Stop as e:  # a read that fails in the wait still reverts the claim
+            ok, why = False, str(e)
         if not ok:
             fail(why)
         c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
@@ -374,7 +456,7 @@ def confirm(root, cfg, cfgrel, n, host, lock):
         try:
             ff_main(root, base, commit)
         except Stop as e:  # the merge landed: report, go on, exit non-zero at the end
-            say(f"merge: the merge landed, but the local {base} did not move: {e}")
+            say(f"merge: the merge landed. The local {base} did not move: {e}")
             ok = False
         ok = after_merge(root, m.get("afterMerge", [])) and ok
         if m.get("deleteBranch"):
@@ -404,7 +486,7 @@ def main(argv, host=None, lock=None):
             lock.unlock(cfg["defaultBranch"])
             say(f"merge: lock on {cfg['defaultBranch']} removed.")
             return 0
-        return (confirm if a.confirm else preview)(root, cfg, a.config, a.pr, host or Host(), lock) or 0
+        return (confirm if a.confirm else preview)(root, cfg, a.config, a.pr, host or Host(cfg.get("merge", {}).get("requiredChecks", "protection"), cfg["defaultBranch"]), lock) or 0
     except Stop as e:
         print(f"merge: {e}", file=sys.stderr)
         return 1
