@@ -1511,6 +1511,9 @@ _RUN_LOCK = threading.RLock()  # `_pmap` workers share the cache: each read stil
 _POOL = None  # the per-branch and per-worktree reads of ONE repository
 _ROOT_POOL = None  # whole repositories; a separate pool, so a repository never waits on itself
 PREVIEW_WORKERS = 8
+# Windows stays serial: its ctypes reads set argtypes on the shared `kernel32` object (and rebuild
+# a Structure class) on every call, so two threads in them break each other. Measured on CI.
+PREVIEW_THREADS = not sys.platform.startswith("win")
 PREVIEW_ROOT_WORKERS = 4
 
 
@@ -1570,8 +1573,9 @@ def _begin_preview_cache():
     undo function."""
     global _RUN, _POOL, _ROOT_POOL
     _RUN = {}
-    _POOL = concurrent.futures.ThreadPoolExecutor(max_workers=PREVIEW_WORKERS)
-    _ROOT_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=PREVIEW_ROOT_WORKERS)
+    if PREVIEW_THREADS:
+        _POOL = concurrent.futures.ThreadPoolExecutor(max_workers=PREVIEW_WORKERS)
+        _ROOT_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=PREVIEW_ROOT_WORKERS)
     real_git, real_records = guard._git, guard.session_records
 
     def run_git(where, *args):
@@ -1584,8 +1588,9 @@ def _begin_preview_cache():
 
     def undo():
         global _RUN, _POOL, _ROOT_POOL
-        _POOL.shutdown()
-        _ROOT_POOL.shutdown()
+        for pool in (_POOL, _ROOT_POOL):
+            if pool is not None:
+                pool.shutdown()
         _POOL = _ROOT_POOL = None
         _RUN = None
         guard._git, guard.session_records = real_git, real_records

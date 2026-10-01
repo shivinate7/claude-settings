@@ -2493,7 +2493,8 @@ class PreviewCacheTests(unittest.TestCase):
                 (sweep._RUN is not None, sweep._POOL is not None)) or 0):
             for args in ([repo], ["--confirm", repo], ["--tier1", repo], ["--branches", repo]):
                 sweep.main(args)
-        self.assertEqual(seen, [(True, True), (False, False), (False, False), (True, True)])
+        on = sweep.PREVIEW_THREADS
+        self.assertEqual(seen, [(True, on), (False, False), (False, False), (True, on)])
         self.assertIsNone(sweep._RUN)
         self.assertIsNone(sweep._POOL)
         self.assertIs(sweep.guard._git, real_git)
@@ -2522,6 +2523,7 @@ class ParallelPreviewTests(unittest.TestCase):
         finally:
             undo()
 
+    @unittest.skipUnless(sweep.PREVIEW_THREADS, "Windows previews stay serial")
     def test_pmap_runs_a_preview_in_parallel_and_returns_input_order(self):
         undo = sweep._begin_preview_cache()
         try:
@@ -2575,7 +2577,7 @@ class ParallelPreviewTests(unittest.TestCase):
         self.assertEqual(fast, plain)
 
         # Each loop runs its decisions side by side in a preview.
-        for name in ("decide_branch", "decide_worktree"):
+        for name in ("decide_branch", "decide_worktree") if sweep.PREVIEW_THREADS else ():
             peak = self._peak_concurrency(name, lambda: sweep.sweep_repo(root, False, log))
             self.assertTrue(peak > 1, "%s never ran twice at once" % name)
 
@@ -2614,6 +2616,7 @@ class ParallelPreviewTests(unittest.TestCase):
             undo()
         return state["peak"]
 
+    @unittest.skipUnless(sweep.PREVIEW_THREADS, "Windows previews stay serial")
     def test_whole_repositories_run_side_by_side_in_a_preview(self):
         class Stop(Exception):
             pass
