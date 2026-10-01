@@ -1981,6 +1981,19 @@ class SingleTierModeTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("not inside a repository", text)
 
+    def test_root_whose_git_dir_sits_in_another_repos_root_exits_1(self):
+        parent = os.path.join(ROOT, "mode-nested-parent")
+        make_repo(parent, {"f.txt": "x\n"})
+        work = os.path.join(ROOT, "mode-nested-work")
+        os.makedirs(work)
+        made = run_vcs(work, "init", "-q", "-b", "main", "--separate-git-dir",
+                       os.path.join(parent, "g"))
+        require(made.returncode == 0, "nested git dir fixture: %s" % made.stderr.strip())
+        require(guard.primary_checkout(work) == os.path.realpath(parent), "fixture: sees parent")
+        code, text = self._main("--root", work, "--tier1")
+        self.assertEqual(code, 1)
+        self.assertIn("not inside a repository", text)
+
     def test_root_outside_any_repository_exits_1(self):
         code, text = self._main("--root", ROOT, "--tier1")
         self.assertEqual(code, 1)

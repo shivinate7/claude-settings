@@ -2118,7 +2118,10 @@ def main(argv=None) -> int:
     roots = [os.path.abspath(r) for r in args.roots]
     if args.root:
         primary = guard.primary_checkout(os.path.abspath(args.root))
-        if primary is not None and not _is_toplevel(primary):
+        if primary is not None and not (
+                _is_toplevel(primary) and os.path.normcase(os.path.realpath(
+                    guard.git_common_dir(primary) or "")) == os.path.normcase(os.path.realpath(
+                        guard.git_common_dir(os.path.abspath(args.root)) or "-"))):
             primary = None  # a submodule or a separate git dir: dirname(common dir) is wrong
         if primary is None:
             print("janitor: %s is not inside a repository" % args.root, file=sys.stderr)
