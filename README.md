@@ -114,7 +114,7 @@ merge --dev ...         run the checkout's own tree, not origin main
   prints a warning block and runs the code it has. `--dev` skips all of this and runs the
   checkout's own tree. Use it only to work on the tool.
 * **Preview.** `merge <pr>` runs the claim in a temporary worktree and drops it. It prints
-  the lock state, the state of the head's checks (green, pending or red), the claim line, and the steps a run would take. Nothing reaches origin.
+  the lock state, the state of the head's checks (green, or every pending or red check by name), the claim line, and the steps a run would take. Nothing reaches origin.
 * **`--confirm`.** It takes the lock, then reads the required checks. If the list is empty or
   unreadable, it stops before the claim push. Then it checks first: it waits for the head's
   own checks, and a red one stops the run with nothing claimed or pushed. Only on green does it
@@ -122,6 +122,17 @@ merge --dev ...         run the checkout's own tree, not origin main
   and merges with `--match-head-commit`. Then it moves the local main, runs `afterMerge`, and
   deletes the head branch if `merge.deleteBranch` is set. A rerun on a branch that already
   holds its own claim resumes at the wait.
+* **The wait.** It ends green only when every check run and status on the head SHA has finished
+  and none failed, required or not. Skipped and neutral pass. A pending check is waited on. A
+  failed, cancelled, timed out, action required or startup failure check stops the run, and so does
+  any status the tool does not know. The required list must still be non-empty, and each name must
+  be present, so a check that never started cannot pass by its absence. Both waits (the head
+  before the claim, and the claim SHA) work this way. `merge.ignoreChecks` is an optional list of
+  `{"name": "...", "reason": "..."}` in the `merge` block. A check named there is left out of the
+  wait, and the output names it. An entry with no name or an empty reason refuses the config, and so does a name that is also a required check.
+  Before the wait ends green it also reads the workflow runs of the head SHA: each must be completed with success, skipped or neutral,
+  so a run whose jobs are not listed yet holds the wait. Then it waits 30 seconds and reads again, and the result must be green again.
+  One window stays: a workflow that GitHub has not created yet.
 * **A stop in the wait.** The wait stops on any failed or cancelled check, required or not,
   and on a DIRTY branch or a moved head. It reverts the claim, but only while the origin head
   is still the claim commit. A head that still reads as the pre-claim SHA is GitHub lagging
