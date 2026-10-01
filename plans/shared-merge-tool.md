@@ -104,7 +104,7 @@ The repo keeps one config file, the stamp config it already has or a new one at
 | `merge.method` | `merge`, `squash` or `rebase`. Read it from the repo history. Never guess it. |
 | `merge.requiredChecks` | `"protection"` reads the branch protection API. A list names the checks for a repo with no protection. |
 | `merge.deadlineMinutes` | The longest wait for the claim commit's checks. |
-| `merge.afterMerge` | Commands that run after the local main moves, such as a primary-checkout sync. Each runs in the repo root. A failure is reported, and the merge stays. |
+| `merge.afterMerge` | Commands that run after the local main moves, such as a primary-checkout sync. Each runs in the repo root. A failure is reported, the merge stays, and the command exits non-zero. |
 | `merge.deleteBranch` | Delete the head branch on origin and locally after the merge. |
 
 A repo calls the command from its own wrapper, such as a `make merge` target. The wrapper
@@ -217,9 +217,11 @@ Each lane is one Sonnet builder. When every lane in its "Waits for" cell has mer
 2. **The merge lock is a ref on origin,** `refs/merge-lock/<branch>`, made by the GitHub API.
    Cloud sessions merge too, and a file lock cannot see them.
 3. **Delete mode `stamp` once q_max moves** (lane 9). One path, and no workflow writes to main.
-6. **Lanes 8 and 9 are on hold.** Do not start them. The owner starts them later.
 4. **The command updates itself before every merge.** It never refuses to merge for an old
    copy. When it cannot prove fresh code, it warns loudly and goes on (see "The fresh-code
    guard").
 5. **`--dev` exists, behind the explicit flag only.** It runs the checkout's own tree, for work
    on the tool itself.
+6. **Lanes 8 and 9 are on hold.** Do not start them. The owner starts them later.
+7. **A failed `afterMerge` gives a non-zero exit.** The merge stays, and the printed line says
+   that it landed.
