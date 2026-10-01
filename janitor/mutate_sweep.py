@@ -461,11 +461,13 @@ MUTATIONS = [
      '            [sys.executable, SWEEP_PATH, root],',
      "test_sweeps_repo_a_leaves_repo_b_untouched"),
 
+    # only_on="posix": LooseProcessTests is skipped on Windows (its sh-loop fixture is POSIX only).
     ("loose processes: an unreadable owner is left out instead of listed",
      "sweep",
      '        if owner is not False:\n            found.append(',
      '        if owner is True:\n            found.append(',
-     "test_unreadable_owner_is_listed_as_unknown"),
+     "test_unreadable_owner_is_listed_as_unknown",
+     "posix"),
 
     # ---- orphaned TCP listeners (this build, 2026-09-24) ----
     #
