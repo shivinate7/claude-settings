@@ -547,6 +547,12 @@ MUTATIONS = [
      "test_marked_process_is_listed_and_unmarked_is_not",
      "posix"),
 
+    ("prune: a preview prunes the stale registration for real",
+     "sweep",
+     '    if confirm and names:\n        done = guard._git(root, "worktree", "prune")',
+     '    if names:\n        done = guard._git(root, "worktree", "prune")',
+     "test_preview_names_the_stale_registration_and_prunes_nothing"),
+
     # ---- the worktree pre-removal process check (this build, 2026-09-24) ----
     ("pre-check: a process sitting inside the worktree no longer keeps it",
      "sweep",

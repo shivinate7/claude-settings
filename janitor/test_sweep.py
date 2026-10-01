@@ -1654,6 +1654,48 @@ class ConfirmGateTests(unittest.TestCase):
                          "a preview run with confirm=False deleted a worktree's directory")
 
 
+class WorktreePruneTests(unittest.TestCase):
+    """`sweep.prune_registrations`: a registration whose directory is gone is named by
+    `git worktree prune -n`, and pruned only under confirm."""
+
+    def _stale(self, name):
+        root = os.path.join(ROOT, name + "-repo")
+        make_repo(root, {"f.txt": "x\n"})
+        target = os.path.join(ROOT, name + "-wt")
+        run_vcs(root, "worktree", "add", "-q", target, "-b", "lane-" + name)
+        shutil.rmtree(target)
+        registration = os.path.join(root, ".git", "worktrees", os.path.basename(target))
+        self.assertTrue(os.path.isdir(registration), "fixture needs a stale registration")
+        return root, registration
+
+    def test_preview_names_the_stale_registration_and_prunes_nothing(self):
+        root, registration = self._stale("prune-preview")
+        result = sweep.sweep_repo(root, False, os.path.join(ROOT, "prune-preview.log"))
+        self.assertEqual(len(result["pruned"]["names"]), 1)
+        self.assertTrue(os.path.isdir(registration))
+        out = io.StringIO()
+        sweep.print_sweep_report([result], False, out=out)
+        self.assertIn("prune     WOULD", out.getvalue())
+
+    def test_confirm_prunes_the_stale_registration(self):
+        root, registration = self._stale("prune-confirm")
+        result = sweep.sweep_repo(root, True, os.path.join(ROOT, "prune-confirm.log"))
+        self.assertEqual(len(result["pruned"]["names"]), 1)
+        self.assertIsNone(result["pruned"]["error"])
+        self.assertFalse(os.path.isdir(registration))
+
+    def test_an_unreadable_preview_prunes_nothing(self):
+        root, registration = self._stale("prune-blind")
+        real = guard._git
+        guard._git = lambda where, *a: None if a[:2] == ("worktree", "prune") else real(where, *a)
+        try:
+            found = sweep.prune_registrations(root, True)
+        finally:
+            guard._git = real
+        self.assertIsNone(found["names"])
+        self.assertTrue(os.path.isdir(registration))
+
+
 # --------------------------------------------------------------------------- the purge
 
 

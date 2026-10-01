@@ -1601,8 +1601,27 @@ def purge_tombstones(restore_log_path: str, confirm: bool, now_ms=None):
 # ------------------------------------------------------------------ sweeping one repository
 
 
+def prune_registrations(root: str, confirm: bool):
+    """Stale worktree registrations, named by `git worktree prune -n -v`. Under `confirm`, runs
+    `git worktree prune` and nothing else. Returns {"names": [...], "error": str|None}; `names`
+    is None when git could not answer, and then nothing is pruned."""
+    preview = guard._git(root, "worktree", "prune", "-n", "-v")
+    if preview is None or preview.returncode != 0:
+        return {"names": None, "error": "git worktree prune -n gave no answer"}
+    names = [line.strip() for line in (preview.stdout + preview.stderr).splitlines()
+             if line.strip()]
+    result = {"names": names, "error": None}
+    if confirm and names:
+        done = guard._git(root, "worktree", "prune")
+        if done is None or done.returncode != 0:
+            result["error"] = "prune failed: %s" % (
+                done.stderr.strip() if done is not None else "git gave no answer")
+    return result
+
+
 def sweep_repo(root: str, confirm: bool, restore_log_path: str):
-    result = {"root": root, "refused": None, "branches": [], "worktrees": [], "listeners": []}
+    result = {"root": root, "refused": None, "branches": [], "worktrees": [], "listeners": [],
+              "pruned": None}
 
     sweep_enabled, protected_prefixes, optout_ok = load_optout(root)
     if not optout_ok:
@@ -1616,6 +1635,9 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str):
     if base is None:
         result["refused"] = "no-default-base"
         return result
+
+    # Before the worktree list is read, so a pruned registration is not judged as a worktree.
+    result["pruned"] = prune_registrations(root, confirm)
 
     entries = parse_worktree_list(root)
     if entries is None:
@@ -1688,8 +1710,18 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
             print("  REFUSED: %s -- reaps nothing in this repository" % result["refused"],
                   file=out)
             continue
-        if not result["branches"] and not result["worktrees"] and not result["listeners"]:
+        pruned = result.get("pruned")
+        if not result["branches"] and not result["worktrees"] and not result["listeners"] \
+                and not (pruned and (pruned["names"] or pruned["names"] is None)):
             print("  nothing to examine", file=out)
+        if pruned and pruned["names"] is None:
+            print("  prune     UNREADABLE -- %s; nothing pruned" % pruned["error"], file=out)
+        elif pruned:
+            for name in pruned["names"]:
+                line = "  prune     %-5s %s" % ("PRUNE" if confirm else "WOULD", name)
+                if pruned["error"]:
+                    line += "  [ERROR: %s]" % pruned["error"]
+                print(line, file=out)
         for b in result["branches"]:
             branch_counts[(b["action"], b["reason"].split(":", 1)[0])] += 1
             tag = "REAP" if b["action"] == "reap" else "KEEP"
@@ -1740,6 +1772,8 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
     print("  TCP listeners examined: %d" % total_listeners, file=out)
     for (action, reason), n in sorted(listener_counts.items()):
         print("    %-5s %-20s %d" % (action, reason, n), file=out)
+    print("  stale worktree registrations: %d" % sum(
+        len(r["pruned"]["names"] or []) for r in results if r.get("pruned")), file=out)
     if unreadable_listener_repos:
         print("  repositories with an unreadable listener enumeration: %d"
               % len(unreadable_listener_repos), file=out)
