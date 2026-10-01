@@ -2623,7 +2623,7 @@ class ParallelPreviewTests(unittest.TestCase):
 
         def stop(*a, **k):
             raise Stop
-        args = types.SimpleNamespace(confirm=False)
+        args = types.SimpleNamespace(confirm=False, unattended=False)
 
         def run():
             with _Stub("print_sweep_report", stop):
@@ -2803,6 +2803,127 @@ class AgentEndReapTests(unittest.TestCase):
     def test_junk_on_stdin_names_no_target_and_raises_nothing(self):
         for raw in ("", "not json", "[1]", json.dumps({"hook_event_name": "SubagentStop"})):
             self.assertIsNone(self.reap.handle(raw).get("target"))
+
+
+class UnattendedWorktreeTests(unittest.TestCase):
+    """Owner ruling: an unattended run removes a worktree only when it is merged (by patch, not
+    ancestry) and idle 1 hour. A person's run keeps today's rules."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.root = os.path.join(ROOT, "unatt-repo")
+        make_repo(cls.root, {"f.txt": "base\n"})
+        give_remote(cls.root)
+        # lane-unmerged: a commit pushed to origin, on no default branch.
+        cls.unmerged = os.path.join(ROOT, "unatt-unmerged")
+        run_vcs(cls.root, "worktree", "add", "-q", cls.unmerged, "-b", "lane-unmerged")
+        write(os.path.join(cls.unmerged, "u.txt"), "only on the lane\n")
+        run_vcs(cls.unmerged, "add", "u.txt")
+        run_vcs(cls.unmerged, *IDENT, "commit", "-q", "-m", "unmerged")
+        require(run_vcs(cls.unmerged, "push", "-q", "origin", "lane-unmerged").returncode == 0,
+                "pushing lane-unmerged failed")
+        # lane-patch: same patch as a commit on main, other commit id, pushed.
+        cls.patch = os.path.join(ROOT, "unatt-patch")
+        run_vcs(cls.root, "worktree", "add", "-q", cls.patch, "-b", "lane-patch")
+        write(os.path.join(cls.patch, "p.txt"), "same patch\n")
+        run_vcs(cls.patch, "add", "p.txt")
+        run_vcs(cls.patch, *IDENT, "commit", "-q", "-m", "patch on the lane")
+        require(run_vcs(cls.patch, "push", "-q", "origin", "lane-patch").returncode == 0,
+                "pushing lane-patch failed")
+        write(os.path.join(cls.root, "p.txt"), "same patch\n")
+        run_vcs(cls.root, "add", "p.txt")
+        run_vcs(cls.root, *IDENT, "commit", "-q", "-m", "patch on main")
+        require(run_vcs(cls.root, "push", "-q", "origin", "main").returncode == 0,
+                "pushing main failed")
+        # lane-merged: at main's own tip, so an ancestor.
+        cls.merged = os.path.join(ROOT, "unatt-merged")
+        run_vcs(cls.root, "worktree", "add", "-q", cls.merged, "-b", "lane-merged")
+        cls.entries = {os.path.normcase(os.path.realpath(e["path"])): e
+                       for e in sweep.parse_worktree_list(cls.root)}
+
+    def entry(self, path):
+        return self.entries[os.path.normcase(os.path.realpath(path))]
+
+    def age(self, path, seconds, only=None):
+        """Set the worktree's admin files `seconds` old, except `only`, left fresh."""
+        admin = run_vcs(path, "rev-parse", "--absolute-git-dir").stdout.strip()
+        for name in ("index", "HEAD", os.path.join("logs", "HEAD")):
+            target = os.path.join(admin, name)
+            then = time.time() - (0 if name == only else seconds)
+            if os.path.exists(target):
+                os.utime(target, (then, then))
+
+    def decide(self, path, unattended=True):
+        return sweep.decide_worktree(self.root, self.entry(path), unattended)
+
+    def test_unattended_keeps_a_pushed_but_unmerged_tree(self):
+        self.age(self.unmerged, 7200)
+        decision = self.decide(self.unmerged)
+        self.assertEqual(decision["action"], "keep")
+        self.assertTrue(decision["reason"].startswith("unmerged"), decision["reason"])
+
+    def test_unattended_keeps_a_merged_tree_active_10_minutes_ago(self):
+        self.age(self.merged, 600)
+        decision = self.decide(self.merged)
+        self.assertEqual(decision["action"], "keep")
+        self.assertTrue(decision["reason"].startswith("recently-active"), decision["reason"])
+
+    def test_unattended_activity_in_any_one_admin_file_keeps_the_tree(self):
+        for name in ("index", "HEAD", os.path.join("logs", "HEAD")):
+            self.age(self.merged, 7200, only=name)
+            decision = self.decide(self.merged)
+            self.assertEqual(decision["action"], "keep", name)
+            self.assertTrue(decision["reason"].startswith("recently-active"), name)
+
+    def test_unattended_removes_a_merged_tree_idle_2_hours(self):
+        self.age(self.merged, 7200)
+        decision = self.decide(self.merged)
+        self.assertEqual(decision["action"], "reap")
+        self.assertEqual(decision["reason"], "removable")
+
+    def test_unattended_removes_a_tree_merged_by_patch_idle_2_hours(self):
+        self.age(self.patch, 7200)
+        decision = self.decide(self.patch)
+        self.assertEqual(decision["action"], "reap")
+        self.assertEqual(decision["reason"], "removable")
+
+    def test_unattended_keeps_a_tree_whose_idle_time_cannot_be_read(self):
+        with mock.patch.object(sweep, "worktree_idle_seconds", return_value=None):
+            decision = self.decide(self.merged)
+        self.assertEqual(decision["action"], "keep")
+        self.assertEqual(decision["reason"], "unreadable-subject")
+        self.assertIsNone(sweep.worktree_idle_seconds(os.path.join(ROOT, "no-such-tree")))
+
+    def test_a_persons_run_removes_an_unmerged_active_tree_as_before(self):
+        self.age(self.unmerged, 60)
+        decision = self.decide(self.unmerged, unattended=False)
+        self.assertEqual(decision["action"], "reap")
+        self.assertEqual(decision["reason"], "removable")
+
+    def test_the_unattended_flag_reaches_the_sweep(self):
+        self.age(self.unmerged, 7200)
+        result = sweep.sweep_repo(self.root, False, os.path.join(ROOT, "unatt.log"),
+                                  unattended=True)
+        mine = [d for d in result["worktrees"]
+                if os.path.normcase(os.path.realpath(d["path"]))
+                == os.path.normcase(os.path.realpath(self.unmerged))]
+        self.assertEqual(len(mine), 1)
+        self.assertTrue(mine[0]["reason"].startswith("unmerged"), mine[0]["reason"])
+
+    def test_main_takes_the_unattended_flag(self):
+        seen = []
+
+        def spy(root, confirm, log, mode="full", unattended=False):
+            seen.append(unattended)
+            return {"root": root, "refused": "opted-out", "branches": [], "worktrees": [],
+                    "listeners": [], "pruned": None, "husks": []}
+
+        with mock.patch.object(sweep, "sweep_repo", spy), \
+                contextlib.redirect_stdout(io.StringIO()):
+            sweep.main(["--root", self.root, "--unattended",
+                        "--restore-log", os.path.join(ROOT, "unatt.log")])
+            sweep.main(["--root", self.root, "--restore-log", os.path.join(ROOT, "unatt.log")])
+        self.assertEqual(seen, [True, False])
 
 
 if __name__ == "__main__":

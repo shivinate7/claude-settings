@@ -60,7 +60,9 @@ fact, keeps it.
 Owner ruling: remove only a folder that is clean and fully pushed. This covers
 every worktree reap, locked or not. Every commit on HEAD must be on a remote
 branch, and a detached HEAD counts. The daily job reaped q_max agent
-worktrees before this check existed. The count is unmeasured here.
+worktrees before this check existed. The count is unmeasured here. An
+unattended run also needs the worktree merged and idle 1 hour
+(`unattended-sweep-stops-proven-orphans.md`).
 `--confirm` unlocks, then removes, never with `--force`. If the removal fails,
 the sweep restores the lock.
 

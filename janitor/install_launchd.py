@@ -57,7 +57,7 @@ def build_plist(repo_root: str, hour: int, minute: int, log_dir: str):
     sweep_py = os.path.join(repo_root, "janitor", "sweep.py")
     return {
         "Label": LABEL,
-        "ProgramArguments": [sys.executable, sweep_py, "--confirm"],
+        "ProgramArguments": [sys.executable, sweep_py, "--confirm", "--unattended"],
         "StartCalendarInterval": {"Hour": hour, "Minute": minute},
         "RunAtLoad": False,
         "StandardOutPath": os.path.join(log_dir, "launchd-sweep.log"),

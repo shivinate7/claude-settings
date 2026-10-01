@@ -115,6 +115,7 @@ class GeneratesPlistForAnOrdinaryCheckout(unittest.TestCase):
         args_joined = " ".join(data["ProgramArguments"])
         self.assertIn("sweep.py", args_joined)
         self.assertIn("--confirm", data["ProgramArguments"])
+        self.assertIn("--unattended", data["ProgramArguments"])
         # No --discover root: sweep.py resolves its own roots at run time (janitor.roots,
         # falling back to its own default candidate list). See the module docstring.
         self.assertNotIn("--discover", data["ProgramArguments"])

@@ -529,6 +529,29 @@ class HookSweepsNothingWhenTooLittleBudgetRemains(unittest.TestCase):
                        "nothing was swept, so the reapable branch must still be there")
 
 
+    def test_the_sweep_is_passed_the_unattended_flag(self):
+        repo = os.path.join(ROOT, "budget_unattended_repo")
+        make_repo(repo)
+        calls = []
+        real_run = self.mod.subprocess.run
+
+        def record_call(*args, **kwargs):
+            argv = args[0] if args else kwargs.get("args")
+            if isinstance(argv, list) and self.mod.SWEEP_PATH in argv:
+                calls.append(argv)
+                return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
+            return real_run(*args, **kwargs)
+
+        self.mod.subprocess.run = record_call
+        try:
+            self.mod.handle({"hook_event_name": "SessionEnd", "cwd": repo}, elapsed_seconds=0)
+        finally:
+            self.mod.subprocess.run = real_run
+        self.assertEqual(len(calls), 1)
+        self.assertIn("--confirm", calls[0])
+        self.assertIn("--unattended", calls[0])
+
+
 class RemainingSweepTimeoutRefusesAnUntrustworthyElapsedReading(unittest.TestCase):
     """Arms guarding the property PR #84 review actually asked for: even with the environment
     seam gone, an elapsed reading this function cannot trust must never be spent as if it were
