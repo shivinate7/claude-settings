@@ -1748,15 +1748,48 @@ class HuskTests(unittest.TestCase):
         found = sweep.find_husks(root, sweep.parse_worktree_list(root), names)
         return {os.path.basename(h["path"]): h["action"] for h in found}
 
-    def test_a_folder_holding_only_named_entries_is_a_husk_and_confirm_keeps_it(self):
+    def test_preview_lists_a_husk_as_would_and_deletes_nothing(self):
         root = self._repo("husk-found")
         path = self._husk(root, "gone", ["node_modules", ".serve"])
         self.assertEqual(self._husks(root), {"gone": "husk"})
-        result = sweep.sweep_repo(root, True, os.path.join(ROOT, "husk.log"))
-        self.assertTrue(os.path.isdir(path), "a husk was deleted; this tier is report only")
+        result = sweep.sweep_repo(root, False, os.path.join(ROOT, "husk.log"))
+        self.assertTrue(os.path.isdir(path), "a preview deleted a husk")
         out = io.StringIO()
-        sweep.print_sweep_report([result], True, out=out)
-        self.assertIn("husk      HUSK", out.getvalue())
+        sweep.print_sweep_report([result], False, out=out)
+        self.assertIn("husk      WOULD", out.getvalue())
+
+    def test_confirm_deletes_a_proven_husk(self):
+        root = self._repo("husk-confirm")
+        path = self._husk(root, "gone", ["node_modules", ".serve"])
+        keep = self._husk(root, "has-source", ["node_modules", "src"])
+        result = sweep.sweep_repo(root, True, os.path.join(ROOT, "husk.log"))
+        self.assertFalse(os.path.exists(path))
+        self.assertTrue(os.path.isdir(keep))
+        self.assertEqual([h.get("error") for h in result["husks"]], [None])
+
+    def test_confirm_keeps_a_folder_that_gained_a_foreign_file_after_the_find(self):
+        root = self._repo("husk-changed")
+        path = self._husk(root, "gone", ["node_modules"])
+        names = ["node_modules"]
+        found = sweep.find_husks(root, sweep.parse_worktree_list(root), names)
+        write(os.path.join(path, "notes.txt"), "mine\n")
+        sweep.reap_husk(root, found[0], names)
+        self.assertTrue(os.path.isfile(os.path.join(path, "notes.txt")))
+        self.assertEqual(found[0]["action"], "keep")
+
+    @unittest.skipIf(os.name == "nt", "symlinks need privilege on Windows")
+    def test_confirm_refuses_a_folder_that_became_a_link(self):
+        root = self._repo("husk-link")
+        path = self._husk(root, "gone", ["node_modules"])
+        names = ["node_modules"]
+        found = sweep.find_husks(root, sweep.parse_worktree_list(root), names)
+        target = os.path.join(ROOT, "husk-link-target")
+        os.makedirs(os.path.join(target, "node_modules"))
+        shutil.rmtree(path)
+        os.symlink(target, path)
+        sweep.reap_husk(root, found[0], names)
+        self.assertTrue(os.path.isdir(os.path.join(target, "node_modules")))
+        self.assertEqual(found[0]["action"], "keep")
 
     def test_a_folder_holding_anything_else_is_not_a_husk(self):
         root = self._repo("husk-source")

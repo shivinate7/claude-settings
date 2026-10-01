@@ -574,21 +574,40 @@ MUTATIONS = [
     # ---- husks ----
     ("husks: a folder holding a file outside huskNames is listed as a husk",
      "sweep",
-     '        if not contents or not set(contents) <= set(names):',
-     '        if not contents:',
+     '    if not contents or not set(contents) <= set(names):',
+     '    if not contents:',
      "test_a_folder_holding_anything_else_is_not_a_husk"),
 
     ("husks: a registered worktree is listed as a husk",
      "sweep",
-     '        if os.path.normcase(os.path.realpath(path)) in registered:',
-     '        if False:',
+     '    if os.path.normcase(os.path.realpath(path)) in registered:\n        return None',
+     '    if False:\n        return None',
      "test_a_registered_worktree_is_not_a_husk"),
+
+    ("husks: a preview deletes the husk",
+     "sweep",
+     '    if confirm:\n        for decision in result["husks"]:',
+     '    if True:\n        for decision in result["husks"]:',
+     "test_preview_lists_a_husk_as_would_and_deletes_nothing"),
+
+    ("husks: the delete skips the re-proof and trusts the preview",
+     "sweep",
+     '    again = husk_verdict(path, entries, names)',
+     '    again = decision',
+     "test_confirm_keeps_a_folder_that_gained_a_foreign_file_after_the_find"),
+
+    ("husks: a folder that became a link is no longer refused",
+     "sweep",
+     '    if os.path.islink(path) or not os.path.isdir(path):\n        return None\n    registered',
+     '    if not os.path.isdir(path):\n        return None\n    registered',
+     "test_confirm_refuses_a_folder_that_became_a_link",
+     "posix"),
 
     # only_on="posix": the sleep fixture is POSIX only.
     ("husks: a process inside no longer keeps the husk",
      "sweep",
-     '        elif inside:\n            found.append({"path": path, "action": "keep", "reason": "process-inside',
-     '        elif False:\n            found.append({"path": path, "action": "keep", "reason": "process-inside',
+     '    if inside:\n        return {"path": path, "action": "keep", "reason": "process-inside',
+     '    if False:\n        return {"path": path, "action": "keep", "reason": "process-inside',
      "test_a_process_inside_keeps_the_husk",
      "posix"),
 

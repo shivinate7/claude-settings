@@ -7,7 +7,7 @@ of your own.
 `janitor/sweep.py` reaps local branches that hold no unique work. It removes
 worktrees that no session still uses. It also signals an orphaned TCP listener
 left behind inside a repository it covers. It prunes stale worktree
-registrations. It lists leftover folders. It runs against every repository on
+registrations. It deletes leftover folders. It runs against every repository on
 this machine.
 
 ## What it never does
@@ -175,11 +175,16 @@ A leftover folder (a husk) is a real folder directly under
   example `["node_modules", ".serve"]`. With no `huskNames`, the sweep finds
   none.
 
-The preview lists each one as `husk HUSK`. A folder with a live session or any
+The preview lists each one as `husk WOULD`. A folder with a live session or any
 process inside is listed as `husk KEEP`, with the reason. An unreadable folder
-or check is KEEP. This tier is report only. `--confirm` deletes none of them.
-A person reads the list and decides. This tier runs per repository, so
-`sweep: false` opts it out.
+or check is KEEP.
+
+`--confirm` deletes each proven husk. Right before the delete, the sweep
+proves it again: still unregistered, still only `huskNames` entries, still no
+process inside. A folder that changed since the preview is kept. The sweep
+never follows a link: a folder that became a link is refused, and a link inside
+a husk is removed as a link. An error keeps the folder and is reported. This
+tier runs per repository, so `sweep: false` opts it out.
 
 ## How you opt out
 

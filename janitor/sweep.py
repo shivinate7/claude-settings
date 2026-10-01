@@ -71,6 +71,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -254,7 +255,11 @@ def load_optout(root: str):
     costs one rerun after the owner fixes the file. Guessing costs branches that do not come
     back.
     """
-    data = read_optout(root)
+    return _optout_fields(read_optout(root))
+
+
+def _optout_fields(data):
+    """(sweep_enabled, protected_prefixes, ok) from `read_optout`'s dict (None means unreadable)."""
     if data is None:
         return False, (), False
     sweep_enabled = data.get("sweep", True)
@@ -1409,6 +1414,28 @@ def print_loose_processes_report(found, out=sys.stdout):
         len(found), sum(1 for d in found if d["owner"] is None)), file=out)
 
 
+def _all_cwds_macos():
+    """Every process's cwd as [(pid, cwd)], from ONE `lsof -d cwd -Fpn` (the per-pid read cost
+    about 25 s per call on a real machine). `None` when lsof could not answer: any exit code
+    but 0 or 1 (1 means some process was not readable, the same out-of-scope case as a
+    per-pid `None`)."""
+    try:
+        answer = subprocess.run(["lsof", "-d", "cwd", "-Fpn"], capture_output=True, text=True,
+                                timeout=60)
+    except Exception:
+        return None
+    if answer.returncode not in (0, 1):
+        return None
+    table = []
+    pid = None
+    for line in answer.stdout.splitlines():
+        if line.startswith("p"):
+            pid = int(line[1:]) if line[1:].isdigit() else None
+        elif line.startswith("n") and pid is not None:
+            table.append((pid, line[1:]))
+    return table
+
+
 def processes_in(path: str):
     """Return `(inside_pids, unreadable_pids)`, both lists (possibly empty), for the pre-removal
     check in `decide_worktree`. `inside_pids` is `None` (with `unreadable_pids` also `None`)
@@ -1427,6 +1454,11 @@ def processes_in(path: str):
     act on it"), extended here from the owner check to this one, for the measured reason
     above, and identical on POSIX and Windows: both dispatch through this same `process_cwd`,
     with no OS branch anywhere in this function."""
+    if sys.platform == "darwin":
+        table = _all_cwds_macos()
+        if table is None:
+            return None, None
+        return [pid for pid, cwd in table if _cwd_under_checkout(cwd, path)], []
     pids = list_all_pids()
     if pids is None:
         return None, None
@@ -1631,51 +1663,71 @@ def prune_registrations(root: str, confirm: bool):
     return result
 
 
+def husk_verdict(path: str, entries, names):
+    """One folder's verdict, or None when it is not a husk candidate. A husk is a real folder
+    directly under `<root>/.claude/worktrees/` that git does not list as a worktree, is not
+    empty, and holds only entries named in `huskNames`. Returns {"path", "action":
+    "husk"|"keep", "reason"}. A live session or any process inside is "keep": a supervisor
+    there would only recreate it. An unreadable folder or check is "keep" too."""
+    if os.path.islink(path) or not os.path.isdir(path):
+        return None
+    registered = {os.path.normcase(os.path.realpath(e["path"])) for e in entries}
+    if os.path.normcase(os.path.realpath(path)) in registered:
+        return None
+    keep = {"path": path, "action": "keep", "reason": "unreadable-subject"}
+    try:
+        contents = os.listdir(path)
+    except OSError:
+        return keep
+    if not contents or not set(contents) <= set(names):
+        return None
+    live = guard.worktree_live_session(path)
+    inside, _ = processes_in(path)
+    if live is None or inside is None:
+        return keep
+    if live:
+        return {"path": path, "action": "keep", "reason": "live-session"}
+    if inside:
+        return {"path": path, "action": "keep", "reason": "process-inside: pid %s"
+                % ", ".join(str(p) for p in sorted(inside))}
+    return {"path": path, "action": "husk", "reason": "only " + ", ".join(sorted(contents))}
+
+
 def find_husks(root: str, entries, names):
-    """Leftover folders, report only. A husk is a real folder directly under
-    `<root>/.claude/worktrees/` that git does not list as a worktree, is not empty, and holds
-    only entries named in `huskNames` (from `.claude/janitor.json`; no key, no husks). Returns
-    [{"path", "action": "husk"|"keep", "reason"}]. A husk with a live session or any process
-    inside is "keep": a supervisor there would only recreate it. An unreadable folder or
-    unreadable check is "keep" too. Nothing is deleted; no `--confirm` path exists."""
+    """Every husk verdict under `<root>/.claude/worktrees/` (none when `names` is empty)."""
     base = os.path.join(root, ".claude", "worktrees")
     if not names or not os.path.isdir(base):
         return []
-    registered = {os.path.normcase(os.path.realpath(e["path"])) for e in entries}
-    found = []
-    for name in sorted(os.listdir(base)):
-        path = os.path.join(base, name)
-        if os.path.islink(path) or not os.path.isdir(path):
-            continue
-        if os.path.normcase(os.path.realpath(path)) in registered:
-            continue
-        try:
-            contents = os.listdir(path)
-        except OSError:
-            found.append({"path": path, "action": "keep", "reason": "unreadable-subject"})
-            continue
-        if not contents or not set(contents) <= set(names):
-            continue
-        live = guard.worktree_live_session(path)
-        inside, _ = processes_in(path)
-        if live is None or inside is None:
-            found.append({"path": path, "action": "keep", "reason": "unreadable-subject"})
-        elif live:
-            found.append({"path": path, "action": "keep", "reason": "live-session"})
-        elif inside:
-            found.append({"path": path, "action": "keep", "reason": "process-inside: pid %s"
-                          % ", ".join(str(p) for p in sorted(inside))})
-        else:
-            found.append({"path": path, "action": "husk",
-                          "reason": "only " + ", ".join(sorted(contents))})
-    return found
+    verdicts = (husk_verdict(os.path.join(base, n), entries, names) for n in sorted(os.listdir(base)))
+    return [v for v in verdicts if v]
+
+
+def reap_husk(root: str, decision: dict, names):
+    """Delete one proven husk. The proof is run again right before the delete, because the
+    folder may have changed since the preview. `shutil.rmtree` never follows a link inside, and
+    a folder that is itself a link is refused. Any error keeps the folder and is reported."""
+    path = decision["path"]
+    entries = parse_worktree_list(root)
+    if entries is None:
+        decision["error"] = "worktree list unreadable"
+        return
+    again = husk_verdict(path, entries, names)
+    if again is None or again["action"] != "husk":
+        decision["action"] = "keep"
+        decision["reason"] = "changed before delete: " + (again["reason"] if again else "no longer a husk")
+        return
+    try:
+        shutil.rmtree(path)
+    except OSError as exc:
+        decision["error"] = "delete failed: %s" % exc
 
 
 def sweep_repo(root: str, confirm: bool, restore_log_path: str):
     result = {"root": root, "refused": None, "branches": [], "worktrees": [], "listeners": [],
               "pruned": None, "husks": []}
 
-    sweep_enabled, protected_prefixes, optout_ok = load_optout(root)
+    optout = read_optout(root)  # once: protected prefixes and huskNames both come from it
+    sweep_enabled, protected_prefixes, optout_ok = _optout_fields(optout)
     if not optout_ok:
         result["refused"] = "unreadable-optout"
         return result
@@ -1732,7 +1784,12 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str):
         if confirm and decision["action"] == "reap":
             remove_worktree(root, entry["path"], decision)
 
-    result["husks"] = find_husks(root, entries, (read_optout(root) or {}).get("huskNames", []))
+    husk_names = optout.get("huskNames", [])
+    result["husks"] = find_husks(root, entries, husk_names)
+    if confirm:
+        for decision in result["husks"]:
+            if decision["action"] == "husk":
+                reap_husk(root, decision, husk_names)
 
     checkout_paths = [root] + [e["path"] for e in entries if not e.get("bare")]
     listener_entries = find_swept_listeners(checkout_paths)
@@ -1785,7 +1842,10 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
                 print(line, file=out)
         for h in result.get("husks", []):
             husk_counts[h["action"]] += 1
-            line = "  husk      %-4s %-60s %s" % (h["action"].upper(), h["path"], h["reason"])
+            tag = {"husk": "REAP" if confirm else "WOULD"}.get(h["action"], "KEEP")
+            line = "  husk      %-5s %-60s %s" % (tag, h["path"], h["reason"])
+            if h.get("error"):
+                line += "  [ERROR: %s]" % h["error"]
             print(line, file=out)
         for b in result["branches"]:
             branch_counts[(b["action"], b["reason"].split(":", 1)[0])] += 1
@@ -1837,7 +1897,7 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
     print("  TCP listeners examined: %d" % total_listeners, file=out)
     for (action, reason), n in sorted(listener_counts.items()):
         print("    %-5s %-20s %d" % (action, reason, n), file=out)
-    print("  leftover folders (report only): %d, kept: %d"
+    print("  leftover folders: %d, kept: %d"
           % (husk_counts["husk"], husk_counts["keep"]), file=out)
     print("  stale worktree registrations: %d" % sum(
         len(r["pruned"]["names"] or []) for r in results if r.get("pruned")), file=out)

@@ -45,13 +45,13 @@ Branches and worktrees are git's to judge, so the prune tier asks git. It runs
 the worktree list is read, so a pruned registration is never judged as a
 worktree.
 
-## Leftover folders are listed, never deleted
+## Leftover folders are deleted only when proven twice
 
-`find_husks` lists a real folder under `.claude/worktrees/` that git does not
+`find_husks` finds a real folder under `.claude/worktrees/` that git does not
 list as a worktree and that holds only names the repository gives in
 `huskNames`. The repository knows its own build output. The sweep does not.
-The tier has no `--confirm` path. The brief asked to find these folders, not to
-delete them. Add deletion only on the owner's word, for proven husks alone.
+Only `--confirm` deletes, and only after the proof runs again right before the
+delete. The sweep never follows a link. Any error keeps the folder.
 
 ## The sweep never runs code a repository supplies
 
