@@ -1418,7 +1418,8 @@ def _all_cwds_macos():
     """Every process's cwd as [(pid, cwd)], from ONE `lsof -d cwd -Fpn` (the per-pid read cost
     about 25 s per call on a real machine). `None` when lsof could not answer: any exit code
     but 0 or 1 (1 means some process was not readable, the same out-of-scope case as a
-    per-pid `None`)."""
+    per-pid `None`). An EMPTY table is also `None`: lsof printed nothing, which cannot be
+    "no process anywhere"."""
     try:
         answer = subprocess.run(["lsof", "-d", "cwd", "-Fpn"], capture_output=True, text=True,
                                 timeout=60)
@@ -1433,7 +1434,8 @@ def _all_cwds_macos():
             pid = int(line[1:]) if line[1:].isdigit() else None
         elif line.startswith("n") and pid is not None:
             table.append((pid, line[1:]))
-    return table
+    # A running machine always has processes; an empty table is a failed read, not "nobody".
+    return table or None
 
 
 def processes_in(path: str):
@@ -1663,12 +1665,23 @@ def prune_registrations(root: str, confirm: bool):
     return result
 
 
-def husk_verdict(path: str, entries, names):
+# Windows junctions are not seen by `os.path.islink` before Python 3.12, and `rmtree` there has no
+# symlink-attack guard, so husks are never deleted on Windows.
+HUSKS_DELETABLE = os.name != "nt"
+
+
+def husk_verdict(root: str, path: str, entries, names):
     """One folder's verdict, or None when it is not a husk candidate. A husk is a real folder
     directly under `<root>/.claude/worktrees/` that git does not list as a worktree, is not
     empty, and holds only entries named in `huskNames`. Returns {"path", "action":
     "husk"|"keep", "reason"}. A live session or any process inside is "keep": a supervisor
-    there would only recreate it. An unreadable folder or check is "keep" too."""
+    there would only recreate it. An unreadable folder or check is "keep" too. The folder's
+    parent must be the repository's own `.claude/worktrees`, not a link out of it. The check
+    sees a process by its cwd only: a process outside the folder that holds a file inside is
+    not seen."""
+    own_base = os.path.join(os.path.realpath(root), ".claude", "worktrees")
+    if os.path.normcase(os.path.realpath(os.path.dirname(path))) != os.path.normcase(own_base):
+        return None
     if os.path.islink(path) or not os.path.isdir(path):
         return None
     registered = {os.path.normcase(os.path.realpath(e["path"])) for e in entries}
@@ -1690,6 +1703,9 @@ def husk_verdict(path: str, entries, names):
     if inside:
         return {"path": path, "action": "keep", "reason": "process-inside: pid %s"
                 % ", ".join(str(p) for p in sorted(inside))}
+    if not HUSKS_DELETABLE:
+        return {"path": path, "action": "keep",
+                "reason": "windows: report only (no link-safe delete)"}
     return {"path": path, "action": "husk", "reason": "only " + ", ".join(sorted(contents))}
 
 
@@ -1698,7 +1714,8 @@ def find_husks(root: str, entries, names):
     base = os.path.join(root, ".claude", "worktrees")
     if not names or not os.path.isdir(base):
         return []
-    verdicts = (husk_verdict(os.path.join(base, n), entries, names) for n in sorted(os.listdir(base)))
+    verdicts = (husk_verdict(root, os.path.join(base, n), entries, names)
+                for n in sorted(os.listdir(base)))
     return [v for v in verdicts if v]
 
 
@@ -1711,7 +1728,7 @@ def reap_husk(root: str, decision: dict, names):
     if entries is None:
         decision["error"] = "worktree list unreadable"
         return
-    again = husk_verdict(path, entries, names)
+    again = husk_verdict(root, path, entries, names)
     if again is None or again["action"] != "husk":
         decision["action"] = "keep"
         decision["reason"] = "changed before delete: " + (again["reason"] if again else "no longer a husk")
@@ -1842,7 +1859,8 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
                 print(line, file=out)
         for h in result.get("husks", []):
             husk_counts[h["action"]] += 1
-            tag = {"husk": "REAP" if confirm else "WOULD"}.get(h["action"], "KEEP")
+            tag = "KEEP" if h.get("error") else {"husk": "REAP" if confirm else "WOULD"}.get(
+                h["action"], "KEEP")
             line = "  husk      %-5s %-60s %s" % (tag, h["path"], h["reason"])
             if h.get("error"):
                 line += "  [ERROR: %s]" % h["error"]
@@ -1967,7 +1985,7 @@ def main(argv=None) -> int:
     parser.add_argument("--discover", metavar="DIR",
                          help="sweep DIR's own checkouts, used only when no ROOT is given")
     parser.add_argument("--confirm", action="store_true",
-                         help="actually delete branches/worktrees or drop tombstones")
+                         help="actually delete branches, worktrees and leftover folders (husks), or drop tombstones")
     parser.add_argument("--purge", action="store_true",
                          help="purge tombstones past 90 days instead of sweeping")
     parser.add_argument("--restore-log", metavar="PATH",

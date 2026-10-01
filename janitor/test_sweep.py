@@ -342,6 +342,41 @@ class _BreakRead:
         return False
 
 
+class _Stub:
+    """Context manager: replaces `sweep.<name>` with FN, restoring it afterward."""
+
+    def __init__(self, name, fn):
+        self.name, self.fn = name, fn
+
+    def __enter__(self):
+        self.original = getattr(sweep, self.name)
+        setattr(sweep, self.name, self.fn)
+
+    def __exit__(self, *exc_info):
+        setattr(sweep, self.name, self.original)
+        return False
+
+
+class _FakeLsof:
+    """Context manager: `sweep.subprocess.run` answers CODE and OUT, or raises EXC."""
+
+    def __init__(self, code=0, out="", exc=None):
+        self.code, self.out, self.exc = code, out, exc
+
+    def __enter__(self):
+        self.original = sweep.subprocess.run
+
+        def fake(*a, **k):
+            if self.exc:
+                raise self.exc
+            return subprocess.CompletedProcess(a, self.code, self.out, "")
+        sweep.subprocess.run = fake
+
+    def __exit__(self, *exc_info):
+        sweep.subprocess.run = self.original
+        return False
+
+
 # --------------------------------------------------------------------------- shared fixtures
 #
 # MAIN carries the branch shapes every branch-decision arm needs, off one shared history, pushed
@@ -919,8 +954,14 @@ class WorktreeProcessPreCheckTests(unittest.TestCase):
         for a different read: "A single process ... that refuses access is out of scope.
         Count it in the report, never act on it." Only the WHOLE enumeration failing (the
         next test below) still means keep-everything."""
-        with _BreakRead(_platform_read_name("cwd")):
-            decision = sweep.decide_worktree(self.root, self.entry_for(self.empty))
+        if sys.platform == "darwin":
+            # macOS reads every cwd in ONE lsof call: no per-pid read left to break. The analog
+            # is a table that holds other processes only (lsof skipped the unreadable ones).
+            with _Stub("_all_cwds_macos", lambda: [(os.getpid(), "/elsewhere")]):
+                decision = sweep.decide_worktree(self.root, self.entry_for(self.empty))
+        else:
+            with _BreakRead(_platform_read_name("cwd")):
+                decision = sweep.decide_worktree(self.root, self.entry_for(self.empty))
         self.assertEqual(decision["action"], "reap")
         self.assertEqual(decision["reason"], "removable")
 
@@ -928,12 +969,9 @@ class WorktreeProcessPreCheckTests(unittest.TestCase):
         """The OTHER half of the pre-check's own unreadable contract: the brief's own words,
         "if the whole listing ... or the pre-check enumeration fails, KEEP everything and
         remove no worktree" -- this is the whole PID listing itself failing, not one pid's cwd."""
-        original = sweep.list_all_pids
-        sweep.list_all_pids = lambda: None
-        try:
+        name = "_all_cwds_macos" if sys.platform == "darwin" else "list_all_pids"
+        with _Stub(name, lambda: None):
             decision = sweep.decide_worktree(self.root, self.entry_for(self.empty))
-        finally:
-            sweep.list_all_pids = original
         self.assertEqual(decision["action"], "keep")
         self.assertEqual(decision["reason"], "unreadable-subject")
 
@@ -1819,6 +1857,70 @@ class HuskTests(unittest.TestCase):
         result = sweep.sweep_repo(root, False, os.path.join(ROOT, "h.log"))
         self.assertEqual(result["refused"], "unreadable-optout")
 
+    def test_a_symlinked_worktrees_base_is_never_walked_or_deleted(self):
+        root = self._repo("husk-base-link")
+        outside = os.path.join(ROOT, "husk-base-outside")
+        os.makedirs(os.path.join(outside, "gone", "node_modules"))
+        os.makedirs(os.path.join(root, ".claude"), exist_ok=True)
+        os.symlink(outside, os.path.join(root, ".claude", "worktrees"))
+        names = ["node_modules"]
+        self.assertEqual(sweep.find_husks(root, sweep.parse_worktree_list(root), names), [])
+        forged = {"path": os.path.join(root, ".claude", "worktrees", "gone"), "action": "husk",
+                  "reason": "forged"}
+        sweep.reap_husk(root, forged, names)
+        self.assertTrue(os.path.isdir(os.path.join(outside, "gone", "node_modules")))
+        self.assertEqual(forged["action"], "keep")
+
+    def test_a_failed_delete_prints_keep_with_the_error(self):
+        root = self._repo("husk-fails")
+        path = self._husk(root, "gone", ["node_modules"])
+
+        def refuse(*a, **k):
+            raise OSError("refused")
+        real = shutil.rmtree
+        shutil.rmtree = refuse
+        try:
+            result = sweep.sweep_repo(root, True, os.path.join(ROOT, "husk.log"))
+        finally:
+            shutil.rmtree = real
+        self.assertTrue(os.path.isdir(path))
+        out = io.StringIO()
+        sweep.print_sweep_report([result], True, out=out)
+        self.assertIn("husk      KEEP", out.getvalue())
+        self.assertIn("refused", out.getvalue())
+
+    def test_windows_keeps_husks_report_only(self):
+        root = self._repo("husk-windows")
+        path = self._husk(root, "gone", ["node_modules"])
+        real = sweep.HUSKS_DELETABLE
+        sweep.HUSKS_DELETABLE = False
+        try:
+            self.assertEqual(self._husks(root), {"gone": "keep"})
+            sweep.sweep_repo(root, True, os.path.join(ROOT, "husk.log"))
+        finally:
+            sweep.HUSKS_DELETABLE = real
+        self.assertTrue(os.path.isdir(path))
+
+    def test_an_empty_process_table_keeps_the_husk(self):
+        root = self._repo("husk-blind")
+        self._husk(root, "gone", ["node_modules"])
+        with _Stub("processes_in", lambda path: (None, None)):
+            self.assertEqual(self._husks(root), {"gone": "keep"})
+
+    def test_darwin_processes_in_reads_one_table(self):
+        inside = os.path.join(ROOT, "husk-table")
+        os.makedirs(inside, exist_ok=True)
+        real = sweep.sys.platform
+        sweep.sys.platform = "darwin"
+        try:
+            with _Stub("_all_cwds_macos", lambda: [(7, inside), (8, "/elsewhere")]):
+                self.assertEqual(sweep.processes_in(inside), ([7], []))
+            with _Stub("_all_cwds_macos", lambda: None):
+                self.assertEqual(sweep.processes_in(inside), (None, None))
+        finally:
+            sweep.sys.platform = real
+
+
     @unittest.skipIf(os.name == "nt", "the sleep fixture is POSIX only")
     def test_a_process_inside_keeps_the_husk(self):
         root = self._repo("husk-busy")
@@ -1829,6 +1931,30 @@ class HuskTests(unittest.TestCase):
         finally:
             proc.kill()
             proc.wait()
+
+
+class AllCwdsMacosTests(unittest.TestCase):
+    """`sweep._all_cwds_macos` against a faked lsof, on every platform."""
+
+    def test_parses_pid_and_cwd_lines(self):
+        with _FakeLsof(0, "p10\nn/a/b\np11\nn/c\n"):
+            self.assertEqual(sweep._all_cwds_macos(), [(10, "/a/b"), (11, "/c")])
+
+    def test_exit_1_is_readable_and_other_exits_are_not(self):
+        with _FakeLsof(1, "p10\nn/a\n"):
+            self.assertEqual(sweep._all_cwds_macos(), [(10, "/a")])
+        with _FakeLsof(2, "p10\nn/a\n"):
+            self.assertIsNone(sweep._all_cwds_macos())
+
+    def test_a_timeout_is_unreadable(self):
+        with _FakeLsof(exc=subprocess.TimeoutExpired("lsof", 60)):
+            self.assertIsNone(sweep._all_cwds_macos())
+
+    def test_an_empty_table_is_unreadable(self):
+        with _FakeLsof(0, ""):
+            self.assertIsNone(sweep._all_cwds_macos())
+        with _FakeLsof(1, ""):
+            self.assertIsNone(sweep._all_cwds_macos())
 
 
 # --------------------------------------------------------------------------- the purge

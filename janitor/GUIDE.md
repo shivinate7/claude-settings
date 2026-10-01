@@ -183,8 +183,15 @@ or check is KEEP.
 proves it again: still unregistered, still only `huskNames` entries, still no
 process inside. A folder that changed since the preview is kept. The sweep
 never follows a link: a folder that became a link is refused, and a link inside
-a husk is removed as a link. An error keeps the folder and is reported. This
-tier runs per repository, so `sweep: false` opts it out.
+a husk is removed as a link. An error keeps the folder and is reported. The
+sweep walks only the repository's own `.claude/worktrees`. When that folder is a
+link out of the repository, it finds nothing. A process counts as inside by its
+current directory alone. A process outside the folder that holds a file inside
+is not seen. If the process table is empty or unreadable, the husk is kept.
+
+On Windows, husks are never deleted. The preview lists them as `husk KEEP`,
+with the reason, because Python before 3.12 does not see a junction as a link.
+This tier runs per repository, so `sweep: false` opts it out.
 
 ## How you opt out
 

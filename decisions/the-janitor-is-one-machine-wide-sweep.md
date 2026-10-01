@@ -51,7 +51,12 @@ worktree.
 list as a worktree and that holds only names the repository gives in
 `huskNames`. The repository knows its own build output. The sweep does not.
 Only `--confirm` deletes, and only after the proof runs again right before the
-delete. The sweep never follows a link. Any error keeps the folder.
+delete. The sweep never follows a link, and it walks only the repository's own
+`.claude/worktrees`, never a link out of it. Any error keeps the folder. An
+empty process table keeps it too. The process check reads the current directory
+only, so a process outside the folder that holds a file inside is not seen.
+On Windows the tier stays report only: Python before 3.12 does not see a
+junction as a link, and `rmtree` there has no symlink-attack guard.
 
 ## The sweep never runs code a repository supplies
 

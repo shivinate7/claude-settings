@@ -587,7 +587,7 @@ MUTATIONS = [
 
     ("husks: the delete skips the re-proof and trusts the preview",
      "sweep",
-     '    again = husk_verdict(path, entries, names)',
+     '    again = husk_verdict(root, path, entries, names)',
      '    again = decision',
      "test_confirm_keeps_a_folder_that_gained_a_foreign_file_after_the_find"),
 
@@ -597,6 +597,61 @@ MUTATIONS = [
      '    if not os.path.isdir(path):\n        return None\n    registered',
      "test_confirm_refuses_a_folder_that_became_a_link",
      "posix"),
+
+    ('husks: a worktrees folder that is a link out of the repository is walked',
+     "sweep",
+     '    if os.path.normcase(os.path.realpath(os.path.dirname(path))) != os.path.normcase(own_base):\n        return None\n',
+     '',
+     'test_a_symlinked_worktrees_base_is_never_walked_or_deleted',
+     "posix"),
+
+    ('husks: an empty process table reads as nobody inside',
+     "sweep",
+     '    return table or None\n',
+     '    return table\n',
+     'test_an_empty_table_is_unreadable'),
+
+    ('husks: a husk whose delete failed prints REAP',
+     "sweep",
+     '            tag = "KEEP" if h.get("error") else {"husk"',
+     '            tag = None if False else {"husk"',
+     'test_a_failed_delete_prints_keep_with_the_error'),
+
+    ('husks: Windows deletes husks',
+     "sweep",
+     '    if not HUSKS_DELETABLE:\n',
+     '    if False:\n',
+     'test_windows_keeps_husks_report_only'),
+
+    ('macos cwd table: the pid and path lines are mis-parsed',
+     "sweep",
+     '            table.append((pid, line[1:]))',
+     '            table.append((pid, line))',
+     'test_parses_pid_and_cwd_lines'),
+
+    ('macos cwd table: lsof exit 1 is read as unreadable',
+     "sweep",
+     '    if answer.returncode not in (0, 1):\n        return None\n    table = []',
+     '    if answer.returncode not in (0,):\n        return None\n    table = []',
+     'test_exit_1_is_readable_and_other_exits_are_not'),
+
+    ('macos cwd table: any lsof exit code is read as readable',
+     "sweep",
+     '    if answer.returncode not in (0, 1):\n        return None\n    table = []',
+     '    if False:\n        return None\n    table = []',
+     'test_exit_1_is_readable_and_other_exits_are_not'),
+
+    ('macos cwd table: a lsof timeout escapes instead of reading as unknown',
+     "sweep",
+     '                                timeout=60)\n    except Exception:',
+     '                                timeout=60)\n    except OSError:',
+     'test_a_timeout_is_unreadable'),
+
+    ('macos cwd table: processes_in ignores the table',
+     "sweep",
+     '        return [pid for pid, cwd in table if _cwd_under_checkout(cwd, path)], []',
+     '        return [], []',
+     'test_darwin_processes_in_reads_one_table'),
 
     # only_on="posix": the sleep fixture is POSIX only.
     ("husks: a process inside no longer keeps the husk",
