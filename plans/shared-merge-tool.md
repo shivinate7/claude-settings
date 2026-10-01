@@ -223,5 +223,5 @@ Each lane is one Sonnet builder. When every lane in its "Waits for" cell has mer
 5. **`--dev` exists, behind the explicit flag only.** It runs the checkout's own tree, for work
    on the tool itself.
 6. **Lanes 8 and 9 are on hold.** Do not start them. The owner starts them later.
-7. **A failed `afterMerge` gives a non-zero exit.** The merge stays, and the printed line says
-   that it landed.
+7. **A failed `afterMerge` or a failed local-main fast-forward gives a non-zero exit.** The
+   merge stays, and the printed line says that it landed.
