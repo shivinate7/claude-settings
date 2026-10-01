@@ -160,7 +160,9 @@ base of HEAD and the base ref, and it refuses a number that the branch added or 
 A branch may delete a numbered record. The owner ruled that records may be deleted and that
 numbers come from the highest ever used. A claim takes the next number past every number in
 the base tree and in the history of the base ref. It refuses a shallow or unreadable
-history. So that run reads git history, and a check job needs `fetch-depth: 0`. Only
+history. So that run reads git history, and a check job needs `fetch-depth: 0`. The owner ruled that a number is never reused. In a flat-file kind,
+a title change under one number is refused, because a swap looks the same. A title fix
+needs a delete and a new number. Only
 `--stamp` and a default-branch run with nothing pending read no history at all. `stamp.mjs`'s own `addedByHead`
 and merge-order reader are lifted from `harness/decision-refs.mjs` nearly unchanged.
 That logic was already measured against q_max's real history. Rewriting it a second
