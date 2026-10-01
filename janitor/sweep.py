@@ -446,8 +446,9 @@ AGENT_LOCK_RE = re.compile(r"^claude agent agent-\w+ \(pid (\d+) start (.+)\)$")
 def stale_agent_lock_verdict(reason: str):
     """True when REASON is a claude agent lock (`claude agent agent-<id> (pid N start <date>)`,
     MEASURED from the Agent tool's own lock) whose pid is dead, or alive with a different start
-    time (pid reuse). The pid is the HOST claude process, not the agent. False when it still runs, or the reason is any other lock. None
-    when the start time or the process read could not tell. Only True lets a lock go."""
+    time (pid reuse). The pid is the HOST claude process, not the agent. False when it still
+    runs, or the reason is any other lock. None when the start time or the process read could
+    not tell. Only True lets a lock go."""
     found = AGENT_LOCK_RE.match(reason or "")
     if not found:
         return False
