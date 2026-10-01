@@ -157,7 +157,8 @@ list and decides.
 A registration is stale when git lists a worktree whose directory is gone.
 The sweep asks `git worktree prune -n -v` which registrations are stale. The
 preview lists each one as `prune WOULD`. `--confirm` then runs
-`git worktree prune`, and nothing else. Git alone decides what is stale. A
+`git worktree prune`, which applies git's own staleness test again. Git alone
+decides what is stale. A
 locked worktree is never stale. If git gives no answer, the sweep prunes
 nothing and says so. This tier runs per repository, so `sweep: false` in
 `.claude/janitor.json` opts it out.

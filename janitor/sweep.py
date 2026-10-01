@@ -318,6 +318,7 @@ def parse_worktree_list(where: str):
             "bare": False,
             "detached": False,
             "locked_reason": None,
+            "prunable": False,
         }
         for line in lines[1:]:
             if line.startswith("branch "):
@@ -326,6 +327,8 @@ def parse_worktree_list(where: str):
                 entry["bare"] = True
             elif line == "detached":
                 entry["detached"] = True
+            elif line == "prunable" or line.startswith("prunable "):
+                entry["prunable"] = True
             elif line == "locked" or line.startswith("locked "):
                 entry["locked_reason"] = line[len("locked"):].strip() or "locked"
         entries.append(entry)
@@ -1644,6 +1647,14 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str):
         result["refused"] = "unreadable-worktree-list"
         return result
 
+    if result["pruned"]["names"]:
+        # Confirm prunes these before anything else is judged; a preview must predict that run.
+        entries = [e for e in entries if not e["prunable"]]
+
+    if result["pruned"]["names"]:
+        # Confirm prunes these before anything else is judged; a preview must predict that run.
+        entries = [e for e in entries if not e["prunable"]]
+
     checked_out_branches = {e["branch"] for e in entries if e.get("branch")}
 
     branches = list_local_branches(root)
@@ -1711,8 +1722,9 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
                   file=out)
             continue
         pruned = result.get("pruned")
+        has_prune = pruned and (pruned["names"] is None or pruned["names"])
         if not result["branches"] and not result["worktrees"] and not result["listeners"] \
-                and not (pruned and (pruned["names"] or pruned["names"] is None)):
+                and not has_prune:
             print("  nothing to examine", file=out)
         if pruned and pruned["names"] is None:
             print("  prune     UNREADABLE -- %s; nothing pruned" % pruned["error"], file=out)

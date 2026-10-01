@@ -1684,16 +1684,31 @@ class WorktreePruneTests(unittest.TestCase):
         self.assertIsNone(result["pruned"]["error"])
         self.assertFalse(os.path.isdir(registration))
 
+    def test_preview_and_confirm_agree_on_a_branch_held_by_a_stale_registration(self):
+        root, _ = self._stale("prune-agree")
+        log = os.path.join(ROOT, "prune-agree.log")
+        verdicts = []
+        for confirm in (False, True):
+            result = sweep.sweep_repo(root, confirm, log)
+            verdicts.append([(b["name"], b["action"], b["reason"]) for b in result["branches"]
+                             if b["name"] == "lane-prune-agree"])
+        self.assertEqual(len(verdicts[0]), 1)
+        self.assertEqual(verdicts[0], verdicts[1])
+
     def test_an_unreadable_preview_prunes_nothing(self):
-        root, registration = self._stale("prune-blind")
-        real = guard._git
-        guard._git = lambda where, *a: None if a[:2] == ("worktree", "prune") else real(where, *a)
-        try:
-            found = sweep.prune_registrations(root, True)
-        finally:
-            guard._git = real
-        self.assertIsNone(found["names"])
-        self.assertTrue(os.path.isdir(registration))
+        """git gives no answer (None), and git answers with a failure: both prune nothing."""
+        failed = subprocess.CompletedProcess([], 128, "", "fatal")
+        for name, answer in (("none", None), ("failed", failed)):
+            root, registration = self._stale("prune-blind-" + name)
+            real = guard._git
+            guard._git = lambda where, *a: (answer if a[:2] == ("worktree", "prune")
+                                            else real(where, *a))
+            try:
+                found = sweep.prune_registrations(root, True)
+            finally:
+                guard._git = real
+            self.assertIsNone(found["names"])
+            self.assertTrue(os.path.isdir(registration))
 
 
 # --------------------------------------------------------------------------- the purge

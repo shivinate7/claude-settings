@@ -553,6 +553,18 @@ MUTATIONS = [
      '    if names:\n        done = guard._git(root, "worktree", "prune")',
      "test_preview_names_the_stale_registration_and_prunes_nothing"),
 
+    ("prune: an unreadable preview is read as an empty list and prunes on",
+     "sweep",
+     '    if preview is None or preview.returncode != 0:\n        return {"names": None,',
+     '    if preview is None:\n        return {"names": None,',
+     "test_an_unreadable_preview_prunes_nothing"),
+
+    ("prune: the preview keeps a stale registration's branch checked out",
+     "sweep",
+     '        entries = [e for e in entries if not e["prunable"]]',
+     '        pass',
+     "test_preview_and_confirm_agree_on_a_branch_held_by_a_stale_registration"),
+
     # ---- the worktree pre-removal process check (this build, 2026-09-24) ----
     ("pre-check: a process sitting inside the worktree no longer keeps it",
      "sweep",
