@@ -197,15 +197,30 @@ class Host:
             if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
                 return False, "the pull request went DIRTY during the wait. Merge the base into the branch and run again."
             got = self.checks(n)
-            red = [f"{k}: {b} {l}".strip() for k, rows in got.items() for b, l in rows if b in ("fail", "cancel")]
+            red, pending = self.classify(got, names)
             if red:
                 return False, "a check is red: " + "; ".join(red)
-            pending = [k for k in names if not got.get(k) or any(b not in ("pass", "skipping") for b, _ in got[k])]
             if not pending:
                 return True, ""
             if self.now() >= end:
                 return False, f"the deadline of {deadline_minutes} minutes passed. Still pending: " + ", ".join(pending)
             self.block(pending, got)
+
+    @staticmethod
+    def classify(got, names):
+        """-> (red, pending): red entries of any check, required or not; required names not yet all green."""
+        red = [f"{k}: {b} {l}".strip() for k, rows in got.items() for b, l in rows if b in ("fail", "cancel")]
+        pending = [k for k in names if not got.get(k) or any(b not in ("pass", "skipping") for b, _ in got[k])]
+        return red, pending
+
+    def head_state(self, n):
+        """One read of the head's own checks, for the preview: green, pending, or red: <name>. Reads only, never waits."""
+        try:
+            got = self.checks(n)
+            red, pending = self.classify(got, self.required_names())
+        except Stop as e:
+            return f"unknown ({e})"
+        return "red: " + "; ".join(red) if red else "pending: " + ", ".join(pending) if pending else "green"
 
     def block(self, pending, got):
         """Wait up to a minute for something to change."""
@@ -402,6 +417,7 @@ def preview(root, cfg, cfgrel, n, host, lock):
     held = lock.read(base)
     say(f"merge: PREVIEW for #{n} ({info['branch']} at {info['head'][:9]}). Nothing was pressed.",
         f"  lock:   " + ("held" if held and held[1] > lock.now() else "free"),
+        f"  head checks: {host.head_state(n)}",
         "  claim:  " + (f"already claimed ({resumed}); a run resumes at the wait" if resumed else trailer or "nothing to claim"),
         f"  then:   push HEAD:{info['branch']}, wait for the checks, `gh pr merge --{m.get('method', '?')} --match-head-commit`,",
         f"          move local {base}, run {len(m.get('afterMerge', []))} afterMerge command(s)" + (", delete the branch." if m.get("deleteBranch") else "."))
@@ -427,6 +443,13 @@ def confirm(root, cfg, cfgrel, n, host, lock):
         else:
             trailer = do_claim(wt, cfgrel, base_ref)
             if trailer:
+                # check first, then claim: a claim push cancels the head's own run and would hide a red already there
+                try:
+                    ok, why = host.wait_checks(n, info["head"], m["deadlineMinutes"])
+                except Stop as e:
+                    ok, why = False, str(e)
+                if not ok:
+                    raise Stop("the head's own checks are not green, so nothing was claimed or pushed: " + why)
                 claim_sha = commit_claim(wt, trailer)
                 push_branch(wt, branch)
                 say(f"merge: {trailer} pushed to {branch} at {claim_sha[:9]}.")

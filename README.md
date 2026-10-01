@@ -114,10 +114,11 @@ merge --dev ...         run the checkout's own tree, not origin main
   prints a warning block and runs the code it has. `--dev` skips all of this and runs the
   checkout's own tree. Use it only to work on the tool.
 * **Preview.** `merge <pr>` runs the claim in a temporary worktree and drops it. It prints
-  the lock state, the claim line, and the steps a run would take. Nothing reaches origin.
+  the lock state, the state of the head's checks (green, pending or red), the claim line, and the steps a run would take. Nothing reaches origin.
 * **`--confirm`.** It takes the lock, then reads the required checks. If the list is empty or
-  unreadable, it stops before the claim push. It claims, pushes the claim, and waits for the
-  checks on the claim SHA. It checks that each claimed number is still free on the base tip,
+  unreadable, it stops before the claim push. Then it checks first: it waits for the head's
+  own checks, and a red one stops the run with nothing claimed or pushed. Only on green does it
+  claim and push the claim, and wait for the checks on the claim SHA. It checks that each claimed number is still free on the base tip,
   and merges with `--match-head-commit`. Then it moves the local main, runs `afterMerge`, and
   deletes the head branch if `merge.deleteBranch` is set. A rerun on a branch that already
   holds its own claim resumes at the wait.
