@@ -674,6 +674,37 @@ MUTATIONS = [
      '        return {"path": path, "action": "keep",\n'
      '                "reason": "process-inside: pid %s" % ", ".join(str(p) for p in sorted(inside))}',
      "test_a_process_inside_the_worktree_keeps_it_and_names_the_pid"),
+
+    # ---- the stale agent lock (a dead or reused pid frees a clean, fully pushed worktree) ----
+    ("stale lock: a dead agent's lock still keeps the worktree",
+     "sweep",
+     '        if stale_agent_lock is not True:\n',
+     '        if True:\n',
+     "test_dead_pid_lock_is_stale_and_pushed_worktree_is_removable"),
+    ("stale lock: a running agent's lock no longer keeps",
+     "sweep",
+     '    return abs(actual - locked_ms) > guard.SESSION_LIVE_TOLERANCE_MS',
+     '    return True',
+     "test_running_agent_lock_keeps"),
+    ("stale lock: an unreadable lock start counts as stale",
+     "sweep",
+     '    except Exception:\n'
+     '        return None\n'
+     '    actual = guard._process_start_ms(',
+     '    except Exception:\n'
+     '        return True\n'
+     '    actual = guard._process_start_ms(',
+     "test_unreadable_lock_start_keeps"),
+    ("stale lock: an unpushed commit no longer keeps the worktree",
+     "sweep",
+     '        if not pushed:\n',
+     '        if False:\n',
+     "test_stale_lock_with_unpushed_commit_keeps"),
+    ("stale lock: --confirm removes without unlocking first",
+     "sweep",
+     '        unlocked = guard._git(root, "worktree", "unlock", path)',
+     '        unlocked = guard._git(root, "worktree", "list", path)',
+     "test_remove_unlocks_then_removes_without_force"),
 ]
 
 
