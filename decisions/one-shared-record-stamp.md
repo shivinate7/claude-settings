@@ -199,9 +199,9 @@ own real tree on 2026-09-24.
 ## The mechanism
 
 This entry adds no new CLAUDE.md rule anchor. `lint/rule_mechanisms.json` keeps
-`git-slug-then-claim-number` as `unmechanized` in this repo. That matches
-`actions/ste-lint`, which carries no anchor of its own either. A reusable action lives
-here, but it enforces nothing until another repo's own workflow calls it. Fixtures:
+`git-slug-then-claim-number` to the merge tool, `merge/merge.py` (plan
+`plans/shared-merge-tool.md`). The engine itself enforces nothing until another repo's
+own workflow calls it. Fixtures:
 `actions/stamp/test_stamp.mjs` for the engine, and `actions/stamp/test_action.sh` for
 the composite action's own shell logic. Both are wired into `gates`, `gates-windows`
 and `gates-macos` in `.github/workflows/gates.yml`.

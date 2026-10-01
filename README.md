@@ -16,6 +16,7 @@ One source of truth for my user-level Claude Code config. Local sessions and clo
 | `decisions/`    | One file per ruling, cited by slug                          | stays in the repo |
 | `deferred/`, `plans/` | Open questions and plans, not yet a ruling             | stay in the repo |
 | `actions/`      | Composite GitHub Actions this repo publishes (`stamp`, `ste-lint`) | callers pin them by commit SHA |
+| `merge/`, `bin/` | The `merge` command, and its launchers `bin/merge` and `bin/merge.cmd` | `bin/` lands in `~/.claude/bin`. `merge/` runs from the clone |
 | `.github/`      | `gates.yml`, the CI that checks this repo                   | runs here only, never installed |
 
 `agents/`, `hooks/`, and `lint/` are the folders `landed-dirs.txt` names. Both installers read
@@ -85,6 +86,59 @@ Once merged:
   changed files after your next `git pull` on `main`, and re-runs `install.ps1` itself if
   `install.ps1` changed.
 * Cloud: the next new or resumed session re-runs the setup script and picks up the change.
+
+## The `merge` command
+
+One command merges a pull request in any repo that has opted in. It claims record numbers
+before the merge, waits for CI on the claim commit, reverts the claim if a step fails, and
+then merges. Plan: `plans/shared-merge-tool.md`. The repo's own opt-in is the `merge` block of
+its stamp config, see "The merge tool contract" in `actions/stamp/README.md`.
+
+Run it from inside the repo, with `gh`, `git`, `node` and Python 3 on PATH:
+
+```
+merge <pr>              preview: what it would claim and merge. Presses nothing.
+merge <pr> --confirm    lock, claim, push, wait, merge, move the local main, clean up.
+merge --unlock          remove this repo's merge lock. Reads no other state.
+merge --dev ...         run the checkout's own tree, not origin main
+```
+
+* **Launcher.** On macOS and Linux, `bin/merge` lands in `~/.claude/bin`. On Windows,
+  `bin\merge.cmd` lands there too, and starts `bin\merge`. Both find this clone through
+  `CLAUDE_SETTINGS_DIR`, then the `@` line in `~/.claude/CLAUDE.md`. With neither, they clone
+  the public repo into a temporary folder. The checkout must have `origin` set to
+  `shivinate7/claude-settings`. Any other result stops before a pull request read.
+* **Fresh code.** Each run fetches `origin main` and runs from a temporary worktree at that
+  SHA. It prints the SHA it ran. If it cannot prove fresh code, such as when offline, it
+  prints a warning block and runs the code it has. `--dev` skips all of this and runs the
+  checkout's own tree. Use it only to work on the tool.
+* **Preview.** `merge <pr>` runs the claim in a temporary worktree and drops it. It prints
+  the lock state, the claim line, and the steps a run would take. Nothing reaches origin.
+* **`--confirm`.** It takes the lock, then reads the required checks. If the list is empty or
+  unreadable, it stops before the claim push. It claims, pushes the claim, and waits for the
+  checks on the claim SHA. It checks that each claimed number is still free on the base tip,
+  and merges with `--match-head-commit`. Then it moves the local main, runs `afterMerge`, and
+  deletes the head branch if `merge.deleteBranch` is set. A rerun on a branch that already
+  holds its own claim resumes at the wait.
+* **A stop in the wait.** The wait stops on any failed or cancelled check, required or not,
+  and on a DIRTY branch or a moved head. It reverts the claim, but only while the origin head
+  is still the claim commit. A head that still reads as the pre-claim SHA is GitHub lagging
+  the push, so the wait goes on until the deadline.
+* **`--unlock`.** The lock is the ref `refs/merge-lock/<defaultBranch>` on origin. It expires
+  after `merge.deadlineMinutes` plus ten minutes, and a later run breaks an expired lock.
+  `--unlock` removes it at once, for a run that died. It reads no lock state first.
+
+Exit codes:
+
+| Code | Meaning |
+| --- | --- |
+| 0 | A preview ran, the lock was removed, or the merge landed and every after-step passed. |
+| 1 | A refusal or a failed step. The message on stderr names it. A launcher stop also exits 1. |
+| 1 | The merge landed, but the local main did not move or an `afterMerge` command failed. The merge stays. The printed line says so. |
+| 2 | The arguments are wrong, such as both a pull request number and `--unlock`. |
+
+Exit 1 has two causes. Read the output to tell them apart. A line that starts
+`merge: #<pr> merged as` means that the merge landed.
 
 ## Editing
 
