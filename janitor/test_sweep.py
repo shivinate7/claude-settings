@@ -1695,6 +1695,21 @@ class WorktreePruneTests(unittest.TestCase):
         self.assertEqual(len(verdicts[0]), 1)
         self.assertEqual(verdicts[0], verdicts[1])
 
+    def test_a_failed_prune_leaves_the_registration_and_its_branch_kept(self):
+        root, registration = self._stale("prune-fails")
+        failed = subprocess.CompletedProcess([], 1, "", "fatal")
+        real = guard._git
+        guard._git = lambda where, *a: (failed if a == ("worktree", "prune")
+                                        else real(where, *a))
+        try:
+            result = sweep.sweep_repo(root, True, os.path.join(ROOT, "prune-fails.log"))
+        finally:
+            guard._git = real
+        self.assertTrue(result["pruned"]["error"])
+        self.assertTrue(os.path.isdir(registration))
+        verdict = [b for b in result["branches"] if b["name"] == "lane-prune-fails"]
+        self.assertEqual([b["action"] for b in verdict], ["keep"])
+
     def test_an_unreadable_preview_prunes_nothing(self):
         """git gives no answer (None), and git answers with a failure: both prune nothing."""
         failed = subprocess.CompletedProcess([], 128, "", "fatal")

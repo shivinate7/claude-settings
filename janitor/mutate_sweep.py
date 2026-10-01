@@ -565,6 +565,12 @@ MUTATIONS = [
      '        pass',
      "test_preview_and_confirm_agree_on_a_branch_held_by_a_stale_registration"),
 
+    ("prune: a failed real prune still drops the stale registrations from the verdict",
+     "sweep",
+     '    if result["pruned"]["names"] and not result["pruned"]["error"]:',
+     '    if result["pruned"]["names"]:',
+     "test_a_failed_prune_leaves_the_registration_and_its_branch_kept"),
+
     # ---- the worktree pre-removal process check (this build, 2026-09-24) ----
     ("pre-check: a process sitting inside the worktree no longer keeps it",
      "sweep",

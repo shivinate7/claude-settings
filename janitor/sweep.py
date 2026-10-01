@@ -1647,12 +1647,9 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str):
         result["refused"] = "unreadable-worktree-list"
         return result
 
-    if result["pruned"]["names"]:
+    if result["pruned"]["names"] and not result["pruned"]["error"]:
         # Confirm prunes these before anything else is judged; a preview must predict that run.
-        entries = [e for e in entries if not e["prunable"]]
-
-    if result["pruned"]["names"]:
-        # Confirm prunes these before anything else is judged; a preview must predict that run.
+        # A failed real prune leaves them registered, so they stay.
         entries = [e for e in entries if not e["prunable"]]
 
     checked_out_branches = {e["branch"] for e in entries if e.get("branch")}
