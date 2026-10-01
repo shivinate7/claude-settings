@@ -663,7 +663,7 @@ class GhHalf(Env):
     def calls(self):
         return pathlib.Path(self.state, "calls.log").read_text()
 
-    def gh_host(self, required=("gates",), pause=None):
+    def gh_host(self, required=("gates",), pause=None, ignore=None):
         def tick(s):
             self.ticks += 1
             self.paused.append(s)
@@ -671,7 +671,7 @@ class GhHalf(Env):
             self.now += s
             if pause:
                 pause()
-        return merge.Host(required if required == "protection" else list(required), "main", minute=60, now=lambda: self.now, pause=tick)
+        return merge.Host(required if required == "protection" else list(required), "main", minute=60, now=lambda: self.now, pause=tick, ignore=ignore)
 
     def go(self, **kw):
         return self.run_merge("7", "--confirm", host=self.gh_host(**kw))
@@ -832,6 +832,67 @@ class GhHalf(Env):
             rc, out = self.run_merge("7", host=self.gh_host())
             self.assertEqual(rc, 0, out)
             self.assertIn(want, out)
+
+    def test_banchi_604_a_pending_check_that_is_not_required_goes_red_after_the_required_are_green(self):
+        # The head reads green on `gates`, `design` still pending, then red. The old wait ended on the green required check.
+        before = self.head()
+        self.set(checks_seq=[[("gates", "pass", ""), ("design", "pending", "")], [("gates", "pass", ""), ("design", "fail", "")]])
+        rc, out = self.go()
+        self.assertEqual(rc, 1)
+        self.assertIn("a check is red: design: fail", out)
+        self.assertEqual(self.head(), before)  # stopped at the head wait: nothing claimed
+        self.assertNotIn("pr merge", self.calls())
+
+    def test_banchi_604_same_in_the_wait_after_the_claim_push(self):
+        self.set(checks_seq=[[("gates", "pass", ""), ("design", "pass", "")], [("gates", "pass", ""), ("design", "pending", "")],
+                             [("gates", "pass", ""), ("design", "fail", "")]])
+        rc, out = self.go()
+        self.assertEqual(rc, 1)
+        self.assertIn("a check is red: design: fail", out)
+        self.assertNotIn("pr merge", self.calls())
+        self.assertTrue(self.reverted())
+
+    def test_a_pending_check_that_is_not_required_is_waited_on_then_merges_on_green(self):
+        self.set(checks_seq=[[("gates", "pass", ""), ("design", "pending", "")], [("gates", "pass", ""), ("design", "pass", "")]])
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertGreaterEqual(self.paused.count(60), 1)
+        self.assertIn("pr merge", self.calls())
+
+    def test_skipped_and_neutral_count_as_passed(self):
+        self.set(checks_seq=[[("gates", "pass", ""), ("a", "skipping", ""), ("b", "pass", "")]])  # gh buckets neutral as pass
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+
+    def test_cancelled_and_unknown_buckets_stop_the_run(self):
+        for bucket in ("cancel", "startup_failure"):
+            self.set(checks_seq=[[("gates", "pass", ""), ("x", bucket, "")]])
+            rc, out = self.go()
+            self.assertEqual(rc, 1, bucket)
+            self.assertIn(f"x: {bucket}", out)
+        self.assertNotIn("pr merge", self.calls())
+
+    def test_an_ignore_entry_without_a_reason_refuses_the_config(self):
+        sh(self.co, "git", "checkout", "-q", "main")
+        for bad in ({"name": "design"}, {"name": "design", "reason": "  "}, {"reason": "r"}):
+            cfg = dict(CONFIG, merge=dict(CONFIG["merge"], ignoreChecks=[bad]))
+            put(os.path.join(self.co, ".github/stamp.json"), json.dumps(cfg))
+            rc, out = self.run_merge("7", "--confirm")
+            self.assertEqual(rc, 1)
+            self.assertIn("merge.ignoreChecks", out)
+            self.assertFalse(self.lock_ref())
+
+    def test_an_ignored_red_check_is_reported_and_the_merge_goes_on(self):
+        self.set(checks_seq=[[("gates", "pass", ""), ("design", "fail", ""), ("slow", "pending", "")]])
+        rc, out = self.go(ignore={"design": "flaky upstream", "slow": "nightly"})
+        self.assertEqual(rc, 0, out)
+        self.assertIn("design (flaky upstream): fail", out)
+        self.assertIn("pr merge", self.calls())
+
+    def test_the_preview_lists_a_pending_check_that_is_not_required(self):
+        self.set(checks_seq=[[("gates", "pass", ""), ("design", "pending", "")]])
+        rc, out = self.run_merge("7", host=self.gh_host())
+        self.assertIn("head checks: pending: design", out)
 
     def test_a_failed_read_in_the_wait_reverts_the_claim(self):
         before = self.head()

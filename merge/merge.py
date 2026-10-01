@@ -136,8 +136,9 @@ class Host:
     """The GitHub half: `gh` for the pull request, the required checks, the wait and the merge.
     Tests pass a fake with the same pr, wait_checks and merge, or a `gh` shim on PATH."""
 
-    def __init__(self, required="protection", base="main", minute=60, now=time.time, pause=time.sleep):
+    def __init__(self, required="protection", base="main", minute=60, now=time.time, pause=time.sleep, ignore=None):
         self.required, self.base, self.minute, self.now, self.pause = required, base, minute, now, pause
+        self.ignore = ignore or {}  # check name -> reason, from ignore_checks()
 
     def pr(self, n):
         """-> {head, branch, base, state, mergeable, merge_state}"""
@@ -178,10 +179,10 @@ class Host:
         return got
 
     def wait_checks(self, n, sha, deadline_minutes, prior=None):
-        """Wait for the required checks on `sha`. -> (ok, why). `prior` is the head before this run's push.
+        """Wait until every check on `sha` has finished and none failed. -> (ok, why). `prior` is the head before this run's push.
         Each pass reads the pull request first: a third head, DIRTY or CONFLICTING ends the wait. A head
         that still reads as `prior` is GitHub lagging the push: keep waiting. Any red check, required or
-        not, ends the wait. No sleep: a pending check blocks in `gh run watch <id> --exit-status` for at
+        not, ends the wait, and any pending check, required or not, is waited on. No sleep: a pending check blocks in `gh run watch <id> --exit-status` for at
         most a minute, then the loop reads again."""
         names = self.required_names()
         end = self.now() + deadline_minutes * 60
@@ -197,30 +198,39 @@ class Host:
             if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
                 return False, "the pull request went DIRTY during the wait. Merge the base into the branch and run again."
             got = self.checks(n)
-            red, pending = self.classify(got, names)
+            red, pending, ignored = self.classify(got, names, self.ignore)
             if red:
                 return False, "a check is red: " + "; ".join(red)
             if not pending:
+                if ignored:
+                    say("merge: ignored by merge.ignoreChecks: " + "; ".join(ignored))
                 return True, ""
             if self.now() >= end:
                 return False, f"the deadline of {deadline_minutes} minutes passed. Still pending: " + ", ".join(pending)
             self.block(pending, got)
 
     @staticmethod
-    def classify(got, names):
-        """-> (red, pending): red entries of any check, required or not; required names not yet all green."""
-        red = [f"{k}: {b} {l}".strip() for k, rows in got.items() for b, l in rows if b in ("fail", "cancel")]
-        pending = [k for k in names if not got.get(k) or any(b not in ("pass", "skipping") for b, _ in got[k])]
-        return red, pending
+    def classify(got, names, ignore=None):
+        """-> (red, pending, ignored). Every check on the head counts, required or not. Red: any bucket
+        that is not pass, skipping or pending (fail, cancel, and any bucket gh adds later: closed).
+        Pending: a pending entry, or a required name with no entry. `ignore` maps a name to its reason:
+        those checks are left out of red and pending, and named in `ignored`."""
+        ignore = ignore or {}
+        live = {k: rows for k, rows in got.items() if k not in ignore}
+        red = [f"{k}: {b} {l}".strip() for k, rows in live.items() for b, l in rows if b not in ("pass", "skipping", "pending")]
+        pending = sorted({k for k, rows in live.items() if any(b == "pending" for b, _ in rows)} | {k for k in names if k not in ignore and not got.get(k)})
+        ignored = [f"{k} ({ignore[k]}): " + "/".join(sorted({b for b, _ in rows})) for k, rows in got.items() if k in ignore]
+        return red, pending, ignored
 
     def head_state(self, n):
         """One read of the head's own checks, for the preview: green, pending, or red: <name>. Reads only, never waits."""
         try:
             got = self.checks(n)
-            red, pending = self.classify(got, self.required_names())
+            red, pending, ignored = self.classify(got, self.required_names(), self.ignore)
         except Stop as e:
             return f"unknown ({e})"
-        return "red: " + "; ".join(red) if red else "pending: " + ", ".join(pending) if pending else "green"
+        s = "red: " + "; ".join(red) if red else "pending: " + ", ".join(pending) if pending else "green"
+        return s + (" (ignored: " + "; ".join(ignored) + ")" if ignored else "")
 
     def block(self, pending, got):
         """Wait up to a minute for something to change."""
@@ -403,6 +413,15 @@ def drop_worktree(root, tmp, wt):
     git(root, "worktree", "prune")
     shutil.rmtree(tmp, ignore_errors=True)
 
+def ignore_checks(cfg):
+    """merge.ignoreChecks -> {name: reason}. An entry without a name or a non-empty reason refuses the config."""
+    out = {}
+    for e in cfg.get("merge", {}).get("ignoreChecks", []):
+        if not isinstance(e, dict) or not str(e.get("name", "")).strip() or not str(e.get("reason", "")).strip():
+            raise Stop(f"merge.ignoreChecks entry {e!r} needs a name and a non-empty reason. Config refused.")
+        out[e["name"]] = e["reason"]
+    return out
+
 def preview(root, cfg, cfgrel, n, host, lock):
     base = cfg["defaultBranch"]
     info = host.pr(n)
@@ -527,7 +546,8 @@ def main(argv, host=None, lock=None):
             lock.unlock(cfg["defaultBranch"])
             say(f"merge: lock on {cfg['defaultBranch']} removed.")
             return 0
-        return (confirm if a.confirm else preview)(root, cfg, a.config, a.pr, host or Host(cfg.get("merge", {}).get("requiredChecks", "protection"), cfg["defaultBranch"]), lock) or 0
+        ignore = ignore_checks(cfg)
+        return (confirm if a.confirm else preview)(root, cfg, a.config, a.pr, host or Host(cfg.get("merge", {}).get("requiredChecks", "protection"), cfg["defaultBranch"], ignore=ignore), lock) or 0
     except Stop as e:
         print(f"merge: {e}", file=sys.stderr)
         return 1

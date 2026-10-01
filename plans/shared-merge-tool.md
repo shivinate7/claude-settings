@@ -103,6 +103,7 @@ The repo keeps one config file, the stamp config it already has or a new one at
 | `cite.glossFirstUse` | New, shape 3. Globs, such as `["CLAUDE.md"]`. At a claimed cite's first use in a paragraph, the claim adds ` (gloss)`, the first six words of the record title. Shapes 1 and 2 already have `{gloss}` in `cite.template`. |
 | `merge.method` | `merge`, `squash` or `rebase`. Read it from the repo history. Never guess it. |
 | `merge.requiredChecks` | `"protection"` reads the branch protection API. A list names the checks for a repo with no protection. |
+| `merge.ignoreChecks` | Optional. `[{"name": "...", "reason": "..."}]`. The wait leaves these checks out and names them in the output. An entry with no non-empty reason refuses the config. |
 | `merge.deadlineMinutes` | The longest wait for the claim commit's checks. |
 | `merge.afterMerge` | Commands that run after the local main moves, such as a primary-checkout sync. Each runs in the repo root. A failure is reported, the merge stays, and the command exits non-zero. |
 | `merge.deleteBranch` | Delete the head branch on origin and locally after the merge. |
@@ -123,12 +124,15 @@ passes its arguments through and adds nothing.
 4. Run `stamp.mjs --claim --base origin/<defaultBranch>`. The ceiling is every number in the
    tree and in the base tip, plus each `RETIRED` list. Then run `regenerate`.
 5. When nothing changed, skip to step 6 with the head as the SHA: one wait only. Else check
-   first. Wait for the required checks on the head, with the wait of step 6 (same deadline and
-   moved-head rules). Any red or cancelled check stops the run with nothing claimed and
-   nothing pushed, names the red check, and releases the lock. Pending checks are waited
-   out. Only when all are green: commit with the trailer `Record-claim: <ids>` and push
+   first. Wait on the head with the wait of step 6 (same deadline and moved-head rules). Any
+   red or cancelled check stops the run with nothing claimed and nothing pushed, names the red
+   check, and releases the lock. Every pending check, required or not, is waited out. Only when all are green: commit with the trailer `Record-claim: <ids>` and push
    `HEAD:<branch>` as a plain push. Never force.
-6. Wait for the required checks on the SHA (the claim SHA after a claim). Each pass reads the pull request first.
+6. Wait for every check on the SHA (the claim SHA after a claim) to finish with none failed.
+   Required or not, a pending check is waited on. Skipped and neutral pass. Failed, cancelled,
+   timed out, action required, startup failure and any unknown status stop the wait. The
+   required list stays non-empty and all present. `merge.ignoreChecks` names are left out and
+   printed. Each pass reads the pull request first.
    A head that still reads as the pre-claim SHA is GitHub lagging the push. The wait goes
    on for it until the deadline. Any other head, DIRTY or CONFLICTING ends the wait. Any failed or
    cancelled check ends the wait, required or not. Every entry of a duplicate check name is
@@ -144,7 +148,7 @@ passes its arguments through and adds nothing.
 10. Delete the head branch, remove the temporary worktree, and release the lock.
 
 The preview prints the head's check state: `head checks: green`, `pending: <names>` or
-`red: <name>`.
+`red: <name>`. A pending or red check is named whether or not it is required.
 
 A rerun finds its own claim at the head (the trailer, and each number still free) and resumes
 at step 6. It does not claim twice.
@@ -154,7 +158,7 @@ at step 6. It does not claim twice.
 | Failure | Guard |
 |---|---|
 | Two sessions claim against one base tip. | The merge lock serializes claim to merge for one repo. Step 7 reads the base tip again before the merge. After the merge, `check` on the default branch refuses a duplicate number. |
-| Any check on the claim commit goes red, required or not. | A failed or cancelled check ends the wait. Revert the claim commit and push the revert. Do this only while the origin head is the claim SHA. Nothing merges. The message names the red check. |
+| Any check on the claim commit goes red, required or not, even after the required checks are green. | A failed or cancelled check ends the wait. A pending check of any kind is waited on first. Revert the claim commit and push the revert. Do this only while the origin head is the claim SHA. Nothing merges. The message names the red check. |
 | The required check list is empty or unreadable. | The tool stops before the claim push. Nothing is on origin. The message says to name the checks in `merge.requiredChecks`. |
 | The branch goes DIRTY or CONFLICTING in the wait. | Each pass of the wait reads it. The wait stops, and the claim is reverted as above. The message says to merge the base into the branch and run again. |
 | Someone pushes or force-pushes the branch in the wait. | The head SHA is not the claim SHA. The tool reverts nothing, because the claim commit can be gone. `--match-head-commit` refuses the merge in any case. The message says to run again. |
@@ -250,3 +254,7 @@ Each lane is one Sonnet builder. When every lane in its "Waits for" cell has mer
    released. Pending: it waits, then claims only on green. The wait after the claim push stays.
    With nothing to claim, one wait only. Cause: Banchi #595, a claim push cancelled a run
    whose failure was already there, and the claim was reverted twice.
+10. **Never merge while any check on the head is failing or running,** required or not (repo
+    rule "never merge failing CI"). The wait ends green only when every check has finished and
+    none failed. Cause: Banchi #604 merged while a non-required check was pending, and it went
+    red after the merge. A repo may list `merge.ignoreChecks`, each entry with a reason.
