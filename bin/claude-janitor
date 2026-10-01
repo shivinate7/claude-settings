@@ -1,0 +1,7 @@
+#!/bin/sh
+# Shim for the machine-wide sweep. No sweep logic lives here: it runs the landed janitor/sweep.py.
+# install.sh lands this file as ~/.claude/bin/claude-janitor and janitor/ as ~/.claude/janitor.
+s="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/janitor/sweep.py"
+for p in python3 python; do command -v "$p" >/dev/null 2>&1 && exec "$p" "$s" "$@"; done
+echo "claude-janitor: python not found" >&2
+exit 127
