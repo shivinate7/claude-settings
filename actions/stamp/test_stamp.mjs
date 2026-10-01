@@ -1180,7 +1180,7 @@ test("--check refuses a claimed number whose commit has no trailer", () =>
     assert.match(problems[0], /D-002 on a branch/);
   }));
 
-test("--check refuses a trailer that names another id, and a trailer commit that did not change the file", () =>
+test("--check refuses a trailer that names another id, and one commit's trailer vouches only for numbers it adds", () =>
   withTempDir((root) => {
     claimRepo(root);
     claim(root, frontmatterConfig(), "main");
@@ -1189,9 +1189,20 @@ test("--check refuses a trailer that names another id, and a trailer commit that
     write(root, "docs/decisions/note.md", "---\nid: D-003\nslug: note\ntitle: note\ndate: 2026-01-03\n---\n\nBody.\n");
     commit(root, "later\n\nRecord-claim: D-002 D-003");
     const problems = check(root, frontmatterConfig(), LOCAL);
-    // D-003's file is changed by its trailer commit, so it passes. D-002's is not, so it stays refused.
+    // The trailer commit ADDED D-003, so it passes. It did not add D-002, so that stays refused.
     assert.equal(problems.some((p) => p.includes("p.md") && p.includes("D-002")), true, problems.join(" | "));
     assert.equal(problems.some((p) => p.includes("note.md")), false, problems.join(" | "));
+  }));
+
+test("--check refuses a number one commit hand-numbered and a later Record-claim commit only edited", () =>
+  withTempDir((root) => {
+    claimRepo(root);
+    write(root, "docs/decisions/p.md", rec(5, "p")); // commit A: numbers it by hand, no trailer
+    commit(root, "hand-numbered");
+    write(root, "docs/decisions/p.md", rec(5, "p").replace("Body.", "Edited."));
+    commit(root, "edit\n\nRecord-claim: D-005"); // commit B: edits only
+    const problems = check(root, frontmatterConfig(), LOCAL);
+    assert.equal(problems.some((p) => p.includes("p.md") && p.includes("D-005") && p.includes("on a branch")), true, problems.join(" | "));
   }));
 
 test("--check refuses a claimed number that the base tip took after the claim", () =>

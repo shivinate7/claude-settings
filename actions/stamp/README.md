@@ -85,7 +85,8 @@ It asks one more question, and the question depends on the branch.
 
   One exception to the first state. A number that a commit with a `Record-claim: <ids>`
   trailer added is accepted when the tip of the base ref does not hold it. The same commit
-  must change the record's file. A number with no trailer stays refused. A number that the
+  must add the number itself: its parent lacks the number, and it holds the number. A later
+  edit of a number that another commit wrote is not vouched for. A number with no trailer stays refused. A number that the
   base tip took after the claim is refused, and the fix is to claim again.
 
 A pull request checkout is always off the default branch. The engine knows it is one when
@@ -104,6 +105,8 @@ ref is missing, or it has no merge base with HEAD. The config has no `defaultBra
   the read could not run, and it names the remedy.
 - **Everywhere else**, `--check` prints a line that starts with `UNKNOWN:` and names the same
   remedy. It exits 0. It does not print the line that says the records are in order.
+  A caller that runs `--check` outside Actions, such as the merge tool, must read an
+  `UNKNOWN:` line as a failure. The exit code 0 does not mean a pass.
 
 The remedy is to fetch the base branch with its history, or to pass `--base <ref>`. A check
 job needs `actions/checkout` with `fetch-depth: 0`. A shallow fetch of the base is not

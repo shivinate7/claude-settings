@@ -607,17 +607,41 @@ function tipTaken(root, config, ref) {
   }
 }
 
-// The ids that `Record-claim:` commits of base..HEAD added, as Map id -> Set of files that commit
-// changed. A trailer names ids, and only a file the same commit changed vouches for one.
-function claimedByTrailer(root, base) {
-  const out = new Map();
+// The (kind, number) pairs one commit's tree holds. A commit git cannot read, such as the parent
+// of a root commit, holds none.
+function numbersAt(root, config, commit) {
+  let dir;
+  try {
+    dir = materializeTree(root, commit, recordPaths(config));
+  } catch {
+    return new Set();
+  }
+  try {
+    return new Set(numberedRecords(dir, config).map((r) => `${r.kind}\0${r.n}`));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// The ids that `Record-claim:` commits of base..HEAD added. A trailer names ids. It vouches for
+// an id only when the same commit ADDED the number: the commit's parent lacks it, and the commit
+// holds it. A number a commit only edits is not vouched for.
+function claimedByTrailer(root, config, base) {
+  const out = new Set();
   const log = gitOut(root, ["log", "--no-merges", "--format=%x01%H%n%(trailers:key=Record-claim,valueonly)", `${base}..HEAD`]).toString("utf8");
   for (const chunk of log.split("\x01").slice(1)) {
     const [hash, ...vals] = chunk.split("\n");
-    const ids = vals.join(" ").split(/[\s,]+/).filter(Boolean);
-    if (!ids.length) continue;
-    const files = new Set(gitOut(root, ["-c", "core.quotePath=false", "diff-tree", "-r", "--root", "--no-commit-id", "--name-only", hash]).toString("utf8").split("\n").filter(Boolean));
-    for (const id of ids) out.set(id, new Set([...(out.get(id) ?? []), ...files]));
+    const ids = new Set(vals.join(" ").split(/[\s,]+/).filter(Boolean));
+    if (!ids.size) continue;
+    const before = numbersAt(root, config, `${hash}^`);
+    const after = materializeTree(root, hash, recordPaths(config));
+    try {
+      for (const r of numberedRecords(after, config)) {
+        if (ids.has(r.id) && !before.has(`${r.kind}\0${r.n}`)) out.add(r.id);
+      }
+    } finally {
+      rmSync(after, { recursive: true, force: true });
+    }
   }
   return out;
 }
@@ -637,7 +661,7 @@ function claimedByTrailer(root, base) {
 // the defect. In a pull_request merge commit the merge base IS the base ref's tip, so both read
 // the same tree there.
 //   - one exception. A number that a `Record-claim:` commit of the branch added is accepted when
-//     the tip of the base ref does not hold it (the tool claims before the merge, against the
+//     the tip of the base ref does not hold it. The commit must have added the number itself (the tool claims before the merge, against the
 //     tip). A number with no such trailer stays refused, and so does one the tip took since.
 //
 // A base that cannot be read comes back as `unknown`, never as a pass. check() decides whether
@@ -667,11 +691,11 @@ function branchNumbered(root, config, opts) {
     const baseByNumber = new Map();
     for (const r of before) if (!baseByNumber.has(numberOf(r))) baseByNumber.set(numberOf(r), r);
     const problems = [];
-    const claims = claimedByTrailer(root, base);
+    const claims = claimedByTrailer(root, config, base);
     let tip; // read only when a claim needs it
     for (const r of now) {
       if (baseKeys.has(r.key)) continue;
-      if (claims.get(r.id)?.has(r.rel)) {
+      if (claims.has(r.id)) {
         tip ??= tipTaken(root, config, ref);
         if (tip.get(r.kind).has(r.n)) {
           problems.push(`${r.rel}: ${r.id} was claimed on this branch, and ${ref} holds ${r.id} now. ` +
@@ -755,9 +779,19 @@ export function check(root, config, opts = {}) {
 // without it could hand out a number the base holds. Runs the config's `regenerate` after, when
 // something was claimed. The tree is written either way.
 export function claim(root, config, baseTip) {
-  const result = stamp(root, config, tipTaken(root, config, baseTip));
+  let taken;
+  try {
+    taken = tipTaken(root, config, baseTip);
+  } catch (e) {
+    throw new Error(`git cannot read ${baseTip} (${String(e.message).split("\n")[0]}). Nothing was written`);
+  }
+  const result = stamp(root, config, taken);
   if (!result.problems.length && result.assigned.length && config.regenerate) {
-    execFileSync("bash", ["-c", config.regenerate], { cwd: root, stdio: "inherit" });
+    try {
+      execFileSync("bash", ["-c", config.regenerate], { cwd: root, stdio: "inherit" });
+    } catch {
+      throw new Error("the regenerate command failed. The tree holds the claim. Discard the tree, and do not commit it");
+    }
   }
   return result;
 }
@@ -792,7 +826,7 @@ if (isMain) {
     try {
       result = args.mode === "claim" ? claim(args.root, config, args.base) : stamp(args.root, config);
     } catch (e) {
-      console.error(`${args.mode} REFUSES: ${String(e.message).split("\n")[0]}. Nothing more was written.`);
+      console.error(`${args.mode} REFUSES: ${String(e.message).split("\n")[0]}.`);
       process.exit(1);
     }
     if (result.problems.length) {
