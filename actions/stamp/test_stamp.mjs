@@ -528,6 +528,59 @@ test("heading: a pending heading in the flat corpus is numbered in place, and ci
     assert.equal(read(root, "docs/x.csv"), "C-new-code\n");
   }));
 
+test("heading debt: the file name has no letter, the heading and cite carry DEBT", () =>
+  withTempDir((root) => {
+    headingTree(root);
+    write(root, "docs/debts/ORDER.json", manifestText(["001-old.md", "DEBT-quiet-gap-extra.md"]));
+    write(root, "docs/debts/001-old.md", "## 1 — Old\n");
+    write(root, "docs/debts/DEBT-quiet-gap-extra.md", "## DEBT-quiet-gap — Quiet gap\n");
+    write(root, "docs/specs/a.md", "See DEBT-quiet-gap and `docs/debts/DEBT-quiet-gap-extra.md`.\n");
+    const result = stamp(root, headingConfig());
+    assert.deepEqual(result.problems, []);
+    assert.equal(read(root, "docs/debts/002-extra.md"), "## DEBT2 — Quiet gap\n");
+    assert.equal(existsSync(join(root, "docs/debts/DEBT-quiet-gap-extra.md")), false);
+    assert.equal(read(root, "docs/debts/ORDER.json"), manifestText(["001-old.md", "002-extra.md"]));
+    assert.equal(read(root, "docs/specs/a.md"), "See DEBT2 and DEBT2.\n");
+  }));
+
+const glossTree = (root, claude) => {
+  headingTree(root);
+  write(root, "docs/decisions/D-two-thing.md", "## D-two-thing — A (paren) `tick` title with many more words\n");
+  write(root, "CLAUDE.md", claude);
+  write(root, "docs/specs/a.md", "D-two-thing here.\n");
+};
+const glossRun = (claude) => withTempDir((root) => {
+  glossTree(root, claude);
+  assert.deepEqual(stamp(root, headingConfig()).problems, []);
+  assert.equal(read(root, "docs/specs/a.md"), "D4 here.\n"); // not a glossFirstUse file
+  return read(root, "CLAUDE.md");
+});
+
+test("glossFirstUse: the first cite in a paragraph gains the first six title words", () =>
+  assert.equal(glossRun("D-two-thing and D-two-thing.\n"),
+    "D4 (A paren tick title with many) and D4.\n"));
+
+test("glossFirstUse: a blank line or a bullet starts a new paragraph", () =>
+  assert.equal(glossRun("D-two-thing.\n\nD-two-thing.\n- D-two-thing\n- D-two-thing\n"),
+    "D4 (A paren tick title with many).\n\nD4 (A paren tick title with many).\n" +
+    "- D4 (A paren tick title with many)\n- D4 (A paren tick title with many)\n"));
+
+test("glossFirstUse: a gloss already there is never doubled, and a heading line is skipped", () =>
+  assert.equal(glossRun("# D-two-thing\nD-two-thing (mine) then D-two-thing, words\n"),
+    "# D4\nD4 (mine) then D4, words\n"));
+
+test("glossFirstUse: a backticked cite keeps its tick before the gloss", () =>
+  assert.equal(glossRun("`D-two-thing` ok\n"), "`D4` (A paren tick title with many) ok\n"));
+
+test("glossFirstUse: a flat-file kind has no gloss", () =>
+  withTempDir((root) => {
+    headingTree(root);
+    write(root, "docs/codes.md", "# Codes\n\n## C-new-code — New code\n");
+    write(root, "CLAUDE.md", "C-new-code\n");
+    stamp(root, headingConfig());
+    assert.equal(read(root, "CLAUDE.md"), "C1\n");
+  }));
+
 test("heading: a malformed pending heading is refused and nothing is written", () =>
   withTempDir((root) => {
     headingTree(root);

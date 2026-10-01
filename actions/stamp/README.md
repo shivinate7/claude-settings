@@ -29,7 +29,9 @@ A repo that adopts this engine meets each item below.
    corpus shapes.
    - `folder`: one file per record, with the heading on line 1. The file
      `D-<slug>.md` that starts `## D-<slug> — Title` becomes `D258-<slug>.md` that starts
-     `## D258 — Title`.
+     `## D258 — Title`. A debt is a `folder` kind whose `filenameTemplate` has no
+     `{prefix}`: `DEBT-<slug>.md` starting `## DEBT-<slug> — Title` becomes `079-<slug>.md`
+     starting `## DEBT79 — Title`. Its `numberedRegex` may accept a bare `## 12` too.
    - `file`: one flat file, and every heading is a record. `## C-<slug> — Title` becomes
      `## C12 — Title`. The file keeps its name.
 
@@ -232,6 +234,7 @@ after `<slug>-`.
 | Field | Default | Meaning |
 |---|---|---|
 | `cite.before`, `cite.after` | `(?<![-\p{L}\p{N}_])`, `(?![-\p{L}\p{N}_])` | The boundary around a slug token. Write Python's Unicode `\w` as `[\p{L}\p{N}_]`. |
+| `cite.glossFirstUse` | `[]` | Globs of files. In each, a claimed cite of a `folder` record gains ` (gloss)` at its first use in a paragraph. The gloss is the first six words of the record title, with `(`, `)` and backticks dropped. A blank line or a bullet starts a paragraph. A cite already followed by ` (` or `, word` is left alone. A heading line is skipped. A `file` record has no gloss. The gloss boundary is fixed, and it ignores `cite.before` and `cite.after`. |
 | `walk.textSuffixes` | required | The file suffixes the rewrite opens. |
 | `walk.skipDirs` | `[]` | Folder names the walk does not enter. |
 | `walk.skipDotDirs` | `true` | The walk does not enter a folder whose name starts with a dot. |

@@ -49,6 +49,10 @@ export function normalizeConfig(config) {
   const cite = (config.cite ??= {});
   cite.before ??= `(?<![-\\p{L}\\p{N}_])`;
   cite.after ??= `(?![-\\p{L}\\p{N}_])`;
+  cite.glossFirstUse ??= [];
+  if (!Array.isArray(cite.glossFirstUse) || cite.glossFirstUse.some((g) => typeof g !== "string")) {
+    throw new Error("config.cite.glossFirstUse must be an array of glob strings");
+  }
   // A bad `unclaimed` entry is a config error, caught here, before any tree is read — never a
   // TypeError mid-walk from a pattern with no "slug" group, and never a run that silently walks
   // right past an unparseable pattern.
@@ -118,6 +122,13 @@ function classify(config, token) {
   return "malformed";
 }
 
+// The gloss a claim writes after a cite: the first six words of the record's heading title, with
+// parentheses and backticks dropped. Empty when the heading has no dash and title.
+function glossOf(line, token) {
+  const m = new RegExp(`^#+\\s+${escapeRe(token)}\\s+[\u2014-]\\s*(.+)`, "u").exec(line);
+  return m ? m[1].replace(/[()`]/g, "").split(/\s+/).filter(Boolean).slice(0, 6).join(" ") : "";
+}
+
 const titleOf = (line) => line.replace(/^#+\s+\S+\s*[—-]?\s*/u, "").trim();
 
 function readKind(root, config, kind, h) {
@@ -128,7 +139,7 @@ function readKind(root, config, kind, h) {
   };
   const sort = (line, token, rel, name) => {
     const cls = classify(config, token);
-    if (cls === "pending") out.pending.push({ rel, name, slug: kind.prefix + token, title: titleOf(line) });
+    if (cls === "pending") out.pending.push({ rel, name, slug: kind.prefix + token, title: titleOf(line), gloss: kind.folder ? glossOf(line, kind.prefix + token) : "" });
     else if (cls === "malformed") out.malformed.push({ rel, line });
   };
   if (kind.folder) {
@@ -319,6 +330,30 @@ function substitute(text, config, claims) {
   return text;
 }
 
+// At a claimed cite's first use in a paragraph, add ` (gloss)`. A paragraph ends at a blank line
+// and starts at a bullet. A cite already followed by ` (` or `, word` is left alone, so a gloss
+// is never doubled. Only the first match of a cite on a line is looked at. Heading lines are
+// skipped. Only a `folder` kind carries a gloss: a flat-file record has no entry file.
+function glossFirstUses(text, claims) {
+  let seen = new Set();
+  const lines = text.split("\n").map((line) => {
+    if (!line.trim() || /^\s*[-*] /.test(line)) seen = new Set();
+    if (line.startsWith("#")) return line;
+    for (const c of claims) {
+      if (!c.rec.gloss) continue;
+      const re = new RegExp(`(?<![-\\p{L}\\p{N}_])${escapeRe(c.id)}(\`?)(?![-\\p{L}\\p{N}_])`, "u");
+      line = line.replace(re, (all, tick, offset, whole) => {
+        if (seen.has(c.id)) return all;
+        seen.add(c.id);
+        if (/^`?( \(|,\s+[\p{L}\p{N}_])/u.test(whole.slice(offset + all.length))) return all;
+        return `${c.id}${tick} (${c.rec.gloss})`;
+      });
+    }
+    return line;
+  });
+  return lines.join("\n");
+}
+
 // Python's `json.dumps(obj, indent=2)`, the byte shape a Python generator writes a manifest in.
 // `kind.manifestAscii` (default true) picks it. JSON.stringify gives the same bytes except for
 // `ensure_ascii`: Python escapes every character outside
@@ -364,11 +399,13 @@ export function stamp(root, config, h, extra) {
 
   const skip = new Set(config.kinds.filter((k) => k.manifest).map((k) => k.manifest));
   let glossed = 0;
+  const glossMatch = h.makeMatcher(config.cite.glossFirstUse);
   for (const rel of textFiles(root, config.walk)) {
     if (skip.has(rel)) continue;
     const abs = join(root, rel);
     const { text, eol } = h.readFileEol(abs);
-    const next = substitute(text, config, claims);
+    let next = substitute(text, config, claims);
+    if (glossMatch(rel)) next = glossFirstUses(next, claims);
     if (next !== text) { writeFileSync(abs, h.withEol(next, eol)); glossed += 1; }
   }
 
