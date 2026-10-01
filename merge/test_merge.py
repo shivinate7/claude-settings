@@ -157,6 +157,14 @@ class Flow(Env):
         rc, out = self.run_merge("7")
         self.assertIn("head checks: red: gates: fail", out)
 
+    def test_the_lock_outlives_two_waits(self):
+        ttls = []
+        acquire = self.lock.acquire
+        self.lock.acquire = lambda b, ttl: (ttls.append(ttl), acquire(b, ttl))[1]
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertGreaterEqual(ttls[0], (2 * CONFIG["merge"]["deadlineMinutes"] + 10) * 60)  # head wait, claim wait, ten spare
+
     def test_head_red_claims_nothing_pushes_nothing_and_frees_the_lock(self):
         before = self.refs()
         self.host.seq = [(False, "a check is red: gates: fail")]
@@ -496,7 +504,7 @@ class Stopped(Env):
         self.assertEqual(rc, 1)
         self.assertIn("held", out)
         self.assertEqual(self.head(), claim_head)
-        self.now += 16 * 60  # deadlineMinutes 5 + 10, passed
+        self.now += 21 * 60  # 2 * deadlineMinutes 5 + 10, passed
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertIn("resumed", out)

@@ -428,7 +428,7 @@ def confirm(root, cfg, cfgrel, n, host, lock):
         if k not in m:
             raise Stop(f"{cfgrel} has no merge.{k}. Read it from the repo; the tool never guesses it.")
     base, base_ref = cfg["defaultBranch"], f"origin/{cfg['defaultBranch']}"
-    token = lock.acquire(base, (m["deadlineMinutes"] + 10) * 60)
+    token = lock.acquire(base, (2 * m["deadlineMinutes"] + 10) * 60)  # two waits: the head, then the claim
     tmp = wt = claim_sha = None
     try:
         info = host.pr(n)

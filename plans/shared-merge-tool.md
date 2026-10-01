@@ -160,7 +160,7 @@ at step 6. It does not claim twice.
 | Someone pushes or force-pushes the branch in the wait. | The head SHA is not the claim SHA. The tool reverts nothing, because the claim commit can be gone. `--match-head-commit` refuses the merge in any case. The message says to run again. |
 | A push of the claim or of the revert is refused. | Each push is fast-forward only, so a moved branch refuses it. Nothing is on origin. The tool removes its worktree and stops. A refused revert prints the exact revert command. |
 | Protection refuses the merge. | `gh pr merge` fails. The claim is reverted, and the full gh message is printed. The tool never adds `--admin` and never pushes the default branch. |
-| The tool stops mid-run. | The lock carries an expiry of `deadlineMinutes` plus ten. A rerun breaks an expired lock. `merge --unlock` removes the lock and reads nothing first. |
+| The tool stops mid-run. | The lock carries an expiry of twice `deadlineMinutes` plus ten (a run waits twice). A rerun breaks an expired lock. `merge --unlock` removes the lock and reads nothing first. |
 
 The pull request check needs one change. Off the default branch, `check` refuses a number
 the branch added. It must accept a number that a `Record-claim` commit added, when that

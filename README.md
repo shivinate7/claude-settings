@@ -127,7 +127,7 @@ merge --dev ...         run the checkout's own tree, not origin main
   is still the claim commit. A head that still reads as the pre-claim SHA is GitHub lagging
   the push, so the wait goes on until the deadline.
 * **`--unlock`.** The lock is the ref `refs/merge-lock/<defaultBranch>` on origin. It expires
-  after `merge.deadlineMinutes` plus ten minutes, and a later run breaks an expired lock.
+  after twice `merge.deadlineMinutes` plus ten minutes (a run can wait twice), and a later run breaks an expired lock.
   `--unlock` removes it at once, for a run that died. It reads no lock state. It still reads the git root and the config.
 
 Exit codes:
