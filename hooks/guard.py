@@ -2414,9 +2414,10 @@ def session_root_pid():
 
 
 def pid_is_owned(pid: int, root: int):
-    """True when `pid` is dead or descends from `root`; False when it does not; None unknown."""
-    if pid == root:   # the session's own claude process is not something it started
-        return False
+    """True when `pid` is dead or descends from `root`; False when it does not; None unknown.
+
+    `root` itself does not descend from `root`, so it reads False with no check of its own.
+    """
     for _ in range(64):
         parent = _ps_ppid(pid)
         if parent is None:
