@@ -1770,7 +1770,8 @@ class HuskTests(unittest.TestCase):
         self.assertEqual(self._husks(root), {})
 
     def test_a_registered_worktree_is_not_a_husk(self):
-        root = self._repo("husk-registered")
+        # `.git` is named too, so only the registration check can tell this folder from a husk.
+        root = self._repo("husk-registered", husk_names=("node_modules", ".git"))
         target = os.path.join(root, ".claude", "worktrees", "live")
         run_vcs(root, "worktree", "add", "-q", target, "-b", "lane-husk-registered")
         for tracked in os.listdir(target):
