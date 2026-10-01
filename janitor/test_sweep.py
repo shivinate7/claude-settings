@@ -1726,6 +1726,77 @@ class WorktreePruneTests(unittest.TestCase):
             self.assertTrue(os.path.isdir(registration))
 
 
+class HuskTests(unittest.TestCase):
+    """`sweep.find_husks`: a leftover folder is reported, never deleted, `--confirm` included."""
+
+    def _repo(self, name, husk_names=("node_modules", ".serve")):
+        root = os.path.join(ROOT, name + "-repo")
+        make_repo(root, {"f.txt": "x\n"})
+        if husk_names is not None:
+            write(os.path.join(root, ".claude", "janitor.json"),
+                  json.dumps({"huskNames": list(husk_names)}))
+        return root
+
+    def _husk(self, root, name, children):
+        path = os.path.join(root, ".claude", "worktrees", name)
+        for child in children:
+            os.makedirs(os.path.join(path, child))
+        return path
+
+    def _husks(self, root):
+        names = sweep.read_optout(root).get("huskNames", [])
+        found = sweep.find_husks(root, sweep.parse_worktree_list(root), names)
+        return {os.path.basename(h["path"]): h["action"] for h in found}
+
+    def test_a_folder_holding_only_named_entries_is_a_husk_and_confirm_keeps_it(self):
+        root = self._repo("husk-found")
+        path = self._husk(root, "gone", ["node_modules", ".serve"])
+        self.assertEqual(self._husks(root), {"gone": "husk"})
+        result = sweep.sweep_repo(root, True, os.path.join(ROOT, "husk.log"))
+        self.assertTrue(os.path.isdir(path), "a husk was deleted; this tier is report only")
+        out = io.StringIO()
+        sweep.print_sweep_report([result], True, out=out)
+        self.assertIn("husk      HUSK", out.getvalue())
+
+    def test_a_folder_holding_anything_else_is_not_a_husk(self):
+        root = self._repo("husk-source")
+        self._husk(root, "has-source", ["node_modules", "src"])
+        self._husk(root, "empty", [])
+        self.assertEqual(self._husks(root), {})
+
+    def test_no_husk_names_means_no_husks(self):
+        root = self._repo("husk-nokey", husk_names=None)
+        self._husk(root, "gone", ["node_modules"])
+        self.assertEqual(self._husks(root), {})
+
+    def test_a_registered_worktree_is_not_a_husk(self):
+        root = self._repo("husk-registered")
+        target = os.path.join(root, ".claude", "worktrees", "live")
+        run_vcs(root, "worktree", "add", "-q", target, "-b", "lane-husk-registered")
+        for tracked in os.listdir(target):
+            if tracked != ".git":
+                os.remove(os.path.join(target, tracked))
+        os.makedirs(os.path.join(target, "node_modules"))
+        self.assertNotIn("live", self._husks(root))
+
+    def test_a_malformed_husk_names_refuses_the_repository(self):
+        root = self._repo("husk-bad")
+        write(os.path.join(root, ".claude", "janitor.json"), '{"huskNames": "node_modules"}')
+        result = sweep.sweep_repo(root, False, os.path.join(ROOT, "h.log"))
+        self.assertEqual(result["refused"], "unreadable-optout")
+
+    @unittest.skipIf(os.name == "nt", "the sleep fixture is POSIX only")
+    def test_a_process_inside_keeps_the_husk(self):
+        root = self._repo("husk-busy")
+        path = self._husk(root, "busy", ["node_modules"])
+        proc = subprocess.Popen(["sleep", "30"], cwd=path)
+        try:
+            self.assertEqual(self._husks(root), {"busy": "keep"})
+        finally:
+            proc.kill()
+            proc.wait()
+
+
 # --------------------------------------------------------------------------- the purge
 
 

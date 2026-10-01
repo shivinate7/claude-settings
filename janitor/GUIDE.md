@@ -7,7 +7,8 @@ of your own.
 `janitor/sweep.py` reaps local branches that hold no unique work. It removes
 worktrees that no session still uses. It also signals an orphaned TCP listener
 left behind inside a repository it covers. It prunes stale worktree
-registrations. It runs against every repository on this machine.
+registrations. It lists leftover folders. It runs against every repository on
+this machine.
 
 ## What it never does
 
@@ -163,13 +164,31 @@ locked worktree is never stale. If git gives no answer, the sweep prunes
 nothing and says so. This tier runs per repository, so `sweep: false` in
 `.claude/janitor.json` opts it out.
 
+## Leftover folders
+
+A leftover folder (a husk) is a real folder directly under
+`.claude/worktrees/` that meets all of these:
+
+- Git does not list it as a worktree.
+- It is not empty.
+- It holds only entries named in `huskNames` in `.claude/janitor.json`, for
+  example `["node_modules", ".serve"]`. With no `huskNames`, the sweep finds
+  none.
+
+The preview lists each one as `husk HUSK`. A folder with a live session or any
+process inside is listed as `husk KEEP`, with the reason. An unreadable folder
+or check is KEEP. This tier is report only. `--confirm` deletes none of them.
+A person reads the list and decides. This tier runs per repository, so
+`sweep: false` opts it out.
+
 ## How you opt out
 
 Write `.claude/janitor.json` at the root of your repository:
 
     {
       "sweep": false,
-      "protectedPrefixes": ["archive/", "wip/"]
+      "protectedPrefixes": ["archive/", "wip/"],
+      "huskNames": ["node_modules", ".serve"]
     }
 
 `sweep` must be the JSON literal `false` to opt out. A string, a number or a
@@ -180,7 +199,10 @@ direction as an unreadable file, not a guess at what you meant.
 and it never drops the default. A value that is not a list of strings also
 refuses your whole repository, instead of silently protecting nothing.
 
-Both keys are optional. A file that holds only `protectedPrefixes` stays swept,
+`huskNames` is a list of strings. A value that is not a list of strings also
+refuses your whole repository.
+
+All keys are optional. A file that holds only `protectedPrefixes` stays swept,
 and protects more names.
 
 The sweep visits a repository that carries no file. The owner chose that

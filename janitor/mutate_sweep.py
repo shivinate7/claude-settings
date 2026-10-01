@@ -571,6 +571,27 @@ MUTATIONS = [
      '    if result["pruned"]["names"]:',
      "test_a_failed_prune_leaves_the_registration_and_its_branch_kept"),
 
+    # ---- husks ----
+    ("husks: a folder holding a file outside huskNames is listed as a husk",
+     "sweep",
+     '        if not contents or not set(contents) <= set(names):',
+     '        if not contents:',
+     "test_a_folder_holding_anything_else_is_not_a_husk"),
+
+    ("husks: a registered worktree is listed as a husk",
+     "sweep",
+     '        if os.path.normcase(os.path.realpath(path)) in registered:',
+     '        if False:',
+     "test_a_registered_worktree_is_not_a_husk"),
+
+    # only_on="posix": the sleep fixture is POSIX only.
+    ("husks: a process inside no longer keeps the husk",
+     "sweep",
+     '        elif inside:\n            found.append({"path": path, "action": "keep", "reason": "process-inside',
+     '        elif False:\n            found.append({"path": path, "action": "keep", "reason": "process-inside',
+     "test_a_process_inside_keeps_the_husk",
+     "posix"),
+
     # ---- the worktree pre-removal process check (this build, 2026-09-24) ----
     ("pre-check: a process sitting inside the worktree no longer keeps it",
      "sweep",

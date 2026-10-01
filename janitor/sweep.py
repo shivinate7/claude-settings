@@ -254,30 +254,39 @@ def load_optout(root: str):
     costs one rerun after the owner fixes the file. Guessing costs branches that do not come
     back.
     """
+    data = read_optout(root)
+    if data is None:
+        return False, (), False
+    sweep_enabled = data.get("sweep", True)
+    prefixes = list(DEFAULT_PROTECTED_PREFIXES)
+    for item in data.get("protectedPrefixes", []):
+        if item:
+            prefixes.append(item)
+    return sweep_enabled, tuple(prefixes), True
+
+
+def read_optout(root: str):
+    """The one reader of `.claude/janitor.json`: its keys as a dict ({} when the file is absent),
+    or None when the file is unreadable or a key it holds is mis-shaped (`sweep` not a boolean,
+    `protectedPrefixes` or `huskNames` not a list of strings). `load_optout` and `find_husks`
+    both read through this."""
     path = os.path.join(root, OPTOUT_FILENAME)
     if not os.path.isfile(path):
-        return True, DEFAULT_PROTECTED_PREFIXES, True
+        return {}
     try:
         with open(path, "r", encoding="utf-8") as handle:
             data = json.load(handle)
     except Exception:
-        return False, (), False
+        return None
     if not isinstance(data, dict):
-        return False, (), False
+        return None
     if "sweep" in data and not isinstance(data["sweep"], bool):
-        return False, (), False
-    sweep_enabled = data.get("sweep", True)
-    if "protectedPrefixes" in data:
-        extra = data["protectedPrefixes"]
-        if not isinstance(extra, list) or not all(isinstance(item, str) for item in extra):
-            return False, (), False
-    else:
-        extra = []
-    prefixes = list(DEFAULT_PROTECTED_PREFIXES)
-    for item in extra:
-        if item:
-            prefixes.append(item)
-    return sweep_enabled, tuple(prefixes), True
+        return None
+    for key in ("protectedPrefixes", "huskNames"):
+        if key in data and (not isinstance(data[key], list)
+                            or not all(isinstance(item, str) for item in data[key])):
+            return None
+    return data
 
 
 # ------------------------------------------------------------------ reading a repository's state
@@ -1622,9 +1631,49 @@ def prune_registrations(root: str, confirm: bool):
     return result
 
 
+def find_husks(root: str, entries, names):
+    """Leftover folders, report only. A husk is a real folder directly under
+    `<root>/.claude/worktrees/` that git does not list as a worktree, is not empty, and holds
+    only entries named in `huskNames` (from `.claude/janitor.json`; no key, no husks). Returns
+    [{"path", "action": "husk"|"keep", "reason"}]. A husk with a live session or any process
+    inside is "keep": a supervisor there would only recreate it. An unreadable folder or
+    unreadable check is "keep" too. Nothing is deleted; no `--confirm` path exists."""
+    base = os.path.join(root, ".claude", "worktrees")
+    if not names or not os.path.isdir(base):
+        return []
+    registered = {os.path.normcase(os.path.realpath(e["path"])) for e in entries}
+    found = []
+    for name in sorted(os.listdir(base)):
+        path = os.path.join(base, name)
+        if os.path.islink(path) or not os.path.isdir(path):
+            continue
+        if os.path.normcase(os.path.realpath(path)) in registered:
+            continue
+        try:
+            contents = os.listdir(path)
+        except OSError:
+            found.append({"path": path, "action": "keep", "reason": "unreadable-subject"})
+            continue
+        if not contents or not set(contents) <= set(names):
+            continue
+        live = guard.worktree_live_session(path)
+        inside, _ = processes_in(path)
+        if live is None or inside is None:
+            found.append({"path": path, "action": "keep", "reason": "unreadable-subject"})
+        elif live:
+            found.append({"path": path, "action": "keep", "reason": "live-session"})
+        elif inside:
+            found.append({"path": path, "action": "keep", "reason": "process-inside: pid %s"
+                          % ", ".join(str(p) for p in sorted(inside))})
+        else:
+            found.append({"path": path, "action": "husk",
+                          "reason": "only " + ", ".join(sorted(contents))})
+    return found
+
+
 def sweep_repo(root: str, confirm: bool, restore_log_path: str):
     result = {"root": root, "refused": None, "branches": [], "worktrees": [], "listeners": [],
-              "pruned": None}
+              "pruned": None, "husks": []}
 
     sweep_enabled, protected_prefixes, optout_ok = load_optout(root)
     if not optout_ok:
@@ -1683,6 +1732,8 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str):
         if confirm and decision["action"] == "reap":
             remove_worktree(root, entry["path"], decision)
 
+    result["husks"] = find_husks(root, entries, (read_optout(root) or {}).get("huskNames", []))
+
     checkout_paths = [root] + [e["path"] for e in entries if not e.get("bare")]
     listener_entries = find_swept_listeners(checkout_paths)
     if listener_entries is None:
@@ -1707,6 +1758,7 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
     branch_counts = Counter()
     worktree_counts = Counter()
     listener_counts = Counter()
+    husk_counts = Counter()
     refused_repos = []
     unreadable_listener_repos = []
 
@@ -1721,7 +1773,7 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
         pruned = result.get("pruned")
         has_prune = pruned and (pruned["names"] is None or pruned["names"])
         if not result["branches"] and not result["worktrees"] and not result["listeners"] \
-                and not has_prune:
+                and not has_prune and not result.get("husks"):
             print("  nothing to examine", file=out)
         if pruned and pruned["names"] is None:
             print("  prune     UNREADABLE -- %s; nothing pruned" % pruned["error"], file=out)
@@ -1731,6 +1783,10 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
                 if pruned["error"]:
                     line += "  [ERROR: %s]" % pruned["error"]
                 print(line, file=out)
+        for h in result.get("husks", []):
+            husk_counts[h["action"]] += 1
+            line = "  husk      %-4s %-60s %s" % (h["action"].upper(), h["path"], h["reason"])
+            print(line, file=out)
         for b in result["branches"]:
             branch_counts[(b["action"], b["reason"].split(":", 1)[0])] += 1
             tag = "REAP" if b["action"] == "reap" else "KEEP"
@@ -1781,6 +1837,8 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
     print("  TCP listeners examined: %d" % total_listeners, file=out)
     for (action, reason), n in sorted(listener_counts.items()):
         print("    %-5s %-20s %d" % (action, reason, n), file=out)
+    print("  leftover folders (report only): %d, kept: %d"
+          % (husk_counts["husk"], husk_counts["keep"]), file=out)
     print("  stale worktree registrations: %d" % sum(
         len(r["pruned"]["names"] or []) for r in results if r.get("pruned")), file=out)
     if unreadable_listener_repos:
