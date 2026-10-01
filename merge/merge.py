@@ -252,9 +252,13 @@ def cut_branch(root, branch):
         say(f"merge: {branch} here: " + ("deleted." if not c else "not deleted: " + out))
 
 def after_merge(root, cmds):
+    """Run each command. True when every one passed. A failure never undoes the merge."""
+    ok = True
     for cmd in cmds:
         c = subprocess.run(["bash", "-c", cmd], cwd=root).returncode
-        say(f"merge: afterMerge `{cmd}`: " + ("done." if not c else f"FAILED (exit {c}). The merge stays."))
+        say(f"merge: afterMerge `{cmd}`: " + ("done." if not c else f"FAILED (exit {c}). The merge landed and stays."))
+        ok = ok and not c
+    return ok
 
 # ------------------------------------------------------------------ the flow
 
@@ -364,9 +368,10 @@ def confirm(root, cfg, cfgrel, n, host, lock):
             ff_main(root, base, commit)
         except Stop as e:  # the merge is done: report, go on
             say(f"merge: {e}")
-        after_merge(root, m.get("afterMerge", []))
+        ok = after_merge(root, m.get("afterMerge", []))
         if m.get("deleteBranch"):
             cut_branch(root, branch)
+        return 0 if ok else 1  # the merge landed either way; a failed afterMerge exits non-zero
     finally:
         if wt:
             drop_worktree(root, tmp, wt)
@@ -391,8 +396,7 @@ def main(argv, host=None, lock=None):
             lock.unlock(cfg["defaultBranch"])
             say(f"merge: lock on {cfg['defaultBranch']} removed.")
             return 0
-        (confirm if a.confirm else preview)(root, cfg, a.config, a.pr, host or Host(), lock)
-        return 0
+        return (confirm if a.confirm else preview)(root, cfg, a.config, a.pr, host or Host(), lock) or 0
     except Stop as e:
         print(f"merge: {e}", file=sys.stderr)
         return 1

@@ -186,8 +186,9 @@ class Flow(Env):
         sh(self.other, "git", "commit", "-qam", "cfg"); sh(self.other, "git", "push", "-q", "origin", "main")
         sh(self.co, "git", "pull", "-q", "--ff-only")
         rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 0, out)
-        self.assertIn("FAILED (exit 3)", out)
+        self.assertEqual(rc, 1, out)  # owner ruling: a failed afterMerge exits non-zero
+        self.assertIn("FAILED (exit 3). The merge landed and stays.", out)
+        self.assertNotIn("refs/heads/feat", self.refs())  # the rest of the cleanup still ran
         self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
 
     def test_conflicting_pr_is_refused_before_any_claim(self):
