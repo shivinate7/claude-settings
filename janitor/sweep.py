@@ -715,7 +715,12 @@ def process_cwd(pid: int):
 def _process_cwd_macos(pid: int):
     """`lsof -a -p PID -d cwd -Fn`: one `n<path>` line for the cwd file descriptor alone (`-d
     cwd`), `-a` ANDs that with `-p PID`. Exit code 1 with empty output means lsof found no such
-    fd (pid gone, or this read is not allowed to see it) -- unreadable, not a path."""
+    fd (pid gone, or this read is not allowed to see it) -- unreadable, not a path.
+    In a preview the one cwd table answers it (the first cwd line of PID, as lsof would print)."""
+    if _RUN is not None:
+        table = _all_cwds_macos()
+        if table is not None:
+            return _memo("cwd-by-pid", lambda: _first_cwd_by_pid(table)).get(pid)
     try:
         answer = subprocess.run(
             ["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
@@ -849,6 +854,9 @@ def process_command(pid: int):
 
 
 def _process_command_posix(pid: int):
+    row = _ps_row(pid)
+    if row is not _NO_TABLE:
+        return (row[2].strip() or None) if row else None
     try:
         answer = subprocess.run(
             ["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, timeout=5,
@@ -919,6 +927,9 @@ def is_orphan(pid: int):
     parent exited, and Windows never updates the child's own stale record of it. Either shape
     means orphaned. A live parent created BEFORE this pid, the ordinary shape, means not."""
     if sys.platform == "darwin":
+        row = _ps_row(pid)
+        if row is not _NO_TABLE:
+            return _ppid_is_init(row[0] if row else "")
         return _is_orphan_posix_ppid(["ps", "-o", "ppid=", "-p", str(pid)])
     if sys.platform.startswith("linux"):
         return _is_orphan_linux(pid)
@@ -948,7 +959,11 @@ def _is_orphan_posix_ppid(argv):
         return None
     if answer.returncode != 0:
         return None
-    text = answer.stdout.strip()
+    return _ppid_is_init(answer.stdout)
+
+
+def _ppid_is_init(text: str):
+    text = text.strip()
     if not text:
         return None
     try:
@@ -1081,6 +1096,10 @@ def _list_all_pids_posix():
             return [int(name) for name in os.listdir("/proc") if name.isdigit()]
         except Exception:
             return None
+    if sys.platform == "darwin" and _RUN is not None:
+        table = _ps_table()
+        if table is not None:
+            return list(table)
     try:
         answer = subprocess.run(["ps", "-axo", "pid="], capture_output=True, text=True, timeout=10)
     except Exception:
@@ -1105,6 +1124,9 @@ def is_current_user_process(pid: int):
     owned by someone else. None when the read could not tell -- reported as
     `unreadable-subject`, same as every other tri-state read in this file."""
     if sys.platform == "darwin":
+        row = _ps_row(pid)
+        if row is not _NO_TABLE:
+            return _uid_is_mine(row[1] if row else "")
         return _is_current_user_posix_uid(["ps", "-o", "uid=", "-p", str(pid)])
     if sys.platform.startswith("linux"):
         return _is_current_user_linux(pid)
@@ -1131,7 +1153,11 @@ def _is_current_user_posix_uid(argv):
         return None
     if answer.returncode != 0:
         return None
-    text = answer.stdout.strip()
+    return _uid_is_mine(answer.stdout)
+
+
+def _uid_is_mine(text: str):
+    text = text.strip()
     if not text:
         return None
     try:
@@ -1466,7 +1492,91 @@ def print_loose_processes_report(found, out=sys.stdout):
         len(found), sum(1 for d in found if d["owner"] is None)), file=out)
 
 
+# ------------------------------------------------------------------ the per-run read cache
+#
+# A preview reads the same machine facts again and again: one `lsof` table per worktree judged,
+# one `ps` call per pid, one `git worktree list` per worktree, one session-record read per
+# worktree. Measured on a real machine: 67 of 70 s. `_RUN` is a dict only while a PREVIEW runs
+# (`main` sets it, without --confirm and outside --tier1); every read below then happens once.
+# A run that acts is never cached: the re-check right before a delete must see the machine as it
+# is NOW. Direct callers (the tests, other scripts) see `_RUN is None` and read fresh.
+_RUN = None
+_NO_TABLE = object()  # `_ps_row`: no table to read, so the caller runs its own per-pid read
+_WORKTREE_LIST_ARGS = ("worktree", "list", "--porcelain")
+
+
+def _memo(key, compute):
+    if _RUN is None:
+        return compute()
+    if key not in _RUN:
+        _RUN[key] = compute()
+    return _RUN[key]
+
+
+def _read_ps_table():
+    """`{pid: (ppid, uid, command)}` (strings) from ONE `ps`, or None when it could not answer."""
+    try:
+        answer = subprocess.run(["ps", "-axo", "pid=,ppid=,uid=,command="],
+                                capture_output=True, text=True, timeout=30)
+    except Exception:
+        return None
+    if answer.returncode != 0:
+        return None
+    table = {}
+    for line in answer.stdout.splitlines():
+        parts = line.split(None, 3)
+        if len(parts) >= 3 and parts[0].isdigit():
+            table[int(parts[0])] = (parts[1], parts[2], parts[3] if len(parts) > 3 else "")
+    return table if table else None  # an empty table is a failed read, never "no process"
+
+
+def _ps_table():
+    return _memo("ps", _read_ps_table)
+
+
+def _ps_row(pid: int):
+    """PID's (ppid, uid, command) row; None when PID is not in the table (what a failed per-pid
+    `ps -p` answers); `_NO_TABLE` when this run has no table (cache off, or `ps` failed)."""
+    if _RUN is None or sys.platform != "darwin":
+        return _NO_TABLE  # Linux and Windows keep their own reads
+    table = _ps_table()
+    return _NO_TABLE if table is None else table.get(pid)
+
+
+def _begin_preview_cache():
+    """Start the per-run cache and wrap the two guard reads that repeat per worktree. Returns the
+    undo function."""
+    global _RUN
+    _RUN = {}
+    real_git, real_records = guard._git, guard.session_records
+
+    def run_git(where, *args):
+        if args == _WORKTREE_LIST_ARGS:
+            return _memo(("git", where), lambda: real_git(where, *args))
+        return real_git(where, *args)
+
+    guard._git = run_git
+    guard.session_records = lambda: _memo("sessions", real_records)
+
+    def undo():
+        global _RUN
+        _RUN = None
+        guard._git, guard.session_records = real_git, real_records
+    return undo
+
+
+def _first_cwd_by_pid(table):
+    found = {}
+    for pid, cwd in table:
+        found.setdefault(pid, cwd)
+    return found
+
+
 def _all_cwds_macos():
+    return _memo("cwds", _read_all_cwds_macos)
+
+
+def _read_all_cwds_macos():
     """Every process's cwd as [(pid, cwd)], from ONE `lsof -d cwd -Fpn` (the per-pid read cost
     about 25 s per call on a real machine). `None` when lsof could not answer: any exit code
     but 0 or 1 (1 means some process was not readable, the same out-of-scope case as a
@@ -2151,6 +2261,14 @@ def main(argv=None) -> int:
                 return 1
 
     mode = "tier1" if args.tier1 else "branches" if args.branches else "full"
+    undo = _begin_preview_cache() if not args.confirm and mode != "tier1" else (lambda: None)
+    try:
+        return _sweep_roots(args, roots, restore_log_path, mode)
+    finally:
+        undo()
+
+
+def _sweep_roots(args, roots, restore_log_path, mode):
     results = [sweep_repo(root, args.confirm, restore_log_path, mode) for root in roots]
     print_sweep_report(results, args.confirm or mode == "tier1")
     if mode != "full":
