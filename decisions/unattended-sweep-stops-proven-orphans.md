@@ -90,6 +90,13 @@ That includes a false "no live session" answer. It also includes a false
 one traces back to a real process an unattended run should not have
 touched.
 
+## An unattended run may remove a worktree
+
+Owner ruling: an unattended `--confirm` run, the daily job or SessionEnd, may
+remove a worktree. The worktree must be clean and fully pushed. Its lock must
+be gone, or its lock host process must be gone. The reasons are in
+`the-janitor-is-one-machine-wide-sweep.md`.
+
 ## Dead-rooted servers follow the same gate
 
 `find_dead_rooted` finds a process whose argv names a script file and whose

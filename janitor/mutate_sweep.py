@@ -193,14 +193,20 @@ MUTATIONS = [
      '    locked = guard.worktree_locked(where, path)\n'
      '    if locked is None:\n'
      '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}\n'
+     '    stale_agent_lock = False\n'
      '    if locked:\n'
      '        holder = entry.get("locked_reason") or "locked"\n'
-     '        return {"path": path, "action": "keep", "reason": "locked: %s" % holder}\n'
+     '        stale_agent_lock = stale_agent_lock_verdict(holder)\n'
+     '        if stale_agent_lock is not True:\n'
+     '            return {"path": path, "action": "keep", "reason": "locked: %s" % holder}\n'
      '    live = guard.worktree_live_session(path)\n'
      '    if live is None:\n'
      '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}\n'
      '    if live:\n'
-     '        return {"path": path, "action": "keep", "reason": "live-session"}',
+     '        return {"path": path, "action": "keep", "reason": "live-session"}\n'
+     '    pushed = fully_pushed(path)\n'
+     '    if pushed is None:\n'
+     '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}',
      '    path = entry["path"]\n'
      '    dirty = guard.porcelain(path)\n'
      '    if False:\n'
@@ -210,14 +216,20 @@ MUTATIONS = [
      '    locked = guard.worktree_locked(where, path)\n'
      '    if False:\n'
      '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}\n'
+     '    stale_agent_lock = False\n'
      '    if locked:\n'
      '        holder = entry.get("locked_reason") or "locked"\n'
-     '        return {"path": path, "action": "keep", "reason": "locked: %s" % holder}\n'
+     '        stale_agent_lock = stale_agent_lock_verdict(holder)\n'
+     '        if stale_agent_lock is not True:\n'
+     '            return {"path": path, "action": "keep", "reason": "locked: %s" % holder}\n'
      '    live = guard.worktree_live_session(path)\n'
      '    if False:\n'
      '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}\n'
      '    if live:\n'
-     '        return {"path": path, "action": "keep", "reason": "live-session"}',
+     '        return {"path": path, "action": "keep", "reason": "live-session"}\n'
+     '    pushed = fully_pushed(path)\n'
+     '    if False:\n'
+     '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}',
      "test_refusal_unreadable_subject_worktree",
      "posix"),
 
@@ -674,6 +686,85 @@ MUTATIONS = [
      '        return {"path": path, "action": "keep",\n'
      '                "reason": "process-inside: pid %s" % ", ".join(str(p) for p in sorted(inside))}',
      "test_a_process_inside_the_worktree_keeps_it_and_names_the_pid"),
+
+    # ---- the stale agent lock (a dead or reused pid frees a clean, fully pushed worktree) ----
+    ("stale lock: a dead agent's lock still keeps the worktree",
+     "sweep",
+     '        if stale_agent_lock is not True:\n',
+     '        if True:\n',
+     "test_dead_pid_lock_is_stale_and_pushed_worktree_is_removable"),
+    ("stale lock: a running agent's lock no longer keeps",
+     "sweep",
+     '    return abs(actual - locked_ms) > guard.SESSION_LIVE_TOLERANCE_MS',
+     '    return True',
+     "test_running_agent_lock_keeps"),
+    ("stale lock: an unreadable lock start counts as stale",
+     "sweep",
+     '    except Exception:\n'
+     '        return None\n'
+     '    actual = guard._process_start_ms(',
+     '    except Exception:\n'
+     '        return True\n'
+     '    actual = guard._process_start_ms(',
+     "test_unreadable_lock_start_keeps"),
+    ("stale lock: --confirm removes without unlocking first",
+     "sweep",
+     '        unlocked = guard._git(root, "worktree", "unlock", path)',
+     '        unlocked = guard._git(root, "worktree", "list", path)',
+     "test_remove_unlocks_then_removes_without_force"),
+    ("pushed check: an unpushed commit no longer keeps an unlocked worktree",
+     "sweep",
+     '    if not pushed:\n'
+     '        return {"path": path, "action": "keep",\n'
+     '                "reason": "unpushed',
+     '    if False:\n'
+     '        return {"path": path, "action": "keep",\n'
+     '                "reason": "unpushed',
+     "test_unlocked_clean_detached_worktree_with_an_unpushed_commit_keeps"),
+
+    ("stale lock: a failed remove leaves the worktree unlocked",
+     "sweep",
+     '            relock = guard._git(root, "worktree", "lock", "--reason",',
+     '            relock = guard._git(root, "worktree", "list", "--reason",',
+     "test_failed_remove_restores_the_lock"),
+    # only_on="posix": the case needs time.tzset, which Windows lacks.
+    ("stale lock: the lock date is read as local time, not UTC",
+     "sweep",
+     '        locked_ms = calendar.timegm(time.strptime(',
+     '        locked_ms = time.mktime(time.strptime(',
+     "test_lock_date_is_read_as_utc_in_a_non_utc_zone",
+     "posix"),
+    ("pushed check: the remote-branch filter is dropped",
+     "sweep",
+     '"rev-list", "-n", "1", "HEAD", "--not", "--remotes")',
+     '"rev-list", "-n", "1", "HEAD")',
+     "test_detached_head_on_a_pushed_commit_counts_as_pushed"),
+    ("pushed check: an unreadable pushed read reaps instead of keeping",
+     "sweep",
+     '    pushed = fully_pushed(path)\n'
+     '    if pushed is None:',
+     '    pushed = fully_pushed(path)\n'
+     '    if False:',
+     "test_unreadable_pushed_check_keeps"),
+    ("stale lock: an unreadable process start counts as stale",
+     "sweep",
+     '    if actual is guard.PROCESS_START_UNREADABLE:\n'
+     '        return None',
+     '    if actual is guard.PROCESS_START_UNREADABLE:\n'
+     '        return True',
+     "test_unreadable_process_start_is_unknown_not_stale"),
+    ("stale lock: a lock reason of another form counts as stale",
+     "sweep",
+     '    if not found:\n'
+     '        return False',
+     '    if not found:\n'
+     '        return True',
+     "test_other_lock_reason_keeps"),
+    ("stale lock: the decision no longer asks for an unlock",
+     "sweep",
+     '"unlock": True, "lock_reason": holder}',
+     '"unlock": False, "lock_reason": holder}',
+     "test_dead_pid_lock_is_stale_and_pushed_worktree_is_removable"),
 ]
 
 

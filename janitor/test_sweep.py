@@ -67,6 +67,17 @@ def make_repo(where, files, branch="main"):
                   % (where, commit.stderr.strip()))
 
 
+def give_remote(root):
+    """Push main to a bare remote, so a worktree at main's commit counts as fully pushed."""
+    remote = root.rstrip("/\\") + "-origin.git"
+    run_vcs(os.path.dirname(remote), "init", "-q", "--bare", remote)
+    run_vcs(root, "remote", "add", "origin", remote)
+    pushed = run_vcs(root, "push", "-q", "origin", "main")
+    if pushed.returncode != 0:
+        sys.exit("fixture setup failed: push in %r failed: %s" % (root, pushed.stderr.strip()))
+    run_vcs(root, "fetch", "-q", "origin")
+
+
 def require(condition, message):
     if not condition:
         sys.exit("fixture setup failed: " + message)
@@ -602,6 +613,7 @@ class WorktreeDecisionTests(unittest.TestCase):
     def setUpClass(cls):
         cls.root = os.path.join(ROOT, "wt-repo")
         make_repo(cls.root, {"f.txt": "base\n"})
+        give_remote(cls.root)
 
         cls.dirty = os.path.join(ROOT, "wt-dirty")
         run_vcs(cls.root, "worktree", "add", "-q", cls.dirty, "-b", "lane-dirty")
@@ -703,6 +715,164 @@ class WorktreeDecisionTests(unittest.TestCase):
         self.assertEqual(decision["reason"], "unreadable-subject")
 
 
+class StaleAgentLockTests(unittest.TestCase):
+    """A claude agent lock (`claude agent agent-<id> (pid N start <UTC date>)`) is stale when its
+    pid is dead, or alive with another start time. A stale lock no longer keeps the worktree; the
+    worktree must then be clean and fully pushed. Any other lock reason keeps."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.root = os.path.join(ROOT, "stale-lock-repo")
+        make_repo(cls.root, {"f.txt": "base\n"})
+        give_remote(cls.root)
+
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        cls.dead_pid = gone.pid
+        own = time.strftime("%a %b %e %H:%M:%S %Y",
+                            time.gmtime(this_process_start_ms() / 1000))
+        cls.reasons = {
+            "dead": "claude agent agent-dead (pid %d start %s)" % (cls.dead_pid, own),
+            "running": "claude agent agent-run (pid %d start %s)" % (os.getpid(), own),
+            "reused": "claude agent agent-reuse (pid %d start Thu Jan  1 00:00:00 2015)"
+                      % os.getpid(),
+            "garbled": "claude agent agent-bad (pid %d start no-date)" % cls.dead_pid,
+        }
+        cls.wt = {}
+        for name, reason in cls.reasons.items():
+            cls.wt[name] = cls.add(name, reason)
+        cls.wt["unpushed"] = cls.add("unpushed", cls.reasons["dead"])
+        write(os.path.join(cls.wt["unpushed"], "g.txt"), "only here\n")
+        run_vcs(cls.wt["unpushed"], "add", "-A")
+        run_vcs(cls.wt["unpushed"], *IDENT, "commit", "-q", "-m", "unpushed work")
+        cls.wt["detached"] = cls.add("detached", cls.reasons["dead"], detach=True)
+        # No lock at all: the pushed check covers every reap, not only a stale agent lock.
+        cls.wt["free_unpushed"] = os.path.join(ROOT, "stale-lock-free-unpushed")
+        run_vcs(cls.root, "worktree", "add", "-q", "--detach", cls.wt["free_unpushed"], "main")
+        write(os.path.join(cls.wt["free_unpushed"], "h.txt"), "only here\n")
+        run_vcs(cls.wt["free_unpushed"], "add", "-A")
+        run_vcs(cls.wt["free_unpushed"], *IDENT, "commit", "-q", "-m", "unpushed detached")
+        cls.wt["other"] = cls.add("other", "held by lane-x")
+        entries = sweep.parse_worktree_list(cls.root)
+        cls.entries = {os.path.normcase(os.path.realpath(e["path"])): e for e in entries}
+
+    @classmethod
+    def add(cls, name, reason, detach=False):
+        path = os.path.join(ROOT, "stale-lock-" + name)
+        args = ["worktree", "add", "-q", path]
+        args += ["--detach", "main"] if detach else ["-b", "lane-stale-" + name]
+        require(run_vcs(cls.root, *args).returncode == 0, "worktree add %s failed" % name)
+        require(run_vcs(cls.root, "worktree", "lock", path, "--reason", reason).returncode == 0,
+                "lock %s failed" % name)
+        return path
+
+    def decide(self, name):
+        entry = self.entries[os.path.normcase(os.path.realpath(self.wt[name]))]
+        return sweep.decide_worktree(self.root, entry)
+
+    def test_dead_pid_lock_is_stale_and_pushed_worktree_is_removable(self):
+        decision = self.decide("dead")
+        self.assertEqual(decision["action"], "reap")
+        self.assertTrue(decision.get("unlock"))
+
+    def test_detached_head_on_a_pushed_commit_counts_as_pushed(self):
+        self.assertEqual(self.decide("detached")["action"], "reap")
+
+    def test_reused_pid_with_other_start_time_is_stale(self):
+        self.assertEqual(self.decide("reused")["action"], "reap")
+
+    def test_running_agent_lock_keeps(self):
+        decision = self.decide("running")
+        self.assertEqual(decision["action"], "keep")
+        self.assertTrue(decision["reason"].startswith("locked:"))
+
+    def test_unreadable_lock_start_keeps(self):
+        decision = self.decide("garbled")
+        self.assertEqual(decision["action"], "keep")
+        self.assertTrue(decision["reason"].startswith("locked:"))
+
+    def test_other_lock_reason_keeps(self):
+        self.assertEqual(self.decide("other")["action"], "keep")
+
+    def test_unlocked_clean_detached_worktree_with_an_unpushed_commit_keeps(self):
+        decision = self.decide("free_unpushed")
+        self.assertEqual(decision["action"], "keep")
+        self.assertTrue(decision["reason"].startswith("unpushed:"))
+
+    def test_stale_lock_with_unpushed_commit_keeps(self):
+        decision = self.decide("unpushed")
+        self.assertEqual(decision["action"], "keep")
+        self.assertTrue(decision["reason"].startswith("unpushed:"))
+
+    def test_remove_unlocks_then_removes_without_force(self):
+        path = self.add("removal", self.reasons["dead"])
+        decision = sweep.decide_worktree(
+            self.root, {"path": path, "locked_reason": self.reasons["dead"]})
+        self.assertEqual(decision["action"], "reap")
+        sweep.remove_worktree(self.root, path, decision)
+        self.assertNotIn("error", decision)
+        self.assertFalse(os.path.exists(path))
+
+    def test_failed_remove_restores_the_lock(self):
+        path = self.add("failremove", self.reasons["dead"])
+        write(os.path.join(path, "dirty.txt"), "git refuses to remove this without --force\n")
+        decision = {"path": path, "action": "reap", "unlock": True,
+                    "lock_reason": self.reasons["dead"]}
+        sweep.remove_worktree(self.root, path, decision)
+        self.assertIn("remove failed", decision["error"])
+        self.assertIn("lock restored", decision["error"])
+        self.assertTrue(os.path.isdir(path))
+        self.assertTrue(guard.worktree_locked(self.root, path))
+        entry = [e for e in sweep.parse_worktree_list(self.root)
+                 if os.path.realpath(e["path"]) == os.path.realpath(path)][0]
+        self.assertEqual(entry["locked_reason"], self.reasons["dead"])
+
+    @unittest.skipIf(not hasattr(time, "tzset"), "no time.tzset on this platform")
+    def test_lock_date_is_read_as_utc_in_a_non_utc_zone(self):
+        old = os.environ.get("TZ")
+        os.environ["TZ"] = "America/Chicago"
+        time.tzset()
+        try:
+            self.assertIs(sweep.stale_agent_lock_verdict(self.reasons["running"]), False)
+        finally:
+            if old is None:
+                del os.environ["TZ"]
+            else:
+                os.environ["TZ"] = old
+            time.tzset()
+
+    def test_unreadable_process_start_is_unknown_not_stale(self):
+        real = guard._process_start_ms
+        guard._process_start_ms = lambda pid: guard.PROCESS_START_UNREADABLE
+        try:
+            self.assertIsNone(sweep.stale_agent_lock_verdict(self.reasons["dead"]))
+        finally:
+            guard._process_start_ms = real
+
+    def test_unreadable_pushed_check_keeps(self):
+        real = sweep.fully_pushed
+        sweep.fully_pushed = lambda path: None
+        try:
+            decision = self.decide("detached")
+        finally:
+            sweep.fully_pushed = real
+        self.assertEqual(decision["action"], "keep")
+        self.assertEqual(decision["reason"], "unreadable-subject")
+
+    def test_a_repository_with_no_remote_keeps_every_worktree(self):
+        root = os.path.join(ROOT, "no-remote-repo")
+        make_repo(root, {"f.txt": "base\n"})
+        path = os.path.join(ROOT, "no-remote-wt")
+        run_vcs(root, "worktree", "add", "-q", "--detach", path, "main")
+        decision = sweep.decide_worktree(root, {"path": path})
+        self.assertEqual(decision["action"], "keep")
+        self.assertTrue(decision["reason"].startswith("unpushed:"))
+
+    def test_preview_never_unlocks(self):
+        sweep.sweep_repo(self.root, confirm=False, restore_log_path=os.path.join(ROOT, "p.log"))
+        self.assertTrue(guard.worktree_locked(self.root, self.wt["dead"]))
+
+
 class ListenerDecisionTests(unittest.TestCase):
     """`sweep.find_swept_listeners` / `sweep.decide_listener`, this build's own subject. Every
     listener here is a REAL process this suite starts itself (`spawn_plain_listener` /
@@ -713,6 +883,7 @@ class ListenerDecisionTests(unittest.TestCase):
     def setUpClass(cls):
         cls.root = os.path.join(ROOT, "listener-repo")
         make_repo(cls.root, {"f.txt": "base\n"})
+        give_remote(cls.root)
 
         cls.reap_wt = os.path.join(ROOT, "wt-listener-reap")
         run_vcs(cls.root, "worktree", "add", "-q", cls.reap_wt, "-b", "lane-listener-reap")
@@ -907,6 +1078,7 @@ class WorktreeProcessPreCheckTests(unittest.TestCase):
     def setUpClass(cls):
         cls.root = os.path.join(ROOT, "precheck-repo")
         make_repo(cls.root, {"f.txt": "base\n"})
+        give_remote(cls.root)
         cls.occupied = os.path.join(ROOT, "wt-precheck-occupied")
         run_vcs(cls.root, "worktree", "add", "-q", cls.occupied, "-b", "lane-precheck-occupied")
         cls.empty = os.path.join(ROOT, "wt-precheck-empty")
@@ -1179,6 +1351,7 @@ class PrimaryCheckoutExclusionTests(unittest.TestCase):
         self.tag = tag
         self.primary = os.path.join(ROOT, "primary-checkout-%s" % tag)
         make_repo(self.primary, {"f.txt": "base\n"})
+        give_remote(self.primary)
 
         self.linked = os.path.join(ROOT, "primary-checkout-linked-%s" % tag)
         result = run_vcs(self.primary, "worktree", "add", "-q", self.linked, "-b", "lane-x")
@@ -1603,6 +1776,7 @@ class WorktreeRemovalTests(unittest.TestCase):
     def test_confirm_removes_a_reapable_worktree(self):
         root = os.path.join(ROOT, "wt-remove-repo")
         make_repo(root, {"f.txt": "x\n"})
+        give_remote(root)
         target = os.path.join(ROOT, "wt-remove-target")
         run_vcs(root, "worktree", "add", "-q", target, "-b", "lane-remove")
 
@@ -1636,6 +1810,7 @@ class ConfirmGateTests(unittest.TestCase):
     def test_preview_names_reapable_subjects_but_touches_neither(self):
         root = os.path.join(ROOT, "confirm-gate-repo")
         make_repo(root, {"f.txt": "x\n"})
+        give_remote(root)
         # A branch identical to main's own tip: the ancestor test alone proves it empty, so it is
         # REAPABLE, not merely present.
         run_vcs(root, "checkout", "-q", "-b", "preview-should-not-touch")
@@ -2043,6 +2218,7 @@ class AgentEndReapTests(unittest.TestCase):
         cls.reap = agent_end_reap
         cls.repo = os.path.join(ROOT, "reap-primary")
         make_repo(cls.repo, {"f.txt": "base\n"})
+        give_remote(cls.repo)
         cls.wts = {}
         for name in ("reapA", "reapB", "reapLive"):
             path = os.path.join(cls.repo, ".claude", "worktrees", "agent-" + name)
