@@ -32,6 +32,46 @@ merge --unlock          remove this repo's merge lock. Reads no other state.
 The command is `merge/merge.py`, Python stdlib plus `gh`, `git` and `node`. It calls
 `actions/stamp/stamp.mjs` for every record read and write. It has no parser of its own.
 
+### How the command finds claude-settings
+
+No install step copies the tool. It runs from the claude-settings checkout that the device
+already uses as its parent mandate. `actions/stamp` sits beside it in that checkout.
+
+The only file outside the checkout is a shim, `~/.claude/bin/merge`, of about ten lines. The
+shim finds the checkout and starts `merge/merge.py` there. It holds no merge logic, so it
+never needs an update. A repo's own wrapper can hold the same lookup instead of the shim.
+
+The lookup, in this order:
+
+1. `CLAUDE_SETTINGS_DIR`, when it is set.
+2. The `@` include line in `~/.claude/CLAUDE.md`. The checkout is the folder of the included
+   `CLAUDE.md`.
+3. Neither found: a cloud session, or a device with no checkout. The shim clones
+   `shivinate7/claude-settings` into a temporary folder. The repo is public, so no
+   credential is needed.
+
+Each result must be a git checkout whose `origin` is `shivinate7/claude-settings`. Any other
+result stops the command before it reads a pull request.
+
+### The fresh-code guard
+
+The command runs claude-settings' current `main` when it can. It updates itself and never
+refuses to merge for an old copy.
+
+1. Fetch `origin main` in the checkout.
+2. Run `merge.py` and `stamp.mjs` from a detached temporary worktree at the fetched
+   `origin/main` SHA. The checkout's own tree is never written. So local edits and a dirty
+   tree are safe.
+3. When the checkout is on `main`, clean, and behind, fast-forward it. In any other state,
+   leave it, and print one line that says why.
+4. **Warn loudly, then go on.** When the command cannot prove fresh code (no network, a fetch
+   failure, a SHA mismatch, or a dirty checkout), it runs the code it has. Before step 1 of the
+   flow, it prints a warning block. The block names the SHA it runs, how many commits that SHA
+   is behind `origin/main` when that is known, and why the update failed.
+
+Each run prints the claude-settings SHA it ran. `merge --dev` runs the checkout's own tree
+instead, for work on the tool itself. Only that flag does it.
+
 The action keeps mode `check`. Every pull request runs it. Every push to the default branch
 runs it too, and there it refuses any pending record (see "q_max and the stamp action").
 
@@ -71,7 +111,8 @@ passes its arguments through and adds nothing.
 
 ## The flow
 
-1. Take the merge lock for this repo (see "Failure modes").
+1. Take the merge lock: create the ref `refs/merge-lock/<defaultBranch>` on origin through the
+   GitHub API. The API refuses a ref that exists, so only one session holds it.
 2. Fetch origin. Read the pull request head SHA, base and mergeable state through `gh`.
    Refuse a CONFLICTING or DIRTY pull request before any claim.
 3. Make a detached temporary worktree at the head SHA. The caller's checkout is never
@@ -147,35 +188,40 @@ its own session, per `record-stamp-stays-generic`, the stamp stays generic:
 3. Switch `stamp.yml` to mode `check` on a push to main, with `contents: read`. The write
    permission and the protection bypass it needed go away.
 
-After the move, no repo uses mode `stamp`. Question 3 asks whether to delete it.
+After the move, no repo uses mode `stamp`, and lane 9 deletes it. A pending record on main
+then goes red in `check`. The fix is any pull request through the command, which claims it.
 
 ## Build lanes
 
-Each lane is one Sonnet builder. Each lane waits for the lane above it, except lanes 4 and 5.
+Each lane is one Sonnet builder. When every lane in its "Waits for" cell has merged, a lane starts.
 
-| # | Lane | Done when |
-|---|---|---|
-| 1 | `stamp.mjs`: `--claim --base`, the base-tip ceiling, the `Record-claim` exception in `check`, the default-branch refusal of any pending record, `regenerate` in the config. | New `test_stamp.mjs` cases pass, and each new refusal goes red on a mutant. |
-| 2 | `stamp.mjs`: the debt kind and `cite.glossFirstUse`. | `test_stamp.mjs` passes. A claim on a copy of Banchi main matches `claim-ids.py --write` byte for byte, debts and gloss included. |
-| 3 | `merge/merge.py`, git half: lock, temporary worktree, claim, push, revert, resume, `--unlock`, local main, `afterMerge`. Land `merge/` in `landed-dirs.txt` and the guard's frozen list. | `merge/test_merge.py` against a local bare origin covers the race, a moved head, a refused push and a stopped run. Wired into `gates.yml`. |
-| 4 | `merge/merge.py`, GitHub half: required checks, the wait, the minute read, `gh pr merge --match-head-commit`, branch delete. | The same test, with a `gh` shim on `PATH`, covers red, DIRTY, a force-push and a protection refusal. |
-| 5 | Docs: the stamp README contract and adoption checklist, the claude-settings README, `rule_mechanisms.json` for `git-slug-then-claim-number`. | `rule_audit.py`, `check_landed_dirs.py` and STE lint pass. |
-| 6 | Banchi, in Banchi: the config, mode `check` in `check.yml`, `make merge` on the tool. | One real merge through the tool. `make check` is green. |
-| 7 | Banchi, in Banchi: delete the ported code, the gloss stopgap and DEBT78. Rewrite D140. | `make check` is green. A search for `entry_gloss` and `gloss_first_uses` finds nothing. |
-| 8 | q_max, in q_max: the three steps above. | One real merge through the tool. `stamp.yml` holds no write permission. |
+| # | Lane | Waits for | Done when |
+|---|---|---|---|
+| 1 | `stamp.mjs`: `--claim --base`, the base-tip ceiling, the `Record-claim` exception in `check`, the default-branch refusal of any pending record, `regenerate` in the config. | none | New `test_stamp.mjs` cases pass, and each new refusal goes red on a mutant. |
+| 2 | `stamp.mjs`: the debt kind and `cite.glossFirstUse`. | 1 | `test_stamp.mjs` passes. A claim on a copy of Banchi main matches `claim-ids.py --write` byte for byte, debts and gloss included. |
+| 3 | The shim, the lookup, the fresh-code guard and `--dev`. | none | `merge/test_launch.py` covers each lookup source, a dirty checkout left untouched, and an offline fetch that warns and runs the code it has. Each guard goes red on a mutant. Wired into `gates.yml`. |
+| 3b | `merge/merge.py`, git half: the lock ref, temporary worktree, claim, push, revert, resume, `--unlock`, local main, `afterMerge`. | 1 | `merge/test_merge.py` against a local bare origin covers the race, a moved head, a refused push and a stopped run. Wired into `gates.yml`. |
+| 4 | `merge/merge.py`, GitHub half: required checks, the wait, the minute read, `gh pr merge --match-head-commit`, branch delete. | 3b | The same test, with a `gh` shim on `PATH`, covers red, DIRTY, a force-push and a protection refusal. |
+| 5 | Docs: the stamp README contract and adoption checklist, the claude-settings README, `rule_mechanisms.json` for `git-slug-then-claim-number`. | 1, 2, 3, 4 | `rule_audit.py`, `check_landed_dirs.py` and STE lint pass. |
+| 6 | Banchi, in Banchi: the config, mode `check` in `check.yml`, `make merge` on the tool. | 2, 4 | One real merge through the tool. `make check` is green. |
+| 7 | Banchi, in Banchi: delete the ported code, the gloss stopgap and DEBT78. Rewrite D140. | 6 | `make check` is green. A search for `entry_gloss` and `gloss_first_uses` finds nothing. |
+| 8 | q_max, in q_max: the three steps above. | 3, 4 | One real merge through the tool. `stamp.yml` holds no write permission. |
+| 9 | Delete mode `stamp` from `actions/stamp`, its tests and its README. | 8 | No workflow in any repo names mode `stamp`. `test_stamp.mjs` passes, and a pending record on the default branch goes red in `check`. |
 
-## Open questions for the owner
+## Settled by the owner
 
-1. **How the installed command reaches `stamp.mjs`.** `landed-dirs.txt` lands no `actions/`.
-   A: land `actions/` too. B: the command fetches `stamp.mjs` at a pinned SHA into a cache.
-   C: move the engine into `merge/` and point the action at it.
-   **Recommend A.** One copy, and the installer already lands folders.
-2. **Where the merge lock lives.** A: a file lock on this machine. B: a ref on origin,
-   `refs/merge-lock/<branch>`, made by the GitHub API, which refuses a ref that exists.
-   **Recommend B.** Cloud sessions merge too, and a file lock cannot see them.
-3. **Mode `stamp` after q_max moves.** A: delete it. A pending record on main then goes red in
-   `check`, and the fix is any pull request through the command, which claims it. B: keep it
-   as an opt-in fallback. **Recommend A.** One path, and no workflow that writes to main.
-4. **An installed command behind claude-settings main.** Banchi refuses a stale copy of its
-   own merge script. A: the command refuses when its install is behind origin. B: it warns.
-   C: nothing. **Recommend A.** The command moves main, so a stale copy is the costly case.
+1. **No install.** The command runs from the claude-settings checkout that every device's
+   `~/.claude/CLAUDE.md` includes. `actions/stamp` sits beside it, so `landed-dirs.txt` needs
+   no `actions/`.
+2. **The merge lock is a ref on origin,** `refs/merge-lock/<branch>`, made by the GitHub API.
+   Cloud sessions merge too, and a file lock cannot see them.
+3. **Delete mode `stamp` once q_max moves** (lane 9). One path, and no workflow writes to main.
+4. **The command updates itself before every merge.** It never refuses to merge for an old
+   copy. When it cannot prove fresh code, it warns loudly and goes on (see "The fresh-code
+   guard").
+
+## Open question for the owner
+
+1. **Should `--dev` exist?** It runs the checkout's own tree, for work on the tool itself.
+   A: yes, behind the explicit flag only. B: no, and the tool is tested through its own suites.
+   **Recommend A.** Without it, each edit to the tool needs a merge to main before a real run.
