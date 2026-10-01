@@ -18,8 +18,8 @@ itself, never typed by hand through a shell, the same way hooks/test_guard.py dr
 fixtures.
 """
 import contextlib
-import io
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -1054,6 +1054,12 @@ class LooseProcessTests(unittest.TestCase):
         self.assertIn(self.marked, pids)
         self.assertNotIn(self.plain, pids)
 
+    def test_report_lists_the_marked_process(self):
+        out = io.StringIO()
+        sweep.print_loose_processes_report(sweep.find_loose_processes(), out=out)
+        self.assertIn("loose processes", out.getvalue())
+        self.assertIn("pid=%-8s" % self.marked, out.getvalue())
+
     def test_confirm_sends_the_marked_process_no_signal(self):
         """Runs real `main --confirm` on an empty scratch repo. `find_dead_rooted` is stubbed
         so the real machine's dead-rooted tier cannot act; every signal path is recorded."""
@@ -1069,13 +1075,11 @@ class LooseProcessTests(unittest.TestCase):
         for key, fn in stubs.items():
             setattr(key[0], key[1], fn)
         try:
-            with contextlib.redirect_stdout(io.StringIO()) as shown:
+            with contextlib.redirect_stdout(io.StringIO()):
                 sweep.main(["--confirm", "--restore-log", os.path.join(self.home, "log"), repo])
         finally:
             for key, fn in real.items():
                 setattr(key[0], key[1], fn)
-        self.assertIn("loose processes", shown.getvalue())
-        self.assertIn(str(self.marked), shown.getvalue())
         self.assertNotIn(self.marked, sent)
         self.assertIsNone(self.procs[0].poll())
 

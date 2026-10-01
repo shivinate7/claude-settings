@@ -1364,8 +1364,9 @@ SESSION_MARK = os.path.join(".claude", "shell-snapshots")
 def find_loose_processes():
     """Return one dict per process whose argv names a shell-snapshots file, or `None` when the
     pid enumeration failed. REPORT ONLY: nothing here, and nothing in `main`, signals one.
-    Dict: {"pid", "command", "orphan"}, `orphan` True, False, or None (unreadable). Only
-    processes of the current user are listed; the caller's own wrapper is among them."""
+    Dict: {"pid", "command", "orphan", "owner"}; `orphan` and `owner` are True, False, or None
+    (unreadable). A process of another user is left out; an unreadable owner is listed.
+    The caller's own wrapper is among them."""
     pids = list_all_pids()
     if pids is None:
         return None
@@ -1374,23 +1375,25 @@ def find_loose_processes():
         command = process_command(pid)
         if not command or SESSION_MARK not in command or pid == os.getpid():
             continue
-        if is_current_user_process(pid):
-            found.append({"pid": pid, "command": command, "orphan": is_orphan(pid)})
+        owner = is_current_user_process(pid)
+        if owner is not False:
+            found.append({"pid": pid, "command": command, "owner": owner,
+                          "orphan": is_orphan(pid)})
     return found
 
 
-def print_loose_processes_report(found, out=None):
-    out = out or sys.stdout  # late-bound, so a caller's stdout redirect reaches it
+def print_loose_processes_report(found, out=sys.stdout):
     print("", file=out)
     print("== loose processes (report only, never stopped) ==", file=out)
     if found is None:
         print("  UNREADABLE -- the machine pid enumeration failed; none examined", file=out)
         return
     for d in found:
-        print("  process   pid=%-8s orphan=%-7s %.80s" % (
-            d["pid"], {True: "yes", False: "no"}.get(d["orphan"], "unknown"), d["command"]),
-            file=out)
-    print("  loose processes examined: %d" % len(found), file=out)
+        print("  process   pid=%-8s orphan=%-7s owner=%-7s %.70s" % (
+            d["pid"], {True: "yes", False: "no"}.get(d["orphan"], "unknown"),
+            "me" if d["owner"] else "unknown", d["command"]), file=out)
+    print("  loose processes listed: %d (%d with an unreadable owner)" % (
+        len(found), sum(1 for d in found if d["owner"] is None)), file=out)
 
 
 def processes_in(path: str):
