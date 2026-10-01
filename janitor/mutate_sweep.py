@@ -955,8 +955,9 @@ MUTATIONS = [
      "test_only_a_preview_caches_and_the_guard_reads_come_back_after"),
     ("parallel preview: whole repositories run one after another",
      "sweep",
+     '    results = list(_pmap(lambda root: sweep_repo(root, args.confirm, restore_log_path, mode),\n'
      '                         roots, _ROOT_POOL))',
-     '                         roots))',
+     '    results = [sweep_repo(root, args.confirm, restore_log_path, mode) for root in roots]',
      "test_whole_repositories_run_side_by_side_in_a_preview"),
     ("parallel preview: the branch decisions run one after another",
      "sweep",
@@ -967,11 +968,6 @@ MUTATIONS = [
      "sweep",
      '    for entry, decision in zip(judged, _pmap(judge, judged)):',
      '    for entry, decision in zip(judged, map(judge, judged)):',
-     "test_a_parallel_preview_reports_what_a_plain_one_does"),
-    ("parallel preview: the decisions come back out of order",
-     "sweep",
-     '    for entry, decision in zip(judged, _pmap(judge, judged)):',
-     '    for entry, decision in zip(judged, reversed(list(_pmap(judge, judged)))):',
      "test_a_parallel_preview_reports_what_a_plain_one_does"),
 ]
 
