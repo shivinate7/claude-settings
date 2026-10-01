@@ -24,15 +24,14 @@ in one line before it starts.
 ## What the rule protects
 
 Edits that no second reader sees. The reviewer now runs on rule, gate, and logic
-diffs, where a wrong edit changes what the software does. A wrong word in a doc
-changes nothing that a check would miss and a reviewer would catch.
+diffs, where a wrong edit changes what the software does.
 
 It also protects the context the session already holds. A builder reloads the
 repo for work the session can do at once.
 
 ## Evidence
 
-A session was asked for six one-word text swaps. The old rule made it an
+Unmeasured anecdote: a session was asked for six one-word text swaps. The old rule made it an
 orchestrator, so it sent each swap to a builder. Each builder reloaded the repo,
 while the session already held it. The six edits moved no verdict. The lanes cost
 more than the edits, and no reviewer was needed.
