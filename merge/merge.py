@@ -26,6 +26,8 @@ def sh(args, cwd=None, input=None):
 def git(cwd, *a, input=None):
     return sh(["git", "-C", cwd, *a], input=input)
 
+SETTLE_SECONDS = 30
+
 def say(*lines):
     print(*lines, flush=True)
 
@@ -159,6 +161,9 @@ class Host:
                 raise Stop(f"cannot read the required checks of {self.base} (no branch protection?). "
                            f"Set merge.requiredChecks to a list of check names.\n{out}")
             names = json.loads(out)
+        clash = [k for k in names if k in self.ignore]
+        if clash:
+            raise Stop("merge.ignoreChecks names a required check: " + ", ".join(clash) + ". A required check is never ignored.")
         if not names:
             raise Stop(f"no required checks are named for {self.base} (merge.requiredChecks or the branch protection is empty). "
                        "The tool never merges with nothing to wait for. Name the checks.")
@@ -186,6 +191,7 @@ class Host:
         most a minute, then the loop reads again."""
         names = self.required_names()
         end = self.now() + deadline_minutes * 60
+        settled = False
         while True:
             info = self.pr(n)
             if info["head"] == prior and prior != sha:
@@ -199,15 +205,36 @@ class Host:
                 return False, "the pull request went DIRTY during the wait. Merge the base into the branch and run again."
             got = self.checks(n)
             red, pending, ignored = self.classify(got, names, self.ignore)
+            r_red, r_pending = self.run_state(sha)
+            red, pending = red + r_red, pending + r_pending
             if red:
                 return False, "a check is red: " + "; ".join(red)
+            if not pending and not settled:
+                # ponytail: a workflow GitHub has not created yet still reads as green. The runs read and this settle read close most of the window. Ceiling: a workflow that appears after SETTLE_SECONDS.
+                self.pause(SETTLE_SECONDS)
+                settled = True
+                continue
             if not pending:
                 if ignored:
                     say("merge: ignored by merge.ignoreChecks: " + "; ".join(ignored))
                 return True, ""
             if self.now() >= end:
                 return False, f"the deadline of {deadline_minutes} minutes passed. Still pending: " + ", ".join(pending)
+            settled = False
             self.block(pending, got)
+
+    def run_state(self, sha):
+        """-> (red, pending) from the workflow runs of `sha`. A run that is not completed holds the wait even
+        when its jobs are not listed as checks yet. Only success, skipped and neutral pass."""
+        c, out = sh(["gh", "run", "list", "--commit", sha, "--limit", "100", "--json", "status,conclusion,name"])
+        try:
+            runs = json.loads(out)
+        except ValueError:
+            raise Stop("gh run list failed: " + out)
+        runs = [r for r in runs if r["name"] not in self.ignore]
+        red = [f"workflow {r['name']}: {r['conclusion']}" for r in runs if r["status"] == "completed" and r["conclusion"] not in ("success", "skipped", "neutral")]
+        pending = [f"workflow {r['name']}" for r in runs if r["status"] != "completed"]
+        return red, pending
 
     @staticmethod
     def classify(got, names, ignore=None):
@@ -216,9 +243,9 @@ class Host:
         Pending: a pending entry, or a required name with no entry. `ignore` maps a name to its reason:
         those checks are left out of red and pending, and named in `ignored`."""
         ignore = ignore or {}
-        live = {k: rows for k, rows in got.items() if k not in ignore}
+        live = {k: rows for k, rows in got.items() if k not in ignore or k in names}
         red = [f"{k}: {b} {l}".strip() for k, rows in live.items() for b, l in rows if b not in ("pass", "skipping", "pending")]
-        pending = sorted({k for k, rows in live.items() if any(b == "pending" for b, _ in rows)} | {k for k in names if k not in ignore and not got.get(k)})
+        pending = sorted({k for k, rows in live.items() if any(b == "pending" for b, _ in rows)} | {k for k in names if not got.get(k)})
         ignored = [f"{k} ({ignore[k]}): " + "/".join(sorted({b for b, _ in rows})) for k, rows in got.items() if k in ignore]
         return red, pending, ignored
 

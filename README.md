@@ -129,7 +129,10 @@ merge --dev ...         run the checkout's own tree, not origin main
   be present, so a check that never started cannot pass by its absence. Both waits (the head
   before the claim, and the claim SHA) work this way. `merge.ignoreChecks` is an optional list of
   `{"name": "...", "reason": "..."}` in the `merge` block. A check named there is left out of the
-  wait, and the output names it. An entry with no name or an empty reason refuses the config.
+  wait, and the output names it. An entry with no name or an empty reason refuses the config, and so does a name that is also a required check.
+  Before the wait ends green it also reads the workflow runs of the head SHA: each must be completed with success, skipped or neutral,
+  so a run whose jobs are not listed yet holds the wait. Then it waits 30 seconds and reads again, and the result must be green again.
+  One window stays: a workflow that GitHub has not created yet.
 * **A stop in the wait.** The wait stops on any failed or cancelled check, required or not,
   and on a DIRTY branch or a moved head. It reverts the claim, but only while the origin head
   is still the claim commit. A head that still reads as the pre-claim SHA is GitHub lagging

@@ -131,7 +131,9 @@ passes its arguments through and adds nothing.
 6. Wait for every check on the SHA (the claim SHA after a claim) to finish with none failed.
    Required or not, a pending check is waited on. Skipped and neutral pass. Failed, cancelled,
    timed out, action required, startup failure and any unknown status stop the wait. The
-   required list stays non-empty and all present. `merge.ignoreChecks` names are left out and
+   required list stays non-empty and all present, and never overlaps `merge.ignoreChecks`. The wait also reads the workflow runs of the SHA
+   (`gh run list --commit`): a run that is not completed holds it, and any conclusion but success, skipped or neutral is red. When all is
+   green it waits 30 seconds and reads again, and ends only on green twice. Open window: a workflow GitHub has not created yet. `merge.ignoreChecks` names are left out and
    printed. Each pass reads the pull request first.
    A head that still reads as the pre-claim SHA is GitHub lagging the push. The wait goes
    on for it until the deadline. Any other head, DIRTY or CONFLICTING ends the wait. Any failed or

@@ -621,6 +621,9 @@ elif a[:2] == ["pr", "checks"]:
     seq = S["checks_seq"]; cur = seq.pop(0) if len(seq) > 1 else seq[0]; S["checks_calls"] += 1; save()
     print(json.dumps([{"name": n, "bucket": b, "link": l} for n, b, l in cur]))
     sys.exit(0 if all(b in ("pass", "skipping") for _, b, _ in cur) else 8)
+elif a[:2] == ["run", "list"]:
+    seq = S.get("runs_seq") or [[]]; cur = seq.pop(0) if len(seq) > 1 else seq[0]; save()
+    print(json.dumps([{"name": n, "status": st, "conclusion": c} for n, st, c in cur]))
 elif a[:2] == ["run", "watch"]:
     pass
 elif a[:2] == ["pr", "merge"]:
@@ -894,9 +897,46 @@ class GhHalf(Env):
         rc, out = self.run_merge("7", host=self.gh_host())
         self.assertIn("head checks: pending: design", out)
 
+    def test_a_required_check_is_never_ignored(self):
+        before = self.head()
+        rc, out = self.go(ignore={"gates": "flaky"})
+        self.assertEqual(rc, 1)
+        self.assertIn("A required check is never ignored", out)
+        self.assertEqual(self.head(), before)
+        self.assertNotIn("pr merge", self.calls())
+
+    def test_classify_keeps_an_absent_required_name_pending_even_when_ignored(self):
+        red, pending, _ = merge.Host.classify({"a": [("pass", "")]}, ["a", "b"], {"b": "x"})
+        self.assertEqual(pending, ["b"])
+
+    def test_a_workflow_run_in_progress_holds_the_wait_though_no_job_is_listed(self):
+        self.set(runs_seq=[[("ci", "in_progress", "")], [("ci", "completed", "success")]])
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertGreaterEqual(self.paused.count(60), 1)
+
+    def test_a_failed_workflow_run_stops_the_run_and_an_ignored_one_does_not(self):
+        before = self.head()
+        self.set(runs_seq=[[("ci", "completed", "failure")]])
+        rc, out = self.go()
+        self.assertEqual(rc, 1)
+        self.assertIn("workflow ci: failure", out)
+        self.assertEqual(self.head(), before)
+        rc, out = self.go(ignore={"ci": "known"})
+        self.assertEqual(rc, 0, out)
+
+    def test_a_check_that_appears_on_the_settle_reread_holds_the_wait(self):
+        before = self.head()
+        self.set(checks_seq=[[("gates", "pass", "")], [("gates", "pass", ""), ("late", "fail", "")]])
+        rc, out = self.go()
+        self.assertEqual(rc, 1)
+        self.assertIn("late: fail", out)
+        self.assertIn(merge.SETTLE_SECONDS, self.paused)
+        self.assertEqual(self.head(), before)  # stopped at the head wait: nothing claimed
+
     def test_a_failed_read_in_the_wait_reverts_the_claim(self):
         before = self.head()
-        self.set(checks_broken=True, broken_from=1)  # the head reads fine, the wait after the claim push does not
+        self.set(checks_broken=True, broken_from=2)  # the head and its settle read fine, the wait after the claim push does not
         self.set(checks_seq=[[("gates", "pass", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 1)
