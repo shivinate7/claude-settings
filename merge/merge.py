@@ -376,13 +376,14 @@ def open_worktree(root, info, base):
         raise Stop(f"{info['branch']} moved: gh says {info['head'][:9]}, origin holds {got[:9]}. Run again. Nothing was claimed.")
     tmp = os.path.realpath(tempfile.mkdtemp(prefix="merge-wt-"))  # /var is a symlink on macOS
     wt = os.path.join(tmp, "tree")
-    c, out = git(root, "worktree", "add", "-q", "--detach", wt, info["head"])
+    c, out = git(root, "worktree", "add", "-q", "--detach", "--lock", "--reason", f"merge tool, pid {os.getpid()}", wt, info["head"])  # a locked tree survives the janitor sweep
     if c:
         shutil.rmtree(tmp, ignore_errors=True)
         raise Stop("cannot make the worktree: " + out)
     return tmp, wt
 
 def drop_worktree(root, tmp, wt):
+    git(root, "worktree", "unlock", wt)
     git(root, "worktree", "remove", "--force", wt)
     git(root, "worktree", "prune")
     shutil.rmtree(tmp, ignore_errors=True)
@@ -435,24 +436,39 @@ def confirm(root, cfg, cfgrel, n, host, lock):
 
         def fail(why):
             if claim_sha:
+                if not os.path.isfile(os.path.join(wt, cfgrel)):  # the tree is gone (swept or cleaned): the revert needs one
+                    shutil.rmtree(tmp, ignore_errors=True)
+                    git(root, "worktree", "unlock", wt)
+                    git(root, "worktree", "prune")
+                    os.makedirs(tmp)
+                    c, out = git(root, "worktree", "add", "-q", "--detach", "--lock", "--reason", f"merge tool, pid {os.getpid()}", wt, claim_sha)
+                    if c:
+                        raise Stop(f"{why}\nmerge: the worktree is gone and cannot be rebuilt ({out}). The claim {claim_sha[:9]} stays on {branch}. Run again to resume, or revert it by hand.")
                 revert_claim(root, wt, branch, claim_sha)
             raise Stop(why)
 
-        try:
-            ok, why = host.wait_checks(n, sha, m["deadlineMinutes"], info["head"] if claim_sha else None)
-        except Stop as e:  # a read that fails in the wait still reverts the claim
-            ok, why = False, str(e)
-        if not ok:
-            fail(why)
-        c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
-        if c:  # never check against a stale base tip
-            fail(f"cannot fetch origin {base}, so the claim cannot be proved fresh:\n" + out)
-        c, out = node_stamp(wt, cfgrel, "check", base_ref)  # each claimed number must still be free on the base tip
-        if c or "UNKNOWN:" in out:
-            fail("the base moved and the claim is stale, or the check could not read the base:\n" + out)
-        commit, msg = host.merge(n, m["method"], sha)
-        if not commit:
-            fail("the merge was refused:\n" + msg)
+        try:  # after the push only a Stop may leave: any other error reverts the claim first
+            try:
+                ok, why = host.wait_checks(n, sha, m["deadlineMinutes"], info["head"] if claim_sha else None)
+            except Stop as e:  # a read that fails in the wait still reverts the claim
+                ok, why = False, str(e)
+            if not ok:
+                fail(why)
+            c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
+            if c:  # never check against a stale base tip
+                fail(f"cannot fetch origin {base}, so the claim cannot be proved fresh:\n" + out)
+            if not os.path.isfile(os.path.join(wt, cfgrel)):  # stamp would crash on it with a raw traceback
+                fail(f"the worktree lost {cfgrel}, so the claim cannot be proved fresh.")
+            c, out = node_stamp(wt, cfgrel, "check", base_ref)  # each claimed number must still be free on the base tip
+            if c or "UNKNOWN:" in out:
+                fail("the base moved and the claim is stale, or the check could not read the base:\n" + out)
+            commit, msg = host.merge(n, m["method"], sha)
+            if not commit:
+                fail("the merge was refused:\n" + msg)
+        except Stop:
+            raise
+        except Exception as e:
+            fail(f"unexpected {type(e).__name__} after the claim was pushed: {e}")
         say(f"merge: #{n} merged as {commit[:9]}.")
         ok = True
         try:

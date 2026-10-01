@@ -377,6 +377,48 @@ class CutBranch(Env):
         self.assertIn("local-only commits", out)
         self.assertTrue(self.exists())
 
+class AfterPush(Env):
+    """A crash between the claim push and the merge must stop cleanly: claim reverted, lock released."""
+    def merge_tree(self):
+        out = sh(self.co, "git", "worktree", "list", "--porcelain")
+        return [l.split(" ", 1)[1] for l in out.splitlines() if l.startswith("worktree ") and "merge-wt-" in l][0]
+
+    def assert_clean_stop(self, rc, out):
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(self.show("feat", "docs/decisions/second.md"), record("pending", "second").strip())
+        self.assertIn("reverted", out)
+        self.assertFalse(self.lock_ref())
+        self.assertEqual(self.worktrees(), 1)
+
+    def test_the_tree_is_gone_at_the_base_check(self):
+        self.host.on_wait = lambda: shutil.rmtree(os.path.dirname(self.merge_tree()))
+        self.assert_clean_stop(*self.run_merge("7", "--confirm"))
+
+    def test_the_config_is_gone_at_the_base_check(self):
+        self.host.on_wait = lambda: os.remove(os.path.join(self.merge_tree(), ".github/stamp.json"))
+        self.assert_clean_stop(*self.run_merge("7", "--confirm"))
+
+    def test_any_error_after_the_push_reverts_the_claim(self):
+        def boom():
+            raise RuntimeError("boom")
+        self.host.on_wait = boom
+        self.assert_clean_stop(*self.run_merge("7", "--confirm"))
+
+    def test_an_error_in_the_merge_call_reverts_the_claim(self):
+        def boom(*a):
+            raise RuntimeError("boom")
+        self.host.merge = boom
+        self.assert_clean_stop(*self.run_merge("7", "--confirm"))
+
+    def test_the_tree_is_locked_while_the_run_waits(self):
+        seen = []
+        self.host.on_wait = lambda: seen.append(sh(self.co, "git", "worktree", "list", "--porcelain"))
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("locked", seen[0])
+        self.assertEqual(self.worktrees(), 1)
+
 class Stopped(Env):
     def test_stopped_run_resumes_then_an_expired_lock_is_broken(self):
         child = subprocess.run([sys.executable, __file__, "--child", self.co], capture_output=True, text=True)
