@@ -149,41 +149,58 @@ class Host:
                 "mergeable": d["mergeable"], "merge_state": d["mergeStateStatus"]}
 
     def required_names(self):
+        """The required check names. Never empty: an empty list would pass the wait without a read."""
         if isinstance(self.required, list):
-            return self.required
-        c, out = sh(["gh", "api", f"repos/{{owner}}/{{repo}}/branches/{self.base}/protection/required_status_checks", "--jq", ".contexts"])
-        if c:
-            raise Stop(f"cannot read the required checks of {self.base} (no branch protection?). "
-                       f"Set merge.requiredChecks to a list of check names.\n{out}")
-        return json.loads(out)
+            names = self.required
+        else:
+            c, out = sh(["gh", "api", f"repos/{{owner}}/{{repo}}/branches/{self.base}/protection/required_status_checks", "--jq", ".contexts"])
+            if c:
+                raise Stop(f"cannot read the required checks of {self.base} (no branch protection?). "
+                           f"Set merge.requiredChecks to a list of check names.\n{out}")
+            names = json.loads(out)
+        if not names:
+            raise Stop(f"no required checks are named for {self.base} (merge.requiredChecks or the branch protection is empty). "
+                       "The tool never merges with nothing to wait for. Name the checks.")
+        return names
 
     def checks(self, n):
-        """-> {check name: (bucket, link)} from `gh pr checks`. It exits non-zero on red or pending, so read the JSON, not the code."""
+        """-> {check name: [(bucket, link), ...]} from `gh pr checks`, every entry kept. It exits non-zero on red or pending, so read the JSON, not the code."""
         c, out = sh(["gh", "pr", "checks", str(n), "--json", "name,bucket,link"])
         try:
-            return {d["name"]: (d["bucket"], d.get("link") or "") for d in json.loads(out)}
+            rows = json.loads(out)
         except ValueError:
             if "no checks reported" in out:
                 return {}
             raise Stop("gh pr checks failed: " + out)
+        got = {}
+        for d in rows:
+            got.setdefault(d["name"], []).append((d["bucket"], d.get("link") or ""))
+        return got
 
-    def wait_checks(self, n, sha, deadline_minutes):
-        """Wait for the required checks on `sha`. -> (ok, why). Each pass reads the pull request first:
-        a moved head, DIRTY or CONFLICTING ends the wait. No sleep: a pending check blocks in
-        `gh run watch <id> --exit-status` for at most a minute, then the loop reads again."""
+    def wait_checks(self, n, sha, deadline_minutes, prior=None):
+        """Wait for the required checks on `sha`. -> (ok, why). `prior` is the head before this run's push.
+        Each pass reads the pull request first: a third head, DIRTY or CONFLICTING ends the wait. A head
+        that still reads as `prior` is GitHub lagging the push: keep waiting. Any red check, required or
+        not, ends the wait. No sleep: a pending check blocks in `gh run watch <id> --exit-status` for at
+        most a minute, then the loop reads again."""
         names = self.required_names()
         end = self.now() + deadline_minutes * 60
         while True:
             info = self.pr(n)
+            if info["head"] == prior and prior != sha:
+                if self.now() >= end:
+                    return False, f"the deadline of {deadline_minutes} minutes passed. GitHub still shows the head before the push."
+                self.pause(self.minute)
+                continue
             if info["head"] != sha:
                 return False, f"the branch head moved to {info['head'][:9]} during the wait ({sha[:9]} was waited on). Run again."
             if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
                 return False, "the pull request went DIRTY during the wait. Merge the base into the branch and run again."
             got = self.checks(n)
-            red = [f"{k}: {got[k][0]} {got[k][1]}".strip() for k in names if k in got and got[k][0] in ("fail", "cancel")]
+            red = [f"{k}: {b} {l}".strip() for k, rows in got.items() for b, l in rows if b in ("fail", "cancel")]
             if red:
-                return False, "a required check is red: " + "; ".join(red)
-            pending = [k for k in names if k not in got or got[k][0] not in ("pass", "skipping")]
+                return False, "a check is red: " + "; ".join(red)
+            pending = [k for k in names if not got.get(k) or any(b not in ("pass", "skipping") for b, _ in got[k])]
             if not pending:
                 return True, ""
             if self.now() >= end:
@@ -192,7 +209,7 @@ class Host:
 
     def block(self, pending, got):
         """Wait up to a minute for something to change."""
-        ids = [m.group(1) for k in pending if k in got for m in [re.search(r"/actions/runs/(\d+)", got[k][1])] if m]
+        ids = [m.group(1) for k in pending for _, l in got.get(k, []) for m in [re.search(r"/actions/runs/(\d+)", l)] if m]
         if not ids:  # ponytail: a check outside Actions has no run to watch, so this is a plain pause. Fine while the loop exits at the deadline.
             self.pause(self.minute)
             return
@@ -202,7 +219,7 @@ class Host:
         except subprocess.TimeoutExpired:
             pass
         if self.now() - t0 < 1:  # watch returned at once: do not spin on the API
-            self.pause(min(1, self.minute))
+            self.pause(self.minute)
 
     def merge(self, n, method, sha):
         """`gh pr merge --match-head-commit sha`. Never --admin, never --delete-branch (cut_branch does that).
@@ -418,7 +435,7 @@ def confirm(root, cfg, cfgrel, n, host, lock):
                 revert_claim(root, wt, branch, claim_sha)
             raise Stop(why)
 
-        ok, why = host.wait_checks(n, sha, m["deadlineMinutes"])
+        ok, why = host.wait_checks(n, sha, m["deadlineMinutes"], info["head"] if claim_sha else None)
         if not ok:
             fail(why)
         c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")

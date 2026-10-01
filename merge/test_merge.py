@@ -51,7 +51,7 @@ class FakeHost:
         return {"head": self.head_override or head, "branch": self.branch, "base": "main", "state": "OPEN",
                 "mergeable": self.mergeable, "merge_state": "CLEAN"}
 
-    def wait_checks(self, n, sha, d):
+    def wait_checks(self, n, sha, d, prior=None):
         if self.on_wait:
             self.on_wait()
         return self.checks
@@ -481,6 +481,9 @@ log()
 if a[:2] == ["pr", "view"]:
     if "headRefOid" in a[-1]:
         head = git("ls-remote", "origin", "refs/heads/feat").split("\t")[0]
+        lag = S.get("lag")
+        if lag and lag["n"] > 0 and head != lag["prior"]:  # GitHub still shows the head before the push
+            lag["n"] -= 1; save(); head = lag["prior"]
         bad = S.get("dirty_after_checks") is not None and S["checks_calls"] >= S["dirty_after_checks"]
         print(json.dumps({"headRefOid": head, "headRefName": "feat", "baseRefName": "main", "state": "OPEN",
                           "mergeable": "CONFLICTING" if bad else "MERGEABLE", "mergeStateStatus": "DIRTY" if bad else "CLEAN"}))
@@ -519,7 +522,7 @@ class GhHalf(Env):
         old = {k: os.environ.get(k) for k in ("PATH", "FAKE_GH_DIR")}
         os.environ["PATH"] = bindir + os.pathsep + old["PATH"]; os.environ["FAKE_GH_DIR"] = self.state
         self.addCleanup(lambda: [os.environ.__setitem__(k, v) if v is not None else os.environ.pop(k, None) for k, v in old.items()])
-        self.ticks = 0
+        self.ticks, self.paused = 0, []
         self.set(checks_seq=[[("gates", "pass", "")]])
 
     def set(self, **kw):
@@ -535,6 +538,7 @@ class GhHalf(Env):
     def gh_host(self, required=("gates",), pause=None):
         def tick(s):
             self.ticks += 1
+            self.paused.append(s)
             assert self.ticks < 200, "the wait never ended"
             self.now += s
             if pause:
@@ -563,14 +567,56 @@ class GhHalf(Env):
         self.set(checks_seq=[[("gates", "fail", "https://x/y"), ("other", "pass", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 1)
-        self.assertIn("a required check is red: gates: fail", out)
+        self.assertIn("a check is red: gates: fail", out)
         self.assertNotIn("pr merge", self.calls())
         self.assertTrue(self.reverted())
         self.assertFalse(self.lock_ref())
 
-    def test_a_red_check_that_is_not_required_does_not_stop_the_merge(self):
+    def test_a_red_check_that_is_not_required_still_stops_the_merge(self):
         self.set(checks_seq=[[("gates", "pass", ""), ("lint", "fail", "")]])
-        self.assertEqual(self.go()[0], 0)
+        rc, out = self.go()
+        self.assertEqual(rc, 1)
+        self.assertIn("a check is red: lint: fail", out)
+        self.assertNotIn("pr merge", self.calls())
+        self.assertTrue(self.reverted())
+
+    def test_an_empty_required_list_is_refused(self):
+        for kw, extra in (({"required": []}, {}), ({"required": "protection"}, {"contexts": []})):
+            self.set(**extra)
+            rc, out = self.go(**kw)
+            self.assertEqual(rc, 1)
+            self.assertIn("no required checks are named", out)
+            self.assertNotIn("pr merge", self.calls())
+
+    def test_one_red_entry_under_a_name_makes_the_name_red(self):
+        self.set(checks_seq=[[("gates", "fail", ""), ("gates", "pass", "")]])  # a last-entry-wins map would pass
+        rc, out = self.go()
+        self.assertEqual(rc, 1)
+        self.assertIn("a check is red: gates: fail", out)
+        self.assertNotIn("pr merge", self.calls())
+
+    def test_a_name_is_green_only_when_every_entry_passed(self):
+        self.set(checks_seq=[[("gates", "pending", ""), ("gates", "pass", "")]])  # pending then pass: never green
+        rc, out = self.go()
+        self.assertEqual(rc, 1)
+        self.assertIn("Still pending: gates", out)
+
+    def test_a_lagging_head_is_waited_out_not_called_moved(self):
+        self.set(lag={"n": 2, "prior": self.head()})
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertGreaterEqual(len(self.paused), 2)
+
+    def test_a_head_that_never_leaves_the_prior_sha_stops_at_the_deadline(self):
+        self.set(lag={"n": 1000, "prior": self.head()})
+        rc, out = self.go()
+        self.assertEqual(rc, 1)
+        self.assertIn("still shows the head before the push", out)
+        self.assertNotIn("pr merge", self.calls())
+
+    def test_a_fast_run_watch_pauses_a_full_minute(self):
+        self.gh_host().block(["gates"], {"gates": [("pending", "https://x/actions/runs/5/job/1")]})
+        self.assertEqual(self.paused, [60])
 
     def test_dirty_in_the_wait_reverts_the_claim(self):
         self.set(checks_seq=[[("gates", "pending", "")], [("gates", "pass", "")]], dirty_after_checks=1)
@@ -639,7 +685,7 @@ if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--child":
         # A run that dies without cleanup: os._exit at the wait, so no `finally` runs.
         class Die(FakeHost):
-            def wait_checks(self, n, sha, d):
+            def wait_checks(self, n, sha, d, prior=None):
                 os._exit(9)
         os.chdir(sys.argv[2])
         sys.exit(merge.main(["7", "--confirm"], host=Die(sys.argv[2], None), lock=merge.GitLock(sys.argv[2])))
