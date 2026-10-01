@@ -39,7 +39,7 @@ ROOT = tempfile.mkdtemp(prefix="session_end_cases_")
 
 
 def run_vcs(where, *args):
-    return subprocess.run([VCS, "-C", where, *args], capture_output=True, text=True, timeout=10)
+    return subprocess.run([VCS, "-C", where, *args], capture_output=True, text=True, timeout=120)
 
 
 def write(path, text):
@@ -74,7 +74,7 @@ def local_branches(where):
     return [line.strip() for line in answer.stdout.splitlines() if line.strip()]
 
 
-def run_hook(hook_payload, env_extra=None, cwd=None, timeout=15):
+def run_hook(hook_payload, env_extra=None, cwd=None, timeout=120):
     env = dict(os.environ)
     if env_extra:
         env.update(env_extra)

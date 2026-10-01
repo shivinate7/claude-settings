@@ -17,7 +17,9 @@ Destructive git calls this suite drives (`git branch -D`, `git worktree remove`,
 itself, never typed by hand through a shell, the same way hooks/test_guard.py drives its own
 fixtures.
 """
+import contextlib
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -1017,6 +1019,85 @@ class DeadRootedServerTests(unittest.TestCase):
 
     def test_script_outside_any_project_is_ignored(self):
         self.assertIsNone(sweep._project_ancestor("/nonexistent-root-xyz/a/b.sh"))
+
+
+@unittest.skipIf(os.name == "nt", "the sh-loop fixture is POSIX only")
+class LooseProcessTests(unittest.TestCase):
+    """`sweep.find_loose_processes`. Real `sh` loops, one with a fake shell-snapshots path in
+    argv and one without. The report stops nothing, `--confirm` included."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.home = tempfile.mkdtemp(dir=ROOT)
+        snap = os.path.join(cls.home, ".claude", "shell-snapshots", "snapshot-zsh-1-fake.sh")
+        cls.procs = []
+        cls.marked = cls._start(snap)
+        cls.plain = cls._start(os.path.join(cls.home, "plain.sh"))
+
+    @classmethod
+    def _start(cls, arg):
+        pidfile = tempfile.mktemp(dir=ROOT, suffix=".pid")
+        proc = subprocess.Popen(["sh", "-c", _LOOP, "sh", arg, pidfile])
+        cls.procs.append(proc)
+        _read_when_ready(pidfile)
+        return proc.pid
+
+    @classmethod
+    def tearDownClass(cls):
+        for proc in cls.procs:
+            proc.kill()
+            proc.wait()
+        shutil.rmtree(cls.home, ignore_errors=True)
+
+    def test_marked_process_is_listed_and_unmarked_is_not(self):
+        pids = {d["pid"] for d in sweep.find_loose_processes()}
+        self.assertIn(self.marked, pids)
+        self.assertNotIn(self.plain, pids)
+
+    def test_report_lists_the_marked_process(self):
+        out = io.StringIO()
+        sweep.print_loose_processes_report(sweep.find_loose_processes(), out=out)
+        self.assertIn("loose processes", out.getvalue())
+        self.assertIn("pid=%-8s" % self.marked, out.getvalue())
+
+    def test_unreadable_owner_is_listed_as_unknown(self):
+        """An owner read that fails (`None`) lists the process; it is not left out. The stub
+        answers `None` for the marked pid only, the real read for every other pid."""
+        real = sweep.is_current_user_process
+        sweep.is_current_user_process = lambda pid: None if pid == self.marked else real(pid)
+        try:
+            found = sweep.find_loose_processes()
+        finally:
+            sweep.is_current_user_process = real
+        entry = [d for d in found if d["pid"] == self.marked]
+        self.assertEqual(len(entry), 1)
+        self.assertIsNone(entry[0]["owner"])
+        out = io.StringIO()
+        sweep.print_loose_processes_report(entry, out=out)
+        self.assertIn("owner=unknown", out.getvalue())
+
+    def test_confirm_sends_the_marked_process_no_signal(self):
+        """Runs real `main --confirm` on an empty scratch repo. `find_dead_rooted` is stubbed
+        so the real machine's dead-rooted tier cannot act; every signal path is recorded."""
+        sent = []
+        stubs = {
+            (os, "kill"): lambda pid, sig: sent.append(pid),
+            (sweep, "reap_listener"): lambda d: sent.append(d["pid"]),
+            (sweep, "find_dead_rooted"): lambda: [],
+        }
+        real = {key: getattr(*key) for key in stubs}
+        repo = os.path.join(self.home, "repo")
+        subprocess.run(["git", "init", repo], check=True, capture_output=True)
+        for key, fn in stubs.items():
+            setattr(key[0], key[1], fn)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                sweep.main(["--confirm", "--restore-log", os.path.join(self.home, "log"), repo])
+        finally:
+            for key, fn in real.items():
+                setattr(key[0], key[1], fn)
+        self.assertNotIn(self.marked, sent)
+        self.assertIsNone(self.procs[0].poll())
 
 
 class PrimaryCheckoutExclusionTests(unittest.TestCase):

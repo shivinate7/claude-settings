@@ -124,7 +124,7 @@ anything else because of it.
 
 A dead-rooted server is a process whose argv names a script file (`.py`, `.sh`,
 `.js`, `.mjs`, `.ts`) that no longer exists. The script's parent directory must
-be missing too, so a whole tree is gone. The nearest existing ancestor of that
+be missing too. The nearest existing ancestor of that
 path must carry `.git` or `.claude`. A script missing from a directory that
 still exists does not qualify. Such a process is a leftover of a deleted
 checkout or worktree. It is often a restart loop that holds no port.
@@ -138,6 +138,19 @@ The preview lists each one in a "dead-rooted servers" section, with a reason.
 An unreadable answer means keep. The signal, the grace period, and the report
 are the same as for a listener. This tier is machine-wide and not tied to a
 repository, so `janitor.roots` and `.claude/janitor.json` do not narrow it.
+
+## Loose processes
+
+A loose process is a process whose argv contains the shell-snapshots path
+(`.claude/shell-snapshots`). A Claude Code Bash call puts that path in the
+argv of its process, and the argv keeps it after the session ends. The match is
+a substring, so a command such as `ls` of that directory matches too. The
+preview lists each match in a "loose processes" section, with an orphan answer
+(yes, no, or unknown). A process whose owner cannot be read is counted as
+unknown. The list includes the wrappers of live sessions, yours too.
+
+This tier is report only. `--confirm` stops none of them. A person reads the
+list and decides.
 
 ## How you opt out
 

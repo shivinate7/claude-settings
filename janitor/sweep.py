@@ -1302,10 +1302,11 @@ def _project_ancestor(path: str):
 def find_dead_rooted():
     """Return one decision dict per process whose argv names a script file
     (`DEAD_ROOTED_EXTENSIONS`) that no longer exists, whose parent directory is also
-    missing (a whole tree was deleted), and whose nearest existing ancestor carries `.git` or `.claude` (a deleted checkout or worktree). `None` when the machine
-    pid enumeration failed. Decision: {"pid", "command", "missing", "home", "action":
-    "reap"|"keep", "reason"}. Reap only when `is_orphan` and `is_current_user_process` both
-    answer a confirmed yes; `None` from either is `unreadable-subject`, keep.
+    missing, and whose nearest existing ancestor carries `.git` or `.claude` (a deleted
+    checkout or worktree). `None` when the machine pid enumeration failed.
+    Decision: {"pid", "command", "missing", "home", "action": "reap"|"keep", "reason"}.
+    Reap only when `is_orphan` and `is_current_user_process` both answer a confirmed yes;
+    `None` from either is `unreadable-subject`, keep.
 
     The argv is the subject here, so `process_command` decides WHICH processes qualify. It never
     decides reap-or-keep: that stays with the two reads and a pid-only signal."""
@@ -1353,6 +1354,47 @@ def print_dead_rooted_report(decisions, out=sys.stdout):
             "REAP" if d["action"] == "reap" else "KEEP", d["pid"], d["missing"], d["reason"]),
             file=out)
     print("  dead-rooted servers examined: %d" % len(decisions), file=out)
+
+
+# A Claude Code Bash call starts every command as `zsh -c 'source ~/.claude/shell-snapshots/...
+# && <command>'`, so that path sits in the argv of the process and stays there after the
+# session is gone. Measured on this machine: 10 live processes carry it, read in 0.03 s.
+SESSION_MARK = os.path.join(".claude", "shell-snapshots")
+
+
+def find_loose_processes():
+    """Return one dict per process whose argv contains a shell-snapshots path, or `None` when the
+    pid enumeration failed. REPORT ONLY: nothing here, and nothing in `main`, signals one.
+    Dict: {"pid", "command", "orphan", "owner"}; `orphan` and `owner` are True, False, or None
+    (unreadable). A process of another user is left out; an unreadable owner is listed.
+    The caller's own wrapper is among them."""
+    pids = list_all_pids()
+    if pids is None:
+        return None
+    found = []
+    for pid in pids:
+        command = process_command(pid)
+        if not command or SESSION_MARK not in command or pid == os.getpid():
+            continue
+        owner = is_current_user_process(pid)
+        if owner is not False:
+            found.append({"pid": pid, "command": command, "owner": owner,
+                          "orphan": is_orphan(pid)})
+    return found
+
+
+def print_loose_processes_report(found, out=sys.stdout):
+    print("", file=out)
+    print("== loose processes (report only, never stopped) ==", file=out)
+    if found is None:
+        print("  UNREADABLE -- the machine pid enumeration failed; none examined", file=out)
+        return
+    for d in found:
+        print("  process   pid=%-8s orphan=%-7s owner=%-7s %.70s" % (
+            d["pid"], {True: "yes", False: "no"}.get(d["orphan"], "unknown"),
+            "me" if d["owner"] else "unknown", d["command"]), file=out)
+    print("  loose processes listed: %d (%d with an unreadable owner)" % (
+        len(found), sum(1 for d in found if d["owner"] is None)), file=out)
 
 
 def processes_in(path: str):
@@ -1808,6 +1850,7 @@ def main(argv=None) -> int:
     print_sweep_report(results, args.confirm)
     dead = find_dead_rooted()
     print_dead_rooted_report(dead)
+    print_loose_processes_report(find_loose_processes())
     if args.confirm:
         reaped = reaped_listener_decisions(results)
         for d in dead or []:

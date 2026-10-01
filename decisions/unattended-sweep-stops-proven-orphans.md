@@ -101,11 +101,20 @@ The one signal, the grace period, and the keep on an unreadable answer are the
 same. A report of a stopped process that was not a true orphan reopens this
 tier too.
 
+## Loose processes are never stopped
+
+`find_loose_processes` lists a process whose argv contains a shell-snapshots
+path. It stops none, under any flag. The argv containing that path does not
+prove a Claude Code Bash call started the process, and does not prove the
+process is abandoned. A live session owns its own wrapper. No read here
+proves an orphan that no live session claims. The tier reports, and a person
+decides.
+
 ## The mechanism
 
 `janitor/sweep.py`'s `decide_listener`, `find_dead_rooted`, `is_orphan`, and
 `is_current_user_process` hold the reads. `processes_in` holds the
 pre-check's own enumeration. `janitor/test_sweep.py`'s
 `ListenerDecisionTests`, `UnreadableListenerReadTests`,
-`WorktreeProcessPreCheckTests`, and `DeadRootedServerTests` prove them, against
+`WorktreeProcessPreCheckTests`, `DeadRootedServerTests`, and `LooseProcessTests` prove them, against
 real fixture processes.

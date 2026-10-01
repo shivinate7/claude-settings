@@ -461,6 +461,14 @@ MUTATIONS = [
      '            [sys.executable, SWEEP_PATH, root],',
      "test_sweeps_repo_a_leaves_repo_b_untouched"),
 
+    # only_on="posix": LooseProcessTests is skipped on Windows (its sh-loop fixture is POSIX only).
+    ("loose processes: an unreadable owner is left out instead of listed",
+     "sweep",
+     '        if owner is not False:\n            found.append(',
+     '        if owner is True:\n            found.append(',
+     "test_unreadable_owner_is_listed_as_unknown",
+     "posix"),
+
     # ---- orphaned TCP listeners (this build, 2026-09-24) ----
     #
     # ---- the agent-end reaper and the deepest-checkout match it depends on ----
@@ -530,6 +538,13 @@ MUTATIONS = [
      '    if os.path.isdir(probe):\n        return None\n    levels = 0',
      '    levels = 0',
      "test_missing_script_in_a_live_directory_is_kept",
+     "posix"),
+
+    ("loose: a process without the shell-snapshots mark is listed as loose",
+     "sweep",
+     '        if not command or SESSION_MARK not in command or pid == os.getpid():',
+     '        if not command or pid == os.getpid():',
+     "test_marked_process_is_listed_and_unmarked_is_not",
      "posix"),
 
     # ---- the worktree pre-removal process check (this build, 2026-09-24) ----
