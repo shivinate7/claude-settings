@@ -515,12 +515,16 @@ MUTATIONS = [
     # reason. The case is therefore SKIPPED on Windows entirely, so the required name can never
     # appear among that platform's FAIL lines, whatever else the run turns up.
     ("subject: an unreadable subject is refused instead of allowed and logged",
-     '        if state is None:\n'
-     '            record(tool, "noted", "subject-unread", matched)\n'
-     '            continue',
-     '        if False:\n'
-     '            record(tool, "noted", "subject-unread", matched)\n'
-     '            continue', "guard", 'subject: a git that cannot answer the status read allows, rather than guess', "posix"),
+     '        if state is None:\n',
+     '        if False:\n', "guard", 'subject: a git that cannot answer the status read allows, rather than guess', "posix"),
+    ("subject: an unforced worktree remove is noted as unread again",
+     '            if subcommand != "worktree-remove" or worktree_remove_forced(args):',
+     '            if True:', "guard", "log: an unforced worktree remove with an unreadable subject records no note", "posix"),
+    ("subject: a forced worktree remove loses its unread note",
+     '            if subcommand != "worktree-remove" or worktree_remove_forced(args):',
+     '            if subcommand != "worktree-remove":', "guard", "log: a forced worktree remove with an unreadable subject is still noted", "posix"),
+    ("subject: a quoted force flag reads as unforced", '            tokens = shlex.split(arg)', '            tokens = [arg]', "guard", "log: a quoted or abbreviated force on a worktree remove is still noted", "posix"),
+    ("subject: an abbreviated force flag reads as unforced", '"--force".startswith(tok)', 'tok == "--force"', "guard", "log: a quoted or abbreviated force on a worktree remove is still noted", "posix"),
     ("scratchpad: this session's own scratchpad stops being private",
      'def under_session_scratchpad(where: str, session_id: str) -> bool:',
      'def under_session_scratchpad(where: str, session_id: str) -> bool:\n    return False', "guard", "scratchpad: a discard in this session's own scratchpad is private"),

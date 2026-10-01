@@ -64,3 +64,7 @@ The lesson holds twice over: import the resolver, do not re-derive a part of
 it. Or gate on identity before content, the way the fixed `session_start.sh`
 now compares `git remote get-url origin` in both trees, before it reads
 either file.
+
+## Ruling: an unforced worktree remove is not noted as unread
+
+The owner ruled that the `subject-unread` note must not fire for an unforced worktree remove. The VCS itself refuses a dirty or locked tree without `--force` or `-f`, so the note protects nothing. The note stays for a forced remove and for every other shared-tree command.

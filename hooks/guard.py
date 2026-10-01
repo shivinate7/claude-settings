@@ -1819,6 +1819,26 @@ def worktree_live_session(target: str):
     return None if saw_unreadable else False
 
 
+def worktree_remove_forced(args) -> bool:
+    """True when the call may carry force: `--force` or any prefix of it (`--f`, `--fo`), or a
+    short cluster holding `f` (`-f`, `-ff`). Args are unquoted like segment_tokens does. An arg
+    shlex cannot read counts as forced, so the note is kept."""
+    for arg in args:
+        try:
+            tokens = shlex.split(arg)
+        except ValueError:
+            return True
+        for tok in tokens:
+            if tok == "--":
+                return False
+            if tok.startswith("--"):
+                if len(tok) > 2 and "--force".startswith(tok):
+                    return True
+            elif tok.startswith("-") and "f" in tok[1:]:
+                return True
+    return False
+
+
 def worktree_remove_subject(args, where: str):
     """The subject of `git worktree remove <path>` is PATH's own uncommitted and untracked work,
     widened by whether it is locked and whether a live session still stands in it."""
@@ -4017,7 +4037,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
         # "this destroys something", and the Stop hook names it at the end of the turn.
         state = subject_state(subcommand, args, root)
         if state is None:
-            record(tool, "noted", "subject-unread", matched)
+            # An unforced remove is refused by the VCS itself when the tree is dirty or locked,
+            # so a note protects nothing (owner ruling, decisions/guard-that-cries-wolf-is-spent.md).
+            if subcommand != "worktree-remove" or worktree_remove_forced(args):
+                record(tool, "noted", "subject-unread", matched)
             continue
         if state is True:
             continue
