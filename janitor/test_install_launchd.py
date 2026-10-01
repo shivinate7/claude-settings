@@ -112,12 +112,14 @@ class GeneratesPlistForAnOrdinaryCheckout(unittest.TestCase):
             data = plistlib.load(handle)
         self.assertEqual(data["Label"], install_launchd.LABEL)
         self.assertNotIn("worktree", data["Label"].lower())
-        args_joined = " ".join(data["ProgramArguments"])
+        args_joined = " ".join(data["ProgramArguments"][1:])
         self.assertIn("sweep.py", args_joined)
         self.assertIn("--confirm", data["ProgramArguments"])
+        self.assertNotIn("--attended", data["ProgramArguments"])  # strict is the default
         # No --discover root: sweep.py resolves its own roots at run time (janitor.roots,
         # falling back to its own default candidate list). See the module docstring.
         self.assertNotIn("--discover", data["ProgramArguments"])
+        # The interpreter may sit under Xcode's own Developer folder; check the rest.
         self.assertNotIn("Developer", args_joined)
         self.assertIn("StartCalendarInterval", data)
         self.assertFalse(data["RunAtLoad"])

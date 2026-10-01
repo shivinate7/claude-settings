@@ -478,8 +478,58 @@ def fully_pushed(path: str):
     return not answer.stdout.strip()
 
 
-def decide_worktree(where: str, entry: dict):
-    """Return one decision dict: {"path", "action": "reap"|"keep", "reason"}."""
+STRICT_IDLE_SECONDS = 60 * 60  # owner ruling: a tree needs 1 hour of git quiet
+
+
+def worktree_idle_seconds(path: str, now=None):
+    """Seconds since the newest git activity in worktree PATH, or None when it cannot be read.
+    Activity is the newest mtime of the worktree's own admin files: index, HEAD, logs/HEAD under
+    `.git/worktrees/<name>`. HEAD must exist; a missing index or log is skipped."""
+    answer = guard._git(path, "rev-parse", "--absolute-git-dir")
+    if answer is None or answer.returncode != 0 or not answer.stdout.strip():
+        return None
+    admin = answer.stdout.strip()
+    try:
+        newest = os.stat(os.path.join(admin, "HEAD")).st_mtime
+    except OSError:
+        return None
+    for name in ("index", os.path.join("logs", "HEAD")):
+        try:
+            newest = max(newest, os.stat(os.path.join(admin, name)).st_mtime)
+        except OSError:
+            pass
+    return (time.time() if now is None else now) - newest
+
+
+def _strict_keep(where: str, path: str, idle):
+    """The keep decision a run adds unless a person passed --attended, or None when the tree is merged and idle.
+    Merged: HEAD holds no commit the default branch lacks, by ancestry or by patch
+    (decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md). Pushed alone is not merged."""
+    base = guard.resolve_default_base(where)
+    merged = None
+    if base is not None:  # HEAD is read in the worktree itself, never in WHERE
+        merged = guard.branch_is_ancestor(path, base, "HEAD")
+        if merged is False:
+            merged = guard.branch_cherry_empty(path, base, "HEAD")
+    if merged is None:
+        return {"path": path, "action": "keep", "reason": "unreadable-subject"}
+    if not merged:
+        return {"path": path, "action": "keep",
+                "reason": "unmerged: HEAD has a commit the default branch lacks"}
+    if idle is None:
+        return {"path": path, "action": "keep", "reason": "unreadable-subject"}
+    if idle < STRICT_IDLE_SECONDS:
+        return {"path": path, "action": "keep",
+                "reason": "recently-active: git activity %d minutes ago" % (idle // 60)}
+    return None
+
+
+def decide_worktree(where: str, entry: dict, attended: bool = False):
+    """Return one decision dict: {"path", "action": "reap"|"keep", "reason"}. Strict by default: a
+    worktree also needs to be merged and idle 1 hour, so a stale installed job fails safe.
+    ATTENDED (a person's run) skips those two keeps."""
+    # Read first: `git status` below can rewrite the index and make every tree look active.
+    idle = worktree_idle_seconds(entry["path"]) if not attended else None
     path = entry["path"]
     dirty = guard.porcelain(path)
     if dirty is None:
@@ -506,6 +556,10 @@ def decide_worktree(where: str, entry: dict):
     if not pushed:
         return {"path": path, "action": "keep",
                 "reason": "unpushed: HEAD has a commit on no remote branch"}
+    if not attended:
+        kept = _strict_keep(where, path, idle)
+        if kept:
+            return kept
     # The pre-removal process check (brief point 4). ANY process at all, not only a listener --
     # a plain shell sitting in this worktree is just as much a reason `git worktree remove`
     # must not run as a live Claude session is.
@@ -1956,7 +2010,8 @@ def _is_toplevel(path: str) -> bool:
 MODES = ("full", "tier1", "branches")
 
 
-def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "full"):
+def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "full",
+               attended: bool = False):
     """One repository. `mode` "full" is the whole sweep. "tier1" acts for real, with no
     --confirm, and only on stale registrations and husks: no worktree, branch or process work.
     "branches" reaps branches only (preview without --confirm), removes no worktree, and holds
@@ -2021,7 +2076,7 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
             # Could not tell whether this IS the primary checkout. Rule 7's direction: an
             # unreadable subject means keep, never a guess that it is safe to evaluate.
             return {"path": entry["path"], "action": "keep", "reason": "unreadable-subject"}
-        return decide_worktree(root, entry)
+        return decide_worktree(root, entry, attended)
 
     judged = entries if mode == "full" else []
     for entry, decision in zip(judged, _pmap(judge, judged, confirm)):
@@ -2236,6 +2291,9 @@ def main(argv=None) -> int:
                          help="sweep DIR's own checkouts, used only when no ROOT is given")
     parser.add_argument("--confirm", action="store_true",
                          help="actually delete branches, worktrees and leftover folders (husks), or drop tombstones")
+    parser.add_argument("--attended", action="store_true",
+                         help="a person's run: skip the merged and idle-1-hour keeps. Without "
+                              "it, --confirm removes a worktree only when it is both")
     parser.add_argument("--purge", action="store_true",
                          help="purge tombstones past 90 days instead of sweeping")
     parser.add_argument("--restore-log", metavar="PATH",
@@ -2306,8 +2364,9 @@ def main(argv=None) -> int:
 
 
 def _sweep_roots(args, roots, restore_log_path, mode):
-    results = list(_pmap(lambda root: sweep_repo(root, args.confirm, restore_log_path, mode),
-                         roots, args.confirm or mode == "tier1", _ROOT_POOL))
+    results = list(_pmap(
+        lambda root: sweep_repo(root, args.confirm, restore_log_path, mode, args.attended),
+        roots, args.confirm or mode == "tier1", _ROOT_POOL))
     print_sweep_report(results, args.confirm or mode == "tier1")
     if mode != "full":
         return 0

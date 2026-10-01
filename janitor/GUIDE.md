@@ -122,6 +122,18 @@ The sweep keeps a worktree with a commit that is on no remote branch, and the
 reason is `unpushed`. This holds for every worktree, locked or not. A detached
 HEAD counts. A repository with no remote keeps every worktree.
 
+Every `--confirm` run adds two more keeps. It removes a worktree only when
+the worktree is merged and idle 1 hour. Merged means that HEAD holds no
+commit the default branch lacks, by ancestry or by patch. A tree that is
+only pushed is kept, and the reason is `unmerged`. Idle means that the
+newest mtime of the worktree's own `index`, `HEAD` and `logs/HEAD` under
+`.git/worktrees/<name>` is 60 minutes old. A younger tree is kept, and the
+reason is `recently-active`. A time that cannot be read keeps the tree
+(`unreadable-subject`). Strict is the default, so a job that an older
+installer wrote is strict with no reinstall. A person passes `--attended`
+for the old rules. See
+`decisions/unattended-sweep-stops-proven-orphans.md`.
+
 The sweep keeps a worktree that any process sits inside, not only a
 listener. It names the pids. This check runs right before the removal
 itself. On Windows, that is what stops a partial delete: files gone, an
