@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Shim for the merge tool. Finds the claude-settings checkout and starts merge/launch.py there.
 # No merge logic lives here. Plan: plans/shared-merge-tool.md, "How the command finds claude-settings".
-import os, re, subprocess, sys, tempfile
+import os, re, shutil, subprocess, sys, tempfile
 OK = r"(https://github\.com/|git@github\.com:)shivinate7/claude-settings(\.git)?/?"
 def origin(d):
     r = subprocess.run(["git", "-C", d, "config", "--get", "remote.origin.url"], capture_output=True, text=True)
@@ -15,8 +15,16 @@ def find():
     m = re.search(r"^@(\S.*?)[/\\]CLAUDE\.md\s*$", text, re.M)
     if m: return os.path.expanduser(m.group(1))
     d = tempfile.mkdtemp(prefix="claude-settings-")  # the repo is public: no credential needed
-    if subprocess.run(["git", "clone", "-q", "https://github.com/shivinate7/claude-settings", d]).returncode: sys.exit("merge: clone of claude-settings failed")
+    if subprocess.run(["git", "clone", "-q", "https://github.com/shivinate7/claude-settings", d]).returncode:
+        shutil.rmtree(d, ignore_errors=True)
+        sys.exit("merge: clone of claude-settings failed")
+    made.append(d)
     return d
+made = []
 d = find()
-if not origin(d): sys.exit(f"merge: {d} is not a checkout of shivinate7/claude-settings; stopped before any PR read")
-sys.exit(subprocess.run([sys.executable, os.path.join(d, "merge", "launch.py"), d] + sys.argv[1:]).returncode)
+try:
+    if not origin(d): sys.exit(f"merge: {d} is not a checkout of shivinate7/claude-settings; stopped before any PR read")
+    rc = subprocess.run([sys.executable, os.path.join(d, "merge", "launch.py"), d] + sys.argv[1:]).returncode
+finally:
+    for m in made: shutil.rmtree(m, ignore_errors=True)  # only a clone this shim made
+sys.exit(rc)

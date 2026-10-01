@@ -30,9 +30,11 @@ class Launch(unittest.TestCase):
         self.cfg = os.path.join(self.t, "gitconfig")
         self.home = os.path.join(self.t, "home")
         os.makedirs(self.home)
+        self.tmp = os.path.join(self.t, "tmp")  # TMPDIR for the code under test: must be empty after a run
+        os.makedirs(self.tmp)
         self.rewrite(self.bare)
         self.env = {**os.environ, "GIT_CONFIG_GLOBAL": self.cfg, "GIT_CONFIG_SYSTEM": os.devnull,
-                    "HOME": self.home, "USERPROFILE": self.home, "CLAUDE_CONFIG_DIR": os.path.join(self.t, "cfg")}
+                    "HOME": self.home, "TMPDIR": self.tmp, "TMP": self.tmp, "TEMP": self.tmp, "USERPROFILE": self.home, "CLAUDE_CONFIG_DIR": os.path.join(self.t, "cfg")}
         for k in ("CLAUDE_SETTINGS_DIR",):
             self.env.pop(k, None)
         sh(self.t, "git", "init", "-q", "--bare", "-b", "main", self.bare, env=self.env)
@@ -141,6 +143,17 @@ class Launch(unittest.TestCase):
         self.release("v2")
         self.merge()
         self.assertEqual(len(sh(self.co, "git", "worktree", "list", env=self.env).splitlines()), 1)
+        self.assertEqual(os.listdir(self.tmp), [])
+
+    def test_temp_clone_removed_after_run_and_after_failed_clone(self):
+        e = {k: v for k, v in self.env.items() if k != "CLAUDE_SETTINGS_DIR"}
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "bin", "merge")], env=e, capture_output=True, text=True, timeout=120)
+        self.assertEqual(r.stdout.strip(), "RAN v1", r.stderr)
+        self.assertEqual(os.listdir(self.tmp), [])
+        self.rewrite(os.path.join(self.t, "gone.git"))
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "bin", "merge")], env=e, capture_output=True, text=True, timeout=120)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(os.listdir(self.tmp), [])
 
     def test_offline_warns_and_runs_the_code_it_has(self):
         self.rewrite(os.path.join(self.t, "gone.git"))
@@ -157,7 +170,7 @@ class Launch(unittest.TestCase):
         self.rewrite(os.path.join(self.t, "gone.git"))
         rc, out, err = self.merge()
         self.assertEqual(out.strip(), "RAN v1")
-        self.assertIn("1 commits behind origin/main", err)
+        self.assertIn("1 commit(s) behind origin/main as of the last fetch", err)
 
     def test_dev_runs_own_tree_and_does_not_fetch(self):
         self.release("v2")

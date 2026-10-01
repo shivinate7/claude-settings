@@ -16,7 +16,7 @@ def run(tree, args):
     return subprocess.run([sys.executable, os.path.join(tree, "merge", "merge.py"), *args]).returncode
 
 def warn(sha, behind, why):
-    b = f"{behind} commits behind origin/main" if behind is not None else "distance behind origin/main unknown"
+    b = f"{behind} commit(s) behind origin/main as of the last fetch" if behind is not None else "distance behind origin/main unknown"
     print("=" * 60 + f"\nWARNING: merge cannot prove it runs fresh code.\n  Running: claude-settings {sha} ({b})\n  Why: {why}\n" + "=" * 60, file=sys.stderr)
 
 def main(co, args):
