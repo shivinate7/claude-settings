@@ -1105,21 +1105,46 @@ bin_case1() {
   cp "$REPO_ROOT/bin/claude-janitor" "$co/bin/claude-janitor"
   mkdir -p "$cfg/bin"
   printf 'old shim\n' > "$cfg/bin/claude-janitor"
-  for f in janitor.py reap.py session-teardown.sh keep-me.sh; do printf 'x\n' > "$cfg/bin/$f"; done
+  # Stale: reap.py is a foreign symlink, janitor.py is a repo link (kept), session-teardown.sh
+  # is a plain file. Decoys that must all survive: foo.sh, claude-janitor-old, a dir named
+  # janitor-dir. bin2 covers a dir named janitor.py.
+  printf 'x\n' > "$cfg/bin/session-teardown.sh"
+  printf 'x\n' > "$cfg/bin/foo.sh"
+  printf 'x\n' > "$cfg/bin/claude-janitor-old"
+  mkdir -p "$cfg/bin/janitor-dir"
+  ln -s "$h/elsewhere" "$cfg/bin/reap.py"
+  printf 'x\n' > "$co/bin/janitor.py"
+  ln -s "$co/bin/janitor.py" "$cfg/bin/janitor.py"
 
   out=$(run_local_install "$co" "$h" "$cfg"); rc=$?
+  got=$(ls -A "$cfg/bin" | sed "s/\.bak\.[0-9]*/.bak/" | sort | tr '\n' ' ')
+  want="claude-janitor claude-janitor-old claude-janitor.bak foo.sh janitor-dir janitor.py "
 
   if [ $rc -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $out"
   elif [ "$(readlink "$cfg/bin/claude-janitor")" != "$co/bin/claude-janitor" ]; then
     bad "$name" "claude-janitor is not a link to the repo shim"
-  elif [ -e "$cfg/bin/janitor.py" ] || [ -e "$cfg/bin/reap.py" ] || [ -e "$cfg/bin/session-teardown.sh" ]; then
-    bad "$name" "a stale Banchi file survived"
-  elif [ ! -f "$cfg/bin/keep-me.sh" ]; then
-    bad "$name" "keep-me.sh (not on the stale list) was removed"
+  elif [ "$got" != "$want" ]; then
+    bad "$name" "bin/ holds [$got], expected [$want]"
+  elif [ "$(readlink "$cfg/bin/janitor.py")" != "$co/bin/janitor.py" ]; then
+    bad "$name" "repo-linked janitor.py was changed"
   else
     ok "$name"
   fi
+  rm -rf "$h"
+}
+
+bin_case2() {
+  name="bin2: a directory named janitor.py is left alone"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/bin2-checkout"
+  make_checkout "$co" "# bin2 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  mkdir -p "$cfg/bin/janitor.py"
+  printf 'x\n' > "$cfg/bin/janitor.py/inner"
+  out=$(run_local_install "$co" "$h" "$cfg"); rc=$?
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
+  elif [ ! -f "$cfg/bin/janitor.py/inner" ]; then bad "$name" "the directory was removed"
+  else ok "$name"; fi
   rm -rf "$h"
 }
 
@@ -1171,6 +1196,7 @@ prune_case6
 skills_case1
 skills_case2
 bin_case1
+bin_case2
 caseF1
 caseF2
 caseF3
