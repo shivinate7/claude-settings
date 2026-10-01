@@ -122,6 +122,9 @@ jobs:
       - name: Janitor triggers fixture suite (schtasks installer)
         run: python3 janitor/test_install_schtasks.py
 
+      - name: STE lint action fixture suite
+        run: python3 actions/ste-lint/test_action.py
+
       - name: Record stamp engine fixture suite
         run: node actions/stamp/test_stamp.mjs
 
