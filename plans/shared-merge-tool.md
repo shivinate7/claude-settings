@@ -190,7 +190,7 @@ place to name the shared tool. Its ruling does not change.
 
 ## q_max and the stamp action
 
-q_max stamps after the merge through `stamp.yml`, mode `stamp`. It pins `actions/stamp` at a
+q_max stamped after the merge through `stamp.yml`, mode `stamp`. It pinned `actions/stamp` at a
 claude-settings SHA. It moved in its own repo (lane 8, q_max#347), by its own session, per
 `record-stamp-stays-generic`, the stamp stays generic:
 
@@ -199,8 +199,8 @@ claude-settings SHA. It moved in its own repo (lane 8, q_max#347), by its own se
 3. Switch `stamp.yml` to mode `check` on a push to main, with `contents: read`. The write
    permission and the protection bypass it needed go away.
 
-After the move, no repo uses mode `stamp`, and lane 9 deletes it. A pending record on main
-then goes red in `check`. The fix is any pull request through the command, which claims it.
+After the move, no repo used mode `stamp`, and lane 9 deleted it. A pending record on main
+goes red in `check`. The fix is any pull request through the command, which claims it.
 
 ## Build lanes
 
@@ -217,7 +217,7 @@ Each lane is one Sonnet builder. When every lane in its "Waits for" cell has mer
 | 6 | Banchi, in Banchi: the config, mode `check` in `check.yml`, `make merge` on the tool. | open | 2, 3, 4 | One real merge through the tool. `make check` is green. |
 | 7 | Banchi, in Banchi: delete the ported code, the gloss stopgap and DEBT78. Rewrite D140. | open | 6 | `make check` is green. A search for `entry_gloss` and `gloss_first_uses` finds nothing. |
 | 8 | q_max, in q_max: the three steps above. The owner started it. | done (q_max#347) | 3, 4, and the owner's word | One real merge through the tool. `stamp.yml` holds no write permission. |
-| 9 | **On hold.** Delete mode `stamp` from `actions/stamp`, its tests and its README. | on hold | 8, and the owner's word | No workflow in any repo names mode `stamp`. `test_stamp.mjs` passes, and a pending record on the default branch goes red in `check`. |
+| 9 | Delete mode `stamp` from `actions/stamp`, its tests and its README. | done | 8, and the owner's word | No workflow in any repo names mode `stamp`. `test_stamp.mjs` passes, and a pending record on the default branch goes red in `check`. |
 
 ## Settled by the owner
 
@@ -226,13 +226,13 @@ Each lane is one Sonnet builder. When every lane in its "Waits for" cell has mer
    no `actions/`.
 2. **The merge lock is a ref on origin,** `refs/merge-lock/<branch>`, made by the GitHub API.
    Cloud sessions merge too, and a file lock cannot see them.
-3. **Delete mode `stamp` once q_max moves** (lane 9). One path, and no workflow writes to main.
+3. **Mode `stamp` is deleted** (lane 9). One path, and no workflow writes to main.
 4. **The command updates itself before every merge.** It never refuses to merge for an old
    copy. When it cannot prove fresh code, it warns loudly and goes on (see "The fresh-code
    guard").
 5. **`--dev` exists, behind the explicit flag only.** It runs the checkout's own tree, for work
    on the tool itself.
-6. **Lane 9 is on hold.** Do not start it. The owner starts it later. The owner started lane 8.
+6. **The owner started lanes 8 and 9.** Lane 9 deleted mode `stamp` after q_max moved.
 7. **A failed `afterMerge` or a failed local-main fast-forward gives a non-zero exit.** The
    merge stays, and the printed line says that it landed.
 8. **Numbered records may be deleted.** There is no retired list and no stub file. The claim

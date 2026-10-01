@@ -13,9 +13,9 @@ A repo that adopts this engine meets each item below.
 2. The repo keeps one config file in its own tree, such as `.github/stamp.json`. Every
    field in it is read off the repo's own claim tool or its own tree. No field is a guess.
 3. Every pull request runs mode `check`. A record numbered on the branch fails it.
-4. Every push to the default branch runs mode `stamp`. It numbers each pending record,
-   runs the repo's own generator and full gate, and pushes one commit.
-5. The workflow pins this action by commit SHA and holds the concurrency lock.
+4. Every push to the default branch runs mode `check` too. A pending record there fails it.
+5. The claim runs before the merge, through the merge tool ("The merge tool contract" below).
+6. The workflow pins this action by commit SHA.
 
 ## Record shapes
 
@@ -35,27 +35,22 @@ A repo that adopts this engine meets each item below.
    - `file`: one flat file, and every heading is a record. `## C-<slug> — Title` becomes
      `## C12 — Title`. The file keeps its name.
 
-A repo on the merge tool follows "The merge tool contract" below. It replaces item 4 above.
-
 A shape that no config field can state is not covered. Bring it to the owner as a
 question. Do not add a repo name here to fit it.
 
 ## Modes
 
 ```
-node stamp.mjs --stamp --config <path> [--root <path>]
 node stamp.mjs --claim --base <ref> --config <path> [--root <path>]
 node stamp.mjs --check --config <path> [--root <path>] [--base <ref>]
 ```
 
 `--root` defaults to the current directory. It must be the root of the checkout.
 
-**`--stamp`** gives each pending record the next number for its kind, in the order the
+**`--claim`** gives each pending record the next number for its kind, in the order the
 config states. Then it rewrites each cite of the record's slug to the numbered form. It
-never renumbers a record. It runs the structural checks of `--check` first. If one fails,
-it writes nothing.
-
-**`--claim`** is `--stamp` for a branch, before the merge. It needs `--base`. The next
+never renumbers a record. It runs the structural checks of `--check` first. If one fails, it
+writes nothing. It runs on a branch, before the merge. It needs `--base`. The next
 number is above every number in this tree, in the tip of `--base`, and in every commit of the
 history of `--base`. It is also above each `RETIRED` list of both. So a number that the base
 took since the cut, or that a record once held and lost, is never reused. A base that git
@@ -171,7 +166,7 @@ tree. A default applies when a field is not set.
 | Field | Shapes | Meaning |
 |---|---|---|
 | `format` | all | Not set for shapes 1 and 2. `"heading"` for shape 3. |
-| `regenerate` | all | Your own generator, a shell command. `--claim` runs it after the claim. Mode `stamp` runs it when the `regenerate` input is empty. |
+| `regenerate` | all | Your own generator, a shell command. `--claim` runs it after the claim. |
 | `defaultBranch` | all | The default branch name. `--check` needs it to find the branch. Without it, `--check` needs `--base` or `GITHUB_BASE_REF`. |
 | `kinds` | all | A list of record kinds. It must not be empty. |
 | `cite` | all | How a cite of a slug is found and rewritten. Omit it for shapes 1 and 2 if the repo cites by path. |
@@ -256,7 +251,7 @@ after `<slug>-`.
 | `unclaimed[].label` | not set | When set, the refusal names `<label> <slug>`, not the matched line. |
 
 The walk never follows a symlink. Use `unclaimed` for a marker that your repo has no claim
-rule for yet. Both modes refuse it before they write anything.
+rule for yet. `--claim` and `--check` refuse it before they write anything.
 
 ## The composite action
 
@@ -264,43 +259,20 @@ rule for yet. Both modes refuse it before they write anything.
 uses: shivinate7/claude-settings/actions/stamp@<sha>
 ```
 
-**Pin it by commit SHA. Never use `@main`.** Mode `stamp` writes to your default branch.
+**Pin it by commit SHA. Never use `@main`.**
 
 ### Inputs
 
 | Input | Default | Meaning |
 |---|---|---|
-| `mode` | `stamp` | `stamp` or `check`. |
+| `mode` | `check` | `check`, the only mode. Any other value is refused. |
 | `config` | required | The config path, from the repository root. |
-| `base` | empty | Mode `check` only. The base ref, passed to `stamp.mjs` as `--base`, and only when it is set. When it is empty, the engine picks the base itself. |
-| `gate-command` | empty | Mode `stamp` only, and required there. Your own full check. It must pass on the stamped tree before the push. |
-| `regenerate` | empty | Mode `stamp` only. Your own generator. An empty input reads the config's `regenerate`. It runs after `--stamp` and before the gate, in the same commit. |
-| `commit-subject` | `Stamp {ids}` | The commit subject. `{ids}` becomes the ids that the run stamped. |
-| `token` | empty | Mode `stamp` only, and required there. The push token. Only `git fetch` and `git push` receive it. |
-| `bot-name` | `record-stamp[bot]` | The commit author name. |
-| `bot-email` | `record-stamp@users.noreply.github.com` | The commit author email. |
+| `base` | empty | The base ref, passed to `stamp.mjs` as `--base`, and only when it is set. When it is empty, the engine picks the base itself. |
 
 **Mode `check`** runs `stamp.mjs --check --config <config>` and nothing else. When `base` is
 set, it adds `--base <base>`. It needs no default branch, no gate, no commit, and no push.
 It works with `contents: read`. Its checkout needs `fetch-depth: 0`. A shallow fetch of the
 base is not enough.
-
-**Mode `stamp`** refuses to run off the default branch. It refuses an empty
-`gate-command`. It stamps, runs `regenerate`, runs the gate, commits, and pushes. When
-nothing is pending, it stops before `regenerate`. When the push is rejected, it starts
-again from the new tree and runs the gate again, up to 3 times. It never rebases a commit
-that the gate already passed, because a rebased tree is a tree that no gate read.
-
-**The token.** The checkout must set `persist-credentials: false`. Mode `stamp` refuses to
-run when `.git/config` holds a credential for the remote, and when `token` is empty. The
-action copies the token out of its environment at start. It gives the token to `git fetch`
-and `git push` only, in per-command env. Your `regenerate` and `gate-command` do not inherit
-it. Limit: the gate runs as the same user, so a determined attacker could still read process
-memory. Full isolation needs a separate push job.
-
-**The concurrency rule.** A composite action cannot hold a lock. The job that runs mode
-`stamp` must set `concurrency: {group: <name>, cancel-in-progress: false}`. Two runs at
-the same time could otherwise claim the same number.
 
 ```yaml
 name: records
@@ -310,37 +282,17 @@ on:
     branches: [main]
 jobs:
   check:
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          fetch-depth: 0   # the base tree and the merge base
+          fetch-depth: 0   # the base tree, the merge base, and the default-branch question
       - uses: shivinate7/claude-settings/actions/stamp@<sha>
         with:
           mode: check
           config: .github/stamp.json
-  stamp:
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    concurrency:
-      group: stamp-main
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          fetch-depth: 0   # order "merge", and the default-branch question
-          persist-credentials: false
-      - uses: shivinate7/claude-settings/actions/stamp@<sha>
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          config: .github/stamp.json
-          regenerate: "<your own generator>"
-          gate-command: "<your own full check>"
 ```
 
 ## Adoption checklist
@@ -353,17 +305,15 @@ Do each step in your own repo, from your own tree.
    example.
 3. Set `regenerate` to run your own generators, such as an index or a manifest append.
    Adoption must change nothing else in the tree.
-4. Set `gate-command` to your own full check, the same one your pull requests run.
-5. Run `--stamp` on a copy of your tree. Compare the result with your own claim tool's
-   result on a second copy. Each difference is a field to fix, or a question for the
-   owner.
-6. Run `--check` on your tree. Read each refusal. Add an `excludeGlobs` entry only for a
+4. Run `--claim --base <ref>` on a copy of your tree. Compare the result with your own claim
+   tool's result on a second copy. Each difference is a field to fix, or a question for
+   the owner.
+5. Run `--check` on your tree. Read each refusal. Add an `excludeGlobs` entry only for a
    file that teaches the cite syntax.
-7. Retire each step that claims a number on a branch, such as a claim in a merge script.
+6. Retire each step that claims a number on a branch, such as a claim in a merge script.
    Mode `check` refuses each number that a branch writes.
-8. `--check` on the default branch refuses any pending record. In a repo that uses mode
-   `stamp`, run it after the stamp commit lands. Before that, it is red.
-9. Add both jobs to your workflow. Pin the SHA. Set the concurrency lock.
+7. Add the check job to your workflow. Pin the SHA. Run it on every pull request and on every
+   push to the default branch. `--check` on the default branch refuses any pending record.
 
 ## The merge tool contract
 
@@ -387,7 +337,7 @@ meets each item below.
 6. Every pull request runs mode `check`, with `fetch-depth: 0`. A number that a
    `Record-claim` commit added is accepted. Any other number a branch adds is refused.
 7. Every push to the default branch runs mode `check` too. It refuses any pending record
-   there, and needs only `contents: read`. No workflow runs mode `stamp` for this repo.
+   there, and needs only `contents: read`.
 8. A check name can repeat, such as one job in two workflows. The wait keeps every entry
    of a name. All of them must pass, and one red entry stops the wait.
 
@@ -407,7 +357,7 @@ The tool keeps these behaviours. The adopting repo needs no setting for them.
 
 Do each step in your own repo, from your own tree.
 
-1. Do steps 1 to 6 of the engine checklist above, so the config reads your tree correctly.
+1. Do steps 1 to 5 of the engine checklist above, so the config reads your tree correctly.
 2. Add the `merge` block. Read `method` from the repo's merge history. Set
    `deadlineMinutes` to a bit more than your slowest required check.
 3. Set `requiredChecks`. For a branch with protection, use `"protection"`. Otherwise name the
@@ -417,7 +367,7 @@ Do each step in your own repo, from your own tree.
 5. Set `regenerate` in the config, not in the workflow input. The claim runs it in the
    same commit.
 6. Switch the workflow. Run mode `check` on every pull request, and on every push to the
-   default branch. Remove the mode `stamp` job and its write permission.
+   default branch, with `contents: read`.
 7. Retire your own claim step, such as a claim in a merge script. Keep a wrapper that
    passes its arguments through and adds nothing. Remove any other.
 8. Run `merge <pr>` with no flag on a real pull request. Read the preview. Then run one real
@@ -428,7 +378,7 @@ Do each step in your own repo, from your own tree.
 
 ```
 node actions/stamp/test_stamp.mjs   # the engine: numbering, rename, cite rewrite, --check
-bash actions/stamp/test_action.sh   # run.sh, both modes, against a real git remote
+bash actions/stamp/test_action.sh   # run.sh, mode check, against a real git remote
 ```
 
 Both build their own temporary folders. Neither reads or writes this repository's own

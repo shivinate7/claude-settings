@@ -175,7 +175,7 @@ test("frontmatter+filename: a pending record is renamed and its cite gains its g
     assert.equal(read(root, "README.md").includes("See D1, widgets ship in v2 for the plan."), true);
   }));
 
-test("frontmatter+filename: a pending record missing a required field refuses --stamp and writes nothing", () =>
+test("frontmatter+filename: a pending record missing a required field refuses stamp() and writes nothing", () =>
   withTempDir((root) => {
     initRepo(root);
     write(root, "docs/decisions/_no-date.md", '---\nid:\nslug: no-date\ngloss: "no date here"\n---\n\nBody.\n');
@@ -786,7 +786,7 @@ test("unclaimed: --check refuses a pending step, naming the file, its slug and t
       p.includes(config.unclaimed[0].message)), true);
   }));
 
-test("unclaimed: --stamp refuses a pending step, and writes nothing", () =>
+test("unclaimed: stamp() refuses a pending step, and writes nothing", () =>
   withTempDir((root) => {
     headingTree(root);
     write(root, "docs/steps/some-file.md", pendingStep);
@@ -1141,7 +1141,7 @@ function claimCommit(root, message = "claim") {
   return r;
 }
 
-test("claim: the number is above the base tip's numbers, which --stamp alone would reuse", () =>
+test("claim: the number is above the base tip's numbers, which stamp() alone would reuse", () =>
   withTempDir((root) => {
     claimRepo(root, (d) => write(d, "docs/decisions/e.md", rec(5, "e")));
     const c = claim(root, frontmatterConfig(), "main");

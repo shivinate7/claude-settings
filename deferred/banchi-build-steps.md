@@ -9,7 +9,7 @@ from `docs/GATES.md`. That file is now a pointer. So Banchi's tool cannot claim 
 `docs/gates/steps/`, and this engine has no working rule to copy. The owner chose to leave
 steps out on 2026-09-25. See `decisions/one-shared-record-stamp.md`, "Left out, on purpose".
 
-**What keeps it from being lost.** The engine's `--check` and `--stamp` can refuse a tree
+**What keeps it from being lost.** The engine's `--check` and `--claim` can refuse a tree
 that holds a pending step marker. The repo's own config must have an `unclaimed` entry for it.
 Since 2026-09-28 the parent names no repo (`record-stamp-stays-generic`). So Banchi's own
 config must carry that entry, with a message that names this file. No adoption brief
