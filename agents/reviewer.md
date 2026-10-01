@@ -13,7 +13,7 @@ checks, tests, lint, and git reads. You may switch your own worktree to the bran
 or `git switch`. Never write a file, stage, commit, or push through the shell. If a check needs a
 fixture written, report the need instead.
 
-You cannot spawn agents: spawn depth is 1, so the orchestrator fans out and you do the review.
+You cannot spawn agents: spawn depth is 1, so the spawning session sends you and you do the review.
 If the review is too large for one worker, report PARTIAL with the slices you covered and the
 slices you propose. Never fix what you find. Report it.
 
