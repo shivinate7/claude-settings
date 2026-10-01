@@ -1786,6 +1786,7 @@ class HuskTests(unittest.TestCase):
         found = sweep.find_husks(root, sweep.parse_worktree_list(root), names)
         return {os.path.basename(h["path"]): h["action"] for h in found}
 
+    @unittest.skipIf(os.name == "nt", "Windows never deletes husks")
     def test_preview_lists_a_husk_as_would_and_deletes_nothing(self):
         root = self._repo("husk-found")
         path = self._husk(root, "gone", ["node_modules", ".serve"])
@@ -1796,6 +1797,7 @@ class HuskTests(unittest.TestCase):
         sweep.print_sweep_report([result], False, out=out)
         self.assertIn("husk      WOULD", out.getvalue())
 
+    @unittest.skipIf(os.name == "nt", "Windows never deletes husks")
     def test_confirm_deletes_a_proven_husk(self):
         root = self._repo("husk-confirm")
         path = self._husk(root, "gone", ["node_modules", ".serve"])
@@ -1871,6 +1873,7 @@ class HuskTests(unittest.TestCase):
         self.assertTrue(os.path.isdir(os.path.join(outside, "gone", "node_modules")))
         self.assertEqual(forged["action"], "keep")
 
+    @unittest.skipIf(os.name == "nt", "Windows never deletes husks")
     def test_a_failed_delete_prints_keep_with_the_error(self):
         root = self._repo("husk-fails")
         path = self._husk(root, "gone", ["node_modules"])
@@ -1888,6 +1891,14 @@ class HuskTests(unittest.TestCase):
         sweep.print_sweep_report([result], True, out=out)
         self.assertIn("husk      KEEP", out.getvalue())
         self.assertIn("refused", out.getvalue())
+
+    @unittest.skipUnless(os.name == "nt", "the real Windows answer; POSIX patches the constant below")
+    def test_on_windows_a_husk_is_kept_and_not_deleted(self):
+        root = self._repo("husk-nt")
+        path = self._husk(root, "gone", ["node_modules"])
+        self.assertEqual(self._husks(root), {"gone": "keep"})
+        sweep.sweep_repo(root, True, os.path.join(ROOT, "husk.log"))
+        self.assertTrue(os.path.isdir(path))
 
     def test_windows_keeps_husks_report_only(self):
         root = self._repo("husk-windows")
@@ -1948,7 +1959,11 @@ class AllCwdsMacosTests(unittest.TestCase):
 
     def test_a_timeout_is_unreadable(self):
         with _FakeLsof(exc=subprocess.TimeoutExpired("lsof", 60)):
-            self.assertIsNone(sweep._all_cwds_macos())
+            try:
+                found = sweep._all_cwds_macos()
+            except Exception as exc:  # a FAIL line, not an ERROR line, is what the harness reads
+                self.fail("the timeout escaped: %r" % (exc,))
+        self.assertIsNone(found)
 
     def test_an_empty_table_is_unreadable(self):
         with _FakeLsof(0, ""):

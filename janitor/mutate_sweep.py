@@ -583,13 +583,15 @@ MUTATIONS = [
      "sweep",
      '    if confirm:\n        for decision in result["husks"]:',
      '    if True:\n        for decision in result["husks"]:',
-     "test_preview_lists_a_husk_as_would_and_deletes_nothing"),
+     "test_preview_lists_a_husk_as_would_and_deletes_nothing",
+     "posix"),
 
     ("husks: the delete skips the re-proof and trusts the preview",
      "sweep",
      '    again = husk_verdict(root, path, entries, names)',
      '    again = decision',
-     "test_confirm_keeps_a_folder_that_gained_a_foreign_file_after_the_find"),
+     "test_confirm_keeps_a_folder_that_gained_a_foreign_file_after_the_find",
+     "posix"),
 
     ("husks: a folder that became a link is no longer refused",
      "sweep",
@@ -615,7 +617,8 @@ MUTATIONS = [
      "sweep",
      '            tag = "KEEP" if h.get("error") else {"husk"',
      '            tag = None if False else {"husk"',
-     'test_a_failed_delete_prints_keep_with_the_error'),
+     'test_a_failed_delete_prints_keep_with_the_error',
+     "posix"),
 
     ('husks: Windows deletes husks',
      "sweep",
