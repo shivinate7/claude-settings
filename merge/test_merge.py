@@ -419,6 +419,27 @@ class AfterPush(Env):
         self.assertIn("locked", seen[0])
         self.assertEqual(self.worktrees(), 1)
 
+class RerunAfterRevert(Env):
+    def test_second_run_claims_the_same_number_again_and_merges(self):
+        # Banchi #595, DEBT81: a red check reverts the claim; the rerun, after green, must claim again.
+        self.host.checks = (False, "check gates is red")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("reverted", out)
+        self.assertEqual(self.show("feat", "docs/decisions/second.md"), record("pending", "second").strip())
+        self.host.checks = (True, "")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("resumed", out)
+        self.assertIn("Record-claim: D-002 pushed", out)  # the same number, no branch reset
+        self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
+        # the claim, its revert, and the claim again: three commits on top of the feature commit
+        subjects = sh(self.co, "git", "log", "--first-parent", "--format=%s", "origin/main^2").splitlines()  # feat is deleted after the merge.splitlines()
+        self.assertEqual(subjects[:4], ["Claim record numbers", 'Revert "Claim record numbers"', "Claim record numbers", "feat: second"], subjects)
+        self.assertEqual(sh(self.co, "git", "log", "--first-parent", "--format=%s", "origin/main").splitlines()[0], "merge #7")
+        self.assertFalse(self.lock_ref())
+        self.assertEqual(self.worktrees(), 1)
+
 class Stopped(Env):
     def test_stopped_run_resumes_then_an_expired_lock_is_broken(self):
         child = subprocess.run([sys.executable, __file__, "--child", self.co], capture_output=True, text=True)
