@@ -336,6 +336,19 @@ class Stopped(Env):
         self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
         self.assertFalse(self.lock_ref())
 
+    def test_an_unreadable_base_is_never_a_resume(self):
+        # stamp --check prints UNKNOWN and exits 0 off Actions. The tool must read that as failure.
+        info = self.host.pr(7)
+        tmp, wt = merge.open_worktree(self.co, info, "main")
+        try:
+            cfg = ".github/stamp.json"
+            trailer = merge.do_claim(wt, cfg, "origin/main")
+            merge.commit_claim(wt, trailer)
+            self.assertEqual(merge.own_claim(wt, cfg, "origin/main"), "D-002")
+            self.assertIsNone(merge.own_claim(wt, cfg, "origin/no-such-ref"))
+        finally:
+            merge.drop_worktree(self.co, tmp, wt)
+
 class Unlock(Env):
     def test_unlock_removes_a_live_lock_and_reads_nothing_first(self):
         sha = sh(self.co, "git", "commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "unreadable, not ours")
