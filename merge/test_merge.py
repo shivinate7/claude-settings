@@ -365,6 +365,13 @@ class CutBranch(Env):
         self.assertFalse(self.exists())
         self.assertNotIn("refs/heads/feat", self.refs())
 
+    def test_a_gone_remote_ref_counts_as_deleted(self):
+        self.local_branch(False)
+        sh(self.co, "git", "push", "-q", "origin", "--delete", "feat")
+        out = self.cut(self.head())
+        self.assertIn("origin/feat: already deleted.", out)
+        self.assertNotIn("not deleted", out.split("feat here")[0])
+
     def test_local_only_commits_keep_the_branch(self):
         out = self.cut(self.local_branch(True))
         self.assertIn("local-only commits", out)

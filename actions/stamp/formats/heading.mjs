@@ -449,8 +449,8 @@ function git(root, args) {
 
 // Every numbered record in this tree, keyed for stamp.mjs's branch question. A folder kind keys
 // a number by its file, since a file keeps its name once numbered. A flat-file kind has no stable
-// per-record key but the number itself, so it keys by the kind and the number. stamp.mjs refuses
-// a removed number, so a swap under the same number can only be an in-place edit.
+// per-record key but the number itself, so it keys by the kind and the number. a deleted record
+// keeps its number taken through the history read in stamp.mjs.
 export function numberedRecords(root, config, h) {
   const out = [];
   for (const kind of config.kinds) {
@@ -459,6 +459,21 @@ export function numberedRecords(root, config, h) {
       const key = kind.folder ? `${kind.id}\0${rel}\0${n}` : `${kind.id}\0${n}`;
       out.push({ key, name: kind.folder ? rel : renderId(kind, n), kind: kind.id, n, rel, id: renderId(kind, n), prefix: kind.prefix });
     }
+  }
+  return out;
+}
+
+// The numbers one historical file holds, for stamp.mjs's highest-ever read: the kind's own
+// numbered headings, and for a folder kind the number in the filename. [] when `rel` is not a
+// record file of `kind`.
+export function numbersOfFile(kind, rel, text) {
+  const own = kind.folder ? rel.startsWith(kind.folder + "/") && !rel.slice(kind.folder.length + 1).includes("/") && rel.endsWith(".md") : rel === kind.file;
+  if (!own) return [];
+  const out = [...text.replace(/\r\n/g, "\n").matchAll(new RegExp(kind.numberedRegex, "gmu"))].map((m) => Number(m[1]));
+  if (kind.folder) {
+    const re = new RegExp("^" + escapeRe(kind.filenameTemplate).replace(escapeRe("{prefix}"), escapeRe(kind.prefix)).replace(escapeRe("{n}"), "(\\d+)").replace(escapeRe("{rest}"), "(?:.+)") + "$", "u");
+    const m = re.exec(rel.slice(kind.folder.length + 1));
+    if (m) out.push(Number(m[1]));
   }
   return out;
 }

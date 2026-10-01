@@ -967,11 +967,11 @@ test("--check refuses a renamed numbered record, and names the old key and the n
     }
   }));
 
-test("--check refuses a branch that removes a numbered record, in every shape", () =>
+test("--check passes a branch that removes a numbered record, in every shape", () =>
   withTempDir((root) => {
     const shapes = [
       {
-        name: "frontmatter", config: frontmatterConfig, ids: ["D-002"], remedy: "list its number",
+        name: "frontmatter", config: frontmatterConfig, 
         base: (d) => {
           write(d, "docs/decisions/a.md", "---\nid: D-001\nslug: a\ntitle: A\ndate: 2026-01-01\n---\n\nBody.\n");
           write(d, "docs/decisions/b.md", "---\nid: D-002\nslug: b\ntitle: B\ndate: 2026-01-02\n---\n\nBody.\n");
@@ -979,7 +979,7 @@ test("--check refuses a branch that removes a numbered record, in every shape", 
         branch: (d) => git(d, "rm", "-q", "docs/decisions/b.md"),
       },
       {
-        name: "frontmatter+filename", config: filenameConfig, ids: ["D2"], remedy: "list its number",
+        name: "frontmatter+filename", config: filenameConfig, 
         base: (d) => {
           write(d, "docs/decisions/D1_one.md", '---\nid: D1\nslug: one\ngloss: "one"\ndate: 2026-01-01\n---\n\nBody.\n');
           write(d, "docs/decisions/D2_two.md", '---\nid: D2\nslug: two\ngloss: "two"\ndate: 2026-01-02\n---\n\nBody.\n');
@@ -988,7 +988,7 @@ test("--check refuses a branch that removes a numbered record, in every shape", 
       },
       {
         // Both corpus shapes: a folder record, and a heading in the flat file, keyed by its number.
-        name: "heading", config: headingConfig, ids: ["D3", "C2"], remedy: "no retired list",
+        name: "heading", config: headingConfig, 
         base: (d) => { headingTree(d); write(d, "docs/codes.md", "# Codes\n\n## C1 — First\n\n## C2 — Second\n"); },
         branch: (d) => { git(d, "rm", "-q", "docs/decisions/D003-three.md"); write(d, "docs/codes.md", "# Codes\n\n## C1 — First\n"); },
       },
@@ -1003,11 +1003,7 @@ test("--check refuses a branch that removes a numbered record, in every shape", 
       sh.branch(dir);
       commit(dir, "a branch deletes a numbered record");
 
-      const problems = check(dir, sh.config(), LOCAL);
-      assert.equal(problems.length, sh.ids.length, `${sh.name}: ${problems.join(" | ")}`);
-      for (const id of sh.ids) {
-        assert.equal(problems.some((p) => p.startsWith(`${id} `) && p.includes("Numbers are permanent") && p.includes(sh.remedy)), true, `${sh.name}: ${id}`);
-      }
+      assert.deepEqual(check(dir, sh.config(), LOCAL), [], sh.name);
     }
   }));
 
@@ -1063,11 +1059,9 @@ function retiredBranch(root, base, branch) {
   return check(root, frontmatterConfig(), LOCAL);
 }
 
-test("retired list: an unlisted removal fails", () =>
+test("retired list: an unlisted removal passes", () =>
   withTempDir((root) => {
-    const problems = retiredBranch(root, null, (d) => git(d, "rm", "-q", "docs/decisions/b.md"));
-    assert.equal(problems.length, 1, problems.join(" | "));
-    assert.match(problems[0], /D-002 .*removed on a branch/);
+    assert.deepEqual(retiredBranch(root, null, (d) => git(d, "rm", "-q", "docs/decisions/b.md")), []);
   }));
 
 test("retired list: a removal named in RETIRED passes", () =>
@@ -1084,9 +1078,8 @@ test("retired list: a number removed from RETIRED fails, and a number added stay
     const problems = retiredBranch(root,
       (d) => write(d, "docs/decisions/RETIRED", "D-002 b\n"),
       (d) => { git(d, "rm", "-q", "docs/decisions/b.md"); write(d, "docs/decisions/RETIRED", "D-003 later\n"); });
-    assert.equal(problems.length, 2, problems.join(" | "));
-    assert.equal(problems.some((p) => /D-002 is removed from .*RETIRED.*append-only/.test(p)), true, problems.join(" | "));
-    assert.equal(problems.some((p) => /D-002 .*removed on a branch/.test(p)), true, problems.join(" | "));
+    assert.equal(problems.length, 1, problems.join(" | "));
+    assert.match(problems[0], /D-002 is removed from .*RETIRED.*append-only/);
   }));
 
 test("retired list: a listed top number is never allocated again, in both numbering modes", () =>
@@ -1160,6 +1153,71 @@ test("claim: a number in the base tip's RETIRED list is taken", () =>
   withTempDir((root) => {
     claimRepo(root, (d) => write(d, "docs/decisions/RETIRED", "D-009 gone\n"));
     assert.deepEqual(claim(root, frontmatterConfig(), "main").assigned.map((a) => a.id), ["D-010"]);
+  }));
+
+// main holds D-001 and D-002, then deletes D-002 (the top number). wt/lane adds a pending record.
+function deletedTopRepo(root) {
+  initRepo(root);
+  write(root, "docs/decisions/a.md", rec(1, "a"));
+  write(root, "docs/decisions/b.md", rec(2, "b"));
+  commit(root, "main holds D-002");
+  git(root, "rm", "-q", "docs/decisions/b.md");
+  commit(root, "main deletes D-002");
+  git(root, "checkout", "-q", "-b", "wt/lane");
+  write(root, "docs/decisions/p.md", pendingRec("p"));
+  commit(root, "branch adds a pending record");
+}
+
+test("claim: a number deleted from the base history is skipped", () =>
+  withTempDir((root) => {
+    deletedTopRepo(root);
+    assert.deepEqual(claim(root, frontmatterConfig(), "main").assigned.map((a) => a.id), ["D-003"]);
+  }));
+
+test("claim, heading shape: a deleted folder record and a deleted flat-file heading are skipped", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    headingTree(root);
+    write(root, "docs/codes.md", "# Codes\n\n## C1 — First\n\n## C2 — Second\n");
+    commit(root, "main");
+    git(root, "rm", "-q", "docs/decisions/D003-three.md");
+    write(root, "docs/codes.md", "# Codes\n\n## C1 — First\n");
+    commit(root, "main deletes D3 and C2");
+    git(root, "checkout", "-q", "-b", "wt/lane");
+    write(root, "docs/decisions/D-two-thing.md", "## D-two-thing — Two thing\n");
+    write(root, "docs/codes.md", "# Codes\n\n## C1 — First\n\n## C-new-code — New\n");
+    commit(root, "branch adds pending records");
+    assert.deepEqual(claim(root, headingConfig(), "main").assigned.map((a) => a.id).sort(), ["C3", "D4"]);
+  }));
+
+test("--check refuses a claim that reuses a number deleted from the base history", () =>
+  withTempDir((root) => {
+    deletedTopRepo(root);
+    write(root, "docs/decisions/p.md", rec(2, "p"));
+    commit(root, "claim D-002 again\n\nRecord-claim: D-002");
+    const problems = check(root, frontmatterConfig(), LOCAL);
+    assert.equal(problems.length, 1, problems.join(" | "));
+    assert.match(problems[0], /D-002 was claimed on this branch, and main holds or once held D-002/);
+  }));
+
+test("--check accepts a claim made after a deletion", () =>
+  withTempDir((root) => {
+    deletedTopRepo(root);
+    claimCommit(root);
+    assert.deepEqual(check(root, frontmatterConfig(), LOCAL), []);
+  }));
+
+test("claim: a shallow clone is refused with the remedy, and nothing is written", () =>
+  withTempDir((root) => {
+    const src = join(root, "src");
+    mkdirSync(src);
+    deletedTopRepo(src);
+    git(src, "checkout", "-q", "main");
+    const shallow = join(root, "shallow");
+    execFileSync("git", ["clone", "-q", "--depth", "1", "--no-local", `file://${src}`, shallow]);
+    write(shallow, "docs/decisions/p.md", pendingRec("p"));
+    assert.throws(() => claim(shallow, frontmatterConfig(), "origin/main"), /shallow.*fetch-depth: 0/s);
+    assert.equal(read(shallow, "docs/decisions/p.md").includes("id: pending"), true);
   }));
 
 test("claim: a base that git cannot read is refused, and the tree stays pending", () =>

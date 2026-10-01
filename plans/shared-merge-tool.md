@@ -235,3 +235,6 @@ Each lane is one Sonnet builder. When every lane in its "Waits for" cell has mer
 6. **Lane 9 is on hold.** Do not start it. The owner starts it later. The owner started lane 8.
 7. **A failed `afterMerge` or a failed local-main fast-forward gives a non-zero exit.** The
    merge stays, and the printed line says that it landed.
+8. **Numbered records may be deleted.** There is no retired list and no stub file. The claim
+   takes the next number past the highest number ever used for the kind, read from the base
+   ref's history. `check` accepts a removed record. A shallow clone refuses the claim.

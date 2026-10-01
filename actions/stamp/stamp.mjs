@@ -18,14 +18,15 @@
 // Modes:
 //   --stamp   number every pending record and rewrite cites. Writes the tree.
 //   --claim   --stamp before the merge, on a branch: the next number is above every number in the
-//             tree AND in the tip of --base (required), and above each RETIRED list of both. Then
-//             runs the config's `regenerate` command. Prints a last line `Record-claim: <ids>`,
+//             tree, in the tip of --base (required), in every commit of the base ref's history
+//             (a deleted record keeps its number), and in each RETIRED list. A shallow clone or an
+//             unreadable history refuses. Then runs the config's `regenerate` command. Prints a last line `Record-claim: <ids>`,
 //             the trailer for the claim commit. Writes the tree.
 //   --check   refuse a malformed record, a duplicate id, or a cite that points at no record. On
 //             the default branch, also refuse any pending record. Off it, refuse a
-//             record numbered on the branch, a renamed numbered record, and a removed number,
-//             against the base branch's tree. A number that a `Record-claim:` commit added is
-//             accepted, when the base tip does not hold it. Touches nothing. A base it cannot read fails the
+//             record numbered on the branch and a renamed numbered record, against the base
+//             branch's tree. A removed record is allowed. A number that a `Record-claim:` commit
+//             added is accepted, when the base ref never held it. Touches nothing. A base it cannot read fails the
 //             check when GITHUB_ACTIONS is "true", and prints UNKNOWN and exits 0 elsewhere.
 //
 // All take --config <path> (required) and --root <path> (default: cwd). --check also takes
@@ -607,6 +608,60 @@ function tipTaken(root, config, ref) {
   }
 }
 
+// The numbers one historical file holds, for kind `kind`: [] when it is not that kind's record file.
+function numbersOfFile(config, kind, rel, text) {
+  if (config.format === "heading") return headingFormat.numbersOfFile(kind, rel, text);
+  if (!rel.startsWith(kind.folder + "/") || rel.slice(kind.folder.length + 1).includes("/")) return [];
+  const name = rel.split("/").pop();
+  if (!globToRegExp(kind.filePattern).test(name) || makeMatcher(kind.excludeFiles)(name)) return [];
+  if (kind.location === "frontmatter+filename") {
+    const m = templateToPattern(kind.filenameTemplate, kind).exec(name);
+    return m ? [Number(m[1])] : [];
+  }
+  return idsFromValue(kind, readField(splitFrontMatter(text.replace(/\r\n/g, "\n")) ?? "", "id"));
+}
+
+const FETCH_REMEDY = "Fetch full history (actions/checkout with fetch-depth: 0, or git fetch --unshallow).";
+
+// Every number the tip of `ref` takes, plus every number any commit in its history ever held, per
+// kind id. A deleted record leaves its number here, so no claim reuses it: the next number is
+// above the highest ever used, not the highest still present. Throws when git cannot read the tip
+// or the history, or when the clone is shallow: a history that is cut short would hand out a low
+// number, so the read refuses instead.
+function everTaken(root, config, ref) {
+  const out = tipTaken(root, config, ref);
+  let log;
+  try {
+    if (gitOut(root, ["rev-parse", "--is-shallow-repository"]).toString().trim() === "true") {
+      throw new Error("the clone is shallow");
+    }
+    log = gitOut(root, ["log", "-m", "--no-renames", "--raw", "-z", "--format=", ref, "--", ...recordPaths(config)]).toString("utf8");
+  } catch (e) {
+    throw new Error(`git cannot read the full history of ${ref} (${String(e.message).split("\n")[0]}), so a number deleted from it cannot be told from a free one. ${FETCH_REMEDY}`);
+  }
+  const files = new Map(); // oid -> Set of paths
+  const toks = log.split("\0").map((t) => t.replace(/^\n+/, ""));
+  for (let i = 0; i + 1 < toks.length; i++) {
+    const m = /^:\d+ \d+ ([0-9a-f]+) ([0-9a-f]+) \S+$/.exec(toks[i]);
+    if (!m) continue;
+    for (const oid of [m[1], m[2]]) if (!/^0+$/.test(oid)) files.set(oid, (files.get(oid) ?? new Set()).add(toks[i + 1]));
+    i += 1;
+  }
+  if (!files.size) return out;
+  const oids = [...files.keys()];
+  const blobs = gitOut(root, ["cat-file", "--batch"], oids.join("\n") + "\n");
+  let at = 0;
+  for (const oid of oids) {
+    const nl = blobs.indexOf(0x0a, at);
+    const size = Number(blobs.subarray(at, nl).toString("utf8").split(" ")[2]);
+    if (!Number.isFinite(size)) throw new Error(`git cannot read blob ${oid} of ${ref}. ${FETCH_REMEDY}`);
+    const text = blobs.subarray(nl + 1, nl + 1 + size).toString("utf8");
+    at = nl + 1 + size + 1;
+    for (const rel of files.get(oid)) for (const kind of config.kinds) for (const n of numbersOfFile(config, kind, rel, text)) out.get(kind.id).add(n);
+  }
+  return out;
+}
+
 // The (kind, number) pairs one commit's tree holds. A commit git cannot read, such as the parent
 // of a root commit, holds none.
 function numbersAt(root, config, commit) {
@@ -651,18 +706,16 @@ function claimedByTrailer(root, config, base) {
 //     same key, in the base tree. A new record with a number fails, and so does a record that was
 //     pending on the base and has a number now. A record whose number the base holds under
 //     another key was renamed, and gets its own message.
-//   - every number the base tree holds, per kind, must still be held by a record of this tree, or
-//     be named in this tree's RETIRED list. Numbers are permanent. The list is append-only: a
-//     number the base list names stays named. The allocator never hands out a listed number. This
-//     also closes a same-number swap in a kind keyed by its number alone: the swap can only be an
-//     in-place edit now.
+//   - a record may be deleted. Its number stays taken: the claim reads the history of the base ref
+//     (everTaken) and never hands the number out again. A RETIRED list, where a format has one,
+//     is append-only: a number the base list names stays named.
 // The base tree is the merge base of HEAD and the base ref, never the ref's tip: the tip may have
 // taken the same number since, for another record, and that reads as "already there" and hides
 // the defect. In a pull_request merge commit the merge base IS the base ref's tip, so both read
 // the same tree there.
 //   - one exception. A number that a `Record-claim:` commit of the branch added is accepted when
-//     the tip of the base ref does not hold it. The commit must have added the number itself (the tool claims before the merge, against the
-//     tip). A number with no such trailer stays refused, and so does one the tip took since.
+//     the base ref, tip and history, never held it. The commit must have added the number itself (the tool claims before the merge, against the
+//     tip). A number with no such trailer stays refused, and so does one the base ref took since.
 //
 // A base that cannot be read comes back as `unknown`, never as a pass. check() decides whether
 // that fails the run. A check that did not run is not green.
@@ -687,7 +740,6 @@ function branchNumbered(root, config, opts) {
     const numberOf = (r) => `${r.kind}\0${r.n}`;
     const baseKeys = new Set(before.map((r) => r.key));
     const nowKeys = new Set(now.map((r) => r.key));
-    const held = new Set(now.map(numberOf));
     const baseByNumber = new Map();
     for (const r of before) if (!baseByNumber.has(numberOf(r))) baseByNumber.set(numberOf(r), r);
     const problems = [];
@@ -710,9 +762,9 @@ function branchNumbered(root, config, opts) {
     for (const r of now) {
       if (baseKeys.has(r.key) || defaultHas(r)) continue;
       if (claims.has(r.id)) {
-        tip ??= tipTaken(root, config, ref);
+        tip ??= everTaken(root, config, ref);
         if (tip.get(r.kind).has(r.n)) {
-          problems.push(`${r.rel}: ${r.id} was claimed on this branch, and ${ref} holds ${r.id} now. ` +
+          problems.push(`${r.rel}: ${r.id} was claimed on this branch, and ${ref} holds or once held ${r.id}. ` +
             `Merge ${ref} into the branch, write the pending marker again, and claim again.`);
         }
         continue;
@@ -734,14 +786,6 @@ function branchNumbered(root, config, opts) {
     const listed = (dir_, kind) => (config.format === "heading" ? new Set() : retiredNumbers(dir_, kind).nums);
     const retiredNow = new Set();
     for (const kind of config.kinds) for (const n of listed(root, kind)) retiredNow.add(`${kind.id}\0${n}`);
-    for (const r of before) {
-      if (!held.has(numberOf(r)) && !retiredNow.has(numberOf(r))) {
-        problems.push(`${r.id} (${r.rel} in ${ref}) is removed on a branch, and no record of this tree holds it. ` +
-          `Numbers are permanent. ` + (config.format === "heading"
-            ? `The heading format has no retired list. Restore the record.`
-            : `To delete a record, list its number in its folder's ${RETIRED_FILE} file.`));
-      }
-    }
     for (const kind of config.kinds) {
       for (const n of listed(dir, kind)) {
         if (!retiredNow.has(`${kind.id}\0${n}`)) {
@@ -799,7 +843,7 @@ export function check(root, config, opts = {}) {
 export function claim(root, config, baseTip) {
   let taken;
   try {
-    taken = tipTaken(root, config, baseTip);
+    taken = everTaken(root, config, baseTip);
   } catch (e) {
     throw new Error(`git cannot read ${baseTip} (${String(e.message).split("\n")[0]}). Nothing was written`);
   }
