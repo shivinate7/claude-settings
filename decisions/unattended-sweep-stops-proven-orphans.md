@@ -92,8 +92,8 @@ touched.
 
 ## An unattended run may remove a worktree
 
-Owner ruling, 2026-10-01: an unattended `--confirm` run is the daily job or
-SessionEnd. Both of these must be true for it to remove a worktree:
+Owner ruling, 2026-10-01: every `--confirm` run, the daily job and SessionEnd
+included, needs both of these to remove a worktree:
 
 - Merged. HEAD holds no commit that the default branch lacks. The test is the
   redundancy test of `a-branch-is-redundant-by-patch-not-by-ancestry.md`, by
@@ -108,12 +108,13 @@ SessionEnd. Both of these must be true for it to remove a worktree:
 
 The old conditions stay. The worktree must be clean and fully pushed. No live
 session and no process may be inside. The lock must be gone, or its host
-process must be gone. A person's own `--confirm` run from a terminal keeps
-those old conditions alone.
+process must be gone.
 
-The signal is the flag `--unattended`. The launchd plist, the Task Scheduler
-task and the SessionEnd hook pass it. Without it, the run is a person's. The
-agent-end reap stops processes and removes no worktree, so it needs no flag.
+Strict is the default. A job that an older installer wrote passes no flag, so
+it is strict at once, with no reinstall. A stale installed job fails safe. A
+person who wants the old rules passes `--attended`. The launchd plist, the
+Task Scheduler task and the SessionEnd hook never pass it. The agent-end reap
+stops processes and removes no worktree, so it needs no flag.
 
 Why: the 03:17 daily run on 2026-10-01 removed q_max's live wave 15
 integration worktree (`w15-port`). It was clean and pushed, but not merged,
@@ -121,9 +122,9 @@ and in use (`launchd-sweep.log`, line 2799). Pushed proves that a copy exists.
 It does not prove that the work is done. The reasons for the old conditions
 are in `the-janitor-is-one-machine-wide-sweep.md`.
 
-The mechanism: `janitor/sweep.py`'s `decide_worktree`, `_unattended_keep` and
-`worktree_idle_seconds`. `janitor/test_sweep.py`'s `UnattendedWorktreeTests`
-proves them. `janitor/mutate_sweep.py` carries 14 mutants for them.
+The mechanism: `janitor/sweep.py`'s `decide_worktree`, `_strict_keep` and
+`worktree_idle_seconds`. `janitor/test_sweep.py`'s `StrictWorktreeTests`
+proves them. `janitor/mutate_sweep.py` carries 15 mutants for them.
 
 ## Dead-rooted servers follow the same gate
 

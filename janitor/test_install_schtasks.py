@@ -115,7 +115,7 @@ class GeneratesTaskXmlForAnOrdinaryCheckout(unittest.TestCase):
         self.assertEqual(command.text, sys.executable)
         self.assertIn("sweep.py", arguments.text)
         self.assertIn("--confirm", arguments.text)
-        self.assertIn("--unattended", arguments.text)
+        self.assertNotIn("--attended", arguments.text)  # strict is the default
         # No --discover root: sweep.py resolves its own roots at run time (janitor.roots,
         # falling back to its own default candidate list). See the module docstring.
         self.assertNotIn("--discover", arguments.text)

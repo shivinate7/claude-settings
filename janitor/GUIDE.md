@@ -122,15 +122,16 @@ The sweep keeps a worktree with a commit that is on no remote branch, and the
 reason is `unpushed`. This holds for every worktree, locked or not. A detached
 HEAD counts. A repository with no remote keeps every worktree.
 
-An unattended run adds two more keeps. The daily job and the SessionEnd hook
-pass `--unattended`, and a person's run from a terminal does not. An
-unattended run removes a worktree only when it is merged and idle 1 hour.
-Merged means that HEAD holds no commit the default branch lacks, by ancestry
-or by patch. A tree that is only pushed is kept, and the reason is
-`unmerged`. Idle means that the newest mtime of the worktree's own `index`,
-`HEAD` and `logs/HEAD` under `.git/worktrees/<name>` is 60 minutes old. A
-younger tree is kept, and the reason is `recently-active`. A time that cannot
-be read keeps the tree (`unreadable-subject`). See
+Every `--confirm` run adds two more keeps. It removes a worktree only when
+the worktree is merged and idle 1 hour. Merged means that HEAD holds no
+commit the default branch lacks, by ancestry or by patch. A tree that is
+only pushed is kept, and the reason is `unmerged`. Idle means that the
+newest mtime of the worktree's own `index`, `HEAD` and `logs/HEAD` under
+`.git/worktrees/<name>` is 60 minutes old. A younger tree is kept, and the
+reason is `recently-active`. A time that cannot be read keeps the tree
+(`unreadable-subject`). Strict is the default, so a job that an older
+installer wrote is strict with no reinstall. A person passes `--attended`
+for the old rules. See
 `decisions/unattended-sweep-stops-proven-orphans.md`.
 
 The sweep keeps a worktree that any process sits inside, not only a
@@ -285,8 +286,7 @@ take the commits.
 
 ## How you run it every day
 
-Two installers write a scheduled job that runs the sweep with `--confirm
---unattended`.
+Two installers write a scheduled job that runs the sweep with `--confirm`.
 Neither one runs that job itself.
 
 `janitor/install_launchd.py` writes a `launchd` `.plist` under

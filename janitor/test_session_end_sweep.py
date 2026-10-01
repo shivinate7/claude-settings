@@ -529,8 +529,8 @@ class HookSweepsNothingWhenTooLittleBudgetRemains(unittest.TestCase):
                        "nothing was swept, so the reapable branch must still be there")
 
 
-    def test_the_sweep_is_passed_the_unattended_flag(self):
-        repo = os.path.join(ROOT, "budget_unattended_repo")
+    def test_the_sweep_is_not_passed_the_attended_flag(self):
+        repo = os.path.join(ROOT, "budget_strict_repo")
         make_repo(repo)
         calls = []
         real_run = self.mod.subprocess.run
@@ -549,7 +549,7 @@ class HookSweepsNothingWhenTooLittleBudgetRemains(unittest.TestCase):
             self.mod.subprocess.run = real_run
         self.assertEqual(len(calls), 1)
         self.assertIn("--confirm", calls[0])
-        self.assertIn("--unattended", calls[0])
+        self.assertNotIn("--attended", calls[0])  # strict is the default
 
 
 class RemainingSweepTimeoutRefusesAnUntrustworthyElapsedReading(unittest.TestCase):

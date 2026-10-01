@@ -217,7 +217,7 @@ def handle(hook, start=None, elapsed_seconds=None) -> None:
 
     try:
         subprocess.run(
-            [sys.executable, SWEEP_PATH, root, "--confirm", "--unattended"],
+            [sys.executable, SWEEP_PATH, root, "--confirm"],
             capture_output=True, text=True, timeout=sweep_timeout,
         )
     except Exception:

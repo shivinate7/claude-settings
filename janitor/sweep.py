@@ -478,7 +478,7 @@ def fully_pushed(path: str):
     return not answer.stdout.strip()
 
 
-UNATTENDED_IDLE_SECONDS = 60 * 60  # owner ruling: an unattended run waits 1 hour of git quiet
+STRICT_IDLE_SECONDS = 60 * 60  # owner ruling: a tree needs 1 hour of git quiet
 
 
 def worktree_idle_seconds(path: str, now=None):
@@ -501,8 +501,8 @@ def worktree_idle_seconds(path: str, now=None):
     return (time.time() if now is None else now) - newest
 
 
-def _unattended_keep(where: str, path: str, idle):
-    """The keep decision an unattended run adds, or None when the tree is merged and idle.
+def _strict_keep(where: str, path: str, idle):
+    """The keep decision a run adds unless a person passed --attended, or None when the tree is merged and idle.
     Merged: HEAD holds no commit the default branch lacks, by ancestry or by patch
     (decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md). Pushed alone is not merged."""
     base = guard.resolve_default_base(where)
@@ -518,17 +518,18 @@ def _unattended_keep(where: str, path: str, idle):
                 "reason": "unmerged: HEAD has a commit the default branch lacks"}
     if idle is None:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
-    if idle < UNATTENDED_IDLE_SECONDS:
+    if idle < STRICT_IDLE_SECONDS:
         return {"path": path, "action": "keep",
                 "reason": "recently-active: git activity %d minutes ago" % (idle // 60)}
     return None
 
 
-def decide_worktree(where: str, entry: dict, unattended: bool = False):
-    """Return one decision dict: {"path", "action": "reap"|"keep", "reason"}. UNATTENDED adds
-    two keeps (merged, idle 1 hour) for a run no person watches."""
+def decide_worktree(where: str, entry: dict, attended: bool = False):
+    """Return one decision dict: {"path", "action": "reap"|"keep", "reason"}. Strict by default: a
+    worktree also needs to be merged and idle 1 hour, so a stale installed job fails safe.
+    ATTENDED (a person's run) skips those two keeps."""
     # Read first: `git status` below can rewrite the index and make every tree look active.
-    idle = worktree_idle_seconds(entry["path"]) if unattended else None
+    idle = worktree_idle_seconds(entry["path"]) if not attended else None
     path = entry["path"]
     dirty = guard.porcelain(path)
     if dirty is None:
@@ -555,8 +556,8 @@ def decide_worktree(where: str, entry: dict, unattended: bool = False):
     if not pushed:
         return {"path": path, "action": "keep",
                 "reason": "unpushed: HEAD has a commit on no remote branch"}
-    if unattended:
-        kept = _unattended_keep(where, path, idle)
+    if not attended:
+        kept = _strict_keep(where, path, idle)
         if kept:
             return kept
     # The pre-removal process check (brief point 4). ANY process at all, not only a listener --
@@ -2010,7 +2011,7 @@ MODES = ("full", "tier1", "branches")
 
 
 def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "full",
-               unattended: bool = False):
+               attended: bool = False):
     """One repository. `mode` "full" is the whole sweep. "tier1" acts for real, with no
     --confirm, and only on stale registrations and husks: no worktree, branch or process work.
     "branches" reaps branches only (preview without --confirm), removes no worktree, and holds
@@ -2075,7 +2076,7 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
             # Could not tell whether this IS the primary checkout. Rule 7's direction: an
             # unreadable subject means keep, never a guess that it is safe to evaluate.
             return {"path": entry["path"], "action": "keep", "reason": "unreadable-subject"}
-        return decide_worktree(root, entry, unattended)
+        return decide_worktree(root, entry, attended)
 
     judged = entries if mode == "full" else []
     for entry, decision in zip(judged, _pmap(judge, judged, confirm)):
@@ -2290,9 +2291,9 @@ def main(argv=None) -> int:
                          help="sweep DIR's own checkouts, used only when no ROOT is given")
     parser.add_argument("--confirm", action="store_true",
                          help="actually delete branches, worktrees and leftover folders (husks), or drop tombstones")
-    parser.add_argument("--unattended", action="store_true",
-                         help="a run no person watches (daily job, session end): remove a "
-                              "worktree only when it is merged and idle 1 hour")
+    parser.add_argument("--attended", action="store_true",
+                         help="a person's run: skip the merged and idle-1-hour keeps. Without "
+                              "it, --confirm removes a worktree only when it is both")
     parser.add_argument("--purge", action="store_true",
                          help="purge tombstones past 90 days instead of sweeping")
     parser.add_argument("--restore-log", metavar="PATH",
@@ -2364,7 +2365,7 @@ def main(argv=None) -> int:
 
 def _sweep_roots(args, roots, restore_log_path, mode):
     results = list(_pmap(
-        lambda root: sweep_repo(root, args.confirm, restore_log_path, mode, args.unattended),
+        lambda root: sweep_repo(root, args.confirm, restore_log_path, mode, args.attended),
         roots, args.confirm or mode == "tier1", _ROOT_POOL))
     print_sweep_report(results, args.confirm or mode == "tier1")
     if mode != "full":

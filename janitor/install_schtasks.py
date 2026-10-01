@@ -82,7 +82,7 @@ def build_task_xml(repo_root: str, hour: int, minute: int) -> bytes:
     root: `sweep.py` resolves its own roots at run time (see the module docstring above).
     """
     sweep_py = os.path.join(repo_root, "janitor", "sweep.py")
-    arguments = "%s --confirm --unattended" % _quote_arg(sweep_py)
+    arguments = "%s --confirm" % _quote_arg(sweep_py)
     ET.register_namespace("", TASK_XML_NAMESPACE)
     task = ET.Element("{%s}Task" % TASK_XML_NAMESPACE, attrib={"version": "1.2"})
 

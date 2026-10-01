@@ -693,7 +693,7 @@ class WorktreeDecisionTests(unittest.TestCase):
         self.assertEqual(decision["reason"], "unreadable-subject")
 
     def test_clean_unlocked_no_session_worktree_is_removable(self):
-        decision = sweep.decide_worktree(self.root, self.entry_for(self.removable))
+        decision = sweep.decide_worktree(self.root, self.entry_for(self.removable), attended=True)
         self.assertEqual(decision["action"], "reap")
         self.assertEqual(decision["reason"], "removable")
 
@@ -771,7 +771,7 @@ class StaleAgentLockTests(unittest.TestCase):
 
     def decide(self, name):
         entry = self.entries[os.path.normcase(os.path.realpath(self.wt[name]))]
-        return sweep.decide_worktree(self.root, entry)
+        return sweep.decide_worktree(self.root, entry, attended=True)
 
     def test_dead_pid_lock_is_stale_and_pushed_worktree_is_removable(self):
         decision = self.decide("dead")
@@ -810,7 +810,8 @@ class StaleAgentLockTests(unittest.TestCase):
     def test_remove_unlocks_then_removes_without_force(self):
         path = self.add("removal", self.reasons["dead"])
         decision = sweep.decide_worktree(
-            self.root, {"path": path, "locked_reason": self.reasons["dead"]})
+            self.root, {"path": path, "locked_reason": self.reasons["dead"]},
+            attended=True)
         self.assertEqual(decision["action"], "reap")
         sweep.remove_worktree(self.root, path, decision)
         self.assertNotIn("error", decision)
@@ -867,7 +868,7 @@ class StaleAgentLockTests(unittest.TestCase):
         make_repo(root, {"f.txt": "base\n"})
         path = os.path.join(ROOT, "no-remote-wt")
         run_vcs(root, "worktree", "add", "-q", "--detach", path, "main")
-        decision = sweep.decide_worktree(root, {"path": path})
+        decision = sweep.decide_worktree(root, {"path": path}, attended=True)
         self.assertEqual(decision["action"], "keep")
         self.assertTrue(decision["reason"].startswith("unpushed:"))
 
@@ -1106,13 +1107,13 @@ class WorktreeProcessPreCheckTests(unittest.TestCase):
         self.fail("no worktree-list entry found for %r" % path)
 
     def test_a_process_inside_the_worktree_keeps_it_and_names_the_pid(self):
-        decision = sweep.decide_worktree(self.root, self.entry_for(self.occupied))
+        decision = sweep.decide_worktree(self.root, self.entry_for(self.occupied), attended=True)
         self.assertEqual(decision["action"], "keep")
         self.assertTrue(decision["reason"].startswith("process-inside:"))
         self.assertIn(str(self.pid), decision["reason"])
 
     def test_an_empty_worktree_is_still_removable(self):
-        decision = sweep.decide_worktree(self.root, self.entry_for(self.empty))
+        decision = sweep.decide_worktree(self.root, self.entry_for(self.empty), attended=True)
         self.assertEqual(decision["action"], "reap")
         self.assertEqual(decision["reason"], "removable")
 
@@ -1133,10 +1134,10 @@ class WorktreeProcessPreCheckTests(unittest.TestCase):
             # macOS reads every cwd in ONE lsof call: no per-pid read left to break. The analog
             # is a table that holds other processes only (lsof skipped the unreadable ones).
             with _Stub("_all_cwds_macos", lambda: [(os.getpid(), "/elsewhere")]):
-                decision = sweep.decide_worktree(self.root, self.entry_for(self.empty))
+                decision = sweep.decide_worktree(self.root, self.entry_for(self.empty), attended=True)
         else:
             with _BreakRead(_platform_read_name("cwd")):
-                decision = sweep.decide_worktree(self.root, self.entry_for(self.empty))
+                decision = sweep.decide_worktree(self.root, self.entry_for(self.empty), attended=True)
         self.assertEqual(decision["action"], "reap")
         self.assertEqual(decision["reason"], "removable")
 
@@ -1146,7 +1147,7 @@ class WorktreeProcessPreCheckTests(unittest.TestCase):
         remove no worktree" -- this is the whole PID listing itself failing, not one pid's cwd."""
         name = "_all_cwds_macos" if sys.platform == "darwin" else "list_all_pids"
         with _Stub(name, lambda: None):
-            decision = sweep.decide_worktree(self.root, self.entry_for(self.empty))
+            decision = sweep.decide_worktree(self.root, self.entry_for(self.empty), attended=True)
         self.assertEqual(decision["action"], "keep")
         self.assertEqual(decision["reason"], "unreadable-subject")
 
@@ -1808,7 +1809,7 @@ class WorktreeRemovalTests(unittest.TestCase):
         self.assertTrue(entries is not None and len(entries) > 0)
 
         log_path = os.path.join(ROOT, "wt-remove.log")
-        result = sweep.sweep_repo(root, confirm=True, restore_log_path=log_path)
+        result = sweep.sweep_repo(root, confirm=True, restore_log_path=log_path, attended=True)
         self.assertIsNone(result["refused"])
         matches = [w for w in result["worktrees"]
                    if os.path.normcase(os.path.realpath(w["path"]))
@@ -1839,7 +1840,7 @@ class SameRunBranchCutTests(unittest.TestCase):
         return found[0]
 
     def _sweep(self, root, confirm):
-        return sweep.sweep_repo(root, confirm, os.path.join(ROOT, "cut.log"))
+        return sweep.sweep_repo(root, confirm, os.path.join(ROOT, "cut.log"), attended=True)
 
     def test_preview_releases_the_branch_of_a_reap_worktree(self):
         root, _wt = self._repo("preview")
@@ -1919,7 +1920,7 @@ class SingleTierModeTests(unittest.TestCase):
 
     def test_branches_reaps_a_merged_branch_but_removes_no_worktree_and_holds_theirs(self):
         root, live = self._fixture("branches")
-        code, _ = self._main("--root", root, "--branches", "--confirm")
+        code, _ = self._main("--root", root, "--branches", "--confirm", "--attended")
         self.assertEqual(code, 0)
         left = sweep.list_local_branches(root)
         self.assertNotIn("merged-b", left)
@@ -2042,7 +2043,7 @@ class ConfirmGateTests(unittest.TestCase):
         ))
 
         log_path = os.path.join(ROOT, "confirm-gate.log")
-        result = sweep.sweep_repo(root, confirm=False, restore_log_path=log_path)
+        result = sweep.sweep_repo(root, confirm=False, restore_log_path=log_path, attended=True)
         self.assertIsNone(result["refused"])
 
         # The preview must have NAMED both subjects as reapable. A preview that silently reported
@@ -2623,7 +2624,7 @@ class ParallelPreviewTests(unittest.TestCase):
 
         def stop(*a, **k):
             raise Stop
-        args = types.SimpleNamespace(confirm=False, unattended=False)
+        args = types.SimpleNamespace(confirm=False, attended=False)
 
         def run():
             with _Stub("print_sweep_report", stop):
@@ -2805,9 +2806,9 @@ class AgentEndReapTests(unittest.TestCase):
             self.assertIsNone(self.reap.handle(raw).get("target"))
 
 
-class UnattendedWorktreeTests(unittest.TestCase):
-    """Owner ruling: an unattended run removes a worktree only when it is merged (by patch, not
-    ancestry) and idle 1 hour. A person's run keeps today's rules."""
+class StrictWorktreeTests(unittest.TestCase):
+    """Owner ruling: --confirm removes a worktree only when it is merged (by patch, not
+    ancestry) and idle 1 hour. A person passes --attended for the old rules."""
 
     @classmethod
     def setUpClass(cls):
@@ -2853,41 +2854,41 @@ class UnattendedWorktreeTests(unittest.TestCase):
             if os.path.exists(target):
                 os.utime(target, (then, then))
 
-    def decide(self, path, unattended=True):
-        return sweep.decide_worktree(self.root, self.entry(path), unattended)
+    def decide(self, path, attended=False):
+        return sweep.decide_worktree(self.root, self.entry(path), attended)
 
-    def test_unattended_keeps_a_pushed_but_unmerged_tree(self):
+    def test_strict_keeps_a_pushed_but_unmerged_tree(self):
         self.age(self.unmerged, 7200)
         decision = self.decide(self.unmerged)
         self.assertEqual(decision["action"], "keep")
         self.assertTrue(decision["reason"].startswith("unmerged"), decision["reason"])
 
-    def test_unattended_keeps_a_merged_tree_active_10_minutes_ago(self):
+    def test_strict_keeps_a_merged_tree_active_10_minutes_ago(self):
         self.age(self.merged, 600)
         decision = self.decide(self.merged)
         self.assertEqual(decision["action"], "keep")
         self.assertTrue(decision["reason"].startswith("recently-active"), decision["reason"])
 
-    def test_unattended_activity_in_any_one_admin_file_keeps_the_tree(self):
+    def test_strict_activity_in_any_one_admin_file_keeps_the_tree(self):
         for name in ("index", "HEAD", os.path.join("logs", "HEAD")):
             self.age(self.merged, 7200, only=name)
             decision = self.decide(self.merged)
             self.assertEqual(decision["action"], "keep", name)
             self.assertTrue(decision["reason"].startswith("recently-active"), name)
 
-    def test_unattended_removes_a_merged_tree_idle_2_hours(self):
+    def test_strict_removes_a_merged_tree_idle_2_hours(self):
         self.age(self.merged, 7200)
         decision = self.decide(self.merged)
         self.assertEqual(decision["action"], "reap")
         self.assertEqual(decision["reason"], "removable")
 
-    def test_unattended_removes_a_tree_merged_by_patch_idle_2_hours(self):
+    def test_strict_removes_a_tree_merged_by_patch_idle_2_hours(self):
         self.age(self.patch, 7200)
         decision = self.decide(self.patch)
         self.assertEqual(decision["action"], "reap")
         self.assertEqual(decision["reason"], "removable")
 
-    def test_unattended_keeps_a_tree_whose_idle_time_cannot_be_read(self):
+    def test_strict_keeps_a_tree_whose_idle_time_cannot_be_read(self):
         with mock.patch.object(sweep, "worktree_idle_seconds", return_value=None):
             decision = self.decide(self.merged)
         self.assertEqual(decision["action"], "keep")
@@ -2896,31 +2897,50 @@ class UnattendedWorktreeTests(unittest.TestCase):
 
     def test_a_persons_run_removes_an_unmerged_active_tree_as_before(self):
         self.age(self.unmerged, 60)
-        decision = self.decide(self.unmerged, unattended=False)
+        decision = self.decide(self.unmerged, attended=True)
         self.assertEqual(decision["action"], "reap")
         self.assertEqual(decision["reason"], "removable")
 
-    def test_the_unattended_flag_reaches_the_sweep(self):
+    def test_the_attended_flag_reaches_the_sweep(self):
         self.age(self.unmerged, 7200)
-        result = sweep.sweep_repo(self.root, False, os.path.join(ROOT, "unatt.log"),
-                                  unattended=True)
-        mine = [d for d in result["worktrees"]
-                if os.path.normcase(os.path.realpath(d["path"]))
-                == os.path.normcase(os.path.realpath(self.unmerged))]
-        self.assertEqual(len(mine), 1)
-        self.assertTrue(mine[0]["reason"].startswith("unmerged"), mine[0]["reason"])
+        def mine(**kw):
+            result = sweep.sweep_repo(self.root, False, os.path.join(ROOT, "unatt.log"), **kw)
+            found = [d for d in result["worktrees"]
+                     if os.path.normcase(os.path.realpath(d["path"]))
+                     == os.path.normcase(os.path.realpath(self.unmerged))]
+            self.assertEqual(len(found), 1)
+            return found[0]["reason"]
 
-    def test_main_takes_the_unattended_flag(self):
+        self.assertTrue(mine().startswith("unmerged"))  # strict with no flag at all
+        self.age(self.unmerged, 7200)
+        self.assertEqual(mine(attended=True), "removable")
+
+    def test_strict_removes_a_detached_merged_tree_and_keeps_a_detached_unmerged_one(self):
+        merged = os.path.join(ROOT, "unatt-detached-merged")
+        run_vcs(self.root, "worktree", "add", "-q", "--detach", merged, "main")
+        unmerged = os.path.join(ROOT, "unatt-detached-unmerged")
+        run_vcs(self.root, "worktree", "add", "-q", "--detach", unmerged, "lane-unmerged")
+        entries = {os.path.normcase(os.path.realpath(e["path"])): e
+                   for e in sweep.parse_worktree_list(self.root)}
+        for path, action, reason in ((merged, "reap", "removable"),
+                                     (unmerged, "keep", "unmerged")):
+            self.age(path, 7200)
+            decision = sweep.decide_worktree(
+                self.root, entries[os.path.normcase(os.path.realpath(path))])
+            self.assertEqual(decision["action"], action, path)
+            self.assertTrue(decision["reason"].startswith(reason), decision["reason"])
+
+    def test_main_takes_the_attended_flag(self):
         seen = []
 
-        def spy(root, confirm, log, mode="full", unattended=False):
-            seen.append(unattended)
+        def spy(root, confirm, log, mode="full", attended=False):
+            seen.append(attended)
             return {"root": root, "refused": "opted-out", "branches": [], "worktrees": [],
                     "listeners": [], "pruned": None, "husks": []}
 
         with mock.patch.object(sweep, "sweep_repo", spy), \
                 contextlib.redirect_stdout(io.StringIO()):
-            sweep.main(["--root", self.root, "--unattended",
+            sweep.main(["--root", self.root, "--attended",
                         "--restore-log", os.path.join(ROOT, "unatt.log")])
             sweep.main(["--root", self.root, "--restore-log", os.path.join(ROOT, "unatt.log")])
         self.assertEqual(seen, [True, False])
