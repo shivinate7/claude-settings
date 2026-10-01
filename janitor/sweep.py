@@ -1523,13 +1523,14 @@ def _memo(key, compute):
         return _RUN[key]
 
 
-def _pmap(fn, items, pool=None):
+def _pmap(fn, items, acts, pool=None):
     """`map(fn, items)` in order. In a preview the calls run on a few threads, because the
-    per-branch and per-worktree reads are many separate `git` runs that nothing can share. A run
-    that acts gets the lazy `map`, so each decision still comes before the act that follows it."""
+    per-branch and per-worktree reads are many separate `git` runs that nothing can share. ACTS
+    is True when the caller acts on each result (confirm): that always gets the lazy `map`,
+    whatever the pool state, so each decision still comes before the act that follows it."""
     items = list(items)
     pool = pool or _POOL
-    if pool is None or len(items) < 2:
+    if acts or pool is None or len(items) < 2:
         return map(fn, items)
     return pool.map(fn, items)
 
@@ -2018,7 +2019,7 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
         return decide_worktree(root, entry)
 
     judged = entries if mode == "full" else []
-    for entry, decision in zip(judged, _pmap(judge, judged)):
+    for entry, decision in zip(judged, _pmap(judge, judged, confirm)):
         if decision is None:
             continue
         result["worktrees"].append(decision)
@@ -2034,7 +2035,7 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
 
     for branch, decision in zip(branches, _pmap(
             lambda b: decide_branch(root, base, b, protected_prefixes, checked_out_branches),
-            branches)):
+            branches, confirm)):
         result["branches"].append(decision)
         if confirm and decision["action"] == "reap":
             reap_branch(root, branch, decision, restore_log_path)
@@ -2301,7 +2302,7 @@ def main(argv=None) -> int:
 
 def _sweep_roots(args, roots, restore_log_path, mode):
     results = list(_pmap(lambda root: sweep_repo(root, args.confirm, restore_log_path, mode),
-                         roots, _ROOT_POOL))
+                         roots, args.confirm or mode == "tier1", _ROOT_POOL))
     print_sweep_report(results, args.confirm or mode == "tier1")
     if mode != "full":
         return 0

@@ -2506,10 +2506,21 @@ class ParallelPreviewTests(unittest.TestCase):
 
     def test_pmap_is_lazy_and_in_order_outside_a_preview(self):
         seen = []
-        out = sweep._pmap(lambda i: seen.append(i) or i, [1, 2, 3])
+        out = sweep._pmap(lambda i: seen.append(i) or i, [1, 2, 3], False)
         self.assertEqual(seen, [])
         self.assertEqual(next(iter(out)), 1)
         self.assertEqual(seen, [1])
+
+    def test_a_run_that_acts_gets_one_decision_at_a_time_even_with_the_pool_open(self):
+        undo = sweep._begin_preview_cache()
+        try:
+            seen = []
+            out = sweep._pmap(lambda i: seen.append(i) or i, [1, 2, 3], True)
+            self.assertEqual(seen, [])
+            self.assertEqual(next(iter(out)), 1)
+            self.assertEqual(seen, [1])
+        finally:
+            undo()
 
     def test_pmap_runs_a_preview_in_parallel_and_returns_input_order(self):
         undo = sweep._begin_preview_cache()
@@ -2521,7 +2532,7 @@ class ParallelPreviewTests(unittest.TestCase):
                 time.sleep((2 - i) * 0.2)
                 return i
             try:
-                got = list(sweep._pmap(both, [0, 1]))
+                got = list(sweep._pmap(both, [0, 1], False))
             except threading.BrokenBarrierError:
                 self.fail("the two calls did not run at the same time")
             self.assertEqual(got, [0, 1])
@@ -2534,7 +2545,7 @@ class ParallelPreviewTests(unittest.TestCase):
         try:
             runs = []
             list(sweep._pmap(lambda i: sweep._memo("k", lambda: runs.append(i) or time.sleep(0.2)),
-                             range(6)))
+                             range(6), False))
         finally:
             undo()
         self.assertEqual(len(runs), 1)
@@ -2567,6 +2578,18 @@ class ParallelPreviewTests(unittest.TestCase):
         for name in ("decide_branch", "decide_worktree"):
             peak = self._peak_concurrency(name, lambda: sweep.sweep_repo(root, False, log))
             self.assertTrue(peak > 1, "%s never ran twice at once" % name)
+
+    def test_confirm_never_runs_decisions_side_by_side_even_with_the_pool_open(self):
+        root = os.path.join(ROOT, "confirm-serial-repo")
+        make_repo(root, {"f.txt": "x\n"})
+        give_remote(root)
+        for name in ("empty-a", "empty-b", "empty-c"):
+            run_vcs(root, "branch", name)
+        log = os.path.join(ROOT, "confirm-serial.log")
+        peak = self._peak_concurrency(
+            "decide_branch", lambda: sweep.sweep_repo(root, True, log))
+        self.assertEqual(peak, 1)
+        self.assertNotIn("empty-a", sweep.list_local_branches(root))
 
     def _peak_concurrency(self, name, run):
         """Highest number of calls to `sweep.<name>` in flight at once during `run()`, in a
