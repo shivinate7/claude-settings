@@ -519,14 +519,14 @@ def decide_worktree(where: str, entry: dict):
     if inside:
         return {"path": path, "action": "keep",
                 "reason": "process-inside: pid %s" % ", ".join(str(p) for p in sorted(inside))}
+    # Every reap needs it, not only a stale agent lock: a lane always commits, and a detached
+    # HEAD has no branch to tombstone. Unreadable keeps.
+    pushed = fully_pushed(path)
+    if pushed is None:
+        return {"path": path, "action": "keep", "reason": "unreadable-subject"}
+    if not pushed:
+        return {"path": path, "action": "keep", "reason": "unpushed: HEAD has a commit on no remote branch"}
     if stale_agent_lock:
-        # Only a stale agent lock needs this: its lane always commits, so the commits must
-        # already be on a remote branch before the worktree goes. Unreadable keeps.
-        pushed = fully_pushed(path)
-        if pushed is None:
-            return {"path": path, "action": "keep", "reason": "unreadable-subject"}
-        if not pushed:
-            return {"path": path, "action": "keep", "reason": "unpushed: %s" % holder}
         return {"path": path, "action": "reap", "reason": "removable: stale agent lock",
                 "unlock": True}
     return {"path": path, "action": "reap", "reason": "removable"}

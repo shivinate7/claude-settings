@@ -92,12 +92,14 @@ is dead, or alive with a different start time (the pid was reused). A lock that
 is not in this form, a running agent, or a date or process read that fails
 keeps the worktree.
 
-A stale agent lock frees the worktree for the other checks, plus two more. The
-worktree must be clean. Every commit on its HEAD must be on some remote
-branch. A detached HEAD counts. A commit that is not on a remote keeps the worktree,
-and the reason is `unpushed`. `--confirm` then unlocks and runs
+A stale agent lock frees the worktree for the other checks. `--confirm` then
+unlocks and runs
 `git worktree remove`, never with `--force`. The preview lists the worktree as
 `REAP` and unlocks nothing.
+
+The sweep keeps a worktree with a commit that is on no remote branch, and the
+reason is `unpushed`. This holds for every worktree, locked or not. A detached
+HEAD counts. A repository with no remote keeps every worktree.
 
 The sweep keeps a worktree that any process sits inside, not only a
 listener. It names the pids. This check runs right before the removal

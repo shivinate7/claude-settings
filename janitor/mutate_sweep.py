@@ -695,16 +695,18 @@ MUTATIONS = [
      '        return True\n'
      '    actual = guard._process_start_ms(',
      "test_unreadable_lock_start_keeps"),
-    ("stale lock: an unpushed commit no longer keeps the worktree",
-     "sweep",
-     '        if not pushed:\n',
-     '        if False:\n',
-     "test_stale_lock_with_unpushed_commit_keeps"),
     ("stale lock: --confirm removes without unlocking first",
      "sweep",
      '        unlocked = guard._git(root, "worktree", "unlock", path)',
      '        unlocked = guard._git(root, "worktree", "list", path)',
      "test_remove_unlocks_then_removes_without_force"),
+    ("pushed check: an unpushed commit no longer keeps an unlocked worktree",
+     "sweep",
+     '    if not pushed:\n'
+     '        return {"path": path, "action": "keep", "reason": "unpushed',
+     '    if False:\n'
+     '        return {"path": path, "action": "keep", "reason": "unpushed',
+     "test_unlocked_clean_detached_worktree_with_an_unpushed_commit_keeps"),
 ]
 
 

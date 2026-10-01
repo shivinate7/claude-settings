@@ -52,8 +52,13 @@ reason `claude agent agent-<id> (pid N start <UTC date>)`. A lane always
 commits, so the tool never removes it, and the lock outlives the agent. The
 outcome to protect is a lane's unpushed work. The sweep frees a worktree from
 such a lock only when the pid is dead, or alive with another start time. The
-worktree must also be clean, and every commit on HEAD must be on a remote
-branch. Any other lock reason, and any unreadable fact, keeps it. `--confirm` unlocks, then
+worktree must also pass every other check. Any other lock reason, and any
+unreadable fact, keeps it.
+
+Owner ruling: remove only a folder that is clean and fully pushed. This covers
+every worktree reap, locked or not. Every commit on HEAD must be on a remote
+branch, and a detached HEAD counts. Before this ruling the daily job reaped
+117 q_max agent worktrees with no such check. `--confirm` unlocks, then
 removes, never with `--force`.
 
 Unmeasured: q_max held no locked worktree when this was written, so the lock
