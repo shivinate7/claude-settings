@@ -1060,6 +1060,22 @@ class LooseProcessTests(unittest.TestCase):
         self.assertIn("loose processes", out.getvalue())
         self.assertIn("pid=%-8s" % self.marked, out.getvalue())
 
+    def test_unreadable_owner_is_listed_as_unknown(self):
+        """An owner read that fails (`None`) lists the process; it is not left out. The stub
+        answers `None` for the marked pid only, the real read for every other pid."""
+        real = sweep.is_current_user_process
+        sweep.is_current_user_process = lambda pid: None if pid == self.marked else real(pid)
+        try:
+            found = sweep.find_loose_processes()
+        finally:
+            sweep.is_current_user_process = real
+        entry = [d for d in found if d["pid"] == self.marked]
+        self.assertEqual(len(entry), 1)
+        self.assertIsNone(entry[0]["owner"])
+        out = io.StringIO()
+        sweep.print_loose_processes_report(entry, out=out)
+        self.assertIn("owner=unknown", out.getvalue())
+
     def test_confirm_sends_the_marked_process_no_signal(self):
         """Runs real `main --confirm` on an empty scratch repo. `find_dead_rooted` is stubbed
         so the real machine's dead-rooted tier cannot act; every signal path is recorded."""

@@ -461,6 +461,12 @@ MUTATIONS = [
      '            [sys.executable, SWEEP_PATH, root],',
      "test_sweeps_repo_a_leaves_repo_b_untouched"),
 
+    ("loose processes: an unreadable owner is left out instead of listed",
+     "sweep",
+     '        if owner is not False:\n            found.append(',
+     '        if owner is True:\n            found.append(',
+     "test_unreadable_owner_is_listed_as_unknown"),
+
     # ---- orphaned TCP listeners (this build, 2026-09-24) ----
     #
     # ---- the agent-end reaper and the deepest-checkout match it depends on ----
