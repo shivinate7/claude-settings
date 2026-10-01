@@ -1519,6 +1519,10 @@ sh("kill: a pid list made by pidof", "kill -9 $(pidof node)", "deny", "machine-w
    cwd=NOGIT)
 sh("kill: a pid list made by pgrep, backtick form", "kill `pgrep node`", "deny",
    "machine-wide-kill", cwd=NOGIT)
+sh("kill: a pid list made by pgrep, spaced and by path", "kill $( /usr/bin/pgrep node )",
+   "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: a pid list made by pgrep behind command", "kill $(command pgrep node)", "deny",
+   "machine-wide-kill", cwd=NOGIT)
 sh("kill: pgrep piped into xargs kill", "pgrep -f node | xargs kill", "deny",
    "machine-wide-kill", cwd=NOGIT)
 sh("kill: xargs kill after a pipe from a plain list is not by name", "echo 1 | xargs kill -l",

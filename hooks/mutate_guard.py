@@ -239,7 +239,7 @@ MUTATIONS = [
      '        if number in (0, 1, -1):', '        if False:', "guard",
      'kill: init with the root unknown'),
     ("machine-wide-kill: a kill fed by pgrep or pidof in a substitution no longer denies",
-     '            if "$(" + lister in arg or "`" + lister in arg:', '            if False:', "guard",
+     '    return "kill " + found.group(1) if found else ""', '    return ""', "guard",
      'kill: a pid list made by pgrep'),
     ("machine-wide-kill: pgrep piped into xargs kill no longer denies",
      '    if before is not None and basename(previous[before]) in PID_LISTERS:',

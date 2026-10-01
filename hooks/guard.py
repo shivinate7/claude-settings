@@ -2367,6 +2367,7 @@ def kill_hit(tokens) -> str:
 KILL_PID_RE = re.compile(r"^-?[0-9]+$")
 ROOT_PID_RE = re.compile(r"[0-9]+")
 PID_LISTERS = {"pgrep", "pidof"}   # a kill fed by these names its target by pattern
+PID_SUBSTITUTION_RE = re.compile(r"(?:\$\(|`)\s*(?:command\s+)?(?:\S*/)?(pgrep|pidof)\b")
 KILL_SIGNAL_ARG_FLAGS = {"-s", "-n"}   # these two take the next token as a signal
 
 
@@ -2477,11 +2478,8 @@ def kill_fed_by_name(tokens) -> str:
     index = resolve_command(tokens)
     if index is None or basename(tokens[index]) != "kill":
         return ""
-    for arg in tokens[index + 1:]:
-        for lister in PID_LISTERS:
-            if "$(" + lister in arg or "`" + lister in arg:
-                return "kill " + lister
-    return ""
+    found = PID_SUBSTITUTION_RE.search(" ".join(tokens[index + 1:]))
+    return "kill " + found.group(1) if found else ""
 
 
 def kill_fed_by_pipe(tokens, previous) -> str:

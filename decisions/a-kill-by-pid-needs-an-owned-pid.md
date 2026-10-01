@@ -26,6 +26,9 @@ pattern. They are denied as a kill by name, the same as `pkill`. A pid group (`-
 
 - `$!`, `$PID`, `%1`, `$(...)`: the guard cannot read them, so they pass. The remedy asks
   for `$!`.
+- A lister through a longer pipe (`pgrep x | sort | xargs kill`) passes.
+- Process substitution (`kill $(<(pgrep x))`-style forms) passes.
+- Pids stored first (`pids=$(pgrep x); kill $pids`) pass.
 - A process that reparented to init reads as foreign. Stop it through the harness.
 - When no `claude` ancestor or no `ps` exists (Windows, unmeasured), the guard allows.
   Unknown is not a verdict. `taskkill /PID` and `Stop-Process -Id` pass for the same reason.
