@@ -135,7 +135,7 @@ function readKind(root, config, kind, h) {
   const out = { kind, pending: [], malformed: [], numbers: [], order: [] };
   const numberedRe = new RegExp(kind.numberedRegex, "gmu");
   const take = (text, rel) => {
-    for (const m of text.matchAll(numberedRe)) out.numbers.push({ n: Number(m[1]), rel });
+    for (const m of text.matchAll(numberedRe)) out.numbers.push({ n: Number(m[1]), rel, title: titleOf(text.slice(m.index).split("\n", 1)[0]) });
   };
   const sort = (line, token, rel, name) => {
     const cls = classify(config, token);
@@ -449,15 +449,16 @@ function git(root, args) {
 
 // Every numbered record in this tree, keyed for stamp.mjs's branch question. A folder kind keys
 // a number by its file, since a file keeps its name once numbered. A flat-file kind has no stable
-// per-record key but the number itself, so it keys by the kind and the number. a deleted record
-// keeps its number taken through the history read in stamp.mjs.
+// per-record key but the number and the heading's title, so a title change under one number reads
+// as a different record (delete it and claim a new number). A deleted record keeps its number
+// taken through the history read in stamp.mjs.
 export function numberedRecords(root, config, h) {
   const out = [];
   for (const kind of config.kinds) {
     const k = readKind(root, config, kind, h);
-    for (const { n, rel } of k.numbers) {
-      const key = kind.folder ? `${kind.id}\0${rel}\0${n}` : `${kind.id}\0${n}`;
-      out.push({ key, name: kind.folder ? rel : renderId(kind, n), kind: kind.id, n, rel, id: renderId(kind, n), prefix: kind.prefix });
+    for (const { n, rel, title } of k.numbers) {
+      const key = kind.folder ? `${kind.id}\0${rel}\0${n}` : `${kind.id}\0${n}\0${title}`;
+      out.push({ key, name: kind.folder ? rel : `${renderId(kind, n)} — ${title}`, kind: kind.id, n, rel, id: renderId(kind, n), prefix: kind.prefix });
     }
   }
   return out;

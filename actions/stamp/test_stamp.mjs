@@ -1025,7 +1025,7 @@ test("--check passes a branch that fixes a typo in a numbered record's title, in
         base: (d) => headingTree(d),
         branch: (d) => {
           write(d, "docs/decisions/D001-one.md", "## D1 — One, fixed\n\nBody.\n");
-          write(d, "docs/codes.md", "# Codes\n\n## C1 — First, fixed\n\nBody.\n");
+          write(d, "docs/codes.md", "# Codes\n\n## C1 — First\n\nBody fixed.\n");
         },
       },
     ];
@@ -1205,6 +1205,58 @@ test("--check accepts a claim made after a deletion", () =>
     deletedTopRepo(root);
     claimCommit(root);
     assert.deepEqual(check(root, frontmatterConfig(), LOCAL), []);
+  }));
+
+test("claim: a number added and deleted on a branch that merged by merge commit is skipped", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    write(root, "docs/decisions/a.md", rec(1, "a"));
+    commit(root, "main");
+    git(root, "checkout", "-q", "-b", "b");
+    // B holds the merge's record tree, so history simplification follows B and prunes main's side.
+    write(root, "docs/decisions/c.md", rec(2, "c"));
+    commit(root, "branch B adds D-002");
+    git(root, "checkout", "-q", "main");
+    write(root, "docs/decisions/s.md", rec(7, "s"));
+    commit(root, "main adds D-007");
+    git(root, "rm", "-q", "docs/decisions/s.md");
+    commit(root, "main deletes D-007");
+    git(root, "merge", "--no-ff", "-q", "-m", "merge B", "b");
+    git(root, "checkout", "-q", "-b", "wt/lane");
+    write(root, "docs/decisions/p.md", pendingRec("p"));
+    commit(root, "branch adds a pending record");
+    assert.deepEqual(claim(root, frontmatterConfig(), "main").assigned.map((a) => a.id), ["D-008"]);
+  }));
+
+test("--check refuses a flat-file entry whose title changes under one number, and passes a body-only edit", () =>
+  withTempDir((root) => {
+    initRepo(root);
+    headingTree(root);
+    write(root, "docs/codes.md", "# Codes\n\n## C1 — First\n\nBody.\n\n## C2 — Second\n\nBody.\n");
+    commit(root, "main");
+    git(root, "checkout", "-q", "-b", "wt/lane");
+    write(root, "docs/codes.md", "# Codes\n\n## C1 — First\n\nBody edited.\n\n## C2 — Second\n\nBody.\n");
+    commit(root, "body edit");
+    assert.deepEqual(check(root, headingConfig(), LOCAL), []);
+    write(root, "docs/codes.md", "# Codes\n\n## C1 — First\n\nBody edited.\n\n## C2 — Something else\n\nBody.\n");
+    commit(root, "swap C2");
+    const problems = check(root, headingConfig(), LOCAL);
+    assert.equal(problems.length, 1, problems.join(" | "));
+    assert.match(problems[0], /C2 was renamed.*delete the record and claim a new number/);
+  }));
+
+test("--check reports a shallow history as the full history, not the tree", () =>
+  withTempDir((root) => {
+    const src = join(root, "src");
+    mkdirSync(src);
+    deletedTopRepo(src);
+    claimCommit(src);
+    const shallow = join(root, "shallow");
+    execFileSync("git", ["clone", "-q", "--depth", "3", "--no-local", "--branch", "wt/lane", `file://${src}`, shallow]);
+    git(shallow, "fetch", "-q", "--depth", "1", "origin", "main:refs/remotes/origin/main");
+    const problems = check(shallow, frontmatterConfig(), { base: "origin/main" });
+    assert.match(problems.unknown ?? "", /cannot read the full history.*fetch-depth: 0/s);
+    assert.doesNotMatch(problems.unknown, /cannot read the tree/);
   }));
 
 test("claim: a shallow clone is refused with the remedy, and nothing is written", () =>

@@ -635,7 +635,11 @@ function everTaken(root, config, ref) {
     if (gitOut(root, ["rev-parse", "--is-shallow-repository"]).toString().trim() === "true") {
       throw new Error("the clone is shallow");
     }
-    log = gitOut(root, ["log", "-m", "--no-renames", "--raw", "-z", "--format=", ref, "--", ...recordPaths(config)]).toString("utf8");
+    // --full-history: the default simplification can prune the side of a merge where a number was
+    // added and then deleted, and that number would be reused.
+    // ponytail: reads today's record paths only. A number used under a path a kind has since left
+    // is not seen. Upgrade: a per-kind list of old paths in the config.
+    log = gitOut(root, ["log", "--full-history", "-m", "--no-renames", "--raw", "-z", "--format=", ref, "--", ...recordPaths(config)]).toString("utf8");
   } catch (e) {
     throw new Error(`git cannot read the full history of ${ref} (${String(e.message).split("\n")[0]}), so a number deleted from it cannot be told from a free one. ${FETCH_REMEDY}`);
   }
@@ -772,7 +776,7 @@ function branchNumbered(root, config, opts) {
       const old = baseByNumber.get(numberOf(r));
       if (old && !nowKeys.has(old.key)) {
         problems.push(`${r.rel}: ${r.id} was renamed on a branch. ${ref} holds it under the key "${old.name}", and this tree ` +
-          `holds it under "${r.name}". A numbered record keeps its key. Restore "${old.name}".`);
+          `holds it under "${r.name}". A numbered record keeps its key. Restore "${old.name}", or delete the record and claim a new number.`);
       } else {
         problems.push(`${r.rel} is numbered ${r.id} on a branch, and ${ref} does not number it so. ` +
           `Write the pending marker and let the stamp claim the number at merge.` +
@@ -795,6 +799,7 @@ function branchNumbered(root, config, opts) {
     }
     return { problems: [...new Set(problems)], unknown: null };
   } catch (e) {
+    if (String(e.message).startsWith("git cannot read the full history")) return { problems: [], unknown: `branch question could not run: ${e.message}` };
     return { problems: [], unknown: `branch question could not run: git cannot read the tree of ${base} (${String(e.message).split("\n")[0]}). ${remedy}` };
   } finally {
     if (dir) rmSync(dir, { recursive: true, force: true });

@@ -93,9 +93,14 @@ It asks one more question, and the question depends on the branch.
   edit of a number that another commit wrote is not vouched for. A number with no trailer stays refused. A number that the
   base ref took after the claim, or held before it, is refused, and the fix is to claim again.
 
+  A flat-file entry keys by its number and heading title. A title change under one number is
+  refused as a rename: delete the entry and claim a new number.
+
   A record may be deleted. The check does not refuse a removed record. Its number stays
   taken, because the claim reads the highest number ever used from the history of the base
   ref. A kind that keeps a `RETIRED` list works as before (see "The retired-numbers list").
+  Known gap: after a kind's folder or file is moved, numbers used under the old path are not
+  seen. Keep the old path in the kind's config, or check those numbers by hand.
 
 A pull request checkout is always off the default branch. The engine knows it is one when
 `GITHUB_BASE_REF` is set, or when `GITHUB_REF` starts with `refs/pull/`.
