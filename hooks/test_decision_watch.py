@@ -466,6 +466,14 @@ def _run_main(hook_payload, timeout=30):
     )
 
 
+def _says_unknown(result):
+    """True when main() printed an UNKNOWN systemMessage. The known-bad half of a silent pair."""
+    try:
+        return json.loads(result.stdout.strip()).get("systemMessage", "").startswith(dw.UNKNOWN_PREFIX)
+    except Exception:
+        return False
+
+
 def case_main_ordinary_turn():
     repo = make_repo("main_ordinary_turn")
     write(os.path.join(repo, "src", "app.py"), "print('hello')\n")
@@ -479,6 +487,11 @@ def case_main_ordinary_turn():
     result = _run_main({"transcript_path": path, "cwd": repo})
     check("main_ordinary_turn: exit 0", result.returncode == 0, result.returncode)
     check("main_ordinary_turn: nothing printed", result.stdout.strip() == "", result.stdout)
+    # KNOWN-BAD PAIR: a stub that always exits 0 silent passes the two lines above. The same
+    # payload with the transcript gone must print UNKNOWN, so a stub fails here.
+    os.remove(path)
+    paired = _run_main({"transcript_path": path, "cwd": repo})
+    check("main_ordinary_turn: known-bad pair prints UNKNOWN", _says_unknown(paired), paired.stdout)
 
 
 def case_main_missing_transcript():
@@ -497,6 +510,9 @@ def case_main_stop_hook_active_stays_quiet():
     result = _run_main({"transcript_path": "/does/not/matter", "cwd": ".", "stop_hook_active": True})
     check("main_stop_hook_active: exit 0", result.returncode == 0, result.returncode)
     check("main_stop_hook_active: nothing printed", result.stdout.strip() == "", result.stdout)
+    # KNOWN-BAD PAIR: the same payload without the flag must not be silent.
+    paired = _run_main({"transcript_path": "/does/not/matter", "cwd": "."})
+    check("main_stop_hook_active: known-bad pair prints UNKNOWN", _says_unknown(paired), paired.stdout)
 
 
 def main():

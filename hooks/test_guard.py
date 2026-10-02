@@ -118,6 +118,9 @@ GHRED = os.path.join(ROOT, "ghred")        # one check failed
 GHRUNPEND = os.path.join(ROOT, "ghrunpend")  # every check passed, one workflow run is not done
 GHBROKEN = os.path.join(ROOT, "ghbroken")  # answers every call with text that is not JSON
 GHNEED = os.path.join(ROOT, "ghneed")      # green, but only for a call that names pull request 12 and y/x
+GHEMPTY = os.path.join(ROOT, "ghempty")    # no check and no workflow run reported yet
+GHCWD = os.path.join(ROOT, "ghcwd")        # green, but only for a call run inside the folder `ctxrepo`
+WFREPO = os.path.join(ROOT, "wfrepo")      # a folder that holds one workflow file
 GHSLOW = os.path.join(ROOT, "ghslow")      # green, but every call takes longer than the gate waits
 GHBLANK = os.path.join(ROOT, "ghblank")    # green checks, a base that reads as empty
 CTXEMPTY = os.path.join(ROOT, "ctxempty")    # a checkout with no commit yet
@@ -412,6 +415,8 @@ def make_blind_git(folder):
 FAKE_GH_PY = r'''import json, os, sys
 state = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")))
 args = sys.argv[1:]
+if state["cwd_name"] and os.path.basename(os.getcwd()) != state["cwd_name"]:
+    state["broken"] = True
 if args[:1] == ["pr"] and not all(word in args for word in state["need"]):
     state["broken"] = True
 while "-R" in args:
@@ -435,7 +440,8 @@ else:
 '''
 
 
-def make_fake_gh(folder, base, delay=0, checks=None, runs=None, broken=False, need=()):
+def make_fake_gh(folder, base, delay=0, checks=None, runs=None, broken=False, need=(),
+                 cwd_name=""):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
     MEASURED on Windows 2026-09-16: a call of "gh" through CreateProcess appends `.exe` and never
@@ -477,6 +483,7 @@ def make_fake_gh(folder, base, delay=0, checks=None, runs=None, broken=False, ne
         "runs": runs if runs is not None else [
             {"status": "completed", "conclusion": "success", "name": "gates"}],
         "broken": broken,
+        "cwd_name": cwd_name,   # the folder name a call must run in, or it answers as a broken tool
         "need": list(need),   # words every call must carry, or it answers as a broken tool does
     }
     write(os.path.join(folder, "state.json"), json.dumps(state))
@@ -571,7 +578,10 @@ def build_fixtures():
     make_fake_gh(GHBROKEN, "main", broken=True)
     make_fake_gh(GHBLANK, "", )
     make_fake_gh(GHNEED, "main", need=["12", "y/x"])
-    make_fake_gh(GHSLOW, "main", delay=9)
+    make_fake_gh(GHSLOW, "main", delay=4)
+    make_fake_gh(GHEMPTY, "main", checks=[], runs=[])
+    make_fake_gh(GHCWD, "main", cwd_name="ctxrepo")
+    write(os.path.join(WFREPO, ".github", "workflows", "gates.yml"), "name: gates\n")
     # The guard finds the merge tool beside its own real path, or in the clone the global rules
     # file points at. A mutant copy of the guard sits in a temp folder and takes the second way.
     write(os.path.join(MERGECFG, "CLAUDE.md"), "@" + slash(REPO) + "/CLAUDE.md\n")
@@ -2329,10 +2339,27 @@ sh("merge-checks: a gh slower than the gate waits is unknown, and denies",
    env_path=GHSLOW + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge-checks: the words of a merge in an echo are no merge", "echo gh pr merge 12 --squash",
    "allow", silent=True, cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: a head that reports nothing yet is not settled when the repo has workflows",
+   "gh pr merge 12 --squash", "deny", "merge-checks", carries="no check", cwd=WFREPO,
+   env_path=GHEMPTY + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: a head that reports nothing may merge when the repo has no workflows at all",
+   "gh pr merge 12 --squash", "allow", silent=True, cwd=NOGIT,
+   env_path=GHEMPTY + os.pathsep + PY_PATH, config=MERGECFG)
+# 4. the repo the command names
+sh("merge-checks: a cd names the repo the read runs in",
+   "cd " + CTXREPO + " && gh pr merge 5 --squash", "allow", silent=True, cwd=NOGIT,
+   env_path=GHCWD + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: a read run in the wrong folder is unknown, and denies",
+   "gh pr merge 5 --squash", "deny", "merge-checks", carries="could not run", cwd=NOGIT,
+   env_path=GHCWD + os.pathsep + PY_PATH, config=MERGECFG)
+add("merge-checks: the host merge tool reads the repo of the call's folder", "allow", silent=True,
+    tool="mcp__github__merge_pull_request", cwd=CTXREPO, pullNumber=5, repo="x", owner="y",
+    env_path=GHCWD + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge-checks: a green head merges", "gh pr merge 12 --squash", "allow", silent=True,
    cwd=NOGIT, env_path=GREEN_ON, config=MERGECFG)
-sh("merge-checks: --auto leaves the waiting to GitHub", "gh pr merge 12 --auto --squash", "allow",
-   silent=True, cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: --auto is gated like any merge", "gh pr merge 12 --auto --squash", "deny",
+   "merge-checks", carries="pending", cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH,
+   config=MERGECFG)
 sh("merge-checks: help merges nothing", "gh pr merge --help", "allow", silent=True,
    cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge-checks: the merge tool is judged by its own wait, not here",
@@ -2403,20 +2430,22 @@ for _name, _command in (
     ("a commit -m", VCS + ' commit -m "fix, per ' + CITE + '"'),
     ("a second -m paragraph", VCS + ' commit -m "title" -m "body cites ' + CITE + '"'),
     ("a -am cluster", VCS + ' commit -am "see deferred/later-item.md"'),
-    ("the long --message=", VCS + ' commit --message="cites docs/' + CITE + '"'),
+    ("the long --message=", VCS + ' commit --message="cites ' + CITE + '"'),
     ("a single-quoted message", VCS + " commit -m 'cites " + CITE + "'"),
     ("a heredoc inside -m", VCS + ' commit -m "$(cat <<\'EOF\'\ntitle\n\ncites ' + CITE + '\nEOF\n)"'),
     ("a heredoc fed to -F -", VCS + " commit -F - <<'EOF'\ntitle\n\ncites " + CITE + "\nEOF"),
     ("a file named by -F", VCS + " commit -F " + MSG_BAD),
     ("a backslash path", VCS + ' commit -m "cites decisions\\one-shared-record-stamp.md"'),
     ("an attached -m value", VCS + ' commit -m"cites ' + CITE + '"'),
+    ("a repo-root record path in parentheses", VCS + ' commit -m "done (' + CITE + ')"'),
+    ("a dot-slash record path", VCS + ' commit -m "cites ./' + CITE + '"'),
     ("a PR body", 'gh pr create --title t --body "cites ' + CITE + '"'),
     ("a PR body file", "gh pr edit 3 --body-file " + MSG_BAD),
     ("a PR body behind a cd", "cd x; gh pr edit 3 -b 'cites " + CITE + "'"),
 ):
-    sh("cite-by-id: %s denies" % _name, _command, "deny", "cite-by-id", cwd=NOGIT)
+    sh("cite-by-id: %s denies" % _name, _command, "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: a PowerShell commit denies too", VCS + ' commit -m "cites ' + CITE + '"', "deny",
-   "cite-by-id", tool="PowerShell", cwd=NOGIT)
+   "cite-by-id", tool="PowerShell", cwd=NOGIT, config=MERGECFG)
 for _name, _command in (
     ("a code path", VCS + ' commit -m "guard: fix hooks/guard.py"'),
     ("the word decisions", VCS + ' commit -m "decisions: one word, no path"'),
@@ -2428,10 +2457,14 @@ for _name, _command in (
     ("a heredoc that belongs to the command after the commit",
      VCS + ' commit -m "add" && cat > notes.txt <<\'EOF\'\nsee ' + CITE + '\nEOF'),
     ("a note message, which this rule does not read", VCS + ' notes add -m "cites ' + CITE + '"'),
+    ("a URL that holds a record path",
+     VCS + ' commit -m "see https://github.com/o/r/blob/main/' + CITE + '"'),
+    ("a record path under another folder", VCS + ' commit -m "see lint/' + CITE + '"'),
+    ("a numbered record path under docs", VCS + ' commit -m "see docs/decisions/0001.md"'),
     ("a message file that cites an id", VCS + " commit -F " + MSG_OK),
     ("a PR body with an id", 'gh pr create --title t --body "per D12, short titles for records"'),
 ):
-    sh("cite-by-id: %s is allowed" % _name, _command, "allow", cwd=NOGIT)
+    sh("cite-by-id: %s is allowed" % _name, _command, "allow", cwd=NOGIT, config=MERGECFG)
 for _name, _command in (
     ("a log of a record", VCS + " log --oneline -- " + CITE),
     ("a show of a record", VCS + " show HEAD:" + CITE),
@@ -2443,7 +2476,7 @@ for _name, _command in (
     ("a log search for the path", VCS + ' log --grep="' + CITE + '"'),
     ("a PR view", "gh pr view 12 --json body"),
 ):
-    sh("cite-by-id: %s is no message" % _name, _command, "allow", silent=True, cwd=NOGIT)
+    sh("cite-by-id: %s is no message" % _name, _command, "allow", silent=True, cwd=NOGIT, config=MERGECFG)
 
 
 # =========================================================================== 6. frozen paths
@@ -3357,7 +3390,22 @@ def merge_tool_missing_case():
         capture_output=True, text=True, env=env, timeout=60)
     if "merge-checks" not in result.stdout or "could not be loaded" not in result.stdout:
         return False, "expected a deny that names the unloadable tool, got %r" % result.stdout[:120]
-    return True, "deny, the tool could not be loaded"
+    # The same copy cannot read the record folders either. The cite rule stands down, and the log says so.
+    result = subprocess.run(
+        [sys.executable, copy],
+        input=json.dumps({"tool_name": "Bash", "cwd": NOGIT, "tool_input": {
+            "command": VCS + ' commit -m "cites decisions/one-shared-record-stamp.md"'}}),
+        capture_output=True, text=True, env=env, timeout=60)
+    if "permissionDecision" in result.stdout:
+        return False, "an unread folder list must not deny, got %r" % result.stdout[:120]
+    try:
+        with open(os.path.join(folder, "cfg", "guard.log"), encoding="utf-8") as handle:
+            logged = "cite-by-id: record folders unread" in handle.read()
+    except OSError:
+        logged = False
+    if not logged:
+        return False, "an unread folder list must be logged as unread"
+    return True, "deny, the tool could not be loaded; the unread folder list is logged, not denied"
 
 
 def merge_log_case():

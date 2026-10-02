@@ -50,12 +50,18 @@ GUARD = os.path.join(HERE, "guard.py")
 SUITE = os.path.join(HERE, "test_guard.py")
 WATCH = os.path.join(HERE, "config_watch.py")
 WATCH_SUITE = os.path.join(HERE, "test_config_watch.py")
+DECISION = os.path.join(HERE, "decision_watch.py")
+DECISION_SUITE = os.path.join(HERE, "test_decision_watch.py")
+RULING = os.path.join(HERE, "ruling_home.py")
+RULING_SUITE = os.path.join(HERE, "test_ruling_home.py")
 
 # A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
 # every mutation written before the watch existed reads unchanged.
 TARGETS = {
     "guard": (GUARD, SUITE, "GUARD_UNDER_TEST", "guard"),
     "watch": (WATCH, WATCH_SUITE, "WATCH_UNDER_TEST", "config_watch"),
+    "decision": (DECISION, DECISION_SUITE, "DECISION_WATCH_UNDER_TEST", "decision_watch"),
+    "ruling": (RULING, RULING_SUITE, "RULING_HOME_UNDER_TEST", "ruling_home"),
 }
 
 # (label, anchor text found once in the source, its mutated replacement, target, required case
@@ -973,9 +979,27 @@ MUTATIONS = [
      '        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),\n                   "merge tool "',
      '        if False:\n            refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),\n                   "merge tool "',
      "guard", 'merge-checks: the merge tool of the host denies on a pending head'),
-    ("merge-checks: --auto is gated like a merge",
-     '        if merging is None or merging[2]:',
-     '        if merging is None:', "guard", 'merge-checks: --auto leaves the waiting to GitHub'),
+    ("merge-checks: --auto skips the gate",
+     '        if merging is None:\n            continue\n        verdict, detail = merge_gate(',
+     '        if merging is None or "--auto" in segment:\n            continue\n        verdict, detail = merge_gate(',
+     "guard", 'merge-checks: --auto is gated like any merge'),
+    ("merge-checks: a head that reports nothing is green in a repo with workflows",
+     'nothing_is_green=not has_workflows(where))', 'nothing_is_green=True)', "guard",
+     'merge-checks: a head that reports nothing yet is not settled'),
+    ("merge-checks: a repo with no workflow folder reads as having workflows",
+     '    except FileNotFoundError:\n        return False', '    except FileNotFoundError:\n        return True',
+     "guard", 'merge-checks: a head that reports nothing may merge when the repo has no workflows'),
+    ("merge-checks: the read runs in the guard's own folder, not the command's",
+     'merge_gate(merging[0], merging[1], cite_where)', 'merge_gate(merging[0], merging[1], cwd)',
+     "guard", 'merge-checks: a cd names the repo the read runs in'),
+    ("merge-checks: the host tool's read runs in the guard's own folder",
+     'repo, cwd)\n        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),\n                   "merge tool "',
+     'repo, "")\n        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),\n                   "merge tool "',
+     "guard", 'merge-checks: the host merge tool reads the repo of the call'),
+    ("merge-checks: the read gets no folder",
+     'host = module.Host(repo=repo or None, cwd=where or None)',
+     'host = module.Host(repo=repo or None)', "guard",
+     'merge-checks: a cd names the repo the read runs in'),
     ("merge-checks: help is gated like a merge",
      '    if "-h" in args or "--help" in args:\n        return None   # help merges nothing',
      '    if False:\n        return None', "guard", 'merge-checks: help merges nothing'),
@@ -983,12 +1007,12 @@ MUTATIONS = [
      'return "unknown", "the merge tool\'s check reader could not be loaded"',
      'return "green", ""', "guard", 'merge-checks: a merge tool that cannot load'),
     ("merge-checks: the repo is never passed to the read",
-     'module.Host(repo=repo or None).head_read(selector)',
-     'module.Host().head_read(selector)', "guard",
+     'host = module.Host(repo=repo or None, cwd=where or None)',
+     'host = module.Host(cwd=where or None)', "guard",
      'merge-checks: the pull request and repo of the call are the ones read'),
     ("merge-checks: the pull request is never passed to the read",
-     'return module.Host(repo=repo or None).head_read(selector)',
-     'return module.Host(repo=repo or None).head_read("")', "guard",
+     'return host.head_read(selector, nothing_is_green',
+     'return host.head_read("", nothing_is_green', "guard",
      'merge-checks: the pull request and repo of the call are the ones read'),
     ("merge-checks: the long repo flag goes unread",
      '        elif arg.startswith("--repo="):',
@@ -1006,13 +1030,25 @@ MUTATIONS = [
      '            module.SH_TIMEOUT = None', "guard",
      'merge-checks: a gh slower than the gate waits is unknown'),
     ("cite-by-id: the deferred folder is no record folder",
-     'RECORD_DIRS = ("decisions", "deferred")',
-     'RECORD_DIRS = ("decisions",)', "guard", 'cite-by-id: a -am cluster denies'),
+     '"|".join(map(re.escape, names))', 're.escape(names[0])', "guard",
+     'cite-by-id: a -am cluster denies'),
+    ("cite-by-id: the record folders are read from nowhere",
+     "names = re.findall(r'\"([\\w.-]+)/\"', block.group(1)) if block else []", "names = []",
+     "guard", 'cite-by-id: a commit -m denies'),
+    ("cite-by-id: a path deep in a URL or a subfolder is a record path",
+     'r"(?:^|(?<=[\\s\\"\'`(\\[<,;=@]))(?:\\./)?(?:"', 'r"(?:[\\w.:/-]*/)?(?:"', "guard",
+     'cite-by-id: a URL that holds a record path is allowed'),
+    ("cite-by-id: a dot-slash path is no record path",
+     'r"(?:^|(?<=[\\s\\"\'`(\\[<,;=@]))(?:\\./)?(?:"', 'r"(?:^|(?<=[\\s\\"\'`(\\[<,;=@]))(?:"',
+     "guard", 'cite-by-id: a dot-slash record path denies'),
+    ("cite-by-id: an unread folder list denies nothing but says nothing",
+     '        record("Bash", "noted", "subject-unread", "cite-by-id: record folders unread")\n',
+     '', "guard", 'merge-checks: a merge tool that cannot load'),
     ("cite-by-id: any file of a record folder is a record",
      '+ r")/[\\w.-]+\\.md\\b")', '+ r")/[\\w.-]+")', "guard",
      'cite-by-id: a non-record file of a record folder is allowed'),
     ("cite-by-id: a backslash path is not read as a path",
-     'found = RECORD_PATH.search(norm(text))', 'found = RECORD_PATH.search(text)', "guard",
+     'found = pattern.search(norm(text))', 'found = pattern.search(text)', "guard",
      'cite-by-id: a backslash path denies'),
     ("cite-by-id: a heredoc body is never read",
      '    if "<<" in segment:\n        texts.extend(', '    if False:\n        texts.extend(',
@@ -1041,6 +1077,24 @@ MUTATIONS = [
     ("cite-by-id: every git call with a message flag is a commit",
      '        if call[0] != "commit":\n            return ""', '        if False:\n            return ""',
      "guard", 'cite-by-id: a note message, which this rule does not read'),
+    # ---- the always-silent stub. A hook whose main() exits 0 with no output passes every
+    # "nothing printed" case on its own. Each suite pairs that silence with a known-bad input in
+    # the same case (`known-bad pair`), and these mutants are the stub itself.
+    ("decision watch: main() is an always-silent stub",
+     'def main():\n    guard._force_utf8_streams()',
+     'def main():\n    sys.exit(0)\n    guard._force_utf8_streams()', "decision",
+     "main_ordinary_turn: known-bad pair"),
+    ("decision watch: stop_hook_active is true for every input",
+     '    if hook.get("stop_hook_active"):', '    if True:', "decision",
+     "main_stop_hook_active: known-bad pair"),
+    ("ruling home: main() is an always-silent stub",
+     'def main():\n    try:\n        hook = json.load(sys.stdin)',
+     'def main():\n    sys.exit(0)\n    try:\n        hook = json.load(sys.stdin)', "ruling",
+     "main_silent: known-bad pair"),
+    ("ruling home: every failure stands the hook down, git present or not",
+     '    try:\n        reason = run(hook)\n    except Exception:',
+     '    try:\n        reason = run(hook)\n        raise RuntimeError("mutant")\n    except Exception:', "ruling",
+     "main_missing_git: known-bad pair"),
 ]
 
 
@@ -1049,6 +1103,8 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
     env = dict(os.environ)
     env.pop("GUARD_UNDER_TEST", None)
     env.pop("WATCH_UNDER_TEST", None)
+    env.pop("DECISION_WATCH_UNDER_TEST", None)
+    env.pop("RULING_HOME_UNDER_TEST", None)
     env[variable] = copy_path
     env["CLAUDE_CONFIG_DIR"] = config_dir
     env.pop("MUTATE_ONLY", None)
@@ -1103,6 +1159,15 @@ def run_mutant(sources, work: str, entry):
     _path, suite, variable, stem = TARGETS[target]
     mutated = sources[target].replace(old, new, 1)
     copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(label)))
+    if target == "ruling":
+        # ruling_home.py reads `../lint/_transcript.py` beside itself. A bare copy in `work`
+        # would crash on that import and read as red on every case, whatever was mutated
+        # (mutant-cause-of-death, a mutant's own cause of death must be checked). Lay out hooks/ and lint/ for the copy.
+        tree = os.path.join(work, "tree_%s" % mutate_shared.safe_name(label))
+        os.makedirs(os.path.join(tree, "hooks"), exist_ok=True)
+        os.makedirs(os.path.join(tree, "lint"), exist_ok=True)
+        shutil.copy(os.path.join(HERE, "..", "lint", "_transcript.py"), os.path.join(tree, "lint"))
+        copy_path = os.path.join(tree, "hooks", "ruling_home.py")
     with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(mutated)
     config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(label))

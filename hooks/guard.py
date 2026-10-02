@@ -4109,20 +4109,23 @@ def checkout_context(subcommand: str, where: str) -> str:
 # ---- 2. a merge made outside the merge tool
 MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject",
                      "--match-head-commit", "-A", "--author-email"}
-MERGE_READ_TIMEOUT = 8   # seconds per `gh` call; three calls fit the hook's own timeout
+# Seconds per `gh` call. The gate makes three calls and, once it passes, `merge_base` makes one of
+# up to 10 s: 3 * 3 + 10 = 19 s, under the 20 s hook timeout in settings.json.
+MERGE_READ_TIMEOUT = 3
 MERGE_TOOL_REL = os.path.join("merge", "merge.py")
 
 
 def merge_call_of(segment: str):
-    """Return (selector, repo, auto) for a `gh pr merge` segment, else None.
+    """Return (selector, repo) for a `gh pr merge` segment, else None.
 
-    `selector` is the first positional word, '' for the current branch's pull request. `--auto`
-    asks GitHub to merge once the checks pass, so GitHub does the waiting and the gate lets it by.
+    `selector` is the first positional word, '' for the current branch's pull request. `--auto` is
+    judged like any merge: GitHub's auto-merge waits only on REQUIRED checks, and a base with none
+    merges at once.
     """
     rest = gh_call_of(segment)
     if rest is None or rest[:2] != ["pr", "merge"]:
         return None
-    selector, repo, auto = "", "", False
+    selector, repo = "", ""
     args = rest[2:]
     if "-h" in args or "--help" in args:
         return None   # help merges nothing
@@ -4130,9 +4133,7 @@ def merge_call_of(segment: str):
     while index < len(args):
         arg = args[index]
         index += 1
-        if arg == "--auto":
-            auto = True
-        elif arg in ("-R", "--repo"):
+        if arg in ("-R", "--repo"):
             repo = args[index] if index < len(args) else ""
             index += 1
         elif arg.startswith("--repo="):
@@ -4143,10 +4144,21 @@ def merge_call_of(segment: str):
             continue
         elif not selector:
             selector = arg
-    return selector, repo, auto
+    return selector, repo
 
 
 _MERGE_MODULE = []
+
+
+def settings_roots():
+    """The clones of claude-settings this guard may read a sibling file from: the one beside its
+    own real path (the hooks are symlinks into the clone), then the one the global rules file
+    points at."""
+    roots = [os.path.dirname(os.path.dirname(os.path.realpath(__file__)))]
+    pointer = pointer_checkout()
+    if pointer:
+        roots.append(pointer)
+    return roots
 
 
 def merge_module():
@@ -4155,11 +4167,7 @@ def merge_module():
     file points at. An unloadable tool is an unknown read, never a pass."""
     if _MERGE_MODULE:
         return _MERGE_MODULE[0]
-    roots = [os.path.dirname(os.path.dirname(os.path.realpath(__file__)))]
-    pointer = pointer_checkout()
-    if pointer:
-        roots.append(pointer)
-    for root in roots:
+    for root in settings_roots():
         path = os.path.join(root, MERGE_TOOL_REL)
         if not os.path.isfile(path):
             continue
@@ -4176,13 +4184,26 @@ def merge_module():
     return None
 
 
-def merge_gate(selector, repo: str):
+def has_workflows(where: str) -> bool:
+    """True when the checkout at `where` holds a workflow file, or when that cannot be told: a
+    head with nothing reported is then unsettled, never green."""
+    try:
+        folder = os.path.join(where, ".github", "workflows")
+        return any(name.endswith((".yml", ".yaml")) for name in os.listdir(folder))
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return True
+
+
+def merge_gate(selector, repo: str, where: str):
     """Return (verdict, detail) for the head of the named pull request: green, pending, red or
-    unknown. One read, no wait."""
+    unknown. One read, no wait, run in `where` so `gh` names the repo the command names."""
     module = merge_module()
     if module is None:
         return "unknown", "the merge tool's check reader could not be loaded"
-    return module.Host(repo=repo or None).head_read(selector)
+    host = module.Host(repo=repo or None, cwd=where or None)
+    return host.head_read(selector, nothing_is_green=not has_workflows(where))
 
 
 MERGE_GATE_REASON = (
@@ -4198,9 +4219,36 @@ def merge_gate_reason(verdict: str, detail: str) -> str:
 
 
 # ---- 3. a message that cites a record by path
-RECORD_DIRS = ("decisions", "deferred")   # the record folders of lint/check_record_slugs.py
-RECORD_PATH = re.compile(
-    r"(?<![\w.])(?:[\w.-]+/)*(?:" + "|".join(RECORD_DIRS) + r")/[\w.-]+\.md\b")
+RECORD_DIRS_FILE = os.path.join("lint", "check_record_slugs.py")   # its DIRS is the one list
+_RECORD_PATTERN = []
+
+
+def record_path_pattern():
+    """The pattern for a repo-root record path, or None when the record folders cannot be read.
+
+    The folders are the `DIRS` of lint/check_record_slugs.py, read from the file (it runs on
+    import, so it cannot be imported). A path counts only at the START of a word: after a space,
+    quote, bracket or `=`, with an optional `./`. A URL, `lint/decisions/x.md` and
+    `docs/decisions/0001.md` have a `/` or a word before the folder, so they are not repo-root
+    record paths and stay allowed.
+    """
+    if _RECORD_PATTERN:
+        return _RECORD_PATTERN[0]
+    for root in settings_roots():
+        try:
+            with open(os.path.join(root, RECORD_DIRS_FILE), encoding="utf-8") as handle:
+                text = handle.read(MESSAGE_FILE_MAX)
+        except Exception:
+            continue
+        block = re.search(r"^DIRS\s*=\s*\(([^)]*)\)", text, re.MULTILINE)
+        names = re.findall(r'"([\w.-]+)/"', block.group(1)) if block else []
+        if names:
+            pattern = re.compile(
+                r"(?:^|(?<=[\s\"'`(\[<,;=@]))(?:\./)?(?:" + "|".join(map(re.escape, names))
+                + r")/[\w.-]+\.md\b")
+            _RECORD_PATTERN.append(pattern)
+            return pattern
+    return None
 MESSAGE_VALUE_FLAGS = {"-m", "--message", "-b", "--body"}
 MESSAGE_FILE_FLAGS = {"-F", "--file", "--body-file"}
 MESSAGE_FILE_MAX = 64 * 1024
@@ -4269,6 +4317,11 @@ def cited_record_path(segment: str, raw: str, where: str) -> str:
         if rest is None or rest[:1] != ["pr"] or rest[1:2] not in (["create"], ["edit"]):
             return ""
         args = rest[2:]
+    pattern = record_path_pattern()
+    if pattern is None:
+        # An unread folder list is logged, as every unread subject is, and the rule stands down.
+        record("Bash", "noted", "subject-unread", "cite-by-id: record folders unread")
+        return ""
     texts, files, stdin = message_sources(args)
     for name in files:
         try:
@@ -4279,7 +4332,7 @@ def cited_record_path(segment: str, raw: str, where: str) -> str:
     if "<<" in segment:
         texts.extend(body for _, body in _split_heredocs(raw)[1])
     for text in texts:
-        found = RECORD_PATH.search(norm(text))
+        found = pattern.search(norm(text))
         if found:
             return found.group(0)
     return ""
@@ -4451,9 +4504,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
     # could not run. Judged per segment from the command word, so quoted text never fires it.
     for segment in split_segments(stripped):
         merging = merge_call_of(segment) if segment.strip() else None
-        if merging is None or merging[2]:
+        if merging is None:
             continue
-        verdict, detail = merge_gate(merging[0], merging[1])
+        verdict, detail = merge_gate(merging[0], merging[1], cite_where)
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),
                    "gh pr merge " + merging[0] + " " + verdict)
@@ -4549,7 +4602,7 @@ def judge(payload) -> None:
     if tool in MERGE_TOOLS:
         owner, name, number = (tool_input.get(k) for k in ("owner", "repo", "pullNumber"))
         repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
-        verdict, detail = merge_gate("" if number is None else str(number), repo)
+        verdict, detail = merge_gate("" if number is None else str(number), repo, cwd)
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),
                    "merge tool " + verdict)

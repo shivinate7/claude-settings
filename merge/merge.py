@@ -21,8 +21,8 @@ class Held(Stop):
 
 SH_TIMEOUT = None  # seconds; the guard sets it, so a hung `gh` cannot outlast its hook
 
-def sh(args, cwd=None, input=None):
-    r = subprocess.run(args, cwd=cwd, input=input, capture_output=True, text=True, timeout=SH_TIMEOUT)
+def sh(args, cwd=None, input=None, env=None):
+    r = subprocess.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, timeout=SH_TIMEOUT)
     return r.returncode, (r.stdout + r.stderr).strip()
 
 def git(cwd, *a, input=None):
@@ -140,9 +140,10 @@ class Host:
     """The GitHub half: `gh` for the pull request, the required checks, the wait and the merge.
     Tests pass a fake with the same pr, wait_checks and merge, or a `gh` shim on PATH."""
 
-    def __init__(self, required="protection", base="main", minute=60, now=time.time, pause=time.sleep, ignore=None, repo=None):
+    def __init__(self, required="protection", base="main", minute=60, now=time.time, pause=time.sleep, ignore=None, repo=None, cwd=None):
         self.required, self.base, self.minute, self.now, self.pause = required, base, minute, now, pause
         self.repo = repo  # OWNER/NAME, or None for the repo of the working directory
+        self.cwd = cwd    # where `gh` runs, so it names the repo of that directory
         self.ignore = ignore or {}  # check name -> reason, from ignore_checks()
 
     def _repo_args(self):
@@ -154,7 +155,7 @@ class Host:
 
     def pr(self, n):
         """-> {head, branch, base, state, mergeable, merge_state}"""
-        c, out = sh(["gh", "pr", "view", *self._pr_args(n), "--json", "headRefOid,headRefName,baseRefName,state,mergeable,mergeStateStatus"])
+        c, out = sh(["gh", "pr", "view", *self._pr_args(n), "--json", "headRefOid,headRefName,baseRefName,state,mergeable,mergeStateStatus"], cwd=self.cwd)
         if c:
             raise Stop("gh pr view failed: " + out)
         d = json.loads(out)
@@ -181,7 +182,7 @@ class Host:
 
     def checks(self, n):
         """-> {check name: [(bucket, link), ...]} from `gh pr checks`, every entry kept. It exits non-zero on red or pending, so read the JSON, not the code."""
-        c, out = sh(["gh", "pr", "checks", *self._pr_args(n), "--json", "name,bucket,link"])
+        c, out = sh(["gh", "pr", "checks", *self._pr_args(n), "--json", "name,bucket,link"], cwd=self.cwd)
         try:
             rows = json.loads(out)
         except ValueError:
@@ -233,15 +234,23 @@ class Host:
             settled = False
             self.block(pending, got)
 
-    def run_state(self, sha):
-        """-> (red, pending) from the workflow runs of `sha`. A run that is not completed holds the wait even
-        when its jobs are not listed as checks yet. Only success, skipped and neutral pass."""
-        c, out = sh(["gh", "run", "list", *self._repo_args(), "--commit", sha, "--limit", "100", "--json", "status,conclusion,name"])
+    def runs(self, sha):
+        """The workflow runs of `sha`, less the ignored ones."""
+        c, out = sh(["gh", "run", "list", *self._repo_args(), "--commit", sha, "--limit", "100", "--json", "status,conclusion,name"], cwd=self.cwd)
         try:
             runs = json.loads(out)
         except ValueError:
             raise Stop("gh run list failed: " + out)
-        runs = [r for r in runs if r["name"] not in self.ignore]
+        return [r for r in runs if r["name"] not in self.ignore]
+
+    def run_state(self, sha):
+        """-> (red, pending) from the workflow runs of `sha`. A run that is not completed holds the wait even
+        when its jobs are not listed as checks yet. Only success, skipped and neutral pass."""
+        return self.judge_runs(self.runs(sha))
+
+    @staticmethod
+    def judge_runs(runs):
+        """-> (red, pending) from a list of workflow runs."""
         red = [f"workflow {r['name']}: {r['conclusion']}" for r in runs if r["status"] == "completed" and r["conclusion"] not in ("success", "skipped", "neutral")]
         pending = [f"workflow {r['name']}" for r in runs if r["status"] != "completed"]
         return red, pending
@@ -269,21 +278,27 @@ class Host:
         s = "red: " + "; ".join(red) if red else "pending: " + ", ".join(pending) if pending else "green"
         return s + (" (ignored: " + "; ".join(ignored) + ")" if ignored else "")
 
-    def head_read(self, n):
+    def head_read(self, n, nothing_is_green=False):
         """One read, no wait, of every check and workflow run on the head, required or not.
         -> (verdict, detail): green, pending, red, or unknown when any read could not run. The guard's
-        home for "has this head settled", so it shares classify and run_state with the wait."""
+        home for "has this head settled", so it shares classify and runs with the wait.
+        No check and no run reads as pending, not green: right after a push GitHub has not created
+        them yet (wait_checks settles for the same reason). `nothing_is_green` is for a repo with no workflows."""
         try:
             info = self.pr(n)
-            red, pending, _ = self.classify(self.checks(n), [], self.ignore)
-            r_red, r_pending = self.run_state(info["head"])
+            got = self.checks(n)
+            red, pending, _ = self.classify(got, [], self.ignore)
+            runs = self.runs(info["head"])
         except Exception as e:  # Stop, a missing gh, a timeout, malformed JSON: all unread
             return "unknown", str(e)
+        r_red, r_pending = self.judge_runs(runs)
         red, pending = red + r_red, pending + r_pending
         if red:
             return "red", "; ".join(red)
         if pending:
             return "pending", ", ".join(pending)
+        if not got and not runs and not nothing_is_green:
+            return "pending", "no check and no workflow run is reported on the head yet"
         return "green", ""
 
     def block(self, pending, got):
@@ -318,7 +333,9 @@ class Host:
 # ------------------------------------------------------------------ git steps
 
 def node_stamp(wt, cfgrel, mode, base):
-    return sh(["node", STAMP, f"--{mode}", "--base", base, "--config", os.path.join(wt, cfgrel), "--root", wt])
+    # GITHUB_REF and GITHUB_BASE_REF name the runner's checkout, not this worktree. stamp would read them as the worktree's branch.
+    env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_REF", "GITHUB_BASE_REF")}
+    return sh(["node", STAMP, f"--{mode}", "--base", base, "--config", os.path.join(wt, cfgrel), "--root", wt], env=env)
 
 def own_claim(wt, cfgrel, base):
     """The trailer ids when HEAD is this tool's claim and each number is still free, else None."""
