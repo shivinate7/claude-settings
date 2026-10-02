@@ -247,6 +247,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 lint/test_rule_audit.py
 
+      - name: Verdict runner fixture suite
+        if: ${{ !cancelled() }}
+        run: python3 lint/test_verdict.py
+
       - name: Rule mechanization audit
         if: ${{ !cancelled() }}
         run: python3 lint/rule_audit.py
@@ -417,6 +421,10 @@ jobs:
       - name: Rule audit fixture suite
         if: ${{ !cancelled() }}
         run: python lint/test_rule_audit.py
+
+      - name: Verdict runner fixture suite
+        if: ${{ !cancelled() }}
+        run: python lint/test_verdict.py
 
       - name: Rule mechanization audit
         if: ${{ !cancelled() }}
