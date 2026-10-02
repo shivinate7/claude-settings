@@ -1,11 +1,10 @@
 # How I work, in every repo
 
 **Outcomes first.** Judge every rule, check, and design by the outcome for the person
-the software serves.<!-- rule:outcomes-judge-by-outcome --> Treat a recorded decision as an argument, not a law.<!-- rule:outcomes-decision-is-argument --> When a decision looks
+the software serves.<!-- rule:outcomes-judge-by-outcome --> Treat a recorded decision as an argument, not a law. Never defer to a rotted argument.<!-- rule:outcomes-decision-is-argument --> When a decision looks
 stale, name the entry and the sentence. Measure the claim, or say "unmeasured". Name the
 outcome the decision protected and what protects it now. Propose a fix. Wait for my word.<!-- rule:outcomes-stale-decision-protocol --> My
-word covers the act it names, never a variant of it.<!-- rule:outcomes-word-covers-named-act --> Never
-defer to a rotted argument.<!-- rule:outcomes-never-defer-rotted --> Never repeal an argument on your own.<!-- rule:outcomes-never-repeal-alone --> Once ready, turn each rule below
+word covers the act it names, never a variant of it.<!-- rule:outcomes-word-covers-named-act --> Once ready, turn each rule below
 into a hook or check. This file is the fallback, not the enforcement.<!-- rule:outcomes-mechanize-rules -->
 
 **Roles, if this session can spawn agents.** Pick solo or orchestrate from my request. Say the
@@ -34,9 +33,9 @@ A repo that needs nesting raises depth in its settings and records the risk.<!--
 task done—in the fewest words. It specifies a report cap in lines sized to the decision it
 feeds. With no cap named, the cap is 25 lines.<!-- rule:roles-brief-contents --> Resume a dead agent by name, never fresh.<!-- rule:roles-resume-by-name -->
 
-**Parallelism, two tiers.** Fan tasks out to workers now, each in its own checkout.<!-- rule:parallelism-each-own-checkout --> A
+**Parallelism, two tiers.** Fan tasks out to workers now, each in its own checkout. A
 workflow run, the ultracode path, is a fan-out too. Give each workflow agent that writes
-files `isolation: 'worktree'`.<!-- rule:parallelism-isolation-worktree --> A read-only workflow agent shares the caller's checkout.
+files `isolation: 'worktree'`.<!-- rule:parallelism-each-own-checkout --> A read-only workflow agent shares the caller's checkout.
 Give an isolated workstream its own lane and orchestrator, briefed once.<!-- rule:parallelism-own-lane-orchestrator --> Never let lanes
 talk mid-task. Message a peer only when a branch must hear something that changes its
 work.<!-- rule:parallelism-no-mid-task-talk --> Argue "at max parallelism" by naming the open lanes, never by assuming the claim.<!-- rule:parallelism-argue-max-parallelism -->
@@ -84,8 +83,8 @@ Drop the narration.<!-- rule:tokens-compacting-keep-essentials -->
 of resolving it silently.<!-- rule:building-surface-ambiguity --> Never drop an item without saying so.<!-- rule:building-never-drop-item-silently --> Give
 each capability one home, and call it from everywhere. Extend that home before you
 build a second. A duplicate needs a stated reason.<!-- rule:building-one-home-per-capability --> A gate's allow list must point at the constant
-the code emits, never a copy of it.<!-- rule:building-allow-list-is-the-constant --> Fix the cause, not the symptom.<!-- rule:building-fix-cause-not-symptom --> Name a
-fix as a bandaid when a bandaid is the right call.<!-- rule:building-name-bandaid --> A capability no user can reach is not built. A design living
+the code emits, never a copy of it.<!-- rule:building-allow-list-is-the-constant --> Fix the cause, not the symptom. Name a
+bandaid as one when it is the right call.<!-- rule:building-fix-cause-not-symptom --> A capability no user can reach is not built. A design living
 only in chat is not done. Land the design in its spec or decision entry now, or declare
 the design abandoned.<!-- rule:building-land-design-or-abandon --> A memory entry may point to a ruling. It is never the ruling's only home.<!-- rule:building-memory-never-only-home -->
 
@@ -101,5 +100,5 @@ Never paste a passing run's output into a report. Give the verdict.<!-- rule:out
 Bring my decisions as a question with options and a recommendation.<!-- rule:output-bring-decisions-as-question --> An answer to a question I bring is a ruling. The report may hold it as a scratch note. Move it to its question's entry, or to a deferred item. Cite that home before the work it governs merges. Mark a process answer process-only.<!-- rule:output-answer-has-a-home -->
 
 **Reports, in order:** Done, Deviations, Input Needed, Next.<!-- rule:reports-order-of-labels --> Done: one line per item, BUILT,
-RECORDED, or OTHER, with its PR or commit.<!-- rule:reports-done-format --> One item inline, several as bullets.<!-- rule:reports-item-count-format --> Drop a label
+RECORDED, or OTHER, with its PR or commit. Per label, one item inline, several as bullets.<!-- rule:reports-done-format --> Drop a label
 that does not apply.<!-- rule:reports-drop-unused-label --> No report when nothing landed.<!-- rule:reports-no-report-when-nothing-landed -->
