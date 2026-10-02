@@ -2775,6 +2775,64 @@ LIVE_STREAM_REASON = (
 )
 
 
+# A COMMAND THAT NARRATES WHILE IT WAITS, piped into `tail` or `head`. Ported from pkmnscan's
+# `scripts/guard-shell.py` (the heartbeat clause), behaviour only. The merge tool waits minutes for
+# a claim commit's checks and prints a line a minute. A pipe block-buffers that heartbeat and the
+# filter keeps one end of it, so a working wait reads as a hang. The roster is NAMED, one entry per
+# incident, because "does this command narrate for minutes" cannot be resolved from the system, and
+# refusing every `| tail` is the cry-wolf guard (decisions/guard-that-cries-wolf-is-spent.md). `tee`
+# keeps every byte, so it is not refused. Only `--confirm` reaches the wait: a bare `merge <pr>` is a
+# preview that returns in seconds, so piping it is allowed.
+NARRATING_COMMANDS = ("merge", "merge.cmd")
+NARRATING_SCRIPT_TAILS = ("merge/merge.py", "merge/launch.py")
+TRUNCATING_FILTERS = ("tail", "head")
+
+
+def narrating_stage(segment: str) -> str:
+    """The command word when one segment is a long, narrating `--confirm` run, else ''."""
+    tokens = segment_tokens(segment)
+    if not tokens or "--confirm" not in tokens:
+        return ""
+    index = resolve_command(tokens)
+    if index is None:
+        return ""
+    word = basename(tokens[index])
+    if word in NARRATING_COMMANDS:
+        return word
+    for token in tokens[index:]:
+        if token.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
+            return word + " " + basename(token)
+    return ""
+
+
+def narrated_tail_hit(stripped: str) -> str:
+    """Return the matched text when a narrating stage is piped straight into `tail`/`head`."""
+    ends = []
+    segments = split_segments(stripped, ends)
+    for index in range(len(segments) - 1):
+        if ends[index] != "|":
+            continue
+        stage = narrating_stage(segments[index])
+        if not stage:
+            continue
+        tokens = segment_tokens(segments[index + 1])
+        if not tokens:
+            continue
+        at = resolve_command(tokens)
+        if at is not None and basename(tokens[at]) in TRUNCATING_FILTERS:
+            return stage + " | " + basename(tokens[at])
+    return ""
+
+
+NARRATED_TAIL_REASON = (
+    "this command waits for minutes and prints a line as it goes, and a pipe into a filter "
+    "that keeps one end of the stream hides that line until the end, so a working wait looks "
+    "like a hang. "
+    "Remedy: run the command with nothing after it and read its output as it arrives, or "
+    "redirect to a file you read back afterwards, or use tee to keep a full copy."
+)
+
+
 # ------------------------------------------------------------------ a waiter loop
 #
 # Rule 9, approved by the owner: a shell segment whose command word is a sleep-and-poll turns
@@ -4001,6 +4059,187 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str) -> No
     sys.exit(0)
 
 
+# ------------------------------------------------------------------ three ported shell traps
+#
+# Ported from pkmnscan's `scripts/guard-shell.py` (behaviour, not code shape). Each clause below is
+# self-contained so it merges cleanly beside other edits to this file.
+
+# `gh api` with a field flag and no method. `-f`/`-F` give the request a body and gh then sends POST,
+# so a call meant as a GET silently becomes a write (hung past a 120s timeout in Banchi, 2026-09-12).
+# A named method (`-X`, `--method`, in any spelling) is the caller saying what they mean. `graphql`
+# is a POST by design and takes no method.
+GH_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
+GH_METHOD_FLAGS = ("-X", "--method")
+GH_VALUE_FLAGS = ("-H", "--header", "--hostname", "--jq", "-q", "--template", "-t", "--cache",
+                  "--input", "-p", "--preview")
+
+
+def gh_api_post_hit(segment: str) -> str:
+    """Return the matched text when a `gh api` call has a field and no method, else ''."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return ""
+    at = resolve_command(tokens)
+    if at is None or basename(tokens[at]) not in ("gh", "gh.exe") or tokens[at + 1:at + 2] != ["api"]:
+        return ""
+    rest = tokens[at + 2:]
+    fielded = False
+    endpoint = ""
+    index = 0
+    while index < len(rest):
+        token = rest[index]
+        index += 1
+        if token in GH_METHOD_FLAGS or token.startswith(("--method=", "-X")):
+            return ""
+        if token in GH_FIELD_FLAGS:
+            fielded = True
+            index += 1
+        elif token.startswith(("--field=", "--raw-field=")) or (
+                token[:2] in ("-f", "-F") and len(token) > 2 and not token.startswith("--")):
+            fielded = True
+        elif token in GH_VALUE_FLAGS:
+            index += 1
+        elif not token.startswith("-") and not endpoint:
+            endpoint = token
+    if not fielded or endpoint == "graphql":
+        return ""
+    return "gh api " + endpoint + " with a field and no method"
+
+
+GH_API_METHOD_REASON = (
+    "a field flag gives the request a body, and gh sends a body with POST, so with no method named "
+    "this is a write and not the read it looks like. "
+    "Remedy: put a read's parameters in the query string of the endpoint, or name the method with "
+    "--method when the body is what you want."
+)
+
+
+# `ln -s` where the link name is a directory that is already there. ln does not fail: it creates the
+# link INSIDE that directory (`images/images`), the original is still in place, and the call exits 0
+# (Banchi 2026-08-29, which ended with a real directory renamed away). A real directory always
+# descends, whatever flags. A symlink to a directory descends unless `-n`/`-h`, so `-sf` over one is
+# the trap and `-sfn` is the answer. Nothing else is refused: a file or a link to a file either
+# fails loudly or, with `-f`, is replaced as asked, and neither loses anything silently. A trailing
+# slash, `-t`, and `-T` each say the destination is, or is not, a directory, so each is allowed.
+# `-sf` over a link to a file is therefore allowed: it replaces the link, which is what `-f` means.
+def ln_descends_hit(segment: str, where: str) -> str:
+    """Return the matched text when `ln -s` would create a link inside an existing directory."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return ""
+    at = resolve_command(tokens)
+    if at is None or basename(tokens[at]) != "ln":
+        return ""
+    symbolic = no_deref = False
+    operands = []
+    index = at + 1
+    while index < len(tokens):
+        token = tokens[index]
+        index += 1
+        if token == "--":
+            operands.extend(tokens[index:])
+            break
+        if token in ("-t", "--target-directory", "--no-target-directory") or token.startswith(
+                "--target-directory="):
+            return ""
+        if token.startswith("--"):
+            symbolic = symbolic or token == "--symbolic"
+            no_deref = no_deref or token == "--no-dereference"
+        elif token.startswith("-") and len(token) > 1:
+            if "T" in token[1:] or "t" in token[1:]:
+                return ""
+            symbolic = symbolic or "s" in token[1:]
+            no_deref = no_deref or "n" in token[1:] or "h" in token[1:]
+        else:
+            operands.append(token)
+    if not symbolic or len(operands) != 2:
+        return ""
+    dest = operands[1]
+    if dest.endswith(("/", "\\")) or "$" in dest or "*" in dest:
+        return ""
+    full = _absolute(os.path.expanduser(dest), where or os.getcwd())
+    if not os.path.isdir(full):
+        return ""
+    if os.path.islink(full) and no_deref:
+        return ""
+    return "ln -s over an existing directory"
+
+
+LN_DESCENDS_REASON = (
+    "the link name is a directory that already exists, so ln does not replace it: it creates the "
+    "link inside it and exits 0, leaving the original where it was. "
+    "Remedy: add -n beside -f to replace a link to a directory, check that the path is free first "
+    "with a test such as [ -e path ], or end the destination with a slash when you mean a link "
+    "inside the directory."
+)
+
+
+# `git push <remote> HEAD` from a branch whose upstream has a DIFFERENT name on that remote. HEAD
+# pushes to a branch named like the local one, so it creates a stray branch there, reports success,
+# and leaves the tracked branch untouched (Banchi 2026-09-12). A refspec with a colon names its
+# destination, so it is the fix and not the trap. No upstream on this remote, or an upstream of the
+# same name, is the ordinary push. A branch cut from the remote's default branch tracks that default
+# from birth and its first push is meant to create its own name, so that case is exempt. The reads
+# are git's own (HEAD, branch.<name>.remote, branch.<name>.merge), never a guess from text.
+PUSH_VALUE_FLAGS = ("--repo", "-o", "--push-option", "--receive-pack", "--exec")
+PUSH_SPECIAL_FLAGS = ("--all", "--mirror", "--tags", "-d", "--delete")
+
+
+def _git_line(where: str, *args) -> str:
+    answer = _git(where, *args)
+    if answer is None or answer.returncode != 0:
+        return ""
+    return answer.stdout.strip()
+
+
+def push_head_mismatch_hit(segment: str, where: str) -> str:
+    """Return the matched text when `git push <remote> HEAD` goes to a name other than upstream."""
+    for subcommand, args in git_calls(segment):
+        if subcommand != "push":
+            continue
+        positional = []
+        index = 0
+        while index < len(args):
+            arg = args[index]
+            index += 1
+            if arg in PUSH_SPECIAL_FLAGS:
+                positional = []
+                break
+            if arg in PUSH_VALUE_FLAGS:
+                index += 1
+            elif not arg.startswith("-"):
+                positional.append(arg)
+        if len(positional) != 2 or positional[1] != "HEAD" or not where or not os.path.isdir(where):
+            continue
+        remote = positional[0]
+        branch = _git_line(where, "symbolic-ref", "--quiet", "--short", "HEAD")
+        if not branch or _git_line(where, "config", "--get", "branch." + branch + ".remote") != remote:
+            continue
+        tracked = _git_line(where, "config", "--get", "branch." + branch + ".merge")
+        tracked = tracked[len("refs/heads/"):] if tracked.startswith("refs/heads/") else tracked
+        if not tracked or tracked == branch:
+            continue
+        default = _git_line(where, "symbolic-ref", "--quiet", "--short",
+                            "refs/remotes/" + remote + "/HEAD")
+        default = default[len(remote) + 1:] if default.startswith(remote + "/") else default
+        if not default:
+            default = next((name for name in ("main", "master") if _git_line(
+                where, "rev-parse", "--verify", "--quiet", "refs/heads/" + name)), "")
+        if tracked == default:
+            continue
+        return "git push " + remote + " HEAD from " + branch + " tracking another name"
+    return ""
+
+
+PUSH_HEAD_REASON = (
+    "HEAD is pushed to a branch of the same name as the local branch, and this branch tracks a "
+    "branch with a different name, so the push creates a new branch on the remote and leaves the "
+    "tracked one untouched while reporting success. "
+    "Remedy: give the destination explicitly as HEAD:<branch-name>, using the remote branch you "
+    "mean to update."
+)
+
+
 SPAWN_TOOLS = ("Agent", "Task")
 MODEL_FLOOR_REASON = (
     "Sonnet is the floor for every subagent. Start the subagent with model sonnet or opus, "
@@ -4131,6 +4370,25 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
             if poller:
                 refuse(tool, "deny", "waiter", PATTERN_POLLER_REASON, poller + " " + matched)
             refuse(tool, "deny", "waiter", WAITER_REASON, matched)
+    matched = narrated_tail_hit(stripped)
+    if matched:
+        refuse(tool, "deny", "live-stream", NARRATED_TAIL_REASON, matched)
+
+    # 3b. Three traps ported from pkmnscan's `scripts/guard-shell.py`: `gh api` with a field and no
+    # method, `ln -s` onto a directory that is already there, and `git push <remote> HEAD` from a
+    # branch whose upstream has another name. Each reads the segment's own command word, never a
+    # substring, and the last two read the filesystem or the repository rather than the text.
+    run_in = _run_dir(stripped, cwd)
+    for segment in split_segments(stripped):
+        matched = gh_api_post_hit(segment)
+        if matched:
+            refuse(tool, "deny", "gh-api-method", GH_API_METHOD_REASON, matched)
+        matched = ln_descends_hit(segment, run_in)
+        if matched:
+            refuse(tool, "deny", "ln-over-directory", LN_DESCENDS_REASON, matched)
+        matched = push_head_mismatch_hit(segment, run_in)
+        if matched:
+            refuse(tool, "deny", "push-head-mismatch", PUSH_HEAD_REASON, matched)
 
     # 4. A wide delete denies, and a force push asks.
     for pattern in DESTRUCTIVE_DELETE:

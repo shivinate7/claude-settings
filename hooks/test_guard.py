@@ -831,6 +831,37 @@ def build_fixtures():
 
 build_fixtures()
 
+# --------------------------------------------------------------- the four ported shell traps
+#
+# TRAPDIFF stands on `local-x`, whose upstream is `remote-x`: a name that differs from its own.
+# TRAPSAME stands on `same-x`, tracking `same-x`. TRAPCUT stands on a branch cut from `main`, which
+# tracks `main` from birth. TRAPLN holds one real directory, a link to it, a file and a link to it.
+TRAPDIFF = os.path.join(ROOT, "trapdiff")
+TRAPSAME = os.path.join(ROOT, "trapsame")
+TRAPCUT = os.path.join(ROOT, "trapcut")
+TRAPLN = os.path.join(ROOT, "trapln")
+
+
+def build_trap_fixtures():
+    for where, branch, tracked in ((TRAPDIFF, "local-x", "remote-x"),
+                                   (TRAPSAME, "same-x", "same-x"),
+                                   (TRAPCUT, "local-cut", "main")):
+        make_repo(where, {"base.txt": "base\n"})
+        run_vcs(where, "checkout", "-q", "-b", branch)
+        run_vcs(where, "config", "branch." + branch + ".remote", "origin")
+        run_vcs(where, "config", "branch." + branch + ".merge", "refs/heads/" + tracked)
+        got = run_vcs(where, "config", "--get", "branch." + branch + ".merge").stdout.strip()
+        if got != "refs/heads/" + tracked:
+            sys.exit("fixture setup failed in build_trap_fixtures: %r tracks %r, not %r"
+                     % (where, got, tracked))
+    os.makedirs(os.path.join(TRAPLN, "realdir"))
+    write(os.path.join(TRAPLN, "file.txt"), "x\n")
+    os.symlink("realdir", os.path.join(TRAPLN, "linkdir"))
+    os.symlink("file.txt", os.path.join(TRAPLN, "linkfile"))
+
+
+build_trap_fixtures()
+
 CFG_SETTINGS = slash(os.path.join(CFG, "settings.json"))
 CFG_CLAUDEMD = slash(os.path.join(CFG, "CLAUDE.md"))
 CFG_HOOK = slash(os.path.join(CFG, "hooks", "guard.py"))
@@ -1697,6 +1728,71 @@ sh("stream: Get-Content -Tail reads and stops", "Get-Content app.log -Tail 20", 
 # too. Pinned here so a later change cannot narrow that read back to command position only.
 sh("stream: tail -f inside a loop's do-block denies unchanged",
    "while true; do tail -f app.log; done", "deny", "live-stream", cwd=NOGIT)
+
+
+# =========================================================================== 2c. shell traps
+#
+# Four traps ported from pkmnscan's `scripts/guard-shell.py`. Each has a red case, an allowed case,
+# and two false-alarm cases: a command that reads like the trap and is not it. Each is judged on the
+# act (the command word, the flags, what the path or the branch resolves to), never on a substring.
+
+# --- a narrating command piped into tail (extends the live-stream rule)
+sh("narrate: merge --confirm piped to tail hides its heartbeat",
+   "merge 12 --confirm 2>&1 | tail -18", "deny", "live-stream", cwd=NOGIT)
+sh("narrate: the script run by path, piped to head",
+   "~/.claude/bin/merge 12 --confirm | head -5", "deny", "live-stream", cwd=NOGIT)
+sh("narrate: a merge preview is not a wait", "merge 12 2>&1 | tail -5", "allow", cwd=NOGIT)
+sh("narrate: tee keeps every byte", "merge 12 --confirm 2>&1 | tee run.out", "allow", cwd=NOGIT)
+sh("narrate: an ordinary command piped to tail", "make check 2>&1 | tail -40", "allow", cwd=NOGIT)
+sh("narrate: tail of a file, no pipe", "tail -n 5 notes.txt", "allow", cwd=NOGIT)
+sh("narrate: merge --confirm named in a quoted argument runs nothing",
+   "echo 'merge 12 --confirm' | tail -1", "allow", cwd=NOGIT)
+
+# --- gh api with a field and no method
+sh("gh-api: a field with no method is a POST",
+   "gh api repos/o/r/pulls -f state=open", "deny", "gh-api-method", cwd=NOGIT)
+sh("gh-api: a typed field with no method is a POST",
+   "gh api repos/o/r/pulls -F per_page=5 --paginate", "deny", "gh-api-method", cwd=NOGIT)
+sh("gh-api: a named method says what is meant",
+   "gh api -X POST repos/o/r/issues -f title=x", "allow", cwd=NOGIT)
+sh("gh-api: --method GET with a field is a stated read",
+   "gh api --method=GET repos/o/r/pulls -f state=open", "allow", cwd=NOGIT)
+sh("gh-api: a query string and no field", "gh api 'repos/o/r/pulls?state=open'", "allow", cwd=NOGIT)
+sh("gh-api: graphql is a POST by design", "gh api graphql -f query='{ viewer { login } }'",
+   "allow", cwd=NOGIT)
+sh("gh-api: -f on another program is not gh api", "curl -f https://example.invalid/x", "allow",
+   cwd=NOGIT)
+
+# --- ln -s onto a directory that is already there
+sh("ln: -s over a real directory nests the link inside it",
+   "ln -s /opt/tool/realdir realdir", "deny", "ln-over-directory", cwd=TRAPLN)
+sh("ln: -sf over a link to a directory descends into it",
+   "ln -sf /opt/tool/linkdir linkdir", "deny", "ln-over-directory", cwd=TRAPLN)
+sh("ln: -sfn replaces a link to a directory", "ln -sfn /opt/tool/linkdir linkdir", "allow",
+   cwd=TRAPLN)
+sh("ln: -sf over a link to a file replaces the link, as -f says",
+   "ln -sf /opt/tool/other linkfile", "allow", cwd=TRAPLN)
+sh("ln: a free name", "ln -s /opt/tool/x brand-new", "allow", cwd=TRAPLN)
+sh("ln: a trailing slash says the destination is a directory",
+   "ln -s /opt/tool/x realdir/", "allow", cwd=TRAPLN)
+sh("ln: a hard link over a directory name is not symbolic", "ln /opt/tool/x realdir", "allow",
+   cwd=TRAPLN)
+
+# --- git push <remote> HEAD from a branch whose upstream has another name
+sh("push-head: HEAD from a branch tracking another name makes a stray branch",
+   VCS + " push origin HEAD", "deny", "push-head-mismatch", cwd=TRAPDIFF)
+sh("push-head: -u does not change the destination name",
+   VCS + " push -u origin HEAD", "deny", "push-head-mismatch", cwd=TRAPDIFF)
+sh("push-head: an explicit destination is the fix",
+   VCS + " push origin HEAD:refs/heads/remote-x", "allow", cwd=TRAPDIFF)
+sh("push-head: a branch named outright is not HEAD", VCS + " push origin local-x", "allow",
+   cwd=TRAPDIFF)
+sh("push-head: upstream of the same name is the ordinary push", VCS + " push origin HEAD",
+   "allow", cwd=TRAPSAME)
+sh("push-head: a branch cut from main pushes under its own name",
+   VCS + " push origin HEAD", "allow", cwd=TRAPCUT)
+sh("push-head: the remedy form on the branch's own name",
+   VCS + " push origin HEAD:refs/heads/same-x", "allow", cwd=TRAPSAME)
 
 
 # =========================================================================== 2c. waiter loops
