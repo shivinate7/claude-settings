@@ -945,6 +945,51 @@ class GhHalf(Env):
         self.assertTrue(self.reverted())
         self.assertFalse(self.lock_ref())
 
+class SilentUndo(Env):
+    def stale_feat(self):
+        """main gains lines in first.md, then feat merges main keeping ours: feat carries the old file."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, "docs/decisions/first.md"), record("D-001", "first") + "newer line a\nnewer line b\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "main moves"); sh(o, "git", "push", "-q", "origin", "main")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "merge", "-q", "-s", "ours", "--no-edit", "origin/main")
+        sh(o, "git", "push", "-q", "origin", "feat")
+
+    def test_a_stale_branch_is_refused_before_anything_is_pushed(self):
+        self.stale_feat()
+        before = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1)
+        self.assertIn("silently undoes", out)
+        self.assertIn("first.md", out)
+        self.assertEqual(self.refs(), before)
+        self.assertEqual(self.host.waits, [])
+
+    def test_a_trailer_lets_the_deliberate_drop_merge(self):
+        self.stale_feat()
+        o = self.other
+        sh(o, "git", "commit", "-q", "--allow-empty", "-m", "Drop them on purpose\n\nDrops-lines: docs/decisions/first.md")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+
+    def test_the_check_runs_again_after_the_wait_and_a_red_reverts_the_claim(self):
+        calls = []
+        real = merge.undo_check
+        def second_is_red(wt, base):
+            calls.append(base)
+            if len(calls) == 2:
+                raise merge.Stop("the branch silently undoes earlier work: main moved during the wait")
+            return real(wt, base)
+        with unittest.mock.patch.object(merge, "undo_check", second_is_red):
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.claims(), 0)
+        self.assertFalse(getattr(self.host, "merged", False))
+
 class Identity(Env):
     def test_claim_commit_falls_back_when_only_the_email_is_set(self):
         info = self.host.pr(7)

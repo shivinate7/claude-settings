@@ -1,0 +1,386 @@
+#!/usr/bin/env python3
+"""Fixture suite for lint/check_silent_undo.py. Run: python3 lint/test_check_silent_undo.py
+
+Every case builds a throwaway repo with a local `origin` and asks the check for a verdict.
+Red cases come from two real incidents: a squash that carried the pre-deletion copy of a file
+(pkmnscan, a revert nobody wrote), and a merge that dropped a parent's added line (q_max).
+"""
+import contextlib, io, os, subprocess, sys, tempfile, unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "..", "merge"))
+import check_silent_undo as C  # noqa: E402
+
+ENV = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t",
+           GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+os.environ.update({k: ENV[k] for k in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL")})
+
+BODY = "".join("line %d\n" % i for i in range(1, 21))
+
+
+REPOS = []
+
+
+def tearDownModule():
+    for r in REPOS:
+        r.tmp.cleanup()
+
+
+class Repo:
+    def __init__(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        REPOS.append(self)
+        self.dir = os.path.join(self.tmp.name, "w")
+        origin = os.path.join(self.tmp.name, "o.git")
+        self.sh("init", "-q", "--bare", origin, cwd=self.tmp.name)
+        self.sh("init", "-q", "-b", "main", self.dir, cwd=self.tmp.name)
+        self.sh("remote", "add", "origin", origin)
+
+    def sh(self, *a, cwd=None, ok=True):
+        r = subprocess.run(["git", *a], cwd=cwd or self.dir, capture_output=True, text=True)
+        assert r.returncode == 0 or not ok, (a, r.stdout, r.stderr)
+        return r.stdout.strip()
+
+    def put(self, path, text):
+        full = os.path.join(self.dir, path)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "w") as f:
+            f.write(text)
+
+    def commit(self, msg, **files):
+        for k, v in files.items():
+            self.put(k.replace("__", "/").replace("_md", ".md").replace("_txt", ".txt"), v)
+        self.sh("add", "-A")
+        self.sh("commit", "-q", "-m", msg)
+        return self.sh("rev-parse", "HEAD")
+
+    def push(self):
+        self.sh("push", "-q", "origin", "main")
+        self.sh("fetch", "-q", "origin")
+
+    def verdict(self, head="HEAD", window=60):
+        return C.check(self.dir, "origin/main", head, window)
+
+
+def base_repo():
+    r = Repo()
+    r.put("app.txt", BODY + "function Card() {}\n")
+    r.put("other.txt", "other v1\n")
+    r.commit("base")
+    r.push()
+    return r
+
+
+class Red(unittest.TestCase):
+    def setUp(self):
+        self.r = base_repo()
+
+    def merged_pr(self, branch="pr1"):
+        """PR 1: deletes Card from app.txt, merges into main with a merge commit."""
+        r = self.r
+        r.sh("checkout", "-q", "-b", branch)
+        r.commit("delete Card", app_txt=BODY)
+        r.sh("checkout", "-q", "main")
+        r.sh("merge", "-q", "--no-ff", "-m", "Merge pull request #1", branch)
+        r.push()
+
+    def test_revert_of_a_prior_pr(self):
+        self.merged_pr()
+        r = self.r
+        r.sh("checkout", "-q", "-b", "oops")
+        r.commit("tidy other", other_txt="other v2\n")
+        r.sh("revert", "--no-edit", "-m", "1", "main")
+        got = r.verdict()
+        self.assertTrue(any("app.txt" in p and "undoing" in p for p in got), got)
+
+    def test_revert_with_trailer_passes(self):
+        self.merged_pr()
+        r = self.r
+        r.sh("checkout", "-q", "-b", "oops")
+        r.sh("revert", "--no-edit", "-m", "1", "main")
+        r.sh("commit", "-q", "--amend", "-m", "Bring Card back\n\nDrops-lines: app.txt")
+        self.assertEqual(r.verdict(), [])
+
+    def test_stale_branch_keep_ours_merge(self):
+        """pkmnscan shape: cut before the PR, merge main keeping ours, land: the old file returns."""
+        r = self.r
+        r.sh("checkout", "-q", "-b", "stale")
+        r.sh("checkout", "-q", "main")
+        self.merged_pr("pr1")
+        r.sh("checkout", "-q", "stale")
+        r.commit("wording", other_txt="other v2\n")
+        r.sh("merge", "-q", "-s", "ours", "--no-edit", "main")
+        got = r.verdict()
+        self.assertTrue(any("app.txt" in p and "whole file restored" in p for p in got), got)
+
+    def test_stale_branch_hunk_level(self):
+        """Main added a comment after the PR; the branch restores Card but keeps the comment."""
+        self.merged_pr()
+        r = self.r
+        r.sh("checkout", "-q", "-b", "silent")
+        r.commit("wording", app_txt=BODY + "function Card() {}\n")
+        got = r.verdict()
+        self.assertTrue(any("app.txt" in p and "undoing" in p for p in got), got)
+
+    def test_conflict_resolved_taking_ours_drops_the_other_side(self):
+        r = self.r
+        r.sh("checkout", "-q", "-b", "feat")
+        r.commit("feat edits line 5", app_txt=BODY.replace("line 5\n", "line 5 feat\n") + "function Card() {}\n")
+        r.sh("checkout", "-q", "main")
+        r.commit("main edits line 5", app_txt=BODY.replace("line 5\n", "line 5 main\nmain extra\n") + "function Card() {}\n")
+        r.push()
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "main", ok=False)  # conflicts
+        r.sh("checkout", "--ours", "app.txt")
+        r.sh("add", "app.txt")
+        r.sh("commit", "-q", "--no-edit")
+        got = r.verdict()
+        self.assertTrue(any("app.txt" in p and "drops" in p and "main extra" in p for p in got), got)
+
+    def test_hand_drop_in_a_merge_without_conflict(self):
+        r = self.r
+        r.sh("checkout", "-q", "-b", "feat")
+        r.commit("feat", other_txt="other v2\n")
+        r.sh("checkout", "-q", "main")
+        r.commit("main adds", app_txt=BODY + "function Card() {}\nadded by main\n")
+        r.push()
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "--no-commit", "--no-ff", "main")
+        r.put("app.txt", BODY + "function Card() {}\n")
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge main")
+        got = r.verdict()
+        self.assertTrue(any("added by main" in p for p in got), got)
+
+    def test_trailer_on_the_merge_allows_the_drop(self):
+        r = self.r
+        r.sh("checkout", "-q", "-b", "feat")
+        r.commit("feat", other_txt="other v2\n")
+        r.sh("checkout", "-q", "main")
+        r.commit("main adds", app_txt=BODY + "function Card() {}\nadded by main\n")
+        r.push()
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "--no-commit", "--no-ff", "main")
+        r.put("app.txt", BODY + "function Card() {}\n")
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge main\n\nDrops-lines: app.txt")
+        self.assertEqual(r.verdict(), [])
+
+
+BLOCK = "alpha one\nbeta two\ngamma three\ndelta four\nepsilon five\nzeta six\n"
+
+
+class Debt19(unittest.TestCase):
+    """The three shapes that walked past the pkmnscan revert guard: age, re-wording, a widened hunk."""
+
+    def setUp(self):
+        r = self.r = Repo()
+        r.put("app.txt", BODY + BLOCK)
+        r.put("other.txt", "other v1\n")
+        r.commit("base")
+        r.push()
+
+    def pr_deletes_block(self):
+        r = self.r
+        r.sh("checkout", "-q", "-b", "pr1")
+        r.commit("delete block", app_txt=BODY)
+        r.sh("checkout", "-q", "main")
+        r.sh("merge", "-q", "--no-ff", "-m", "Merge pull request #1", "pr1")
+        r.push()
+
+    def test_age_beyond_the_window(self):
+        r = self.r
+        r.sh("checkout", "-q", "-b", "stale")
+        r.sh("checkout", "-q", "main")
+        self.pr_deletes_block()
+        for i in range(6):
+            r.commit("filler %d" % i, other_txt="other v%d\n" % (i + 2))
+        r.push()
+        r.sh("checkout", "-q", "stale")
+        r.commit("wording", other_txt="mine\n")
+        r.sh("merge", "-q", "-s", "ours", "--no-edit", "main")
+        got = r.verdict(window=2)
+        self.assertTrue(any("app.txt" in p for p in got), got)
+
+    def test_restored_block_with_one_line_reworded(self):
+        self.pr_deletes_block()
+        r = self.r
+        r.sh("checkout", "-q", "-b", "reword")
+        r.commit("restore", app_txt=BODY + BLOCK.replace("delta four", "delta 4, reworded"))
+        got = r.verdict()
+        self.assertTrue(any("app.txt" in p for p in got), got)
+
+    def test_reversal_widened_by_an_adjacent_edit(self):
+        self.pr_deletes_block()
+        r = self.r
+        r.sh("checkout", "-q", "-b", "widen")
+        r.commit("restore and touch the line above", app_txt=BODY.replace("line 20\n", "line 20 edited\n") + BLOCK)
+        got = r.verdict()
+        self.assertTrue(any("app.txt" in p for p in got), got)
+
+    def test_two_lines_reworded_is_a_new_edit(self):
+        self.pr_deletes_block()
+        r = self.r
+        r.sh("checkout", "-q", "-b", "newedit")
+        r.commit("rewrite", app_txt=BODY + "alpha 1\nbeta 2\ngamma three\ndelta four\nepsilon five\nzeta six\n")
+        self.assertEqual(r.verdict(), [])  # the stated ceiling: more than one altered line is a new edit
+
+
+class Green(unittest.TestCase):
+    def setUp(self):
+        self.r = base_repo()
+
+    def test_clean_merge_keeping_both_sides(self):
+        r = self.r
+        r.sh("checkout", "-q", "-b", "feat")
+        r.commit("feat", other_txt="other v2\n")
+        r.sh("checkout", "-q", "main")
+        r.commit("main", app_txt=BODY + "function Card() {}\nmore\n")
+        r.push()
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "-q", "--no-edit", "main")
+        self.assertEqual(r.verdict(), [])
+
+    def test_unrelated_branch_and_branch_at_main(self):
+        r = self.r
+        self.assertEqual(r.verdict(), [])
+        r.sh("checkout", "-q", "-b", "feat")
+        r.commit("feat", other_txt="other v2\n")
+        self.assertEqual(r.verdict(), [])
+
+    def test_pure_move_to_another_file(self):
+        r = self.r
+        r.sh("checkout", "-q", "-b", "feat")
+        r.commit("feat", other_txt="other v2\n")
+        r.sh("checkout", "-q", "main")
+        r.commit("main adds", app_txt=BODY + "function Card() {}\nmoved fn\n")
+        r.push()
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "--no-commit", "--no-ff", "main")
+        r.put("app.txt", BODY + "function Card() {}\n")
+        r.put("other.txt", "other v2\nmoved fn\n")
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge main, move fn")
+        self.assertEqual(r.verdict(), [])
+
+    def test_reorder_inside_a_file(self):
+        r = self.r
+        r.sh("checkout", "-q", "-b", "feat")
+        r.commit("feat", other_txt="other v2\n")
+        r.sh("checkout", "-q", "main")
+        r.commit("main adds", app_txt=BODY + "function Card() {}\nfirst\nsecond\n")
+        r.push()
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "--no-commit", "--no-ff", "main")
+        r.put("app.txt", BODY + "function Card() {}\nsecond\nfirst\n")
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge main, reorder")
+        self.assertEqual(r.verdict(), [])
+
+    def test_whitespace_only_rewrite_of_a_merged_line(self):
+        r = self.r
+        r.sh("checkout", "-q", "-b", "feat")
+        r.commit("feat", other_txt="other v2\n")
+        r.sh("checkout", "-q", "main")
+        r.commit("main adds", app_txt=BODY + "function Card() {}\nif (x) { go(); }\n")
+        r.push()
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "--no-commit", "--no-ff", "main")
+        r.put("app.txt", BODY + "function Card() {}\n    if (x)   { go(); }\n")
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge main, reindent")
+        self.assertEqual(r.verdict(), [])
+
+    def test_whitespace_only_flip_is_not_a_reversal(self):
+        r = self.r
+        r.sh("checkout", "-q", "-b", "pr1")
+        r.commit("reindent", app_txt=BODY + "function  Card()  {}\n")
+        r.sh("checkout", "-q", "main")
+        r.sh("merge", "-q", "--no-ff", "-m", "Merge pull request #1", "pr1")
+        r.push()
+        r.sh("checkout", "-q", "-b", "back")
+        r.commit("reindent back", app_txt=BODY + "function Card() {}\n")
+        self.assertEqual(r.verdict(), [])
+
+
+class Unknown(unittest.TestCase):
+    def test_no_upstream_is_unknown(self):
+        r = Repo()
+        r.commit("only", a_txt="x\n")
+        with self.assertRaises(C.Unknown):
+            C.check(r.dir, "origin/nope", "HEAD", 60)
+
+    def test_shallow_is_unknown(self):
+        r = base_repo()
+        r.commit("two", other_txt="v2\n")
+        r.push()
+        sh = os.path.join(r.tmp.name, "shallow")
+        subprocess.run(["git", "clone", "-q", "--depth", "1", "file://" + os.path.join(r.tmp.name, "o.git"), sh], check=True, capture_output=True)
+        with self.assertRaises(C.Unknown):
+            C.check(sh, "origin/main", "HEAD", 60)
+
+    def run_main(self, env_ci, *extra):
+        r = Repo()
+        r.commit("only", a_txt="x\n")
+        old = os.environ.pop("CI", None)
+        if env_ci:
+            os.environ["CI"] = "1"
+        try:
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                code = C.main(["--repo", r.dir, "--upstream", "origin/nope", *extra])
+        finally:
+            os.environ.pop("CI", None)
+            if old is not None:
+                os.environ["CI"] = old
+        return code, out.getvalue()
+
+    def test_unknown_exit_codes(self):
+        self.assertEqual(self.run_main(False)[0], 0)
+        self.assertEqual(self.run_main(True)[0], 1)
+        code, out = self.run_main(False, "--strict")
+        self.assertEqual(code, 1)
+        self.assertIn("UNKNOWN", out)
+
+
+class History(unittest.TestCase):
+    def test_history_finds_a_landed_stale_merge(self):
+        r = base_repo()
+        r.sh("checkout", "-q", "-b", "stale")
+        r.sh("checkout", "-q", "main")
+        r.sh("checkout", "-q", "-b", "pr1")
+        r.commit("delete Card", app_txt=BODY)
+        r.sh("checkout", "-q", "main")
+        r.sh("merge", "-q", "--no-ff", "-m", "Merge pull request #1", "pr1")
+        r.sh("checkout", "-q", "stale")
+        r.commit("wording", other_txt="v2\n")
+        r.sh("merge", "-q", "-s", "ours", "--no-edit", "main")
+        r.sh("checkout", "-q", "main")
+        r.sh("merge", "-q", "--no-ff", "-m", "Merge pull request #2", "stale")
+        n, hits = C.history(r.dir, "main", 60)
+        self.assertTrue(any("app.txt" in h and "whole file" in h for h in hits), hits)
+
+
+class MergeTool(unittest.TestCase):
+    def test_merge_tool_refuses_a_stale_branch(self):
+        import merge
+        r = base_repo()
+        r.sh("checkout", "-q", "-b", "stale")
+        r.sh("checkout", "-q", "main")
+        r.sh("checkout", "-q", "-b", "pr1")
+        r.commit("delete Card", app_txt=BODY)
+        r.sh("checkout", "-q", "main")
+        r.sh("merge", "-q", "--no-ff", "-m", "Merge pull request #1", "pr1")
+        r.push()
+        r.sh("checkout", "-q", "stale")
+        r.commit("wording", other_txt="v2\n")
+        r.sh("merge", "-q", "-s", "ours", "--no-edit", "main")
+        with self.assertRaises(merge.Stop) as cm:
+            merge.undo_check(r.dir, "origin/main")
+        self.assertIn("app.txt", str(cm.exception))
+        r.sh("checkout", "-q", "main")
+        merge.undo_check(r.dir, "origin/main")  # a branch at main: green, no raise
+
+
+if __name__ == "__main__":
+    unittest.main()

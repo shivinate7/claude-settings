@@ -28,6 +28,18 @@ def git(cwd, *a, input=None):
 
 SETTLE_SECONDS = 30
 
+def undo_check(wt, base_ref):
+    """The shared silent-undo lint (lint/check_silent_undo.py), run on the branch before anything is pushed.
+    A finding or an unreadable history refuses: the merge cannot be taken back."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+    import check_silent_undo as undo
+    try:
+        problems = undo.check(wt, base_ref, "HEAD", 60)
+    except undo.Unknown as e:
+        raise Stop(f"silent-undo check could not read the history: {e}")
+    if problems:
+        raise Stop("the branch silently undoes earlier work:\n  " + "\n  ".join(problems) + f"\nPut it back, or add the trailer `{undo.TRAILER}: <path>` to a commit message.")
+
 def say(*lines):
     print(*lines, flush=True)
 
@@ -482,6 +494,7 @@ def confirm(root, cfg, cfgrel, n, host, lock):
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
         branch = info["branch"]
         tmp, wt = open_worktree(root, info, base)
+        undo_check(wt, base_ref)
         resumed = own_claim(wt, cfgrel, base_ref)
         if resumed:
             claim_sha = info["head"]
@@ -526,6 +539,10 @@ def confirm(root, cfg, cfgrel, n, host, lock):
             c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
             if c:  # never check against a stale base tip
                 fail(f"cannot fetch origin {base}, so the claim cannot be proved fresh:\n" + out)
+            try:  # main may have moved during the wait: read the branch against the tip fetched just now
+                undo_check(wt, base_ref)
+            except Stop as e:
+                fail(str(e))
             if not os.path.isfile(os.path.join(wt, cfgrel)):  # stamp would crash on it with a raw traceback
                 fail(f"the worktree lost {cfgrel}, so the claim cannot be proved fresh.")
             c, out = node_stamp(wt, cfgrel, "check", base_ref)  # each claimed number must still be free on the base tip
