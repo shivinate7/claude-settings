@@ -1741,6 +1741,10 @@ sh("narrate: merge --confirm piped to tail hides its heartbeat",
    "merge 12 --confirm 2>&1 | tail -18", "deny", "live-stream", cwd=NOGIT)
 sh("narrate: the script run by path, piped to head",
    "~/.claude/bin/merge 12 --confirm | head -5", "deny", "live-stream", cwd=NOGIT)
+sh("narrate: the launcher script run through python, piped to tail",
+   "python merge/launch.py 12 --confirm 2>&1 | tail -5", "deny", "live-stream", cwd=NOGIT)
+sh("narrate: --confirm on a command off the roster", "deploy 12 --confirm 2>&1 | tail -5",
+   "allow", cwd=NOGIT)
 sh("narrate: a merge preview is not a wait", "merge 12 2>&1 | tail -5", "allow", cwd=NOGIT)
 sh("narrate: tee keeps every byte", "merge 12 --confirm 2>&1 | tee run.out", "allow", cwd=NOGIT)
 sh("narrate: an ordinary command piped to tail", "make check 2>&1 | tail -40", "allow", cwd=NOGIT)
