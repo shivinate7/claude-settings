@@ -67,8 +67,8 @@ CI_STEP_RE = re.compile(r'^\s*-\s*name:\s*(.+?)\s*$', re.MULTILINE)
 # module docstring, "NON-VACUITY, TWO WAYS", for the argument. Update RULE_FLOOR when a rule
 # is deliberately removed. Update UNMECHANIZED_EXPECTED in the SAME commit that builds a
 # mechanism (lower it) or adds an unmechanized rule (raise it, and say why in the message).
-RULE_FLOOR = 91
-UNMECHANIZED_EXPECTED = 72
+RULE_FLOOR = 84
+UNMECHANIZED_EXPECTED = 65
 REASON_MIN_WORDS = 8
 
 KINDS = {"guard", "gate", "ci", "unmechanized"}

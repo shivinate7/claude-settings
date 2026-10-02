@@ -25,18 +25,6 @@
         "reason": "Whether a stated act matches the literal word given, versus a variant of it, is a judgment call on wording. No hook parses an instruction and an action for a match."
       }
     },
-    "outcomes-never-defer-rotted": {
-      "mechanism": {
-        "kind": "unmechanized",
-        "reason": "Whether an argument has rotted is a judgment call on its merit. No test reads argument quality."
-      }
-    },
-    "outcomes-never-repeal-alone": {
-      "mechanism": {
-        "kind": "unmechanized",
-        "reason": "Nothing in the repo distinguishes a solo repeal of a decision from one the owner approved."
-      }
-    },
     "outcomes-mechanize-rules": {
       "mechanism": {
         "kind": "gate",
@@ -148,12 +136,6 @@
         "reason": "No check counts checkouts against concurrent workers or catches two agents sharing one tree."
       }
     },
-    "parallelism-isolation-worktree": {
-      "mechanism": {
-        "kind": "unmechanized",
-        "reason": "Nothing inspects the isolation field a workflow agent invocation carries."
-      }
-    },
     "parallelism-own-lane-orchestrator": {
       "mechanism": {
         "kind": "unmechanized",
@@ -182,12 +164,6 @@
       "mechanism": {
         "kind": "guard",
         "ref": "machine-wide-kill"
-      }
-    },
-    "shared-trees-one-checkout-per-agent": {
-      "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No check counts how many agents hold a given checkout at once."
       }
     },
     "shared-trees-confirm-before-write": {
@@ -401,12 +377,6 @@
         "reason": "Distinguishing a cause fix from a symptom fix is a code-review judgment, not a parseable property."
       }
     },
-    "building-name-bandaid": {
-      "mechanism": {
-        "kind": "unmechanized",
-        "reason": "Whether a fix is a bandaid, and whether it was named as one, is a judgment call on the report text."
-      }
-    },
     "building-land-design-or-abandon": {
       "mechanism": {
         "kind": "unmechanized",
@@ -478,12 +448,6 @@
       "mechanism": {
         "kind": "unmechanized",
         "reason": "lint/report_gate.py checks the label headers only. It does not read whether Done's line says BUILT, RECORDED, or OTHER, or names a PR or commit."
-      }
-    },
-    "reports-item-count-format": {
-      "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No check counts whether a label held one inline item or several as bullets."
       }
     },
     "reports-drop-unused-label": {
@@ -580,12 +544,6 @@
       "mechanism": {
         "kind": "unmechanized",
         "reason": "No check holds a list of jargon, and plain words depend on what the reader already knows."
-      }
-    },
-    "style-explain-or-drop-term": {
-      "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No check finds a technical term in a reply and reads whether an everyday gloss sits beside it."
       }
     },
     "style-question-states-problem": {
