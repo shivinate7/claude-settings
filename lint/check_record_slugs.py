@@ -20,7 +20,7 @@ def added():
     r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
     if r.returncode:
         print("check_record_slugs: UNKNOWN, git diff failed: " + r.stderr.strip())
-        sys.exit(0)  # unreadable is unknown, not red
+        sys.exit(1 if os.environ.get("CI") else 0)  # CI exit code is a verdict: unknown is red there
     return r.stdout.split()
 
 
