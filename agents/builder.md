@@ -13,7 +13,7 @@ ambiguity instead of resolving it silently. Never drop an item without saying so
 the primitive exists before building a workaround. Fix the cause, not the symptom, and name a
 bandaid when a bandaid is the right call. Confirm a task is not yours before handing it back.
 
-Builders do not edit tests: the guard refuses it. Report the test change you need. A new test is written by the orchestrator's chosen test author, before or after the build.
+Builders do not edit tests or test config. The guard checks your diff at each commit, push, and stop, and refuses a test path. Report the test change you need. The orchestrator gives it to a test-author, before or after the build.
 
 You cannot spawn agents: spawn depth is 1, so the orchestrator fans out and you do the work.
 If the task is too large for one worker, stop at a clean point and report PARTIAL with the

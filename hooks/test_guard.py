@@ -43,7 +43,7 @@ CASES = []
 
 
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
-        session=None, carries=(), config=None, agent_id=None, no_root=False, agent_type=None, **tool_input):
+        session=None, carries=(), config=None, agent_id=None, no_root=False, agent_type=None, event=None, **tool_input):
     """Register one case.
 
     `carries` names fragments the printed reason MUST hold, which is how a case pins what an
@@ -71,6 +71,7 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "config": config,
         "agent_id": agent_id,
         "agent_type": agent_type,
+        "event": event,
         "no_root": no_root,
         "tool_input": tool_input,
     })
@@ -2640,61 +2641,211 @@ sh("ordinary: npm ci is not the PowerShell ci alias", "npm ci", "allow", tool="P
 
 # =========================================================================== builders do not edit tests
 #
-# Only a payload with an agent_id AND agent_type "builder" is judged. Every case runs from NOGIT, so
-# a relative path resolves under a folder that holds no `.git` and no test part of its own.
+# The rule judges the RESULT: the diff a builder (or test-author) would commit, push or stop with.
+# Only a payload with an agent_id AND a matching agent_type is judged. Three entry points read the
+# same diff: a write tool (early warning, by path), `commit`/`push`, and SubagentStop.
 
 BT = "builder-test-edit"
+TA = "test-author-scope"
 B = dict(agent_id="bld1", agent_type="builder", cwd=NOGIT)
+A = dict(agent_id="auth1", agent_type="test-author", cwd=NOGIT)
+
+# ---- the early warning, by path (write tools)
 for _tool, _field in (("Edit", "file_path"), ("Write", "file_path"), ("MultiEdit", "file_path"),
                       ("NotebookEdit", "notebook_path")):
     add("builder-test: %s of a test file is refused" % _tool, "deny", rule=BT, tool=_tool,
-        carries=("non-builder", "report"), **{_field: "src/test_app.py"}, **B)
+        carries=("test-author", "Report"), **{_field: "src/test_app.py"}, **B)
 for _path in ("src/app_test.py", "pkg/app_test.go", "web/a.test.ts", "web/a.test.jsx",
               "web/a.spec.js", "tests/helper.py", "pkg/__tests__/x.js", "spec/models/user.rb",
-              "src/tests/data/fixture.json", "test/x.txt"):
+              "src/tests/data/fixture.json", "test/x.txt", "src/conftest.py"):
     add("builder-test: Edit of %s is refused" % _path, "deny", rule=BT, tool="Edit",
-        file_path=_path, **B)
-add("builder-test: a skip marker added to conftest.py is refused", "deny", rule=BT, tool="Edit",
-    file_path="src/conftest.py", new_string="@pytest.mark.skip\ndef f(): pass", **B)
-for _cmd in ("rm tests/x.py", "rm -rf tests", "mv tests/a.py old.py", "mv src/a.py tests/a.py",
-             "sed -i 's/a/b/' src/test_a.py", "sed -i.bak s/a/b/ web/a.spec.ts",
-             "echo x > tests/a.py", "echo x >> src/b_test.go", "cat x 2>tests/err.log",
-             VCS + " rm tests/a.py", "tee tests/a.py", "cp /tmp/new.py tests/a.py",
-             "cd src && rm a.test.js", "true; rm src/test_a.py"):
-    sh("builder-test: shell `%s` is refused" % _cmd, _cmd, "deny", rule=BT, **B)
-sh("builder-test: PowerShell Remove-Item of a test is refused", "Remove-Item -Force tests/a.py",
-   "deny", rule=BT, tool="PowerShell", **B)
-sh("builder-test: PowerShell Set-Content onto a test is refused",
-   "Set-Content -Path src/test_a.py -Value x", "deny", rule=BT, tool="PowerShell", **B)
-
-# The role is the whole gate: the same calls from anyone else are allowed.
+        file_path=_path, new_string="x = 1", **B)
+add("builder-test: addopts --deselect added to pytest.ini is refused", "deny", rule=BT,
+    tool="Edit", file_path="pytest.ini", new_string="addopts = --deselect a::b", **B)
+add("builder-test: a dependency added to pyproject.toml is allowed", "allow", tool="Edit",
+    file_path="pyproject.toml", new_string='dependencies = ["requests"]', **B)
+for _path in ("src/app.py", "src/contest.py", "latest_results.md", "docs/attest.md",
+              "src/protest_handler.ts", "src/specs.md", "src/testing.py"):
+    add("builder-test: Edit of %s is allowed" % _path, "allow", tool="Edit", file_path=_path,
+        new_string="x = 1", **B)
+add("builder-test: Read of a test is allowed", "allow", tool="Read", file_path="tests/x.py", **B)
+add("builder-test: a repo that lives under a tests folder is not all test files", "allow",
+    tool="Edit", file_path=os.path.join(UNDERTESTS, "src", "app.py"), **B)
+add("builder-test: a test inside that repo is still refused", "deny", rule=BT, tool="Edit",
+    file_path=os.path.join(UNDERTESTS, "src", "test_app.py"), **B)
 add("builder-test: main session may edit a test", "allow", tool="Edit",
     file_path="src/test_app.py", cwd=NOGIT)
 add("builder-test: reviewer may edit a test", "allow", tool="Edit", file_path="src/test_app.py",
     agent_id="rev1", agent_type="reviewer", cwd=NOGIT)
 add("builder-test: a session run with --agent builder (no agent_id) is not judged", "allow",
     tool="Edit", file_path="src/test_app.py", agent_type="builder", cwd=NOGIT)
-sh("builder-test: main session may delete a test", "rm tests/x.py", "allow", cwd=NOGIT)
-sh("builder-test: reviewer may delete a test", "rm tests/x.py", "allow", cwd=NOGIT,
-   agent_id="rev1", agent_type="reviewer")
+add("test-author: Edit of product code is refused", "deny", rule=TA, tool="Edit",
+    file_path="src/app.py", carries=("builder", "Report"), **A)
+add("test-author: Edit of package.json is refused", "deny", rule=TA, tool="Edit",
+    file_path="package.json", **A)
+for _path in ("tests/test_a.py", "src/b_test.go", "pytest.ini", "pyproject.toml", "conftest.py",
+              "jest.config.js"):
+    add("test-author: Edit of %s is allowed" % _path, "allow", tool="Edit", file_path=_path, **A)
 
-# Not a test, or not a write: allowed for a builder.
-for _path in ("src/app.py", "src/contest.py", "latest_results.md", "docs/attest.md",
-              "src/protest_handler.ts", "src/specs.md", "src/testing.py", "src/conftest.py"):
-    add("builder-test: Edit of %s is allowed" % _path, "allow", tool="Edit", file_path=_path,
-        new_string="x = 1", **B)
-add("builder-test: a repo that lives under a tests folder is not all test files", "allow",
-    tool="Edit", file_path=os.path.join(UNDERTESTS, "src", "app.py"), agent_id="bld1",
-    agent_type="builder", cwd=NOGIT)
-add("builder-test: a test inside that repo is still refused", "deny", rule=BT, tool="Edit",
-    file_path=os.path.join(UNDERTESTS, "src", "test_app.py"), agent_id="bld1",
-    agent_type="builder", cwd=NOGIT)
-add("builder-test: Read of a test is allowed", "allow", tool="Read", file_path="tests/x.py", **B)
-for _cmd in ("cat tests/x.py", "grep -rn foo tests/", "ls tests", "python -m pytest tests/",
-             "rm contest.py", "mv latest_results.md old.md", "cp tests/a.py /tmp/a.py",
-             "sed -n '1,5p' tests/x.py", "sed -i s/a/b/ src/app.py", "echo x > src/app.py",
-             "echo tests/x.py", VCS + " diff -- tests/x.py", "echo done 2>/dev/null"):
-    sh("builder-test: shell `%s` is allowed" % _cmd, _cmd, "allow", **B)
+# ---- the diff, judged at commit, push and SubagentStop
+BASE_FILES = {
+    "src/app.py": "x = 1\n", "src/contest.py": "y = 1\n", "latest_results.md": "ok\n",
+    "tests/test_a.py": "def test_a():\n    assert True\n", "pyproject.toml": "[project]\nname = 'x'\n",
+    "package.json": '{"name": "x"}\n',
+}
+DIFFROOT = os.path.join(ROOT, "diffrepos")
+
+
+def diff_repo(name, change, commit=False):
+    """A real repo with a base commit on main and a branch `work` created from it, so the guard
+    reads the base from the branch's own reflog. `change` edits the tree; `commit` then commits."""
+    where = os.path.join(DIFFROOT, name)
+    make_repo(where, BASE_FILES)
+    run_vcs(where, "checkout", "-q", "-b", "work")
+    change(where)
+    if commit:
+        run_vcs(where, "add", "-A")
+        done = run_vcs(where, *IDENT, "commit", "-q", "-m", "work")
+        if done.returncode != 0:
+            sys.exit("fixture setup failed: commit in %r: %s" % (where, done.stderr.strip()))
+    return where
+
+
+def _rm(rel):
+    return lambda w: os.remove(os.path.join(w, rel))
+
+
+def _put(rel, text):
+    return lambda w: write(os.path.join(w, rel), text)
+
+
+def _mv(src, dst):
+    def go(w):
+        os.makedirs(os.path.dirname(os.path.join(w, dst)), exist_ok=True)
+        os.rename(os.path.join(w, src), os.path.join(w, dst))
+    return go
+
+
+def _link(target, rel):
+    def go(w):
+        os.makedirs(os.path.dirname(os.path.join(w, rel)), exist_ok=True)
+        os.symlink(target, os.path.join(w, rel))
+    return go
+
+
+# Each reviewer bypass of the old command reader ends in ONE of these trees. The guard never saw
+# the command, only the tree, and every one is red.
+BUILDER_RED = [
+    ("deleted", _rm("tests/test_a.py")),                      # rm, find -delete, xargs rm, dd
+    ("rewritten", _put("tests/test_a.py", "pass\n")),         # sed -i, patch, apply, rsync, bash -c
+    ("new-untracked", _put("tests/test_new.py", "pass\n")),   # cp -t, a redirect through a variable
+    ("moved-out", _mv("tests/test_a.py", "src/moved.py")),    # mv
+    ("symlink-file", _link("../tests/test_a.py", "src/link.py")),
+    ("symlink-dir", _link("tests", "src/linkdir")),
+    ("backslash-name", _put("tests\\foo.py", "pass\n")),
+    ("conftest", _put("conftest.py", "import pytest\n")),
+    ("pytest-ini", _put("pytest.ini", "[pytest]\naddopts = --deselect tests/test_a.py\n")),
+    ("pyproject-addopts", _put("pyproject.toml",
+                               "[project]\nname = 'x'\n[tool.pytest.ini_options]\n"
+                               "addopts = \"--ignore=tests\"\n")),
+    ("jest-config", _put("jest.config.js", "module.exports = {testPathIgnorePatterns: ['/src/']}\n")),
+    ("package-json-jest", _put("package.json",
+                               '{"name": "x", "jest": {"testPathIgnorePatterns": ["src"]}}\n')),
+    ("spec-file", _put("web/a.spec.ts", "it.skip('x', () => {})\n")),
+]
+BUILDER_GREEN = [
+    ("clean-tree", lambda w: None),
+    ("product-edit", _put("src/app.py", "x = 2\n")),
+    ("contest-and-results", lambda w: (write(os.path.join(w, "src/contest.py"), "y = 2\n"),
+                                       write(os.path.join(w, "latest_results.md"), "better\n"))),
+    ("product-rename", _mv("src/app.py", "src/main.py")),
+    ("product-delete", _rm("src/contest.py")),
+    ("dependency-added", _put("pyproject.toml", "[project]\nname = 'x'\ndependencies = ['requests']\n")),
+    ("script-added", _put("package.json", '{"name": "x", "scripts": {"build": "tsc"}}\n')),
+    ("symlink-to-product", _link("../src/app.py", "src/alias.py")),
+]
+COMMIT, PUSH = VCS + " commit -m x", VCS + " push origin work"
+for _name, _change in BUILDER_RED:
+    _repo = diff_repo("b-" + _name, _change)
+    sh("builder-diff: commit with a %s change is refused" % _name, COMMIT, "deny", rule=BT,
+       cwd=_repo, agent_id="bld1", agent_type="builder", carries=("test-author", "Report"))
+    sh("builder-diff: push with a %s change is refused" % _name, PUSH, "deny", rule=BT,
+       cwd=_repo, agent_id="bld1", agent_type="builder")
+    add("builder-diff: stop with a %s change is blocked" % _name, "deny", rule=BT,
+        event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder",
+        carries=("test-author", "Report"))
+_repo = diff_repo("b-committed", _put("tests/test_a.py", "pass\n"), commit=True)
+add("builder-diff: stop after COMMITTING a test change is blocked", "deny", rule=BT,
+    event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
+sh("builder-diff: push after COMMITTING a test change is refused", PUSH, "deny", rule=BT,
+   cwd=_repo, agent_id="bld1", agent_type="builder")
+_repo = diff_repo("b-reverted", lambda w: (write(os.path.join(w, "tests/test_a.py"), "pass\n"),
+                                           write(os.path.join(w, "tests/test_a.py"),
+                                                 BASE_FILES["tests/test_a.py"])))
+add("builder-diff: a test change put back to the base bytes is no change", "allow",
+    event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
+_inh = os.path.join(DIFFROOT, "g-inherited")
+make_repo(_inh, BASE_FILES)
+run_vcs(_inh, "checkout", "-q", "-b", "orch")
+write(os.path.join(_inh, "tests/test_a.py"), "pass\n")        # the orchestrator's own commit
+run_vcs(_inh, "add", "-A")
+run_vcs(_inh, *IDENT, "commit", "-q", "-m", "orch")
+run_vcs(_inh, "checkout", "-q", "-b", "work")                 # the builder's branch starts here
+write(os.path.join(_inh, "src/app.py"), "x = 9\n")
+add("builder-diff: test changes the branch inherited are not the builder's", "allow",
+    event="SubagentStop", cwd=_inh, agent_id="bld1", agent_type="builder")
+for _name, _change in BUILDER_GREEN:
+    _repo = diff_repo("g-" + _name, _change)
+    sh("builder-diff: commit with %s is allowed" % _name, COMMIT, "allow", cwd=_repo,
+       agent_id="bld1", agent_type="builder")
+    add("builder-diff: stop with %s is allowed" % _name, "allow", event="SubagentStop",
+        cwd=_repo, agent_id="bld1", agent_type="builder")
+_dirty = diff_repo("main-dirty", _put("tests/test_a.py", "pass\n"))
+sh("builder-diff: the main session may commit a test change", COMMIT, "allow", cwd=_dirty)
+sh("builder-diff: a reviewer may commit a test change", COMMIT, "allow", cwd=_dirty,
+   agent_id="rev1", agent_type="reviewer")
+sh("builder-diff: a session run with --agent builder (no agent_id) is not judged", COMMIT,
+   "allow", cwd=_dirty, agent_type="builder")
+add("builder-diff: a reviewer stop with a test change is allowed", "allow", event="SubagentStop",
+    cwd=_dirty, agent_id="rev1", agent_type="reviewer")
+sh("builder-diff: a builder in a tree git cannot read is allowed and noted", COMMIT, "allow",
+   cwd=NOGIT, agent_id="bld1", agent_type="builder")
+sh("builder-diff: reads stay allowed in a dirty tree", "cat tests/test_a.py && ls tests",
+   "allow", cwd=_dirty, agent_id="bld1", agent_type="builder")
+
+# ---- the test-author, inverted: only tests and test config may change
+AUTHOR_GREEN = [
+    ("new-test", _put("tests/test_new.py", "pass\n")),
+    ("edited-test", _put("tests/test_a.py", "pass\n")),
+    ("test-config", _put("pytest.ini", "[pytest]\naddopts = --deselect x\n")),
+    ("conftest", _put("conftest.py", "import pytest\n")),
+    ("clean-tree", lambda w: None),
+]
+AUTHOR_RED = [
+    ("product-edit", _put("src/app.py", "x = 2\n")),
+    ("product-new", _put("src/new.py", "x = 2\n")),
+    ("product-delete", _rm("src/contest.py")),
+    ("docs-edit", _put("latest_results.md", "better\n")),
+    ("package-json", _put("package.json", '{"name": "y"}\n')),
+    ("mixed", lambda w: (write(os.path.join(w, "tests/test_new.py"), "pass\n"),
+                         write(os.path.join(w, "src/app.py"), "x = 3\n"))),
+    ("test-symlink-to-product", _link("../src/app.py", "tests/alias.py")),
+]
+for _name, _change in AUTHOR_RED:
+    _repo = diff_repo("a-" + _name, _change)
+    sh("author-diff: commit with a %s change is refused" % _name, COMMIT, "deny", rule=TA,
+       cwd=_repo, agent_id="auth1", agent_type="test-author", carries=("builder", "Report"))
+    sh("author-diff: push with a %s change is refused" % _name, PUSH, "deny", rule=TA,
+       cwd=_repo, agent_id="auth1", agent_type="test-author")
+    add("author-diff: stop with a %s change is blocked" % _name, "deny", rule=TA,
+        event="SubagentStop", cwd=_repo, agent_id="auth1", agent_type="test-author",
+        carries=("builder", "Report"))
+for _name, _change in AUTHOR_GREEN:
+    _repo = diff_repo("ag-" + _name, _change)
+    sh("author-diff: commit with %s is allowed" % _name, COMMIT, "allow", cwd=_repo,
+       agent_id="auth1", agent_type="test-author")
+    add("author-diff: stop with %s is allowed" % _name, "allow", event="SubagentStop",
+        cwd=_repo, agent_id="auth1", agent_type="test-author")
 
 
 # =========================================================================== failing open
@@ -2720,6 +2871,8 @@ def decide(case):
         payload = case["raw"]
     else:
         body = {"tool_name": case["tool"], "tool_input": dict(case["tool_input"])}
+        if case.get("event"):
+            body = {"hook_event_name": case["event"]}
         if case["cwd"]:
             body["cwd"] = case["cwd"]
         if case["session"]:
@@ -2758,6 +2911,8 @@ def decide(case):
         return "allow", ""
     try:
         parsed = json.loads(out)
+        if parsed.get("decision") == "block":   # a SubagentStop block, not a PreToolUse answer
+            return "deny", parsed["reason"]
         block = parsed["hookSpecificOutput"]
         return block["permissionDecision"], block["permissionDecisionReason"]
     except Exception:
