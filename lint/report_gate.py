@@ -102,7 +102,7 @@ def find_block_start(lines):
     """Return the index of the first blockquote line, else None.
 
     Shared by `report_shape_ok` and by `block_text`, so a second caller (such as
-    `hooks/config_report.py`'s merge-report check) locates the same block this gate judges,
+    `hooks/decision_watch.py`'s merge-report check) locates the same block this gate judges,
     rather than re-deriving its own idea of where the report starts.
     """
     for i, line in enumerate(lines):

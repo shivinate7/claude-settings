@@ -2805,6 +2805,17 @@ class AgentEndReapTests(unittest.TestCase):
         for raw in ("", "not json", "[1]", json.dumps({"hook_event_name": "SubagentStop"})):
             self.assertIsNone(self.reap.handle(raw).get("target"))
 
+    def test_the_payload_log_keeps_only_the_last_200_lines(self):
+        folder = os.path.join(ROOT, "reap-log")
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": folder}):
+            for number in range(205):
+                self.reap.log({"raw": "payload %d" % number})
+            with open(self.reap.log_path(), encoding="utf-8") as handle:
+                lines = handle.read().splitlines()
+        self.assertEqual(len(lines), 200)
+        self.assertEqual(json.loads(lines[0])["raw"], "payload 5")
+        self.assertEqual(json.loads(lines[-1])["raw"], "payload 204")
+
 
 class StrictWorktreeTests(unittest.TestCase):
     """Owner ruling: --confirm removes a worktree only when it is merged (by patch, not

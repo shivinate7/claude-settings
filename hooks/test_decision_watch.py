@@ -460,9 +460,13 @@ def case_invoke_model_argv():
 # the printed systemMessage envelope, exit 0) was never actually exercised end to end.
 
 def _run_main(hook_payload, timeout=30):
+    # An empty config directory, so the config report never reads this machine's own guard.log.
+    config = os.path.join(ROOT, "empty-config")
+    os.makedirs(config, exist_ok=True)
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=config)
     return subprocess.run(
         [sys.executable, MODULE_PATH],
-        input=json.dumps(hook_payload), capture_output=True, text=True, timeout=timeout,
+        input=json.dumps(hook_payload), capture_output=True, text=True, timeout=timeout, env=env,
     )
 
 
@@ -492,6 +496,33 @@ def case_main_ordinary_turn():
     os.remove(path)
     paired = _run_main({"transcript_path": path, "cwd": repo})
     check("main_ordinary_turn: known-bad pair prints UNKNOWN", _says_unknown(paired), paired.stdout)
+
+
+def case_main_prints_the_config_report():
+    # The config report was its own Stop hook. It is a section of this one now, so main() must
+    # print its message, and only that message here: nothing protected changed, so the judgment
+    # has nothing to say.
+    repo = make_repo("main_config_report")
+    write(os.path.join(repo, "src", "app.py"), "print('hello')\n")
+    commit_all(repo)
+    target = os.path.join(repo, ".claude", "settings.local.json")
+    edit = {"type": "tool_use", "name": "Edit", "input": {"file_path": target}}
+    records = [
+        human_record("tune the project settings", T0),
+        assistant_record(tool_use=edit),
+        assistant_record(text="done"),
+    ]
+    path = write_transcript(repo, records)
+    result = _run_main({"transcript_path": path, "cwd": repo})
+    check("main_config_report: exit 0", result.returncode == 0, result.returncode)
+    try:
+        message = json.loads(result.stdout.strip()).get("systemMessage", "")
+    except Exception:
+        message = ""
+    check("main_config_report: names the config file", "Config files changed this turn" in message
+          and "settings.local.json" in message, result.stdout)
+    check("main_config_report: no judgment text beside it", dw.FLAG_PREFIX not in message
+          and dw.UNKNOWN_PREFIX not in message, result.stdout)
 
 
 def case_main_missing_transcript():
@@ -529,6 +560,7 @@ def main():
     case_judge_isolation_copies_credentials()
     case_invoke_model_argv()
     case_main_ordinary_turn()
+    case_main_prints_the_config_report()
     case_main_missing_transcript()
     case_main_stop_hook_active_stays_quiet()
 

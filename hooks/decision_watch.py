@@ -73,6 +73,11 @@ run with a `systemMessage` that names UNKNOWN and why, and exit 0. This hook onl
 reports, so nothing here ever blocks the turn. The incident cap never touches this branch:
 an UNKNOWN read is never cached and always reported again.
 
+THE CONFIG REPORT. The same Stop run also prints the old `hooks/config_report.py` message,
+folded in below ("the config report"): the project config files, merges into main and
+unreadable subjects of this turn. It is a separate section with its own message, joined to the
+judgment's with a space, and it never calls the model.
+
 WHAT THIS FILE DOES NOT DO. It does not adopt PR #88's `hooks/run_hook.sh` launcher; that PR
 is an open draft on another branch, and this file matches the inline python-fallback shape
 already used by the other Stop entries in `settings.json` instead.
@@ -85,7 +90,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -170,7 +175,7 @@ def _safe_why(text):
 
 # ------------------------------------------------------------------ transcript walking
 #
-# Copied from hooks/config_report.py and lint/md_sweep.py, not imported, so each Stop hook
+# Copied from lint/md_sweep.py, not imported, so each Stop hook
 # stays readable as one file (decisions/a-gates-allow-list-is-the-constant.md names this
 # exact copy as one of the exceptions the rule does not govern).
 
@@ -763,6 +768,296 @@ def run(hook, model_call=invoke_model):
     return ""
 
 
+# ------------------------------------------------------------------ the config report
+#
+# FOLDED IN FROM `hooks/config_report.py` 2026-10-02 (decisions/guard-trims-from-the-audit.md): two Stop
+# hooks that each read the transcript and each print a systemMessage were one hook's work. This
+# section keeps the old hook's whole job, unchanged, and `main` prints its message after `run`'s.
+#
+# Decision 7 ("Project config edits: allow and report") lets a session edit a project's own
+# `.claude/hooks/*`, `.claude/settings.json`, or `.claude/settings.local.json` without a prompt.
+# This section is how the owner still SEES the edit at turn end: it names every such file changed
+# since the last human message, so the reply can name it under Deviations. It also names each
+# merge into main landed this turn (Decision 8), unless the reply's own report block already
+# names it (decisions/merge-notice-checks-the-report.md), and each `noted`/`subject-unread` guard
+# line from this turn, because the guard allows a subject it could not read and that allow must
+# not be silent. The guard writes a LOCAL time and the transcript a UTC time, so the turn bound is
+# converted to local time, minus one second, because the guard truncates its stamp to whole
+# seconds. Fails open: any failure prints nothing, a missed report and never a wrong one.
+
+LINT_DIR = os.path.join(HERE, "..", "lint")
+
+
+def _shared_transcript():
+    """Return `lint/_transcript.py`, the one home of the transcript readers
+    (decisions/hooks-share-the-transcript-reader.md). This section reads through it, never through
+    the older copies above."""
+    if LINT_DIR not in sys.path:
+        sys.path.insert(0, LINT_DIR)
+    import _transcript
+    return _transcript
+
+FILE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
+SHELL_TOOLS = {"Bash", "PowerShell"}
+MERGE_TOOLS = {"mcp__github__merge_pull_request"}
+
+GH_PR_MERGE = re.compile(r"\bgh\s+pr\s+merge\b")
+PR_NUM_TOKEN = re.compile(r"^(\d+)$")
+PR_NUM_URL = re.compile(r"/pull/(\d+)")
+
+CONFIG_MESSAGE = "Config files changed this turn: %s."
+MERGE_MESSAGE = "Merges into main this turn: %s."
+UNREAD_MESSAGE = (
+    "The guard could not read the subject of these commands, and allowed them: %s."
+)
+TAIL = " Name them in the report."
+UNREAD_RULE = "subject-unread"
+
+# Fallback label for a merge whose PR number this hook could not read from the command or the
+# MCP tool's own input (for example `gh pr merge` run with no number and no PR checked out by
+# convention this hook can resolve). Short and fixed, never the raw command line.
+UNNUMBERED_MERGE = "an unnumbered merge"
+
+MCP_PR_NUMBER_KEYS = ("pullNumber", "pull_number", "prNumber", "pr_number", "number", "pr")
+
+
+def collect_paths(records, cwd):
+    """Return the project config paths this turn's tools touched, in first-seen order."""
+    reader = _shared_transcript()
+    seen = []
+
+    def note(path):
+        if path and path not in seen:
+            seen.append(path)
+
+    for rec in records:
+        for b in reader.tool_uses(rec):
+            name = b.get("name")
+            inp = b.get("input") or {}
+            if not isinstance(inp, dict):
+                continue
+            if name in FILE_TOOLS:
+                target = (
+                    inp.get("file_path") or inp.get("path") or inp.get("notebook_path") or ""
+                )
+                if not isinstance(target, str) or not target:
+                    continue
+                try:
+                    hit = guard.is_project_config(target, cwd)
+                except Exception:
+                    hit = False
+                if hit:
+                    note(target)
+            elif name in SHELL_TOOLS:
+                cmd = inp.get("command") or ""
+                if not isinstance(cmd, str) or not cmd.strip():
+                    continue
+                try:
+                    matched = guard.project_config_shell_hit(cmd, cwd)
+                except Exception:
+                    matched = ""
+                if matched:
+                    note(matched)
+    return seen
+
+
+def _pr_number_from_segment(segment):
+    """Return the PR number a `gh pr merge` call in `segment` names, else None.
+
+    Reads only the tokens that follow the call's own `gh pr merge` words, so a command chained
+    onto it with `;` or `&&` (already split into its own segment by the caller) can never
+    supply the number for this call.
+    """
+    m = GH_PR_MERGE.search(segment)
+    if not m:
+        return None
+    for tok in segment[m.end():].split():
+        if tok.startswith("-"):
+            continue
+        num = PR_NUM_TOKEN.match(tok)
+        if num:
+            return num.group(1)
+        url = PR_NUM_URL.search(tok)
+        if url:
+            return url.group(1)
+    return None
+
+
+def _pr_number_from_mcp_input(inp):
+    for key in MCP_PR_NUMBER_KEYS:
+        value = inp.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            return str(value)
+        if isinstance(value, str) and value.strip().isdigit():
+            return value.strip()
+    return None
+
+
+def collect_merges(records):
+    """Return the merges into main this turn's tools named, as display labels, in first-seen
+    order: `#<N>` when a PR number could be read, else UNNUMBERED_MERGE.
+    """
+    reader = _shared_transcript()
+    seen = []
+
+    def note(number):
+        label = "#%s" % number if number else UNNUMBERED_MERGE
+        if label not in seen:
+            seen.append(label)
+
+    for rec in records:
+        for b in reader.tool_uses(rec):
+            name = b.get("name")
+            inp = b.get("input") or {}
+            if not isinstance(inp, dict):
+                continue
+            if name in MERGE_TOOLS:
+                note(_pr_number_from_mcp_input(inp))
+            elif name in SHELL_TOOLS:
+                cmd = inp.get("command") or ""
+                if not isinstance(cmd, str) or not cmd.strip():
+                    continue
+                try:
+                    stripped = guard.strip_heredoc_bodies(cmd)
+                    segments = guard.split_segments(stripped)
+                except Exception:
+                    segments = [cmd]
+                for segment in segments:
+                    if GH_PR_MERGE.search(segment):
+                        note(_pr_number_from_segment(segment))
+    return seen
+
+
+def already_named(labels, report_block):
+    """Return the labels from `labels` that `report_block` does not already name.
+
+    `#75` is looked for both as written and as `PR 75` / `PR#75` (case-insensitive), since a
+    report is free to spell it either way. UNNUMBERED_MERGE is looked for verbatim: it is
+    already the short, fixed string a report would have to repeat to name it.
+    """
+    if not report_block:
+        return list(labels)
+    remaining = []
+    for label in labels:
+        if label in report_block:
+            continue
+        if label.startswith("#"):
+            num = label[1:]
+            alt = re.compile(r"\bpr\s*#?\s*" + re.escape(num) + r"\b", re.IGNORECASE)
+            if alt.search(report_block):
+                continue
+        remaining.append(label)
+    return remaining
+
+
+def last_human_stamp(records):
+    """Return the timestamp of the last human message, else ''."""
+    reader = _shared_transcript()
+    stamp = ""
+    for rec in records:
+        if reader.is_last_human(rec):
+            value = rec.get("timestamp") or ""
+            stamp = value if isinstance(value, str) else ""
+    return stamp
+
+
+def _turn_bound(stamp):
+    """Return the last human message time as a naive LOCAL datetime, else None.
+
+    The transcript stamp is UTC and the guard's log stamp is local, so the bound is converted
+    rather than compared across zones. One second is taken off, because the guard truncates its
+    own stamp to whole seconds and a line written in the same second would otherwise be dropped.
+    """
+    text = (stamp or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        moment = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if moment.tzinfo is not None:
+        moment = moment.astimezone().replace(tzinfo=None)
+    return moment - timedelta(seconds=1)
+
+
+def collect_unread(stamp):
+    """Return the matched text of each `noted`/`subject-unread` guard line from this turn."""
+    bound = _turn_bound(stamp)
+    if bound is None:
+        return []
+    try:
+        path = os.path.join(guard.config_dir(), "guard.log")
+    except Exception:
+        return []
+    if not os.path.exists(path):
+        return []
+    seen = []
+    try:
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+    except Exception:
+        return []
+    for line in lines:
+        fields = line.split("\t")
+        if len(fields) != 5 or fields[3] != UNREAD_RULE:
+            continue
+        try:
+            when = datetime.fromisoformat(fields[0])
+        except Exception:
+            continue
+        if when < bound:
+            continue
+        text = fields[4].strip()
+        if text and text not in seen:
+            seen.append(text)
+    return seen
+
+
+def config_report(hook):
+    """Return the config-report systemMessage for this turn, or '' for nothing to say."""
+    if hook.get("stop_hook_active"):
+        return ""  # a rewrite of an earlier reply: stay quiet, as `main` does for `run`
+    path = hook.get("transcript_path")
+    if not path or not isinstance(path, str) or not os.path.exists(path):
+        return ""
+    try:
+        reader = _shared_transcript()
+        records = reader.read_transcript(path)
+        after = reader.records_after_last_human(records)
+        if not after:
+            return ""
+        cwd = hook.get("cwd") or ""
+        if not isinstance(cwd, str):
+            cwd = ""
+        hits = collect_paths(after, cwd)
+        merges = collect_merges(after)
+        if merges:
+            try:
+                import report_gate  # lint/report_gate.py, same-repo sibling package
+                from ste_gate import last_reply  # lint/ste_gate.py
+                merges = already_named(merges, report_gate.block_text(last_reply(hook)))
+            except Exception:
+                # Cannot tell whether the report already named the merge: still name it.
+                pass
+        unread = collect_unread(last_human_stamp(records))
+    except Exception:
+        return ""
+    if not hits and not merges and not unread:
+        return ""
+    parts = []
+    if hits:
+        parts.append(CONFIG_MESSAGE % ", ".join(hits))
+    if merges:
+        parts.append(MERGE_MESSAGE % ", ".join(merges))
+    if unread:
+        parts.append(UNREAD_MESSAGE % ", ".join(unread))
+    return " ".join(parts) + TAIL
+
+
 def main():
     guard._force_utf8_streams()
     try:
@@ -782,6 +1077,7 @@ def main():
         print(json.dumps({"systemMessage": UNKNOWN_PREFIX + "the watch itself raised (%s)." % exc}))
         sys.exit(0)
 
+    message = " ".join(m for m in (message, config_report(hook)) if m)
     if message:
         print(json.dumps({"systemMessage": message}))
     sys.exit(0)

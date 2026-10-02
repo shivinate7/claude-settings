@@ -67,7 +67,7 @@ TARGETS = {
 # (label, anchor text found once in the source, its mutated replacement, target, required case
 # name). Each one breaks exactly one rule. One mutation per rule at least:
 # shared-tree, machine-wide kill, live-stream, waiter, force push, destructive
-# delete, env-file, merge-main, frozen-path, the redirect strip, and the log.
+# delete, env-file, frozen-path, the redirect strip, and the log.
 #
 # THE FIFTH FIELD is the case name, or a distinctive fragment of it, that must show up among the
 # suite's own FAIL lines: `hooks/test_guard.py`'s FAIL line already prints `case["name"]` verbatim,
@@ -220,9 +220,10 @@ MUTATIONS = [
     ("force-push: forget the force push",
      'def push_is_forced(args) -> bool:',
      'def push_is_forced(args) -> bool:\n    return False', "guard", 'push: the long force flag'),
-    ("merge-main: trust an unreadable merge base",
-     '        elif base == "":',
-     '        elif base == "never":', "guard", 'log: a merge into main is allowed and noted where the base is unsafe'),
+    ("env-file: a search command's pattern is read as a path",
+     '                if index in patterns:\n                    continue\n',
+     '                if False:\n                    continue\n', "guard",
+     'trim: env: grep with a dot-star pattern'),
     ("machine-wide-kill: pkill and killall no longer deny in command position",
      '    if tool in KILL_COMMAND_WORDS:\n        return word',
      '    if False:\n        return word', "guard", 'kill: pkill by pattern'),
@@ -319,10 +320,10 @@ MUTATIONS = [
     ("shell segments: a quote never closes, so a real call after it is swallowed whole",
      '            if char == quote:\n                quote = ""',
      '            if False:\n                quote = ""', "guard", 'kill: a quoted phrase ahead of a real chained kill still denies'),
-    ("conflict-resolve: a conflict-side flag no longer exempts the checkout",
+    ("shared-tree: a conflict-side flag no longer exempts the checkout",
      'CHECKOUT_CONFLICT_FLAGS = {"--ours", "--theirs", "--merge"}',
      'CHECKOUT_CONFLICT_FLAGS = set()', "guard", 'checkout: --theirs resolves a real, unresolved merge conflict'),
-    ("conflict-resolve: every tree reads as mid-conflict",
+    ("shared-tree: every tree reads as mid-conflict",
      '    return any(os.path.isdir(os.path.join(path, name)) for name in REBASE_STATE_DIRS)',
      '    return True', "guard", "checkout: the same call with no conflict in progress keeps today's decision"),
     ("log: stop logging refusals",
@@ -415,8 +416,8 @@ MUTATIONS = [
      '        if False:\n            return (ENV_CONTENTS_REASON,', "guard",
      'env: fd duplication or a read after the write, echo .env > f; cat f'),
     ("frozen-path: name the path in the frozen reason",
-     '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)',
-     '        refuse(tool, "deny", "frozen-path", FROZEN_REASON + " " + target, target)', "guard", 'frozen: Write of a config hook'),
+     '    refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)',
+     '    refuse(tool, "deny", "frozen-path", FROZEN_REASON + " " + target, target)', "guard", 'frozen: Write of a config hook'),
     # Added: rules guard.py grew after the prior mutation run.
     ("live-stream: never refuse a live stream",
      '    for segment in split_segments(stripped):\n'
@@ -573,32 +574,15 @@ MUTATIONS = [
      '    for found in ():\n'
      '        reading.setdefault(found.group(0), "")', "guard", 'cap: a value the pattern cannot read still asks'),
     ("cap: the rule runs ahead of the frozen-path deny, so the config settings ask instead",
-     '        if is_frozen(target, cwd):\n'
-     '            refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)',
-     '        if is_settings_file(target, cwd):\n'
-     '            change = cap_change_parts(write_content_parts(tool_input))\n'
-     '            if change:\n'
-     '                refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, target),\n'
-     '                       target + " " + change)\n'
-     '        if is_frozen(target, cwd):\n'
-     '            refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)', "guard", 'cap: the config settings stay denied, never asked'),
-    ("cap: the shell route runs ahead of the frozen-path deny, so a heredoc onto the config "
-     "settings asks instead",
-     '    matched = frozen_shell_hit(stripped, cwd)\n'
-     '    if matched:\n'
-     '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)',
-     '    matched = _shell_write_hit(stripped, cwd, is_settings_file)\n'
-     '    if matched:\n'
-     '        change = cap_change(raw)\n'
+     '    if is_frozen(target, cwd):\n'
+     '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)',
+     '    if is_settings_file(target, cwd):\n'
+     '        change = cap_change_parts(write_content_parts(tool_input))\n'
      '        if change:\n'
-     '            refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, matched),\n'
-     '                   matched + " " + change)\n'
-     '    matched = frozen_shell_hit(stripped, cwd)\n'
-     '    if matched:\n'
-     '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)', "guard", 'cap: a heredoc onto the config settings stays denied'),
-    ("cap: the shell route reads the stripped command, so a heredoc body's cap change walks past",
-     '        change = cap_change(raw)',
-     '        change = cap_change(stripped)', "guard", 'cap: a heredoc writing a project settings file asks'),
+     '            refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, target),\n'
+     '                   target + " " + change)\n'
+     '    if is_frozen(target, cwd):\n'
+     '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)', "guard", 'cap: the config settings stay denied, never asked'),
     ("cap: an earlier part wins, so an Edit names the value it leaves, not the one it arrives at",
      '            values[key] = value',
      '            values.setdefault(key, value)', "guard", 'cap: Edit turning the force flag off asks'),
@@ -797,19 +781,6 @@ MUTATIONS = [
      '        )',
      "guard", 'pointer: checkout of a branch in another checkout is allowed'),
 
-    # `merge_base`'s `gh pr view ... --json baseRefName` read gets a timeout so small the call can
-    # never finish, exactly the shape a real flaky sandbox gh call takes. `TimeoutExpired` is
-    # caught the same as every other failure and answers "" (unreadable), which the caller notes
-    # the same as a merge into main (decision 8's own "an unreadable base is not a safe answer").
-    # A merge into `dev` is the one scenario this turns from "not noted" into "noted", because a
-    # base that WAS readable now reads as unreadable purely because the read could not finish in
-    # time.
-    ("timeout: the merge-base read cannot finish, so a merge into a safe branch is wrongly noted "
-     "as unread",
-     'answer = subprocess.run(query, capture_output=True, text=True, timeout=10)',
-     'answer = subprocess.run(query, capture_output=True, text=True, timeout=0.0001)',
-     "guard", "log: a merge into main is allowed and noted where the base is unsafe"),
-
     # `_process_start_ms`'s POSIX `ps -o lstart=` read gets the same treatment: a timeout so small
     # the read can never finish, so a live session's own liveness probe comes back
     # PROCESS_START_UNREADABLE instead of a real start time. POSIX-only: `_process_start_ms`
@@ -894,10 +865,6 @@ MUTATIONS = [
      '                        and path_is_inside(resolved_target, home) is False):',
      '                if (path_is_inside(resolved_target, home_primary) is True\n'
      '                        and path_is_inside(resolved_target, home) is None):',
-     "guard", "worktree-home:"),
-    ("worktree-home: Read is judged the same as a write, so a stranded agent cannot even read",
-     '        elif tool in WRITE_TOOLS:\n            write_target = (',
-     '        elif tool in WRITE_TOOLS + READ_ONLY_TOOLS:\n            write_target = (',
      "guard", "worktree-home:"),
     ("worktree-home: an unreadable home record denies instead of allowing",
      '    home_status, home, home_primary = agent_worktree_home(payload, cwd)\n'

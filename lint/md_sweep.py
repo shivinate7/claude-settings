@@ -18,7 +18,7 @@ PreToolUse gate. A gate a lane can skip by picking another tool is not a gate.
 
 SCOPE. This hook lints only the markdown files this turn changed, whatever tool wrote them.
 It reads the last human message's timestamp from the transcript, the way
-hooks/config_report.py reads that same field for its own turn boundary.
+hooks/decision_watch.py's config report reads that same field for its own turn boundary.
 It never scans the whole repository. An old file with old errors is not this turn's debt.
 
 Inside a changed file, it lints only the BLOCKS the diff against HEAD touched, not the whole
@@ -118,8 +118,8 @@ NOTE = ("Code in backticks or a fence is exempt. Errors only: sentence length, n
 # ------------------------------------------------------------------ transcript walking
 #
 # is_last_human and read_transcript live in lint/_transcript.py, imported above. This hook,
-# lint/ste_gate.py, lint/report_gate.py, and hooks/config_report.py share that one copy;
-# hooks/config_report.py already imports lint/report_gate.py, which already imports
+# lint/ste_gate.py, lint/report_gate.py, and hooks/decision_watch.py share that one copy;
+# hooks/decision_watch.py already imports lint/report_gate.py, which already imports
 # lint/ste_gate.py, so the readers these hooks share are no longer split one-per-file.
 
 def last_human_stamp(records):

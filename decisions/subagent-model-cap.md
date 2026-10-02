@@ -300,8 +300,9 @@ model on that one call instead. That is cheaper and narrower than a repository-w
 raise. The grant is for
 the case where several lanes in a row need the higher tier.
 
-That write triggers guard rule 8. The ask names the model and the file, so the raise
-never lands in silence. `_subagentCapUntil` sits outside the `env` block, is read
+That write triggers guard rule 8 when a file tool makes it. The ask names the model and the
+file, so the raise never lands in silence. A shell write is not asked: `hooks/config_watch.py`
+reverts it after the call (decisions/guard-trims-from-the-audit.md). `_subagentCapUntil` sits outside the `env` block, is read
 only by `hooks/config_watch.py`, and must be no more than 24 hours ahead. A deadline
 that is missing, unparseable, passed, or too far out gets the file reverted to the
 `prior` content the watch holds. With no `prior` on record the watch reports the file

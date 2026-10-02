@@ -3,8 +3,9 @@
 Four hooks each carried their own copy of the same transcript readers. The copies are
 now one module, `lint/_transcript.py`. It holds `read_transcript`, `is_last_human`,
 `tool_uses`, `records_after_last_human`, `paragraph_blocks` and `format_finding`.
-`lint/md_sweep.py`, `lint/ste_gate.py`, `lint/report_gate.py` and
-`hooks/config_report.py` import it.
+`lint/md_sweep.py`, `lint/ste_gate.py` and `lint/report_gate.py` import it. The config
+report section of `hooks/decision_watch.py` reads through it too (the old
+`hooks/config_report.py`, folded in on 2026-10-02).
 
 ## The sentence this retires
 
@@ -30,14 +31,14 @@ gave was already false. The next section is the measurement that showed it.
 ## What this change measured
 
 The sentence was already false when this change started. The reads below show that. `hooks/config_report.py`
-imports `lint/report_gate.py` today. Its own docstring says so, at lines 32 to 44 of
+(folded into `hooks/decision_watch.py` since) imported `lint/report_gate.py`. Its own docstring says so, at lines 32 to 44 of
 the file before this change. Line 35 names `report_gate.block_text` as the reader it
 reuses. Lines 42 to 44 record that the import of `report_gate` pulls in that module's
 own import of `hooks/guard.py`. `lint/report_gate.py` in turn imports `lint/ste_gate.py`
 for `last_reply`. Three of the four hooks were therefore already linked by import
 before this change. Only the fourth, `lint/md_sweep.py`, stood alone.
 
-The docstring lines 42 to 44 also claim that `hooks/config_report.py` avoids
+The docstring lines 42 to 44 also claimed that `hooks/config_report.py` avoids
 `lint/ste_gate.py`. That claim was already wrong for the same reason, through
 `report_gate`. This change does not repair that sentence. It is named here as a known
 error in the docstring.
@@ -65,7 +66,7 @@ measured the suite at 76 failures and 18 errors. The guard goes red on the defec
 guards.
 
 A break in the shared module is also LOUD, not quiet. The same reviewer ran
-`hooks/config_report.py` directly against the broken module. It exited 1 and printed a
+the config report hook directly against the broken module. It exited 1 and printed a
 Python traceback. The shared import sits at the top of each hook file, above `main`.
 The fail-open `try` and `except` inside `main` never sees an import-time error. The
 owner therefore gets a visible failure, not silence.
