@@ -50,12 +50,18 @@ GUARD = os.path.join(HERE, "guard.py")
 SUITE = os.path.join(HERE, "test_guard.py")
 WATCH = os.path.join(HERE, "config_watch.py")
 WATCH_SUITE = os.path.join(HERE, "test_config_watch.py")
+DECISION = os.path.join(HERE, "decision_watch.py")
+DECISION_SUITE = os.path.join(HERE, "test_decision_watch.py")
+RULING = os.path.join(HERE, "ruling_home.py")
+RULING_SUITE = os.path.join(HERE, "test_ruling_home.py")
 
 # A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
 # every mutation written before the watch existed reads unchanged.
 TARGETS = {
     "guard": (GUARD, SUITE, "GUARD_UNDER_TEST", "guard"),
     "watch": (WATCH, WATCH_SUITE, "WATCH_UNDER_TEST", "config_watch"),
+    "decision": (DECISION, DECISION_SUITE, "DECISION_WATCH_UNDER_TEST", "decision_watch"),
+    "ruling": (RULING, RULING_SUITE, "RULING_HOME_UNDER_TEST", "ruling_home"),
 }
 
 # (label, anchor text found once in the source, its mutated replacement, target, required case
@@ -1000,6 +1006,24 @@ MUTATIONS = [
      '                token[:2] in ("-f", "-F") and len(token) > 2 and not token.startswith("--")):',
      '                False):',
      "guard", 'a field glued to its flag'),
+    # ---- the always-silent stub. A hook whose main() exits 0 with no output passes every
+    # "nothing printed" case on its own. Each suite pairs that silence with a known-bad input in
+    # the same case (`known-bad pair`), and these mutants are the stub itself.
+    ("decision watch: main() is an always-silent stub",
+     'def main():\n    guard._force_utf8_streams()',
+     'def main():\n    sys.exit(0)\n    guard._force_utf8_streams()', "decision",
+     "main_ordinary_turn: known-bad pair"),
+    ("decision watch: stop_hook_active is true for every input",
+     '    if hook.get("stop_hook_active"):', '    if True:', "decision",
+     "main_stop_hook_active: known-bad pair"),
+    ("ruling home: main() is an always-silent stub",
+     'def main():\n    try:\n        hook = json.load(sys.stdin)',
+     'def main():\n    sys.exit(0)\n    try:\n        hook = json.load(sys.stdin)', "ruling",
+     "main_silent: known-bad pair"),
+    ("ruling home: every failure stands the hook down, git present or not",
+     '    try:\n        reason = run(hook)\n    except Exception:',
+     '    try:\n        reason = run(hook)\n        raise RuntimeError("mutant")\n    except Exception:', "ruling",
+     "main_missing_git: known-bad pair"),
 ]
 
 
@@ -1008,6 +1032,8 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
     env = dict(os.environ)
     env.pop("GUARD_UNDER_TEST", None)
     env.pop("WATCH_UNDER_TEST", None)
+    env.pop("DECISION_WATCH_UNDER_TEST", None)
+    env.pop("RULING_HOME_UNDER_TEST", None)
     env[variable] = copy_path
     env["CLAUDE_CONFIG_DIR"] = config_dir
     env.pop("MUTATE_ONLY", None)
@@ -1062,6 +1088,15 @@ def run_mutant(sources, work: str, entry):
     _path, suite, variable, stem = TARGETS[target]
     mutated = sources[target].replace(old, new, 1)
     copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(label)))
+    if target == "ruling":
+        # ruling_home.py reads `../lint/_transcript.py` beside itself. A bare copy in `work`
+        # would crash on that import and read as red on every case, whatever was mutated
+        # (mutant-cause-of-death, a mutant's own cause of death must be checked). Lay out hooks/ and lint/ for the copy.
+        tree = os.path.join(work, "tree_%s" % mutate_shared.safe_name(label))
+        os.makedirs(os.path.join(tree, "hooks"), exist_ok=True)
+        os.makedirs(os.path.join(tree, "lint"), exist_ok=True)
+        shutil.copy(os.path.join(HERE, "..", "lint", "_transcript.py"), os.path.join(tree, "lint"))
+        copy_path = os.path.join(tree, "hooks", "ruling_home.py")
     with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(mutated)
     config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(label))

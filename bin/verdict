@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+# verdict <cmd...>: run the command, keep the full output in a log, print only the verdict.
+# Log: $VERDICT_LOG (appended, never truncated), else a new file in $TMPDIR. Exit code is the command's.
+# Killed by signal N: exit 128+N. Ctrl-C: exit 130. Windows: bin/verdict.cmd.
+import os, re, shutil, subprocess, sys, tempfile, time
+HOT = re.compile(r"FAIL|Error|assert|Traceback")
+CAP = 30
+TAIL = 1 << 20  # read at most the last 1 MiB of this run's output for the excerpt
+def main(argv):
+    if not argv: sys.exit("usage: verdict <cmd...>")
+    name = " ".join(argv)
+    argv = [shutil.which(argv[0]) or argv[0]] + argv[1:]  # finds .cmd/.bat shims on Windows
+    log = os.environ.get("VERDICT_LOG")
+    if not log:
+        fd, log = tempfile.mkstemp(prefix="verdict-", suffix=".log"); os.close(fd)
+    t = time.time()
+    note = ""
+    with open(log, "ab") as f:
+        f.write(f"=== verdict run {time.strftime('%Y-%m-%d %H:%M:%S')}: {name}\n".encode()); f.flush()
+        start = f.tell()
+        try: rc = subprocess.run(argv, stdout=f, stderr=subprocess.STDOUT).returncode
+        except KeyboardInterrupt: rc = 130
+        except OSError as e: f.write(f"verdict: cannot run {argv[0]}: {e}\n".encode()); rc = 127
+        f.flush(); end = f.tell()
+    secs = f"{time.time() - t:.1f}s"
+    if rc < 0: note, rc = f" killed by signal {-rc}", 128 - rc
+    if rc == 0:
+        print(f"PASS {name} ({secs})"); return 0
+    print(f"FAIL {name} rc={rc}{note} ({secs}) log={log}")
+    with open(log, "rb") as f:
+        f.seek(max(start, end - TAIL))
+        lines = f.read(end - f.tell()).decode("utf-8", errors="replace").splitlines()
+    hot = [l for l in lines if HOT.search(l)]
+    print("\n".join((hot or lines)[-CAP:]))
+    return rc
+sys.exit(main(sys.argv[1:]))
