@@ -46,7 +46,8 @@ one fixed order, and the first match wins.
                        name to stop it later.
   3 live-stream        a command that follows a stream and never ends on its own
   3 waiter             a shell segment whose command word is a sleep-and-poll
-  4 force-push         a rewrite of a published branch
+  4 force-push         a forced push. Allowed with a lease plus --force-if-includes, denied
+                       with --force or a +refspec, asked when it reaches the default branch.
     destructive-delete a recursive delete at a root, a home or a glob
   5 env-file           any read or write of an environment file
   6 merge-main         a pull request merged into main. Allowed, and logged (Decision 8).
@@ -537,14 +538,94 @@ def clean_deletes_files(args) -> bool:
     return False
 
 
-def push_is_forced(args) -> bool:
-    """True when a `git push` rewrites the remote branch."""
+PUSH_VALUE_OPTS = {"--repo", "--receive-pack", "--exec", "-o", "--push-option"}
+DEFAULT_BRANCH_FALLBACK = ("main", "master")
+
+
+def _push_current_branch(cwd: str):
+    answer = _git(cwd, "symbolic-ref", "-q", "--short", "HEAD") if cwd else None
+    if answer is None or answer.returncode != 0 or not answer.stdout.strip():
+        return None
+    return answer.stdout.strip()
+
+
+def _push_default_branches(cwd: str, remote: str):
+    """The default branch names, or None when git cannot be read at all.
+
+    `refs/remotes/<remote>/HEAD` answers when it exists. A repository with no such ref falls back
+    to main and master. No readable repository is unknown, and unknown is never safe.
+    """
+    if not cwd or not os.path.isdir(cwd):
+        return None
+    repo = _git(cwd, "rev-parse", "--git-dir")
+    if repo is None or repo.returncode != 0:
+        return None
+    prefix = "refs/remotes/" + remote + "/"
+    head = _git(cwd, "symbolic-ref", "-q", prefix + "HEAD")
+    if head is not None and head.returncode == 0 and head.stdout.strip().startswith(prefix):
+        return (head.stdout.strip()[len(prefix):],)
+    return DEFAULT_BRANCH_FALLBACK
+
+
+PUSH_QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'")
+
+
+def push_text(segment: str) -> str:
+    """The segment with quoted text blanked: a quoted `--force` is text, not a push."""
+    return PUSH_QUOTED.sub(" ", segment)
+
+
+def push_verdict(args, cwd: str) -> str:
+    """'' for an allowed push, else 'ask' or 'deny', for the `git push` arguments `args`.
+
+    Not forced: ''. Forced at the default branch, or at a destination this cannot resolve: 'ask'.
+    Forced by `--force`, `-f`, a `--fo...` prefix or a `+refspec`: 'deny'. Forced by a lease: ''
+    when `--force-if-includes` rides with it, or every lease names its own sha; else 'deny'.
+    """
+    force = mirror = every = includes = unpinned = leased = False
+    plain = []
+    skip = False
     for arg in args:
-        if arg == "--force" or arg.startswith("--force-with-lease"):
-            return True
-        if arg.startswith("-") and not arg.startswith("--") and "f" in arg:
-            return True
-    return False
+        if skip:
+            skip = False
+        elif arg in PUSH_VALUE_OPTS:
+            skip = True
+        elif arg.startswith("--"):
+            name, _, value = arg.partition("=")
+            if arg == "--force-if-includes":
+                includes = True
+            elif name == "--force-with-lease":
+                leased = True
+                unpinned = unpinned or not value.partition(":")[2]
+            elif name == "--mirror":
+                mirror = True
+            elif name == "--all":
+                every = True
+            elif len(name) >= 4 and "--force".startswith(name):
+                force = True
+        elif arg.startswith("-") and len(arg) > 1:
+            force = force or "f" in arg
+        else:
+            plain.append(arg)
+    plus = any(spec.startswith("+") for spec in plain[1:])
+    if not (force or leased or plus or mirror):
+        return ""
+    defaults = _push_default_branches(cwd, plain[0] if plain else "origin")
+    reaches = mirror or every or defaults is None
+    for spec in plain[1:] or [""]:
+        source, colon, target = spec.lstrip("+").partition(":")
+        target = target if colon else source
+        if target in ("", "HEAD", "@"):
+            target = _push_current_branch(cwd)
+        if target is None or "*" in target:
+            reaches = True
+        elif target.removeprefix("refs/heads/") in (defaults or ()):
+            reaches = True
+    if reaches:
+        return "ask"
+    if force or plus:
+        return "deny"
+    return "" if includes or not unpinned else "deny"
 
 
 # ------------------------------------------------------------------ the silent write
@@ -2931,10 +3012,12 @@ def cmd_exe_delete_hit(segment: str) -> str:
 
 
 PUSH_REASON = (
-    "Rule (Git): this rewrites a branch that other people have already pulled. "
-    "Their next pull then conflicts with history they already hold. "
-    "Remedy: push a new commit on top when the branch is shared. "
-    "The click in this prompt is the grant when the rewrite is the intent."
+    "Rule (Git): a forced push can overwrite newer remote work with a stale copy. "
+    "Remedy: retry with --force-with-lease --force-if-includes."
+)
+PUSH_ASK_REASON = (
+    "Rule (Git): this forced push may rewrite the default branch, or its target is unreadable. "
+    "The click in this prompt is the grant."
 )
 
 
@@ -4142,9 +4225,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
         if matched:
             refuse(tool, "deny", "destructive-delete", DELETE_REASON, matched)
     for segment in split_segments(stripped):
-        for subcommand, args in git_calls(segment):
-            if subcommand == "push" and push_is_forced(args):
-                refuse(tool, "ask", "force-push", PUSH_REASON,
+        for subcommand, args in git_calls(push_text(segment)):
+            verdict = push_verdict(args, cwd) if subcommand == "push" else ""
+            if verdict:
+                refuse(tool, verdict, "force-push",
+                       PUSH_REASON if verdict == "deny" else PUSH_ASK_REASON,
                        "git push " + " ".join(args))
 
     # 5. The environment file. This layer reads the command BEFORE normalization.

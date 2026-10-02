@@ -1,0 +1,64 @@
+# A forced push is safe when it cannot overwrite newer work
+
+CLAUDE.md says: "Judge every rule, check, and design by the outcome for the person the
+software serves." The outcome here: the owner gets no prompt for a safe push, and no push
+overwrites newer remote work with a stale copy. This entry replaces the old rule, which
+asked on every forced push. That prompt protected nothing the lease does not protect, and
+it fired on every safe rebase. A guard that fires when nothing is wrong is spent. See
+decisions/guard-that-cries-wolf-is-spent.md.
+
+## The outcomes
+
+The guard resolves the act, not substrings. See decisions/predicate-is-the-act.md. It reads
+the flags and the refspecs of each `git push` call. Quoted text, heredocs, and
+`git log --grep=--force` are not a push.
+
+| Push | Outcome |
+|---|---|
+| Not forced | allow |
+| `--force-with-lease` (bare, `=<ref>`) with `--force-if-includes`, off the default branch | allow |
+| `--force-with-lease=<ref>:<sha>`, off the default branch | allow, alone |
+| `--force`, `-f`, a `--fo` prefix, `+refspec` | deny, with a remedy |
+| A lease without `--force-if-includes` and without a sha | deny, with a remedy |
+| Any forced push whose destination is the default branch | ask |
+| Any forced push whose destination cannot be resolved | ask |
+
+The remedy reads "retry with --force-with-lease --force-if-includes". It never names the
+target (CLAUDE.md, git-remedy-never-names-target).
+
+## How the destination is resolved
+
+- A refspec `src:dst` goes to `dst`. A bare `src` goes to `src`. A leading `+` and a
+  `refs/heads/` prefix drop off.
+- `HEAD`, an empty destination, and no refspec at all resolve to the current branch. A
+  detached HEAD has none, so the push asks.
+- `--mirror` and `--all` reach every branch, so a forced one asks. `--mirror` forces by
+  itself.
+- A glob destination asks.
+
+## How the default branch is resolved
+
+1. `refs/remotes/<remote>/HEAD`, with the remote named in the push (`origin` when none).
+2. No such ref in a readable repository: `main` and `master`.
+3. No readable repository: unknown. Unknown is not safe, so the push asks.
+
+## Why ask, not deny, at the default branch
+
+The owner changed the first design, which denied. A rewrite of the default branch is
+sometimes the intent. The prompt is the grant. The prompt names no target.
+
+## What would date this entry
+
+- Git older than 2.30 lacks `--force-if-includes`. On such a git the remedy fails. Measured
+  on git 2.54.0 only, never on an older one: unmeasured.
+- A lease with a sha guards the one ref it names. A push of another ref beside it is not
+  guarded. This design accepts that for the sha form, as briefed.
+- Quoted text is blanked before the push is read. A push inside `sh -c "..."` is not read,
+  as before this change.
+- `git -C <path> push` and a `cd` before the push read the session's directory, not the
+  push's. A wrong read can resolve the wrong default branch.
+
+## Checks
+
+`hooks/test_guard.py` holds a case for each row above, and the false alarms. The mutants in
+`hooks/mutate_guard.py` named `force-push:` kill each branch of `push_verdict`.
