@@ -1,5 +1,5 @@
 {
-  "_note": "Checked-in map for lint/rule_audit.py. Each key is a `<!-- rule:<slug> -->` anchor in a file that lint/rule_audit.py RULE_FILES names. `mechanism.kind` is one of guard, gate, ci, unmechanized. guard.ref must name a rule string passed to refuse()/record() in hooks/guard.py. gate.ref must be a file path, relative to the repo root, that exists; gate.needle, if set, must still appear in that file. ci.ref must name a `- name:` step in .github/workflows/gates.yml. unmechanized.reason must say what a hook or check would have to see.",
+  "_note": "Checked-in map for lint/rule_audit.py. Each key is a `<!-- rule:<slug> -->` anchor in a file that lint/rule_audit.py RULE_FILES names. `mechanism.kind` is one of guard, gate, ci, unmechanized. guard.ref must name a rule string passed to refuse()/record() in hooks/guard.py. gate.ref must be a file path, relative to the repo root, that exists; a gate row cites `test` (path::name, resolved by AST) and/or `setting` (a JSON value in settings.json), never a `needle`. ci.ref must name a `- name:` step in .github/workflows/gates.yml. unmechanized.reason must say what a hook or check would have to see.",
   "rules": {
     "outcomes-judge-by-outcome": {
       "mechanism": {
@@ -29,7 +29,7 @@
       "mechanism": {
         "kind": "gate",
         "ref": "lint/rule_audit.py",
-        "needle": "every rule anchor maps to a mechanism"
+        "test": "lint/test_rule_audit.py::RuleAuditTests.test_new_rule_with_no_row_fails_and_names_it"
       }
     },
     "roles-pick-mode-from-request": {
@@ -72,7 +72,11 @@
       "mechanism": {
         "kind": "gate",
         "ref": "settings.json",
-        "needle": "CLAUDE_CODE_SUBAGENT_MODEL"
+        "setting": {
+          "file": "settings.json",
+          "path": "env.CLAUDE_CODE_SUBAGENT_MODEL",
+          "equals": "sonnet"
+        }
       }
     },
     "roles-sonnet-is-the-floor": {
@@ -115,7 +119,11 @@
       "mechanism": {
         "kind": "gate",
         "ref": "settings.json",
-        "needle": "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"
+        "setting": {
+          "file": "settings.json",
+          "path": "env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH",
+          "equals": "1"
+        }
       }
     },
     "roles-brief-contents": {
@@ -194,7 +202,11 @@
       "mechanism": {
         "kind": "gate",
         "ref": "settings.json",
-        "needle": "hooks/guard.py"
+        "setting": {
+          "file": "settings.json",
+          "path": "hooks.PreToolUse[*].hooks[*].command",
+          "contains": "hooks/guard.py"
+        }
       }
     },
     "git-main-only-by-pr": {
@@ -225,14 +237,14 @@
       "mechanism": {
         "kind": "gate",
         "ref": "hooks/test_guard.py",
-        "needle": "FORBIDDEN_IN_A_REASON"
+        "test": "hooks/test_guard.py::stack_reason_hygiene_case"
       }
     },
     "git-slug-then-claim-number": {
       "mechanism": {
         "kind": "gate",
         "ref": "actions/stamp/stamp.mjs",
-        "needle": "function branchNumbered("
+        "test": "actions/stamp/test_stamp.mjs::frontmatter --check refuses a new record numbered on a feature branch"
       }
     },
     "git-cite-by-id": {
@@ -281,14 +293,13 @@
       "mechanism": {
         "kind": "gate",
         "ref": "hooks/mutate_shared.py",
-        "needle": "SURVIVED"
+        "test": "hooks/test_mutate_shared.py::ReportVerdictTests.test_exit_zero_with_red_lines_survives"
       }
     },
     "verification-verify-against-repo": {
       "mechanism": {
-        "kind": "gate",
-        "ref": "hooks/mutate_shared.py",
-        "needle": "WRONG CAUSE"
+        "kind": "unmechanized",
+        "reason": "No check reads whether a report about long work was verified against the repo instead of a status line. The mutation harness's WRONG CAUSE verdict covers only mutant cause of death, not this."
       }
     },
     "verification-never-waiter-loop": {
@@ -299,9 +310,8 @@
     },
     "verification-never-dry-run-blocklist": {
       "mechanism": {
-        "kind": "gate",
-        "ref": "hooks/test_guard.py",
-        "needle": "drives the guard as Claude Code drives it"
+        "kind": "unmechanized",
+        "reason": "No check reads whether a block-list was tested by running it for real. The guard suite drives the guard as a subprocess, but nothing proves a dry run would be refused."
       }
     },
     "verification-bump-first-fix-version": {
@@ -319,8 +329,8 @@
     "verification-report-unknown-reads": {
       "mechanism": {
         "kind": "gate",
-        "ref": "lint/check_unknown_reads_contract.py",
-        "needle": "THE CONTRACT'S MEMBERS"
+        "ref": "hooks/test_guard.py",
+        "test": "hooks/test_guard.py::subject_unread_log_case"
       }
     },
     "tokens-never-load-whole-doc": {
@@ -416,7 +426,8 @@
     "output-write-in-ste": {
       "mechanism": {
         "kind": "gate",
-        "ref": "lint/ste_lint.py"
+        "ref": "lint/ste_lint.py",
+        "test": "lint/test_gates.py::PromotedRuleTests.test_ste003_nominalization_blocks"
       }
     },
     "output-start-with-point": {
@@ -453,7 +464,7 @@
       "mechanism": {
         "kind": "gate",
         "ref": "lint/report_gate.py",
-        "needle": "LABEL_ORDER"
+        "test": "lint/test_gates.py::ReportGateTests.test_04_landed_labels_out_of_order_blocks"
       }
     },
     "reports-done-format": {
@@ -464,30 +475,29 @@
     },
     "reports-drop-unused-label": {
       "mechanism": {
-        "kind": "gate",
-        "ref": "lint/report_gate.py",
-        "needle": "LABEL_ORDER"
+        "kind": "unmechanized",
+        "reason": "The report gate accepts any in-order subset of the four labels, so it cannot see whether a label that stays in the report is empty or does not apply."
       }
     },
     "reports-blockquote-no-fence": {
       "mechanism": {
         "kind": "gate",
         "ref": "lint/report_gate.py",
-        "needle": "```"
+        "test": "lint/test_gates.py::ReportGateTests.test_03_landed_code_fence_in_blockquote_blocks"
       }
     },
     "reports-no-report-when-nothing-landed": {
       "mechanism": {
         "kind": "gate",
         "ref": "lint/report_gate.py",
-        "needle": "turn_landed"
+        "test": "lint/test_gates.py::ReportGateTests.test_07_nothing_landed_prose_reply_passes"
       }
     },
     "verification-cry-wolf-guard-is-spent": {
       "mechanism": {
         "kind": "gate",
         "ref": "lint/test_gates.py",
-        "needle": "test_58_quoted_git_commit_in_probe_list_passes"
+        "test": "lint/test_gates.py::ReportGateTests.test_58_quoted_git_commit_in_probe_list_passes"
       }
     },
     "verification-recovery-not-gated-on-own-state": {
@@ -506,14 +516,14 @@
       "mechanism": {
         "kind": "gate",
         "ref": "lint/check_landed_dirs.py",
-        "needle": "CONFIG_FROZEN_DIRS"
+        "test": "lint/test_check_landed_dirs.py::CheckLandedDirsTests.test_manifest_dir_missing_from_the_guard_literal_fails"
       }
     },
     "building-memory-never-only-home": {
       "mechanism": {
         "kind": "gate",
         "ref": "hooks/ruling_home.py",
-        "needle": "Claude Code hook: ruling-home check (Stop)."
+        "test": "hooks/test_ruling_home.py::case_a_no_home_line"
       }
     },
     "output-answer-has-a-home": {
