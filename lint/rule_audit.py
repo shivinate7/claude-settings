@@ -21,9 +21,19 @@ anchor, not something this script infers from prose.
 THE MAP. lint/rule_mechanisms.json holds one row per anchor. A row's mechanism is one of:
   - `guard`: a rule name string this session's hooks/guard.py actually passes as the third
     argument to `refuse(...)` or `record(...)`.
-  - `gate`: a file, named by its path from the repo root, that exists on disk. An optional
-    `needle` is a substring that must still appear in that file, so a citation of a gate
-    whose relevant code moved away reads as stale rather than as coverage.
+  - `gate`: a file, named by its path from the repo root, that exists on disk, plus the proof
+    that the gate WORKS. A row carries `test`, `setting`, or both. `needle` (a substring
+    that must appear in the file) is refused: a docstring or a label satisfies it while the
+    code under it does nothing (decisions/known-bad-input-proves-the-gate.md).
+      - `test`: a test id, `path::name` or `path::Class.name`, resolved by `citation_problem`.
+        A `.py` id must name a `def` (a unittest method, or a case function that the file
+        references), or a case registered by a literal first argument to `add(`, `sh(` or
+        `check(`. All of that is read from the AST. A `.mjs` id must name a top-level
+        `test("name", ...)` registration; no JavaScript parser ships here, so that one is a
+        line-anchored pattern on the registry key. That is a bandaid, named.
+      - `setting`: `{"file": "settings.json", "path": "env.NAME", "equals": "v"}` or
+        `"contains": "v"`. The value is read from the parsed JSON, never the name. `[*]` in a
+        path fans out over a list.
   - `ci`: a step name that appears in a `- name:` line of .github/workflows/gates.yml.
   - `unmechanized`: the literal token, paired with a `reason` of real length. A rule that
     genuinely cannot be checked by a machine still needs a row saying so, and saying why.
@@ -39,13 +49,16 @@ for a rule and lower this pin in the same commit, or add a rule with no mechanis
 and say why.
 
 WHAT THIS CANNOT SEE, BY NAME. It reads a citation, not the coverage behind it: a row can name
-a real guard rule that does not actually cover what the rule sentence demands, and this
-check passes it anyway. It cannot judge whether an `unmechanized` reason is a good argument,
+a real guard rule, or a real test, that does not actually cover what the rule sentence
+demands, and this check passes it anyway. It proves a cited test exists and is collected, not
+that the test goes red on the defect; the fixture tests in lint/test_rule_audit.py and the
+mutants in hooks/mutate_guard.py carry that proof for the checks changed with them. It cannot judge whether an `unmechanized` reason is a good argument,
 only whether one was written at length. And it governs only the RULE_FILES text: a rule
 recorded in a decision file or an agent prompt is a different surface, ungoverned here.
 """
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -68,10 +81,118 @@ CI_STEP_RE = re.compile(r'^\s*-\s*name:\s*(.+?)\s*$', re.MULTILINE)
 # is deliberately removed. Update UNMECHANIZED_EXPECTED in the SAME commit that builds a
 # mechanism (lower it) or adds an unmechanized rule (raise it, and say why in the message).
 RULE_FLOOR = 91
-UNMECHANIZED_EXPECTED = 72
+UNMECHANIZED_EXPECTED = 75
 REASON_MIN_WORDS = 8
 
 KINDS = {"guard", "gate", "ci", "unmechanized"}
+# A case-registering call whose first argument is a literal case name.
+CASE_REGISTRARS = {"add", "sh", "check"}
+
+
+def _defs(tree):
+    """Every function def in `tree`, as (class name or None, node)."""
+    out = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    out.append((node.name, item))
+    in_class = {id(n) for _, n in out}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and id(node) not in in_class:
+            out.append((None, node))
+    return out
+
+
+def citation_problem(test_id: str, root: str = ROOT):
+    """Return why `test_id` names no test that runs, or None when it does.
+
+    `path::name`, `path::Class.name`. The file must exist; the name must resolve as the
+    module docstring says. A name defined twice in one class is refused: the second `def`
+    silently replaces the first, so the cited body never runs.
+    """
+    path, sep, name = test_id.partition("::")
+    if not sep or not name:
+        return f"test id {test_id!r} is not `path::name`."
+    full = os.path.join(root, path)
+    if not os.path.exists(full):
+        return f"test file `{path}` does not exist."
+    text = read(full)
+    if path.endswith(".mjs"):
+        if re.search(r'^test\(\s*"' + re.escape(name) + r'"\s*,', text, re.MULTILINE):
+            return None
+        return f"`{path}` registers no test named {name!r}."
+    if not path.endswith(".py"):
+        return f"test file `{path}` is neither .py nor .mjs."
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as e:
+        return f"`{path}` does not parse: {e}."
+    cls, _, func = name.rpartition(".")
+    matches = [n for c, n in _defs(tree) if n.name == func and (not cls or c == cls)]
+    if len(matches) > 1:
+        return f"`{path}` defines {name!r} {len(matches)} times; the last silently wins."
+    if matches:
+        node = matches[0]
+        owners = {id(n): c for c, n in _defs(tree)}
+        if owners[id(node)] is not None:
+            if not func.startswith("test"):
+                return f"`{name}` in `{path}` is a method that unittest never collects."
+            return None
+        used = sum(1 for n in ast.walk(tree)
+                   if isinstance(n, ast.Name) and n.id == func and isinstance(n.ctx, ast.Load))
+        if used == 0:
+            return f"`{name}` in `{path}` is defined and never referenced, so no run calls it."
+        return None
+    for n in ast.walk(tree):
+        if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                and n.func.id in CASE_REGISTRARS and n.args
+                and isinstance(n.args[0], ast.Constant) and n.args[0].value == name):
+            return None
+    return f"`{path}` has no test, case function, or registered case named {name!r}."
+
+
+def _walk(value, parts):
+    """Yield every value at `parts` under `value`. A `name[*]` part fans out over a list."""
+    if not parts:
+        yield value
+        return
+    head, rest = parts[0], parts[1:]
+    fan = head.endswith("[*]")
+    key = head[:-3] if fan else head
+    if not isinstance(value, dict) or key not in value:
+        return
+    child = value[key]
+    if fan:
+        if isinstance(child, list):
+            for item in child:
+                yield from _walk(item, rest)
+    else:
+        yield from _walk(child, rest)
+
+
+def setting_problem(spec, root: str = ROOT):
+    """Return why a `setting` spec does not hold in its JSON file, or None when it does."""
+    if not isinstance(spec, dict) or not spec.get("file") or not spec.get("path"):
+        return "a `setting` needs \"file\" and \"path\"."
+    if ("equals" in spec) == ("contains" in spec):
+        return "a `setting` needs exactly one of \"equals\" and \"contains\"."
+    full = os.path.join(root, spec["file"])
+    try:
+        data = json.loads(read(full))
+    except Exception as e:
+        return f"`{spec['file']}` is unreadable as JSON: {e}."
+    found = list(_walk(data, spec["path"].split(".")))
+    if "equals" in spec:
+        ok = any(v == spec["equals"] for v in found)
+        want = f"= {spec['equals']!r}"
+    else:
+        ok = any(isinstance(v, str) and spec["contains"] in v for v in found)
+        want = f"containing {spec['contains']!r}"
+    if ok:
+        return None
+    return (f"`{spec['file']}` at `{spec['path']}` does not hold {want} "
+            f"(found {found!r}).")
 
 
 def read(path: str) -> str:
@@ -183,13 +304,26 @@ def check(
             path = os.path.join(ROOT, ref)
             if not os.path.exists(path):
                 problems.append(f"row `{slug}` names gate file `{ref}`, which does not exist.")
-            else:
-                needle = mech.get("needle")
-                if needle and needle not in read(path):
-                    problems.append(
-                        f"row `{slug}` names gate file `{ref}`, but the text it depends on, "
-                        f"{needle!r}, is gone from that file. Stale row."
-                    )
+                continue
+            if "needle" in mech:
+                problems.append(
+                    f"row `{slug}` cites a `needle`, which passes on a docstring or a label. "
+                    f"Cite a `test` that exercises the behaviour, or a `setting` value, or "
+                    f"downgrade the row to `unmechanized`."
+                )
+            if not mech.get("test") and not mech.get("setting"):
+                problems.append(
+                    f"row `{slug}` names gate file `{ref}` and proves nothing about it. "
+                    f"Add a `test` id or a `setting`."
+                )
+            if mech.get("test"):
+                why = citation_problem(mech["test"])
+                if why:
+                    problems.append(f"row `{slug}` cites a test that does not resolve: {why}")
+            if mech.get("setting"):
+                why = setting_problem(mech["setting"])
+                if why:
+                    problems.append(f"row `{slug}` cites a setting that does not hold: {why}")
         elif kind == "ci":
             if ref not in ci_names:
                 problems.append(
