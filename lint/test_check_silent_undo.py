@@ -37,8 +37,9 @@ class Repo:
         self.sh("init", "-q", "-b", "main", self.dir, cwd=self.tmp.name)
         self.sh("remote", "add", "origin", origin)
 
-    def sh(self, *a, cwd=None, ok=True):
-        r = subprocess.run(["git", *a], cwd=cwd or self.dir, capture_output=True, text=True)
+    def sh(self, *a, cwd=None, ok=True, date=None):
+        env = dict(os.environ, GIT_AUTHOR_DATE=date, GIT_COMMITTER_DATE=date) if date else None
+        r = subprocess.run(["git", *a], cwd=cwd or self.dir, capture_output=True, text=True, env=env)
         assert r.returncode == 0 or not ok, (a, r.stdout, r.stderr)
         return r.stdout.strip()
 
@@ -48,19 +49,20 @@ class Repo:
         with open(full, "w") as f:
             f.write(text)
 
-    def commit(self, msg, **files):
+    def commit(self, msg, date=None, **files):
         for k, v in files.items():
             self.put(k.replace("__", "/").replace("_md", ".md").replace("_txt", ".txt"), v)
         self.sh("add", "-A")
-        self.sh("commit", "-q", "-m", msg)
+        self.sh("commit", "-q", "-m", msg, date=date)
         return self.sh("rev-parse", "HEAD")
 
     def push(self):
         self.sh("push", "-q", "origin", "main")
         self.sh("fetch", "-q", "origin")
 
-    def verdict(self, head="HEAD", window=60):
-        return C.check(self.dir, "origin/main", head, window)
+    def verdict(self, head="HEAD"):
+        got, self.notes = C.check(self.dir, "origin/main", head)
+        return got
 
 
 def base_repo():
@@ -99,8 +101,9 @@ class Red(unittest.TestCase):
         r = self.r
         r.sh("checkout", "-q", "-b", "oops")
         r.sh("revert", "--no-edit", "-m", "1", "main")
-        r.sh("commit", "-q", "--amend", "-m", "Bring Card back\n\nDrops-lines: app.txt")
+        r.sh("commit", "-q", "--amend", "-m", "Bring Card back\n\nDrops-lines: app.txt -- the owner wants Card back")
         self.assertEqual(r.verdict(), [])
+        self.assertEqual(r.notes, ["ALLOWED app.txt: the owner wants Card back"])
 
     def test_stale_branch_keep_ours_merge(self):
         """pkmnscan shape: cut before the PR, merge main keeping ours, land: the old file returns."""
@@ -164,7 +167,7 @@ class Red(unittest.TestCase):
         r.sh("merge", "--no-commit", "--no-ff", "main")
         r.put("app.txt", BODY + "function Card() {}\n")
         r.sh("add", "-A")
-        r.sh("commit", "-q", "-m", "Merge main\n\nDrops-lines: app.txt")
+        r.sh("commit", "-q", "-m", "Merge main\n\nDrops-lines: app.txt -- main's line is dead")
         self.assertEqual(r.verdict(), [])
 
 
@@ -189,7 +192,15 @@ class Debt19(unittest.TestCase):
         r.sh("merge", "-q", "--no-ff", "-m", "Merge pull request #1", "pr1")
         r.push()
 
-    def test_age_beyond_the_window(self):
+    def test_a_bare_trailer_excuses_nothing(self):
+        self.pr_deletes_block()
+        r = self.r
+        r.sh("checkout", "-q", "-b", "bare")
+        r.sh("revert", "--no-edit", "-m", "1", "main")
+        r.sh("commit", "-q", "--amend", "-m", "Bring it back\n\nDrops-lines: app.txt")
+        self.assertTrue(r.verdict())
+
+    def test_age_is_read_without_a_floor(self):
         r = self.r
         r.sh("checkout", "-q", "-b", "stale")
         r.sh("checkout", "-q", "main")
@@ -200,7 +211,7 @@ class Debt19(unittest.TestCase):
         r.sh("checkout", "-q", "stale")
         r.commit("wording", other_txt="mine\n")
         r.sh("merge", "-q", "-s", "ours", "--no-edit", "main")
-        got = r.verdict(window=2)
+        got = r.verdict()
         self.assertTrue(any("app.txt" in p for p in got), got)
 
     def test_restored_block_with_one_line_reworded(self):
@@ -225,6 +236,110 @@ class Debt19(unittest.TestCase):
         r.sh("checkout", "-q", "-b", "newedit")
         r.commit("rewrite", app_txt=BODY + "alpha 1\nbeta 2\ngamma three\ndelta four\nepsilon five\nzeta six\n")
         self.assertEqual(r.verdict(), [])  # the stated ceiling: more than one altered line is a new edit
+
+
+class Stale(unittest.TestCase):
+    """The owner's incident, single-parent form: main gained lines after the branch was cut, and
+    the branch carries a version without them. Dates are fixed so a rebase keeps the cut."""
+    T0, T1, T2 = "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
+
+    def setUp(self):
+        r = self.r = Repo()
+        r.put("app.txt", BODY)
+        r.put("other.txt", "other v1\n")
+        r.commit("base", date="2025-12-01T10:00:00")
+        r.push()
+        r.sh("checkout", "-q", "-b", "feat")
+        # the branch edits the line next to where main will insert
+        r.commit("feat edits line 5", date=self.T0, app_txt=BODY.replace("line 5\n", "line 5 B\n"))
+        r.sh("checkout", "-q", "main")
+        r.commit("A adds lines", date=self.T1, app_txt=BODY.replace("line 5\n", "line 5\nA new 1\nA new 2\n"))
+        r.push()
+        r.sh("checkout", "-q", "feat")
+
+    def land_squash(self):
+        r = self.r
+        r.sh("checkout", "-q", "main")
+        r.sh("merge", "--squash", "feat")
+        r.sh("commit", "-q", "-m", "squash feat", date=self.T2)
+
+    def land_merge(self):
+        r = self.r
+        r.sh("checkout", "-q", "main")
+        r.sh("merge", "--no-ff", "-m", "Merge feat", "feat", date=self.T2)
+
+    def hits(self):
+        return [h for h in C.history(self.r.dir, "main", 60)[1] if "app.txt" in h]
+
+    def rebase_takes_its_own_side(self):
+        self.r.sh("rebase", "-X", "theirs", "main")
+
+    def rewrite_from_a_stale_copy(self):
+        r = self.r
+        r.sh("merge", "-X", "theirs", "--no-edit", "main", date=self.T1)  # A is now in the branch
+        r.commit("rewrite app.txt from the copy read before A", date=self.T2,
+                 app_txt=BODY.replace("line 5\n", "line 5 B\n"))
+
+    def test_rebase_takes_ours_is_red_on_the_branch(self):
+        self.rebase_takes_its_own_side()
+        got = self.r.verdict()
+        self.assertTrue(any("app.txt" in p for p in got), got)
+
+    def test_rebase_takes_ours_is_red_landed_as_squash(self):
+        self.rebase_takes_its_own_side()
+        self.land_squash()
+        self.assertTrue(self.hits())
+
+    def test_rebase_takes_ours_is_red_landed_as_merge_commit(self):
+        self.rebase_takes_its_own_side()
+        self.land_merge()
+        self.assertTrue(self.hits())
+
+    def test_stale_rewrite_is_red_on_the_branch(self):
+        self.rewrite_from_a_stale_copy()
+        got = self.r.verdict()
+        self.assertTrue(any("app.txt" in p for p in got), got)
+
+    def test_stale_rewrite_is_red_landed_as_squash(self):
+        self.rewrite_from_a_stale_copy()
+        self.land_squash()
+        self.assertTrue(self.hits())
+
+    def test_stale_rewrite_is_red_landed_as_merge_commit(self):
+        self.rewrite_from_a_stale_copy()
+        self.land_merge()
+        self.assertTrue(self.hits())
+
+    def test_main_work_before_the_cut_is_not_read(self):
+        """Cry-wolf guard: lines main gained BEFORE the branch was cut may be removed on purpose."""
+        r = self.r
+        r.sh("checkout", "-q", "-B", "late", "main")
+        r.commit("late work removes A's lines on purpose", date="2026-02-01T10:00:00", app_txt=BODY)
+        self.assertEqual(r.verdict(), [])
+
+    def test_similar_looking_lines_do_not_hide_a_drop(self):
+        """`A new 1` and `B new 1` read alike. A merge that swaps one for the other drops main's line."""
+        r = self.r
+        first = r.sh("rev-list", "--max-parents=0", "main")
+        r.sh("checkout", "-q", "-B", "swap", first)
+        r.commit("swap branch work", date=self.T0, other_txt="other v2\n")
+        r.sh("merge", "--no-commit", "--no-ff", "main")
+        r.put("app.txt", BODY.replace("line 5\n", "line 5\nB new 1\nB new 2\n"))
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge main", date=self.T2)
+        got = r.verdict()
+        self.assertTrue(any("A new 1" in p for p in got), got)
+
+    def test_a_real_rewrite_by_the_resolver_is_not_a_drop(self):
+        r = self.r
+        first = r.sh("rev-list", "--max-parents=0", "main")
+        r.sh("checkout", "-q", "-B", "rw", first)
+        r.commit("rw branch work", date=self.T0, other_txt="other v2\n")
+        r.sh("merge", "--no-commit", "--no-ff", "main")
+        r.put("app.txt", BODY.replace("line 5\n", "line 5\nA new 1 \nA new 2.\n"))
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge main", date=self.T2)
+        self.assertEqual(r.verdict(), [])
 
 
 class Green(unittest.TestCase):
@@ -309,7 +424,7 @@ class Unknown(unittest.TestCase):
         r = Repo()
         r.commit("only", a_txt="x\n")
         with self.assertRaises(C.Unknown):
-            C.check(r.dir, "origin/nope", "HEAD", 60)
+            C.check(r.dir, "origin/nope", "HEAD")
 
     def test_shallow_is_unknown(self):
         r = base_repo()
@@ -318,7 +433,7 @@ class Unknown(unittest.TestCase):
         sh = os.path.join(r.tmp.name, "shallow")
         subprocess.run(["git", "clone", "-q", "--depth", "1", "file://" + os.path.join(r.tmp.name, "o.git"), sh], check=True, capture_output=True)
         with self.assertRaises(C.Unknown):
-            C.check(sh, "origin/main", "HEAD", 60)
+            C.check(sh, "origin/main", "HEAD")
 
     def run_main(self, env_ci, *extra):
         r = Repo()

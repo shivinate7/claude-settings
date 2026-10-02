@@ -7,14 +7,19 @@
 It reads two things.
 
 - **Reversal.** Landing the branch on upstream puts a file back as an earlier
-  first-parent commit of upstream (window 60) had it. Exact blob (whole file), or
-  a `-U0` hunk that is that commit's hunk reversed. Catches `git revert` of a merged
-  PR and a stale copy carried in by a merge.
+  first-parent commit of upstream had it. The proof is one of three. The exact blob
+  (whole file). A `-U0` hunk reversed on all but one line. Lines main only added that the
+  change removes, even in a hunk that also edits a neighbour. The third is the rebase that
+  took its own side. Catches `git revert` of a merged PR and a stale copy.
+  Only commits upstream gained after the branch was cut are read. That means since the merge
+  base, or since the branch's first commit was authored. A rebase keeps that date.
+  There is no 60-commit floor. The floor read old main work that a branch may remove on purpose.
 - **Lost line.** A merge commit in the branch loses a line one parent added since the
   merge base. Catches a conflict taken "ours" and a hand edit of a merge.
 
-The escape is the trailer `Drops-lines: <path>`, one per path, on any commit of the
-branch. A commit message that only names the file does not pass.
+The escape is the trailer `Drops-lines: <path> -- <reason>`, one per path, on any commit of the
+branch. A bare path excuses nothing. Each use prints `ALLOWED <path>: <reason>`. A commit
+message that only names the file does not pass.
 
 ## The stale green PR
 
@@ -25,12 +30,12 @@ The agent resolves a conflict to its own side, or writes the whole file from an 
   after the post-wait fetch of the base tip, right before `gh pr merge`. A red at the
   second run reverts the claim. Unknown refuses too.
 - The result is read against the latest upstream tip, never against the merge base.
-- The window is 60 commits or every commit upstream gained since the branch was cut,
-  whichever is more. An old branch reads all of main's newer work.
+- An old branch reads all of main's newer work, by commit count since the merge base or by
+  date since the branch's first commit.
 
 ## Three shapes that passed Banchi's guard (its DEBT19)
 
-- **Age.** A branch older than the window. Closed by the widened window above.
+- **Age.** A branch older than a window. There is no window now. Closed.
 - **Re-wording.** A restored block with one line changed. A reversal now counts when all
   but one line of an earlier hunk (3 lines or more) come back or go away. Two changed
   lines are a new edit. This is a dial. It is set at one line and stays there until a
@@ -62,18 +67,22 @@ q_max `merge-lost-lines.mjs` compares the parents of one merge.
 - A move is not a loss. A removed line that the change adds to another file is excused.
   That also covers a rename and a reorder.
 - A re-wrapped prose line is not a loss. The line must still read as a run in the new file.
-- A rewrite by the resolver is not a loss. Half of the line must survive in a line
-  the merge gained.
+- A rewrite by the resolver is not a loss. A line of the same hunk must read 0.9 like it.
+  0.8 would excuse `A new 1` against `B new 1` (0.86), which is a drop.
 
 ## Unknown is red in CI
 
 No upstream, a shallow clone, or a failed git read prints UNKNOWN. Locally it exits 0.
 With env `CI` or `--strict` it exits 1. `merge.py` refuses on unknown, because its merge
-cannot be taken back. This follows decisions/ci-unknown-is-red-and-dedup.md on PR 226.
+cannot be taken back. The way out that does not depend on the check is the owner flag
+`merge <pr> --confirm --undo-check-unknown-ok "<reason>"`. It is logged and never excuses a
+finding. This follows decisions/ci-unknown-is-red-and-dedup.md on PR 226.
 
 ## Measured on this repo
 
-Run over main (189 first-parent commits, 2026-10-02): 26 hits.
+Run over main (189 first-parent commits, 2026-10-02): 26 hits. This run used the 60-commit floor and
+the older 0.5 rewrite rule. It was not repeated after the fixes. The owner ruled that CI runs the full
+suites and no history audit runs locally. The numbers below are unmeasured for the current code.
 
 - 1 lost line: a merge that removed a placeholder entry once the real one landed. Deliberate.
 - 25 reversals. Each undoes earlier work by a later commit. The 15 exact ones were read
