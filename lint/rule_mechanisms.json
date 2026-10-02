@@ -192,9 +192,11 @@
     },
     "shared-trees-confirm-before-write": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "guard.py acts on the command itself. Nothing checks that the assistant confirmed its checkout and branch before issuing it."
-      }
+        "kind": "gate",
+        "ref": "hooks/test_guard.py",
+        "needle": "names the checkout and branch\" % _write"
+      },
+      "note": "hooks/guard.py prints the checkout and branch as PreToolUse context on a git write. It is context, not a refusal, so it passes no refuse() or record() name for a guard row to cite."
     },
     "shared-trees-own-ports-data": {
       "mechanism": {
@@ -223,9 +225,10 @@
     },
     "git-wait-for-required-checks": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "Waiting is a behavior in time. No artifact records whether the assistant waited before it acted again."
-      }
+        "kind": "guard",
+        "ref": "merge-checks"
+      },
+      "test": "hooks/test_guard.py: merge-checks: a pending check denies"
     },
     "git-never-merge-failing-ci": {
       "mechanism": {
@@ -255,9 +258,10 @@
     },
     "git-cite-by-id": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No lint checks citation style in a commit message or a PR body for an id versus a bare path."
-      }
+        "kind": "guard",
+        "ref": "cite-by-id"
+      },
+      "test": "hooks/test_guard.py: cite-by-id: a commit -m denies"
     },
     "git-record-own-file-per-kind": {
       "mechanism": {

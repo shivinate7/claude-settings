@@ -19,8 +19,10 @@ class Stop(Exception):
 class Held(Stop):
     pass
 
+SH_TIMEOUT = None  # seconds; the guard sets it, so a hung `gh` cannot outlast its hook
+
 def sh(args, cwd=None, input=None):
-    r = subprocess.run(args, cwd=cwd, input=input, capture_output=True, text=True)
+    r = subprocess.run(args, cwd=cwd, input=input, capture_output=True, text=True, timeout=SH_TIMEOUT)
     return r.returncode, (r.stdout + r.stderr).strip()
 
 def git(cwd, *a, input=None):
@@ -138,13 +140,21 @@ class Host:
     """The GitHub half: `gh` for the pull request, the required checks, the wait and the merge.
     Tests pass a fake with the same pr, wait_checks and merge, or a `gh` shim on PATH."""
 
-    def __init__(self, required="protection", base="main", minute=60, now=time.time, pause=time.sleep, ignore=None):
+    def __init__(self, required="protection", base="main", minute=60, now=time.time, pause=time.sleep, ignore=None, repo=None):
         self.required, self.base, self.minute, self.now, self.pause = required, base, minute, now, pause
+        self.repo = repo  # OWNER/NAME, or None for the repo of the working directory
         self.ignore = ignore or {}  # check name -> reason, from ignore_checks()
+
+    def _repo_args(self):
+        return ["-R", self.repo] if self.repo else []
+
+    def _pr_args(self, n):
+        """The pull request selector: the number, or none for the current branch's."""
+        return ([str(n)] if n not in (None, "") else []) + self._repo_args()
 
     def pr(self, n):
         """-> {head, branch, base, state, mergeable, merge_state}"""
-        c, out = sh(["gh", "pr", "view", str(n), "--json", "headRefOid,headRefName,baseRefName,state,mergeable,mergeStateStatus"])
+        c, out = sh(["gh", "pr", "view", *self._pr_args(n), "--json", "headRefOid,headRefName,baseRefName,state,mergeable,mergeStateStatus"])
         if c:
             raise Stop("gh pr view failed: " + out)
         d = json.loads(out)
@@ -171,7 +181,7 @@ class Host:
 
     def checks(self, n):
         """-> {check name: [(bucket, link), ...]} from `gh pr checks`, every entry kept. It exits non-zero on red or pending, so read the JSON, not the code."""
-        c, out = sh(["gh", "pr", "checks", str(n), "--json", "name,bucket,link"])
+        c, out = sh(["gh", "pr", "checks", *self._pr_args(n), "--json", "name,bucket,link"])
         try:
             rows = json.loads(out)
         except ValueError:
@@ -226,7 +236,7 @@ class Host:
     def run_state(self, sha):
         """-> (red, pending) from the workflow runs of `sha`. A run that is not completed holds the wait even
         when its jobs are not listed as checks yet. Only success, skipped and neutral pass."""
-        c, out = sh(["gh", "run", "list", "--commit", sha, "--limit", "100", "--json", "status,conclusion,name"])
+        c, out = sh(["gh", "run", "list", *self._repo_args(), "--commit", sha, "--limit", "100", "--json", "status,conclusion,name"])
         try:
             runs = json.loads(out)
         except ValueError:
@@ -258,6 +268,23 @@ class Host:
             return f"unknown ({e})"
         s = "red: " + "; ".join(red) if red else "pending: " + ", ".join(pending) if pending else "green"
         return s + (" (ignored: " + "; ".join(ignored) + ")" if ignored else "")
+
+    def head_read(self, n):
+        """One read, no wait, of every check and workflow run on the head, required or not.
+        -> (verdict, detail): green, pending, red, or unknown when any read could not run. The guard's
+        home for "has this head settled", so it shares classify and run_state with the wait."""
+        try:
+            info = self.pr(n)
+            red, pending, _ = self.classify(self.checks(n), [], self.ignore)
+            r_red, r_pending = self.run_state(info["head"])
+        except Exception as e:  # Stop, a missing gh, a timeout, malformed JSON: all unread
+            return "unknown", str(e)
+        red, pending = red + r_red, pending + r_pending
+        if red:
+            return "red", "; ".join(red)
+        if pending:
+            return "pending", ", ".join(pending)
+        return "green", ""
 
     def block(self, pending, got):
         """Wait up to a minute for something to change."""

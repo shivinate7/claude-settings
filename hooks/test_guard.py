@@ -30,6 +30,7 @@ import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(HERE)
 # GUARD_UNDER_TEST points the suite at another copy of the guard, such as a `.bak` copy carrying
 # one mutation. A mutation test then needs no copy of this file, so the cases cannot drift from the
 # cases that pass.
@@ -43,7 +44,8 @@ CASES = []
 
 
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
-        session=None, carries=(), config=None, agent_id=None, no_root=False, **tool_input):
+        session=None, carries=(), config=None, agent_id=None, no_root=False, silent=False,
+        **tool_input):
     """Register one case.
 
     `carries` names fragments the printed reason MUST hold, which is how a case pins what an
@@ -71,14 +73,16 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "config": config,
         "agent_id": agent_id,
         "no_root": no_root,
+        # An allow that must print NOTHING, not even context. Only a case that says so is held to it.
+        "silent": silent,
         "tool_input": tool_input,
     })
 
 
 def sh(name, command, expected, rule=None, tool="Bash", cwd=None, env_path=None, session=None,
-       carries=(), config=None, agent_id=None, no_root=False):
+       carries=(), config=None, agent_id=None, no_root=False, silent=False):
     add(name, expected, rule=rule, tool=tool, cwd=cwd, env_path=env_path, session=session,
-        agent_id=agent_id, no_root=no_root,
+        agent_id=agent_id, no_root=no_root, silent=silent,
         carries=carries, config=config, command=command)
 
 
@@ -109,6 +113,19 @@ OTHER_SESSION = "0000ffff-0000-4000-8000-000000000000"
 PRIVREPO = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "priv")
 GHMAIN = os.path.join(ROOT, "ghmain")      # a fake command line tool answering "main"
 GHDEV = os.path.join(ROOT, "ghdev")        # the same, answering "dev"
+GHPEND = os.path.join(ROOT, "ghpend")      # green base main, but one check is pending
+GHRED = os.path.join(ROOT, "ghred")        # one check failed
+GHRUNPEND = os.path.join(ROOT, "ghrunpend")  # every check passed, one workflow run is not done
+GHBROKEN = os.path.join(ROOT, "ghbroken")  # answers every call with text that is not JSON
+GHNEED = os.path.join(ROOT, "ghneed")      # green, but only for a call that names pull request 12 and y/x
+GHSLOW = os.path.join(ROOT, "ghslow")      # green, but every call takes longer than the gate waits
+GHBLANK = os.path.join(ROOT, "ghblank")    # green checks, a base that reads as empty
+CTXEMPTY = os.path.join(ROOT, "ctxempty")    # a checkout with no commit yet
+CTXDETACH = os.path.join(ROOT, "ctxdetach")  # a linked worktree of CTXREPO on a detached HEAD
+CTXREPO = os.path.join(ROOT, "ctxrepo")      # a checkout on main with one merged branch, `done`
+MSG_BAD = os.path.join(ROOT, "msg_bad.txt")  # a message file that cites a record by path
+MSG_OK = os.path.join(ROOT, "msg_ok.txt")    # a message file that cites a record by id
+MERGECFG = os.path.join(ROOT, "mergecfg")  # a config directory whose rules file points at this repo
 GHNONE = os.path.join(ROOT, "ghnone")      # an empty directory, so the tool is missing
 # The WHOLE PATH of every "gh missing" case: GHNONE and nothing else, never PY_PATH beside it.
 # MEASURED on WSL Ubuntu: with the interpreter at /usr/bin/python3, PY_PATH is /usr/bin, which also
@@ -392,7 +409,33 @@ def make_blind_git(folder):
     os.chmod(script, 0o755)
 
 
-def make_fake_gh(folder, base, delay=0):
+FAKE_GH_PY = r'''import json, os, sys
+state = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")))
+args = sys.argv[1:]
+if args[:1] == ["pr"] and not all(word in args for word in state["need"]):
+    state["broken"] = True
+while "-R" in args:
+    i = args.index("-R")
+    del args[i:i + 2]
+if state["broken"]:
+    print("boom")
+    sys.exit(1)
+if not args:
+    print(json.dumps({"baseRefName": state["pr"]["baseRefName"]}))
+elif args[:2] == ["pr", "view"]:
+    fields = args[args.index("--json") + 1].split(",")
+    print(json.dumps({k: state["pr"][k] for k in fields}))
+elif args[:2] == ["pr", "checks"]:
+    print(json.dumps(state["checks"]))
+elif args[:2] == ["run", "list"]:
+    print(json.dumps(state["runs"]))
+else:
+    print("fake gh: unhandled " + " ".join(args), file=sys.stderr)
+    sys.exit(2)
+'''
+
+
+def make_fake_gh(folder, base, delay=0, checks=None, runs=None, broken=False, need=()):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
     MEASURED on Windows 2026-09-16: a call of "gh" through CreateProcess appends `.exe` and never
@@ -423,7 +466,22 @@ def make_fake_gh(folder, base, delay=0):
     fixture, not a fact to route around.
     """
     os.makedirs(folder, exist_ok=True)
-    body = '{"baseRefName":"%s"}' % base
+    # The answers live in a state file, and `ghfake.py` serves them the way the real tool does: a
+    # `pr view` returns exactly the fields it was asked for, `pr checks` the check rows, `run list`
+    # the workflow runs. No argument at all answers the base alone, which is what
+    # _verify_fake_gh_delay reads. `broken` answers every call with text that is not JSON.
+    state = {
+        "pr": {"baseRefName": base, "headRefOid": "abc1234", "headRefName": "feat",
+               "state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN"},
+        "checks": checks if checks is not None else [{"name": "gates", "bucket": "pass", "link": ""}],
+        "runs": runs if runs is not None else [
+            {"status": "completed", "conclusion": "success", "name": "gates"}],
+        "broken": broken,
+        "need": list(need),   # words every call must carry, or it answers as a broken tool does
+    }
+    write(os.path.join(folder, "state.json"), json.dumps(state))
+    write(os.path.join(folder, "ghfake.py"), FAKE_GH_PY)
+    fake_py = os.path.join(folder, "ghfake.py")
     if os.name == "nt":
         tool = shutil.which("ping", path=os.environ.get("PATH")) if delay else None
         if delay and not tool:
@@ -431,7 +489,8 @@ def make_fake_gh(folder, base, delay=0):
                 "make_fake_gh: delay=%d requested but 'ping' is not on this process's PATH" % delay
             )
         wait = ('"%s" -n %d 127.0.0.1 >nul\r\n' % (tool, delay + 1)) if delay else ""
-        write(os.path.join(folder, "gh.cmd"), "@echo off\r\n" + wait + "echo " + body + "\r\n")
+        write(os.path.join(folder, "gh.cmd"), "@echo off\r\n" + wait
+              + '"%s" "%s" %%*\r\n' % (sys.executable, fake_py))
     else:
         script = os.path.join(folder, "gh")
         tool = shutil.which("sleep", path=os.environ.get("PATH")) if delay else None
@@ -440,7 +499,7 @@ def make_fake_gh(folder, base, delay=0):
                 "make_fake_gh: delay=%d requested but 'sleep' is not on this process's PATH" % delay
             )
         wait = ("%s %d\n" % (tool, delay)) if delay else ""
-        write(script, "#!/bin/sh\n" + wait + "echo '" + body + "'\n")
+        write(script, "#!/bin/sh\n" + wait + 'exec "%s" "%s" "$@"\n' % (sys.executable, fake_py))
         os.chmod(script, 0o755)
 
 
@@ -496,6 +555,26 @@ def build_fixtures():
     write(os.path.join(CLONE, "settings.json"), "{}\n")
     write(os.path.join(CLONE, "install.ps1"), "# install\n")
     make_fake_gh(GHMAIN, "main")
+    write(MSG_BAD, "title\n\ncites decisions/one-shared-record-stamp.md\n")
+    write(MSG_OK, "title\n\ncites D12, short titles for records\n")
+    os.makedirs(CTXREPO, exist_ok=True)
+    run_vcs(CTXREPO, "init", "-q", "-b", "main", ".")
+    run_vcs(CTXREPO, *IDENT, "commit", "-q", "--allow-empty", "-m", "first")
+    run_vcs(CTXREPO, "branch", "done")
+    run_vcs(CTXREPO, "worktree", "add", "-q", "--detach", CTXDETACH)
+    os.makedirs(CTXEMPTY, exist_ok=True)
+    run_vcs(CTXEMPTY, "init", "-q", "-b", "main", ".")
+    make_fake_gh(GHPEND, "main", checks=[{"name": "gates", "bucket": "pending", "link": ""}])
+    make_fake_gh(GHRED, "main", checks=[{"name": "gates", "bucket": "fail", "link": ""}])
+    make_fake_gh(GHRUNPEND, "main",
+                 runs=[{"status": "in_progress", "conclusion": "", "name": "gates"}])
+    make_fake_gh(GHBROKEN, "main", broken=True)
+    make_fake_gh(GHBLANK, "", )
+    make_fake_gh(GHNEED, "main", need=["12", "y/x"])
+    make_fake_gh(GHSLOW, "main", delay=9)
+    # The guard finds the merge tool beside its own real path, or in the clone the global rules
+    # file points at. A mutant copy of the guard sits in a temp folder and takes the second way.
+    write(os.path.join(MERGECFG, "CLAUDE.md"), "@" + slash(REPO) + "/CLAUDE.md\n")
     # GHDEV alone gets the delay: it is the one base whose logged/not-logged answer the timeout
     # mutant can flip (GHMAIN and GHNONE both expect "logged" either way), so it is the one fixture
     # whose instant reply could race that mutant's shrunk timeout. See make_fake_gh's docstring.
@@ -2184,20 +2263,187 @@ sh("env: the accessor search in the other shell",
 # merge call is now an ALLOW; the guard log is what carries the base and the tool, checked in
 # merge_log_case() below.
 
+# These run against a green head. Section 5b below pins the gate that refuses a head that is not.
 sh("merge: a base of main is allowed", "gh pr merge 12 --squash", "allow", cwd=NOGIT,
-   env_path=GHMAIN + os.pathsep + PY_PATH)
+   env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge: a base of dev is allowed", "gh pr merge 12 --squash", "allow", cwd=NOGIT,
-   env_path=GHDEV + os.pathsep + PY_PATH)
-sh("merge: an unreadable base is allowed", "gh pr merge 12 --squash", "allow",
-   cwd=NOGIT, env_path=GHNONE_PATH)
+   env_path=GHDEV + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge: an unreadable base is allowed once the head checks read green",
+   "gh pr merge 12 --squash", "allow", cwd=NOGIT, env_path=GHBLANK + os.pathsep + PY_PATH,
+   config=MERGECFG)
 sh("merge: no number is allowed", "gh pr merge", "allow",
-   cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
+   cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge: reading a pull request is untouched", "gh pr view 75 --json baseRefName", "allow",
    cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
 sh("merge: opening a pull request is untouched", "gh pr create --base main --title x --body y",
    "allow", cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
-add("merge: every call of the merge tool is allowed", "allow",
-    tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12, repo="x", owner="y")
+add("merge: a call of the merge tool on a green head is allowed", "allow",
+    tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12, repo="x", owner="y",
+    env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
+
+
+# =========================================================================== 5b. the merge gate
+#
+# `git-wait-for-required-checks`. A merge made outside the merge tool is refused while the head has
+# a check or a workflow run pending or red, and when that read could not run. Every case names the
+# fake `gh` it runs against; MERGECFG lets a mutant copy of the guard find the merge tool.
+
+GREEN_ON = GHMAIN + os.pathsep + PY_PATH
+for _fake, _word, _label in (
+    (GHPEND, "pending", "a pending check"),
+    (GHRED, "red", "a failed check"),
+    (GHRUNPEND, "pending", "a workflow run not finished"),
+):
+    sh("merge-checks: %s denies" % _label, "gh pr merge 12 --squash", "deny", "merge-checks",
+       carries=_word, cwd=NOGIT, env_path=_fake + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: match-head-commit is no proof the head settled",
+   "gh pr merge 12 --squash --match-head-commit abc1234", "deny", "merge-checks",
+   carries="pending", cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: a merge behind another command still denies",
+   "echo ok && gh pr merge 12 --squash", "deny", "merge-checks", carries="pending",
+   cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: a gh that answers nothing readable is unknown, and denies",
+   "gh pr merge 12 --squash", "deny", "merge-checks", carries="could not run",
+   cwd=NOGIT, env_path=GHBROKEN + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: a missing gh is unknown, and denies", "gh pr merge 12 --squash", "deny",
+   "merge-checks", carries="could not run", cwd=NOGIT, env_path=GHNONE_PATH, config=MERGECFG)
+add("merge-checks: the merge tool of the host denies on a pending head", "deny", "merge-checks",
+    carries="pending", tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12,
+    repo="x", owner="y", env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+add("merge-checks: the merge tool of the host denies on a failed head", "deny", "merge-checks",
+    carries="red", tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12,
+    repo="x", owner="y", env_path=GHRED + os.pathsep + PY_PATH, config=MERGECFG)
+NEED_ON = GHNEED + os.pathsep + PY_PATH
+sh("merge-checks: the pull request and repo of the call are the ones read",
+   "gh pr merge 12 --squash -R y/x", "allow", silent=True, cwd=NOGIT, env_path=NEED_ON,
+   config=MERGECFG)
+sh("merge-checks: the long repo flag names the repo too", "gh pr merge 12 --repo=y/x", "allow",
+   silent=True, cwd=NOGIT, env_path=NEED_ON, config=MERGECFG)
+sh("merge-checks: a flag value is no pull request", "gh pr merge -b note 12 -R y/x --squash",
+   "allow", silent=True, cwd=NOGIT, env_path=NEED_ON, config=MERGECFG)
+add("merge-checks: the host merge tool reads the pull request and repo it names", "allow",
+    silent=True, tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12, repo="x",
+    owner="y", env_path=NEED_ON, config=MERGECFG)
+sh("merge-checks: a gh slower than the gate waits is unknown, and denies",
+   "gh pr merge 12 --squash", "deny", "merge-checks", carries="could not run", cwd=NOGIT,
+   env_path=GHSLOW + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: the words of a merge in an echo are no merge", "echo gh pr merge 12 --squash",
+   "allow", silent=True, cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: a green head merges", "gh pr merge 12 --squash", "allow", silent=True,
+   cwd=NOGIT, env_path=GREEN_ON, config=MERGECFG)
+sh("merge-checks: --auto leaves the waiting to GitHub", "gh pr merge 12 --auto --squash", "allow",
+   silent=True, cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: help merges nothing", "gh pr merge --help", "allow", silent=True,
+   cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: the merge tool is judged by its own wait, not here",
+   "python3 merge/merge.py 12 --confirm", "allow", silent=True, cwd=NOGIT,
+   env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: reading a pending pull request is untouched", "gh pr view 12 --json state",
+   "allow", silent=True, cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: quoted text that names a merge is text", 'echo "gh pr merge 12 --squash"',
+   "allow", silent=True, cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: a grep for a merge is no merge", "grep -rn 'gh pr merge' docs", "allow",
+   silent=True, cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: a heredoc body that names a merge is data",
+   "cat > notes.txt <<'EOF'\ngh pr merge 12 --squash\nEOF", "allow", silent=True, cwd=NOGIT,
+   env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: a commit message that names a merge is a message",
+   VCS + ' log --grep "gh pr merge"', "allow", silent=True, cwd=NOGIT,
+   env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+
+
+# =========================================================================== 5c. git write context
+#
+# `shared-trees-confirm-before-write`. A git write prints context that names the checkout and the
+# branch it hits. It never refuses. A read prints nothing.
+
+for _write in ("commit -m x", "push origin x", "merge feature/x", "rebase main",
+               "cherry-pick abc1234", "tag v1", "tag -d v1"):
+    sh("context: git %s names the checkout and branch" % _write, VCS + " " + _write, "allow",
+       carries=["Checkout:", "Branch: main"], cwd=GITMAIN)
+sh("context: a branch delete is a write", VCS + " branch -d done", "allow",
+   carries=["Checkout:", "Branch: main"], cwd=CTXREPO)
+sh("context: a linked worktree names its own branch", VCS + " commit -m x", "allow",
+   carries="Branch: lane", cwd=GITWT)
+sh("context: a detached HEAD says so", VCS + " commit -m x", "allow",
+   carries=["Checkout:", "detached HEAD"], cwd=CTXDETACH)
+sh("context: a checkout with no commit yet still names its branch", VCS + " commit -m x",
+   "allow", carries=["Checkout:", "Branch: main"], cwd=CTXEMPTY)
+sh("context: a -C target names the checkout the write hits", VCS + " -C " + GITWT + " commit -m x",
+   "allow", carries="Branch: lane", cwd=GITMAIN)
+sh("context: a write behind a read is still named", VCS + " status && " + VCS + " commit -m x",
+   "allow", carries="Branch: main", cwd=GITMAIN)
+sh("context: a write outside any checkout says it could not read one", VCS + " commit -m x",
+   "allow", carries="could not be read", cwd=NOGIT)
+for _read in ("status", "log --oneline -3", "diff HEAD", "branch", "branch -a", "tag", "tag -l 'v*'",
+              "push --dry-run origin x", "commit --dry-run", "show HEAD", "fetch origin",
+              "merge-base main HEAD", "rev-parse --show-toplevel"):
+    sh("context: git %s is a read and prints nothing" % _read, VCS + " " + _read, "allow",
+       silent=True, cwd=GITMAIN)
+sh("context: the words of a write in an echo are no write", "echo " + VCS + " commit -m x",
+   "allow", silent=True, cwd=GITMAIN)
+sh("context: quoted write text is no write", 'echo "' + VCS + ' push origin main"', "allow",
+   silent=True, cwd=GITMAIN)
+sh("context: a log search for write words is a read", VCS + ' log --grep="' + VCS + ' commit"',
+   "allow", silent=True, cwd=GITMAIN)
+sh("context: a heredoc body that holds write words is data",
+   "cat > notes.txt <<'EOF'\n" + VCS + " commit -m x\n" + VCS + " push\nEOF", "allow",
+   silent=True, cwd=GITMAIN)
+sh("context: a refusal prints the refusal alone", VCS + " push --force origin main", "ask",
+   "force-push", cwd=GITMAIN)
+
+
+# =========================================================================== 5d. cite by id
+#
+# `git-cite-by-id`. A commit message or a PR body that cites a record by its path is refused. A code
+# path, the word "decisions", a read of a record and a record's own file stay allowed.
+
+CITE = "decisions/one-shared-record-stamp.md"
+for _name, _command in (
+    ("a commit -m", VCS + ' commit -m "fix, per ' + CITE + '"'),
+    ("a second -m paragraph", VCS + ' commit -m "title" -m "body cites ' + CITE + '"'),
+    ("a -am cluster", VCS + ' commit -am "see deferred/later-item.md"'),
+    ("the long --message=", VCS + ' commit --message="cites docs/' + CITE + '"'),
+    ("a single-quoted message", VCS + " commit -m 'cites " + CITE + "'"),
+    ("a heredoc inside -m", VCS + ' commit -m "$(cat <<\'EOF\'\ntitle\n\ncites ' + CITE + '\nEOF\n)"'),
+    ("a heredoc fed to -F -", VCS + " commit -F - <<'EOF'\ntitle\n\ncites " + CITE + "\nEOF"),
+    ("a file named by -F", VCS + " commit -F " + MSG_BAD),
+    ("a backslash path", VCS + ' commit -m "cites decisions\\one-shared-record-stamp.md"'),
+    ("an attached -m value", VCS + ' commit -m"cites ' + CITE + '"'),
+    ("a PR body", 'gh pr create --title t --body "cites ' + CITE + '"'),
+    ("a PR body file", "gh pr edit 3 --body-file " + MSG_BAD),
+    ("a PR body behind a cd", "cd x; gh pr edit 3 -b 'cites " + CITE + "'"),
+):
+    sh("cite-by-id: %s denies" % _name, _command, "deny", "cite-by-id", cwd=NOGIT)
+sh("cite-by-id: a PowerShell commit denies too", VCS + ' commit -m "cites ' + CITE + '"', "deny",
+   "cite-by-id", tool="PowerShell", cwd=NOGIT)
+for _name, _command in (
+    ("a code path", VCS + ' commit -m "guard: fix hooks/guard.py"'),
+    ("the word decisions", VCS + ' commit -m "decisions: one word, no path"'),
+    ("the word deferred and a folder", VCS + ' commit -m "move the deferred items, see decisions/"'),
+    ("an id with a gloss", VCS + ' commit -m "per D12, short titles for records"'),
+    ("a record path in the add, not the message",
+     VCS + " add " + CITE + " && " + VCS + ' commit -m "add the record"'),
+    ("a non-record file of a record folder", VCS + ' commit -m "update decisions/ORDER.json"'),
+    ("a heredoc that belongs to the command after the commit",
+     VCS + ' commit -m "add" && cat > notes.txt <<\'EOF\'\nsee ' + CITE + '\nEOF'),
+    ("a note message, which this rule does not read", VCS + ' notes add -m "cites ' + CITE + '"'),
+    ("a message file that cites an id", VCS + " commit -F " + MSG_OK),
+    ("a PR body with an id", 'gh pr create --title t --body "per D12, short titles for records"'),
+):
+    sh("cite-by-id: %s is allowed" % _name, _command, "allow", cwd=NOGIT)
+for _name, _command in (
+    ("a log of a record", VCS + " log --oneline -- " + CITE),
+    ("a show of a record", VCS + " show HEAD:" + CITE),
+    ("a cat of a record", "cat " + CITE),
+    ("an echo that holds commit words", 'echo \'' + VCS + ' commit -m "' + CITE + '"\''),
+    ("a grep for a record path", "grep -rn '" + CITE + "' ."),
+    ("a heredoc that writes a record citing another",
+     "cat > decisions/a.md <<'EOF'\nsee " + CITE + "\nEOF"),
+    ("a log search for the path", VCS + ' log --grep="' + CITE + '"'),
+    ("a PR view", "gh pr view 12 --json body"),
+):
+    sh("cite-by-id: %s is no message" % _name, _command, "allow", silent=True, cwd=NOGIT)
 
 
 # =========================================================================== 6. frozen paths
@@ -2694,6 +2940,10 @@ def decide(case):
     try:
         parsed = json.loads(out)
         block = parsed["hookSpecificOutput"]
+        if "permissionDecision" not in block and "additionalContext" in block:
+            # Context is an ALLOW that speaks. Its text rides in the reason slot, marked, so a case
+            # can pin it with `carries` and a `silent` case can tell it from nothing.
+            return "allow", "CONTEXT: " + block["additionalContext"]
         return block["permissionDecision"], block["permissionDecisionReason"]
     except Exception:
         return "unparsable", out[:200]
@@ -3029,8 +3279,9 @@ def branch_base_unread_log_case():
                           "cwd": BRANCHNOBASE}),
         capture_output=True, text=True, env=env, timeout=60,
     )
-    if result.stdout.strip():
-        return False, "expected a silent allow, got %r" % result.stdout.strip()[:120]
+    # A branch delete is a git write, so the allow carries context. It must carry no decision.
+    if "permissionDecision" in result.stdout:
+        return False, "expected an allow, got %r" % result.stdout.strip()[:120]
     if not os.path.exists(path):
         return False, "no log file was written for the unresolved base"
     with open(path, encoding="utf-8") as handle:
@@ -3085,6 +3336,30 @@ REASON_MAY_NAME = {
 }
 
 
+def merge_tool_missing_case():
+    """A merge gate that cannot load the merge tool is unknown, and denies.
+
+    The guard is copied into a folder with no `merge/` beside it, under a config directory whose
+    rules file points nowhere, so neither place the tool is looked for holds it.
+    """
+    folder = os.path.join(ROOT, "nomergetool")
+    os.makedirs(os.path.join(folder, "cfg"), exist_ok=True)
+    copy = os.path.join(folder, "hooks", "guard.py")
+    os.makedirs(os.path.dirname(copy), exist_ok=True)
+    shutil.copy(GUARD, copy)
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = os.path.join(folder, "cfg")
+    env["PATH"] = GHMAIN + os.pathsep + PY_PATH
+    result = subprocess.run(
+        [sys.executable, copy],
+        input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "gh pr merge 12"},
+                          "cwd": NOGIT}),
+        capture_output=True, text=True, env=env, timeout=60)
+    if "merge-checks" not in result.stdout or "could not be loaded" not in result.stdout:
+        return False, "expected a deny that names the unloadable tool, got %r" % result.stdout[:120]
+    return True, "deny, the tool could not be loaded"
+
+
 def merge_log_case():
     """Decision 8: a merge into main is allowed, and noted in the log when the base is main or
     unreadable, or when the call goes through the MCP tool that carries no base at all. A base of
@@ -3093,13 +3368,14 @@ def merge_log_case():
     scenarios = [
         ("gh pr merge 12", GHMAIN + os.pathsep + PY_PATH, True, "base main"),
         ("gh pr merge 12", GHDEV + os.pathsep + PY_PATH, False, "base dev"),
-        ("gh pr merge 12", GHNONE_PATH, True, "base unreadable"),
+        ("gh pr merge 12", GHBLANK + os.pathsep + PY_PATH, True, "base unreadable"),
     ]
     problems = []
     for index, (command, env_path, expect_logged, label) in enumerate(scenarios):
         folder = os.path.join(ROOT, "mlog%d" % index)
         os.makedirs(folder, exist_ok=True)
         path = os.path.join(folder, "guard.log")
+        write(os.path.join(folder, "CLAUDE.md"), "@" + slash(REPO) + "/CLAUDE.md\n")
         env = dict(os.environ)
         env["CLAUDE_CONFIG_DIR"] = folder
         env["PATH"] = env_path
@@ -3126,8 +3402,10 @@ def merge_log_case():
     folder = os.path.join(ROOT, "mlogtool")
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, "guard.log")
+    write(os.path.join(folder, "CLAUDE.md"), "@" + slash(REPO) + "/CLAUDE.md\n")
     env = dict(os.environ)
     env["CLAUDE_CONFIG_DIR"] = folder
+    env["PATH"] = GHMAIN + os.pathsep + PY_PATH
     result = subprocess.run(
         [sys.executable, GUARD],
         input=json.dumps({"tool_name": "mcp__github__merge_pull_request",
@@ -3733,6 +4011,7 @@ LOG_CHECKS = (
     ("log: a cap lift under a deep path still logs the model", cap_deep_path_log_case),
     ("cap: the printed reason is bounded, single-line and marks a cut", cap_reason_bound_case),
     ("log: a merge into main is allowed and noted where the base is unsafe", merge_log_case),
+    ("merge-checks: a merge tool that cannot load is unknown, and denies", merge_tool_missing_case),
     ("log: a conflict-side checkout is allowed and noted", conflict_resolve_log_case),
     ("log: an unreadable subject is allowed and noted", subject_unread_log_case),
     ("log: an unforced worktree remove with an unreadable subject records no note",
@@ -3778,7 +4057,10 @@ def main():
         got, reason = decide(case)
         ok = got == case["expected"]
         note = ""
-        if ok and case["rule"] and case["rule"] not in reason:
+        if ok and case.get("silent") and reason:
+            ok = False
+            note = "  (an allow that must be silent printed: %s)" % reason[:90]
+        elif ok and case["rule"] and case["rule"] not in reason:
             ok = False
             note = "  (the reason does not name rule %r: %s)" % (case["rule"], reason[:90])
         elif ok and case["carries"] and [f for f in case["carries"] if f not in reason]:
