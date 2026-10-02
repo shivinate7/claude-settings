@@ -59,6 +59,11 @@ def run(md=GOOD_MD, rule_map=None, guard=GUARD_SRC, workflow=WORKFLOW_SRC,
     return rule_audit.check(md, rule_map, guard, workflow, rule_floor, unmechanized_expected)
 
 
+def gate_map(mechanism):
+    mechanism = dict(mechanism, kind="gate")
+    return {"rules": {"shared-trees-no-destructive-git": {"mechanism": mechanism}}}
+
+
 class RuleAuditTests(unittest.TestCase):
 
     def test_single_mapped_rule_is_clean(self):
@@ -105,20 +110,54 @@ class RuleAuditTests(unittest.TestCase):
         problems = run(rule_map=rule_map)
         self.assertTrue(any("does_not_exist.py" in p for p in problems), problems)
 
-    def test_row_naming_a_real_gate_file_with_stale_needle_fails(self):
-        rule_map = {
-            "rules": {
-                "shared-trees-no-destructive-git": {
-                    "mechanism": {
-                        "kind": "gate",
-                        "ref": "lint/rule_audit.py",
-                        "needle": "this text will never appear in the file",
-                    }
-                }
-            }
-        }
+    def test_row_citing_a_needle_is_refused(self):
+        # The old shape: a real file and a substring that is present. It must go red now.
+        rule_map = gate_map({"ref": "lint/rule_audit.py", "needle": "every rule anchor maps"})
         problems = run(rule_map=rule_map)
-        self.assertTrue(any("Stale row" in p for p in problems), problems)
+        self.assertTrue(any("needle" in p for p in problems), problems)
+
+    def test_gate_row_with_no_test_and_no_setting_is_refused(self):
+        problems = run(rule_map=gate_map({"ref": "lint/rule_audit.py"}))
+        self.assertTrue(any("proves nothing" in p for p in problems), problems)
+
+    def test_gate_row_citing_a_real_test_passes(self):
+        problems = run(rule_map=gate_map({
+            "ref": "lint/rule_audit.py",
+            "test": "lint/test_rule_audit.py::RuleAuditTests.test_single_mapped_rule_is_clean"}))
+        self.assertEqual(problems, [])
+
+    def test_gate_row_citing_a_test_that_does_not_exist_fails(self):
+        problems = run(rule_map=gate_map({
+            "ref": "lint/rule_audit.py",
+            "test": "lint/test_rule_audit.py::RuleAuditTests.test_no_such_thing"}))
+        self.assertTrue(any("does not resolve" in p for p in problems), problems)
+
+    def test_gate_row_citing_a_docstring_phrase_as_a_test_fails(self):
+        problems = run(rule_map=gate_map({
+            "ref": "hooks/test_guard.py",
+            "test": "hooks/test_guard.py::drives the guard as Claude Code drives it"}))
+        self.assertTrue(any("does not resolve" in p for p in problems), problems)
+
+    def test_gate_row_with_a_setting_that_holds_passes(self):
+        problems = run(rule_map=gate_map({
+            "ref": "settings.json",
+            "setting": {"file": "settings.json", "path": "env.CLAUDE_CODE_SUBAGENT_MODEL",
+                        "equals": "sonnet"}}))
+        self.assertEqual(problems, [])
+
+    def test_gate_row_with_a_wrong_setting_value_fails(self):
+        # The name is present in settings.json; only the value is wrong.
+        problems = run(rule_map=gate_map({
+            "ref": "settings.json",
+            "setting": {"file": "settings.json", "path": "env.CLAUDE_CODE_SUBAGENT_MODEL",
+                        "equals": "opus"}}))
+        self.assertTrue(any("does not hold" in p for p in problems), problems)
+
+    def test_gate_row_with_a_setting_name_absent_fails(self):
+        problems = run(rule_map=gate_map({
+            "ref": "settings.json",
+            "setting": {"file": "settings.json", "path": "env.NO_SUCH_NAME", "equals": "1"}}))
+        self.assertTrue(any("does not hold" in p for p in problems), problems)
 
     def test_row_naming_a_dead_ci_step_fails(self):
         rule_map = {
@@ -225,6 +264,132 @@ class RuleAuditTests(unittest.TestCase):
         workflow_text = rule_audit.read(rule_audit.WORKFLOW)
         problems = rule_audit.check(claude_text, rule_map, guard_text, workflow_text)
         self.assertEqual(problems, [])
+
+
+class CitationTests(unittest.TestCase):
+    """`citation_problem` over a throwaway tree: each known-bad file shape must read red."""
+
+    def problem(self, src, test_id, filename="test_x.py"):
+        with tempfile.TemporaryDirectory() as root:
+            with open(os.path.join(root, filename), "w", encoding="utf-8") as f:
+                f.write(src)
+            return rule_audit.citation_problem(f"{filename}::{test_id}", root)
+
+    def test_unittest_method_resolves(self):
+        src = "import unittest\nclass T(unittest.TestCase):\n    def test_a(self): pass\n"
+        self.assertIsNone(self.problem(src, "T.test_a"))
+        self.assertIsNone(self.problem(src, "test_a"))
+
+    def test_missing_name_is_red(self):
+        src = "import unittest\nclass T(unittest.TestCase):\n    def test_a(self): pass\n"
+        self.assertIn("no test", self.problem(src, "T.test_b"))
+
+    def test_name_in_a_docstring_only_is_red(self):
+        src = '"""test_a drives the guard."""\n'
+        self.assertIn("no test", self.problem(src, "test_a"))
+
+    def test_method_a_runner_never_collects_is_red(self):
+        src = "class T:\n    def helper(self): pass\n"
+        self.assertIn("not a test method", self.problem(src, "T.helper"))
+
+    def test_duplicate_def_in_a_class_is_red(self):
+        src = ("import unittest\nclass T(unittest.TestCase):\n"
+               "    def test_a(self): pass\n    def test_a(self): assert False\n")
+        self.assertIn("2 times", self.problem(src, "T.test_a"))
+
+    def test_function_never_referenced_is_red(self):
+        self.assertIn("never named", self.problem("def case_a(): pass\n", "case_a"))
+
+    def test_function_referenced_by_a_runner_resolves(self):
+        src = "def case_a(): pass\nCHECKS = (case_a,)\n"
+        self.assertIsNone(self.problem(src, "case_a"))
+
+    def test_registered_case_resolves_and_a_commented_one_is_red(self):
+        self.assertIsNone(self.problem('sh("a case name", "ls", "allow")\n', "a case name"))
+        self.assertIn("no test", self.problem('# sh("a case name", "ls", "allow")\n', "a case name"))
+
+    def test_mjs_registration_resolves_and_a_comment_is_red(self):
+        self.assertIsNone(self.problem('test("it works", () => {});\n', "it works", "t.mjs"))
+        self.assertIn("registers no test", self.problem('// test("it works", () => {});\n',
+                                                        "it works", "t.mjs"))
+
+    def test_skipped_method_is_red(self):
+        src = ("import unittest\nclass T(unittest.TestCase):\n"
+               "    @unittest.skip('later')\n    def test_a(self): pass\n")
+        self.assertIn("skip marker", self.problem(src, "T.test_a"))
+
+    def test_method_that_skips_itself_is_red(self):
+        src = ("import unittest\nclass T(unittest.TestCase):\n"
+               "    def test_a(self):\n        self.skipTest('no')\n")
+        self.assertIn("skip marker", self.problem(src, "T.test_a"))
+
+    def test_method_in_a_skipped_class_is_red(self):
+        src = ("import unittest\n@unittest.skip('x')\nclass T(unittest.TestCase):\n"
+               "    def test_a(self): pass\n")
+        self.assertIn("skip marker", self.problem(src, "T.test_a"))
+
+    def test_test_method_in_a_plain_class_is_red(self):
+        src = "class T:\n    def test_a(self): pass\n"
+        self.assertIn("not a test method", self.problem(src, "T.test_a"))
+
+    def test_method_in_a_class_deriving_a_local_testcase_resolves(self):
+        src = ("import unittest\nclass B(unittest.TestCase): pass\n"
+               "class T(B):\n    def test_a(self): pass\n")
+        self.assertIsNone(self.problem(src, "T.test_a"))
+
+    def test_case_function_named_only_under_if_false_is_red(self):
+        src = "def case_a(): pass\nif False:\n    CHECKS = (case_a,)\n"
+        self.assertIn("never named", self.problem(src, "case_a"))
+
+    def test_case_function_named_only_by_an_uncalled_function_is_red(self):
+        src = "def case_a(): pass\ndef dead():\n    return (case_a,)\n"
+        self.assertIn("never named", self.problem(src, "case_a"))
+
+    def test_case_function_named_by_a_called_function_resolves(self):
+        src = "def case_a(): pass\ndef main():\n    case_a()\nmain()\n"
+        self.assertIsNone(self.problem(src, "case_a"))
+
+    def test_registration_inside_an_uncalled_function_is_red(self):
+        src = 'def dead():\n    add("a case", 1)\n'
+        self.assertIn("no test", self.problem(src, "a case"))
+
+    def test_registration_inside_a_called_function_resolves(self):
+        src = 'def build():\n    add("a case", 1)\nbuild()\n'
+        self.assertIsNone(self.problem(src, "a case"))
+
+    def test_mjs_block_comment_and_template_literal_are_red(self):
+        self.assertIn("registers no test", self.problem(
+            '/*\ntest("it works", () => {});\n*/\n', "it works", "t.mjs"))
+        self.assertIn("registers no test", self.problem(
+            'const s = `\ntest("it works", () => {});\n`;\n', "it works", "t.mjs"))
+        self.assertIsNone(self.problem(
+            '/* note */\ntest("it works", () => {});\n', "it works", "t.mjs"))
+
+    def test_test_file_that_never_touches_the_ref_is_red(self):
+        with tempfile.TemporaryDirectory() as root:
+            for rel, body in (("gate.py", "x = 1\n"), ("test_other.py", "import os\n"),
+                              ("test_gate.py", "import gate\n"),
+                              ("test_run.py", "import subprocess\nsubprocess.run(['python3', 'lint/gate.py'])\n"),
+                              ("test_mention.py", "NOTE = 'lint/gate.py'\n")):
+                with open(os.path.join(root, rel), "w", encoding="utf-8") as f:
+                    f.write(body)
+            self.assertIn("proves nothing",
+                          rule_audit.link_problem("test_other.py::t", "lint/gate.py", root))
+            self.assertIsNone(rule_audit.link_problem("test_gate.py::t", "lint/gate.py", root))
+            self.assertIsNone(rule_audit.link_problem("test_run.py::t", "lint/gate.py", root))
+            self.assertIn("proves nothing",
+                          rule_audit.link_problem("test_mention.py::t", "lint/gate.py", root))
+            self.assertIsNone(rule_audit.link_problem("gate.py::t", "gate.py", root))
+
+    def test_row_whose_test_never_touches_its_ref_fails(self):
+        problems = run(rule_map=gate_map({
+            "ref": "lint/report_gate.py",
+            "test": "lint/test_rule_audit.py::RuleAuditTests.test_single_mapped_rule_is_clean"}))
+        self.assertTrue(any("unlinked" in p for p in problems), problems)
+
+    def test_missing_file_is_red(self):
+        self.assertIn("does not exist",
+                      rule_audit.citation_problem("nope.py::x", tempfile.gettempdir()))
 
 
 if __name__ == "__main__":
