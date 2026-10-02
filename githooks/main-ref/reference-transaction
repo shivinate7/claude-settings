@@ -58,7 +58,13 @@ while IFS=' ' read -r old new r rest; do
   # is still stale here. Allow when the same transaction moves origin/main to the same commit.
   # (Measured: GIT_REFLOG_ACTION is empty in the hook. `update-ref --stdin` can fake this line
   # on purpose, as the escape hatch can.)
-  case "$lines" in *"$new refs/remotes/origin/$branch"*) continue ;; esac
+  tracked=""
+  while IFS=' ' read -r _o n2 r2 rest2; do
+    [ "${r2:-}" = "refs/remotes/origin/$branch" ] && [ -z "${rest2:-}" ] && [ "$n2" = "$new" ] && tracked=1
+  done <<EOT
+$lines
+EOT
+  [ -n "$tracked" ] && continue
   refuse "$(git rev-parse --short "$new" 2>/dev/null || echo "$new") is not on origin/$branch."
 done <<EOF
 $lines

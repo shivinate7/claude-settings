@@ -38,4 +38,9 @@ git switch -q feat
 cd "$tmp/w2" && git commit -q --allow-empty -m remote2 && git push -q origin main 2>/dev/null
 cd "$tmp/w"
 t ok      "fetch origin main:main, origin/main stale" git fetch -q origin main:main
+# a different remote branch whose name starts with "main" must not pass as origin/main
+git switch -q feat
+cd "$tmp/w2" && git switch -q -c main-x && git commit -q --allow-empty -m other && git push -q origin main-x 2>/dev/null
+cd "$tmp/w"
+t refused "fetch origin main-x:main"             git fetch -q origin main-x:main
 rm -rf "$tmp"; exit $bad
