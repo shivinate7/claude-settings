@@ -230,6 +230,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 hooks/test_ruling_home.py
 
+      - name: Ruling census fixture suite
+        if: ${{ !cancelled() }}
+        run: python3 lint/test_ruling_census.py
+
       - name: Unknown-read contract (guard + session_start)
         if: ${{ !cancelled() }}
         run: python3 lint/check_unknown_reads_contract.py
@@ -380,6 +384,10 @@ jobs:
       - name: Ruling home fixture suite
         if: ${{ !cancelled() }}
         run: python hooks/test_ruling_home.py
+
+      - name: Ruling census fixture suite
+        if: ${{ !cancelled() }}
+        run: python lint/test_ruling_census.py
 
       - name: Unknown-read contract (guard + session_start)
         if: ${{ !cancelled() }}

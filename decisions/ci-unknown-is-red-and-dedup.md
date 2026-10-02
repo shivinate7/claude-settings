@@ -7,8 +7,10 @@
   (rule verification-report-unknown-reads, report a read that could not run as unknown).
   `lint/check_record_slugs.py` is the only lint with this shape. `harness-scope.sh`
   fails safe by running the harness. The other lints exit 1 on a failed read.
-- OS-independent suites and pure lints run on ubuntu only: ruling census, rule audit
+- OS-independent suites and pure lints run on ubuntu only: rule audit
   (suite and lint), record slugs, landed dirs, agent models, STE lints, zizmor.
+- The ruling census suite stays on every OS: it tests macOS `/var` symlinks and
+  Windows backslash and `normcase` paths.
 - Suites that touch paths, processes, shells, launchd, schtasks, symlinks or encoding
   run on every OS. When unsure, a suite stays on all OSes.
 - `install.sh` syntax and checkout detection run once, on `shell-macos`
