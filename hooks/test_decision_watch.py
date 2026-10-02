@@ -513,6 +513,14 @@ def case_protected_file_committed_this_turn_is_judged():
     os.makedirs(cfg, exist_ok=True)
     prior_cfg = os.environ.get("CLAUDE_CONFIG_DIR")
     os.environ["CLAUDE_CONFIG_DIR"] = cfg
+    root = make_repo("committed_root")
+    write(os.path.join(root, "decisions", "r.md"), "# R\n\nAlways X.\n")
+    commit_all(root, "root", when=None)
+    seen = []
+    dw.run({"transcript_path": write_transcript(root, [human_record("go", T0), assistant_record(text="x")]),
+            "cwd": root}, model_call=lambda prompt, **k: (seen.append(prompt), ({"verdict": "ALLOW"}, None))[1])
+    check("committed_turn: a root commit made this turn is judged as a new file",
+          len(seen) == 1 and "(new file)" in seen[0], seen[:1])
     count, restore = _fake_claude("committed_turn")
     try:
         message = dw.run(hook)

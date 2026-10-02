@@ -416,14 +416,18 @@ def looks_concerning(tool_use):
 
 # ------------------------------------------------------------------ evidence for the model
 
+ROOT_COMMIT = "root"
+
+
 def file_evidence(cwd, rel_path, untracked, since=None):
     """Return a short label plus the diff (or full text for an untracked file), or None on
     a git failure -- the caller reads None as UNKNOWN, per this hook's own design constraint
     that a git-diff failure is unknown, never silence and never a flag.
 
-    `since` is the oldest commit made this turn: the diff then runs from its parent to the
-    work tree, so a change committed this turn shows, with any later edit on top. A parent
-    that does not exist (the turn made the root commit) reads as a new file."""
+    `since` is the parent of the oldest commit made this turn (`committed_this_turn` reads it
+    from the same `git log` call, so no extra git call runs here): the diff then runs from that
+    parent to the work tree, so a change committed this turn shows, with any later edit on
+    top. `ROOT_COMMIT` means the turn made the root commit, which reads as a new file."""
     def whole_file():
         try:
             with open(os.path.join(cwd, rel_path), "r", encoding="utf-8", errors="replace") as f:
@@ -432,13 +436,12 @@ def file_evidence(cwd, rel_path, untracked, since=None):
             return None
     if untracked:
         return whole_file()
+    if since == ROOT_COMMIT:
+        return whole_file()
     if since:
-        run = _run_git(cwd, ["diff", since + "^", "--", rel_path])
-        if run is None:
+        run = _run_git(cwd, ["diff", since, "--", rel_path])
+        if run is None or run.returncode != 0:
             return None
-        if run.returncode != 0:
-            probe = _run_git(cwd, ["rev-parse", "--verify", "-q", since + "^"])
-            return whole_file() if probe is not None and probe.returncode != 0 else None
         return "%s (diff since the turn's first commit):\n%s" % (rel_path, run.stdout[:4000])
     run = _run_git(cwd, ["diff", "HEAD", "--", rel_path])
     if run is None or run.returncode != 0:
@@ -450,7 +453,7 @@ MAX_TURN_COMMITS = 200
 
 
 def committed_this_turn(cwd, baseline):
-    """Return ([relative paths], oldest commit) that commits made since `baseline` touched,
+    """Return ([relative paths], parent of the oldest commit) that commits made since `baseline` touched,
     or (None, None) when git could not be read. No baseline, or no commit since it, is ([], None).
 
     One bounded `git log --since` call, and only when HEAD's reflog says HEAD moved: an idle
@@ -458,7 +461,7 @@ def committed_this_turn(cwd, baseline):
     if baseline is None or head_moved_since(cwd, baseline) is False:
         return [], None
     run = _run_git(cwd, ["-c", "core.quotepath=off", "log", "--since=%d" % int(baseline),
-                         "--max-count=%d" % MAX_TURN_COMMITS, "--name-only", "--format=%x01%H"])
+                         "--max-count=%d" % MAX_TURN_COMMITS, "--name-only", "--format=%x01%P"])
     if run is None:
         return None, None
     if run.returncode != 0:
@@ -468,7 +471,8 @@ def committed_this_turn(cwd, baseline):
     paths, oldest = [], None
     for line in run.stdout.splitlines():
         if line.startswith("\x01"):
-            oldest = line[1:]
+            parents = line[1:].split()
+            oldest = parents[0] if parents else ROOT_COMMIT
         elif line and line not in paths:
             paths.append(line)
     return paths, oldest
