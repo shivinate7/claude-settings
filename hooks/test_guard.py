@@ -43,7 +43,7 @@ CASES = []
 
 
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
-        session=None, carries=(), config=None, agent_id=None, no_root=False, agent_type=None, event=None, **tool_input):
+        session=None, carries=(), config=None, agent_id=None, no_root=False, agent_type=None, event=None, stop_active=False, **tool_input):
     """Register one case.
 
     `carries` names fragments the printed reason MUST hold, which is how a case pins what an
@@ -72,6 +72,7 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "agent_id": agent_id,
         "agent_type": agent_type,
         "event": event,
+        "stop_active": stop_active,
         "no_root": no_root,
         "tool_input": tool_input,
     })
@@ -2665,7 +2666,7 @@ add("builder-test: addopts --deselect added to pytest.ini is refused", "deny", r
 add("builder-test: a dependency added to pyproject.toml is allowed", "allow", tool="Edit",
     file_path="pyproject.toml", new_string='dependencies = ["requests"]', **B)
 for _path in ("src/app.py", "src/contest.py", "latest_results.md", "docs/attest.md",
-              "src/protest_handler.ts", "src/specs.md", "src/testing.py"):
+              "src/protest_handler.ts", "src/specs.md", "src/testing.py", "src/Contest.java"):
     add("builder-test: Edit of %s is allowed" % _path, "allow", tool="Edit", file_path=_path,
         new_string="x = 1", **B)
 add("builder-test: Read of a test is allowed", "allow", tool="Read", file_path="tests/x.py", **B)
@@ -2681,8 +2682,10 @@ add("builder-test: a session run with --agent builder (no agent_id) is not judge
     tool="Edit", file_path="src/test_app.py", agent_type="builder", cwd=NOGIT)
 add("test-author: Edit of product code is refused", "deny", rule=TA, tool="Edit",
     file_path="src/app.py", carries=("builder", "Report"), **A)
-add("test-author: Edit of package.json is refused", "deny", rule=TA, tool="Edit",
-    file_path="package.json", **A)
+add("builder-test: ignore-scripts added to package.json is allowed", "allow", tool="Edit",
+    file_path="package.json", new_string='"ci": "npm ci --ignore-scripts"', **B)
+add("test-author: Edit of package.json passes the early warning (the diff judges it)", "allow",
+    tool="Edit", file_path="package.json", **A)
 for _path in ("tests/test_a.py", "src/b_test.go", "pytest.ini", "pyproject.toml", "conftest.py",
               "jest.config.js"):
     add("test-author: Edit of %s is allowed" % _path, "allow", tool="Edit", file_path=_path, **A)
@@ -2690,18 +2693,24 @@ for _path in ("tests/test_a.py", "src/b_test.go", "pytest.ini", "pyproject.toml"
 # ---- the diff, judged at commit, push and SubagentStop
 BASE_FILES = {
     "src/app.py": "x = 1\n", "src/contest.py": "y = 1\n", "latest_results.md": "ok\n",
-    "tests/test_a.py": "def test_a():\n    assert True\n", "pyproject.toml": "[project]\nname = 'x'\n",
-    "package.json": '{"name": "x"}\n',
+    "tests/test_a.py": "def test_a():\n    assert True\n", "pyproject.toml": "[project]\nname = 'x'\n[tool.pytest.ini_options]\nminversion = '7'\n",
+    "package.json": ('{"name": "x", "scripts": {"build": "tsc", "test": "jest"}, '
+                     '"dependencies": {"a": "1"}, "devDependencies": {"b": "1"}}\n'),
+    "requirements-dev.txt": "pytest\n",
 }
 DIFFROOT = os.path.join(ROOT, "diffrepos")
 
 
-def diff_repo(name, change, commit=False):
-    """A real repo with a base commit on main and a branch `work` created from it, so the guard
-    reads the base from the branch's own reflog. `change` edits the tree; `commit` then commits."""
+def diff_repo(name, change, commit=False, cut_from=None, files=None):
+    """A real linked worktree, as a builder runs in: a main checkout with a base commit, and a
+    worktree on a new branch `work` cut from `cut_from` (default HEAD). `change` edits the
+    worktree; `commit` then commits there. Returns the worktree's path."""
+    main = os.path.join(DIFFROOT, name + "-main")
     where = os.path.join(DIFFROOT, name)
-    make_repo(where, BASE_FILES)
-    run_vcs(where, "checkout", "-q", "-b", "work")
+    make_repo(main, files or BASE_FILES)
+    made = run_vcs(main, "worktree", "add", "-q", "-b", "work", where, *([cut_from] if cut_from else []))
+    if made.returncode != 0:
+        sys.exit("fixture setup failed: worktree in %r: %s" % (where, made.stderr.strip()))
     change(where)
     if commit:
         run_vcs(where, "add", "-A")
@@ -2752,6 +2761,11 @@ BUILDER_RED = [
     ("package-json-jest", _put("package.json",
                                '{"name": "x", "jest": {"testPathIgnorePatterns": ["src"]}}\n')),
     ("spec-file", _put("web/a.spec.ts", "it.skip('x', () => {})\n")),
+    ("testdata", _put("testdata/x.json", "{}\n")),
+    ("snapshots", _put("src/__snapshots__/a.snap", "snap\n")),
+    ("jest-setup", _put("jest.setup.js", "global.x = 1\n")),
+    ("java-test", _put("src/FooTest.java", "class FooTest {}\n")),
+    ("test-support", _put("test_support/helper.py", "pass\n")),
 ]
 BUILDER_GREEN = [
     ("clean-tree", lambda w: None),
@@ -2763,6 +2777,12 @@ BUILDER_GREEN = [
     ("dependency-added", _put("pyproject.toml", "[project]\nname = 'x'\ndependencies = ['requests']\n")),
     ("script-added", _put("package.json", '{"name": "x", "scripts": {"build": "tsc"}}\n')),
     ("symlink-to-product", _link("../src/app.py", "src/alias.py")),
+    ("ignore-scripts-flag", _put("package.json",
+                                 '{"name": "x", "scripts": {"ci": "npm ci --ignore-scripts"}}\n')),
+    ("dev-requirements", _put("requirements-dev.txt", "pytest\nruff\n")),
+    ("pyproject-non-pytest", _put("pyproject.toml",
+                                  "[project]\nname = 'x'\ndependencies = ['y']\n"
+                                  "[tool.pytest.ini_options]\nminversion = '7'\n")),
 ]
 COMMIT, PUSH = VCS + " commit -m x", VCS + " push origin work"
 for _name, _change in BUILDER_RED:
@@ -2784,16 +2804,115 @@ _repo = diff_repo("b-reverted", lambda w: (write(os.path.join(w, "tests/test_a.p
                                                  BASE_FILES["tests/test_a.py"])))
 add("builder-diff: a test change put back to the base bytes is no change", "allow",
     event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
+def _parent_branch(w):
+    main = os.path.join(DIFFROOT, "g-inherited-main")
+    run_vcs(main, "checkout", "-q", "-b", "orch")
+    write(os.path.join(main, "tests/test_a.py"), "pass\n")      # the orchestrator's own commit
+    run_vcs(main, "add", "-A")
+    run_vcs(main, *IDENT, "commit", "-q", "-m", "orch")
+
+
+_inh_main = os.path.join(DIFFROOT, "g-inherited-main")
+make_repo(_inh_main, BASE_FILES)
+_parent_branch(None)
+run_vcs(_inh_main, "worktree", "add", "-q", "-b", "work", os.path.join(DIFFROOT, "g-inherited"), "orch")
 _inh = os.path.join(DIFFROOT, "g-inherited")
-make_repo(_inh, BASE_FILES)
-run_vcs(_inh, "checkout", "-q", "-b", "orch")
-write(os.path.join(_inh, "tests/test_a.py"), "pass\n")        # the orchestrator's own commit
-run_vcs(_inh, "add", "-A")
-run_vcs(_inh, *IDENT, "commit", "-q", "-m", "orch")
-run_vcs(_inh, "checkout", "-q", "-b", "work")                 # the builder's branch starts here
 write(os.path.join(_inh, "src/app.py"), "x = 9\n")
 add("builder-diff: test changes the branch inherited are not the builder's", "allow",
     event="SubagentStop", cwd=_inh, agent_id="bld1", agent_type="builder")
+
+
+def _merge_main_in(own_test_edit):
+    """Main gains a test change AFTER the builder's branch was cut; the builder merges main in."""
+    def go(w):
+        main = w + "-main"
+        write(os.path.join(main, "tests/test_a.py"), "pass  # main's own change\n")
+        run_vcs(main, "add", "-A")
+        run_vcs(main, *IDENT, "commit", "-q", "-m", "main moves")
+        merged = run_vcs(w, *IDENT, "merge", "-q", "--no-edit", "main")
+        if merged.returncode != 0:
+            sys.exit("fixture setup failed: merge in %r: %s" % (w, merged.stderr.strip()))
+        write(os.path.join(w, "src/app.py"), "x = 5\n")
+        if own_test_edit:
+            write(os.path.join(w, "tests/test_b.py"), "pass\n")
+    return go
+
+
+_repo = diff_repo("g-merged-main", _merge_main_in(False))
+add("builder-diff: test changes merged in from main are not the builder's", "allow",
+    event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
+sh("builder-diff: commit after merging main in is allowed", COMMIT, "allow", cwd=_repo,
+   agent_id="bld1", agent_type="builder")
+_repo = diff_repo("b-merged-main-own", _merge_main_in(True))
+add("builder-diff: its OWN new test after merging main in is still blocked", "deny", rule=BT,
+    event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
+
+
+def _own_test_then_new_branch(w):
+    write(os.path.join(w, "tests/test_a.py"), "pass\n")
+    run_vcs(w, "add", "-A")
+    run_vcs(w, *IDENT, "commit", "-q", "-m", "own test change")
+    run_vcs(w, "switch", "-q", "-c", "b2")
+
+
+_repo = diff_repo("b-new-branch-name", _own_test_then_new_branch)
+add("builder-diff: a new branch name does not reset the base", "deny", rule=BT,
+    event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
+sh("builder-diff: a new branch name does not reset the base at push", PUSH, "deny", rule=BT,
+   cwd=_repo, agent_id="bld1", agent_type="builder")
+
+# the refusal gives up once, and names a working undo route with placeholders
+_repo = diff_repo("b-giveup", _put("tests/test_a.py", "pass\n"))
+add("builder-diff: the stop refusal names the undo route, with placeholders", "deny", rule=BT,
+    event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder",
+    carries=(VCS + " show ", ":<path> > <path>", "rm <path>"))
+write(os.path.join(DIFFROOT, "b-giveup-main", "tests", "test_x.py"), "pass\n")  # the MAIN tree is dirty
+add("builder-diff: a second stop (stop_hook_active) is allowed, once blocked", "allow",
+    event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder", stop_active=True)
+add("builder-diff: a test-author's second stop is allowed too", "allow",
+    event="SubagentStop", cwd=diff_repo("a-giveup", _put("src/app.py", "x = 2\n")),
+    agent_id="auth1", agent_type="test-author", stop_active=True)
+add("builder-diff: an unread diff blocks the first stop", "deny", rule=BT,
+    event="SubagentStop", cwd=NOGIT, agent_id="bld1", agent_type="builder",
+    carries=("could not read",))
+add("builder-diff: an unread diff lets the second stop go", "allow",
+    event="SubagentStop", cwd=NOGIT, agent_id="bld1", agent_type="builder", stop_active=True)
+add("builder-diff: a stop with no cwd is allowed (and logged)", "allow", event="SubagentStop",
+    agent_id="bld1", agent_type="builder")
+add("builder-diff: a stop whose cwd is a main checkout is allowed (and logged)", "allow",
+    event="SubagentStop", cwd=os.path.join(DIFFROOT, "b-giveup-main"), agent_id="bld1",
+    agent_type="builder")
+
+
+def role_log_case():
+    """Every stop the guard cannot judge LOGS, so an unjudged stop is never a silent pass."""
+    folder = os.path.join(ROOT, "rolelog")
+    os.makedirs(folder, exist_ok=True)
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    stops = [
+        ({}, "role-diff-nocwd"),
+        ({"cwd": os.path.join(DIFFROOT, "b-giveup-main")}, "role-diff-main-checkout"),
+        ({"cwd": os.path.join(DIFFROOT, "b-giveup"), "stop_hook_active": True},
+         "role-diff-unresolved"),
+    ]
+    problems = []
+    for extra, want in stops:
+        body = {"hook_event_name": "SubagentStop", "agent_id": "bld1", "agent_type": "builder"}
+        body.update(extra)
+        got = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True,
+                             text=True, env=env, timeout=60)
+        if got.stdout.strip():
+            problems.append("%s: expected a silent allow, got %r" % (want, got.stdout[:60]))
+    path = os.path.join(folder, "guard.log")
+    text = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+    for _, want in stops:
+        if want not in text:
+            problems.append("no log line for " + want)
+    return (not problems), ("; ".join(problems) or "each unjudged stop is logged")
+
+
+LOG_CHECKS_EXTRA = [("role-diff: every unjudged stop is logged", role_log_case)]
 for _name, _change in BUILDER_GREEN:
     _repo = diff_repo("g-" + _name, _change)
     sh("builder-diff: commit with %s is allowed" % _name, COMMIT, "allow", cwd=_repo,
@@ -2820,6 +2939,19 @@ AUTHOR_GREEN = [
     ("test-config", _put("pytest.ini", "[pytest]\naddopts = --deselect x\n")),
     ("conftest", _put("conftest.py", "import pytest\n")),
     ("clean-tree", lambda w: None),
+    ("dev-dependency", _put("package.json", '{"name": "x", "scripts": {"build": "tsc", "test": '
+                            '"jest"}, "dependencies": {"a": "1"}, "devDependencies": {"b": "2"}}\n')),
+    ("test-script", _put("package.json", '{"name": "x", "scripts": {"build": "tsc", "test": '
+                         '"jest --ci", "test:unit": "jest u"}, "dependencies": {"a": "1"}, '
+                         '"devDependencies": {"b": "1"}}\n')),
+    ("dev-requirements", _put("requirements-dev.txt", "pytest\nhypothesis\n")),
+    ("testdata", _put("testdata/x.json", "{}\n")),
+    ("snapshots", _put("src/__snapshots__/a.snap", "snap\n")),
+    ("jest-setup", _put("jest.setup.js", "global.x = 1\n")),
+    ("java-test", _put("src/FooTest.java", "class FooTest {}\n")),
+    ("test-support", _put("test_support/helper.py", "pass\n")),
+    ("pytest-section", _put("pyproject.toml", "[project]\nname = 'x'\n[tool.pytest.ini_options]\n"
+                            "minversion = '8'\naddopts = '-q'\n")),
 ]
 AUTHOR_RED = [
     ("product-edit", _put("src/app.py", "x = 2\n")),
@@ -2827,6 +2959,13 @@ AUTHOR_RED = [
     ("product-delete", _rm("src/contest.py")),
     ("docs-edit", _put("latest_results.md", "better\n")),
     ("package-json", _put("package.json", '{"name": "y"}\n')),
+    ("runtime-dependency", _put("package.json", '{"name": "x", "scripts": {"build": "tsc", '
+                                '"test": "jest"}, "dependencies": {"a": "2"}, "devDependencies": '
+                                '{"b": "1"}}\n')),
+    ("build-script", _put("package.json", '{"name": "x", "scripts": {"build": "make", "test": '
+                          '"jest"}, "dependencies": {"a": "1"}, "devDependencies": {"b": "1"}}\n')),
+    ("pyproject-project-section", _put("pyproject.toml", "[project]\nname = 'x'\ndependencies = "
+                                       "['y']\n[tool.pytest.ini_options]\nminversion = '7'\n")),
     ("mixed", lambda w: (write(os.path.join(w, "tests/test_new.py"), "pass\n"),
                          write(os.path.join(w, "src/app.py"), "x = 3\n"))),
     ("test-symlink-to-product", _link("../src/app.py", "tests/alias.py")),
@@ -2873,6 +3012,8 @@ def decide(case):
         body = {"tool_name": case["tool"], "tool_input": dict(case["tool_input"])}
         if case.get("event"):
             body = {"hook_event_name": case["event"]}
+            if case.get("stop_active"):
+                body["stop_hook_active"] = True
         if case["cwd"]:
             body["cwd"] = case["cwd"]
         if case["session"]:
@@ -3982,6 +4123,9 @@ LOG_CHECKS = (
     ("worktree-home: orchestrator, no-record, home, outside-home, edit, read, removed-home, "
      "unreadable", worktree_home_case),
 )
+
+
+LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
 
 
 def main():

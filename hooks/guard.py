@@ -4033,23 +4033,29 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str) -> No
 BUILDER_ROLE = "builder"
 AUTHOR_ROLE = "test-author"
 TEST_BASENAME = re.compile(
-    r"^(?:test_.*\.py|.*_test\.(?:py|go)|.*\.test\.[cm]?[jt]sx?|.*\.spec\..+|conftest\.py)$")
-TEST_DIRS = {"tests", "test", "__tests__", "spec"}
+    r"^(?:test_.*\.py|.*_test\.(?:py|go)|.*\.test\.[cm]?[jt]sx?|.*\.spec\..+|conftest\.py"
+    r"|jest\.setup\..+)$")
+# Case matters: `FooTest.java` is a test, `Contest.java` is not.
+JAVA_TEST = re.compile(r"^\w*Tests?\.java$")
+TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support"}
+# Dependency lists only a test-author owns. A builder may add a dev dependency.
+AUTHOR_BASENAMES = {"requirements-dev.txt"}
 TEST_CONFIG = re.compile(
     r"^(?:pytest\.ini|tox\.ini|setup\.cfg|pyproject\.toml|package\.json"
     r"|(?:jest|vitest|playwright|karma)\.conf(?:ig)?\.\w+|vitest\.workspace\.\w+|\.mocharc(?:\.\w+)?)$")
 TEST_DISABLES = re.compile(
-    r"--deselect|--ignore|collect_ignore|norecursedirs|testpaths|testPathIgnorePatterns|testIgnore"
-    r"|testMatch|testRegex|xfail|passWithNoTests|--collect-only|-p\s+no:|-[km]\s*['\"]?not\b"
+    r"--(?:deselect|ignore|ignore-glob|collect-only)(?![\w-])|collect_ignore|norecursedirs"
+    r"|testpaths|testPathIgnorePatterns|testIgnore|testMatch|testRegex|xfail|passWithNoTests"
+    r"|-p\s+no:|-[km]\s*['\"]?not\b"
     r"|pytest\.(?:mark\.)?skip|unittest\.(?:skip|expectedFailure)|\.skip\(|\bx(?:it|describe)\("
     r"|\bt\.Skip(?:Now)?\(")
 BUILDER_TEST_REASON = (
-    "A builder does not change tests or test config. Undo that change in your tree. Report the "
-    "needed test change in your report. The orchestrator assigns it to a test-author."
+    "A builder does not change tests or test config. Report the needed test change in your "
+    "report. The orchestrator assigns it to a test-author."
 )
 AUTHOR_SCOPE_REASON = (
-    "A test-author changes only tests and test config. Undo that change in your tree. Report the "
-    "needed product change in your report. The orchestrator assigns it to a builder."
+    "A test-author changes only tests and test config. Report the needed product change in your "
+    "report. The orchestrator assigns it to a builder."
 )
 
 
@@ -4066,7 +4072,8 @@ def is_test_rel(rel: str) -> bool:
     """True when a repository-relative path is a test path (see the block comment above)."""
     parts = [part for part in norm(rel).split("/") if part]
     return bool(parts) and (
-        bool(TEST_BASENAME.match(parts[-1].lower())) or any(p.lower() in TEST_DIRS for p in parts)
+        bool(TEST_BASENAME.match(parts[-1].lower())) or bool(JAVA_TEST.match(parts[-1]))
+        or any(p.lower() in TEST_DIRS for p in parts)
     )
 
 
@@ -4074,10 +4081,10 @@ def is_test_config_rel(rel: str) -> bool:
     return bool(TEST_CONFIG.match(basename(rel)))
 
 
-def author_owns_rel(rel: str) -> bool:
-    """A test-author may change a test path or test config (never `package.json`, which also
-    holds the product's own manifest)."""
-    return is_test_rel(rel) or (is_test_config_rel(rel) and basename(rel) != "package.json")
+def author_path_ok(rel: str) -> bool:
+    """A test-author may change a test path, test config, or a dev dependency list. `package.json`
+    and `pyproject.toml` pass here and are read by content in `role_offences`."""
+    return is_test_rel(rel) or is_test_config_rel(rel) or basename(rel) in AUTHOR_BASENAMES
 
 
 def repo_rel(path: str, cwd: str):
@@ -4103,7 +4110,7 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str) -> str:
     if rel is None:
         return ""
     if role == AUTHOR_ROLE:
-        return "" if author_owns_rel(rel) else target
+        return "" if author_path_ok(rel) else target
     if is_test_rel(rel):
         return target
     if is_test_config_rel(rel) and any(
@@ -4112,84 +4119,201 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str) -> str:
     return ""
 
 
-def diff_base(root: str):
-    """The commit the agent's own branch was created from, or None when it cannot be read.
+def diff_bases(root: str):
+    """The commits this agent's own work is measured against. Empty when git could not answer.
 
-    A worktree branch's reflog opens with `branch: Created from HEAD`, which names exactly the
-    work this agent added. Without it the merge base with the default branch stands in."""
-    head = _git(root, "symbolic-ref", "-q", "--short", "HEAD")
-    if head is not None and head.returncode == 0 and head.stdout.strip():
-        log = _git(root, "reflog", "show", "--format=%H %gs", "refs/heads/" + head.stdout.strip())
-        lines = log.stdout.splitlines() if log is not None and log.returncode == 0 else []
-        if lines and "branch: Created from" in lines[-1]:
-            return lines[-1].split()[0]
+    TWO candidates, and a path counts only if it differs from BOTH:
+      - the oldest `HEAD` reflog entry: the commit the worktree was cut from. It survives a new
+        branch name (`switch -c b2`), which a branch reflog would not.
+      - the merge base of HEAD with the default branch. It moves forward each time main is merged
+        or rebased in.
+    The work the parent branch handed over differs from the first and not the second only if the
+    parent is the default branch; the work main later gained differs from the second and not the
+    first. Only the agent's own change differs from both."""
+    bases = []
+    log = _git(root, "reflog", "show", "--format=%H", "HEAD")
+    lines = log.stdout.split() if log is not None and log.returncode == 0 else []
+    if lines:
+        bases.append(lines[-1])
     default = resolve_default_base(root)
     if default:
-        base = _git(root, "merge-base", "HEAD", default)
-        if base is not None and base.returncode == 0 and base.stdout.strip():
-            return base.stdout.strip()
-    return None
+        merged = _git(root, "merge-base", "HEAD", default)
+        if merged is not None and merged.returncode == 0 and merged.stdout.strip():
+            if merged.stdout.strip() not in bases:
+                bases.append(merged.stdout.strip())
+    return bases
 
 
-def diff_violation(root: str, role: str):
-    """Judge the agent's whole result. Returns '' when clean, the first offending path, or None
-    when git could not answer (UNKNOWN, never clear).
+def package_json_author_ok(old: str, new: str) -> bool:
+    """A test-author may change `devDependencies`, `jest`, and the test scripts of a manifest, and
+    nothing else in it."""
+    try:
+        before, after = json.loads(old), json.loads(new)
+    except Exception:
+        return False
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return False
+
+    def scripts(manifest):
+        found = manifest.get("scripts")
+        found = found if isinstance(found, dict) else {}
+        return {k: v for k, v in found.items() if not re.match(r"^(?:pre|post)?test", k)}
+
+    for key in set(before) | set(after):
+        if key in ("devDependencies", "jest"):
+            continue
+        if key == "scripts":
+            if scripts(before) != scripts(after):
+                return False
+        elif before.get(key) != after.get(key):
+            return False
+    return True
+
+
+def toml_sections(text: str):
+    """Split TOML text into {header: body}, the lines before any header under ''."""
+    sections, name = {"": []}, ""
+    for line in text.splitlines():
+        found = re.match(r"^\s*\[\[?([^\]]+)\]\]?\s*$", line)
+        if found:
+            name = found.group(1).strip()
+            sections.setdefault(name, [])
+        else:
+            sections[name].append(line.strip())
+    return {key: "\n".join(body).strip() for key, body in sections.items()}
+
+
+def pyproject_author_ok(old: str, new: str) -> bool:
+    """A test-author may change the `[tool.pytest*]` sections of a project file, and nothing else."""
+    before, after = toml_sections(old), toml_sections(new)
+    return all(before.get(key) == after.get(key)
+               for key in set(before) | set(after) if not key.startswith("tool.pytest"))
+
+
+def base_text(root: str, base: str, rel: str) -> str:
+    """The file's text at the base commit, or '' when it did not exist there."""
+    answer = _git(root, "show", base + ":" + norm(rel))
+    return answer.stdout if answer is not None and answer.returncode == 0 else ""
+
+
+def work_text(root: str, rel: str) -> str:
+    try:
+        with open(os.path.join(root, rel), encoding="utf-8", errors="replace") as handle:
+            return handle.read()
+    except Exception:
+        return ""
+
+
+def added_text(root: str, base: str, rel: str) -> str:
+    """The lines a change ADDS to one file against the base."""
+    old, new = base_text(root, base, rel).splitlines(), work_text(root, rel).splitlines()
+    return "\n".join(line for line in new if line not in old)
+
+
+def role_offences(root: str, top: str, base: str, role: str):
+    """The paths whose change, against ONE base, the role may not make; None when git failed.
 
     The files are the working tree against the base (committed, staged and unstaged work in one
     read; a change put back to the base's own bytes is no change) plus untracked files. Each path
     is checked as spelled and as resolved through symlinks."""
-    base = diff_base(root)
-    top = _git(root, "rev-parse", "--show-toplevel")
-    if not base or top is None or top.returncode != 0:
-        return None
-    top = os.path.realpath(top.stdout.strip())
     tracked = _git(root, "diff", "--name-only", "-z", "--no-renames", base)
     fresh = _git(root, "ls-files", "--others", "--exclude-standard", "-z")
     if tracked is None or fresh is None or tracked.returncode or fresh.returncode:
         return None
-    untracked = {p for p in fresh.stdout.split("\0") if p}
-    for rel in [p for p in tracked.stdout.split("\0") if p] + sorted(untracked):
+    found = []
+    for rel in [p for p in tracked.stdout.split("\0") if p] + sorted(
+            p for p in fresh.stdout.split("\0") if p):
         # `is_test_rel` is the one place a backslash becomes `/`. A path outside the repository
         # reads `../...`, which no role owns.
         real = os.path.realpath(os.path.join(top, rel))
         names = [rel, os.path.relpath(real, top)]
         if role == AUTHOR_ROLE:
-            if not all(author_owns_rel(n) for n in names):
-                return rel
-        elif any(is_test_rel(n) for n in names) or (
-                is_test_config_rel(rel) and TEST_DISABLES.search(added_text(root, base, rel, untracked))):
-            return rel
-    return ""
+            bad = not all(author_path_ok(n) for n in names)
+            if not bad and basename(rel) == "package.json":
+                bad = not package_json_author_ok(base_text(root, base, rel), work_text(root, rel))
+            if not bad and basename(rel) == "pyproject.toml":
+                bad = not pyproject_author_ok(base_text(root, base, rel), work_text(root, rel))
+        else:
+            bad = any(is_test_rel(n) for n in names) or (
+                is_test_config_rel(rel) and bool(TEST_DISABLES.search(added_text(root, base, rel))))
+        if bad:
+            found.append(rel)
+    return found
 
 
-def added_text(root: str, base: str, rel: str, untracked) -> str:
-    """The lines a change ADDS to one file: the diff's `+` lines, or a new file whole."""
-    if rel in untracked:
-        try:
-            with open(os.path.join(root, rel), encoding="utf-8", errors="replace") as handle:
-                return handle.read()
-        except Exception:
-            return ""
-    answer = _git(root, "diff", "--no-renames", "-U0", base, "--", rel)
-    if answer is None or answer.returncode != 0:
-        return ""
-    return "\n".join(line[1:] for line in answer.stdout.splitlines()
-                     if line.startswith("+") and not line.startswith("+++"))
+def diff_violation(root: str, role: str):
+    """Judge the agent's whole result. Returns ('', base) when clean, (the first offending path,
+    base) when not, and (None, base) when git could not answer: UNKNOWN, never clear.
+
+    A path offends only if it offends against EVERY base (see `diff_bases`)."""
+    bases = diff_bases(root)
+    top = _git(root, "rev-parse", "--show-toplevel")
+    if not bases or top is None or top.returncode != 0:
+        return None, ""
+    top = os.path.realpath(top.stdout.strip())
+    sets = [role_offences(root, top, base, role) for base in bases]
+    if any(s is None for s in sets):
+        return None, bases[0]
+    both = [rel for rel in sets[0] if all(rel in s for s in sets[1:])]
+    return (both[0] if both else ""), bases[0]
+
+
+def undo_route(base: str) -> str:
+    """The working way to put one path back, with placeholders: it names no target."""
+    return ("Undo it. Restore a changed or deleted file with `git show %s:<path> > <path>`. "
+            "Remove a new file with `rm <path>`." % (base[:12] or "<base>"))
 
 
 def diff_refusal(tool: str, role: str, root: str) -> None:
-    """Refuse (or note, when unreadable) a role's diff. Never returns on a refusal."""
-    found = diff_violation(root, role)
+    """Refuse (or note, when unreadable) a role's diff at commit or push. Never returns on a
+    refusal."""
+    found, base = diff_violation(root, role)
     if found is None:
         record(tool, "noted", "role-diff-unread", root)
     elif found:
         rule = "test-author-scope" if role == AUTHOR_ROLE else "builder-test-edit"
         reason = AUTHOR_SCOPE_REASON if role == AUTHOR_ROLE else BUILDER_TEST_REASON
-        if tool == "SubagentStop":
-            record(tool, "deny", rule, found)
-            print(json.dumps({"decision": "block", "reason": rule + ": " + reason}))
-            sys.exit(0)
-        refuse(tool, "deny", rule, reason, found)
+        refuse(tool, "deny", rule, reason + " " + undo_route(base), found)
+
+
+STOP_UNREAD_REASON = (
+    "The guard could not read your diff. Make sure your work is committed in your own worktree, "
+    "then stop again."
+)
+
+
+def judge_stop(payload) -> None:
+    """A builder or test-author that tries to stop is judged on its whole diff.
+
+    A refusal blocks the stop ONCE and hands the reason back. A second stop (`stop_hook_active`)
+    is allowed and logged as `role-diff-unresolved`, so an agent that cannot fix its tree never
+    loops. Every path that cannot judge LOGS: a missing cwd, a cwd that is the main checkout
+    (which holds no agent's own work), and a diff git could not read."""
+    role = agent_role(payload)
+    if not role:
+        return
+    where = payload.get("cwd", "")
+    if not isinstance(where, str) or not where:
+        record("SubagentStop", "noted", "role-diff-nocwd", role)
+        return
+    if is_worktree(where) is False:
+        record("SubagentStop", "noted", "role-diff-main-checkout", where)
+        return
+    found, base = diff_violation(where, role)
+    if found == "":
+        return
+    rule = "test-author-scope" if role == AUTHOR_ROLE else "builder-test-edit"
+    if payload.get("stop_hook_active"):
+        record("SubagentStop", "noted", "role-diff-unresolved", found or "unread")
+        return
+    if found is None:
+        reason = STOP_UNREAD_REASON
+    else:
+        reason = (AUTHOR_SCOPE_REASON if role == AUTHOR_ROLE else BUILDER_TEST_REASON
+                  ) + " " + undo_route(base)
+    record("SubagentStop", "deny", rule, found or "unread")
+    print(json.dumps({"decision": "block", "reason": rule + ": " + reason}))
+    sys.exit(0)
 
 
 SPAWN_TOOLS = ("Agent", "Task")
@@ -4385,13 +4509,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
 
 def judge(payload) -> None:
-    # A builder or test-author that tries to stop is judged on its whole diff. The block ends the
-    # stop and hands the reason back to the agent.
     if payload.get("hook_event_name") == "SubagentStop":
-        role = agent_role(payload)
-        where = payload.get("cwd", "")
-        if role and isinstance(where, str) and where:
-            diff_refusal("SubagentStop", role, where)
+        judge_stop(payload)
         return
     tool = payload.get("tool_name", "") or ""
     tool_input = payload.get("tool_input", {}) or {}
