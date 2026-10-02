@@ -4080,9 +4080,15 @@ def gh_api_post_hit(segment: str) -> str:
     if not tokens:
         return ""
     at = resolve_command(tokens)
-    if at is None or basename(tokens[at]) not in ("gh", "gh.exe") or tokens[at + 1:at + 2] != ["api"]:
+    if at is None or basename(tokens[at]) not in ("gh", "gh.exe"):
         return ""
-    rest = tokens[at + 2:]
+    # gh's own global flags may sit ahead of `api`: `gh --repo o/r api ...`.
+    sub_at = at + 1
+    while sub_at < len(tokens) and tokens[sub_at].startswith("-"):
+        sub_at += 2 if tokens[sub_at] in ("-R", "--repo") else 1
+    if tokens[sub_at:sub_at + 1] != ["api"]:
+        return ""
+    rest = tokens[sub_at + 1:]
     fielded = False
     endpoint = ""
     index = 0
@@ -4101,7 +4107,7 @@ def gh_api_post_hit(segment: str) -> str:
             index += 1
         elif not token.startswith("-") and not endpoint:
             endpoint = token
-    if not fielded or endpoint == "graphql":
+    if not fielded or endpoint.strip("/") == "graphql":
         return ""
     return "gh api " + endpoint + " with a field and no method"
 
@@ -4181,6 +4187,11 @@ LN_DESCENDS_REASON = (
 # same name, is the ordinary push. A branch cut from the remote's default branch tracks that default
 # from birth and its first push is meant to create its own name, so that case is exempt. The reads
 # are git's own (HEAD, branch.<name>.remote, branch.<name>.merge), never a guess from text.
+# FAIL-OPEN: a git read that fails or times out (10s, `_git`) answers "", and every "" above reads as
+# "no opinion", so the push is allowed. Acceptable here because the trap is a stray branch on the
+# remote, which is visible in git's own `[new branch]` line and removable with one delete, and
+# because a guard that refused on an unreadable repository would cry wolf on every push from a
+# broken checkout (decisions/guard-that-cries-wolf-is-spent.md).
 PUSH_VALUE_FLAGS = ("--repo", "-o", "--push-option", "--receive-pack", "--exec")
 PUSH_SPECIAL_FLAGS = ("--all", "--mirror", "--tags", "-d", "--delete")
 
@@ -4200,7 +4211,7 @@ def push_head_mismatch_hit(segment: str, where: str) -> str:
         positional = []
         index = 0
         while index < len(args):
-            arg = args[index]
+            arg = args[index].strip("'\"")  # git_calls splits on spaces, so quotes survive
             index += 1
             if arg in PUSH_SPECIAL_FLAGS:
                 positional = []

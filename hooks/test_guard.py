@@ -1757,6 +1757,14 @@ sh("gh-api: a field with no method is a POST",
    "gh api repos/o/r/pulls -f state=open", "deny", "gh-api-method", cwd=NOGIT)
 sh("gh-api: a typed field with no method is a POST",
    "gh api repos/o/r/pulls -F per_page=5 --paginate", "deny", "gh-api-method", cwd=NOGIT)
+sh("gh-api: gh's own --repo flag ahead of api is skipped",
+   "gh --repo o/r api repos/o/r/pulls -f state=open", "deny", "gh-api-method", cwd=NOGIT)
+sh("gh-api: a leading slash on graphql is still graphql",
+   "gh api /graphql -f query='{ viewer { login } }'", "allow", cwd=NOGIT)
+sh("gh-api: -XPOST joined is a named method", "gh api repos/o/r/issues -XPOST -f title=x",
+   "allow", cwd=NOGIT)
+sh("gh-api: a field glued to its flag is still a field",
+   "gh api repos/o/r/pulls -fstate=open", "deny", "gh-api-method", cwd=NOGIT)
 sh("gh-api: a named method says what is meant",
    "gh api -X POST repos/o/r/issues -f title=x", "allow", cwd=NOGIT)
 sh("gh-api: --method GET with a field is a stated read",
@@ -1785,6 +1793,8 @@ sh("ln: a hard link over a directory name is not symbolic", "ln /opt/tool/x real
 # --- git push <remote> HEAD from a branch whose upstream has another name
 sh("push-head: HEAD from a branch tracking another name makes a stray branch",
    VCS + " push origin HEAD", "deny", "push-head-mismatch", cwd=TRAPDIFF)
+sh("push-head: a quoted HEAD is still HEAD", VCS + ' push origin "HEAD"', "deny",
+   "push-head-mismatch", cwd=TRAPDIFF)
 sh("push-head: -u does not change the destination name",
    VCS + " push -u origin HEAD", "deny", "push-head-mismatch", cwd=TRAPDIFF)
 sh("push-head: an explicit destination is the fix",
