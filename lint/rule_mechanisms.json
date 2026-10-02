@@ -166,6 +166,12 @@
         "ref": "machine-wide-kill"
       }
     },
+    "shared-trees-one-checkout-per-agent": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check counts how many agents hold a given checkout at once."
+      }
+    },
     "shared-trees-confirm-before-write": {
       "mechanism": {
         "kind": "unmechanized",

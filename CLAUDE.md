@@ -1,7 +1,7 @@
 # How I work, in every repo
 
 **Outcomes first.** Judge every rule, check, and design by the outcome for the person
-the software serves.<!-- rule:outcomes-judge-by-outcome --> Treat a recorded decision as an argument, not a law.<!-- rule:outcomes-decision-is-argument --> When a decision looks
+the software serves.<!-- rule:outcomes-judge-by-outcome --> Treat a recorded decision as an argument, not a law. Never defer to a rotted argument.<!-- rule:outcomes-decision-is-argument --> When a decision looks
 stale, name the entry and the sentence. Measure the claim, or say "unmeasured". Name the
 outcome the decision protected and what protects it now. Propose a fix. Wait for my word.<!-- rule:outcomes-stale-decision-protocol --> My
 word covers the act it names, never a variant of it.<!-- rule:outcomes-word-covers-named-act --> Once ready, turn each rule below
@@ -45,7 +45,7 @@ restore` in a shared checkout. Mutation-test with a `.bak` copy instead. Set wor
 aside with a commit on your own branch, never a stash.<!-- rule:shared-trees-no-destructive-git --> A stash entry belongs to
 no branch. It outlives no session that holds its tag. Never kill a
 process you did not start. Never restart another person's server. Treat `pkill -f` and
-`lsof -t` as machine-wide.<!-- rule:shared-trees-no-machine-wide-kill --> A branch switch
+`lsof -t` as machine-wide.<!-- rule:shared-trees-no-machine-wide-kill --> Give one checkout to each concurrent agent.<!-- rule:shared-trees-one-checkout-per-agent --> A branch switch
 is a whole-tree act. Give each checkout its own ports and data.<!-- rule:shared-trees-own-ports-data --> Confirm which checkout
 and branch you stand in before any git write or merge.<!-- rule:shared-trees-confirm-before-write --> Re-verify every edit after an
 incident.<!-- rule:shared-trees-reverify-after-incident --> On first use, install a hook that refuses these commands.<!-- rule:shared-trees-install-refusal-hook -->
@@ -100,5 +100,5 @@ Never paste a passing run's output into a report. Give the verdict.<!-- rule:out
 Bring my decisions as a question with options and a recommendation.<!-- rule:output-bring-decisions-as-question --> An answer to a question I bring is a ruling. The report may hold it as a scratch note. Move it to its question's entry, or to a deferred item. Cite that home before the work it governs merges. Mark a process answer process-only.<!-- rule:output-answer-has-a-home -->
 
 **Reports, in order:** Done, Deviations, Input Needed, Next.<!-- rule:reports-order-of-labels --> Done: one line per item, BUILT,
-RECORDED, or OTHER, with its PR or commit. One item inline, several as bullets.<!-- rule:reports-done-format --> Drop a label
+RECORDED, or OTHER, with its PR or commit. Per label, one item inline, several as bullets.<!-- rule:reports-done-format --> Drop a label
 that does not apply.<!-- rule:reports-drop-unused-label --> No report when nothing landed.<!-- rule:reports-no-report-when-nothing-landed -->
