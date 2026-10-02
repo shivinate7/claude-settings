@@ -54,8 +54,6 @@ one fixed order, and the first match wins.
   6a merge-checks      a `gh pr merge` (or the MCP merge tool) while the head has a check or run
                        pending or red, or the read could not run. Denied. `--auto` passes.
   6 merge-main         a pull request merged into main. Allowed, and logged (Decision 8).
-  1e git write context a git write that nothing refused gets PreToolUse context naming its
-                       checkout and branch. Context, never a refusal.
   7 frozen-path        a write to the settings, the hooks or the global CLAUDE.md, under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. Always denied.
   8 subagent-model-cap a write to a settings file whose content sets or changes
@@ -4019,13 +4017,11 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str) -> No
 # predicate-is-the-act.md), never a substring of the text. `echo git commit`, a `git log`, a
 # quoted message and a heredoc body name an act and perform none.
 #
-# 1. git-confirm (CLAUDE.md `shared-trees-confirm-before-write`): a git WRITE gets context that
-#    names the checkout and branch it will hit. Context, never a refusal; a read gets nothing.
-# 2. merge-checks (CLAUDE.md `git-wait-for-required-checks`): a merge made outside the merge tool is
+# 1. merge-checks (CLAUDE.md `git-wait-for-required-checks`): a merge made outside the merge tool is
 #    refused while the head has a check or a workflow run pending or red, or when that read could
 #    not run. The merge tool (merge/merge.py) runs its own `gh pr merge` as a subprocess, so no hook
 #    sees it; it has already waited. The read below is the tool's own `Host.head_read`, one home.
-# 3. cite-by-id (CLAUDE.md `git-cite-by-id`): a commit message or PR body that cites a record by
+# 2. cite-by-id (CLAUDE.md `git-cite-by-id`): a commit message or PR body that cites a record by
 #    its path is refused. The id is the record's file name without folder or `.md`, the slug
 #    lint/check_record_slugs.py measures, or the number the stamp claims at merge.
 
@@ -4058,55 +4054,7 @@ def gh_call_of(segment: str):
     return tokens[index + 1:]
 
 
-# ---- 1. context for a git write
-TAG_READ_FLAGS = {"-l", "--list", "-v", "--verify", "--contains", "--no-contains", "--merged",
-                  "--no-merged", "--points-at"}
-DRY_RUN_SUBCOMMANDS = ("commit", "push")
-
-
-def git_write_of(segment: str) -> str:
-    """Return the subcommand name when the segment is a git WRITE, else ''.
-
-    Write: commit, merge, push, rebase, cherry-pick, tag with something to create or delete, and
-    branch with a delete flag. A bare `git tag` and `tag -l` list. `--dry-run` writes nothing.
-    """
-    call = git_call_of(segment)
-    if call is None:
-        return ""
-    subcommand, args = call
-    if subcommand in DRY_RUN_SUBCOMMANDS and "--dry-run" in args:
-        return ""
-    if subcommand in ("commit", "merge", "push", "rebase", "cherry-pick"):
-        return subcommand
-    if subcommand == "tag":
-        listing = any(a in TAG_READ_FLAGS or a.startswith("-n") for a in args)
-        return "tag" if args and not listing else ""
-    if subcommand == "branch" and branch_delete_names(args):
-        return "branch"
-    return ""
-
-
-def checkout_context(subcommand: str, where: str) -> str:
-    """The context line for a git write. An unread checkout is said to be unread, never guessed."""
-    # One git call on the usual path. A repository with no commit yet fails `--abbrev-ref HEAD`,
-    # so only that case pays for the two reads below.
-    both = _git(where, "rev-parse", "--show-toplevel", "--abbrev-ref", "HEAD") if where else None
-    lines = both.stdout.splitlines() if both is not None and both.returncode == 0 else []
-    if len(lines) == 2:
-        top, name = lines[0].strip(), ("" if lines[1].strip() == "HEAD" else lines[1].strip())
-    else:
-        found = _git(where, "rev-parse", "--show-toplevel") if where else None
-        top = found.stdout.strip() if found is not None and found.returncode == 0 else ""
-        branch = _git(where, "symbolic-ref", "--short", "-q", "HEAD") if top else None
-        name = branch.stdout.strip() if branch is not None and branch.returncode == 0 else ""
-    if not top:
-        return ("Git write (%s): the checkout could not be read from this directory. "
-                "Confirm which checkout and branch it hits." % subcommand)
-    return ("Git write (%s). Checkout: %s. Branch: %s. Confirm both are the ones you mean."
-            % (subcommand, cap_safe(top, 200), name or "none (detached HEAD)"))
-
-
-# ---- 2. a merge made outside the merge tool
+# ---- a merge made outside the merge tool
 MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject",
                      "--match-head-commit", "-A", "--author-email"}
 # Seconds per `gh` call. The gate makes three calls and, once it passes, `merge_base` makes one of
@@ -4218,7 +4166,7 @@ def merge_gate_reason(verdict: str, detail: str) -> str:
     return MERGE_GATE_REASON % (verdict + (" (" + cap_safe(detail, 160) + ")" if detail else ""))
 
 
-# ---- 3. a message that cites a record by path
+# ---- a message that cites a record by path
 RECORD_DIRS_FILE = os.path.join("lint", "check_record_slugs.py")   # its DIRS is the one list
 _RECORD_PATTERN = []
 
@@ -4542,15 +4490,6 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
             refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, matched),
                    log_path_and_text(matched, change))
 
-    # 1e. Nothing refused: a git write still gets the checkout and branch it will hit, as context.
-    # Read last, so a refused call prints its refusal alone.
-    for segment in split_segments(stripped):
-        written = git_write_of(segment) if segment.strip() else ""
-        if written:
-            return checkout_context(written, command_root(stripped, cwd))
-    return ""
-
-
 def judge(payload) -> None:
     tool = payload.get("tool_name", "") or ""
     tool_input = payload.get("tool_input", {}) or {}
@@ -4611,10 +4550,7 @@ def judge(payload) -> None:
     if tool in SHELL_TOOLS:
         command = tool_input.get("command", "") or ""
         if isinstance(command, str) and command.strip():
-            note = judge_shell(tool, command, cwd, session_id_of(payload))
-            if note:
-                print(json.dumps({"hookSpecificOutput": {
-                    "hookEventName": "PreToolUse", "additionalContext": note}}))
+            judge_shell(tool, command, cwd, session_id_of(payload))
         return
 
     if tool not in READ_ONLY_TOOLS + WRITE_TOOLS:

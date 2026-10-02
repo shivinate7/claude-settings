@@ -123,8 +123,6 @@ GHCWD = os.path.join(ROOT, "ghcwd")        # green, but only for a call run insi
 WFREPO = os.path.join(ROOT, "wfrepo")      # a folder that holds one workflow file
 GHSLOW = os.path.join(ROOT, "ghslow")      # green, but every call takes longer than the gate waits
 GHBLANK = os.path.join(ROOT, "ghblank")    # green checks, a base that reads as empty
-CTXEMPTY = os.path.join(ROOT, "ctxempty")    # a checkout with no commit yet
-CTXDETACH = os.path.join(ROOT, "ctxdetach")  # a linked worktree of CTXREPO on a detached HEAD
 CTXREPO = os.path.join(ROOT, "ctxrepo")      # a checkout on main with one merged branch, `done`
 MSG_BAD = os.path.join(ROOT, "msg_bad.txt")  # a message file that cites a record by path
 MSG_OK = os.path.join(ROOT, "msg_ok.txt")    # a message file that cites a record by id
@@ -568,9 +566,6 @@ def build_fixtures():
     run_vcs(CTXREPO, "init", "-q", "-b", "main", ".")
     run_vcs(CTXREPO, *IDENT, "commit", "-q", "--allow-empty", "-m", "first")
     run_vcs(CTXREPO, "branch", "done")
-    run_vcs(CTXREPO, "worktree", "add", "-q", "--detach", CTXDETACH)
-    os.makedirs(CTXEMPTY, exist_ok=True)
-    run_vcs(CTXEMPTY, "init", "-q", "-b", "main", ".")
     make_fake_gh(GHPEND, "main", checks=[{"name": "gates", "bucket": "pending", "link": ""}])
     make_fake_gh(GHRED, "main", checks=[{"name": "gates", "bucket": "fail", "link": ""}])
     make_fake_gh(GHRUNPEND, "main",
@@ -2379,47 +2374,6 @@ sh("merge-checks: a commit message that names a merge is a message",
    env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
 
 
-# =========================================================================== 5c. git write context
-#
-# `shared-trees-confirm-before-write`. A git write prints context that names the checkout and the
-# branch it hits. It never refuses. A read prints nothing.
-
-for _write in ("commit -m x", "push origin x", "merge feature/x", "rebase main",
-               "cherry-pick abc1234", "tag v1", "tag -d v1"):
-    sh("context: git %s names the checkout and branch" % _write, VCS + " " + _write, "allow",
-       carries=["Checkout:", "Branch: main"], cwd=GITMAIN)
-sh("context: a branch delete is a write", VCS + " branch -d done", "allow",
-   carries=["Checkout:", "Branch: main"], cwd=CTXREPO)
-sh("context: a linked worktree names its own branch", VCS + " commit -m x", "allow",
-   carries="Branch: lane", cwd=GITWT)
-sh("context: a detached HEAD says so", VCS + " commit -m x", "allow",
-   carries=["Checkout:", "detached HEAD"], cwd=CTXDETACH)
-sh("context: a checkout with no commit yet still names its branch", VCS + " commit -m x",
-   "allow", carries=["Checkout:", "Branch: main"], cwd=CTXEMPTY)
-sh("context: a -C target names the checkout the write hits", VCS + " -C " + GITWT + " commit -m x",
-   "allow", carries="Branch: lane", cwd=GITMAIN)
-sh("context: a write behind a read is still named", VCS + " status && " + VCS + " commit -m x",
-   "allow", carries="Branch: main", cwd=GITMAIN)
-sh("context: a write outside any checkout says it could not read one", VCS + " commit -m x",
-   "allow", carries="could not be read", cwd=NOGIT)
-for _read in ("status", "log --oneline -3", "diff HEAD", "branch", "branch -a", "tag", "tag -l 'v*'",
-              "push --dry-run origin x", "commit --dry-run", "show HEAD", "fetch origin",
-              "merge-base main HEAD", "rev-parse --show-toplevel"):
-    sh("context: git %s is a read and prints nothing" % _read, VCS + " " + _read, "allow",
-       silent=True, cwd=GITMAIN)
-sh("context: the words of a write in an echo are no write", "echo " + VCS + " commit -m x",
-   "allow", silent=True, cwd=GITMAIN)
-sh("context: quoted write text is no write", 'echo "' + VCS + ' push origin main"', "allow",
-   silent=True, cwd=GITMAIN)
-sh("context: a log search for write words is a read", VCS + ' log --grep="' + VCS + ' commit"',
-   "allow", silent=True, cwd=GITMAIN)
-sh("context: a heredoc body that holds write words is data",
-   "cat > notes.txt <<'EOF'\n" + VCS + " commit -m x\n" + VCS + " push\nEOF", "allow",
-   silent=True, cwd=GITMAIN)
-sh("context: a refusal prints the refusal alone", VCS + " push --force origin main", "ask",
-   "force-push", cwd=GITMAIN)
-
-
 # =========================================================================== 5d. cite by id
 #
 # `git-cite-by-id`. A commit message or a PR body that cites a record by its path is refused. A code
@@ -2973,10 +2927,6 @@ def decide(case):
     try:
         parsed = json.loads(out)
         block = parsed["hookSpecificOutput"]
-        if "permissionDecision" not in block and "additionalContext" in block:
-            # Context is an ALLOW that speaks. Its text rides in the reason slot, marked, so a case
-            # can pin it with `carries` and a `silent` case can tell it from nothing.
-            return "allow", "CONTEXT: " + block["additionalContext"]
         return block["permissionDecision"], block["permissionDecisionReason"]
     except Exception:
         return "unparsable", out[:200]

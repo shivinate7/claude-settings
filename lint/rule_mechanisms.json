@@ -182,11 +182,9 @@
     },
     "shared-trees-confirm-before-write": {
       "mechanism": {
-        "kind": "gate",
-        "ref": "hooks/test_guard.py",
-        "test": "hooks/test_guard.py::context: a detached HEAD says so"
-      },
-      "note": "hooks/guard.py prints the checkout and branch as PreToolUse context on a git write. It is context, not a refusal, so it passes no refuse() or record() name for a guard row to cite."
+        "kind": "unmechanized",
+        "reason": "dropped: per-write token cost, no incident; owner ruling on PR 235"
+      }
     },
     "shared-trees-own-ports-data": {
       "mechanism": {
