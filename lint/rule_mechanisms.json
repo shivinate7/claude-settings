@@ -415,8 +415,9 @@
     },
     "speak-cite-id-plus-gloss": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No lint checks that a decision citation in a reply carries an id plus a short gloss rather than a bare id."
+        "kind": "gate",
+        "ref": "lint/report_gate.py",
+        "needle": "bare_cite"
       }
     },
     "speak-never-explain-in-paragraph": {
@@ -476,8 +477,9 @@
     },
     "reports-done-format": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "lint/report_gate.py checks the label headers only. It does not read whether Done's line says BUILT, RECORDED, or OTHER, or names a PR or commit."
+        "kind": "gate",
+        "ref": "lint/report_gate.py",
+        "needle": "done_format_problem"
       }
     },
     "reports-item-count-format": {
