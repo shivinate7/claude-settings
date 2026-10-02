@@ -7,7 +7,7 @@ cat > "$tmp/bin/gh" <<'SH'
 #!/usr/bin/env bash
 case "$1 $2" in
   "run list") cat "$RUNS" ;;
-  "issue list") echo "" ;;
+  "issue list") echo "${OPEN:-}" ;;
   "issue create") echo "ISSUE $*" >> "$LOG" ;;
   "issue comment") echo "COMMENT $*" >> "$LOG" ;;
 esac
@@ -29,4 +29,9 @@ echo '[{"workflowName":"alarm","conclusion":"failure","createdAt":"2026-01-02","
 t green own-workflow-is-ignored
 echo '[{"workflowName":"ci","conclusion":"success","createdAt":"2026-01-02","url":"u1"},{"workflowName":"deploy","conclusion":"timed_out","createdAt":"2026-01-01","url":"u2"}]' > "$tmp/runs"
 t red one-red-workflow-among-green
+echo '[{"workflowName":"ci","conclusion":"failure","createdAt":"2026-01-02","url":"u1"}]' > "$tmp/runs"
+: > "$tmp/log"
+OPEN=42 PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" LOG="$tmp/log" GITHUB_REPOSITORY=o/r SELF=alarm bash "$here/alarm.sh" >/dev/null 2>&1
+if grep -q "COMMENT issue comment 42" "$tmp/log" && ! grep -q ISSUE "$tmp/log"; then echo "ok   open-issue-gets-a-comment-not-a-duplicate"
+else echo "FAIL open-issue-gets-a-comment-not-a-duplicate"; bad=1; fi
 rm -rf "$tmp"; exit $bad

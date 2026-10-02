@@ -33,4 +33,9 @@ cd "$tmp" && git clone -q origin.git w2 2>/dev/null && cd w2 && git commit -q --
 cd "$tmp/w" && git switch -q main && git fetch -q origin
 t ok      "pull of a commit origin has"     git merge -q --ff-only origin/main
 t ok      "gc leaves main alone"            git gc -q
+# stale origin/main: a second clone pushes, this clone has not fetched, then fetch into main directly
+git switch -q feat
+cd "$tmp/w2" && git commit -q --allow-empty -m remote2 && git push -q origin main 2>/dev/null
+cd "$tmp/w"
+t ok      "fetch origin main:main, origin/main stale" git fetch -q origin main:main
 rm -rf "$tmp"; exit $bad
