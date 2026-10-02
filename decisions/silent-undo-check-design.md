@@ -73,7 +73,19 @@ cannot be taken back. This follows decisions/ci-unknown-is-red-and-dedup.md on P
 
 ## Measured on this repo
 
-HISTORY_PLACEHOLDER
+Run over main (189 first-parent commits, 2026-10-02): 26 hits.
+
+- 1 lost line: a merge that removed a placeholder entry once the real one landed. Deliberate.
+- 25 reversals. Each undoes earlier work by a later commit. The 15 exact ones were read
+  one by one: all deliberate (a deleted file, a removed rule, a counter that moved back).
+  Of the 10 added by the near-reversal read, 4 were sampled and are real deliberate
+  removals. 6 are unread.
+- 0 accidental undos found. Every real hit is a deliberate removal that now needs a trailer.
+  That cost is the owner's choice. A hit rate of 26 in 189 commits is high, and is the
+  price of the near-reversal read (an exact-only read gave 16).
+
+Cost: a pull request run took 0.4 to 5 seconds on this repo. The full-history audit took
+2 to 6 minutes (204 merges are read, one `git show` per file).
 
 ## Known limits
 
@@ -81,4 +93,6 @@ HISTORY_PLACEHOLDER
 - A reversal that also rewrites a line is a new edit, not a reversal.
 - A line that a resolver half-rewrote passes. The merge is then a judgement call.
 - A binary file is not read.
+- A removal of added lines that shares a hunk with an edit is not seen. An edit in place
+  looks the same. Restored lines in a shared hunk are seen.
 - A merge of three or more parents is UNKNOWN.
