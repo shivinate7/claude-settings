@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# main does not move locally except to a commit origin already has.
+#
+# A pre-commit hook misses a fast-forward, merge, rebase, `reset --hard` or `branch -f`: none
+# makes a commit. All of them are one ref update, so this hook watches the ref update.
+# Git calls it with the phase as $1 and `<old> <new> <ref>` lines on stdin. Non-zero at
+# `prepared` aborts the transaction.
+#
+# Allowed: main untouched; main created where none exists; main moved to a commit that is an
+# ancestor of origin/main (`git pull` after a PR merged on GitHub); a pack-refs/gc no-op.
+# The `old` column is NOT evidence: git sends zeros when the caller states no expected value
+# (`branch -f`, `update-ref`, a delete). The decision uses `new` and the ref's value on disk.
+# It fails open on its own bugs: a hook that exits non-zero by mistake breaks git for every
+# session. The only non-zero exit is the refusal below.
+#
+# Env: MAIN_REF_BRANCH (default main) names the branch; MAIN_REF_GUARD=off is the escape hatch.
+# `gh pr merge` moves main on GitHub, not here, so it never meets this hook.
+set -uo pipefail
+
+[ "${1:-}" = prepared ] || exit 0
+[ "${MAIN_REF_GUARD:-}" = off ] && exit 0
+branch="${MAIN_REF_BRANCH:-main}"
+ref="refs/heads/$branch"
+
+lines="$(cat 2>/dev/null)" || exit 0
+case "$lines" in *"$ref"*) ;; *) exit 0 ;; esac
+
+zero_oid() { case "$1" in *[!0]*|"") return 1 ;; *) return 0 ;; esac; }
+
+current="$(git rev-parse --verify --quiet "$ref" 2>/dev/null)" || current=""
+
+refuse() {
+  {
+    echo ""
+    echo "REFUSED: $branch does not move locally. $1"
+    echo "  Put the work on a branch and open a pull request; sync $branch with git pull after the merge."
+    echo "  Escape hatch, deliberate: MAIN_REF_GUARD=off git ..."
+    echo ""
+  } >&2
+  exit 1
+}
+
+while IFS=' ' read -r old new r rest; do
+  [ "${r:-}" = "$ref" ] || continue
+  [ -n "${rest:-}" ] && continue
+  if zero_oid "$new"; then
+    # Packing drops the loose ref after writing packed-refs, stating the real old value.
+    if ! zero_oid "$old" && [ "$old" = "$current" ]; then
+      cdir="$(git rev-parse --git-common-dir 2>/dev/null)" || cdir=""
+      [ -n "$cdir" ] && [ -f "$cdir/$ref" ] && continue
+    fi
+    refuse "This would delete the branch."
+  fi
+  [ -z "$current" ] && continue
+  [ "$new" = "$current" ] && continue
+  git merge-base --is-ancestor "$new" "refs/remotes/origin/$branch" 2>/dev/null && continue
+  refuse "$(git rev-parse --short "$new" 2>/dev/null || echo "$new") is not on origin/$branch."
+done <<EOF
+$lines
+EOF
+exit 0
