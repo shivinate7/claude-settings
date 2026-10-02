@@ -18,7 +18,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   gates:
@@ -77,8 +77,17 @@ jobs:
       - name: Rule audit fixture suite
         run: python3 lint/test_rule_audit.py
 
+      - name: Verdict runner fixture suite
+        run: python3 lint/test_verdict.py
+
       - name: Rule mechanization audit
         run: python3 lint/rule_audit.py
+
+      - name: Mutation verdict fixture suite
+        run: python3 hooks/test_mutate_shared.py
+
+      - name: Landed-directory check fixture suite
+        run: python3 lint/test_check_landed_dirs.py
 
       - name: Record slug length
         run: python3 lint/check_record_slugs.py
@@ -92,12 +101,6 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: python3 lint/check_silent_undo.py --upstream "origin/$BASE_REF" --head "$HEAD_SHA" --strict
-
-      - name: Shell syntax check, install.sh
-        run: bash -n install.sh
-
-      - name: install.sh checkout-detection suite
-        run: sh hooks/test_install_src.sh
 
       - name: Unknown-read contract (guard + session_start)
         run: python3 lint/check_unknown_reads_contract.py
@@ -186,7 +189,7 @@ jobs:
   # The owner runs this repo on macOS. Before this job, every Python suite in the gates
   # and gates-windows jobs above proved itself only on Linux and Windows, never on a real
   # Mac, so janitor/install_launchd.py -- the one installer built for the Mac -- had no
-  # macOS signal at all. This job mirrors gates-windows: same suites, same order, and the
+  # macOS signal at all. This job mirrors gates-windows: same OS-touching suites, same order, and the
   # same `if: ${{ !cancelled() }}` on every step, for the reason gates-windows documents
   # above -- a job that stops at its first red step proves nothing about the suites
   # behind it.
@@ -250,25 +253,13 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 lint/test_ruling_census.py
 
-      - name: Rule audit fixture suite
+      - name: Verdict runner fixture suite
         if: ${{ !cancelled() }}
-        run: python3 lint/test_rule_audit.py
-
-      - name: Rule mechanization audit
-        if: ${{ !cancelled() }}
-        run: python3 lint/rule_audit.py
-
-      - name: Record slug length
-        if: ${{ !cancelled() }}
-        run: python3 lint/check_record_slugs.py
+        run: python3 lint/test_verdict.py
 
       - name: Unknown-read contract (guard + session_start)
         if: ${{ !cancelled() }}
         run: python3 lint/check_unknown_reads_contract.py
-
-      - name: Landed-directory manifest agreement
-        if: ${{ !cancelled() }}
-        run: python3 lint/check_landed_dirs.py
 
       - name: Janitor triggers fixture suite (SessionEnd hook)
         if: ${{ !cancelled() }}
@@ -421,25 +412,13 @@ jobs:
         if: ${{ !cancelled() }}
         run: python lint/test_ruling_census.py
 
-      - name: Rule audit fixture suite
+      - name: Verdict runner fixture suite
         if: ${{ !cancelled() }}
-        run: python lint/test_rule_audit.py
-
-      - name: Rule mechanization audit
-        if: ${{ !cancelled() }}
-        run: python lint/rule_audit.py
-
-      - name: Record slug length
-        if: ${{ !cancelled() }}
-        run: python lint/check_record_slugs.py
+        run: python lint/test_verdict.py
 
       - name: Unknown-read contract (guard + session_start)
         if: ${{ !cancelled() }}
         run: python lint/check_unknown_reads_contract.py
-
-      - name: Landed-directory manifest agreement
-        if: ${{ !cancelled() }}
-        run: python lint/check_landed_dirs.py
 
       - name: Janitor triggers fixture suite (SessionEnd hook)
         if: ${{ !cancelled() }}

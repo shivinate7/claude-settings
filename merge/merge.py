@@ -19,8 +19,8 @@ class Stop(Exception):
 class Held(Stop):
     pass
 
-def sh(args, cwd=None, input=None):
-    r = subprocess.run(args, cwd=cwd, input=input, capture_output=True, text=True)
+def sh(args, cwd=None, input=None, env=None):
+    r = subprocess.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True)
     return r.returncode, (r.stdout + r.stderr).strip()
 
 def git(cwd, *a, input=None):
@@ -303,7 +303,9 @@ class Host:
 # ------------------------------------------------------------------ git steps
 
 def node_stamp(wt, cfgrel, mode, base):
-    return sh(["node", STAMP, f"--{mode}", "--base", base, "--config", os.path.join(wt, cfgrel), "--root", wt])
+    # GITHUB_REF and GITHUB_BASE_REF name the runner's checkout, not this worktree. stamp would read them as the worktree's branch.
+    env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_REF", "GITHUB_BASE_REF")}
+    return sh(["node", STAMP, f"--{mode}", "--base", base, "--config", os.path.join(wt, cfgrel), "--root", wt], env=env)
 
 def own_claim(wt, cfgrel, base):
     """The trailer ids when HEAD is this tool's claim and each number is still free, else None."""

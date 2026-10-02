@@ -990,6 +990,20 @@ class SilentUndo(Env):
         self.assertEqual(self.claims(), 0)
         self.assertFalse(getattr(self.host, "merged", False))
 
+class StampEnv(unittest.TestCase):
+    def test_the_stamp_child_never_sees_the_runners_ref(self):
+        # On a push to main the runner sets GITHUB_REF=refs/heads/main. stamp would read it as the worktree's branch.
+        seen = {}
+        def fake(args, cwd=None, input=None, env=None):
+            seen.update(env or {"__none__": "1"})
+            return 0, ""
+        with unittest.mock.patch.dict(os.environ, {"GITHUB_REF": "refs/heads/main", "GITHUB_BASE_REF": "main"}), \
+             unittest.mock.patch.object(merge, "sh", fake):
+            merge.node_stamp("/wt", ".github/stamp.json", "check", "origin/main")
+        self.assertNotIn("__none__", seen)
+        self.assertNotIn("GITHUB_REF", seen)
+        self.assertNotIn("GITHUB_BASE_REF", seen)
+
 class Identity(Env):
     def test_claim_commit_falls_back_when_only_the_email_is_set(self):
         info = self.host.pr(7)
