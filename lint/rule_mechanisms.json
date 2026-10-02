@@ -353,6 +353,12 @@
         "reason": "No check tells a pasted verdict apart from a pasted stream, or counts the commands used to get it."
       }
     },
+    "tokens-run-through-verdict": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check sees which command an agent ran a verification through. CI tests only that bin/verdict itself works."
+      }
+    },
     "tokens-point-brief-at-files": {
       "mechanism": {
         "kind": "unmechanized",
