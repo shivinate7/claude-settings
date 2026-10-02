@@ -4059,7 +4059,7 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str) -> No
     sys.exit(0)
 
 
-# ------------------------------------------------------------------ three ported shell traps
+# ------------------------------------------------------------------ two ported shell traps
 #
 # Ported from pkmnscan's `scripts/guard-shell.py` (behaviour, not code shape). Each clause below is
 # self-contained so it merges cleanly beside other edits to this file.
@@ -4177,77 +4177,6 @@ LN_DESCENDS_REASON = (
     "Remedy: add -n beside -f to replace a link to a directory, check that the path is free first "
     "with a test such as [ -e path ], or end the destination with a slash when you mean a link "
     "inside the directory."
-)
-
-
-# `git push <remote> HEAD` from a branch whose upstream has a DIFFERENT name on that remote. HEAD
-# pushes to a branch named like the local one, so it creates a stray branch there, reports success,
-# and leaves the tracked branch untouched (Banchi 2026-09-12). A refspec with a colon names its
-# destination, so it is the fix and not the trap. No upstream on this remote, or an upstream of the
-# same name, is the ordinary push. A branch cut from the remote's default branch tracks that default
-# from birth and its first push is meant to create its own name, so that case is exempt. The reads
-# are git's own (HEAD, branch.<name>.remote, branch.<name>.merge), never a guess from text.
-# FAIL-OPEN: a git read that fails or times out (10s, `_git`) answers "", and every "" above reads as
-# "no opinion", so the push is allowed. Acceptable here because the trap is a stray branch on the
-# remote, which is visible in git's own `[new branch]` line and removable with one delete, and
-# because a guard that refused on an unreadable repository would cry wolf on every push from a
-# broken checkout (decisions/guard-that-cries-wolf-is-spent.md).
-PUSH_VALUE_FLAGS = ("--repo", "-o", "--push-option", "--receive-pack", "--exec")
-PUSH_SPECIAL_FLAGS = ("--all", "--mirror", "--tags", "-d", "--delete")
-
-
-def _git_line(where: str, *args) -> str:
-    answer = _git(where, *args)
-    if answer is None or answer.returncode != 0:
-        return ""
-    return answer.stdout.strip()
-
-
-def push_head_mismatch_hit(segment: str, where: str) -> str:
-    """Return the matched text when `git push <remote> HEAD` goes to a name other than upstream."""
-    for subcommand, args in git_calls(segment):
-        if subcommand != "push":
-            continue
-        positional = []
-        index = 0
-        while index < len(args):
-            arg = args[index].strip("'\"")  # git_calls splits on spaces, so quotes survive
-            index += 1
-            if arg in PUSH_SPECIAL_FLAGS:
-                positional = []
-                break
-            if arg in PUSH_VALUE_FLAGS:
-                index += 1
-            elif not arg.startswith("-"):
-                positional.append(arg)
-        if len(positional) != 2 or positional[1] != "HEAD" or not where or not os.path.isdir(where):
-            continue
-        remote = positional[0]
-        branch = _git_line(where, "symbolic-ref", "--quiet", "--short", "HEAD")
-        if not branch or _git_line(where, "config", "--get", "branch." + branch + ".remote") != remote:
-            continue
-        tracked = _git_line(where, "config", "--get", "branch." + branch + ".merge")
-        tracked = tracked[len("refs/heads/"):] if tracked.startswith("refs/heads/") else tracked
-        if not tracked or tracked == branch:
-            continue
-        default = _git_line(where, "symbolic-ref", "--quiet", "--short",
-                            "refs/remotes/" + remote + "/HEAD")
-        default = default[len(remote) + 1:] if default.startswith(remote + "/") else default
-        if not default:
-            default = next((name for name in ("main", "master") if _git_line(
-                where, "rev-parse", "--verify", "--quiet", "refs/heads/" + name)), "")
-        if tracked == default:
-            continue
-        return "git push " + remote + " HEAD from " + branch + " tracking another name"
-    return ""
-
-
-PUSH_HEAD_REASON = (
-    "HEAD is pushed to a branch of the same name as the local branch, and this branch tracks a "
-    "branch with a different name, so the push creates a new branch on the remote and leaves the "
-    "tracked one untouched while reporting success. "
-    "Remedy: give the destination explicitly as HEAD:<branch-name>, using the remote branch you "
-    "mean to update."
 )
 
 
@@ -4385,10 +4314,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
     if matched:
         refuse(tool, "deny", "live-stream", NARRATED_TAIL_REASON, matched)
 
-    # 3b. Three traps ported from pkmnscan's `scripts/guard-shell.py`: `gh api` with a field and no
-    # method, `ln -s` onto a directory that is already there, and `git push <remote> HEAD` from a
-    # branch whose upstream has another name. Each reads the segment's own command word, never a
-    # substring, and the last two read the filesystem or the repository rather than the text.
+    # 3b. Two traps ported from pkmnscan's `scripts/guard-shell.py`: `gh api` with a field and no
+    # method, and `ln -s` onto a directory that is already there. Each reads the segment's own
+    # command word, never a substring, and `ln` reads the filesystem rather than the text.
     run_in = _run_dir(stripped, cwd)
     for segment in split_segments(stripped):
         matched = gh_api_post_hit(segment)
@@ -4397,9 +4325,6 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
         matched = ln_descends_hit(segment, run_in)
         if matched:
             refuse(tool, "deny", "ln-over-directory", LN_DESCENDS_REASON, matched)
-        matched = push_head_mismatch_hit(segment, run_in)
-        if matched:
-            refuse(tool, "deny", "push-head-mismatch", PUSH_HEAD_REASON, matched)
 
     # 4. A wide delete denies, and a force push asks.
     for pattern in DESTRUCTIVE_DELETE:

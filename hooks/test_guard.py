@@ -831,29 +831,13 @@ def build_fixtures():
 
 build_fixtures()
 
-# --------------------------------------------------------------- the four ported shell traps
+# --------------------------------------------------------------- the ported shell traps
 #
-# TRAPDIFF stands on `local-x`, whose upstream is `remote-x`: a name that differs from its own.
-# TRAPSAME stands on `same-x`, tracking `same-x`. TRAPCUT stands on a branch cut from `main`, which
-# tracks `main` from birth. TRAPLN holds one real directory, a link to it, a file and a link to it.
-TRAPDIFF = os.path.join(ROOT, "trapdiff")
-TRAPSAME = os.path.join(ROOT, "trapsame")
-TRAPCUT = os.path.join(ROOT, "trapcut")
+# TRAPLN holds one real directory, a link to it, a file and a link to it.
 TRAPLN = os.path.join(ROOT, "trapln")
 
 
 def build_trap_fixtures():
-    for where, branch, tracked in ((TRAPDIFF, "local-x", "remote-x"),
-                                   (TRAPSAME, "same-x", "same-x"),
-                                   (TRAPCUT, "local-cut", "main")):
-        make_repo(where, {"base.txt": "base\n"})
-        run_vcs(where, "checkout", "-q", "-b", branch)
-        run_vcs(where, "config", "branch." + branch + ".remote", "origin")
-        run_vcs(where, "config", "branch." + branch + ".merge", "refs/heads/" + tracked)
-        got = run_vcs(where, "config", "--get", "branch." + branch + ".merge").stdout.strip()
-        if got != "refs/heads/" + tracked:
-            sys.exit("fixture setup failed in build_trap_fixtures: %r tracks %r, not %r"
-                     % (where, got, tracked))
     os.makedirs(os.path.join(TRAPLN, "realdir"))
     write(os.path.join(TRAPLN, "file.txt"), "x\n")
     os.symlink("realdir", os.path.join(TRAPLN, "linkdir"))
@@ -1732,7 +1716,7 @@ sh("stream: tail -f inside a loop's do-block denies unchanged",
 
 # =========================================================================== 2c. shell traps
 #
-# Four traps ported from pkmnscan's `scripts/guard-shell.py`. Each has a red case, an allowed case,
+# Three traps ported from pkmnscan's `scripts/guard-shell.py`. Each has a red case, an allowed case,
 # and two false-alarm cases: a command that reads like the trap and is not it. Each is judged on the
 # act (the command word, the flags, what the path or the branch resolves to), never on a substring.
 
@@ -1789,25 +1773,6 @@ sh("ln: a trailing slash says the destination is a directory",
    "ln -s /opt/tool/x realdir/", "allow", cwd=TRAPLN)
 sh("ln: a hard link over a directory name is not symbolic", "ln /opt/tool/x realdir", "allow",
    cwd=TRAPLN)
-
-# --- git push <remote> HEAD from a branch whose upstream has another name
-sh("push-head: HEAD from a branch tracking another name makes a stray branch",
-   VCS + " push origin HEAD", "deny", "push-head-mismatch", cwd=TRAPDIFF)
-sh("push-head: a quoted HEAD is still HEAD", VCS + ' push origin "HEAD"', "deny",
-   "push-head-mismatch", cwd=TRAPDIFF)
-sh("push-head: -u does not change the destination name",
-   VCS + " push -u origin HEAD", "deny", "push-head-mismatch", cwd=TRAPDIFF)
-sh("push-head: an explicit destination is the fix",
-   VCS + " push origin HEAD:refs/heads/remote-x", "allow", cwd=TRAPDIFF)
-sh("push-head: a branch named outright is not HEAD", VCS + " push origin local-x", "allow",
-   cwd=TRAPDIFF)
-sh("push-head: upstream of the same name is the ordinary push", VCS + " push origin HEAD",
-   "allow", cwd=TRAPSAME)
-sh("push-head: a branch cut from main pushes under its own name",
-   VCS + " push origin HEAD", "allow", cwd=TRAPCUT)
-sh("push-head: the remedy form on the branch's own name",
-   VCS + " push origin HEAD:refs/heads/same-x", "allow", cwd=TRAPSAME)
-
 
 # =========================================================================== 2c. waiter loops
 #
