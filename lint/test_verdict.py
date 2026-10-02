@@ -38,5 +38,20 @@ class T(unittest.TestCase):
         self.assertEqual(len(body), 30)
         self.assertEqual(body[-1], "l99")
 
+    def test_reused_log_is_not_truncated(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = os.path.join(d, "v.log")
+            run("print('first-run')", log)
+            run("print('second-run')", log)
+            full = open(log).read()
+            self.assertIn("first-run", full)
+            self.assertIn("second-run", full)
+
+    @unittest.skipIf(os.name == "nt", "POSIX signals")
+    def test_signal_kill(self):
+        r = run("import os, signal\nos.kill(os.getpid(), signal.SIGTERM)")
+        self.assertEqual(r.returncode, 128 + 15)
+        self.assertIn("killed by signal 15", r.stdout)
+
 if __name__ == "__main__":
     unittest.main()
