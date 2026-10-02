@@ -177,7 +177,7 @@ def report_shape_ok(text):
     return True
 
 
-# reports-done-format: each Done item says BUILT, RECORDED, or OTHER and names a PR or commit.
+# reports-done-format: each Done item says BUILT, RECORDED, or OTHER; BUILT and RECORDED also name a PR or commit.
 # A ref is `#12`, `PR 12`, a /pull/N or /commit/<sha> URL, or a hex sha of 6 to 40 digits that
 # holds at least one digit (so a plain word like "added" is not a sha).
 DONE_KIND_RE = re.compile(r"\b(?:BUILT|RECORDED|OTHER)\b")
@@ -228,7 +228,8 @@ def done_items(block):
 def done_format_problem(text):
     """Name the first Done item lacking a BUILT/RECORDED/OTHER word or a PR/commit ref, else ''."""
     for item in done_items(block_text(text, keep_indent=True)):
-        if not DONE_KIND_RE.search(item) or not DONE_REF_RE.search(item):
+        kinds = set(DONE_KIND_RE.findall(item))
+        if not kinds or (kinds & {"BUILT", "RECORDED"} and not DONE_REF_RE.search(item)):
             return item[:60]
     return ""
 
@@ -315,8 +316,8 @@ def main():
     item = done_format_problem(text) if shape_ok else ""
     if item:
         reasons.append(
-            "Report-shape gate: each Done line must say BUILT, RECORDED, or OTHER and name a "
-            "PR or commit. This one does not: " + repr(item) + ".")
+            "Report-shape gate: each Done line must say BUILT, RECORDED, or OTHER. BUILT and "
+            "RECORDED must also name a PR or commit. This one does not: " + repr(item) + ".")
     cite = bare_cite(text)
     if cite:
         reasons.append(

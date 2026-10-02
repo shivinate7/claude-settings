@@ -479,6 +479,12 @@ class DoneFormatAndCiteTests(unittest.TestCase):
         self.assert_blocked("> **Done**\n> - BUILT gate, PR #5\n> - RECORDED the ruling\n> **Next** none",
                             "RECORDED the ruling")
 
+    def test_df_allowed_other_needs_no_ref(self):
+        self.assert_allowed("> **Done**\n> - BUILT gate, PR #5\n> - OTHER swept the stale branches\n> **Next** none")
+
+    def test_df_red_other_item_alone_still_needs_kind_word(self):
+        self.assert_blocked("> **Done**\n> - swept the stale branches\n> **Next** none", "swept the stale")
+
     def test_df_allowed_inline_with_pr(self):
         self.assert_allowed("> **Done** BUILT the gate, PR #226\n> **Next** none")
 
