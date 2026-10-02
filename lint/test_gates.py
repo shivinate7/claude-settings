@@ -438,6 +438,47 @@ class ReportGateTests(unittest.TestCase):
         out = json.loads(run.stdout)
         self.assertEqual(out.get("decision"), "block")
 
+    def test_67_every_github_landing_tool_with_no_report_blocks(self):
+        # Pinned by hand, not read from report_gate.LANDING_TOOLS: an emptied set must fail here.
+        for tool in ("mcp__github__merge_pull_request", "mcp__github__create_pull_request",
+                     "mcp__github__push_files", "mcp__github__create_or_update_file"):
+            records = [
+                human("land it"),
+                tool_use_msg(tool, {"title": "x"}),
+                tool_result_msg(),
+                assistant_text("Landed it."),
+            ]
+            path = write_transcript(records, self.tmp.name)
+            run = run_gate(REPORT_GATE, self.hook_for(path))
+            self.assertEqual(run.returncode, 0, tool)
+            self.assertEqual(json.loads(run.stdout).get("decision"), "block", tool)
+
+    def test_68_first_label_not_done_blocks(self):
+        records = [
+            human("do the task"),
+            tool_use_msg("Bash", {"command": "git commit -m x"}),
+            tool_result_msg(),
+            assistant_text("> **Deviations** none\n> **Next** ship it"),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(REPORT_GATE, self.hook_for(path))
+        self.assertEqual(json.loads(run.stdout).get("decision"), "block")
+
+    def test_69_event_other_than_stop_never_blocks(self):
+        records = [
+            human("do the task"),
+            tool_use_msg("Bash", {"command": "git commit -m x"}),
+            tool_result_msg(),
+            assistant_text("Done BUILT abc123"),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        for event in ("SubagentStop", "PreToolUse", "SessionEnd"):
+            hook = self.hook_for(path)
+            hook["hook_event_name"] = event
+            run = run_gate(REPORT_GATE, hook)
+            self.assertEqual(run.returncode, 0, event)
+            self.assertEqual(run.stdout.strip(), "", event)
+
 
 class ConfigReportTests(unittest.TestCase):
     """Decision 7: an allowed project config edit is still reported at turn end."""
@@ -1556,6 +1597,44 @@ class SteGatePreToolUseTests(unittest.TestCase):
     def test_67_non_markdown_path_allowed(self):
         target = self._write("notes.py", "print('a; b')\n")
         run = self.run_pretooluse("Write", {"file_path": target, "content": "print('a; b')\n"})
+        self.assert_allowed(run)
+
+    def test_67b_non_prose_suffix_with_an_ste_error_still_allowed(self):
+        # The path guard, not the text, must be what lets this through: the content has a
+        # contraction, an STE008 error if the file were linted.
+        target = os.path.join(self.tmp.name, "notes.txt")  # never created: Write makes it
+        run = self.run_pretooluse("Write", {
+            "file_path": target, "content": "This isn't prose the gate should read.\n"})
+        self.assert_allowed(run)
+
+    def test_67c_failed_multiedit_replay_lints_the_new_text_not_the_old_file(self):
+        # The second edit cannot be replayed (old_string absent), so the gate lints the
+        # proposed new text in full. Linting the old file instead would find nothing.
+        target = self._write("notes.md", self.THREE_ERRORS_ONE_CLEAN)
+        run = self.run_pretooluse("MultiEdit", {"file_path": target, "edits": [
+            {"old_string": "This is the clean block that gets edited.\n",
+             "new_string": "This is the clean block that gets edited today.\n"},
+            {"old_string": "text that is not actually in the file",
+             "new_string": "This new text isn't clean, introduced here."},
+        ]})
+        reason = self.assert_denied(run)
+        self.assertIn("contraction", reason.lower())
+
+    def test_67d_ambiguous_edit_is_not_replayed_at_the_first_match(self):
+        # old_string sits in two paragraphs, no replace_all. Edit itself refuses that, and
+        # the gate lints only new_string (short, clean). Replaying at the first match would
+        # join it to the 20 words above and wrongly report a long sentence.
+        head = ("w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12\n"
+                "w13 w14 w15 w16 w17 w18 w19 w20\n"
+                "w21 w22 w23.\n\n"
+                "Another paragraph.\n\n"
+                "w21 w22 w23.\n")
+        target = self._write("twice.md", head)
+        run = self.run_pretooluse("Edit", {
+            "file_path": target,
+            "old_string": "w21 w22 w23.\n",
+            "new_string": "w21 w22 w23 w24 w25 w26 w27 w28 w29 w30.\n",
+        })
         self.assert_allowed(run)
 
 
