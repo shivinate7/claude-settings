@@ -22,6 +22,7 @@ otherwise depend on hooks/guard.py, and importing it here would give them that d
 for the first time.
 """
 import json
+import os
 import re
 
 FINDING_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
@@ -90,6 +91,157 @@ def records_after_last_human(records):
     if last_human_idx is None:
         return []
     return records[last_human_idx + 1:]
+
+
+def parse_utc_timestamp(text):
+    """Epoch seconds for a transcript `timestamp` (a trailing Z is read as UTC), or None."""
+    from datetime import datetime, timezone  # lazy: ste_gate runs on every Write
+    text = (text or "").strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        moment = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.timestamp()
+
+
+def _lines_backwards(path, chunk=1 << 18):
+    """Yield the transcript's lines (bytes), last first, reading only as far as asked."""
+    with open(path, "rb") as f:
+        pos = f.seek(0, 2)
+        carry = b""
+        while pos > 0:
+            n = min(chunk, pos)
+            pos -= n
+            f.seek(pos)
+            lines = (f.read(n) + carry).split(b"\n")
+            carry = lines[0] if pos > 0 else b""
+            for line in reversed(lines[1:] if pos > 0 else lines):
+                yield line
+
+
+def read_turn(path):
+    """Return (last human record or None, the records after it), read from the END.
+
+    The same answer as `records_after_last_human(read_transcript(path))`, for the cost of
+    this turn's records alone. Raises OSError when the file cannot be read.
+    """
+    after = []
+    for line in _lines_backwards(path):
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        if not isinstance(rec, dict):
+            continue
+        if is_last_human(rec):
+            return rec, after[::-1]
+        after.append(rec)
+    return None, []
+
+
+def last_human_epoch(path):
+    """Epoch seconds of the last human message, or None.
+
+    None means "no human record, no timestamp, or unreadable": callers read it as "cannot tell"
+    and keep running. A line is parsed only when it mentions "user", so an idle turn costs a
+    few KB of reads, not the whole file.
+    """
+    try:
+        for line in _lines_backwards(path):
+            if b'"user"' not in line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(rec, dict) and is_last_human(rec):
+                value = rec.get("timestamp")
+                return parse_utc_timestamp(value) if isinstance(value, str) else None
+    except Exception:
+        return None
+    return None
+
+
+def _git(cwd, *args):
+    import subprocess  # lazy, same reason
+    try:
+        run = subprocess.run(["git", "-C", cwd] + list(args), capture_output=True, text=True,
+                             timeout=10)
+    except Exception:
+        return None
+    return run.stdout if run.returncode == 0 else None
+
+
+def _head_moved_since(cwd, base):
+    """True when HEAD took a commit (or any move) after `base`, False when not, None if unknown.
+
+    Reads HEAD's reflog mtime, with no subprocess: every commit appends to it. A checkout or
+    reset also touches it, which only ever answers True, the safe side. With no reflog file
+    it asks `git log` for the newest commit time instead.
+    """
+    here = os.path.realpath(cwd)
+    while True:
+        dot = os.path.join(here, ".git")
+        if os.path.isdir(dot):
+            gitdir = dot
+            break
+        if os.path.isfile(dot):  # a linked work tree: `gitdir: <path>`
+            with open(dot, encoding="utf-8") as f:
+                line = f.readline().strip()
+            if not line.startswith("gitdir:"):
+                return None
+            gitdir = os.path.join(here, line[7:].strip())
+            break
+        parent = os.path.dirname(here)
+        if parent == here:
+            return None
+        here = parent
+    reflog = os.path.join(gitdir, "logs", "HEAD")
+    if os.path.isfile(reflog):
+        return os.path.getmtime(reflog) >= base - 1
+    stamp = _git(cwd, "log", "-1", "--format=%ct")
+    return None if stamp is None else int(stamp.strip() or 0) >= base - 1
+
+
+def landed_work(path, cwd, extra_paths=()):
+    """The one early exit for the Stop hooks: False only when this turn landed nothing.
+
+    False means the last human message is known, and since it no file under `cwd` is dirty
+    in the work tree with a newer mtime (a deleted one counts as newer), `HEAD` holds no newer commit,
+    and no path in `extra_paths` has a newer mtime. Any read that cannot run, a missing
+    timestamp, no git, a stat error, answers True, so the hook runs as it did before. A hook
+    whose fire has a cause outside these files (a clock, a baseline, a PR merge) adds its own
+    check beside this call; this one never reasons about them.
+    """
+    base = last_human_epoch(path)
+    if base is None or not cwd or not os.path.isdir(cwd):
+        return True
+    try:
+        if any(os.path.getmtime(p) > base for p in extra_paths if os.path.exists(p)):
+            return True
+        status = _git(cwd, "status", "--porcelain", "-z", "--untracked-files=all", "--", ".")
+        if status is None:
+            return True
+        fields = status.split("\0")
+        i = 0
+        while i < len(fields):
+            entry = fields[i]
+            i += 1
+            if not entry:
+                continue
+            if entry[0] in "RC":
+                i += 1  # the rename/copy source path, not a target
+            # A deleted file has no mtime: getmtime raises, and the except below answers True.
+            if os.path.getmtime(os.path.join(cwd, *entry[3:].split("/"))) > base:
+                return True
+        moved = _head_moved_since(cwd, base)
+        return True if moved is None else moved
+    except Exception:
+        return True
 
 
 def paragraph_blocks(text):
