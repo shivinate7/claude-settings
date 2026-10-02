@@ -2010,9 +2010,8 @@ class SteGateUIScopeTests(unittest.TestCase):
 
 class TurnEndEarlyExitTests(unittest.TestCase):
     """lint/_transcript.py's `landed_work` is the one early exit for a Stop hook: False only
-    when nothing is dirty in the work tree, committed, or in `extra_paths` since the last
-    human message. The repo below is quiet (every file backdated), so each test changes ONE
-    thing and the answer must follow it. `read_turn` is the tail reader the idle hooks use."""
+    when nothing is dirty in the work tree since the last human message. The repo below is
+    quiet (every file backdated), so each test changes ONE thing and the answer must follow it. `read_turn` is the tail reader the idle hooks use."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -2062,10 +2061,6 @@ class TurnEndEarlyExitTests(unittest.TestCase):
         os.remove(os.path.join(self.repo, "n.txt"))
         self.assertTrue(self.landed())
 
-    def test_commit_does_not_exit(self):
-        self.vcs("commit", "-q", "--allow-empty", "-m", "landed")
-        self.assertTrue(self.landed())
-
     def test_dirt_older_than_the_message_exits(self):
         target = os.path.join(self.repo, "n.txt")
         with open(target, "w", encoding="utf-8") as f:
@@ -2073,15 +2068,6 @@ class TurnEndEarlyExitTests(unittest.TestCase):
         old = datetime.now(timezone.utc).timestamp() - 1000
         os.utime(target, (old, old))
         self.assertFalse(self.landed())
-
-    def test_extra_path_decides(self):
-        extra = os.path.join(self.tmp.name, "outside.log")
-        with open(extra, "w", encoding="utf-8") as f:
-            f.write("x\n")
-        self.assertTrue(self.landed(extra_paths=[extra]))
-        old = datetime.now(timezone.utc).timestamp() - 1000
-        os.utime(extra, (old, old))
-        self.assertFalse(self.landed(extra_paths=[extra]))
 
     def test_unknown_reads_keep_the_hook_running(self):
         self.assertTrue(self.landed(stamp=""))  # no timestamp on the human record

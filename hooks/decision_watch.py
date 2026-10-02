@@ -111,16 +111,16 @@ else:
 # The tail reader for the cheap check lives in lint/_transcript.py, the one home
 # (decisions/hooks-share-the-transcript-reader.md). The older copies below predate it.
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
-from _transcript import last_human_epoch  # noqa: E402
+from _transcript import last_human_epoch, head_moved_since  # noqa: E402
 
 # THE TIME BUDGET. settings.json's Stop entry for this hook carries `"timeout": 170`.
 # Every git call below uses GIT_TIMEOUT (10s). At most MAX_DIFFED_FILES protected files
 # are diffed; the rest are still named in the evidence, but with no git call, so the
 # count of protected files can grow unbounded with no matching growth in wall time.
 # Worst case, computed here rather than assumed: one `git status`
-# (GIT_TIMEOUT) + MAX_DIFFED_FILES `git diff` calls (MAX_DIFFED_FILES * GIT_TIMEOUT) +
-# one model call (MODEL_TIMEOUT) = 10 + 8*10 + 60 = 150 seconds, against a 170-second
-# hook timeout: 20 seconds of margin, not zero. Lowering any of these three numbers
+# (GIT_TIMEOUT) + one `git log` (GIT_TIMEOUT) + MAX_DIFFED_FILES `git diff` calls
+# (MAX_DIFFED_FILES * GIT_TIMEOUT) + one model call (MODEL_TIMEOUT) = 10 + 10 + 8*10 + 60
+# = 160 seconds, against a 170-second hook timeout: 10 seconds of margin, not zero. Lowering any of these three numbers
 # without re-deriving this sum, or raising settings.json's own timeout to match, breaks
 # the proof, not just the comment.
 MODEL = "claude-sonnet-5"
@@ -416,20 +416,62 @@ def looks_concerning(tool_use):
 
 # ------------------------------------------------------------------ evidence for the model
 
-def file_evidence(cwd, rel_path, untracked):
+def file_evidence(cwd, rel_path, untracked, since=None):
     """Return a short label plus the diff (or full text for an untracked file), or None on
     a git failure -- the caller reads None as UNKNOWN, per this hook's own design constraint
-    that a git-diff failure is unknown, never silence and never a flag."""
-    if untracked:
+    that a git-diff failure is unknown, never silence and never a flag.
+
+    `since` is the oldest commit made this turn: the diff then runs from its parent to the
+    work tree, so a change committed this turn shows, with any later edit on top. A parent
+    that does not exist (the turn made the root commit) reads as a new file."""
+    def whole_file():
         try:
             with open(os.path.join(cwd, rel_path), "r", encoding="utf-8", errors="replace") as f:
                 return "%s (new file):\n%s" % (rel_path, f.read()[:4000])
         except Exception:
             return None
+    if untracked:
+        return whole_file()
+    if since:
+        run = _run_git(cwd, ["diff", since + "^", "--", rel_path])
+        if run is None:
+            return None
+        if run.returncode != 0:
+            probe = _run_git(cwd, ["rev-parse", "--verify", "-q", since + "^"])
+            return whole_file() if probe is not None and probe.returncode != 0 else None
+        return "%s (diff since the turn's first commit):\n%s" % (rel_path, run.stdout[:4000])
     run = _run_git(cwd, ["diff", "HEAD", "--", rel_path])
     if run is None or run.returncode != 0:
         return None
     return "%s (diff against HEAD):\n%s" % (rel_path, run.stdout[:4000])
+
+
+MAX_TURN_COMMITS = 200
+
+
+def committed_this_turn(cwd, baseline):
+    """Return ([relative paths], oldest commit) that commits made since `baseline` touched,
+    or (None, None) when git could not be read. No baseline, or no commit since it, is ([], None).
+
+    One bounded `git log --since` call, and only when HEAD's reflog says HEAD moved: an idle
+    turn pays no subprocess here. A failed read is unknown, never clear."""
+    if baseline is None or head_moved_since(cwd, baseline) is False:
+        return [], None
+    run = _run_git(cwd, ["-c", "core.quotepath=off", "log", "--since=%d" % int(baseline),
+                         "--max-count=%d" % MAX_TURN_COMMITS, "--name-only", "--format=%x01%H"])
+    if run is None:
+        return None, None
+    if run.returncode != 0:
+        if "does not have any commits" in (run.stderr or ""):
+            return [], None
+        return None, None
+    paths, oldest = [], None
+    for line in run.stdout.splitlines():
+        if line.startswith("\x01"):
+            oldest = line[1:]
+        elif line and line not in paths:
+            paths.append(line)
+    return paths, oldest
 
 
 # ------------------------------------------------------------------ the per-incident, per-session cap
@@ -494,18 +536,27 @@ def _mark_seen(session_id, incident_key):
         pass  # a cache write failure re-flags next time rather than losing the report now
 
 
+DIGEST_READ_MAX = 1 << 20
+
+
 def content_digest(cwd, protected):
-    """Return one hash of the protected files' bytes (a missing file hashes as gone).
+    """Return one hash of the repo root and the protected files' bytes (a missing file hashes
+    as gone), so one session in two repos never shares a verdict.
 
     `file_evidence` cuts a diff at 4000 characters, so an edit past the cut would leave the
-    evidence, and so the key, unchanged. This digest moves with every byte.
+    evidence, and so the key, unchanged. This digest moves with every byte of a file up to
+    DIGEST_READ_MAX; a larger file hashes its first DIGEST_READ_MAX bytes plus its size and
+    mtime, so a protected file cannot make this hook read without bound.
     """
-    h = hashlib.sha256()
+    h = hashlib.sha256(os.path.realpath(cwd).encode("utf-8", "replace") + b"\2")
     for rel in sorted(protected):
         h.update(rel.encode("utf-8", "replace") + b"\0")
         try:
             with open(os.path.join(cwd, rel), "rb") as f:
-                h.update(f.read())
+                h.update(f.read(DIGEST_READ_MAX))
+                st = os.fstat(f.fileno())
+                if st.st_size > DIGEST_READ_MAX:
+                    h.update(b"%d:%d" % (st.st_size, st.st_mtime_ns))
         except OSError:
             h.update(b"<gone>")
         h.update(b"\1")
@@ -725,6 +776,13 @@ def run(hook, model_call=invoke_model):
 
     protected = [rel for rel in changed if looks_protected(rel, cwd)]
 
+    # A protected file committed this turn is clean in `git status`, and agents commit.
+    committed, oldest = committed_this_turn(cwd, baseline)
+    if committed is None:
+        return UNKNOWN_PREFIX + "git log could not be read for this working directory."
+    committed = [rel for rel in committed if looks_protected(rel, cwd)]
+    protected += [rel for rel in committed if rel not in protected]
+
     # GATE: an actual on-disk change to a protected path, full stop. An outbound
     # SendMessage/Task alone no longer triggers a model call (see looks_concerning's
     # docstring for why the independent audit corrected this). Nothing executed yet is
@@ -744,7 +802,7 @@ def run(hook, model_call=invoke_model):
     # is still named in the evidence, with no git call spent on it.
     evidence = []
     for rel in protected[:MAX_DIFFED_FILES]:
-        piece = file_evidence(cwd, rel, untracked.get(rel, False))
+        piece = file_evidence(cwd, rel, untracked.get(rel, False), oldest if rel in committed else None)
         if piece is None:
             return UNKNOWN_PREFIX + "git diff could not be read for %s." % rel
         evidence.append(piece)

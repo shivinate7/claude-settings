@@ -176,12 +176,12 @@ def _git(cwd, *args):
     return run.stdout if run.returncode == 0 else None
 
 
-def _head_moved_since(cwd, base):
+def head_moved_since(cwd, base):
     """True when HEAD took a commit (or any move) after `base`, False when not, None if unknown.
 
     Reads HEAD's reflog mtime, with no subprocess: every commit appends to it. A checkout or
     reset also touches it, which only ever answers True, the safe side. With no reflog file
-    it asks `git log` for the newest commit time instead.
+    it returns None, and the caller asks `git log` itself.
     """
     here = os.path.realpath(cwd)
     while True:
@@ -190,8 +190,11 @@ def _head_moved_since(cwd, base):
             gitdir = dot
             break
         if os.path.isfile(dot):  # a linked work tree: `gitdir: <path>`
-            with open(dot, encoding="utf-8") as f:
-                line = f.readline().strip()
+            try:
+                with open(dot, encoding="utf-8") as f:
+                    line = f.readline().strip()
+            except OSError:
+                return None
             if not line.startswith("gitdir:"):
                 return None
             gitdir = os.path.join(here, line[7:].strip())
@@ -201,28 +204,26 @@ def _head_moved_since(cwd, base):
             return None
         here = parent
     reflog = os.path.join(gitdir, "logs", "HEAD")
-    if os.path.isfile(reflog):
+    try:
         return os.path.getmtime(reflog) >= base - 1
-    stamp = _git(cwd, "log", "-1", "--format=%ct")
-    return None if stamp is None else int(stamp.strip() or 0) >= base - 1
+    except OSError:
+        return None
 
 
-def landed_work(path, cwd, extra_paths=()):
-    """The one early exit for the Stop hooks: False only when this turn landed nothing.
+def landed_work(path, cwd):
+    """The early exit for a Stop hook that scans dirty files: False only when none is newer.
 
     False means the last human message is known, and since it no file under `cwd` is dirty
-    in the work tree with a newer mtime (a deleted one counts as newer), `HEAD` holds no newer commit,
-    and no path in `extra_paths` has a newer mtime. Any read that cannot run, a missing
-    timestamp, no git, a stat error, answers True, so the hook runs as it did before. A hook
-    whose fire has a cause outside these files (a clock, a baseline, a PR merge) adds its own
-    check beside this call; this one never reasons about them.
+    in the work tree with a newer mtime (a deleted one counts as newer). Any read that cannot
+    run, a missing timestamp, no work tree, a stat error, answers True, so the hook runs as it
+    did before. A commit alone is not a signal: a hook that scans only dirty files cannot get
+    a target from one. A hook whose fire has another cause (a clock, a baseline, a PR merge)
+    adds its own check beside this call.
     """
     base = last_human_epoch(path)
     if base is None or not cwd or not os.path.isdir(cwd):
         return True
     try:
-        if any(os.path.getmtime(p) > base for p in extra_paths if os.path.exists(p)):
-            return True
         status = _git(cwd, "status", "--porcelain", "-z", "--untracked-files=all", "--", ".")
         if status is None:
             return True
@@ -238,8 +239,7 @@ def landed_work(path, cwd, extra_paths=()):
             # A deleted file has no mtime: getmtime raises, and the except below answers True.
             if os.path.getmtime(os.path.join(cwd, *entry[3:].split("/"))) > base:
                 return True
-        moved = _head_moved_since(cwd, base)
-        return True if moved is None else moved
+        return False
     except Exception:
         return True
 
