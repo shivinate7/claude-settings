@@ -4001,6 +4001,118 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str) -> No
     sys.exit(0)
 
 
+# ------------------------------------------------------------------ builders do not edit tests
+#
+# EVIDENCE: ImpossibleBench (arXiv 2510.20270): read-only tests block a worker's direct edits of
+# the tests that grade it, with little loss of real performance. A builder that cannot pass a test
+# may otherwise delete it, skip it, or rewrite it to pass. The refusal is by ROLE: only a payload
+# that carries BOTH an `agent_id` (a subagent) and `agent_type` "builder" is judged. The main
+# session, a reviewer, and every other agent type pass untouched, as does a session started with
+# `--agent builder` (no `agent_id`; unmeasured, so it stays allowed).
+#
+# A TEST PATH is read from the path's own parts, never from a substring: a basename shape
+# (`test_*.py`, `*_test.py`, `*_test.go`, `*.test.{ts,js,tsx,jsx}`, `*.spec.*`) or a directory part
+# named tests, test, __tests__ or spec. Parts are counted from the repository root (the nearest
+# parent holding `.git`), so a clone that lives under a folder named `tests` is not all test files.
+# `contest.py` and `latest_results.md` match no shape. The decisions: predicate-is-the-act,
+# guard-that-cries-wolf-is-spent, builders-cannot-edit-tests.
+BUILDER_ROLE = "builder"
+TEST_BASENAME = re.compile(
+    r"^(?:test_.*\.py|.*_test\.(?:py|go)|.*\.test\.[cm]?[jt]sx?|.*\.spec\..+)$")
+TEST_DIRS = {"tests", "test", "__tests__", "spec"}
+# Commands that delete, move or rewrite every file they name, and commands that write only the
+# LAST file they name (a copy READS its source, so `cp tests/a.py /tmp` is no write to a test).
+TEST_WRITERS = {
+    "rm", "mv", "tee", "truncate", "del", "erase", "rmdir", "rd", "ri", "ren", "move",
+    "remove-item", "move-item", "rename-item", "set-content", "add-content", "clear-content",
+    "out-file", "new-item",
+}
+TEST_LAST_WRITERS = {"cp", "install", "copy", "copy-item"}
+SKIP_MARKER = re.compile(
+    r"pytest\.mark\.(?:skip|xfail)|pytest\.(?:skip|xfail)\(|unittest\.(?:skip|expectedFailure)"
+    r"|\b(?:it|test|describe)\.(?:skip|fixme)\b|\bx(?:it|describe)\(|\bt\.Skip(?:Now)?\(|collect_ignore"
+)
+BUILDER_TEST_REASON = (
+    "A builder does not change tests. Report the needed test change in your report. "
+    "The orchestrator assigns it to a non-builder."
+)
+
+
+def is_builder(payload) -> bool:
+    role = payload.get("agent_type")
+    return bool(payload.get("agent_id")) and isinstance(role, str) and role.strip().lower() == BUILDER_ROLE
+
+
+def is_test_path(path: str, cwd: str) -> bool:
+    if not path or not isinstance(path, str):
+        return False
+    try:
+        full = norm(_literal_resolved(path, cwd))
+    except Exception:
+        return False
+    parent = os.path.dirname(full)
+    while parent and parent != os.path.dirname(parent):
+        if os.path.exists(os.path.join(parent, ".git")):
+            full = full[len(parent):]
+            break
+        parent = os.path.dirname(parent)
+    parts = [part for part in full.split("/") if part]
+    return bool(parts) and (
+        bool(TEST_BASENAME.match(parts[-1].lower())) or any(p.lower() in TEST_DIRS for p in parts)
+    )
+
+
+def builder_test_shell_hit(segment: str, cwd: str) -> str:
+    """Return the test path one shell segment deletes, moves or rewrites, else ''.
+
+    Resolved from the segment's tokens and its command word, so `cat tests/x.py` reads and
+    `rm contest.py` names no test. ponytail: a rewrite through an interpreter (`python -c`) or a
+    quoted `>` inside an `echo` argument is not read; an editor tool is the route that is judged.
+    """
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return ""
+    for index, token in enumerate(tokens):
+        found = re.match(r"^\d*>>?(?!&)(.*)$", token)
+        if found:
+            target = found.group(1) or (tokens[index + 1] if index + 1 < len(tokens) else "")
+            if is_test_path(target, cwd):
+                return target
+    at = resolve_command(tokens)
+    if at is None:
+        return ""
+    word, args = basename(tokens[at]), tokens[at + 1:]
+    if word == "git":
+        plain = [a for a in args if not a.startswith("-")]
+        if not plain or plain[0] not in ("rm", "mv"):
+            return ""
+        paths = plain[1:]
+    elif word in ("sed", "perl"):
+        if not any(re.match(r"^-[A-Za-z]*i|^--in-place", a) for a in args):
+            return ""
+        paths = [a for a in args if not a.startswith("-")]
+    elif word in TEST_WRITERS:
+        paths = [a for a in args if not a.startswith("-")]
+    elif word in TEST_LAST_WRITERS:
+        paths = [a for a in args if not a.startswith("-")][-1:]
+    else:
+        return ""
+    return next((p for p in paths if is_test_path(p, cwd)), "")
+
+
+def builder_test_write_hit(tool_input, target: str, cwd: str) -> str:
+    """Return what a builder's write tool call may not do: its target is a test path, or it adds
+    a skip marker to `conftest.py` (the one non-test file that can skip a whole suite)."""
+    if is_test_path(target, cwd):
+        return target
+    if basename(target) == "conftest.py":
+        marker = next((m.group(0) for part in write_content_parts(tool_input)
+                       for m in [SKIP_MARKER.search(part)] if m), "")
+        if marker:
+            return target + " " + marker
+    return ""
+
+
 SPAWN_TOOLS = ("Agent", "Task")
 MODEL_FLOOR_REASON = (
     "Sonnet is the floor for every subagent. Start the subagent with model sonnet or opus, "
@@ -4012,9 +4124,16 @@ def below_the_floor(model) -> bool:
     return "haiku" in str(model).lower()
 
 
-def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
+def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", builder: bool = False) -> None:
     stripped = strip_heredoc_bodies(raw)
     cmd = norm(stripped)
+
+    # 0b. A builder does not change tests (see BUILDER_ROLE).
+    if builder:
+        for segment in split_segments(stripped):
+            matched = builder_test_shell_hit(segment, cwd)
+            if matched:
+                refuse(tool, "deny", "builder-test-edit", BUILDER_TEST_REASON, matched)
 
     # 1. Shared trees.
     for segment in split_segments(stripped):
@@ -4240,7 +4359,7 @@ def judge(payload) -> None:
     if tool in SHELL_TOOLS:
         command = tool_input.get("command", "") or ""
         if isinstance(command, str) and command.strip():
-            judge_shell(tool, command, cwd, session_id_of(payload))
+            judge_shell(tool, command, cwd, session_id_of(payload), is_builder(payload))
         return
 
     if tool not in READ_ONLY_TOOLS + WRITE_TOOLS:
@@ -4254,6 +4373,12 @@ def judge(payload) -> None:
     )
     if not isinstance(target, str) or not target:
         return
+
+    # 0b. A builder does not change tests (see BUILDER_ROLE). A write tool only; a read is allowed.
+    if tool in WRITE_TOOLS and is_builder(payload):
+        matched = builder_test_write_hit(tool_input, target, cwd)
+        if matched:
+            refuse(tool, "deny", "builder-test-edit", BUILDER_TEST_REASON, matched)
 
     # 5. The environment file. Every matched tool is refused, a read included, because the rule is
     # about the contents and a read is contents. The reason names no file, and the log holds the

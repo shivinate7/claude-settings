@@ -43,7 +43,7 @@ CASES = []
 
 
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
-        session=None, carries=(), config=None, agent_id=None, no_root=False, **tool_input):
+        session=None, carries=(), config=None, agent_id=None, no_root=False, agent_type=None, **tool_input):
     """Register one case.
 
     `carries` names fragments the printed reason MUST hold, which is how a case pins what an
@@ -70,15 +70,16 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         # read from, so a pointer case names its own and every other case keeps the default.
         "config": config,
         "agent_id": agent_id,
+        "agent_type": agent_type,
         "no_root": no_root,
         "tool_input": tool_input,
     })
 
 
 def sh(name, command, expected, rule=None, tool="Bash", cwd=None, env_path=None, session=None,
-       carries=(), config=None, agent_id=None, no_root=False):
+       carries=(), config=None, agent_id=None, no_root=False, agent_type=None):
     add(name, expected, rule=rule, tool=tool, cwd=cwd, env_path=env_path, session=session,
-        agent_id=agent_id, no_root=no_root,
+        agent_id=agent_id, agent_type=agent_type, no_root=no_root,
         carries=carries, config=config, command=command)
 
 
@@ -479,8 +480,11 @@ def _verify_fake_gh_delay(ghdir, delay):
         )
 
 
+UNDERTESTS = os.path.join(ROOT, "tests", "clone")   # a repo whose own folder sits under `tests`
+
+
 def build_fixtures():
-    for folder in (CFG, LOGDIR, PROJ, CLONE, NOGIT, GITMAIN):
+    for folder in (CFG, LOGDIR, PROJ, CLONE, NOGIT, GITMAIN, os.path.join(UNDERTESTS, ".git")):
         os.makedirs(folder, exist_ok=True)
     write(os.path.join(CFG, "settings.json"), "{}\n")
     write(os.path.join(CFG, "CLAUDE.md"), "rules\n")
@@ -2634,6 +2638,65 @@ sh("ordinary: npm ci is not the PowerShell ci alias", "npm ci", "allow", tool="P
    cwd=NOGIT)
 
 
+# =========================================================================== builders do not edit tests
+#
+# Only a payload with an agent_id AND agent_type "builder" is judged. Every case runs from NOGIT, so
+# a relative path resolves under a folder that holds no `.git` and no test part of its own.
+
+BT = "builder-test-edit"
+B = dict(agent_id="bld1", agent_type="builder", cwd=NOGIT)
+for _tool, _field in (("Edit", "file_path"), ("Write", "file_path"), ("MultiEdit", "file_path"),
+                      ("NotebookEdit", "notebook_path")):
+    add("builder-test: %s of a test file is refused" % _tool, "deny", rule=BT, tool=_tool,
+        carries=("non-builder", "report"), **{_field: "src/test_app.py"}, **B)
+for _path in ("src/app_test.py", "pkg/app_test.go", "web/a.test.ts", "web/a.test.jsx",
+              "web/a.spec.js", "tests/helper.py", "pkg/__tests__/x.js", "spec/models/user.rb",
+              "src/tests/data/fixture.json", "test/x.txt"):
+    add("builder-test: Edit of %s is refused" % _path, "deny", rule=BT, tool="Edit",
+        file_path=_path, **B)
+add("builder-test: a skip marker added to conftest.py is refused", "deny", rule=BT, tool="Edit",
+    file_path="src/conftest.py", new_string="@pytest.mark.skip\ndef f(): pass", **B)
+for _cmd in ("rm tests/x.py", "rm -rf tests", "mv tests/a.py old.py", "mv src/a.py tests/a.py",
+             "sed -i 's/a/b/' src/test_a.py", "sed -i.bak s/a/b/ web/a.spec.ts",
+             "echo x > tests/a.py", "echo x >> src/b_test.go", "cat x 2>tests/err.log",
+             VCS + " rm tests/a.py", "tee tests/a.py", "cp /tmp/new.py tests/a.py",
+             "cd src && rm a.test.js", "true; rm src/test_a.py"):
+    sh("builder-test: shell `%s` is refused" % _cmd, _cmd, "deny", rule=BT, **B)
+sh("builder-test: PowerShell Remove-Item of a test is refused", "Remove-Item -Force tests/a.py",
+   "deny", rule=BT, tool="PowerShell", **B)
+sh("builder-test: PowerShell Set-Content onto a test is refused",
+   "Set-Content -Path src/test_a.py -Value x", "deny", rule=BT, tool="PowerShell", **B)
+
+# The role is the whole gate: the same calls from anyone else are allowed.
+add("builder-test: main session may edit a test", "allow", tool="Edit",
+    file_path="src/test_app.py", cwd=NOGIT)
+add("builder-test: reviewer may edit a test", "allow", tool="Edit", file_path="src/test_app.py",
+    agent_id="rev1", agent_type="reviewer", cwd=NOGIT)
+add("builder-test: a session run with --agent builder (no agent_id) is not judged", "allow",
+    tool="Edit", file_path="src/test_app.py", agent_type="builder", cwd=NOGIT)
+sh("builder-test: main session may delete a test", "rm tests/x.py", "allow", cwd=NOGIT)
+sh("builder-test: reviewer may delete a test", "rm tests/x.py", "allow", cwd=NOGIT,
+   agent_id="rev1", agent_type="reviewer")
+
+# Not a test, or not a write: allowed for a builder.
+for _path in ("src/app.py", "src/contest.py", "latest_results.md", "docs/attest.md",
+              "src/protest_handler.ts", "src/specs.md", "src/testing.py", "src/conftest.py"):
+    add("builder-test: Edit of %s is allowed" % _path, "allow", tool="Edit", file_path=_path,
+        new_string="x = 1", **B)
+add("builder-test: a repo that lives under a tests folder is not all test files", "allow",
+    tool="Edit", file_path=os.path.join(UNDERTESTS, "src", "app.py"), agent_id="bld1",
+    agent_type="builder", cwd=NOGIT)
+add("builder-test: a test inside that repo is still refused", "deny", rule=BT, tool="Edit",
+    file_path=os.path.join(UNDERTESTS, "src", "test_app.py"), agent_id="bld1",
+    agent_type="builder", cwd=NOGIT)
+add("builder-test: Read of a test is allowed", "allow", tool="Read", file_path="tests/x.py", **B)
+for _cmd in ("cat tests/x.py", "grep -rn foo tests/", "ls tests", "python -m pytest tests/",
+             "rm contest.py", "mv latest_results.md old.md", "cp tests/a.py /tmp/a.py",
+             "sed -n '1,5p' tests/x.py", "sed -i s/a/b/ src/app.py", "echo x > src/app.py",
+             "echo tests/x.py", VCS + " diff -- tests/x.py", "echo done 2>/dev/null"):
+    sh("builder-test: shell `%s` is allowed" % _cmd, _cmd, "allow", **B)
+
+
 # =========================================================================== failing open
 
 add("open: a payload with no command", "allow", tool="Bash", cwd=NOGIT)
@@ -2663,6 +2726,8 @@ def decide(case):
             body["session_id"] = case["session"]
         if case.get("agent_id"):
             body["agent_id"] = case["agent_id"]
+        if case.get("agent_type"):
+            body["agent_type"] = case["agent_type"]
         payload = json.dumps(body)
     env = dict(os.environ)
     # `.get`, not `[...]`: a checker below builds a case dict by hand and names only the keys it
