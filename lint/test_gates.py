@@ -528,6 +528,37 @@ class DoneFormatAndCiteTests(unittest.TestCase):
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
         self.assertEqual(run_gate(REPORT_GATE, hook).stdout.strip(), "")
 
+    # review fixes
+    def test_df_red_facade_is_not_a_sha(self):
+        self.assert_blocked("> **Done** BUILT facade\n> **Next** none", "BUILT facade")
+
+    def test_df_allowed_sub_bullets_are_details(self):
+        self.assert_allowed(
+            "> **Done**\n> - BUILT gate, PR #5\n>   - touched the parser\n>   - no ref here\n> **Next** none")
+
+    def test_df_red_top_bullet_after_sub_bullets_still_checked(self):
+        self.assert_blocked(
+            "> **Done**\n> - BUILT gate, PR #5\n>   - detail\n> - RECORDED ruling\n> **Next** none",
+            "RECORDED ruling")
+
+    def test_df_allowed_lead_in_text_with_bullets_is_not_an_item(self):
+        self.assert_allowed("> **Done** two items:\n> - BUILT gate, PR #5\n> - OTHER swept, abc1234\n> **Next** none")
+
+    def test_df_red_lead_in_with_kind_but_no_ref_blocks(self):
+        self.assert_blocked("> **Done** BUILT it:\n> - BUILT gate, PR #5\n> **Next** none", "BUILT it")
+
+    def test_cite_allowed_more_gloss_shapes(self):
+        for lead in ("D12 = short titles for records", "D12 -- short titles for records",
+                     "D12 says short titles win", "Short titles ruling, D12"):
+            self.assert_allowed("Per " + lead + " here.\n\n> **Done** BUILT gate, PR #226\n> **Next** none")
+
+    def test_cite_false_alarm_cell_range_and_vitamin(self):
+        self.assert_allowed("Sum A1:D12 and take vitamin D3 daily, or D12:F20.\n\n"
+                            "> **Done** BUILT gate, PR #226\n> **Next** none")
+
+    def test_cite_red_gloss_shapes_do_not_hide_bare_id(self):
+        self.assert_blocked("Per D12 and more.\n\n> **Done** BUILT gate, PR #226\n> **Next** none", "'D12'")
+
     def test_cite_and_done_block_once_with_both_reasons(self):
         out = self.verdict("Per D12.\n\n> **Done** BUILT gate\n> **Next** none")
         self.assertIn("BUILT, RECORDED, or OTHER", out["reason"])

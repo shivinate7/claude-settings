@@ -115,7 +115,7 @@ def find_block_start(lines):
     return None
 
 
-def block_text(text):
+def block_text(text, keep_indent=False):
     """Return the reply's report block, quote markers stripped, or "" when there is none.
 
     This does not judge shape (label order, fencing, trailing text): that is `report_shape_ok`'s
@@ -133,8 +133,10 @@ def block_text(text):
             continue
         if not line.lstrip().startswith(">"):
             break
-        stripped = line.lstrip()[1:].lstrip() if line.lstrip().startswith(">") else line
-        out.append(stripped)
+        stripped = line.lstrip()[1:]
+        # keep_indent: drop `>` and one space only, so a caller can tell a sub-bullet from a bullet.
+        out.append(stripped[1:] if keep_indent and stripped.startswith(" ") else
+                   stripped if keep_indent else stripped.lstrip())
     return "\n".join(out)
 
 
@@ -202,20 +204,30 @@ def done_items(block):
             body.append(line)
     inline = body[0].strip() if body else ""
     items = []
+    top = None  # indent of the first bullet; deeper bullets are details, not items
+    in_detail = False
     for line in body[1:]:
-        if BULLET_RE.match(line.strip()):
-            items.append(line.strip())
-        elif items and line.strip():
-            items[-1] += " " + line.strip()
+        text = line.strip()
+        if not text:
+            continue
+        indent = len(line) - len(line.lstrip())
+        if BULLET_RE.match(text):
+            if top is None:
+                top = indent
+            in_detail = indent > top
+            if not in_detail:
+                items.append(text)
+        elif items and not in_detail:
+            items[-1] += " " + text
     if items:
-        return ([inline] if inline else []) + items
+        return ([inline] if DONE_KIND_RE.search(inline) else []) + items
     text = " ".join(l.strip() for l in body if l.strip())
     return [text] if text else []
 
 
 def done_format_problem(text):
     """Name the first Done item lacking a BUILT/RECORDED/OTHER word or a PR/commit ref, else ''."""
-    for item in done_items(block_text(text)):
+    for item in done_items(block_text(text, keep_indent=True)):
         if not DONE_KIND_RE.search(item) or not DONE_REF_RE.search(item):
             return item[:60]
     return ""
@@ -227,12 +239,15 @@ def done_format_problem(text):
 # carries a gloss when 2 or more words follow it after a separator (`D12, short titles`,
 # `D12: ...`, `D12 (..)`), or `D12's two words`, or it sits in parentheses after words
 # (`short titles (D12)`).
-CITE_ID_RE = re.compile(r"(?<![\w/.#-])(?:D\d{1,4}|[Dd]ecisions?\s+#?\d{1,4})(?!\w|\.\d)")
+CITE_ID_RE = re.compile(r"(?<![\w/.#:$-])(?:D\d{1,4}|[Dd]ecisions?\s+#?\d{1,4})(?!\w|\.\d|:[A-Z]\d)")
 CITE_SKIP_RE = re.compile(r"```.*?```|`[^`\n]*`|https?://\S+|\[[^\]\n]*\]\([^)\n]*\)", re.S)
 GLOSS_AFTER_RE = re.compile(
-    r"""^["')\]]*\s*(?:[,:;(—–-]|\s-\s)\s*\(?[A-Za-z][\w'-]*\s+[\w'-]+""")
+    r"""^["')\]]*\s*(?:[,:;(=—–-]|\s-{1,2}\s)\s*\(?[A-Za-z][\w'-]*\s+[\w'-]+"""
+    r"""|^["')\]]*\s+(?:says|means|is|covers|rules)\s+[A-Za-z][\w'-]*\s+[\w'-]+""")
 GLOSS_POSSESSIVE_RE = re.compile(r"^['’]s\s+[A-Za-z][\w'-]*\s+[\w'-]+")
 GLOSS_BEFORE_RE = re.compile(r"[A-Za-z]{2,}[^\n(]{0,60}\(\s*$")
+# a gloss before the id: two words, then a comma, colon, or dash, then the id
+GLOSS_LEAD_RE = re.compile(r"[A-Za-z]{2,}\s+[A-Za-z]{2,}\s*(?:[,:—–=]|--|\s-)\s*$")
 
 
 def bare_cite(text):
@@ -244,6 +259,8 @@ def bare_cite(text):
         if GLOSS_AFTER_RE.match(after) or GLOSS_POSSESSIVE_RE.match(after):
             continue
         if GLOSS_BEFORE_RE.search(before) and after.lstrip().startswith(")"):
+            continue
+        if GLOSS_LEAD_RE.search(before) or before.rstrip().lower().endswith("vitamin"):
             continue
         return m.group(0)
     return ""
