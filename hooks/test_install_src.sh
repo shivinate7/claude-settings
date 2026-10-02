@@ -5,7 +5,7 @@
 #
 # Run it from the repository root:
 #
-#   sh hooks/test_install_src.sh
+#   sh hooks/test_install_src.sh [case ...]   # names given: run only those cases
 #
 # Every case uses a temp HOME and a temp CLAUDE_CONFIG_DIR so the real /root/.claude is
 # never touched. SESSION_START_SH lets a case point at a different (e.g. pre-fix) copy of
@@ -1170,39 +1170,44 @@ caseF5() {
   fi
 }
 
-case1
-case2
-case3
-case_origins
-case7
-case8
-pointer_case1
-pointer_case2
-pointer_case3
-pointer_case4
-pointer_case5
-pointer_case6
-case4
-case5
-case6
-case9
-case10
-prune_case1
-prune_case2
-prune_case3
-prune_case4
-prune_case5
-prune_case6
-skills_case1
-skills_case2
-bin_case1
-bin_case2
-caseF1
-caseF2
-caseF3
-caseF4
-caseF5
-caseF6
+# Optional case filter: `sh hooks/test_install_src.sh caseF4 caseF6` runs only those cases.
+# No arguments runs every case. lint/check_unknown_reads_contract.py uses it.
+ONLY=" $* "
+run() { [ "$ONLY" = "  " ] || case "$ONLY" in *" $1 "*) ;; *) return 0 ;; esac; "$1"; }
+
+run case1
+run case2
+run case3
+run case_origins
+run case7
+run case8
+run pointer_case1
+run pointer_case2
+run pointer_case3
+run pointer_case4
+run pointer_case5
+run pointer_case6
+run case4
+run case5
+run case6
+run case9
+run case10
+run prune_case1
+run prune_case2
+run prune_case3
+run prune_case4
+run prune_case5
+run prune_case6
+run skills_case1
+run skills_case2
+run bin_case1
+run bin_case2
+run caseF1
+run caseF2
+run caseF3
+run caseF4
+run caseF5
+run caseF6
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
