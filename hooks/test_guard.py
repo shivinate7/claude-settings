@@ -152,6 +152,12 @@ PUSHMAIN = os.path.join(ROOT, "pushmain")
 PUSHTRUNK = os.path.join(ROOT, "pushtrunk")
 PUSHNOHEAD = os.path.join(ROOT, "pushnohead")
 PUSHDETACHED = os.path.join(ROOT, "pushdetached")
+# push.default fixtures, each on `feat`: UP follows an upstream named main, UPSELF an upstream
+# named feat, NOUP has push.default upstream and no upstream, MATCH has push.default matching.
+PUSHUP = os.path.join(ROOT, "pushup")
+PUSHUPSELF = os.path.join(ROOT, "pushupself")
+PUSHNOUP = os.path.join(ROOT, "pushnoup")
+PUSHMATCH = os.path.join(ROOT, "pushmatch")
 
 # WTMAIN is the primary checkout of its own small repository. Every linked worktree below is a
 # real one, because the rule reads `git worktree list --porcelain` and `git status --porcelain`
@@ -755,6 +761,20 @@ def build_fixtures():
             run_vcs(where, "checkout", "-q", "--detach")
         if (head and run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD").returncode != 0):
             sys.exit("fixture setup failed in build_fixtures: origin/HEAD in %r unreadable" % where)
+
+    for where, mode, merge in ((PUSHUP, "upstream", "main"), (PUSHUPSELF, "upstream", "feat"),
+                               (PUSHNOUP, "upstream", None), (PUSHMATCH, "matching", None)):
+        make_repo(where, {"base.txt": "base\n"})
+        run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+        run_vcs(where, "update-ref", "refs/remotes/origin/main", "HEAD")
+        run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        run_vcs(where, "checkout", "-q", "-b", "feat")
+        run_vcs(where, "config", "push.default", mode)
+        if merge:
+            run_vcs(where, "config", "branch.feat.remote", "origin")
+            run_vcs(where, "config", "branch.feat.merge", "refs/heads/" + merge)
+        if run_vcs(where, "config", "--get", "push.default").stdout.strip() != mode:
+            sys.exit("fixture setup failed in build_fixtures: push.default in %r" % where)
 
     # ----------------------------------------------------------------- worktree remove/prune
     #
@@ -1913,6 +1933,37 @@ push_case("forced where git cannot be read asks",
           "--force-with-lease --force-if-includes origin HEAD:feat", "ask",
           cwd=NOGIT)
 push_case("forced with a plus where git cannot be read asks", "origin +HEAD:feat", "ask", cwd=NOGIT)
+
+LE = "--force-with-lease --force-if-includes "
+push_case("a quoted refspec to the default branch asks", LE + 'origin "HEAD:main"', "ask")
+push_case("a single-quoted plus refspec to the default branch asks", "origin '+main'", "ask")
+push_case("a quoted remote is unquoted", LE + '"origin" HEAD:main', "ask")
+push_case("lease with --repo=, refspec to the default branch asks", "--repo=origin " + LE + "HEAD:main",
+          "ask")
+push_case("lease with --repo and its value, refspec to the default branch asks",
+          "--repo origin " + LE + "HEAD:main", "ask")
+push_case("lease with --repo off the default branch", "--repo=origin " + LE + "HEAD:feat", "allow")
+push_case("a delete refspec at the default branch asks", "origin :main", "ask")
+push_case("a delete refspec at a full default ref asks", "origin :refs/heads/main", "ask")
+push_case("deleting with --delete at the default branch asks", "--delete origin main", "ask")
+push_case("deleting with -d at the default branch asks", "-d origin main", "ask")
+push_case("a deletion off the default branch, refspec", "origin :feat", "allow")
+push_case("a deletion off the default branch, --delete", "--delete origin feat", "allow")
+push_case("--no-force-if-includes cancels --force-if-includes",
+          "--force-with-lease --force-if-includes --no-force-if-includes", "deny")
+push_case("--no-force-with-lease cancels the lease, so nothing is forced",
+          "--force-with-lease --no-force-with-lease --force-if-includes origin feat", "allow")
+push_case("a glued push option is not -f", "-ofoo origin feat", "allow")
+push_case("a push option with its value is not -f", "-o foo origin feat", "allow")
+push_case("a bare lease with push.default upstream follows the upstream to the default branch",
+          LE.strip(), "ask", cwd=PUSHUP)
+push_case("a bare lease with push.default upstream follows an upstream off the default branch",
+          LE.strip(), "allow", cwd=PUSHUPSELF)
+push_case("a bare lease with push.default upstream and no upstream asks", LE.strip(), "ask",
+          cwd=PUSHNOUP)
+push_case("a bare lease with push.default matching asks", LE.strip(), "ask", cwd=PUSHMATCH)
+push_case("a bare lease with an abbreviated force-with-lease and includes allows",
+          "--force-with --force-if-inc", "allow")
 
 # FALSE ALARMS: a guard that cries wolf is spent.
 push_case("a non-forced push of main", "origin main", "allow", cwd=PUSHMAIN)

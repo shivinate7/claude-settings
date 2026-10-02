@@ -29,9 +29,16 @@ target (CLAUDE.md, git-remedy-never-names-target).
 ## How the destination is resolved
 
 - A refspec `src:dst` goes to `dst`. A bare `src` goes to `src`. A leading `+` and a
-  `refs/heads/` prefix drop off.
-- `HEAD`, an empty destination, and no refspec at all resolve to the current branch. A
-  detached HEAD has none, so the push asks.
+  `refs/heads/` prefix drop off. A quoted single-word refspec or remote is unquoted first.
+- `HEAD` resolves to the current branch. A detached HEAD has none, so the push asks.
+- No refspec: read `push.default` with `git config`. `simple`, `current`, or unset: the
+  current branch. `upstream`: the branch's `branch.<name>.merge`. Anything else (`matching`,
+  `nothing`, no upstream, an unreadable config) asks.
+- `--repo=<remote>` or `--repo <remote>` names the remote. Every plain word is then a refspec.
+- A deletion (`--delete`, `-d`, `:dst`) at the default branch asks. A deletion elsewhere
+  is allowed.
+- `--no-force-if-includes` and `--no-force-with-lease` cancel the flag before them.
+  `-ofoo` and `-o foo` are push options, never `-f`.
 - `--mirror` and `--all` reach every branch, so a forced one asks. `--mirror` forces by
   itself.
 - A glob destination asks.
@@ -53,8 +60,9 @@ sometimes the intent. The prompt is the grant. The prompt names no target.
   on git 2.54.0 only, never on an older one: unmeasured.
 - A lease with a sha guards the one ref it names. A push of another ref beside it is not
   guarded. This design accepts that for the sha form, as briefed.
-- Quoted text is blanked before the push is read. A push inside `sh -c "..."` is not read,
-  as before this change.
+- Known gaps. A push through a shell alias, a git alias, or `sh -c "..."` is not read.
+  Quoted multi-word text is blanked, so a push inside it is not read either. Shell
+  variables and command substitution in a refspec are not expanded.
 - `git -C <path> push` and a `cd` before the push read the session's directory, not the
   push's. A wrong read can resolve the wrong default branch.
 

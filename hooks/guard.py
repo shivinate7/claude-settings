@@ -538,8 +538,16 @@ def clean_deletes_files(args) -> bool:
     return False
 
 
-PUSH_VALUE_OPTS = {"--repo", "--receive-pack", "--exec", "-o", "--push-option"}
+PUSH_VALUE_OPTS = {"--receive-pack", "--exec", "-o", "--push-option"}
 DEFAULT_BRANCH_FALLBACK = ("main", "master")
+
+
+def _push_config(cwd: str, key: str):
+    """The config value, '' when the key is unset, None when git cannot answer."""
+    answer = _git(cwd, "config", "--get", key) if cwd else None
+    if answer is None or answer.returncode not in (0, 1):
+        return None
+    return answer.stdout.strip()
 
 
 def _push_current_branch(cwd: str):
@@ -547,6 +555,25 @@ def _push_current_branch(cwd: str):
     if answer is None or answer.returncode != 0 or not answer.stdout.strip():
         return None
     return answer.stdout.strip()
+
+
+def _push_bare_destination(cwd: str):
+    """Where a push with no refspec goes, read through push.default, else None (unknown).
+
+    `simple` and `current` push the current branch to its own name. `upstream` pushes to the
+    branch's upstream ref. `matching`, `nothing`, an unset upstream or an unreadable config is
+    unknown, and unknown is never safe.
+    """
+    current = _push_current_branch(cwd)
+    mode = _push_config(cwd, "push.default")
+    if current is None or mode is None:
+        return None
+    if mode in ("", "simple", "current"):
+        return current
+    if mode in ("upstream", "tracking"):
+        merge = _push_config(cwd, "branch." + current + ".merge")
+        return merge.removeprefix("refs/heads/") if merge else None
+    return None
 
 
 def _push_default_branches(cwd: str, remote: str):
@@ -567,55 +594,84 @@ def _push_default_branches(cwd: str, remote: str):
     return DEFAULT_BRANCH_FALLBACK
 
 
-PUSH_QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'")
+# A quoted run with a space in it is text (a commit message, an echo), never a push. A quoted
+# single word stays: it is a refspec or a remote, and the shell would unquote it.
+PUSH_QUOTED = re.compile(r"\"[^\"\s]*\s[^\"]*\"|'[^'\s]*\s[^']*'")
 
 
 def push_text(segment: str) -> str:
-    """The segment with quoted text blanked: a quoted `--force` is text, not a push."""
+    """The segment with quoted multi-word text blanked: a quoted `--force` is text, not a push."""
     return PUSH_QUOTED.sub(" ", segment)
 
 
 def push_verdict(args, cwd: str) -> str:
     """'' for an allowed push, else 'ask' or 'deny', for the `git push` arguments `args`.
 
-    Not forced: ''. Forced at the default branch, or at a destination this cannot resolve: 'ask'.
-    Forced by `--force`, `-f`, a `--fo...` prefix or a `+refspec`: 'deny'. Forced by a lease: ''
-    when `--force-if-includes` rides with it, or every lease names its own sha; else 'deny'.
+    Not forced: ''. Forced or deleting at the default branch, or at a destination this cannot
+    resolve: 'ask'. Forced by `--force`, `-f`, a `--fo...` prefix or a `+refspec`: 'deny'. Forced
+    by a lease: '' when `--force-if-includes` rides with it, or every lease names its own sha;
+    else 'deny'. A deletion off the default branch is ''.
     """
-    force = mirror = every = includes = unpinned = leased = False
+    force = mirror = every = includes = unpinned = leased = delete = False
+    remote = ""
     plain = []
-    skip = False
+    skip = repo_next = False
     for arg in args:
-        if skip:
+        arg = arg.replace('"', "").replace("'", "")
+        if repo_next:
+            repo_next, remote = False, arg
+        elif skip:
             skip = False
         elif arg in PUSH_VALUE_OPTS:
             skip = True
         elif arg.startswith("--"):
             name, _, value = arg.partition("=")
-            if arg == "--force-if-includes":
+            if name == "--repo":
+                remote, repo_next = value, not value
+            elif name == "--force-if-includes" or (
+                    len(name) >= 9 and "--force-if-includes".startswith(name)):
                 includes = True
-            elif name == "--force-with-lease":
+            elif name == "--no-force-if-includes":
+                includes = False
+            elif name == "--no-force-with-lease":
+                leased = unpinned = False
+            elif name == "--force-with-lease" or (
+                    len(name) >= 9 and "--force-with-lease".startswith(name)):
                 leased = True
                 unpinned = unpinned or not value.partition(":")[2]
             elif name == "--mirror":
                 mirror = True
             elif name == "--all":
                 every = True
+            elif name == "--delete":
+                delete = True
             elif len(name) >= 4 and "--force".startswith(name):
                 force = True
         elif arg.startswith("-") and len(arg) > 1:
-            force = force or "f" in arg
+            for letter in arg[1:]:
+                if letter == "o":  # a push option: the rest of the word, or the next word
+                    skip = arg.endswith("o")
+                    break
+                force = force or letter == "f"
+                delete = delete or letter == "d"
         else:
             plain.append(arg)
-    plus = any(spec.startswith("+") for spec in plain[1:])
-    if not (force or leased or plus or mirror):
+    if not remote and plain:
+        remote, plain = plain[0], plain[1:]
+    plus = any(spec.startswith("+") for spec in plain)
+    delete = delete or any(spec.startswith(":") for spec in plain)
+    if not (force or leased or plus or mirror or delete):
         return ""
-    defaults = _push_default_branches(cwd, plain[0] if plain else "origin")
+    if not remote:
+        remote = _push_config(cwd, "branch." + (_push_current_branch(cwd) or "") + ".remote")
+    defaults = _push_default_branches(cwd, remote or "origin")
     reaches = mirror or every or defaults is None
-    for spec in plain[1:] or [""]:
+    for spec in plain or [""]:
         source, colon, target = spec.lstrip("+").partition(":")
         target = target if colon else source
-        if target in ("", "HEAD", "@"):
+        if not plain:
+            target = _push_bare_destination(cwd)
+        elif target in ("HEAD", "@"):
             target = _push_current_branch(cwd)
         if target is None or "*" in target:
             reaches = True
@@ -625,6 +681,8 @@ def push_verdict(args, cwd: str) -> str:
         return "ask"
     if force or plus:
         return "deny"
+    if delete and not leased:
+        return ""
     return "" if includes or not unpinned else "deny"
 
 
