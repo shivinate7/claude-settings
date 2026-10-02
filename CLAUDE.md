@@ -76,7 +76,7 @@ never as clear or broken.<!-- rule:verification-report-unknown-reads -->
 **Tokens.** Never load a long document whole. Read one entry, one section, or a
 rendered view.<!-- rule:tokens-never-load-whole-doc --> A verification command's answer is its verdict, not its stream. Get the
 verdict with one bounded command. Never scroll a log to find out whether something
-passed.<!-- rule:tokens-verdict-not-stream --> Point a brief at files. Never paste them in.<!-- rule:tokens-point-brief-at-files --> Read a sub-agent's report,
+passed.<!-- rule:tokens-verdict-not-stream --> Run every verification command through `verdict <cmd>`, which prints the verdict and keeps the full output in a log.<!-- rule:tokens-run-through-verdict --> Point a brief at files. Never paste them in.<!-- rule:tokens-point-brief-at-files --> Read a sub-agent's report,
 never its transcript.<!-- rule:tokens-read-report-not-transcript --> When compacting, keep the files, the commands, each ruling's home, and the pid and port of each server still running.
 Drop the narration.<!-- rule:tokens-compacting-keep-essentials -->
 

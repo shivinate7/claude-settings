@@ -1,0 +1,25 @@
+#!/usr/bin/env python3
+# verdict <cmd...>: run the command, keep the full output in a log, print only the verdict.
+# Log: $VERDICT_LOG, else a new file in $TMPDIR. Exit code is the command's. Windows: bin/verdict.cmd.
+import os, re, subprocess, sys, tempfile, time
+HOT = re.compile(r"FAIL|Error|assert|Traceback")
+CAP = 30
+def main(argv):
+    if not argv: sys.exit("usage: verdict <cmd...>")
+    name = " ".join(argv)
+    log = os.environ.get("VERDICT_LOG")
+    if not log:
+        fd, log = tempfile.mkstemp(prefix="verdict-", suffix=".log"); os.close(fd)
+    t = time.time()
+    with open(log, "wb") as f:
+        try: rc = subprocess.run(argv, stdout=f, stderr=subprocess.STDOUT).returncode
+        except OSError as e: f.write(f"verdict: cannot run {argv[0]}: {e}\n".encode()); rc = 127
+    secs = f"{time.time() - t:.1f}s"
+    if rc == 0:
+        print(f"PASS {name} ({secs})"); return 0
+    print(f"FAIL {name} rc={rc} ({secs}) log={log}")
+    lines = open(log, encoding="utf-8", errors="replace").read().splitlines()
+    hot = [l for l in lines if HOT.search(l)]
+    print("\n".join((hot or lines)[-CAP:]))
+    return rc
+sys.exit(main(sys.argv[1:]))
