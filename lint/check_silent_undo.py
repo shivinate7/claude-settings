@@ -104,11 +104,25 @@ def pool_of(cwd, p, m):
     return counts("\n".join(l[1:] for l in out.splitlines() if l.startswith("+") and not l.startswith("+++")))
 
 
-def rewritten(line, hs):
-    """True when a line the merge put in the same hunk reads at least 0.9 like this one. 0.8 would
-    excuse `A new 1` against `B new 1` (0.86), which is a drop."""
-    return any(difflib.SequenceMatcher(None, line, g, autojunk=False).ratio() >= 0.9
-               for o, n in hs if line in o for g in n)
+def rewritten(line, hs, base=(), modified=False):
+    """True when the merge rewrote this line inside its hunk, so it is no silent drop. Either every
+    word of the line survives, in order, in the hunk's new lines (a re-wrap), or a new line reads
+    0.9 like it. 0.8 would excuse `A new 1` against `B new 1` (0.86), which is a drop. A line that
+    itself changed a base line (`modified`) is a value both sides touched, and 0.8 is enough: a
+    resolver who picks a third value for `RULE_FLOOR = 85` and `= 91` wrote `= 94`.
+    A new line that equals the base version is a restore, never a rewrite: A changed
+    `retries = 4` to 5, and a stale copy put 4 back. Only a line that differs from both counts."""
+    words = re.findall(r"\w+", line)
+    for o, n in hs:
+        if line not in o:
+            continue
+        new = [g for g in n if not any(g in c for c in base)]
+        flat = re.findall(r"\w+", " ".join(new))
+        if words and any(flat[i:i + len(words)] == words for i in range(len(flat) - len(words) + 1)):
+            return True
+        if any(difflib.SequenceMatcher(None, line, g, autojunk=False).ratio() >= (0.8 if modified else 0.9) for g in new):
+            return True
+    return False
 
 
 def lost_lines(cwd, m):
@@ -143,7 +157,8 @@ def lost_lines(cwd, m):
                 pool[l] -= moved
                 if missing > moved:
                     hs = hunks(cwd, p, m, path) if hs is None else hs
-                    if not rewritten(l, hs):
+                    mod = any(l in hn and ho for b in bases for ho, hn in hunks(cwd, b, p, path))
+                    if not rewritten(l, hs, in_b, mod):
                         lost.append(l)
             if lost:
                 found.append((path, p, lost))
@@ -212,16 +227,17 @@ def misses(small, big):
 
 
 def undone(o, n, mine):
-    """True when a hunk of `mine` reverses the earlier hunk (o -> n). Exact, or with 3 lines or more
-    in the earlier hunk, whole inside a hunk that holds other edits too, or with 6 lines or more, on
-    all but one line (a re-worded line). Lines the earlier commit only added (o empty) count when
-    this change removes them, even in a hunk that also edits a neighbour."""
+    """True when a hunk of `mine` reverses the earlier hunk (o -> n). Exact. Or the earlier hunk,
+    whole and line for line, inside a bigger hunk that holds other edits (a stale value put back
+    beside an edited neighbour). Or, with 6 lines or more, on all but one line (a re-worded line).
+    Lines the earlier commit only added (o empty) count when this change removes them, edit
+    beside them or not, unless the hunk re-wrote them."""
     for big_o, big_n in mine:
         if (big_o, big_n) == (n, o):
             return True
-        if not o and misses(n, big_o) == 0 and any(not rewritten(l, [(big_o, big_n)]) for l in n):
-            return True  # main only added these lines, and this change removes them, edit beside them or not
-        if len(o) + len(n) < 3:
+        if not o:
+            if n and misses(n, big_o) == 0 and any(not rewritten(l, [(big_o, big_n)]) for l in n):
+                return True
             continue
         if misses(o, big_n) + misses(n, big_o) <= (1 if len(o) + len(n) >= 6 else 0):
             return True

@@ -104,4 +104,13 @@ Cost: a pull request run took 0.4 to 5 seconds on this repo. The full-history au
 - A binary file is not read.
 - A removal of added lines that shares a hunk with an edit is not seen. An edit in place
   looks the same. Restored lines in a shared hunk are seen.
-- A merge of three or more parents is UNKNOWN.
+- A merge of three or more parents is UNKNOWN. So are git older than 2.38, a shallow clone,
+  and any history the check cannot read. Aliases and exotic merges count as unknown, not as clean.
+  CI is red on unknown. `merge.py` refuses unless the owner passes `--undo-check-unknown-ok`.
+- A junk trailer reason passes. `Drops-lines: a.txt -- x` excuses the path. The check prints
+  `ALLOWED <path>: <reason>`, so the reviewer reads every reason. A reviewer who does not
+  read it is the gap.
+- A stale value put back is a reversal, never a rewrite. A similar line excuses a drop only
+  when it differs from both the lost line and the base line. A value both sides changed may
+  resolve to a third value (0.8 like it). A line main only added needs 0.9.
+- A removed line whose words all survive in order in the hunk is a re-wrap, and passes.

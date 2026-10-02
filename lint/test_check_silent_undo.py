@@ -342,6 +342,75 @@ class Stale(unittest.TestCase):
         self.assertEqual(r.verdict(), [])
 
 
+class Value(unittest.TestCase):
+    """A stale value overwrite is the incident in its smallest form: A changed one value line, and
+    the branch carries the old one back. Similar lines must not hide it."""
+    T0, T1, T2 = "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
+    PAIRS = [("retries = 4", "retries = 5"), ("ten minutes", "one hour")]
+
+    def build(self, old, new):
+        r = self.r = Repo()
+        text = lambda first, val: "".join("l%d\n" % i for i in range(1, 6)) + first + "\n" + val + "\n" + "tail\n"
+        r.put("cfg.txt", text("head", old))
+        r.commit("base", date="2025-12-01T10:00:00", cfg_txt=text("head", old))
+        r.push()
+        r.sh("checkout", "-q", "-b", "feat")
+        r.commit("feat edits the line above", date=self.T0, cfg_txt=text("head B", old))
+        r.sh("checkout", "-q", "main")
+        r.commit("A changes the value", date=self.T1, cfg_txt=text("head", new))
+        r.push()
+        r.sh("checkout", "-q", "feat")
+
+    def test_rebase_that_takes_its_own_side_restores_the_old_value(self):
+        for old, new in self.PAIRS:
+            with self.subTest(old=old):
+                self.build(old, new)
+                self.r.sh("rebase", "-X", "theirs", "main")
+                got = self.r.verdict()
+                self.assertTrue(any("cfg.txt" in p for p in got), got)
+
+    def test_merge_taking_ours_restores_the_old_value(self):
+        for old, new in self.PAIRS:
+            with self.subTest(old=old):
+                self.build(old, new)
+                self.r.sh("merge", "-X", "ours", "--no-edit", "main", date=self.T2)
+                got = self.r.verdict()
+                self.assertTrue(any("cfg.txt" in p and "drops" in p for p in got), got)
+
+    def test_a_third_value_is_a_rewrite_not_a_reversal(self):
+        """Both sides changed the line, and the resolver picked a value that is neither."""
+        r = self.r = Repo()
+        text = lambda val: "".join("l%d\n" % i for i in range(1, 6)) + val + "\ntail\n"
+        r.commit("base", date="2025-12-01T10:00:00", cfg_txt=text("RULE_FLOOR = 80"))
+        r.push()
+        r.sh("checkout", "-q", "-b", "feat")
+        r.commit("feat bumps", date=self.T0, cfg_txt=text("RULE_FLOOR = 85"))
+        r.sh("checkout", "-q", "main")
+        r.commit("main bumps", date=self.T1, cfg_txt=text("RULE_FLOOR = 91"))
+        r.push()
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "main", ok=False)
+        r.put("cfg.txt", text("RULE_FLOOR = 94"))
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge main", date=self.T2)
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_re_wrapped_paragraph_is_not_a_drop(self):
+        r = self.r = Repo()
+        body = "".join("l%d\n" % i for i in range(1, 8))
+        r.commit("base", date="2025-12-01T10:00:00", doc_txt=body)
+        r.push()
+        r.sh("checkout", "-q", "-b", "feat")
+        r.commit("feat", date=self.T0, other_txt="x\n")
+        r.sh("checkout", "-q", "main")
+        r.commit("A adds a paragraph", date=self.T1, doc_txt=body.replace("l3\n", "l3\nalpha beta gamma delta\nepsilon zeta eta theta\niota kappa\n"))
+        r.push()
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "--no-edit", "main", date=self.T1)
+        r.commit("re-wrap it", date=self.T2, doc_txt=body.replace("l3\n", "l3\nalpha beta gamma\ndelta epsilon zeta eta\ntheta iota kappa\n"))
+        self.assertEqual(r.verdict(), [])
+
+
 class Green(unittest.TestCase):
     def setUp(self):
         self.r = base_repo()
