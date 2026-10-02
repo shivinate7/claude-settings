@@ -26,9 +26,12 @@ THE MAP. lint/rule_mechanisms.json holds one row per anchor. A row's mechanism i
     that must appear in the file) is refused: a docstring or a label satisfies it while the
     code under it does nothing (decisions/known-bad-input-proves-the-gate.md).
       - `test`: a test id, `path::name` or `path::Class.name`, resolved by `citation_problem`.
-        A `.py` id must name a `def` (a unittest method, or a case function that the file
-        references), or a case registered by a literal first argument to `add(`, `sh(` or
-        `check(`. All of that is read from the AST. A `.mjs` id must name a top-level
+        A `.py` id must name a `def` (a method of a unittest.TestCase class with no skip
+        marker, or a case function that code which runs names), or a case registered by a
+        literal first argument to `add(`, `sh(` or `check(` in code that runs. All of that is
+        read from the AST. "Runs" is static: module-level code and the bodies of functions it
+        names; a form that cannot be proved so is refused. The test file must also be the
+        row's `ref`, or import it, or pass its file name to a call (`link_problem`). A `.mjs` id must name a top-level
         `test("name", ...)` registration; no JavaScript parser ships here, so that one is a
         line-anchored pattern on the registry key. That is a bandaid, named.
       - `setting`: `{"file": "settings.json", "path": "env.NAME", "equals": "v"}` or
@@ -90,26 +93,89 @@ CASE_REGISTRARS = {"add", "sh", "check"}
 
 
 def _defs(tree):
-    """Every function def in `tree`, as (class name or None, node)."""
+    """Every function def in `tree`, as (class node or None, node)."""
     out = []
+    in_class = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
             for item in node.body:
                 if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    out.append((node.name, item))
-    in_class = {id(n) for _, n in out}
+                    out.append((node, item))
+                    in_class.add(id(item))
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and id(node) not in in_class:
             out.append((None, node))
     return out
 
 
-def citation_problem(test_id: str, root: str = ROOT):
-    """Return why `test_id` names no test that runs, or None when it does.
+def _skipped(node) -> bool:
+    """True when a def or class carries a skip marker we cannot prove is lifted."""
+    for dec in node.decorator_list:
+        text = ast.unparse(dec)
+        if "skip" in text.lower() or "expectedFailure" in text:
+            return True
+    for n in ast.walk(node):
+        if isinstance(n, ast.Name) and n.id == "SkipTest":
+            return True
+        if isinstance(n, ast.Attribute) and n.attr in ("skipTest", "SkipTest"):
+            return True
+    return False
 
-    `path::name`, `path::Class.name`. The file must exist; the name must resolve as the
-    module docstring says. A name defined twice in one class is refused: the second `def`
-    silently replaces the first, so the cited body never runs.
+
+def _is_testcase(cls, classes) -> bool:
+    """A class unittest collects: derives, directly or through a local class, from TestCase."""
+    for base in cls.bases:
+        name = base.id if isinstance(base, ast.Name) else getattr(base, "attr", None)
+        if name == "TestCase":
+            return True
+        if name in classes and classes[name] is not cls and _is_testcase(classes[name], classes):
+            return True
+    return False
+
+
+def _constant_false(test) -> bool:
+    return isinstance(test, ast.Constant) and not test.value
+
+
+def _scan(nodes, out):
+    """Collect `nodes` and everything under them, skipping def bodies and `if False:` bodies."""
+    for node in nodes:
+        out.append(node)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            continue
+        if isinstance(node, ast.If) and _constant_false(node.test):
+            _scan(node.orelse, out)
+            continue
+        _scan(ast.iter_child_nodes(node), out)
+
+
+def _live_nodes(tree):
+    """Every node that runs when the file runs: module-level code, plus the body of any module
+    function that live code names. A def nobody names, a branch under `if False:`, and a call
+    inside an uncalled function are not live. Static and conservative: a function reached only
+    through a dynamic lookup reads as dead, and the row must then cite something provable."""
+    funcs = {n.name: n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    live = []
+    _scan(tree.body, live)
+    seen = set()
+    i = 0
+    while i < len(live):
+        node = live[i]
+        i += 1
+        if (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+                and node.id in funcs and node.id not in seen):
+            seen.add(node.id)
+            _scan(funcs[node.id].body, live)
+    return live
+
+
+def citation_problem(test_id: str, root: str = ROOT):
+    """Return why `test_id` names no test that provably runs, or None when it does.
+
+    `path::name`, `path::Class.name`. The file must exist; the name must resolve as the module
+    docstring says. Refused: a name defined twice in a class (the last `def` wins), a skip
+    marker, a `test*` method outside a TestCase subclass, a case function that only dead code
+    names, and a registration inside a function that live code never calls.
     """
     path, sep, name = test_id.partition("::")
     if not sep or not name:
@@ -119,7 +185,10 @@ def citation_problem(test_id: str, root: str = ROOT):
         return f"test file `{path}` does not exist."
     text = read(full)
     if path.endswith(".mjs"):
-        if re.search(r'^test\(\s*"' + re.escape(name) + r'"\s*,', text, re.MULTILINE):
+        # Comments and template literals can hold a column-0 `test("..."` that never registers.
+        bare = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
+        bare = re.sub(r"`(?:\\.|[^`\\])*`", "``", bare, flags=re.DOTALL)
+        if re.search(r'^test\(\s*"' + re.escape(name) + r'"\s*,', bare, re.MULTILINE):
             return None
         return f"`{path}` registers no test named {name!r}."
     if not path.endswith(".py"):
@@ -128,28 +197,65 @@ def citation_problem(test_id: str, root: str = ROOT):
         tree = ast.parse(text)
     except SyntaxError as e:
         return f"`{path}` does not parse: {e}."
-    cls, _, func = name.rpartition(".")
-    matches = [n for c, n in _defs(tree) if n.name == func and (not cls or c == cls)]
+    cls_name, _, func = name.rpartition(".")
+    classes = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
+    matches = [(c, n) for c, n in _defs(tree)
+               if n.name == func and (not cls_name or (c is not None and c.name == cls_name))]
     if len(matches) > 1:
         return f"`{path}` defines {name!r} {len(matches)} times; the last silently wins."
     if matches:
-        node = matches[0]
-        owners = {id(n): c for c, n in _defs(tree)}
-        if owners[id(node)] is not None:
-            if not func.startswith("test"):
-                return f"`{name}` in `{path}` is a method that unittest never collects."
+        owner, node = matches[0]
+        if _skipped(node) or (owner is not None and _skipped(owner)):
+            return f"`{name}` in `{path}` carries a skip marker, so it may never run."
+        if owner is not None:
+            if not func.startswith("test") or not _is_testcase(owner, classes):
+                return f"`{name}` in `{path}` is not a test method of a unittest.TestCase class."
             return None
-        used = sum(1 for n in ast.walk(tree)
-                   if isinstance(n, ast.Name) and n.id == func and isinstance(n.ctx, ast.Load))
-        if used == 0:
-            return f"`{name}` in `{path}` is defined and never referenced, so no run calls it."
+        if not any(isinstance(n, ast.Name) and n.id == func and isinstance(n.ctx, ast.Load)
+                   for n in _live_nodes(tree)):
+            return f"`{name}` in `{path}` is never named by code that runs, so no run calls it."
         return None
-    for n in ast.walk(tree):
+    for n in _live_nodes(tree):
         if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
                 and n.func.id in CASE_REGISTRARS and n.args
                 and isinstance(n.args[0], ast.Constant) and n.args[0].value == name):
             return None
-    return f"`{path}` has no test, case function, or registered case named {name!r}."
+    return f"`{path}` has no test, case function, or live registered case named {name!r}."
+
+
+def link_problem(test_id: str, ref: str, root: str = ROOT):
+    """Return why the cited test's file never touches `ref`, or None when it does.
+
+    A test that proves some other file proves nothing about the row's gate. The test file must
+    be `ref`, or import its module, or pass its file name to a call (a subprocess path).
+    """
+    path = test_id.partition("::")[0]
+    if os.path.normpath(path) == os.path.normpath(ref):
+        return None
+    base = os.path.basename(ref)
+    stem = os.path.splitext(base)[0]
+    text = read(os.path.join(root, path))
+    if path.endswith(".mjs"):
+        return None if base in text else f"`{path}` never names `{base}`."
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return None  # citation_problem already reports an unparsable file
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Import) and any(a.name.split(".")[-1] == stem for a in n.names):
+            return None
+        if isinstance(n, ast.ImportFrom) and (n.module or "").split(".")[-1] == stem:
+            return None
+        if isinstance(n, ast.Call):
+            # A path handed straight to a call (a subprocess argv, os.path.join), never a
+            # string in a dict or a keyword: a citation row itself would satisfy that.
+            args = [a for arg in n.args
+                    for a in (arg.elts if isinstance(arg, (ast.List, ast.Tuple)) else [arg])]
+            if any(isinstance(a, ast.Constant) and isinstance(a.value, str) and base in a.value
+                   for a in args):
+                return None
+    return (f"`{path}` neither imports nor runs `{ref}`, so a test there proves nothing "
+            f"about that gate.")
 
 
 def _walk(value, parts):
@@ -320,6 +426,10 @@ def check(
                 why = citation_problem(mech["test"])
                 if why:
                     problems.append(f"row `{slug}` cites a test that does not resolve: {why}")
+                else:
+                    why = link_problem(mech["test"], ref)
+                    if why:
+                        problems.append(f"row `{slug}` cites a test unlinked to its ref: {why}")
             if mech.get("setting"):
                 why = setting_problem(mech["setting"])
                 if why:

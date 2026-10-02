@@ -290,7 +290,7 @@ class CitationTests(unittest.TestCase):
 
     def test_method_a_runner_never_collects_is_red(self):
         src = "class T:\n    def helper(self): pass\n"
-        self.assertIn("never collects", self.problem(src, "T.helper"))
+        self.assertIn("not a test method", self.problem(src, "T.helper"))
 
     def test_duplicate_def_in_a_class_is_red(self):
         src = ("import unittest\nclass T(unittest.TestCase):\n"
@@ -298,7 +298,7 @@ class CitationTests(unittest.TestCase):
         self.assertIn("2 times", self.problem(src, "T.test_a"))
 
     def test_function_never_referenced_is_red(self):
-        self.assertIn("never referenced", self.problem("def case_a(): pass\n", "case_a"))
+        self.assertIn("never named", self.problem("def case_a(): pass\n", "case_a"))
 
     def test_function_referenced_by_a_runner_resolves(self):
         src = "def case_a(): pass\nCHECKS = (case_a,)\n"
@@ -312,6 +312,80 @@ class CitationTests(unittest.TestCase):
         self.assertIsNone(self.problem('test("it works", () => {});\n', "it works", "t.mjs"))
         self.assertIn("registers no test", self.problem('// test("it works", () => {});\n',
                                                         "it works", "t.mjs"))
+
+    def test_skipped_method_is_red(self):
+        src = ("import unittest\nclass T(unittest.TestCase):\n"
+               "    @unittest.skip('later')\n    def test_a(self): pass\n")
+        self.assertIn("skip marker", self.problem(src, "T.test_a"))
+
+    def test_method_that_skips_itself_is_red(self):
+        src = ("import unittest\nclass T(unittest.TestCase):\n"
+               "    def test_a(self):\n        self.skipTest('no')\n")
+        self.assertIn("skip marker", self.problem(src, "T.test_a"))
+
+    def test_method_in_a_skipped_class_is_red(self):
+        src = ("import unittest\n@unittest.skip('x')\nclass T(unittest.TestCase):\n"
+               "    def test_a(self): pass\n")
+        self.assertIn("skip marker", self.problem(src, "T.test_a"))
+
+    def test_test_method_in_a_plain_class_is_red(self):
+        src = "class T:\n    def test_a(self): pass\n"
+        self.assertIn("not a test method", self.problem(src, "T.test_a"))
+
+    def test_method_in_a_class_deriving_a_local_testcase_resolves(self):
+        src = ("import unittest\nclass B(unittest.TestCase): pass\n"
+               "class T(B):\n    def test_a(self): pass\n")
+        self.assertIsNone(self.problem(src, "T.test_a"))
+
+    def test_case_function_named_only_under_if_false_is_red(self):
+        src = "def case_a(): pass\nif False:\n    CHECKS = (case_a,)\n"
+        self.assertIn("never named", self.problem(src, "case_a"))
+
+    def test_case_function_named_only_by_an_uncalled_function_is_red(self):
+        src = "def case_a(): pass\ndef dead():\n    return (case_a,)\n"
+        self.assertIn("never named", self.problem(src, "case_a"))
+
+    def test_case_function_named_by_a_called_function_resolves(self):
+        src = "def case_a(): pass\ndef main():\n    case_a()\nmain()\n"
+        self.assertIsNone(self.problem(src, "case_a"))
+
+    def test_registration_inside_an_uncalled_function_is_red(self):
+        src = 'def dead():\n    add("a case", 1)\n'
+        self.assertIn("no test", self.problem(src, "a case"))
+
+    def test_registration_inside_a_called_function_resolves(self):
+        src = 'def build():\n    add("a case", 1)\nbuild()\n'
+        self.assertIsNone(self.problem(src, "a case"))
+
+    def test_mjs_block_comment_and_template_literal_are_red(self):
+        self.assertIn("registers no test", self.problem(
+            '/*\ntest("it works", () => {});\n*/\n', "it works", "t.mjs"))
+        self.assertIn("registers no test", self.problem(
+            'const s = `\ntest("it works", () => {});\n`;\n', "it works", "t.mjs"))
+        self.assertIsNone(self.problem(
+            '/* note */\ntest("it works", () => {});\n', "it works", "t.mjs"))
+
+    def test_test_file_that_never_touches_the_ref_is_red(self):
+        with tempfile.TemporaryDirectory() as root:
+            for rel, body in (("gate.py", "x = 1\n"), ("test_other.py", "import os\n"),
+                              ("test_gate.py", "import gate\n"),
+                              ("test_run.py", "import subprocess\nsubprocess.run(['python3', 'lint/gate.py'])\n"),
+                              ("test_mention.py", "NOTE = 'lint/gate.py'\n")):
+                with open(os.path.join(root, rel), "w", encoding="utf-8") as f:
+                    f.write(body)
+            self.assertIn("proves nothing",
+                          rule_audit.link_problem("test_other.py::t", "lint/gate.py", root))
+            self.assertIsNone(rule_audit.link_problem("test_gate.py::t", "lint/gate.py", root))
+            self.assertIsNone(rule_audit.link_problem("test_run.py::t", "lint/gate.py", root))
+            self.assertIn("proves nothing",
+                          rule_audit.link_problem("test_mention.py::t", "lint/gate.py", root))
+            self.assertIsNone(rule_audit.link_problem("gate.py::t", "gate.py", root))
+
+    def test_row_whose_test_never_touches_its_ref_fails(self):
+        problems = run(rule_map=gate_map({
+            "ref": "lint/report_gate.py",
+            "test": "lint/test_rule_audit.py::RuleAuditTests.test_single_mapped_rule_is_clean"}))
+        self.assertTrue(any("unlinked" in p for p in problems), problems)
 
     def test_missing_file_is_red(self):
         self.assertIn("does not exist",

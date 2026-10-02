@@ -347,7 +347,7 @@
     "verification-report-unknown-reads": {
       "mechanism": {
         "kind": "gate",
-        "ref": "lint/check_unknown_reads_contract.py",
+        "ref": "hooks/test_guard.py",
         "test": "hooks/test_guard.py::subject_unread_log_case"
       }
     },

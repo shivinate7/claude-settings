@@ -1009,7 +1009,7 @@ def run_mutant(sources, work: str, entry):
     if target == "ruling":
         # ruling_home.py reads `../lint/_transcript.py` beside itself. A bare copy in `work`
         # would crash on that import and read as red on every case, whatever was mutated
-        # (decisions/mutant-cause-of-death.md). Lay out hooks/ and lint/ for the copy.
+        # (mutant-cause-of-death, a mutant's own cause of death must be checked). Lay out hooks/ and lint/ for the copy.
         tree = os.path.join(work, "tree_%s" % mutate_shared.safe_name(label))
         os.makedirs(os.path.join(tree, "hooks"), exist_ok=True)
         os.makedirs(os.path.join(tree, "lint"), exist_ok=True)

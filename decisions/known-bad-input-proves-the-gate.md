@@ -20,11 +20,19 @@ silent with or without the failure.
 ## Ruling
 
 - A `gate` row cites a `test` id (`path::name`, `path::Class.name`) or a `setting` value.
-  A `needle` is refused. The audit resolves the id from the AST: a `def` that unittest
-  collects or a runner references, or a case registered by a literal first argument to
-  `add(`, `sh(` or `check(`. A name inside a docstring, a comment, or a duplicate `def`
-  does not resolve. `.mjs` ids match a line-anchored `test("name",` registration, a named
-  bandaid: no JavaScript parser ships here.
+  A `needle` is refused. The audit resolves the id from the AST, and refuses every form it
+  cannot prove runs. It accepts three forms. One is a method of a `unittest.TestCase`
+  subclass with no skip marker. One is a case function that module-level code names, directly
+  or through a function that code names. One is a case registered by a literal first argument
+  to `add(`, `sh(` or `check(` in code that runs. It refuses six forms. One is a name in a docstring or comment. One is a duplicate `def`.
+  One is a skip marker. One is a `test*` method outside a TestCase class. Two are a name reached only under
+  `if False:` or inside an uncalled function. `.mjs` ids match a line-anchored
+  `test("name",` registration. Block comments and template literals are removed first. That
+  is a named bandaid: no JavaScript parser ships here.
+- The test file must also touch the row's `ref`: be it, import it, or pass its file name to a
+  call. A test of some other file proves nothing about the gate. `verification-report-unknown-reads`
+  now cites `hooks/test_guard.py`, where the cited case runs, not the contract script that
+  only calls it.
 - A `setting` row reads the parsed JSON value, `equals` or `contains`.
 - Where no test exercises the behaviour, the row reads `unmechanized` with the reason.
   Three rows moved: `verification-verify-against-repo`, `verification-never-dry-run-blocklist`,
@@ -38,5 +46,9 @@ silent with or without the failure.
 
 ## What this does not prove
 
-The audit proves a cited test exists and is collected. It does not prove the test goes red on
-the defect it names. That proof stays with the mutants and the fixture tests above.
+The audit proves a cited test exists and that static reading finds no reason it would not run.
+It does not run the test, and it does not prove the test goes red on the defect it names. A
+function reached only through a dynamic lookup reads as dead and is refused. The proof of red
+stays with the mutants and fixture tests above. The mutants follow mutant-cause-of-death, a
+mutant's own cause of death must be the one its label names. Each stub mutant names the case
+that must fail. The `ruling` target gets a tree that lets the copy import its helper.
