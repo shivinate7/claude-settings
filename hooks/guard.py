@@ -3795,6 +3795,7 @@ CONFIG_FROZEN_DIRS = (
 # checks by hand that this set matches the repo's own skills/*/ subdirectories.
 CONFIG_FROZEN_SKILLS = (
     os.path.normcase("ci-hygiene"),
+    os.path.normcase("compliance-check"),
     os.path.normcase("fresh-prose"),
 )
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
