@@ -530,6 +530,12 @@
         "test": "hooks/test_ruling_home.py::case_a_no_home_line"
       }
     },
+    "building-memory-is-short-term": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Whether a memory entry's ruling has a tracked home on main is a read of the repo against the entry's meaning. No hook matches the two yet."
+      }
+    },
     "output-answer-has-a-home": {
       "mechanism": {
         "kind": "unmechanized",
