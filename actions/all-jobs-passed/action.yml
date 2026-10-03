@@ -5,7 +5,7 @@ description: >
   needed job fails, and a skipped required check reads as green.
 inputs:
   needs:
-    description: "Pass `${{ toJSON(needs) }}`."
+    description: "Pass toJSON(needs) from the calling job, written as an expression in its with: block."
     required: true
 runs:
   using: composite
