@@ -21,9 +21,35 @@ class Held(Stop):
 
 SH_TIMEOUT = None  # seconds; the guard sets it, so a hung `gh` cannot outlast its hook
 
+def resolve_program(name, env=None):
+    """Find the real program by full path. One home for sh(), block() and after_merge().
+
+    On Windows CreateProcess never reads PATHEXT, so a bare `gh` misses `gh.cmd`: shutil.which
+    covers that. For `bash` specifically, Windows also lists C:\\Windows\\System32 ahead of
+    Git's own bin on PATH, and that folder holds the WSL launcher stub, not Git Bash (decision
+    bare-bash-on-windows-can-resolve-to-the-wsl-stub). So bash never resolves to anything under
+    System32: check %ProgramFiles%\\Git\\bin\\bash.exe (and the x86/W6432 copies) first, then a
+    PATH scan that skips System32. On POSIX this is plain shutil.which."""
+    env = env or os.environ
+    path = env.get("PATH")
+    if name == "bash" and os.name == "nt":
+        for var in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"):
+            base = env.get(var)
+            if base:
+                candidate = os.path.join(base, "Git", "bin", "bash.exe")
+                if os.path.isfile(candidate):
+                    return candidate
+        system_root = os.path.normcase(os.path.join(env.get("SystemRoot", r"C:\Windows"), "System32"))
+        for folder in (path or "").split(os.pathsep):
+            if os.path.normcase(folder).startswith(system_root):
+                continue
+            candidate = os.path.join(folder, "bash.exe")
+            if os.path.isfile(candidate):
+                return candidate
+    return shutil.which(name, path=path) or name
+
 def sh(args, cwd=None, input=None, env=None):
-    # Resolve the program first: on Windows CreateProcess never reads PATHEXT, so a bare `gh` misses `gh.cmd`.
-    args = [shutil.which(args[0], path=(env or os.environ).get("PATH")) or args[0], *args[1:]]
+    args = [resolve_program(args[0], env), *args[1:]]
     r =subprocess.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, timeout=SH_TIMEOUT)
     return r.returncode, (r.stdout + r.stderr).strip()
 
@@ -332,7 +358,7 @@ class Host:
             return
         t0 = self.now()
         try:
-            subprocess.run(["gh", "run", "watch", ids[0], "--exit-status"], capture_output=True, text=True, timeout=self.minute)
+            subprocess.run([resolve_program("gh"), "run", "watch", ids[0], "--exit-status"], capture_output=True, text=True, timeout=self.minute)
         except subprocess.TimeoutExpired:
             pass
         if self.now() - t0 < 1:  # watch returned at once: do not spin on the API
@@ -467,7 +493,7 @@ def after_merge(root, cmds):
     """Run each command. True when every one passed. A failure never undoes the merge."""
     ok = True
     for cmd in cmds:
-        c = subprocess.run(["bash", "-c", cmd], cwd=root).returncode
+        c = subprocess.run([resolve_program("bash"), "-c", cmd], cwd=root).returncode
         say(f"merge: afterMerge `{cmd}`: " + ("done." if not c else f"FAILED (exit {c}). The merge landed and stays."))
         ok = ok and not c
     return ok
