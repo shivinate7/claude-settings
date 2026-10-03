@@ -4561,7 +4561,10 @@ BUILDER_ROLE = "builder"
 AUTHOR_ROLE = "test-author"
 TEST_BASENAME = re.compile(
     r"^(?:test_.*\.py|.*_test\.(?:py|go)|.*\.test\.[cm]?[jt]sx?|.*\.spec\..+|conftest\.py"
-    r"|jest\.setup\..+)$")
+    r"|jest\.setup\..+|(?:.*[-_]selftest|selftest_.*)\.(?!md$).+)$")
+# SELF-TEST files (`*-selftest.*`, `*_selftest.*`, `selftest_*.*`) are test paths, except .md notes.
+# Incident 2026-10-02: Banchi self-test files had the role split inverted (builder edited them).
+# `selftestify.py`, `myselftest.py` and a bare `scripts/selftest` match no shape.
 # Case matters: `FooTest.java` is a test, `Contest.java` is not.
 JAVA_TEST = re.compile(r"^\w*Tests?\.java$")
 TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support"}
