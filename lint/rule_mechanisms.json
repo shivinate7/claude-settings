@@ -183,7 +183,7 @@
     "shared-trees-confirm-before-write": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "guard.py acts on the command itself. Nothing checks that the assistant confirmed its checkout and branch before issuing it."
+        "reason": "dropped: per-write token cost, no incident; owner ruling on PR 235"
       }
     },
     "shared-trees-own-ports-data": {
@@ -217,9 +217,10 @@
     },
     "git-wait-for-required-checks": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "Waiting is a behavior in time. No artifact records whether the assistant waited before it acted again."
-      }
+        "kind": "guard",
+        "ref": "merge-checks"
+      },
+      "test": "hooks/test_guard.py::merge-checks: --auto is gated like any merge"
     },
     "git-never-merge-failing-ci": {
       "mechanism": {
@@ -249,9 +250,10 @@
     },
     "git-cite-by-id": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No lint checks citation style in a commit message or a PR body for an id versus a bare path."
-      }
+        "kind": "guard",
+        "ref": "cite-by-id"
+      },
+      "test": "hooks/test_guard.py::cite-by-id: a PowerShell commit denies"
     },
     "git-record-own-file-per-kind": {
       "mechanism": {

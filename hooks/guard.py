@@ -33,6 +33,8 @@ one fixed order, and the first match wins.
                        flag alone. `commit`, `tag`, and `cherry-pick`'s own flags are measured
                        carve-outs. `merge --abort` is carved out, and every read subcommand is
                        untouched.
+  1d cite-by-id        a `git commit` message or `gh pr create|edit` body that cites a record by
+                       its path. Denied. See "three git acts" below.
   2 machine-wide-kill  a kill by name or by pattern, or `kill <pid>` of a live process that is
                        not a descendant of this session's own `claude` process
   2b detached-launch   a command that starts a process and detaches it from the session: a
@@ -49,6 +51,8 @@ one fixed order, and the first match wins.
   4 force-push         a rewrite of a published branch
     destructive-delete a recursive delete at a root, a home or a glob
   5 env-file           any read or write of an environment file
+  6 merge-checks       a `gh pr merge` (or the MCP merge tool) while the head has a check or run
+                       pending or red, or the read could not run. Denied. `--auto` passes.
   7 frozen-path        a write to the settings, the hooks or the global CLAUDE.md, under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. Always denied.
   8 subagent-model-cap a write to a settings file whose content sets or changes
@@ -296,10 +300,17 @@ def segment_tokens(segment: str):
     An unmatched quote or a stray backslash means the guard cannot tell what the segment would
     run. That must fail open, this file's existing stance: judge nothing rather than guess.
     """
+    # PowerShell's escape is the backtick, so a backslash there is a path separator. Doubling it
+    # keeps posix shlex from eating it (`C:\\repo` would read as `C:repo`).
+    if POWERSHELL_CALL[0]:
+        segment = segment.replace("\\", "\\\\")
     try:
         return shlex.split(segment, posix=True)
     except ValueError:
         return None
+
+
+POWERSHELL_CALL = [False]   # set per call by judge_shell: the tool being judged is PowerShell
 
 
 def _skip_assignments_and_keywords(tokens, index=0):
@@ -441,6 +452,21 @@ REDIRECTION = re.compile(
 )
 
 
+def _git_subcommand_index(tokens, index: int) -> int:
+    """Return the index of the subcommand of the `git` word at `index`, past git's own options."""
+    cursor = index + 1
+    while cursor < len(tokens):
+        token = tokens[cursor]
+        if token in GIT_OPT_WITH_VALUE:
+            cursor += 2
+            continue
+        if token.startswith("-"):
+            cursor += 1
+            continue
+        break
+    return cursor
+
+
 def git_calls(segment: str):
     """Return (subcommand, arguments) for every `git` call in one segment."""
     tokens = REDIRECTION.sub(" ", segment).split()
@@ -448,16 +474,7 @@ def git_calls(segment: str):
     index = 0
     while index < len(tokens):
         if basename(tokens[index]) in ("git", "git.exe"):
-            cursor = index + 1
-            while cursor < len(tokens):
-                token = tokens[cursor]
-                if token in GIT_OPT_WITH_VALUE:
-                    cursor += 2
-                    continue
-                if token.startswith("-"):
-                    cursor += 1
-                    continue
-                break
+            cursor = _git_subcommand_index(tokens, index)
             if cursor < len(tokens):
                 calls.append((tokens[cursor].lower(), tokens[cursor + 1:]))
             index = cursor + 1
@@ -4046,6 +4063,295 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str) -> No
     sys.exit(0)
 
 
+# ------------------------------------------------------------------ three git acts
+#
+# Each clause below judges the ACT a segment performs, read off its command word (decisions/
+# predicate-is-the-act.md), never a substring of the text. `echo git commit`, a `git log`, a
+# quoted message and a heredoc body name an act and perform none.
+#
+# 1. merge-checks (CLAUDE.md `git-wait-for-required-checks`): a merge made outside the merge tool is
+#    refused while the head has a check or a workflow run pending or red, or when that read could
+#    not run. The merge tool (merge/merge.py) runs its own `gh pr merge` as a subprocess, so no hook
+#    sees it; it has already waited. The read below is the tool's own `Host.head_read`, one home.
+# 2. cite-by-id (CLAUDE.md `git-cite-by-id`): a commit message or PR body that cites a record by
+#    its path is refused. The id is the record's file name without folder or `.md`, the slug
+#    lint/check_record_slugs.py measures, or the number the stamp claims at merge.
+
+def git_call_of(segment: str):
+    """Return (subcommand, args) when the segment's COMMAND WORD is git, else None.
+
+    Args come from shlex, so a quoted message stays one token. A segment shlex cannot parse
+    judges nothing: the same fail-open stance as `segment_tokens`.
+    """
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return None
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]) not in ("git", "git.exe"):
+        return None
+    cursor = _git_subcommand_index(tokens, index)
+    if cursor >= len(tokens):
+        return None
+    return tokens[cursor].lower(), tokens[cursor + 1:]
+
+
+def gh_call_of(segment: str):
+    """Return the tokens after `gh` when the segment's COMMAND WORD is gh, else None."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return None
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]) not in ("gh", "gh.exe"):
+        return None
+    return tokens[index + 1:]
+
+
+# ---- a merge made outside the merge tool
+MERGE_TOOLS = ("mcp__github__merge_pull_request",)
+MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject",
+                     "--match-head-commit", "-A", "--author-email"}
+# Seconds per `gh` call. The gate makes three calls: 3 * 3 = 9 s, under the 20 s hook timeout in
+# settings.json.
+MERGE_READ_TIMEOUT = 3
+MERGE_TOOL_REL = os.path.join("merge", "merge.py")
+
+
+def merge_call_of(segment: str):
+    """Return (selector, repo) for a `gh pr merge` segment, else None.
+
+    `selector` is the first positional word, '' for the current branch's pull request. `--auto` is
+    judged like any merge: GitHub's auto-merge waits only on REQUIRED checks, and a base with none
+    merges at once.
+    """
+    rest = gh_call_of(segment)
+    if rest is None or rest[:2] != ["pr", "merge"]:
+        return None
+    selector, repo = "", ""
+    args = rest[2:]
+    if "-h" in args or "--help" in args:
+        return None   # help merges nothing
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        if arg in ("-R", "--repo"):
+            repo = args[index] if index < len(args) else ""
+            index += 1
+        elif arg.startswith("--repo="):
+            repo = arg[len("--repo="):]
+        elif arg in MERGE_VALUE_FLAGS:
+            index += 1
+        elif arg.startswith("-"):
+            continue
+        elif not selector:
+            selector = arg
+    return selector, repo
+
+
+_MERGE_MODULE = []
+
+
+def settings_roots():
+    """The clones of claude-settings this guard may read a sibling file from: the one beside its
+    own real path (the hooks are symlinks into the clone), then the one the global rules file
+    points at."""
+    roots = [os.path.dirname(os.path.dirname(os.path.realpath(__file__)))]
+    pointer = pointer_checkout()
+    if pointer:
+        roots.append(pointer)
+    return roots
+
+
+def merge_module():
+    """Load merge/merge.py, the merge tool, or return None. Looked up beside this file's real
+    path first (the hooks are symlinks into the clone), then in the clone the global rules
+    file points at. An unloadable tool is an unknown read, never a pass."""
+    if _MERGE_MODULE:
+        return _MERGE_MODULE[0]
+    for root in settings_roots():
+        path = os.path.join(root, MERGE_TOOL_REL)
+        if not os.path.isfile(path):
+            continue
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("merge_tool", path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            module.SH_TIMEOUT = MERGE_READ_TIMEOUT
+            _MERGE_MODULE.append(module)
+            return module
+        except Exception:
+            continue
+    return None
+
+
+def has_workflows(where: str) -> bool:
+    """True when the checkout at `where` holds a workflow file, or when that cannot be told: a
+    head with nothing reported is then unsettled, never green."""
+    try:
+        folder = os.path.join(where, ".github", "workflows")
+        return any(name.endswith((".yml", ".yaml")) for name in os.listdir(folder))
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return True
+
+
+def merge_gate(selector, repo: str, where: str):
+    """Return (verdict, detail) for the head of the named pull request: green, pending, red or
+    unknown. One read, no wait, run in `where` so `gh` names the repo the command names."""
+    module = merge_module()
+    if module is None:
+        return "unknown", "the merge tool's check reader could not be loaded"
+    where = os.path.normpath(where) if where else ""   # a `cd` target may carry either separator
+    host = module.Host(repo=repo or None, cwd=where or None)
+    return host.head_read(selector, nothing_is_green=not has_workflows(where))
+
+
+MERGE_GATE_REASON = (
+    "Rule (Git): this head is not settled: %s. A merge waits for every check and workflow run on "
+    "the head, required or not, and a read that could not run counts as not settled. "
+    "Remedy: run the merge tool, `merge <pr> --confirm`, which waits on every check, then "
+    "merges the head it waited on."
+)
+
+
+def merge_gate_reason(verdict: str, detail: str) -> str:
+    return MERGE_GATE_REASON % (verdict + (" (" + cap_safe(detail, 160) + ")" if detail else ""))
+
+
+# ---- a message that cites a record by path
+RECORD_DIRS_FILE = os.path.join("lint", "check_record_slugs.py")   # its DIRS is the one list
+_RECORD_PATTERN = []
+
+
+def record_path_pattern():
+    """The pattern for a repo-root record path, or None when the record folders cannot be read.
+
+    The folders are the `DIRS` of lint/check_record_slugs.py, read from the file (it runs on
+    import, so it cannot be imported). A path counts only at the START of a word: after a space,
+    quote, bracket or `=`, with an optional `./`. A URL, `lint/decisions/x.md` and
+    `docs/decisions/0001.md` have a `/` or a word before the folder, so they are not repo-root
+    record paths and stay allowed.
+    """
+    if _RECORD_PATTERN:
+        return _RECORD_PATTERN[0]
+    for root in settings_roots():
+        try:
+            with open(os.path.join(root, RECORD_DIRS_FILE), encoding="utf-8") as handle:
+                text = handle.read(MESSAGE_FILE_MAX)
+        except Exception:
+            continue
+        block = re.search(r"^DIRS\s*=\s*\(([^)]*)\)", text, re.MULTILINE)
+        names = re.findall(r'"([\w.-]+)/"', block.group(1)) if block else []
+        if names:
+            pattern = re.compile(
+                r"(?:^|(?<=[\s\"'`(\[<,;=@]))(?:\./)?(?:" + "|".join(map(re.escape, names))
+                + r")/[\w.-]+\.md\b")
+            _RECORD_PATTERN.append(pattern)
+            return pattern
+    return None
+MESSAGE_VALUE_FLAGS = {"-m", "--message", "-b", "--body"}
+MESSAGE_FILE_FLAGS = {"-F", "--file", "--body-file"}
+MESSAGE_FILE_MAX = 64 * 1024
+
+CITE_REASON = (
+    "Rule (Git): this message cites a record by its path. A record is cited by its id, with a "
+    "short gloss, like \"D12, short titles for records\". "
+    "Remedy: write the id the record carries, or its slug while the number is unclaimed, "
+    "and leave the folder and the file extension out."
+)
+
+
+def message_sources(args):
+    """Return (texts, files, stdin) the message flags of a commit or PR call carry.
+
+    `texts` are the inline values, `files` the named files, `stdin` True for `-F -`. Reads
+    `-m x`, `--message=x`, `-mx`, a short cluster ending in m (`-am x`), and the long and short
+    body and file flags. A flag glued to a value in any other way is a form this does not read.
+    """
+    texts, files, stdin = [], [], False
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        value = None
+        is_file = False
+        if arg in MESSAGE_VALUE_FLAGS or (re.match(r"^-[A-Za-z]+$", arg) and arg.endswith("m")
+                                          and not arg.startswith("--")):
+            value = args[index] if index < len(args) else ""
+            index += 1
+        elif arg in MESSAGE_FILE_FLAGS:
+            value = args[index] if index < len(args) else ""
+            index += 1
+            is_file = True
+        elif arg.startswith(("--message=", "--body=")):
+            value = arg.split("=", 1)[1]
+        elif arg.startswith(("--file=", "--body-file=")):
+            value = arg.split("=", 1)[1]
+            is_file = True
+        elif arg.startswith("-m") and not arg.startswith("--") and len(arg) > 2:
+            value = arg[2:]
+        if value is None:
+            continue
+        if not is_file:
+            texts.append(value)
+        elif value == "-":
+            stdin = True
+        else:
+            files.append(value)
+    return texts, files, stdin
+
+
+UNREAD_MARK = "\0unread:"
+UNREAD_REASON = (
+    "Rule (Git): the message file could not be read, so the guard cannot tell whether it cites a "
+    "record by its path. "
+    "Remedy: pass the message inline, or name a file this directory can read."
+)
+
+
+def cited_record_path(segment: str, raw: str, where: str) -> str:
+    """Return the first record path a commit message or PR body cites, else ''. A message file
+    that cannot be read returns UNREAD_MARK + its name: an unread message is not a clean one.
+
+    Acts: `git commit` and `gh pr create|edit`. A heredoc body belongs to the act only when the
+    segment itself carries the `<<` header, so a heredoc that writes a record file never counts.
+    """
+    call = git_call_of(segment)
+    if call is not None:
+        if call[0] != "commit":
+            return ""
+        args = call[1]
+    else:
+        rest = gh_call_of(segment)
+        if rest is None or rest[:1] != ["pr"] or rest[1:2] not in (["create"], ["edit"]):
+            return ""
+        args = rest[2:]
+    pattern = record_path_pattern()
+    if pattern is None:
+        # An unread folder list is logged, as every unread subject is, and the rule stands down.
+        record("Bash", "noted", "subject-unread", "cite-by-id: record folders unread")
+        return ""
+    texts, files, stdin = message_sources(args)
+    for name in files:
+        if is_env(name):
+            continue   # never opened here: the environment-file rule judges it, and refuses
+        try:
+            with open(os.path.normpath(_absolute(name, where)), encoding="utf-8",
+                      errors="replace") as handle:
+                texts.append(handle.read(MESSAGE_FILE_MAX))
+        except Exception:
+            return UNREAD_MARK + name   # unknown, never a pass
+    if "<<" in segment:
+        texts.extend(body for _, body in _split_heredocs(raw)[1])
+    for text in texts:
+        found = pattern.search(norm(text))
+        if found:
+            return found.group(0)
+    return ""
+
+
 # ------------------------------------------------------------------ two ported shell traps
 #
 # Ported from pkmnscan's `scripts/guard-shell.py` (behaviour, not code shape). Each clause below is
@@ -4179,7 +4485,8 @@ def below_the_floor(model) -> bool:
 
 
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
-    stripped = strip_heredoc_bodies(raw)
+    POWERSHELL_CALL[0] = tool == "PowerShell"
+    stripped =strip_heredoc_bodies(raw)
     cmd = norm(stripped)
 
     # 1. Shared trees.
@@ -4254,6 +4561,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
             reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"
                       else SILENT_WRITE_QUIET_REASON)
             refuse(tool, "deny", "silent-write", reason, matched)
+
+    # 1d. A commit message or PR body that cites a record by its path.
+    cite_where = command_root(stripped, cwd)
+    for segment in split_segments(stripped):
+        if not segment.strip():
+            continue
+        matched = cited_record_path(segment, raw, cite_where)
+        if matched.startswith(UNREAD_MARK):
+            refuse(tool, "deny", "cite-by-id", UNREAD_REASON, matched[len(UNREAD_MARK):])
+        if matched:
+            refuse(tool, "deny", "cite-by-id", CITE_REASON, matched)
 
     # 2. A machine-wide kill. Judged in COMMAND POSITION, from the segment's own tokens, never
     # by the word appearing anywhere in the text. A segment shlex cannot parse fails open:
@@ -4334,6 +4652,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
     if refusal:
         refuse(tool, "deny", "env-file", refusal + ". " + ENV_ADVICE, logged)
 
+    # 6. A merge outside the merge tool, while the head has a check pending or red, or the read
+    # could not run. Judged per segment from the command word, so quoted text never fires it.
+    for segment in split_segments(stripped):
+        merging = merge_call_of(segment) if segment.strip() else None
+        if merging is None:
+            continue
+        verdict, detail = merge_gate(merging[0], merging[1], cite_where)
+        if verdict != "green":
+            refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),
+                   "gh pr merge " + merging[0] + " " + verdict)
+
     # 7. A frozen path.
     matched = frozen_shell_hit(stripped, cwd)
     if matched:
@@ -4357,7 +4686,6 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
         if change:
             refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, matched),
                    log_path_and_text(matched, change))
-
 
 def judge(payload) -> None:
     tool = payload.get("tool_name", "") or ""
@@ -4409,6 +4737,15 @@ def judge(payload) -> None:
     # model; the log holds what the call asked for.
     if tool in SPAWN_TOOLS and below_the_floor(tool_input.get("model")):
         refuse(tool, "deny", "subagent-model-floor", MODEL_FLOOR_REASON, str(tool_input.get("model")))
+
+    # A merge through the MCP tool is judged by the same check gate as `gh pr merge`.
+    if tool in MERGE_TOOLS:
+        owner, name, number = (tool_input.get(k) for k in ("owner", "repo", "pullNumber"))
+        repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
+        verdict, detail = merge_gate("" if number is None else str(number), repo, cwd)
+        if verdict != "green":
+            refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),
+                   "merge tool " + verdict)
 
     if tool in SHELL_TOOLS:
         command = tool_input.get("command", "") or ""
