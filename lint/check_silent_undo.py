@@ -10,7 +10,8 @@ Two reads, one verdict. Design: decisions/silent-undo-check-design.md.
               merge base: the line is absent from every base, M holds fewer copies than that
               parent, no other file of M gained it, it is no run of words re-wrapped inside
               the file, and no line of the same hunk reads 0.9 like it (a resolver's rewrite).
-              Catches a conflict taken "ours", and a hand edit of a merge.
+              Catches a conflict taken "ours", and a hand edit of a merge. Only a parent that
+              upstream already holds counts: a line the branch alone added is the branch's own.
   reversal    The result of landing head on upstream puts a file back as it was before an
               earlier first-parent commit of upstream changed it: the exact blob (whole
               file), a -U0 hunk reversed on all but one line, or lines main only added
@@ -120,6 +121,14 @@ def trailing_only(g, base):
     return any(g.startswith(b) and len(g) > len(b) and not (g[len(b)].isalnum() or g[len(b)] == "_") for c in base for b in c)
 
 
+def extends(line, g):
+    """True when every token of line survives, in order, in g, starts the same way, and g adds no negation, so a line pasted into a comment is not one: the merge
+    only added to the line (`subprocess.run(a, b)` became `subprocess.run(a, b, timeout=T)`)."""
+    lt, gt = TOKEN.findall(line), TOKEN.findall(g)
+    it = iter(gt)
+    return bool(lt) and lt[0] == gt[0] and all(tok in it for tok in lt) and len(NEGATION.findall(g)) <= len(NEGATION.findall(line))
+
+
 def wrapped(line, new):
     """True when line, whole and whitespace-collapsed, is a run of the joined new lines with at
     least 4 words, and the run starts or ends where a new line starts or ends (a re-wrap)."""
@@ -156,6 +165,8 @@ def rewritten(line, hs, base=(), modified=False):
         if wrapped(line, new):
             return True
         for g in new:
+            if extends(line, g):
+                return True
             gnum, gops, gneg = kinds(g)
             if (gops, gneg) != (ops, neg) or (gnum != num and not modified):
                 continue
@@ -164,8 +175,10 @@ def rewritten(line, hs, base=(), modified=False):
     return False
 
 
-def lost_lines(cwd, m):
-    """[(path, parent, [line])] for merge commit m."""
+def lost_lines(cwd, m, upstream=None):
+    """[(path, parent, [line])] for merge commit m. With an upstream, only a parent that upstream
+    already holds counts: a line is main's only if it reached main. A line a commit added on the
+    branch alone, and that the branch or this merge removes later, is the branch's own work."""
     _, out = git(cwd, "rev-list", "--parents", "-n", "1", m)
     parents = out.split()[1:]
     if len(parents) < 2:
@@ -176,6 +189,8 @@ def lost_lines(cwd, m):
     bases = out.split() if rc == 0 else []
     found = []
     for p in parents:
+        if upstream and git(cwd, "merge-base", "--is-ancestor", p, upstream, ok=(0, 1))[0] != 0:
+            continue
         pool = pool_of(cwd, p, m)
         paths = set()
         for b in bases:
@@ -315,7 +330,7 @@ def fmt_rev(path, how, e):
 
 
 def fmt_lost(m, path, p, lost):
-    shown = "".join("\n      - " + l[:120] for l in lost[:3])
+    shown = "".join("\n      - " + l for l in lost)
     return "%s: merge %s drops %d line(s) that parent %s added%s" % (path, m[:9], len(lost), p[:9], shown)
 
 
@@ -343,7 +358,7 @@ def check(cwd, upstream, head):
     ok = allowed(cwd, "%s..%s" % (upstream, h))
     items = []
     for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
-        items += [(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m)]
+        items += [(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m, upstream)]
     rc, out = git(cwd, "merge-tree", "--write-tree", upstream, h, ok=(0, 1))
     if rc == 0:
         old, new = upstream, out.split()[0]

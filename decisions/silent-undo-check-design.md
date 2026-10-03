@@ -61,6 +61,19 @@ q_max `merge-lost-lines.mjs` compares the parents of one merge.
 - Dropped from q_max: a conflict region is not excused, because a conflict taken "ours"
   is the incident. Also dropped: token-level rewrite rules and rename tracking.
 
+## A branch's own history is not main's (follow-up)
+
+Batch 3 flagged 16 findings (71 lines) that were all false. They came from a branch
+removing lines that its own earlier commits added. The builder hid them with trailers,
+which teaches agents to rubber-stamp.
+
+- A lost line counts only when a parent of the merge is already reachable from upstream.
+  A line main only gained is main's. A line a commit added on the branch alone is the branch's.
+- The reversal read is unchanged. It still sees a stale copy that main's lines vanished from.
+- A merge that only adds tokens to a line (a new argument) is a rewrite. The line must start
+  the same way, and the merge must add no negation.
+- The check prints every flagged line in full, with no cap.
+
 ## False alarms handled
 
 - Whitespace and blank lines never count, in either read.
