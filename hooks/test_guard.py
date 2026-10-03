@@ -2780,22 +2780,50 @@ BASE_FILES = {
 DIFFROOT = os.path.join(ROOT, "diffrepos")
 
 
+# A diff repo costs real git calls, and the mutation harness runs this module once per mutant while
+# `MUTATE_ONLY` selects one or two cases. So a repo is built LAZILY, the first time a case runs in
+# it (`materialize`, called from `decide`). MEASURED on Windows CI: building all of them at import
+# cost 1 min 52 s per run of this module.
+LAZY = {}
+
+
+def lazy_fixture(paths, build):
+    """Register `build` (run once) for every path in `paths`."""
+    done = []
+
+    def once():
+        if not done:
+            done.append(1)
+            build()
+    for path in paths:
+        LAZY[path] = once
+
+
+def materialize(path):
+    if path and path in LAZY:
+        LAZY[path]()
+
+
 def diff_repo(name, change, commit=False, cut_from=None, files=None):
     """A real linked worktree, as a builder runs in: a main checkout with a base commit, and a
     worktree on a new branch `work` cut from `cut_from` (default HEAD). `change` edits the
-    worktree; `commit` then commits there. Returns the worktree's path."""
+    worktree; `commit` then commits there. Returns the worktree's path. Built on first use."""
     main = os.path.join(DIFFROOT, name + "-main")
     where = os.path.join(DIFFROOT, name)
-    make_repo(main, files or BASE_FILES)
-    made = run_vcs(main, "worktree", "add", "-q", "-b", "work", where, *([cut_from] if cut_from else []))
-    if made.returncode != 0:
-        sys.exit("fixture setup failed: worktree in %r: %s" % (where, made.stderr.strip()))
-    change(where)
-    if commit:
-        run_vcs(where, "add", "-A")
-        done = run_vcs(where, *IDENT, "commit", "-q", "-m", "work")
-        if done.returncode != 0:
-            sys.exit("fixture setup failed: commit in %r: %s" % (where, done.stderr.strip()))
+
+    def build():
+        make_repo(main, files or BASE_FILES)
+        made = run_vcs(main, "worktree", "add", "-q", "-b", "work", where,
+                       *([cut_from] if cut_from else []))
+        if made.returncode != 0:
+            sys.exit("fixture setup failed: worktree in %r: %s" % (where, made.stderr.strip()))
+        change(where)
+        if commit:
+            run_vcs(where, "add", "-A")
+            done = run_vcs(where, *IDENT, "commit", "-q", "-m", "work")
+            if done.returncode != 0:
+                sys.exit("fixture setup failed: commit in %r: %s" % (where, done.stderr.strip()))
+    lazy_fixture([where, main], build)
     return where
 
 
@@ -2892,20 +2920,21 @@ _repo = diff_repo("b-reverted", lambda w: (write(os.path.join(w, "tests/test_a.p
                                                  BASE_FILES["tests/test_a.py"])))
 add("builder-diff: a test change put back to the base bytes is no change", "allow",
     event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
-def _parent_branch(w):
-    main = os.path.join(DIFFROOT, "g-inherited-main")
-    run_vcs(main, "checkout", "-q", "-b", "orch")
-    write(os.path.join(main, "tests/test_a.py"), "pass\n")      # the orchestrator's own commit
-    run_vcs(main, "add", "-A")
-    run_vcs(main, *IDENT, "commit", "-q", "-m", "orch")
-
-
 _inh_main = os.path.join(DIFFROOT, "g-inherited-main")
-make_repo(_inh_main, BASE_FILES)
-_parent_branch(None)
-run_vcs(_inh_main, "worktree", "add", "-q", "-b", "work", os.path.join(DIFFROOT, "g-inherited"), "orch")
 _inh = os.path.join(DIFFROOT, "g-inherited")
-write(os.path.join(_inh, "src/app.py"), "x = 9\n")
+
+
+def _build_inherited():
+    make_repo(_inh_main, BASE_FILES)
+    run_vcs(_inh_main, "checkout", "-q", "-b", "orch")
+    write(os.path.join(_inh_main, "tests/test_a.py"), "pass\n")   # the orchestrator's own commit
+    run_vcs(_inh_main, "add", "-A")
+    run_vcs(_inh_main, *IDENT, "commit", "-q", "-m", "orch")
+    run_vcs(_inh_main, "worktree", "add", "-q", "-b", "work", _inh, "orch")
+    write(os.path.join(_inh, "src/app.py"), "x = 9\n")
+
+
+lazy_fixture([_inh, _inh_main], _build_inherited)
 add("builder-diff: test changes the branch inherited are not the builder's", "allow",
     event="SubagentStop", cwd=_inh, agent_id="bld1", agent_type="builder")
 
@@ -2950,11 +2979,12 @@ sh("builder-diff: a new branch name does not reset the base at push", PUSH, "den
    cwd=_repo, agent_id="bld1", agent_type="builder")
 
 # the refusal gives up once, and names a working undo route with placeholders
-_repo = diff_repo("b-giveup", _put("tests/test_a.py", "pass\n"))
+_repo = diff_repo("b-giveup", lambda w: (write(os.path.join(w, "tests/test_a.py"), "pass\n"),
+                                         # the MAIN tree is dirty too
+                                         write(os.path.join(w + "-main", "tests", "test_x.py"), "pass\n")))
 add("builder-diff: the stop refusal names the undo route, with placeholders", "deny", rule=BT,
     event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder",
     carries=(VCS + " show ", ":<path> > <path>", "rm <path>", "WHOLE file"))
-write(os.path.join(DIFFROOT, "b-giveup-main", "tests", "test_x.py"), "pass\n")  # the MAIN tree is dirty
 add("builder-diff: a second stop (stop_hook_active) is allowed, once blocked", "allow",
     event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder", stop_active=True)
 add("builder-diff: a test-author's second stop is allowed too", "allow",
@@ -2974,6 +3004,7 @@ add("builder-diff: a stop whose cwd is a main checkout is allowed (and logged)",
 
 def role_log_case():
     """Every stop the guard cannot judge LOGS, so an unjudged stop is never a silent pass."""
+    materialize(os.path.join(DIFFROOT, "b-giveup"))
     folder = os.path.join(ROOT, "rolelog")
     os.makedirs(folder, exist_ok=True)
     env = dict(os.environ)
@@ -3094,6 +3125,7 @@ add("open: a tool_input that is not an object", "allow", raw='{"tool_name":"Bash
 
 def decide(case):
     """Return (decision, reason) for one case."""
+    materialize(case.get("cwd"))
     if case["raw"] is not None:
         payload = case["raw"]
     else:
