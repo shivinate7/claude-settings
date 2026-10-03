@@ -263,6 +263,35 @@ def case_h_two_sections_one_missing():
     check("case_h: does not name the first section", "First" not in reason, reason)
 
 
+# --------------------------------------------------------------------------- idle turn
+# THE CHEAP EXIT. Only this turn's records are read, from the tail of the transcript. A
+# transcript whose whole-file reader raises must not matter on an idle turn, and a turn
+# that wrote a memory file must still block (the known-bad half of the pair).
+
+def case_idle_turn_never_parses_the_whole_transcript():
+    rh._ensure_transcript_helpers()
+    real = rh.read_transcript
+
+    def boom(_path):
+        raise AssertionError("the whole transcript was parsed")
+    session_dir, memory_dir = new_session("case_idle_tail_only")
+    mem_path = os.path.join(memory_dir, "notes.md")
+    write(mem_path, "# Note\n\nNo home line.\n")
+    old_turn = [human_record("write a note", T0), assistant_record(tool_use=write_tool_use(mem_path)),
+                human_record("thanks", "2026-09-24T11:00:00.000Z"), assistant_record(text="You are welcome.")]
+    hook = {"transcript_path": write_transcript(session_dir, old_turn), "cwd": ROOT}
+    rh.read_transcript = boom
+    try:
+        idle = rh.run(hook)
+    finally:
+        rh.read_transcript = real
+    check("idle_tail_only: an earlier turn's memory write is not reported", idle == "", idle)
+    new_turn = old_turn + [assistant_record(tool_use=write_tool_use(mem_path))]
+    hook = {"transcript_path": write_transcript(session_dir, new_turn), "cwd": ROOT}
+    reason = rh.run(hook)
+    check("idle_tail_only: this turn's memory write still blocks", "notes.md" in reason, reason)
+
+
 # --------------------------------------------------------------------------- finding 1
 # The tool-use path alone: an OLD mtime, but a Write tool use naming the file, still blocks.
 
@@ -871,6 +900,7 @@ def main():
     case_g_stop_hook_active()
     case_h_two_sections_one_missing()
     case_tool_use_alone_old_mtime_blocks()
+    case_idle_turn_never_parses_the_whole_transcript()
     case_bash_names_specific_file()
     case_bash_names_folder_only()
     case_bash_read_only_old_file_silent()

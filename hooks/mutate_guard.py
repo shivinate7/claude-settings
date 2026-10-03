@@ -1088,15 +1088,17 @@ def run_mutant(sources, work: str, entry):
     _path, suite, variable, stem = TARGETS[target]
     mutated = sources[target].replace(old, new, 1)
     copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(label)))
-    if target == "ruling":
-        # ruling_home.py reads `../lint/_transcript.py` beside itself. A bare copy in `work`
+    if target in ("ruling", "decision"):
+        # ruling_home.py and decision_watch.py read `../lint/_transcript.py` beside itself. A bare copy in `work`
         # would crash on that import and read as red on every case, whatever was mutated
         # (mutant-cause-of-death, a mutant's own cause of death must be checked). Lay out hooks/ and lint/ for the copy.
         tree = os.path.join(work, "tree_%s" % mutate_shared.safe_name(label))
         os.makedirs(os.path.join(tree, "hooks"), exist_ok=True)
         os.makedirs(os.path.join(tree, "lint"), exist_ok=True)
         shutil.copy(os.path.join(HERE, "..", "lint", "_transcript.py"), os.path.join(tree, "lint"))
-        copy_path = os.path.join(tree, "hooks", "ruling_home.py")
+        if target == "decision":
+            shutil.copy(os.path.join(HERE, "guard.py"), os.path.join(tree, "hooks"))
+        copy_path = os.path.join(tree, "hooks", os.path.basename(TARGETS[target][0]))
     with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(mutated)
     config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(label))

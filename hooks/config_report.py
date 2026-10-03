@@ -53,7 +53,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LINT_DIR = os.path.join(HERE, "..", "lint")
 sys.path.insert(0, HERE)
 sys.path.insert(0, LINT_DIR)
-from _transcript import is_last_human, tool_uses, records_after_last_human, read_transcript  # noqa: E402
+from _transcript import is_last_human, tool_uses, read_turn  # noqa: E402
 
 FILE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 SHELL_TOOLS = {"Bash", "PowerShell"}
@@ -81,7 +81,7 @@ MCP_PR_NUMBER_KEYS = ("pullNumber", "pull_number", "prNumber", "pr_number", "num
 
 # ------------------------------------------------------------------ transcript walking
 #
-# is_last_human, tool_uses, records_after_last_human, and read_transcript live in
+# is_last_human, tool_uses, and read_turn live in
 # lint/_transcript.py, imported above. This hook already imports lint/report_gate.py (which
 # already imports lint/ste_gate.py) for the merge-notice check below, so importing
 # lint/_transcript.py adds no new dependency.
@@ -315,11 +315,10 @@ def main():
         return
 
     try:
-        records = read_transcript(path)
+        human, after = read_turn(path)
     except Exception:
         return
 
-    after = records_after_last_human(records)
     if not after:
         return
 
@@ -327,8 +326,9 @@ def main():
     if not isinstance(cwd, str):
         cwd = ""
 
-    hits = collect_paths(after, cwd)
+    # Only this turn's records are read (the tail reader), so an idle turn costs a few KB.
     merges = collect_merges(after)
+    hits = collect_paths(after, cwd)
     if merges:
         try:
             import report_gate  # lint/report_gate.py, same-repo sibling package
@@ -340,7 +340,7 @@ def main():
             # Cannot tell whether the report already named the merge: fail open the same way
             # this hook fails open elsewhere, by still naming it, not by going quiet.
             pass
-    unread = collect_unread(last_human_stamp(records))
+    unread = collect_unread(last_human_stamp([human] if human else []))
     if not hits and not merges and not unread:
         return
 

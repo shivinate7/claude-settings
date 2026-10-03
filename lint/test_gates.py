@@ -22,7 +22,7 @@ MD_SWEEP = os.environ.get("MD_SWEEP_UNDER_TEST") or os.path.join(HERE, "md_sweep
 
 sys.path.insert(0, HERE)
 import ste_lint  # noqa: E402
-from _transcript import format_finding  # noqa: E402
+from _transcript import format_finding, landed_work  # noqa: E402
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 
@@ -2224,6 +2224,148 @@ class SteGateUIScopeTests(unittest.TestCase):
                 "hook_event_name": "PreToolUse", "tool_name": "Write",
                 "tool_input": {"file_path": os.path.join(self.tmp.name, name), "content": "x\n"}})
             self.assertIn("unknown", json.loads(run.stdout)["systemMessage"], name)
+
+
+class TurnEndEarlyExitTests(unittest.TestCase):
+    """lint/_transcript.py's `landed_work` is the one early exit for a Stop hook: False only
+    when nothing is dirty in the work tree since the last human message. The repo below is
+    quiet (every file backdated), so each test changes ONE thing and the answer must follow it. `read_turn` is the tail reader the idle hooks use."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo = os.path.join(self.tmp.name, "repo")
+        os.makedirs(self.repo)
+        self.vcs("init", "-q")
+        for name in ("a.md", "n.txt"):
+            with open(os.path.join(self.repo, name), "w", encoding="utf-8") as f:
+                f.write("one\n")
+        self.vcs("add", "-A")
+        self.vcs("commit", "-q", "-m", "init")
+        old = datetime.now(timezone.utc).timestamp() - 1000
+        for name in ("a.md", "n.txt"):  # the work tree only: the repo's own files churn under us
+            os.utime(os.path.join(self.repo, name), (old, old))
+
+    def vcs(self, *args):
+        subprocess.run(["git", "-c", "user.email=t@example.com", "-c", "user.name=T",
+                        "-C", self.repo] + list(args), check=True, capture_output=True, text=True)
+
+    def transcript(self, stamp="auto"):
+        record = human("go")
+        if stamp == "auto":
+            stamp = (datetime.now(timezone.utc) - timedelta(seconds=100)).isoformat().replace("+00:00", "Z")
+        if stamp:
+            record["timestamp"] = stamp
+        return write_transcript([record, assistant_text("hi")], self.tmp.name)
+
+    def landed(self, **kw):
+        return landed_work(self.transcript(kw.pop("stamp", "auto")), kw.pop("cwd", self.repo), **kw)
+
+    def test_idle_turn_exits(self):
+        self.assertFalse(self.landed())
+
+    def test_uncommitted_edit_does_not_exit(self):
+        with open(os.path.join(self.repo, "n.txt"), "w", encoding="utf-8") as f:
+            f.write("two\n")
+        self.assertTrue(self.landed())
+
+    def test_untracked_file_does_not_exit(self):
+        with open(os.path.join(self.repo, "new.txt"), "w", encoding="utf-8") as f:
+            f.write("x\n")
+        self.assertTrue(self.landed())
+
+    def test_deleted_file_does_not_exit(self):
+        os.remove(os.path.join(self.repo, "n.txt"))
+        self.assertTrue(self.landed())
+
+    def test_dirt_older_than_the_message_exits(self):
+        target = os.path.join(self.repo, "n.txt")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write("two\n")
+        old = datetime.now(timezone.utc).timestamp() - 1000
+        os.utime(target, (old, old))
+        self.assertFalse(self.landed())
+
+    def test_unknown_reads_keep_the_hook_running(self):
+        self.assertTrue(self.landed(stamp=""))  # no timestamp on the human record
+        self.assertTrue(self.landed(cwd=self.tmp.name))  # not a work tree
+
+    def test_read_turn_matches_the_full_read(self):
+        sidechain = dict(human("sub"), isSidechain=True)
+        records = [human("q1"), tool_use_msg("Bash", {"command": "ls"}), tool_result_msg(),
+                   human("q2"), sidechain, tool_use_msg("Edit", {"file_path": "x"}),
+                   tool_result_msg(), assistant_text("done")]
+        path = write_transcript(records, self.tmp.name)
+        from _transcript import read_transcript, records_after_last_human, read_turn
+        full = read_transcript(path)
+        last, after = read_turn(path)
+        self.assertEqual(after, records_after_last_human(full))
+        self.assertEqual(last, records[3])
+        self.assertEqual(read_turn(write_transcript([assistant_text("x")], self.tmp.name)), (None, []))
+
+    def test_read_turn_crosses_a_chunk_boundary(self):
+        import _transcript
+        big = [human("q")] + [assistant_text("y" * 400) for _ in range(40)]
+        path = write_transcript(big, self.tmp.name)
+        whole = list(_transcript._lines_backwards(path))
+        small = list(_transcript._lines_backwards(path, chunk=300))
+        self.assertEqual(whole, small)
+
+    def _main_inproc(self, module_path, name, payload, patches):
+        import contextlib
+        import importlib.util
+        import io
+        spec = importlib.util.spec_from_file_location(name, module_path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        calls = {}
+        for attr in patches:
+            real = getattr(mod, attr)
+
+            def counted(*a, _real=real, _attr=attr, **k):
+                calls[_attr] = calls.get(_attr, 0) + 1
+                return _real(*a, **k)
+            setattr(mod, attr, counted)
+        out, stdin = io.StringIO(), sys.stdin
+        sys.stdin = io.StringIO(json.dumps(payload))
+        try:
+            with contextlib.redirect_stdout(out):
+                mod.main()
+        finally:
+            sys.stdin = stdin
+        return out.getvalue(), calls
+
+    def test_md_sweep_idle_turn_stops_before_it_reads_the_baseline(self):
+        hook = {"hook_event_name": "Stop", "transcript_path": self.transcript(), "cwd": self.repo}
+        out, calls = self._main_inproc(MD_SWEEP, "md_sweep_idle", hook, ["last_human_epoch"])
+        self.assertEqual((out.strip(), calls.get("last_human_epoch", 0)), ("", 0))
+
+    def test_md_sweep_landed_turn_still_blocks(self):
+        with open(os.path.join(self.repo, "a.md"), "w", encoding="utf-8") as f:
+            f.write(MdSweepTests.ERROR_TEXT)
+        hook = {"hook_event_name": "Stop", "transcript_path": self.transcript(), "cwd": self.repo}
+        out, calls = self._main_inproc(MD_SWEEP, "md_sweep_landed", hook, ["last_human_epoch"])
+        self.assertEqual(calls.get("last_human_epoch"), 1)
+        self.assertEqual(json.loads(out).get("decision"), "block")
+
+    def test_config_report_reads_only_this_turn(self):
+        target = os.path.join(self.repo, ".claude", "hooks", "x.py")
+        records = [human("old turn"), tool_use_msg("Edit", {"file_path": target}), tool_result_msg(),
+                   human("new turn"), assistant_text("done")]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(CONFIG_REPORT, {"hook_event_name": "Stop", "transcript_path": path, "cwd": self.repo})
+        self.assertEqual(run.stdout.strip(), "")
+        records.append(tool_use_msg("Edit", {"file_path": target}))
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(CONFIG_REPORT, {"hook_event_name": "Stop", "transcript_path": path, "cwd": self.repo})
+        self.assertIn("Config files changed", json.loads(run.stdout)["systemMessage"])
+
+    def test_config_report_names_a_merge_that_left_no_file(self):
+        records = [human("merge it"), tool_use_msg("Bash", {"command": "gh pr merge 7 --squash"}),
+                   tool_result_msg(), assistant_text("done")]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(CONFIG_REPORT, {"hook_event_name": "Stop", "transcript_path": path, "cwd": self.repo})
+        self.assertIn("Merges into main", json.loads(run.stdout)["systemMessage"])
 
 
 if __name__ == "__main__":

@@ -100,7 +100,7 @@ from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from _transcript import is_last_human, read_transcript, paragraph_blocks, format_finding  # noqa: E402
+from _transcript import is_last_human, last_human_epoch, paragraph_blocks, format_finding, landed_work  # noqa: E402
 
 LINTER = os.path.join(HERE, "ste_lint.py")
 
@@ -453,20 +453,18 @@ def main():
     if not path or not os.path.exists(path):
         return
 
-    try:
-        records = read_transcript(path)
-    except Exception:
-        return
-
-    baseline = parse_utc_timestamp(last_human_stamp(records))
-    if baseline is None:
-        return  # no timestamp on the last human record: no baseline, so no sweep
-
     cwd = hook.get("cwd") or ""
     if not isinstance(cwd, str) or not cwd:
         cwd = os.getcwd()
     if not os.path.isdir(cwd):
         return
+
+    if not landed_work(path, cwd):
+        return  # idle turn: nothing dirty or committed since the last human message
+
+    baseline = last_human_epoch(path)  # the tail only, not the whole transcript
+    if baseline is None:
+        return  # no timestamp on the last human record: no baseline, so no sweep
 
     try:
         targets, status_entries = collect_markdown_targets(cwd, baseline)

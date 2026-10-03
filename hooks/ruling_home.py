@@ -98,10 +98,11 @@ is_last_human = None
 tool_uses = None
 records_after_last_human = None
 read_transcript = None
+read_turn = None
 
 
 def _ensure_transcript_helpers():
-    global is_last_human, tool_uses, records_after_last_human, read_transcript
+    global is_last_human, tool_uses, records_after_last_human, read_transcript, read_turn
     if tool_uses is not None:
         return
     here = os.path.dirname(os.path.abspath(__file__))
@@ -110,9 +111,10 @@ def _ensure_transcript_helpers():
         sys.path.insert(0, lint_dir)
     from _transcript import (
         is_last_human as _ilh, tool_uses as _tu,
-        records_after_last_human as _rah, read_transcript as _rt,
+        records_after_last_human as _rah, read_transcript as _rt, read_turn as _rtn,
     )
     is_last_human, tool_uses, records_after_last_human, read_transcript = _ilh, _tu, _rah, _rt
+    read_turn = _rtn
 
 
 class _GitFailure(Exception):
@@ -466,16 +468,21 @@ def run(hook):
     if not os.path.isdir(memory_dir):
         return ""
 
-    records = read_transcript(path)
-    after = records_after_last_human(records)
-    baseline = _last_human_baseline(records)
-
     cwd = hook.get("cwd") or ""
     if not isinstance(cwd, str):
         cwd = ""
 
+    # The shared early exit is the tail reader, not the git predicate: this hook fires on a
+    # tool use that names a memory file "regardless of mtime", and the memory folder sits
+    # outside the work tree, so dirty or committed work in `cwd` says nothing about it.
+    # Only this turn's records are parsed; an idle turn names no memory file and ends here.
+    human, after = read_turn(path)
+    baseline = _last_human_baseline([human] if human else [])
+
     candidate_names = find_memory_files(memory_dir)
     written = _written_names(after, baseline, memory_dir, candidate_names)
+    if not written:
+        return ""
 
     findings = []
     for name in candidate_names:

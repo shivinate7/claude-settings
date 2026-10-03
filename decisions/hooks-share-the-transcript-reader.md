@@ -6,6 +6,13 @@ now one module, `lint/_transcript.py`. It holds `read_transcript`, `is_last_huma
 `lint/md_sweep.py`, `lint/ste_gate.py`, `lint/report_gate.py` and
 `hooks/config_report.py` import it.
 
+It also holds the cheap Stop reads. `last_human_epoch` and `read_turn` read only the
+tail of the transcript since the last human message. `landed_work` is the one early
+exit "nothing dirty, committed, or in the extra paths since that message".
+`lint/md_sweep.py` calls `landed_work`. `hooks/decision_watch.py`, `hooks/config_report.py`
+and `hooks/ruling_home.py` call the tail readers. `hooks/config_watch.py` calls neither:
+its expiry rule fires with no file change, so no such exit is safe there.
+
 ## The sentence this retires
 
 The governing entry is `a-gates-allow-list-is-the-constant`, the scope section that
