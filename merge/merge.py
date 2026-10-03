@@ -9,7 +9,7 @@ Git half: the merge lock, the temporary worktree, the claim, the push, the rever
 local main, afterMerge and the branch delete. GitHub half (`Host`): required checks, the wait,
 the minute read and `gh pr merge --match-head-commit`.
 """
-import argparse, json, os, re, shutil, subprocess, sys, tempfile, time, uuid
+import argparse, contextlib, json, os, re, shutil, subprocess, sys, tempfile, time, uuid
 
 STAMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "actions", "stamp", "stamp.mjs")
 
@@ -21,10 +21,31 @@ class Held(Stop):
 
 SH_TIMEOUT = None  # seconds; the guard sets it, so a hung `gh` cannot outlast its hook
 
+# Set only inside `shared_deadline`, below. A fixed per-call SH_TIMEOUT cannot give a slow but
+# real `gh` headroom and still keep several calls inside a hook's own budget (incident
+# 2026-10-03: 3s/call read real `gh` at 3.0-3.9s as a hang). `Host.head_read` makes three calls
+# for one read, so it shares a single deadline across them instead: each call gets whatever of
+# that one budget the earlier calls left.
+_READ_DEADLINE = None
+
+@contextlib.contextmanager
+def shared_deadline(seconds):
+    """Give every `sh()` call made in this block one shared time budget (seconds) instead of the
+    fixed SH_TIMEOUT each would otherwise get. `seconds=None` is a no-op: sh() keeps using
+    SH_TIMEOUT alone, as it does everywhere outside this context."""
+    global _READ_DEADLINE
+    prior = _READ_DEADLINE
+    _READ_DEADLINE = (time.monotonic() + seconds) if seconds is not None else None
+    try:
+        yield
+    finally:
+        _READ_DEADLINE = prior
+
 def sh(args, cwd=None, input=None, env=None):
     # Resolve the program first: on Windows CreateProcess never reads PATHEXT, so a bare `gh` misses `gh.cmd`.
     args = [shutil.which(args[0], path=(env or os.environ).get("PATH")) or args[0], *args[1:]]
-    r =subprocess.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, timeout=SH_TIMEOUT)
+    timeout = max(0.05, _READ_DEADLINE - time.monotonic()) if _READ_DEADLINE is not None else SH_TIMEOUT
+    r =subprocess.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, timeout=timeout)
     return r.returncode, (r.stdout + r.stderr).strip()
 
 def git(cwd, *a, input=None):
@@ -304,12 +325,16 @@ class Host:
         -> (verdict, detail): green, pending, red, or unknown when any read could not run. The guard's
         home for "has this head settled", so it shares classify and runs with the wait.
         No check and no run reads as pending, not green: right after a push GitHub has not created
-        them yet (wait_checks settles for the same reason). `nothing_is_green` is for a repo with no workflows."""
+        them yet (wait_checks settles for the same reason). `nothing_is_green` is for a repo with no workflows.
+        Its three `gh` calls share one deadline (SH_TIMEOUT, the guard's one budget for this whole
+        read) instead of each getting it afresh: a lone per-call constant cannot give real gh
+        latency headroom and still fit three calls in the guard's hook budget."""
         try:
-            info = self.pr(n)
-            got = self.checks(n)
-            red, pending, _ = self.classify(got, [], self.ignore)
-            runs = self.runs(info["head"])
+            with shared_deadline(SH_TIMEOUT):
+                info = self.pr(n)
+                got = self.checks(n)
+                red, pending, _ = self.classify(got, [], self.ignore)
+                runs = self.runs(info["head"])
         except subprocess.TimeoutExpired:  # its text names the resolved program path
             return "unknown", "a gh call timed out"
         except Exception as e:  # Stop, a missing gh, malformed JSON: all unread
