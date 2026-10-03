@@ -3241,6 +3241,25 @@ for _path in ("tests/test_a.py", "src/b_test.go", "pytest.ini", "pyproject.toml"
               "jest.config.js"):
     add("test-author: Edit of %s is allowed" % _path, "allow", tool="Edit", file_path=_path, **A)
 
+# ---- repo self-test files are test paths (Banchi incident, 2026-10-02): `*-selftest.*`,
+# `*_selftest.*`, `selftest_*.*`, in any folder. A .md file does NOT count: a note named like a
+# self-test is prose, not a runnable check, and a builder must keep its docs.
+SELFTEST_PATHS = ("scripts/guard-shell-selftest.sh", "scripts/docs_audit/selftest_env_map.py",
+                  "scripts/foo-selftest.py", "foo_selftest.py", "a/b/c/selftest_x.sh")
+SELFTEST_FALSE_ALARMS = ("selftestify.py", "docs/selftest-notes.md", "myselftest.py",
+                         "docs/foo-selftest.md", "docs/selftest_notes.md", "scripts/selftest")
+for _tool in ("Edit", "Write"):
+    for _path in SELFTEST_PATHS:
+        add("builder-test: %s of self-test file %s is refused" % (_tool, _path), "deny", rule=BT,
+            tool=_tool, file_path=_path, **B)
+        add("test-author: %s of self-test file %s is allowed" % (_tool, _path), "allow",
+            tool=_tool, file_path=_path, **A)
+    for _path in SELFTEST_FALSE_ALARMS:
+        add("builder-test: %s of non-test %s is allowed" % (_tool, _path), "allow", tool=_tool,
+            file_path=_path, **B)
+        add("test-author: %s of non-test %s is refused" % (_tool, _path), "deny", rule=TA,
+            tool=_tool, file_path=_path, **A)
+
 # ---- the diff, judged at commit, push and SubagentStop
 BASE_FILES = {
     "src/app.py": "x = 1\n", "src/contest.py": "y = 1\n", "latest_results.md": "ok\n",
