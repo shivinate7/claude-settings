@@ -768,7 +768,7 @@ MUTATIONS = [
      'QUIET_FLAG_SUBCOMMANDS = ("push", "merge", "rebase")', "guard",
      "silent-write gap: pull's own quiet flag"),
     ("silent-write: --dry-run no longer carves out",
-     '        if "--dry-run" in args:\n            continue',
+     '        if subcommand in ("fetch", "pull") and "--dry-run" in args:\n            continue',
      '        if False:\n            continue', "guard",
      "silent-write gap, allow: a dry-run fetch moves nothing"),
     ("silent-write: make merge is no longer a write",

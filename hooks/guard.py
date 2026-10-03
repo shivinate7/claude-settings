@@ -854,7 +854,7 @@ def silent_write_hit(segment: str):
             continue
         if subcommand == "merge" and "--abort" in args:
             continue
-        if "--dry-run" in args:
+        if subcommand in ("fetch", "pull") and "--dry-run" in args:
             continue
         matched = ("git " + subcommand + " " + " ".join(args)).strip()
         if discards_output(segment):
