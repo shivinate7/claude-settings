@@ -310,10 +310,17 @@ def segment_tokens(segment: str):
     An unmatched quote or a stray backslash means the guard cannot tell what the segment would
     run. That must fail open, this file's existing stance: judge nothing rather than guess.
     """
+    # PowerShell's escape is the backtick, so a backslash there is a path separator. Doubling it
+    # keeps posix shlex from eating it (`C:\\repo` would read as `C:repo`).
+    if POWERSHELL_CALL[0]:
+        segment = segment.replace("\\", "\\\\")
     try:
         return shlex.split(segment, posix=True)
     except ValueError:
         return None
+
+
+POWERSHELL_CALL = [False]   # set per call by judge_shell: the tool being judged is PowerShell
 
 
 def _skip_assignments_and_keywords(tokens, index=0):
@@ -4340,6 +4347,8 @@ def cited_record_path(segment: str, raw: str, where: str) -> str:
         return ""
     texts, files, stdin = message_sources(args)
     for name in files:
+        if is_env(name):
+            continue   # never opened here: the environment-file rule judges it, and refuses
         try:
             with open(os.path.normpath(_absolute(name, where)), encoding="utf-8",
                       errors="replace") as handle:
@@ -4488,7 +4497,8 @@ def below_the_floor(model) -> bool:
 
 
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
-    stripped = strip_heredoc_bodies(raw)
+    POWERSHELL_CALL[0] = tool == "PowerShell"
+    stripped =strip_heredoc_bodies(raw)
     cmd = norm(stripped)
 
     # 1. Shared trees.

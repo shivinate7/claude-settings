@@ -2227,7 +2227,8 @@ for held in (
     VCS + " check-ignore -v --stdin < " + ENV, VCS + " check-ignore -z " + ENV,
     VCS + " check-ignore -v " + ENV + " > " + ENV,
 ):
-    sh("env: a message allowance does not leak, " + held[:34], held, "deny", "env-file", cwd=NOGIT)
+    sh("env: a message allowance does not leak, " + held[:34], held, "deny", "env-file", cwd=NOGIT,
+       config=MERGECFG)   # the cite rule must find its folder list, or it never reaches a file
 
 # The contents of a command substitution or a process substitution are judged as commands, at any
 # depth, and a `<` redirect from the file is a read. A word such as `.env)` hides no name.
@@ -2419,6 +2420,11 @@ sh("merge-checks: a head that reports nothing may merge when the repo has no wor
 sh("merge-checks: a cd names the repo the read runs in",
    "cd " + slash(CTXREPO) + " && gh pr merge 5 --squash", "allow", silent=True, cwd=NOGIT,
    env_path=GHCWD + os.pathsep + PY_PATH, config=MERGECFG)
+# PowerShell passes native paths. On Windows these are backslash paths, which a POSIX tokenizer
+# would eat; `powershell_backslash_case` pins that on every platform.
+sh("merge-checks: a PowerShell cd to a native path names the repo the read runs in",
+   "cd " + CTXREPO + "; gh pr merge 5 --squash", "allow", silent=True, tool="PowerShell",
+   cwd=NOGIT, env_path=GHCWD + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge-checks: a read run in the wrong folder is unknown, and denies",
    "gh pr merge 5 --squash", "deny", "merge-checks", carries="could not run", cwd=NOGIT,
    env_path=GHCWD + os.pathsep + PY_PATH, config=MERGECFG)
@@ -2476,6 +2482,8 @@ for _name, _command in (
 sh("cite-by-id: a message file that cannot be read is unknown, and denies",
    VCS + " commit -F " + slash(ROOT) + "/no-such-message.txt", "deny", "cite-by-id",
    carries="could not be read", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: a PowerShell -F file at a native path is read", VCS + " commit -F " + MSG_BAD,
+   "deny", "cite-by-id", tool="PowerShell", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: a PowerShell commit denies too", VCS + ' commit -m "cites ' + CITE + '"', "deny",
    "cite-by-id", tool="PowerShell", cwd=NOGIT, config=MERGECFG)
 for _name, _command in (
@@ -3397,6 +3405,25 @@ REASON_MAY_NAME = {
 }
 
 
+def powershell_backslash_case():
+    """Under PowerShell a backslash is a path separator, so tokenizing keeps it. Under Bash it is
+    an escape, so it goes. The same text reads two ways, and the tool decides which."""
+    guard = _load_guard_module()
+    text = "cd C:\\repo; git commit -F C:\\tmp\\msg.txt"
+    try:
+        guard.POWERSHELL_CALL[0] = True
+        ps = guard.segment_tokens(text)
+        guard.POWERSHELL_CALL[0] = False
+        sh_tokens = guard.segment_tokens(text)
+    finally:
+        guard.POWERSHELL_CALL[0] = False
+    if ps != ["cd", "C:\\repo;", "git", "commit", "-F", "C:\\tmp\\msg.txt"]:
+        return False, "PowerShell tokens lost a backslash: %r" % (ps,)
+    if sh_tokens != ["cd", "C:repo;", "git", "commit", "-F", "C:tmpmsg.txt"]:
+        return False, "Bash tokens changed: %r" % (sh_tokens,)
+    return True, "PowerShell keeps backslashes, Bash eats them as an escape"
+
+
 def merge_tool_missing_case():
     """A merge gate that cannot load the merge tool is unknown, and denies.
 
@@ -4088,6 +4115,7 @@ LOG_CHECKS = (
     ("cap: the printed reason is bounded, single-line and marks a cut", cap_reason_bound_case),
     ("log: a merge into main is allowed and noted where the base is unsafe", merge_log_case),
     ("merge-checks: a merge tool that cannot load is unknown, and denies", merge_tool_missing_case),
+    ("powershell: a backslash path survives tokenizing, a Bash one does not", powershell_backslash_case),
     ("log: a conflict-side checkout is allowed and noted", conflict_resolve_log_case),
     ("log: an unreadable subject is allowed and noted", subject_unread_log_case),
     ("log: an unforced worktree remove with an unreadable subject records no note",
