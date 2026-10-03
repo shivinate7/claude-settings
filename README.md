@@ -9,7 +9,7 @@ One source of truth for my user-level Claude Code config. Local sessions and clo
 | --------------- | --------------------------------------------------------- | ------------------------------ |
 | `CLAUDE.md`     | Global working rules                                       | `~/.claude/CLAUDE.md`, through a one-line `@` import |
 | `settings.json` | Output style, env vars, hooks                               | `~/.claude/settings.json` |
-| `agents/`       | The `builder` and `reviewer` roles                          | `~/.claude/agents/*.md` |
+| `agents/`       | The `builder`, `reviewer`, `test-author` roles              | `~/.claude/agents/*.md` |
 | `hooks/`        | `guard.py` (refuses destructive git in a shared tree), config and decision watches, `session_start.sh` | `~/.claude/hooks/*` |
 | `lint/`         | The Simplified Technical English prose linter and its hook gate | `~/.claude/lint/*` |
 | `janitor/`      | A machine-wide sweep for orphaned worktrees, branches, and listeners. See `janitor/GUIDE.md` | not installed to `~/.claude`, runs from the clone |
