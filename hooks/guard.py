@@ -818,7 +818,7 @@ QUIET_FLAG_SUBCOMMANDS = ("push", "merge", "rebase", "pull", "fetch")
 # POSIX (`/dev/null`), Windows cmd (`NUL`), and PowerShell (`$null`). `2>&1` duplicates one stream
 # onto another file descriptor and is not this: the line still reaches a stream the session reads.
 SILENT_WRITE_REDIRECT = re.compile(
-    r"(?:&>>?|\d?>>?)\s*(['\"]?)(?:/dev/null|NUL|\$null)\1(?=$|[\s;&|])"
+    r"(?:&>>?|\d?>>?&?)\s*(['\"]?)(?:/dev/null|NUL|\$null)\1(?=$|[\s;&|])"
     r"|\d?>&-(?=$|[\s;&|])",   # a closed descriptor
     re.IGNORECASE,
 )
@@ -829,12 +829,28 @@ def discards_output(segment: str) -> bool:
     return bool(SILENT_WRITE_REDIRECT.search(segment))
 
 
+# PIPES, Banchi review #666 (2026-10-03): a write piped into `cat >/dev/null` threw its output
+# away through the pipe's LAST command, and the rule judged only the write's own segment.
+# A write whose output feeds a pipe is judged by that pipe's tail: silenced by a redirect, or a
+# `grep -q`, which prints nothing by itself. A printing tail (`| tail -5`, `| tee f`) is not.
+# `bash -c '...'` stays unparsed, a known gap the owner left.
+def tail_discards(tail: str) -> bool:
+    """True when a pipe's last segment prints nothing the session can read."""
+    tail = tail.strip().lstrip("&").strip()   # `|&` leaves a leading `&`
+    if discards_output(tail):
+        return True
+    tokens = segment_tokens(tail) or []
+    index = resolve_command(tokens) if tokens else None
+    return (index is not None and basename(tokens[index]) == "grep"
+            and any(t in ("-q", "--quiet", "--silent") for t in tokens[index + 1:]))
+
+
 def quiet_write(args) -> bool:
     """True when a git call carries `-q` or `--quiet`."""
     return "-q" in args or "--quiet" in args
 
 
-def silent_write_hit(segment: str):
+def silent_write_hit(segment: str, tail: str = ""):
     """Return (matched text, mechanism) for a write whose own trace is silenced, else ("", "").
 
     `mechanism` is `"redirect"` or `"quiet"`, so the caller can print the reason that matches
@@ -844,7 +860,9 @@ def silent_write_hit(segment: str):
     every other read subcommand fall outside it, which is what keeps `git fetch -q` and the
     test-by-exit-code shape `git rev-parse -q --verify <ref> >/dev/null 2>&1` allowed. `merge
     --abort` is carved out inside the loop: it lands nothing, so it has no landing to prove.
+    `tail` is the last segment of the pipe this segment feeds, if any (see `tail_discards`).
     """
+    silenced = discards_output(segment) or (bool(tail) and tail_discards(tail))
     for subcommand, args in git_calls(segment):
         if subcommand == "fetch":
             # Only a fetch that moves a local ref (`src:dst`) is a write; a bare one is a read.
@@ -857,11 +875,11 @@ def silent_write_hit(segment: str):
         if subcommand in ("fetch", "pull") and "--dry-run" in args:
             continue
         matched = ("git " + subcommand + " " + " ".join(args)).strip()
-        if discards_output(segment):
+        if silenced:
             return matched, "redirect"
         if subcommand in QUIET_FLAG_SUBCOMMANDS and quiet_write(args):
             return matched, "quiet"
-    if discards_output(segment):
+    if silenced:
         tokens = segment_tokens(segment)
         index = resolve_command(tokens) if tokens else None
         if index is not None:
@@ -5080,10 +5098,15 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # device, or, on the measured subcommands, by git's own quiet flag alone. Placed after the
     # pointer-head rule and before every rule below, so a silenced write is caught on its own
     # defect before anything else judges the same segment.
-    for segment in split_segments(stripped):
+    ends = []
+    segments = split_segments(stripped, ends)
+    for number, segment in enumerate(segments):
         if not segment.strip():
             continue
-        matched, mechanism = silent_write_hit(segment)
+        last = number
+        while last < len(segments) - 1 and ends[last] == "|":
+            last += 1
+        matched, mechanism = silent_write_hit(segment, segments[last] if last > number else "")
         if matched:
             reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"
                       else SILENT_WRITE_QUIET_REASON)

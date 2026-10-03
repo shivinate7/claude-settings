@@ -2049,6 +2049,33 @@ sh("silent-write gap, allow: gh pr view is a read",
 sh("silent-write gap, allow (held, unmeasured): output to a file is not discarded",
    VCS + " commit -m x > /tmp/log 2>&1", "allow", cwd=NOGIT)
 
+# Pipes (Banchi review #666): a write whose pipe tail is silenced is silenced.
+sh("silent-write pipe: cat discards the piped output",
+   VCS + " commit -m x 2>&1 | cat >/dev/null", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write pipe: tail discards the piped output",
+   VCS + " push origin b 2>&1 | tail -1 >/dev/null", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write pipe: wc discards the piped output",
+   VCS + " commit -m x 2>&1 | wc -l >/dev/null", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write pipe: |& into cat discards the piped output",
+   VCS + " commit -m x |& cat >/dev/null", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write pipe: make merge, cat discards",
+   "make merge ARGS=5 2>&1 | cat >/dev/null", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write pipe: gh pr merge, tail discards",
+   "gh pr merge 5 --squash 2>&1 | tail -1 >/dev/null", "deny", "silent-write", cwd=NOGIT,
+   env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
+sh("silent-write pipe: >&/dev/null shorthand",
+   VCS + " commit -m x >&/dev/null", "deny", "silent-write", cwd=NOGIT)
+
+sh("silent-write pipe, allow: the tail prints",
+   VCS + " commit -m x 2>&1 | tail -5", "allow", cwd=NOGIT)
+sh("silent-write pipe, allow: a read piped to a discard",
+   VCS + " log | cat >/dev/null", "allow", cwd=NOGIT)
+sh("silent-write pipe, allow: tee prints",
+   VCS + " commit -m x | tee /tmp/l", "allow", cwd=NOGIT)
+# KNOWN GAP, pinned ALLOWED on purpose: the owner left bash -c unparsed. Do not flip without the owner.
+sh("silent-write pipe, allow (known gap): bash -c wrapper is not parsed",
+   "bash -c '" + VCS + " commit -m x >/dev/null 2>&1'", "allow", cwd=NOGIT)
+
 
 # =========================================================================== 3. push and delete
 
