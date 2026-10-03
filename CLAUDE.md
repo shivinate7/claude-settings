@@ -93,7 +93,8 @@ only against a named incident or a measured risk. Cite it in the rule's record. 
 enforces a rule in this file needs no other incident.<!-- rule:building-guard-needs-incident --> Fix the cause, not the symptom. Name a
 bandaid as one when it is the right call.<!-- rule:building-fix-cause-not-symptom --> A capability no user can reach is not built. A design living
 only in chat is not done. Land the design in its spec or decision entry now, or declare
-the design abandoned.<!-- rule:building-land-design-or-abandon --> A memory entry may point to a ruling. It is never the ruling's only home.<!-- rule:building-memory-never-only-home -->
+the design abandoned.<!-- rule:building-land-design-or-abandon --> A memory entry may point to a ruling. It is never the ruling's only home.<!-- rule:building-memory-never-only-home --> Memory is short-term. Once a fact or ruling has a tracked home on main, delete its memory
+file and its `MEMORY.md` line.<!-- rule:building-memory-is-short-term -->
 
 **Speak plainly.** Cite a record by id plus a short gloss, like "D12, short titles for
 records". Never cite a bare id.<!-- rule:speak-cite-id-plus-gloss --> Never explain a rule in a paragraph.<!-- rule:speak-never-explain-in-paragraph --> Rewrite

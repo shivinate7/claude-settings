@@ -162,3 +162,10 @@ These change CLAUDE.md text. The owner answered each one:
 
 The owner also named the home for a deferred item: the `deferred/` folder, one file per item.
 Some repos call this kind "debts".
+
+## Memory is short-term, ruled 2026-10-03
+
+The owner ruled: auto-memory stays on, but only as short-term notes. Each lasting fact or
+ruling goes to a tracked file. When it has a tracked home on main, delete its memory file
+and its `MEMORY.md` line. Do not turn auto-memory off. `rule:building-memory-is-short-term` carries
+this ruling to every repo that loads `CLAUDE.md`.
