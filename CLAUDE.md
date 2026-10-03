@@ -31,8 +31,9 @@ that write lands.<!-- rule:roles-opus-override-guarded -->
 The file also carries `_subagentCapUntil`, an ISO-8601 time no more than 24 hours ahead. The
 watch reverts the raise once that time passes.<!-- rule:roles-override-carries-expiry -->
 Remove the file when the raise is no longer needed.<!-- rule:roles-remove-override-file --> Workers never spawn: nested reports misroute (Sept 2026).
-A repo that needs nesting raises depth in its settings and records the risk.<!-- rule:roles-workers-never-spawn --> A brief carries the task, the files, the governing rulings, and the check that proves the
-task done—in the fewest words. It specifies a report cap in lines sized to the decision it
+A repo that needs nesting raises depth in its settings and records the risk.<!-- rule:roles-workers-never-spawn --> A brief carries the task, the files, governing rulings, failure classes from
+`outcomes-tests-are-claims`, and the check that proves the task done—in the fewest words. It
+specifies a report cap in lines sized to the decision it
 feeds. With no cap named, the cap is 25 lines.<!-- rule:roles-brief-contents --> Each layer proves a change once. A
 test-author writes the new cases first and shows them red on the old code. The builder changes
 product code until they go green. CI alone runs the full suites and the mutation harnesses. A
