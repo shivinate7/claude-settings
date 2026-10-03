@@ -100,5 +100,5 @@ Never paste a passing run's output into a report. Give the verdict.<!-- rule:out
 Bring my decisions as a question with options and a recommendation.<!-- rule:output-bring-decisions-as-question --> An answer to a question I bring is a ruling. The report may hold it as a scratch note. Move it to its question's entry, or to a deferred item. Cite that home before the work it governs merges. Mark a process answer process-only.<!-- rule:output-answer-has-a-home -->
 
 **Reports, in order:** Done, Deviations, Input Needed, Next.<!-- rule:reports-order-of-labels --> Done: one line per item, BUILT,
-RECORDED, or OTHER, with its PR or commit. Per label, one item inline, several as bullets.<!-- rule:reports-done-format --> Drop a label
+RECORDED, or OTHER. BUILT and RECORDED carry a PR or commit. Per label, one item inline, several as bullets.<!-- rule:reports-done-format --> Drop a label
 that does not apply.<!-- rule:reports-drop-unused-label --> No report when nothing landed.<!-- rule:reports-no-report-when-nothing-landed -->

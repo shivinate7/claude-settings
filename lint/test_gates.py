@@ -439,6 +439,145 @@ class ReportGateTests(unittest.TestCase):
         self.assertEqual(out.get("decision"), "block")
 
 
+class DoneFormatAndCiteTests(unittest.TestCase):
+    """reports-done-format and speak-cite-id-plus-gloss, both in report_gate.py's Stop hook."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def verdict(self, reply):
+        records = [
+            human("do the task"),
+            tool_use_msg("Bash", {"command": "git commit -m x"}),
+            tool_result_msg(),
+            assistant_text(reply),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
+        run = run_gate(REPORT_GATE, hook)
+        self.assertEqual(run.returncode, 0)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def assert_blocked(self, reply, needle):
+        out = self.verdict(reply)
+        self.assertIsNotNone(out, reply)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn(needle, out["reason"])
+
+    def assert_allowed(self, reply):
+        self.assertIsNone(self.verdict(reply), reply)
+
+    # reports-done-format
+    def test_df_red_done_without_kind_blocks(self):
+        self.assert_blocked("> **Done** fixed it in abc123\n> **Next** none", "BUILT, RECORDED, or OTHER")
+
+    def test_df_red_done_without_ref_blocks(self):
+        self.assert_blocked("> **Done** BUILT the gate\n> **Next** none", "BUILT, RECORDED, or OTHER")
+
+    def test_df_red_one_bullet_lacks_ref_blocks(self):
+        self.assert_blocked("> **Done**\n> - BUILT gate, PR #5\n> - RECORDED the ruling\n> **Next** none",
+                            "RECORDED the ruling")
+
+    def test_df_allowed_other_needs_no_ref(self):
+        self.assert_allowed("> **Done**\n> - BUILT gate, PR #5\n> - OTHER swept the stale branches\n> **Next** none")
+
+    def test_df_red_other_item_alone_still_needs_kind_word(self):
+        self.assert_blocked("> **Done**\n> - swept the stale branches\n> **Next** none", "swept the stale")
+
+    def test_df_allowed_inline_with_pr(self):
+        self.assert_allowed("> **Done** BUILT the gate, PR #226\n> **Next** none")
+
+    def test_df_allowed_bullets_with_sha_and_pr_url(self):
+        self.assert_allowed(
+            "> **Done**\n> - BUILT gate, abc1234\n"
+            "> - RECORDED ruling, https://github.com/o/r/pull/12\n> **Next** none")
+
+    def test_df_false_alarm_ref_on_wrapped_line_passes(self):
+        self.assert_allowed("> **Done**\n> - BUILT the gate and\n>   its tests, commit abc1234\n> **Next** none")
+
+    def test_df_false_alarm_deviations_text_not_read_as_done(self):
+        self.assert_allowed("> **Done** BUILT gate, PR #226\n> **Deviations** none of the kind words here")
+
+    # speak-cite-id-plus-gloss
+    def test_cite_red_bare_d_id_blocks(self):
+        self.assert_blocked("Per D12 this is fine.\n\n> **Done** BUILT gate, PR #226\n> **Next** none", "'D12'")
+
+    def test_cite_red_bare_decision_number_blocks(self):
+        self.assert_blocked("See decision 136.\n\n> **Done** BUILT gate, PR #226\n> **Next** none", "decision 136")
+
+    def test_cite_red_bare_id_inside_report_blocks(self):
+        self.assert_blocked("> **Done** BUILT gate, PR #226\n> **Next** follow D258 next", "'D258'")
+
+    def test_cite_allowed_id_plus_gloss(self):
+        self.assert_allowed(
+            "Per D12, short titles for records, this holds.\n\n> **Done** BUILT gate, PR #226\n> **Next** none")
+
+    def test_cite_allowed_gloss_before_in_parens(self):
+        self.assert_allowed(
+            "Short titles for records (D12) hold.\n\n> **Done** BUILT gate, PR #226\n> **Next** none")
+
+    def test_cite_false_alarm_pr_link_sha_and_version(self):
+        self.assert_allowed(
+            "Merged https://github.com/o/r/pull/218 and [D12](https://x/y), sha d1234567890abcdef, "
+            "version v1.2.3, decision 1.2 notes, and PR #218.\n\n"
+            "> **Done** BUILT gate, PR #218\n> **Next** none")
+
+    def test_cite_false_alarm_code_span_and_path(self):
+        self.assert_allowed(
+            "The heading `## D012` is refused, see decisions/D258-slug.md.\n\n"
+            "> **Done** BUILT gate, PR #226\n> **Next** none")
+
+    def test_cite_false_alarm_not_a_report_turn(self):
+        records = [human("what is D12?"), assistant_text("D12 is a record.")]
+        path = write_transcript(records, self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
+        self.assertEqual(run_gate(REPORT_GATE, hook).stdout.strip(), "")
+
+    # review fixes
+    def test_df_red_facade_is_not_a_sha(self):
+        self.assert_blocked("> **Done** BUILT facade\n> **Next** none", "BUILT facade")
+
+    def test_df_allowed_sub_bullets_are_details(self):
+        self.assert_allowed(
+            "> **Done**\n> - BUILT gate, PR #5\n>   - touched the parser\n>   - no ref here\n> **Next** none")
+
+    def test_df_red_top_bullet_after_sub_bullets_still_checked(self):
+        self.assert_blocked(
+            "> **Done**\n> - BUILT gate, PR #5\n>   - detail\n> - RECORDED ruling\n> **Next** none",
+            "RECORDED ruling")
+
+    def test_df_allowed_lead_in_text_with_bullets_is_not_an_item(self):
+        self.assert_allowed("> **Done** two items:\n> - BUILT gate, PR #5\n> - OTHER swept, abc1234\n> **Next** none")
+
+    def test_df_red_lead_in_with_kind_but_no_ref_blocks(self):
+        self.assert_blocked("> **Done** BUILT it:\n> - BUILT gate, PR #5\n> **Next** none", "BUILT it")
+
+    def test_cite_allowed_more_gloss_shapes(self):
+        for lead in ("D12 = short titles for records", "D12 -- short titles for records",
+                     "D12 says short titles win", "Short titles ruling, D12"):
+            self.assert_allowed("Per " + lead + " here.\n\n> **Done** BUILT gate, PR #226\n> **Next** none")
+
+    def test_cite_false_alarm_cell_range_and_vitamin(self):
+        self.assert_allowed("Sum A1:D12 and take vitamin D3 daily, or D12:F20.\n\n"
+                            "> **Done** BUILT gate, PR #226\n> **Next** none")
+
+    def test_cite_red_gloss_shapes_do_not_hide_bare_id(self):
+        self.assert_blocked("Per D12 and more.\n\n> **Done** BUILT gate, PR #226\n> **Next** none", "'D12'")
+
+    def test_cite_and_done_block_once_with_both_reasons(self):
+        out = self.verdict("Per D12.\n\n> **Done** BUILT gate\n> **Next** none")
+        self.assertIn("BUILT, RECORDED, or OTHER", out["reason"])
+        self.assertIn("'D12'", out["reason"])
+
+    def test_df_cite_quiet_on_rewrite(self):
+        records = [human("x"), tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text("Per D12.\n\n> **Done** BUILT gate\n> **Next** none")]
+        path = write_transcript(records, self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": True}
+        self.assertEqual(run_gate(REPORT_GATE, hook).stdout.strip(), "")
+
+
 class ConfigReportTests(unittest.TestCase):
     """Decision 7: an allowed project config edit is still reported at turn end."""
 
