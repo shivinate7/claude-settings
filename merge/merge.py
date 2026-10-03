@@ -28,6 +28,25 @@ def git(cwd, *a, input=None):
 
 SETTLE_SECONDS = 30
 
+def undo_check(wt, base_ref, unknown_ok=""):
+    """The shared silent-undo lint (lint/check_silent_undo.py), run on the branch before anything is pushed.
+    A finding refuses. An unreadable history refuses too, unless the owner passed
+    --undo-check-unknown-ok "<reason>": that is the way out when the check cannot run (octopus merge,
+    git older than 2.38, shallow clone). It is logged and does not excuse a finding."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+    import check_silent_undo as undo
+    try:
+        problems, notes = undo.check(wt, base_ref, "HEAD")
+    except undo.Unknown as e:
+        if unknown_ok.strip():
+            say(f"merge: silent-undo check UNKNOWN ({e}). Owner override, reason: {unknown_ok.strip()}")
+            return
+        raise Stop(f"silent-undo check could not read the history: {e}\nIf the owner accepts that, run again with --undo-check-unknown-ok \"<reason>\".")
+    for n in notes:
+        say("merge: " + n)
+    if problems:
+        raise Stop("the branch silently undoes earlier work:\n  " + "\n  ".join(problems) + f"\nPut it back, or add the trailer `{undo.TRAILER}: <path> -- <reason>` to a commit message.")
+
 def say(*lines):
     print(*lines, flush=True)
 
@@ -470,7 +489,7 @@ def preview(root, cfg, cfgrel, n, host, lock):
         f"  then:   push HEAD:{info['branch']}, wait for the checks, `gh pr merge --{m.get('method', '?')} --match-head-commit`,",
         f"          move local {base}, run {len(m.get('afterMerge', []))} afterMerge command(s)" + (", delete the branch." if m.get("deleteBranch") else "."))
 
-def confirm(root, cfg, cfgrel, n, host, lock):
+def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok=""):
     m = cfg.get("merge", {})
     for k in ("method", "deadlineMinutes"):
         if k not in m:
@@ -484,6 +503,7 @@ def confirm(root, cfg, cfgrel, n, host, lock):
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
         branch = info["branch"]
         tmp, wt = open_worktree(root, info, base)
+        undo_check(wt, base_ref, unknown_ok)
         resumed = own_claim(wt, cfgrel, base_ref)
         if resumed:
             claim_sha = info["head"]
@@ -528,6 +548,10 @@ def confirm(root, cfg, cfgrel, n, host, lock):
             c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
             if c:  # never check against a stale base tip
                 fail(f"cannot fetch origin {base}, so the claim cannot be proved fresh:\n" + out)
+            try:  # main may have moved during the wait: read the branch against the tip fetched just now
+                undo_check(wt, base_ref, unknown_ok)
+            except Stop as e:
+                fail(str(e))
             if not os.path.isfile(os.path.join(wt, cfgrel)):  # stamp would crash on it with a raw traceback
                 fail(f"the worktree lost {cfgrel}, so the claim cannot be proved fresh.")
             c, out = node_stamp(wt, cfgrel, "check", base_ref)  # each claimed number must still be free on the base tip
@@ -561,6 +585,7 @@ def main(argv, host=None, lock=None):
     p.add_argument("pr", nargs="?", type=int)
     p.add_argument("--confirm", action="store_true")
     p.add_argument("--unlock", action="store_true")
+    p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
     p.add_argument("--config", default=".github/stamp.json")
     a = p.parse_args(argv)
     if a.unlock == (a.pr is not None) or (a.unlock and a.confirm):
@@ -576,7 +601,8 @@ def main(argv, host=None, lock=None):
             say(f"merge: lock on {cfg['defaultBranch']} removed.")
             return 0
         ignore = ignore_checks(cfg)
-        return (confirm if a.confirm else preview)(root, cfg, a.config, a.pr, host or Host(cfg.get("merge", {}).get("requiredChecks", "protection"), cfg["defaultBranch"], ignore=ignore), lock) or 0
+        h = host or Host(cfg.get("merge", {}).get("requiredChecks", "protection"), cfg["defaultBranch"], ignore=ignore)
+        return (confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok) if a.confirm else preview(root, cfg, a.config, a.pr, h, lock)) or 0
     except Stop as e:
         print(f"merge: {e}", file=sys.stderr)
         return 1

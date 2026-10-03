@@ -964,6 +964,52 @@ class GhHalf(Env):
         self.assertTrue(self.reverted())
         self.assertFalse(self.lock_ref())
 
+class SilentUndo(Env):
+    def stale_feat(self):
+        """main gains lines in first.md, then feat merges main keeping ours: feat carries the old file."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, "docs/decisions/first.md"), record("D-001", "first") + "newer line a\nnewer line b\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "main moves"); sh(o, "git", "push", "-q", "origin", "main")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "merge", "-q", "-s", "ours", "--no-edit", "origin/main")
+        sh(o, "git", "push", "-q", "origin", "feat")
+
+    def test_a_stale_branch_is_refused_before_anything_is_pushed(self):
+        self.stale_feat()
+        before = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1)
+        self.assertIn("silently undoes", out)
+        self.assertIn("first.md", out)
+        self.assertEqual(self.refs(), before)
+        self.assertEqual(self.host.waits, [])
+        self.assertFalse(self.lock_ref())  # a refusal frees the lock
+
+    def test_a_trailer_lets_the_deliberate_drop_merge(self):
+        self.stale_feat()
+        o = self.other
+        sh(o, "git", "commit", "-q", "--allow-empty", "-m", "Drop them on purpose\n\nDrops-lines: docs/decisions/first.md -- the lines are dead")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+
+    def test_the_check_runs_again_after_the_wait_and_a_red_reverts_the_claim(self):
+        calls = []
+        real = merge.undo_check
+        def second_is_red(wt, base, unknown_ok=""):
+            calls.append(base)
+            if len(calls) == 2:
+                raise merge.Stop("the branch silently undoes earlier work: main moved during the wait")
+            return real(wt, base, unknown_ok)
+        with unittest.mock.patch.object(merge, "undo_check", second_is_red):
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.claims(), 0)
+        self.assertFalse(getattr(self.host, "merged", False))
+
 class StampEnv(unittest.TestCase):
     def test_the_stamp_child_never_sees_the_runners_ref(self):
         # On a push to main the runner sets GITHUB_REF=refs/heads/main. stamp would read it as the worktree's branch.
@@ -977,6 +1023,41 @@ class StampEnv(unittest.TestCase):
         self.assertNotIn("__none__", seen)
         self.assertNotIn("GITHUB_REF", seen)
         self.assertNotIn("GITHUB_BASE_REF", seen)
+
+class UnknownOverride(Env):
+    """Unknown has a way out that does not depend on the check: an owner flag with a reason, logged."""
+    def unreadable(self):
+        sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+        import check_silent_undo as undo
+        def boom(*a, **k):
+            raise undo.Unknown("git is older than 2.38")
+        return unittest.mock.patch.object(undo, "check", boom)
+
+    def test_unknown_refuses_and_names_the_flag(self):
+        before = self.refs()
+        with self.unreadable():
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1)
+        self.assertIn("--undo-check-unknown-ok", out)
+        self.assertEqual(self.refs(), before)
+        self.assertFalse(self.lock_ref())
+
+    def test_the_owner_flag_with_a_reason_goes_on_and_logs_it(self):
+        with self.unreadable():
+            rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", "octopus, owner read it")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Owner override, reason: octopus, owner read it", out)
+
+    def test_the_flag_with_no_reason_does_not_go_on(self):
+        with self.unreadable():
+            rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", " ")
+        self.assertEqual(rc, 1)
+
+    def test_the_flag_never_excuses_a_finding(self):
+        SilentUndo.stale_feat(self)
+        rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", "just let it through")
+        self.assertEqual(rc, 1)
+        self.assertIn("silently undoes", out)
 
 class Identity(Env):
     def test_claim_commit_falls_back_when_only_the_email_is_set(self):
