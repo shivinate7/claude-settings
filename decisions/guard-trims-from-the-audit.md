@@ -90,5 +90,8 @@ change.
 Not touched, by instruction: `destructive-delete`, `subagent-model-floor` and `machine-wide-kill`.
 Bypass mode shows no prompt, so they stay.
 
-Open, outside this brief: 29 `env-file` denies read "only a runner may be handed '.env' with
---env-file, and 'Semwal' is not one". They are a separate false hit and are not fixed.
+Fixed after review: 29 `env-file` denies read "only a runner may be handed '.env' with
+--env-file, and 'Semwal' is not one". The cause was a quoted assignment value with a space, as in
+`ADMINS='Shivam Semwal' node --env-file=.env server.ts`. The guard split words on spaces, so the tail
+of the value read as the command word. `_assignment_end` now spans the quoted value. The owner ruled
+that `frozen-path` stays, with no new watch.

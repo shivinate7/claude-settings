@@ -3309,6 +3309,19 @@ def _pattern_words(words, position: int):
     return set()
 
 
+def _assignment_end(words, position: int) -> int:
+    """Return the index after the `VAR=value` assignment that starts at `position`. A quoted value
+    with a space (`ADMINS='Shivam Semwal'`) spans several words, and its tail must not read as the
+    command word. MEASURED: 29 false `env-file` denies named an author's surname as the command."""
+    quote = next((c for c in "'\"" if words[position].partition("=")[2].count(c) % 2), "")
+    end = position
+    while quote and end + 1 < len(words):
+        end += 1
+        if quote in words[end]:
+            break
+    return end + 1
+
+
 def _env_words(segment: str):
     """Return (words, command word) of one segment, redirects spaced into words of their own."""
     words = READ_REDIRECT.sub(" < ", REDIRECT.sub(
@@ -3316,7 +3329,7 @@ def _env_words(segment: str):
     # The command is the first word that is not a `VAR=value` assignment.
     position = 0
     while position < len(words) and ASSIGNMENT.match(words[position]):
-        position += 1
+        position = _assignment_end(words, position)
     head = words[position] if position < len(words) else ""
     command = head.strip("'\"").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     if command in ENV_TEXT_COMMANDS:

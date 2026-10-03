@@ -1836,6 +1836,13 @@ sh("trim: env: a dot-star glob as grep's FILE still denies", "grep foo .*", "den
    cwd=NOGIT)
 sh("trim: env: the file named after grep -e still denies", "grep -e foo " + ENV, "deny",
    "env-file", cwd=NOGIT)
+# An assignment whose quoted value holds a space is not the command: its tail once read as the
+# command word and denied a real runner.
+sh("trim: env: a quoted assignment value with a space ahead of node --env-file",
+   "ADMINS='Shivam Semwal' PORT=1 node --env-file=" + ENV + " --import tsx server.ts", "allow",
+   cwd=NOGIT)
+sh("trim: env: the same assignment ahead of a non-runner still denies",
+   "ADMINS='Shivam Semwal' cat --env-file=" + ENV, "deny", "env-file", cwd=NOGIT)
 add("env: Edit of the example file", "allow", tool="Edit", cwd=NOGIT,
     file_path=slash(os.path.join(PROJ, ENV + ".example")))
 
