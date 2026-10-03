@@ -1024,6 +1024,27 @@ class StampEnv(unittest.TestCase):
         self.assertNotIn("GITHUB_REF", seen)
         self.assertNotIn("GITHUB_BASE_REF", seen)
 
+class ClaimStderr(unittest.TestCase):
+    """q_max PR 402: stamp.mjs --claim prints Record-claim: on stdout, but its regenerate step
+    (npm) can write warn/notice lines on stderr. sh() concatenates stdout+stderr, so those land
+    after the trailer. do_claim must find the trailer, not assume it is the last line."""
+    def fake_sh(self, combined):
+        # sh() itself does (r.stdout + r.stderr).strip(); patching sh means replicating that join.
+        def fake(args, cwd=None, input=None, env=None):
+            return 0, combined.strip()
+        return fake
+
+    def test_a_trailer_followed_by_npm_noise_on_stderr_is_still_read(self):
+        out = "Record-claim: D-701\n" + "npm warn deprecated inflight@1.0.6: this module is not supported\nnpm notice new version of npm available"
+        with unittest.mock.patch.object(merge, "sh", self.fake_sh(out)):
+            trailer = merge.do_claim("/wt", ".github/stamp.json", "origin/main")
+        self.assertEqual(trailer, "Record-claim: D-701")
+
+    def test_nothing_to_claim_is_still_none(self):
+        with unittest.mock.patch.object(merge, "sh", self.fake_sh("nothing pending.\n")):
+            trailer = merge.do_claim("/wt", ".github/stamp.json", "origin/main")
+        self.assertIsNone(trailer)
+
 class UnknownOverride(Env):
     """Unknown has a way out that does not depend on the check: an owner flag with a reason, logged."""
     def unreadable(self):
