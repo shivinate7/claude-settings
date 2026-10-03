@@ -4043,12 +4043,36 @@ AUTHOR_BASENAMES = {"requirements-dev.txt"}
 TEST_CONFIG = re.compile(
     r"^(?:pytest\.ini|tox\.ini|setup\.cfg|pyproject\.toml|package\.json"
     r"|(?:jest|vitest|playwright|karma)\.conf(?:ig)?\.\w+|vitest\.workspace\.\w+|\.mocharc(?:\.\w+)?)$")
-TEST_DISABLES = re.compile(
-    r"--(?:deselect|ignore|ignore-glob|collect-only)(?![\w-])|collect_ignore|norecursedirs"
-    r"|testpaths|testPathIgnorePatterns|testIgnore|testMatch|testRegex|xfail|passWithNoTests"
-    r"|-p\s+no:|-[km]\s*['\"]?not\b"
+# What disables tests. NAMES are test-runner settings that no lint tool shares, so they count in any
+# test config. FLAGS (`--ignore` is also ruff's and flake8's) count only in a test-runner context:
+# pytest `addopts`, a `[tool.pytest*]` section, or a line that calls a test runner.
+TEST_DISABLE_NAMES = re.compile(
+    r"collect_ignore|norecursedirs|testpaths|testPathIgnorePatterns|testIgnore|testMatch"
+    r"|testRegex|xfail|passWithNoTests"
     r"|pytest\.(?:mark\.)?skip|unittest\.(?:skip|expectedFailure)|\.skip\(|\bx(?:it|describe)\("
     r"|\bt\.Skip(?:Now)?\(")
+TEST_DISABLE_FLAGS = re.compile(
+    r"--(?:deselect|ignore|ignore-glob|collect-only)(?![\w-])|-p\s+no:|-[km]\s*['\"]?not\b")
+TEST_RUNNER_CONTEXT = re.compile(
+    r"addopts|\b(?:pytest|py\.test|jest|vitest|mocha|playwright|karma)\b|go\s+test")
+
+
+def disables_tests(new_lines, old_lines) -> bool:
+    """True when the ADDED lines (those of `new_lines` not in `old_lines`) disable tests."""
+    section = ""
+    for index, line in enumerate(new_lines):
+        header = re.match(r"^\s*\[([^\]]+)\]", line)
+        if header:
+            section = header.group(1)
+        if line in old_lines:
+            continue
+        if TEST_DISABLE_NAMES.search(line):
+            return True
+        if TEST_DISABLE_FLAGS.search(line) and (
+                "pytest" in section
+                or any(TEST_RUNNER_CONTEXT.search(near) for near in new_lines[max(0, index - 3):index + 1])):
+            return True
+    return False
 BUILDER_TEST_REASON = (
     "A builder does not change tests or test config. Report the needed test change in your "
     "report. The orchestrator assigns it to a test-author."
@@ -4114,7 +4138,7 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str) -> str:
     if is_test_rel(rel):
         return target
     if is_test_config_rel(rel) and any(
-            TEST_DISABLES.search(part) for part in write_content_parts(tool_input)):
+            disables_tests(part.splitlines(), []) for part in write_content_parts(tool_input)):
         return target
     return ""
 
@@ -4204,10 +4228,9 @@ def work_text(root: str, rel: str) -> str:
         return ""
 
 
-def added_text(root: str, base: str, rel: str) -> str:
-    """The lines a change ADDS to one file against the base."""
-    old, new = base_text(root, base, rel).splitlines(), work_text(root, rel).splitlines()
-    return "\n".join(line for line in new if line not in old)
+def disabling_added(root: str, base: str, rel: str) -> bool:
+    """True when the lines a change ADDS to one file, against the base, disable tests."""
+    return disables_tests(work_text(root, rel).splitlines(), base_text(root, base, rel).splitlines())
 
 
 def role_offences(root: str, top: str, base: str, role: str):
@@ -4235,7 +4258,7 @@ def role_offences(root: str, top: str, base: str, role: str):
                 bad = not pyproject_author_ok(base_text(root, base, rel), work_text(root, rel))
         else:
             bad = any(is_test_rel(n) for n in names) or (
-                is_test_config_rel(rel) and bool(TEST_DISABLES.search(added_text(root, base, rel))))
+                is_test_config_rel(rel) and disabling_added(root, base, rel))
         if bad:
             found.append(rel)
     return found
@@ -4261,6 +4284,7 @@ def diff_violation(root: str, role: str):
 def undo_route(base: str) -> str:
     """The working way to put one path back, with placeholders: it names no target."""
     return ("Undo it. Restore a changed or deleted file with `git show %s:<path> > <path>`. "
+            "That restores the WHOLE file, so redo any product change in it after. "
             "Remove a new file with `rm <path>`." % (base[:12] or "<base>"))
 
 

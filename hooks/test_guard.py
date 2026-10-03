@@ -2682,6 +2682,10 @@ add("builder-test: a session run with --agent builder (no agent_id) is not judge
     tool="Edit", file_path="src/test_app.py", agent_type="builder", cwd=NOGIT)
 add("test-author: Edit of product code is refused", "deny", rule=TA, tool="Edit",
     file_path="src/app.py", carries=("builder", "Report"), **A)
+add("builder-test: a ruff --ignore script added to package.json is allowed", "allow", tool="Edit",
+    file_path="package.json", new_string='"lint": "ruff check --ignore E501"', **B)
+add("builder-test: a flake8 --ignore line added to setup.cfg is allowed", "allow", tool="Edit",
+    file_path="setup.cfg", new_string="commands = flake8 --ignore=E203", **B)
 add("builder-test: ignore-scripts added to package.json is allowed", "allow", tool="Edit",
     file_path="package.json", new_string='"ci": "npm ci --ignore-scripts"', **B)
 add("test-author: Edit of package.json passes the early warning (the diff judges it)", "allow",
@@ -2758,6 +2762,12 @@ BUILDER_RED = [
                                "[project]\nname = 'x'\n[tool.pytest.ini_options]\n"
                                "addopts = \"--ignore=tests\"\n")),
     ("jest-config", _put("jest.config.js", "module.exports = {testPathIgnorePatterns: ['/src/']}\n")),
+    ("pytest-section-far-flag", _put("pyproject.toml", "[project]\nname = 'x'\n[tool.pytest.ini_options]\n"
+                                     "minversion = '7'\na = 1\nb = 2\nc = 3\nflags = \"--ignore=tests\"\n")),
+    ("test-script-deselect", _put("package.json", '{"name": "x", "scripts": {"test": '
+                                  '"pytest --deselect a::b"}}\n')),
+    ("pytest-ini-continued-addopts", _put("pytest.ini", "[pytest]\naddopts =\n    -q\n"
+                                          "    --ignore=tests/slow\n")),
     ("package-json-jest", _put("package.json",
                                '{"name": "x", "jest": {"testPathIgnorePatterns": ["src"]}}\n')),
     ("spec-file", _put("web/a.spec.ts", "it.skip('x', () => {})\n")),
@@ -2777,6 +2787,9 @@ BUILDER_GREEN = [
     ("dependency-added", _put("pyproject.toml", "[project]\nname = 'x'\ndependencies = ['requests']\n")),
     ("script-added", _put("package.json", '{"name": "x", "scripts": {"build": "tsc"}}\n')),
     ("symlink-to-product", _link("../src/app.py", "src/alias.py")),
+    ("ruff-ignore-script", _put("package.json", '{"name": "x", "scripts": {"lint": '
+                                '"ruff check --ignore E501"}}\n')),
+    ("flake8-ignore-flag", _put("tox.ini", "[testenv:lint]\ncommands = flake8 --ignore=E203\n")),
     ("ignore-scripts-flag", _put("package.json",
                                  '{"name": "x", "scripts": {"ci": "npm ci --ignore-scripts"}}\n')),
     ("dev-requirements", _put("requirements-dev.txt", "pytest\nruff\n")),
@@ -2865,7 +2878,7 @@ sh("builder-diff: a new branch name does not reset the base at push", PUSH, "den
 _repo = diff_repo("b-giveup", _put("tests/test_a.py", "pass\n"))
 add("builder-diff: the stop refusal names the undo route, with placeholders", "deny", rule=BT,
     event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder",
-    carries=(VCS + " show ", ":<path> > <path>", "rm <path>"))
+    carries=(VCS + " show ", ":<path> > <path>", "rm <path>", "WHOLE file"))
 write(os.path.join(DIFFROOT, "b-giveup-main", "tests", "test_x.py"), "pass\n")  # the MAIN tree is dirty
 add("builder-diff: a second stop (stop_hook_active) is allowed, once blocked", "allow",
     event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder", stop_active=True)

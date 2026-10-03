@@ -40,7 +40,9 @@ Only the agent's own change differs from both.
 A refusal at SubagentStop blocks the stop once. A second stop (`stop_hook_active`) is allowed,
 and the guard logs `role-diff-unresolved`. So an agent that cannot fix its tree never loops.
 The reason names the undo route with placeholders and no target:
-`git show <base>:<path> > <path>` restores a file, and `rm <path>` removes a new file.
+`git show <base>:<path> > <path>` restores a file, and `rm <path>` removes a new file. The
+reason says that the restore covers the WHOLE file. The agent must redo any product change in
+that file afterward.
 
 A stop the guard cannot judge always logs. These are the logs: `role-diff-nocwd` (no cwd),
 `role-diff-main-checkout` (the cwd is a main checkout, which holds no agent's own work), and
@@ -68,8 +70,12 @@ folder named `tests` is not all test files.
 
 Test config is `pytest.ini`, `tox.ini`, `setup.cfg`, `pyproject.toml`, `package.json`, and the
 jest, vitest, playwright, karma, and mocha configs. If a builder change to such a file ADDS a
-line that disables tests, it counts as a test change. The disabling flags match exactly, so
-`--ignore-scripts` is no hit. A new dependency stays allowed.
+line that disables tests, it counts as a test change. Some names belong to test runners only,
+such as `testpaths` and `testPathIgnorePatterns`. They count in any test config. A flag
+(`--ignore`, `--deselect`) counts only in a test-runner context. That context is pytest
+`addopts`, a `[tool.pytest*]` section, or a script line that calls pytest, jest, vitest,
+mocha, or `go test`. So `ruff check --ignore E501` and `flake8 --ignore=E203` stay free.
+Flags match exactly, so `--ignore-scripts` is no hit. A new dependency stays allowed.
 
 For a test-author:
 
@@ -87,6 +93,18 @@ These stay allowed for a builder:
 - A dependency or a script added to a manifest, `--ignore-scripts` included.
 - A symlink to product code, a clean tree, and reads of tests.
 - Test changes that the branch inherited, or that main brought in a merge.
+
+## Threat model, and known gaps
+
+The guard stops ACCIDENTAL test edits. It does not stop a deliberate evasion. The reviewer
+reads every diff, so a deliberate test edit is caught there. These gaps are known and have no
+new code:
+
+- `git update-ref` or `git branch -f` can move a base.
+- A new worktree can reset the reflog base.
+- A commit made through `sh -c` or a subshell is not read at commit time. The stop check still
+  reads the diff.
+- The second stop is allowed after one block, so an agent can ignore the first block.
 
 ## Known ceilings (bandaids, named)
 
