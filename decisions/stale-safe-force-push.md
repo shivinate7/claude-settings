@@ -63,8 +63,14 @@ sometimes the intent. The prompt is the grant. The prompt names no target.
 - Known gaps. A push through a shell alias, a git alias, or `sh -c "..."` is not read.
   Quoted multi-word text is blanked, so a push inside it is not read either. Shell
   variables and command substitution in a refspec are not expanded.
-- `git -C <path> push` and a `cd` before the push read the session's directory, not the
-  push's. A wrong read can resolve the wrong default branch.
+- The target is the push's own `git -C <dir>`, else the command's last `cd`, else the session's
+  cwd. A `-c key=value` on the call overrides config. A directory that is not there asks.
+  Several `-C` on one call and a `cd` inside a subshell are not followed.
+- Gap: a refspec `src:heads/main` (short form of the full ref) is not matched as the default
+  branch.
+- Gap: `remote.<name>.push` config (for example `HEAD:main`) sets the refspec of a bare push
+  and is not read.
+- Both gaps are exotic. Git's own lease plus `--force-if-includes` still protects the remote.
 
 ## Checks
 

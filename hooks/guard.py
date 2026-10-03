@@ -542,8 +542,13 @@ PUSH_VALUE_OPTS = {"--receive-pack", "--exec", "-o", "--push-option"}
 DEFAULT_BRANCH_FALLBACK = ("main", "master")
 
 
-def _push_config(cwd: str, key: str):
-    """The config value, '' when the key is unset, None when git cannot answer."""
+def _push_config(cwd: str, key: str, overrides=None):
+    """The config value, '' when the key is unset, None when git cannot answer.
+
+    A `git -c key=value` override on the push call wins over the repository's own config.
+    """
+    if overrides and key.lower() in overrides:
+        return overrides[key.lower()]
     answer = _git(cwd, "config", "--get", key) if cwd else None
     if answer is None or answer.returncode not in (0, 1):
         return None
@@ -557,7 +562,7 @@ def _push_current_branch(cwd: str):
     return answer.stdout.strip()
 
 
-def _push_bare_destination(cwd: str):
+def _push_bare_destination(cwd: str, overrides=None):
     """Where a push with no refspec goes, read through push.default, else None (unknown).
 
     `simple` and `current` push the current branch to its own name. `upstream` pushes to the
@@ -565,13 +570,13 @@ def _push_bare_destination(cwd: str):
     unknown, and unknown is never safe.
     """
     current = _push_current_branch(cwd)
-    mode = _push_config(cwd, "push.default")
+    mode = _push_config(cwd, "push.default", overrides)
     if current is None or mode is None:
         return None
     if mode in ("", "simple", "current"):
         return current
     if mode in ("upstream", "tracking"):
-        merge = _push_config(cwd, "branch." + current + ".merge")
+        merge = _push_config(cwd, "branch." + current + ".merge", overrides)
         return merge.removeprefix("refs/heads/") if merge else None
     return None
 
@@ -599,12 +604,36 @@ def _push_default_branches(cwd: str, remote: str):
 PUSH_QUOTED = re.compile(r"\"[^\"\s]*\s[^\"]*\"|'[^'\s]*\s[^']*'")
 
 
+def push_target(segment: str, cmd: str, cwd: str):
+    """(directory, config overrides) a `git push` in this segment runs against.
+
+    The directory is the segment's own `git -C <dir>`, else the command's last `cd`, else the
+    session's cwd. A segment that cannot be read gives ('', {}): a directory that does not
+    exist, which the verdict reads as unknown, and unknown asks.
+    """
+    tokens = segment_tokens(segment)
+    if tokens is None:
+        return "", {}
+    run_dir = _run_dir(cmd, cwd)
+    git_c = _segment_git_c_target(tokens)
+    where = _absolute(git_c, run_dir) if git_c is not None else run_dir
+    overrides = {}
+    index = resolve_command(tokens)
+    cursor = index + 1 if index is not None else len(tokens)
+    while cursor < len(tokens) and tokens[cursor].startswith("-"):
+        if tokens[cursor] == "-c" and cursor + 1 < len(tokens):
+            key, _, value = tokens[cursor + 1].partition("=")
+            overrides[key.lower()] = value
+        cursor += 2 if tokens[cursor] in GIT_OPT_WITH_VALUE else 1
+    return where, overrides
+
+
 def push_text(segment: str) -> str:
     """The segment with quoted multi-word text blanked: a quoted `--force` is text, not a push."""
     return PUSH_QUOTED.sub(" ", segment)
 
 
-def push_verdict(args, cwd: str) -> str:
+def push_verdict(args, cwd: str, overrides=None) -> str:
     """'' for an allowed push, else 'ask' or 'deny', for the `git push` arguments `args`.
 
     Not forced: ''. Forced or deleting at the default branch, or at a destination this cannot
@@ -648,9 +677,9 @@ def push_verdict(args, cwd: str) -> str:
             elif len(name) >= 4 and "--force".startswith(name):
                 force = True
         elif arg.startswith("-") and len(arg) > 1:
-            for letter in arg[1:]:
+            for index, letter in enumerate(arg[1:]):
                 if letter == "o":  # a push option: the rest of the word, or the next word
-                    skip = arg.endswith("o")
+                    skip = index == len(arg) - 2
                     break
                 force = force or letter == "f"
                 delete = delete or letter == "d"
@@ -663,14 +692,15 @@ def push_verdict(args, cwd: str) -> str:
     if not (force or leased or plus or mirror or delete):
         return ""
     if not remote:
-        remote = _push_config(cwd, "branch." + (_push_current_branch(cwd) or "") + ".remote")
+        remote = _push_config(
+            cwd, "branch." + (_push_current_branch(cwd) or "") + ".remote", overrides)
     defaults = _push_default_branches(cwd, remote or "origin")
     reaches = mirror or every or defaults is None
     for spec in plain or [""]:
         source, colon, target = spec.lstrip("+").partition(":")
         target = target if colon else source
         if not plain:
-            target = _push_bare_destination(cwd)
+            target = _push_bare_destination(cwd, overrides)
         elif target in ("HEAD", "@"):
             target = _push_current_branch(cwd)
         if target is None or "*" in target:
@@ -4284,7 +4314,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
             refuse(tool, "deny", "destructive-delete", DELETE_REASON, matched)
     for segment in split_segments(stripped):
         for subcommand, args in git_calls(push_text(segment)):
-            verdict = push_verdict(args, cwd) if subcommand == "push" else ""
+            where, overrides = push_target(segment, stripped, cwd) if subcommand == "push" else ("", {})
+            verdict = push_verdict(args, where, overrides) if subcommand == "push" else ""
             if verdict:
                 refuse(tool, verdict, "force-push",
                        PUSH_REASON if verdict == "deny" else PUSH_ASK_REASON,

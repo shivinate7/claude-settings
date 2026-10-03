@@ -1965,6 +1965,31 @@ push_case("a bare lease with push.default matching asks", LE.strip(), "ask", cwd
 push_case("a bare lease with an abbreviated force-with-lease and includes allows",
           "--force-with --force-if-inc", "allow")
 
+push_case("a glued push option then force denies", "-ofoo --force origin feat", "deny")
+push_case("a glued push option in a cluster then force denies", "-vofoo --force origin feat", "deny")
+push_case("a glued push option, other letters, then force denies", "-oyo --force origin feat", "deny")
+push_case("a push option with its value then force denies", "-o foo --force origin feat", "deny")
+
+# THE TARGET DIRECTORY. Config and the default branch are read where the push runs: a `git -C`,
+# a `cd` before it, a `-c` override on the call. The session's cwd here is never the answer.
+sh("push: lease with git -C naming the default branch's checkout asks",
+   VCS + " -C " + slash(PUSHMAIN) + " push " + LE.strip(), "ask", "force-push", cwd=PUSHFEAT)
+sh("push: lease with git -C naming a feature checkout allows from the main checkout",
+   VCS + " -C " + slash(PUSHFEAT) + " push " + LE.strip(), "allow", cwd=PUSHMAIN)
+sh("push: lease after cd into the default branch's checkout asks",
+   "cd " + slash(PUSHMAIN) + " && " + VCS + " push " + LE.strip(), "ask", "force-push", cwd=PUSHFEAT)
+sh("push: lease after cd into a feature checkout allows from the main checkout",
+   "cd " + slash(PUSHFEAT) + " && " + VCS + " push " + LE.strip(), "allow", cwd=PUSHMAIN)
+sh("push: lease with git -C naming a directory that is not there asks",
+   VCS + " -C " + slash(os.path.join(ROOT, "nowhere")) + " push " + LE.strip(), "ask", "force-push",
+   cwd=PUSHFEAT)
+sh("push: lease with -c push.default=upstream follows the upstream to the default branch",
+   VCS + " -c push.default=upstream push " + LE.strip(), "ask", "force-push", cwd=PUSHUP)
+sh("push: lease with -c push.default=current ignores the repository's upstream",
+   VCS + " -c push.default=current push " + LE.strip(), "allow", cwd=PUSHUP)
+sh("push: lease with -c push.default=matching asks",
+   VCS + " -c push.default=matching push " + LE.strip(), "ask", "force-push", cwd=PUSHFEAT)
+
 # FALSE ALARMS: a guard that cries wolf is spent.
 push_case("a non-forced push of main", "origin main", "allow", cwd=PUSHMAIN)
 push_case("a non-forced bare push on main", "", "allow", cwd=PUSHMAIN)
