@@ -728,12 +728,12 @@ MUTATIONS = [
     #   carve-outs undone"
     #     -> "silent-write: commit's own quiet flag is a carve-out, MEASURED 2026-09-19"
     ("silent-write: the rule never denies at all",
-     '        matched, mechanism = silent_write_hit(segment)\n'
+     '        matched, mechanism = silent_write_hit(segment, segments[last] if last > number else "")\n'
      '        if matched:\n'
      '            reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"\n'
      '                      else SILENT_WRITE_QUIET_REASON)\n'
      '            refuse(tool, "deny", "silent-write", reason, matched)',
-     '        matched, mechanism = silent_write_hit(segment)\n'
+     '        matched, mechanism = silent_write_hit(segment, segments[last] if last > number else "")\n'
      '        if False:\n'
      '            reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"\n'
      '                      else SILENT_WRITE_QUIET_REASON)\n'
@@ -744,7 +744,7 @@ MUTATIONS = [
      '        if False and quiet_write(args):', "guard",
      "silent-write: push's own quiet flag needs no redirect at all"),
     ("silent-write: a discarding redirect no longer silences anything",
-     '        if discards_output(segment):\n            return matched, "redirect"',
+     '        if silenced:\n            return matched, "redirect"',
      '        if False:\n            return matched, "redirect"', "guard",
      'silent-write: a discarded proof of landing, stdout alone'),
     ("silent-write: the merge --abort carve-out is gone",
@@ -755,6 +755,13 @@ MUTATIONS = [
      '            if not any(":" in a and not a.startswith("-") for a in args):\n                continue',
      '            if False:\n                continue', "guard",
      "silent-write: fetch discarding both streams is a carve-out"),
+    ("silent-write: a pipe's tail is no longer followed",
+     '        matched, mechanism = silent_write_hit(segment, segments[last] if last > number else "")',
+     '        matched, mechanism = silent_write_hit(segment)', "guard",
+     "silent-write pipe: cat discards the piped output"),
+    ("silent-write: >&/dev/null no longer silences",
+     '\\d?>>?&?)', '\\d?>>?)', "guard",
+     "silent-write pipe: >&/dev/null shorthand"),
     ("silent-write: pull is no longer a write",
      'SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick", "pull")',
      'SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick")',
