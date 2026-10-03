@@ -54,7 +54,9 @@ class Launch(unittest.TestCase):
         put(self.cfg, f'[user]\n\tname = t\n\temail = t@t\n[url "{target}"]\n\tinsteadOf = {URL}\n')
 
     def release(self, tag):
-        put(os.path.join(self.work, "merge", "merge.py"), f"print('RAN {tag}')\n")
+        # The stub prints its tag and, when ARGS_FILE is set, records the arguments it received.
+        put(os.path.join(self.work, "merge", "merge.py"), "import os, sys\nprint('RAN %s')\n"
+            "f = os.environ.get('ARGS_FILE')\nif f: open(f, 'w').write(repr(sys.argv[1:]))\n" % tag)
         sh(self.work, "git", "add", "-A", env=self.env)
         sh(self.work, "git", "commit", "-q", "-m", tag, env=self.env)
         if tag != "v1":
@@ -179,6 +181,23 @@ class Launch(unittest.TestCase):
         self.assertEqual((rc, out.strip()), (0, "RAN v1"), err)
         self.assertEqual(self.head(self.co), before)
         self.assertIn("--dev", err)
+
+    def test_dev_is_not_forwarded_and_other_args_are(self):
+        rec = os.path.join(self.t, "args.txt")
+        rc, out, err = self.merge("--dev", "7", "--confirm", ARGS_FILE=rec)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(open(rec).read(), repr(["7", "--confirm"]))
+
+    def test_checkout_that_cannot_fast_forward_is_left_as_is_and_still_runs_fresh(self):
+        self.release("v2")
+        put(os.path.join(self.co, "local.txt"), "local only\n")
+        sh(self.co, "git", "add", "-A", env=self.env)
+        sh(self.co, "git", "commit", "-q", "-m", "local", env=self.env)
+        before = self.head(self.co)  # diverged from origin/main: only a merge commit could join them
+        rc, out, err = self.merge()
+        self.assertEqual((rc, out.strip()), (0, "RAN v2"), err)
+        self.assertEqual(self.head(self.co), before)
+        self.assertIn("ff-only merge refused", err)
 
 if __name__ == "__main__":
     unittest.main()

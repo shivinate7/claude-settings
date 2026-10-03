@@ -424,6 +424,25 @@ MUTATIONS = [
      '            mtime_ms = now_ms\n'
      '        age_ms = now_ms - mtime_ms',
      "test_confirm_drops_a_tombstone_past_90_days"),
+    ("tombstone: a failed tombstone write no longer stops the branch delete",
+     "sweep",
+     '    if tomb is None or tomb.returncode != 0:\n'
+     '        decision["error"] = "tombstone write failed',
+     '    if False:\n'
+     '        decision["error"] = "tombstone write failed',
+     "test_a_failed_tombstone_write_stops_the_delete"),
+    ("tombstone: an unresolved branch tip no longer leaves the branch alone",
+     "sweep",
+     '    if tip is None or tip.returncode != 0:\n'
+     '        decision["error"] = "could not resolve the branch tip',
+     '    if False:\n'
+     '        decision["error"] = "could not resolve the branch tip',
+     "test_an_unresolved_branch_tip_leaves_the_branch_alone"),
+    ("purge: a non-numeric time_ms is no longer an unreadable entry",
+     "sweep",
+     '                or not isinstance(when, (int, float)) or isinstance(when, bool):',
+     '                or False:',
+     "test_a_non_numeric_time_ms_is_kept_not_purged"),
 
     # ---- --confirm (plan, "the refusals"). See the module docstring: MEASURED to survive. ----
     ("--confirm: reap branches for real with no --confirm on the line",

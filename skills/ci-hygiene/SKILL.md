@@ -42,3 +42,14 @@ See `snippets.md`.
 ## Docs
 
 CI claims in README or docs go stale too. See the `fresh-prose` skill.
+
+## Opt-in templates
+
+Adopt each by `uses: shivinate7/claude-settings/actions/<name>@<full-sha>`, or copy the file.
+Record: `decisions/opt-in-ci-templates-composite.md`.
+
+- `all-jobs-passed`: in a job with `needs: [...]` and `if: always()`, pass `needs: ${{ toJSON(needs) }}`. A skipped needed job then fails.
+- `ci-alarm`: in a nightly workflow with `permissions: {actions: read, issues: write}`. One issue opens when main's latest run is red.
+- `readme-links`: in a weekly workflow after checkout, never per PR. Set `open-issue: true` with `issues: write`.
+- `githooks/main-ref`: run `sh githooks/main-ref/install.sh` in each clone. It refuses a local move of main to a commit origin lacks.
+- `testing/skip-locally-fail-in-ci.mjs`: wrap an env-dependent probe in `needEnv`. It skips locally and fails when `CI` is set.

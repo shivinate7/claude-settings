@@ -77,13 +77,13 @@ def guard_subject_unread_member() -> Tuple[bool, str]:
 
 
 def session_start_freshness_unknown_member() -> Tuple[bool, str]:
-    """Reuse hooks/test_install_src.sh's own caseF4 and caseF6 wholesale, by running the
-    real suite and reading its real verdict lines, rather than re-driving a fetch failure
+    """Reuse hooks/test_install_src.sh's own caseF4 and caseF6 wholesale, by running just those
+    two cases of the real suite and reading its real verdict lines, rather than re-driving a fetch failure
     and a fetch timeout a second time in Python."""
     if not os.path.exists(TEST_INSTALL_SRC):
         return False, "hooks/test_install_src.sh does not exist"
     result = subprocess.run(
-        ["sh", TEST_INSTALL_SRC], capture_output=True, text=True, timeout=180,
+        ["sh", TEST_INSTALL_SRC, "caseF4", "caseF6"], capture_output=True, text=True, timeout=180,
     )
     lines = result.stdout.splitlines()
     missing = []
