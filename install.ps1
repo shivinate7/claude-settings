@@ -85,9 +85,10 @@ while IFS= read -r sub || [ -n "`$sub" ]; do
       [ -d "`$d" ] || continue
       dest="`$cfg/`$sub/`$(basename "`$d")"
       if [ -L "`$dest" ]; then continue; fi
+      # A real directory here is this same installer's own earlier copy (no symlink
+      # rights): replace it, no backup (D: copy-mode-overwrites-no-backup).
       if [ -e "`$dest" ]; then
-        bak="`$dest.bak.`$(date +%Y%m%d%H%M%S)"
-        mv "`$dest" "`$bak" && echo "claude-settings: existing `$dest moved to `$bak"
+        rm -rf "`$dest"
       fi
       cp -r "`$d" "`$dest" && echo "claude-settings: refreshed `$dest"
     done
@@ -155,6 +156,18 @@ function Get-LandedDirs([string]$FromRepoDir) {
         Where-Object { $_ -ne '' }
 }
 
+# A real file/dir at a landed name is either a person's own pre-existing file (a true
+# first install here: back it up) or this same installer's own earlier copy, from a prior
+# no-symlink-rights run that fell back to Copy-Item (a repeat install: no backup, per
+# D: copy-mode-overwrites-no-backup). Content can't tell the two apart, since the source
+# legitimately changes between runs, so this marker does. It is the same file install.sh
+# writes and reads ($ClaudeDir\.claude-settings-installed), so either installer having run
+# once here is enough to call every later real file "ours". Written once, at every
+# successful-run exit, by Write-CopyMarker below.
+$CopyMarker = Join-Path $ClaudeDir '.claude-settings-installed'
+$FirstLocalRun = -not (Test-Path $CopyMarker)
+function Write-CopyMarker { [IO.File]::WriteAllText($CopyMarker, '') }
+
 $AgentCopied = $false
 foreach ($sub in (Get-LandedDirs $RepoDir)) {
     $srcDir  = Join-Path $RepoDir $sub
@@ -171,10 +184,19 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
             $dest = Join-Path $destDir $src.Name
             $cur  = Get-Item $dest -ErrorAction SilentlyContinue
             if ($cur -and $cur.LinkType -eq 'SymbolicLink' -and $cur.Target -eq $src.FullName) { continue }
+            # A real directory (or a symlink pointing elsewhere) at $dest: on the first
+            # local install ever, it is a person's own hand-made skill, backed up. After
+            # that, it is this same installer's own earlier copy, from a no-symlink-rights
+            # machine where the symlink attempt below fell back to Copy-Item: replace it,
+            # no backup (D: copy-mode-overwrites-no-backup).
             if ($cur) {
-                $bak = "$dest.bak.$(Get-Date -Format yyyyMMddHHmmss)"
-                Move-Item $dest $bak
-                Log "existing $dest moved to $bak"
+                if ($FirstLocalRun) {
+                    $bak = "$dest.bak.$(Get-Date -Format yyyyMMddHHmmss)"
+                    Move-Item $dest $bak
+                    Log "existing $dest moved to $bak"
+                } else {
+                    Remove-Item $dest -Recurse -Force
+                }
             }
             try {
                 New-Item -ItemType SymbolicLink -Path $dest -Target $src.FullName -ErrorAction Stop | Out-Null
@@ -201,14 +223,18 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
         $dest = Join-Path $destDir $src.Name
         $cur  = Get-Item $dest -ErrorAction SilentlyContinue
         if ($cur -and $cur.LinkType -eq 'SymbolicLink' -and $cur.Target -eq $src.FullName) { continue }
-        if ($cur -and -not $cur.LinkType) {
-            if ((Get-FileHash $dest).Hash -ne (Get-FileHash $src.FullName).Hash) {
+        # A real file (or a symlink pointing elsewhere) at $dest: on the first local
+        # install ever, it is a person's own file, backed up. After that, it is this same
+        # installer's own earlier copy, from a no-symlink-rights machine where the symlink
+        # attempt below fell back to Copy-Item: replace it, no backup
+        # (D: copy-mode-overwrites-no-backup). Matches the skills branch above, so both
+        # branches agree.
+        if ($cur) {
+            if ($FirstLocalRun) {
                 $bak = "$dest.bak.$(Get-Date -Format yyyyMMddHHmmss)"
                 Copy-Item $dest $bak
                 Log "existing $dest backed up to $bak"
             }
-            Remove-Item $dest
-        } elseif ($cur) {
             Remove-Item $dest
         }
         try {
@@ -247,11 +273,16 @@ if ($item -and $item.LinkType -eq 'SymbolicLink' -and $item.Target -eq $SrcJson)
     $HookMode = 'not needed'
     if ($AgentCopied) { $HookMode = Install-PostMergeHook }
     Write-InstallLog -SettingsMode 'symlink' -AgentsMode $AgentsMode -HookMode $HookMode
+    Write-CopyMarker
     exit 0
 }
 
+# A real file here: on the first local install ever, it is a person's own settings.json,
+# backed up. After that, it is this same installer's own earlier copy, from a
+# no-symlink-rights machine where the symlink attempt below fell back to Copy-Item:
+# replace it, no backup (D: copy-mode-overwrites-no-backup).
 if ($item -and -not $item.LinkType) {
-    if ((Get-FileHash $TargetJson).Hash -ne (Get-FileHash $SrcJson).Hash) {
+    if ($FirstLocalRun) {
         $bak = "$TargetJson.bak.$(Get-Date -Format yyyyMMddHHmmss)"
         Copy-Item $TargetJson $bak
         Log "existing $TargetJson backed up to $bak; merge any keys you want (permissions, etc.) into $SrcJson"
@@ -273,3 +304,4 @@ try {
     $AgentsMode = if ($AgentCopied) { 'copy' } else { 'symlink' }
     Write-InstallLog -SettingsMode 'copy' -AgentsMode $AgentsMode -HookMode $HookMode
 }
+Write-CopyMarker

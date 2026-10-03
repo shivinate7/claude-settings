@@ -171,6 +171,19 @@ fi
 
 mkdir -p "$CLAUDE_DIR"
 
+# A real file where land_dir()/land_skills_dir()/the settings.json block expect a symlink is
+# either a person's own pre-existing file (first local install ever: back it up) or this same
+# installer's own earlier copy, left by a no-symlink-rights `ln -sfn` fallback on a prior local
+# run (repeat install: no backup, per D: copy-mode-overwrites-no-backup). Content can't tell
+# these apart (the source file legitimately changes between runs, e.g. a skill's SKILL.md), so
+# this marker does: its absence means no local install has landed here before, so any real file
+# now is a person's own and gets backed up; once it exists, every local run after the first
+# treats a real file at a landed name as its own prior copy. Written once, at the end of a
+# successful local run, below.
+COPY_MARKER="$CLAUDE_DIR/.claude-settings-installed"
+FIRST_LOCAL_RUN=1
+[ "$CLOUD" = 1 ] || [ ! -e "$COPY_MARKER" ] || FIRST_LOCAL_RUN=0
+
 # ---- ~/.claude/CLAUDE.md : pointer -------------------------------------------------------------
 # Use ~/ when the repo sits in $HOME so the same line works on any machine.
 case "$SRC" in
@@ -221,10 +234,18 @@ land_dir() {
       cp "$f" "$DEST"
     else
       if [ -L "$DEST" ] && [ "$(readlink "$DEST")" = "$f" ]; then LANDED="$LANDED $(basename "$f")"; continue; fi
+      # A real file at DEST (not a symlink): on the first local install ever, it is a
+      # person's own file, backed up. After that, a real file here is this same
+      # installer's own earlier copy (`ln -sfn` fell back to copying it on a
+      # no-symlink-rights machine): replace it, no backup (D: copy-mode-overwrites-no-backup).
       if [ -e "$DEST" ] && [ ! -L "$DEST" ]; then
-        BAK="$DEST.bak.$(date +%Y%m%d%H%M%S)"
-        mv "$DEST" "$BAK"
-        log "existing $DEST moved to $BAK"
+        if [ "$FIRST_LOCAL_RUN" = 1 ]; then
+          BAK="$DEST.bak.$(date +%Y%m%d%H%M%S)"
+          mv "$DEST" "$BAK"
+          log "existing $DEST moved to $BAK"
+        else
+          rm -f "$DEST"
+        fi
       fi
       ln -sfn "$f" "$DEST"
     fi
@@ -275,10 +296,20 @@ land_skills_dir() {
       cp -r "$d" "$DEST"
     else
       if [ -L "$DEST" ] && [ "$(readlink "$DEST")" = "$d" ]; then LANDED="$LANDED $name"; continue; fi
-      if [ -e "$DEST" ]; then
-        BAK="$DEST.bak.$(date +%Y%m%d%H%M%S)"
-        mv "$DEST" "$BAK"
-        log "existing $DEST moved to $BAK"
+      # A real directory at DEST (not a symlink): on the first local install ever, it is a
+      # person's own hand-made skill, backed up. After that, a real directory here is this
+      # same installer's own earlier copy, from a no-symlink-rights machine where `ln -sfn`
+      # fell back to copying it: replace it, no backup (D: copy-mode-overwrites-no-backup).
+      # Cloud mode above always backs up: it never writes this marker, so a cloud run can't
+      # tell its own earlier copy from a person's, and keeps the safe default.
+      if [ -e "$DEST" ] && [ ! -L "$DEST" ]; then
+        if [ "$FIRST_LOCAL_RUN" = 1 ]; then
+          BAK="$DEST.bak.$(date +%Y%m%d%H%M%S)"
+          mv "$DEST" "$BAK"
+          log "existing $DEST moved to $BAK"
+        else
+          rm -rf "$DEST"
+        fi
       fi
       ln -sfn "$d" "$DEST"
     fi
@@ -345,14 +376,27 @@ else
   if [ -L "$TARGET_JSON" ] && [ "$(readlink "$TARGET_JSON")" = "$SRC/settings.json" ]; then
     log "$TARGET_JSON already links to $SRC/settings.json"
   else
+    # A real file here (not a symlink): on the first local install ever, it is a person's
+    # own settings.json, backed up. After that, a real file is this same installer's own
+    # earlier copy, from a no-symlink-rights machine where `ln -sfn` fell back to copying
+    # it: replace it, no backup (D: copy-mode-overwrites-no-backup).
     if [ -e "$TARGET_JSON" ] && [ ! -L "$TARGET_JSON" ]; then
-      BAK="$TARGET_JSON.bak.$(date +%Y%m%d%H%M%S)"
-      mv "$TARGET_JSON" "$BAK"
-      log "existing $TARGET_JSON moved to $BAK; merge any keys you want into $SRC/settings.json"
+      if [ "$FIRST_LOCAL_RUN" = 1 ]; then
+        BAK="$TARGET_JSON.bak.$(date +%Y%m%d%H%M%S)"
+        mv "$TARGET_JSON" "$BAK"
+        log "existing $TARGET_JSON moved to $BAK; merge any keys you want into $SRC/settings.json"
+      else
+        rm -f "$TARGET_JSON"
+      fi
     fi
     ln -sfn "$SRC/settings.json" "$TARGET_JSON"
     log "linked $TARGET_JSON -> $SRC/settings.json"
   fi
 fi
+
+# Marks a local install has landed here, so the NEXT local run treats a real file/dir at a
+# landed name as its own earlier copy rather than a person's. See the comment above its
+# definition.
+[ "$CLOUD" = 1 ] || : > "$COPY_MARKER"
 
 exit 0
