@@ -453,8 +453,103 @@ class Flips(unittest.TestCase):
     def test_a_line_pasted_into_a_comment_is_not_a_re_wrap(self):
         self.red("", "timeout = 60", "# was timeout = 60 before")
 
+    def test_a_line_that_only_gained_an_argument_passes(self):
+        self.assertEqual(self.resolve("run(a, b)", "run(a, b, env=e)", "run(a, b, env=e, timeout=T)"), [])
+
     def test_a_third_value_still_passes(self):
         self.assertEqual(self.resolve("RULE_FLOOR = 80", "RULE_FLOOR = 91", "RULE_FLOOR = 94"), [])
+
+
+class OwnHistory(unittest.TestCase):
+    """A line the branch alone added is the branch's work. Removing it later, or in a merge, is no loss."""
+    T0, T1, T2 = "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
+
+    def setUp(self):
+        r = self.r = Repo()
+        r.put("app.txt", BODY)
+        r.commit("base", date="2025-12-01T10:00:00", other_txt="o1\n")
+        r.push()
+        r.sh("checkout", "-q", "-b", "feat")
+        r.commit("feat adds a line", date=self.T0, app_txt=BODY + "own line one\nown line two\n")
+
+    def main_moves(self, n, date):
+        r = self.r
+        r.sh("checkout", "-q", "main")
+        r.commit("main moves %d" % n, date=date, other_txt="o%d\n" % n)
+        r.push()
+        r.sh("checkout", "-q", "feat")
+
+    def merge_dropping_own_lines(self, date):
+        r = self.r
+        r.sh("merge", "--no-commit", "--no-ff", "main")
+        r.put("app.txt", BODY)
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge main, drop my own lines", date=date)
+
+    def test_a_merge_that_removes_the_branchs_own_lines_is_green(self):
+        self.main_moves(2, self.T1)
+        self.merge_dropping_own_lines(self.T2)
+        self.assertEqual(self.r.verdict(), [])
+
+    def test_the_same_through_a_second_in_branch_merge_of_main(self):
+        r = self.r
+        self.main_moves(2, self.T1)
+        r.sh("merge", "--no-edit", "main", date=self.T1)  # keeps the lines
+        self.main_moves(3, self.T2)
+        self.merge_dropping_own_lines(self.T2)
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_later_branch_commit_that_removes_them_is_green(self):
+        self.main_moves(2, self.T1)
+        r = self.r
+        r.commit("remove my lines", date=self.T2, app_txt=BODY)
+        r.sh("merge", "--no-edit", "main", date=self.T2)
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_flagged_line_is_printed_in_full_with_no_cap(self):
+        r = self.r
+        r.sh("checkout", "-q", "main")
+        lines = "".join("main added line number %d with a long tail %s\n" % (i, "x" * 150) for i in range(8))
+        r.commit("main adds many", date=self.T1, app_txt=BODY + lines)
+        r.push()
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "--no-commit", "--no-ff", "main", ok=False)
+        r.sh("checkout", "--ours", "app.txt")
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge main taking ours", date=self.T2)
+        got = "\n".join(r.verdict())
+        for i in range(8):
+            self.assertIn("main added line number %d with a long tail %s" % (i, "x" * 150), got)
+
+
+class IntegrationBase(unittest.TestCase):
+    """This repo merges through integration branches. A PR based on `integ` is checked against
+    origin/integ, and main's lines are not integ's: a parent that integ lacks can still carry them."""
+    T0, T1, T2 = "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
+
+    def test_merging_main_with_ours_into_a_pr_on_integ_is_red(self):
+        r = Repo()
+        text = lambda v: "".join("l%d\n" % i for i in range(1, 6)) + v + "\ntail\n"
+        r.commit("base", date="2025-12-01T10:00:00", cfg_txt=text("timeout = 30"))
+        r.push()
+        r.sh("checkout", "-q", "-b", "integ")
+        r.commit("integ moves", date=self.T0, other_txt="integ\n")
+        r.sh("push", "-q", "origin", "integ")
+        r.sh("checkout", "-q", "-b", "feat")
+        r.commit("feat edits the line above", date=self.T0, cfg_txt=text("timeout = 30").replace("l5\n", "l5 B\n"))
+        r.sh("checkout", "-q", "main")
+        r.commit("A", date=self.T1, cfg_txt=text("timeout = 60"))
+        r.push()
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "-X", "ours", "--no-edit", "main", date=self.T2)
+        r.sh("fetch", "-q", "origin")
+        got, _ = C.check(r.dir, "origin/integ", "HEAD")
+        self.assertTrue(any("cfg.txt" in p and "timeout = 60" in p for p in got), got)
+
+    def test_a_failed_read_of_the_adding_commit_counts_the_line(self):
+        r = Repo()
+        r.commit("base", date="2025-12-01T10:00:00", a_txt="x\n")
+        self.assertFalse(C.branch_only(r.dir, "HEAD", ["nosuchrev"], "a.txt", "x", ["HEAD"]))
 
 
 class Green(unittest.TestCase):
