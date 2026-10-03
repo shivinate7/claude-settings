@@ -9,12 +9,14 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 ## Procedure
 
 1. **Measure first.** Rank the step times of a finished run. Optimize the slowest step only.
-   Never guess which step is slow.
+   Never guess which step is slow. Measure wall time on the slowest job, not runner minutes
+   alone: a cut off a job that is not the slowest saves money, not waiting.
 2. **Check what exists.** Read the current workflow and the log before you build a speedup. The
    step may already run in parallel, or be cached.
 3. **Gate slow checks on their inputs.** Run a slow check after a change to the files it reads.
    Detect the change with `git diff` against the base commit. Add a nightly full run and a manual
-   trigger. If detection cannot read the diff, run the check (fail safe).
+   trigger. If detection cannot read the diff, run the check (fail safe). A check that cannot
+   read its own input exits non-zero in CI, never 0: CI reads an exit code as a verdict.
 4. **Cancel superseded runs.** Set `concurrency` with `cancel-in-progress`, so a new push to a
    ref cancels the old run on that ref. Never cancel a run on the default branch: each merge
    needs its own verdict. Runners with a low concurrency cap, such as hosted
@@ -28,7 +30,10 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    an audit tool in CI, and run it locally with the exact CI command and paths.
    If the installed tool's `--version` matches the CI pin, use it. If it does not, install a copy.
 8. **Batch green PRs.** Merge PRs that are green together through one integration branch. One CI
-   run then covers the combined code. "No conflicts" does not prove they work together.
+   run then covers the combined code. "No conflicts" does not prove they work together. Green CI
+   does not prove that no line was lost either: run `lint/check_silent_undo.py` before the merge.
+   GitHub's merge queue needs an organization-owned repo, so a personal repo batches by hand or
+   through the merge tool.
 9. **Wait without loops.** Watch a run once, in the background, and keep its output. Never poll
    with a sleep loop.
 10. **Prove each new gate red once.** Break the gate's target on a scratch copy. Watch the gate

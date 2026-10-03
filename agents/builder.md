@@ -19,6 +19,10 @@ You cannot spawn agents: spawn depth is 1, so the orchestrator fans out and you 
 If the task is too large for one worker, stop at a clean point and report PARTIAL with the
 split you propose. Never review your own work. The orchestrator sends a reviewer.
 
+Prove your change once: show each new case red on the old code, then green on yours. Run only
+the suites your change touches. Never run the full suites or a mutation harness locally; CI
+runs them.
+
 When your commit is pushed, report at once. Never wait on a CI run, a pull request check, or
 another agent. The orchestrator reads the run. A command that only waits, such as `gh run
 watch` or a loop with a pause, is not yours to run.
