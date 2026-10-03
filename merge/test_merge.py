@@ -25,6 +25,19 @@ def put(path, text):
     with open(path, "w") as f:
         f.write(text)
 
+def put_shim(path, text):
+    """Write an extension-less fake program and make it runnable from PATH.
+
+    merge.py resolves programs with shutil.which, which on Windows only matches
+    PATHEXT extensions (.exe/.cmd/...), never an extension-less script. So on
+    Windows we also drop a matching `<name>.cmd` beside it that re-dispatches
+    to the script through the current Python.
+    """
+    put(path, text)
+    os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR)
+    if os.name == "nt":
+        put(path + ".cmd", '@"%s" "%%~dp0%s" %%*\n' % (sys.executable, os.path.basename(path)))
+
 CONFIG = {
     "defaultBranch": "main",
     "regenerate": '[ -z "$MERGE_TEST_HOOK" ] || bash "$MERGE_TEST_HOOK"',
@@ -590,7 +603,7 @@ class GhLockTest(unittest.TestCase):
         t = tempfile.mkdtemp(prefix="test-ghlock-")
         self.addCleanup(shutil.rmtree, t, True)
         bindir = os.path.join(t, "bin"); os.makedirs(bindir)
-        gh = os.path.join(bindir, "gh"); put(gh, FAKE_GH); os.chmod(gh, os.stat(gh).st_mode | stat.S_IXUSR)
+        gh = os.path.join(bindir, "gh"); put_shim(gh, FAKE_GH)
         self.state = os.path.join(t, "state"); os.makedirs(self.state)
         old = {k: os.environ.get(k) for k in ("PATH", "FAKE_GH_DIR")}
         os.environ["PATH"] = bindir + os.pathsep + old["PATH"]; os.environ["FAKE_GH_DIR"] = self.state
@@ -667,7 +680,7 @@ class GhHalf(Env):
     def setUp(self):
         super().setUp()
         bindir = os.path.join(self.t, "bin"); os.makedirs(bindir)
-        gh = os.path.join(bindir, "gh"); put(gh, FAKE_GH_PR); os.chmod(gh, os.stat(gh).st_mode | stat.S_IXUSR)
+        gh = os.path.join(bindir, "gh"); put_shim(gh, FAKE_GH_PR)
         self.state = os.path.join(self.t, "ghstate"); os.makedirs(self.state)
         old = {k: os.environ.get(k) for k in ("PATH", "FAKE_GH_DIR")}
         os.environ["PATH"] = bindir + os.pathsep + old["PATH"]; os.environ["FAKE_GH_DIR"] = self.state
