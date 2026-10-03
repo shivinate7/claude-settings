@@ -593,6 +593,18 @@
         "kind": "unmechanized",
         "reason": "No check sees the text of a reply beside its question box and reads whether the question depends on text outside the box."
       }
+    },
+    "roles-each-layer-proves-once": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Which layer ran which proof lives in agent transcripts and briefs. No check reads who reran a passing suite."
+      }
+    },
+    "building-guard-needs-incident": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Whether a named incident or measured risk justifies a rule is a human read of the rule's record."
+      }
     }
   }
 }
