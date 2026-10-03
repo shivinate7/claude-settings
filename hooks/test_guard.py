@@ -3375,17 +3375,16 @@ BUILDER_GREEN = [
 COMMIT, PUSH = VCS + " commit -m x", VCS + " push origin work"
 for _name, _change in BUILDER_RED:
     _repo = diff_repo("b-" + _name, _change)
-    sh("builder-diff: commit with a %s change is refused" % _name, COMMIT, "deny", rule=BT,
-       cwd=_repo, agent_id="bld1", agent_type="builder", carries=("test-author", "Report"))
-    sh("builder-diff: push with a %s change is refused" % _name, PUSH, "deny", rule=BT,
+    sh("builder-diff: commit with a %s change is allowed and logged" % _name, COMMIT, "allow",
        cwd=_repo, agent_id="bld1", agent_type="builder")
-    add("builder-diff: stop with a %s change is blocked" % _name, "deny", rule=BT,
-        event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder",
-        carries=("test-author", "Report"))
+    sh("builder-diff: push with a %s change is allowed and logged" % _name, PUSH, "allow",
+       cwd=_repo, agent_id="bld1", agent_type="builder")
+    add("builder-diff: stop with a %s change is allowed and logged" % _name, "allow",
+        event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
 _repo = diff_repo("b-committed", _put("tests/test_a.py", "pass\n"), commit=True)
-add("builder-diff: stop after COMMITTING a test change is blocked", "deny", rule=BT,
+add("builder-diff: stop after COMMITTING a test change is allowed and logged", "allow",
     event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
-sh("builder-diff: push after COMMITTING a test change is refused", PUSH, "deny", rule=BT,
+sh("builder-diff: push after COMMITTING a test change is allowed and logged", PUSH, "allow",
    cwd=_repo, agent_id="bld1", agent_type="builder")
 _repo = diff_repo("b-reverted", lambda w: (write(os.path.join(w, "tests/test_a.py"), "pass\n"),
                                            write(os.path.join(w, "tests/test_a.py"),
@@ -3433,7 +3432,7 @@ add("builder-diff: test changes merged in from main are not the builder's", "all
 sh("builder-diff: commit after merging main in is allowed", COMMIT, "allow", cwd=_repo,
    agent_id="bld1", agent_type="builder")
 _repo = diff_repo("b-merged-main-own", _merge_main_in(True))
-add("builder-diff: its OWN new test after merging main in is still blocked", "deny", rule=BT,
+add("builder-diff: its OWN new test after merging main in is allowed and logged", "allow",
     event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
 
 
@@ -3445,26 +3444,24 @@ def _own_test_then_new_branch(w):
 
 
 _repo = diff_repo("b-new-branch-name", _own_test_then_new_branch)
-add("builder-diff: a new branch name does not reset the base", "deny", rule=BT,
+add("builder-diff: a new branch name does not reset the base", "allow",
     event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
-sh("builder-diff: a new branch name does not reset the base at push", PUSH, "deny", rule=BT,
+sh("builder-diff: a new branch name does not reset the base at push", PUSH, "allow",
    cwd=_repo, agent_id="bld1", agent_type="builder")
 
 # the refusal gives up once, and names a working undo route with placeholders
 _repo = diff_repo("b-giveup", lambda w: (write(os.path.join(w, "tests/test_a.py"), "pass\n"),
                                          # the MAIN tree is dirty too
                                          write(os.path.join(w + "-main", "tests", "test_x.py"), "pass\n")))
-add("builder-diff: the stop refusal names the undo route, with placeholders", "deny", rule=BT,
-    event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder",
-    carries=(VCS + " show ", ":<path> > <path>", "rm <path>", "WHOLE file"))
+add("builder-diff: a stop with a test change is allowed, so there is no undo route to name",
+    "allow", event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
 add("builder-diff: a second stop (stop_hook_active) is allowed, once blocked", "allow",
     event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder", stop_active=True)
 add("builder-diff: a test-author's second stop is allowed too", "allow",
     event="SubagentStop", cwd=diff_repo("a-giveup", _put("src/app.py", "x = 2\n")),
     agent_id="auth1", agent_type="test-author", stop_active=True)
-add("builder-diff: an unread diff blocks the first stop", "deny", rule=BT,
-    event="SubagentStop", cwd=NOGIT, agent_id="bld1", agent_type="builder",
-    carries=("could not read",))
+add("builder-diff: an unread diff logs role-diff-unread and the first stop is allowed", "allow",
+    event="SubagentStop", cwd=NOGIT, agent_id="bld1", agent_type="builder")
 add("builder-diff: an unread diff lets the second stop go", "allow",
     event="SubagentStop", cwd=NOGIT, agent_id="bld1", agent_type="builder", stop_active=True)
 add("builder-diff: a stop with no cwd is allowed (and logged)", "allow", event="SubagentStop",
@@ -3486,6 +3483,7 @@ def role_log_case():
         ({"cwd": os.path.join(DIFFROOT, "b-giveup-main")}, "role-diff-main-checkout"),
         ({"cwd": os.path.join(DIFFROOT, "b-giveup"), "stop_hook_active": True},
          "role-diff-unresolved"),
+        ({"cwd": NOGIT}, "role-diff-unread"),
     ]
     problems = []
     for extra, want in stops:
@@ -3503,7 +3501,83 @@ def role_log_case():
     return (not problems), ("; ".join(problems) or "each unjudged stop is logged")
 
 
-LOG_CHECKS_EXTRA = [("role-diff: every unjudged stop is logged", role_log_case)]
+def _diff_log_run(folder, repo, agent_type, agent_id):
+    """Run commit, push and stop for one agent in `repo`. Returns (stdout seen, guard.log rows)."""
+    materialize(repo)
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "guard.log")
+    if os.path.exists(path):
+        os.remove(path)
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    bodies = [{"tool_name": "Bash", "tool_input": {"command": c}, "cwd": repo,
+               "agent_id": agent_id, "agent_type": agent_type} for c in (COMMIT, PUSH)]
+    bodies.append({"hook_event_name": "SubagentStop", "cwd": repo, "agent_id": agent_id,
+                   "agent_type": agent_type})
+    out = ""
+    for body in bodies:
+        got = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True,
+                             text=True, env=env, timeout=120)
+        out += got.stdout.strip()
+    text = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+    return out, [line.split("\t") for line in text.splitlines() if line.strip()]
+
+
+def diff_logs_case():
+    """The diff check LOGS for the reviewer and never blocks: commit, push and stop each print
+    nothing and write one `noted` line named `builder-diff` or `author-diff`."""
+    problems = []
+    for label, agent_type, agent_id, rule in (
+            ("b-rewritten", "builder", "bld1", "builder-diff"),
+            ("b-new-untracked", "builder", "bld1", "builder-diff"),
+            ("a-product-edit", "test-author", "auth1", "author-diff")):
+        out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + label),
+                                  os.path.join(DIFFROOT, label), agent_type, agent_id)
+        if out:
+            problems.append("%s: expected silent allows, got %r" % (label, out[:60]))
+        hits = [r for r in rows if len(r) == 5 and r[2] == "noted" and r[3] == rule]
+        if len(hits) != 3:
+            problems.append("%s: expected 3 noted/%s lines, found %d" % (label, rule, len(hits)))
+    return (not problems), ("; ".join(problems) or "each diff check logged and allowed")
+
+
+def _long_lived_main_tests(w):
+    """A long-lived worktree: cut long ago, main has since gained test files, and the branch has
+    merged main in. Those test files equal main's, so they are not the builder's."""
+    main = w + "-main"
+    write(os.path.join(main, "tests/test_late.py"), "pass  # main added this later\n")
+    write(os.path.join(main, "tests/test_a.py"), "pass  # main edited this later\n")
+    run_vcs(main, "add", "-A")
+    run_vcs(main, *IDENT, "commit", "-q", "-m", "main moves")
+    run_vcs(w, "switch", "-q", "-c", "feat")
+    merged = run_vcs(w, *IDENT, "merge", "-q", "--no-edit", "main")
+    if merged.returncode != 0:
+        sys.exit("fixture setup failed: merge in %r: %s" % (w, merged.stderr.strip()))
+    write(os.path.join(w, "src/app.py"), "x = 7\n")
+
+
+_long_lived = diff_repo("g-long-lived", _long_lived_main_tests)
+add("builder-diff: a long-lived worktree with main's later tests merged in is allowed",
+    "allow", event="SubagentStop", cwd=_long_lived, agent_id="bld1", agent_type="builder",
+    silent=True)
+
+
+def long_lived_no_log_case():
+    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-longlived"), _long_lived, "builder", "bld1")
+    rows = [r for r in rows if len(r) > 3 and r[3] in ("builder-diff", "author-diff")]
+    if out or rows:
+        return False, "main's own test files were judged: %r %r" % (out[:60], rows)
+    return True, "allowed with no builder-diff line"
+
+
+LOG_CHECKS_EXTRA = [
+    ("role-diff: every unjudged stop is logged", role_log_case),
+    ("builder-diff: the diff check logs for the reviewer and never blocks", diff_logs_case),
+    ("builder-diff: main's later tests merged into a long-lived worktree log nothing",
+     long_lived_no_log_case),
+]
 for _name, _change in BUILDER_GREEN:
     _repo = diff_repo("g-" + _name, _change)
     sh("builder-diff: commit with %s is allowed" % _name, COMMIT, "allow", cwd=_repo,
@@ -3563,13 +3637,12 @@ AUTHOR_RED = [
 ]
 for _name, _change in AUTHOR_RED:
     _repo = diff_repo("a-" + _name, _change)
-    sh("author-diff: commit with a %s change is refused" % _name, COMMIT, "deny", rule=TA,
-       cwd=_repo, agent_id="auth1", agent_type="test-author", carries=("builder", "Report"))
-    sh("author-diff: push with a %s change is refused" % _name, PUSH, "deny", rule=TA,
+    sh("author-diff: commit with a %s change is allowed and logged" % _name, COMMIT, "allow",
        cwd=_repo, agent_id="auth1", agent_type="test-author")
-    add("author-diff: stop with a %s change is blocked" % _name, "deny", rule=TA,
-        event="SubagentStop", cwd=_repo, agent_id="auth1", agent_type="test-author",
-        carries=("builder", "Report"))
+    sh("author-diff: push with a %s change is allowed and logged" % _name, PUSH, "allow",
+       cwd=_repo, agent_id="auth1", agent_type="test-author")
+    add("author-diff: stop with a %s change is allowed and logged" % _name, "allow",
+        event="SubagentStop", cwd=_repo, agent_id="auth1", agent_type="test-author")
 for _name, _change in AUTHOR_GREEN:
     _repo = diff_repo("ag-" + _name, _change)
     sh("author-diff: commit with %s is allowed" % _name, COMMIT, "allow", cwd=_repo,
