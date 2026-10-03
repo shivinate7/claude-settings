@@ -17,9 +17,25 @@ clauses.
 
 `hooks/guard.py` reads one diff at three points:
 
-- A builder's `git commit` and `git push` (PreToolUse, Bash and PowerShell).
-- A builder's SubagentStop. The guard answers `decision: block`.
+- A builder's `git commit` and `git push` (PreToolUse, Bash and PowerShell). It LOGS.
+- A builder's SubagentStop. It LOGS.
 - A write tool call (Edit, Write, MultiEdit, NotebookEdit). This is the early warning, by path.
+  It DENIES.
+
+## Verdict: the diff check logs, it does not block
+
+Owner ruling, 2026-10-02. At commit, push and stop, an offence writes one `noted` line,
+`builder-diff` or `author-diff`, with the path, and the guard allows the act. An unreadable diff
+logs `role-diff-unread` at commit, push and stop. The reviewer reads the log and the diff.
+
+Why: the base can be wrong, and a refusal on a wrong base is a false alarm, which spends the
+guard (CLAUDE.md, verification-cry-wolf-guard-is-spent). The base is the OLDEST `HEAD` reflog
+entry. A branch cut from a non-default branch counts that branch's files as the agent's own.
+Unmeasured: how often it fired wrongly. The outcome protected, a green run that means the code
+is right, now rests on the reviewer and on the Edit/Write denial.
+
+Trigger to restore blocking: fix the base bug. Then a refusal at commit, push and stop returns,
+with the undo route and the once-only stop.
 
 ## What counts as the agent's own change
 
@@ -35,29 +51,24 @@ Backslashes become `/`. There are TWO bases, and a path counts only if it differ
 
 Only the agent's own change differs from both.
 
-## The stop gives up once
-
-A refusal at SubagentStop blocks the stop once. A second stop (`stop_hook_active`) is allowed,
-and the guard logs `role-diff-unresolved`. So an agent that cannot fix its tree never loops.
-The reason names the undo route with placeholders and no target:
-`git show <base>:<path> > <path>` restores a file, and `rm <path>` removes a new file. The
-reason says that the restore covers the WHOLE file. The agent must redo any product change in
-that file afterward.
+## Stops the guard cannot judge
 
 A stop the guard cannot judge always logs. These are the logs: `role-diff-nocwd` (no cwd),
 `role-diff-main-checkout` (the cwd is a main checkout, which holds no agent's own work), and
-`role-diff-unread`. At SubagentStop an unread diff blocks once, under the same cap.
+`role-diff-unread`. A second stop (`stop_hook_active`) with an offence logs
+`role-diff-unresolved`.
 
 ## Roles
 
 The payload must carry an `agent_id`. The main session, reviewers, Explore, and a session
 started with `--agent builder` (no `agent_id`) stay allowed.
 
-- `builder` (rule `builder-test-edit`): refused when the diff holds a test path.
-- `test-author` (rule `test-author-scope`, `agents/test-author.md`): the inverse. Refused when
-  the diff holds anything but a test path, test config, or a dev dependency list.
+- `builder` (diff rule `builder-diff`, write rule `builder-test-edit`): logged when the diff
+  holds a test path. The write tool denies it.
+- `test-author` (diff rule `author-diff`, write rule `test-author-scope`,
+  `agents/test-author.md`): the inverse. Logged when the diff holds anything but a test path, test config, or a dev dependency list.
 
-Both reasons name no path. They say: report the needed change, and the orchestrator assigns it
+Both write refusals name no path. They say: report the needed change, and the orchestrator assigns it
 to the other role (rule git-remedy-never-names-target).
 
 ## Test path
@@ -104,7 +115,8 @@ new code:
 - A new worktree can reset the reflog base.
 - A commit made through `sh -c` or a subshell is not read at commit time. The stop check still
   reads the diff.
-- The second stop is allowed after one block, so an agent can ignore the first block.
+- The diff check does not block, so an agent can commit a test change. The reviewer must read
+  the log.
 
 ## Known ceilings (bandaids, named)
 

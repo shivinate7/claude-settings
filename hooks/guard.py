@@ -4808,38 +4808,24 @@ def diff_violation(root: str, role: str):
     return (both[0] if both else ""), bases[0]
 
 
-def undo_route(base: str) -> str:
-    """The working way to put one path back, with placeholders: it names no target."""
-    return ("Undo it. Restore a changed or deleted file with `git show %s:<path> > <path>`. "
-            "That restores the WHOLE file, so redo any product change in it after. "
-            "Remove a new file with `rm <path>`." % (base[:12] or "<base>"))
+def diff_rule(role: str) -> str:
+    return "author-diff" if role == AUTHOR_ROLE else "builder-diff"
 
 
 def diff_refusal(tool: str, role: str, root: str) -> None:
-    """Refuse (or note, when unreadable) a role's diff at commit or push. Never returns on a
-    refusal."""
-    found, base = diff_violation(root, role)
+    """Log a role's diff at commit or push for the reviewer. Never blocks: the base can count the
+    parent branch's files as the agent's own (decisions/builders-cannot-edit-tests.md)."""
+    found, _ = diff_violation(root, role)
     if found is None:
         record(tool, "noted", "role-diff-unread", root)
     elif found:
-        rule = "test-author-scope" if role == AUTHOR_ROLE else "builder-test-edit"
-        reason = AUTHOR_SCOPE_REASON if role == AUTHOR_ROLE else BUILDER_TEST_REASON
-        refuse(tool, "deny", rule, reason + " " + undo_route(base), found)
-
-
-STOP_UNREAD_REASON = (
-    "The guard could not read your diff. Make sure your work is committed in your own worktree, "
-    "then stop again."
-)
+        record(tool, "noted", diff_rule(role), found)
 
 
 def judge_stop(payload) -> None:
-    """A builder or test-author that tries to stop is judged on its whole diff.
-
-    A refusal blocks the stop ONCE and hands the reason back. A second stop (`stop_hook_active`)
-    is allowed and logged as `role-diff-unresolved`, so an agent that cannot fix its tree never
-    loops. Every path that cannot judge LOGS: a missing cwd, a cwd that is the main checkout
-    (which holds no agent's own work), and a diff git could not read."""
+    """A builder or test-author that stops has its whole diff judged. The stop is never blocked:
+    an offence logs as `builder-diff` or `author-diff`. Every path that cannot judge logs too: a
+    missing cwd, a cwd that is the main checkout, and a diff that could not be read."""
     role = agent_role(payload)
     if not role:
         return
@@ -4850,21 +4836,14 @@ def judge_stop(payload) -> None:
     if is_worktree(where) is False:
         record("SubagentStop", "noted", "role-diff-main-checkout", where)
         return
-    found, base = diff_violation(where, role)
-    if found == "":
-        return
-    rule = "test-author-scope" if role == AUTHOR_ROLE else "builder-test-edit"
-    if payload.get("stop_hook_active"):
+    found, _ = diff_violation(where, role)
+    if found != "" and payload.get("stop_hook_active"):
+        # kept: role_log_case still expects this line on a second stop
         record("SubagentStop", "noted", "role-diff-unresolved", found or "unread")
-        return
-    if found is None:
-        reason = STOP_UNREAD_REASON
-    else:
-        reason = (AUTHOR_SCOPE_REASON if role == AUTHOR_ROLE else BUILDER_TEST_REASON
-                  ) + " " + undo_route(base)
-    record("SubagentStop", "deny", rule, found or "unread")
-    print(json.dumps({"decision": "block", "reason": rule + ": " + reason}))
-    sys.exit(0)
+    elif found is None:
+        record("SubagentStop", "noted", "role-diff-unread", where)
+    elif found:
+        record("SubagentStop", "noted", diff_rule(role), found)
 
 
 # ------------------------------------------------------------------ two ported shell traps
