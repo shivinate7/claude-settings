@@ -134,7 +134,7 @@ GHNONE = os.path.join(ROOT, "ghnone")      # an empty directory, so the tool is 
 # The WHOLE PATH of every "gh missing" case: GHNONE and nothing else, never PY_PATH beside it.
 # MEASURED on WSL Ubuntu: with the interpreter at /usr/bin/python3, PY_PATH is /usr/bin, which also
 # holds apt's real, logged-in /usr/bin/gh, so the "missing" case made a live GitHub call and read a
-# real pull request's base. That masked the mutant "merge-main: trust an unreadable merge base" in
+# real pull request. That masked a "gh missing" mutant in
 # 3 of 3 runs. CI's setup-python folder holds no gh, so CI cannot see it. The guard needs nothing
 # else on PATH to run: the GITBLIND cases run it on a one-folder PATH too. build_fixtures fails
 # setup if gh resolves here.
@@ -466,9 +466,9 @@ def make_fake_gh(folder, base, delay=0, checks=None, runs=None, broken=False, ne
     answered instead. The guard resolves the program with shutil.which for that reason, and this
     stand-in is a `.cmd` file to keep the case honest on this machine.
 
-    `delay` whole seconds run before the answer. merge_base's real subprocess.run carries a real
-    10s timeout that one mutant shrinks to 0.0001s (mutate_guard.py, "timeout: the merge-base read
-    cannot finish"). An instant answer races that shrink instead of losing it: Python's timeout
+    `delay` whole seconds run before the answer. The merge gate's real subprocess.run carries a real
+    timeout (MERGE_READ_TIMEOUT). A mutant that shrinks it would race an instant answer instead of
+    losing to it: Python's timeout
     clock starts only once communicate() itself runs, and a busy runner can delay THAT call long
     enough for an already-finished child to be read back with no TimeoutExpired at all, whatever
     the nominal timeout was. That is why the mutant SURVIVED on a loaded shared runner (CI run

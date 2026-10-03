@@ -53,7 +53,7 @@ one fixed order, and the first match wins.
     destructive-delete a recursive delete at a root, a home or a glob
   5 env-file           any read or write of an environment file
   6 merge-checks       a `gh pr merge` (or the MCP merge tool) while the head has a check or run
-                       pending or red, or the read could not run. Denied. `--auto` passes.
+                       pending or red, or the read could not run. Denied, `--auto` too.
   7 frozen-path        a write to the settings, the hooks or the global CLAUDE.md, under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. Always denied.
   8 subagent-model-cap a write to a settings file whose content sets or changes

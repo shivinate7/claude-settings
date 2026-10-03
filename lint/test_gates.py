@@ -2368,18 +2368,18 @@ class TurnEndEarlyExitTests(unittest.TestCase):
         records = [human("old turn"), tool_use_msg("Edit", {"file_path": target}), tool_result_msg(),
                    human("new turn"), assistant_text("done")]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(CONFIG_REPORT, {"hook_event_name": "Stop", "transcript_path": path, "cwd": self.repo})
+        run = run_config_report({"hook_event_name": "Stop", "transcript_path": path, "cwd": self.repo})
         self.assertEqual(run.stdout.strip(), "")
         records.append(tool_use_msg("Edit", {"file_path": target}))
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(CONFIG_REPORT, {"hook_event_name": "Stop", "transcript_path": path, "cwd": self.repo})
+        run = run_config_report({"hook_event_name": "Stop", "transcript_path": path, "cwd": self.repo})
         self.assertIn("Config files changed", json.loads(run.stdout)["systemMessage"])
 
     def test_config_report_names_a_merge_that_left_no_file(self):
         records = [human("merge it"), tool_use_msg("Bash", {"command": "gh pr merge 7 --squash"}),
                    tool_result_msg(), assistant_text("done")]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(CONFIG_REPORT, {"hook_event_name": "Stop", "transcript_path": path, "cwd": self.repo})
+        run = run_config_report({"hook_event_name": "Stop", "transcript_path": path, "cwd": self.repo})
         self.assertIn("Merges into main", json.loads(run.stdout)["systemMessage"])
 
 
