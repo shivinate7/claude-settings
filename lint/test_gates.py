@@ -438,6 +438,186 @@ class ReportGateTests(unittest.TestCase):
         out = json.loads(run.stdout)
         self.assertEqual(out.get("decision"), "block")
 
+    def test_67_every_github_landing_tool_with_no_report_blocks(self):
+        # Pinned by hand, not read from report_gate.LANDING_TOOLS: an emptied set must fail here.
+        for tool in ("mcp__github__merge_pull_request", "mcp__github__create_pull_request",
+                     "mcp__github__push_files", "mcp__github__create_or_update_file"):
+            records = [
+                human("land it"),
+                tool_use_msg(tool, {"title": "x"}),
+                tool_result_msg(),
+                assistant_text("Landed it."),
+            ]
+            path = write_transcript(records, self.tmp.name)
+            run = run_gate(REPORT_GATE, self.hook_for(path))
+            self.assertEqual(run.returncode, 0, tool)
+            self.assertEqual(json.loads(run.stdout).get("decision"), "block", tool)
+
+    def test_68_first_label_not_done_blocks(self):
+        records = [
+            human("do the task"),
+            tool_use_msg("Bash", {"command": "git commit -m x"}),
+            tool_result_msg(),
+            assistant_text("> **Deviations** none\n> **Next** ship it"),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        run = run_gate(REPORT_GATE, self.hook_for(path))
+        self.assertEqual(json.loads(run.stdout).get("decision"), "block")
+
+    def test_69_event_other_than_stop_never_blocks(self):
+        records = [
+            human("do the task"),
+            tool_use_msg("Bash", {"command": "git commit -m x"}),
+            tool_result_msg(),
+            assistant_text("Done BUILT abc123"),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        for event in ("SubagentStop", "PreToolUse", "SessionEnd"):
+            hook = self.hook_for(path)
+            hook["hook_event_name"] = event
+            run = run_gate(REPORT_GATE, hook)
+            self.assertEqual(run.returncode, 0, event)
+            self.assertEqual(run.stdout.strip(), "", event)
+
+
+class DoneFormatAndCiteTests(unittest.TestCase):
+    """reports-done-format and speak-cite-id-plus-gloss, both in report_gate.py's Stop hook."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def verdict(self, reply):
+        records = [
+            human("do the task"),
+            tool_use_msg("Bash", {"command": "git commit -m x"}),
+            tool_result_msg(),
+            assistant_text(reply),
+        ]
+        path = write_transcript(records, self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
+        run = run_gate(REPORT_GATE, hook)
+        self.assertEqual(run.returncode, 0)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def assert_blocked(self, reply, needle):
+        out = self.verdict(reply)
+        self.assertIsNotNone(out, reply)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn(needle, out["reason"])
+
+    def assert_allowed(self, reply):
+        self.assertIsNone(self.verdict(reply), reply)
+
+    # reports-done-format
+    def test_df_red_done_without_kind_blocks(self):
+        self.assert_blocked("> **Done** fixed it in abc123\n> **Next** none", "BUILT, RECORDED, or OTHER")
+
+    def test_df_red_done_without_ref_blocks(self):
+        self.assert_blocked("> **Done** BUILT the gate\n> **Next** none", "BUILT, RECORDED, or OTHER")
+
+    def test_df_red_one_bullet_lacks_ref_blocks(self):
+        self.assert_blocked("> **Done**\n> - BUILT gate, PR #5\n> - RECORDED the ruling\n> **Next** none",
+                            "RECORDED the ruling")
+
+    def test_df_allowed_other_needs_no_ref(self):
+        self.assert_allowed("> **Done**\n> - BUILT gate, PR #5\n> - OTHER swept the stale branches\n> **Next** none")
+
+    def test_df_red_other_item_alone_still_needs_kind_word(self):
+        self.assert_blocked("> **Done**\n> - swept the stale branches\n> **Next** none", "swept the stale")
+
+    def test_df_allowed_inline_with_pr(self):
+        self.assert_allowed("> **Done** BUILT the gate, PR #226\n> **Next** none")
+
+    def test_df_allowed_bullets_with_sha_and_pr_url(self):
+        self.assert_allowed(
+            "> **Done**\n> - BUILT gate, abc1234\n"
+            "> - RECORDED ruling, https://github.com/o/r/pull/12\n> **Next** none")
+
+    def test_df_false_alarm_ref_on_wrapped_line_passes(self):
+        self.assert_allowed("> **Done**\n> - BUILT the gate and\n>   its tests, commit abc1234\n> **Next** none")
+
+    def test_df_false_alarm_deviations_text_not_read_as_done(self):
+        self.assert_allowed("> **Done** BUILT gate, PR #226\n> **Deviations** none of the kind words here")
+
+    # speak-cite-id-plus-gloss
+    def test_cite_red_bare_d_id_blocks(self):
+        self.assert_blocked("Per D12 this is fine.\n\n> **Done** BUILT gate, PR #226\n> **Next** none", "'D12'")
+
+    def test_cite_red_bare_decision_number_blocks(self):
+        self.assert_blocked("See decision 136.\n\n> **Done** BUILT gate, PR #226\n> **Next** none", "decision 136")
+
+    def test_cite_red_bare_id_inside_report_blocks(self):
+        self.assert_blocked("> **Done** BUILT gate, PR #226\n> **Next** follow D258 next", "'D258'")
+
+    def test_cite_allowed_id_plus_gloss(self):
+        self.assert_allowed(
+            "Per D12, short titles for records, this holds.\n\n> **Done** BUILT gate, PR #226\n> **Next** none")
+
+    def test_cite_allowed_gloss_before_in_parens(self):
+        self.assert_allowed(
+            "Short titles for records (D12) hold.\n\n> **Done** BUILT gate, PR #226\n> **Next** none")
+
+    def test_cite_false_alarm_pr_link_sha_and_version(self):
+        self.assert_allowed(
+            "Merged https://github.com/o/r/pull/218 and [D12](https://x/y), sha d1234567890abcdef, "
+            "version v1.2.3, decision 1.2 notes, and PR #218.\n\n"
+            "> **Done** BUILT gate, PR #218\n> **Next** none")
+
+    def test_cite_false_alarm_code_span_and_path(self):
+        self.assert_allowed(
+            "The heading `## D012` is refused, see decisions/D258-slug.md.\n\n"
+            "> **Done** BUILT gate, PR #226\n> **Next** none")
+
+    def test_cite_false_alarm_not_a_report_turn(self):
+        records = [human("what is D12?"), assistant_text("D12 is a record.")]
+        path = write_transcript(records, self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
+        self.assertEqual(run_gate(REPORT_GATE, hook).stdout.strip(), "")
+
+    # review fixes
+    def test_df_red_facade_is_not_a_sha(self):
+        self.assert_blocked("> **Done** BUILT facade\n> **Next** none", "BUILT facade")
+
+    def test_df_allowed_sub_bullets_are_details(self):
+        self.assert_allowed(
+            "> **Done**\n> - BUILT gate, PR #5\n>   - touched the parser\n>   - no ref here\n> **Next** none")
+
+    def test_df_red_top_bullet_after_sub_bullets_still_checked(self):
+        self.assert_blocked(
+            "> **Done**\n> - BUILT gate, PR #5\n>   - detail\n> - RECORDED ruling\n> **Next** none",
+            "RECORDED ruling")
+
+    def test_df_allowed_lead_in_text_with_bullets_is_not_an_item(self):
+        self.assert_allowed("> **Done** two items:\n> - BUILT gate, PR #5\n> - OTHER swept, abc1234\n> **Next** none")
+
+    def test_df_red_lead_in_with_kind_but_no_ref_blocks(self):
+        self.assert_blocked("> **Done** BUILT it:\n> - BUILT gate, PR #5\n> **Next** none", "BUILT it")
+
+    def test_cite_allowed_more_gloss_shapes(self):
+        for lead in ("D12 = short titles for records", "D12 -- short titles for records",
+                     "D12 says short titles win", "Short titles ruling, D12"):
+            self.assert_allowed("Per " + lead + " here.\n\n> **Done** BUILT gate, PR #226\n> **Next** none")
+
+    def test_cite_false_alarm_cell_range_and_vitamin(self):
+        self.assert_allowed("Sum A1:D12 and take vitamin D3 daily, or D12:F20.\n\n"
+                            "> **Done** BUILT gate, PR #226\n> **Next** none")
+
+    def test_cite_red_gloss_shapes_do_not_hide_bare_id(self):
+        self.assert_blocked("Per D12 and more.\n\n> **Done** BUILT gate, PR #226\n> **Next** none", "'D12'")
+
+    def test_cite_and_done_block_once_with_both_reasons(self):
+        out = self.verdict("Per D12.\n\n> **Done** BUILT gate\n> **Next** none")
+        self.assertIn("BUILT, RECORDED, or OTHER", out["reason"])
+        self.assertIn("'D12'", out["reason"])
+
+    def test_df_cite_quiet_on_rewrite(self):
+        records = [human("x"), tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text("Per D12.\n\n> **Done** BUILT gate\n> **Next** none")]
+        path = write_transcript(records, self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": True}
+        self.assertEqual(run_gate(REPORT_GATE, hook).stdout.strip(), "")
+
 
 class ConfigReportTests(unittest.TestCase):
     """Decision 7: an allowed project config edit is still reported at turn end."""
@@ -1556,6 +1736,44 @@ class SteGatePreToolUseTests(unittest.TestCase):
     def test_67_non_markdown_path_allowed(self):
         target = self._write("notes.py", "print('a; b')\n")
         run = self.run_pretooluse("Write", {"file_path": target, "content": "print('a; b')\n"})
+        self.assert_allowed(run)
+
+    def test_67b_non_prose_suffix_with_an_ste_error_still_allowed(self):
+        # The path guard, not the text, must be what lets this through: the content has a
+        # contraction, an STE008 error if the file were linted.
+        target = os.path.join(self.tmp.name, "notes.txt")  # never created: Write makes it
+        run = self.run_pretooluse("Write", {
+            "file_path": target, "content": "This isn't prose the gate should read.\n"})
+        self.assert_allowed(run)
+
+    def test_67c_failed_multiedit_replay_lints_the_new_text_not_the_old_file(self):
+        # The second edit cannot be replayed (old_string absent), so the gate lints the
+        # proposed new text in full. Linting the old file instead would find nothing.
+        target = self._write("notes.md", self.THREE_ERRORS_ONE_CLEAN)
+        run = self.run_pretooluse("MultiEdit", {"file_path": target, "edits": [
+            {"old_string": "This is the clean block that gets edited.\n",
+             "new_string": "This is the clean block that gets edited today.\n"},
+            {"old_string": "text that is not actually in the file",
+             "new_string": "This new text isn't clean, introduced here."},
+        ]})
+        reason = self.assert_denied(run)
+        self.assertIn("contraction", reason.lower())
+
+    def test_67d_ambiguous_edit_is_not_replayed_at_the_first_match(self):
+        # old_string sits in two paragraphs, no replace_all. Edit itself refuses that, and
+        # the gate lints only new_string (short, clean). Replaying at the first match would
+        # join it to the 20 words above and wrongly report a long sentence.
+        head = ("w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12\n"
+                "w13 w14 w15 w16 w17 w18 w19 w20\n"
+                "w21 w22 w23.\n\n"
+                "Another paragraph.\n\n"
+                "w21 w22 w23.\n")
+        target = self._write("twice.md", head)
+        run = self.run_pretooluse("Edit", {
+            "file_path": target,
+            "old_string": "w21 w22 w23.\n",
+            "new_string": "w21 w22 w23 w24 w25 w26 w27 w28 w29 w30.\n",
+        })
         self.assert_allowed(run)
 
 

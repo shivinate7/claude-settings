@@ -5,7 +5,7 @@
 #
 # Run it from the repository root:
 #
-#   sh hooks/test_install_src.sh
+#   sh hooks/test_install_src.sh [case ...]   # names given: run only those cases
 #
 # Every case uses a temp HOME and a temp CLAUDE_CONFIG_DIR so the real /root/.claude is
 # never touched. SESSION_START_SH lets a case point at a different (e.g. pre-fix) copy of
@@ -1092,6 +1092,61 @@ skills_case2() {
   rm -rf "$h"
 }
 
+# ---- backup cases: a person's own CLAUDE.md or settings.json is never lost ------------------
+backup_case1() {
+  name="backup1: a pre-existing CLAUDE.md with its own content is backed up before the pointer replaces it"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/backup1-checkout"
+  make_checkout "$co" "# backup1 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  mkdir -p "$cfg"
+  printf 'my own notes\n' > "$cfg/CLAUDE.md"
+
+  out=$(run_local_install "$co" "$h" "$cfg"); rc=$?
+  bak=$(ls "$cfg"/CLAUDE.md.bak.* 2>/dev/null | head -n1)
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ -z "$bak" ]; then
+    bad "$name" "no CLAUDE.md.bak.* file; the person's own CLAUDE.md was overwritten"
+  elif [ "$(cat "$bak")" != "my own notes" ]; then
+    bad "$name" "the backup does not hold the original content"
+  elif grep -q "my own notes" "$cfg/CLAUDE.md"; then
+    bad "$name" "CLAUDE.md still holds the old content, no pointer written"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+backup_case2() {
+  name="backup2: a pre-existing real settings.json is moved to a backup, not replaced silently"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then
+    skip "$name" "$NO_SYMLINK_REASON"
+    return
+  fi
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/backup2-checkout"
+  make_checkout "$co" "# backup2 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  mkdir -p "$cfg"
+  printf '{"mine": true}\n' > "$cfg/settings.json"
+
+  out=$(run_local_install "$co" "$h" "$cfg"); rc=$?
+  bak=$(ls "$cfg"/settings.json.bak.* 2>/dev/null | head -n1)
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ -z "$bak" ]; then
+    bad "$name" "no settings.json.bak.* file; the person's own settings.json was lost"
+  elif [ "$(cat "$bak")" != '{"mine": true}' ]; then
+    bad "$name" "the backup does not hold the original content"
+  elif [ ! -L "$cfg/settings.json" ]; then
+    bad "$name" "settings.json is not a symlink after install"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
 # ---- bin case: the shim lands, and only the three stale Banchi files go ------------------------
 bin_case1() {
   name="bin1: claude-janitor shim lands; janitor.py, reap.py, session-teardown.sh removed; others kept"
@@ -1170,39 +1225,46 @@ caseF5() {
   fi
 }
 
-case1
-case2
-case3
-case_origins
-case7
-case8
-pointer_case1
-pointer_case2
-pointer_case3
-pointer_case4
-pointer_case5
-pointer_case6
-case4
-case5
-case6
-case9
-case10
-prune_case1
-prune_case2
-prune_case3
-prune_case4
-prune_case5
-prune_case6
-skills_case1
-skills_case2
-bin_case1
-bin_case2
-caseF1
-caseF2
-caseF3
-caseF4
-caseF5
-caseF6
+# Optional case filter: `sh hooks/test_install_src.sh caseF4 caseF6` runs only those cases.
+# No arguments runs every case. lint/check_unknown_reads_contract.py uses it.
+ONLY=" $* "
+run() { [ "$ONLY" = "  " ] || case "$ONLY" in *" $1 "*) ;; *) return 0 ;; esac; "$1"; }
+
+run case1
+run case2
+run case3
+run case_origins
+run case7
+run case8
+run pointer_case1
+run pointer_case2
+run pointer_case3
+run pointer_case4
+run pointer_case5
+run pointer_case6
+run case4
+run case5
+run case6
+run case9
+run case10
+run prune_case1
+run prune_case2
+run prune_case3
+run prune_case4
+run prune_case5
+run prune_case6
+run skills_case1
+run skills_case2
+run backup_case1
+run backup_case2
+run bin_case1
+run bin_case2
+run caseF1
+run caseF2
+run caseF3
+run caseF4
+run caseF5
+run caseF6
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
