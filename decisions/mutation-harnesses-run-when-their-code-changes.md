@@ -24,9 +24,12 @@ other step took under 2 min. A pull request that changed one sentence in
 - The diff uses `--no-renames`. A move out of a trigger path then lists the old path.
 - An empty base SHA on a pull request runs every harness. So does an empty or
   all-zeros `before` SHA on a push.
-- A nightly `schedule:` run on main and `workflow_dispatch` run every harness on every OS.
+- A nightly `schedule:` run on main and `workflow_dispatch` run every harness. The guard harness
+  runs on ubuntu only; the sweep harness runs on every OS.
 - A diff that cannot be read runs both harnesses.
-- The earlier choices stay: macOS and Windows skip the Guard harness on pull requests.
+- The Guard harness runs on Ubuntu only (the `gates` job). macOS and Windows never run it: on
+  main's push run 37086259145 it took 34.5 min on Windows and hit the 45 min job timeout. No
+  mutant is marked `windows` or macOS-only, so no subset stays on those OSes.
 
 ## Accepted risk
 
