@@ -161,6 +161,22 @@ BRANCHFALLBACKMAIN = os.path.join(ROOT, "branchfallbackmain")
 BRANCHFALLBACKMASTER = os.path.join(ROOT, "branchfallbackmaster")
 BRANCHNOBASE = os.path.join(ROOT, "branchnobase")
 
+# The push cases. Each is a real checkout, so the default branch is read from git and never
+# guessed. PUSHFEAT sits on `feat` with origin/HEAD naming main, PUSHMAIN sits on main, PUSHTRUNK
+# sits on `feat` with origin/HEAD naming trunk (so main is an ordinary branch there), PUSHNOHEAD
+# has no origin/HEAD at all (the main/master fallback), PUSHDETACHED has no current branch.
+PUSHFEAT = os.path.join(ROOT, "pushfeat")
+PUSHMAIN = os.path.join(ROOT, "pushmain")
+PUSHTRUNK = os.path.join(ROOT, "pushtrunk")
+PUSHNOHEAD = os.path.join(ROOT, "pushnohead")
+PUSHDETACHED = os.path.join(ROOT, "pushdetached")
+# push.default fixtures, each on `feat`: UP follows an upstream named main, UPSELF an upstream
+# named feat, NOUP has push.default upstream and no upstream, MATCH has push.default matching.
+PUSHUP = os.path.join(ROOT, "pushup")
+PUSHUPSELF = os.path.join(ROOT, "pushupself")
+PUSHNOUP = os.path.join(ROOT, "pushnoup")
+PUSHMATCH = os.path.join(ROOT, "pushmatch")
+
 # WTMAIN is the primary checkout of its own small repository. Every linked worktree below is a
 # real one, because the rule reads `git worktree list --porcelain` and `git status --porcelain`
 # with git itself, never a guess from a path. WTPRUNE is a SEPARATE repository, so pruning it
@@ -812,6 +828,37 @@ def build_fixtures():
     if base_check2.returncode == 0:
         sys.exit("fixture setup failed in build_fixtures: BRANCHNOBASE unexpectedly has a "
                   "local main")
+
+    # ----------------------------------------------------------------- push destinations
+    for where, head, branch in ((PUSHFEAT, "main", "feat"), (PUSHMAIN, "main", "main"),
+                                (PUSHTRUNK, "trunk", "feat"), (PUSHNOHEAD, None, "feat"),
+                                (PUSHDETACHED, "main", None)):
+        make_repo(where, {"base.txt": "base\n"})
+        if head:
+            run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+            run_vcs(where, "update-ref", "refs/remotes/origin/" + head, "HEAD")
+            run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD",
+                    "refs/remotes/origin/" + head)
+        if branch and branch != "main":
+            run_vcs(where, "checkout", "-q", "-b", branch)
+        if branch is None:
+            run_vcs(where, "checkout", "-q", "--detach")
+        if (head and run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD").returncode != 0):
+            sys.exit("fixture setup failed in build_fixtures: origin/HEAD in %r unreadable" % where)
+
+    for where, mode, merge in ((PUSHUP, "upstream", "main"), (PUSHUPSELF, "upstream", "feat"),
+                               (PUSHNOUP, "upstream", None), (PUSHMATCH, "matching", None)):
+        make_repo(where, {"base.txt": "base\n"})
+        run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+        run_vcs(where, "update-ref", "refs/remotes/origin/main", "HEAD")
+        run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        run_vcs(where, "checkout", "-q", "-b", "feat")
+        run_vcs(where, "config", "push.default", mode)
+        if merge:
+            run_vcs(where, "config", "branch.feat.remote", "origin")
+            run_vcs(where, "config", "branch.feat.merge", "refs/heads/" + merge)
+        if run_vcs(where, "config", "--get", "push.default").stdout.strip() != mode:
+            sys.exit("fixture setup failed in build_fixtures: push.default in %r" % where)
 
     # ----------------------------------------------------------------- worktree remove/prune
     #
@@ -1965,21 +2012,169 @@ sh("silent-write: 2>&1 alone duplicates a stream and discards nothing",
 
 # =========================================================================== 3. push and delete
 
-sh("push: the long force flag", VCS + " push --force", "ask", "force-push", cwd=NOGIT)
-sh("push: the short force flag", VCS + " push -f origin x", "ask", "force-push", cwd=NOGIT)
-sh("push: force with lease", VCS + " push --force-with-lease", "ask", "force-push", cwd=NOGIT)
-sh("push: force with lease naming a ref", VCS + " push --force-with-lease=main origin main", "ask",
-   "force-push", cwd=NOGIT)
-sh("push: force from the PowerShell tool as well", VCS + " push --force-with-lease", "ask",
-   "force-push", tool="PowerShell", cwd=NOGIT)
+LEASE = " --force-with-lease --force-if-includes"
+SHA = "0123456789abcdef0123456789abcdef01234567"
+REMEDY = "retry with --force-with-lease --force-if-includes"
+
+
+def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash"):
+    sh("push: " + name, VCS + " push " + tail, expected,
+       "force-push" if expected != "allow" else None, cwd=cwd, tool=tool,
+       carries=REMEDY if expected == "deny" else ())
+
+
+# ALLOW: a lease that cannot overwrite newer work, off the default branch.
+push_case("lease with includes, bare", "--force-with-lease --force-if-includes", "allow")
+push_case("lease with includes, naming a ref", "--force-with-lease=feat --force-if-includes origin feat",
+          "allow")
+push_case("lease with includes, naming ref and sha",
+          "--force-with-lease=feat:" + SHA + " --force-if-includes origin feat", "allow")
+push_case("lease naming ref and sha is stale-safe alone", "--force-with-lease=feat:" + SHA + " origin feat",
+          "allow")
+push_case("lease with includes, flags in the other order", "--force-if-includes --force-with-lease origin HEAD",
+          "allow")
+push_case("lease with includes from the PowerShell tool as well", "--force-with-lease --force-if-includes",
+          "allow", tool="PowerShell")
+push_case("lease with includes to main-fix, not the default branch",
+          "--force-with-lease --force-if-includes origin HEAD:main-fix", "allow")
+push_case("lease with includes to a branch under the default name's prefix",
+          "--force-with-lease --force-if-includes origin HEAD:refs/heads/main-fix", "allow")
+push_case("lease to a branch main-fix when the default branch is trunk",
+          "--force-with-lease --force-if-includes origin HEAD:main", "allow", cwd=PUSHTRUNK)
+
+# DENY with the remedy: any force that can overwrite newer work.
+push_case("the long force flag", "--force", "deny")
+push_case("the short force flag", "-f origin feat", "deny")
+push_case("the short force flag inside a bundle", "-fu origin feat", "deny")
+push_case("a force prefix", "--forc origin feat", "deny")
+push_case("a shorter force prefix", "--fo origin feat", "deny")
+push_case("a plus refspec", "origin +HEAD:feat", "deny")
+push_case("a plus refspec with the branch name", "origin +feat", "deny")
+push_case("a bare lease without includes", "--force-with-lease", "deny")
+push_case("a lease naming a ref, without includes", "--force-with-lease=feat origin feat", "deny")
+push_case("a force beside a lease and includes", "--force" + LEASE, "deny")
+push_case("includes alone is not a force, so a plain push allows", "--force-if-includes", "allow")
+push_case("a force while the default branch is trunk, main is ordinary there",
+          "--force origin HEAD:main", "deny", cwd=PUSHTRUNK)
+push_case("a push option value is not the remote", "--force-with-lease --force-if-includes -o x origin HEAD:trunk",
+          "ask", cwd=PUSHTRUNK)
+push_case("a push option value with --push-option is not the remote",
+          "--force-with-lease --force-if-includes --push-option x origin HEAD:trunk", "ask",
+          cwd=PUSHTRUNK)
+push_case("a force with no default branch ref, to a feature branch", "--force origin feat", "deny",
+          cwd=PUSHNOHEAD)
+
+# ASK: any forced push that reaches the default branch, or whose destination cannot be read.
+for form, tail in (
+        ("bare, on main", "--force"),
+        ("lease with includes, bare, on main", "--force-with-lease --force-if-includes"),
+        ("lease with includes, HEAD, on main", "--force-with-lease --force-if-includes origin HEAD"),
+        ("the current branch named, on main", "--force-with-lease --force-if-includes origin main"),
+        ("HEAD:main", "--force-with-lease --force-if-includes origin HEAD:main"),
+        ("a full ref", "--force-with-lease --force-if-includes origin x:refs/heads/main"),
+        ("a plus refspec", "origin +HEAD:main"),
+        ("a pinned lease", "--force-with-lease=main:" + SHA + " origin HEAD:main"),
+        ("--mirror", "--mirror --force"),
+        ("--mirror alone, which forces by itself", "--mirror"),
+        ("--all", "--all --force"),
+        ("--all with a lease", "--all" + LEASE),
+        ("a glob refspec", "--force origin refs/heads/*:refs/heads/*"),
+        ("the short flag", "-f origin HEAD:main")):
+    push_case("forced to the default branch asks: " + form, tail, "ask",
+              cwd=PUSHMAIN if "on main" in form or form == "HEAD" else PUSHFEAT)
+push_case("forced to the default branch from a feature branch asks", "--force origin HEAD:main", "ask")
+push_case("forced to the default branch named by origin/HEAD, not by name", "--force origin HEAD:trunk",
+          "ask", cwd=PUSHTRUNK)
+push_case("forced to master when no origin/HEAD is read asks (fallback)", "--force origin HEAD:master",
+          "ask", cwd=PUSHNOHEAD)
+push_case("forced to main when no origin/HEAD is read asks (fallback)", "--force origin HEAD:main",
+          "ask", cwd=PUSHNOHEAD)
+push_case("forced from a detached HEAD, no current branch to resolve, asks",
+          "--force-with-lease --force-if-includes", "ask", cwd=PUSHDETACHED)
+push_case("forced where git cannot be read asks",
+          "--force-with-lease --force-if-includes origin HEAD:feat", "ask",
+          cwd=NOGIT)
+push_case("forced with a plus where git cannot be read asks", "origin +HEAD:feat", "ask", cwd=NOGIT)
+
+LE = "--force-with-lease --force-if-includes "
+push_case("a quoted refspec to the default branch asks", LE + 'origin "HEAD:main"', "ask")
+push_case("a single-quoted plus refspec to the default branch asks", "origin '+main'", "ask")
+push_case("a quoted remote is unquoted", LE + '"origin" HEAD:main', "ask")
+push_case("lease with --repo=, refspec to the default branch asks", "--repo=origin " + LE + "HEAD:main",
+          "ask")
+push_case("lease with --repo and its value, refspec to the default branch asks",
+          "--repo origin " + LE + "HEAD:main", "ask")
+push_case("lease with --repo off the default branch", "--repo=origin " + LE + "HEAD:feat", "allow")
+push_case("a delete refspec at the default branch asks", "origin :main", "ask")
+push_case("a delete refspec at a full default ref asks", "origin :refs/heads/main", "ask")
+push_case("deleting with --delete at the default branch asks", "--delete origin main", "ask")
+push_case("deleting with -d at the default branch asks", "-d origin main", "ask")
+push_case("a deletion off the default branch, refspec", "origin :feat", "allow")
+push_case("a deletion off the default branch, --delete", "--delete origin feat", "allow")
+push_case("--no-force-if-includes cancels --force-if-includes",
+          "--force-with-lease --force-if-includes --no-force-if-includes", "deny")
+push_case("--no-force-with-lease cancels the lease, so nothing is forced",
+          "--force-with-lease --no-force-with-lease --force-if-includes origin feat", "allow")
+push_case("a glued push option is not -f", "-ofoo origin feat", "allow")
+push_case("a push option with its value is not -f", "-o foo origin feat", "allow")
+push_case("a bare lease with push.default upstream follows the upstream to the default branch",
+          LE.strip(), "ask", cwd=PUSHUP)
+push_case("a bare lease with push.default upstream follows an upstream off the default branch",
+          LE.strip(), "allow", cwd=PUSHUPSELF)
+push_case("a bare lease with push.default upstream and no upstream asks", LE.strip(), "ask",
+          cwd=PUSHNOUP)
+push_case("a bare lease with push.default matching asks", LE.strip(), "ask", cwd=PUSHMATCH)
+push_case("a bare lease with an abbreviated force-with-lease and includes allows",
+          "--force-with --force-if-inc", "allow")
+
+push_case("a glued push option then force denies", "-ofoo --force origin feat", "deny")
+push_case("a glued push option in a cluster then force denies", "-vofoo --force origin feat", "deny")
+push_case("a glued push option, other letters, then force denies", "-oyo --force origin feat", "deny")
+push_case("a push option with its value then force denies", "-o foo --force origin feat", "deny")
+
+# THE TARGET DIRECTORY. Config and the default branch are read where the push runs: a `git -C`,
+# a `cd` before it, a `-c` override on the call. The session's cwd here is never the answer.
+sh("push: lease with git -C naming the default branch's checkout asks",
+   VCS + " -C " + slash(PUSHMAIN) + " push " + LE.strip(), "ask", "force-push", cwd=PUSHFEAT)
+sh("push: lease with git -C naming a feature checkout allows from the main checkout",
+   VCS + " -C " + slash(PUSHFEAT) + " push " + LE.strip(), "allow", cwd=PUSHMAIN)
+sh("push: a git -C on another call is not the push's directory",
+   VCS + " -C " + slash(PUSHMAIN) + " status && " + VCS + " push " + LE.strip(), "allow",
+   cwd=PUSHFEAT)
+sh("push: lease after cd into the default branch's checkout asks",
+   "cd " + slash(PUSHMAIN) + " && " + VCS + " push " + LE.strip(), "ask", "force-push", cwd=PUSHFEAT)
+sh("push: lease after cd into a feature checkout allows from the main checkout",
+   "cd " + slash(PUSHFEAT) + " && " + VCS + " push " + LE.strip(), "allow", cwd=PUSHMAIN)
+sh("push: lease with git -C naming a directory that is not there asks",
+   VCS + " -C " + slash(os.path.join(ROOT, "nowhere")) + " push " + LE.strip(), "ask", "force-push",
+   cwd=PUSHFEAT)
+sh("push: lease with -c push.default=upstream follows the upstream to the default branch",
+   VCS + " -c push.default=upstream push " + LE.strip(), "ask", "force-push", cwd=PUSHUP)
+sh("push: lease with -c push.default=current ignores the repository's upstream",
+   VCS + " -c push.default=current push " + LE.strip(), "allow", cwd=PUSHUP)
+sh("push: lease with -c push.default=matching asks",
+   VCS + " -c push.default=matching push " + LE.strip(), "ask", "force-push", cwd=PUSHFEAT)
+
+# FALSE ALARMS: a guard that cries wolf is spent.
+push_case("a non-forced push of main", "origin main", "allow", cwd=PUSHMAIN)
+push_case("a non-forced bare push on main", "", "allow", cwd=PUSHMAIN)
+push_case("a non-forced push with -u of the current branch", "-u origin HEAD", "allow")
+push_case("a non-forced push with -u where git cannot be read", "-u origin HEAD", "allow", cwd=NOGIT)
+push_case("a push of a branch whose name holds force", "origin force-fix", "allow")
+sh("false alarm: --force quoted in a commit message",
+   VCS + ' commit -m "never git push --force here"', "allow", cwd=PUSHFEAT)
+sh("false alarm: --force quoted in an echo", 'echo "git push --force"', "allow", cwd=PUSHFEAT)
+sh("false alarm: --force as a log grep pattern", VCS + " log --grep=--force", "allow", cwd=PUSHFEAT)
+sh("false alarm: --force in a heredoc body",
+   "cat <<'EOF'\n" + VCS + " push --force\nEOF", "allow", cwd=PUSHFEAT)
+sh("false alarm: a lease to main-fix", VCS + " push --force-with-lease --force-if-includes origin HEAD:main-fix",
+   "allow", cwd=PUSHMAIN)
+sh("push: a force push inside a loop's do-block still counts",
+   "while true; do " + VCS + " push --force; done", "deny", "force-push", cwd=PUSHFEAT,
+   carries=REMEDY)
+
 sh("push: an ordinary push", VCS + " push", "allow", cwd=NOGIT)
 sh("push: setting the upstream", VCS + " push -u origin claude/lane", "allow", cwd=NOGIT)
-
-# BLAST RADIUS of the loop-keyword fix: `git_calls` already scans every token of its segment for
-# `git`, not only the first, so a force push inside a loop's do-block asked before this fix too.
-# Pinned here so a later change cannot narrow that scan back to command position only.
-sh("push: git push --force inside a loop's do-block asks unchanged",
-   "while true; do " + VCS + " push --force; done", "ask", "force-push", cwd=NOGIT)
 
 sh("delete: the root", "rm -rf /", "deny", "destructive-delete", cwd=NOGIT)
 sh("delete: the home directory", "rm -fr ~", "deny", "destructive-delete", cwd=NOGIT)
@@ -2741,7 +2936,7 @@ sh("frozen: a leftover token is not a key to the frozen rule",
 sh("frozen: a leftover token is not a key to the shared-tree rule",
    "GIT_DISCARD_OK=1 " + VCS + " restore src", "deny", "shared-tree", cwd=NOGIT)
 sh("frozen: a leftover token is not a key to the push rule",
-   "GIT_DISCARD_OK=1 " + VCS + " push --force", "ask", "force-push", cwd=NOGIT)
+   "GIT_DISCARD_OK=1 " + VCS + " push --force", "deny", "force-push", cwd=PUSHFEAT)
 
 
 # =========================================================================== 6b. the model cap
