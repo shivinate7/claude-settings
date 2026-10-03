@@ -19,6 +19,12 @@
         "reason": "Naming a stale decision, measuring its claim, and proposing a fix are judgment calls in prose. Nothing parses staleness or fix quality."
       }
     },
+    "outcomes-tests-are-claims": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Sorting a failing test into re-point-and-show-red-then-green, real defect, or possibly-stale is a judgment call on the failure's cause. Whether a builder or reviewer actually applied that reasoning is not something a hook can read from a diff. agents/builder.md and agents/reviewer.md carrying the 3-class list is checkable, but proving the check works needs a test fixture, and builders do not write tests; left to a test-author to mechanize that slice."
+      }
+    },
     "outcomes-word-covers-named-act": {
       "mechanism": {
         "kind": "unmechanized",

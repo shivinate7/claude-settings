@@ -17,6 +17,13 @@ Builders do not edit tests or test config. The guard refuses an Edit or Write on
 and the reviewer flags any test path in your diff. A test-author writes the new cases first and
 shows them red. Report any other test change you need.
 
+A test is a claim, not law. When your change breaks one, sort the failure into one class.
+(a) The subject still holds, and only its route changed. Re-point the check. Show it red,
+then green. (b) The failure found a real defect. Fix the code. (c) The rule may be stale.
+STOP. Bring the owner the entry id, its gloss, and the stale sentence. Name the outcome it
+protected and what protects it now. Propose a fix. Wait for their word. Carry this 3-class
+list in your report.
+
 You cannot spawn agents: spawn depth is 1, so the orchestrator fans out and you do the work.
 If the task is too large for one worker, stop at a clean point and report PARTIAL with the
 split you propose. Never review your own work. The orchestrator sends a reviewer.

@@ -3,7 +3,9 @@
 **Outcomes first.** Judge every rule, check, and design by the outcome for the person
 the software serves.<!-- rule:outcomes-judge-by-outcome --> Treat a recorded decision as an argument, not a law. Never defer to a rotted argument.<!-- rule:outcomes-decision-is-argument --> When a decision looks
 stale, name the entry and the sentence. Measure the claim, or say "unmeasured". Name the
-outcome the decision protected and what protects it now. Propose a fix. Wait for my word.<!-- rule:outcomes-stale-decision-protocol --> My
+outcome the decision protected and what protects it now. Propose a fix. Wait for my word.<!-- rule:outcomes-stale-decision-protocol --> A failing test is a claim, not law. When a change breaks one, re-point it and
+show it red then green, or fix the defect it found. When the test itself may be stale, use
+the stale-decision protocol above.<!-- rule:outcomes-tests-are-claims --> My
 word covers the act it names, never a variant of it.<!-- rule:outcomes-word-covers-named-act --> Once ready, turn each rule below
 into a hook or check. This file is the fallback, not the enforcement.<!-- rule:outcomes-mechanize-rules -->
 
@@ -29,8 +31,9 @@ that write lands.<!-- rule:roles-opus-override-guarded -->
 The file also carries `_subagentCapUntil`, an ISO-8601 time no more than 24 hours ahead. The
 watch reverts the raise once that time passes.<!-- rule:roles-override-carries-expiry -->
 Remove the file when the raise is no longer needed.<!-- rule:roles-remove-override-file --> Workers never spawn: nested reports misroute (Sept 2026).
-A repo that needs nesting raises depth in its settings and records the risk.<!-- rule:roles-workers-never-spawn --> A brief carries the task, the files, the governing rulings, and the check that proves the
-task done—in the fewest words. It specifies a report cap in lines sized to the decision it
+A repo that needs nesting raises depth in its settings and records the risk.<!-- rule:roles-workers-never-spawn --> A brief carries the task, the files, governing rulings, failure classes from
+`outcomes-tests-are-claims`, and the check that proves the task done—in the fewest words. It
+specifies a report cap in lines sized to the decision it
 feeds. With no cap named, the cap is 25 lines.<!-- rule:roles-brief-contents --> Each layer proves a change once. A
 test-author writes the new cases first and shows them red on the old code. The builder changes
 product code until they go green. CI alone runs the full suites and the mutation harnesses. A
