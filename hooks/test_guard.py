@@ -2034,6 +2034,10 @@ sh("silent-write gap: push with stdout closed",
 
 sh("silent-write gap, allow: a dry-run fetch moves nothing",
    VCS + " fetch --dry-run >/dev/null", "allow", cwd=NOGIT)
+sh("silent-write gap, allow: a dry-run fetch into a local ref moves nothing",
+   VCS + " fetch origin main:main --dry-run >/dev/null", "allow", cwd=NOGIT)
+sh("silent-write gap, allow: a dry-run pull moves nothing",
+   VCS + " pull --dry-run >/dev/null", "allow", cwd=NOGIT)
 sh("silent-write gap, allow: pull with no redirect",
    VCS + " pull", "allow", cwd=NOGIT)
 sh("silent-write gap, allow: make test is not a merge",
