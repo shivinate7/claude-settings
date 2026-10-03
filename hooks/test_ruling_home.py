@@ -754,6 +754,14 @@ def _run_main(hook_payload, env=None, timeout=30):
     )
 
 
+def _blocks(result):
+    """True when main()'s stdout is a block decision. The known-bad half of every silent pair."""
+    try:
+        return json.loads(result.stdout.strip()).get("decision") == "block"
+    except Exception:
+        return False
+
+
 def case_main_silent_no_memory_folder():
     session_dir = os.path.join(ROOT, "case_main_silent")
     os.makedirs(session_dir, exist_ok=True)
@@ -762,6 +770,16 @@ def case_main_silent_no_memory_folder():
     result = _run_main({"transcript_path": path, "cwd": ROOT})
     check("main_silent: exit 0", result.returncode == 0, result.returncode)
     check("main_silent: nothing printed", result.stdout.strip() == "", result.stdout)
+    # KNOWN-BAD PAIR: silence proves nothing from a hook that is silent for every input. The same
+    # transcript with a memory folder holding a note with no home line must block.
+    memory_dir = os.path.join(session_dir, "memory")
+    os.makedirs(memory_dir, exist_ok=True)
+    mem_path = os.path.join(memory_dir, "notes.md")
+    write(mem_path, "# Note\n\nNo home line.\n")
+    bad = write_transcript(session_dir, [human_record("hi", T0),
+                                         assistant_record(tool_use=write_tool_use(mem_path))])
+    paired = _run_main({"transcript_path": bad, "cwd": ROOT})
+    check("main_silent: known-bad pair blocks", _blocks(paired), paired.stdout)
 
 
 def case_main_blocks():
@@ -794,12 +812,16 @@ def case_main_missing_git_binary_stands_down():
 
     session_dir, memory_dir = new_session("case_main_missing_git")
     mem_path = os.path.join(memory_dir, "notes.md")
-    write(mem_path, "# Note\n\nhome: x.md\n")
+    # An UNRESOLVED home, so that only a working git makes the hook speak. A home that resolves
+    # reads silent with or without git, and the stand-down would prove nothing.
+    write(mem_path, "# Note\n\nhome: no/such/file.md\n")
     records = [
         human_record("do the thing", T0),
         assistant_record(tool_use=write_tool_use(mem_path)),
     ]
     path = write_transcript(session_dir, records)
+    control = _run_main({"transcript_path": path, "cwd": repo})
+    check("main_missing_git: known-bad pair blocks with git present", _blocks(control), control.stdout)
 
     empty_path_dir = os.path.join(ROOT, "empty_path_for_git_test")
     os.makedirs(empty_path_dir, exist_ok=True)
@@ -831,6 +853,12 @@ def case_main_repo_git_cannot_read_stands_down():
     result = _run_main({"transcript_path": path, "cwd": broken})
     check("main_broken_git_repo: exit 0", result.returncode == 0, result.returncode)
     check("main_broken_git_repo: nothing printed", result.stdout.strip() == "", result.stdout)
+    sound = make_repo("case_broken_git_control_repo")
+    write(os.path.join(sound, "x.md"), "hello\n")
+    commit_all(sound)
+    control = _run_main({"transcript_path": path, "cwd": sound})
+    check("main_broken_git_repo: known-bad pair blocks in a readable repo", _blocks(control),
+          control.stdout)
 
 
 def main():

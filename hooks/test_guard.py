@@ -2791,7 +2791,7 @@ BUILDER_GREEN = [
                                 '"ruff check --ignore E501"}}\n')),
     ("flake8-ignore-flag", _put("tox.ini", "[testenv:lint]\ncommands = flake8 --ignore=E203\n")),
     ("ignore-scripts-flag", _put("package.json",
-                                 '{"name": "x", "scripts": {"ci": "npm ci --ignore-scripts"}}\n')),
+                                 '{"name": "x", "scripts": {"ci": "npm ci --ignore-scripts && jest"}}\n')),
     ("dev-requirements", _put("requirements-dev.txt", "pytest\nruff\n")),
     ("pyproject-non-pytest", _put("pyproject.toml",
                                   "[project]\nname = 'x'\ndependencies = ['y']\n"
