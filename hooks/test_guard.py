@@ -1899,6 +1899,9 @@ push_case("a force while the default branch is trunk, main is ordinary there",
           "--force origin HEAD:main", "deny", cwd=PUSHTRUNK)
 push_case("a push option value is not the remote", "--force-with-lease --force-if-includes -o x origin HEAD:trunk",
           "ask", cwd=PUSHTRUNK)
+push_case("a push option value with --push-option is not the remote",
+          "--force-with-lease --force-if-includes --push-option x origin HEAD:trunk", "ask",
+          cwd=PUSHTRUNK)
 push_case("a force with no default branch ref, to a feature branch", "--force origin feat", "deny",
           cwd=PUSHNOHEAD)
 
@@ -1976,6 +1979,9 @@ sh("push: lease with git -C naming the default branch's checkout asks",
    VCS + " -C " + slash(PUSHMAIN) + " push " + LE.strip(), "ask", "force-push", cwd=PUSHFEAT)
 sh("push: lease with git -C naming a feature checkout allows from the main checkout",
    VCS + " -C " + slash(PUSHFEAT) + " push " + LE.strip(), "allow", cwd=PUSHMAIN)
+sh("push: a git -C on another call is not the push's directory",
+   VCS + " -C " + slash(PUSHMAIN) + " status && " + VCS + " push " + LE.strip(), "allow",
+   cwd=PUSHFEAT)
 sh("push: lease after cd into the default branch's checkout asks",
    "cd " + slash(PUSHMAIN) + " && " + VCS + " push " + LE.strip(), "ask", "force-push", cwd=PUSHFEAT)
 sh("push: lease after cd into a feature checkout allows from the main checkout",

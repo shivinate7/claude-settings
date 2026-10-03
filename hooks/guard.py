@@ -538,7 +538,8 @@ def clean_deletes_files(args) -> bool:
     return False
 
 
-PUSH_VALUE_OPTS = {"--receive-pack", "--exec", "-o", "--push-option"}
+# `-o` is read in the short-flag loop, where its value may be glued on.
+PUSH_VALUE_OPTS = {"--receive-pack", "--exec", "--push-option"}
 DEFAULT_BRANCH_FALLBACK = ("main", "master")
 
 
@@ -614,7 +615,13 @@ def push_target(segment: str, cmd: str, cwd: str):
     tokens = segment_tokens(segment)
     if tokens is None:
         return "", {}
-    run_dir = _run_dir(cmd, cwd)
+    # The last `cd` only: `_run_dir` would also take the first `git -C` of ANY segment.
+    run_dir = cwd
+    for other in split_segments(_strip_heredoc_bodies_unconditionally(cmd)):
+        words = segment_tokens(other)
+        cd = _segment_cd_target(words) if words else None
+        if cd is not None:
+            run_dir = _absolute(cd, run_dir)
     git_c = _segment_git_c_target(tokens)
     where = _absolute(git_c, run_dir) if git_c is not None else run_dir
     overrides = {}
@@ -711,8 +718,6 @@ def push_verdict(args, cwd: str, overrides=None) -> str:
         return "ask"
     if force or plus:
         return "deny"
-    if delete and not leased:
-        return ""
     return "" if includes or not unpinned else "deny"
 
 
