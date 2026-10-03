@@ -3257,6 +3257,8 @@ def env_refusal(cmd: str, subs_only: bool = False):
         return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH
     if subs_only:
         texts = texts[:-1]
+        if not texts:
+            return "", ""  # a body with no substitution is text: nothing to judge, and no crash
     for index, (text, in_message) in enumerate(texts):
         # The command itself is last. Its `echo` or `printf` prints to stdout or a file, and an env
         # name among the arguments is text. A substitution's output is an ARGUMENT of the command
@@ -4251,7 +4253,10 @@ def main() -> None:
         judge(payload)
     except SystemExit:
         raise
-    except Exception:
+    except Exception as exc:
+        # Fail open, but never silently: a crash that hides a rule must show in the log.
+        record(str(payload.get("tool_name", "")), "crash", "guard-crash",
+               cap_safe(type(exc).__name__ + ": " + str(exc), 200))
         sys.exit(0)  # fail open on a guard defect
     sys.exit(0)
 

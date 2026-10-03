@@ -1841,6 +1841,12 @@ sh("trim: env: the file named after grep -e still denies", "grep -e foo " + ENV,
 sh("trim: env: a quoted assignment value with a space ahead of node --env-file",
    "ADMINS='Shivam Semwal' PORT=1 node --env-file=" + ENV + " --import tsx server.ts", "allow",
    cwd=NOGIT)
+# An unquoted heredoc whose body holds no substitution once crashed the env check, which failed
+# open and skipped every rule after it, the frozen-path rule included.
+sh("trim: env: an unquoted heredoc with no substitution still reaches the frozen-path rule",
+   "cat <<EOF > " + CFG_HOOK + "\nhello\nEOF", "deny", "frozen-path", cwd=NOGIT)
+sh("trim: env: an unquoted heredoc with a substitution that reads the file denies",
+   "cat <<EOF\n$(cat " + ENV + ")\nEOF", "deny", "env-file", cwd=NOGIT)
 sh("trim: env: the same assignment ahead of a non-runner still denies",
    "ADMINS='Shivam Semwal' cat --env-file=" + ENV, "deny", "env-file", cwd=NOGIT)
 add("env: Edit of the example file", "allow", tool="Edit", cwd=NOGIT,
@@ -2779,6 +2785,33 @@ def cap_reason_bound_case():
     return True, "%d characters, one line, cut marked" % len(reason)
 
 
+def crash_log_case():
+    """A guard defect still allows (fail open), and now logs one `crash` line naming the error."""
+    folder = os.path.join(ROOT, "crashlog")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "guard.log")
+    if os.path.exists(path):
+        os.remove(path)
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    code = ("import io, sys, importlib.util as u\n"
+            "spec = u.spec_from_file_location('g', %r)\n"
+            "g = u.module_from_spec(spec); spec.loader.exec_module(g)\n"
+            "g.judge = lambda payload: 1 / 0\n"
+            "sys.stdin = io.StringIO('{\"tool_name\": \"Bash\", \"tool_input\": {}}')\n"
+            "g.main()\n" % GUARD)
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                            env=env, timeout=60)
+    if result.returncode != 0 or result.stdout.strip():
+        return False, "expected a silent exit 0, got %d %r" % (result.returncode, result.stdout[:80])
+    if not os.path.exists(path):
+        return False, "no crash line was logged"
+    fields = open(path, encoding="utf-8").read().strip().split("\t")
+    if len(fields) != 5 or fields[2:4] != ["crash", "guard-crash"] or "ZeroDivisionError" not in fields[4]:
+        return False, "unexpected crash line: %r" % fields
+    return True, "allowed, and one crash line logged"
+
+
 def conflict_resolve_log_case():
     """`git checkout --theirs` during a real conflict is allowed and logs NOTHING: it is a
     carve-out of shared-tree, with no rule of its own (decisions/guard-trims-from-the-audit.md).
@@ -3555,6 +3588,7 @@ LOG_CHECKS = (
     ("log: a cap lift under a deep path still logs the model", cap_deep_path_log_case),
     ("cap: the printed reason is bounded, single-line and marks a cut", cap_reason_bound_case),
     ("trim: a merge into main is allowed and logs nothing", merge_log_case),
+    ("trim: a guard crash fails open and logs a crash line", crash_log_case),
     ("trim: a conflict-side checkout is allowed and logs nothing", conflict_resolve_log_case),
     ("log: an unreadable subject is allowed and noted", subject_unread_log_case),
     ("log: an unforced worktree remove with an unreadable subject records no note",

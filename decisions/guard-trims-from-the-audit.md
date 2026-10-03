@@ -95,3 +95,8 @@ Fixed after review: 29 `env-file` denies read "only a runner may be handed '.env
 `ADMINS='Shivam Semwal' node --env-file=.env server.ts`. The guard split words on spaces, so the tail
 of the value read as the command word. `_assignment_end` now spans the quoted value. The owner ruled
 that `frozen-path` stays, with no new watch.
+
+Also fixed after review: an unquoted heredoc body with no `$(...)` made `env_heredoc_refusal` raise an
+IndexError. The guard failed open, so every rule after the env check was skipped. The body is now
+judged and passes. The top-level crash handler of `guard.py` now logs one `crash` line, so the next
+hidden crash shows in `guard.log`.
