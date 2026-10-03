@@ -31,7 +31,7 @@ logs `role-diff-unread` at commit, push and stop. The reviewer reads the log and
 Why: the base can be wrong, and a refusal on a wrong base is a false alarm, which spends the
 guard (CLAUDE.md, verification-cry-wolf-guard-is-spent). The base is the OLDEST `HEAD` reflog
 entry. A branch cut from a non-default branch counts that branch's files as the agent's own.
-Unmeasured: how often it fired wrongly. The outcome protected, a green run that means the code
+Unmeasured: how often it fired wrongly. The outcome protected, a green run that means that the code
 is right, now rests on the reviewer and on the Edit/Write denial.
 
 Trigger to restore blocking: fix the base bug. Then a refusal at commit, push and stop returns,
