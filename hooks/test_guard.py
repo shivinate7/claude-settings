@@ -135,6 +135,8 @@ GHEMPTY = os.path.join(ROOT, "ghempty")    # no check and no workflow run report
 GHCWD = os.path.join(ROOT, "ghcwd")        # green, but only for a call run inside the folder `ctxrepo`
 WFREPO = os.path.join(ROOT, "wfrepo")      # a folder that holds one workflow file
 GHSLOW = os.path.join(ROOT, "ghslow")      # green, but every call takes longer than the gate waits
+GHWARM = os.path.join(ROOT, "ghwarm")      # green, each call as slow as a real gh measured locally
+GHHANG = os.path.join(ROOT, "ghhang")      # green, but every call never answers at all
 GHBLANK = os.path.join(ROOT, "ghblank")    # green checks, a base that reads as empty
 CTXREPO = os.path.join(ROOT, "ctxrepo")      # a checkout on main with one merged branch, `done`
 MSG_BAD = os.path.join(ROOT, "msg_bad.txt")  # a message file that cites a record by path
@@ -439,8 +441,10 @@ def make_blind_git(folder):
     os.chmod(script, 0o755)
 
 
-FAKE_GH_PY = r'''import json, os, sys
+FAKE_GH_PY = r'''import json, os, sys, time
 state = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")))
+if state.get("delay_s"):
+    time.sleep(state["delay_s"])
 args = sys.argv[1:]
 if state["cwd_name"] and os.path.basename(os.getcwd()) != state["cwd_name"]:
     state["broken"] = True
@@ -467,7 +471,7 @@ else:
 '''
 
 
-def make_fake_gh(folder, base, delay=0, checks=None, runs=None, broken=False, need=(),
+def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
                  cwd_name=""):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
@@ -475,6 +479,11 @@ def make_fake_gh(folder, base, delay=0, checks=None, runs=None, broken=False, ne
     reads PATHEXT, so a `gh.cmd` earlier on PATH was skipped and the real `gh.exe` further along
     answered instead. The guard resolves the program with shutil.which for that reason, and this
     stand-in is a `.cmd` file to keep the case honest on this machine.
+
+    `delay_s` is a plain float number of seconds, slept inside the fake's own Python process
+    before it answers. It needs no external `sleep`/`ping` and so has none of the whole-second or
+    PATH-resolution limits `delay` carries below; use it for a measured, fractional or very long
+    wait (a realistic `gh` latency, or a stand-in for a `gh` that never answers at all).
 
     `delay` whole seconds run before the answer. The merge gate's real subprocess.run carries a real
     timeout (MERGE_READ_TIMEOUT). A mutant that shrinks it would race an instant answer instead of
@@ -512,6 +521,7 @@ def make_fake_gh(folder, base, delay=0, checks=None, runs=None, broken=False, ne
         "broken": broken,
         "cwd_name": cwd_name,   # the folder name a call must run in, or it answers as a broken tool
         "need": list(need),   # words every call must carry, or it answers as a broken tool does
+        "delay_s": delay_s,   # seconds to sleep in-process before answering; see the delay_s note above
     }
     write(os.path.join(folder, "state.json"), json.dumps(state))
     write(os.path.join(folder, "ghfake.py"), FAKE_GH_PY)
@@ -522,7 +532,12 @@ def make_fake_gh(folder, base, delay=0, checks=None, runs=None, broken=False, ne
             raise RuntimeError(
                 "make_fake_gh: delay=%d requested but 'ping' is not on this process's PATH" % delay
             )
-        wait = ('"%s" -n %d 127.0.0.1 >nul\r\n' % (tool, delay + 1)) if delay else ""
+        # Both streams to nul, not stdout alone: cmd.exe redirects only what it is told to, so an
+        # unredirected stderr handle stays inherited into `ping` and keeps the REAL captured pipe
+        # open for ping's whole run. MEASURED: with stdout alone redirected, a delay far past
+        # SH_TIMEOUT (GHHANG, 30s wait vs. a 3s kill) left communicate() blocked on that still-open
+        # handle for the ping's full duration, not the ~3s the kill should have bounded it to.
+        wait = ('"%s" -n %d 127.0.0.1 >nul 2>&1\r\n' % (tool, delay + 1)) if delay else ""
         write(os.path.join(folder, "gh.cmd"), "@echo off\r\n" + wait
               + '"%s" "%s" %%*\r\n' % (sys.executable, fake_py))
     else:
@@ -605,7 +620,24 @@ def build_fixtures():
     make_fake_gh(GHBROKEN, "main", broken=True)
     make_fake_gh(GHBLANK, "", )
     make_fake_gh(GHNEED, "main", need=["12", "y/x"])
-    make_fake_gh(GHSLOW, "main", delay=4)
+    # merge.py's shared_deadline (3f07b06) splits one budget across the read's three calls, so a
+    # delay only a little past the per-call figure that used to be the cutoff no longer exhausts
+    # it: 3 calls * 4s = 12s now fits inside the 14s MERGE_READ_TIMEOUT. 20s per call outruns that
+    # whole shared budget on its own, whichever call absorbs the time.
+    make_fake_gh(GHSLOW, "main", delay=20)
+    # Incident 2026-10-03: pr view 3.0-3.8s, pr checks 3.6-3.9s, the runs read 1.3-1.4s, measured
+    # on the machine that filed it. 3.5s per call stands in for that real latency, slower than
+    # MERGE_READ_TIMEOUT's 3s but nowhere near a hang.
+    make_fake_gh(GHWARM, "main", delay_s=3.5)
+    # A `gh` that never answers at all. MEASURED on Windows: this fake is a `.cmd`, so the
+    # process subprocess.run actually kills on timeout is cmd.exe, never the ping (or python)
+    # it spawned for the wait -- Windows hands that child a full set of inherited handles
+    # REGARDLESS of its own `>nul 2>&1` redirection, so the real captured pipe stays open and
+    # communicate() blocks for the WHOLE configured wait, not just until the kill. One gh call
+    # is all head_read ever attempts before an exception ends the read (see merge_hang_timeout_case
+    # below), so 10s bounds the real wait on this fixture's worst case here, and bounds it far
+    # more tightly still on a platform (POSIX CI) where the kill lands cleanly.
+    make_fake_gh(GHHANG, "main", delay=10)
     make_fake_gh(GHEMPTY, "main", checks=[], runs=[])
     make_fake_gh(GHCWD, "main", cwd_name="ctxrepo")
     write(os.path.join(WFREPO, ".github", "workflows", "gates.yml"), "name: gates\n")
@@ -2762,6 +2794,11 @@ add("merge-checks: the host merge tool reads the pull request and repo it names"
 sh("merge-checks: a gh slower than the gate waits is unknown, and denies",
    "gh pr merge 12 --squash", "deny", "merge-checks", carries="could not run", cwd=NOGIT,
    env_path=GHSLOW + os.pathsep + PY_PATH, config=MERGECFG)
+# Incident 2026-10-03: MERGE_READ_TIMEOUT (3s) sits under real `gh` latency (3.0-3.9s measured),
+# so a settled, all-green head still reads as unknown and the gate cries wolf on passing CI.
+sh("merge-checks: a head as slow as real gh, but green, still allows",
+   "gh pr merge 12 --squash", "allow", cwd=NOGIT, env_path=GHWARM + os.pathsep + PY_PATH,
+   config=MERGECFG)
 sh("merge-checks: the words of a merge in an echo are no merge", "echo gh pr merge 12 --squash",
    "allow", silent=True, cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge-checks: a head that reports nothing yet is not settled when the repo has workflows",
@@ -4422,6 +4459,48 @@ def merge_log_case():
     return True, "allowed, no log line, by the command and by the tool"
 
 
+def merge_hang_timeout_case():
+    """A `gh` that never answers must still end in a deny, and that deny must not depend on the
+    hook's 20s budget being outlived first.
+
+    The "denies as unknown" half holds on every OS: THAT is the subject (git-wait-for-required-
+    checks), and this is pinned everywhere.
+
+    The wall-time half -- the read must finish well inside the 20s hook budget, bounded here at
+    ~15s -- is asserted on POSIX only. MEASURED on Windows: GHHANG is a `.cmd` fake, and
+    subprocess.run's kill on timeout only reaches the cmd.exe it directly spawned, never the
+    ping it wraps for the wait -- Windows hands that ping an inherited duplicate of the real
+    captured pipe regardless of its own `>nul 2>&1` redirection, so communicate() blocks until
+    ping's FULL configured wait elapses, not until the kill. That is a fixture artifact of
+    faking `gh` as a batch file on this one platform, not a fact about guard.py or merge.py: a
+    real `gh.exe` is a single process, killed cleanly (confirmed directly against `ping.exe`
+    itself: a bare, unwrapped call is killed at the nominal timeout, not its full duration). No
+    `.cmd` fake can be killed on time here, so there is nothing truthful left to assert for wall
+    time on Windows; skip it there, loudly, rather than fake a shorter wait or a looser bound.
+    """
+    started = time.time()
+    got, reason = decide({
+        "raw": None, "tool": "Bash", "cwd": NOGIT, "session": None,
+        "env_path": GHHANG + os.pathsep + PY_PATH, "config": MERGECFG,
+        "tool_input": {"command": "gh pr merge 12 --squash"},
+    })
+    elapsed = time.time() - started
+    problems = []
+    if got != "deny":
+        problems.append("expected deny, got %s" % got)
+    elif "could not run" not in reason:
+        problems.append("expected the could-not-run reason, got %r" % reason[:120])
+    if os.name != "nt" and elapsed >= 15:
+        problems.append("the judgement took %.1fs, at or past the 15s bound" % elapsed)
+    if problems:
+        return False, "; ".join(problems)
+    note = ("denied as unknown in %.1fs; the wall-time bound is skipped on Windows, a `.cmd` "
+            "fake gh cannot be killed on time here (see this case's docstring)" % elapsed
+            if os.name == "nt" else
+            "denied as unknown in %.1fs, inside the 20s hook budget" % elapsed)
+    return True, note
+
+
 def names_the_target(reason, rule=None):
     """Return the first forbidden fragment the printed reason carries, else ''.
 
@@ -5003,6 +5082,8 @@ LOG_CHECKS = (
     ("trim: a merge into main is allowed and logs nothing", merge_log_case),
     ("trim: a guard crash fails open and logs a crash line", crash_log_case),
     ("merge-checks: a merge tool that cannot load is unknown, and denies", merge_tool_missing_case),
+    ("merge-checks: a gh that never answers still denies, well inside the hook's 20s budget",
+     merge_hang_timeout_case),
     ("powershell: a backslash path survives tokenizing, a Bash one does not", powershell_backslash_case),
     ("trim: a conflict-side checkout is allowed and logs nothing", conflict_resolve_log_case),
     ("log: an unreadable subject is allowed and noted", subject_unread_log_case),
