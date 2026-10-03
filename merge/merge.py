@@ -22,7 +22,9 @@ class Held(Stop):
 SH_TIMEOUT = None  # seconds; the guard sets it, so a hung `gh` cannot outlast its hook
 
 def sh(args, cwd=None, input=None, env=None):
-    r = subprocess.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, timeout=SH_TIMEOUT)
+    # Resolve the program first: on Windows CreateProcess never reads PATHEXT, so a bare `gh` misses `gh.cmd`.
+    args = [shutil.which(args[0], path=(env or os.environ).get("PATH")) or args[0], *args[1:]]
+    r =subprocess.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, timeout=SH_TIMEOUT)
     return r.returncode, (r.stdout + r.stderr).strip()
 
 def git(cwd, *a, input=None):
@@ -289,7 +291,9 @@ class Host:
             got = self.checks(n)
             red, pending, _ = self.classify(got, [], self.ignore)
             runs = self.runs(info["head"])
-        except Exception as e:  # Stop, a missing gh, a timeout, malformed JSON: all unread
+        except subprocess.TimeoutExpired:  # its text names the resolved program path
+            return "unknown", "a gh call timed out"
+        except Exception as e:  # Stop, a missing gh, malformed JSON: all unread
             return "unknown", str(e)
         r_red, r_pending = self.judge_runs(runs)
         red, pending = red + r_red, pending + r_pending
