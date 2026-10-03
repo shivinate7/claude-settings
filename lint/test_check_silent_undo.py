@@ -522,6 +522,36 @@ class OwnHistory(unittest.TestCase):
             self.assertIn("main added line number %d with a long tail %s" % (i, "x" * 150), got)
 
 
+class IntegrationBase(unittest.TestCase):
+    """This repo merges through integration branches. A PR based on `integ` is checked against
+    origin/integ, and main's lines are not integ's: a parent that integ lacks can still carry them."""
+    T0, T1, T2 = "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
+
+    def test_merging_main_with_ours_into_a_pr_on_integ_is_red(self):
+        r = Repo()
+        text = lambda v: "".join("l%d\n" % i for i in range(1, 6)) + v + "\ntail\n"
+        r.commit("base", date="2025-12-01T10:00:00", cfg_txt=text("timeout = 30"))
+        r.push()
+        r.sh("checkout", "-q", "-b", "integ")
+        r.commit("integ moves", date=self.T0, other_txt="integ\n")
+        r.sh("push", "-q", "origin", "integ")
+        r.sh("checkout", "-q", "-b", "feat")
+        r.commit("feat edits the line above", date=self.T0, cfg_txt=text("timeout = 30").replace("l5\n", "l5 B\n"))
+        r.sh("checkout", "-q", "main")
+        r.commit("A", date=self.T1, cfg_txt=text("timeout = 60"))
+        r.push()
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "-X", "ours", "--no-edit", "main", date=self.T2)
+        r.sh("fetch", "-q", "origin")
+        got, _ = C.check(r.dir, "origin/integ", "HEAD")
+        self.assertTrue(any("cfg.txt" in p and "timeout = 60" in p for p in got), got)
+
+    def test_a_failed_read_of_the_adding_commit_counts_the_line(self):
+        r = Repo()
+        r.commit("base", date="2025-12-01T10:00:00", a_txt="x\n")
+        self.assertFalse(C.branch_only(r.dir, "HEAD", ["nosuchrev"], "a.txt", "x", ["HEAD"]))
+
+
 class Green(unittest.TestCase):
     def setUp(self):
         self.r = base_repo()
