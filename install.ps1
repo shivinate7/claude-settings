@@ -85,9 +85,10 @@ while IFS= read -r sub || [ -n "`$sub" ]; do
       [ -d "`$d" ] || continue
       dest="`$cfg/`$sub/`$(basename "`$d")"
       if [ -L "`$dest" ]; then continue; fi
+      # A real directory here is this same installer's own earlier copy (no symlink
+      # rights): replace it, no backup (D: copy-mode-overwrites-no-backup).
       if [ -e "`$dest" ]; then
-        bak="`$dest.bak.`$(date +%Y%m%d%H%M%S)"
-        mv "`$dest" "`$bak" && echo "claude-settings: existing `$dest moved to `$bak"
+        rm -rf "`$dest"
       fi
       cp -r "`$d" "`$dest" && echo "claude-settings: refreshed `$dest"
     done
@@ -171,10 +172,12 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
             $dest = Join-Path $destDir $src.Name
             $cur  = Get-Item $dest -ErrorAction SilentlyContinue
             if ($cur -and $cur.LinkType -eq 'SymbolicLink' -and $cur.Target -eq $src.FullName) { continue }
+            # A real directory (or a symlink pointing elsewhere) at $dest is this same
+            # installer's own earlier copy, from a no-symlink-rights machine where the
+            # symlink attempt below fell back to Copy-Item: replace it, no backup
+            # (D: copy-mode-overwrites-no-backup).
             if ($cur) {
-                $bak = "$dest.bak.$(Get-Date -Format yyyyMMddHHmmss)"
-                Move-Item $dest $bak
-                Log "existing $dest moved to $bak"
+                Remove-Item $dest -Recurse -Force
             }
             try {
                 New-Item -ItemType SymbolicLink -Path $dest -Target $src.FullName -ErrorAction Stop | Out-Null
@@ -201,14 +204,12 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
         $dest = Join-Path $destDir $src.Name
         $cur  = Get-Item $dest -ErrorAction SilentlyContinue
         if ($cur -and $cur.LinkType -eq 'SymbolicLink' -and $cur.Target -eq $src.FullName) { continue }
-        if ($cur -and -not $cur.LinkType) {
-            if ((Get-FileHash $dest).Hash -ne (Get-FileHash $src.FullName).Hash) {
-                $bak = "$dest.bak.$(Get-Date -Format yyyyMMddHHmmss)"
-                Copy-Item $dest $bak
-                Log "existing $dest backed up to $bak"
-            }
-            Remove-Item $dest
-        } elseif ($cur) {
+        # A real file (or a symlink pointing elsewhere) at $dest is this same installer's
+        # own earlier copy, from a no-symlink-rights machine where the symlink attempt
+        # below fell back to Copy-Item: replace it, no backup
+        # (D: copy-mode-overwrites-no-backup). Matches the skills branch above, so both
+        # branches agree.
+        if ($cur) {
             Remove-Item $dest
         }
         try {
