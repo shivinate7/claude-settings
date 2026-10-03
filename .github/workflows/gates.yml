@@ -143,6 +143,7 @@ jobs:
         run: bash actions/stamp/test_action.sh
 
       - name: Opt-in CI template fixture suites
+        if: ${{ steps.scope.outputs.code == 'true' }}
         shell: bash
         run: |
           bash actions/all-jobs-passed/test_action.sh
