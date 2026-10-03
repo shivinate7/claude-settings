@@ -104,24 +104,63 @@ def pool_of(cwd, p, m):
     return counts("\n".join(l[1:] for l in out.splitlines() if l.startswith("+") and not l.startswith("+++")))
 
 
+TOKEN = re.compile(r"[A-Za-z_]+|\d+(?:\.\d+)?|[<>=!]=?|[-+*/%&|^~]|\S")
+NEGATION = re.compile(r"\b(?:not|no|never|none|nor|cannot|without)\b|n't\b", re.I)
+
+
+def kinds(line):
+    """(numbers, operators, negation count) of a line, as sorted lists and a count."""
+    toks = TOKEN.findall(line)
+    return (sorted(x for x in toks if x[0].isdigit()), sorted(x for x in toks if x[0] in "<>=!-+*/%&|^~"),
+            len(NEGATION.findall(line)))
+
+
+def trailing_only(g, base):
+    """True when g is a base line plus trailing tokens or punctuation (` #s`, `,`, `;`)."""
+    return any(g.startswith(b) and len(g) > len(b) and not (g[len(b)].isalnum() or g[len(b)] == "_") for c in base for b in c)
+
+
+def wrapped(line, new):
+    """True when line, whole and whitespace-collapsed, is a run of the joined new lines with at
+    least 4 words, and the run starts or ends where a new line starts or ends (a re-wrap)."""
+    if len(line.split()) < 4:
+        return False
+    joined, edges, pos = " ".join(new), set(), 0
+    for g in new:
+        edges |= {pos, pos + len(g)}
+        pos += len(g) + 1
+    i = joined.find(line)
+    while i >= 0:
+        if i in edges or i + len(line) in edges:
+            return True
+        i = joined.find(line, i + 1)
+    return False
+
+
 def rewritten(line, hs, base=(), modified=False):
-    """True when the merge rewrote this line inside its hunk, so it is no silent drop. Either every
-    word of the line survives, in order, in the hunk's new lines (a re-wrap), or a new line reads
-    0.9 like it. 0.8 would excuse `A new 1` against `B new 1` (0.86), which is a drop. A line that
+    """True when the merge rewrote this line inside its hunk, so it is no silent drop. Either the
+    whole line is a re-wrapped run of the hunk's new lines (`wrapped`), or a new line reads 0.9
+    like it. 0.8 would excuse `A new 1` against `B new 1` (0.86), which is a drop. A line that
     itself changed a base line (`modified`) is a value both sides touched, and 0.8 is enough: a
     resolver who picks a third value for `RULE_FLOOR = 85` and `= 91` wrote `= 94`.
-    A new line that equals the base version is a restore, never a rewrite: A changed
-    `retries = 4` to 5, and a stale copy put 4 back. Only a line that differs from both counts."""
-    words = re.findall(r"\w+", line)
+    A new line that equals the base version, or that only adds trailing tokens or punctuation
+    to it, is a restore, never a rewrite: A changed `timeout = 30` to 60, and a stale copy put
+    `timeout = 30 #s` back. Whatever the ratio, a new line whose operators or negation differ
+    from the lost line is a different claim and never excuses it (`x < 5` to `x >= 5`, `do not`
+    to `do`). Numbers differ only in the `modified` case, the third value above."""
+    num, ops, neg = kinds(line)
     for o, n in hs:
         if line not in o:
             continue
-        new = [g for g in n if not any(g in c for c in base)]
-        flat = re.findall(r"\w+", " ".join(new))
-        if words and any(flat[i:i + len(words)] == words for i in range(len(flat) - len(words) + 1)):
+        new = [g for g in n if not any(g in c for c in base) and not trailing_only(g, base)]
+        if wrapped(line, new):
             return True
-        if any(difflib.SequenceMatcher(None, line, g, autojunk=False).ratio() >= (0.8 if modified else 0.9) for g in new):
-            return True
+        for g in new:
+            gnum, gops, gneg = kinds(g)
+            if (gops, gneg) != (ops, neg) or (gnum != num and not modified):
+                continue
+            if difflib.SequenceMatcher(None, line, g, autojunk=False).ratio() >= (0.8 if modified else 0.9):
+                return True
     return False
 
 
@@ -236,6 +275,8 @@ def undone(o, n, mine):
         if (big_o, big_n) == (n, o):
             return True
         if not o:
+            if wrapped(" ".join(n), list(big_n)):
+                continue  # the whole block survives, only its line breaks moved
             if n and misses(n, big_o) == 0 and any(not rewritten(l, [(big_o, big_n)]) for l in n):
                 return True
             continue

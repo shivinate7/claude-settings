@@ -411,6 +411,52 @@ class Value(unittest.TestCase):
         self.assertEqual(r.verdict(), [])
 
 
+class Flips(unittest.TestCase):
+    """Lines that look alike but claim something else must not pass as a rewrite."""
+    T0, T1, T2 = "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
+
+    def resolve(self, base_line, a_line, result_line):
+        """main changes base_line to a_line (A). The branch merges main by hand and writes result_line."""
+        r = self.r = Repo()
+        text = lambda v: "".join("l%d\n" % i for i in range(1, 6)) + (v + "\n" if v else "") + "tail\n"
+        r.commit("base", date="2025-12-01T10:00:00", cfg_txt=text(base_line))
+        r.push()
+        r.sh("checkout", "-q", "-b", "feat")
+        r.commit("feat", date=self.T0, other_txt="x\n")
+        r.sh("checkout", "-q", "main")
+        r.commit("A", date=self.T1, cfg_txt=text(a_line))
+        r.push()
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "--no-commit", "--no-ff", "main")
+        r.put("cfg.txt", text(result_line))
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge main", date=self.T2)
+        return r.verdict()
+
+    def red(self, *case):
+        got = self.resolve(*case)
+        self.assertTrue(any("cfg.txt" in p for p in got), (case, got))
+
+    def test_a_stale_value_with_trailing_tokens_is_the_base_line(self):
+        for tail in (" #s", ",", ";"):
+            with self.subTest(tail=tail):
+                self.red("timeout = 30", "timeout = 60", "timeout = 30" + tail)
+
+    def test_a_negation_flip_is_not_a_rewrite(self):
+        self.red("deploy now", "do not deploy now", "do deploy now!")
+        self.red("deploy now", "never deploy now", "deploy now")
+
+    def test_an_operator_flip_is_not_a_rewrite(self):
+        self.red("x == 5", "x < 5", "x >= 5")
+        self.red("a * b", "a - b", "a + b")
+
+    def test_a_line_pasted_into_a_comment_is_not_a_re_wrap(self):
+        self.red("", "timeout = 60", "# was timeout = 60 before")
+
+    def test_a_third_value_still_passes(self):
+        self.assertEqual(self.resolve("RULE_FLOOR = 80", "RULE_FLOOR = 91", "RULE_FLOOR = 94"), [])
+
+
 class Green(unittest.TestCase):
     def setUp(self):
         self.r = base_repo()

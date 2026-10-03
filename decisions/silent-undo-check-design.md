@@ -113,4 +113,9 @@ Cost: a pull request run took 0.4 to 5 seconds on this repo. The full-history au
 - A stale value put back is a reversal, never a rewrite. A similar line excuses a drop only
   when it differs from both the lost line and the base line. A value both sides changed may
   resolve to a third value (0.8 like it). A line main only added needs 0.9.
-- A removed line whose words all survive in order in the hunk is a re-wrap, and passes.
+- A base line plus trailing tokens or punctuation is the base line, so a stale value stays a reversal.
+- A similar line never excuses a drop when its operators or negation differ from the lost line.
+  Numbers may differ only when both sides changed the base line (a third value).
+- A re-wrap passes only when the whole line, whitespace collapsed, is a run of the new lines with
+  4 words or more, and the run starts or ends at a line edge. A whole added block that survives
+  with only its line breaks moved also passes. A short line never passes as a re-wrap.
