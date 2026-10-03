@@ -31,11 +31,12 @@ watch reverts the raise once that time passes.<!-- rule:roles-override-carries-e
 Remove the file when the raise is no longer needed.<!-- rule:roles-remove-override-file --> Workers never spawn: nested reports misroute (Sept 2026).
 A repo that needs nesting raises depth in its settings and records the risk.<!-- rule:roles-workers-never-spawn --> A brief carries the task, the files, the governing rulings, and the check that proves the
 task done—in the fewest words. It specifies a report cap in lines sized to the decision it
-feeds. With no cap named, the cap is 25 lines.<!-- rule:roles-brief-contents --> Each layer proves a change once. The
-builder shows its new cases red, then green. CI alone runs the full suites and the mutation
-harnesses. A reviewer hunts bypasses and false alarms and never replays a passing run. The
-builder's recorded red run is the red proof. A reviewer re-runs it only when that record is
-missing or in doubt. The orchestrator reads CI once, on the head it merges.<!-- rule:roles-each-layer-proves-once --> Resume a dead agent by name, never fresh.<!-- rule:roles-resume-by-name -->
+feeds. With no cap named, the cap is 25 lines.<!-- rule:roles-brief-contents --> Each layer proves a change once. A
+test-author writes the new cases first and shows them red on the old code. The builder changes
+product code until they go green. CI alone runs the full suites and the mutation harnesses. A
+reviewer hunts bypasses and false alarms and never replays a passing run. The test-author's
+recorded red run is the red proof. A reviewer re-runs it only when that record is missing or
+in doubt. The orchestrator reads CI once, on the head it merges.<!-- rule:roles-each-layer-proves-once --> Resume a dead agent by name, never fresh.<!-- rule:roles-resume-by-name -->
 
 **Parallelism, two tiers.** Fan tasks out to workers now, each in its own checkout. A
 workflow run, the ultracode path, is a fan-out too. Give each workflow agent that writes

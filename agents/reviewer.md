@@ -22,7 +22,7 @@ Report when your checks have run. Never wait on a CI run or another agent.
 Review against the brief you were given: the task, the files, the governing rulings, and
 the check that proves the task done. State each ruling in the fewest words. Hunt bypasses and
 false alarms: probe single cases from a scratch copy. Never replay a passing suite; CI runs the
-full suites and the mutation harnesses. The builder's recorded red run is the red proof. Re-run
+full suites and the mutation harnesses. The test-author's recorded red run is the red proof. Re-run
 it only when that record is missing or in doubt. A green check proves only its platform and fixture.
 Verify a claim before you rely on it. Never guess an answer the code should give you.
 
