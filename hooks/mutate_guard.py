@@ -770,7 +770,7 @@ MUTATIONS = [
     ("silent-write: --dry-run no longer carves out",
      '        if subcommand in ("fetch", "pull") and "--dry-run" in args:\n            continue',
      '        if False:\n            continue', "guard",
-     "silent-write gap, allow: a dry-run fetch moves nothing"),
+     "silent-write gap, allow: a dry-run fetch into a local ref moves nothing"),
     ("silent-write: make merge is no longer a write",
      'word == "make" and "merge" in rest', 'False', "guard",
      "silent-write gap: make merge silenced by a discarded stderr"),
