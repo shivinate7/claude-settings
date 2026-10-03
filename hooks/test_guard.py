@@ -2015,6 +2015,40 @@ sh("silent-write: an ordinary read discarding its output is a carve-out",
 sh("silent-write: 2>&1 alone duplicates a stream and discards nothing",
    VCS + " commit -m x 2>&1", "allow", cwd=NOGIT)
 
+# Gaps Banchi's scripts/silent-write-guard.py found (red until guard.py closes them).
+sh("silent-write gap: pull silenced, both streams, with -C",
+   VCS + " -C " + NOGIT + " pull --ff-only >/dev/null 2>&1", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write gap: a fetch that moves a ref (refspec) silenced",
+   VCS + " fetch origin main:main >/dev/null", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write gap: pull's own quiet flag",
+   VCS + " pull -q", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write gap: make merge silenced by a discarded stderr",
+   "make merge PR=5 2>/dev/null", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write gap: gh pr merge silenced by a discarded stdout",
+   "gh pr merge 5 --merge >/dev/null", "deny", "silent-write", cwd=NOGIT,
+   env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
+sh("silent-write gap: commit with stderr closed",
+   VCS + " commit -m x 2>&-", "deny", "silent-write", cwd=NOGIT)
+sh("silent-write gap: push with stdout closed",
+   VCS + " push >&-", "deny", "silent-write", cwd=NOGIT)
+
+sh("silent-write gap, allow: a dry-run fetch moves nothing",
+   VCS + " fetch --dry-run >/dev/null", "allow", cwd=NOGIT)
+sh("silent-write gap, allow: a dry-run fetch into a local ref moves nothing",
+   VCS + " fetch origin main:main --dry-run >/dev/null", "allow", cwd=NOGIT)
+sh("silent-write gap, allow: a dry-run pull moves nothing",
+   VCS + " pull --dry-run >/dev/null", "allow", cwd=NOGIT)
+sh("silent-write gap, allow: pull with no redirect",
+   VCS + " pull", "allow", cwd=NOGIT)
+sh("silent-write gap, allow: make test is not a merge",
+   "make test >/dev/null", "allow", cwd=NOGIT)
+sh("silent-write gap, allow: gh pr view is a read",
+   "gh pr view 5 >/dev/null", "allow", cwd=NOGIT)
+# HELD: the owner kept "output to a file" allowed until measured. Pinned as allowed on purpose;
+# Banchi's guard refuses it. Do not flip without a measurement.
+sh("silent-write gap, allow (held, unmeasured): output to a file is not discarded",
+   VCS + " commit -m x > /tmp/log 2>&1", "allow", cwd=NOGIT)
+
 
 # =========================================================================== 3. push and delete
 
