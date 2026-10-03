@@ -1,7 +1,7 @@
 """Shared transcript readers for the hooks fired off a Stop event.
 
-`hooks/config_report.py` already imports `lint/report_gate.py`, which already imports
-`lint/ste_gate.py` (see `hooks/config_report.py`'s own docstring). The "no import between two
+`hooks/decision_watch.py`'s config report section already imports `lint/report_gate.py`, which
+already imports `lint/ste_gate.py`. The "no import between two
 hooks fired by the same Stop event" rule that once justified copying these readers into each
 hook is retired, so this module holds the one copy and the four hooks import it.
 

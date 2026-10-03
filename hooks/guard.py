@@ -49,7 +49,6 @@ one fixed order, and the first match wins.
   4 force-push         a rewrite of a published branch
     destructive-delete a recursive delete at a root, a home or a glob
   5 env-file           any read or write of an environment file
-  6 merge-main         a pull request merged into main. Allowed, and logged (Decision 8).
   7 frozen-path        a write to the settings, the hooks or the global CLAUDE.md, under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. Always denied.
   8 subagent-model-cap a write to a settings file whose content sets or changes
@@ -64,8 +63,8 @@ A project's own `.claude/settings.json`, `.claude/settings.local.json`, and
 `.claude/hooks/*` are NOT frozen (Decision 7). They are allowed, and the guard appends
 one log line with decision `noted` and rule `config-edit`, so a person can see the edit at
 turn end. Nothing is printed for a noted edit; the config-report Stop hook is what surfaces
-it to the transcript. `merge-main`, `conflict-resolve`, and `subject-unread` are logged the
-same way: an ALLOW that a person still gets to see.
+it to the transcript. `subject-unread` is logged the same way: an ALLOW that a person still
+gets to see.
 
 Rule 8 stands after rule 7 on purpose. The owner's user settings hold the subagent model cap,
 `CLAUDE_CODE_SUBAGENT_MODEL` with `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, which stops a session
@@ -88,19 +87,12 @@ refusal whose ground could not be read is a guess, and the line names what could
 read so a reader can tell "I could not confirm this" from "this destroys something". The
 config-report Stop hook prints those lines for the turn that wrote them.
 
-Decision 8 ("Merge into main: allow and report") makes `merge-main` the same shape: a
-merge into main is allowed, never asked, and the guard logs `noted`/`merge-main` when
-the base is `main` or unreadable, and always for the MCP merge tool, which carries no
-base at all. CLAUDE.md's "merged only when I name the act" stays the model's rule; the
-guard cannot read chat, so a prompt here would only repeat a decision the owner already
-made in the conversation.
-
-`conflict-resolve` is a third case in that same shape, inside rule 1. A `git checkout`
-that carries `--ours`, `--theirs`, or `--merge` while a merge, rebase, cherry-pick or
-revert is unresolved in the tree picks a conflict side; it does not discard work, and
-git itself already holds the tree open. That one call is allowed and logged as
-`noted`/`conflict-resolve`. Any other `git checkout` that names a path keeps rule 1's
-ordinary deny or ask.
+A merge into main is allowed and never logged by the guard (decisions/guard-trims-from-the-audit.md,
+guard trims from the 2026-10-02 audit). `hooks/decision_watch.py` names each merge from the
+transcript at turn end. A `git checkout` that carries `--ours`, `--theirs`, or `--merge` while a
+merge, rebase, cherry-pick or revert is unresolved in the tree picks a conflict side; it does not
+discard work, so rule 1 passes it, with no log line of its own. Any other `git checkout` that
+names a path keeps rule 1's ordinary deny or ask.
 
 Rule 1c, `silent-write`, mechanizes CLAUDE.md's "Never discard a command's output" for
 git. pkmnscan's `scripts/silent-write-guard.py` carries the measurement this rule ports:
@@ -153,7 +145,6 @@ import json
 import os
 import re
 import shlex
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -187,7 +178,6 @@ def _force_utf8_streams() -> None:
 SHELL_TOOLS = ("Bash", "PowerShell")
 READ_ONLY_TOOLS = ("Read", "Grep")
 WRITE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
-MERGE_TOOLS = ("mcp__github__merge_pull_request",)
 
 
 def norm(path: str) -> str:
@@ -2043,7 +2033,7 @@ WORKTREE_PRUNE_ASK_REASON = (
 
 # ------------------------------------------------------------------ picking a conflict side
 #
-# The owner's argument: `git checkout --theirs docs/DEBTS.md` during an unresolved merge does
+# A carve-out of rule 1 (shared-tree), with no rule name or log line of its own. The owner's argument: `git checkout --theirs docs/DEBTS.md` during an unresolved merge does
 # not discard uncommitted work. It picks a conflict side, and the file is already in a
 # conflicted state that git itself will not let the caller leave silently. `checkout_names_a_path`
 # still flags the call, because a bare `git checkout <path>` overwrites from the index, so the
@@ -2315,6 +2305,9 @@ def head_move_target(subcommand: str, args) -> str:
     if target == PROTECTED_BASE:
         return ""
     return matched
+
+
+PROTECTED_BASE = "main"
 
 
 def pointer_head_hit(segment: str, root: str) -> str:
@@ -3052,6 +3045,11 @@ ENV_EXISTENCE_COMMANDS = ("ls", "test", "[", "[[")
 # stdout or written to a file that is NOT an environment file (`echo <name> > .worktreeinclude`),
 # and no environment file is read or written. A redirect onto an environment file is refused first. `cat <name> > x` is not on the list, so it stays held.
 ENV_TEXT_COMMANDS = ("echo", "printf")
+# A search command's pattern is a regex, never a path: a lone dot-star pattern reads no
+# environment file. MEASURED in guard.log 2026-09-16 to 10-02: 65 false `env-file` denies.
+ENV_PATTERN_COMMANDS = ("grep", "egrep", "fgrep", "rg", "ag", "ack")
+ENV_PATTERN_FLAGS = ("-e", "--regexp")
+ENV_PATTERN_VALUE_FLAGS = ("-A", "-B", "-C", "-m")  # a count follows, never the pattern
 
 # The message or body of a commit or a pull request is text. Its value is blanked before the words
 # are read, so an env name in prose reads no contents. A substitution in the value is cut out
@@ -3314,6 +3312,8 @@ def env_refusal(cmd: str, subs_only: bool = False):
         return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH
     if subs_only:
         texts = texts[:-1]
+        if not texts:
+            return "", ""  # a body with no substitution is text: nothing to judge, and no crash
     for index, (text, in_message) in enumerate(texts):
         # The command itself is last. Its `echo` or `printf` prints to stdout or a file, and an env
         # name among the arguments is text. A substitution's output is an ARGUMENT of the command
@@ -3348,6 +3348,39 @@ def _env_parts(piece: str):
     return _ampersand_split(piece)
 
 
+def _pattern_words(words, position: int):
+    """Return the indexes of the words a search command reads as its PATTERN, never as a path.
+
+    With `-e` or `--regexp`, the word after each one is a pattern. Without, the first plain word
+    is. A flag's own value (`-A 3`) can stand first and is then skipped in the pattern's place,
+    which only ever leaves a real path judged, never hides one.
+    """
+    if any(w in ("-f", "--file") or w.startswith("--file=") for w in words[position + 1:]):
+        return set()  # patterns come from a file: its name is a path, and every word is judged
+    marked = {i + 1 for i, w in enumerate(words) if w in ENV_PATTERN_FLAGS and i > position}
+    if marked:
+        return marked
+    for i in range(position + 1, len(words)):
+        if (words[i].startswith("-") or REDIRECT.fullmatch(words[i])
+                or REDIRECT.fullmatch(words[i - 1]) or words[i - 1] in ENV_PATTERN_VALUE_FLAGS):
+            continue
+        return {i}
+    return set()
+
+
+def _assignment_end(words, position: int) -> int:
+    """Return the index after the `VAR=value` assignment that starts at `position`. A quoted value
+    with a space (`ADMINS='Shivam Semwal'`) spans several words, and its tail must not read as the
+    command word. MEASURED: 29 false `env-file` denies named an author's surname as the command."""
+    quote = next((c for c in "'\"" if words[position].partition("=")[2].count(c) % 2), "")
+    end = position
+    while quote and end + 1 < len(words):
+        end += 1
+        if quote in words[end]:
+            break
+    return end + 1
+
+
 def _env_words(segment: str):
     """Return (words, command word) of one segment, redirects spaced into words of their own."""
     words = READ_REDIRECT.sub(" < ", REDIRECT.sub(
@@ -3355,7 +3388,7 @@ def _env_words(segment: str):
     # The command is the first word that is not a `VAR=value` assignment.
     position = 0
     while position < len(words) and ASSIGNMENT.match(words[position]):
-        position += 1
+        position = _assignment_end(words, position)
     head = words[position] if position < len(words) else ""
     command = head.strip("'\"").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     if command in ENV_TEXT_COMMANDS:
@@ -3434,7 +3467,10 @@ def _env_flat(cmd: str, text_ok: bool = False):
             # A text command's arguments are data. A redirect onto an environment file is refused
             # below, first.
             text_to_file = command in ENV_TEXT_COMMANDS and text_ok and not piped
+            patterns = _pattern_words(words, position) if command in ENV_PATTERN_COMMANDS else ()
             for index, word in enumerate(words):
+                if index in patterns:
+                    continue
                 prefix, assigned, rest = word.partition("=")
                 flag = prefix if assigned and prefix.startswith("-") else ""
                 named = env_reference(rest if assigned else word)
@@ -3471,55 +3507,6 @@ def _env_flat(cmd: str, text_ok: bool = False):
 def is_env(path: str) -> bool:
     name = norm(path).rsplit("/", 1)[-1]
     return name.startswith(".env") and name != ENV_ALLOWED
-
-
-# ------------------------------------------------------------------ the merge into main
-#
-# Decision 8 ("Merge into main: allow and report") supersedes Decision 2 ("ask always"). CLAUDE.md
-# still says "merged only when I name the act", but the owner names the act in chat, and the guard
-# cannot read chat. A prompt here would only repeat a decision already made, so the call is
-# allowed and NOTED in `guard.log` instead, for a person to read at turn end and the report to
-# name under Done.
-#
-# THE BASE IS QUERIED, never guessed from the command. `gh pr merge 75 --squash` names no base at
-# all, because the base is a property of the pull request. A merge into any other base is not
-# noted at all, because an integration branch takes its lanes without asking anybody.
-#
-# AN UNREADABLE BASE IS NOT A SAFE ANSWER, so it is noted the same as a base of main.
-GH_PR_MERGE = re.compile(r"\bgh\s+pr\s+merge\b")
-PROTECTED_BASE = "main"
-
-
-def merge_base(cmd: str) -> str:
-    """Return the base branch of the pull request the command names, or '' when unreadable.
-
-    The number is the first bare digit word after `merge`. With no number, the tool answers for the
-    current branch's pull request, which is the same question one argument shorter.
-    """
-    named = re.search(r"\bgh\s+pr\s+merge\b([^\n;|&]*)", cmd)
-    words = (named.group(1) if named else "").split()
-    number = next((w for w in words if w.isdigit()), "")
-    # RESOLVE THE PROGRAM FIRST. MEASURED on Windows 2026-09-16: CreateProcess appends `.exe` and
-    # never reads PATHEXT, so a call of "gh" skipped a `gh.cmd` earlier on PATH and found a
-    # `gh.exe` further along. `shutil.which` reads PATHEXT, so the resolved path is the one the
-    # shell would run, and a missing tool is then plain to see.
-    program = shutil.which("gh")
-    if not program:
-        return ""
-    query = [program, "pr", "view"] + ([number] if number else []) + ["--json", "baseRefName"]
-    try:
-        answer = subprocess.run(query, capture_output=True, text=True, timeout=10)
-    except Exception:
-        return ""
-    if answer.returncode != 0:
-        return ""
-    try:
-        parsed = json.loads(answer.stdout)
-    except Exception:
-        return ""
-    if not isinstance(parsed, dict):
-        return ""
-    return parsed.get("baseRefName", "") or ""
 
 
 # ------------------------------------------------------------------ the frozen paths
@@ -4206,7 +4193,6 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
         root = command_root(stripped, cwd)
         resolved = checkout_conflict_resolve(segment, root)
         if resolved:
-            record(tool, "noted", "conflict-resolve", resolved)
             continue
         # This session's own scratchpad: private by path, so nothing shared can be lost.
         if under_session_scratchpad(root, session_id):
@@ -4348,14 +4334,6 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
     if refusal:
         refuse(tool, "deny", "env-file", refusal + ". " + ENV_ADVICE, logged)
 
-    # 6. A merge into main: allow (Decision 8), and note it when the base is main or unreadable.
-    if GH_PR_MERGE.search(cmd):
-        base = merge_base(stripped)
-        if base == PROTECTED_BASE:
-            record(tool, "noted", "merge-main", "gh pr merge into " + base)
-        elif base == "":
-            record(tool, "noted", "merge-main", "gh pr merge, base unread")
-
     # 7. A frozen path.
     matched = frozen_shell_hit(stripped, cwd)
     if matched:
@@ -4365,6 +4343,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
     matched = project_config_shell_hit(stripped, cwd)
     if matched:
         record(tool, "noted", "config-edit", matched)
+
 
     # 8. The subagent model cap. The PATH comes from the stripped command, the same machinery the
     # frozen path uses, so a redirect, a `tee`, a `sed -i` and a heredoc header all read as writes.
@@ -4384,6 +4363,11 @@ def judge(payload) -> None:
     tool = payload.get("tool_name", "") or ""
     tool_input = payload.get("tool_input", {}) or {}
     if not isinstance(tool_input, dict):
+        return
+    # Read and Grep: no rule judges them, so the guard leaves at once and spends no git call.
+    # worktree-home never judged them, the settings deny list owns Read(.env) and Read(.env.*),
+    # and a frozen path stays readable (decisions/guard-trims-from-the-audit.md).
+    if tool in READ_ONLY_TOOLS:
         return
     cwd = payload.get("cwd", "") or os.getcwd() or ""
     if not isinstance(cwd, str):
@@ -4426,18 +4410,13 @@ def judge(payload) -> None:
     if tool in SPAWN_TOOLS and below_the_floor(tool_input.get("model")):
         refuse(tool, "deny", "subagent-model-floor", MODEL_FLOOR_REASON, str(tool_input.get("model")))
 
-    # A merge through the MCP tool carries no base for the guard to read, so every call is
-    # allowed (Decision 8) and noted, the same as an unreadable `gh pr merge` base.
-    if tool in MERGE_TOOLS:
-        record(tool, "noted", "merge-main", tool)
-
     if tool in SHELL_TOOLS:
         command = tool_input.get("command", "") or ""
         if isinstance(command, str) and command.strip():
             judge_shell(tool, command, cwd, session_id_of(payload))
         return
 
-    if tool not in READ_ONLY_TOOLS + WRITE_TOOLS:
+    if tool not in WRITE_TOOLS:
         return
 
     target = (
@@ -4449,31 +4428,29 @@ def judge(payload) -> None:
     if not isinstance(target, str) or not target:
         return
 
-    # 5. The environment file. Every matched tool is refused, a read included, because the rule is
-    # about the contents and a read is contents. The reason names no file, and the log holds the
-    # path the tool asked for.
+    # 5. The environment file. Every writing tool is refused. A read is not judged here: the
+    # settings deny list blocks Read(.env) and Read(.env.*). The reason names no file, and the log
+    # holds the path the tool asked for.
     if is_env(target):
         refuse(tool, "deny", "env-file", ENV_TOOL_REASON + ". " + ENV_ADVICE, target)
 
-    # 7. A frozen path. A read-only tool may look, because reading the hook is how anyone finds out
-    # what it does. A writing tool may not.
-    if tool not in READ_ONLY_TOOLS:
-        if is_frozen(target, cwd):
-            refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)
-        # 7b. A project config edit: allowed (Decision 7), and noted in the log only.
-        if is_project_config(target, cwd):
-            record(tool, "noted", "config-edit", target)
-        # 8. The subagent model cap. Rule 7 already denied the config directory's own settings, so
-        # only a project-scoped or clone-scoped settings file reaches here. The content read is what
-        # the tool would WRITE, so a file that carries the variable name anywhere in that content
-        # asks, a permission string or a comment line included. That is an over-ask and it stays:
-        # the alternative is a value test that a crafted spelling walks past. A write that does not
-        # carry the name never fires, and no other file than a settings file reaches this rule.
-        if is_settings_file(target, cwd):
-            change = cap_change_parts(write_content_parts(tool_input))
-            if change:
-                refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, target),
-                       log_path_and_text(target, change))
+    # 7. A frozen path. Only a writing tool reaches here, so a frozen path stays readable.
+    if is_frozen(target, cwd):
+        refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)
+    # 7b. A project config edit: allowed (Decision 7), and noted in the log only.
+    if is_project_config(target, cwd):
+        record(tool, "noted", "config-edit", target)
+    # 8. The subagent model cap. Rule 7 already denied the config directory's own settings, so
+    # only a project-scoped or clone-scoped settings file reaches here. The content read is what
+    # the tool would WRITE, so a file that carries the variable name anywhere in that content
+    # asks, a permission string or a comment line included. That is an over-ask and it stays:
+    # the alternative is a value test that a crafted spelling walks past. A write that does not
+    # carry the name never fires, and no other file than a settings file reaches this rule.
+    if is_settings_file(target, cwd):
+        change = cap_change_parts(write_content_parts(tool_input))
+        if change:
+            refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, target),
+                   log_path_and_text(target, change))
 
 
 def main() -> None:
@@ -4488,7 +4465,10 @@ def main() -> None:
         judge(payload)
     except SystemExit:
         raise
-    except Exception:
+    except Exception as exc:
+        # Fail open, but never silently: a crash that hides a rule must show in the log.
+        record(str(payload.get("tool_name", "")), "crash", "guard-crash",
+               cap_safe(type(exc).__name__ + ": " + str(exc), 200))
         sys.exit(0)  # fail open on a guard defect
     sys.exit(0)
 

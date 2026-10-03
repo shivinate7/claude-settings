@@ -107,17 +107,6 @@ GITBLIND = os.path.join(ROOT, "gitblind")  # a git that answers the repo test an
 FAKE_SESSION = "5b9f6a3d-0000-4000-8000-000000000000"
 OTHER_SESSION = "0000ffff-0000-4000-8000-000000000000"
 PRIVREPO = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "priv")
-GHMAIN = os.path.join(ROOT, "ghmain")      # a fake command line tool answering "main"
-GHDEV = os.path.join(ROOT, "ghdev")        # the same, answering "dev"
-GHNONE = os.path.join(ROOT, "ghnone")      # an empty directory, so the tool is missing
-# The WHOLE PATH of every "gh missing" case: GHNONE and nothing else, never PY_PATH beside it.
-# MEASURED on WSL Ubuntu: with the interpreter at /usr/bin/python3, PY_PATH is /usr/bin, which also
-# holds apt's real, logged-in /usr/bin/gh, so the "missing" case made a live GitHub call and read a
-# real pull request's base. That masked the mutant "merge-main: trust an unreadable merge base" in
-# 3 of 3 runs. CI's setup-python folder holds no gh, so CI cannot see it. The guard needs nothing
-# else on PATH to run: the GITBLIND cases run it on a one-folder PATH too. build_fixtures fails
-# setup if gh resolves here.
-GHNONE_PATH = GHNONE
 # THE POINTER CHECKOUT. `PTRCFG` is a config directory whose global rules file points at
 # `PTRMAIN`, which stands in for the machine's primary checkout: the one every session runs its
 # hooks and its lint from. `PTRWT` is a real linked worktree of it, which must stay allowed.
@@ -376,7 +365,7 @@ def make_blind_git(folder):
     that is no git tree. A real repository is still the cwd; only the program answering is blind,
     so the case drives the guard's own "I could not read this" path rather than a mock of it.
 
-    MEASURED on Windows 2026-09-16, recorded in `make_fake_gh` below: a call through
+    MEASURED on Windows 2026-09-16: a call through
     CreateProcess appends `.exe` and never reads PATHEXT, so a `git.cmd` stand-in would be
     skipped there and the case would answer for the wrong reason. The unreadable-subject cases
     are therefore SKIPPED on Windows rather than run against a stand-in that never answers.
@@ -390,93 +379,6 @@ def make_blind_git(folder):
                   "echo 'blind git: no answer' >&2\n"
                   "exit 128\n")
     os.chmod(script, 0o755)
-
-
-def make_fake_gh(folder, base, delay=0):
-    """Put a stand-in for the pull request tool in its own folder on PATH.
-
-    MEASURED on Windows 2026-09-16: a call of "gh" through CreateProcess appends `.exe` and never
-    reads PATHEXT, so a `gh.cmd` earlier on PATH was skipped and the real `gh.exe` further along
-    answered instead. The guard resolves the program with shutil.which for that reason, and this
-    stand-in is a `.cmd` file to keep the case honest on this machine.
-
-    `delay` whole seconds run before the answer. merge_base's real subprocess.run carries a real
-    10s timeout that one mutant shrinks to 0.0001s (mutate_guard.py, "timeout: the merge-base read
-    cannot finish"). An instant answer races that shrink instead of losing it: Python's timeout
-    clock starts only once communicate() itself runs, and a busy runner can delay THAT call long
-    enough for an already-finished child to be read back with no TimeoutExpired at all, whatever
-    the nominal timeout was. That is why the mutant SURVIVED on a loaded shared runner (CI run
-    35883652442) though the fixture suite was green an hour earlier: the kill depended on wall-clock
-    luck, not on the mutant's own defect. A deliberate delay, far past the mutant's 0.0001s and far
-    under the real 10s, removes the race instead of hoping the real timeout stays small enough to
-    lose it every time.
-
-    The delay tool (`sleep` or `ping`) is resolved to an ABSOLUTE PATH here, with shutil.which on
-    this test process's own full PATH, and that absolute path is written into the fake's body. The
-    fake itself runs under a narrow PATH the guard builds (its own folder, then only the Python
-    interpreter's folder — see PY_PATH), and calling the tool by bare name there is a silent
-    no-op on machines where that narrow PATH has no `sleep`/`ping` of its own: MEASURED in CI run
-    (gates job, PR #124) setup-python's toolcache folder has no `sleep`, and MEASURED locally
-    `C:\\Python314` has no `ping`. Both print a "not found" line to stderr and return instantly, so
-    the delay never runs and the race make_fake_gh exists to remove comes right back. A missing
-    tool is a raise, not a silent skip: a delay fixture that cannot delay is a defect in the
-    fixture, not a fact to route around.
-    """
-    os.makedirs(folder, exist_ok=True)
-    body = '{"baseRefName":"%s"}' % base
-    if os.name == "nt":
-        tool = shutil.which("ping", path=os.environ.get("PATH")) if delay else None
-        if delay and not tool:
-            raise RuntimeError(
-                "make_fake_gh: delay=%d requested but 'ping' is not on this process's PATH" % delay
-            )
-        wait = ('"%s" -n %d 127.0.0.1 >nul\r\n' % (tool, delay + 1)) if delay else ""
-        write(os.path.join(folder, "gh.cmd"), "@echo off\r\n" + wait + "echo " + body + "\r\n")
-    else:
-        script = os.path.join(folder, "gh")
-        tool = shutil.which("sleep", path=os.environ.get("PATH")) if delay else None
-        if delay and not tool:
-            raise RuntimeError(
-                "make_fake_gh: delay=%d requested but 'sleep' is not on this process's PATH" % delay
-            )
-        wait = ("%s %d\n" % (tool, delay)) if delay else ""
-        write(script, "#!/bin/sh\n" + wait + "echo '" + body + "'\n")
-        os.chmod(script, 0o755)
-
-
-def _verify_fake_gh_delay(ghdir, delay):
-    """Fail fixture setup if the delayed gh fake in `ghdir` does not actually delay.
-
-    Runs the fake under the exact PATH the guard itself gets when it is asked about that base
-    (`ghdir` first, then only the Python interpreter's own folder — see merge_log_case and
-    PY_PATH). This is the check that goes red on the defect make_fake_gh's absolute-path fix
-    repairs: a delay tool resolved by bare name can silently vanish on that narrow PATH, and the
-    fake then answers instantly with an error on stderr instead of raising or waiting.
-    """
-    py_path = os.path.dirname(sys.executable)
-    env = dict(os.environ)
-    env["PATH"] = ghdir + os.pathsep + py_path
-    program = shutil.which("gh", path=env["PATH"])
-    if not program:
-        sys.exit(
-            "fixture check failed in _verify_fake_gh_delay: no 'gh' fake resolvable on "
-            "PATH=%r" % env["PATH"]
-        )
-    started = time.time()
-    result = subprocess.run([program], capture_output=True, text=True, env=env, timeout=60)
-    elapsed = time.time() - started
-    if result.stderr.strip():
-        sys.exit(
-            "fixture check failed in _verify_fake_gh_delay: the delayed gh fake in %r wrote to "
-            "stderr instead of delaying %ds (PATH=%r): %r"
-            % (ghdir, delay, env["PATH"], result.stderr.strip())
-        )
-    if elapsed < delay:
-        sys.exit(
-            "fixture check failed in _verify_fake_gh_delay: the delayed gh fake in %r answered "
-            "in %.3fs, under its %ds delay (PATH=%r) -- the delay tool resolved to nothing "
-            "real on this PATH" % (ghdir, elapsed, delay, env["PATH"])
-        )
 
 
 def build_fixtures():
@@ -495,20 +397,6 @@ def build_fixtures():
     # so it must stay editable. The two marker files are what tell the clone from a config folder.
     write(os.path.join(CLONE, "settings.json"), "{}\n")
     write(os.path.join(CLONE, "install.ps1"), "# install\n")
-    make_fake_gh(GHMAIN, "main")
-    # GHDEV alone gets the delay: it is the one base whose logged/not-logged answer the timeout
-    # mutant can flip (GHMAIN and GHNONE both expect "logged" either way), so it is the one fixture
-    # whose instant reply could race that mutant's shrunk timeout. See make_fake_gh's docstring.
-    make_fake_gh(GHDEV, "dev", delay=1)
-    # Trust this delay only once it is proven, not assumed: run it now, under the guard's own
-    # narrow PATH, and fail fixture setup outright if it does not really delay. See
-    # _verify_fake_gh_delay's docstring for the defect this catches.
-    _verify_fake_gh_delay(GHDEV, delay=1)
-    os.makedirs(GHNONE, exist_ok=True)
-    found = shutil.which("gh", path=GHNONE_PATH)
-    if found:
-        sys.exit("fixture check failed: the 'gh missing' PATH %r resolves a real gh at %r"
-                 % (GHNONE_PATH, found))
     # A real checkout and a real linked worktree of it. The shared-tree rule asks git which is
     # which, so no fake will do.
     #
@@ -1992,8 +1880,8 @@ sh("delete: a grep pattern naming the cmd.exe form calls nothing",
 # Ported whole from q_max. The rule is about the CONTENTS of the file, so a read is refused as
 # firmly as a write, and a runner that loads the file into its own environment is allowed by name.
 
-add("env: Read of the file", "deny", "env-file", tool="Read", cwd=NOGIT,
-    file_path=slash(os.path.join(PROJ, ENV)))
+add("trim: env: Read of the file is the settings deny list's, not the guard's", "allow",
+    tool="Read", cwd=NOGIT, file_path=slash(os.path.join(PROJ, ENV)))
 add("env: Write of the file", "deny", "env-file", tool="Write", cwd=NOGIT,
     file_path=slash(os.path.join(PROJ, ENV)))
 add("env: Edit of the file", "deny", "env-file", tool="Edit", cwd=NOGIT,
@@ -2004,14 +1892,47 @@ add("env: MultiEdit of the file", "deny", "env-file", tool="MultiEdit", cwd=NOGI
     file_path=slash(os.path.join(PROJ, ENV)))
 add("env: NotebookEdit of a variant", "deny", "env-file", tool="NotebookEdit", cwd=NOGIT,
     notebook_path=slash(os.path.join(PROJ, ENV + ".ipynb")))
-add("env: Grep naming the file by path", "deny", "env-file", tool="Grep", cwd=NOGIT,
-    path=slash(os.path.join(PROJ, ENV + ".local")))
+add("trim: env: Grep naming the file by path is the deny list's, not the guard's", "allow",
+    tool="Grep", cwd=NOGIT, path=slash(os.path.join(PROJ, ENV + ".local")))
 # The reviewer's own payload, pinned by name. Every refused case is checked for a leaked file
 # name, and this one holds the exact shape the review asked for.
-add("env: a Read outside the fixtures, and the reason names no file", "deny", "env-file",
-    tool="Read", cwd="C:/repo", file_path="C:/repo/" + ENV)
+add("env: a Write outside the fixtures, and the reason names no file", "deny", "env-file",
+    tool="Write", cwd="C:/repo", file_path="C:/repo/" + ENV)
 add("env: Read of the example file", "allow", tool="Read", cwd=NOGIT,
     file_path=slash(os.path.join(PROJ, ENV + ".example")))
+# A search command's PATTERN is a regex, never a path. MEASURED: 65 false denies of a lone dot-star.
+sh("trim: env: grep with a dot-star pattern", "grep -n '.*' README.md", "allow", cwd=NOGIT)
+sh("trim: env: grep -e with a dot-star pattern", "grep -rn -e '.*' src/", "allow", cwd=NOGIT)
+sh("trim: env: grep with a dot-star pattern and a flag value first", "grep -A 3 '.*' README.md",
+   "allow", cwd=NOGIT)
+# `-f` and `--file` hand grep a FILE of patterns: that value is a path and is judged.
+sh("trim: env: grep -f names the file as a path", "grep -f " + ENV + " x", "deny", "env-file",
+   cwd=NOGIT)
+sh("trim: env: rg -f names the file as a path", "rg -f " + ENV + " x", "deny", "env-file",
+   cwd=NOGIT)
+sh("trim: env: grep --file names the file as a path", "grep --file " + ENV + " x", "deny",
+   "env-file", cwd=NOGIT)
+sh("trim: env: grep --file= names the file as a path", "grep --file=" + ENV + " x", "deny",
+   "env-file", cwd=NOGIT)
+sh("trim: env: a dot-star glob handed to cat still denies", "cat .*", "deny", "env-file",
+   cwd=NOGIT)
+sh("trim: env: a dot-star glob as grep's FILE still denies", "grep foo .*", "deny", "env-file",
+   cwd=NOGIT)
+sh("trim: env: the file named after grep -e still denies", "grep -e foo " + ENV, "deny",
+   "env-file", cwd=NOGIT)
+# An assignment whose quoted value holds a space is not the command: its tail once read as the
+# command word and denied a real runner.
+sh("trim: env: a quoted assignment value with a space ahead of node --env-file",
+   "ADMINS='Shivam Semwal' PORT=1 node --env-file=" + ENV + " --import tsx server.ts", "allow",
+   cwd=NOGIT)
+# An unquoted heredoc whose body holds no substitution once crashed the env check, which failed
+# open and skipped every rule after it, the frozen-path rule included.
+sh("trim: env: an unquoted heredoc with no substitution still reaches the frozen-path rule",
+   "cat <<EOF > " + CFG_HOOK + "\nhello\nEOF", "deny", "frozen-path", cwd=NOGIT)
+sh("trim: env: an unquoted heredoc with a substitution that reads the file denies",
+   "cat <<EOF\n$(cat " + ENV + ")\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("trim: env: the same assignment ahead of a non-runner still denies",
+   "ADMINS='Shivam Semwal' cat --env-file=" + ENV, "deny", "env-file", cwd=NOGIT)
 add("env: Edit of the example file", "allow", tool="Edit", cwd=NOGIT,
     file_path=slash(os.path.join(PROJ, ENV + ".example")))
 
@@ -2251,28 +2172,6 @@ sh("env: PowerShell Get-Content of the example file", "Get-Content " + ENV + ".e
 sh("env: the accessor search in the other shell",
    "Select-String -Pattern 'import\\.meta\\" + ENV + "' -Path src/main.tsx", "allow",
    tool="PowerShell", cwd=NOGIT)
-
-
-# =========================================================================== 5. merge into main
-#
-# Decision 8 ("Merge into main: allow and report") supersedes Decision 2 ("ask always"). Every
-# merge call is now an ALLOW; the guard log is what carries the base and the tool, checked in
-# merge_log_case() below.
-
-sh("merge: a base of main is allowed", "gh pr merge 12 --squash", "allow", cwd=NOGIT,
-   env_path=GHMAIN + os.pathsep + PY_PATH)
-sh("merge: a base of dev is allowed", "gh pr merge 12 --squash", "allow", cwd=NOGIT,
-   env_path=GHDEV + os.pathsep + PY_PATH)
-sh("merge: an unreadable base is allowed", "gh pr merge 12 --squash", "allow",
-   cwd=NOGIT, env_path=GHNONE_PATH)
-sh("merge: no number is allowed", "gh pr merge", "allow",
-   cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
-sh("merge: reading a pull request is untouched", "gh pr view 75 --json baseRefName", "allow",
-   cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
-sh("merge: opening a pull request is untouched", "gh pr create --base main --title x --body y",
-   "allow", cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
-add("merge: every call of the merge tool is allowed", "allow",
-    tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12, repo="x", owner="y")
 
 
 # =========================================================================== 6. frozen paths
@@ -2988,9 +2887,36 @@ def cap_reason_bound_case():
     return True, "%d characters, one line, cut marked" % len(reason)
 
 
+def crash_log_case():
+    """A guard defect still allows (fail open), and now logs one `crash` line naming the error."""
+    folder = os.path.join(ROOT, "crashlog")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "guard.log")
+    if os.path.exists(path):
+        os.remove(path)
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    code = ("import io, sys, importlib.util as u\n"
+            "spec = u.spec_from_file_location('g', %r)\n"
+            "g = u.module_from_spec(spec); spec.loader.exec_module(g)\n"
+            "g.judge = lambda payload: 1 / 0\n"
+            "sys.stdin = io.StringIO('{\"tool_name\": \"Bash\", \"tool_input\": {}}')\n"
+            "g.main()\n" % GUARD)
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                            env=env, timeout=60)
+    if result.returncode != 0 or result.stdout.strip():
+        return False, "expected a silent exit 0, got %d %r" % (result.returncode, result.stdout[:80])
+    if not os.path.exists(path):
+        return False, "no crash line was logged"
+    fields = open(path, encoding="utf-8").read().strip().split("\t")
+    if len(fields) != 5 or fields[2:4] != ["crash", "guard-crash"] or "ZeroDivisionError" not in fields[4]:
+        return False, "unexpected crash line: %r" % fields
+    return True, "allowed, and one crash line logged"
+
+
 def conflict_resolve_log_case():
-    """`git checkout --theirs` during a real conflict is allowed, and logged as
-    `noted`/`conflict-resolve`, the same shape as the other allow-and-log rules.
+    """`git checkout --theirs` during a real conflict is allowed and logs NOTHING: it is a
+    carve-out of shared-tree, with no rule of its own (decisions/guard-trims-from-the-audit.md).
     """
     folder = os.path.join(ROOT, "conflictlog")
     os.makedirs(folder, exist_ok=True)
@@ -3008,16 +2934,9 @@ def conflict_resolve_log_case():
     )
     if result.stdout.strip():
         return False, "expected a silent allow, got %r" % result.stdout.strip()[:120]
-    if not os.path.exists(path):
-        return False, "no log file was written for the noted resolve"
-    with open(path, encoding="utf-8") as handle:
-        lines = [line for line in handle.read().splitlines() if line.strip()]
-    if len(lines) != 1:
-        return False, "expected one line, found %d" % len(lines)
-    fields = lines[0].split("\t")
-    if len(fields) != 5 or fields[2] != "noted" or fields[3] != "conflict-resolve":
-        return False, "line does not read noted/conflict-resolve: %r" % lines[0]
-    return True, "one noted/conflict-resolve line"
+    if os.path.exists(path) and open(path, encoding="utf-8").read().strip():
+        return False, "expected no log line, found: %r" % open(path, encoding="utf-8").read()[:120]
+    return True, "allowed, no log line"
 
 
 def subject_unread_log_case(command=None, expect_note=True):
@@ -3161,72 +3080,35 @@ REASON_MAY_NAME = {
 
 
 def merge_log_case():
-    """Decision 8: a merge into main is allowed, and noted in the log when the base is main or
-    unreadable, or when the call goes through the MCP tool that carries no base at all. A base of
-    dev is allowed and logs nothing.
+    """A merge into main is allowed and logs NOTHING, by either route: the guard no longer reads a
+    base or matches the merge tool (decisions/guard-trims-from-the-audit.md). PATH holds an empty
+    folder, so an old guard would log `merge-main` for an unreadable base instead of calling a
+    real `gh`.
     """
-    scenarios = [
-        ("gh pr merge 12", GHMAIN + os.pathsep + PY_PATH, True, "base main"),
-        ("gh pr merge 12", GHDEV + os.pathsep + PY_PATH, False, "base dev"),
-        ("gh pr merge 12", GHNONE_PATH, True, "base unreadable"),
-    ]
     problems = []
-    for index, (command, env_path, expect_logged, label) in enumerate(scenarios):
+    nogh = os.path.join(ROOT, "nogh")
+    os.makedirs(nogh, exist_ok=True)
+    for index, payload in enumerate((
+        {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 12 --squash"}, "cwd": NOGIT},
+        {"tool_name": "mcp__github__merge_pull_request",
+         "tool_input": {"pullNumber": 12, "repo": "x", "owner": "y"}, "cwd": NOGIT},
+    )):
         folder = os.path.join(ROOT, "mlog%d" % index)
         os.makedirs(folder, exist_ok=True)
-        path = os.path.join(folder, "guard.log")
         env = dict(os.environ)
         env["CLAUDE_CONFIG_DIR"] = folder
-        env["PATH"] = env_path
-        result = subprocess.run(
-            [sys.executable, GUARD],
-            input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command},
-                              "cwd": NOGIT}),
-            capture_output=True, text=True, env=env, timeout=60,
-        )
+        env["PATH"] = nogh
+        result = subprocess.run([sys.executable, GUARD], input=json.dumps(payload),
+                                capture_output=True, text=True, env=env, timeout=60)
         if result.stdout.strip():
             problems.append("%s: expected a silent allow, got %r" % (
-                label, result.stdout.strip()[:80]))
-            continue
-        logged = False
-        if os.path.exists(path):
-            with open(path, encoding="utf-8") as handle:
-                logged = any(
-                    line.split("\t")[2:4] == ["noted", "merge-main"]
-                    for line in handle.read().splitlines() if line.strip()
-                )
-        if logged != expect_logged:
-            problems.append("%s: expected logged=%s, got %s" % (label, expect_logged, logged))
-
-    folder = os.path.join(ROOT, "mlogtool")
-    os.makedirs(folder, exist_ok=True)
-    path = os.path.join(folder, "guard.log")
-    env = dict(os.environ)
-    env["CLAUDE_CONFIG_DIR"] = folder
-    result = subprocess.run(
-        [sys.executable, GUARD],
-        input=json.dumps({"tool_name": "mcp__github__merge_pull_request",
-                          "tool_input": {"pullNumber": 12, "repo": "x", "owner": "y"},
-                          "cwd": NOGIT}),
-        capture_output=True, text=True, env=env, timeout=60,
-    )
-    if result.stdout.strip():
-        problems.append("merge tool: expected a silent allow, got %r" % (
-            result.stdout.strip()[:80]))
-    elif not os.path.exists(path):
-        problems.append("merge tool: no log file was written")
-    else:
-        with open(path, encoding="utf-8") as handle:
-            logged = any(
-                line.split("\t")[2:4] == ["noted", "merge-main"]
-                for line in handle.read().splitlines() if line.strip()
-            )
-        if not logged:
-            problems.append("merge tool: log line does not read noted/merge-main")
-
+                payload["tool_name"], result.stdout.strip()[:80]))
+        path = os.path.join(folder, "guard.log")
+        if os.path.exists(path) and open(path, encoding="utf-8").read().strip():
+            problems.append("%s: expected no log line" % payload["tool_name"])
     if problems:
         return False, "; ".join(problems)
-    return True, "allow in all four cases, noted where the base is unsafe or unread"
+    return True, "allowed, no log line, by the command and by the tool"
 
 
 def names_the_target(reason, rule=None):
@@ -3289,7 +3171,7 @@ def log_env_case():
     env["CLAUDE_CONFIG_DIR"] = folder
     result = subprocess.run(
         [sys.executable, GUARD],
-        input=json.dumps({"tool_name": "Read",
+        input=json.dumps({"tool_name": "Write",
                           "tool_input": {"file_path": "C:/repo/" + ENV},
                           "cwd": "C:/repo"}),
         capture_output=True, text=True, env=env, timeout=60,
@@ -3807,8 +3689,9 @@ LOG_CHECKS = (
     ("log: a cap lift is asked and logged with its file and value", cap_log_case),
     ("log: a cap lift under a deep path still logs the model", cap_deep_path_log_case),
     ("cap: the printed reason is bounded, single-line and marks a cut", cap_reason_bound_case),
-    ("log: a merge into main is allowed and noted where the base is unsafe", merge_log_case),
-    ("log: a conflict-side checkout is allowed and noted", conflict_resolve_log_case),
+    ("trim: a merge into main is allowed and logs nothing", merge_log_case),
+    ("trim: a guard crash fails open and logs a crash line", crash_log_case),
+    ("trim: a conflict-side checkout is allowed and logs nothing", conflict_resolve_log_case),
     ("log: an unreadable subject is allowed and noted", subject_unread_log_case),
     ("log: an unforced worktree remove with an unreadable subject records no note",
      worktree_remove_plain_quiet_case),

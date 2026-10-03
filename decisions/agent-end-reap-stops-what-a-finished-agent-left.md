@@ -98,7 +98,8 @@ orphaned tree inside an ended agent's worktree, not only listeners.
 Each run appends one JSON line to
 `${CLAUDE_CONFIG_DIR:-~/.claude}/state/agent-end-payloads.jsonl`. The line
 holds the raw payload, the target, and each decision. The hook fields that
-the docs leave open get measured from this log. The hook always exits 0.
+the docs leave open get measured from this log. The file keeps the last 200
+lines (decisions/guard-trims-from-the-audit.md). The hook always exits 0.
 
 ## Not wired: WorktreeRemove
 

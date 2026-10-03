@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 HERE = os.path.dirname(os.path.abspath(__file__))
 STE_GATE = os.path.join(HERE, "ste_gate.py")
 REPORT_GATE = os.path.join(HERE, "report_gate.py")
-CONFIG_REPORT = os.path.join(HERE, "..", "hooks", "config_report.py")
+HOOKS = os.path.join(HERE, "..", "hooks")
 MD_SWEEP = os.environ.get("MD_SWEEP_UNDER_TEST") or os.path.join(HERE, "md_sweep.py")
 
 sys.path.insert(0, HERE)
@@ -65,6 +65,21 @@ def run_gate(gate, hook, raw_stdin=None, env=None):
         env=env,
     )
     return run
+
+
+# The config report is a section of hooks/decision_watch.py (decisions/guard-trims-from-the-audit.md).
+# This runs just that section, in a fresh process like the hook, so a case never reaches the git
+# status and model judgment `decision_watch.run` makes. It prints what `main` would print for it.
+CONFIG_REPORT_CODE = (
+    "import json, sys; sys.path.insert(0, %r); import decision_watch; "
+    "message = decision_watch.config_report(json.load(sys.stdin)); "
+    "print(json.dumps({'systemMessage': message}) if message else '')" % HOOKS
+)
+
+
+def run_config_report(hook, env=None):
+    return subprocess.run([sys.executable, "-c", CONFIG_REPORT_CODE], input=json.dumps(hook),
+                          capture_output=True, text=True, timeout=15, env=env)
 
 
 class ReportGateTests(unittest.TestCase):
@@ -643,7 +658,7 @@ class ConfigReportTests(unittest.TestCase):
             assistant_text("done"),
         ]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(CONFIG_REPORT, self.hook_for(path))
+        run = run_config_report(self.hook_for(path))
         self.assertEqual(run.returncode, 0)
         out = json.loads(run.stdout)
         self.assertIn("systemMessage", out)
@@ -659,7 +674,7 @@ class ConfigReportTests(unittest.TestCase):
             assistant_text("done"),
         ]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(CONFIG_REPORT, self.hook_for(path))
+        run = run_config_report(self.hook_for(path))
         self.assertEqual(run.returncode, 0)
         self.assertEqual(run.stdout.strip(), "")
 
@@ -693,7 +708,7 @@ class ConfigReportTests(unittest.TestCase):
     def test_20_unread_subject_this_turn_is_named(self):
         path, env = self._turn([self._log_line("subject-unread", "noted",
                                                "git reset --hard HEAD")])
-        run = run_gate(CONFIG_REPORT, self.hook_for(path), env=env)
+        run = run_config_report(self.hook_for(path), env=env)
         self.assertEqual(run.returncode, 0)
         out = json.loads(run.stdout)
         self.assertIn("could not read the subject", out["systemMessage"])
@@ -706,14 +721,14 @@ class ConfigReportTests(unittest.TestCase):
                             age_seconds=600)],
             human_offset_seconds=60,
         )
-        run = run_gate(CONFIG_REPORT, self.hook_for(path), env=env)
+        run = run_config_report(self.hook_for(path), env=env)
         self.assertEqual(run.returncode, 0)
         self.assertEqual(run.stdout.strip(), "")
 
     def test_22_a_refusal_line_is_not_an_unread_subject(self):
         path, env = self._turn([self._log_line("shared-tree", "deny",
                                                "git reset --hard HEAD")])
-        run = run_gate(CONFIG_REPORT, self.hook_for(path), env=env)
+        run = run_config_report(self.hook_for(path), env=env)
         self.assertEqual(run.returncode, 0)
         self.assertEqual(run.stdout.strip(), "")
 
@@ -728,7 +743,7 @@ class ConfigReportTests(unittest.TestCase):
             assistant_text("> **Done** shipped it"),
         ]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(CONFIG_REPORT, self.hook_for(path))
+        run = run_config_report(self.hook_for(path))
         self.assertEqual(run.returncode, 0)
         out = json.loads(run.stdout)
         self.assertIn("systemMessage", out)
@@ -744,7 +759,7 @@ class ConfigReportTests(unittest.TestCase):
             assistant_text("> **Done** BUILT, merged #75\n> **Next** none"),
         ]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(CONFIG_REPORT, self.hook_for(path))
+        run = run_config_report(self.hook_for(path))
         self.assertEqual(run.returncode, 0)
         self.assertEqual(run.stdout.strip(), "")
 
@@ -756,7 +771,7 @@ class ConfigReportTests(unittest.TestCase):
             assistant_text("> **Done** BUILT the fix\n> **Next** none"),
         ]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(CONFIG_REPORT, self.hook_for(path))
+        run = run_config_report(self.hook_for(path))
         self.assertEqual(run.returncode, 0)
         out = json.loads(run.stdout)
         self.assertIn("Merges into main this turn: #75.", out["systemMessage"])
@@ -771,7 +786,7 @@ class ConfigReportTests(unittest.TestCase):
             assistant_text("no report yet"),
         ]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(CONFIG_REPORT, self.hook_for(path))
+        run = run_config_report(self.hook_for(path))
         self.assertEqual(run.returncode, 0)
         out = json.loads(run.stdout)
         self.assertIn("Merges into main this turn: #75.", out["systemMessage"])
@@ -788,7 +803,7 @@ class ConfigReportTests(unittest.TestCase):
             assistant_text("> **Done** merged #75\n> **Next** none"),
         ]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(CONFIG_REPORT, self.hook_for(path))
+        run = run_config_report(self.hook_for(path))
         self.assertEqual(run.returncode, 0)
         out = json.loads(run.stdout)
         # #75 is already named in the report; #76 is not, so only #76 fires.
@@ -803,7 +818,7 @@ class ConfigReportTests(unittest.TestCase):
             assistant_text("no report yet"),
         ]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(CONFIG_REPORT, self.hook_for(path))
+        run = run_config_report(self.hook_for(path))
         self.assertEqual(run.returncode, 0)
         out = json.loads(run.stdout)
         self.assertIn("Merges into main this turn: an unnumbered merge.", out["systemMessage"])
@@ -817,7 +832,7 @@ class ConfigReportTests(unittest.TestCase):
             assistant_text("done"),
         ]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(CONFIG_REPORT, self.hook_for(path, stop_hook_active=True))
+        run = run_config_report(self.hook_for(path, stop_hook_active=True))
         self.assertEqual(run.returncode, 0)
         self.assertEqual(run.stdout.strip(), "")
 
