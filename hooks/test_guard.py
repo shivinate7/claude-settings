@@ -610,7 +610,11 @@ def build_fixtures():
     make_fake_gh(GHBROKEN, "main", broken=True)
     make_fake_gh(GHBLANK, "", )
     make_fake_gh(GHNEED, "main", need=["12", "y/x"])
-    make_fake_gh(GHSLOW, "main", delay=4)
+    # merge.py's shared_deadline (3f07b06) splits one budget across the read's three calls, so a
+    # delay only a little past the per-call figure that used to be the cutoff no longer exhausts
+    # it: 3 calls * 4s = 12s now fits inside the 14s MERGE_READ_TIMEOUT. 20s per call outruns that
+    # whole shared budget on its own, whichever call absorbs the time.
+    make_fake_gh(GHSLOW, "main", delay=20)
     # Incident 2026-10-03: pr view 3.0-3.8s, pr checks 3.6-3.9s, the runs read 1.3-1.4s, measured
     # on the machine that filed it. 3.5s per call stands in for that real latency, slower than
     # MERGE_READ_TIMEOUT's 3s but nowhere near a hang.
@@ -4354,12 +4358,23 @@ def merge_log_case():
 
 
 def merge_hang_timeout_case():
-    """A `gh` that never answers must not make the guard itself outlast the hook.
+    """A `gh` that never answers must still end in a deny, and that deny must not depend on the
+    hook's 20s budget being outlived first.
 
-    Incident 2026-10-03: the PreToolUse hook gets 20s total (settings.json), and the merge gate
-    makes three `gh` calls, each bounded by MERGE_READ_TIMEOUT. A hung `gh` must still end in a
-    deny (unknown, never a silent hang), and the whole judgement must finish well inside the 20s
-    hook budget -- bounded here at ~15s -- or a hung `gh` could outlast the hook that calls it.
+    The "denies as unknown" half holds on every OS: THAT is the subject (git-wait-for-required-
+    checks), and this is pinned everywhere.
+
+    The wall-time half -- the read must finish well inside the 20s hook budget, bounded here at
+    ~15s -- is asserted on POSIX only. MEASURED on Windows: GHHANG is a `.cmd` fake, and
+    subprocess.run's kill on timeout only reaches the cmd.exe it directly spawned, never the
+    ping it wraps for the wait -- Windows hands that ping an inherited duplicate of the real
+    captured pipe regardless of its own `>nul 2>&1` redirection, so communicate() blocks until
+    ping's FULL configured wait elapses, not until the kill. That is a fixture artifact of
+    faking `gh` as a batch file on this one platform, not a fact about guard.py or merge.py: a
+    real `gh.exe` is a single process, killed cleanly (confirmed directly against `ping.exe`
+    itself: a bare, unwrapped call is killed at the nominal timeout, not its full duration). No
+    `.cmd` fake can be killed on time here, so there is nothing truthful left to assert for wall
+    time on Windows; skip it there, loudly, rather than fake a shorter wait or a looser bound.
     """
     started = time.time()
     got, reason = decide({
@@ -4373,11 +4388,15 @@ def merge_hang_timeout_case():
         problems.append("expected deny, got %s" % got)
     elif "could not run" not in reason:
         problems.append("expected the could-not-run reason, got %r" % reason[:120])
-    if elapsed >= 15:
+    if os.name != "nt" and elapsed >= 15:
         problems.append("the judgement took %.1fs, at or past the 15s bound" % elapsed)
     if problems:
         return False, "; ".join(problems)
-    return True, "denied as unknown in %.1fs, inside the 20s hook budget" % elapsed
+    note = ("denied as unknown in %.1fs; the wall-time bound is skipped on Windows, a `.cmd` "
+            "fake gh cannot be killed on time here (see this case's docstring)" % elapsed
+            if os.name == "nt" else
+            "denied as unknown in %.1fs, inside the 20s hook budget" % elapsed)
+    return True, note
 
 
 def names_the_target(reason, rule=None):
