@@ -490,6 +490,14 @@ jobs:
         shell: bash
         run: bash actions/stamp/test_action.sh
 
+      - name: Merge launcher fixture suite
+        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
+        run: python merge/test_launch.py
+
+      - name: Merge tool git-half fixture suite
+        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
+        run: python merge/test_merge.py
+
       - name: Merge launcher fixture suite (merge.cmd)
         if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
         run: python merge/test_cmd.py
