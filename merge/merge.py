@@ -369,12 +369,19 @@ def own_claim(wt, cfgrel, base):
     return None if c or "UNKNOWN:" in out else ids  # UNKNOWN is a failure: it exits 0 outside Actions
 
 def do_claim(wt, cfgrel, base):
-    """Run the claim in the worktree. -> the Record-claim line, or None when nothing was claimed."""
+    """Run the claim in the worktree. -> the Record-claim line, or None when nothing was claimed.
+
+    sh() joins stdout+stderr (see sh() above), so a regenerate step's npm warn/notice lines on
+    stderr can land after the trailer. Scan every line for the one starting "Record-claim: "
+    instead of assuming it is the last line. Two such lines is a signal we don't understand: refuse
+    rather than guess which one is real."""
     c, out = node_stamp(wt, cfgrel, "claim", base)
     if c:
         raise Stop("the claim was refused. Nothing is on origin.\n" + out)
-    lines = [l for l in out.splitlines() if l.strip()]
-    return lines[-1] if lines and lines[-1].startswith("Record-claim: ") else None
+    claims = [l for l in out.splitlines() if l.startswith("Record-claim: ")]
+    if len(claims) > 1:
+        raise Stop("the claim printed more than one Record-claim line. Refusing to guess which is real.\n" + out)
+    return claims[0] if claims else None
 
 def commit_claim(wt, trailer):
     git(wt, "add", "-A")
