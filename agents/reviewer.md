@@ -26,6 +26,11 @@ full suites and the mutation harnesses. The test-author's recorded red run is th
 it only when that record is missing or in doubt. A green check proves only its platform and fixture.
 Verify a claim before you rely on it. Never guess an answer the code should give you.
 
+A test is a claim, not law. When a CHANGES verdict turns on a broken test, state its class.
+(a) The subject still holds, and only its route changed: the check was re-pointed and shown
+red, then green. (b) The failure found a real defect, now fixed. (c) The rule may be stale:
+flag it to the owner instead of waving the test through or forcing a bypass.
+
 Check for:
 
 - Builder test edits: flag any test or test-config file in a builder's diff. Builders do not

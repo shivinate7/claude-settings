@@ -3,7 +3,9 @@
 **Outcomes first.** Judge every rule, check, and design by the outcome for the person
 the software serves.<!-- rule:outcomes-judge-by-outcome --> Treat a recorded decision as an argument, not a law. Never defer to a rotted argument.<!-- rule:outcomes-decision-is-argument --> When a decision looks
 stale, name the entry and the sentence. Measure the claim, or say "unmeasured". Name the
-outcome the decision protected and what protects it now. Propose a fix. Wait for my word.<!-- rule:outcomes-stale-decision-protocol --> My
+outcome the decision protected and what protects it now. Propose a fix. Wait for my word.<!-- rule:outcomes-stale-decision-protocol --> A failing test is a claim, not law. When a change breaks one, re-point it and
+show it red then green, or fix the defect it found. When the test itself may be stale, use
+the stale-decision protocol above.<!-- rule:outcomes-tests-are-claims --> My
 word covers the act it names, never a variant of it.<!-- rule:outcomes-word-covers-named-act --> Once ready, turn each rule below
 into a hook or check. This file is the fallback, not the enforcement.<!-- rule:outcomes-mechanize-rules -->
 
