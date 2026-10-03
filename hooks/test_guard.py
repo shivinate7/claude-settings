@@ -3460,9 +3460,8 @@ add("builder-diff: a second stop (stop_hook_active) is allowed, once blocked", "
 add("builder-diff: a test-author's second stop is allowed too", "allow",
     event="SubagentStop", cwd=diff_repo("a-giveup", _put("src/app.py", "x = 2\n")),
     agent_id="auth1", agent_type="test-author", stop_active=True)
-add("builder-diff: an unread diff blocks the first stop", "deny", rule=BT,
-    event="SubagentStop", cwd=NOGIT, agent_id="bld1", agent_type="builder",
-    carries=("could not read",))
+add("builder-diff: an unread diff logs role-diff-unread and the first stop is allowed", "allow",
+    event="SubagentStop", cwd=NOGIT, agent_id="bld1", agent_type="builder")
 add("builder-diff: an unread diff lets the second stop go", "allow",
     event="SubagentStop", cwd=NOGIT, agent_id="bld1", agent_type="builder", stop_active=True)
 add("builder-diff: a stop with no cwd is allowed (and logged)", "allow", event="SubagentStop",
@@ -3484,6 +3483,7 @@ def role_log_case():
         ({"cwd": os.path.join(DIFFROOT, "b-giveup-main")}, "role-diff-main-checkout"),
         ({"cwd": os.path.join(DIFFROOT, "b-giveup"), "stop_hook_active": True},
          "role-diff-unresolved"),
+        ({"cwd": NOGIT}, "role-diff-unread"),
     ]
     problems = []
     for extra, want in stops:
