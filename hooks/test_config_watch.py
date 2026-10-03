@@ -371,11 +371,7 @@ bypass("a path held in a shell variable",
                  % to_bash_path(os.path.join(FIXTURE_TMP, "lift_case4.json")))
 bypass("a script file that never names the path in the command",
        lambda p: "sh write.sh")
-# MOVED 2026-10-02 (decisions/guard-trims-from-the-audit.md): the guard no longer asks about a shell
-# write, so a heredoc that NAMES the value is reverted here like every other shell shape. It was
-# an "approved" pass case while the guard asked.
-bypass("trim: a heredoc that names the value",
-       lambda p: "cat > .claude/settings.local.json <<'JSON'\n" + LIFT + "\nJSON\n")
+
 
 
 # --------------------------------------------------------------------------- the green cases
@@ -387,6 +383,16 @@ def approved_write(project):
     decision = project.pre("Write", {"file_path": project.settings, "content": LIFT})
     write(project.settings, LIFT)
     message = project.post("Write", {"file_path": project.settings, "content": LIFT})
+    return {"pre": decision, "lifted": project.lifted(), "message": message}
+
+
+@case("an approved heredoc passes through and is NOT reverted", "pass")
+def approved_heredoc(project):
+    project.settle()
+    command = ("cat > .claude/settings.local.json <<'JSON'\n" + LIFT + "\nJSON\n")
+    decision = project.pre("Bash", {"command": command})
+    shell(project, command)
+    message = project.post("Bash", {"command": command})
     return {"pre": decision, "lifted": project.lifted(), "message": message}
 
 

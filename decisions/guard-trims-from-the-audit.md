@@ -37,6 +37,8 @@ show that the act is safe.
   skips the pattern word of a search command (`grep`, `egrep`, `fgrep`, `rg`, `ag`, `ack`). `-e` and
   `--regexp` mark the pattern. Without them, the first plain word is the pattern, after the values
   of `-A`, `-B`, `-C` and `-m`. A path word is still judged, so `grep foo .*` and `cat .*` still deny.
+  With `-f`, `--file` or `--file=`, the patterns come from a file, so nothing is skipped and the
+  value is judged as a path: `grep -f .env x` denies.
 - `env-file` no longer judges `Read` and `Grep`. The settings deny list blocks `Read(.env)` and
   `Read(.env.*)`. The log holds 0 `env-file` denies for those two tools. `Write`, `Edit`,
   `MultiEdit` and `NotebookEdit` stay denied.
@@ -45,23 +47,25 @@ show that the act is safe.
   on each read. One effect: a subagent's first call no longer writes its home record when that call
   is a `Read` or `Grep`. The next write or shell call writes it from the same worktree. The
   PreToolUse matcher in `settings.json` also drops `Read` and `Grep`, so no process starts for them.
+  Without the guard, the deny list alone blocks `.env` reads. `settings.json` now also denies
+  `Read(**/.env)` and `Read(**/.env.*)`, with `Read(!**/.env.example)`, so a read in a subfolder
+  stays blocked. How those patterns match is per Claude Code permission rules. It is unmeasured
+  here.
 - `janitor/agent_end_reap.py` wrote every raw SubagentStop payload to
   `state/agent-end-payloads.jsonl`: 3,939 lines at the audit. The entry
   `agent-end-reap-stops-what-a-finished-agent-left` names the file as the evidence for payload
   fields that the docs leave open, and `janitor/prove_agent_end_reap.py` reads its last line. So
-  the file stays, capped at the last 200 lines.
+  the file stays, capped at the last 200 lines. The cap writes a temp file and renames it over the
+  log, so a reader never sees an empty file.
 
 ## Folded
 
-- Subagent model cap, settings writes. `hooks/config_watch.py` already hashes the project settings
-  files after every Bash, PowerShell and file-tool call, and reverts an unasked cap change in every
-  shape. The guard also read shell text for the same act (five shapes that name the value). The
-  entry `predicate-is-the-act` says a shape list cannot do that. The shell part of rule 8 is gone.
-  The watch now reverts and reports a shell cap change, and the guard never asks about it. The
-  guard keeps the ask for `Write`, `Edit`, `MultiEdit` and `NotebookEdit`. A watch runs after the
-  write. Only a PreToolUse hook can ask before a write lands, and a file tool's payload names the
-  value to ask about. Cost: a shell lift of a file with no baseline is reported as UNKNOWN and not
-  reverted. The expiry check is unchanged.
+- Subagent model cap, settings writes: NOT moved. A first draft moved the shell route to
+  `hooks/config_watch.py` alone. The reviewer found a hole. The watch reads only the watched paths
+  of the current directory. A shell write from a subdirectory or from another worktree was
+  neither reverted nor reported. The guard's shell ask is back, with its five cases and two
+  mutants. `config_watch` stays the second layer. It reverts every shell cap change that the guard
+  did not ask about, in every shape. The guard asks before the write, and the watch reverts after it.
 - `hooks/config_report.py` is a section of `hooks/decision_watch.py`, and its Stop entry is gone from
   `settings.json`. The message and the checks are the same. One process now runs for both at each
   Stop. It reads the transcript through `lint/_transcript.py`

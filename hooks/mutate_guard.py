@@ -336,7 +336,8 @@ MUTATIONS = [
     ("env-file: name the file in the environment reason, the reviewed defect",
      '        refuse(tool, "deny", "env-file", ENV_TOOL_REASON + ". " + ENV_ADVICE, target)',
      '        refuse(tool, "deny", "env-file", ENV_TOOL_REASON + " " + target + ". "'
-     ' + ENV_ADVICE, target)', "guard", 'env: Read of the file'),
+     ' + ENV_ADVICE, target)', "guard",
+     'env: a Write outside the fixtures, and the reason names no file'),
     ("env-file: name the file in the shell environment reason, the reviewed defect",
      '        refuse(tool, "deny", "env-file", refusal + ". " + ENV_ADVICE, logged)',
      '        refuse(tool, "deny", "env-file", logged + ". " + ENV_ADVICE, logged)', "guard", 'env: an absolute Windows path is still a path'),
@@ -583,6 +584,23 @@ MUTATIONS = [
      '                   target + " " + change)\n'
      '    if is_frozen(target, cwd):\n'
      '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)', "guard", 'cap: the config settings stay denied, never asked'),
+    ("cap: the shell route runs ahead of the frozen-path deny, so a heredoc onto the config "
+     "settings asks instead",
+     '    matched = frozen_shell_hit(stripped, cwd)\n'
+     '    if matched:\n'
+     '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)',
+     '    matched = _shell_write_hit(stripped, cwd, is_settings_file)\n'
+     '    if matched:\n'
+     '        change = cap_change(raw)\n'
+     '        if change:\n'
+     '            refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, matched),\n'
+     '                   matched + " " + change)\n'
+     '    matched = frozen_shell_hit(stripped, cwd)\n'
+     '    if matched:\n'
+     '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)', "guard", 'cap: a heredoc onto the config settings stays denied'),
+    ("cap: the shell route reads the stripped command, so a heredoc body's cap change walks past",
+     '        change = cap_change(raw)',
+     '        change = cap_change(stripped)', "guard", 'cap: a heredoc writing a project settings file asks'),
     ("cap: an earlier part wins, so an Edit names the value it leaves, not the one it arrives at",
      '            values[key] = value',
      '            values.setdefault(key, value)', "guard", 'cap: Edit turning the force flag off asks'),
@@ -899,7 +917,7 @@ MUTATIONS = [
      'def main():\n    sys.exit(0)\n    guard._force_utf8_streams()', "decision",
      "main_ordinary_turn: known-bad pair"),
     ("decision watch: stop_hook_active is true for every input",
-     '    if hook.get("stop_hook_active"):', '    if True:', "decision",
+     '    if hook.get("stop_hook_active"):\n        sys.exit(0)  # this Stop firing', '    if True:\n        sys.exit(0)  # this Stop firing', "decision",
      "main_stop_hook_active: known-bad pair"),
     ("ruling home: main() is an always-silent stub",
      'def main():\n    try:\n        hook = json.load(sys.stdin)',

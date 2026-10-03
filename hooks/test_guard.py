@@ -1830,6 +1830,15 @@ sh("trim: env: grep with a dot-star pattern", "grep -n '.*' README.md", "allow",
 sh("trim: env: grep -e with a dot-star pattern", "grep -rn -e '.*' src/", "allow", cwd=NOGIT)
 sh("trim: env: grep with a dot-star pattern and a flag value first", "grep -A 3 '.*' README.md",
    "allow", cwd=NOGIT)
+# `-f` and `--file` hand grep a FILE of patterns: that value is a path and is judged.
+sh("trim: env: grep -f names the file as a path", "grep -f " + ENV + " x", "deny", "env-file",
+   cwd=NOGIT)
+sh("trim: env: rg -f names the file as a path", "rg -f " + ENV + " x", "deny", "env-file",
+   cwd=NOGIT)
+sh("trim: env: grep --file names the file as a path", "grep --file " + ENV + " x", "deny",
+   "env-file", cwd=NOGIT)
+sh("trim: env: grep --file= names the file as a path", "grep --file=" + ENV + " x", "deny",
+   "env-file", cwd=NOGIT)
 sh("trim: env: a dot-star glob handed to cat still denies", "cat .*", "deny", "env-file",
    cwd=NOGIT)
 sh("trim: env: a dot-star glob as grep's FILE still denies", "grep foo .*", "deny", "env-file",
@@ -2415,6 +2424,12 @@ add("cap: a value the pattern cannot read still asks", "ask", "subagent-model-ca
     cwd=NOGIT, file_path=PROJ_LOCAL,
     old_string='"' + CAP_KEY + '": "sonnet"', new_string='"' + CAP_KEY + '": "$OPUS_ID"',
     carries=(CAP_KEY + " = (value unread)",))
+sh("cap: a shell variable as the model value still asks",
+   "cat <<'JSON' > " + PROJ_LOCAL + "\n{\"env\": {\"" + CAP_KEY + "\": \"$OPUS_ID\"}}\nJSON",
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(CAP_KEY + " = (value unread)",))
+sh("cap: an object as the model value still asks",
+   "cat <<'JSON' > " + PROJ_SETTINGS + "\n{\"env\": {\"" + CAP_KEY + "\": {\"a\": 1}}}\nJSON",
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(CAP_KEY + " = (value unread)",))
 
 # THE OVER-ASK IS PINNED, because a comment claiming otherwise once stood here. A settings write
 # that names the variable only inside a permission string still asks: the bare-key pass fires on any
@@ -2446,15 +2461,22 @@ add("cap: the clone's own settings file is asked, not denied", "ask", "subagent-
     old_string='"' + CAP_KEY + '": "sonnet"', new_string='"' + CAP_KEY + '": "' + OPUS + '"',
     carries=(OPUS,))
 
-# THE SHELL ROUTE MOVED to hooks/config_watch.py (decisions/guard-trims-from-the-audit.md): the guard
-# no longer reads shell text for the cap, so the shapes it used to ask about are plain allows
-# here, and the watch reverts them after the write (hooks/test_config_watch.py).
-sh("trim: cap: a redirect onto a project settings file is no longer asked here",
-   "printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
-   "allow", cwd=NOGIT)
-sh("trim: cap: a heredoc writing a project settings file is no longer asked here",
+sh("cap: a heredoc writing a project settings file asks",
    "cat <<'JSON' > " + PROJ_LOCAL + "\n" + cap_settings() + "\nJSON",
-   "allow", cwd=NOGIT)
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+sh("cap: a tee onto a project settings file asks",
+   "printf '%s' '" + cap_settings(compact=True) + "' | tee " + PROJ_SETTINGS,
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+sh("cap: a sed -i on a project settings file asks, and names the value it arrives at",
+   "sed -i 's/\"" + CAP_KEY + "\": \"sonnet\"/\"" + CAP_KEY + "\": \"" + OPUS + "\"/' "
+   + PROJ_SETTINGS,
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(CAP_KEY + " = " + OPUS,))
+sh("cap: a redirect onto a project settings file asks",
+   "printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+sh("cap: an append onto a project settings file asks",
+   "echo '\"" + CAP_FORCE + "\": \"0\"' >> " + PROJ_SETTINGS,
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(CAP_FORCE + " = 0",))
 
 # RULE ORDER. The config directory's own settings keep rule 7's deny, which stands ahead of rule 8,
 # so the cap content never turns that wall into a prompt.
@@ -2652,8 +2674,9 @@ def config_edit_log_case():
 def cap_log_case():
     """Rule 8 logs its ask the way the other rules log, so the config report can surface it.
 
-    One tool call lifting the cap in a project settings file. It must print an `ask` and add one
-    `ask`/`subagent-model-cap` line whose matched text holds the file and the requested value.
+    One tool call and one shell call, each lifting the cap in a project settings file. Each must
+    print an `ask`, and each must add one `ask`/`subagent-model-cap` line whose matched text holds
+    the file and the requested value.
     """
     folder = os.path.join(ROOT, "caplog")
     os.makedirs(folder, exist_ok=True)
@@ -2665,6 +2688,10 @@ def cap_log_case():
     calls = [
         {"tool_name": "Write",
          "tool_input": {"file_path": PROJ_LOCAL, "content": cap_settings()}, "cwd": NOGIT},
+        {"tool_name": "Bash",
+         "tool_input": {"command": "printf '%s' '" + cap_settings(compact=True) + "' > "
+                        + PROJ_SETTINGS},
+         "cwd": NOGIT},
     ]
     for payload in calls:
         result = subprocess.run(
@@ -2681,12 +2708,12 @@ def cap_log_case():
         lines = [line for line in handle.read().splitlines() if line.strip()]
     asks = [line.split("\t") for line in lines if line.split("\t")[2:4] == ["ask",
                                                                            "subagent-model-cap"]]
-    if len(asks) != 1:
-        return False, "expected one ask line, found %d of %d" % (len(asks), len(lines))
+    if len(asks) != 2:
+        return False, "expected two ask lines, found %d of %d" % (len(asks), len(lines))
     for fields in asks:
         if len(fields) != 5 or OPUS not in fields[4] or "settings" not in fields[4]:
             return False, "the log line does not carry the file and the value: %r" % fields[-1:]
-    return True, "one ask line, naming the file and the model"
+    return True, "two ask lines, each naming the file and the model"
 
 
 def cap_deep_path_log_case():

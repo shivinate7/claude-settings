@@ -63,8 +63,10 @@ def log(record: dict):
                 kept = handle.readlines()[-(MAX_LOG_LINES - 1):]
         except OSError:
             kept = []
-        with open(path, "w", encoding="utf-8") as handle:
+        temp = path + ".tmp"
+        with open(temp, "w", encoding="utf-8") as handle:
             handle.writelines(kept + [line])
+        os.replace(temp, path)  # a reader never sees an empty or half-written file
     except Exception:
         pass
 

@@ -51,12 +51,9 @@ one fixed order, and the first match wins.
   5 env-file           any read or write of an environment file
   7 frozen-path        a write to the settings, the hooks or the global CLAUDE.md, under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. Always denied.
-  8 subagent-model-cap a Write, Edit, MultiEdit or NotebookEdit of a settings file whose content
-                       sets or changes `CLAUDE_CODE_SUBAGENT_MODEL` or
-                       `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`. Always asked, never denied. A SHELL
-                       write is not read here: `hooks/config_watch.py` hashes the file after the
-                       call and reverts an unasked cap change, in every shape
-                       (decisions/guard-trims-from-the-audit.md).
+  8 subagent-model-cap a write to a settings file whose content sets or changes
+                       `CLAUDE_CODE_SUBAGENT_MODEL` or `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`.
+                       Always asked, never denied.
   9 subagent-model-floor an `Agent` or legacy `Task` call whose `model` is a Haiku model, by alias or
                        by any full id. Always denied. Sonnet is the floor (owner ruling 2026-09-28).
                        An agent file's own `model:` key never reaches this rule, so
@@ -3300,6 +3297,8 @@ def _pattern_words(words, position: int):
     is. A flag's own value (`-A 3`) can stand first and is then skipped in the pattern's place,
     which only ever leaves a real path judged, never hides one.
     """
+    if any(w in ("-f", "--file") or w.startswith("--file=") for w in words[position + 1:]):
+        return set()  # patterns come from a file: its name is a path, and every word is judged
     marked = {i + 1 for i, w in enumerate(words) if w in ENV_PATTERN_FLAGS and i > position}
     if marked:
         return marked
@@ -3695,7 +3694,7 @@ SUBAGENT_CAP_ASSIGN = re.compile(
 )
 
 # The fields a write tool carries its content in. `old_string` stands before `new_string`, so that
-# `cap_change_parts` reads the value the edit ARRIVES at, not the value it leaves.
+# `cap_change` reads the value the edit ARRIVES at, not the value it leaves.
 #
 # EVERY EDIT IS READ. An earlier version of this rule read the first 200 edits of a `MultiEdit`,
 # and a review MEASURED the boundary that cap bought an attacker: 199 no-op edits ahead of the cap
@@ -3844,6 +3843,11 @@ def cap_change_parts(parts) -> str:
     printed = [key + " = " + (cap_safe(values[key], CAP_MAX_VALUE) or "(value unread)")
                for key in order]
     return cap_safe(", ".join(printed), CAP_MAX_CHANGE)
+
+
+def cap_change(text: str) -> str:
+    """The one-text reading, for the shell route, which judges a whole command."""
+    return cap_change_parts([text])
 
 
 def write_content_parts(tool_input):
@@ -4145,6 +4149,20 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
     matched = project_config_shell_hit(stripped, cwd)
     if matched:
         record(tool, "noted", "config-edit", matched)
+
+
+    # 8. The subagent model cap. The PATH comes from the stripped command, the same machinery the
+    # frozen path uses, so a redirect, a `tee`, a `sed -i` and a heredoc header all read as writes.
+    # The CONTENT comes from the RAW command, because a heredoc body is the content being written
+    # and rule 1 strips it. A command that writes a settings file and names the cap variable
+    # somewhere else on the line is asked too: an over-trigger of one prompt, inside a scope this
+    # narrow, beats a bypass by a second segment.
+    matched = _shell_write_hit(stripped, cwd, is_settings_file)
+    if matched:
+        change = cap_change(raw)
+        if change:
+            refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, matched),
+                   log_path_and_text(matched, change))
 
 
 def judge(payload) -> None:

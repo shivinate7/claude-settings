@@ -53,15 +53,11 @@ a script file and a path held in a shell variable are all equally visible to a h
 change that the guard did not ask about, this file puts the previous content back and prints a
 systemMessage naming the file, the tool and the command.
 
-THE SHELL ROUTE LIVES HERE ALONE, MOVED 2026-10-02 (decisions/guard-trims-from-the-audit.md). The
-guard used to ask about the five shell shapes that name the value on the command line, which read
-shell text, the shape list `decisions/predicate-is-the-act.md` rejects. This file already covered
-all eleven by hash, so the guard's second reading of the same act is gone. A shell cap change is
-now reverted and reported, whether or not it named the value. The guard keeps the ask for the
-file tools (Write, Edit, MultiEdit, NotebookEdit): only a PreToolUse hook can ask before a write
-lands, and a file tool's payload names the value to ask about. A first sight with no baseline stays
-UNKNOWN, as above, so a shell lift that is a session's very first call to a file with no baseline
-is reported and not reverted.
+THE SHELL ROUTE HAS TWO LAYERS (decisions/guard-trims-from-the-audit.md). The guard asks about
+the shell shapes that name the value, and this file reverts every shell cap change it did not
+explain, in every shape. This file sees only the watched paths of the current directory, so the
+guard's ask is the layer for a shell write from a subdirectory or another worktree. The guard's
+ask is the first layer and this revert is the second.
 
 THIS IS REVERT AND REPORT, NOT PREVENTION. The write lands and is then undone. That is acceptable
 here and nowhere wider: the cap takes effect when a subagent is next spawned, and the restore
@@ -488,8 +484,6 @@ def expiry_problem(content, clock=None) -> str:
 def explained_path(tool: str, tool_input, cwd: str) -> str:
     """Return the resolved path rule 8 asked about for this tool call, or ''.
 
-    Only a file tool is ever asked about. A shell write is never explained: the guard no longer
-    reads shell text for the cap, so every shell cap change is judged here, after the write.
     Stop time passes no tool call, so nothing is explained there and every outstanding cap change
     is judged on its own.
     """
@@ -507,6 +501,17 @@ def explained_path(tool: str, tool_input, cwd: str) -> str:
         if not guard.cap_change_parts(guard.write_content_parts(tool_input)):
             return ""
         return resolve(target, cwd)
+    if tool in guard.SHELL_TOOLS:
+        raw = tool_input.get("command", "") or ""
+        if not isinstance(raw, str) or not raw.strip():
+            return ""
+        stripped = guard.strip_heredoc_bodies(raw)
+        hit = guard._shell_write_hit(stripped, cwd, guard.is_settings_file)
+        if not hit:
+            return ""
+        if not guard.cap_change(raw):
+            return ""
+        return resolve(hit, cwd)
     return ""
 
 
