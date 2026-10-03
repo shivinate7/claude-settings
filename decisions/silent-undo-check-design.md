@@ -116,6 +116,7 @@ Cost: a pull request run took 0.4 to 5 seconds on this repo. The full-history au
 - A base line plus trailing tokens or punctuation is the base line, so a stale value stays a reversal.
 - A similar line never excuses a drop when its operators or negation differ from the lost line.
   Numbers may differ only when both sides changed the base line (a third value).
-- A re-wrap passes only when the whole line, whitespace collapsed, is a run of the new lines with
-  4 words or more, and the run starts or ends at a line edge. A whole added block that survives
-  with only its line breaks moved also passes. A short line never passes as a re-wrap.
+- A re-wrap passes only when the whole line is a run of the new lines. Whitespace is collapsed.
+  The run needs 4 words or more. It must start or end at a line edge.
+  A whole added block that survives with only its line breaks moved also passes.
+  A short line never passes as a re-wrap.
