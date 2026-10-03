@@ -13,11 +13,17 @@ ambiguity instead of resolving it silently. Never drop an item without saying so
 the primitive exists before building a workaround. Fix the cause, not the symptom, and name a
 bandaid when a bandaid is the right call. Confirm a task is not yours before handing it back.
 
-Builders do not edit tests or test config. The guard checks your diff at each commit, push, and stop, and refuses a test path. Report the test change you need. The orchestrator gives it to a test-author, before or after the build.
+Builders do not edit tests or test config. The guard refuses an Edit or Write on a test path,
+and the reviewer flags any test path in your diff. A test-author writes the new cases first and
+shows them red. Report any other test change you need.
 
 You cannot spawn agents: spawn depth is 1, so the orchestrator fans out and you do the work.
 If the task is too large for one worker, stop at a clean point and report PARTIAL with the
 split you propose. Never review your own work. The orchestrator sends a reviewer.
+
+Prove your change once: show the test-author's new cases green on your code. Run only the
+suites your change touches. Never run the full suites or a mutation harness locally; CI
+runs them.
 
 When your commit is pushed, report at once. Never wait on a CI run, a pull request check, or
 another agent. The orchestrator reads the run. A command that only waits, such as `gh run

@@ -10,7 +10,8 @@ Two reads, one verdict. Design: decisions/silent-undo-check-design.md.
               merge base: the line is absent from every base, M holds fewer copies than that
               parent, no other file of M gained it, it is no run of words re-wrapped inside
               the file, and no line of the same hunk reads 0.9 like it (a resolver's rewrite).
-              Catches a conflict taken "ours", and a hand edit of a merge.
+              Catches a conflict taken "ours", and a hand edit of a merge. Only a parent that
+              upstream already holds counts: a line the branch alone added is the branch's own.
   reversal    The result of landing head on upstream puts a file back as it was before an
               earlier first-parent commit of upstream changed it: the exact blob (whole
               file), a -U0 hunk reversed on all but one line, or lines main only added
@@ -120,6 +121,14 @@ def trailing_only(g, base):
     return any(g.startswith(b) and len(g) > len(b) and not (g[len(b)].isalnum() or g[len(b)] == "_") for c in base for b in c)
 
 
+def extends(line, g):
+    """True when every token of line survives, in order, in g, starts the same way, and g adds no negation, so a line pasted into a comment is not one: the merge
+    only added to the line (`subprocess.run(a, b)` became `subprocess.run(a, b, timeout=T)`)."""
+    lt, gt = TOKEN.findall(line), TOKEN.findall(g)
+    it = iter(gt)
+    return bool(lt) and lt[0] == gt[0] and all(tok in it for tok in lt) and len(NEGATION.findall(g)) <= len(NEGATION.findall(line))
+
+
 def wrapped(line, new):
     """True when line, whole and whitespace-collapsed, is a run of the joined new lines with at
     least 4 words, and the run starts or ends where a new line starts or ends (a re-wrap)."""
@@ -156,6 +165,8 @@ def rewritten(line, hs, base=(), modified=False):
         if wrapped(line, new):
             return True
         for g in new:
+            if extends(line, g):
+                return True
             gnum, gops, gneg = kinds(g)
             if (gops, gneg) != (ops, neg) or (gnum != num and not modified):
                 continue
@@ -164,8 +175,33 @@ def rewritten(line, hs, base=(), modified=False):
     return False
 
 
-def lost_lines(cwd, m):
-    """[(path, parent, [line])] for merge commit m."""
+OWN_LOOKUPS = 25  # per file: `git log -G` calls spent finding who added a lost line
+
+
+def ere(line):
+    """An ERE for a normalized line, whitespace-flexible."""
+    return "[[:space:]]*" + "[[:space:]]+".join(re.sub(r"([.\[\]{}()*+?^$|\\])", r"\\\1", w) for w in line.split())
+
+
+def branch_only(cwd, p, bases, path, line, refs):
+    """True only when the commit that first added `line` on the way to parent p is reachable from none
+    of refs (upstream and the default branch): the branch alone introduced it. A read that fails, or
+    finds no adding commit, is False, so the line counts. Unknown is never clear. `-m` lets a line that
+    entered through a merge's own resolution show up. The oldest entry is the real adder: a line
+    from main always has main's own commit in the range, older than any merge that carried it."""
+    try:
+        _, out = git(cwd, "log", "-m", "-G" + ere(line), "--format=%H", p, "--not", *bases, "--", path)
+        shas = out.split()
+        return bool(shas) and all(git(cwd, "merge-base", "--is-ancestor", shas[-1], r, ok=(0, 1))[0] == 1 for r in refs)
+    except Unknown:
+        return False
+
+
+def lost_lines(cwd, m, refs=()):
+    """[(path, parent, [line])] for merge commit m. With refs (upstream, then the default branch),
+    a lost line whose adding commit no ref holds is the branch's own work and is skipped. The
+    test is per line, not per parent: a parent the branch built on an integration branch can still
+    carry main's lines."""
     _, out = git(cwd, "rev-list", "--parents", "-n", "1", m)
     parents = out.split()[1:]
     if len(parents) < 2:
@@ -199,6 +235,13 @@ def lost_lines(cwd, m):
                     mod = any(l in hn and ho for b in bases for ho, hn in hunks(cwd, b, p, path))
                     if not rewritten(l, hs, in_b, mod):
                         lost.append(l)
+            if refs and lost:
+                budget = [OWN_LOOKUPS]
+
+                def counts_as_lost(l):
+                    budget[0] -= 1
+                    return budget[0] < 0 or not branch_only(cwd, p, bases, path, l, refs)
+                lost = [l for l in lost if counts_as_lost(l)]
             if lost:
                 found.append((path, p, lost))
     return found
@@ -315,7 +358,7 @@ def fmt_rev(path, how, e):
 
 
 def fmt_lost(m, path, p, lost):
-    shown = "".join("\n      - " + l[:120] for l in lost[:3])
+    shown = "".join("\n      - " + l for l in lost)
     return "%s: merge %s drops %d line(s) that parent %s added%s" % (path, m[:9], len(lost), p[:9], shown)
 
 
@@ -330,7 +373,7 @@ def resolve_upstream(cwd, upstream):
     raise Unknown("no %s here, nothing to compare against" % upstream)
 
 
-def check(cwd, upstream, head):
+def check(cwd, upstream, head, default=None):
     """(problem lines, ALLOWED notes); no problems is green. Raises Unknown. Reads only the commits
     upstream gained after the branch was cut: since the merge base, or since the branch's first
     commit was authored (a rebase keeps that date, so a rebased branch still reads them)."""
@@ -341,9 +384,11 @@ def check(cwd, upstream, head):
     if git(cwd, "merge-base", "--is-ancestor", h, upstream, ok=(0, 1))[0] == 0:
         return [], []  # at or behind upstream: nothing lands
     ok = allowed(cwd, "%s..%s" % (upstream, h))
+    refs = [upstream] + [r for r in ((default,) if default else ("origin/HEAD", "origin/main", "main")) if r != upstream and git(
+        cwd, "rev-parse", "--verify", "-q", r + "^{commit}", ok=(0, 1))[0] == 0][:1]  # the default branch too
     items = []
     for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
-        items += [(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m)]
+        items += [(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m, refs)]
     rc, out = git(cwd, "merge-tree", "--write-tree", upstream, h, ok=(0, 1))
     if rc == 0:
         old, new = upstream, out.split()[0]
