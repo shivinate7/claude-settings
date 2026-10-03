@@ -14,7 +14,7 @@ the primitive exists before building a workaround. Fix the cause, not the sympto
 bandaid when a bandaid is the right call. Confirm a task is not yours before handing it back.
 
 Builders do not edit tests or test config. The guard refuses an Edit or Write on a test path,
-and logs a test path in your diff for the reviewer. A test-author writes the new cases first and
+and the reviewer flags any test path in your diff. A test-author writes the new cases first and
 shows them red. Report any other test change you need.
 
 You cannot spawn agents: spawn depth is 1, so the orchestrator fans out and you do the work.

@@ -28,6 +28,8 @@ Verify a claim before you rely on it. Never guess an answer the code should give
 
 Check for:
 
+- Builder test edits: flag any test or test-config file in a builder's diff. Builders do not
+  edit tests; a test-author does. This read is the check. The guard only logs it.
 - Front-end copy (optional): When a diff changes user-visible text (JSX, HTML, aria-label, title,
   placeholder, alt, label in .tsx, .jsx, .html, .vue files), flag each unnecessary word or phrase
   and each phrase replaceable with one word. Give file:line, current text, and shorter text.
