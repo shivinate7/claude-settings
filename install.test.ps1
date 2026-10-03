@@ -54,6 +54,71 @@ try {
     Remove-Item -Recurse -Force $Tmp -ErrorAction SilentlyContinue
 }
 
+
+# ---- copy-mode case: skills/ under a real install.ps1 run, twice, no symlink rights -----------
+# Mirrors hooks/test_install_src.sh's copymode_case1 (D: copy-mode-overwrites-no-backup). Runs
+# the WHOLE install.ps1 as a subprocess (not just one extracted function) against a fake
+# checkout and a fake CLAUDE_CONFIG_DIR, twice, so the loop at install.ps1's skills branch
+# (lines 169-197) takes the real New-Item -ItemType SymbolicLink -> catch -> Copy-Item path
+# this machine actually hits. A machine WITH symlink rights would take the symlink branch
+# instead and pass by not exercising the bug at all, so that case is skipped there with a
+# reason instead of a false pass.
+$SymlinkCapable = $true
+$ProbeLink = Join-Path ([IO.Path]::GetTempPath()) ("symprobe-" + [guid]::NewGuid().ToString('N'))
+try {
+    New-Item -ItemType SymbolicLink -Path $ProbeLink -Target $Here -ErrorAction Stop | Out-Null
+    Remove-Item $ProbeLink -Force -ErrorAction SilentlyContinue
+} catch {
+    $SymlinkCapable = $false
+}
+
+if ($SymlinkCapable) {
+    Write-Host "SKIP: copymode1 (this runner holds symlink rights; the copy path cannot be exercised honestly without forcing it, see install.ps1 skills branch)"
+} else {
+    $Tmp2    = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-copymode-" + [guid]::NewGuid().ToString('N'))
+    $Co      = Join-Path $Tmp2 'clone'
+    $Cfg     = Join-Path $Tmp2 'claude'
+    New-Item -ItemType Directory -Force -Path $Co, $Cfg | Out-Null
+    try {
+        Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $Co 'install.ps1')
+        Set-Content -Path (Join-Path $Co 'CLAUDE.md') -Value "# copymode1 content" -Encoding utf8
+        Set-Content -Path (Join-Path $Co 'settings.json') -Value '{}' -Encoding utf8
+        Set-Content -Path (Join-Path $Co 'landed-dirs.txt') -Value "skills" -Encoding utf8
+        $SkillDir = Join-Path $Co 'skills\sample-skill'
+        New-Item -ItemType Directory -Force -Path $SkillDir | Out-Null
+        Set-Content -Path (Join-Path $SkillDir 'SKILL.md') -Value 'v1' -Encoding utf8
+
+        $env:CLAUDE_CONFIG_DIR = $Cfg
+        powershell -NoProfile -File (Join-Path $Co 'install.ps1') *> $null
+        if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: copymode1 run 1 exited $LASTEXITCODE"; $Failed++ }
+
+        # Change the skill's source content between runs, the way a real `git pull` would.
+        Set-Content -Path (Join-Path $SkillDir 'SKILL.md') -Value 'v2' -Encoding utf8
+
+        powershell -NoProfile -File (Join-Path $Co 'install.ps1') *> $null
+        if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: copymode1 run 2 exited $LASTEXITCODE"; $Failed++ }
+
+        Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
+        $Baks     = Get-ChildItem -Path $Cfg -Recurse -Filter '*.bak.*' -ErrorAction SilentlyContinue
+        $GotFile  = Join-Path $Cfg 'skills\sample-skill\SKILL.md'
+        $GotValue = if (Test-Path $GotFile) { Get-Content -Raw $GotFile } else { $null }
+
+        Check "copymode1: run 2 leaves no .bak under the config dir" (-not $Baks)
+        Check "copymode1: sample-skill/SKILL.md lands after run 2" (Test-Path $GotFile)
+        if ($GotValue) { Check "copymode1: sample-skill/SKILL.md holds run 2's content (v2)" ($GotValue.Trim() -eq 'v2') }
+    } finally {
+        Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
+        Remove-Item -Recurse -Force $Tmp2 -ErrorAction SilentlyContinue
+    }
+}
+
+# ---- gap: the embedded post-merge hook body (install.ps1's Install-PostMergeHook) is not --
+# covered here. It is a heredoc written into .git\hooks\post-merge and run by `git` itself on
+# a real `git pull`, under `sh` inside Git Bash, not by any PowerShell function this file can
+# load or call directly. Exercising it for real needs a real git repo, a real merge that
+# changes install.ps1 or a skill, and a real Git-Bash `sh` to run the written hook body, none
+# of which this harness drives. Reported as a gap, not faked.
+
 if ($Failed) { Write-Host "$Failed case(s) failed"; exit 1 }
 Write-Host "all cases passed"
 exit 0

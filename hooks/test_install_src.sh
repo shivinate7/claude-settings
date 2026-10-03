@@ -1092,6 +1092,77 @@ skills_case2() {
   rm -rf "$h"
 }
 
+# ---- copy-mode case: a fake `ln` that copies instead of linking (D: copy-mode-overwrites- ---
+# no-backup) must not pile up .bak entries across repeated runs. This is the exact fault
+# measured 2026-10-03: Git Bash's `ln -sfn` on a Windows account without symlink rights
+# makes a real copy, so the next run sees a real file/dir where land_dir()/land_skills_dir()
+# expect a symlink, and backs it up before copying again. Builds a stub `ln` first on PATH
+# that always copies, so this reproduces without needing a literal no-symlink-rights host.
+make_fake_ln_bin() {
+  stub_bin="$1"
+  mkdir -p "$stub_bin"
+  cat > "$stub_bin/ln" <<'EOF'
+#!/bin/sh
+# usage: ln -sfn <target> <linkname>  (flags ignored; copies instead of linking)
+last1=""; last2=""
+for a in "$@"; do
+  case "$a" in
+    -*) continue ;;
+  esac
+  last1="$last2"
+  last2="$a"
+done
+target="$last1"; dest="$last2"
+[ -n "$dest" ] || exit 1
+rm -rf "$dest"
+cp -R "$target" "$dest"
+EOF
+  chmod +x "$stub_bin/ln"
+}
+
+copymode_case1() {
+  name="copymode1: two runs under a copying \`ln\` leave no .bak and land current content"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/copymode1-checkout"
+  make_checkout "$co" "# copymode1 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  mkdir -p "$co/skills/sample-skill"
+  printf 'v1\n' > "$co/skills/sample-skill/SKILL.md"
+  printf 'agent v1\n' > "$co/agents/sample.md"
+
+  fake_bin="$work/copymode1-bin"
+  make_fake_ln_bin "$fake_bin"
+  run1=$(cd "$co" && env -i PATH="$fake_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+         bash ./install.sh 2>&1); rc1=$?
+
+  # Change a skill's source content between runs, the way a real `git pull` would.
+  printf 'v2\n' > "$co/skills/sample-skill/SKILL.md"
+
+  run2=$(cd "$co" && env -i PATH="$fake_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+         bash ./install.sh 2>&1); rc2=$?
+
+  baks=$(find "$cfg" -name '*.bak.*' 2>/dev/null)
+  skill_got=$(cat "$cfg/skills/sample-skill/SKILL.md" 2>/dev/null)
+  agent_got=$(cat "$cfg/agents/sample.md" 2>/dev/null)
+  agent_src=$(cat "$co/agents/sample.md" 2>/dev/null)
+
+  if [ $rc1 -ne 0 ]; then
+    bad "$name" "run 1 exited $rc1: $run1"
+  elif [ $rc2 -ne 0 ]; then
+    bad "$name" "run 2 exited $rc2: $run2"
+  elif [ -n "$baks" ]; then
+    bad "$name" "run 2 left .bak entries under $cfg:$baks"
+  elif [ ! -f "$cfg/skills/sample-skill/SKILL.md" ]; then
+    bad "$name" "$cfg/skills/sample-skill/SKILL.md does not exist after run 2"
+  elif [ "$skill_got" != "v2" ]; then
+    bad "$name" "sample-skill/SKILL.md holds [$skill_got] after run 2, source changed to v2"
+  elif [ "$agent_got" != "$agent_src" ]; then
+    bad "$name" "agents/sample.md [$agent_got] does not match source [$agent_src] after run 2"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
 # ---- backup cases: a person's own CLAUDE.md or settings.json is never lost ------------------
 backup_case1() {
   name="backup1: a pre-existing CLAUDE.md with its own content is backed up before the pointer replaces it"
@@ -1255,6 +1326,7 @@ run prune_case5
 run prune_case6
 run skills_case1
 run skills_case2
+run copymode_case1
 run backup_case1
 run backup_case2
 run bin_case1
