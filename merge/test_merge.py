@@ -45,11 +45,12 @@ class FakeHost:
         self.root, self.other, self.branch = root, other, branch
         self.checks, self.refuse, self.on_wait = (True, ""), None, None
         self.head_override, self.mergeable = None, "MERGEABLE"
+        self.pr_state = "OPEN"
         self.waits, self.seq, self.state = [], None, "green"  # waits: (sha, prior) per call; seq: scripted results, then self.checks
 
     def pr(self, n):
         head = merge.origin_head(self.root, self.branch)
-        return {"head": self.head_override or head, "branch": self.branch, "base": "main", "state": "OPEN",
+        return {"head": self.head_override or head, "branch": self.branch, "base": "main", "state": self.pr_state,
                 "mergeable": self.mergeable, "merge_state": "CLEAN"}
 
     def required_names(self):
@@ -257,6 +258,24 @@ class Flow(Env):
         self.assertIn("CONFLICTING", out)
         self.assertEqual(self.head(), before)
         self.assertFalse(self.lock_ref())
+
+    def test_a_closed_or_merged_pr_is_refused_before_any_claim(self):
+        before = self.head()
+        for state in ("CLOSED", "MERGED"):
+            self.host.pr_state = state
+            rc, out = self.run_merge("7", "--confirm")
+            self.assertEqual(rc, 1, out)
+            self.assertIn("the pull request is " + state, out)
+            self.assertEqual(self.head(), before)
+            self.assertFalse(self.lock_ref())
+
+    def test_ff_main_refuses_a_commit_origin_main_does_not_hold(self):
+        feat = self.head("feat")  # on origin, but never merged into origin/main
+        main_before = sh(self.co, "git", "rev-parse", "refs/heads/main")
+        with self.assertRaises(merge.Stop) as cm:
+            merge.ff_main(self.co, "main", feat)
+        self.assertIn("is not on origin/main", str(cm.exception))
+        self.assertEqual(sh(self.co, "git", "rev-parse", "refs/heads/main"), main_before)
 
     def test_config_without_merge_method_is_refused_never_guessed(self):
         sh(self.co, "git", "checkout", "-q", "main")

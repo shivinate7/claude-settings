@@ -1793,6 +1793,50 @@ class TombstoneTests(unittest.TestCase):
         self.assertTrue(len(entries) > 0)
         self.assertTrue(any(e.get("branch") == "old-topic-2" for e in entries))
 
+    def _reap_with_git_failing(self, name, failing_args, answer):
+        """Run reap_branch on an ancestor branch while guard._git answers `answer` for the
+        call whose leading args are `failing_args`. Return (decision, log_path, root)."""
+        root = os.path.join(ROOT, "tomb-gitfail-" + name)
+        make_repo(root, {"f.txt": "x\n"})
+        run_vcs(root, "checkout", "-q", "-b", name)
+        run_vcs(root, "checkout", "-q", "main")
+        real_git = guard._git
+
+        def failing_git(where, *args):
+            if args[:len(failing_args)] == failing_args:
+                return answer(args)
+            return real_git(where, *args)
+
+        log_path = os.path.join(ROOT, "tomb-gitfail-%s.jsonl" % name)
+        decision = {"name": name, "action": "reap", "reason": "ancestor"}
+        guard._git = failing_git
+        try:
+            sweep.reap_branch(root, name, decision, log_path)
+        finally:
+            guard._git = real_git
+        return decision, log_path, root
+
+    def test_a_failed_tombstone_write_stops_the_delete(self):
+        for label, answer in (("rc", lambda a: subprocess.CompletedProcess(a, 1, "", "no ref")),
+                              ("none", lambda a: None)):
+            name = "tomb-w-" + label
+            decision, log_path, root = self._reap_with_git_failing(
+                name, ("update-ref",), answer)
+            self.assertIn("tombstone write failed", decision.get("error", ""), label)
+            self.assertIn(name, sweep.list_local_branches(root),
+                          "the branch was deleted although its tombstone never landed: " + label)
+            self.assertEqual(sweep.read_restore_log(log_path), [], label)
+
+    def test_an_unresolved_branch_tip_leaves_the_branch_alone(self):
+        for label, answer in (("rc", lambda a: subprocess.CompletedProcess(a, 128, "", "bad")),
+                              ("none", lambda a: None)):
+            name = "tomb-t-" + label
+            decision, log_path, root = self._reap_with_git_failing(
+                name, ("rev-parse", "refs/heads/" + name), answer)
+            self.assertIn("could not resolve the branch tip", decision.get("error", ""), label)
+            self.assertIn(name, sweep.list_local_branches(root), label)
+            self.assertEqual(sweep.read_restore_log(log_path), [], label)
+
 
 # --------------------------------------------------------------------------- worktree removal
 
@@ -2696,6 +2740,23 @@ class PurgeTests(unittest.TestCase):
         self.assertTrue(len(decisions) > 0)
         self.assertEqual(decisions[0]["action"], "keep")
         self.assertEqual(decisions[0]["reason"], "unreadable-entry")
+
+    def test_a_non_numeric_time_ms_is_kept_not_purged(self):
+        """A string, a bool, or a missing time must read as unreadable. A True would otherwise
+        count as 1 ms since the epoch and purge a fresh tombstone."""
+        run_vcs(self.repo, "update-ref", "refs/janitor/reaped/odd-time", "HEAD")
+        now = int(time.time() * 1000)
+        for bad_time in ("yesterday", True, None):
+            self.write_log([{"repo": self.repo, "branch": "odd-time",
+                              "commit": "deadbeef", "time_ms": bad_time}])
+            try:
+                decisions = sweep.purge_tombstones(self.log_path, confirm=True, now_ms=now)
+            except TypeError as exc:
+                self.fail("time_ms %r crashed the purge: %s" % (bad_time, exc))
+            self.assertEqual(decisions[0]["action"], "keep", repr(bad_time))
+            self.assertEqual(decisions[0]["reason"], "unreadable-entry", repr(bad_time))
+        still_there = run_vcs(self.repo, "rev-parse", "refs/janitor/reaped/odd-time")
+        self.assertEqual(still_there.returncode, 0)
 
 
 class AgentEndReapTests(unittest.TestCase):

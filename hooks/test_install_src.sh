@@ -1092,6 +1092,61 @@ skills_case2() {
   rm -rf "$h"
 }
 
+# ---- backup cases: a person's own CLAUDE.md or settings.json is never lost ------------------
+backup_case1() {
+  name="backup1: a pre-existing CLAUDE.md with its own content is backed up before the pointer replaces it"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/backup1-checkout"
+  make_checkout "$co" "# backup1 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  mkdir -p "$cfg"
+  printf 'my own notes\n' > "$cfg/CLAUDE.md"
+
+  out=$(run_local_install "$co" "$h" "$cfg"); rc=$?
+  bak=$(ls "$cfg"/CLAUDE.md.bak.* 2>/dev/null | head -n1)
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ -z "$bak" ]; then
+    bad "$name" "no CLAUDE.md.bak.* file; the person's own CLAUDE.md was overwritten"
+  elif [ "$(cat "$bak")" != "my own notes" ]; then
+    bad "$name" "the backup does not hold the original content"
+  elif grep -q "my own notes" "$cfg/CLAUDE.md"; then
+    bad "$name" "CLAUDE.md still holds the old content, no pointer written"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+backup_case2() {
+  name="backup2: a pre-existing real settings.json is moved to a backup, not replaced silently"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then
+    skip "$name" "$NO_SYMLINK_REASON"
+    return
+  fi
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/backup2-checkout"
+  make_checkout "$co" "# backup2 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  mkdir -p "$cfg"
+  printf '{"mine": true}\n' > "$cfg/settings.json"
+
+  out=$(run_local_install "$co" "$h" "$cfg"); rc=$?
+  bak=$(ls "$cfg"/settings.json.bak.* 2>/dev/null | head -n1)
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ -z "$bak" ]; then
+    bad "$name" "no settings.json.bak.* file; the person's own settings.json was lost"
+  elif [ "$(cat "$bak")" != '{"mine": true}' ]; then
+    bad "$name" "the backup does not hold the original content"
+  elif [ ! -L "$cfg/settings.json" ]; then
+    bad "$name" "settings.json is not a symlink after install"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
 # ---- bin case: the shim lands, and only the three stale Banchi files go ------------------------
 bin_case1() {
   name="bin1: claude-janitor shim lands; janitor.py, reap.py, session-teardown.sh removed; others kept"
@@ -1200,6 +1255,8 @@ run prune_case5
 run prune_case6
 run skills_case1
 run skills_case2
+run backup_case1
+run backup_case2
 run bin_case1
 run bin_case2
 run caseF1
