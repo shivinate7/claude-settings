@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# Decides which mutation harnesses a run needs. Writes guard=<bool> and sweep=<bool> to
-# $GITHUB_OUTPUT. Fails safe: every harness runs unless the diff was read and shows neither
+# Decides which mutation harnesses and which fixture suites a run needs. Writes guard=<bool>,
+# sweep=<bool> and code=<bool> to $GITHUB_OUTPUT. code=false only on a pull_request whose diff
+# was read and lists nothing but *.md files; the janitor, merge, installer and guard suites
+# then skip (decisions/docs-only-prs-skip-code-suites.md). Push, schedule and manual runs
+# always give code=true. Fails safe: every harness runs unless the diff was read and shows neither
 # harness's code changed. Inputs (env): EVENT, BASE_SHA, BEFORE_SHA.
 set -u
 guard=true
 sweep=true
+code=true
 range=""
 # An empty BASE_SHA (pull_request) or an empty or all-zeros BEFORE_SHA (push, new branch)
 # leaves range empty, so both harnesses run.
@@ -26,7 +30,15 @@ if [ -n "$range" ] && files=$(git diff --name-only --no-renames "$range" 2>/dev/
   # harness imports it), settings.json (the session-end suite reads it), this script and
   # the workflow.
   grep -Eq '^(janitor/|hooks/guard\.py$|hooks/mutate_shared\.py$|settings\.json$|\.github/scripts/harness-scope\.sh$|\.github/workflows/gates\.yml$)' <<< "$files" && sweep=true
+  # Docs-only: a pull request whose every changed file is *.md. An empty list was not read
+  # as docs, so it stays code=true. Harnesses test code, so they skip too.
+  if [ "$EVENT" = pull_request ] && [ -n "$files" ] && ! grep -Evq '\.md$' <<< "$files"; then
+    code=false
+    guard=false
+    sweep=false
+  fi
 fi
-echo "harness scope: event=$EVENT range=${range:-none} guard=$guard sweep=$sweep"
+echo "harness scope: event=$EVENT range=${range:-none} guard=$guard sweep=$sweep code=$code"
 echo "guard=$guard" >> "$GITHUB_OUTPUT"
 echo "sweep=$sweep" >> "$GITHUB_OUTPUT"
+echo "code=$code" >> "$GITHUB_OUTPUT"

@@ -46,6 +46,7 @@ jobs:
         run: pipx run zizmor==1.30.1 .github/ actions/
 
       - name: Guard fixture suite
+        if: ${{ steps.scope.outputs.code == 'true' }}
         run: python3 hooks/test_guard.py
 
       - name: Guard mutation harness
@@ -53,6 +54,7 @@ jobs:
         run: python3 hooks/mutate_guard.py
 
       - name: Janitor sweep fixture suite
+        if: ${{ steps.scope.outputs.code == 'true' }}
         run: python3 janitor/test_sweep.py
 
       - name: Janitor sweep mutation harness
@@ -93,6 +95,7 @@ jobs:
         run: python3 lint/check_record_slugs.py
 
       - name: Unknown-read contract (guard + session_start)
+        if: ${{ steps.scope.outputs.code == 'true' }}
         run: python3 lint/check_unknown_reads_contract.py
 
       - name: Landed-directory manifest agreement
@@ -102,6 +105,7 @@ jobs:
         run: python3 lint/check_agent_models.py
 
       - name: PowerShell syntax check, install.ps1
+        if: ${{ steps.scope.outputs.code == 'true' }}
         shell: pwsh
         run: |
           $e = $null
@@ -109,6 +113,7 @@ jobs:
           if ($e) { $e; exit 1 }
 
       - name: Pointer encoding test, install.test.ps1
+        if: ${{ steps.scope.outputs.code == 'true' }}
         run: pwsh -NoProfile -File install.test.ps1
 
       - name: STE lint
@@ -118,11 +123,13 @@ jobs:
           fail: ${{ !inputs.full_ste_audit }}
 
       - name: Janitor triggers fixture suite (SessionEnd hook + launchd installer)
+        if: ${{ steps.scope.outputs.code == 'true' }}
         run: |
           python3 janitor/test_session_end_sweep.py
           python3 janitor/test_install_launchd.py
 
       - name: Janitor triggers fixture suite (schtasks installer)
+        if: ${{ steps.scope.outputs.code == 'true' }}
         run: python3 janitor/test_install_schtasks.py
 
       - name: STE lint action fixture suite
@@ -136,12 +143,15 @@ jobs:
         run: bash actions/stamp/test_action.sh
 
       - name: Merge launcher fixture suite
+        if: ${{ steps.scope.outputs.code == 'true' }}
         run: python3 merge/test_launch.py
 
       - name: Merge tool git-half fixture suite
+        if: ${{ steps.scope.outputs.code == 'true' }}
         run: python3 merge/test_merge.py
 
       - name: Merge launcher fixture suite (bin/merge)
+        if: ${{ steps.scope.outputs.code == 'true' }}
         run: python3 merge/test_cmd.py
 
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
@@ -151,8 +161,19 @@ jobs:
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
+          fetch-depth: 0
           persist-credentials: false
+
+      - name: Detect which suites this change needs
+        id: scope
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: bash .github/scripts/harness-scope.sh
       - name: Pointer encoding test, Windows PowerShell 5.1
+        if: ${{ steps.scope.outputs.code == 'true' }}
         shell: powershell
         run: powershell -NoProfile -File install.test.ps1
 
@@ -165,7 +186,17 @@ jobs:
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
+          fetch-depth: 0
           persist-credentials: false
+
+      - name: Detect which suites this change needs
+        id: scope
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: bash .github/scripts/harness-scope.sh
       - name: Report the shell this job actually runs
         run: |
           /bin/bash --version | head -n1
@@ -174,6 +205,7 @@ jobs:
       - name: Shell syntax check, install.sh
         run: bash -n install.sh
       - name: install.sh checkout-detection suite
+        if: ${{ steps.scope.outputs.code == 'true' }}
         run: sh hooks/test_install_src.sh
 
   # The owner runs this repo on macOS. Before this job, every Python suite in the gates
@@ -205,7 +237,7 @@ jobs:
           python-version: "3.11"
 
       - name: Guard fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
         run: python3 hooks/test_guard.py
 
       # Same time trade-off gates-windows makes for the same reason: the gates job's own
@@ -216,11 +248,11 @@ jobs:
         run: python3 hooks/mutate_guard.py
 
       - name: Janitor sweep fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
         run: python3 janitor/test_sweep.py
 
       - name: Janitor sweep mutation harness
-        if: ${{ !cancelled() && steps.scope.outputs.sweep == 'true' }}
+        if: ${{ !cancelled() && github.event_name != 'pull_request' && steps.scope.outputs.sweep == 'true' }}
         run: python3 janitor/mutate_sweep.py
 
       - name: Config watch fixture suite
@@ -248,19 +280,19 @@ jobs:
         run: python3 lint/test_verdict.py
 
       - name: Unknown-read contract (guard + session_start)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
         run: python3 lint/check_unknown_reads_contract.py
 
       - name: Janitor triggers fixture suite (SessionEnd hook)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
         run: python3 janitor/test_session_end_sweep.py
 
       - name: Janitor triggers fixture suite (launchd installer)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
         run: python3 janitor/test_install_launchd.py
 
       - name: Janitor triggers fixture suite (schtasks installer)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
         run: python3 janitor/test_install_schtasks.py
 
       - name: Record stamp engine fixture suite
@@ -363,7 +395,7 @@ jobs:
           mktemp -d
 
       - name: Guard fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
         run: python hooks/test_guard.py
 
       # 39m12s of this job's 46m50s. The gates job's own Guard mutation harness
@@ -375,11 +407,11 @@ jobs:
         run: python hooks/mutate_guard.py
 
       - name: Janitor sweep fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
         run: python janitor/test_sweep.py
 
       - name: Janitor sweep mutation harness
-        if: ${{ !cancelled() && steps.scope.outputs.sweep == 'true' }}
+        if: ${{ !cancelled() && github.event_name != 'pull_request' && steps.scope.outputs.sweep == 'true' }}
         run: python janitor/mutate_sweep.py
 
       - name: Config watch fixture suite
@@ -407,23 +439,23 @@ jobs:
         run: python lint/test_verdict.py
 
       - name: Unknown-read contract (guard + session_start)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
         run: python lint/check_unknown_reads_contract.py
 
       - name: Janitor triggers fixture suite (SessionEnd hook)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
         run: python janitor/test_session_end_sweep.py
 
       - name: Janitor triggers fixture suite (launchd installer)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
         run: python janitor/test_install_launchd.py
 
       - name: Janitor triggers fixture suite (schtasks installer)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
         run: python janitor/test_install_schtasks.py
 
       - name: install.sh checkout-detection suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
         shell: bash
         run: sh hooks/test_install_src.sh
 
@@ -437,5 +469,5 @@ jobs:
         run: bash actions/stamp/test_action.sh
 
       - name: Merge launcher fixture suite (merge.cmd)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
         run: python merge/test_cmd.py
