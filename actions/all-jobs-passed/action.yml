@@ -1,0 +1,17 @@
+name: All jobs passed
+description: >
+  Fan-in gate. Fails when any needed job failed, was cancelled or was skipped. The caller job
+  MUST set `needs: [...]` and `if: always()`; without `always()` GitHub skips this job when a
+  needed job fails, and a skipped required check reads as green.
+inputs:
+  needs:
+    description: "Pass `${{ toJSON(needs) }}`."
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Every needed job passed
+      shell: bash
+      env:
+        NEEDS: ${{ inputs.needs }}
+      run: bash "${{ github.action_path }}/check.sh"

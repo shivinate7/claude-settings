@@ -1,0 +1,20 @@
+name: CI alarm
+description: >
+  Opens (or comments on) one issue when the latest completed run of any workflow on a branch is
+  red. Call it from a scheduled workflow with `permissions: {actions: read, issues: write}`; it
+  needs no checkout. A merge-triggered failure shows on no PR, so main can sit red unnoticed.
+inputs:
+  branch:
+    description: Branch to watch.
+    required: false
+    default: main
+runs:
+  using: composite
+  steps:
+    - name: Alarm on a red branch
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        BRANCH: ${{ inputs.branch }}
+        SELF: ${{ github.workflow }}
+      run: bash "${{ github.action_path }}/alarm.sh"

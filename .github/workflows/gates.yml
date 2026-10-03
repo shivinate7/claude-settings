@@ -142,6 +142,15 @@ jobs:
         shell: bash
         run: bash actions/stamp/test_action.sh
 
+      - name: Opt-in CI template fixture suites
+        shell: bash
+        run: |
+          bash actions/all-jobs-passed/test_action.sh
+          bash actions/ci-alarm/test_action.sh
+          python3 actions/readme-links/test_readme_links.py
+          bash githooks/main-ref/test_hook.sh
+          node --test testing/skip-locally-fail-in-ci.test.mjs
+
       - name: Merge launcher fixture suite
         if: ${{ steps.scope.outputs.code == 'true' }}
         run: python3 merge/test_launch.py
