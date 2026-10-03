@@ -3321,6 +3321,26 @@ for _tool in ("Edit", "Write"):
         add("test-author: %s of non-test %s is refused" % (_tool, _path), "deny", rule=TA,
             tool=_tool, file_path=_path, **A)
 
+# ---- shell/PowerShell test suites are test paths too (incident 2026-10-03): `test_*.sh`,
+# `*_test.sh`, `*.test.ps1`, `*.Tests.ps1` (Pester). A test-author could not edit this repo's own
+# `hooks/test_install_src.sh` or `install.test.ps1`. Near misses (`install.ps1`, `install.sh`,
+# `session_start.sh`, `contest.sh`, `latest.ps1`) stay non-test.
+TEST_SHELL_PATHS = ("hooks/test_install_src.sh", "install.test.ps1", "scripts/foo_test.sh",
+                    "scripts/Foo.Tests.ps1")
+TEST_SHELL_FALSE_ALARMS = ("install.ps1", "install.sh", "session_start.sh", "contest.sh",
+                           "latest.ps1")
+for _tool in ("Edit", "Write"):
+    for _path in TEST_SHELL_PATHS:
+        add("builder-test: %s of shell/ps1 test %s is refused" % (_tool, _path), "deny", rule=BT,
+            tool=_tool, file_path=_path, **B)
+        add("test-author: %s of shell/ps1 test %s is allowed" % (_tool, _path), "allow",
+            tool=_tool, file_path=_path, **A)
+    for _path in TEST_SHELL_FALSE_ALARMS:
+        add("builder-test: %s of non-test %s is allowed" % (_tool, _path), "allow", tool=_tool,
+            file_path=_path, **B)
+        add("test-author: %s of non-test %s is refused" % (_tool, _path), "deny", rule=TA,
+            tool=_tool, file_path=_path, **A)
+
 # ---- the diff, judged at commit, push and SubagentStop
 BASE_FILES = {
     "src/app.py": "x = 1\n", "src/contest.py": "y = 1\n", "latest_results.md": "ok\n",
