@@ -55,6 +55,10 @@ jobs:
         if: ${{ steps.scope.outputs.guard == 'true' }}
         run: python3 hooks/mutate_guard.py
 
+      - name: Action metadata loads
+        if: ${{ steps.scope.outputs.code == 'true' }}
+        run: python3 actions/test_action_metadata.py
+
       - name: Janitor sweep fixture suite
         if: ${{ steps.scope.outputs.code == 'true' }}
         run: python3 janitor/test_sweep.py
