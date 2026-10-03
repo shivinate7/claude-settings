@@ -21,6 +21,17 @@ The escape is the trailer `Drops-lines: <path> -- <reason>`, one per path, on an
 branch. A bare path excuses nothing. Each use prints `ALLOWED <path>: <reason>`. A commit
 message that only names the file does not pass.
 
+## Required or advisory depends on the lane shape
+
+The check is required here. Lanes are short and land through integration batches, and 60 merges
+gave 0 false alarms. It is advisory in a repo whose long-lived lanes merge main in and then edit
+main's lines. On q_max PR 397 all 11 alarms were false. No rule could tell them from a stale
+overwrite. Date order, first-parent ancestry and similarity each also passed the real incident
+fixtures. Advisory means that the check runs and prints its flags. The batch reviewer marks each
+flag real or deliberate, and a real flag blocks the merge. Owner ruling, 2026-10-03.
+This dates when a rule separates a deliberate edit of main's lines from a stale overwrite.
+Every incident fixture must still go red under that rule.
+
 ## The stale green PR
 
 The owner's first problem: an older PR overwrites a newer change to the same file.
