@@ -2025,9 +2025,8 @@ class TurnEndEarlyExitTests(unittest.TestCase):
         self.vcs("add", "-A")
         self.vcs("commit", "-q", "-m", "init")
         old = datetime.now(timezone.utc).timestamp() - 1000
-        for root, _dirs, files in os.walk(self.repo):
-            for name in files:
-                os.utime(os.path.join(root, name), (old, old))
+        for name in ("a.md", "n.txt"):  # the work tree only: the repo's own files churn under us
+            os.utime(os.path.join(self.repo, name), (old, old))
 
     def vcs(self, *args):
         subprocess.run(["git", "-c", "user.email=t@example.com", "-c", "user.name=T",
