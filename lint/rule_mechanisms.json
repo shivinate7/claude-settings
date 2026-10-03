@@ -409,8 +409,9 @@
     },
     "speak-cite-id-plus-gloss": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No lint checks that a decision citation in a reply carries an id plus a short gloss rather than a bare id."
+        "kind": "gate",
+        "ref": "lint/report_gate.py",
+        "test": "lint/test_gates.py::DoneFormatAndCiteTests.test_cite_red_bare_d_id_blocks"
       }
     },
     "speak-never-explain-in-paragraph": {
@@ -471,8 +472,9 @@
     },
     "reports-done-format": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "lint/report_gate.py checks the label headers only. It does not read whether Done's line says BUILT, RECORDED, or OTHER, or names a PR or commit."
+        "kind": "gate",
+        "ref": "lint/report_gate.py",
+        "test": "lint/test_gates.py::DoneFormatAndCiteTests.test_df_red_done_without_ref_blocks"
       }
     },
     "reports-drop-unused-label": {
@@ -592,6 +594,18 @@
       "mechanism": {
         "kind": "unmechanized",
         "reason": "No check sees the text of a reply beside its question box and reads whether the question depends on text outside the box."
+      }
+    },
+    "roles-each-layer-proves-once": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Which layer ran which proof lives in agent transcripts and briefs. No check reads who reran a passing suite."
+      }
+    },
+    "building-guard-needs-incident": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Whether a named incident or measured risk justifies a rule is a human read of the rule's record."
       }
     }
   }

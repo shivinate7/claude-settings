@@ -124,6 +124,22 @@ class GeneratesTaskXmlForAnOrdinaryCheckout(unittest.TestCase):
         trigger = root.find("%sTriggers/%sCalendarTrigger" % (NS, NS))
         self.assertIsNotNone(trigger, "must schedule a daily CalendarTrigger")
 
+    def test_exact_time_script_quoting_and_daily_interval(self):
+        # A folder with a space: the one case that makes the quoting matter.
+        repo = os.path.join(ROOT, "checkout with space")
+        make_repo(repo)
+        out_dir = os.path.join(ROOT, "out_exact")
+        result = run_installer(["--repo-root", repo, "--output-dir", out_dir,
+                                "--hour", "5", "--minute", "42"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        root = ET.parse(os.path.join(out_dir, install_schtasks.TASK_NAME + ".xml")).getroot()
+        trigger = "%sTriggers/%sCalendarTrigger/" % (NS, NS)
+        self.assertEqual(root.find(trigger + NS + "StartBoundary").text, "2024-01-01T05:42:00")
+        self.assertEqual(root.find(trigger + "%sScheduleByDay/%sDaysInterval" % (NS, NS)).text, "1")
+        arguments = root.find("%sActions/%sExec/%sArguments" % (NS, NS, NS)).text
+        # Exactly sweep.py (not session_end_sweep.py), quoted whole, then the one flag.
+        self.assertEqual(arguments, '"%s" --confirm' % os.path.join(repo, "janitor", "sweep.py"))
+
     def test_prints_the_real_schtasks_command_and_never_calls_it(self):
         out_dir = os.path.join(ROOT, "out_print_check")
         result = run_installer(["--repo-root", self.repo, "--output-dir", out_dir])

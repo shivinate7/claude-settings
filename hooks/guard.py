@@ -2785,6 +2785,64 @@ LIVE_STREAM_REASON = (
 )
 
 
+# A COMMAND THAT NARRATES WHILE IT WAITS, piped into `tail` or `head`. Ported from pkmnscan's
+# `scripts/guard-shell.py` (the heartbeat clause), behaviour only. The merge tool waits minutes for
+# a claim commit's checks and prints a line a minute. A pipe block-buffers that heartbeat and the
+# filter keeps one end of it, so a working wait reads as a hang. The roster is NAMED, one entry per
+# incident, because "does this command narrate for minutes" cannot be resolved from the system, and
+# refusing every `| tail` is the cry-wolf guard (decisions/guard-that-cries-wolf-is-spent.md). `tee`
+# keeps every byte, so it is not refused. Only `--confirm` reaches the wait: a bare `merge <pr>` is a
+# preview that returns in seconds, so piping it is allowed.
+NARRATING_COMMANDS = ("merge", "merge.cmd")
+NARRATING_SCRIPT_TAILS = ("merge/merge.py", "merge/launch.py")
+TRUNCATING_FILTERS = ("tail", "head")
+
+
+def narrating_stage(segment: str) -> str:
+    """The command word when one segment is a long, narrating `--confirm` run, else ''."""
+    tokens = segment_tokens(segment)
+    if not tokens or "--confirm" not in tokens:
+        return ""
+    index = resolve_command(tokens)
+    if index is None:
+        return ""
+    word = basename(tokens[index])
+    if word in NARRATING_COMMANDS:
+        return word
+    for token in tokens[index:]:
+        if token.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
+            return word + " " + basename(token)
+    return ""
+
+
+def narrated_tail_hit(stripped: str) -> str:
+    """Return the matched text when a narrating stage is piped straight into `tail`/`head`."""
+    ends = []
+    segments = split_segments(stripped, ends)
+    for index in range(len(segments) - 1):
+        if ends[index] != "|":
+            continue
+        stage = narrating_stage(segments[index])
+        if not stage:
+            continue
+        tokens = segment_tokens(segments[index + 1])
+        if not tokens:
+            continue
+        at = resolve_command(tokens)
+        if at is not None and basename(tokens[at]) in TRUNCATING_FILTERS:
+            return stage + " | " + basename(tokens[at])
+    return ""
+
+
+NARRATED_TAIL_REASON = (
+    "this command waits for minutes and prints a line as it goes, and a pipe into a filter "
+    "that keeps one end of the stream hides that line until the end, so a working wait looks "
+    "like a hang. "
+    "Remedy: run the command with nothing after it and read its output as it arrives, or "
+    "redirect to a file you read back afterwards, or use tee to keep a full copy."
+)
+
+
 # ------------------------------------------------------------------ a waiter loop
 #
 # Rule 9, approved by the owner: a shell segment whose command word is a sleep-and-poll turns
@@ -4150,6 +4208,7 @@ def merge_gate(selector, repo: str, where: str):
     module = merge_module()
     if module is None:
         return "unknown", "the merge tool's check reader could not be loaded"
+    where = os.path.normpath(where) if where else ""   # a `cd` target may carry either separator
     host = module.Host(repo=repo or None, cwd=where or None)
     return host.head_read(selector, nothing_is_green=not has_workflows(where))
 
@@ -4249,8 +4308,17 @@ def message_sources(args):
     return texts, files, stdin
 
 
+UNREAD_MARK = "\0unread:"
+UNREAD_REASON = (
+    "Rule (Git): the message file could not be read, so the guard cannot tell whether it cites a "
+    "record by its path. "
+    "Remedy: pass the message inline, or name a file this directory can read."
+)
+
+
 def cited_record_path(segment: str, raw: str, where: str) -> str:
-    """Return the first record path a commit message or PR body cites, else ''.
+    """Return the first record path a commit message or PR body cites, else ''. A message file
+    that cannot be read returns UNREAD_MARK + its name: an unread message is not a clean one.
 
     Acts: `git commit` and `gh pr create|edit`. A heredoc body belongs to the act only when the
     segment itself carries the `<<` header, so a heredoc that writes a record file never counts.
@@ -4273,10 +4341,11 @@ def cited_record_path(segment: str, raw: str, where: str) -> str:
     texts, files, stdin = message_sources(args)
     for name in files:
         try:
-            with open(_absolute(name, where), encoding="utf-8", errors="replace") as handle:
+            with open(os.path.normpath(_absolute(name, where)), encoding="utf-8",
+                      errors="replace") as handle:
                 texts.append(handle.read(MESSAGE_FILE_MAX))
         except Exception:
-            pass   # git or gh refuses an unreadable file itself
+            return UNREAD_MARK + name   # unknown, never a pass
     if "<<" in segment:
         texts.extend(body for _, body in _split_heredocs(raw)[1])
     for text in texts:
@@ -4284,6 +4353,127 @@ def cited_record_path(segment: str, raw: str, where: str) -> str:
         if found:
             return found.group(0)
     return ""
+
+
+# ------------------------------------------------------------------ two ported shell traps
+#
+# Ported from pkmnscan's `scripts/guard-shell.py` (behaviour, not code shape). Each clause below is
+# self-contained so it merges cleanly beside other edits to this file.
+
+# `gh api` with a field flag and no method. `-f`/`-F` give the request a body and gh then sends POST,
+# so a call meant as a GET silently becomes a write (hung past a 120s timeout in Banchi, 2026-09-12).
+# A named method (`-X`, `--method`, in any spelling) is the caller saying what they mean. `graphql`
+# is a POST by design and takes no method.
+GH_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
+GH_METHOD_FLAGS = ("-X", "--method")
+GH_VALUE_FLAGS = ("-H", "--header", "--hostname", "--jq", "-q", "--template", "-t", "--cache",
+                  "--input", "-p", "--preview")
+
+
+def gh_api_post_hit(segment: str) -> str:
+    """Return the matched text when a `gh api` call has a field and no method, else ''."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return ""
+    at = resolve_command(tokens)
+    if at is None or basename(tokens[at]) not in ("gh", "gh.exe"):
+        return ""
+    # gh's own global flags may sit ahead of `api`: `gh --repo o/r api ...`.
+    sub_at = at + 1
+    while sub_at < len(tokens) and tokens[sub_at].startswith("-"):
+        sub_at += 2 if tokens[sub_at] in ("-R", "--repo") else 1
+    if tokens[sub_at:sub_at + 1] != ["api"]:
+        return ""
+    rest = tokens[sub_at + 1:]
+    fielded = False
+    endpoint = ""
+    index = 0
+    while index < len(rest):
+        token = rest[index]
+        index += 1
+        if token in GH_METHOD_FLAGS or token.startswith(("--method=", "-X")):
+            return ""
+        if token in GH_FIELD_FLAGS:
+            fielded = True
+            index += 1
+        elif token.startswith(("--field=", "--raw-field=")) or (
+                token[:2] in ("-f", "-F") and len(token) > 2 and not token.startswith("--")):
+            fielded = True
+        elif token in GH_VALUE_FLAGS:
+            index += 1
+        elif not token.startswith("-") and not endpoint:
+            endpoint = token
+    if not fielded or endpoint.strip("/") == "graphql":
+        return ""
+    return "gh api " + endpoint + " with a field and no method"
+
+
+GH_API_METHOD_REASON = (
+    "a field flag gives the request a body, and gh sends a body with POST, so with no method named "
+    "this is a write and not the read it looks like. "
+    "Remedy: put a read's parameters in the query string of the endpoint, or name the method with "
+    "--method when the body is what you want."
+)
+
+
+# `ln -s` where the link name is a directory that is already there. ln does not fail: it creates the
+# link INSIDE that directory (`images/images`), the original is still in place, and the call exits 0
+# (Banchi 2026-08-29, which ended with a real directory renamed away). A real directory always
+# descends, whatever flags. A symlink to a directory descends unless `-n`/`-h`, so `-sf` over one is
+# the trap and `-sfn` is the answer. Nothing else is refused: a file or a link to a file either
+# fails loudly or, with `-f`, is replaced as asked, and neither loses anything silently. A trailing
+# slash, `-t`, and `-T` each say the destination is, or is not, a directory, so each is allowed.
+# `-sf` over a link to a file is therefore allowed: it replaces the link, which is what `-f` means.
+def ln_descends_hit(segment: str, where: str) -> str:
+    """Return the matched text when `ln -s` would create a link inside an existing directory."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return ""
+    at = resolve_command(tokens)
+    if at is None or basename(tokens[at]) != "ln":
+        return ""
+    symbolic = no_deref = False
+    operands = []
+    index = at + 1
+    while index < len(tokens):
+        token = tokens[index]
+        index += 1
+        if token == "--":
+            operands.extend(tokens[index:])
+            break
+        if token in ("-t", "--target-directory", "--no-target-directory") or token.startswith(
+                "--target-directory="):
+            return ""
+        if token.startswith("--"):
+            symbolic = symbolic or token == "--symbolic"
+            no_deref = no_deref or token == "--no-dereference"
+        elif token.startswith("-") and len(token) > 1:
+            if "T" in token[1:] or "t" in token[1:]:
+                return ""
+            symbolic = symbolic or "s" in token[1:]
+            no_deref = no_deref or "n" in token[1:] or "h" in token[1:]
+        else:
+            operands.append(token)
+    if not symbolic or len(operands) != 2:
+        return ""
+    dest = operands[1]
+    if dest.endswith(("/", "\\")) or "$" in dest or "*" in dest:
+        return ""
+    full = _absolute(os.path.expanduser(dest), where or os.getcwd())
+    if not os.path.isdir(full):
+        return ""
+    if os.path.islink(full) and no_deref:
+        return ""
+    return "ln -s over an existing directory"
+
+
+LN_DESCENDS_REASON = (
+    "the link name is a directory that already exists, so ln does not replace it: it creates the "
+    "link inside it and exits 0, leaving the original where it was. "
+    "Remedy: add -n beside -f to replace a link to a directory, check that the path is free first "
+    "with a test such as [ -e path ], or end the destination with a slash when you mean a link "
+    "inside the directory."
+)
 
 
 SPAWN_TOOLS = ("Agent", "Task")
@@ -4381,6 +4571,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
         if not segment.strip():
             continue
         matched = cited_record_path(segment, raw, cite_where)
+        if matched.startswith(UNREAD_MARK):
+            refuse(tool, "deny", "cite-by-id", UNREAD_REASON, matched[len(UNREAD_MARK):])
         if matched:
             refuse(tool, "deny", "cite-by-id", CITE_REASON, matched)
 
@@ -4425,6 +4617,21 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
             if poller:
                 refuse(tool, "deny", "waiter", PATTERN_POLLER_REASON, poller + " " + matched)
             refuse(tool, "deny", "waiter", WAITER_REASON, matched)
+    matched = narrated_tail_hit(stripped)
+    if matched:
+        refuse(tool, "deny", "live-stream", NARRATED_TAIL_REASON, matched)
+
+    # 3b. Two traps ported from pkmnscan's `scripts/guard-shell.py`: `gh api` with a field and no
+    # method, and `ln -s` onto a directory that is already there. Each reads the segment's own
+    # command word, never a substring, and `ln` reads the filesystem rather than the text.
+    run_in = _run_dir(stripped, cwd)
+    for segment in split_segments(stripped):
+        matched = gh_api_post_hit(segment)
+        if matched:
+            refuse(tool, "deny", "gh-api-method", GH_API_METHOD_REASON, matched)
+        matched = ln_descends_hit(segment, run_in)
+        if matched:
+            refuse(tool, "deny", "ln-over-directory", LN_DESCENDS_REASON, matched)
 
     # 4. A wide delete denies, and a force push asks.
     for pattern in DESTRUCTIVE_DELETE:

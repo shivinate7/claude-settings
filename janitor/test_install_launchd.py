@@ -124,6 +124,21 @@ class GeneratesPlistForAnOrdinaryCheckout(unittest.TestCase):
         self.assertIn("StartCalendarInterval", data)
         self.assertFalse(data["RunAtLoad"])
 
+    def test_exact_hour_minute_and_script(self):
+        lib_dir = os.path.join(ROOT, "lib_exact")
+        result = run_installer(
+            ["--repo-root", self.repo, "--library-dir", lib_dir, "--hour", "5", "--minute", "42"],
+            cfg_dir=os.path.join(ROOT, "cfg_exact"),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        plist_path = os.path.join(lib_dir, "LaunchAgents", install_launchd.LABEL + ".plist")
+        with open(plist_path, "rb") as handle:
+            data = plistlib.load(handle)
+        self.assertEqual(data["StartCalendarInterval"], {"Hour": 5, "Minute": 42})
+        # Exactly sweep.py (not session_end_sweep.py), then the one flag.
+        self.assertEqual(data["ProgramArguments"][1:],
+                         [os.path.join(self.repo, "janitor", "sweep.py"), "--confirm"])
+
     def test_never_touches_the_repo_tree_git_status_stays_clean(self):
         """Check 7: the generated plist must not become a tracked path. Uses the ordinary
         fixture checkout, not REPO_ROOT itself -- this suite runs from inside a linked
