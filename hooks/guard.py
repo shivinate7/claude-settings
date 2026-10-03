@@ -734,7 +734,15 @@ def push_verdict(args, cwd: str, overrides=None) -> str:
 # every one of these six subcommands, whatever the subcommand does with its own output: the shell
 # throws the stream away before git ever gets a say, so a hook's refusal and git's own proof of
 # landing are both gone, together, always.
-SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick")
+SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick", "pull")
+
+# Gap roster, 2026-10-03. Banchi's scripts/silent-write-guard.py refused these shapes and this
+# shared guard missed them. Each one moves a ref or lands a merge, so each is a write when its
+# output is silenced: `pull` (a fetch plus a merge; its `-q` joins the quiet arm), a `fetch` that
+# names a `src:dst` refspec (it moves a local ref; a bare `fetch` stays a read), `make merge`,
+# `gh pr merge`, and a closed descriptor (`2>&-`, `>&-`), which silences like /dev/null.
+# `--dry-run` moves nothing and stays allowed. Output sent to a FILE stays allowed: the owner held
+# that until measured.
 
 # git's OWN `-q`/`--quiet` flag is a narrower claim, and it does not read the same for every
 # subcommand. MEASURED 2026-09-19 and 2026-09-20, in throwaway repos under this session's
@@ -804,13 +812,14 @@ SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-
 # commit" and "previous cherry-pick is now empty" in full, at its own distinct nonzero exit. No
 # state is silent, so nothing is lost by allowing either spelling. `cherry-pick` drops out of the
 # quiet-flag arm.
-QUIET_FLAG_SUBCOMMANDS = ("push", "merge", "rebase")
+QUIET_FLAG_SUBCOMMANDS = ("push", "merge", "rebase", "pull", "fetch")
 
 # A null-device target, on either stream, in the three shells this guard reads a command from:
 # POSIX (`/dev/null`), Windows cmd (`NUL`), and PowerShell (`$null`). `2>&1` duplicates one stream
 # onto another file descriptor and is not this: the line still reaches a stream the session reads.
 SILENT_WRITE_REDIRECT = re.compile(
-    r"(?:&>>?|\d?>>?)\s*(['\"]?)(?:/dev/null|NUL|\$null)\1(?=$|[\s;&|])",
+    r"(?:&>>?|\d?>>?)\s*(['\"]?)(?:/dev/null|NUL|\$null)\1(?=$|[\s;&|])"
+    r"|\d?>&-(?=$|[\s;&|])",   # a closed descriptor
     re.IGNORECASE,
 )
 
@@ -837,15 +846,29 @@ def silent_write_hit(segment: str):
     --abort` is carved out inside the loop: it lands nothing, so it has no landing to prove.
     """
     for subcommand, args in git_calls(segment):
-        if subcommand not in SILENT_WRITE_SUBCOMMANDS:
+        if subcommand == "fetch":
+            # Only a fetch that moves a local ref (`src:dst`) is a write; a bare one is a read.
+            if not any(":" in a and not a.startswith("-") for a in args):
+                continue
+        elif subcommand not in SILENT_WRITE_SUBCOMMANDS:
             continue
         if subcommand == "merge" and "--abort" in args:
+            continue
+        if "--dry-run" in args:
             continue
         matched = ("git " + subcommand + " " + " ".join(args)).strip()
         if discards_output(segment):
             return matched, "redirect"
         if subcommand in QUIET_FLAG_SUBCOMMANDS and quiet_write(args):
             return matched, "quiet"
+    if discards_output(segment):
+        tokens = segment_tokens(segment)
+        index = resolve_command(tokens) if tokens else None
+        if index is not None:
+            word, rest = basename(tokens[index]), tokens[index + 1:]
+            if (word == "make" and "merge" in rest) or (
+                    word in ("gh", "gh.exe") and rest[:2] == ["pr", "merge"]):
+                return word + " " + " ".join(rest), "redirect"
     return "", ""
 
 
