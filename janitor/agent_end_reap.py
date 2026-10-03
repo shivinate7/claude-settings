@@ -25,7 +25,7 @@ Any read that cannot tell means keep. One signal, by pid, through `sweep.send_si
 
 Every run appends the raw payload and the decisions to
 `${CLAUDE_CONFIG_DIR:-~/.claude}/state/agent-end-payloads.jsonl`, so the payload fields the docs
-leave unmeasured get measured. Always exits 0: exit 2 on SubagentStop keeps the agent running.
+leave unmeasured get measured. The file keeps the last 200 lines. Always exits 0: exit 2 on SubagentStop keeps the agent running.
 """
 import json
 import os
@@ -41,6 +41,7 @@ import guard  # noqa: E402
 import sweep  # noqa: E402
 
 AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+MAX_LOG_LINES = 200  # the payload log keeps the last 200 runs
 MAX_CLIMB = 64  # ponytail: fixed depth bound against a pid cycle, never a real tree this deep
 
 
@@ -49,10 +50,23 @@ def log_path() -> str:
 
 
 def log(record: dict):
+    """Append one line and keep only the last MAX_LOG_LINES. The log is the evidence for the hook
+    fields the docs leave open (decisions/agent-end-reap-stops-what-a-finished-agent-left.md), and
+    it grew to thousands of raw payloads nobody reads. Two agents ending at once can lose a line:
+    ponytail: no lock, add one only if a measured field goes missing."""
+    path = log_path()
+    line = json.dumps(dict(record, at=time.strftime("%Y-%m-%dT%H:%M:%S%z"))) + "\n"
     try:
-        os.makedirs(os.path.dirname(log_path()), exist_ok=True)
-        with open(log_path(), "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(dict(record, at=time.strftime("%Y-%m-%dT%H:%M:%S%z"))) + "\n")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        try:
+            with open(path, encoding="utf-8") as handle:
+                kept = handle.readlines()[-(MAX_LOG_LINES - 1):]
+        except OSError:
+            kept = []
+        temp = path + ".tmp"
+        with open(temp, "w", encoding="utf-8") as handle:
+            handle.writelines(kept + [line])
+        os.replace(temp, path)  # a reader never sees an empty or half-written file
     except Exception:
         pass
 

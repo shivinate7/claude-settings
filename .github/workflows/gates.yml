@@ -23,6 +23,8 @@ concurrency:
 jobs:
   gates:
     runs-on: ubuntu-latest
+    # About 2x the slowest green run measured 2026-10-02 (4 min 9 s).
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -93,6 +95,16 @@ jobs:
 
       - name: Record slug length
         run: python3 lint/check_record_slugs.py
+
+      - name: Silent undo fixture suite
+        run: python3 lint/test_check_silent_undo.py
+
+      - name: Silent undo check
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 lint/check_silent_undo.py --upstream "origin/$BASE_REF" --head "$HEAD_SHA" --strict
 
       - name: Unknown-read contract (guard + session_start)
         if: ${{ steps.scope.outputs.code == 'true' }}
@@ -227,6 +239,8 @@ jobs:
   # behind it.
   gates-macos:
     runs-on: macos-latest
+    # About 2x the slowest green run measured 2026-10-02 (10 min 17 s).
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -325,6 +339,8 @@ jobs:
   # job that stops at its first red step proves nothing about the suites behind it.
   gates-windows:
     runs-on: windows-latest
+    # About 2x the slowest green run measured 2026-10-02 (20 min 1 s).
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:

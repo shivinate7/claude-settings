@@ -43,9 +43,13 @@ def make_repo(name):
     return repo
 
 
-def commit_all(repo, msg="init"):
+def commit_all(repo, msg="init", when="2020-01-01T00:00:00Z"):
+    """Commit everything. The default date is long before every fixture's human message, so a
+    setup commit is never read as work landed this turn; pass `when=None` for a commit made now."""
     _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", msg)
+    env = dict(os.environ, GIT_COMMITTER_DATE=when, GIT_AUTHOR_DATE=when) if when else None
+    subprocess.run(["git", "-C", repo, "commit", "-q", "-m", msg], capture_output=True, text=True,
+                   check=True, env=env)
 
 
 def write(path, text):
@@ -336,6 +340,246 @@ def case_incident_cap_same_session():
             os.environ["CLAUDE_CONFIG_DIR"] = prior
 
 
+# --------------------------------------------------------------------------- case 8b
+# THE CHEAP CHECK COMES FIRST. `run` must end on `git status` alone, before it parses the
+# transcript, when no protected path is dirty AND newer than the last human message. A
+# counter on `read_transcript` shows the exit; the last pair shows it does not hide a turn
+# that did change a protected file.
+
+class _Counted:
+    def __init__(self, real):
+        self.real, self.calls = real, 0
+
+    def __call__(self, *a, **k):
+        self.calls += 1
+        return self.real(*a, **k)
+
+
+def _in_future(seconds):
+    return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def case_early_exit_before_transcript_read():
+    real = dw.read_transcript
+    counter = _Counted(real)
+    dw.read_transcript = counter
+    try:
+        repo = make_repo("early_idle")
+        write(os.path.join(repo, "src", "app.py"), "print(1)\n")
+        write(os.path.join(repo, "decisions", "r.md"), "# R\n\nAlways X.\n")
+        commit_all(repo)
+        path = write_transcript(repo, [human_record("hi", T0), assistant_record(text="hello")])
+        spy = never_called()
+        message = dw.run({"transcript_path": path, "cwd": repo}, model_call=spy)
+        check("early_exit: idle turn silent", message == "", message)
+        check("early_exit: idle turn never parses the transcript", counter.calls == 0, counter.calls)
+        check("early_exit: idle turn never calls the model", spy.calls == 0)
+
+        write(os.path.join(repo, "decisions", "r.md"), "# R\n\nNever X.\n")
+        path = write_transcript(repo, [human_record("hi", _in_future(3600)), assistant_record(text="hello")])
+        message = dw.run({"transcript_path": path, "cwd": repo}, model_call=spy)
+        check("early_exit: protected dirt older than the human message ends early",
+              message == "" and counter.calls == 0 and spy.calls == 0, (message, counter.calls, spy.calls))
+
+        path = write_transcript(repo, [human_record("hi", T0), assistant_record(text="hello")])
+        allow = stub({"verdict": "ALLOW"})
+        dw.run({"transcript_path": path, "cwd": repo}, model_call=allow)
+        check("early_exit: protected dirt newer than the human message is judged",
+              counter.calls == 1 and allow.calls == 1, (counter.calls, allow.calls))
+    finally:
+        dw.read_transcript = real
+
+
+# --------------------------------------------------------------------------- case 8c
+# AN ALLOW IS CACHED, LIKE A FLAG. One model call per change to a protected file, not one per
+# Stop. Run against a fake `claude` binary on PATH (never a real model call) that counts its
+# own invocations. The key holds the file's bytes, so an edited file is judged again, even
+# when the edit falls past the 4000 characters of diff the model is shown.
+
+def _fake_claude(name, verdict='{"verdict": "ALLOW"}'):
+    """Put a fake `claude` first on PATH. Return (count_file, restore)."""
+    bindir = os.path.join(ROOT, name + "_bin")
+    os.makedirs(bindir, exist_ok=True)
+    count = os.path.join(bindir, "count")
+    py = os.path.join(bindir, "fake_claude.py")
+    write(py, "import json, sys\nopen(%r, 'a').write('x')\nprint(json.dumps({'result': %r}))\n" % (count, verdict))
+    launcher = os.path.join(bindir, "claude")
+    write(launcher, '#!/bin/sh\nexec "%s" "%s" "$@"\n' % (sys.executable, py))
+    os.chmod(launcher, 0o755)
+    prior = os.environ.get("PATH", "")
+    os.environ["PATH"] = bindir + os.pathsep + prior
+
+    def restore():
+        os.environ["PATH"] = prior
+    return count, restore
+
+
+def _calls(count_file):
+    try:
+        with open(count_file, encoding="utf-8") as f:
+            return len(f.read())
+    except OSError:
+        return 0
+
+
+def case_allow_verdict_cached_until_the_file_changes():
+    if sys.platform == "win32":
+        print("SKIP: allow_cache: the fake claude is a POSIX launcher")
+        return
+    repo = make_repo("allow_cache")
+    rule = os.path.join(repo, "decisions", "r.md")
+    write(rule, "# R\n\nAlways X.\n")
+    commit_all(repo)
+    write(rule, "# R\n\nAlways X, and Y.\n")
+    path = write_transcript(repo, [human_record("add Y", T0), assistant_record(text="Added Y.")])
+    hook = {"transcript_path": path, "cwd": repo, "session_id": "allow-cache-session"}
+    cfg = os.path.join(ROOT, "cfg_allow_cache")
+    os.makedirs(cfg, exist_ok=True)
+    prior_cfg = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = cfg
+    count, restore = _fake_claude("allow_cache")
+    try:
+        for _ in range(3):
+            message = dw.run(hook)
+        check("allow_cache: three Stops, one unchanged file: one model call", _calls(count) == 1, _calls(count))
+        check("allow_cache: stays silent", message == "", message)
+        write(rule, "# R\n\nAlways X, and Y, and Z.\n")
+        dw.run(hook)
+        dw.run(hook)
+        check("allow_cache: an edited file is judged again, once", _calls(count) == 2, _calls(count))
+
+        # A new file is shown to the model as its first 4000 characters, so only the key's
+        # own hash of the bytes sees an edit past that cut. (A tracked file's diff header
+        # carries the blob id, which moves with every byte.)
+        big = os.path.join(repo, "decisions", "big.md")
+        write(big, "# Big\n\n" + "line\n" * 1500 + "tail A\n")
+        dw.run(hook)
+        before = _calls(count)
+        write(big, "# Big\n\n" + "line\n" * 1500 + "tail B\n")
+        dw.run(hook)
+        check("allow_cache: an edit past the 4000 diff characters is judged again",
+              _calls(count) == before + 1, (before, _calls(count)))
+    finally:
+        restore()
+        if prior_cfg is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = prior_cfg
+
+
+def case_unknown_is_never_cached():
+    repo = make_repo("unknown_not_cached")
+    rule = os.path.join(repo, "decisions", "r.md")
+    write(rule, "# R\n\nAlways X.\n")
+    commit_all(repo)
+    write(rule, "# R\n\nAlways Y.\n")
+    path = write_transcript(repo, [human_record("edit", T0), assistant_record(text="Done.")])
+    hook = {"transcript_path": path, "cwd": repo, "session_id": "unknown-session"}
+    cfg = os.path.join(ROOT, "cfg_unknown")
+    os.makedirs(cfg, exist_ok=True)
+    prior_cfg = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = cfg
+    try:
+        first = dw.run(hook, model_call=stub(None, "model exited 1: boom"))
+        allow = stub({"verdict": "ALLOW"})
+        dw.run(hook, model_call=allow)
+        check("unknown_not_cached: first Stop reads UNKNOWN", first.startswith(dw.UNKNOWN_PREFIX), first)
+        check("unknown_not_cached: the next Stop still asks the model", allow.calls == 1, allow.calls)
+    finally:
+        if prior_cfg is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = prior_cfg
+
+
+# --------------------------------------------------------------------------- case 8d
+# A PROTECTED FILE COMMITTED THIS TURN is clean in `git status`, so only the commit log shows
+# it. Edited and committed after the human message: judged (once, then cached). The same
+# commit made before the message: not judged.
+
+def case_protected_file_committed_this_turn_is_judged():
+    if sys.platform == "win32":
+        print("SKIP: committed_this_turn: the fake claude is a POSIX launcher")
+        return
+    repo = make_repo("committed_turn")
+    rule = os.path.join(repo, "decisions", "r.md")
+    write(rule, "# R\n\nAlways X.\n")
+    commit_all(repo)
+    write(rule, "# R\n\nNever X.\n")
+    commit_all(repo, "flip", when=None)
+    path = write_transcript(repo, [human_record("go", T0), assistant_record(text="Done.")])
+    hook = {"transcript_path": path, "cwd": repo, "session_id": "committed-turn"}
+    cfg = os.path.join(ROOT, "cfg_committed_turn")
+    os.makedirs(cfg, exist_ok=True)
+    prior_cfg = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = cfg
+    root = make_repo("committed_root")
+    write(os.path.join(root, "decisions", "r.md"), "# R\n\nAlways X.\n")
+    commit_all(root, "root", when=None)
+    seen = []
+    dw.run({"transcript_path": write_transcript(root, [human_record("go", T0), assistant_record(text="x")]),
+            "cwd": root}, model_call=lambda prompt, **k: (seen.append(prompt), ({"verdict": "ALLOW"}, None))[1])
+    check("committed_turn: a root commit made this turn is judged as a new file",
+          len(seen) == 1 and "(new file)" in seen[0], seen[:1])
+    count, restore = _fake_claude("committed_turn")
+    try:
+        message = dw.run(hook)
+        dw.run(hook)
+        check("committed_turn: a clean-status protected commit is judged once", _calls(count) == 1, _calls(count))
+        check("committed_turn: ALLOW stays silent", message == "", message)
+        flag = stub({"verdict": "FLAG", "why": "flipped"})
+        fresh = dict(hook, session_id="committed-turn-2")
+        check("committed_turn: the judge sees the committed diff",
+              dw.run(fresh, model_call=flag).startswith(dw.FLAG_PREFIX) and flag.calls == 1)
+        before = _calls(count)
+        path = write_transcript(repo, [human_record("go", _in_future(3600)), assistant_record(text="Done.")])
+        spy = never_called()
+        dw.run(dict(hook, transcript_path=path, session_id="committed-turn-3"), model_call=spy)
+        check("committed_turn: a commit before the human message is not judged",
+              spy.calls == 0 and _calls(count) == before, (spy.calls, _calls(count)))
+    finally:
+        restore()
+        if prior_cfg is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = prior_cfg
+
+
+# --------------------------------------------------------------------------- case 8e
+# The verdict cache never crosses repos, and the byte hash reads a bounded amount.
+
+def case_cache_key_holds_the_repo_and_a_bounded_read():
+    spies = []
+    cfg = os.path.join(ROOT, "cfg_two_repos")
+    os.makedirs(cfg, exist_ok=True)
+    prior_cfg = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = cfg
+    try:
+        for name in ("two_repos_a", "two_repos_b"):
+            repo = make_repo(name)
+            write(os.path.join(repo, "decisions", "r.md"), "# R\n\nAlways X.\n")
+            commit_all(repo)
+            write(os.path.join(repo, "decisions", "r.md"), "# R\n\nNever X.\n")
+            path = write_transcript(repo, [human_record("go", T0), assistant_record(text="Done.")])
+            spy = stub({"verdict": "ALLOW"})
+            dw.run({"transcript_path": path, "cwd": repo, "session_id": "one-session"}, model_call=spy)
+            spies.append(spy.calls)
+    finally:
+        if prior_cfg is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = prior_cfg
+    check("cache_key: one session in two repos, same bytes: judged in each", spies == [1, 1], spies)
+
+    repo = make_repo("digest_cap")
+    big = os.path.join(repo, "decisions", "big.md")
+    write(big, "x" * (dw.DIGEST_READ_MAX + 10))
+    first = dw.content_digest(repo, ["decisions/big.md"])
+    write(big, "x" * (dw.DIGEST_READ_MAX + 20))
+    check("digest_cap: a file past the cap still changes the digest (size)",
+          dw.content_digest(repo, ["decisions/big.md"]) != first)
+
+
 # --------------------------------------------------------------------------- case 9
 # invoke_model's real argv and kwargs, against a fake subprocess.run: the explicit empty
 # tool set, --permission-mode plan, and an isolated cwd/env are actually on the command
@@ -460,9 +704,13 @@ def case_invoke_model_argv():
 # the printed systemMessage envelope, exit 0) was never actually exercised end to end.
 
 def _run_main(hook_payload, timeout=30):
+    # An empty config directory, so the config report never reads this machine's own guard.log.
+    config = os.path.join(ROOT, "empty-config")
+    os.makedirs(config, exist_ok=True)
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=config)
     return subprocess.run(
         [sys.executable, MODULE_PATH],
-        input=json.dumps(hook_payload), capture_output=True, text=True, timeout=timeout,
+        input=json.dumps(hook_payload), capture_output=True, text=True, timeout=timeout, env=env,
     )
 
 
@@ -492,6 +740,33 @@ def case_main_ordinary_turn():
     os.remove(path)
     paired = _run_main({"transcript_path": path, "cwd": repo})
     check("main_ordinary_turn: known-bad pair prints UNKNOWN", _says_unknown(paired), paired.stdout)
+
+
+def case_main_prints_the_config_report():
+    # The config report was its own Stop hook. It is a section of this one now, so main() must
+    # print its message, and only that message here: nothing protected changed, so the judgment
+    # has nothing to say.
+    repo = make_repo("main_config_report")
+    write(os.path.join(repo, "src", "app.py"), "print('hello')\n")
+    commit_all(repo)
+    target = os.path.join(repo, ".claude", "settings.local.json")
+    edit = {"type": "tool_use", "name": "Edit", "input": {"file_path": target}}
+    records = [
+        human_record("tune the project settings", T0),
+        assistant_record(tool_use=edit),
+        assistant_record(text="done"),
+    ]
+    path = write_transcript(repo, records)
+    result = _run_main({"transcript_path": path, "cwd": repo})
+    check("main_config_report: exit 0", result.returncode == 0, result.returncode)
+    try:
+        message = json.loads(result.stdout.strip()).get("systemMessage", "")
+    except Exception:
+        message = ""
+    check("main_config_report: names the config file", "Config files changed this turn" in message
+          and "settings.local.json" in message, result.stdout)
+    check("main_config_report: no judgment text beside it", dw.FLAG_PREFIX not in message
+          and dw.UNKNOWN_PREFIX not in message, result.stdout)
 
 
 def case_main_missing_transcript():
@@ -526,9 +801,15 @@ def main():
     case_not_a_repo()
     case_model_failure()
     case_incident_cap_same_session()
+    case_early_exit_before_transcript_read()
+    case_allow_verdict_cached_until_the_file_changes()
+    case_unknown_is_never_cached()
+    case_protected_file_committed_this_turn_is_judged()
+    case_cache_key_holds_the_repo_and_a_bounded_read()
     case_judge_isolation_copies_credentials()
     case_invoke_model_argv()
     case_main_ordinary_turn()
+    case_main_prints_the_config_report()
     case_main_missing_transcript()
     case_main_stop_hook_active_stays_quiet()
 

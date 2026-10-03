@@ -69,8 +69,8 @@ def lint(linter, text, suffix=".md", config_from=None):
 
 
 # paragraph_blocks and format_finding live in lint/_transcript.py, imported above. This hook,
-# lint/md_sweep.py, lint/report_gate.py, and hooks/config_report.py share that one copy;
-# hooks/config_report.py already imports lint/report_gate.py, which already imports this
+# lint/md_sweep.py, lint/report_gate.py, and hooks/decision_watch.py share that one copy;
+# hooks/decision_watch.py already imports lint/report_gate.py, which already imports this
 # module, so the readers these hooks share are no longer split one-per-file.
 
 # ------------------------------------------------------------------ scoping to changed blocks

@@ -19,14 +19,37 @@ class Stop(Exception):
 class Held(Stop):
     pass
 
+SH_TIMEOUT = None  # seconds; the guard sets it, so a hung `gh` cannot outlast its hook
+
 def sh(args, cwd=None, input=None, env=None):
-    r = subprocess.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True)
+    # Resolve the program first: on Windows CreateProcess never reads PATHEXT, so a bare `gh` misses `gh.cmd`.
+    args = [shutil.which(args[0], path=(env or os.environ).get("PATH")) or args[0], *args[1:]]
+    r =subprocess.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, timeout=SH_TIMEOUT)
     return r.returncode, (r.stdout + r.stderr).strip()
 
 def git(cwd, *a, input=None):
     return sh(["git", "-C", cwd, *a], input=input)
 
 SETTLE_SECONDS = 30
+
+def undo_check(wt, base_ref, unknown_ok=""):
+    """The shared silent-undo lint (lint/check_silent_undo.py), run on the branch before anything is pushed.
+    A finding refuses. An unreadable history refuses too, unless the owner passed
+    --undo-check-unknown-ok "<reason>": that is the way out when the check cannot run (octopus merge,
+    git older than 2.38, shallow clone). It is logged and does not excuse a finding."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+    import check_silent_undo as undo
+    try:
+        problems, notes = undo.check(wt, base_ref, "HEAD")
+    except undo.Unknown as e:
+        if unknown_ok.strip():
+            say(f"merge: silent-undo check UNKNOWN ({e}). Owner override, reason: {unknown_ok.strip()}")
+            return
+        raise Stop(f"silent-undo check could not read the history: {e}\nIf the owner accepts that, run again with --undo-check-unknown-ok \"<reason>\".")
+    for n in notes:
+        say("merge: " + n)
+    if problems:
+        raise Stop("the branch silently undoes earlier work:\n  " + "\n  ".join(problems) + f"\nPut it back, or add the trailer `{undo.TRAILER}: <path> -- <reason>` to a commit message.")
 
 def say(*lines):
     print(*lines, flush=True)
@@ -138,13 +161,22 @@ class Host:
     """The GitHub half: `gh` for the pull request, the required checks, the wait and the merge.
     Tests pass a fake with the same pr, wait_checks and merge, or a `gh` shim on PATH."""
 
-    def __init__(self, required="protection", base="main", minute=60, now=time.time, pause=time.sleep, ignore=None):
+    def __init__(self, required="protection", base="main", minute=60, now=time.time, pause=time.sleep, ignore=None, repo=None, cwd=None):
         self.required, self.base, self.minute, self.now, self.pause = required, base, minute, now, pause
+        self.repo = repo  # OWNER/NAME, or None for the repo of the working directory
+        self.cwd = cwd    # where `gh` runs, so it names the repo of that directory
         self.ignore = ignore or {}  # check name -> reason, from ignore_checks()
+
+    def _repo_args(self):
+        return ["-R", self.repo] if self.repo else []
+
+    def _pr_args(self, n):
+        """The pull request selector: the number, or none for the current branch's."""
+        return ([str(n)] if n not in (None, "") else []) + self._repo_args()
 
     def pr(self, n):
         """-> {head, branch, base, state, mergeable, merge_state}"""
-        c, out = sh(["gh", "pr", "view", str(n), "--json", "headRefOid,headRefName,baseRefName,state,mergeable,mergeStateStatus"])
+        c, out = sh(["gh", "pr", "view", *self._pr_args(n), "--json", "headRefOid,headRefName,baseRefName,state,mergeable,mergeStateStatus"], cwd=self.cwd)
         if c:
             raise Stop("gh pr view failed: " + out)
         d = json.loads(out)
@@ -171,7 +203,7 @@ class Host:
 
     def checks(self, n):
         """-> {check name: [(bucket, link), ...]} from `gh pr checks`, every entry kept. It exits non-zero on red or pending, so read the JSON, not the code."""
-        c, out = sh(["gh", "pr", "checks", str(n), "--json", "name,bucket,link"])
+        c, out = sh(["gh", "pr", "checks", *self._pr_args(n), "--json", "name,bucket,link"], cwd=self.cwd)
         try:
             rows = json.loads(out)
         except ValueError:
@@ -223,15 +255,23 @@ class Host:
             settled = False
             self.block(pending, got)
 
-    def run_state(self, sha):
-        """-> (red, pending) from the workflow runs of `sha`. A run that is not completed holds the wait even
-        when its jobs are not listed as checks yet. Only success, skipped and neutral pass."""
-        c, out = sh(["gh", "run", "list", "--commit", sha, "--limit", "100", "--json", "status,conclusion,name"])
+    def runs(self, sha):
+        """The workflow runs of `sha`, less the ignored ones."""
+        c, out = sh(["gh", "run", "list", *self._repo_args(), "--commit", sha, "--limit", "100", "--json", "status,conclusion,name"], cwd=self.cwd)
         try:
             runs = json.loads(out)
         except ValueError:
             raise Stop("gh run list failed: " + out)
-        runs = [r for r in runs if r["name"] not in self.ignore]
+        return [r for r in runs if r["name"] not in self.ignore]
+
+    def run_state(self, sha):
+        """-> (red, pending) from the workflow runs of `sha`. A run that is not completed holds the wait even
+        when its jobs are not listed as checks yet. Only success, skipped and neutral pass."""
+        return self.judge_runs(self.runs(sha))
+
+    @staticmethod
+    def judge_runs(runs):
+        """-> (red, pending) from a list of workflow runs."""
         red = [f"workflow {r['name']}: {r['conclusion']}" for r in runs if r["status"] == "completed" and r["conclusion"] not in ("success", "skipped", "neutral")]
         pending = [f"workflow {r['name']}" for r in runs if r["status"] != "completed"]
         return red, pending
@@ -258,6 +298,31 @@ class Host:
             return f"unknown ({e})"
         s = "red: " + "; ".join(red) if red else "pending: " + ", ".join(pending) if pending else "green"
         return s + (" (ignored: " + "; ".join(ignored) + ")" if ignored else "")
+
+    def head_read(self, n, nothing_is_green=False):
+        """One read, no wait, of every check and workflow run on the head, required or not.
+        -> (verdict, detail): green, pending, red, or unknown when any read could not run. The guard's
+        home for "has this head settled", so it shares classify and runs with the wait.
+        No check and no run reads as pending, not green: right after a push GitHub has not created
+        them yet (wait_checks settles for the same reason). `nothing_is_green` is for a repo with no workflows."""
+        try:
+            info = self.pr(n)
+            got = self.checks(n)
+            red, pending, _ = self.classify(got, [], self.ignore)
+            runs = self.runs(info["head"])
+        except subprocess.TimeoutExpired:  # its text names the resolved program path
+            return "unknown", "a gh call timed out"
+        except Exception as e:  # Stop, a missing gh, malformed JSON: all unread
+            return "unknown", str(e)
+        r_red, r_pending = self.judge_runs(runs)
+        red, pending = red + r_red, pending + r_pending
+        if red:
+            return "red", "; ".join(red)
+        if pending:
+            return "pending", ", ".join(pending)
+        if not got and not runs and not nothing_is_green:
+            return "pending", "no check and no workflow run is reported on the head yet"
+        return "green", ""
 
     def block(self, pending, got):
         """Wait up to a minute for something to change."""
@@ -470,7 +535,7 @@ def preview(root, cfg, cfgrel, n, host, lock):
         f"  then:   push HEAD:{info['branch']}, wait for the checks, `gh pr merge --{m.get('method', '?')} --match-head-commit`,",
         f"          move local {base}, run {len(m.get('afterMerge', []))} afterMerge command(s)" + (", delete the branch." if m.get("deleteBranch") else "."))
 
-def confirm(root, cfg, cfgrel, n, host, lock):
+def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok=""):
     m = cfg.get("merge", {})
     for k in ("method", "deadlineMinutes"):
         if k not in m:
@@ -484,6 +549,7 @@ def confirm(root, cfg, cfgrel, n, host, lock):
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
         branch = info["branch"]
         tmp, wt = open_worktree(root, info, base)
+        undo_check(wt, base_ref, unknown_ok)
         resumed = own_claim(wt, cfgrel, base_ref)
         if resumed:
             claim_sha = info["head"]
@@ -528,6 +594,10 @@ def confirm(root, cfg, cfgrel, n, host, lock):
             c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
             if c:  # never check against a stale base tip
                 fail(f"cannot fetch origin {base}, so the claim cannot be proved fresh:\n" + out)
+            try:  # main may have moved during the wait: read the branch against the tip fetched just now
+                undo_check(wt, base_ref, unknown_ok)
+            except Stop as e:
+                fail(str(e))
             if not os.path.isfile(os.path.join(wt, cfgrel)):  # stamp would crash on it with a raw traceback
                 fail(f"the worktree lost {cfgrel}, so the claim cannot be proved fresh.")
             c, out = node_stamp(wt, cfgrel, "check", base_ref)  # each claimed number must still be free on the base tip
@@ -561,6 +631,7 @@ def main(argv, host=None, lock=None):
     p.add_argument("pr", nargs="?", type=int)
     p.add_argument("--confirm", action="store_true")
     p.add_argument("--unlock", action="store_true")
+    p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
     p.add_argument("--config", default=".github/stamp.json")
     a = p.parse_args(argv)
     if a.unlock == (a.pr is not None) or (a.unlock and a.confirm):
@@ -576,7 +647,8 @@ def main(argv, host=None, lock=None):
             say(f"merge: lock on {cfg['defaultBranch']} removed.")
             return 0
         ignore = ignore_checks(cfg)
-        return (confirm if a.confirm else preview)(root, cfg, a.config, a.pr, host or Host(cfg.get("merge", {}).get("requiredChecks", "protection"), cfg["defaultBranch"], ignore=ignore), lock) or 0
+        h = host or Host(cfg.get("merge", {}).get("requiredChecks", "protection"), cfg["defaultBranch"], ignore=ignore)
+        return (confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok) if a.confirm else preview(root, cfg, a.config, a.pr, h, lock)) or 0
     except Stop as e:
         print(f"merge: {e}", file=sys.stderr)
         return 1

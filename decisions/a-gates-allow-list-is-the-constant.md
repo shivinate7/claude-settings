@@ -98,7 +98,8 @@ said each hook keeps its own copy "so each Stop hook stays in one file, with
 no import between two hooks fired by the same event". A read of the code
 showed that claim false.
 `lint/report_gate.py:21` imports `ste_gate` at module level, which couples two
-Stop hooks at import time. `hooks/config_report.py:384` imports `report_gate`
+Stop hooks at import time. The config report (then `hooks/config_report.py`, now a section of
+`hooks/decision_watch.py`) imported `report_gate`
 inside a function, a real link taken lazily. Only `lint/md_sweep.py` stood
 alone, on the standard library alone.
 

@@ -33,6 +33,8 @@ one fixed order, and the first match wins.
                        flag alone. `commit`, `tag`, and `cherry-pick`'s own flags are measured
                        carve-outs. `merge --abort` is carved out, and every read subcommand is
                        untouched.
+  1d cite-by-id        a `git commit` message or `gh pr create|edit` body that cites a record by
+                       its path. Denied. See "three git acts" below.
   2 machine-wide-kill  a kill by name or by pattern, or `kill <pid>` of a live process that is
                        not a descendant of this session's own `claude` process
   2b detached-launch   a command that starts a process and detaches it from the session: a
@@ -46,10 +48,12 @@ one fixed order, and the first match wins.
                        name to stop it later.
   3 live-stream        a command that follows a stream and never ends on its own
   3 waiter             a shell segment whose command word is a sleep-and-poll
-  4 force-push         a rewrite of a published branch
+  4 force-push         a forced push. Allowed with a lease plus --force-if-includes, denied
+                       with --force or a +refspec, asked when it reaches the default branch.
     destructive-delete a recursive delete at a root, a home or a glob
   5 env-file           any read or write of an environment file
-  6 merge-main         a pull request merged into main. Allowed, and logged (Decision 8).
+  6 merge-checks       a `gh pr merge` (or the MCP merge tool) while the head has a check or run
+                       pending or red, or the read could not run. Denied, `--auto` too.
   7 frozen-path        a write to the settings, the hooks or the global CLAUDE.md, under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. Always denied.
   8 subagent-model-cap a write to a settings file whose content sets or changes
@@ -64,8 +68,8 @@ A project's own `.claude/settings.json`, `.claude/settings.local.json`, and
 `.claude/hooks/*` are NOT frozen (Decision 7). They are allowed, and the guard appends
 one log line with decision `noted` and rule `config-edit`, so a person can see the edit at
 turn end. Nothing is printed for a noted edit; the config-report Stop hook is what surfaces
-it to the transcript. `merge-main`, `conflict-resolve`, and `subject-unread` are logged the
-same way: an ALLOW that a person still gets to see.
+it to the transcript. `subject-unread` is logged the same way: an ALLOW that a person still
+gets to see.
 
 Rule 8 stands after rule 7 on purpose. The owner's user settings hold the subagent model cap,
 `CLAUDE_CODE_SUBAGENT_MODEL` with `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, which stops a session
@@ -88,19 +92,12 @@ refusal whose ground could not be read is a guess, and the line names what could
 read so a reader can tell "I could not confirm this" from "this destroys something". The
 config-report Stop hook prints those lines for the turn that wrote them.
 
-Decision 8 ("Merge into main: allow and report") makes `merge-main` the same shape: a
-merge into main is allowed, never asked, and the guard logs `noted`/`merge-main` when
-the base is `main` or unreadable, and always for the MCP merge tool, which carries no
-base at all. CLAUDE.md's "merged only when I name the act" stays the model's rule; the
-guard cannot read chat, so a prompt here would only repeat a decision the owner already
-made in the conversation.
-
-`conflict-resolve` is a third case in that same shape, inside rule 1. A `git checkout`
-that carries `--ours`, `--theirs`, or `--merge` while a merge, rebase, cherry-pick or
-revert is unresolved in the tree picks a conflict side; it does not discard work, and
-git itself already holds the tree open. That one call is allowed and logged as
-`noted`/`conflict-resolve`. Any other `git checkout` that names a path keeps rule 1's
-ordinary deny or ask.
+A merge into main is allowed and never logged by the guard (decisions/guard-trims-from-the-audit.md,
+guard trims from the 2026-10-02 audit). `hooks/decision_watch.py` names each merge from the
+transcript at turn end. A `git checkout` that carries `--ours`, `--theirs`, or `--merge` while a
+merge, rebase, cherry-pick or revert is unresolved in the tree picks a conflict side; it does not
+discard work, so rule 1 passes it, with no log line of its own. Any other `git checkout` that
+names a path keeps rule 1's ordinary deny or ask.
 
 Rule 1c, `silent-write`, mechanizes CLAUDE.md's "Never discard a command's output" for
 git. pkmnscan's `scripts/silent-write-guard.py` carries the measurement this rule ports:
@@ -153,7 +150,6 @@ import json
 import os
 import re
 import shlex
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -187,7 +183,6 @@ def _force_utf8_streams() -> None:
 SHELL_TOOLS = ("Bash", "PowerShell")
 READ_ONLY_TOOLS = ("Read", "Grep")
 WRITE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
-MERGE_TOOLS = ("mcp__github__merge_pull_request",)
 
 
 def norm(path: str) -> str:
@@ -306,10 +301,17 @@ def segment_tokens(segment: str):
     An unmatched quote or a stray backslash means the guard cannot tell what the segment would
     run. That must fail open, this file's existing stance: judge nothing rather than guess.
     """
+    # PowerShell's escape is the backtick, so a backslash there is a path separator. Doubling it
+    # keeps posix shlex from eating it (`C:\\repo` would read as `C:repo`).
+    if POWERSHELL_CALL[0]:
+        segment = segment.replace("\\", "\\\\")
     try:
         return shlex.split(segment, posix=True)
     except ValueError:
         return None
+
+
+POWERSHELL_CALL = [False]   # set per call by judge_shell: the tool being judged is PowerShell
 
 
 def _skip_assignments_and_keywords(tokens, index=0):
@@ -451,6 +453,21 @@ REDIRECTION = re.compile(
 )
 
 
+def _git_subcommand_index(tokens, index: int) -> int:
+    """Return the index of the subcommand of the `git` word at `index`, past git's own options."""
+    cursor = index + 1
+    while cursor < len(tokens):
+        token = tokens[cursor]
+        if token in GIT_OPT_WITH_VALUE:
+            cursor += 2
+            continue
+        if token.startswith("-"):
+            cursor += 1
+            continue
+        break
+    return cursor
+
+
 def git_calls(segment: str):
     """Return (subcommand, arguments) for every `git` call in one segment."""
     tokens = REDIRECTION.sub(" ", segment).split()
@@ -458,16 +475,7 @@ def git_calls(segment: str):
     index = 0
     while index < len(tokens):
         if basename(tokens[index]) in ("git", "git.exe"):
-            cursor = index + 1
-            while cursor < len(tokens):
-                token = tokens[cursor]
-                if token in GIT_OPT_WITH_VALUE:
-                    cursor += 2
-                    continue
-                if token.startswith("-"):
-                    cursor += 1
-                    continue
-                break
+            cursor = _git_subcommand_index(tokens, index)
             if cursor < len(tokens):
                 calls.append((tokens[cursor].lower(), tokens[cursor + 1:]))
             index = cursor + 1
@@ -537,14 +545,187 @@ def clean_deletes_files(args) -> bool:
     return False
 
 
-def push_is_forced(args) -> bool:
-    """True when a `git push` rewrites the remote branch."""
+# `-o` is read in the short-flag loop, where its value may be glued on.
+PUSH_VALUE_OPTS = {"--receive-pack", "--exec", "--push-option"}
+DEFAULT_BRANCH_FALLBACK = ("main", "master")
+
+
+def _push_config(cwd: str, key: str, overrides=None):
+    """The config value, '' when the key is unset, None when git cannot answer.
+
+    A `git -c key=value` override on the push call wins over the repository's own config.
+    """
+    if overrides and key.lower() in overrides:
+        return overrides[key.lower()]
+    answer = _git(cwd, "config", "--get", key) if cwd else None
+    if answer is None or answer.returncode not in (0, 1):
+        return None
+    return answer.stdout.strip()
+
+
+def _push_current_branch(cwd: str):
+    answer = _git(cwd, "symbolic-ref", "-q", "--short", "HEAD") if cwd else None
+    if answer is None or answer.returncode != 0 or not answer.stdout.strip():
+        return None
+    return answer.stdout.strip()
+
+
+def _push_bare_destination(cwd: str, overrides=None):
+    """Where a push with no refspec goes, read through push.default, else None (unknown).
+
+    `simple` and `current` push the current branch to its own name. `upstream` pushes to the
+    branch's upstream ref. `matching`, `nothing`, an unset upstream or an unreadable config is
+    unknown, and unknown is never safe.
+    """
+    current = _push_current_branch(cwd)
+    mode = _push_config(cwd, "push.default", overrides)
+    if current is None or mode is None:
+        return None
+    if mode in ("", "simple", "current"):
+        return current
+    if mode in ("upstream", "tracking"):
+        merge = _push_config(cwd, "branch." + current + ".merge", overrides)
+        return merge.removeprefix("refs/heads/") if merge else None
+    return None
+
+
+def _push_default_branches(cwd: str, remote: str):
+    """The default branch names, or None when git cannot be read at all.
+
+    `refs/remotes/<remote>/HEAD` answers when it exists. A repository with no such ref falls back
+    to main and master. No readable repository is unknown, and unknown is never safe.
+    """
+    if not cwd or not os.path.isdir(cwd):
+        return None
+    repo = _git(cwd, "rev-parse", "--git-dir")
+    if repo is None or repo.returncode != 0:
+        return None
+    prefix = "refs/remotes/" + remote + "/"
+    head = _git(cwd, "symbolic-ref", "-q", prefix + "HEAD")
+    if head is not None and head.returncode == 0 and head.stdout.strip().startswith(prefix):
+        return (head.stdout.strip()[len(prefix):],)
+    return DEFAULT_BRANCH_FALLBACK
+
+
+# A quoted run with a space in it is text (a commit message, an echo), never a push. A quoted
+# single word stays: it is a refspec or a remote, and the shell would unquote it.
+PUSH_QUOTED = re.compile(r"\"[^\"\s]*\s[^\"]*\"|'[^'\s]*\s[^']*'")
+
+
+def push_target(segment: str, cmd: str, cwd: str):
+    """(directory, config overrides) a `git push` in this segment runs against.
+
+    The directory is the segment's own `git -C <dir>`, else the command's last `cd`, else the
+    session's cwd. A segment that cannot be read gives ('', {}): a directory that does not
+    exist, which the verdict reads as unknown, and unknown asks.
+    """
+    tokens = segment_tokens(segment)
+    if tokens is None:
+        return "", {}
+    # The last `cd` only: `_run_dir` would also take the first `git -C` of ANY segment.
+    run_dir = cwd
+    for other in split_segments(_strip_heredoc_bodies_unconditionally(cmd)):
+        words = segment_tokens(other)
+        cd = _segment_cd_target(words) if words else None
+        if cd is not None:
+            run_dir = _absolute(cd, run_dir)
+    git_c = _segment_git_c_target(tokens)
+    where = _absolute(git_c, run_dir) if git_c is not None else run_dir
+    overrides = {}
+    index = resolve_command(tokens)
+    cursor = index + 1 if index is not None else len(tokens)
+    while cursor < len(tokens) and tokens[cursor].startswith("-"):
+        if tokens[cursor] == "-c" and cursor + 1 < len(tokens):
+            key, _, value = tokens[cursor + 1].partition("=")
+            overrides[key.lower()] = value
+        cursor += 2 if tokens[cursor] in GIT_OPT_WITH_VALUE else 1
+    return where, overrides
+
+
+def push_text(segment: str) -> str:
+    """The segment with quoted multi-word text blanked: a quoted `--force` is text, not a push."""
+    return PUSH_QUOTED.sub(" ", segment)
+
+
+def push_verdict(args, cwd: str, overrides=None) -> str:
+    """'' for an allowed push, else 'ask' or 'deny', for the `git push` arguments `args`.
+
+    Not forced: ''. Forced or deleting at the default branch, or at a destination this cannot
+    resolve: 'ask'. Forced by `--force`, `-f`, a `--fo...` prefix or a `+refspec`: 'deny'. Forced
+    by a lease: '' when `--force-if-includes` rides with it, or every lease names its own sha;
+    else 'deny'. A deletion off the default branch is ''.
+    """
+    force = mirror = every = includes = unpinned = leased = delete = False
+    remote = ""
+    plain = []
+    skip = repo_next = False
     for arg in args:
-        if arg == "--force" or arg.startswith("--force-with-lease"):
-            return True
-        if arg.startswith("-") and not arg.startswith("--") and "f" in arg:
-            return True
-    return False
+        arg = arg.replace('"', "").replace("'", "")
+        if repo_next:
+            repo_next, remote = False, arg
+        elif skip:
+            skip = False
+        elif arg in PUSH_VALUE_OPTS:
+            skip = True
+        elif arg.startswith("--"):
+            name, _, value = arg.partition("=")
+            if name == "--repo":
+                remote, repo_next = value, not value
+            elif name == "--force-if-includes" or (
+                    len(name) >= 9 and "--force-if-includes".startswith(name)):
+                includes = True
+            elif name == "--no-force-if-includes":
+                includes = False
+            elif name == "--no-force-with-lease":
+                leased = unpinned = False
+            elif name == "--force-with-lease" or (
+                    len(name) >= 9 and "--force-with-lease".startswith(name)):
+                leased = True
+                unpinned = unpinned or not value.partition(":")[2]
+            elif name == "--mirror":
+                mirror = True
+            elif name == "--all":
+                every = True
+            elif name == "--delete":
+                delete = True
+            elif len(name) >= 4 and "--force".startswith(name):
+                force = True
+        elif arg.startswith("-") and len(arg) > 1:
+            for index, letter in enumerate(arg[1:]):
+                if letter == "o":  # a push option: the rest of the word, or the next word
+                    skip = index == len(arg) - 2
+                    break
+                force = force or letter == "f"
+                delete = delete or letter == "d"
+        else:
+            plain.append(arg)
+    if not remote and plain:
+        remote, plain = plain[0], plain[1:]
+    plus = any(spec.startswith("+") for spec in plain)
+    delete = delete or any(spec.startswith(":") for spec in plain)
+    if not (force or leased or plus or mirror or delete):
+        return ""
+    if not remote:
+        remote = _push_config(
+            cwd, "branch." + (_push_current_branch(cwd) or "") + ".remote", overrides)
+    defaults = _push_default_branches(cwd, remote or "origin")
+    reaches = mirror or every or defaults is None
+    for spec in plain or [""]:
+        source, colon, target = spec.lstrip("+").partition(":")
+        target = target if colon else source
+        if not plain:
+            target = _push_bare_destination(cwd, overrides)
+        elif target in ("HEAD", "@"):
+            target = _push_current_branch(cwd)
+        if target is None or "*" in target:
+            reaches = True
+        elif target.removeprefix("refs/heads/") in (defaults or ()):
+            reaches = True
+    if reaches:
+        return "ask"
+    if force or plus:
+        return "deny"
+    return "" if includes or not unpinned else "deny"
 
 
 # ------------------------------------------------------------------ the silent write
@@ -2043,7 +2224,7 @@ WORKTREE_PRUNE_ASK_REASON = (
 
 # ------------------------------------------------------------------ picking a conflict side
 #
-# The owner's argument: `git checkout --theirs docs/DEBTS.md` during an unresolved merge does
+# A carve-out of rule 1 (shared-tree), with no rule name or log line of its own. The owner's argument: `git checkout --theirs docs/DEBTS.md` during an unresolved merge does
 # not discard uncommitted work. It picks a conflict side, and the file is already in a
 # conflicted state that git itself will not let the caller leave silently. `checkout_names_a_path`
 # still flags the call, because a bare `git checkout <path>` overwrites from the index, so the
@@ -2315,6 +2496,9 @@ def head_move_target(subcommand: str, args) -> str:
     if target == PROTECTED_BASE:
         return ""
     return matched
+
+
+PROTECTED_BASE = "main"
 
 
 def pointer_head_hit(segment: str, root: str) -> str:
@@ -2989,10 +3173,12 @@ def cmd_exe_delete_hit(segment: str) -> str:
 
 
 PUSH_REASON = (
-    "Rule (Git): this rewrites a branch that other people have already pulled. "
-    "Their next pull then conflicts with history they already hold. "
-    "Remedy: push a new commit on top when the branch is shared. "
-    "The click in this prompt is the grant when the rewrite is the intent."
+    "Rule (Git): a forced push can overwrite newer remote work with a stale copy. "
+    "Remedy: retry with --force-with-lease --force-if-includes."
+)
+PUSH_ASK_REASON = (
+    "Rule (Git): this forced push may rewrite the default branch, or its target is unreadable. "
+    "The click in this prompt is the grant."
 )
 
 
@@ -3052,6 +3238,11 @@ ENV_EXISTENCE_COMMANDS = ("ls", "test", "[", "[[")
 # stdout or written to a file that is NOT an environment file (`echo <name> > .worktreeinclude`),
 # and no environment file is read or written. A redirect onto an environment file is refused first. `cat <name> > x` is not on the list, so it stays held.
 ENV_TEXT_COMMANDS = ("echo", "printf")
+# A search command's pattern is a regex, never a path: a lone dot-star pattern reads no
+# environment file. MEASURED in guard.log 2026-09-16 to 10-02: 65 false `env-file` denies.
+ENV_PATTERN_COMMANDS = ("grep", "egrep", "fgrep", "rg", "ag", "ack")
+ENV_PATTERN_FLAGS = ("-e", "--regexp")
+ENV_PATTERN_VALUE_FLAGS = ("-A", "-B", "-C", "-m")  # a count follows, never the pattern
 
 # The message or body of a commit or a pull request is text. Its value is blanked before the words
 # are read, so an env name in prose reads no contents. A substitution in the value is cut out
@@ -3314,6 +3505,8 @@ def env_refusal(cmd: str, subs_only: bool = False):
         return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH
     if subs_only:
         texts = texts[:-1]
+        if not texts:
+            return "", ""  # a body with no substitution is text: nothing to judge, and no crash
     for index, (text, in_message) in enumerate(texts):
         # The command itself is last. Its `echo` or `printf` prints to stdout or a file, and an env
         # name among the arguments is text. A substitution's output is an ARGUMENT of the command
@@ -3348,6 +3541,39 @@ def _env_parts(piece: str):
     return _ampersand_split(piece)
 
 
+def _pattern_words(words, position: int):
+    """Return the indexes of the words a search command reads as its PATTERN, never as a path.
+
+    With `-e` or `--regexp`, the word after each one is a pattern. Without, the first plain word
+    is. A flag's own value (`-A 3`) can stand first and is then skipped in the pattern's place,
+    which only ever leaves a real path judged, never hides one.
+    """
+    if any(w in ("-f", "--file") or w.startswith("--file=") for w in words[position + 1:]):
+        return set()  # patterns come from a file: its name is a path, and every word is judged
+    marked = {i + 1 for i, w in enumerate(words) if w in ENV_PATTERN_FLAGS and i > position}
+    if marked:
+        return marked
+    for i in range(position + 1, len(words)):
+        if (words[i].startswith("-") or REDIRECT.fullmatch(words[i])
+                or REDIRECT.fullmatch(words[i - 1]) or words[i - 1] in ENV_PATTERN_VALUE_FLAGS):
+            continue
+        return {i}
+    return set()
+
+
+def _assignment_end(words, position: int) -> int:
+    """Return the index after the `VAR=value` assignment that starts at `position`. A quoted value
+    with a space (`ADMINS='Shivam Semwal'`) spans several words, and its tail must not read as the
+    command word. MEASURED: 29 false `env-file` denies named an author's surname as the command."""
+    quote = next((c for c in "'\"" if words[position].partition("=")[2].count(c) % 2), "")
+    end = position
+    while quote and end + 1 < len(words):
+        end += 1
+        if quote in words[end]:
+            break
+    return end + 1
+
+
 def _env_words(segment: str):
     """Return (words, command word) of one segment, redirects spaced into words of their own."""
     words = READ_REDIRECT.sub(" < ", REDIRECT.sub(
@@ -3355,7 +3581,7 @@ def _env_words(segment: str):
     # The command is the first word that is not a `VAR=value` assignment.
     position = 0
     while position < len(words) and ASSIGNMENT.match(words[position]):
-        position += 1
+        position = _assignment_end(words, position)
     head = words[position] if position < len(words) else ""
     command = head.strip("'\"").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     if command in ENV_TEXT_COMMANDS:
@@ -3434,7 +3660,10 @@ def _env_flat(cmd: str, text_ok: bool = False):
             # A text command's arguments are data. A redirect onto an environment file is refused
             # below, first.
             text_to_file = command in ENV_TEXT_COMMANDS and text_ok and not piped
+            patterns = _pattern_words(words, position) if command in ENV_PATTERN_COMMANDS else ()
             for index, word in enumerate(words):
+                if index in patterns:
+                    continue
                 prefix, assigned, rest = word.partition("=")
                 flag = prefix if assigned and prefix.startswith("-") else ""
                 named = env_reference(rest if assigned else word)
@@ -3471,55 +3700,6 @@ def _env_flat(cmd: str, text_ok: bool = False):
 def is_env(path: str) -> bool:
     name = norm(path).rsplit("/", 1)[-1]
     return name.startswith(".env") and name != ENV_ALLOWED
-
-
-# ------------------------------------------------------------------ the merge into main
-#
-# Decision 8 ("Merge into main: allow and report") supersedes Decision 2 ("ask always"). CLAUDE.md
-# still says "merged only when I name the act", but the owner names the act in chat, and the guard
-# cannot read chat. A prompt here would only repeat a decision already made, so the call is
-# allowed and NOTED in `guard.log` instead, for a person to read at turn end and the report to
-# name under Done.
-#
-# THE BASE IS QUERIED, never guessed from the command. `gh pr merge 75 --squash` names no base at
-# all, because the base is a property of the pull request. A merge into any other base is not
-# noted at all, because an integration branch takes its lanes without asking anybody.
-#
-# AN UNREADABLE BASE IS NOT A SAFE ANSWER, so it is noted the same as a base of main.
-GH_PR_MERGE = re.compile(r"\bgh\s+pr\s+merge\b")
-PROTECTED_BASE = "main"
-
-
-def merge_base(cmd: str) -> str:
-    """Return the base branch of the pull request the command names, or '' when unreadable.
-
-    The number is the first bare digit word after `merge`. With no number, the tool answers for the
-    current branch's pull request, which is the same question one argument shorter.
-    """
-    named = re.search(r"\bgh\s+pr\s+merge\b([^\n;|&]*)", cmd)
-    words = (named.group(1) if named else "").split()
-    number = next((w for w in words if w.isdigit()), "")
-    # RESOLVE THE PROGRAM FIRST. MEASURED on Windows 2026-09-16: CreateProcess appends `.exe` and
-    # never reads PATHEXT, so a call of "gh" skipped a `gh.cmd` earlier on PATH and found a
-    # `gh.exe` further along. `shutil.which` reads PATHEXT, so the resolved path is the one the
-    # shell would run, and a missing tool is then plain to see.
-    program = shutil.which("gh")
-    if not program:
-        return ""
-    query = [program, "pr", "view"] + ([number] if number else []) + ["--json", "baseRefName"]
-    try:
-        answer = subprocess.run(query, capture_output=True, text=True, timeout=10)
-    except Exception:
-        return ""
-    if answer.returncode != 0:
-        return ""
-    try:
-        parsed = json.loads(answer.stdout)
-    except Exception:
-        return ""
-    if not isinstance(parsed, dict):
-        return ""
-    return parsed.get("baseRefName", "") or ""
 
 
 # ------------------------------------------------------------------ the frozen paths
@@ -4059,6 +4239,634 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str) -> No
     sys.exit(0)
 
 
+# ------------------------------------------------------------------ three git acts
+#
+# Each clause below judges the ACT a segment performs, read off its command word (decisions/
+# predicate-is-the-act.md), never a substring of the text. `echo git commit`, a `git log`, a
+# quoted message and a heredoc body name an act and perform none.
+#
+# 1. merge-checks (CLAUDE.md `git-wait-for-required-checks`): a merge made outside the merge tool is
+#    refused while the head has a check or a workflow run pending or red, or when that read could
+#    not run. The merge tool (merge/merge.py) runs its own `gh pr merge` as a subprocess, so no hook
+#    sees it; it has already waited. The read below is the tool's own `Host.head_read`, one home.
+# 2. cite-by-id (CLAUDE.md `git-cite-by-id`): a commit message or PR body that cites a record by
+#    its path is refused. The id is the record's file name without folder or `.md`, the slug
+#    lint/check_record_slugs.py measures, or the number the stamp claims at merge.
+
+def git_call_of(segment: str):
+    """Return (subcommand, args) when the segment's COMMAND WORD is git, else None.
+
+    Args come from shlex, so a quoted message stays one token. A segment shlex cannot parse
+    judges nothing: the same fail-open stance as `segment_tokens`.
+    """
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return None
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]) not in ("git", "git.exe"):
+        return None
+    cursor = _git_subcommand_index(tokens, index)
+    if cursor >= len(tokens):
+        return None
+    return tokens[cursor].lower(), tokens[cursor + 1:]
+
+
+def gh_call_of(segment: str):
+    """Return the tokens after `gh` when the segment's COMMAND WORD is gh, else None."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return None
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]) not in ("gh", "gh.exe"):
+        return None
+    return tokens[index + 1:]
+
+
+# ---- a merge made outside the merge tool
+MERGE_TOOLS = ("mcp__github__merge_pull_request",)
+MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject",
+                     "--match-head-commit", "-A", "--author-email"}
+# Seconds per `gh` call. The gate makes three calls: 3 * 3 = 9 s, under the 20 s hook timeout in
+# settings.json.
+MERGE_READ_TIMEOUT = 3
+MERGE_TOOL_REL = os.path.join("merge", "merge.py")
+
+
+def merge_call_of(segment: str):
+    """Return (selector, repo) for a `gh pr merge` segment, else None.
+
+    `selector` is the first positional word, '' for the current branch's pull request. `--auto` is
+    judged like any merge: GitHub's auto-merge waits only on REQUIRED checks, and a base with none
+    merges at once.
+    """
+    rest = gh_call_of(segment)
+    if rest is None or rest[:2] != ["pr", "merge"]:
+        return None
+    selector, repo = "", ""
+    args = rest[2:]
+    if "-h" in args or "--help" in args:
+        return None   # help merges nothing
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        if arg in ("-R", "--repo"):
+            repo = args[index] if index < len(args) else ""
+            index += 1
+        elif arg.startswith("--repo="):
+            repo = arg[len("--repo="):]
+        elif arg in MERGE_VALUE_FLAGS:
+            index += 1
+        elif arg.startswith("-"):
+            continue
+        elif not selector:
+            selector = arg
+    return selector, repo
+
+
+_MERGE_MODULE = []
+
+
+def settings_roots():
+    """The clones of claude-settings this guard may read a sibling file from: the one beside its
+    own real path (the hooks are symlinks into the clone), then the one the global rules file
+    points at."""
+    roots = [os.path.dirname(os.path.dirname(os.path.realpath(__file__)))]
+    pointer = pointer_checkout()
+    if pointer:
+        roots.append(pointer)
+    return roots
+
+
+def merge_module():
+    """Load merge/merge.py, the merge tool, or return None. Looked up beside this file's real
+    path first (the hooks are symlinks into the clone), then in the clone the global rules
+    file points at. An unloadable tool is an unknown read, never a pass."""
+    if _MERGE_MODULE:
+        return _MERGE_MODULE[0]
+    for root in settings_roots():
+        path = os.path.join(root, MERGE_TOOL_REL)
+        if not os.path.isfile(path):
+            continue
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("merge_tool", path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            module.SH_TIMEOUT = MERGE_READ_TIMEOUT
+            _MERGE_MODULE.append(module)
+            return module
+        except Exception:
+            continue
+    return None
+
+
+def has_workflows(where: str) -> bool:
+    """True when the checkout at `where` holds a workflow file, or when that cannot be told: a
+    head with nothing reported is then unsettled, never green."""
+    try:
+        folder = os.path.join(where, ".github", "workflows")
+        return any(name.endswith((".yml", ".yaml")) for name in os.listdir(folder))
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return True
+
+
+def merge_gate(selector, repo: str, where: str):
+    """Return (verdict, detail) for the head of the named pull request: green, pending, red or
+    unknown. One read, no wait, run in `where` so `gh` names the repo the command names."""
+    module = merge_module()
+    if module is None:
+        return "unknown", "the merge tool's check reader could not be loaded"
+    where = os.path.normpath(where) if where else ""   # a `cd` target may carry either separator
+    host = module.Host(repo=repo or None, cwd=where or None)
+    return host.head_read(selector, nothing_is_green=not has_workflows(where))
+
+
+MERGE_GATE_REASON = (
+    "Rule (Git): this head is not settled: %s. A merge waits for every check and workflow run on "
+    "the head, required or not, and a read that could not run counts as not settled. "
+    "Remedy: run the merge tool, `merge <pr> --confirm`, which waits on every check, then "
+    "merges the head it waited on."
+)
+
+
+def merge_gate_reason(verdict: str, detail: str) -> str:
+    return MERGE_GATE_REASON % (verdict + (" (" + cap_safe(detail, 160) + ")" if detail else ""))
+
+
+# ---- a message that cites a record by path
+RECORD_DIRS_FILE = os.path.join("lint", "check_record_slugs.py")   # its DIRS is the one list
+_RECORD_PATTERN = []
+
+
+def record_path_pattern():
+    """The pattern for a repo-root record path, or None when the record folders cannot be read.
+
+    The folders are the `DIRS` of lint/check_record_slugs.py, read from the file (it runs on
+    import, so it cannot be imported). A path counts only at the START of a word: after a space,
+    quote, bracket or `=`, with an optional `./`. A URL, `lint/decisions/x.md` and
+    `docs/decisions/0001.md` have a `/` or a word before the folder, so they are not repo-root
+    record paths and stay allowed.
+    """
+    if _RECORD_PATTERN:
+        return _RECORD_PATTERN[0]
+    for root in settings_roots():
+        try:
+            with open(os.path.join(root, RECORD_DIRS_FILE), encoding="utf-8") as handle:
+                text = handle.read(MESSAGE_FILE_MAX)
+        except Exception:
+            continue
+        block = re.search(r"^DIRS\s*=\s*\(([^)]*)\)", text, re.MULTILINE)
+        names = re.findall(r'"([\w.-]+)/"', block.group(1)) if block else []
+        if names:
+            pattern = re.compile(
+                r"(?:^|(?<=[\s\"'`(\[<,;=@]))(?:\./)?(?:" + "|".join(map(re.escape, names))
+                + r")/[\w.-]+\.md\b")
+            _RECORD_PATTERN.append(pattern)
+            return pattern
+    return None
+MESSAGE_VALUE_FLAGS = {"-m", "--message", "-b", "--body"}
+MESSAGE_FILE_FLAGS = {"-F", "--file", "--body-file"}
+MESSAGE_FILE_MAX = 64 * 1024
+
+CITE_REASON = (
+    "Rule (Git): this message cites a record by its path. A record is cited by its id, with a "
+    "short gloss, like \"D12, short titles for records\". "
+    "Remedy: write the id the record carries, or its slug while the number is unclaimed, "
+    "and leave the folder and the file extension out."
+)
+
+
+def message_sources(args):
+    """Return (texts, files, stdin) the message flags of a commit or PR call carry.
+
+    `texts` are the inline values, `files` the named files, `stdin` True for `-F -`. Reads
+    `-m x`, `--message=x`, `-mx`, a short cluster ending in m (`-am x`), and the long and short
+    body and file flags. A flag glued to a value in any other way is a form this does not read.
+    """
+    texts, files, stdin = [], [], False
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        value = None
+        is_file = False
+        if arg in MESSAGE_VALUE_FLAGS or (re.match(r"^-[A-Za-z]+$", arg) and arg.endswith("m")
+                                          and not arg.startswith("--")):
+            value = args[index] if index < len(args) else ""
+            index += 1
+        elif arg in MESSAGE_FILE_FLAGS:
+            value = args[index] if index < len(args) else ""
+            index += 1
+            is_file = True
+        elif arg.startswith(("--message=", "--body=")):
+            value = arg.split("=", 1)[1]
+        elif arg.startswith(("--file=", "--body-file=")):
+            value = arg.split("=", 1)[1]
+            is_file = True
+        elif arg.startswith("-m") and not arg.startswith("--") and len(arg) > 2:
+            value = arg[2:]
+        if value is None:
+            continue
+        if not is_file:
+            texts.append(value)
+        elif value == "-":
+            stdin = True
+        else:
+            files.append(value)
+    return texts, files, stdin
+
+
+UNREAD_MARK = "\0unread:"
+UNREAD_REASON = (
+    "Rule (Git): the message file could not be read, so the guard cannot tell whether it cites a "
+    "record by its path. "
+    "Remedy: pass the message inline, or name a file this directory can read."
+)
+
+
+def cited_record_path(segment: str, raw: str, where: str) -> str:
+    """Return the first record path a commit message or PR body cites, else ''. A message file
+    that cannot be read returns UNREAD_MARK + its name: an unread message is not a clean one.
+
+    Acts: `git commit` and `gh pr create|edit`. A heredoc body belongs to the act only when the
+    segment itself carries the `<<` header, so a heredoc that writes a record file never counts.
+    """
+    call = git_call_of(segment)
+    if call is not None:
+        if call[0] != "commit":
+            return ""
+        args = call[1]
+    else:
+        rest = gh_call_of(segment)
+        if rest is None or rest[:1] != ["pr"] or rest[1:2] not in (["create"], ["edit"]):
+            return ""
+        args = rest[2:]
+    pattern = record_path_pattern()
+    if pattern is None:
+        # An unread folder list is logged, as every unread subject is, and the rule stands down.
+        record("Bash", "noted", "subject-unread", "cite-by-id: record folders unread")
+        return ""
+    texts, files, stdin = message_sources(args)
+    for name in files:
+        if is_env(name):
+            continue   # never opened here: the environment-file rule judges it, and refuses
+        try:
+            with open(os.path.normpath(_absolute(name, where)), encoding="utf-8",
+                      errors="replace") as handle:
+                texts.append(handle.read(MESSAGE_FILE_MAX))
+        except Exception:
+            return UNREAD_MARK + name   # unknown, never a pass
+    if "<<" in segment:
+        texts.extend(body for _, body in _split_heredocs(raw)[1])
+    for text in texts:
+        found = pattern.search(norm(text))
+        if found:
+            return found.group(0)
+    return ""
+
+
+# ------------------------------------------------------------------ builders do not edit tests
+#
+# EVIDENCE: ImpossibleBench (arXiv 2510.20270): read-only tests block a worker's direct edits of
+# the tests that grade it, with little loss of real performance. A builder that cannot pass a test
+# may otherwise delete it, skip it, or rewrite it to pass.
+#
+# THE RULE JUDGES THE RESULT, NOT THE COMMANDS (decisions/predicate-is-the-act.md). A first
+# version read shell commands (`rm`, `mv`, `sed -i`, a redirect). A review found a bypass for
+# each: `bash -c`, `find -delete`, `xargs rm`, `dd`, `rsync`, `patch`, a variable, a symlink. The
+# commands are not the act. The act is a test path in the diff. So the diff is judged, at three
+# points: a Write/Edit tool call (the early warning, by path), the builder's own `git commit` and
+# `git push`, and its SubagentStop. Each reads the SAME diff: the working tree against the commit
+# the agent's branch was created from, plus untracked files, with every path normalised for
+# backslashes and resolved through symlinks.
+#
+# THE ROLE is read from the payload: it carries an `agent_id` (a subagent) and an `agent_type`.
+# The main session, a reviewer, an Explore agent, and a session started with `--agent builder` (no
+# `agent_id`; unmeasured, so it stays allowed) pass untouched. `test-author` is the inverse: it may
+# change ONLY test paths and test config, never product code (agents/test-author.md).
+#
+# A TEST PATH is read from the path's own parts, never from a substring: a basename shape
+# (`test_*.py`, `*_test.py`, `*_test.go`, `*.test.{ts,js,tsx,jsx}`, `*.spec.*`, `conftest.py`) or a
+# directory part named tests, test, __tests__ or spec. Parts count from the repository root, so a
+# clone that lives under a folder named `tests` is not all test files. TEST CONFIG (pytest.ini,
+# pyproject.toml, jest.config.*, ...) is a test path for a builder only when the change ADDS a line
+# that disables tests (`--deselect`, `testpaths`, `testPathIgnorePatterns`, ...), so a new
+# dependency in pyproject.toml stays allowed. For a test-author, test config is always its own.
+# `contest.py` and `latest_results.md` match no shape.
+# The decisions: predicate-is-the-act, guard-that-cries-wolf-is-spent, builders-cannot-edit-tests.
+BUILDER_ROLE = "builder"
+AUTHOR_ROLE = "test-author"
+TEST_BASENAME = re.compile(
+    r"^(?:test_.*\.py|.*_test\.(?:py|go)|.*\.test\.[cm]?[jt]sx?|.*\.spec\..+|conftest\.py"
+    r"|jest\.setup\..+)$")
+# Case matters: `FooTest.java` is a test, `Contest.java` is not.
+JAVA_TEST = re.compile(r"^\w*Tests?\.java$")
+TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support"}
+# Dependency lists only a test-author owns. A builder may add a dev dependency.
+AUTHOR_BASENAMES = {"requirements-dev.txt"}
+TEST_CONFIG = re.compile(
+    r"^(?:pytest\.ini|tox\.ini|setup\.cfg|pyproject\.toml|package\.json"
+    r"|(?:jest|vitest|playwright|karma)\.conf(?:ig)?\.\w+|vitest\.workspace\.\w+|\.mocharc(?:\.\w+)?)$")
+# What disables tests. NAMES are test-runner settings that no lint tool shares, so they count in any
+# test config. FLAGS (`--ignore` is also ruff's and flake8's) count only in a test-runner context:
+# pytest `addopts`, a `[tool.pytest*]` section, or a line that calls a test runner.
+TEST_DISABLE_NAMES = re.compile(
+    r"collect_ignore|norecursedirs|testpaths|testPathIgnorePatterns|testIgnore|testMatch"
+    r"|testRegex|xfail|passWithNoTests"
+    r"|pytest\.(?:mark\.)?skip|unittest\.(?:skip|expectedFailure)|\.skip\(|\bx(?:it|describe)\("
+    r"|\bt\.Skip(?:Now)?\(")
+TEST_DISABLE_FLAGS = re.compile(
+    r"--(?:deselect|ignore|ignore-glob|collect-only)(?![\w-])|-p\s+no:|-[km]\s*['\"]?not\b")
+TEST_RUNNER_CONTEXT = re.compile(
+    r"addopts|\b(?:pytest|py\.test|jest|vitest|mocha|playwright|karma)\b|go\s+test")
+
+
+def disables_tests(new_lines, old_lines) -> bool:
+    """True when the ADDED lines (those of `new_lines` not in `old_lines`) disable tests."""
+    section = ""
+    for index, line in enumerate(new_lines):
+        header = re.match(r"^\s*\[([^\]]+)\]", line)
+        if header:
+            section = header.group(1)
+        if line in old_lines:
+            continue
+        if TEST_DISABLE_NAMES.search(line):
+            return True
+        if TEST_DISABLE_FLAGS.search(line) and (
+                "pytest" in section
+                or any(TEST_RUNNER_CONTEXT.search(near) for near in new_lines[max(0, index - 3):index + 1])):
+            return True
+    return False
+BUILDER_TEST_REASON = (
+    "A builder does not change tests or test config. Report the needed test change in your "
+    "report. The orchestrator assigns it to a test-author."
+)
+AUTHOR_SCOPE_REASON = (
+    "A test-author changes only tests and test config. Report the needed product change in your "
+    "report. The orchestrator assigns it to a builder."
+)
+
+
+def agent_role(payload) -> str:
+    """BUILDER_ROLE or AUTHOR_ROLE for a subagent of that type, else ''."""
+    role = payload.get("agent_type")
+    if not payload.get("agent_id") or not isinstance(role, str):
+        return ""
+    role = role.strip().lower()
+    return role if role in (BUILDER_ROLE, AUTHOR_ROLE) else ""
+
+
+def is_test_rel(rel: str) -> bool:
+    """True when a repository-relative path is a test path (see the block comment above)."""
+    parts = [part for part in norm(rel).split("/") if part]
+    return bool(parts) and (
+        bool(TEST_BASENAME.match(parts[-1].lower())) or bool(JAVA_TEST.match(parts[-1]))
+        or any(p.lower() in TEST_DIRS for p in parts)
+    )
+
+
+def is_test_config_rel(rel: str) -> bool:
+    return bool(TEST_CONFIG.match(basename(rel)))
+
+
+def author_path_ok(rel: str) -> bool:
+    """A test-author may change a test path, test config, or a dev dependency list. `package.json`
+    and `pyproject.toml` pass here and are read by content in `role_offences`."""
+    return is_test_rel(rel) or is_test_config_rel(rel) or basename(rel) in AUTHOR_BASENAMES
+
+
+def repo_rel(path: str, cwd: str):
+    """The path relative to its repository root (the nearest parent holding `.git`), posix, or the
+    full path when it sits in no repository. None when it cannot be read."""
+    if not path or not isinstance(path, str):
+        return None
+    try:
+        full = norm(_literal_resolved(path, cwd))
+    except Exception:
+        return None
+    parent = os.path.dirname(full)
+    while parent and parent != os.path.dirname(parent):
+        if os.path.exists(os.path.join(parent, ".git")):
+            return full[len(parent):]
+        parent = os.path.dirname(parent)
+    return full
+
+
+def role_write_hit(role: str, tool_input, target: str, cwd: str) -> str:
+    """The early warning for a write tool call: the target path a role may not change, else ''."""
+    rel = repo_rel(target, cwd)
+    if rel is None:
+        return ""
+    if role == AUTHOR_ROLE:
+        return "" if author_path_ok(rel) else target
+    if is_test_rel(rel):
+        return target
+    if is_test_config_rel(rel) and any(
+            disables_tests(part.splitlines(), []) for part in write_content_parts(tool_input)):
+        return target
+    return ""
+
+
+def diff_bases(root: str):
+    """The commits this agent's own work is measured against. Empty when git could not answer.
+
+    TWO candidates, and a path counts only if it differs from BOTH:
+      - the oldest `HEAD` reflog entry: the commit the worktree was cut from. It survives a new
+        branch name (`switch -c b2`), which a branch reflog would not.
+      - the merge base of HEAD with the default branch. It moves forward each time main is merged
+        or rebased in.
+    The work the parent branch handed over differs from the first and not the second only if the
+    parent is the default branch; the work main later gained differs from the second and not the
+    first. Only the agent's own change differs from both."""
+    bases = []
+    log = _git(root, "reflog", "show", "--format=%H", "HEAD")
+    lines = log.stdout.split() if log is not None and log.returncode == 0 else []
+    if lines:
+        bases.append(lines[-1])
+    default = resolve_default_base(root)
+    if default:
+        merged = _git(root, "merge-base", "HEAD", default)
+        if merged is not None and merged.returncode == 0 and merged.stdout.strip():
+            if merged.stdout.strip() not in bases:
+                bases.append(merged.stdout.strip())
+    return bases
+
+
+def package_json_author_ok(old: str, new: str) -> bool:
+    """A test-author may change `devDependencies`, `jest`, and the test scripts of a manifest, and
+    nothing else in it."""
+    try:
+        before, after = json.loads(old), json.loads(new)
+    except Exception:
+        return False
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return False
+
+    def scripts(manifest):
+        found = manifest.get("scripts")
+        found = found if isinstance(found, dict) else {}
+        return {k: v for k, v in found.items() if not re.match(r"^(?:pre|post)?test", k)}
+
+    for key in set(before) | set(after):
+        if key in ("devDependencies", "jest"):
+            continue
+        if key == "scripts":
+            if scripts(before) != scripts(after):
+                return False
+        elif before.get(key) != after.get(key):
+            return False
+    return True
+
+
+def toml_sections(text: str):
+    """Split TOML text into {header: body}, the lines before any header under ''."""
+    sections, name = {"": []}, ""
+    for line in text.splitlines():
+        found = re.match(r"^\s*\[\[?([^\]]+)\]\]?\s*$", line)
+        if found:
+            name = found.group(1).strip()
+            sections.setdefault(name, [])
+        else:
+            sections[name].append(line.strip())
+    return {key: "\n".join(body).strip() for key, body in sections.items()}
+
+
+def pyproject_author_ok(old: str, new: str) -> bool:
+    """A test-author may change the `[tool.pytest*]` sections of a project file, and nothing else."""
+    before, after = toml_sections(old), toml_sections(new)
+    return all(before.get(key) == after.get(key)
+               for key in set(before) | set(after) if not key.startswith("tool.pytest"))
+
+
+def base_text(root: str, base: str, rel: str) -> str:
+    """The file's text at the base commit, or '' when it did not exist there."""
+    answer = _git(root, "show", base + ":" + norm(rel))
+    return answer.stdout if answer is not None and answer.returncode == 0 else ""
+
+
+def work_text(root: str, rel: str) -> str:
+    try:
+        with open(os.path.join(root, rel), encoding="utf-8", errors="replace") as handle:
+            return handle.read()
+    except Exception:
+        return ""
+
+
+def disabling_added(root: str, base: str, rel: str) -> bool:
+    """True when the lines a change ADDS to one file, against the base, disable tests."""
+    return disables_tests(work_text(root, rel).splitlines(), base_text(root, base, rel).splitlines())
+
+
+def role_offences(root: str, top: str, base: str, role: str):
+    """The paths whose change, against ONE base, the role may not make; None when git failed.
+
+    The files are the working tree against the base (committed, staged and unstaged work in one
+    read; a change put back to the base's own bytes is no change) plus untracked files. Each path
+    is checked as spelled and as resolved through symlinks."""
+    tracked = _git(root, "diff", "--name-only", "-z", "--no-renames", base)
+    fresh = _git(root, "ls-files", "--others", "--exclude-standard", "-z")
+    if tracked is None or fresh is None or tracked.returncode or fresh.returncode:
+        return None
+    found = []
+    for rel in [p for p in tracked.stdout.split("\0") if p] + sorted(
+            p for p in fresh.stdout.split("\0") if p):
+        # `is_test_rel` is the one place a backslash becomes `/`. A path outside the repository
+        # reads `../...`, which no role owns.
+        real = os.path.realpath(os.path.join(top, rel))
+        names = [rel, os.path.relpath(real, top)]
+        if role == AUTHOR_ROLE:
+            bad = not all(author_path_ok(n) for n in names)
+            if not bad and basename(rel) == "package.json":
+                bad = not package_json_author_ok(base_text(root, base, rel), work_text(root, rel))
+            if not bad and basename(rel) == "pyproject.toml":
+                bad = not pyproject_author_ok(base_text(root, base, rel), work_text(root, rel))
+        else:
+            bad = any(is_test_rel(n) for n in names) or (
+                is_test_config_rel(rel) and disabling_added(root, base, rel))
+        if bad:
+            found.append(rel)
+    return found
+
+
+def diff_violation(root: str, role: str):
+    """Judge the agent's whole result. Returns ('', base) when clean, (the first offending path,
+    base) when not, and (None, base) when git could not answer: UNKNOWN, never clear.
+
+    A path offends only if it offends against EVERY base (see `diff_bases`)."""
+    bases = diff_bases(root)
+    top = _git(root, "rev-parse", "--show-toplevel")
+    if not bases or top is None or top.returncode != 0:
+        return None, ""
+    top = os.path.realpath(top.stdout.strip())
+    sets = [role_offences(root, top, base, role) for base in bases]
+    if any(s is None for s in sets):
+        return None, bases[0]
+    both = [rel for rel in sets[0] if all(rel in s for s in sets[1:])]
+    return (both[0] if both else ""), bases[0]
+
+
+def undo_route(base: str) -> str:
+    """The working way to put one path back, with placeholders: it names no target."""
+    return ("Undo it. Restore a changed or deleted file with `git show %s:<path> > <path>`. "
+            "That restores the WHOLE file, so redo any product change in it after. "
+            "Remove a new file with `rm <path>`." % (base[:12] or "<base>"))
+
+
+def diff_refusal(tool: str, role: str, root: str) -> None:
+    """Refuse (or note, when unreadable) a role's diff at commit or push. Never returns on a
+    refusal."""
+    found, base = diff_violation(root, role)
+    if found is None:
+        record(tool, "noted", "role-diff-unread", root)
+    elif found:
+        rule = "test-author-scope" if role == AUTHOR_ROLE else "builder-test-edit"
+        reason = AUTHOR_SCOPE_REASON if role == AUTHOR_ROLE else BUILDER_TEST_REASON
+        refuse(tool, "deny", rule, reason + " " + undo_route(base), found)
+
+
+STOP_UNREAD_REASON = (
+    "The guard could not read your diff. Make sure your work is committed in your own worktree, "
+    "then stop again."
+)
+
+
+def judge_stop(payload) -> None:
+    """A builder or test-author that tries to stop is judged on its whole diff.
+
+    A refusal blocks the stop ONCE and hands the reason back. A second stop (`stop_hook_active`)
+    is allowed and logged as `role-diff-unresolved`, so an agent that cannot fix its tree never
+    loops. Every path that cannot judge LOGS: a missing cwd, a cwd that is the main checkout
+    (which holds no agent's own work), and a diff git could not read."""
+    role = agent_role(payload)
+    if not role:
+        return
+    where = payload.get("cwd", "")
+    if not isinstance(where, str) or not where:
+        record("SubagentStop", "noted", "role-diff-nocwd", role)
+        return
+    if is_worktree(where) is False:
+        record("SubagentStop", "noted", "role-diff-main-checkout", where)
+        return
+    found, base = diff_violation(where, role)
+    if found == "":
+        return
+    rule = "test-author-scope" if role == AUTHOR_ROLE else "builder-test-edit"
+    if payload.get("stop_hook_active"):
+        record("SubagentStop", "noted", "role-diff-unresolved", found or "unread")
+        return
+    if found is None:
+        reason = STOP_UNREAD_REASON
+    else:
+        reason = (AUTHOR_SCOPE_REASON if role == AUTHOR_ROLE else BUILDER_TEST_REASON
+                  ) + " " + undo_route(base)
+    record("SubagentStop", "deny", rule, found or "unread")
+    print(json.dumps({"decision": "block", "reason": rule + ": " + reason}))
+    sys.exit(0)
+
+
 # ------------------------------------------------------------------ two ported shell traps
 #
 # Ported from pkmnscan's `scripts/guard-shell.py` (behaviour, not code shape). Each clause below is
@@ -4191,9 +4999,17 @@ def below_the_floor(model) -> bool:
     return "haiku" in str(model).lower()
 
 
-def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
+def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "") -> None:
+    POWERSHELL_CALL[0] = tool == "PowerShell"
     stripped = strip_heredoc_bodies(raw)
     cmd = norm(stripped)
+
+    # 0b. A builder or test-author's `git commit` or `git push` is judged on the diff it would send.
+    if role:
+        for segment in split_segments(stripped):
+            for subcommand, _ in git_calls(segment):
+                if subcommand in ("commit", "push"):
+                    diff_refusal(tool, role, command_root(stripped, cwd))
 
     # 1. Shared trees.
     for segment in split_segments(stripped):
@@ -4206,7 +5022,6 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
         root = command_root(stripped, cwd)
         resolved = checkout_conflict_resolve(segment, root)
         if resolved:
-            record(tool, "noted", "conflict-resolve", resolved)
             continue
         # This session's own scratchpad: private by path, so nothing shared can be lost.
         if under_session_scratchpad(root, session_id):
@@ -4268,6 +5083,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
             reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"
                       else SILENT_WRITE_QUIET_REASON)
             refuse(tool, "deny", "silent-write", reason, matched)
+
+    # 1d. A commit message or PR body that cites a record by its path.
+    cite_where = command_root(stripped, cwd)
+    for segment in split_segments(stripped):
+        if not segment.strip():
+            continue
+        matched = cited_record_path(segment, raw, cite_where)
+        if matched.startswith(UNREAD_MARK):
+            refuse(tool, "deny", "cite-by-id", UNREAD_REASON, matched[len(UNREAD_MARK):])
+        if matched:
+            refuse(tool, "deny", "cite-by-id", CITE_REASON, matched)
 
     # 2. A machine-wide kill. Judged in COMMAND POSITION, from the segment's own tokens, never
     # by the word appearing anywhere in the text. A segment shlex cannot parse fails open:
@@ -4336,9 +5162,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
         if matched:
             refuse(tool, "deny", "destructive-delete", DELETE_REASON, matched)
     for segment in split_segments(stripped):
-        for subcommand, args in git_calls(segment):
-            if subcommand == "push" and push_is_forced(args):
-                refuse(tool, "ask", "force-push", PUSH_REASON,
+        for subcommand, args in git_calls(push_text(segment)):
+            where, overrides = push_target(segment, stripped, cwd) if subcommand == "push" else ("", {})
+            verdict = push_verdict(args, where, overrides) if subcommand == "push" else ""
+            if verdict:
+                refuse(tool, verdict, "force-push",
+                       PUSH_REASON if verdict == "deny" else PUSH_ASK_REASON,
                        "git push " + " ".join(args))
 
     # 5. The environment file. This layer reads the command BEFORE normalization.
@@ -4348,13 +5177,16 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
     if refusal:
         refuse(tool, "deny", "env-file", refusal + ". " + ENV_ADVICE, logged)
 
-    # 6. A merge into main: allow (Decision 8), and note it when the base is main or unreadable.
-    if GH_PR_MERGE.search(cmd):
-        base = merge_base(stripped)
-        if base == PROTECTED_BASE:
-            record(tool, "noted", "merge-main", "gh pr merge into " + base)
-        elif base == "":
-            record(tool, "noted", "merge-main", "gh pr merge, base unread")
+    # 6. A merge outside the merge tool, while the head has a check pending or red, or the read
+    # could not run. Judged per segment from the command word, so quoted text never fires it.
+    for segment in split_segments(stripped):
+        merging = merge_call_of(segment) if segment.strip() else None
+        if merging is None:
+            continue
+        verdict, detail = merge_gate(merging[0], merging[1], cite_where)
+        if verdict != "green":
+            refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),
+                   "gh pr merge " + merging[0] + " " + verdict)
 
     # 7. A frozen path.
     matched = frozen_shell_hit(stripped, cwd)
@@ -4365,6 +5197,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
     matched = project_config_shell_hit(stripped, cwd)
     if matched:
         record(tool, "noted", "config-edit", matched)
+
 
     # 8. The subagent model cap. The PATH comes from the stripped command, the same machinery the
     # frozen path uses, so a redirect, a `tee`, a `sed -i` and a heredoc header all read as writes.
@@ -4379,11 +5212,18 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "") -> None:
             refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, matched),
                    log_path_and_text(matched, change))
 
-
 def judge(payload) -> None:
+    if payload.get("hook_event_name") == "SubagentStop":
+        judge_stop(payload)
+        return
     tool = payload.get("tool_name", "") or ""
     tool_input = payload.get("tool_input", {}) or {}
     if not isinstance(tool_input, dict):
+        return
+    # Read and Grep: no rule judges them, so the guard leaves at once and spends no git call.
+    # worktree-home never judged them, the settings deny list owns Read(.env) and Read(.env.*),
+    # and a frozen path stays readable (decisions/guard-trims-from-the-audit.md).
+    if tool in READ_ONLY_TOOLS:
         return
     cwd = payload.get("cwd", "") or os.getcwd() or ""
     if not isinstance(cwd, str):
@@ -4426,18 +5266,22 @@ def judge(payload) -> None:
     if tool in SPAWN_TOOLS and below_the_floor(tool_input.get("model")):
         refuse(tool, "deny", "subagent-model-floor", MODEL_FLOOR_REASON, str(tool_input.get("model")))
 
-    # A merge through the MCP tool carries no base for the guard to read, so every call is
-    # allowed (Decision 8) and noted, the same as an unreadable `gh pr merge` base.
+    # A merge through the MCP tool is judged by the same check gate as `gh pr merge`.
     if tool in MERGE_TOOLS:
-        record(tool, "noted", "merge-main", tool)
+        owner, name, number = (tool_input.get(k) for k in ("owner", "repo", "pullNumber"))
+        repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
+        verdict, detail = merge_gate("" if number is None else str(number), repo, cwd)
+        if verdict != "green":
+            refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),
+                   "merge tool " + verdict)
 
     if tool in SHELL_TOOLS:
         command = tool_input.get("command", "") or ""
         if isinstance(command, str) and command.strip():
-            judge_shell(tool, command, cwd, session_id_of(payload))
+            judge_shell(tool, command, cwd, session_id_of(payload), agent_role(payload))
         return
 
-    if tool not in READ_ONLY_TOOLS + WRITE_TOOLS:
+    if tool not in WRITE_TOOLS:
         return
 
     target = (
@@ -4449,31 +5293,37 @@ def judge(payload) -> None:
     if not isinstance(target, str) or not target:
         return
 
-    # 5. The environment file. Every matched tool is refused, a read included, because the rule is
-    # about the contents and a read is contents. The reason names no file, and the log holds the
-    # path the tool asked for.
+    # 0b. The early warning for a builder or test-author write (see BUILDER_ROLE). A read is allowed.
+    role = agent_role(payload)
+    if role and tool in WRITE_TOOLS:
+        matched = role_write_hit(role, tool_input, target, cwd)
+        if matched:
+            refuse(tool, "deny", "test-author-scope" if role == AUTHOR_ROLE else "builder-test-edit",
+                   AUTHOR_SCOPE_REASON if role == AUTHOR_ROLE else BUILDER_TEST_REASON, matched)
+
+    # 5. The environment file. Every writing tool is refused. A read is not judged here: the
+    # settings deny list blocks Read(.env) and Read(.env.*). The reason names no file, and the log
+    # holds the path the tool asked for.
     if is_env(target):
         refuse(tool, "deny", "env-file", ENV_TOOL_REASON + ". " + ENV_ADVICE, target)
 
-    # 7. A frozen path. A read-only tool may look, because reading the hook is how anyone finds out
-    # what it does. A writing tool may not.
-    if tool not in READ_ONLY_TOOLS:
-        if is_frozen(target, cwd):
-            refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)
-        # 7b. A project config edit: allowed (Decision 7), and noted in the log only.
-        if is_project_config(target, cwd):
-            record(tool, "noted", "config-edit", target)
-        # 8. The subagent model cap. Rule 7 already denied the config directory's own settings, so
-        # only a project-scoped or clone-scoped settings file reaches here. The content read is what
-        # the tool would WRITE, so a file that carries the variable name anywhere in that content
-        # asks, a permission string or a comment line included. That is an over-ask and it stays:
-        # the alternative is a value test that a crafted spelling walks past. A write that does not
-        # carry the name never fires, and no other file than a settings file reaches this rule.
-        if is_settings_file(target, cwd):
-            change = cap_change_parts(write_content_parts(tool_input))
-            if change:
-                refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, target),
-                       log_path_and_text(target, change))
+    # 7. A frozen path. Only a writing tool reaches here, so a frozen path stays readable.
+    if is_frozen(target, cwd):
+        refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)
+    # 7b. A project config edit: allowed (Decision 7), and noted in the log only.
+    if is_project_config(target, cwd):
+        record(tool, "noted", "config-edit", target)
+    # 8. The subagent model cap. Rule 7 already denied the config directory's own settings, so
+    # only a project-scoped or clone-scoped settings file reaches here. The content read is what
+    # the tool would WRITE, so a file that carries the variable name anywhere in that content
+    # asks, a permission string or a comment line included. That is an over-ask and it stays:
+    # the alternative is a value test that a crafted spelling walks past. A write that does not
+    # carry the name never fires, and no other file than a settings file reaches this rule.
+    if is_settings_file(target, cwd):
+        change = cap_change_parts(write_content_parts(tool_input))
+        if change:
+            refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, target),
+                   log_path_and_text(target, change))
 
 
 def main() -> None:
@@ -4488,7 +5338,10 @@ def main() -> None:
         judge(payload)
     except SystemExit:
         raise
-    except Exception:
+    except Exception as exc:
+        # Fail open, but never silently: a crash that hides a rule must show in the log.
+        record(str(payload.get("tool_name", "")), "crash", "guard-crash",
+               cap_safe(type(exc).__name__ + ": " + str(exc), 200))
         sys.exit(0)  # fail open on a guard defect
     sys.exit(0)
 

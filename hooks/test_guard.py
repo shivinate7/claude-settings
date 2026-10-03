@@ -30,6 +30,7 @@ import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(HERE)
 # GUARD_UNDER_TEST points the suite at another copy of the guard, such as a `.bak` copy carrying
 # one mutation. A mutation test then needs no copy of this file, so the cases cannot drift from the
 # cases that pass.
@@ -43,7 +44,8 @@ CASES = []
 
 
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
-        session=None, carries=(), config=None, agent_id=None, no_root=False, **tool_input):
+        session=None, carries=(), config=None, agent_id=None, no_root=False, silent=False,
+        agent_type=None, event=None, stop_active=False, **tool_input):
     """Register one case.
 
     `carries` names fragments the printed reason MUST hold, which is how a case pins what an
@@ -70,15 +72,20 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         # read from, so a pointer case names its own and every other case keeps the default.
         "config": config,
         "agent_id": agent_id,
+        "agent_type": agent_type,
+        "event": event,
+        "stop_active": stop_active,
         "no_root": no_root,
+        # An allow that must print NOTHING, not even context. Only a case that says so is held to it.
+        "silent": silent,
         "tool_input": tool_input,
     })
 
 
 def sh(name, command, expected, rule=None, tool="Bash", cwd=None, env_path=None, session=None,
-       carries=(), config=None, agent_id=None, no_root=False):
+       carries=(), config=None, agent_id=None, no_root=False, silent=False, agent_type=None):
     add(name, expected, rule=rule, tool=tool, cwd=cwd, env_path=env_path, session=session,
-        agent_id=agent_id, no_root=no_root,
+        agent_id=agent_id, agent_type=agent_type, no_root=no_root, silent=silent,
         carries=carries, config=config, command=command)
 
 
@@ -109,11 +116,25 @@ OTHER_SESSION = "0000ffff-0000-4000-8000-000000000000"
 PRIVREPO = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "priv")
 GHMAIN = os.path.join(ROOT, "ghmain")      # a fake command line tool answering "main"
 GHDEV = os.path.join(ROOT, "ghdev")        # the same, answering "dev"
+GHPEND = os.path.join(ROOT, "ghpend")      # green base main, but one check is pending
+GHRED = os.path.join(ROOT, "ghred")        # one check failed
+GHRUNPEND = os.path.join(ROOT, "ghrunpend")  # every check passed, one workflow run is not done
+GHBROKEN = os.path.join(ROOT, "ghbroken")  # answers every call with text that is not JSON
+GHNEED = os.path.join(ROOT, "ghneed")      # green, but only for a call that names pull request 12 and y/x
+GHEMPTY = os.path.join(ROOT, "ghempty")    # no check and no workflow run reported yet
+GHCWD = os.path.join(ROOT, "ghcwd")        # green, but only for a call run inside the folder `ctxrepo`
+WFREPO = os.path.join(ROOT, "wfrepo")      # a folder that holds one workflow file
+GHSLOW = os.path.join(ROOT, "ghslow")      # green, but every call takes longer than the gate waits
+GHBLANK = os.path.join(ROOT, "ghblank")    # green checks, a base that reads as empty
+CTXREPO = os.path.join(ROOT, "ctxrepo")      # a checkout on main with one merged branch, `done`
+MSG_BAD = os.path.join(ROOT, "msg_bad.txt")  # a message file that cites a record by path
+MSG_OK = os.path.join(ROOT, "msg_ok.txt")    # a message file that cites a record by id
+MERGECFG = os.path.join(ROOT, "mergecfg")  # a config directory whose rules file points at this repo
 GHNONE = os.path.join(ROOT, "ghnone")      # an empty directory, so the tool is missing
 # The WHOLE PATH of every "gh missing" case: GHNONE and nothing else, never PY_PATH beside it.
 # MEASURED on WSL Ubuntu: with the interpreter at /usr/bin/python3, PY_PATH is /usr/bin, which also
 # holds apt's real, logged-in /usr/bin/gh, so the "missing" case made a live GitHub call and read a
-# real pull request's base. That masked the mutant "merge-main: trust an unreadable merge base" in
+# real pull request. That masked a "gh missing" mutant in
 # 3 of 3 runs. CI's setup-python folder holds no gh, so CI cannot see it. The guard needs nothing
 # else on PATH to run: the GITBLIND cases run it on a one-folder PATH too. build_fixtures fails
 # setup if gh resolves here.
@@ -142,6 +163,22 @@ BRANCHREPO = os.path.join(ROOT, "branchrepo")
 BRANCHFALLBACKMAIN = os.path.join(ROOT, "branchfallbackmain")
 BRANCHFALLBACKMASTER = os.path.join(ROOT, "branchfallbackmaster")
 BRANCHNOBASE = os.path.join(ROOT, "branchnobase")
+
+# The push cases. Each is a real checkout, so the default branch is read from git and never
+# guessed. PUSHFEAT sits on `feat` with origin/HEAD naming main, PUSHMAIN sits on main, PUSHTRUNK
+# sits on `feat` with origin/HEAD naming trunk (so main is an ordinary branch there), PUSHNOHEAD
+# has no origin/HEAD at all (the main/master fallback), PUSHDETACHED has no current branch.
+PUSHFEAT = os.path.join(ROOT, "pushfeat")
+PUSHMAIN = os.path.join(ROOT, "pushmain")
+PUSHTRUNK = os.path.join(ROOT, "pushtrunk")
+PUSHNOHEAD = os.path.join(ROOT, "pushnohead")
+PUSHDETACHED = os.path.join(ROOT, "pushdetached")
+# push.default fixtures, each on `feat`: UP follows an upstream named main, UPSELF an upstream
+# named feat, NOUP has push.default upstream and no upstream, MATCH has push.default matching.
+PUSHUP = os.path.join(ROOT, "pushup")
+PUSHUPSELF = os.path.join(ROOT, "pushupself")
+PUSHNOUP = os.path.join(ROOT, "pushnoup")
+PUSHMATCH = os.path.join(ROOT, "pushmatch")
 
 # WTMAIN is the primary checkout of its own small repository. Every linked worktree below is a
 # real one, because the rule reads `git worktree list --porcelain` and `git status --porcelain`
@@ -376,7 +413,7 @@ def make_blind_git(folder):
     that is no git tree. A real repository is still the cwd; only the program answering is blind,
     so the case drives the guard's own "I could not read this" path rather than a mock of it.
 
-    MEASURED on Windows 2026-09-16, recorded in `make_fake_gh` below: a call through
+    MEASURED on Windows 2026-09-16: a call through
     CreateProcess appends `.exe` and never reads PATHEXT, so a `git.cmd` stand-in would be
     skipped there and the case would answer for the wrong reason. The unreadable-subject cases
     are therefore SKIPPED on Windows rather than run against a stand-in that never answers.
@@ -392,7 +429,36 @@ def make_blind_git(folder):
     os.chmod(script, 0o755)
 
 
-def make_fake_gh(folder, base, delay=0):
+FAKE_GH_PY = r'''import json, os, sys
+state = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")))
+args = sys.argv[1:]
+if state["cwd_name"] and os.path.basename(os.getcwd()) != state["cwd_name"]:
+    state["broken"] = True
+if args[:1] == ["pr"] and not all(word in args for word in state["need"]):
+    state["broken"] = True
+while "-R" in args:
+    i = args.index("-R")
+    del args[i:i + 2]
+if state["broken"]:
+    print("boom")
+    sys.exit(1)
+if not args:
+    print(json.dumps({"baseRefName": state["pr"]["baseRefName"]}))
+elif args[:2] == ["pr", "view"]:
+    fields = args[args.index("--json") + 1].split(",")
+    print(json.dumps({k: state["pr"][k] for k in fields}))
+elif args[:2] == ["pr", "checks"]:
+    print(json.dumps(state["checks"]))
+elif args[:2] == ["run", "list"]:
+    print(json.dumps(state["runs"]))
+else:
+    print("fake gh: unhandled " + " ".join(args), file=sys.stderr)
+    sys.exit(2)
+'''
+
+
+def make_fake_gh(folder, base, delay=0, checks=None, runs=None, broken=False, need=(),
+                 cwd_name=""):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
     MEASURED on Windows 2026-09-16: a call of "gh" through CreateProcess appends `.exe` and never
@@ -400,9 +466,9 @@ def make_fake_gh(folder, base, delay=0):
     answered instead. The guard resolves the program with shutil.which for that reason, and this
     stand-in is a `.cmd` file to keep the case honest on this machine.
 
-    `delay` whole seconds run before the answer. merge_base's real subprocess.run carries a real
-    10s timeout that one mutant shrinks to 0.0001s (mutate_guard.py, "timeout: the merge-base read
-    cannot finish"). An instant answer races that shrink instead of losing it: Python's timeout
+    `delay` whole seconds run before the answer. The merge gate's real subprocess.run carries a real
+    timeout (MERGE_READ_TIMEOUT). A mutant that shrinks it would race an instant answer instead of
+    losing to it: Python's timeout
     clock starts only once communicate() itself runs, and a busy runner can delay THAT call long
     enough for an already-finished child to be read back with no TimeoutExpired at all, whatever
     the nominal timeout was. That is why the mutant SURVIVED on a loaded shared runner (CI run
@@ -423,7 +489,23 @@ def make_fake_gh(folder, base, delay=0):
     fixture, not a fact to route around.
     """
     os.makedirs(folder, exist_ok=True)
-    body = '{"baseRefName":"%s"}' % base
+    # The answers live in a state file, and `ghfake.py` serves them the way the real tool does: a
+    # `pr view` returns exactly the fields it was asked for, `pr checks` the check rows, `run list`
+    # the workflow runs. No argument at all answers the base alone, which is what
+    # _verify_fake_gh_delay reads. `broken` answers every call with text that is not JSON.
+    state = {
+        "pr": {"baseRefName": base, "headRefOid": "abc1234", "headRefName": "feat",
+               "state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN"},
+        "checks": checks if checks is not None else [{"name": "gates", "bucket": "pass", "link": ""}],
+        "runs": runs if runs is not None else [
+            {"status": "completed", "conclusion": "success", "name": "gates"}],
+        "broken": broken,
+        "cwd_name": cwd_name,   # the folder name a call must run in, or it answers as a broken tool
+        "need": list(need),   # words every call must carry, or it answers as a broken tool does
+    }
+    write(os.path.join(folder, "state.json"), json.dumps(state))
+    write(os.path.join(folder, "ghfake.py"), FAKE_GH_PY)
+    fake_py = os.path.join(folder, "ghfake.py")
     if os.name == "nt":
         tool = shutil.which("ping", path=os.environ.get("PATH")) if delay else None
         if delay and not tool:
@@ -431,7 +513,8 @@ def make_fake_gh(folder, base, delay=0):
                 "make_fake_gh: delay=%d requested but 'ping' is not on this process's PATH" % delay
             )
         wait = ('"%s" -n %d 127.0.0.1 >nul\r\n' % (tool, delay + 1)) if delay else ""
-        write(os.path.join(folder, "gh.cmd"), "@echo off\r\n" + wait + "echo " + body + "\r\n")
+        write(os.path.join(folder, "gh.cmd"), "@echo off\r\n" + wait
+              + '"%s" "%s" %%*\r\n' % (sys.executable, fake_py))
     else:
         script = os.path.join(folder, "gh")
         tool = shutil.which("sleep", path=os.environ.get("PATH")) if delay else None
@@ -440,7 +523,7 @@ def make_fake_gh(folder, base, delay=0):
                 "make_fake_gh: delay=%d requested but 'sleep' is not on this process's PATH" % delay
             )
         wait = ("%s %d\n" % (tool, delay)) if delay else ""
-        write(script, "#!/bin/sh\n" + wait + "echo '" + body + "'\n")
+        write(script, "#!/bin/sh\n" + wait + 'exec "%s" "%s" "$@"\n' % (sys.executable, fake_py))
         os.chmod(script, 0o755)
 
 
@@ -479,8 +562,11 @@ def _verify_fake_gh_delay(ghdir, delay):
         )
 
 
+UNDERTESTS = os.path.join(ROOT, "tests", "clone")   # a repo whose own folder sits under `tests`
+
+
 def build_fixtures():
-    for folder in (CFG, LOGDIR, PROJ, CLONE, NOGIT, GITMAIN):
+    for folder in (CFG, LOGDIR, PROJ, CLONE, NOGIT, GITMAIN, os.path.join(UNDERTESTS, ".git")):
         os.makedirs(folder, exist_ok=True)
     write(os.path.join(CFG, "settings.json"), "{}\n")
     write(os.path.join(CFG, "CLAUDE.md"), "rules\n")
@@ -496,6 +582,26 @@ def build_fixtures():
     write(os.path.join(CLONE, "settings.json"), "{}\n")
     write(os.path.join(CLONE, "install.ps1"), "# install\n")
     make_fake_gh(GHMAIN, "main")
+    write(MSG_BAD, "title\n\ncites decisions/one-shared-record-stamp.md\n")
+    write(MSG_OK, "title\n\ncites D12, short titles for records\n")
+    os.makedirs(CTXREPO, exist_ok=True)
+    run_vcs(CTXREPO, "init", "-q", "-b", "main", ".")
+    run_vcs(CTXREPO, *IDENT, "commit", "-q", "--allow-empty", "-m", "first")
+    run_vcs(CTXREPO, "branch", "done")
+    make_fake_gh(GHPEND, "main", checks=[{"name": "gates", "bucket": "pending", "link": ""}])
+    make_fake_gh(GHRED, "main", checks=[{"name": "gates", "bucket": "fail", "link": ""}])
+    make_fake_gh(GHRUNPEND, "main",
+                 runs=[{"status": "in_progress", "conclusion": "", "name": "gates"}])
+    make_fake_gh(GHBROKEN, "main", broken=True)
+    make_fake_gh(GHBLANK, "", )
+    make_fake_gh(GHNEED, "main", need=["12", "y/x"])
+    make_fake_gh(GHSLOW, "main", delay=4)
+    make_fake_gh(GHEMPTY, "main", checks=[], runs=[])
+    make_fake_gh(GHCWD, "main", cwd_name="ctxrepo")
+    write(os.path.join(WFREPO, ".github", "workflows", "gates.yml"), "name: gates\n")
+    # The guard finds the merge tool beside its own real path, or in the clone the global rules
+    # file points at. A mutant copy of the guard sits in a temp folder and takes the second way.
+    write(os.path.join(MERGECFG, "CLAUDE.md"), "@" + slash(REPO) + "/CLAUDE.md\n")
     # GHDEV alone gets the delay: it is the one base whose logged/not-logged answer the timeout
     # mutant can flip (GHMAIN and GHNONE both expect "logged" either way), so it is the one fixture
     # whose instant reply could race that mutant's shrunk timeout. See make_fake_gh's docstring.
@@ -728,6 +834,37 @@ def build_fixtures():
     if base_check2.returncode == 0:
         sys.exit("fixture setup failed in build_fixtures: BRANCHNOBASE unexpectedly has a "
                   "local main")
+
+    # ----------------------------------------------------------------- push destinations
+    for where, head, branch in ((PUSHFEAT, "main", "feat"), (PUSHMAIN, "main", "main"),
+                                (PUSHTRUNK, "trunk", "feat"), (PUSHNOHEAD, None, "feat"),
+                                (PUSHDETACHED, "main", None)):
+        make_repo(where, {"base.txt": "base\n"})
+        if head:
+            run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+            run_vcs(where, "update-ref", "refs/remotes/origin/" + head, "HEAD")
+            run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD",
+                    "refs/remotes/origin/" + head)
+        if branch and branch != "main":
+            run_vcs(where, "checkout", "-q", "-b", branch)
+        if branch is None:
+            run_vcs(where, "checkout", "-q", "--detach")
+        if (head and run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD").returncode != 0):
+            sys.exit("fixture setup failed in build_fixtures: origin/HEAD in %r unreadable" % where)
+
+    for where, mode, merge in ((PUSHUP, "upstream", "main"), (PUSHUPSELF, "upstream", "feat"),
+                               (PUSHNOUP, "upstream", None), (PUSHMATCH, "matching", None)):
+        make_repo(where, {"base.txt": "base\n"})
+        run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+        run_vcs(where, "update-ref", "refs/remotes/origin/main", "HEAD")
+        run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        run_vcs(where, "checkout", "-q", "-b", "feat")
+        run_vcs(where, "config", "push.default", mode)
+        if merge:
+            run_vcs(where, "config", "branch.feat.remote", "origin")
+            run_vcs(where, "config", "branch.feat.merge", "refs/heads/" + merge)
+        if run_vcs(where, "config", "--get", "push.default").stdout.strip() != mode:
+            sys.exit("fixture setup failed in build_fixtures: push.default in %r" % where)
 
     # ----------------------------------------------------------------- worktree remove/prune
     #
@@ -1881,21 +2018,169 @@ sh("silent-write: 2>&1 alone duplicates a stream and discards nothing",
 
 # =========================================================================== 3. push and delete
 
-sh("push: the long force flag", VCS + " push --force", "ask", "force-push", cwd=NOGIT)
-sh("push: the short force flag", VCS + " push -f origin x", "ask", "force-push", cwd=NOGIT)
-sh("push: force with lease", VCS + " push --force-with-lease", "ask", "force-push", cwd=NOGIT)
-sh("push: force with lease naming a ref", VCS + " push --force-with-lease=main origin main", "ask",
-   "force-push", cwd=NOGIT)
-sh("push: force from the PowerShell tool as well", VCS + " push --force-with-lease", "ask",
-   "force-push", tool="PowerShell", cwd=NOGIT)
+LEASE = " --force-with-lease --force-if-includes"
+SHA = "0123456789abcdef0123456789abcdef01234567"
+REMEDY = "retry with --force-with-lease --force-if-includes"
+
+
+def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash"):
+    sh("push: " + name, VCS + " push " + tail, expected,
+       "force-push" if expected != "allow" else None, cwd=cwd, tool=tool,
+       carries=REMEDY if expected == "deny" else ())
+
+
+# ALLOW: a lease that cannot overwrite newer work, off the default branch.
+push_case("lease with includes, bare", "--force-with-lease --force-if-includes", "allow")
+push_case("lease with includes, naming a ref", "--force-with-lease=feat --force-if-includes origin feat",
+          "allow")
+push_case("lease with includes, naming ref and sha",
+          "--force-with-lease=feat:" + SHA + " --force-if-includes origin feat", "allow")
+push_case("lease naming ref and sha is stale-safe alone", "--force-with-lease=feat:" + SHA + " origin feat",
+          "allow")
+push_case("lease with includes, flags in the other order", "--force-if-includes --force-with-lease origin HEAD",
+          "allow")
+push_case("lease with includes from the PowerShell tool as well", "--force-with-lease --force-if-includes",
+          "allow", tool="PowerShell")
+push_case("lease with includes to main-fix, not the default branch",
+          "--force-with-lease --force-if-includes origin HEAD:main-fix", "allow")
+push_case("lease with includes to a branch under the default name's prefix",
+          "--force-with-lease --force-if-includes origin HEAD:refs/heads/main-fix", "allow")
+push_case("lease to a branch main-fix when the default branch is trunk",
+          "--force-with-lease --force-if-includes origin HEAD:main", "allow", cwd=PUSHTRUNK)
+
+# DENY with the remedy: any force that can overwrite newer work.
+push_case("the long force flag", "--force", "deny")
+push_case("the short force flag", "-f origin feat", "deny")
+push_case("the short force flag inside a bundle", "-fu origin feat", "deny")
+push_case("a force prefix", "--forc origin feat", "deny")
+push_case("a shorter force prefix", "--fo origin feat", "deny")
+push_case("a plus refspec", "origin +HEAD:feat", "deny")
+push_case("a plus refspec with the branch name", "origin +feat", "deny")
+push_case("a bare lease without includes", "--force-with-lease", "deny")
+push_case("a lease naming a ref, without includes", "--force-with-lease=feat origin feat", "deny")
+push_case("a force beside a lease and includes", "--force" + LEASE, "deny")
+push_case("includes alone is not a force, so a plain push allows", "--force-if-includes", "allow")
+push_case("a force while the default branch is trunk, main is ordinary there",
+          "--force origin HEAD:main", "deny", cwd=PUSHTRUNK)
+push_case("a push option value is not the remote", "--force-with-lease --force-if-includes -o x origin HEAD:trunk",
+          "ask", cwd=PUSHTRUNK)
+push_case("a push option value with --push-option is not the remote",
+          "--force-with-lease --force-if-includes --push-option x origin HEAD:trunk", "ask",
+          cwd=PUSHTRUNK)
+push_case("a force with no default branch ref, to a feature branch", "--force origin feat", "deny",
+          cwd=PUSHNOHEAD)
+
+# ASK: any forced push that reaches the default branch, or whose destination cannot be read.
+for form, tail in (
+        ("bare, on main", "--force"),
+        ("lease with includes, bare, on main", "--force-with-lease --force-if-includes"),
+        ("lease with includes, HEAD, on main", "--force-with-lease --force-if-includes origin HEAD"),
+        ("the current branch named, on main", "--force-with-lease --force-if-includes origin main"),
+        ("HEAD:main", "--force-with-lease --force-if-includes origin HEAD:main"),
+        ("a full ref", "--force-with-lease --force-if-includes origin x:refs/heads/main"),
+        ("a plus refspec", "origin +HEAD:main"),
+        ("a pinned lease", "--force-with-lease=main:" + SHA + " origin HEAD:main"),
+        ("--mirror", "--mirror --force"),
+        ("--mirror alone, which forces by itself", "--mirror"),
+        ("--all", "--all --force"),
+        ("--all with a lease", "--all" + LEASE),
+        ("a glob refspec", "--force origin refs/heads/*:refs/heads/*"),
+        ("the short flag", "-f origin HEAD:main")):
+    push_case("forced to the default branch asks: " + form, tail, "ask",
+              cwd=PUSHMAIN if "on main" in form or form == "HEAD" else PUSHFEAT)
+push_case("forced to the default branch from a feature branch asks", "--force origin HEAD:main", "ask")
+push_case("forced to the default branch named by origin/HEAD, not by name", "--force origin HEAD:trunk",
+          "ask", cwd=PUSHTRUNK)
+push_case("forced to master when no origin/HEAD is read asks (fallback)", "--force origin HEAD:master",
+          "ask", cwd=PUSHNOHEAD)
+push_case("forced to main when no origin/HEAD is read asks (fallback)", "--force origin HEAD:main",
+          "ask", cwd=PUSHNOHEAD)
+push_case("forced from a detached HEAD, no current branch to resolve, asks",
+          "--force-with-lease --force-if-includes", "ask", cwd=PUSHDETACHED)
+push_case("forced where git cannot be read asks",
+          "--force-with-lease --force-if-includes origin HEAD:feat", "ask",
+          cwd=NOGIT)
+push_case("forced with a plus where git cannot be read asks", "origin +HEAD:feat", "ask", cwd=NOGIT)
+
+LE = "--force-with-lease --force-if-includes "
+push_case("a quoted refspec to the default branch asks", LE + 'origin "HEAD:main"', "ask")
+push_case("a single-quoted plus refspec to the default branch asks", "origin '+main'", "ask")
+push_case("a quoted remote is unquoted", LE + '"origin" HEAD:main', "ask")
+push_case("lease with --repo=, refspec to the default branch asks", "--repo=origin " + LE + "HEAD:main",
+          "ask")
+push_case("lease with --repo and its value, refspec to the default branch asks",
+          "--repo origin " + LE + "HEAD:main", "ask")
+push_case("lease with --repo off the default branch", "--repo=origin " + LE + "HEAD:feat", "allow")
+push_case("a delete refspec at the default branch asks", "origin :main", "ask")
+push_case("a delete refspec at a full default ref asks", "origin :refs/heads/main", "ask")
+push_case("deleting with --delete at the default branch asks", "--delete origin main", "ask")
+push_case("deleting with -d at the default branch asks", "-d origin main", "ask")
+push_case("a deletion off the default branch, refspec", "origin :feat", "allow")
+push_case("a deletion off the default branch, --delete", "--delete origin feat", "allow")
+push_case("--no-force-if-includes cancels --force-if-includes",
+          "--force-with-lease --force-if-includes --no-force-if-includes", "deny")
+push_case("--no-force-with-lease cancels the lease, so nothing is forced",
+          "--force-with-lease --no-force-with-lease --force-if-includes origin feat", "allow")
+push_case("a glued push option is not -f", "-ofoo origin feat", "allow")
+push_case("a push option with its value is not -f", "-o foo origin feat", "allow")
+push_case("a bare lease with push.default upstream follows the upstream to the default branch",
+          LE.strip(), "ask", cwd=PUSHUP)
+push_case("a bare lease with push.default upstream follows an upstream off the default branch",
+          LE.strip(), "allow", cwd=PUSHUPSELF)
+push_case("a bare lease with push.default upstream and no upstream asks", LE.strip(), "ask",
+          cwd=PUSHNOUP)
+push_case("a bare lease with push.default matching asks", LE.strip(), "ask", cwd=PUSHMATCH)
+push_case("a bare lease with an abbreviated force-with-lease and includes allows",
+          "--force-with --force-if-inc", "allow")
+
+push_case("a glued push option then force denies", "-ofoo --force origin feat", "deny")
+push_case("a glued push option in a cluster then force denies", "-vofoo --force origin feat", "deny")
+push_case("a glued push option, other letters, then force denies", "-oyo --force origin feat", "deny")
+push_case("a push option with its value then force denies", "-o foo --force origin feat", "deny")
+
+# THE TARGET DIRECTORY. Config and the default branch are read where the push runs: a `git -C`,
+# a `cd` before it, a `-c` override on the call. The session's cwd here is never the answer.
+sh("push: lease with git -C naming the default branch's checkout asks",
+   VCS + " -C " + slash(PUSHMAIN) + " push " + LE.strip(), "ask", "force-push", cwd=PUSHFEAT)
+sh("push: lease with git -C naming a feature checkout allows from the main checkout",
+   VCS + " -C " + slash(PUSHFEAT) + " push " + LE.strip(), "allow", cwd=PUSHMAIN)
+sh("push: a git -C on another call is not the push's directory",
+   VCS + " -C " + slash(PUSHMAIN) + " status && " + VCS + " push " + LE.strip(), "allow",
+   cwd=PUSHFEAT)
+sh("push: lease after cd into the default branch's checkout asks",
+   "cd " + slash(PUSHMAIN) + " && " + VCS + " push " + LE.strip(), "ask", "force-push", cwd=PUSHFEAT)
+sh("push: lease after cd into a feature checkout allows from the main checkout",
+   "cd " + slash(PUSHFEAT) + " && " + VCS + " push " + LE.strip(), "allow", cwd=PUSHMAIN)
+sh("push: lease with git -C naming a directory that is not there asks",
+   VCS + " -C " + slash(os.path.join(ROOT, "nowhere")) + " push " + LE.strip(), "ask", "force-push",
+   cwd=PUSHFEAT)
+sh("push: lease with -c push.default=upstream follows the upstream to the default branch",
+   VCS + " -c push.default=upstream push " + LE.strip(), "ask", "force-push", cwd=PUSHUP)
+sh("push: lease with -c push.default=current ignores the repository's upstream",
+   VCS + " -c push.default=current push " + LE.strip(), "allow", cwd=PUSHUP)
+sh("push: lease with -c push.default=matching asks",
+   VCS + " -c push.default=matching push " + LE.strip(), "ask", "force-push", cwd=PUSHFEAT)
+
+# FALSE ALARMS: a guard that cries wolf is spent.
+push_case("a non-forced push of main", "origin main", "allow", cwd=PUSHMAIN)
+push_case("a non-forced bare push on main", "", "allow", cwd=PUSHMAIN)
+push_case("a non-forced push with -u of the current branch", "-u origin HEAD", "allow")
+push_case("a non-forced push with -u where git cannot be read", "-u origin HEAD", "allow", cwd=NOGIT)
+push_case("a push of a branch whose name holds force", "origin force-fix", "allow")
+sh("false alarm: --force quoted in a commit message",
+   VCS + ' commit -m "never git push --force here"', "allow", cwd=PUSHFEAT)
+sh("false alarm: --force quoted in an echo", 'echo "git push --force"', "allow", cwd=PUSHFEAT)
+sh("false alarm: --force as a log grep pattern", VCS + " log --grep=--force", "allow", cwd=PUSHFEAT)
+sh("false alarm: --force in a heredoc body",
+   "cat <<'EOF'\n" + VCS + " push --force\nEOF", "allow", cwd=PUSHFEAT)
+sh("false alarm: a lease to main-fix", VCS + " push --force-with-lease --force-if-includes origin HEAD:main-fix",
+   "allow", cwd=PUSHMAIN)
+sh("push: a force push inside a loop's do-block still counts",
+   "while true; do " + VCS + " push --force; done", "deny", "force-push", cwd=PUSHFEAT,
+   carries=REMEDY)
+
 sh("push: an ordinary push", VCS + " push", "allow", cwd=NOGIT)
 sh("push: setting the upstream", VCS + " push -u origin claude/lane", "allow", cwd=NOGIT)
-
-# BLAST RADIUS of the loop-keyword fix: `git_calls` already scans every token of its segment for
-# `git`, not only the first, so a force push inside a loop's do-block asked before this fix too.
-# Pinned here so a later change cannot narrow that scan back to command position only.
-sh("push: git push --force inside a loop's do-block asks unchanged",
-   "while true; do " + VCS + " push --force; done", "ask", "force-push", cwd=NOGIT)
 
 sh("delete: the root", "rm -rf /", "deny", "destructive-delete", cwd=NOGIT)
 sh("delete: the home directory", "rm -fr ~", "deny", "destructive-delete", cwd=NOGIT)
@@ -1992,8 +2277,8 @@ sh("delete: a grep pattern naming the cmd.exe form calls nothing",
 # Ported whole from q_max. The rule is about the CONTENTS of the file, so a read is refused as
 # firmly as a write, and a runner that loads the file into its own environment is allowed by name.
 
-add("env: Read of the file", "deny", "env-file", tool="Read", cwd=NOGIT,
-    file_path=slash(os.path.join(PROJ, ENV)))
+add("trim: env: Read of the file is the settings deny list's, not the guard's", "allow",
+    tool="Read", cwd=NOGIT, file_path=slash(os.path.join(PROJ, ENV)))
 add("env: Write of the file", "deny", "env-file", tool="Write", cwd=NOGIT,
     file_path=slash(os.path.join(PROJ, ENV)))
 add("env: Edit of the file", "deny", "env-file", tool="Edit", cwd=NOGIT,
@@ -2004,14 +2289,47 @@ add("env: MultiEdit of the file", "deny", "env-file", tool="MultiEdit", cwd=NOGI
     file_path=slash(os.path.join(PROJ, ENV)))
 add("env: NotebookEdit of a variant", "deny", "env-file", tool="NotebookEdit", cwd=NOGIT,
     notebook_path=slash(os.path.join(PROJ, ENV + ".ipynb")))
-add("env: Grep naming the file by path", "deny", "env-file", tool="Grep", cwd=NOGIT,
-    path=slash(os.path.join(PROJ, ENV + ".local")))
+add("trim: env: Grep naming the file by path is the deny list's, not the guard's", "allow",
+    tool="Grep", cwd=NOGIT, path=slash(os.path.join(PROJ, ENV + ".local")))
 # The reviewer's own payload, pinned by name. Every refused case is checked for a leaked file
 # name, and this one holds the exact shape the review asked for.
-add("env: a Read outside the fixtures, and the reason names no file", "deny", "env-file",
-    tool="Read", cwd="C:/repo", file_path="C:/repo/" + ENV)
+add("env: a Write outside the fixtures, and the reason names no file", "deny", "env-file",
+    tool="Write", cwd="C:/repo", file_path="C:/repo/" + ENV)
 add("env: Read of the example file", "allow", tool="Read", cwd=NOGIT,
     file_path=slash(os.path.join(PROJ, ENV + ".example")))
+# A search command's PATTERN is a regex, never a path. MEASURED: 65 false denies of a lone dot-star.
+sh("trim: env: grep with a dot-star pattern", "grep -n '.*' README.md", "allow", cwd=NOGIT)
+sh("trim: env: grep -e with a dot-star pattern", "grep -rn -e '.*' src/", "allow", cwd=NOGIT)
+sh("trim: env: grep with a dot-star pattern and a flag value first", "grep -A 3 '.*' README.md",
+   "allow", cwd=NOGIT)
+# `-f` and `--file` hand grep a FILE of patterns: that value is a path and is judged.
+sh("trim: env: grep -f names the file as a path", "grep -f " + ENV + " x", "deny", "env-file",
+   cwd=NOGIT)
+sh("trim: env: rg -f names the file as a path", "rg -f " + ENV + " x", "deny", "env-file",
+   cwd=NOGIT)
+sh("trim: env: grep --file names the file as a path", "grep --file " + ENV + " x", "deny",
+   "env-file", cwd=NOGIT)
+sh("trim: env: grep --file= names the file as a path", "grep --file=" + ENV + " x", "deny",
+   "env-file", cwd=NOGIT)
+sh("trim: env: a dot-star glob handed to cat still denies", "cat .*", "deny", "env-file",
+   cwd=NOGIT)
+sh("trim: env: a dot-star glob as grep's FILE still denies", "grep foo .*", "deny", "env-file",
+   cwd=NOGIT)
+sh("trim: env: the file named after grep -e still denies", "grep -e foo " + ENV, "deny",
+   "env-file", cwd=NOGIT)
+# An assignment whose quoted value holds a space is not the command: its tail once read as the
+# command word and denied a real runner.
+sh("trim: env: a quoted assignment value with a space ahead of node --env-file",
+   "ADMINS='Shivam Semwal' PORT=1 node --env-file=" + ENV + " --import tsx server.ts", "allow",
+   cwd=NOGIT)
+# An unquoted heredoc whose body holds no substitution once crashed the env check, which failed
+# open and skipped every rule after it, the frozen-path rule included.
+sh("trim: env: an unquoted heredoc with no substitution still reaches the frozen-path rule",
+   "cat <<EOF > " + CFG_HOOK + "\nhello\nEOF", "deny", "frozen-path", cwd=NOGIT)
+sh("trim: env: an unquoted heredoc with a substitution that reads the file denies",
+   "cat <<EOF\n$(cat " + ENV + ")\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("trim: env: the same assignment ahead of a non-runner still denies",
+   "ADMINS='Shivam Semwal' cat --env-file=" + ENV, "deny", "env-file", cwd=NOGIT)
 add("env: Edit of the example file", "allow", tool="Edit", cwd=NOGIT,
     file_path=slash(os.path.join(PROJ, ENV + ".example")))
 
@@ -2143,7 +2461,8 @@ for held in (
     VCS + " check-ignore -v --stdin < " + ENV, VCS + " check-ignore -z " + ENV,
     VCS + " check-ignore -v " + ENV + " > " + ENV,
 ):
-    sh("env: a message allowance does not leak, " + held[:34], held, "deny", "env-file", cwd=NOGIT)
+    sh("env: a message allowance does not leak, " + held[:34], held, "deny", "env-file", cwd=NOGIT,
+       config=MERGECFG)   # the cite rule must find its folder list, or it never reaches a file
 
 # The contents of a command substitution or a process substitution are judged as commands, at any
 # depth, and a `<` redirect from the file is a read. A word such as `.env)` hides no name.
@@ -2259,20 +2578,179 @@ sh("env: the accessor search in the other shell",
 # merge call is now an ALLOW; the guard log is what carries the base and the tool, checked in
 # merge_log_case() below.
 
+# These run against a green head. Section 5b below pins the gate that refuses a head that is not.
 sh("merge: a base of main is allowed", "gh pr merge 12 --squash", "allow", cwd=NOGIT,
-   env_path=GHMAIN + os.pathsep + PY_PATH)
+   env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge: a base of dev is allowed", "gh pr merge 12 --squash", "allow", cwd=NOGIT,
-   env_path=GHDEV + os.pathsep + PY_PATH)
-sh("merge: an unreadable base is allowed", "gh pr merge 12 --squash", "allow",
-   cwd=NOGIT, env_path=GHNONE_PATH)
+   env_path=GHDEV + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge: an unreadable base is allowed once the head checks read green",
+   "gh pr merge 12 --squash", "allow", cwd=NOGIT, env_path=GHBLANK + os.pathsep + PY_PATH,
+   config=MERGECFG)
 sh("merge: no number is allowed", "gh pr merge", "allow",
-   cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
+   cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge: reading a pull request is untouched", "gh pr view 75 --json baseRefName", "allow",
    cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
 sh("merge: opening a pull request is untouched", "gh pr create --base main --title x --body y",
    "allow", cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
-add("merge: every call of the merge tool is allowed", "allow",
-    tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12, repo="x", owner="y")
+add("merge: a call of the merge tool on a green head is allowed", "allow",
+    tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12, repo="x", owner="y",
+    env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
+
+
+# =========================================================================== 5b. the merge gate
+#
+# `git-wait-for-required-checks`. A merge made outside the merge tool is refused while the head has
+# a check or a workflow run pending or red, and when that read could not run. Every case names the
+# fake `gh` it runs against; MERGECFG lets a mutant copy of the guard find the merge tool.
+
+GREEN_ON = GHMAIN + os.pathsep + PY_PATH
+for _fake, _word, _label in (
+    (GHPEND, "pending", "a pending check"),
+    (GHRED, "red", "a failed check"),
+    (GHRUNPEND, "pending", "a workflow run not finished"),
+):
+    sh("merge-checks: %s denies" % _label, "gh pr merge 12 --squash", "deny", "merge-checks",
+       carries=_word, cwd=NOGIT, env_path=_fake + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: match-head-commit is no proof the head settled",
+   "gh pr merge 12 --squash --match-head-commit abc1234", "deny", "merge-checks",
+   carries="pending", cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: a merge behind another command still denies",
+   "echo ok && gh pr merge 12 --squash", "deny", "merge-checks", carries="pending",
+   cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: a gh that answers nothing readable is unknown, and denies",
+   "gh pr merge 12 --squash", "deny", "merge-checks", carries="could not run",
+   cwd=NOGIT, env_path=GHBROKEN + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: a missing gh is unknown, and denies", "gh pr merge 12 --squash", "deny",
+   "merge-checks", carries="could not run", cwd=NOGIT, env_path=GHNONE_PATH, config=MERGECFG)
+add("merge-checks: the merge tool of the host denies on a pending head", "deny", "merge-checks",
+    carries="pending", tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12,
+    repo="x", owner="y", env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+add("merge-checks: the merge tool of the host denies on a failed head", "deny", "merge-checks",
+    carries="red", tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12,
+    repo="x", owner="y", env_path=GHRED + os.pathsep + PY_PATH, config=MERGECFG)
+NEED_ON = GHNEED + os.pathsep + PY_PATH
+sh("merge-checks: the pull request and repo of the call are the ones read",
+   "gh pr merge 12 --squash -R y/x", "allow", silent=True, cwd=NOGIT, env_path=NEED_ON,
+   config=MERGECFG)
+sh("merge-checks: the long repo flag names the repo too", "gh pr merge 12 --repo=y/x", "allow",
+   silent=True, cwd=NOGIT, env_path=NEED_ON, config=MERGECFG)
+sh("merge-checks: a flag value is no pull request", "gh pr merge -b note 12 -R y/x --squash",
+   "allow", silent=True, cwd=NOGIT, env_path=NEED_ON, config=MERGECFG)
+add("merge-checks: the host merge tool reads the pull request and repo it names", "allow",
+    silent=True, tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12, repo="x",
+    owner="y", env_path=NEED_ON, config=MERGECFG)
+sh("merge-checks: a gh slower than the gate waits is unknown, and denies",
+   "gh pr merge 12 --squash", "deny", "merge-checks", carries="could not run", cwd=NOGIT,
+   env_path=GHSLOW + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: the words of a merge in an echo are no merge", "echo gh pr merge 12 --squash",
+   "allow", silent=True, cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: a head that reports nothing yet is not settled when the repo has workflows",
+   "gh pr merge 12 --squash", "deny", "merge-checks", carries="no check", cwd=WFREPO,
+   env_path=GHEMPTY + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: a head that reports nothing may merge when the repo has no workflows at all",
+   "gh pr merge 12 --squash", "allow", silent=True, cwd=NOGIT,
+   env_path=GHEMPTY + os.pathsep + PY_PATH, config=MERGECFG)
+# 4. the repo the command names
+sh("merge-checks: a cd names the repo the read runs in",
+   "cd " + slash(CTXREPO) + " && gh pr merge 5 --squash", "allow", silent=True, cwd=NOGIT,
+   env_path=GHCWD + os.pathsep + PY_PATH, config=MERGECFG)
+# PowerShell passes native paths. On Windows these are backslash paths, which a POSIX tokenizer
+# would eat; `powershell_backslash_case` pins that on every platform.
+sh("merge-checks: a PowerShell cd to a native path names the repo the read runs in",
+   "cd " + CTXREPO + "; gh pr merge 5 --squash", "allow", silent=True, tool="PowerShell",
+   cwd=NOGIT, env_path=GHCWD + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: a read run in the wrong folder is unknown, and denies",
+   "gh pr merge 5 --squash", "deny", "merge-checks", carries="could not run", cwd=NOGIT,
+   env_path=GHCWD + os.pathsep + PY_PATH, config=MERGECFG)
+add("merge-checks: the host merge tool reads the repo of the call's folder", "allow", silent=True,
+    tool="mcp__github__merge_pull_request", cwd=CTXREPO, pullNumber=5, repo="x", owner="y",
+    env_path=GHCWD + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: a green head merges", "gh pr merge 12 --squash", "allow", silent=True,
+   cwd=NOGIT, env_path=GREEN_ON, config=MERGECFG)
+sh("merge-checks: --auto is gated like any merge", "gh pr merge 12 --auto --squash", "deny",
+   "merge-checks", carries="pending", cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH,
+   config=MERGECFG)
+sh("merge-checks: help merges nothing", "gh pr merge --help", "allow", silent=True,
+   cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: the merge tool is judged by its own wait, not here",
+   "python3 merge/merge.py 12 --confirm", "allow", silent=True, cwd=NOGIT,
+   env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: reading a pending pull request is untouched", "gh pr view 12 --json state",
+   "allow", silent=True, cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: quoted text that names a merge is text", 'echo "gh pr merge 12 --squash"',
+   "allow", silent=True, cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: a grep for a merge is no merge", "grep -rn 'gh pr merge' docs", "allow",
+   silent=True, cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: a heredoc body that names a merge is data",
+   "cat > notes.txt <<'EOF'\ngh pr merge 12 --squash\nEOF", "allow", silent=True, cwd=NOGIT,
+   env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: a commit message that names a merge is a message",
+   VCS + ' log --grep "gh pr merge"', "allow", silent=True, cwd=NOGIT,
+   env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+
+
+# =========================================================================== 5d. cite by id
+#
+# `git-cite-by-id`. A commit message or a PR body that cites a record by its path is refused. A code
+# path, the word "decisions", a read of a record and a record's own file stay allowed.
+
+CITE = "decisions/one-shared-record-stamp.md"
+for _name, _command in (
+    ("a commit -m", VCS + ' commit -m "fix, per ' + CITE + '"'),
+    ("a second -m paragraph", VCS + ' commit -m "title" -m "body cites ' + CITE + '"'),
+    ("a -am cluster", VCS + ' commit -am "see deferred/later-item.md"'),
+    ("the long --message=", VCS + ' commit --message="cites ' + CITE + '"'),
+    ("a single-quoted message", VCS + " commit -m 'cites " + CITE + "'"),
+    ("a heredoc inside -m", VCS + ' commit -m "$(cat <<\'EOF\'\ntitle\n\ncites ' + CITE + '\nEOF\n)"'),
+    ("a heredoc fed to -F -", VCS + " commit -F - <<'EOF'\ntitle\n\ncites " + CITE + "\nEOF"),
+    ("a file named by -F", VCS + " commit -F " + slash(MSG_BAD)),
+    ("a backslash path", VCS + ' commit -m "cites decisions\\one-shared-record-stamp.md"'),
+    ("an attached -m value", VCS + ' commit -m"cites ' + CITE + '"'),
+    ("a repo-root record path in parentheses", VCS + ' commit -m "done (' + CITE + ')"'),
+    ("a dot-slash record path", VCS + ' commit -m "cites ./' + CITE + '"'),
+    ("a PR body", 'gh pr create --title t --body "cites ' + CITE + '"'),
+    ("a PR body file", "gh pr edit 3 --body-file " + slash(MSG_BAD)),
+    ("a PR body behind a cd", "cd x; gh pr edit 3 -b 'cites " + CITE + "'"),
+):
+    sh("cite-by-id: %s denies" % _name, _command, "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: a message file that cannot be read is unknown, and denies",
+   VCS + " commit -F " + slash(ROOT) + "/no-such-message.txt", "deny", "cite-by-id",
+   carries="could not be read", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: a PowerShell -F file at a native path is read", VCS + " commit -F " + MSG_BAD,
+   "deny", "cite-by-id", tool="PowerShell", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: a PowerShell commit denies too", VCS + ' commit -m "cites ' + CITE + '"', "deny",
+   "cite-by-id", tool="PowerShell", cwd=NOGIT, config=MERGECFG)
+for _name, _command in (
+    ("a code path", VCS + ' commit -m "guard: fix hooks/guard.py"'),
+    ("the word decisions", VCS + ' commit -m "decisions: one word, no path"'),
+    ("the word deferred and a folder", VCS + ' commit -m "move the deferred items, see decisions/"'),
+    ("an id with a gloss", VCS + ' commit -m "per D12, short titles for records"'),
+    ("a record path in the add, not the message",
+     VCS + " add " + CITE + " && " + VCS + ' commit -m "add the record"'),
+    ("a non-record file of a record folder", VCS + ' commit -m "update decisions/ORDER.json"'),
+    ("a heredoc that belongs to the command after the commit",
+     VCS + ' commit -m "add" && cat > notes.txt <<\'EOF\'\nsee ' + CITE + '\nEOF'),
+    ("a note message, which this rule does not read", VCS + ' notes add -m "cites ' + CITE + '"'),
+    ("a URL that holds a record path",
+     VCS + ' commit -m "see https://github.com/o/r/blob/main/' + CITE + '"'),
+    ("a record path under another folder", VCS + ' commit -m "see lint/' + CITE + '"'),
+    ("a numbered record path under docs", VCS + ' commit -m "see docs/decisions/0001.md"'),
+    ("a message file that cites an id", VCS + " commit -F " + slash(MSG_OK)),
+    ("a PR body with an id", 'gh pr create --title t --body "per D12, short titles for records"'),
+):
+    sh("cite-by-id: %s is allowed" % _name, _command, "allow", cwd=NOGIT, config=MERGECFG)
+for _name, _command in (
+    ("a log of a record", VCS + " log --oneline -- " + CITE),
+    ("a show of a record", VCS + " show HEAD:" + CITE),
+    ("a cat of a record", "cat " + CITE),
+    ("an echo that holds commit words", 'echo \'' + VCS + ' commit -m "' + CITE + '"\''),
+    ("a grep for a record path", "grep -rn '" + CITE + "' ."),
+    ("a heredoc that writes a record citing another",
+     "cat > decisions/a.md <<'EOF'\nsee " + CITE + "\nEOF"),
+    ("a log search for the path", VCS + ' log --grep="' + CITE + '"'),
+    ("a PR view", "gh pr view 12 --json body"),
+):
+    sh("cite-by-id: %s is no message" % _name, _command, "allow", silent=True, cwd=NOGIT, config=MERGECFG)
 
 
 # =========================================================================== 6. frozen paths
@@ -2464,7 +2942,7 @@ sh("frozen: a leftover token is not a key to the frozen rule",
 sh("frozen: a leftover token is not a key to the shared-tree rule",
    "GIT_DISCARD_OK=1 " + VCS + " restore src", "deny", "shared-tree", cwd=NOGIT)
 sh("frozen: a leftover token is not a key to the push rule",
-   "GIT_DISCARD_OK=1 " + VCS + " push --force", "ask", "force-push", cwd=NOGIT)
+   "GIT_DISCARD_OK=1 " + VCS + " push --force", "deny", "force-push", cwd=PUSHFEAT)
 
 
 # =========================================================================== 6b. the model cap
@@ -2709,6 +3187,397 @@ sh("ordinary: npm ci is not the PowerShell ci alias", "npm ci", "allow", tool="P
    cwd=NOGIT)
 
 
+# =========================================================================== builders do not edit tests
+#
+# The rule judges the RESULT: the diff a builder (or test-author) would commit, push or stop with.
+# Only a payload with an agent_id AND a matching agent_type is judged. Three entry points read the
+# same diff: a write tool (early warning, by path), `commit`/`push`, and SubagentStop.
+
+BT = "builder-test-edit"
+TA = "test-author-scope"
+B = dict(agent_id="bld1", agent_type="builder", cwd=NOGIT)
+A = dict(agent_id="auth1", agent_type="test-author", cwd=NOGIT)
+
+# ---- the early warning, by path (write tools)
+for _tool, _field in (("Edit", "file_path"), ("Write", "file_path"), ("MultiEdit", "file_path"),
+                      ("NotebookEdit", "notebook_path")):
+    add("builder-test: %s of a test file is refused" % _tool, "deny", rule=BT, tool=_tool,
+        carries=("test-author", "Report"), **{_field: "src/test_app.py"}, **B)
+for _path in ("src/app_test.py", "pkg/app_test.go", "web/a.test.ts", "web/a.test.jsx",
+              "web/a.spec.js", "tests/helper.py", "pkg/__tests__/x.js", "spec/models/user.rb",
+              "src/tests/data/fixture.json", "test/x.txt", "src/conftest.py"):
+    add("builder-test: Edit of %s is refused" % _path, "deny", rule=BT, tool="Edit",
+        file_path=_path, new_string="x = 1", **B)
+add("builder-test: addopts --deselect added to pytest.ini is refused", "deny", rule=BT,
+    tool="Edit", file_path="pytest.ini", new_string="addopts = --deselect a::b", **B)
+add("builder-test: a dependency added to pyproject.toml is allowed", "allow", tool="Edit",
+    file_path="pyproject.toml", new_string='dependencies = ["requests"]', **B)
+for _path in ("src/app.py", "src/contest.py", "latest_results.md", "docs/attest.md",
+              "src/protest_handler.ts", "src/specs.md", "src/testing.py", "src/Contest.java"):
+    add("builder-test: Edit of %s is allowed" % _path, "allow", tool="Edit", file_path=_path,
+        new_string="x = 1", **B)
+add("builder-test: Read of a test is allowed", "allow", tool="Read", file_path="tests/x.py", **B)
+add("builder-test: a repo that lives under a tests folder is not all test files", "allow",
+    tool="Edit", file_path=os.path.join(UNDERTESTS, "src", "app.py"), **B)
+add("builder-test: a test inside that repo is still refused", "deny", rule=BT, tool="Edit",
+    file_path=os.path.join(UNDERTESTS, "src", "test_app.py"), **B)
+add("builder-test: main session may edit a test", "allow", tool="Edit",
+    file_path="src/test_app.py", cwd=NOGIT)
+add("builder-test: reviewer may edit a test", "allow", tool="Edit", file_path="src/test_app.py",
+    agent_id="rev1", agent_type="reviewer", cwd=NOGIT)
+add("builder-test: a session run with --agent builder (no agent_id) is not judged", "allow",
+    tool="Edit", file_path="src/test_app.py", agent_type="builder", cwd=NOGIT)
+add("test-author: Edit of product code is refused", "deny", rule=TA, tool="Edit",
+    file_path="src/app.py", carries=("builder", "Report"), **A)
+add("builder-test: a ruff --ignore script added to package.json is allowed", "allow", tool="Edit",
+    file_path="package.json", new_string='"lint": "ruff check --ignore E501"', **B)
+add("builder-test: a flake8 --ignore line added to setup.cfg is allowed", "allow", tool="Edit",
+    file_path="setup.cfg", new_string="commands = flake8 --ignore=E203", **B)
+add("builder-test: ignore-scripts added to package.json is allowed", "allow", tool="Edit",
+    file_path="package.json", new_string='"ci": "npm ci --ignore-scripts"', **B)
+add("test-author: Edit of package.json passes the early warning (the diff judges it)", "allow",
+    tool="Edit", file_path="package.json", **A)
+for _path in ("tests/test_a.py", "src/b_test.go", "pytest.ini", "pyproject.toml", "conftest.py",
+              "jest.config.js"):
+    add("test-author: Edit of %s is allowed" % _path, "allow", tool="Edit", file_path=_path, **A)
+
+# ---- the diff, judged at commit, push and SubagentStop
+BASE_FILES = {
+    "src/app.py": "x = 1\n", "src/contest.py": "y = 1\n", "latest_results.md": "ok\n",
+    "tests/test_a.py": "def test_a():\n    assert True\n", "pyproject.toml": "[project]\nname = 'x'\n[tool.pytest.ini_options]\nminversion = '7'\n",
+    "package.json": ('{"name": "x", "scripts": {"build": "tsc", "test": "jest"}, '
+                     '"dependencies": {"a": "1"}, "devDependencies": {"b": "1"}}\n'),
+    "requirements-dev.txt": "pytest\n",
+}
+DIFFROOT = os.path.join(ROOT, "diffrepos")
+
+
+# A diff repo costs real git calls, and the mutation harness runs this module once per mutant while
+# `MUTATE_ONLY` selects one or two cases. So a repo is built LAZILY, the first time a case runs in
+# it (`materialize`, called from `decide`). MEASURED on Windows CI: building all of them at import
+# cost 1 min 52 s per run of this module.
+LAZY = {}
+
+
+def lazy_fixture(paths, build):
+    """Register `build` (run once) for every path in `paths`."""
+    done = []
+
+    def once():
+        if not done:
+            done.append(1)
+            build()
+    for path in paths:
+        LAZY[path] = once
+
+
+def materialize(path):
+    if path and path in LAZY:
+        LAZY[path]()
+
+
+def diff_repo(name, change, commit=False, cut_from=None, files=None):
+    """A real linked worktree, as a builder runs in: a main checkout with a base commit, and a
+    worktree on a new branch `work` cut from `cut_from` (default HEAD). `change` edits the
+    worktree; `commit` then commits there. Returns the worktree's path. Built on first use."""
+    main = os.path.join(DIFFROOT, name + "-main")
+    where = os.path.join(DIFFROOT, name)
+
+    def build():
+        make_repo(main, files or BASE_FILES)
+        made = run_vcs(main, "worktree", "add", "-q", "-b", "work", where,
+                       *([cut_from] if cut_from else []))
+        if made.returncode != 0:
+            sys.exit("fixture setup failed: worktree in %r: %s" % (where, made.stderr.strip()))
+        change(where)
+        if commit:
+            run_vcs(where, "add", "-A")
+            done = run_vcs(where, *IDENT, "commit", "-q", "-m", "work")
+            if done.returncode != 0:
+                sys.exit("fixture setup failed: commit in %r: %s" % (where, done.stderr.strip()))
+    lazy_fixture([where, main], build)
+    return where
+
+
+def _rm(rel):
+    return lambda w: os.remove(os.path.join(w, rel))
+
+
+def _put(rel, text):
+    return lambda w: write(os.path.join(w, rel), text)
+
+
+def _mv(src, dst):
+    def go(w):
+        os.makedirs(os.path.dirname(os.path.join(w, dst)), exist_ok=True)
+        os.rename(os.path.join(w, src), os.path.join(w, dst))
+    return go
+
+
+def _link(target, rel):
+    def go(w):
+        os.makedirs(os.path.dirname(os.path.join(w, rel)), exist_ok=True)
+        os.symlink(target, os.path.join(w, rel))
+    return go
+
+
+# Each reviewer bypass of the old command reader ends in ONE of these trees. The guard never saw
+# the command, only the tree, and every one is red.
+BUILDER_RED = [
+    ("deleted", _rm("tests/test_a.py")),                      # rm, find -delete, xargs rm, dd
+    ("rewritten", _put("tests/test_a.py", "pass\n")),         # sed -i, patch, apply, rsync, bash -c
+    ("new-untracked", _put("tests/test_new.py", "pass\n")),   # cp -t, a redirect through a variable
+    ("moved-out", _mv("tests/test_a.py", "src/moved.py")),    # mv
+    ("symlink-file", _link("../tests/test_a.py", "src/link.py")),
+    ("symlink-dir", _link("tests", "src/linkdir")),
+    ("backslash-name", _put("tests\\foo.py", "pass\n")),
+    ("conftest", _put("conftest.py", "import pytest\n")),
+    ("pytest-ini", _put("pytest.ini", "[pytest]\naddopts = --deselect tests/test_a.py\n")),
+    ("pyproject-addopts", _put("pyproject.toml",
+                               "[project]\nname = 'x'\n[tool.pytest.ini_options]\n"
+                               "addopts = \"--ignore=tests\"\n")),
+    ("jest-config", _put("jest.config.js", "module.exports = {testPathIgnorePatterns: ['/src/']}\n")),
+    ("pytest-section-far-flag", _put("pyproject.toml", "[project]\nname = 'x'\n[tool.pytest.ini_options]\n"
+                                     "minversion = '7'\na = 1\nb = 2\nc = 3\nflags = \"--ignore=tests\"\n")),
+    ("test-script-deselect", _put("package.json", '{"name": "x", "scripts": {"test": '
+                                  '"pytest --deselect a::b"}}\n')),
+    ("pytest-ini-continued-addopts", _put("pytest.ini", "[pytest]\naddopts =\n    -q\n"
+                                          "    --ignore=tests/slow\n")),
+    ("package-json-jest", _put("package.json",
+                               '{"name": "x", "jest": {"testPathIgnorePatterns": ["src"]}}\n')),
+    ("spec-file", _put("web/a.spec.ts", "it.skip('x', () => {})\n")),
+    ("testdata", _put("testdata/x.json", "{}\n")),
+    ("snapshots", _put("src/__snapshots__/a.snap", "snap\n")),
+    ("jest-setup", _put("jest.setup.js", "global.x = 1\n")),
+    ("java-test", _put("src/FooTest.java", "class FooTest {}\n")),
+    ("test-support", _put("test_support/helper.py", "pass\n")),
+]
+BUILDER_GREEN = [
+    ("clean-tree", lambda w: None),
+    ("product-edit", _put("src/app.py", "x = 2\n")),
+    ("contest-and-results", lambda w: (write(os.path.join(w, "src/contest.py"), "y = 2\n"),
+                                       write(os.path.join(w, "latest_results.md"), "better\n"))),
+    ("product-rename", _mv("src/app.py", "src/main.py")),
+    ("product-delete", _rm("src/contest.py")),
+    ("dependency-added", _put("pyproject.toml", "[project]\nname = 'x'\ndependencies = ['requests']\n")),
+    ("script-added", _put("package.json", '{"name": "x", "scripts": {"build": "tsc"}}\n')),
+    ("symlink-to-product", _link("../src/app.py", "src/alias.py")),
+    ("ruff-ignore-script", _put("package.json", '{"name": "x", "scripts": {"lint": '
+                                '"ruff check --ignore E501"}}\n')),
+    ("flake8-ignore-flag", _put("tox.ini", "[testenv:lint]\ncommands = flake8 --ignore=E203\n")),
+    ("ignore-scripts-flag", _put("package.json",
+                                 '{"name": "x", "scripts": {"ci": "npm ci --ignore-scripts && jest"}}\n')),
+    ("dev-requirements", _put("requirements-dev.txt", "pytest\nruff\n")),
+    ("pyproject-non-pytest", _put("pyproject.toml",
+                                  "[project]\nname = 'x'\ndependencies = ['y']\n"
+                                  "[tool.pytest.ini_options]\nminversion = '7'\n")),
+]
+COMMIT, PUSH = VCS + " commit -m x", VCS + " push origin work"
+for _name, _change in BUILDER_RED:
+    _repo = diff_repo("b-" + _name, _change)
+    sh("builder-diff: commit with a %s change is refused" % _name, COMMIT, "deny", rule=BT,
+       cwd=_repo, agent_id="bld1", agent_type="builder", carries=("test-author", "Report"))
+    sh("builder-diff: push with a %s change is refused" % _name, PUSH, "deny", rule=BT,
+       cwd=_repo, agent_id="bld1", agent_type="builder")
+    add("builder-diff: stop with a %s change is blocked" % _name, "deny", rule=BT,
+        event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder",
+        carries=("test-author", "Report"))
+_repo = diff_repo("b-committed", _put("tests/test_a.py", "pass\n"), commit=True)
+add("builder-diff: stop after COMMITTING a test change is blocked", "deny", rule=BT,
+    event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
+sh("builder-diff: push after COMMITTING a test change is refused", PUSH, "deny", rule=BT,
+   cwd=_repo, agent_id="bld1", agent_type="builder")
+_repo = diff_repo("b-reverted", lambda w: (write(os.path.join(w, "tests/test_a.py"), "pass\n"),
+                                           write(os.path.join(w, "tests/test_a.py"),
+                                                 BASE_FILES["tests/test_a.py"])))
+add("builder-diff: a test change put back to the base bytes is no change", "allow",
+    event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
+_inh_main = os.path.join(DIFFROOT, "g-inherited-main")
+_inh = os.path.join(DIFFROOT, "g-inherited")
+
+
+def _build_inherited():
+    make_repo(_inh_main, BASE_FILES)
+    run_vcs(_inh_main, "checkout", "-q", "-b", "orch")
+    write(os.path.join(_inh_main, "tests/test_a.py"), "pass\n")   # the orchestrator's own commit
+    run_vcs(_inh_main, "add", "-A")
+    run_vcs(_inh_main, *IDENT, "commit", "-q", "-m", "orch")
+    run_vcs(_inh_main, "worktree", "add", "-q", "-b", "work", _inh, "orch")
+    write(os.path.join(_inh, "src/app.py"), "x = 9\n")
+
+
+lazy_fixture([_inh, _inh_main], _build_inherited)
+add("builder-diff: test changes the branch inherited are not the builder's", "allow",
+    event="SubagentStop", cwd=_inh, agent_id="bld1", agent_type="builder")
+
+
+def _merge_main_in(own_test_edit):
+    """Main gains a test change AFTER the builder's branch was cut; the builder merges main in."""
+    def go(w):
+        main = w + "-main"
+        write(os.path.join(main, "tests/test_a.py"), "pass  # main's own change\n")
+        run_vcs(main, "add", "-A")
+        run_vcs(main, *IDENT, "commit", "-q", "-m", "main moves")
+        merged = run_vcs(w, *IDENT, "merge", "-q", "--no-edit", "main")
+        if merged.returncode != 0:
+            sys.exit("fixture setup failed: merge in %r: %s" % (w, merged.stderr.strip()))
+        write(os.path.join(w, "src/app.py"), "x = 5\n")
+        if own_test_edit:
+            write(os.path.join(w, "tests/test_b.py"), "pass\n")
+    return go
+
+
+_repo = diff_repo("g-merged-main", _merge_main_in(False))
+add("builder-diff: test changes merged in from main are not the builder's", "allow",
+    event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
+sh("builder-diff: commit after merging main in is allowed", COMMIT, "allow", cwd=_repo,
+   agent_id="bld1", agent_type="builder")
+_repo = diff_repo("b-merged-main-own", _merge_main_in(True))
+add("builder-diff: its OWN new test after merging main in is still blocked", "deny", rule=BT,
+    event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
+
+
+def _own_test_then_new_branch(w):
+    write(os.path.join(w, "tests/test_a.py"), "pass\n")
+    run_vcs(w, "add", "-A")
+    run_vcs(w, *IDENT, "commit", "-q", "-m", "own test change")
+    run_vcs(w, "switch", "-q", "-c", "b2")
+
+
+_repo = diff_repo("b-new-branch-name", _own_test_then_new_branch)
+add("builder-diff: a new branch name does not reset the base", "deny", rule=BT,
+    event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
+sh("builder-diff: a new branch name does not reset the base at push", PUSH, "deny", rule=BT,
+   cwd=_repo, agent_id="bld1", agent_type="builder")
+
+# the refusal gives up once, and names a working undo route with placeholders
+_repo = diff_repo("b-giveup", lambda w: (write(os.path.join(w, "tests/test_a.py"), "pass\n"),
+                                         # the MAIN tree is dirty too
+                                         write(os.path.join(w + "-main", "tests", "test_x.py"), "pass\n")))
+add("builder-diff: the stop refusal names the undo route, with placeholders", "deny", rule=BT,
+    event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder",
+    carries=(VCS + " show ", ":<path> > <path>", "rm <path>", "WHOLE file"))
+add("builder-diff: a second stop (stop_hook_active) is allowed, once blocked", "allow",
+    event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder", stop_active=True)
+add("builder-diff: a test-author's second stop is allowed too", "allow",
+    event="SubagentStop", cwd=diff_repo("a-giveup", _put("src/app.py", "x = 2\n")),
+    agent_id="auth1", agent_type="test-author", stop_active=True)
+add("builder-diff: an unread diff blocks the first stop", "deny", rule=BT,
+    event="SubagentStop", cwd=NOGIT, agent_id="bld1", agent_type="builder",
+    carries=("could not read",))
+add("builder-diff: an unread diff lets the second stop go", "allow",
+    event="SubagentStop", cwd=NOGIT, agent_id="bld1", agent_type="builder", stop_active=True)
+add("builder-diff: a stop with no cwd is allowed (and logged)", "allow", event="SubagentStop",
+    agent_id="bld1", agent_type="builder")
+add("builder-diff: a stop whose cwd is a main checkout is allowed (and logged)", "allow",
+    event="SubagentStop", cwd=os.path.join(DIFFROOT, "b-giveup-main"), agent_id="bld1",
+    agent_type="builder")
+
+
+def role_log_case():
+    """Every stop the guard cannot judge LOGS, so an unjudged stop is never a silent pass."""
+    materialize(os.path.join(DIFFROOT, "b-giveup"))
+    folder = os.path.join(ROOT, "rolelog")
+    os.makedirs(folder, exist_ok=True)
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    stops = [
+        ({}, "role-diff-nocwd"),
+        ({"cwd": os.path.join(DIFFROOT, "b-giveup-main")}, "role-diff-main-checkout"),
+        ({"cwd": os.path.join(DIFFROOT, "b-giveup"), "stop_hook_active": True},
+         "role-diff-unresolved"),
+    ]
+    problems = []
+    for extra, want in stops:
+        body = {"hook_event_name": "SubagentStop", "agent_id": "bld1", "agent_type": "builder"}
+        body.update(extra)
+        got = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True,
+                             text=True, env=env, timeout=60)
+        if got.stdout.strip():
+            problems.append("%s: expected a silent allow, got %r" % (want, got.stdout[:60]))
+    path = os.path.join(folder, "guard.log")
+    text = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+    for _, want in stops:
+        if want not in text:
+            problems.append("no log line for " + want)
+    return (not problems), ("; ".join(problems) or "each unjudged stop is logged")
+
+
+LOG_CHECKS_EXTRA = [("role-diff: every unjudged stop is logged", role_log_case)]
+for _name, _change in BUILDER_GREEN:
+    _repo = diff_repo("g-" + _name, _change)
+    sh("builder-diff: commit with %s is allowed" % _name, COMMIT, "allow", cwd=_repo,
+       agent_id="bld1", agent_type="builder")
+    add("builder-diff: stop with %s is allowed" % _name, "allow", event="SubagentStop",
+        cwd=_repo, agent_id="bld1", agent_type="builder")
+_dirty = diff_repo("main-dirty", _put("tests/test_a.py", "pass\n"))
+sh("builder-diff: the main session may commit a test change", COMMIT, "allow", cwd=_dirty)
+sh("builder-diff: a reviewer may commit a test change", COMMIT, "allow", cwd=_dirty,
+   agent_id="rev1", agent_type="reviewer")
+sh("builder-diff: a session run with --agent builder (no agent_id) is not judged", COMMIT,
+   "allow", cwd=_dirty, agent_type="builder")
+add("builder-diff: a reviewer stop with a test change is allowed", "allow", event="SubagentStop",
+    cwd=_dirty, agent_id="rev1", agent_type="reviewer")
+sh("builder-diff: a builder in a tree git cannot read is allowed and noted", COMMIT, "allow",
+   cwd=NOGIT, agent_id="bld1", agent_type="builder")
+sh("builder-diff: reads stay allowed in a dirty tree", "cat tests/test_a.py && ls tests",
+   "allow", cwd=_dirty, agent_id="bld1", agent_type="builder")
+
+# ---- the test-author, inverted: only tests and test config may change
+AUTHOR_GREEN = [
+    ("new-test", _put("tests/test_new.py", "pass\n")),
+    ("edited-test", _put("tests/test_a.py", "pass\n")),
+    ("test-config", _put("pytest.ini", "[pytest]\naddopts = --deselect x\n")),
+    ("conftest", _put("conftest.py", "import pytest\n")),
+    ("clean-tree", lambda w: None),
+    ("dev-dependency", _put("package.json", '{"name": "x", "scripts": {"build": "tsc", "test": '
+                            '"jest"}, "dependencies": {"a": "1"}, "devDependencies": {"b": "2"}}\n')),
+    ("test-script", _put("package.json", '{"name": "x", "scripts": {"build": "tsc", "test": '
+                         '"jest --ci", "test:unit": "jest u"}, "dependencies": {"a": "1"}, '
+                         '"devDependencies": {"b": "1"}}\n')),
+    ("dev-requirements", _put("requirements-dev.txt", "pytest\nhypothesis\n")),
+    ("testdata", _put("testdata/x.json", "{}\n")),
+    ("snapshots", _put("src/__snapshots__/a.snap", "snap\n")),
+    ("jest-setup", _put("jest.setup.js", "global.x = 1\n")),
+    ("java-test", _put("src/FooTest.java", "class FooTest {}\n")),
+    ("test-support", _put("test_support/helper.py", "pass\n")),
+    ("pytest-section", _put("pyproject.toml", "[project]\nname = 'x'\n[tool.pytest.ini_options]\n"
+                            "minversion = '8'\naddopts = '-q'\n")),
+]
+AUTHOR_RED = [
+    ("product-edit", _put("src/app.py", "x = 2\n")),
+    ("product-new", _put("src/new.py", "x = 2\n")),
+    ("product-delete", _rm("src/contest.py")),
+    ("docs-edit", _put("latest_results.md", "better\n")),
+    ("package-json", _put("package.json", '{"name": "y"}\n')),
+    ("runtime-dependency", _put("package.json", '{"name": "x", "scripts": {"build": "tsc", '
+                                '"test": "jest"}, "dependencies": {"a": "2"}, "devDependencies": '
+                                '{"b": "1"}}\n')),
+    ("build-script", _put("package.json", '{"name": "x", "scripts": {"build": "make", "test": '
+                          '"jest"}, "dependencies": {"a": "1"}, "devDependencies": {"b": "1"}}\n')),
+    ("pyproject-project-section", _put("pyproject.toml", "[project]\nname = 'x'\ndependencies = "
+                                       "['y']\n[tool.pytest.ini_options]\nminversion = '7'\n")),
+    ("mixed", lambda w: (write(os.path.join(w, "tests/test_new.py"), "pass\n"),
+                         write(os.path.join(w, "src/app.py"), "x = 3\n"))),
+    ("test-symlink-to-product", _link("../src/app.py", "tests/alias.py")),
+]
+for _name, _change in AUTHOR_RED:
+    _repo = diff_repo("a-" + _name, _change)
+    sh("author-diff: commit with a %s change is refused" % _name, COMMIT, "deny", rule=TA,
+       cwd=_repo, agent_id="auth1", agent_type="test-author", carries=("builder", "Report"))
+    sh("author-diff: push with a %s change is refused" % _name, PUSH, "deny", rule=TA,
+       cwd=_repo, agent_id="auth1", agent_type="test-author")
+    add("author-diff: stop with a %s change is blocked" % _name, "deny", rule=TA,
+        event="SubagentStop", cwd=_repo, agent_id="auth1", agent_type="test-author",
+        carries=("builder", "Report"))
+for _name, _change in AUTHOR_GREEN:
+    _repo = diff_repo("ag-" + _name, _change)
+    sh("author-diff: commit with %s is allowed" % _name, COMMIT, "allow", cwd=_repo,
+       agent_id="auth1", agent_type="test-author")
+    add("author-diff: stop with %s is allowed" % _name, "allow", event="SubagentStop",
+        cwd=_repo, agent_id="auth1", agent_type="test-author")
+
+
 # =========================================================================== failing open
 
 add("open: a payload with no command", "allow", tool="Bash", cwd=NOGIT)
@@ -2728,16 +3597,23 @@ add("open: a tool_input that is not an object", "allow", raw='{"tool_name":"Bash
 
 def decide(case):
     """Return (decision, reason) for one case."""
+    materialize(case.get("cwd"))
     if case["raw"] is not None:
         payload = case["raw"]
     else:
         body = {"tool_name": case["tool"], "tool_input": dict(case["tool_input"])}
+        if case.get("event"):
+            body = {"hook_event_name": case["event"]}
+            if case.get("stop_active"):
+                body["stop_hook_active"] = True
         if case["cwd"]:
             body["cwd"] = case["cwd"]
         if case["session"]:
             body["session_id"] = case["session"]
         if case.get("agent_id"):
             body["agent_id"] = case["agent_id"]
+        if case.get("agent_type"):
+            body["agent_type"] = case["agent_type"]
         payload = json.dumps(body)
     env = dict(os.environ)
     # `.get`, not `[...]`: a checker below builds a case dict by hand and names only the keys it
@@ -2768,6 +3644,8 @@ def decide(case):
         return "allow", ""
     try:
         parsed = json.loads(out)
+        if parsed.get("decision") == "block":   # a SubagentStop block, not a PreToolUse answer
+            return "deny", parsed["reason"]
         block = parsed["hookSpecificOutput"]
         return block["permissionDecision"], block["permissionDecisionReason"]
     except Exception:
@@ -2988,9 +3866,36 @@ def cap_reason_bound_case():
     return True, "%d characters, one line, cut marked" % len(reason)
 
 
+def crash_log_case():
+    """A guard defect still allows (fail open), and now logs one `crash` line naming the error."""
+    folder = os.path.join(ROOT, "crashlog")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "guard.log")
+    if os.path.exists(path):
+        os.remove(path)
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    code = ("import io, sys, importlib.util as u\n"
+            "spec = u.spec_from_file_location('g', %r)\n"
+            "g = u.module_from_spec(spec); spec.loader.exec_module(g)\n"
+            "g.judge = lambda payload: 1 / 0\n"
+            "sys.stdin = io.StringIO('{\"tool_name\": \"Bash\", \"tool_input\": {}}')\n"
+            "g.main()\n" % GUARD)
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                            env=env, timeout=60)
+    if result.returncode != 0 or result.stdout.strip():
+        return False, "expected a silent exit 0, got %d %r" % (result.returncode, result.stdout[:80])
+    if not os.path.exists(path):
+        return False, "no crash line was logged"
+    fields = open(path, encoding="utf-8").read().strip().split("\t")
+    if len(fields) != 5 or fields[2:4] != ["crash", "guard-crash"] or "ZeroDivisionError" not in fields[4]:
+        return False, "unexpected crash line: %r" % fields
+    return True, "allowed, and one crash line logged"
+
+
 def conflict_resolve_log_case():
-    """`git checkout --theirs` during a real conflict is allowed, and logged as
-    `noted`/`conflict-resolve`, the same shape as the other allow-and-log rules.
+    """`git checkout --theirs` during a real conflict is allowed and logs NOTHING: it is a
+    carve-out of shared-tree, with no rule of its own (decisions/guard-trims-from-the-audit.md).
     """
     folder = os.path.join(ROOT, "conflictlog")
     os.makedirs(folder, exist_ok=True)
@@ -3008,16 +3913,9 @@ def conflict_resolve_log_case():
     )
     if result.stdout.strip():
         return False, "expected a silent allow, got %r" % result.stdout.strip()[:120]
-    if not os.path.exists(path):
-        return False, "no log file was written for the noted resolve"
-    with open(path, encoding="utf-8") as handle:
-        lines = [line for line in handle.read().splitlines() if line.strip()]
-    if len(lines) != 1:
-        return False, "expected one line, found %d" % len(lines)
-    fields = lines[0].split("\t")
-    if len(fields) != 5 or fields[2] != "noted" or fields[3] != "conflict-resolve":
-        return False, "line does not read noted/conflict-resolve: %r" % lines[0]
-    return True, "one noted/conflict-resolve line"
+    if os.path.exists(path) and open(path, encoding="utf-8").read().strip():
+        return False, "expected no log line, found: %r" % open(path, encoding="utf-8").read()[:120]
+    return True, "allowed, no log line"
 
 
 def subject_unread_log_case(command=None, expect_note=True):
@@ -3104,8 +4002,9 @@ def branch_base_unread_log_case():
                           "cwd": BRANCHNOBASE}),
         capture_output=True, text=True, env=env, timeout=60,
     )
-    if result.stdout.strip():
-        return False, "expected a silent allow, got %r" % result.stdout.strip()[:120]
+    # A branch delete is a git write, so the allow carries context. It must carry no decision.
+    if "permissionDecision" in result.stdout:
+        return False, "expected an allow, got %r" % result.stdout.strip()[:120]
     if not os.path.exists(path):
         return False, "no log file was written for the unresolved base"
     with open(path, encoding="utf-8") as handle:
@@ -3160,73 +4059,92 @@ REASON_MAY_NAME = {
 }
 
 
-def merge_log_case():
-    """Decision 8: a merge into main is allowed, and noted in the log when the base is main or
-    unreadable, or when the call goes through the MCP tool that carries no base at all. A base of
-    dev is allowed and logs nothing.
+def powershell_backslash_case():
+    """Under PowerShell a backslash is a path separator, so tokenizing keeps it. Under Bash it is
+    an escape, so it goes. The same text reads two ways, and the tool decides which."""
+    guard = _load_guard_module()
+    text = "cd C:\\repo; git commit -F C:\\tmp\\msg.txt"
+    try:
+        guard.POWERSHELL_CALL[0] = True
+        ps = guard.segment_tokens(text)
+        guard.POWERSHELL_CALL[0] = False
+        sh_tokens = guard.segment_tokens(text)
+    finally:
+        guard.POWERSHELL_CALL[0] = False
+    if ps != ["cd", "C:\\repo;", "git", "commit", "-F", "C:\\tmp\\msg.txt"]:
+        return False, "PowerShell tokens lost a backslash: %r" % (ps,)
+    if sh_tokens != ["cd", "C:repo;", "git", "commit", "-F", "C:tmpmsg.txt"]:
+        return False, "Bash tokens changed: %r" % (sh_tokens,)
+    return True, "PowerShell keeps backslashes, Bash eats them as an escape"
+
+
+def merge_tool_missing_case():
+    """A merge gate that cannot load the merge tool is unknown, and denies.
+
+    The guard is copied into a folder with no `merge/` beside it, under a config directory whose
+    rules file points nowhere, so neither place the tool is looked for holds it.
     """
-    scenarios = [
-        ("gh pr merge 12", GHMAIN + os.pathsep + PY_PATH, True, "base main"),
-        ("gh pr merge 12", GHDEV + os.pathsep + PY_PATH, False, "base dev"),
-        ("gh pr merge 12", GHNONE_PATH, True, "base unreadable"),
-    ]
+    folder = os.path.join(ROOT, "nomergetool")
+    os.makedirs(os.path.join(folder, "cfg"), exist_ok=True)
+    copy = os.path.join(folder, "hooks", "guard.py")
+    os.makedirs(os.path.dirname(copy), exist_ok=True)
+    shutil.copy(GUARD, copy)
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = os.path.join(folder, "cfg")
+    env["PATH"] = GHMAIN + os.pathsep + PY_PATH
+    result = subprocess.run(
+        [sys.executable, copy],
+        input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "gh pr merge 12"},
+                          "cwd": NOGIT}),
+        capture_output=True, text=True, env=env, timeout=60)
+    if "merge-checks" not in result.stdout or "could not be loaded" not in result.stdout:
+        return False, "expected a deny that names the unloadable tool, got %r" % result.stdout[:120]
+    # The same copy cannot read the record folders either. The cite rule stands down, and the log says so.
+    result = subprocess.run(
+        [sys.executable, copy],
+        input=json.dumps({"tool_name": "Bash", "cwd": NOGIT, "tool_input": {
+            "command": VCS + ' commit -m "cites decisions/one-shared-record-stamp.md"'}}),
+        capture_output=True, text=True, env=env, timeout=60)
+    if "permissionDecision" in result.stdout:
+        return False, "an unread folder list must not deny, got %r" % result.stdout[:120]
+    try:
+        with open(os.path.join(folder, "cfg", "guard.log"), encoding="utf-8") as handle:
+            logged = "cite-by-id: record folders unread" in handle.read()
+    except OSError:
+        logged = False
+    if not logged:
+        return False, "an unread folder list must be logged as unread"
+    return True, "deny, the tool could not be loaded; the unread folder list is logged, not denied"
+
+
+def merge_log_case():
+    """A merge into main logs NOTHING, by either route: the guard no longer reads a base or notes
+    the merge (decisions/guard-trims-from-the-audit.md). PATH holds the green stand-in `gh`
+    (GHMAIN), so the merge-checks gate passes and the call is a silent allow. An old guard would
+    log `merge-main`.
+    """
     problems = []
-    for index, (command, env_path, expect_logged, label) in enumerate(scenarios):
+    for index, payload in enumerate((
+        {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 12 --squash"}, "cwd": NOGIT},
+        {"tool_name": "mcp__github__merge_pull_request",
+         "tool_input": {"pullNumber": 12, "repo": "x", "owner": "y"}, "cwd": NOGIT},
+    )):
         folder = os.path.join(ROOT, "mlog%d" % index)
         os.makedirs(folder, exist_ok=True)
-        path = os.path.join(folder, "guard.log")
         env = dict(os.environ)
         env["CLAUDE_CONFIG_DIR"] = folder
-        env["PATH"] = env_path
-        result = subprocess.run(
-            [sys.executable, GUARD],
-            input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command},
-                              "cwd": NOGIT}),
-            capture_output=True, text=True, env=env, timeout=60,
-        )
+        env["PATH"] = GHMAIN + os.pathsep + PY_PATH
+        result = subprocess.run([sys.executable, GUARD], input=json.dumps(payload),
+                                capture_output=True, text=True, env=env, timeout=60)
         if result.stdout.strip():
             problems.append("%s: expected a silent allow, got %r" % (
-                label, result.stdout.strip()[:80]))
-            continue
-        logged = False
-        if os.path.exists(path):
-            with open(path, encoding="utf-8") as handle:
-                logged = any(
-                    line.split("\t")[2:4] == ["noted", "merge-main"]
-                    for line in handle.read().splitlines() if line.strip()
-                )
-        if logged != expect_logged:
-            problems.append("%s: expected logged=%s, got %s" % (label, expect_logged, logged))
-
-    folder = os.path.join(ROOT, "mlogtool")
-    os.makedirs(folder, exist_ok=True)
-    path = os.path.join(folder, "guard.log")
-    env = dict(os.environ)
-    env["CLAUDE_CONFIG_DIR"] = folder
-    result = subprocess.run(
-        [sys.executable, GUARD],
-        input=json.dumps({"tool_name": "mcp__github__merge_pull_request",
-                          "tool_input": {"pullNumber": 12, "repo": "x", "owner": "y"},
-                          "cwd": NOGIT}),
-        capture_output=True, text=True, env=env, timeout=60,
-    )
-    if result.stdout.strip():
-        problems.append("merge tool: expected a silent allow, got %r" % (
-            result.stdout.strip()[:80]))
-    elif not os.path.exists(path):
-        problems.append("merge tool: no log file was written")
-    else:
-        with open(path, encoding="utf-8") as handle:
-            logged = any(
-                line.split("\t")[2:4] == ["noted", "merge-main"]
-                for line in handle.read().splitlines() if line.strip()
-            )
-        if not logged:
-            problems.append("merge tool: log line does not read noted/merge-main")
-
+                payload["tool_name"], result.stdout.strip()[:80]))
+        path = os.path.join(folder, "guard.log")
+        if os.path.exists(path) and open(path, encoding="utf-8").read().strip():
+            problems.append("%s: expected no log line" % payload["tool_name"])
     if problems:
         return False, "; ".join(problems)
-    return True, "allow in all four cases, noted where the base is unsafe or unread"
+    return True, "allowed, no log line, by the command and by the tool"
 
 
 def names_the_target(reason, rule=None):
@@ -3289,7 +4207,7 @@ def log_env_case():
     env["CLAUDE_CONFIG_DIR"] = folder
     result = subprocess.run(
         [sys.executable, GUARD],
-        input=json.dumps({"tool_name": "Read",
+        input=json.dumps({"tool_name": "Write",
                           "tool_input": {"file_path": "C:/repo/" + ENV},
                           "cwd": "C:/repo"}),
         capture_output=True, text=True, env=env, timeout=60,
@@ -3807,8 +4725,11 @@ LOG_CHECKS = (
     ("log: a cap lift is asked and logged with its file and value", cap_log_case),
     ("log: a cap lift under a deep path still logs the model", cap_deep_path_log_case),
     ("cap: the printed reason is bounded, single-line and marks a cut", cap_reason_bound_case),
-    ("log: a merge into main is allowed and noted where the base is unsafe", merge_log_case),
-    ("log: a conflict-side checkout is allowed and noted", conflict_resolve_log_case),
+    ("trim: a merge into main is allowed and logs nothing", merge_log_case),
+    ("trim: a guard crash fails open and logs a crash line", crash_log_case),
+    ("merge-checks: a merge tool that cannot load is unknown, and denies", merge_tool_missing_case),
+    ("powershell: a backslash path survives tokenizing, a Bash one does not", powershell_backslash_case),
+    ("trim: a conflict-side checkout is allowed and logs nothing", conflict_resolve_log_case),
     ("log: an unreadable subject is allowed and noted", subject_unread_log_case),
     ("log: an unforced worktree remove with an unreadable subject records no note",
      worktree_remove_plain_quiet_case),
@@ -3839,6 +4760,9 @@ LOG_CHECKS = (
 )
 
 
+LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
+
+
 def main():
     total = len(CASES) + len(LOG_CHECKS)
     print("guard cases, %d in all" % total)
@@ -3853,7 +4777,10 @@ def main():
         got, reason = decide(case)
         ok = got == case["expected"]
         note = ""
-        if ok and case["rule"] and case["rule"] not in reason:
+        if ok and case.get("silent") and reason:
+            ok = False
+            note = "  (an allow that must be silent printed: %s)" % reason[:90]
+        elif ok and case["rule"] and case["rule"] not in reason:
             ok = False
             note = "  (the reason does not name rule %r: %s)" % (case["rule"], reason[:90])
         elif ok and case["carries"] and [f for f in case["carries"] if f not in reason]:

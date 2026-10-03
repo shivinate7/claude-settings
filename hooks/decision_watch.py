@@ -43,8 +43,14 @@ full stop. `looks_concerning`'s outbound scan still runs, but only to enrich the
 a real change already triggered on, never to trigger by itself.
 
 WHEN NOTHING PROTECTED IS TOUCHED. No model call. Print nothing. Exit 0. This is the common
-case and it must stay fast: a `git status` and a scan of records already read for other
-Stop hooks.
+case and it must stay fast: a `git status` and the transcript's tail for the last human
+message's time (`lint/_transcript.py`'s `last_human_epoch`). The transcript is parsed whole
+only once a protected path is dirty and newer than that message.
+
+AN ALLOW IS CACHED LIKE A FLAG. `run` marks every judged incident seen, so one unchanged
+dirty file costs one model call per change, not one per Stop. `incident_key` includes a hash
+of the protected files' bytes, so an edit the model's 4000-character view cannot show still
+moves the key. A UNKNOWN read is never marked.
 
 WHEN SOMETHING PROTECTED IS TOUCHED. `invoke_model` runs `claude -p` with an explicit
 empty tool set and an isolated `cwd`/`CLAUDE_CONFIG_DIR` (see "THE ISOLATION" below), fed
@@ -73,6 +79,11 @@ run with a `systemMessage` that names UNKNOWN and why, and exit 0. This hook onl
 reports, so nothing here ever blocks the turn. The incident cap never touches this branch:
 an UNKNOWN read is never cached and always reported again.
 
+THE CONFIG REPORT. The same Stop run also prints the old `hooks/config_report.py` message,
+folded in below ("the config report"): the project config files, merges into main and
+unreadable subjects of this turn. It is a separate section with its own message, joined to the
+judgment's with a space, and it never calls the model.
+
 WHAT THIS FILE DOES NOT DO. It does not adopt PR #88's `hooks/run_hook.sh` launcher; that PR
 is an open draft on another branch, and this file matches the inline python-fallback shape
 already used by the other Stop entries in `settings.json` instead.
@@ -85,7 +96,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -102,14 +113,19 @@ if _GUARD_PATH:
 else:
     import guard
 
+# The tail reader for the cheap check lives in lint/_transcript.py, the one home
+# (decisions/hooks-share-the-transcript-reader.md). The older copies below predate it.
+sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+from _transcript import last_human_epoch, head_moved_since  # noqa: E402
+
 # THE TIME BUDGET. settings.json's Stop entry for this hook carries `"timeout": 170`.
 # Every git call below uses GIT_TIMEOUT (10s). At most MAX_DIFFED_FILES protected files
 # are diffed; the rest are still named in the evidence, but with no git call, so the
 # count of protected files can grow unbounded with no matching growth in wall time.
 # Worst case, computed here rather than assumed: one `git status`
-# (GIT_TIMEOUT) + MAX_DIFFED_FILES `git diff` calls (MAX_DIFFED_FILES * GIT_TIMEOUT) +
-# one model call (MODEL_TIMEOUT) = 10 + 8*10 + 60 = 150 seconds, against a 170-second
-# hook timeout: 20 seconds of margin, not zero. Lowering any of these three numbers
+# (GIT_TIMEOUT) + one `git log` (GIT_TIMEOUT) + MAX_DIFFED_FILES `git diff` calls
+# (MAX_DIFFED_FILES * GIT_TIMEOUT) + one model call (MODEL_TIMEOUT) = 10 + 10 + 8*10 + 60
+# = 160 seconds, against a 170-second hook timeout: 10 seconds of margin, not zero. Lowering any of these three numbers
 # without re-deriving this sum, or raising settings.json's own timeout to match, breaks
 # the proof, not just the comment.
 MODEL = "claude-sonnet-5"
@@ -170,7 +186,7 @@ def _safe_why(text):
 
 # ------------------------------------------------------------------ transcript walking
 #
-# Copied from hooks/config_report.py and lint/md_sweep.py, not imported, so each Stop hook
+# Copied from lint/md_sweep.py, not imported, so each Stop hook
 # stays readable as one file (decisions/a-gates-allow-list-is-the-constant.md names this
 # exact copy as one of the exceptions the rule does not govern).
 
@@ -405,20 +421,66 @@ def looks_concerning(tool_use):
 
 # ------------------------------------------------------------------ evidence for the model
 
-def file_evidence(cwd, rel_path, untracked):
+ROOT_COMMIT = "root"
+
+
+def file_evidence(cwd, rel_path, untracked, since=None):
     """Return a short label plus the diff (or full text for an untracked file), or None on
     a git failure -- the caller reads None as UNKNOWN, per this hook's own design constraint
-    that a git-diff failure is unknown, never silence and never a flag."""
-    if untracked:
+    that a git-diff failure is unknown, never silence and never a flag.
+
+    `since` is the parent of the oldest commit made this turn (`committed_this_turn` reads it
+    from the same `git log` call, so no extra git call runs here): the diff then runs from that
+    parent to the work tree, so a change committed this turn shows, with any later edit on
+    top. `ROOT_COMMIT` means the turn made the root commit, which reads as a new file."""
+    def whole_file():
         try:
             with open(os.path.join(cwd, rel_path), "r", encoding="utf-8", errors="replace") as f:
                 return "%s (new file):\n%s" % (rel_path, f.read()[:4000])
         except Exception:
             return None
+    if untracked:
+        return whole_file()
+    if since == ROOT_COMMIT:
+        return whole_file()
+    if since:
+        run = _run_git(cwd, ["diff", since, "--", rel_path])
+        if run is None or run.returncode != 0:
+            return None
+        return "%s (diff since the turn's first commit):\n%s" % (rel_path, run.stdout[:4000])
     run = _run_git(cwd, ["diff", "HEAD", "--", rel_path])
     if run is None or run.returncode != 0:
         return None
     return "%s (diff against HEAD):\n%s" % (rel_path, run.stdout[:4000])
+
+
+MAX_TURN_COMMITS = 200
+
+
+def committed_this_turn(cwd, baseline):
+    """Return ([relative paths], parent of the oldest commit) that commits made since `baseline` touched,
+    or (None, None) when git could not be read. No baseline, or no commit since it, is ([], None).
+
+    One bounded `git log --since` call, and only when HEAD's reflog says HEAD moved: an idle
+    turn pays no subprocess here. A failed read is unknown, never clear."""
+    if baseline is None or head_moved_since(cwd, baseline) is False:
+        return [], None
+    run = _run_git(cwd, ["-c", "core.quotepath=off", "log", "--since=%d" % int(baseline),
+                         "--max-count=%d" % MAX_TURN_COMMITS, "--name-only", "--format=%x01%P"])
+    if run is None:
+        return None, None
+    if run.returncode != 0:
+        if "does not have any commits" in (run.stderr or ""):
+            return [], None
+        return None, None
+    paths, oldest = [], None
+    for line in run.stdout.splitlines():
+        if line.startswith("\x01"):
+            parents = line[1:].split()
+            oldest = parents[0] if parents else ROOT_COMMIT
+        elif line and line not in paths:
+            paths.append(line)
+    return paths, oldest
 
 
 # ------------------------------------------------------------------ the per-incident, per-session cap
@@ -483,14 +545,41 @@ def _mark_seen(session_id, incident_key):
         pass  # a cache write failure re-flags next time rather than losing the report now
 
 
-def incident_key(protected, evidence):
+DIGEST_READ_MAX = 1 << 20
+
+
+def content_digest(cwd, protected):
+    """Return one hash of the repo root and the protected files' bytes (a missing file hashes
+    as gone), so one session in two repos never shares a verdict.
+
+    `file_evidence` cuts a diff at 4000 characters, so an edit past the cut would leave the
+    evidence, and so the key, unchanged. This digest moves with every byte of a file up to
+    DIGEST_READ_MAX; a larger file hashes its first DIGEST_READ_MAX bytes plus its size and
+    mtime, so a protected file cannot make this hook read without bound.
+    """
+    h = hashlib.sha256(os.path.realpath(cwd).encode("utf-8", "replace") + b"\2")
+    for rel in sorted(protected):
+        h.update(rel.encode("utf-8", "replace") + b"\0")
+        try:
+            with open(os.path.join(cwd, rel), "rb") as f:
+                h.update(f.read(DIGEST_READ_MAX))
+                st = os.fstat(f.fileno())
+                if st.st_size > DIGEST_READ_MAX:
+                    h.update(b"%d:%d" % (st.st_size, st.st_mtime_ns))
+        except OSError:
+            h.update(b"<gone>")
+        h.update(b"\1")
+    return h.hexdigest()
+
+
+def incident_key(protected, evidence, contents=""):
     """Return one stable id for this finding: the protected paths plus their evidence.
 
     Never the model's own wording, so a verdict that repeats itself in different words
     still collapses to one incident, and a diff that actually moved further still reads
     as a new one.
     """
-    blob = "\x00".join(sorted(protected)) + "\x01" + "\x00".join(evidence)
+    blob = "\x00".join(sorted(protected)) + "\x01" + "\x00".join(evidence) + "\x02" + contents
     return hashlib.sha256(blob.encode("utf-8", "replace")).hexdigest()
 
 
@@ -682,23 +771,26 @@ def run(hook, model_call=invoke_model):
     if not path or not isinstance(path, str) or not os.path.exists(path):
         return UNKNOWN_PREFIX + "transcript_path is missing or does not exist."
 
-    try:
-        records = read_transcript(path)
-    except Exception as exc:
-        return UNKNOWN_PREFIX + "the transcript could not be read (%s)." % exc
-
-    idx, stamp = last_human_index_and_stamp(records)
-    baseline = parse_utc_timestamp(stamp) if idx is not None else None
-
     cwd = hook.get("cwd") or ""
     if not isinstance(cwd, str) or not cwd or not os.path.isdir(cwd):
         return UNKNOWN_PREFIX + "cwd from the hook input is missing or not a directory."
 
+    # THE CHEAP CHECK RUNS BEFORE THE TRANSCRIPT IS PARSED. The turn's start comes from the
+    # transcript's tail (`last_human_epoch`), not a whole-file read. A tail that gives no
+    # baseline (None) skips the mtime filter, the same broad net the full read gave.
+    baseline = last_human_epoch(path)
     changed, untracked = changed_this_turn(cwd, baseline)
     if changed is None:
         return UNKNOWN_PREFIX + "git status could not be read for this working directory."
 
     protected = [rel for rel in changed if looks_protected(rel, cwd)]
+
+    # A protected file committed this turn is clean in `git status`, and agents commit.
+    committed, oldest = committed_this_turn(cwd, baseline)
+    if committed is None:
+        return UNKNOWN_PREFIX + "git log could not be read for this working directory."
+    committed = [rel for rel in committed if looks_protected(rel, cwd)]
+    protected += [rel for rel in committed if rel not in protected]
 
     # GATE: an actual on-disk change to a protected path, full stop. An outbound
     # SendMessage/Task alone no longer triggers a model call (see looks_concerning's
@@ -707,13 +799,19 @@ def run(hook, model_call=invoke_model):
     if not protected:
         return ""
 
+    try:
+        records = read_transcript(path)
+    except Exception as exc:
+        return UNKNOWN_PREFIX + "the transcript could not be read (%s)." % exc
+    idx, _stamp = last_human_index_and_stamp(records)
+
     # MAX_DIFFED_FILES bounds the number of `git diff` calls, so this loop's wall time
     # cannot grow past the fixed sum the module docstring proves against the hook's own
     # timeout, no matter how many protected paths one turn touches. A path past the cap
     # is still named in the evidence, with no git call spent on it.
     evidence = []
     for rel in protected[:MAX_DIFFED_FILES]:
-        piece = file_evidence(cwd, rel, untracked.get(rel, False))
+        piece = file_evidence(cwd, rel, untracked.get(rel, False), oldest if rel in committed else None)
         if piece is None:
             return UNKNOWN_PREFIX + "git diff could not be read for %s." % rel
         evidence.append(piece)
@@ -737,7 +835,7 @@ def run(hook, model_call=invoke_model):
     # in this session. Stay quiet until it changes. See "the per-incident, per-session
     # cap" above.
     session_id = hook.get("session_id") or ""
-    key = incident_key(protected, evidence)
+    key = incident_key(protected, evidence, content_digest(cwd, protected))
     if key in _load_seen(session_id):
         return ""
 
@@ -756,11 +854,303 @@ def run(hook, model_call=invoke_model):
     verdict, error = model_call(prompt)
     if error is not None:
         return UNKNOWN_PREFIX + "the model judgment could not be completed (%s)." % error
+    # An ALLOW is cached like a FLAG: one model call per change, not one per Stop. The key
+    # holds the files' bytes, so an edited file is judged again.
+    _mark_seen(session_id, key)
     if verdict.get("verdict") == "FLAG":
-        _mark_seen(session_id, key)
         why = _safe_why(verdict.get("why") or "an unapproved change to a protected file")
         return FLAG_PREFIX + 'the judge model reported: "%s"' % why
     return ""
+
+
+# ------------------------------------------------------------------ the config report
+#
+# FOLDED IN FROM `hooks/config_report.py` 2026-10-02 (decisions/guard-trims-from-the-audit.md): two Stop
+# hooks that each read the transcript and each print a systemMessage were one hook's work. This
+# section keeps the old hook's whole job, unchanged, and `main` prints its message after `run`'s.
+#
+# Decision 7 ("Project config edits: allow and report") lets a session edit a project's own
+# `.claude/hooks/*`, `.claude/settings.json`, or `.claude/settings.local.json` without a prompt.
+# This section is how the owner still SEES the edit at turn end: it names every such file changed
+# since the last human message, so the reply can name it under Deviations. It also names each
+# merge into main landed this turn (Decision 8), unless the reply's own report block already
+# names it (decisions/merge-notice-checks-the-report.md), and each `noted`/`subject-unread` guard
+# line from this turn, because the guard allows a subject it could not read and that allow must
+# not be silent. The guard writes a LOCAL time and the transcript a UTC time, so the turn bound is
+# converted to local time, minus one second, because the guard truncates its stamp to whole
+# seconds. Fails open: any failure prints nothing, a missed report and never a wrong one.
+
+LINT_DIR = os.path.join(HERE, "..", "lint")
+
+
+def _shared_transcript():
+    """Return `lint/_transcript.py`, the one home of the transcript readers
+    (decisions/hooks-share-the-transcript-reader.md). This section reads through it, never through
+    the older copies above."""
+    if LINT_DIR not in sys.path:
+        sys.path.insert(0, LINT_DIR)
+    import _transcript
+    return _transcript
+
+FILE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
+SHELL_TOOLS = {"Bash", "PowerShell"}
+MERGE_TOOLS = {"mcp__github__merge_pull_request"}
+
+GH_PR_MERGE = re.compile(r"\bgh\s+pr\s+merge\b")
+PR_NUM_TOKEN = re.compile(r"^(\d+)$")
+PR_NUM_URL = re.compile(r"/pull/(\d+)")
+
+CONFIG_MESSAGE = "Config files changed this turn: %s."
+MERGE_MESSAGE = "Merges into main this turn: %s."
+UNREAD_MESSAGE = (
+    "The guard could not read the subject of these commands, and allowed them: %s."
+)
+TAIL = " Name them in the report."
+UNREAD_RULE = "subject-unread"
+
+# Fallback label for a merge whose PR number this hook could not read from the command or the
+# MCP tool's own input (for example `gh pr merge` run with no number and no PR checked out by
+# convention this hook can resolve). Short and fixed, never the raw command line.
+UNNUMBERED_MERGE = "an unnumbered merge"
+
+MCP_PR_NUMBER_KEYS = ("pullNumber", "pull_number", "prNumber", "pr_number", "number", "pr")
+
+
+def collect_paths(records, cwd):
+    """Return the project config paths this turn's tools touched, in first-seen order."""
+    reader = _shared_transcript()
+    seen = []
+
+    def note(path):
+        if path and path not in seen:
+            seen.append(path)
+
+    for rec in records:
+        for b in reader.tool_uses(rec):
+            name = b.get("name")
+            inp = b.get("input") or {}
+            if not isinstance(inp, dict):
+                continue
+            if name in FILE_TOOLS:
+                target = (
+                    inp.get("file_path") or inp.get("path") or inp.get("notebook_path") or ""
+                )
+                if not isinstance(target, str) or not target:
+                    continue
+                try:
+                    hit = guard.is_project_config(target, cwd)
+                except Exception:
+                    hit = False
+                if hit:
+                    note(target)
+            elif name in SHELL_TOOLS:
+                cmd = inp.get("command") or ""
+                if not isinstance(cmd, str) or not cmd.strip():
+                    continue
+                try:
+                    matched = guard.project_config_shell_hit(cmd, cwd)
+                except Exception:
+                    matched = ""
+                if matched:
+                    note(matched)
+    return seen
+
+
+def _pr_number_from_segment(segment):
+    """Return the PR number a `gh pr merge` call in `segment` names, else None.
+
+    Reads only the tokens that follow the call's own `gh pr merge` words, so a command chained
+    onto it with `;` or `&&` (already split into its own segment by the caller) can never
+    supply the number for this call.
+    """
+    m = GH_PR_MERGE.search(segment)
+    if not m:
+        return None
+    for tok in segment[m.end():].split():
+        if tok.startswith("-"):
+            continue
+        num = PR_NUM_TOKEN.match(tok)
+        if num:
+            return num.group(1)
+        url = PR_NUM_URL.search(tok)
+        if url:
+            return url.group(1)
+    return None
+
+
+def _pr_number_from_mcp_input(inp):
+    for key in MCP_PR_NUMBER_KEYS:
+        value = inp.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            return str(value)
+        if isinstance(value, str) and value.strip().isdigit():
+            return value.strip()
+    return None
+
+
+def collect_merges(records):
+    """Return the merges into main this turn's tools named, as display labels, in first-seen
+    order: `#<N>` when a PR number could be read, else UNNUMBERED_MERGE.
+    """
+    reader = _shared_transcript()
+    seen = []
+
+    def note(number):
+        label = "#%s" % number if number else UNNUMBERED_MERGE
+        if label not in seen:
+            seen.append(label)
+
+    for rec in records:
+        for b in reader.tool_uses(rec):
+            name = b.get("name")
+            inp = b.get("input") or {}
+            if not isinstance(inp, dict):
+                continue
+            if name in MERGE_TOOLS:
+                note(_pr_number_from_mcp_input(inp))
+            elif name in SHELL_TOOLS:
+                cmd = inp.get("command") or ""
+                if not isinstance(cmd, str) or not cmd.strip():
+                    continue
+                try:
+                    stripped = guard.strip_heredoc_bodies(cmd)
+                    segments = guard.split_segments(stripped)
+                except Exception:
+                    segments = [cmd]
+                for segment in segments:
+                    if GH_PR_MERGE.search(segment):
+                        note(_pr_number_from_segment(segment))
+    return seen
+
+
+def already_named(labels, report_block):
+    """Return the labels from `labels` that `report_block` does not already name.
+
+    `#75` is looked for both as written and as `PR 75` / `PR#75` (case-insensitive), since a
+    report is free to spell it either way. UNNUMBERED_MERGE is looked for verbatim: it is
+    already the short, fixed string a report would have to repeat to name it.
+    """
+    if not report_block:
+        return list(labels)
+    remaining = []
+    for label in labels:
+        if label in report_block:
+            continue
+        if label.startswith("#"):
+            num = label[1:]
+            alt = re.compile(r"\bpr\s*#?\s*" + re.escape(num) + r"\b", re.IGNORECASE)
+            if alt.search(report_block):
+                continue
+        remaining.append(label)
+    return remaining
+
+
+def last_human_stamp(records):
+    """Return the timestamp of the last human message, else ''."""
+    reader = _shared_transcript()
+    stamp = ""
+    for rec in records:
+        if reader.is_last_human(rec):
+            value = rec.get("timestamp") or ""
+            stamp = value if isinstance(value, str) else ""
+    return stamp
+
+
+def _turn_bound(stamp):
+    """Return the last human message time as a naive LOCAL datetime, else None.
+
+    The transcript stamp is UTC and the guard's log stamp is local, so the bound is converted
+    rather than compared across zones. One second is taken off, because the guard truncates its
+    own stamp to whole seconds and a line written in the same second would otherwise be dropped.
+    """
+    text = (stamp or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        moment = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if moment.tzinfo is not None:
+        moment = moment.astimezone().replace(tzinfo=None)
+    return moment - timedelta(seconds=1)
+
+
+def collect_unread(stamp):
+    """Return the matched text of each `noted`/`subject-unread` guard line from this turn."""
+    bound = _turn_bound(stamp)
+    if bound is None:
+        return []
+    try:
+        path = os.path.join(guard.config_dir(), "guard.log")
+    except Exception:
+        return []
+    if not os.path.exists(path):
+        return []
+    seen = []
+    try:
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+    except Exception:
+        return []
+    for line in lines:
+        fields = line.split("\t")
+        if len(fields) != 5 or fields[3] != UNREAD_RULE:
+            continue
+        try:
+            when = datetime.fromisoformat(fields[0])
+        except Exception:
+            continue
+        if when < bound:
+            continue
+        text = fields[4].strip()
+        if text and text not in seen:
+            seen.append(text)
+    return seen
+
+
+def config_report(hook):
+    """Return the config-report systemMessage for this turn, or '' for nothing to say."""
+    if hook.get("stop_hook_active"):
+        return ""  # a rewrite of an earlier reply: stay quiet, as `main` does for `run`
+    path = hook.get("transcript_path")
+    if not path or not isinstance(path, str) or not os.path.exists(path):
+        return ""
+    try:
+        reader = _shared_transcript()
+        human, after = reader.read_turn(path)
+        if not after:
+            return ""
+        cwd = hook.get("cwd") or ""
+        if not isinstance(cwd, str):
+            cwd = ""
+        # Only this turn's records are read (the tail reader), so an idle turn costs a few KB.
+        merges = collect_merges(after)
+        hits = collect_paths(after, cwd)
+        if merges:
+            try:
+                import report_gate  # lint/report_gate.py, same-repo sibling package
+                from ste_gate import last_reply  # lint/ste_gate.py
+                merges = already_named(merges, report_gate.block_text(last_reply(hook)))
+            except Exception:
+                # Cannot tell whether the report already named the merge: still name it.
+                pass
+        unread = collect_unread(last_human_stamp([human] if human else []))
+    except Exception:
+        return ""
+    if not hits and not merges and not unread:
+        return ""
+    parts = []
+    if hits:
+        parts.append(CONFIG_MESSAGE % ", ".join(hits))
+    if merges:
+        parts.append(MERGE_MESSAGE % ", ".join(merges))
+    if unread:
+        parts.append(UNREAD_MESSAGE % ", ".join(unread))
+    return " ".join(parts) + TAIL
 
 
 def main():
@@ -782,6 +1172,7 @@ def main():
         print(json.dumps({"systemMessage": UNKNOWN_PREFIX + "the watch itself raised (%s)." % exc}))
         sys.exit(0)
 
+    message = " ".join(m for m in (message, config_report(hook)) if m)
     if message:
         print(json.dumps({"systemMessage": message}))
     sys.exit(0)
