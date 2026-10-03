@@ -102,6 +102,16 @@ CLONE = os.path.join(ROOT, "clone")        # the clone of claude-settings, which
 NOGIT = os.path.join(ROOT, "nogit")        # a directory that is not a git tree
 GITMAIN = os.path.join(ROOT, "repo")       # an ordinary checkout, shared with other sessions
 GITWT = os.path.join(ROOT, "lane")         # a linked worktree of that checkout
+# D2026-10-03 (owner ruling): a linked worktree under <repo>/.claude/worktrees/ is AGENT-OWNED,
+# and a discard there is allowed and noted instead of asked. AGENTWT is the real thing. FARWT,
+# DOTDOTWT and SYMWT are near misses that must NOT count as agent-owned: a sibling path that
+# merely contains the word "worktrees", a textual ".claude/worktrees/.." that resolves back
+# outside, and (where the platform allows it) a symlink doing the same. DECOYMAIN is the MAIN
+# checkout, whose own folder happens to be nested under a path spelled like the agent layout.
+AGENTWT = os.path.join(GITMAIN, ".claude", "worktrees", "agent-x")
+FARWT = os.path.join(ROOT, "worktrees", "stray")
+SYMWT = os.path.join(GITMAIN, ".claude", "worktrees", "linked-agent")
+DECOYMAIN = os.path.join(ROOT, "decoyhost", ".claude", "worktrees", "decoy")
 CONFLICT = os.path.join(ROOT, "conflict")  # a real checkout with an unresolved merge conflict
 SUBJCLEAN = os.path.join(ROOT, "subjclean")  # a real checkout with a clean tree and no stash
 SUBJCLEANWT = os.path.join(ROOT, "subjcleanlane")  # a real, clean linked worktree of that one
@@ -630,11 +640,24 @@ def build_fixtures():
     run_vcs(GITMAIN, "add", "-A")
     run_vcs(GITMAIN, *IDENT, "commit", "-q", "-m", "files")
     run_vcs(GITMAIN, "worktree", "add", "-q", GITWT, "-b", "lane")
-    for _tree in (GITMAIN, GITWT):
+    # AGENTWT: a real linked worktree whose path sits under GITMAIN's own .claude/worktrees/.
+    # FARWT: a real linked worktree elsewhere, at a path that merely contains the word
+    # "worktrees" (mimics an unrelated /tmp/worktrees/x), so the agent-owned check must read the
+    # path's PREFIX, not just test for the substring.
+    run_vcs(GITMAIN, "worktree", "add", "-q", AGENTWT, "-b", "agent-x-branch")
+    run_vcs(GITMAIN, "worktree", "add", "-q", FARWT, "-b", "stray-branch")
+    for _tree in (GITMAIN, GITWT, AGENTWT, FARWT):
         write(os.path.join(_tree, "docs", "DEBTS.md"), "uncommitted\n")
         write(os.path.join(_tree, "f.txt"), "uncommitted\n")
         write(os.path.join(_tree, "new.txt"), "untracked\n")
         _require_dirty(_tree, "f.txt", "new.txt", "keep.txt")
+    # DECOYMAIN: an ordinary MAIN checkout whose own folder happens to be nested under a path
+    # spelled ".claude/worktrees/<name>". It is not a linked worktree of anything, so the
+    # coincidence in its path must not earn it the agent-owned allowance.
+    make_repo(DECOYMAIN, {"f.txt": "base\n", "keep.txt": "base\n"})
+    write(os.path.join(DECOYMAIN, "f.txt"), "uncommitted\n")
+    write(os.path.join(DECOYMAIN, "new.txt"), "untracked\n")
+    _require_dirty(DECOYMAIN, "f.txt", "new.txt", "keep.txt")
 
     # THE SUBJECT READ. Each arm gets both sides, built with real state: a real clean tree, a
     # real uncommitted edit, a real untracked file, a real one-entry stash stack.
@@ -967,6 +990,22 @@ def build_fixtures():
 
 
 build_fixtures()
+
+# DOTDOTWT: a path spelled through GITMAIN's .claude/worktrees/ that climbs back out with "..",
+# resolving to GITWT itself (a linked worktree OUTSIDE .claude/worktrees). It must be judged on
+# where it really is, not on the ".claude/worktrees" segment in its spelling.
+DOTDOTWT = os.path.join(GITMAIN, ".claude", "worktrees", "..", "..", "..", "lane")
+if os.path.normcase(os.path.realpath(DOTDOTWT)) != os.path.normcase(os.path.realpath(GITWT)):
+    sys.exit("fixture setup failed: DOTDOTWT does not resolve to GITWT. realpath is %r"
+             % os.path.realpath(DOTDOTWT))
+# SYMWT: a symlink inside .claude/worktrees/ pointing at GITWT, same proof with a real link
+# instead of literal "..". Degrades to skip where the account holds no symlink privilege
+# (MEASURED: this box raises OSError: a required privilege is not held by the client).
+try:
+    os.symlink(GITWT, SYMWT, target_is_directory=True)
+    SYMWT_MADE = True
+except Exception:
+    SYMWT_MADE = False
 
 # --------------------------------------------------------------- the ported shell traps
 #
@@ -1310,6 +1349,26 @@ sh("worktree: restore of a dirty path still asks, unchanged", VCS + " restore f.
    "shared-tree", cwd=GITWT)
 sh("worktree: checkout -- of a dirty path still asks, unchanged", VCS + " checkout -- f.txt",
    "ask", "shared-tree", cwd=GITWT)
+
+# THE AGENT-OWNED CARVE-OUT (owner ruling 2026-10-03, decisions/guard-agent-worktree-discard.md).
+# A linked worktree under <repo>/.claude/worktrees/ is agent-owned: a discard there is ALLOWED,
+# not asked (checked as a log/noted case below, since an allow prints nothing to assert on here).
+# Near misses must still ask or deny, proven against real git state, not a path guess.
+sh("agent worktree: a linked worktree elsewhere that merely says \"worktrees\" still asks",
+   VCS + " reset --hard", "ask", "shared-tree", cwd=FARWT)
+sh("agent worktree: checkout -- in that near-miss worktree still asks",
+   VCS + " checkout -- f.txt", "ask", "shared-tree", cwd=FARWT)
+sh("agent worktree: a textual .claude/worktrees/.. that resolves back outside still asks",
+   VCS + " reset --hard", "ask", "shared-tree", cwd=DOTDOTWT)
+if SYMWT_MADE:
+    sh("agent worktree: a symlink into .claude/worktrees/ aliasing an outside worktree still asks",
+       VCS + " reset --hard", "ask", "shared-tree", cwd=SYMWT)
+sh("agent worktree: the main checkout nested under its own .claude/worktrees/-shaped path "
+   "still denies", VCS + " reset --hard", "deny", "shared-tree", cwd=DECOYMAIN)
+sh("agent worktree: a stash push there still denies, the stack is clone-wide",
+   VCS + " stash push -u -m lane", "deny", "shared-tree", cwd=AGENTWT)
+sh("agent worktree: a bare stash there still denies, the stack is clone-wide",
+   VCS + " stash", "deny", "shared-tree", cwd=AGENTWT)
 
 # THE PUSH ARM. `refs/stash` lives in the COMMON git directory (MEASURED above, next to
 # SUBJSTASHWT), so a push from a worktree lands on the SAME one-entry-wide stack the primary
@@ -4136,6 +4195,49 @@ def subject_unread_log_case(command=None, expect_note=True):
     return True, "one noted/subject-unread line, distinct from a refusal"
 
 
+def agent_worktree_noted_case(command):
+    """A discard inside an agent-owned worktree (<repo>/.claude/worktrees/<name>) is allowed, and
+    logged as `noted`/`shared-tree` rather than asked (owner ruling 2026-10-03).
+
+    AGENTWT is a REAL linked worktree built in build_fixtures, with real uncommitted work, so this
+    proves the carve-out against actual git state, the same discipline subject_unread_log_case
+    uses above.
+    """
+    folder = os.path.join(ROOT, "agentwtlog")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "guard.log")
+    if os.path.exists(path):
+        os.remove(path)
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    result = subprocess.run(
+        [sys.executable, GUARD],
+        input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": AGENTWT}),
+        capture_output=True, text=True, env=env, timeout=60,
+    )
+    if result.stdout.strip():
+        return False, "expected a silent allow, got %r" % result.stdout.strip()[:200]
+    if not os.path.exists(path):
+        return False, "no log file was written for the agent-owned worktree discard"
+    with open(path, encoding="utf-8") as handle:
+        lines = [line for line in handle.read().splitlines() if line.strip()]
+    if len(lines) != 1:
+        return False, "expected one line, found %d: %r" % (len(lines), lines)
+    fields = lines[0].split("\t")
+    if len(fields) != 5 or fields[2] != "noted" or fields[3] != "shared-tree":
+        return False, "line does not read noted/shared-tree: %r" % lines[0]
+    return True, "one noted/shared-tree line, allowed not asked"
+
+
+def agent_worktree_reset_noted_case():
+    return agent_worktree_noted_case(VCS + " reset --hard")
+
+
+def agent_worktree_checkout_noted_case():
+    return agent_worktree_noted_case(VCS + " checkout -- f.txt")
+
+
 def worktree_remove_plain_quiet_case():
     return subject_unread_log_case(VCS + " worktree remove $w", expect_note=False)
 
@@ -4904,6 +5006,10 @@ LOG_CHECKS = (
     ("powershell: a backslash path survives tokenizing, a Bash one does not", powershell_backslash_case),
     ("trim: a conflict-side checkout is allowed and logs nothing", conflict_resolve_log_case),
     ("log: an unreadable subject is allowed and noted", subject_unread_log_case),
+    ("log: a hard reset in an agent-owned worktree is allowed and noted, not asked",
+     agent_worktree_reset_noted_case),
+    ("log: checkout -- in an agent-owned worktree is allowed and noted, not asked",
+     agent_worktree_checkout_noted_case),
     ("log: an unforced worktree remove with an unreadable subject records no note",
      worktree_remove_plain_quiet_case),
     ("log: a forced worktree remove with an unreadable subject is still noted",

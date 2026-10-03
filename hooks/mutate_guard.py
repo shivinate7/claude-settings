@@ -124,6 +124,10 @@ MUTATIONS = [
     ("shared-tree: call every tree a worktree",
      '    return own != common',
      '    return True', "guard", 'worktree: a hard reset in the shared checkout denies'),
+    ("shared-tree: an agent's own worktree never counts as agent-owned",
+     '            if agent_owned_worktree(root) is True:',
+     '            if False:', "guard",
+     'agent-owned worktree is allowed and noted, not asked'),
 
     # ---- rule 1's three new git forms: branch delete, worktree remove, worktree prune. Each
     # mutation breaks one arm of the state read the plan named as the hole in this rule.

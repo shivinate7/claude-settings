@@ -2198,6 +2198,22 @@ TREE_ASK_REASON = (
     "Commit work you must set aside on your own branch, never a stash. "
     "The click in this prompt is the grant."
 )
+# agent-worktree-discard-is-noted: inside a worktree the harness made FOR an agent
+# (`<primary>/.claude/worktrees/<name>`, the same shape `agent_worktree_home` above reads), a
+# discard is ALLOWED and logged as a note, not asked. MEASURED: 18 shared-tree asks in
+# ~/.claude/guard.log since 2026-09-16, and the owner reports the prompt is frequent in
+# agent-heavy repos and carries nothing to judge there, because the lane is the agent's own and
+# its commits already sit on its own branch and in its own reflog. A worktree anywhere else keeps
+# "ask": the loss there may still be a person's own work in a lane they made by hand.
+def agent_owned_worktree(root: str):
+    """True when `root` resolves under some primary checkout's own `.claude/worktrees/`, the
+    folder the harness makes agent worktrees in. False when it plainly does not, None when
+    either path could not be resolved. Real paths only (CLAUDE.md "building-allow-list-is-the-
+    constant"): a `..` or a symlink that climbs back out must not pass."""
+    primary = primary_checkout(root)
+    if not primary:
+        return None
+    return path_is_inside(root, os.path.join(primary, ".claude", "worktrees"))
 # The stash stack is one ref, `refs/stash`, kept in the COMMON git directory, so every worktree
 # of a clone reads and writes the same stack (MEASURED 2026-09-19: from a linked worktree,
 # `git rev-parse --git-path refs/stash` answered `<repo>/.git/refs/stash`, not the worktree's own
@@ -5084,6 +5100,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             refuse(tool, "deny", "shared-tree", PUSH_DENY_REASON, matched)
         worktree = is_worktree(root)
         if worktree is True:
+            # agent-worktree-discard-is-noted: this lane is the harness's own
+            # `.claude/worktrees/<name>` shape, so the loss is the agent's own commits, already
+            # on its own branch and in its own reflog. Allow it, logged, not asked.
+            if agent_owned_worktree(root) is True:
+                record(tool, "noted", "shared-tree", matched)
+                continue
             refuse(tool, "ask", "shared-tree", TREE_ASK_REASON, matched)
         refuse(tool, "deny", "shared-tree", TREE_DENY_REASON, matched)
 
