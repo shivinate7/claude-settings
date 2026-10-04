@@ -349,8 +349,13 @@ def case_reorient_ok_no_plan():
         check("reorient-noplan: exits 0", proc.returncode == 0,
               "returncode=%r stderr=%r" % (proc.returncode, proc.stderr[-300:]))
         check("reorient-noplan: names the handoff path", handoff_path in out, "stdout: %r" % out)
+        # Strip the handoff path before the "no plan clause" check: it sits under this
+        # case's own temp dir, whose prefix ("precompact_reorient_noplan_...") contains
+        # "plan" as a substring and would otherwise false-fail this check on its own path,
+        # never on anything the hook said about a plan.
+        without_path = out.replace(handoff_path, "")
         check("reorient-noplan: no plan clause, since no plan was set",
-              "plan" not in out.lower(),
+              "plan" not in without_path.lower(),
               "stdout named a plan with none set: %r" % out)
     finally:
         c.cleanup()
