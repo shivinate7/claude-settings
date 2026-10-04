@@ -1,6 +1,6 @@
-# Rewrite the handoff before compaction
+# Rewrite the handoff after compaction
 
-Compaction is about to drop detail. Rewrite the handoff now, in this order.
+Compaction just dropped detail. Rewrite the handoff now, in this order.
 
 ## 1. Read the prior handoff first
 
@@ -11,9 +11,15 @@ Read the prior handoff before you write anything. It holds the last known state.
 Check the repo root for `HANDOFF.md` or `handoff.md`, outside any `history` folder.
 Use that file when one exists. Otherwise use `.claude/handoff.md`.
 
-## 3. Rewrite the file in place
+## 3. Gather your sources
 
-Rewrite the handoff file at that same path. Never make a dated copy.
+Use the compaction summary above. Read the digest file the reorient message named, when
+it named one. Read the prior handoff too. Early detail may live only in that prior
+handoff, since the digest keeps only its own tail.
+
+## 4. Rewrite the file in place
+
+Rewrite the handoff file at the path from step 2. Never make a dated copy.
 
 Write these sections:
 
@@ -25,28 +31,13 @@ Write these sections:
 - Next steps.
 - The files and commands that matter.
 
-## 4. Update the plan, only when it changed
+## 5. Update the plan, only when it changed
 
-Look in the digest for a named plan file, under `~/.claude/plans` or the repo's
-own `plans` folder. Update that plan only when the digest names one, and its
-state changed since the prior handoff. Otherwise leave the plan alone, and
-report its path as `null`.
+Look for a named plan file, under `~/.claude/plans` or the repo's own `plans` folder.
+Update that plan only when your sources name one, and its state changed since the
+prior handoff. Otherwise leave the plan alone.
 
-## 5. Print the summary line
+## 6. Confirm, then continue
 
-Print one JSON line as your last line of output. Print no other text after it:
-
-`{"handoff": "<handoff file path>", "plan": "<plan file path, or null>"}`
-
-## Your tools
-
-You have Read, Write, Edit, Glob, and Grep. You have no other tool. You run no
-hooks.
-
-## The transcript digest
-
-The digest follows this line. It holds the session's user and assistant text,
-newest text last. Early detail may be missing from it. Use the prior handoff
-for anything the digest does not cover.
-
----
+Confirm your checkout and your branch before any git write. Then continue the last
+task.
