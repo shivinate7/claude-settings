@@ -190,7 +190,8 @@ def run_precompact(payload):
         proc = subprocess.run(args, cwd=repo_top, env=env, input=stdin_payload,
                                capture_output=True, text=True, timeout=CHILD_TIMEOUT)
         if proc.returncode != 0:
-            failure = "child exited %r: %s" % (proc.returncode, (proc.stderr or "")[-2000:])
+            failure = "child exited %r: stdout=%r stderr=%r" % (
+                proc.returncode, (proc.stdout or "")[-500:], (proc.stderr or "")[-500:])
         else:
             summary = _last_json_line(proc.stdout)
             if summary is None:
@@ -225,9 +226,12 @@ def run_reorient(payload):
         state = None
 
     if not state or not state.get("ok"):
-        print("Context was compacted. The handoff update failed, or it never ran. "
-              "Check the compaction summary for what happened. Confirm checkout and "
-              "branch before any git write. Then continue the last task.")
+        why = ((state or {}).get("failure") or "it never ran")[:300]
+        print("Context was compacted. The handoff update failed: %s. Rewrite the "
+              "handoff yourself now: use the repo's HANDOFF.md or handoff.md, outside "
+              "any history folder, or .claude/handoff.md when neither exists. Rewrite "
+              "it in place from the compaction summary above. Confirm checkout and "
+              "branch before any git write. Then continue the last task." % why)
         return 0
 
     handoff = state.get("handoff")

@@ -44,8 +44,9 @@ One file, `hooks/precompact_handoff.py`, with two modes.
 - Read the state file for `session_id`. Print one short message into context:
   "Context was compacted. Read the handoff at <path> first, then the plan at <path>.
   Confirm checkout and branch before any git write. Then continue the last task."
-- With no state file, or a failed one, say the handoff update failed and point at the
-  compaction summary.
+- With no state file, or a failed one, say the handoff update failed, and give the
+  failure text. Tell the session to rewrite the handoff itself, from the compaction
+  summary, at the path the child would have picked. Then continue.
 
 ## What the handoff holds
 
@@ -59,3 +60,7 @@ short-term note. It is never a ruling's only home (see memory-is-never-a-rulings
 - The digest keeps the tail. Early detail lives on only through the prior handoff, which
   the child reads first.
 - Each compaction adds one Sonnet call and delays compaction by up to 240 s.
+- The child uses the command-line tool's own login. That login is separate from the
+  desktop app's. The CLI login can expire while desktop sessions still work. The
+  reorient fallback covers this: a failed child still gets its handoff rewritten, by
+  the next session, from the compaction summary.
