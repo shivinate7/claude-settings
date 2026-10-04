@@ -10,43 +10,45 @@ claude-settings?
 
 1. Auto-compact fires at 50% of the window: 500k tokens on a 1M Opus window, 100k on a
    200k window. `settings.json` sets `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` to `50`.
-2. Before each compaction, auto or manual, the session's handoff is rewritten in place.
-   The plan file is updated too, when the session works from one and its state changed.
-3. After compaction, a short message reorients the session: read the handoff, then the
-   plan, confirm checkout and branch, continue.
+2. At each compaction, auto or manual, the session's handoff is rewritten in place. The
+   plan file is updated too, when the session works from one and its state changed.
+3. After compaction, a short message reorients the session.
+4. It must work in the desktop app with no other login. The owner rejected a design that
+   ran a second `claude -p` with its own command-line login.
 
 ## The design
 
-One file, `hooks/precompact_handoff.py`, with two modes.
+One file, `hooks/precompact_handoff.py`, with two modes. Neither mode calls a model.
 
 **PreCompact mode** (hook `PreCompact`, no matcher, so auto and manual both fire):
 
 - Read the hook input: `session_id`, `transcript_path`, `cwd`.
-- If `CLAUDE_HANDOFF_CHILD` is set, exit 0 at once. This stops recursion.
 - Build a digest of the transcript: user and assistant text only. Drop tool results and
-  thinking. Keep the last 150,000 characters.
-- Run `claude -p` once, model `sonnet`, cwd at the repo top level, env
-  `CLAUDE_HANDOFF_CHILD=1`. Its tools are Read, Write, Edit, Glob, and Grep only. It runs
-  no hooks. Its prompt is `hooks/precompact_handoff_prompt.md`, with the digest attached.
-- The child picks the handoff path: the repo's live handoff file if one exists (a
-  `HANDOFF.md` or `handoff.md` outside any `history/` folder). Otherwise
-  `.claude/handoff.md`. It rewrites that file in place. It never makes a dated copy.
-- The child updates a plan file only when the digest names one (`~/.claude/plans/*.md` or
-  the repo's `plans/*.md`) and the plan's state changed.
-- The child's last output line is JSON: `{"handoff": <path>, "plan": <path or null>}`.
-- The hook writes `~/.claude/state/handoff/<session_id>.json` with the handoff path, the plan
-  path, ok or failed, and the time.
-- The hook never blocks compaction. A failed or timed-out child is logged, and the hook
-  exits 0. The child's budget is 240 s, inside the hook's 300 s timeout.
+  thinking. Keep the last 60,000 characters.
+- Write the digest to `~/.claude/state/handoff/<session_id>.digest.md`. Write
+  `~/.claude/state/handoff/<session_id>.json` with the digest path, the repo top level,
+  ok or failed, and the time.
+- Never block compaction. On any error, log it and exit 0.
 
 **Reorient mode** (hook `SessionStart`, matcher `compact`):
 
-- Read the state file for `session_id`. Print one short message into context:
-  "Context was compacted. Read the handoff at <path> first, then the plan at <path>.
-  Confirm checkout and branch before any git write. Then continue the last task."
-- With no state file, or a failed one, say the handoff update failed, and give the
-  failure text. Tell the session to rewrite the handoff itself, from the compaction
-  summary, at the path the child would have picked. Then continue.
+Print one short message into context. The session itself does the rewrite, under the
+desktop app's own login. The message tells the session to:
+
+1. Follow `~/.claude/hooks/precompact_handoff_prompt.md` before anything else.
+2. Use the compaction summary, the digest at its path, and the prior handoff.
+3. Then confirm checkout and branch, and continue the last task.
+
+With no state file, or a failed one, the message says the digest is missing. The session
+then rewrites from the compaction summary and the prior handoff alone.
+
+**The prompt file** tells the session how to rewrite:
+
+- The handoff path: the repo's live handoff file if one exists (a `HANDOFF.md` or
+  `handoff.md` outside any `history/` folder). Otherwise `.claude/handoff.md`.
+- Read the prior handoff first. Rewrite it in place. Never make a dated copy.
+- If the work names a plan file (`~/.claude/plans/*.md` or the repo's `plans/*.md`) and
+  the plan's state changed, update that plan in place.
 
 ## What the handoff holds
 
@@ -57,10 +59,7 @@ short-term note. It is never a ruling's only home (see memory-is-never-a-rulings
 
 ## Known limits
 
-- The digest keeps the tail. Early detail lives on only through the prior handoff, which
-  the child reads first.
-- Each compaction adds one Sonnet call and delays compaction by up to 240 s.
-- The child uses the command-line tool's own login. That login is separate from the
-  desktop app's. The CLI login can expire while desktop sessions still work. The
-  reorient fallback covers this: a failed child still gets its handoff rewritten, by
-  the next session, from the compaction summary.
+- The rewrite happens after compaction, so the session writes from the summary and the
+  digest, not from its full context. The digest keeps only the tail. Early detail lives on
+  through the prior handoff.
+- The rewrite costs the post-compact session one read of the digest, about 15k tokens.
