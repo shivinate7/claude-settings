@@ -29,7 +29,7 @@ One file, `hooks/precompact_handoff.py`, with two modes. Neither mode calls a mo
 - Build a digest of the transcript: user and assistant text only. Drop tool results and
   thinking. Keep the last 60,000 characters.
 - Write the digest to `~/.claude/state/handoff/<session_id>.digest.md`. Write
-  `~/.claude/state/handoff/<session_id>.json` with the digest path, the repo top level,
+  `~/.claude/state/handoff/<session_id>.json` with the digest path, the session's cwd,
   ok or failed, and the time.
 - Never block compaction. On any error, log it and exit 0.
 
@@ -66,3 +66,9 @@ short-term note. It is never a ruling's only home (see memory-is-never-a-rulings
   digest, not from its full context. The digest keeps only the tail. Early detail lives on
   through the prior handoff.
 - The rewrite costs the post-compact session one read of the digest, about 15k tokens.
+
+## Measured facts
+
+The session id stays the same across a compaction. This session's transcript has its
+compact boundary at line 2486. All 2,876 entries carry one `sessionId`. So reorient finds
+the state that PreCompact wrote.
