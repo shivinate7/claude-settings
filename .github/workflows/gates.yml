@@ -70,6 +70,9 @@ jobs:
       - name: Config watch fixture suite
         run: python3 hooks/test_config_watch.py
 
+      - name: Precompact handoff fixture suite
+        run: python3 hooks/test_precompact_handoff.py
+
       - name: Decision watch fixture suite
         run: python3 hooks/test_decision_watch.py
 
@@ -283,6 +286,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 hooks/test_config_watch.py
 
+      - name: Precompact handoff fixture suite
+        if: ${{ !cancelled() }}
+        run: python3 hooks/test_precompact_handoff.py
+
       - name: Decision watch fixture suite
         if: ${{ !cancelled() }}
         run: python3 hooks/test_decision_watch.py
@@ -439,6 +446,10 @@ jobs:
       - name: Config watch fixture suite
         if: ${{ !cancelled() }}
         run: python hooks/test_config_watch.py
+
+      - name: Precompact handoff fixture suite
+        if: ${{ !cancelled() }}
+        run: python hooks/test_precompact_handoff.py
 
       - name: Decision watch fixture suite
         if: ${{ !cancelled() }}
