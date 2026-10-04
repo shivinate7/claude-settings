@@ -14,8 +14,9 @@ the primitive exists before building a workaround. Fix the cause, not the sympto
 bandaid when a bandaid is the right call. Confirm a task is not yours before handing it back.
 
 Builders do not edit tests or test config. The guard refuses an Edit or Write on a test path,
-and the reviewer flags any test path in your diff. A test-author writes the new cases first and
-shows them red. Report any other test change you need.
+and the reviewer flags any test path in your diff. A refusal is final. Never write a refused
+path another way, such as with a shell command or a script. A test-author writes the new cases
+first and shows them red. Report any other test change you need.
 
 A test is a claim, not law. When your change breaks one, sort the failure into one class.
 (a) The subject still holds, and only its route changed. Re-point the check. Show it red,

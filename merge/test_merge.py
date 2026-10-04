@@ -25,6 +25,19 @@ def put(path, text):
     with open(path, "w") as f:
         f.write(text)
 
+def put_shim(path, text):
+    """Write an extension-less fake program and make it runnable from PATH.
+
+    merge.py resolves programs with shutil.which, which on Windows only matches
+    PATHEXT extensions (.exe/.cmd/...), never an extension-less script. So on
+    Windows we also drop a matching `<name>.cmd` beside it that re-dispatches
+    to the script through the current Python.
+    """
+    put(path, text)
+    os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR)
+    if os.name == "nt":
+        put(path + ".cmd", '@"%s" "%%~dp0%s" %%*\n' % (sys.executable, os.path.basename(path)))
+
 CONFIG = {
     "defaultBranch": "main",
     "regenerate": '[ -z "$MERGE_TEST_HOOK" ] || bash "$MERGE_TEST_HOOK"',
@@ -202,8 +215,14 @@ class Flow(Env):
         self.assertEqual(len(self.host.waits), 1)
 
     def test_full_merge_claims_pushes_merges_syncs_cleans(self):
-        mark = os.path.join(self.t, "after.txt")
-        cfg = dict(CONFIG, merge=dict(CONFIG["merge"], afterMerge=[f"echo ran > {mark}"]))
+        # A name relative to afterMerge's own cwd (root, i.e. self.co): the command only needs to
+        # prove afterMerge ran, not survive bash's own quoting of a native Windows path. An
+        # absolute `self.t`-joined path here was this test's own route, not the subject: unquoted,
+        # it is bash itself reading "\U" etc. as an escape and mangling the path (confirmed by
+        # direct repro, independent of merge.py). See test_afterMerge_runs_in_git_bash_not_the_wsl_stub
+        # for the real afterMerge defect this same line also hits.
+        mark = os.path.join(self.co, "after.txt")
+        cfg = dict(CONFIG, merge=dict(CONFIG["merge"], afterMerge=["echo ran > after.txt"]))
         sh(self.other, "git", "checkout", "-q", "main"); put(os.path.join(self.other, ".github/stamp.json"), json.dumps(cfg))
         sh(self.other, "git", "commit", "-qam", "cfg"); sh(self.other, "git", "push", "-q", "origin", "main")
         sh(self.co, "git", "pull", "-q", "--ff-only")
@@ -219,6 +238,30 @@ class Flow(Env):
         self.assertNotIn("refs/heads/feat", self.refs())
         self.assertFalse(self.lock_ref())
         self.assertEqual(self.worktrees(), 1)
+
+    def test_afterMerge_runs_in_git_bash_not_the_wsl_stub(self):
+        """after_merge() (merge/merge.py:470) hands subprocess.run a bare "bash". On Windows,
+        CreateProcess searches C:\\Windows\\System32 before PATH, and that folder holds the WSL
+        launcher stub, not Git Bash (decision bare-bash-on-windows-can-resolve-to-the-wsl-stub;
+        the fix, _find_git_bash(), lives only in hooks/test_config_watch.py). A command that
+        prints $OSTYPE tells the two apart: Git Bash (MSYS/MINGW) says "msys" or "msys-...", the
+        WSL stub says "linux-gnu". The redirect target is a bare relative name so this case does
+        not also depend on the separate native-path-quoting defect above."""
+        cfg = dict(CONFIG, merge=dict(CONFIG["merge"], afterMerge=["echo $OSTYPE > ostype.txt"]))
+        sh(self.other, "git", "checkout", "-q", "main"); put(os.path.join(self.other, ".github/stamp.json"), json.dumps(cfg))
+        sh(self.other, "git", "commit", "-qam", "cfg"); sh(self.other, "git", "push", "-q", "origin", "main")
+        sh(self.co, "git", "pull", "-q", "--ff-only")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        p = os.path.join(self.co, "ostype.txt")
+        self.assertTrue(os.path.exists(p), "afterMerge did not run at all")
+        with open(p) as f:
+            ostype = f.read().strip()
+        if os.name == "nt":
+            self.assertRegex(ostype, r"msys|cygwin|mingw",
+                              f"afterMerge ran under $OSTYPE={ostype!r}: that is the WSL stub, not Git Bash")
+        else:
+            self.assertTrue(ostype, "afterMerge ran but $OSTYPE was empty")
 
     def test_local_main_moves_by_fetch_when_no_worktree_holds_it(self):
         sh(self.co, "git", "checkout", "-q", "-b", "side")
@@ -590,7 +633,7 @@ class GhLockTest(unittest.TestCase):
         t = tempfile.mkdtemp(prefix="test-ghlock-")
         self.addCleanup(shutil.rmtree, t, True)
         bindir = os.path.join(t, "bin"); os.makedirs(bindir)
-        gh = os.path.join(bindir, "gh"); put(gh, FAKE_GH); os.chmod(gh, os.stat(gh).st_mode | stat.S_IXUSR)
+        gh = os.path.join(bindir, "gh"); put_shim(gh, FAKE_GH)
         self.state = os.path.join(t, "state"); os.makedirs(self.state)
         old = {k: os.environ.get(k) for k in ("PATH", "FAKE_GH_DIR")}
         os.environ["PATH"] = bindir + os.pathsep + old["PATH"]; os.environ["FAKE_GH_DIR"] = self.state
@@ -598,6 +641,13 @@ class GhLockTest(unittest.TestCase):
         self.now = 1000.0
         self.lock = merge.GhLock(now=lambda: self.now)
 
+    @unittest.skipIf(os.name == "nt",
+        "cmd.exe cannot carry an embedded newline through a .cmd dispatch: lock_message()'s "
+        "commit message always has one, so any .cmd-shimmed fake `gh` loses it before this "
+        "script ever sees it (confirmed directly: list2cmdline embeds the raw \\n, and cmd /c "
+        "reads it as a line break, truncating the argument first). Real gh.exe is a native PE "
+        "with no cmd.exe hop and keeps argv newlines intact, so production is unaffected. "
+        "Linux CI still proves this round trip.")
     def test_acquire_hold_expire_release_unlock(self):
         tok = self.lock.acquire("main", 600)
         with self.assertRaises(merge.Held):
@@ -667,7 +717,7 @@ class GhHalf(Env):
     def setUp(self):
         super().setUp()
         bindir = os.path.join(self.t, "bin"); os.makedirs(bindir)
-        gh = os.path.join(bindir, "gh"); put(gh, FAKE_GH_PR); os.chmod(gh, os.stat(gh).st_mode | stat.S_IXUSR)
+        gh = os.path.join(bindir, "gh"); put_shim(gh, FAKE_GH_PR)
         self.state = os.path.join(self.t, "ghstate"); os.makedirs(self.state)
         old = {k: os.environ.get(k) for k in ("PATH", "FAKE_GH_DIR")}
         os.environ["PATH"] = bindir + os.pathsep + old["PATH"]; os.environ["FAKE_GH_DIR"] = self.state

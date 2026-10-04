@@ -51,7 +51,11 @@ class Launch(unittest.TestCase):
         self.co = self.clone("co")
 
     def rewrite(self, target):
-        put(self.cfg, f'[user]\n\tname = t\n\temail = t@t\n[url "{target}"]\n\tinsteadOf = {URL}\n')
+        # Git's config parser treats `\` as an escape inside a quoted section name, so a raw
+        # Windows path here drops every backslash (`C:\Users\x` -> `C:Usersx`) and every clone
+        # in the suite fails to resolve. Forward slashes parse the same on both OSes and need no
+        # escaping.
+        put(self.cfg, f'[user]\n\tname = t\n\temail = t@t\n[url "{target.replace(os.sep, "/")}"]\n\tinsteadOf = {URL}\n')
 
     def release(self, tag):
         # The stub prints its tag and, when ARGS_FILE is set, records the arguments it received.

@@ -6,11 +6,20 @@ fast-forwards the checkout only when it is on main, clean and behind. When fresh
 be proven, prints a warning block and runs the checkout's own tree. --dev runs the checkout's
 own tree and nothing else. Plan: plans/shared-merge-tool.md, "The fresh-code guard".
 """
-import os, shutil, subprocess, sys, tempfile
+import os, shutil, stat, subprocess, sys, tempfile
 
 def git(co, *a):
     r = subprocess.run(["git", "-C", co, *a], capture_output=True, text=True)
     return r.returncode, (r.stdout + r.stderr).strip()
+
+def rmtree_retry(path):  # own copy: bin/merge is a standalone shim and can't import this
+    def handler(func, p, exc):
+        try:
+            os.chmod(p, stat.S_IWRITE); func(p)
+        except OSError as e:
+            print(f"merge: couldn't remove {p}: {e}", file=sys.stderr)
+    if sys.version_info >= (3, 12): shutil.rmtree(path, onexc=handler)
+    else: shutil.rmtree(path, onerror=lambda f, p, ei: handler(f, p, ei[1]))
 
 def run(tree, args):
     return subprocess.run([sys.executable, os.path.join(tree, "merge", "merge.py"), *args]).returncode
@@ -53,8 +62,8 @@ def main(co, args):
         return run(wt, args)
     finally:
         git(co, "worktree", "remove", "--force", wt)
-        git(co, "worktree", "prune")
-        shutil.rmtree(tmp, ignore_errors=True)
+        rmtree_retry(tmp)  # belt-and-suspenders: Windows can leave read-only pack files behind git's own remove
+        git(co, "worktree", "prune")  # drop the registration once the directory is actually gone
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1], sys.argv[2:]))

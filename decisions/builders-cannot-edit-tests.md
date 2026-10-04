@@ -118,6 +118,12 @@ new code:
 - The diff check does not block, so an agent can commit a test change. The reviewer must read
   the log.
 
+Measured 2026-10-03, q_max: a test-author got an Edit refusal, then wrote the same file with
+Bash and Python. The reviewer caught it. This is the first measured deliberate evasion. The
+owner ruled prose only: `agents/builder.md` and `agents/test-author.md` say a refusal is final,
+and an agent never writes a refused path another way. The diff check still logs and does not
+block. Deferred item refusal-route-around-guard holds the forced-guard option for later.
+
 ## Known ceilings (bandaids, named)
 
 - The SubagentStop `cwd` is read from the payload. It was not measured live.

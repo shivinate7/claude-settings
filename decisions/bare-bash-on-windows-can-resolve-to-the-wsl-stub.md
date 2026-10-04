@@ -63,7 +63,17 @@ read that form the same way, with no backslash left to mis-escape.
 
 ## What remains open
 
-This decision does not touch any other script in this repository that shells out
-with a bare `"bash"`. A grep of `hooks/` and `janitor/`, at the time of this fix,
-found none. A future script that adds one carries the same risk on Windows, and it
-will fail the same silent way.
+`merge/merge.py` had this same risk: `after_merge()` ran `subprocess.run(["bash",
+"-c", cmd])`, and `block()` ran bare `"gh"`, bypassing `sh()`'s own lookup. Both now
+call `resolve_program()`, one home in `merge.py` shared by `sh()`, `block()` and
+`after_merge()`. For `bash` on Windows it carries the same order as
+`hooks/test_config_watch.py`'s `_find_git_bash`: `%ProgramFiles%\Git\bin\bash.exe`
+(then the x86 and W6432 copies), then a PATH scan that skips
+`%SystemRoot%\System32`. On POSIX it is plain `shutil.which`, unchanged.
+
+`hooks/test_config_watch.py` keeps its own copy of `_find_git_bash`. It is a test
+file. A builder cannot edit a test to import `merge.py`'s resolver, so the
+duplicate stays. That is the stated reason for the duplication, not an oversight.
+
+A future script that shells out with a bare `"bash"` or `"gh"` outside these two
+homes carries the same risk on Windows. It will fail the same silent way.

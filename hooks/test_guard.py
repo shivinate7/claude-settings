@@ -102,6 +102,16 @@ CLONE = os.path.join(ROOT, "clone")        # the clone of claude-settings, which
 NOGIT = os.path.join(ROOT, "nogit")        # a directory that is not a git tree
 GITMAIN = os.path.join(ROOT, "repo")       # an ordinary checkout, shared with other sessions
 GITWT = os.path.join(ROOT, "lane")         # a linked worktree of that checkout
+# D2026-10-03 (owner ruling): a linked worktree under <repo>/.claude/worktrees/ is AGENT-OWNED,
+# and a discard there is allowed and noted instead of asked. AGENTWT is the real thing. FARWT,
+# DOTDOTWT and SYMWT are near misses that must NOT count as agent-owned: a sibling path that
+# merely contains the word "worktrees", a textual ".claude/worktrees/.." that resolves back
+# outside, and (where the platform allows it) a symlink doing the same. DECOYMAIN is the MAIN
+# checkout, whose own folder happens to be nested under a path spelled like the agent layout.
+AGENTWT = os.path.join(GITMAIN, ".claude", "worktrees", "agent-x")
+FARWT = os.path.join(ROOT, "worktrees", "stray")
+SYMWT = os.path.join(GITMAIN, ".claude", "worktrees", "linked-agent")
+DECOYMAIN = os.path.join(ROOT, "decoyhost", ".claude", "worktrees", "decoy")
 CONFLICT = os.path.join(ROOT, "conflict")  # a real checkout with an unresolved merge conflict
 SUBJCLEAN = os.path.join(ROOT, "subjclean")  # a real checkout with a clean tree and no stash
 SUBJCLEANWT = os.path.join(ROOT, "subjcleanlane")  # a real, clean linked worktree of that one
@@ -125,6 +135,8 @@ GHEMPTY = os.path.join(ROOT, "ghempty")    # no check and no workflow run report
 GHCWD = os.path.join(ROOT, "ghcwd")        # green, but only for a call run inside the folder `ctxrepo`
 WFREPO = os.path.join(ROOT, "wfrepo")      # a folder that holds one workflow file
 GHSLOW = os.path.join(ROOT, "ghslow")      # green, but every call takes longer than the gate waits
+GHWARM = os.path.join(ROOT, "ghwarm")      # green, each call as slow as a real gh measured locally
+GHHANG = os.path.join(ROOT, "ghhang")      # green, but every call never answers at all
 GHBLANK = os.path.join(ROOT, "ghblank")    # green checks, a base that reads as empty
 CTXREPO = os.path.join(ROOT, "ctxrepo")      # a checkout on main with one merged branch, `done`
 MSG_BAD = os.path.join(ROOT, "msg_bad.txt")  # a message file that cites a record by path
@@ -429,8 +441,10 @@ def make_blind_git(folder):
     os.chmod(script, 0o755)
 
 
-FAKE_GH_PY = r'''import json, os, sys
+FAKE_GH_PY = r'''import json, os, sys, time
 state = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")))
+if state.get("delay_s"):
+    time.sleep(state["delay_s"])
 args = sys.argv[1:]
 if state["cwd_name"] and os.path.basename(os.getcwd()) != state["cwd_name"]:
     state["broken"] = True
@@ -457,7 +471,7 @@ else:
 '''
 
 
-def make_fake_gh(folder, base, delay=0, checks=None, runs=None, broken=False, need=(),
+def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
                  cwd_name=""):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
@@ -465,6 +479,11 @@ def make_fake_gh(folder, base, delay=0, checks=None, runs=None, broken=False, ne
     reads PATHEXT, so a `gh.cmd` earlier on PATH was skipped and the real `gh.exe` further along
     answered instead. The guard resolves the program with shutil.which for that reason, and this
     stand-in is a `.cmd` file to keep the case honest on this machine.
+
+    `delay_s` is a plain float number of seconds, slept inside the fake's own Python process
+    before it answers. It needs no external `sleep`/`ping` and so has none of the whole-second or
+    PATH-resolution limits `delay` carries below; use it for a measured, fractional or very long
+    wait (a realistic `gh` latency, or a stand-in for a `gh` that never answers at all).
 
     `delay` whole seconds run before the answer. The merge gate's real subprocess.run carries a real
     timeout (MERGE_READ_TIMEOUT). A mutant that shrinks it would race an instant answer instead of
@@ -502,6 +521,7 @@ def make_fake_gh(folder, base, delay=0, checks=None, runs=None, broken=False, ne
         "broken": broken,
         "cwd_name": cwd_name,   # the folder name a call must run in, or it answers as a broken tool
         "need": list(need),   # words every call must carry, or it answers as a broken tool does
+        "delay_s": delay_s,   # seconds to sleep in-process before answering; see the delay_s note above
     }
     write(os.path.join(folder, "state.json"), json.dumps(state))
     write(os.path.join(folder, "ghfake.py"), FAKE_GH_PY)
@@ -512,7 +532,12 @@ def make_fake_gh(folder, base, delay=0, checks=None, runs=None, broken=False, ne
             raise RuntimeError(
                 "make_fake_gh: delay=%d requested but 'ping' is not on this process's PATH" % delay
             )
-        wait = ('"%s" -n %d 127.0.0.1 >nul\r\n' % (tool, delay + 1)) if delay else ""
+        # Both streams to nul, not stdout alone: cmd.exe redirects only what it is told to, so an
+        # unredirected stderr handle stays inherited into `ping` and keeps the REAL captured pipe
+        # open for ping's whole run. MEASURED: with stdout alone redirected, a delay far past
+        # SH_TIMEOUT (GHHANG, 30s wait vs. a 3s kill) left communicate() blocked on that still-open
+        # handle for the ping's full duration, not the ~3s the kill should have bounded it to.
+        wait = ('"%s" -n %d 127.0.0.1 >nul 2>&1\r\n' % (tool, delay + 1)) if delay else ""
         write(os.path.join(folder, "gh.cmd"), "@echo off\r\n" + wait
               + '"%s" "%s" %%*\r\n' % (sys.executable, fake_py))
     else:
@@ -595,7 +620,24 @@ def build_fixtures():
     make_fake_gh(GHBROKEN, "main", broken=True)
     make_fake_gh(GHBLANK, "", )
     make_fake_gh(GHNEED, "main", need=["12", "y/x"])
-    make_fake_gh(GHSLOW, "main", delay=4)
+    # merge.py's shared_deadline (3f07b06) splits one budget across the read's three calls, so a
+    # delay only a little past the per-call figure that used to be the cutoff no longer exhausts
+    # it: 3 calls * 4s = 12s now fits inside the 14s MERGE_READ_TIMEOUT. 20s per call outruns that
+    # whole shared budget on its own, whichever call absorbs the time.
+    make_fake_gh(GHSLOW, "main", delay=20)
+    # Incident 2026-10-03: pr view 3.0-3.8s, pr checks 3.6-3.9s, the runs read 1.3-1.4s, measured
+    # on the machine that filed it. 3.5s per call stands in for that real latency, slower than
+    # MERGE_READ_TIMEOUT's 3s but nowhere near a hang.
+    make_fake_gh(GHWARM, "main", delay_s=3.5)
+    # A `gh` that never answers at all. MEASURED on Windows: this fake is a `.cmd`, so the
+    # process subprocess.run actually kills on timeout is cmd.exe, never the ping (or python)
+    # it spawned for the wait -- Windows hands that child a full set of inherited handles
+    # REGARDLESS of its own `>nul 2>&1` redirection, so the real captured pipe stays open and
+    # communicate() blocks for the WHOLE configured wait, not just until the kill. One gh call
+    # is all head_read ever attempts before an exception ends the read (see merge_hang_timeout_case
+    # below), so 10s bounds the real wait on this fixture's worst case here, and bounds it far
+    # more tightly still on a platform (POSIX CI) where the kill lands cleanly.
+    make_fake_gh(GHHANG, "main", delay=10)
     make_fake_gh(GHEMPTY, "main", checks=[], runs=[])
     make_fake_gh(GHCWD, "main", cwd_name="ctxrepo")
     write(os.path.join(WFREPO, ".github", "workflows", "gates.yml"), "name: gates\n")
@@ -630,11 +672,24 @@ def build_fixtures():
     run_vcs(GITMAIN, "add", "-A")
     run_vcs(GITMAIN, *IDENT, "commit", "-q", "-m", "files")
     run_vcs(GITMAIN, "worktree", "add", "-q", GITWT, "-b", "lane")
-    for _tree in (GITMAIN, GITWT):
+    # AGENTWT: a real linked worktree whose path sits under GITMAIN's own .claude/worktrees/.
+    # FARWT: a real linked worktree elsewhere, at a path that merely contains the word
+    # "worktrees" (mimics an unrelated /tmp/worktrees/x), so the agent-owned check must read the
+    # path's PREFIX, not just test for the substring.
+    run_vcs(GITMAIN, "worktree", "add", "-q", AGENTWT, "-b", "agent-x-branch")
+    run_vcs(GITMAIN, "worktree", "add", "-q", FARWT, "-b", "stray-branch")
+    for _tree in (GITMAIN, GITWT, AGENTWT, FARWT):
         write(os.path.join(_tree, "docs", "DEBTS.md"), "uncommitted\n")
         write(os.path.join(_tree, "f.txt"), "uncommitted\n")
         write(os.path.join(_tree, "new.txt"), "untracked\n")
         _require_dirty(_tree, "f.txt", "new.txt", "keep.txt")
+    # DECOYMAIN: an ordinary MAIN checkout whose own folder happens to be nested under a path
+    # spelled ".claude/worktrees/<name>". It is not a linked worktree of anything, so the
+    # coincidence in its path must not earn it the agent-owned allowance.
+    make_repo(DECOYMAIN, {"f.txt": "base\n", "keep.txt": "base\n"})
+    write(os.path.join(DECOYMAIN, "f.txt"), "uncommitted\n")
+    write(os.path.join(DECOYMAIN, "new.txt"), "untracked\n")
+    _require_dirty(DECOYMAIN, "f.txt", "new.txt", "keep.txt")
 
     # THE SUBJECT READ. Each arm gets both sides, built with real state: a real clean tree, a
     # real uncommitted edit, a real untracked file, a real one-entry stash stack.
@@ -967,6 +1022,22 @@ def build_fixtures():
 
 
 build_fixtures()
+
+# DOTDOTWT: a path spelled through GITMAIN's .claude/worktrees/ that climbs back out with "..",
+# resolving to GITWT itself (a linked worktree OUTSIDE .claude/worktrees). It must be judged on
+# where it really is, not on the ".claude/worktrees" segment in its spelling.
+DOTDOTWT = os.path.join(GITMAIN, ".claude", "worktrees", "..", "..", "..", "lane")
+if os.path.normcase(os.path.realpath(DOTDOTWT)) != os.path.normcase(os.path.realpath(GITWT)):
+    sys.exit("fixture setup failed: DOTDOTWT does not resolve to GITWT. realpath is %r"
+             % os.path.realpath(DOTDOTWT))
+# SYMWT: a symlink inside .claude/worktrees/ pointing at GITWT, same proof with a real link
+# instead of literal "..". Degrades to skip where the account holds no symlink privilege
+# (MEASURED: this box raises OSError: a required privilege is not held by the client).
+try:
+    os.symlink(GITWT, SYMWT, target_is_directory=True)
+    SYMWT_MADE = True
+except Exception:
+    SYMWT_MADE = False
 
 # --------------------------------------------------------------- the ported shell traps
 #
@@ -1310,6 +1381,26 @@ sh("worktree: restore of a dirty path still asks, unchanged", VCS + " restore f.
    "shared-tree", cwd=GITWT)
 sh("worktree: checkout -- of a dirty path still asks, unchanged", VCS + " checkout -- f.txt",
    "ask", "shared-tree", cwd=GITWT)
+
+# THE AGENT-OWNED CARVE-OUT (owner ruling 2026-10-03, decisions/guard-agent-worktree-discard.md).
+# A linked worktree under <repo>/.claude/worktrees/ is agent-owned: a discard there is ALLOWED,
+# not asked (checked as a log/noted case below, since an allow prints nothing to assert on here).
+# Near misses must still ask or deny, proven against real git state, not a path guess.
+sh("agent worktree: a linked worktree elsewhere that merely says \"worktrees\" still asks",
+   VCS + " reset --hard", "ask", "shared-tree", cwd=FARWT)
+sh("agent worktree: checkout -- in that near-miss worktree still asks",
+   VCS + " checkout -- f.txt", "ask", "shared-tree", cwd=FARWT)
+sh("agent worktree: a textual .claude/worktrees/.. that resolves back outside still asks",
+   VCS + " reset --hard", "ask", "shared-tree", cwd=DOTDOTWT)
+if SYMWT_MADE:
+    sh("agent worktree: a symlink into .claude/worktrees/ aliasing an outside worktree still asks",
+       VCS + " reset --hard", "ask", "shared-tree", cwd=SYMWT)
+sh("agent worktree: the main checkout nested under its own .claude/worktrees/-shaped path "
+   "still denies", VCS + " reset --hard", "deny", "shared-tree", cwd=DECOYMAIN)
+sh("agent worktree: a stash push there still denies, the stack is clone-wide",
+   VCS + " stash push -u -m lane", "deny", "shared-tree", cwd=AGENTWT)
+sh("agent worktree: a bare stash there still denies, the stack is clone-wide",
+   VCS + " stash", "deny", "shared-tree", cwd=AGENTWT)
 
 # THE PUSH ARM. `refs/stash` lives in the COMMON git directory (MEASURED above, next to
 # SUBJSTASHWT), so a push from a worktree lands on the SAME one-entry-wide stack the primary
@@ -2703,6 +2794,11 @@ add("merge-checks: the host merge tool reads the pull request and repo it names"
 sh("merge-checks: a gh slower than the gate waits is unknown, and denies",
    "gh pr merge 12 --squash", "deny", "merge-checks", carries="could not run", cwd=NOGIT,
    env_path=GHSLOW + os.pathsep + PY_PATH, config=MERGECFG)
+# Incident 2026-10-03: MERGE_READ_TIMEOUT (3s) sits under real `gh` latency (3.0-3.9s measured),
+# so a settled, all-green head still reads as unknown and the gate cries wolf on passing CI.
+sh("merge-checks: a head as slow as real gh, but green, still allows",
+   "gh pr merge 12 --squash", "allow", cwd=NOGIT, env_path=GHWARM + os.pathsep + PY_PATH,
+   config=MERGECFG)
 sh("merge-checks: the words of a merge in an echo are no merge", "echo gh pr merge 12 --squash",
    "allow", silent=True, cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge-checks: a head that reports nothing yet is not settled when the repo has workflows",
@@ -4136,6 +4232,49 @@ def subject_unread_log_case(command=None, expect_note=True):
     return True, "one noted/subject-unread line, distinct from a refusal"
 
 
+def agent_worktree_noted_case(command):
+    """A discard inside an agent-owned worktree (<repo>/.claude/worktrees/<name>) is allowed, and
+    logged as `noted`/`shared-tree` rather than asked (owner ruling 2026-10-03).
+
+    AGENTWT is a REAL linked worktree built in build_fixtures, with real uncommitted work, so this
+    proves the carve-out against actual git state, the same discipline subject_unread_log_case
+    uses above.
+    """
+    folder = os.path.join(ROOT, "agentwtlog")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "guard.log")
+    if os.path.exists(path):
+        os.remove(path)
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    result = subprocess.run(
+        [sys.executable, GUARD],
+        input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": AGENTWT}),
+        capture_output=True, text=True, env=env, timeout=60,
+    )
+    if result.stdout.strip():
+        return False, "expected a silent allow, got %r" % result.stdout.strip()[:200]
+    if not os.path.exists(path):
+        return False, "no log file was written for the agent-owned worktree discard"
+    with open(path, encoding="utf-8") as handle:
+        lines = [line for line in handle.read().splitlines() if line.strip()]
+    if len(lines) != 1:
+        return False, "expected one line, found %d: %r" % (len(lines), lines)
+    fields = lines[0].split("\t")
+    if len(fields) != 5 or fields[2] != "noted" or fields[3] != "shared-tree":
+        return False, "line does not read noted/shared-tree: %r" % lines[0]
+    return True, "one noted/shared-tree line, allowed not asked"
+
+
+def agent_worktree_reset_noted_case():
+    return agent_worktree_noted_case(VCS + " reset --hard")
+
+
+def agent_worktree_checkout_noted_case():
+    return agent_worktree_noted_case(VCS + " checkout -- f.txt")
+
+
 def worktree_remove_plain_quiet_case():
     return subject_unread_log_case(VCS + " worktree remove $w", expect_note=False)
 
@@ -4318,6 +4457,48 @@ def merge_log_case():
     if problems:
         return False, "; ".join(problems)
     return True, "allowed, no log line, by the command and by the tool"
+
+
+def merge_hang_timeout_case():
+    """A `gh` that never answers must still end in a deny, and that deny must not depend on the
+    hook's 20s budget being outlived first.
+
+    The "denies as unknown" half holds on every OS: THAT is the subject (git-wait-for-required-
+    checks), and this is pinned everywhere.
+
+    The wall-time half -- the read must finish well inside the 20s hook budget, bounded here at
+    ~15s -- is asserted on POSIX only. MEASURED on Windows: GHHANG is a `.cmd` fake, and
+    subprocess.run's kill on timeout only reaches the cmd.exe it directly spawned, never the
+    ping it wraps for the wait -- Windows hands that ping an inherited duplicate of the real
+    captured pipe regardless of its own `>nul 2>&1` redirection, so communicate() blocks until
+    ping's FULL configured wait elapses, not until the kill. That is a fixture artifact of
+    faking `gh` as a batch file on this one platform, not a fact about guard.py or merge.py: a
+    real `gh.exe` is a single process, killed cleanly (confirmed directly against `ping.exe`
+    itself: a bare, unwrapped call is killed at the nominal timeout, not its full duration). No
+    `.cmd` fake can be killed on time here, so there is nothing truthful left to assert for wall
+    time on Windows; skip it there, loudly, rather than fake a shorter wait or a looser bound.
+    """
+    started = time.time()
+    got, reason = decide({
+        "raw": None, "tool": "Bash", "cwd": NOGIT, "session": None,
+        "env_path": GHHANG + os.pathsep + PY_PATH, "config": MERGECFG,
+        "tool_input": {"command": "gh pr merge 12 --squash"},
+    })
+    elapsed = time.time() - started
+    problems = []
+    if got != "deny":
+        problems.append("expected deny, got %s" % got)
+    elif "could not run" not in reason:
+        problems.append("expected the could-not-run reason, got %r" % reason[:120])
+    if os.name != "nt" and elapsed >= 15:
+        problems.append("the judgement took %.1fs, at or past the 15s bound" % elapsed)
+    if problems:
+        return False, "; ".join(problems)
+    note = ("denied as unknown in %.1fs; the wall-time bound is skipped on Windows, a `.cmd` "
+            "fake gh cannot be killed on time here (see this case's docstring)" % elapsed
+            if os.name == "nt" else
+            "denied as unknown in %.1fs, inside the 20s hook budget" % elapsed)
+    return True, note
 
 
 def names_the_target(reason, rule=None):
@@ -4901,9 +5082,15 @@ LOG_CHECKS = (
     ("trim: a merge into main is allowed and logs nothing", merge_log_case),
     ("trim: a guard crash fails open and logs a crash line", crash_log_case),
     ("merge-checks: a merge tool that cannot load is unknown, and denies", merge_tool_missing_case),
+    ("merge-checks: a gh that never answers still denies, well inside the hook's 20s budget",
+     merge_hang_timeout_case),
     ("powershell: a backslash path survives tokenizing, a Bash one does not", powershell_backslash_case),
     ("trim: a conflict-side checkout is allowed and logs nothing", conflict_resolve_log_case),
     ("log: an unreadable subject is allowed and noted", subject_unread_log_case),
+    ("log: a hard reset in an agent-owned worktree is allowed and noted, not asked",
+     agent_worktree_reset_noted_case),
+    ("log: checkout -- in an agent-owned worktree is allowed and noted, not asked",
+     agent_worktree_checkout_noted_case),
     ("log: an unforced worktree remove with an unreadable subject records no note",
      worktree_remove_plain_quiet_case),
     ("log: a forced worktree remove with an unreadable subject is still noted",
