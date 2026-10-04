@@ -338,9 +338,11 @@ def case_settings_json():
     path = os.path.join(REPO_ROOT, "settings.json")
     with open(path, "r", encoding="utf-8") as f:
         settings = json.load(f)
+    check("settings: autoCompactWindow is 500000",
+          settings.get("autoCompactWindow") == 500000, "settings: %r" % settings)
     env = settings.get("env", {})
-    check("settings: CLAUDE_AUTOCOMPACT_PCT_OVERRIDE is \"50\"",
-          env.get("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE") == "50", "env: %r" % env)
+    check("settings: CLAUDE_AUTOCOMPACT_PCT_OVERRIDE is gone -- autoCompactWindow replaces it",
+          "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE" not in env, "env: %r" % env)
 
     hooks = settings.get("hooks", {})
 
