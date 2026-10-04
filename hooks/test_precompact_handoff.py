@@ -5,19 +5,19 @@ Run it from the repository root:
 
     python hooks/test_precompact_handoff.py
 
-RED BEFORE GREEN. `hooks/precompact_handoff.py` does not exist yet (decisions/precompact-
-handoff.md is the spec), so every case below must fail now, and fail for the right reason:
-the hook file is missing, so it never calls the child, never writes state, never prints a
-reorient message. Once the builder lands the file, every case must go green.
+Spec: decisions/precompact-handoff.md, rewritten 2026-10-03: no `claude -p` child, no
+second login. PreCompact writes a digest file and a state file. Reorient prints a message
+naming the prompt file and the digest, and never spawns anything.
+
+RED BEFORE GREEN. As of this file's own red run, `hooks/precompact_handoff.py` still runs
+a `claude -p` child (the OLD design) -- so the "never calls claude" case must fail red, for
+that exact reason, not a crash.
 
 Each case gets its own temp root: a real git repo (the hook's `cwd`, and its own top
 level), a `CLAUDE_CONFIG_DIR`, and a `bin` dir on PATH holding a fake `claude` (the same
 extension-less-plus-`.cmd`-shim trick `put_shim` uses in merge/test_merge.py, needed because
-Windows `shutil.which` never matches an extension-less script). The fake records its own
-argv, cwd and env to a JSON file next to itself -- found via its OWN script path, never via
-an inherited env var or a fixed cwd, so it works whether the hook inherits this process's
-environment for the child or builds the child's env from scratch. It then prints whatever
-this case scripted, and exits with whatever code this case scripted.
+Windows `shutil.which` never matches an extension-less script). The fake only records that
+it ran -- this spec never calls it, so any record at all is the defect.
 """
 import json
 import os
@@ -44,13 +44,6 @@ def check(name, condition, detail=""):
         print("FAIL: %s  %s" % (name, detail))
 
 
-def word_in(word, text):
-    """True when `word` appears as a whole token in `text`, not as part of a longer one --
-    so a tool list joined with commas or spaces both read the same, and "Bash" never
-    matches inside some other word that happens to contain it."""
-    return re.search(r'(?<![A-Za-z])%s(?![A-Za-z])' % re.escape(word), text) is not None
-
-
 def put(path, text):
     parent = os.path.dirname(path)
     if parent:
@@ -72,26 +65,14 @@ def put_shim(path, text):
         put(path + ".cmd", '@"%s" "%%~dp0%s" %%*\n' % (sys.executable, os.path.basename(path)))
 
 
+# The fake just proves it ran. This spec calls no model at all, so a record file existing
+# is itself the failure -- there is nothing to script.
 FAKE_CLAUDE = (
     "import json, os, sys\n"
     "HERE = os.path.dirname(os.path.abspath(__file__))\n"
-    "cfg = {}\n"
-    "cfg_path = os.path.join(HERE, 'fake_claude_config.json')\n"
-    "if os.path.isfile(cfg_path):\n"
-    "    with open(cfg_path, 'r', encoding='utf-8') as f:\n"
-    "        cfg = json.load(f)\n"
-    "record = {\n"
-    "    'argv': sys.argv[1:],\n"
-    "    'cwd': os.getcwd(),\n"
-    "    'child_flag': os.environ.get('CLAUDE_HANDOFF_CHILD'),\n"
-    "    'stdin': sys.stdin.read(),\n"
-    "}\n"
     "with open(os.path.join(HERE, 'fake_claude_record.json'), 'w', encoding='utf-8') as f:\n"
-    "    json.dump(record, f)\n"
-    "stdout = cfg.get('stdout', '')\n"
-    "if stdout:\n"
-    "    sys.stdout.write(stdout)\n"
-    "sys.exit(cfg.get('exit_code', 0))\n"
+    "    json.dump({'argv': sys.argv[1:]}, f)\n"
+    "sys.exit(0)\n"
 )
 
 
@@ -118,6 +99,36 @@ def write_transcript(path, lines):
     put(path, "\n".join(lines) + "\n")
 
 
+def flat_values(obj):
+    """Yield every string found anywhere in a JSON-shaped value, so a case can look for a
+    path without pinning the key that carries it."""
+    if isinstance(obj, str):
+        yield obj
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            for s in flat_values(v):
+                yield s
+    elif isinstance(obj, list):
+        for v in obj:
+            for s in flat_values(v):
+                yield s
+
+
+def state_names_path(state, target):
+    """True when some value in `state` is the same file as `target` (normalized, so a
+    trailing slash or a different separator does not matter)."""
+    if state is None:
+        return False
+    want = os.path.normcase(os.path.normpath(target))
+    for s in flat_values(state):
+        try:
+            if os.path.normcase(os.path.normpath(s)) == want:
+                return True
+        except Exception:
+            continue
+    return False
+
+
 class Case(object):
     """One temp root with its own repo, config dir and fake `claude` on PATH."""
 
@@ -131,44 +142,37 @@ class Case(object):
         put_shim(os.path.join(self.bin, "claude"), FAKE_CLAUDE)
         self.session_id = "sess-%s" % name
 
-    def configure_claude(self, stdout="", exit_code=0):
-        put(os.path.join(self.bin, "fake_claude_config.json"),
-            json.dumps({"stdout": stdout, "exit_code": exit_code}))
+    def claude_was_called(self):
+        return os.path.isfile(os.path.join(self.bin, "fake_claude_record.json"))
 
-    def record(self):
-        path = os.path.join(self.bin, "fake_claude_record.json")
-        if not os.path.isfile(path):
-            return None
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-
-    def env(self, extra=None):
+    def env(self):
         env = dict(os.environ)
         env["CLAUDE_CONFIG_DIR"] = self.cfg
         env["PATH"] = self.bin + os.pathsep + env.get("PATH", "")
-        if extra:
-            env.update(extra)
         return env
 
-    def run(self, args, payload, extra_env=None):
-        env = self.env(extra_env)
+    def run(self, args, payload):
         return subprocess.run([sys.executable, MODULE] + args, input=json.dumps(payload),
-                               capture_output=True, text=True, env=env, cwd=self.repo)
+                               capture_output=True, text=True, env=self.env(), cwd=self.repo)
 
-    def run_precompact(self, transcript_lines, extra_env=None):
-        tpath = os.path.join(self.root, "transcript.jsonl")
-        write_transcript(tpath, transcript_lines)
-        payload = {"session_id": self.session_id, "transcript_path": tpath, "cwd": self.repo,
-                   "hook_event_name": "PreCompact"}
-        return self.run([], payload, extra_env)
+    def run_precompact(self, transcript_path):
+        payload = {"session_id": self.session_id, "transcript_path": transcript_path,
+                   "cwd": self.repo, "hook_event_name": "PreCompact"}
+        return self.run([], payload)
 
     def run_reorient(self):
         payload = {"session_id": self.session_id, "hook_event_name": "SessionStart",
                    "source": "compact", "cwd": self.repo}
         return self.run(["--reorient"], payload)
 
+    def digest_path(self):
+        return os.path.join(self.cfg, "state", "handoff", "%s.digest.md" % self.session_id)
+
     def state_path(self):
         return os.path.join(self.cfg, "state", "handoff", "%s.json" % self.session_id)
+
+    def prompt_path(self):
+        return os.path.join(self.cfg, "hooks", "precompact_handoff_prompt.md")
 
     def read_state(self):
         path = self.state_path()
@@ -177,6 +181,13 @@ class Case(object):
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
 
+    def read_digest(self):
+        path = self.digest_path()
+        if not os.path.isfile(path):
+            return None
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+
     def cleanup(self):
         shutil.rmtree(self.root, ignore_errors=True)
 
@@ -184,49 +195,11 @@ class Case(object):
 # --------------------------------------------------------------------------- PreCompact
 
 
-def case_precompact_calls_child_once():
+def case_precompact_writes_digest_and_state():
     c = Case("basic")
     try:
-        handoff_path = os.path.join(c.repo, "HANDOFF.md")
-        plan_path = os.path.join(c.repo, "plans", "p1.md")
-        last_line = json.dumps({"handoff": handoff_path, "plan": plan_path})
-        c.configure_claude(stdout="some chatter the child printed first\n" + last_line + "\n")
-        lines = [transcript_line("user", [{"type": "text", "text": "hello"}])]
-        c.run_precompact(lines)
-        rec = c.record()
-        check("basic: child ran once", rec is not None, "fake claude was never invoked")
-        if rec is not None:
-            argv_text = " ".join(rec["argv"])
-            check("basic: model sonnet", word_in("sonnet", argv_text),
-                  "argv carried no 'sonnet' token: %r" % rec["argv"])
-            check("basic: cwd is the repo top level",
-                  os.path.realpath(rec["cwd"]) == os.path.realpath(c.repo),
-                  "child cwd was %r, not the repo %r" % (rec["cwd"], c.repo))
-            check("basic: env CLAUDE_HANDOFF_CHILD=1", rec["child_flag"] == "1",
-                  "child env carried CLAUDE_HANDOFF_CHILD=%r" % rec["child_flag"])
-            for tool in ("Read", "Write", "Edit", "Glob", "Grep"):
-                check("basic: tool %s granted" % tool, word_in(tool, argv_text),
-                      "argv never named %s: %r" % (tool, rec["argv"]))
-            check("basic: Bash NOT granted", not word_in("Bash", argv_text),
-                  "argv named Bash, which must be excluded: %r" % rec["argv"])
-        state = c.read_state()
-        check("basic: state file written", state is not None,
-              "no state file at %s" % c.state_path())
-        if state is not None:
-            check("basic: state ok=true", state.get("ok") is True, "state: %r" % state)
-            check("basic: state records the handoff path",
-                  state.get("handoff") == handoff_path, "state: %r" % state)
-            check("basic: state records the plan path",
-                  state.get("plan") == plan_path, "state: %r" % state)
-    finally:
-        c.cleanup()
-
-
-def case_digest_filters_and_caps():
-    c = Case("digest")
-    try:
-        old_block = "OLDBLOCK" + ("A" * 100000)
-        new_block = "NEWBLOCK" + ("B" * 100000)
+        old_block = "OLDBLOCK" + ("A" * 40000)
+        new_block = "NEWBLOCK" + ("B" * 40000)
         lines = [
             transcript_line("user", [{"type": "text", "text": old_block}]),
             transcript_line("assistant",
@@ -237,85 +210,69 @@ def case_digest_filters_and_caps():
                             [{"type": "tool_result", "content": "TOOLRESULTMARKER" + "R" * 500}]),
             transcript_line("assistant", [{"type": "text", "text": new_block}]),
         ]
-        c.configure_claude(stdout=json.dumps(
-            {"handoff": os.path.join(c.repo, "HANDOFF.md"), "plan": None}) + "\n")
-        c.run_precompact(lines)
-        rec = c.record()
-        check("digest: child ran", rec is not None, "fake claude was never invoked")
-        if rec is not None:
-            haystack = " ".join(rec["argv"]) + "\n" + (rec.get("stdin") or "")
-            check("digest: newest user/assistant text reached the child",
-                  "NEWBLOCK" in haystack,
-                  "the most recent text never reached the child")
-            check("digest: oldest text was cut by the 150,000-char cap",
-                  "OLDBLOCK" not in haystack,
-                  "text past the cap still reached the child")
-            check("digest: tool_result content dropped", "TOOLRESULTMARKER" not in haystack,
-                  "a tool_result block reached the child")
-            check("digest: thinking content dropped", "THINKINGMARKER" not in haystack,
-                  "a thinking block reached the child")
-            kept_filler = sum(1 for ch in haystack if ch in "AB")
-            check("digest: kept text is near the 150,000-char cap, not the full ~200,000",
-                  kept_filler <= 150000 + 1000,
-                  "kept %d filler chars, want roughly <= 150,000" % kept_filler)
-    finally:
-        c.cleanup()
+        tpath = os.path.join(c.root, "transcript.jsonl")
+        write_transcript(tpath, lines)
+        proc = c.run_precompact(tpath)
 
-
-def case_recursion_guard():
-    c = Case("recursion")
-    try:
-        c.configure_claude(stdout=json.dumps({"handoff": "x", "plan": None}) + "\n")
-        lines = [transcript_line("user", [{"type": "text", "text": "hi"}])]
-        proc = c.run_precompact(lines, extra_env={"CLAUDE_HANDOFF_CHILD": "1"})
-        check("recursion: hook exits 0", proc.returncode == 0,
-              "returncode=%r stderr=%r" % (proc.returncode, proc.stderr[-300:]))
-        check("recursion: the child is never invoked", c.record() is None,
-              "the fake claude ran even though CLAUDE_HANDOFF_CHILD was already set")
-    finally:
-        c.cleanup()
-
-
-def case_failure_child_exits_nonzero():
-    c = Case("fail_exit")
-    try:
-        c.configure_claude(stdout="", exit_code=3)
-        lines = [transcript_line("user", [{"type": "text", "text": "hi"}])]
-        proc = c.run_precompact(lines)
-        check("fail-exit: hook never exits 2", proc.returncode != 2,
+        check("basic: hook never exits 2", proc.returncode != 2,
               "returncode=%r" % proc.returncode)
-        check("fail-exit: hook exits 0", proc.returncode == 0,
+        check("basic: hook exits 0", proc.returncode == 0,
               "returncode=%r stderr=%r" % (proc.returncode, proc.stderr[-300:]))
         out = (proc.stdout or "").lower()
-        check("fail-exit: no block decision printed",
-              '"block"' not in out and '"deny"' not in out,
-              "stdout: %r" % proc.stdout)
+        check("basic: no block decision printed",
+              '"block"' not in out and '"deny"' not in out, "stdout: %r" % proc.stdout)
+        check("basic: never calls claude -- this spec has no child",
+              not c.claude_was_called(), "the fake claude ran at least once")
+
+        digest = c.read_digest()
+        check("basic: digest file written", digest is not None,
+              "no digest file at %s" % c.digest_path())
+        if digest is not None:
+            check("basic: newest user/assistant text kept", "NEWBLOCK" in digest,
+                  "the most recent text never reached the digest")
+            check("basic: oldest text cut by the 60,000-char cap", "OLDBLOCK" not in digest,
+                  "text past the cap still reached the digest")
+            check("basic: tool_result content dropped", "TOOLRESULTMARKER" not in digest,
+                  "a tool_result block reached the digest")
+            check("basic: thinking content dropped", "THINKINGMARKER" not in digest,
+                  "a thinking block reached the digest")
+            kept_filler = sum(1 for ch in digest if ch in "AB")
+            check("basic: kept text is near the 60,000-char cap, not the full ~80,000",
+                  kept_filler <= 60000 + 1000,
+                  "kept %d filler chars, want roughly <= 60,000" % kept_filler)
+
         state = c.read_state()
-        check("fail-exit: state written", state is not None, "no state file")
+        check("basic: state file written", state is not None,
+              "no state file at %s" % c.state_path())
         if state is not None:
-            check("fail-exit: state ok=false", state.get("ok") is False, "state: %r" % state)
+            check("basic: state ok=true", state.get("ok") is True, "state: %r" % state)
+            check("basic: state has a time", bool(state.get("time")), "state: %r" % state)
+            check("basic: state names the digest path",
+                  state_names_path(state, c.digest_path()), "state: %r" % state)
+            check("basic: state names the repo top level",
+                  state_names_path(state, c.repo), "state: %r" % state)
     finally:
         c.cleanup()
 
 
-def case_failure_child_prints_no_json():
-    c = Case("fail_nojson")
+def case_precompact_error_is_ok_false():
+    c = Case("error")
     try:
-        c.configure_claude(stdout="I did some work but forgot the summary line\n", exit_code=0)
-        lines = [transcript_line("user", [{"type": "text", "text": "hi"}])]
-        proc = c.run_precompact(lines)
-        check("fail-nojson: hook never exits 2", proc.returncode != 2,
+        missing_transcript = os.path.join(c.root, "does_not_exist.jsonl")
+        proc = c.run_precompact(missing_transcript)
+        check("error: hook never exits 2", proc.returncode != 2,
               "returncode=%r" % proc.returncode)
-        check("fail-nojson: hook exits 0", proc.returncode == 0,
+        check("error: hook exits 0", proc.returncode == 0,
               "returncode=%r stderr=%r" % (proc.returncode, proc.stderr[-300:]))
         out = (proc.stdout or "").lower()
-        check("fail-nojson: no block decision printed",
-              '"block"' not in out and '"deny"' not in out,
-              "stdout: %r" % proc.stdout)
+        check("error: no block decision printed",
+              '"block"' not in out and '"deny"' not in out, "stdout: %r" % proc.stdout)
+        check("error: never calls claude", not c.claude_was_called(),
+              "the fake claude ran at least once")
         state = c.read_state()
-        check("fail-nojson: state written", state is not None, "no state file")
+        check("error: state written", state is not None, "no state file")
         if state is not None:
-            check("fail-nojson: state ok=false", state.get("ok") is False, "state: %r" % state)
+            check("error: state ok=false", state.get("ok") is False, "state: %r" % state)
     finally:
         c.cleanup()
 
@@ -323,66 +280,52 @@ def case_failure_child_prints_no_json():
 # --------------------------------------------------------------------------- reorient
 
 
-def case_reorient_ok_with_plan():
+def case_reorient_ok_names_prompt_and_digest():
     c = Case("reorient_ok")
     try:
-        handoff_path = os.path.join(c.repo, "HANDOFF.md")
-        plan_path = os.path.join(c.repo, "plans", "p1.md")
-        put(c.state_path(), json.dumps({"handoff": handoff_path, "plan": plan_path, "ok": True}))
+        lines = [transcript_line("user", [{"type": "text", "text": "hello"}])]
+        tpath = os.path.join(c.root, "transcript.jsonl")
+        write_transcript(tpath, lines)
+        c.run_precompact(tpath)  # a real, passing PreCompact run: no field names to guess
+
         proc = c.run_reorient()
         out = proc.stdout or ""
         check("reorient-ok: exits 0", proc.returncode == 0,
               "returncode=%r stderr=%r" % (proc.returncode, proc.stderr[-300:]))
-        check("reorient-ok: names the handoff path", handoff_path in out, "stdout: %r" % out)
-        check("reorient-ok: names the plan path", plan_path in out, "stdout: %r" % out)
+        check("reorient-ok: names the prompt file", c.prompt_path() in out, "stdout: %r" % out)
+        check("reorient-ok: names the digest path", c.digest_path() in out, "stdout: %r" % out)
     finally:
         c.cleanup()
 
 
-def case_reorient_ok_no_plan():
-    c = Case("reorient_noplan")
-    try:
-        handoff_path = os.path.join(c.repo, "HANDOFF.md")
-        put(c.state_path(), json.dumps({"handoff": handoff_path, "plan": None, "ok": True}))
-        proc = c.run_reorient()
-        out = proc.stdout or ""
-        check("reorient-noplan: exits 0", proc.returncode == 0,
-              "returncode=%r stderr=%r" % (proc.returncode, proc.stderr[-300:]))
-        check("reorient-noplan: names the handoff path", handoff_path in out, "stdout: %r" % out)
-        # Strip the handoff path before the "no plan clause" check: it sits under this
-        # case's own temp dir, whose prefix ("precompact_reorient_noplan_...") contains
-        # "plan" as a substring and would otherwise false-fail this check on its own path,
-        # never on anything the hook said about a plan.
-        without_path = out.replace(handoff_path, "")
-        check("reorient-noplan: no plan clause, since no plan was set",
-              "plan" not in without_path.lower(),
-              "stdout named a plan with none set: %r" % out)
-    finally:
-        c.cleanup()
-
-
-def case_reorient_missing_state():
+def case_reorient_no_state_says_digest_missing():
     c = Case("reorient_missing")
     try:
-        proc = c.run_reorient()
+        proc = c.run_reorient()  # no PreCompact run first: no state file at all
         out = proc.stdout or ""
         check("reorient-missing: exits 0", proc.returncode == 0,
               "returncode=%r stderr=%r" % (proc.returncode, proc.stderr[-300:]))
-        check("reorient-missing: says the handoff update failed", "fail" in out.lower(),
+        check("reorient-missing: says the digest is missing", "missing" in out.lower(),
+              "stdout: %r" % out)
+        check("reorient-missing: still names the prompt file", c.prompt_path() in out,
               "stdout: %r" % out)
     finally:
         c.cleanup()
 
 
-def case_reorient_failed_state():
+def case_reorient_failed_state_says_digest_missing():
     c = Case("reorient_failed")
     try:
-        put(c.state_path(), json.dumps({"handoff": None, "plan": None, "ok": False}))
+        missing_transcript = os.path.join(c.root, "does_not_exist.jsonl")
+        c.run_precompact(missing_transcript)  # a real, failing PreCompact run: ok=false
+
         proc = c.run_reorient()
         out = proc.stdout or ""
         check("reorient-failed: exits 0", proc.returncode == 0,
               "returncode=%r stderr=%r" % (proc.returncode, proc.stderr[-300:]))
-        check("reorient-failed: says the handoff update failed", "fail" in out.lower(),
+        check("reorient-failed: says the digest is missing", "missing" in out.lower(),
+              "stdout: %r" % out)
+        check("reorient-failed: still names the prompt file", c.prompt_path() in out,
               "stdout: %r" % out)
     finally:
         c.cleanup()
@@ -409,9 +352,10 @@ def case_settings_json():
         return out
 
     precompact = entries("PreCompact")
-    found = [h for (_, h) in precompact
-             if "precompact_handoff.py" in h.get("command", "") and h.get("timeout") == 300]
-    check("settings: a PreCompact hook runs precompact_handoff.py with timeout 300",
+    # Not pinning a timeout value here: the owner's rewritten design does its work inline,
+    # with no model call to budget for, so a timeout number is the builder's call to make.
+    found = [h for (_, h) in precompact if "precompact_handoff.py" in h.get("command", "")]
+    check("settings: a PreCompact hook runs precompact_handoff.py",
           bool(found), "PreCompact hooks: %r" % precompact)
 
     session_start = entries("SessionStart")
@@ -426,15 +370,11 @@ def case_settings_json():
 
 
 def main() -> int:
-    case_precompact_calls_child_once()
-    case_digest_filters_and_caps()
-    case_recursion_guard()
-    case_failure_child_exits_nonzero()
-    case_failure_child_prints_no_json()
-    case_reorient_ok_with_plan()
-    case_reorient_ok_no_plan()
-    case_reorient_missing_state()
-    case_reorient_failed_state()
+    case_precompact_writes_digest_and_state()
+    case_precompact_error_is_ok_false()
+    case_reorient_ok_names_prompt_and_digest()
+    case_reorient_no_state_says_digest_missing()
+    case_reorient_failed_state_says_digest_missing()
     case_settings_json()
 
     if FAILED:
