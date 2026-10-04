@@ -8,8 +8,11 @@ claude-settings?
 
 ## Ruling (owner, 2026-10-03)
 
-1. Auto-compact fires at 50% of the window: 500k tokens on a 1M Opus window, 100k on a
-   200k window. `settings.json` sets `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` to `50`.
+1. Auto-compact fires at 500k tokens on a 1M Opus window. `settings.json` sets
+   `"autoCompactWindow": 500000`, a token count. Claude Code caps it at the model's own
+   window, so a 200k model keeps 200k. `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` is not used: it
+   is a percent of a window that Claude Code picks per model, and the docs do not give
+   that window's size.
 2. At each compaction, auto or manual, the session's handoff is rewritten in place. The
    plan file is updated too, when the session works from one and its state changed.
 3. After compaction, a short message reorients the session.
