@@ -187,6 +187,8 @@ jobs:
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.
   pointer-windows:
     runs-on: windows-latest
+    # Slowest green run measured 2026-10-05 (18 s); 5 min leaves room for a slow runner start.
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -212,6 +214,8 @@ jobs:
   # below covers the rest of the suite, so this job stays narrow, on purpose.
   shell-macos:
     runs-on: macos-latest
+    # Slowest green run measured 2026-10-05 (20 s); 5 min leaves room for a slow runner start.
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
