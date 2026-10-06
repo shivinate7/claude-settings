@@ -8,6 +8,22 @@ cwd=$(printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\
 
 command -v git >/dev/null 2>&1 || exit 0
 
+# bounded_fetch <dir> <branch>: quiet `git fetch origin <branch>` in <dir>, killed after
+# CLAUDE_SETTINGS_FETCH_TIMEOUT seconds (default 2). Returns the fetch's status: 0 ran, else not.
+# The one home for both freshness checks below.
+bounded_fetch() {
+  fetch_timeout="${CLAUDE_SETTINGS_FETCH_TIMEOUT:-2}"
+  ( cd "$1" 2>/dev/null && git fetch --quiet origin "$2" >/dev/null 2>&1 ) &
+  fetch_pid=$!
+  ( sleep "$fetch_timeout"; kill "$fetch_pid" >/dev/null 2>&1 ) >/dev/null 2>&1 &
+  killer_pid=$!
+  wait "$fetch_pid" 2>/dev/null
+  fetch_rc=$?
+  kill "$killer_pid" >/dev/null 2>&1
+  wait "$killer_pid" 2>/dev/null
+  return "$fetch_rc"
+}
+
 toplevel=$(cd "$cwd" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)
 [ -n "$toplevel" ] || exit 0
 
@@ -80,17 +96,7 @@ if [ -n "$d" ] && [ -d "$d/.git" ]; then
   #
   # CLAUDE_SETTINGS_FETCH_TIMEOUT overrides the 2 second bound, for tests.
   if [ "$pointer_branch" = "main" ]; then
-    fetch_timeout="${CLAUDE_SETTINGS_FETCH_TIMEOUT:-2}"
-    ( cd "$d" 2>/dev/null && git fetch --quiet origin main >/dev/null 2>&1 ) &
-    fetch_pid=$!
-    ( sleep "$fetch_timeout"; kill "$fetch_pid" >/dev/null 2>&1 ) >/dev/null 2>&1 &
-    killer_pid=$!
-    wait "$fetch_pid" 2>/dev/null
-    fetch_rc=$?
-    kill "$killer_pid" >/dev/null 2>&1
-    wait "$killer_pid" 2>/dev/null
-
-    if [ "$fetch_rc" -eq 0 ] 2>/dev/null; then
+    if bounded_fetch "$d" main; then
       behind=$(cd "$d" 2>/dev/null && git rev-list --count main..origin/main 2>/dev/null)
       if [ -n "$behind" ] && [ "$behind" -gt 0 ] 2>/dev/null; then
         printf 'claude-settings: %s is %s commits behind origin/main; global rules and hooks are stale\n' \
@@ -100,6 +106,25 @@ if [ -n "$d" ] && [ -d "$d/.git" ]; then
       printf 'claude-settings: cannot check %s against origin/main, the fetch did not run; freshness unknown\n' \
         "$d"
     fi
+  fi
+fi
+
+# The session's own repo: when its default branch is checked out and behind origin, say so.
+# Skipped for the claude-settings clone, whose line above already covers it. Never pulls;
+# the fetch moves only remote-tracking refs. Unset origin/HEAD means no line.
+default_branch=$(cd "$toplevel" 2>/dev/null && git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
+default_branch="${default_branch#origin/}"
+if [ -n "$default_branch" ] && [ "$branch" = "$default_branch" ] \
+   && { [ -z "$d" ] || [ "$(cd "$toplevel" 2>/dev/null && pwd -P)" != "$(cd "$d" 2>/dev/null && pwd -P)" ]; }; then
+  if bounded_fetch "$toplevel" "$default_branch"; then
+    behind=$(cd "$toplevel" 2>/dev/null && git rev-list --count "$default_branch..origin/$default_branch" 2>/dev/null)
+    if [ -n "$behind" ] && [ "$behind" -gt 0 ] 2>/dev/null; then
+      printf 'checkout %s: %s is %s commits behind origin/%s; pull before you read it\n' \
+        "$toplevel" "$default_branch" "$behind" "$default_branch"
+    fi
+  else
+    printf 'checkout %s: cannot check %s against origin, the fetch did not run; freshness unknown\n' \
+      "$toplevel" "$default_branch"
   fi
 fi
 
