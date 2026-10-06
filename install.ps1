@@ -45,6 +45,12 @@ function Join-BinPath([string]$Current, [string]$Bin) {
     return "$($Current.TrimEnd(';'));$Bin"
 }
 
+# The registry key that holds the user Path. CLAUDE_SETTINGS_USER_ENV_KEY overrides it (tests).
+function Get-UserEnvKey {
+    if ($env:CLAUDE_SETTINGS_USER_ENV_KEY) { return $env:CLAUDE_SETTINGS_USER_ENV_KEY }
+    return 'HKCU:\Environment'
+}
+
 # Adds $Bin to the Path value under registry key $KeyPath. Reads it raw and keeps its kind, so
 # a %VAR% entry stays unexpanded; writes only when it changed. Returns $true when it wrote.
 function Set-UserBinPath([string]$KeyPath, [string]$Bin) {
@@ -331,10 +337,7 @@ try {
 Write-CopyMarker
 
 # ~\.claude\bin on the user PATH, so `merge` and `verdict` resolve in new sessions.
-# The key is HKCU:\Environment unless CLAUDE_SETTINGS_USER_ENV_KEY names another (tests).
-# Set-UserBinPath HKCU:\Environment is the default call.
-$EnvKey = if ($env:CLAUDE_SETTINGS_USER_ENV_KEY) { $env:CLAUDE_SETTINGS_USER_ENV_KEY } else { 'HKCU:\Environment' }
 $BinDir = Join-Path $env:USERPROFILE '.claude\bin'
-if (Set-UserBinPath $EnvKey $BinDir) {
+if (Set-UserBinPath (Get-UserEnvKey) $BinDir) {
     Log "added $BinDir to your user PATH; a new session picks it up"
 }
