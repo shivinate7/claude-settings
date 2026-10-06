@@ -486,9 +486,6 @@ def ff_main(root, base, commit):
     if tree:
         if git(tree, "rev-parse", "--abbrev-ref", "HEAD")[1] != base:
             raise Stop(f"{tree} is not on {base}. Nothing was moved.")
-        dirty = git(tree, "status", "--porcelain")[1]
-        if dirty:
-            raise Stop(f"{tree} has uncommitted changes. Fast-forward {base} there by hand.")
         c, out = git(tree, "merge", "-q", "--ff-only", commit)
     else:
         c, out = git(root, "fetch", "-q", "origin", f"{base}:{base}")
