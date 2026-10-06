@@ -72,6 +72,13 @@ try {
     $SymlinkCapable = $false
 }
 
+# Every subprocess install below writes its PATH change to this throwaway key, never to the real
+# HKCU:\Environment. install.ps1 reads the key path from CLAUDE_SETTINGS_USER_ENV_KEY. The key
+# and the variable are removed at the end of the file.
+$TestEnvSub = 'Software\claude-settings-test-' + [guid]::NewGuid().ToString('N')
+$env:CLAUDE_SETTINGS_USER_ENV_KEY = "HKCU:\$TestEnvSub"
+[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($TestEnvSub).Close()
+
 if ($SymlinkCapable) {
     Write-Host "SKIP: copymode1 (this runner holds symlink rights; the copy path cannot be exercised honestly without forcing it, see install.ps1 skills branch)"
 } else {
@@ -216,6 +223,34 @@ if ($SymlinkCapable) {
     }
 }
 
+# ---- envkey1: a subprocess install writes the absolute bin to the key named by the env var -----
+# Reads the throwaway key, never HKCU:\Environment. Red while the installer ignores the variable.
+$Tmp5 = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-envkey-" + [guid]::NewGuid().ToString('N'))
+$Co5  = Join-Path $Tmp5 'clone'
+$Cfg5 = Join-Path $Tmp5 'claude'
+New-Item -ItemType Directory -Force -Path $Co5, $Cfg5 | Out-Null
+try {
+    Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $Co5 'install.ps1')
+    Set-Content -Path (Join-Path $Co5 'CLAUDE.md') -Value "# envkey1 content" -Encoding utf8
+    Set-Content -Path (Join-Path $Co5 'settings.json') -Value '{}' -Encoding utf8
+    Set-Content -Path (Join-Path $Co5 'landed-dirs.txt') -Value "skills" -Encoding utf8
+    $k5 = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($TestEnvSub)
+    $pre5 = ($env:CLAUDE_SETTINGS_USER_ENV_KEY -eq "HKCU:\$TestEnvSub") -and ($null -ne $k5) -and ($null -eq $k5.GetValue('Path'))
+    if ($k5) { $k5.Close() }
+    if (-not $pre5) { Write-Host "FAIL: envkey1 fixture: var unset, key missing, or Path already set"; $Failed++ }
+    $env:CLAUDE_CONFIG_DIR = $Cfg5
+    powershell -NoProfile -File (Join-Path $Co5 'install.ps1') *> $null
+    if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: envkey1 install exited $LASTEXITCODE"; $Failed++ }
+    Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
+    $k5 = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($TestEnvSub)
+    $got5 = if ($k5) { $k5.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) } else { '' }
+    if ($k5) { $k5.Close() }
+    Check "envkey1: subprocess install writes the absolute bin path to the key in CLAUDE_SETTINGS_USER_ENV_KEY" (($got5 -split ';') -contains (Join-Path $env:USERPROFILE '.claude\bin'))
+} finally {
+    Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force $Tmp5 -ErrorAction SilentlyContinue
+}
+
 # ---- Join-BinPath: pure PATH-string function; never reads or writes the real user PATH ------
 # Loaded on its own so a missing function fails these cases, not the whole file.
 $jb = $Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Join-BinPath' }, $false) | Select-Object -First 1
@@ -283,6 +318,9 @@ if (-not $sb) {
 # load or call directly. Exercising it for real needs a real git repo, a real merge that
 # changes install.ps1 or a skill, and a real Git-Bash `sh` to run the written hook body, none
 # of which this harness drives. Reported as a gap, not faked.
+
+try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($TestEnvSub, $false) } catch { }
+Remove-Item Env:\CLAUDE_SETTINGS_USER_ENV_KEY -ErrorAction SilentlyContinue
 
 if ($Failed) { Write-Host "$Failed case(s) failed"; exit 1 }
 Write-Host "all cases passed"
