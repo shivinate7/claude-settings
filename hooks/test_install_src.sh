@@ -1296,6 +1296,131 @@ caseF5() {
   fi
 }
 
+# caseG*: the session repo (git toplevel of the hook's cwd), not the claude-settings clone.
+# gfix <tag> <behind_n> builds bare origin + checkout on main, origin/HEAD set, origin ahead by n.
+# Sets g_co g_cfg g_bare g_top g_err (g_err non-empty = FIXTURE failed). cfg has no pointer file,
+# so the claude-settings checks stay silent and only the new line can appear.
+gfix() {
+  g_co="$work/$1-checkout"; g_cfg="$work/$1-cfg"; g_bare="$work/$1-origin.git"; g_err=""
+  git init -q --bare "$g_bare" && git -C "$g_bare" symbolic-ref HEAD refs/heads/main
+  make_checkout "$g_co" "# $1 content" "$g_bare"
+  force_main_branch "$g_co"
+  ( cd "$g_co" && git push -q origin main && git fetch -q origin && git remote set-head origin main ) >/dev/null 2>&1 \
+    || { g_err="could not push/set origin/HEAD"; return; }
+  i=0
+  while [ "$i" -lt "$2" ]; do
+    i=$((i+1))
+    rm -rf "$work/$1-extra"
+    ( git clone -q "$g_bare" "$work/$1-extra" && cd "$work/$1-extra" \
+      && git config user.email t@example.com && git config user.name t \
+      && echo "$i" >> extra.txt && git add extra.txt && git commit -q -m "extra$i" \
+      && git push -q origin main ) >/dev/null 2>&1 || { g_err="could not advance origin"; return; }
+  done
+  mkdir -p "$g_cfg"
+  g_top=$(cd "$g_co" && git rev-parse --show-toplevel)
+  built=$(cd "$g_bare" && git rev-list --count "$(cd "$g_co" && git rev-parse main)..main" 2>/dev/null)
+  [ "$built" = "$2" ] || g_err="FIXTURE behind count is [$built], wanted $2"
+}
+
+# grun: runs the hook in g_co; sets g_out g_rc, and g_ref_after (local main sha).
+grun() {
+  g_out=$(cd "$g_co" && CLAUDE_CONFIG_DIR="$g_cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/dev/null)
+  g_rc=$?
+  g_ref_after=$(cd "$g_co" && git rev-parse main 2>/dev/null)
+}
+
+caseG1() {
+  name="caseG1: session repo on default branch 2 behind prints the pull line, never pulls"
+  gfix caseG1 2
+  [ -z "$g_err" ] || { bad "$name" "$g_err"; return; }
+  ref_before=$(cd "$g_co" && git rev-parse main)
+  grun
+  want="checkout $g_top: main is 2 commits behind origin/main; pull before you read it"
+  n=$(printf '%s\n' "$g_out" | grep -c 'pull before you read it')
+  if [ "$g_rc" -ne 0 ]; then bad "$name" "exit $g_rc"
+  elif [ "$n" != "1" ] || ! printf '%s\n' "$g_out" | grep -qxF "$want"; then bad "$name" "expected exactly: $want; got: $g_out"
+  elif [ "$g_ref_after" != "$ref_before" ]; then bad "$name" "hook moved local main"
+  else ok "$name"; fi
+}
+
+caseG2() {
+  name="caseG2: session repo up to date prints no pull line"
+  gfix caseG2 0
+  [ -z "$g_err" ] || { bad "$name" "$g_err"; return; }
+  grun
+  if [ "$g_rc" -ne 0 ]; then bad "$name" "exit $g_rc"
+  elif printf '%s\n' "$g_out" | grep -q 'pull before you read it\|freshness unknown'; then bad "$name" "unexpected line: $g_out"
+  else ok "$name"; fi
+}
+
+caseG3() {
+  name="caseG3: session repo on another branch, default branch behind, prints no pull line"
+  gfix caseG3 2
+  [ -z "$g_err" ] || { bad "$name" "$g_err"; return; }
+  ( cd "$g_co" && git checkout -q -b feature-x ) || { bad "$name" "FIXTURE branch switch failed"; return; }
+  grun
+  if [ "$g_rc" -ne 0 ]; then bad "$name" "exit $g_rc"
+  elif printf '%s\n' "$g_out" | grep -q 'pull before you read it\|freshness unknown'; then bad "$name" "unexpected line: $g_out"
+  else ok "$name"; fi
+}
+
+caseG4() {
+  name="caseG4: origin/HEAD unset prints no pull line"
+  gfix caseG4 2
+  [ -z "$g_err" ] || { bad "$name" "$g_err"; return; }
+  ( cd "$g_co" && git remote set-head origin -d ) >/dev/null 2>&1
+  if ( cd "$g_co" && git symbolic-ref refs/remotes/origin/HEAD ) >/dev/null 2>&1; then bad "$name" "FIXTURE origin/HEAD still set"; return; fi
+  grun
+  if [ "$g_rc" -ne 0 ]; then bad "$name" "exit $g_rc"
+  elif printf '%s\n' "$g_out" | grep -q 'pull before you read it\|freshness unknown'; then bad "$name" "unexpected line: $g_out"
+  else ok "$name"; fi
+}
+
+caseG5() {
+  name="caseG5: session repo is the claude-settings clone, behind: one behind line, not two"
+  gfix caseG5 2
+  [ -z "$g_err" ] || { bad "$name" "$g_err"; return; }
+  printf '@%s/CLAUDE.md\n' "$g_co" > "$g_cfg/CLAUDE.md"
+  grun
+  total=$(printf '%s\n' "$g_out" | grep -c 'commits behind origin/main')
+  new=$(printf '%s\n' "$g_out" | grep -c 'pull before you read it')
+  if [ "$g_rc" -ne 0 ]; then bad "$name" "exit $g_rc"
+  elif [ "$total" != "1" ] || [ "$new" != "0" ]; then bad "$name" "want 1 existing line and 0 new, got $total/$new: $g_out"
+  else ok "$name"; fi
+}
+
+caseG6() {
+  name="caseG6: session repo fetch fails reports freshness unknown, one line"
+  gfix caseG6 2
+  [ -z "$g_err" ] || { bad "$name" "$g_err"; return; }
+  git -C "$g_co" config remote.origin.url "$work/caseG6-no-such-remote"
+  ref_before=$(cd "$g_co" && git rev-parse main)
+  grun
+  want="checkout $g_top: cannot check main against origin, the fetch did not run; freshness unknown"
+  n=$(printf '%s\n' "$g_out" | grep -c 'freshness unknown')
+  if [ "$g_rc" -ne 0 ]; then bad "$name" "exit $g_rc"
+  elif [ "$n" != "1" ] || ! printf '%s\n' "$g_out" | grep -qxF "$want"; then bad "$name" "expected exactly: $want; got: $g_out"
+  elif printf '%s\n' "$g_out" | grep -q 'pull before you read it'; then bad "$name" "printed a count off a stale ref"
+  elif [ "$g_ref_after" != "$ref_before" ]; then bad "$name" "hook moved local main"
+  else ok "$name"; fi
+}
+
+caseG7() {
+  name="caseG7: session repo fetch killed by the timeout reports freshness unknown"
+  gfix caseG7 2
+  [ -z "$g_err" ] || { bad "$name" "$g_err"; return; }
+  slow="$work/caseG7-slow-upload.sh"
+  printf '#!/bin/sh\nsleep 5\nexec git-upload-pack "$1"\n' > "$slow"; chmod +x "$slow"
+  git config -f "$g_co/.git/config" remote.origin.url "ext::sh $slow $g_bare"
+  git config -f "$g_co/.git/config" protocol.ext.allow always
+  g_out=$(cd "$g_co" && CLAUDE_CONFIG_DIR="$g_cfg" CLAUDE_SETTINGS_FETCH_TIMEOUT=0 sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/dev/null)
+  g_rc=$?
+  want="checkout $g_top: cannot check main against origin, the fetch did not run; freshness unknown"
+  if [ "$g_rc" -ne 0 ]; then bad "$name" "exit $g_rc"
+  elif ! printf '%s\n' "$g_out" | grep -qxF "$want"; then bad "$name" "expected: $want; got: $g_out"
+  else ok "$name"; fi
+}
+
 # Optional case filter: `sh hooks/test_install_src.sh caseF4 caseF6` runs only those cases.
 # No arguments runs every case. lint/check_unknown_reads_contract.py uses it.
 ONLY=" $* "
@@ -1337,6 +1462,13 @@ run caseF3
 run caseF4
 run caseF5
 run caseF6
+run caseG1
+run caseG2
+run caseG3
+run caseG4
+run caseG5
+run caseG6
+run caseG7
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
