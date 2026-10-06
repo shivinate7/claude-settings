@@ -337,7 +337,11 @@ try {
 Write-CopyMarker
 
 # ~\.claude\bin on the user PATH, so `merge` and `verdict` resolve in new sessions.
-$BinDir = Join-Path $env:USERPROFILE '.claude\bin'
-if (Set-UserBinPath (Get-UserEnvKey) $BinDir) {
-    Log "added $BinDir to your user PATH; a new session picks it up"
+if ($env:OS -ne 'Windows_NT') {
+    Log "the user PATH step is Windows-only; skipped"
+} else {
+    $BinDir = Join-Path $env:USERPROFILE '.claude\bin'
+    if (Set-UserBinPath (Get-UserEnvKey) $BinDir) {
+        Log "added $BinDir to your user PATH; a new session picks it up"
+    }
 }
