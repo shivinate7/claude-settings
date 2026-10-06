@@ -10,7 +10,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 
 1. **Measure first.** Rank the step times of a finished run. Optimize the slowest step only.
    Never guess which step is slow. Measure wall time on the slowest job, not runner minutes
-   alone: a cut off a job that is not the slowest saves money, not waiting.
+   alone: a cut off a job that is not the slowest saves money, not waiting. Also read the billed
+   minutes each week, and set a spending alarm in the billing settings. See `snippets.md`.
 2. **Check what exists.** Read the current workflow and the log before you build a speedup. The
    step may already run in parallel, or be cached.
 3. **Gate slow checks on their inputs.** Run a slow check after a change to the files it reads.
@@ -38,6 +39,15 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    with a sleep loop.
 10. **Prove each new gate red once.** Break the gate's target on a scratch copy. Watch the gate
    fail. Restore the target. A gate you did not see go red is not proven.
+11. **No CI on a draft.** Run the PR workflow on `opened`, `synchronize`, `reopened` and
+    `ready_for_review`, and skip each job while the PR is a draft. Work in a draft. Mark it ready
+    once. A draft cannot merge, so branch protection needs no check on it yet.
+12. **Cheap checks first.** Give each expensive job `needs:` the cheap static job. A red static
+    check then stops the shards from starting.
+13. **Merge tiny jobs.** Each job bills whole minutes, rounded up, plus its own setup. Put checks
+    under about a minute into one job. Measure the billed minutes before and after.
+14. **Cache the install.** Cache the package install, for example `actions/setup-node` with
+    `cache: npm`. Measure the step before and after.
 
 ## Before you skip a required job
 
@@ -51,7 +61,7 @@ CI claims in README or docs go stale too. See the `fresh-prose` skill.
 ## Opt-in templates
 
 Adopt each by `uses: shivinate7/claude-settings/actions/<name>@<full-sha>`, or copy the file.
-Record: `decisions/opt-in-ci-templates-composite.md`.
+Record: `decisions/opt-in-ci-templates-composite.md`. Spend rules 1, 2 and 4: `decisions/ci-spend-rules.md`.
 
 - `all-jobs-passed`: in a job with `needs: [...]` and `if: always()`, pass `toJSON(needs)` as shown. A skipped needed job then fails.
 
