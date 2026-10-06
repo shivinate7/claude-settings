@@ -111,7 +111,7 @@ fi
 
 # The session's own repo: when its default branch is checked out and behind origin, say so.
 # Skipped for the claude-settings clone, whose line above already covers it. Never pulls;
-# the fetch moves only remote-tracking refs. Unset origin/HEAD means no line.
+# the fetch never moves a local branch (it may write FETCH_HEAD and remote-tracking refs). Unset origin/HEAD means no line.
 default_branch=$(cd "$toplevel" 2>/dev/null && git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
 default_branch="${default_branch#origin/}"
 if [ -n "$default_branch" ] && [ "$branch" = "$default_branch" ] \
