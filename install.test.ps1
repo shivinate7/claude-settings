@@ -216,6 +216,23 @@ if ($SymlinkCapable) {
     }
 }
 
+# ---- Join-BinPath: pure PATH-string function; never reads or writes the real user PATH ------
+# Loaded on its own so a missing function fails these cases, not the whole file.
+$jb = $Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Join-BinPath' }, $false) | Select-Object -First 1
+if (-not $jb) {
+    Check "joinbin: install.ps1 defines function Join-BinPath" $false
+} else {
+    Invoke-Expression $jb.Extent.Text
+    $Bin = 'C:\Users\x\.claude\bin'
+    Check "joinbin: absent bin is appended with ';'" ((Join-BinPath 'C:\a;C:\b' $Bin) -eq "C:\a;C:\b;$Bin")
+    Check "joinbin: present bin returns Current unchanged" ((Join-BinPath "C:\a;$Bin;C:\b" $Bin) -eq "C:\a;$Bin;C:\b")
+    Check "joinbin: match ignores case" ((Join-BinPath 'C:\a;c:\users\X\.CLAUDE\bin' $Bin) -eq 'C:\a;c:\users\X\.CLAUDE\bin')
+    Check "joinbin: match ignores a trailing backslash" ((Join-BinPath "C:\a;$Bin\" $Bin) -eq "C:\a;$Bin\")
+    Check "joinbin: empty Current returns Bin alone" ((Join-BinPath '' $Bin) -eq $Bin)
+    Check "joinbin: a longer sibling dir is not a match" ((Join-BinPath "C:\a;$Bin-old" $Bin) -eq "C:\a;$Bin-old;$Bin")
+}
+Check "joinbin: install.ps1 calls Join-BinPath and writes the user PATH" (($Source -match '=\s*Join-BinPath\s') -and ($Source -match "SetEnvironmentVariable\('Path'"))
+
 # ---- gap: the embedded post-merge hook body (install.ps1's Install-PostMergeHook) is not --
 # covered here. It is a heredoc written into .git\hooks\post-merge and run by `git` itself on
 # a real `git pull`, under `sh` inside Git Bash, not by any PowerShell function this file can
