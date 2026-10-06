@@ -321,7 +321,9 @@ if (-not $ge) {
 # Join-BinPath edge cases. Contract: Join-BinPath Current Bin Kind; a %VAR% entry counts as
 # present only when Kind is ExpandString. Under String (REG_SZ) it is a dead literal entry.
 if ($jb) {
-    $Abs = Join-Path $env:USERPROFILE '.claude\bin'
+    # Concatenate with '\', not Join-Path: Join-Path joins with '/' on Linux, while the expanded
+    # %USERPROFILE%\.claude\bin entry always has '\', so the two would never match there.
+    $Abs = "$env:USERPROFILE\.claude\bin"
     $KExp = [Microsoft.Win32.RegistryValueKind]::ExpandString
     $KStr = [Microsoft.Win32.RegistryValueKind]::String
     Check "joinbin: Current ending in ';' gives no ';;'" ((Join-BinPath 'C:\a;' $Abs $KExp) -eq "C:\a;$Abs")
