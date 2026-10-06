@@ -395,8 +395,8 @@ else
 fi
 
 # ~/.claude/bin on PATH, once, in the rc file of the login shell.
-case "$SHELL" in *zsh) RC="$HOME/.zshrc" ;; *) RC="$HOME/.bashrc" ;; esac
-if ! grep -qsF '# claude-settings: ~/.claude/bin on PATH' "$RC"; then
+case "${SHELL:-}" in *zsh) RC="$HOME/.zshrc" ;; *) RC="$HOME/.bashrc" ;; esac
+if [ "$CLOUD" != 1 ] && ! grep -qsF '# claude-settings: ~/.claude/bin on PATH' "$RC"; then
   printf '\n# claude-settings: ~/.claude/bin on PATH\nexport PATH="$HOME/.claude/bin:$PATH"\n' >> "$RC"
   log "added ~/.claude/bin to PATH in $RC; a new session picks it up"
 fi

@@ -39,8 +39,25 @@ function Write-InstallLog([string]$SettingsMode, [string]$AgentsMode, [string]$H
 # Pure: returns $Current with $Bin appended when absent (case-insensitive, trailing \ ignored).
 function Join-BinPath([string]$Current, [string]$Bin) {
     if (-not $Current) { return $Bin }
-    foreach ($e in $Current.Split(';')) { if ($e.TrimEnd('\') -ieq $Bin.TrimEnd('\')) { return $Current } }
-    return "$Current;$Bin"
+    foreach ($e in $Current.Split(';')) {
+        if ($e -and [Environment]::ExpandEnvironmentVariables($e).TrimEnd('\') -ieq $Bin.TrimEnd('\')) { return $Current }
+    }
+    return "$($Current.TrimEnd(';'));$Bin"
+}
+
+# Adds $Bin to the Path value under registry key $KeyPath. Reads it raw and keeps its kind, so
+# a %VAR% entry stays unexpanded; writes only when it changed. Returns $true when it wrote.
+function Set-UserBinPath([string]$KeyPath, [string]$Bin) {
+    $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey(($KeyPath -replace '^HKCU:\\?', ''))
+    try {
+        $raw  = [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
+        $cur  = [string]$key.GetValue('Path', '', $raw)
+        $kind = if ($null -eq $key.GetValue('Path', $null)) { 'ExpandString' } else { $key.GetValueKind('Path') }
+        $new  = Join-BinPath $cur $Bin
+        if ($new -eq $cur) { return $false }
+        $key.SetValue('Path', $new, $kind)
+        return $true
+    } finally { $key.Close() }
 }
 
 # Bandaid for machines without symlink rights: a git post-merge hook in this clone re-copies
@@ -314,9 +331,10 @@ try {
 Write-CopyMarker
 
 # ~\.claude\bin on the user PATH, so `merge` and `verdict` resolve in new sessions.
-$UserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-$NewPath  = Join-BinPath $UserPath '%USERPROFILE%\.claude\bin'
-if ($NewPath -ne $UserPath) {
-    [Environment]::SetEnvironmentVariable('Path', $NewPath, 'User')
-    Log "added %USERPROFILE%\.claude\bin to your user PATH; a new session picks it up"
+# The key is HKCU:\Environment unless CLAUDE_SETTINGS_USER_ENV_KEY names another (tests).
+# Set-UserBinPath HKCU:\Environment is the default call.
+$EnvKey = if ($env:CLAUDE_SETTINGS_USER_ENV_KEY) { $env:CLAUDE_SETTINGS_USER_ENV_KEY } else { 'HKCU:\Environment' }
+$BinDir = Join-Path $env:USERPROFILE '.claude\bin'
+if (Set-UserBinPath $EnvKey $BinDir) {
+    Log "added $BinDir to your user PATH; a new session picks it up"
 }
