@@ -75,9 +75,14 @@ try {
 # Every subprocess install below writes its PATH change to this throwaway key, never to the real
 # HKCU:\Environment. install.ps1 reads the key path from CLAUDE_SETTINGS_USER_ENV_KEY. The key
 # and the variable are removed at the end of the file.
+# No registry off Windows: there the registry cases SKIP and install.ps1 skips the PATH write.
+$IsWin = ($env:OS -eq 'Windows_NT')
+if (-not $env:USERPROFILE) { $env:USERPROFILE = $HOME }   # the pure Join-BinPath cases expand %USERPROFILE%
 $TestEnvSub = 'Software\claude-settings-test-' + [guid]::NewGuid().ToString('N')
-$env:CLAUDE_SETTINGS_USER_ENV_KEY = "HKCU:\$TestEnvSub"
-[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($TestEnvSub).Close()
+if ($IsWin) {
+    $env:CLAUDE_SETTINGS_USER_ENV_KEY = "HKCU:\$TestEnvSub"
+    [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($TestEnvSub).Close()
+}
 try {
 
 if ($SymlinkCapable) {
@@ -230,6 +235,25 @@ $Tmp5 = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-envkey-" + [guid]
 $Co5  = Join-Path $Tmp5 'clone'
 $Cfg5 = Join-Path $Tmp5 'claude'
 New-Item -ItemType Directory -Force -Path $Co5, $Cfg5 | Out-Null
+if (-not $IsWin) {
+    # Off Windows install.ps1 must skip the PATH write and still exit 0 (it never reaches the registry).
+    try {
+        Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $Co5 'install.ps1')
+        Set-Content -Path (Join-Path $Co5 'CLAUDE.md') -Value "# nonwin1 content" -Encoding utf8
+        Set-Content -Path (Join-Path $Co5 'settings.json') -Value '{}' -Encoding utf8
+        Set-Content -Path (Join-Path $Co5 'landed-dirs.txt') -Value "skills" -Encoding utf8
+        $env:CLAUDE_CONFIG_DIR = $Cfg5
+        & (Get-Process -Id $PID).Path -NoProfile -File (Join-Path $Co5 'install.ps1') *> $null
+        $rc5 = $LASTEXITCODE
+        Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
+        Check "nonwin1: subprocess install exits 0 off Windows (no registry)" ($rc5 -eq 0)
+    } finally {
+        Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
+        Remove-Item -Recurse -Force $Tmp5 -ErrorAction SilentlyContinue
+    }
+    Write-Host "SKIP: envkey1 (no registry off Windows)"
+} else {
+    Write-Host "SKIP: nonwin1 (this is Windows)"
 try {
     Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $Co5 'install.ps1')
     Set-Content -Path (Join-Path $Co5 'CLAUDE.md') -Value "# envkey1 content" -Encoding utf8
@@ -257,6 +281,7 @@ try {
     if ($SharedKey) { $env:CLAUDE_SETTINGS_USER_ENV_KEY = $SharedKey }
     if ($Sub5) { try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($Sub5, $false) } catch { } }
     Remove-Item -Recurse -Force $Tmp5 -ErrorAction SilentlyContinue
+}
 }
 
 # ---- Join-BinPath: pure PATH-string function; never reads or writes the real user PATH ------
@@ -306,7 +331,9 @@ if ($jb) {
 
 # ---- Set-UserBinPath: registry round trip against a THROWAWAY key, never the real HKCU:\Environment
 $sb = $Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Set-UserBinPath' }, $false) | Select-Object -First 1
-if (-not $sb) {
+if (-not $IsWin) {
+    Write-Host "SKIP: setbin (no registry off Windows)"
+} elseif (-not $sb) {
     Check "setbin: install.ps1 defines function Set-UserBinPath" $false
 } else {
     Invoke-Expression $sb.Extent.Text
@@ -361,7 +388,7 @@ if (-not $sb) {
 # of which this harness drives. Reported as a gap, not faked.
 
 } finally {
-    try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($TestEnvSub, $false) } catch { }
+    if ($IsWin) { try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($TestEnvSub, $false) } catch { } }
     Remove-Item Env:\CLAUDE_SETTINGS_USER_ENV_KEY -ErrorAction SilentlyContinue
 }
 
