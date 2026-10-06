@@ -270,16 +270,38 @@ class Flow(Env):
         self.assertEqual(sh(self.co, "git", "rev-parse", "main"), sh(self.co, "git", "rev-parse", "origin/main"))
         self.assertEqual(sh(self.co, "git", "rev-parse", "--abbrev-ref", "HEAD"), "side")
 
-    def test_dirty_main_tree_is_left_alone_and_the_merge_stays(self):
+    def test_an_unrelated_dirty_file_does_not_block_the_fast_forward(self):
         put(os.path.join(self.co, "scratch.txt"), "x")
         sh(self.co, "git", "add", "scratch.txt")
-        old = sh(self.co, "git", "rev-parse", "main")
+        put(os.path.join(self.co, "docs/decisions/first.md"), "my edit\n")  # tracked, modified, not in the merge
         rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(sh(self.co, "git", "rev-parse", "main"), sh(self.co, "git", "rev-parse", "origin/main"))
+        self.assertEqual(open(os.path.join(self.co, "scratch.txt")).read(), "x")
+        self.assertEqual(open(os.path.join(self.co, "docs/decisions/first.md")).read(), "my edit\n")
+
+    def assert_git_refuses_the_overwrite(self, rc, out, old, path, content):
         self.assertEqual(rc, 1, out)  # owner ruling: a failed local fast-forward exits non-zero
         self.assertIn("the merge landed. The local main did not move", out)
-        self.assertIn("uncommitted", out)
         self.assertEqual(sh(self.co, "git", "rev-parse", "main"), old)
+        self.assertEqual(open(os.path.join(self.co, path)).read(), content)
         self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
+
+    def test_a_dirty_tracked_file_the_merge_changes_keeps_its_content_and_main_stays(self):
+        o = self.other  # the PR also edits first.md, so the merge changes a file that is dirty here
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        put(os.path.join(o, "docs/decisions/first.md"), record("D-001", "first") + "pr edit\n")
+        sh(o, "git", "commit", "-qam", "pr edits first"); sh(o, "git", "push", "-q", "origin", "feat")
+        put(os.path.join(self.co, "docs/decisions/first.md"), "my edit\n")
+        old = sh(self.co, "git", "rev-parse", "main")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_git_refuses_the_overwrite(rc, out, old, "docs/decisions/first.md", "my edit\n")
+
+    def test_an_untracked_file_at_a_path_the_merge_adds_keeps_its_content_and_main_stays(self):
+        put(os.path.join(self.co, "docs/decisions/second.md"), "mine\n")  # the merge adds this path
+        old = sh(self.co, "git", "rev-parse", "main")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_git_refuses_the_overwrite(rc, out, old, "docs/decisions/second.md", "mine\n")
 
     def test_after_merge_failure_is_reported_and_the_merge_stays(self):
         sh(self.other, "git", "checkout", "-q", "main")
