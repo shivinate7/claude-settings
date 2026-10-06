@@ -78,6 +78,7 @@ try {
 $TestEnvSub = 'Software\claude-settings-test-' + [guid]::NewGuid().ToString('N')
 $env:CLAUDE_SETTINGS_USER_ENV_KEY = "HKCU:\$TestEnvSub"
 [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($TestEnvSub).Close()
+try {
 
 if ($SymlinkCapable) {
     Write-Host "SKIP: copymode1 (this runner holds symlink rights; the copy path cannot be exercised honestly without forcing it, see install.ps1 skills branch)"
@@ -291,13 +292,16 @@ if (-not $ge) {
         if ($savedKey) { $env:CLAUDE_SETTINGS_USER_ENV_KEY = $savedKey } else { Remove-Item Env:\CLAUDE_SETTINGS_USER_ENV_KEY -ErrorAction SilentlyContinue }
     }
 }
-Check "envkey: install.ps1 code (comments stripped) passes Get-UserEnvKey to Set-UserBinPath" (($Source -replace '(?m)#.*$', '') -match 'Set-UserBinPath\s+\(?\s*Get-UserEnvKey|\$\w+\s*=\s*Get-UserEnvKey')
 
-# Join-BinPath edge cases (contract 2)
+# Join-BinPath edge cases. Contract: Join-BinPath Current Bin Kind; a %VAR% entry counts as
+# present only when Kind is ExpandString. Under String (REG_SZ) it is a dead literal entry.
 if ($jb) {
     $Abs = Join-Path $env:USERPROFILE '.claude\bin'
-    Check "joinbin: Current ending in ';' gives no ';;'" ((Join-BinPath 'C:\a;' $Abs) -eq "C:\a;$Abs")
-    Check "joinbin: a %USERPROFILE% entry counts as the absolute bin" ((Join-BinPath 'C:\a;%USERPROFILE%\.claude\bin' $Abs) -eq 'C:\a;%USERPROFILE%\.claude\bin')
+    $KExp = [Microsoft.Win32.RegistryValueKind]::ExpandString
+    $KStr = [Microsoft.Win32.RegistryValueKind]::String
+    Check "joinbin: Current ending in ';' gives no ';;'" ((Join-BinPath 'C:\a;' $Abs $KExp) -eq "C:\a;$Abs")
+    Check "joinbin: ExpandString: a %USERPROFILE% entry counts as the absolute bin" ((Join-BinPath 'C:\a;%USERPROFILE%\.claude\bin' $Abs $KExp) -eq 'C:\a;%USERPROFILE%\.claude\bin')
+    Check "joinbin: String: a %USERPROFILE% entry is dead, absolute bin appended, dead entry kept" ((Join-BinPath 'C:\a;%USERPROFILE%\.claude\bin' $Abs $KStr) -eq "C:\a;%USERPROFILE%\.claude\bin;$Abs")
 }
 
 # ---- Set-UserBinPath: registry round trip against a THROWAWAY key, never the real HKCU:\Environment
@@ -332,6 +336,18 @@ if (-not $sb) {
         $k = $Reg.OpenSubKey($Sub)
         Check "setbin: a missing Path value is created as ExpandString holding the bin" (($k.GetValueKind('Path') -eq 'ExpandString') -and ($k.GetValue('Path', '', $Raw) -eq $Abs))
         $k.Close()
+        # REG_SZ holding a literal %USERPROFILE% entry: it is dead, so the absolute bin is appended
+        $k = $Reg.OpenSubKey($Sub, $true)
+        $k.SetValue('Path', '%USERPROFILE%\.claude\bin', [Microsoft.Win32.RegistryValueKind]::String)
+        $k.Close()
+        $pre = $Reg.OpenSubKey($Sub)
+        $preOk = ($pre.GetValueKind('Path') -eq 'String') -and ($pre.GetValue('Path', '', $Raw) -eq '%USERPROFILE%\.claude\bin')
+        $pre.Close()
+        if (-not $preOk) { Write-Host "FAIL: setbin fixture did not build a String value"; $Failed++ }
+        $null = Set-UserBinPath "HKCU:\$Sub" $Abs
+        $k = $Reg.OpenSubKey($Sub)
+        Check "setbin: REG_SZ with a literal %USERPROFILE% entry stays String and gets the absolute bin appended" (($k.GetValueKind('Path') -eq 'String') -and ($k.GetValue('Path', '', $Raw) -eq "%USERPROFILE%\.claude\bin;$Abs"))
+        $k.Close()
     } finally {
         try { $Reg.DeleteSubKeyTree($Sub, $false) } catch { }
     }
@@ -344,8 +360,10 @@ if (-not $sb) {
 # changes install.ps1 or a skill, and a real Git-Bash `sh` to run the written hook body, none
 # of which this harness drives. Reported as a gap, not faked.
 
-try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($TestEnvSub, $false) } catch { }
-Remove-Item Env:\CLAUDE_SETTINGS_USER_ENV_KEY -ErrorAction SilentlyContinue
+} finally {
+    try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($TestEnvSub, $false) } catch { }
+    Remove-Item Env:\CLAUDE_SETTINGS_USER_ENV_KEY -ErrorAction SilentlyContinue
+}
 
 if ($Failed) { Write-Host "$Failed case(s) failed"; exit 1 }
 Write-Host "all cases passed"
