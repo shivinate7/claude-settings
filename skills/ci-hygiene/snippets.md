@@ -9,6 +9,17 @@ gh run view <run-id> --json jobs --jq '
   | sort -rn | head
 ```
 
+Read the billed minutes each week. The `user` scope is the scope that worked here, and the docs
+name none. The endpoint works only for accounts on the enhanced billing platform:
+
+```sh
+gh auth refresh -s user
+gh api /users/<owner>/settings/billing/usage --jq '.usageItems[] | select(.product=="actions")'
+```
+
+No template: a workflow token cannot read this endpoint, so an alarm would need a stored
+personal token. Set the budget alarm in the billing settings (Budgets and alerts) instead.
+
 ## 3a. Gate a slow check on its inputs
 
 ```yaml
@@ -65,6 +76,33 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != format('refs/heads/{0}', github.event.repository.default_branch) && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}   # never cancel a main, nightly or manual run
 ```
+
+## 5a. No CI on a draft
+
+```yaml
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+jobs:
+  static:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps: []   # the cheap checks, in one job
+  shards:
+    needs: static   # a red static job stops the shards
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@<full-sha>  # v4.x.x
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@<full-sha>  # v4.x.x
+        with: {node-version: 22, cache: npm}
+      - run: npm ci
+```
+
+A skipped `needs` job skips the job that needs it, so `if:` on `shards` stays: a draft skips both.
+A fan-in job (`all-jobs-passed`) runs on `if: always()` and fails on a skipped need. Give it
+`if: ${{ always() && !github.event.pull_request.draft }}`, so a draft skips it too.
 
 ## 6. Read every run after a merge
 
