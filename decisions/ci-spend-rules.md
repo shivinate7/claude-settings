@@ -14,7 +14,7 @@ failed, and nobody saw the spend first.
 Skill steps 1 and 11 to 14 hold these rules. Read billed minutes weekly and set a spending
 alarm. Run no CI on a draft. Run cheap checks first through `needs:`. Merge jobs under a
 minute. Cache the install.
-Owner approved 2026-10-06.
+The owner chose "Both, skill first" on 2026-10-06.
 
 - A draft cannot merge, so a draft needs no required check. The checks run on
   `ready_for_review`.

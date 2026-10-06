@@ -41,11 +41,15 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    fail. Restore the target. A gate you did not see go red is not proven.
 11. **No CI on a draft.** Run the PR workflow on `opened`, `synchronize`, `reopened` and
     `ready_for_review`, and skip each job while the PR is a draft. Work in a draft. Mark it ready
-    once. A draft cannot merge, so branch protection needs no check on it yet.
+    once. A draft cannot merge, so it needs no check yet. Read the protection rules first: see
+    "Before you skip a required job". A fan-in job with `if: always()` needs its own draft guard.
+    A workflow that also has `on: push` for all branches still runs on a draft branch.
 12. **Cheap checks first.** Give each expensive job `needs:` the cheap static job. A red static
     check then stops the shards from starting.
 13. **Merge tiny jobs.** Each job bills whole minutes, rounded up, plus its own setup. Put checks
-    under about a minute into one job. Measure the billed minutes before and after.
+    under about a minute into one job. This saves money in private repos only: standard hosted
+    runners are free in public repos. Measure billed minutes and wall time before and after.
+    Merged jobs can make the wait longer. Per-job rounding is measured, not a documented rule.
 14. **Cache the install.** Cache the package install, for example `actions/setup-node` with
     `cache: npm`. Measure the step before and after.
 
@@ -61,7 +65,7 @@ CI claims in README or docs go stale too. See the `fresh-prose` skill.
 ## Opt-in templates
 
 Adopt each by `uses: shivinate7/claude-settings/actions/<name>@<full-sha>`, or copy the file.
-Record: `decisions/opt-in-ci-templates-composite.md`. Spend rules 1, 2 and 4: `decisions/ci-spend-rules.md`.
+Record: `decisions/opt-in-ci-templates-composite.md`. Steps 1 and 11 to 14: `decisions/ci-spend-rules.md`.
 
 - `all-jobs-passed`: in a job with `needs: [...]` and `if: always()`, pass `toJSON(needs)` as shown. A skipped needed job then fails.
 

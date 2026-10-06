@@ -9,7 +9,8 @@ gh run view <run-id> --json jobs --jq '
   | sort -rn | head
 ```
 
-Read the billed minutes each week. The token needs the `user` scope:
+Read the billed minutes each week. The `user` scope is the scope that worked here, and the docs
+name none. The endpoint works only for accounts on the enhanced billing platform:
 
 ```sh
 gh auth refresh -s user
@@ -100,7 +101,8 @@ jobs:
 ```
 
 A skipped `needs` job skips the job that needs it, so `if:` on `shards` stays: a draft skips both.
-Where `if: always()` runs a fan-in job, it must fail on a skipped need (`all-jobs-passed`).
+A fan-in job (`all-jobs-passed`) runs on `if: always()` and fails on a skipped need. Give it
+`if: ${{ always() && !github.event.pull_request.draft }}`, so a draft skips it too.
 
 ## 6. Read every run after a merge
 
