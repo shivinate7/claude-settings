@@ -12,7 +12,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import merge  # noqa: E402
 
-os.environ.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+os.environ.update(LC_ALL="C", GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
 
 def sh(cwd, *cmd):
@@ -283,6 +283,10 @@ class Flow(Env):
     def assert_git_refuses_the_overwrite(self, rc, out, old, path, content):
         self.assertEqual(rc, 1, out)  # owner ruling: a failed local fast-forward exits non-zero
         self.assertIn("the merge landed. The local main did not move", out)
+        self.assertIn(path, out)  # git named the blocking path
+        self.assertIn("overwritten", out)  # and it was git's refusal
+        self.assertNotIn("stash", out)  # never git's raw advice
+        self.assertIn("Fast-forward main there by hand.", out)
         self.assertEqual(sh(self.co, "git", "rev-parse", "main"), old)
         self.assertEqual(open(os.path.join(self.co, path)).read(), content)
         self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
