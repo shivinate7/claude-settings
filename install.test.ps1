@@ -234,20 +234,27 @@ try {
     Set-Content -Path (Join-Path $Co5 'CLAUDE.md') -Value "# envkey1 content" -Encoding utf8
     Set-Content -Path (Join-Path $Co5 'settings.json') -Value '{}' -Encoding utf8
     Set-Content -Path (Join-Path $Co5 'landed-dirs.txt') -Value "skills" -Encoding utf8
-    $k5 = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($TestEnvSub)
-    $pre5 = ($env:CLAUDE_SETTINGS_USER_ENV_KEY -eq "HKCU:\$TestEnvSub") -and ($null -ne $k5) -and ($null -eq $k5.GetValue('Path'))
+    # Its own fresh key: the shared key already holds a Path from the earlier installs.
+    $Sub5 = 'Software\claude-settings-test-' + [guid]::NewGuid().ToString('N')
+    [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($Sub5).Close()
+    $SharedKey = $env:CLAUDE_SETTINGS_USER_ENV_KEY
+    $env:CLAUDE_SETTINGS_USER_ENV_KEY = "HKCU:\$Sub5"
+    $k5 = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($Sub5)
+    $pre5 = ($env:CLAUDE_SETTINGS_USER_ENV_KEY -eq "HKCU:\$Sub5") -and ($null -ne $k5) -and ($null -eq $k5.GetValue('Path'))
     if ($k5) { $k5.Close() }
     if (-not $pre5) { Write-Host "FAIL: envkey1 fixture: var unset, key missing, or Path already set"; $Failed++ }
     $env:CLAUDE_CONFIG_DIR = $Cfg5
     powershell -NoProfile -File (Join-Path $Co5 'install.ps1') *> $null
     if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: envkey1 install exited $LASTEXITCODE"; $Failed++ }
     Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
-    $k5 = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($TestEnvSub)
+    $k5 = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($Sub5)
     $got5 = if ($k5) { $k5.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) } else { '' }
     if ($k5) { $k5.Close() }
     Check "envkey1: subprocess install writes the absolute bin path to the key in CLAUDE_SETTINGS_USER_ENV_KEY" (($got5 -split ';') -contains (Join-Path $env:USERPROFILE '.claude\bin'))
 } finally {
     Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
+    if ($SharedKey) { $env:CLAUDE_SETTINGS_USER_ENV_KEY = $SharedKey }
+    if ($Sub5) { try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($Sub5, $false) } catch { } }
     Remove-Item -Recurse -Force $Tmp5 -ErrorAction SilentlyContinue
 }
 
@@ -266,7 +273,25 @@ if (-not $jb) {
     Check "joinbin: empty Current returns Bin alone" ((Join-BinPath '' $Bin) -eq $Bin)
     Check "joinbin: a longer sibling dir is not a match" ((Join-BinPath "C:\a;$Bin-old" $Bin) -eq "C:\a;$Bin-old;$Bin")
 }
-Check "joinbin: install.ps1 calls Set-UserBinPath on HKCU:\Environment" ($Source -match "Set-UserBinPath\s+(-KeyPath\s+)?['""]?HKCU:\\Environment")
+# Contract: pure function Get-UserEnvKey returns $env:CLAUDE_SETTINGS_USER_ENV_KEY when set, else
+# 'HKCU:\Environment'; the installer passes its result to Set-UserBinPath. Behaviour, not text.
+$ge = $Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-UserEnvKey' }, $false) | Select-Object -First 1
+if (-not $ge) {
+    Check "envkey: install.ps1 defines function Get-UserEnvKey" $false
+} else {
+    Invoke-Expression $ge.Extent.Text
+    $savedKey = $env:CLAUDE_SETTINGS_USER_ENV_KEY
+    try {
+        Remove-Item Env:\CLAUDE_SETTINGS_USER_ENV_KEY -ErrorAction SilentlyContinue
+        $pre = $null -eq $env:CLAUDE_SETTINGS_USER_ENV_KEY
+        Check "envkey: with the var unset, Get-UserEnvKey returns HKCU:\Environment" ($pre -and (Get-UserEnvKey) -eq 'HKCU:\Environment')
+        $env:CLAUDE_SETTINGS_USER_ENV_KEY = 'HKCU:\Software\claude-settings-test-x'
+        Check "envkey: with the var set, Get-UserEnvKey returns it" ((Get-UserEnvKey) -eq 'HKCU:\Software\claude-settings-test-x')
+    } finally {
+        if ($savedKey) { $env:CLAUDE_SETTINGS_USER_ENV_KEY = $savedKey } else { Remove-Item Env:\CLAUDE_SETTINGS_USER_ENV_KEY -ErrorAction SilentlyContinue }
+    }
+}
+Check "envkey: install.ps1 code (comments stripped) passes Get-UserEnvKey to Set-UserBinPath" (($Source -replace '(?m)#.*$', '') -match 'Set-UserBinPath\s+\(?\s*Get-UserEnvKey|\$\w+\s*=\s*Get-UserEnvKey')
 
 # Join-BinPath edge cases (contract 2)
 if ($jb) {
@@ -293,17 +318,17 @@ if (-not $sb) {
         $preOk = ($pre.GetValueKind('Path') -eq 'ExpandString') -and ($pre.GetValue('Path', '', $Raw) -eq '%TEMP%\x;C:\a')
         $pre.Close()
         if (-not $preOk) { Write-Host "FAIL: setbin fixture did not build an ExpandString value"; $Failed++ }
-        Set-UserBinPath "HKCU:\$Sub" $Abs
+        $null = Set-UserBinPath "HKCU:\$Sub" $Abs
         $k = $Reg.OpenSubKey($Sub)
         Check "setbin: ExpandString kind is kept" ($k.GetValueKind('Path') -eq 'ExpandString')
         Check "setbin: existing %TEMP%\x entry stays literal and the absolute bin is appended" ($k.GetValue('Path', '', $Raw) -eq "%TEMP%\x;C:\a;$Abs")
         $k.Close()
-        Set-UserBinPath "HKCU:\$Sub" $Abs
+        $null = Set-UserBinPath "HKCU:\$Sub" $Abs
         $k = $Reg.OpenSubKey($Sub)
         Check "setbin: a second call changes nothing" ($k.GetValue('Path', '', $Raw) -eq "%TEMP%\x;C:\a;$Abs")
         $k.Close()
         $k = $Reg.OpenSubKey($Sub, $true); $k.DeleteValue('Path'); $k.Close()
-        Set-UserBinPath "HKCU:\$Sub" $Abs
+        $null = Set-UserBinPath "HKCU:\$Sub" $Abs
         $k = $Reg.OpenSubKey($Sub)
         Check "setbin: a missing Path value is created as ExpandString holding the bin" (($k.GetValueKind('Path') -eq 'ExpandString') -and ($k.GetValue('Path', '', $Raw) -eq $Abs))
         $k.Close()
