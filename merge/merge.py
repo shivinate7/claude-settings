@@ -490,7 +490,9 @@ def ff_main(root, base, commit):
     else:
         c, out = git(root, "fetch", "-q", "origin", f"{base}:{base}")
     if c:
-        raise Stop("the local main did not move. " + out)
+        # Drop git's advice lines (commit, stash, move, remove): they name the forbidden way out.
+        kept = "\n".join(l for l in out.splitlines() if not l.startswith(("Please ", "Aborting")))
+        raise Stop(f"the local main did not move. {kept}\nFast-forward {base} there by hand.")
     say(f"merge: local {base} is at {commit[:9]}.")
 
 def cut_branch(root, branch, merged):
