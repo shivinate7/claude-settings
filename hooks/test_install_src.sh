@@ -1274,6 +1274,85 @@ bin_case2() {
   rm -rf "$h"
 }
 
+# ---- PATH cases: install.sh puts ~/.claude/bin on PATH through the rc file of $SHELL ---------
+PATH_MARK='# claude-settings: ~/.claude/bin on PATH'
+PATH_LINE='export PATH="$HOME/.claude/bin:$PATH"'
+run_path_install() {
+  # $1 = checkout, $2 = HOME, $3 = CLAUDE_CONFIG_DIR, $4 = SHELL value
+  ( cd "$1" && env -i PATH="$PATH" HOME="$2" CLAUDE_CONFIG_DIR="$3" SHELL="$4" bash ./install.sh 2>&1 )
+}
+
+path_case1() {
+  name="path1: zsh SHELL gets the marked block in ~/.zshrc once, not in ~/.bashrc, second run adds nothing"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/path1-checkout"
+  make_checkout "$co" "# path1 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  printf '# my zshrc\n' > "$h/.zshrc"
+  if [ -e "$h/.bashrc" ] || grep -q "claude-settings" "$h/.zshrc"; then
+    bad "$name" "fixture precondition failed: rc files not clean"; rm -rf "$h"; return
+  fi
+  out1=$(run_path_install "$co" "$h" "$cfg" /usr/bin/zsh); rc1=$?
+  after1=$(cat "$h/.zshrc")
+  out2=$(run_path_install "$co" "$h" "$cfg" /usr/bin/zsh); rc2=$?
+  marks=$(grep -cF "$PATH_MARK" "$h/.zshrc"); lines=$(grep -cF "$PATH_LINE" "$h/.zshrc")
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
+  elif [ "$marks" != 1 ] || [ "$lines" != 1 ]; then bad "$name" "~/.zshrc holds $marks marks and $lines export lines, expected 1 and 1"
+  elif [ "$(cat "$h/.zshrc")" != "$after1" ]; then bad "$name" "second run changed ~/.zshrc"
+  elif ! head -1 "$h/.zshrc" | grep -qF "# my zshrc"; then bad "$name" "existing rc content was not kept"
+  elif [ -e "$h/.bashrc" ]; then bad "$name" "a zsh SHELL also wrote ~/.bashrc"
+  else ok "$name"; fi
+  rm -rf "$h"
+}
+
+path_case2() {
+  name="path2: bash SHELL gets the marked block in ~/.bashrc, not in ~/.zshrc"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/path2-checkout"
+  make_checkout "$co" "# path2 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  if [ -e "$h/.bashrc" ] || [ -e "$h/.zshrc" ]; then
+    bad "$name" "fixture precondition failed: rc files exist"; rm -rf "$h"; return
+  fi
+  out=$(run_path_install "$co" "$h" "$cfg" /bin/bash); rc=$?
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
+  elif ! grep -qF "$PATH_MARK" "$h/.bashrc" 2>/dev/null; then bad "$name" "~/.bashrc has no marker line"
+  elif ! grep -qF "$PATH_LINE" "$h/.bashrc"; then bad "$name" "~/.bashrc has no export line"
+  elif [ -e "$h/.zshrc" ]; then bad "$name" "a bash SHELL wrote ~/.zshrc"
+  else ok "$name"; fi
+  rm -rf "$h"
+}
+
+path_case3() {
+  name="path3: SHELL unset under set -u does not abort install and writes ~/.bashrc"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/path3-checkout"
+  make_checkout "$co" "# path3 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  if [ -e "$h/.bashrc" ]; then bad "$name" "fixture precondition failed: ~/.bashrc exists"; rm -rf "$h"; return; fi
+  # bash re-creates SHELL at startup, so `env -i bash ./install.sh` would not leave it unset.
+  # Unset it inside the shell, assert it is unset (exit 99 if not), then source the installer.
+  out=$( cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+         bash -c 'unset SHELL; [ -z "${SHELL+x}" ] || exit 99; source ./install.sh' 2>&1 ); rc=$?
+  if [ $rc -eq 99 ]; then bad "$name" "fixture precondition failed: SHELL could not be unset"
+  elif [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
+  elif ! grep -qF "$PATH_MARK" "$h/.bashrc" 2>/dev/null; then bad "$name" "~/.bashrc has no marker line"
+  else ok "$name"; fi
+  rm -rf "$h"
+}
+
+path_case4() {
+  name="path4: --cloud and CLAUDE_CODE_REMOTE=true touch no rc file"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/path4-checkout"
+  make_checkout "$co" "# path4 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  printf '# my bashrc\n' > "$h/.bashrc"; printf '# my zshrc\n' > "$h/.zshrc"
+  out1=$( cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" SHELL=/bin/bash bash ./install.sh --cloud 2>&1 ); rc1=$?
+  out2=$( cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" SHELL=/usr/bin/zsh CLAUDE_CODE_REMOTE=true bash ./install.sh 2>&1 ); rc2=$?
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
+  elif [ "$(cat "$h/.bashrc")" != "# my bashrc" ]; then bad "$name" "~/.bashrc was changed in cloud mode"
+  elif [ "$(cat "$h/.zshrc")" != "# my zshrc" ]; then bad "$name" "~/.zshrc was changed in cloud mode"
+  else ok "$name"; fi
+  rm -rf "$h"
+}
+
 caseF5() {
   name="caseF5: outside a git tree with no pointer file, stays fully silent, exit 0"
   outside="$work/caseF5-not-a-repo"; cfg="$work/caseF5-cfg"
@@ -1456,6 +1535,10 @@ run backup_case1
 run backup_case2
 run bin_case1
 run bin_case2
+run path_case1
+run path_case2
+run path_case3
+run path_case4
 run caseF1
 run caseF2
 run caseF3

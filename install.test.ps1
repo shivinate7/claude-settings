@@ -72,6 +72,19 @@ try {
     $SymlinkCapable = $false
 }
 
+# Every subprocess install below writes its PATH change to this throwaway key, never to the real
+# HKCU:\Environment. install.ps1 reads the key path from CLAUDE_SETTINGS_USER_ENV_KEY. The key
+# and the variable are removed at the end of the file.
+# No registry off Windows: there the registry cases SKIP and install.ps1 skips the PATH write.
+$IsWin = ($env:OS -eq 'Windows_NT')
+if (-not $env:USERPROFILE) { $env:USERPROFILE = $HOME }   # the pure Join-BinPath cases expand %USERPROFILE%
+$TestEnvSub = 'Software\claude-settings-test-' + [guid]::NewGuid().ToString('N')
+if ($IsWin) {
+    $env:CLAUDE_SETTINGS_USER_ENV_KEY = "HKCU:\$TestEnvSub"
+    [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($TestEnvSub).Close()
+}
+try {
+
 if ($SymlinkCapable) {
     Write-Host "SKIP: copymode1 (this runner holds symlink rights; the copy path cannot be exercised honestly without forcing it, see install.ps1 skills branch)"
 } else {
@@ -216,12 +229,170 @@ if ($SymlinkCapable) {
     }
 }
 
+# ---- envkey1: a subprocess install writes the absolute bin to the key named by the env var -----
+# Reads the throwaway key, never HKCU:\Environment. Red while the installer ignores the variable.
+$Tmp5 = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-envkey-" + [guid]::NewGuid().ToString('N'))
+$Co5  = Join-Path $Tmp5 'clone'
+$Cfg5 = Join-Path $Tmp5 'claude'
+New-Item -ItemType Directory -Force -Path $Co5, $Cfg5 | Out-Null
+if (-not $IsWin) {
+    # Off Windows install.ps1 must skip the PATH write and still exit 0 (it never reaches the registry).
+    try {
+        Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $Co5 'install.ps1')
+        Set-Content -Path (Join-Path $Co5 'CLAUDE.md') -Value "# nonwin1 content" -Encoding utf8
+        Set-Content -Path (Join-Path $Co5 'settings.json') -Value '{}' -Encoding utf8
+        Set-Content -Path (Join-Path $Co5 'landed-dirs.txt') -Value "skills" -Encoding utf8
+        $env:CLAUDE_CONFIG_DIR = $Cfg5
+        & (Get-Process -Id $PID).Path -NoProfile -File (Join-Path $Co5 'install.ps1') *> $null
+        $rc5 = $LASTEXITCODE
+        Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
+        Check "nonwin1: subprocess install exits 0 off Windows (no registry)" ($rc5 -eq 0)
+    } finally {
+        Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
+        Remove-Item -Recurse -Force $Tmp5 -ErrorAction SilentlyContinue
+    }
+    Write-Host "SKIP: envkey1 (no registry off Windows)"
+} else {
+    Write-Host "SKIP: nonwin1 (this is Windows)"
+try {
+    Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $Co5 'install.ps1')
+    Set-Content -Path (Join-Path $Co5 'CLAUDE.md') -Value "# envkey1 content" -Encoding utf8
+    Set-Content -Path (Join-Path $Co5 'settings.json') -Value '{}' -Encoding utf8
+    Set-Content -Path (Join-Path $Co5 'landed-dirs.txt') -Value "skills" -Encoding utf8
+    # Its own fresh key: the shared key already holds a Path from the earlier installs.
+    $Sub5 = 'Software\claude-settings-test-' + [guid]::NewGuid().ToString('N')
+    [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($Sub5).Close()
+    $SharedKey = $env:CLAUDE_SETTINGS_USER_ENV_KEY
+    $env:CLAUDE_SETTINGS_USER_ENV_KEY = "HKCU:\$Sub5"
+    $k5 = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($Sub5)
+    $pre5 = ($env:CLAUDE_SETTINGS_USER_ENV_KEY -eq "HKCU:\$Sub5") -and ($null -ne $k5) -and ($null -eq $k5.GetValue('Path'))
+    if ($k5) { $k5.Close() }
+    if (-not $pre5) { Write-Host "FAIL: envkey1 fixture: var unset, key missing, or Path already set"; $Failed++ }
+    $env:CLAUDE_CONFIG_DIR = $Cfg5
+    powershell -NoProfile -File (Join-Path $Co5 'install.ps1') *> $null
+    if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: envkey1 install exited $LASTEXITCODE"; $Failed++ }
+    Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
+    $k5 = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($Sub5)
+    $got5 = if ($k5) { $k5.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) } else { '' }
+    if ($k5) { $k5.Close() }
+    Check "envkey1: subprocess install writes the absolute bin path to the key in CLAUDE_SETTINGS_USER_ENV_KEY" (($got5 -split ';') -contains (Join-Path $env:USERPROFILE '.claude\bin'))
+} finally {
+    Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
+    if ($SharedKey) { $env:CLAUDE_SETTINGS_USER_ENV_KEY = $SharedKey }
+    if ($Sub5) { try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($Sub5, $false) } catch { } }
+    Remove-Item -Recurse -Force $Tmp5 -ErrorAction SilentlyContinue
+}
+}
+
+# ---- Join-BinPath: pure PATH-string function; never reads or writes the real user PATH ------
+# Loaded on its own so a missing function fails these cases, not the whole file.
+$jb = $Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Join-BinPath' }, $false) | Select-Object -First 1
+if (-not $jb) {
+    Check "joinbin: install.ps1 defines function Join-BinPath" $false
+} else {
+    Invoke-Expression $jb.Extent.Text
+    $Bin = 'C:\Users\x\.claude\bin'
+    Check "joinbin: absent bin is appended with ';'" ((Join-BinPath 'C:\a;C:\b' $Bin) -eq "C:\a;C:\b;$Bin")
+    Check "joinbin: present bin returns Current unchanged" ((Join-BinPath "C:\a;$Bin;C:\b" $Bin) -eq "C:\a;$Bin;C:\b")
+    Check "joinbin: match ignores case" ((Join-BinPath 'C:\a;c:\users\X\.CLAUDE\bin' $Bin) -eq 'C:\a;c:\users\X\.CLAUDE\bin')
+    Check "joinbin: match ignores a trailing backslash" ((Join-BinPath "C:\a;$Bin\" $Bin) -eq "C:\a;$Bin\")
+    Check "joinbin: empty Current returns Bin alone" ((Join-BinPath '' $Bin) -eq $Bin)
+    Check "joinbin: a longer sibling dir is not a match" ((Join-BinPath "C:\a;$Bin-old" $Bin) -eq "C:\a;$Bin-old;$Bin")
+}
+# Contract: pure function Get-UserEnvKey returns $env:CLAUDE_SETTINGS_USER_ENV_KEY when set, else
+# 'HKCU:\Environment'; the installer passes its result to Set-UserBinPath. Behaviour, not text.
+$ge = $Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-UserEnvKey' }, $false) | Select-Object -First 1
+if (-not $ge) {
+    Check "envkey: install.ps1 defines function Get-UserEnvKey" $false
+} else {
+    Invoke-Expression $ge.Extent.Text
+    $savedKey = $env:CLAUDE_SETTINGS_USER_ENV_KEY
+    try {
+        Remove-Item Env:\CLAUDE_SETTINGS_USER_ENV_KEY -ErrorAction SilentlyContinue
+        $pre = $null -eq $env:CLAUDE_SETTINGS_USER_ENV_KEY
+        Check "envkey: with the var unset, Get-UserEnvKey returns HKCU:\Environment" ($pre -and (Get-UserEnvKey) -eq 'HKCU:\Environment')
+        $env:CLAUDE_SETTINGS_USER_ENV_KEY = 'HKCU:\Software\claude-settings-test-x'
+        Check "envkey: with the var set, Get-UserEnvKey returns it" ((Get-UserEnvKey) -eq 'HKCU:\Software\claude-settings-test-x')
+    } finally {
+        if ($savedKey) { $env:CLAUDE_SETTINGS_USER_ENV_KEY = $savedKey } else { Remove-Item Env:\CLAUDE_SETTINGS_USER_ENV_KEY -ErrorAction SilentlyContinue }
+    }
+}
+
+# Join-BinPath edge cases. Contract: Join-BinPath Current Bin Kind; a %VAR% entry counts as
+# present only when Kind is ExpandString. Under String (REG_SZ) it is a dead literal entry.
+if ($jb) {
+    # Concatenate with '\', not Join-Path: Join-Path joins with '/' on Linux, while the expanded
+    # %USERPROFILE%\.claude\bin entry always has '\', so the two would never match there.
+    $Abs = "$env:USERPROFILE\.claude\bin"
+    $KExp = [Microsoft.Win32.RegistryValueKind]::ExpandString
+    $KStr = [Microsoft.Win32.RegistryValueKind]::String
+    Check "joinbin: Current ending in ';' gives no ';;'" ((Join-BinPath 'C:\a;' $Abs $KExp) -eq "C:\a;$Abs")
+    Check "joinbin: ExpandString: a %USERPROFILE% entry counts as the absolute bin" ((Join-BinPath 'C:\a;%USERPROFILE%\.claude\bin' $Abs $KExp) -eq 'C:\a;%USERPROFILE%\.claude\bin')
+    Check "joinbin: String: a %USERPROFILE% entry is dead, absolute bin appended, dead entry kept" ((Join-BinPath 'C:\a;%USERPROFILE%\.claude\bin' $Abs $KStr) -eq "C:\a;%USERPROFILE%\.claude\bin;$Abs")
+}
+
+# ---- Set-UserBinPath: registry round trip against a THROWAWAY key, never the real HKCU:\Environment
+$sb = $Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Set-UserBinPath' }, $false) | Select-Object -First 1
+if (-not $IsWin) {
+    Write-Host "SKIP: setbin (no registry off Windows)"
+} elseif (-not $sb) {
+    Check "setbin: install.ps1 defines function Set-UserBinPath" $false
+} else {
+    Invoke-Expression $sb.Extent.Text
+    $Sub = 'Software\claude-settings-test-' + [guid]::NewGuid().ToString('N')
+    $Reg = [Microsoft.Win32.Registry]::CurrentUser
+    $Abs = Join-Path $env:USERPROFILE '.claude\bin'
+    $Raw = [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
+    try {
+        $k = $Reg.CreateSubKey($Sub)
+        $k.SetValue('Path', '%TEMP%\x;C:\a', [Microsoft.Win32.RegistryValueKind]::ExpandString)
+        $k.Close()
+        $pre = $Reg.OpenSubKey($Sub)
+        $preOk = ($pre.GetValueKind('Path') -eq 'ExpandString') -and ($pre.GetValue('Path', '', $Raw) -eq '%TEMP%\x;C:\a')
+        $pre.Close()
+        if (-not $preOk) { Write-Host "FAIL: setbin fixture did not build an ExpandString value"; $Failed++ }
+        $null = Set-UserBinPath "HKCU:\$Sub" $Abs
+        $k = $Reg.OpenSubKey($Sub)
+        Check "setbin: ExpandString kind is kept" ($k.GetValueKind('Path') -eq 'ExpandString')
+        Check "setbin: existing %TEMP%\x entry stays literal and the absolute bin is appended" ($k.GetValue('Path', '', $Raw) -eq "%TEMP%\x;C:\a;$Abs")
+        $k.Close()
+        $null = Set-UserBinPath "HKCU:\$Sub" $Abs
+        $k = $Reg.OpenSubKey($Sub)
+        Check "setbin: a second call changes nothing" ($k.GetValue('Path', '', $Raw) -eq "%TEMP%\x;C:\a;$Abs")
+        $k.Close()
+        $k = $Reg.OpenSubKey($Sub, $true); $k.DeleteValue('Path'); $k.Close()
+        $null = Set-UserBinPath "HKCU:\$Sub" $Abs
+        $k = $Reg.OpenSubKey($Sub)
+        Check "setbin: a missing Path value is created as ExpandString holding the bin" (($k.GetValueKind('Path') -eq 'ExpandString') -and ($k.GetValue('Path', '', $Raw) -eq $Abs))
+        $k.Close()
+        # REG_SZ holding a literal %USERPROFILE% entry: it is dead, so the absolute bin is appended
+        $k = $Reg.OpenSubKey($Sub, $true)
+        $k.SetValue('Path', '%USERPROFILE%\.claude\bin', [Microsoft.Win32.RegistryValueKind]::String)
+        $k.Close()
+        $pre = $Reg.OpenSubKey($Sub)
+        $preOk = ($pre.GetValueKind('Path') -eq 'String') -and ($pre.GetValue('Path', '', $Raw) -eq '%USERPROFILE%\.claude\bin')
+        $pre.Close()
+        if (-not $preOk) { Write-Host "FAIL: setbin fixture did not build a String value"; $Failed++ }
+        $null = Set-UserBinPath "HKCU:\$Sub" $Abs
+        $k = $Reg.OpenSubKey($Sub)
+        Check "setbin: REG_SZ with a literal %USERPROFILE% entry stays String and gets the absolute bin appended" (($k.GetValueKind('Path') -eq 'String') -and ($k.GetValue('Path', '', $Raw) -eq "%USERPROFILE%\.claude\bin;$Abs"))
+        $k.Close()
+    } finally {
+        try { $Reg.DeleteSubKeyTree($Sub, $false) } catch { }
+    }
+}
+
 # ---- gap: the embedded post-merge hook body (install.ps1's Install-PostMergeHook) is not --
 # covered here. It is a heredoc written into .git\hooks\post-merge and run by `git` itself on
 # a real `git pull`, under `sh` inside Git Bash, not by any PowerShell function this file can
 # load or call directly. Exercising it for real needs a real git repo, a real merge that
 # changes install.ps1 or a skill, and a real Git-Bash `sh` to run the written hook body, none
 # of which this harness drives. Reported as a gap, not faked.
+
+} finally {
+    if ($IsWin) { try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($TestEnvSub, $false) } catch { } }
+    Remove-Item Env:\CLAUDE_SETTINGS_USER_ENV_KEY -ErrorAction SilentlyContinue
+}
 
 if ($Failed) { Write-Host "$Failed case(s) failed"; exit 1 }
 Write-Host "all cases passed"

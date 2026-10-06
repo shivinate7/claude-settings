@@ -36,6 +36,36 @@ function Write-InstallLog([string]$SettingsMode, [string]$AgentsMode, [string]$H
     [System.IO.File]::AppendAllText($InstallLogPath, $line, (New-Object System.Text.UTF8Encoding $false))
 }
 
+# Pure: returns $Current with $Bin appended when absent (case-insensitive, trailing \ ignored).
+function Join-BinPath([string]$Current, [string]$Bin, [Microsoft.Win32.RegistryValueKind]$Kind = "ExpandString") {
+    if (-not $Current) { return $Bin }
+    foreach ($e in $Current.Split(';')) {
+        if ($e -and $(if ($Kind -eq "String") { $e } else { [Environment]::ExpandEnvironmentVariables($e) }).TrimEnd('\') -ieq $Bin.TrimEnd('\')) { return $Current }
+    }
+    return "$($Current.TrimEnd(';'));$Bin"
+}
+
+# The registry key that holds the user Path. CLAUDE_SETTINGS_USER_ENV_KEY overrides it (tests).
+function Get-UserEnvKey {
+    if ($env:CLAUDE_SETTINGS_USER_ENV_KEY) { return $env:CLAUDE_SETTINGS_USER_ENV_KEY }
+    return 'HKCU:\Environment'
+}
+
+# Adds $Bin to the Path value under registry key $KeyPath. Reads it raw and keeps its kind, so
+# a %VAR% entry stays unexpanded; writes only when it changed. Returns $true when it wrote.
+function Set-UserBinPath([string]$KeyPath, [string]$Bin) {
+    $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey(($KeyPath -replace '^HKCU:\\?', ''))
+    try {
+        $raw  = [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
+        $cur  = [string]$key.GetValue('Path', '', $raw)
+        $kind = if ($null -eq $key.GetValue('Path', $null)) { 'ExpandString' } else { $key.GetValueKind('Path') }
+        $new  = Join-BinPath $cur $Bin $kind
+        if ($new -eq $cur) { return $false }
+        $key.SetValue('Path', $new, $kind)
+        return $true
+    } finally { $key.Close() }
+}
+
 # Bandaid for machines without symlink rights: a git post-merge hook in this clone re-copies
 # settings.json into ~\.claude after every `git pull`, so pull stays the only update step.
 # Returns 'installed' or 'skipped', for the install-log summary.
@@ -305,3 +335,13 @@ try {
     Write-InstallLog -SettingsMode 'copy' -AgentsMode $AgentsMode -HookMode $HookMode
 }
 Write-CopyMarker
+
+# ~\.claude\bin on the user PATH, so `merge` and `verdict` resolve in new sessions.
+if ($env:OS -ne 'Windows_NT') {
+    Log "the user PATH step is Windows-only; skipped"
+} else {
+    $BinDir = Join-Path $env:USERPROFILE '.claude\bin'
+    if (Set-UserBinPath (Get-UserEnvKey) $BinDir) {
+        Log "added $BinDir to your user PATH; a new session picks it up"
+    }
+}
