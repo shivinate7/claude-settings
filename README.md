@@ -104,7 +104,8 @@ merge --dev ...         run the checkout's own tree, not origin main
 ```
 
 * **Launcher.** On macOS and Linux, `bin/merge` lands in `~/.claude/bin`. On Windows,
-  `bin\merge.cmd` lands there too, and starts `bin\merge`. Both find this clone through
+  `bin\merge.cmd` lands there too, and starts `bin\merge`. The installers put `~/.claude/bin`
+  on PATH. Both find this clone through
   `CLAUDE_SETTINGS_DIR`, then the `@` line in `CLAUDE.md` under `CLAUDE_CONFIG_DIR` (default
   `~/.claude`). With neither, they clone
   the public repo into a temporary folder. The checkout must have `origin` set to

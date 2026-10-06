@@ -36,6 +36,13 @@ function Write-InstallLog([string]$SettingsMode, [string]$AgentsMode, [string]$H
     [System.IO.File]::AppendAllText($InstallLogPath, $line, (New-Object System.Text.UTF8Encoding $false))
 }
 
+# Pure: returns $Current with $Bin appended when absent (case-insensitive, trailing \ ignored).
+function Join-BinPath([string]$Current, [string]$Bin) {
+    if (-not $Current) { return $Bin }
+    foreach ($e in $Current.Split(';')) { if ($e.TrimEnd('\') -ieq $Bin.TrimEnd('\')) { return $Current } }
+    return "$Current;$Bin"
+}
+
 # Bandaid for machines without symlink rights: a git post-merge hook in this clone re-copies
 # settings.json into ~\.claude after every `git pull`, so pull stays the only update step.
 # Returns 'installed' or 'skipped', for the install-log summary.
@@ -305,3 +312,11 @@ try {
     Write-InstallLog -SettingsMode 'copy' -AgentsMode $AgentsMode -HookMode $HookMode
 }
 Write-CopyMarker
+
+# ~\.claude\bin on the user PATH, so `merge` and `verdict` resolve in new sessions.
+$UserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+$NewPath  = Join-BinPath $UserPath '%USERPROFILE%\.claude\bin'
+if ($NewPath -ne $UserPath) {
+    [Environment]::SetEnvironmentVariable('Path', $NewPath, 'User')
+    Log "added %USERPROFILE%\.claude\bin to your user PATH; a new session picks it up"
+}
