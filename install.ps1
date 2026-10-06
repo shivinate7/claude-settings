@@ -37,10 +37,10 @@ function Write-InstallLog([string]$SettingsMode, [string]$AgentsMode, [string]$H
 }
 
 # Pure: returns $Current with $Bin appended when absent (case-insensitive, trailing \ ignored).
-function Join-BinPath([string]$Current, [string]$Bin) {
+function Join-BinPath([string]$Current, [string]$Bin, [Microsoft.Win32.RegistryValueKind]$Kind = "ExpandString") {
     if (-not $Current) { return $Bin }
     foreach ($e in $Current.Split(';')) {
-        if ($e -and [Environment]::ExpandEnvironmentVariables($e).TrimEnd('\') -ieq $Bin.TrimEnd('\')) { return $Current }
+        if ($e -and $(if ($Kind -eq "String") { $e } else { [Environment]::ExpandEnvironmentVariables($e) }).TrimEnd('\') -ieq $Bin.TrimEnd('\')) { return $Current }
     }
     return "$($Current.TrimEnd(';'));$Bin"
 }
@@ -59,7 +59,7 @@ function Set-UserBinPath([string]$KeyPath, [string]$Bin) {
         $raw  = [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
         $cur  = [string]$key.GetValue('Path', '', $raw)
         $kind = if ($null -eq $key.GetValue('Path', $null)) { 'ExpandString' } else { $key.GetValueKind('Path') }
-        $new  = Join-BinPath $cur $Bin
+        $new  = Join-BinPath $cur $Bin $kind
         if ($new -eq $cur) { return $false }
         $key.SetValue('Path', $new, $kind)
         return $true
