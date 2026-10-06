@@ -231,7 +231,51 @@ if (-not $jb) {
     Check "joinbin: empty Current returns Bin alone" ((Join-BinPath '' $Bin) -eq $Bin)
     Check "joinbin: a longer sibling dir is not a match" ((Join-BinPath "C:\a;$Bin-old" $Bin) -eq "C:\a;$Bin-old;$Bin")
 }
-Check "joinbin: install.ps1 calls Join-BinPath and writes the user PATH" (($Source -match '=\s*Join-BinPath\s') -and ($Source -match "SetEnvironmentVariable\('Path'"))
+Check "joinbin: install.ps1 calls Set-UserBinPath on HKCU:\Environment" ($Source -match "Set-UserBinPath\s+(-KeyPath\s+)?['""]?HKCU:\\Environment")
+
+# Join-BinPath edge cases (contract 2)
+if ($jb) {
+    $Abs = Join-Path $env:USERPROFILE '.claude\bin'
+    Check "joinbin: Current ending in ';' gives no ';;'" ((Join-BinPath 'C:\a;' $Abs) -eq "C:\a;$Abs")
+    Check "joinbin: a %USERPROFILE% entry counts as the absolute bin" ((Join-BinPath 'C:\a;%USERPROFILE%\.claude\bin' $Abs) -eq 'C:\a;%USERPROFILE%\.claude\bin')
+}
+
+# ---- Set-UserBinPath: registry round trip against a THROWAWAY key, never the real HKCU:\Environment
+$sb = $Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Set-UserBinPath' }, $false) | Select-Object -First 1
+if (-not $sb) {
+    Check "setbin: install.ps1 defines function Set-UserBinPath" $false
+} else {
+    Invoke-Expression $sb.Extent.Text
+    $Sub = 'Software\claude-settings-test-' + [guid]::NewGuid().ToString('N')
+    $Reg = [Microsoft.Win32.Registry]::CurrentUser
+    $Abs = Join-Path $env:USERPROFILE '.claude\bin'
+    $Raw = [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
+    try {
+        $k = $Reg.CreateSubKey($Sub)
+        $k.SetValue('Path', '%TEMP%\x;C:\a', [Microsoft.Win32.RegistryValueKind]::ExpandString)
+        $k.Close()
+        $pre = $Reg.OpenSubKey($Sub)
+        $preOk = ($pre.GetValueKind('Path') -eq 'ExpandString') -and ($pre.GetValue('Path', '', $Raw) -eq '%TEMP%\x;C:\a')
+        $pre.Close()
+        if (-not $preOk) { Write-Host "FAIL: setbin fixture did not build an ExpandString value"; $Failed++ }
+        Set-UserBinPath "HKCU:\$Sub" $Abs
+        $k = $Reg.OpenSubKey($Sub)
+        Check "setbin: ExpandString kind is kept" ($k.GetValueKind('Path') -eq 'ExpandString')
+        Check "setbin: existing %TEMP%\x entry stays literal and the absolute bin is appended" ($k.GetValue('Path', '', $Raw) -eq "%TEMP%\x;C:\a;$Abs")
+        $k.Close()
+        Set-UserBinPath "HKCU:\$Sub" $Abs
+        $k = $Reg.OpenSubKey($Sub)
+        Check "setbin: a second call changes nothing" ($k.GetValue('Path', '', $Raw) -eq "%TEMP%\x;C:\a;$Abs")
+        $k.Close()
+        $k = $Reg.OpenSubKey($Sub, $true); $k.DeleteValue('Path'); $k.Close()
+        Set-UserBinPath "HKCU:\$Sub" $Abs
+        $k = $Reg.OpenSubKey($Sub)
+        Check "setbin: a missing Path value is created as ExpandString holding the bin" (($k.GetValueKind('Path') -eq 'ExpandString') -and ($k.GetValue('Path', '', $Raw) -eq $Abs))
+        $k.Close()
+    } finally {
+        try { $Reg.DeleteSubKeyTree($Sub, $false) } catch { }
+    }
+}
 
 # ---- gap: the embedded post-merge hook body (install.ps1's Install-PostMergeHook) is not --
 # covered here. It is a heredoc written into .git\hooks\post-merge and run by `git` itself on
