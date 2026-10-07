@@ -6,7 +6,7 @@ Auto-compact drops detail. The post-compact session must re-learn where the work
 How do the handoff and plan stay current across a compaction, in every repo that uses
 claude-settings?
 
-## Ruling (owner, 2026-10-03)
+## Ruling (owner, 2026-10-03; handoff home 2026-10-07)
 
 1. Auto-compact fires at 500k tokens on a 1M Opus window. `settings.json` sets
    `"autoCompactWindow": 500000`, a token count. Claude Code caps it at the model's own
@@ -18,6 +18,9 @@ claude-settings?
 3. After compaction, a short message reorients the session.
 4. It must work in the desktop app with no other login. The owner rejected a design that
    ran a second `claude -p` with its own command-line login.
+5. The handoff is per session and outside git:
+   `~/.claude/state/handoff/<session_id>.handoff.md`. A repo's own handoff.md is a
+   project document, changed only by PR.
 
 ## The design
 
@@ -39,16 +42,18 @@ Print one short message into context. The session itself does the rewrite, under
 desktop app's own login. The message tells the session to:
 
 1. Follow `~/.claude/hooks/precompact_handoff_prompt.md` before anything else.
-2. Use the compaction summary, the digest at its path, and the prior handoff.
-3. Then confirm checkout and branch, and continue the last task.
+2. Rewrite the handoff at `~/.claude/state/handoff/<session_id>.handoff.md`. The
+   message names the exact path.
+3. Use the compaction summary, the digest at its path, and the prior handoff.
+4. Then confirm checkout and branch, and continue the last task.
 
 With no state file, or a failed one, the message says the digest is missing. The session
 then rewrites from the compaction summary and the prior handoff alone.
 
 **The prompt file** tells the session how to rewrite:
 
-- The handoff path: the repo's live handoff file if one exists (a `HANDOFF.md` or
-  `handoff.md` outside any `history/` folder). Otherwise `.claude/handoff.md`.
+- The handoff path: the one the reorient message names. Never a scratchpad or temp
+  folder. The repo's own handoff.md is context, never the rewrite target.
 - Read the prior handoff first. Rewrite it in place. Never make a dated copy.
 - If the work names a plan file (`~/.claude/plans/*.md` or the repo's `plans/*.md`) and
   the plan's state changed, update that plan in place.
@@ -59,6 +64,20 @@ Where things stand (branch, head, PRs and their CI). The owner's rulings this se
 with its tracked home, or marked "NO HOME YET". Work in flight: agents, workflow runs,
 servers with pid and port. Next steps. The files and commands that matter. A handoff is a
 short-term note. It is never a ruling's only home (see memory-is-never-a-rulings-only-home).
+
+## Why the handoff is per session and outside git
+
+Incident, 2026-10-07: a q_max orchestrator kept its handoff in its session scratchpad,
+under `AppData\Local\Temp\claude`. Something outside the session deleted that folder
+(cause unmeasured; this repo's janitor does not sweep there). The old rule named only a
+root handoff.md or `.claude/handoff.md`. q_max could use neither: a second handoff.md
+breaks its DOC3 check, and its CLAUDE.md puts session state in `specs/handoff.md`.
+
+A shared, committed handoff does not fix it. Several sessions run at once, each on its
+own branch. Each would rewrite one file, every PR would conflict on it, and the last
+merge would erase the others' state. So each session gets its own file, in the folder
+the hook already owns. Rulings still go to tracked homes at once
+(memory-is-never-a-rulings-only-home), so a lost machine loses only short-term state.
 
 ## Known limits
 

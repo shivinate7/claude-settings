@@ -174,6 +174,9 @@ class Case(object):
     def prompt_path(self):
         return os.path.join(self.cfg, "hooks", "precompact_handoff_prompt.md")
 
+    def handoff_path(self):
+        return os.path.join(self.cfg, "state", "handoff", "%s.handoff.md" % self.session_id)
+
     def read_state(self):
         path = self.state_path()
         if not os.path.isfile(path):
@@ -294,6 +297,8 @@ def case_reorient_ok_names_prompt_and_digest():
               "returncode=%r stderr=%r" % (proc.returncode, proc.stderr[-300:]))
         check("reorient-ok: names the prompt file", c.prompt_path() in out, "stdout: %r" % out)
         check("reorient-ok: names the digest path", c.digest_path() in out, "stdout: %r" % out)
+        check("reorient-ok: names the per-session handoff path", c.handoff_path() in out,
+              "stdout: %r" % out)
     finally:
         c.cleanup()
 
@@ -309,6 +314,8 @@ def case_reorient_no_state_says_digest_missing():
               "stdout: %r" % out)
         check("reorient-missing: still names the prompt file", c.prompt_path() in out,
               "stdout: %r" % out)
+        check("reorient-missing: still names the per-session handoff path",
+              c.handoff_path() in out, "stdout: %r" % out)
     finally:
         c.cleanup()
 

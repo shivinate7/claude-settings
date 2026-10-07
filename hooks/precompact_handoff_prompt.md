@@ -4,12 +4,18 @@ Compaction just dropped detail. Rewrite the handoff now, in this order.
 
 ## 1. Read the prior handoff first
 
-Read the prior handoff before you write anything. It holds the last known state.
+Read the prior handoff (the file from step 2) before you write anything, when it exists.
+It holds the last known state.
 
-## 2. Pick the handoff path
+## 2. Use the session's own handoff
 
-Check the repo root for `HANDOFF.md` or `handoff.md`, outside any `history` folder.
-Use that file when one exists. Otherwise use `.claude/handoff.md`.
+The reorient message names your handoff file:
+`~/.claude/state/handoff/<session_id>.handoff.md`. Use that path. It is per session and
+outside git, so sessions on other branches never collide on it. Never keep the handoff
+in a scratchpad or a temp folder.
+
+A repo's own `HANDOFF.md` or `handoff.md` is a project document. Read it for context.
+Change it only in a PR, never as this rewrite.
 
 ## 3. Gather your sources
 
@@ -19,7 +25,7 @@ handoff, since the digest keeps only its own tail.
 
 ## 4. Rewrite the file in place
 
-Rewrite the handoff file at the path from step 2. Never make a dated copy.
+Rewrite the handoff file from step 2. Never make a dated copy.
 
 Write these sections:
 

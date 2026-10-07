@@ -12,7 +12,8 @@ the desktop app has none.
   time).
 
   SessionStart --reorient (stdin: session_id) -- reads that state and prints a short
-  message: follow the installed prompt file, then use the digest (or, with no usable
+  message: follow the installed prompt file, rewrite the session's own handoff at
+  ~/.claude/state/handoff/<session_id>.handoff.md, then use the digest (or, with no usable
   digest, the compaction summary and the prior handoff alone).
 
 Never exits 2 and never blocks compaction: every failure is caught, logged to stderr,
@@ -37,6 +38,13 @@ def digest_path(session_id):
 
 def state_path(session_id):
     return os.path.join(config_dir(), "state", "handoff", "%s.json" % session_id)
+
+
+def handoff_path(session_id):
+    """The session's own handoff: per session and outside git, so concurrent sessions on
+    their own branches never collide on it, and outside Temp, so temp cleanup never
+    reaches it (decisions/precompact-handoff.md)."""
+    return os.path.join(config_dir(), "state", "handoff", "%s.handoff.md" % session_id)
 
 
 def prompt_path():
@@ -147,17 +155,18 @@ def run_reorient(payload):
         state = None
 
     prompt = prompt_path()
+    handoff = handoff_path(session_id)
     if not state or not state.get("ok") or not state.get("digest"):
-        print("Context was compacted. Follow %s before anything else. The digest is "
-              "missing: use the compaction summary and the prior handoff instead. "
-              "Confirm checkout and branch before any git write. Then continue the "
-              "last task." % prompt)
+        print("Context was compacted. Follow %s before anything else. Your handoff is "
+              "%s. The digest is missing: use the compaction summary and the prior "
+              "handoff instead. Confirm checkout and branch before any git write. Then "
+              "continue the last task." % (prompt, handoff))
         return 0
 
-    print("Context was compacted. Follow %s before anything else. Use the compaction "
-          "summary, the digest at %s, and the prior handoff. Confirm checkout and "
-          "branch before any git write. Then continue the last task."
-          % (prompt, state.get("digest")))
+    print("Context was compacted. Follow %s before anything else. Your handoff is %s. "
+          "Use the compaction summary, the digest at %s, and the prior handoff. Confirm "
+          "checkout and branch before any git write. Then continue the last task."
+          % (prompt, handoff, state.get("digest")))
     return 0
 
 
