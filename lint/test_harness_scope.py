@@ -30,7 +30,7 @@ def git(cwd, *a):
     return subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
-def run(paths, event="pull_request", base="auto", before="auto", existing=()):
+def run(paths, event="pull_request", base="auto", before="auto", existing=(), landed=None):
     """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit."""
     with tempfile.TemporaryDirectory() as d:
         git(d, "init", "-q")
@@ -38,6 +38,10 @@ def run(paths, event="pull_request", base="auto", before="auto", existing=()):
         git(d, "config", "user.name", "t")
         git(d, "config", "commit.gpgsign", "false")
         open(os.path.join(d, "seed.txt"), "w").write("seed\n")
+        # The base holds landed-dirs.txt: the repo's own, or `landed` (a list of dir names) in its place.
+        with open(os.path.join(HERE, "..", "landed-dirs.txt")) as f:
+            real = f.read()
+        open(os.path.join(d, "landed-dirs.txt"), "w").write(real if landed is None else chr(10).join(landed) + chr(10))
         for p in existing:  # in the base commit, so the head commit modifies them
             os.makedirs(os.path.dirname(os.path.join(d, p)), exist_ok=True)
             open(os.path.join(d, p), "w").write("old\n")
@@ -127,6 +131,14 @@ class Scope(unittest.TestCase):
 
     def test_a_modified_md_under_skills_turns_on_nothing(self):
         self.assertFlags(run(["skills/old/SKILL.md"], existing=["skills/old/SKILL.md"]), want_false=ALL)
+
+    def test_a_new_file_in_hooks_or_janitor_turns_on_the_install_suite(self):
+        for p in ("hooks/new.py", "janitor/new.py"):
+            self.assertFlags(run([p]), want_true=["gates_windows", "shell_macos"])
+
+    def test_the_landed_dirs_come_from_landed_dirs_txt(self):
+        # A made-up dir in the scratch repo's landed-dirs.txt: the script reads the file, it does not copy the list.
+        self.assertFlags(run(["zz-made-up/new.md"], landed=["zz-made-up"]), want_true=["gates_windows", "shell_macos"])
 
 
 if __name__ == "__main__":
