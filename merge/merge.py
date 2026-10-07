@@ -152,11 +152,12 @@ def holder_text(b, held, now):
     text = f"the merge lock on {b} is held by {who}" + (f" ({', '.join(extra)})" if extra else "")
     if "pid" in f and "host" in f:
         text += f", pid {f['pid']} on {f['host']}"
-    if re.fullmatch(r"[0-9]{1,10}", f.get("started", "")):
+    started_ok = re.fullmatch(r"[0-9]{1,10}", f.get("started", ""))  # a garbled field means a forged lock: trust none of it
+    if started_ok:
         text += ", started " + time.strftime("%H:%M:%SZ", time.gmtime(int(f["started"])))
     text += f", expires in {held[1] - now:.0f}s." if held[1] != float("inf") else ", never expires."
     pid = int(f["pid"]) if re.fullmatch(r"[0-9]{1,10}", f.get("pid", "")) else 0
-    if f.get("host") == socket.gethostname() and f.get("platform") == sys.platform and 0 < pid < 2 ** 31:  # a pid from another OS reads nothing
+    if f.get("host") == socket.gethostname() and f.get("platform") == sys.platform and started_ok and 0 < pid < 2 ** 31:  # a pid from another OS reads nothing
         if pid_alive(pid):
             return text + " The holder is alive. Wait for it, or ask its session."
         return text + " The holder is dead. Run: merge --unlock"
