@@ -20,7 +20,12 @@ The owner chose all four cuts on 2026-10-07. Each lands as its own PR.
 - B. On a pull request, a suite runs only when its inputs change. An unmapped changed path
   runs everything.
 - C. On a pull request, the Windows merge job runs only the Windows-specific merge tests.
-- D. Make `merge/test_merge.py` faster, with the same cases and verdicts.
+- D. Make `merge/test_merge.py` faster, with the same cases and verdicts. Tried and dropped
+  on 2026-10-07. Setup takes 31% of the time, and the `git` calls inside `merge.py` take 69%.
+  Reusing one setup saved about 9%, under the 20% bar. C covers the PR wait instead.
+- C, as built: on a pull request, Windows runs a 14-test slice (`MERGE_TESTS=windows-slice`).
+  Push, nightly and manual runs keep the full suite. `lint/test_windows_split.py` fails when
+  the slice runs on push or the full Windows run is lost.
 
 A push to main, the nightly run and a manual run always run every suite on every OS.
 
