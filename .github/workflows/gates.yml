@@ -449,7 +449,7 @@ jobs:
 
   gates-windows-merge:
     runs-on: windows-latest
-    # Expected about 520 s (merge suite 464 s, launcher 31 s, cmd under 25 s); 2x is 20 min.
+    # Expected: PR slice about 60 s; full merge suite on push and nightly about 8 min (464 s, plus launcher 31 s, cmd under 25 s). 2x of the full run is 20 min.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -475,7 +475,13 @@ jobs:
         run: python merge/test_launch.py
 
       - name: Merge tool git-half fixture suite
-        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && github.event_name != 'pull_request' && steps.scope.outputs.code == 'true' }}
+        run: python merge/test_merge.py
+
+      - name: Merge tool git-half fixture suite (Windows slice)
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && steps.scope.outputs.code == 'true' }}
+        env:
+          MERGE_TESTS: windows-slice
         run: python merge/test_merge.py
 
       - name: Merge launcher fixture suite (merge.cmd)
