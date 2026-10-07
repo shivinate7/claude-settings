@@ -3948,8 +3948,53 @@ def writes_to(path: str, cmd: str) -> bool:
     return False
 
 
+# VARIABLE INDIRECTION. Incident 2026-10-07, q_max session 56ca874f:
+# `D=~/.claude/state/handoff/x.md; ...; cp "$S/handoff.md" "$D"` was allowed, because the parse saw
+# only the word `$D`. One left-to-right pass in `_shell_write_hit` (it feeds the frozen and
+# project-config checks) keeps a table of simple assignments (`D=v`, `export A=1 D=v`, `declare`,
+# a PowerShell `$D = v`), and reads each `$D` or `${D}` as the value current at that point: the
+# last assignment wins, `unset D` clears it, a use before the assignment stays as written, and
+# single quotes do not expand. An unassigned variable stays unresolved and allowed. `$HOME` reads
+# as `~`: `os.path.expandvars` leaves it literal when HOME is unset (the Windows default), so a
+# literal `$HOME/.claude/...` target was allowed.
+# RESIDUAL GAP: a value from `$(...)`, backticks, `read`, `${D:-x}`, a loop variable, `eval`, or an
+# interpreter (`python -c`) is not resolved, nor is a variable set in a different tool call.
+# Fixing that needs a shell parser, not a regex.
+_VAR_TOKEN = re.compile(
+    r"""'[^']*'"""                                                    # single quotes: no expansion
+    r"""|(?<![\w$.\-/:])(?P<n>[A-Za-z_]\w*)=(?!=)(?P<v>"[^"]*"|'[^']*'|[^\s;&|"'`)}]*)"""
+    r"""|\$(?P<pn>[A-Za-z_]\w*)[ \t]*=(?!=)[ \t]*(?P<pv>"[^"]*"|'[^']*'|[^\s;&|"'`)}]*)"""
+    r"""|\bunset\s+(?P<u>\w+)"""
+    r"""|\$(?:(?P<x>[A-Za-z_]\w*)|\{(?P<y>[A-Za-z_]\w*)\})""")
+
+
+def _resolve_vars(cmd: str) -> str:
+    """Read each `$VAR` or `${VAR}` as the value assigned earlier in the command."""
+    table = {"HOME": "~"}
+
+    def use(m):
+        return table.get(m.group("x") or m.group("y"), m.group(0))
+
+    def step(m):
+        if m.group("u"):
+            table.pop(m.group("u"), None)
+        name, raw = (m.group("n"), m.group("v")) if m.group("n") else (m.group("pn"), m.group("pv"))
+        if name:
+            value = raw if raw.startswith("'") else _VAR_TOKEN.sub(step, raw)
+            value = value.strip("'\"")
+            if "$" in value or "`" in value:
+                table.pop(name, None)  # not resolvable: forget any older value too
+            else:
+                table[name] = value
+            return m.group(0)
+        return use(m) if (m.group("x") or m.group("y")) else m.group(0)
+
+    return _VAR_TOKEN.sub(step, cmd)
+
+
 def _shell_write_hit(cmd: str, cwd: str, predicate) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''."""
+    cmd = _resolve_vars(cmd)
     for segment in split_segments(cmd):
         if not segment.strip():
             continue

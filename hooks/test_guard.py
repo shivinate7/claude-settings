@@ -3090,6 +3090,49 @@ sh("frozen: a heredoc writing prose that names the environment file",
    "cat > notes.md <<'DOC'\nThe guard refuses any command naming " + ENV + ".\nDOC", "allow",
    cwd=NOGIT)
 
+# VARIABLE INDIRECTION (incident 2026-10-07): the static parse saw only "$D", never the frozen
+# target. A simple VAR=value assignment earlier in the same command must resolve. An unresolved
+# variable, or a read of a resolved one, stays allowed.
+_D = 'D="' + CFG_STATE + '"; '
+for _n, _c in (
+    ("the incident shape",
+     'S=/tmp/scratch; ' + _D + 'ls $D 2>&1 | head -1; cp "$S/handoff.md" "$D"'),
+    ("a braced ${D}", _D + 'cp /tmp/a "${D}"'),
+    ("export then redirect", 'export D="' + CFG_STATE + '"; echo x > "$D"'),
+    ("tee onto $D", _D + "echo x | tee $D"),
+    ("sed -i on $D", _D + 'sed -i s/a/b/ "$D"'),
+    ("mv onto $D", _D + "mv /tmp/a $D"),
+):
+    sh("frozen: var: " + _n, _c, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: var: ls of $D is a read", _D + "ls $D", "allow", cwd=NOGIT)
+sh("frozen: var: cat of quoted $D is a read", _D + 'cat "$D"', "allow", cwd=NOGIT)
+sh("frozen: var: frozen path read into a safe $OUT",
+   'OUT=/tmp/o; cat "' + CFG_STATE + '" > "$OUT"', "allow", cwd=NOGIT)
+sh("frozen: var: write to a safe $OUT", "OUT=/tmp/o; echo hi > $OUT", "allow", cwd=NOGIT)
+sh("frozen: var: write to an unassigned $D", "echo x > $D", "allow", cwd=NOGIT)
+
+# ROUND 2: shapes the first fix missed. P is the frozen path; every command quotes it.
+_P = '"' + CFG_STATE + '"'
+for _n, _c in (
+    ("the last assignment wins", 'D=/tmp/o; D=' + _P + '; cp a "$D"'),
+    ("a subshell", '(D=' + _P + '; cp a "$D")'),
+    ("a brace group", '{ D=' + _P + '; cp a "$D"; }'),
+    ("an if block", 'if true; then D=' + _P + '; cp a "$D"; fi'),
+    ("declare", 'declare D=' + _P + '; cp a "$D"'),
+    ("export of two names", 'export A=1 D=' + _P + '; cp a "$D"'),
+):
+    sh("frozen: var2: " + _n, _c, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: var2: PowerShell $D assignment then Set-Content",
+   '$D = ' + _P + '; Set-Content $D x', "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+# $HOME-built path (case 4) is skipped: the suite's config dir is CFG, not $HOME/.claude.
+sh("frozen: var2: a later assignment to a safe path", 'D=' + _P + '; D=/tmp/o; cp a "$D"',
+   "allow", cwd=NOGIT)
+sh("frozen: var2: the write comes before the assignment", 'cp a "$D"; D=' + _P, "allow",
+   cwd=NOGIT)
+sh("frozen: var2: unset clears the variable", 'D=' + _P + '; unset D; cp a "$D"', "allow",
+   cwd=NOGIT)
+sh("frozen: var2: single quotes do not expand", 'D=' + _P + "; cp a '$D'", "allow", cwd=NOGIT)
+
 # NO OVERRIDE TOKEN IS A SKELETON KEY, because no override token exists any more. A leftover token
 # from either earlier guard changes nothing.
 sh("frozen: a leftover token is not a key to the environment rule",
