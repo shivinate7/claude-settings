@@ -6,7 +6,7 @@ No network, no real repo. Every run uses a local bare origin in a temp dir, the 
 actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
 """
-import contextlib, io, pathlib, json, os, shutil, stat, subprocess, sys, tempfile, threading, time, unittest, unittest.mock
+import contextlib, io, pathlib, json, os, re, shutil, socket, stat, subprocess, sys, tempfile, threading, time, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -59,11 +59,13 @@ class FakeHost:
         self.checks, self.refuse, self.on_wait = (True, ""), None, None
         self.head_override, self.mergeable = None, "MERGEABLE"
         self.pr_state = "OPEN"
+        self.base, self.base_seq = "main", None  # base_seq: one base per pr() read, the last one repeats
         self.waits, self.seq, self.state = [], None, "green"  # waits: (sha, prior) per call; seq: scripted results, then self.checks
 
     def pr(self, n):
         head = merge.origin_head(self.root, self.branch)
-        return {"head": self.head_override or head, "branch": self.branch, "base": "main", "state": self.pr_state,
+        base = (self.base_seq.pop(0) if len(self.base_seq) > 1 else self.base_seq[0]) if self.base_seq else self.base
+        return {"head": self.head_override or head, "branch": self.branch, "base": base, "state": self.pr_state,
                 "mergeable": self.mergeable, "merge_state": "CLEAN"}
 
     def required_names(self):
@@ -84,9 +86,9 @@ class FakeHost:
         self.merged = True
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
-        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        sh(o, "git", "checkout", "-q", "-B", self.base, f"origin/{self.base}")
         sh(o, "git", "merge", "-q", "--no-ff", "-m", f"merge #{n}", sha)
-        sh(o, "git", "push", "-q", "origin", "main")
+        sh(o, "git", "push", "-q", "origin", self.base)
         return sh(o, "git", "rev-parse", "HEAD"), ""
 
 class Env(unittest.TestCase):
@@ -613,6 +615,171 @@ class Stopped(Env):
         finally:
             merge.drop_worktree(self.co, tmp, wt)
 
+class BaseAware(Env):
+    """Plan "The flow" and "Settled by the owner" item 12: the pull request's own base drives every
+    step. Cause: q_max #497 merged into claude/speed-wave-2 and claimed D-720 against main."""
+    BASE = "integ"
+
+    def setUp(self):
+        super().setUp()
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "push", "-q", "origin", f"origin/main:refs/heads/{self.BASE}")
+        self.host.base = self.BASE
+        self.modes, self.fetches, self.undo_bases = [], [], []
+        real_stamp, real_git, real_undo = merge.node_stamp, merge.git, merge.undo_check
+        def stamp(wt, cfgrel, mode, base):
+            self.modes.append((mode, base))
+            return real_stamp(wt, cfgrel, mode, base)
+        def git(cwd, *a, **k):
+            if "fetch" in a:
+                self.fetches.append((len(self.host.waits), a))
+            return real_git(cwd, *a, **k)
+        def undo(wt, base_ref, unknown_ok=""):
+            self.undo_bases.append(base_ref)
+            return real_undo(wt, base_ref, unknown_ok)
+        for name, fn in (("node_stamp", stamp), ("git", git), ("undo_check", undo)):
+            p = unittest.mock.patch.object(merge, name, fn); p.start(); self.addCleanup(p.stop)
+
+    def put_locks(self, *branches):
+        sha = sh(self.co, "git", "commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "lock")
+        for b in branches:
+            sh(self.co, "git", "push", "-q", "origin", f"{sha}:refs/merge-lock/{b}")
+
+    def test_1_confirm_into_another_base_claims_and_pushes_nothing_but_merges(self):
+        feat_before = self.head()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertNotIn("claim", [m for m, _ in self.modes])  # stamp --claim never runs
+        # nothing pushed to the head branch. deleteBranch removes `feat` after the merge, so read the merge commit instead.
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "rev-parse", f"origin/{self.BASE}^2"), feat_before)
+        self.assertEqual(sh(self.co, "git", "log", f"{feat_before}..origin/{self.BASE}^2", "--format=%B"), "")
+        self.assertNotIn("Record-claim", sh(self.co, "git", "log", f"origin/{self.BASE}^2", "--format=%B"))
+        self.assertIn("id: pending", self.show(self.BASE, "docs/decisions/second.md"))  # ids stay pending
+        self.assertNotIn("second.md", sh(self.co, "git", "ls-tree", "-r", "--name-only", "origin/main"))  # main untouched
+
+    def test_2_preview_into_another_base_prints_no_claim_and_says_ids_stay_pending(self):
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("Record-claim", out)
+        self.assertTrue(any("pending" in l.lower() and "default branch" in l.lower() for l in out.splitlines()), out)
+
+    def test_3_the_lock_is_taken_and_released_on_the_base(self):
+        calls = []
+        acquire, release = self.lock.acquire, self.lock.release
+        self.lock.acquire = lambda b, ttl: (calls.append(("acquire", b)), acquire(b, ttl))[1]
+        self.lock.release = lambda b, tok: (calls.append(("release", b)), release(b, tok))[1]
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(calls, [("acquire", self.BASE), ("release", self.BASE)])
+
+    def test_3_unlock_with_a_branch_unlocks_that_branch_only(self):
+        self.put_locks("main", self.BASE)
+        try:
+            rc, out = self.run_merge("--unlock", self.BASE)
+        except SystemExit as e:  # today argparse refuses the branch argument
+            rc, out = e.code, "SystemExit"
+        self.assertEqual(rc, 0, out)
+        refs = self.refs()
+        self.assertNotIn(f"refs/merge-lock/{self.BASE}", refs)
+        self.assertIn("refs/merge-lock/main", refs)
+
+    def test_3_bare_unlock_still_unlocks_the_default_branch(self):  # guard, green today
+        self.put_locks("main", self.BASE)
+        rc, out = self.run_merge("--unlock")
+        self.assertEqual(rc, 0, out)
+        refs = self.refs()
+        self.assertNotIn("refs/merge-lock/main", refs)
+        self.assertIn(f"refs/merge-lock/{self.BASE}", refs)
+
+    def test_4_a_base_that_changes_between_the_reads_stops_before_any_claim_or_push(self):
+        sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/other-base")
+        self.host.base_seq = [self.BASE, "other-base"]
+        feat_before = self.head()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.head(), feat_before)
+        self.assertNotIn("claim", [m for m, _ in self.modes])
+        self.assertFalse(getattr(self.host, "merged", False))
+        self.assertNotIn("refs/merge-lock/", self.refs())
+
+    def test_6_undo_check_the_base_fetch_after_the_wait_and_stamp_check_use_the_base(self):
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        want = f"origin/{self.BASE}"
+        self.assertTrue(self.undo_bases and all(b == want for b in self.undo_bases), self.undo_bases)
+        checks = [b for m, b in self.modes if m == "check"]
+        self.assertTrue(checks and all(b == want for b in checks), self.modes)
+        after_wait = [a for n, a in self.fetches if n >= 1]  # fetches made once the wait has run
+        self.assertTrue(any(f"+refs/heads/{self.BASE}:refs/remotes/origin/{self.BASE}" in a for a in after_wait), after_wait)
+        self.assertFalse(any("+refs/heads/main:refs/remotes/origin/main" in a for a in after_wait), after_wait)
+
+    def test_7_the_local_fast_forward_moves_the_base_not_the_default_branch(self):
+        main_before = sh(self.co, "git", "rev-parse", "main")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(sh(self.co, "git", "rev-parse", self.BASE), sh(self.co, "git", "rev-parse", f"origin/{self.BASE}"))
+        self.assertEqual(sh(self.co, "git", "rev-parse", "main"), main_before)
+
+    def test_8_control_a_pr_into_the_default_branch_still_claims(self):  # green today
+        self.host.base = "main"
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("claim", [m for m, _ in self.modes])
+        self.assertEqual(self.claims("main"), 1)
+        self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
+
+    def test_A_preview_reads_the_lock_of_the_base(self):  # mutant: lock.read(cfg["defaultBranch"]) in preview()
+        self.put_locks(self.BASE)  # live on integ, none on main
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        self.assertIn(f"lock:   the merge lock on {self.BASE} is held", out)  # say() joins its lines with spaces
+
+    def test_B_a_head_that_holds_an_old_claim_stops_before_the_wait_on_another_base(self):
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "commit", "-q", "--allow-empty", "-m", "Claim record numbers", "-m", "Record-claim: D-002")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        claim = sh(o, "git", "rev-parse", "HEAD")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn(claim[:7], out)  # names the claim commit by its short SHA
+        self.assertEqual(self.host.waits, [])  # stopped before the wait
+        self.assertFalse(getattr(self.host, "merged", False))
+        self.assertEqual(self.head(), claim)  # nothing pushed
+        self.assertNotIn("refs/merge-lock/", self.refs())
+
+    def test_C_a_base_that_changes_during_the_wait_ends_the_wait_and_merges_nothing(self):
+        fake = self.host
+        class WaitHost(merge.Host):  # the real wait loop; every other read comes from the fake
+            def __init__(h):
+                super().__init__(["gates"], minute=60, now=lambda: 0, pause=lambda s: None)
+                h.in_wait, h.passes = False, 0
+            def pr(h, n):
+                info = fake.pr(n)
+                if h.in_wait:
+                    h.passes += 1
+                    if h.passes > 1:
+                        info["base"] = "other-base"  # the second pass of the wait sees a new base
+                h.base = info["base"]  # as Host.pr does: the baseline is "integ" from the reads before the wait
+                return info
+            def required_names(h): return ["gates"]
+            def checks(h, n): return {"gates": [("pass", "")]}
+            def runs(h, sha): return []
+            def head_state(h, n): return "green"
+            def wait_checks(h, *a, **k):
+                h.in_wait = True
+                try:
+                    return super().wait_checks(*a, **k)
+                finally:
+                    h.in_wait = False
+            def merge(h, *a): return fake.merge(*a)
+        rc, out = self.run_merge("7", "--confirm", host=WaitHost())
+        self.assertEqual(rc, 1, out)
+        self.assertFalse(getattr(fake, "merged", False), out)
+        self.assertNotIn("refs/merge-lock/", self.refs())
+
 class Unlock(Env):
     def test_unlock_removes_a_live_lock_and_reads_nothing_first(self):
         sha = sh(self.co, "git", "commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "unreadable, not ours")
@@ -706,7 +873,7 @@ if a[:2] == ["pr", "view"]:
         if lag and lag["n"] > 0 and head != lag["prior"]:  # GitHub still shows the head before the push
             lag["n"] -= 1; save(); head = lag["prior"]
         bad = S.get("dirty_after_checks") is not None and S["checks_calls"] >= S["dirty_after_checks"]
-        print(json.dumps({"headRefOid": head, "headRefName": "feat", "baseRefName": "main", "state": "OPEN",
+        print(json.dumps({"headRefOid": head, "headRefName": "feat", "baseRefName": S.get("base", "main"), "state": "OPEN",
                           "mergeable": "CONFLICTING" if bad else "MERGEABLE", "mergeStateStatus": "DIRTY" if bad else "CLEAN"}))
     else:
         print(json.dumps({"state": "MERGED" if S.get("oid") else "OPEN", "mergeCommit": {"oid": S["oid"]} if S.get("oid") else None}))
@@ -727,8 +894,9 @@ elif a[:2] == ["pr", "merge"]:
         print(S["merge_fail"]); sys.exit(1)
     if git("ls-remote", "origin", "refs/heads/feat").split("\t")[0] != sha:
         print("GraphQL: Head branch was modified. Review and try the merge again."); sys.exit(1)
-    git("fetch", "-q", "origin"); git("checkout", "-q", "-B", "main", "origin/main")
-    git("merge", "-q", "--no-ff", "-m", "merge", sha); git("push", "-q", "origin", "main")
+    B = S.get("base", "main")
+    git("fetch", "-q", "origin"); git("checkout", "-q", "-B", B, "origin/" + B)
+    git("merge", "-q", "--no-ff", "-m", "merge", sha); git("push", "-q", "origin", B)
     S["oid"] = git("rev-parse", "HEAD"); save()
 elif a[0] == "api" and a[1].endswith("/required_status_checks"):
     if S.get("contexts") is None:
@@ -773,6 +941,16 @@ class GhHalf(Env):
 
     def go(self, **kw):
         return self.run_merge("7", "--confirm", host=self.gh_host(**kw))
+
+    def test_5_base_aware_protection_mode_reads_the_protection_of_the_base(self):
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/integ")
+        self.set(base="integ", contexts=["gates"])
+        self.host = None  # run_merge then lets main() build the real Host from the config
+        self.run_merge("7")
+        calls = self.calls()
+        self.assertIn("branches/integ/protection/required_status_checks", calls)
+        self.assertNotIn("branches/main/protection", calls)
 
     def reverted(self):
         return "id: pending" in self.show("feat", "docs/decisions/second.md")
@@ -1170,6 +1348,263 @@ class Identity(Env):
             self.assertEqual(sh(wt, "git", "log", "-1", "--format=%an"), "merge")
         finally:
             merge.drop_worktree(self.co, tmp, wt)
+
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+def dead_pid():
+    p = subprocess.Popen([sys.executable, "-c", "pass"]); p.wait()
+    return p.pid
+
+class LockHolder(Env):
+    """The lock names its holder; the Held text says alive, dead, or cannot tell."""
+    def push_lock(self, message):
+        sha = sh(self.co, "git", "commit-tree", EMPTY_TREE, "-m", message)
+        sh(self.co, "git", "push", "-q", "origin", f"{sha}:refs/merge-lock/main")
+
+    def lock_msg(self):
+        sh(self.co, "git", "fetch", "-q", "origin", "refs/merge-lock/main")
+        return sh(self.co, "git", "log", "-1", "--format=%B", "FETCH_HEAD")
+
+    def peek(self, *args):
+        """Run `merge 7 --confirm *args`. Inside its wait, read the lock message and run a second merge.
+        Returns (lock message, the second run's output). A run that never reaches the wait gives ("", "")."""
+        seen = {"msg": "", "second": ""}
+        orig = self.host.wait_checks
+        def wait(n, sha, d, prior=None):
+            if not seen["msg"]:
+                seen["msg"] = self.lock_msg()
+                seen["second"] = self.run_merge("8", "--confirm")[1]
+            return orig(n, sha, d, prior)
+        self.host.wait_checks = wait
+        try:
+            self.run_merge("7", "--confirm", *args)
+        except SystemExit:
+            pass  # argparse refuses an unknown flag: the lock was never taken
+        return seen["msg"], seen["second"]
+
+    def old_message(self, expires):
+        return f"merge lock\nexpires: {int(expires)}\nowner: abc123"
+
+    def new_message(self, host, pid, expires=None, platform=None):
+        return (f"merge lock\nexpires: {int(expires or self.now + 600)}\nowner: abc123\n"
+                f"pr: 445\nbranch: b\nhost: {host}\npid: {pid}\nstarted: 1790000000\nplatform: {platform or sys.platform}")
+
+    def held(self, message):
+        self.push_lock(message)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        return out
+
+    def test_the_lock_records_the_holder_and_a_second_run_sees_it_alive(self):
+        msg, second = self.peek("--session", "S")
+        lines = msg.splitlines()
+        self.assertEqual(lines[:1], ["merge lock"], msg)
+        for want in ("pr: 7", "branch: feat", f"host: {socket.gethostname()}", f"pid: {os.getpid()}", "session: S"):
+            self.assertIn(want, lines, msg)
+        self.assertTrue(any(re.fullmatch(r"started: \d+", l) for l in lines), msg)
+        self.assertTrue(any(re.fullmatch(r"expires: \d+", l) for l in lines), msg)
+        self.assertTrue(any(re.fullmatch(r"owner: \w+", l) for l in lines), msg)
+        for want in ("PR #7", "feat", '"S"', f"pid {os.getpid()}", socket.gethostname(), "alive"):
+            self.assertIn(want, second)
+        self.assertNotIn("dead", second)
+        self.assertNotIn("Cannot tell", second)
+
+    def test_no_session_flag_writes_no_session_line(self):
+        msg, _ = self.peek()
+        self.assertIn("pr: 7", msg.splitlines())
+        self.assertNotIn("session:", msg)
+
+    def test_held_says_dead_for_a_lock_on_this_host_whose_pid_is_gone(self):
+        out = self.held(self.new_message(socket.gethostname(), dead_pid()))
+        for want in ("PR #445", "branch b", "dead", "merge --unlock"):
+            self.assertIn(want, out)
+        self.assertNotIn("Cannot tell", out)
+
+    def test_held_says_cannot_tell_for_another_host(self):
+        out = self.held(self.new_message("some-other-host-xyz", os.getpid()))
+        self.assertIn("PR #445", out)
+        self.assertIn("some-other-host-xyz", out)
+        self.assertIn("Cannot tell if the holder is alive", out)
+        self.assertNotIn("The holder is alive", out)
+        self.assertNotIn("The holder is dead", out)
+
+    def test_held_says_cannot_tell_for_an_old_lock_and_the_old_lock_still_expires(self):
+        out = self.held(self.old_message(self.now + 600))
+        self.assertIn("Cannot tell if the holder is alive", out)
+        self.assertIn("merge --unlock", out)
+        self.now += 601
+        self.assertTrue(self.lock.acquire("main", 600))
+
+    def test_a_new_lock_expires_too(self):
+        self.push_lock(self.new_message(socket.gethostname(), os.getpid(), expires=self.now + 600))
+        self.now += 601
+        self.assertTrue(self.lock.acquire("main", 600))
+
+    def test_the_preview_lock_line_says_the_holder_state(self):
+        self.push_lock(self.new_message(socket.gethostname(), dead_pid()))
+        rc, out = self.run_merge("7")
+        self.assertIn("PR #445", out)
+        self.assertIn("dead", out)
+
+    def test_a_session_with_a_newline_cannot_add_an_expires_or_owner_line(self):
+        msg, _ = self.peek("--session", "x\nexpires: 1\nowner: evil\r\nexpires: 2")
+        lines = msg.splitlines()
+        self.assertIn("pr: 7", lines, msg)  # the run took the lock at all
+        self.assertEqual(len([l for l in lines if l.startswith("expires:")]), 1, msg)
+        self.assertEqual(len([l for l in lines if l.startswith("owner:")]), 1, msg)
+        self.assertNotIn("owner: evil", lines)
+        self.assertEqual(len([l for l in lines if l.startswith("session:")]), 1, msg)
+
+    def test_a_long_session_is_capped(self):
+        msg, _ = self.peek("--session", "a" * 5000)
+        self.assertIn("pr: 7", msg.splitlines(), msg)
+        self.assertLess(len(msg), 1000)
+
+    def garbled(self, **fields):
+        f = {"pid": os.getpid(), "started": 1790000000}; f.update(fields)
+        try:
+            out = self.held(f"merge lock\nexpires: {int(self.now + 600)}\nowner: abc123\npr: 445\nbranch: b\n"
+                            f"host: {socket.gethostname()}\npid: {f['pid']}\nstarted: {f['started']}\nplatform: {sys.platform}")
+        except Exception as e:
+            self.fail(f"the Held text crashed: {type(e).__name__}: {e}")
+        self.assertIn("Cannot tell if the holder is alive", out)
+        self.assertNotIn("Traceback", out)
+        self.assertNotIn("The holder is dead", out)
+
+    def test_a_pid_too_big_for_the_os_reads_cannot_tell(self):
+        self.garbled(pid=10 ** 12)
+
+    def test_a_non_ascii_digit_pid_reads_cannot_tell(self):
+        self.garbled(pid="²")
+
+    def test_a_non_ascii_digit_started_reads_cannot_tell(self):
+        self.garbled(started="²")
+
+    def test_a_twenty_digit_started_reads_cannot_tell(self):
+        self.garbled(started="1" * 20)
+
+    def test_the_same_host_name_on_another_platform_reads_cannot_tell_never_dead(self):
+        other = "linux" if sys.platform == "win32" else "win32"
+        out = self.held(self.new_message(socket.gethostname(), dead_pid(), platform=other))
+        self.assertIn("Cannot tell if the holder is alive", out)
+        self.assertNotIn("The holder is dead", out)
+
+    def test_a_lock_with_no_platform_line_reads_cannot_tell_never_dead(self):
+        msg = self.new_message(socket.gethostname(), dead_pid()).rsplit("\nplatform:", 1)[0]
+        self.assertNotIn("platform:", msg)
+        out = self.held(msg)
+        self.assertIn("Cannot tell if the holder is alive", out)
+        self.assertNotIn("The holder is dead", out)
+
+    def test_the_lock_records_this_platform(self):
+        msg, _ = self.peek()
+        self.assertIn(f"platform: {sys.platform}", msg.splitlines(), msg)
+
+    def test_the_module_usage_names_session(self):
+        self.assertIn("--session", merge.__doc__)
+
+    def test_a_blank_session_writes_no_session_line(self):
+        msg, _ = self.peek("--session", " \t ")
+        self.assertIn("pr: 7", msg.splitlines(), msg)
+        self.assertNotIn("session:", msg)
+
+    @unittest.skipUnless(os.name == "nt", "the Windows probe: os.kill(pid, 0) is CTRL_C_EVENT there")
+    def test_windows_liveness_never_calls_os_kill(self):
+        self.push_lock(self.new_message(socket.gethostname(), os.getpid()))
+        calls = []
+        def fake_kill(pid, sig):
+            calls.append((pid, sig))
+            raise OSError("must not be called")
+        with unittest.mock.patch.object(os, "kill", fake_kill):
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(calls, [])
+        self.assertIn("The holder is alive", out)
+
+def release_out(test, lock, token):
+    out, err = io.StringIO(), io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            lock.release("main", token)
+    except Exception as e:
+        test.fail(f"release raised {type(e).__name__}: {e}")
+    return out.getvalue() + err.getvalue()
+
+class ReleaseReports(Env):
+    def test_a_normal_acquire_then_release_prints_no_line(self):
+        tok = self.lock.acquire("main", 600)
+        self.assertEqual(release_out(self, self.lock, tok), "")
+        self.assertFalse(self.lock_ref())
+
+    def test_gh_normal_acquire_then_release_prints_no_line(self):
+        S = {}
+        def api(self_, *a):
+            p = a[2] if a[0] == "-X" else a[0]
+            if a[:2] == ("-X", "DELETE"):
+                S.pop("ref", None); return 0, ""
+            if a[:2] == ("-X", "POST"):
+                if p.endswith("git/commits"): return 0, "c1"
+                if "ref" in S: return 1, "HTTP 422"
+                S["ref"] = "c1"; return 0, "{}"
+            if "/git/ref/merge-lock/" in p:
+                return (0, S["ref"]) if "ref" in S else (1, "HTTP 404: Not Found")
+            if "/git/ref/heads/" in p: return 0, "head1"
+            if "/git/commits/head1" in p: return 0, "tree1"
+            if "/git/commits/c1" in p: return 0, "merge lock\nexpires: 2000\nowner: x"
+            return 1, "unhandled " + p
+        with unittest.mock.patch.object(merge.GhLock, "api", api):
+            lock = merge.GhLock(now=lambda: 1000.0)
+            tok = lock.acquire("main", 600)
+            self.assertEqual(release_out(self, lock, tok), "")
+            self.assertNotIn("ref", S)
+
+    def test_git_release_says_so_when_the_delete_fails(self):
+        tok = self.lock.acquire("main", 600)
+        sh(self.co, "git", "remote", "set-url", "origin", os.path.join(self.t, "gone.git"))
+        out = release_out(self, self.lock, tok)
+        self.assertIn("the lock release failed", out)
+        self.assertIn("merge --unlock", out)
+
+    def test_git_release_says_so_when_the_token_was_replaced(self):
+        tok = self.lock.acquire("main", 600)
+        self.lock.unlock("main")
+        merge.GitLock(self.other, now=lambda: self.now).acquire("main", 600)
+        out = release_out(self, self.lock, tok)
+        self.assertIn("not this run's", out)
+        self.assertTrue(self.lock_ref())  # the other run's lock is left
+
+class GhReleaseReports(unittest.TestCase):
+    """GhLock.api is patched, so these run on Windows too."""
+    def lock_with(self, sha_on_read, delete=(0, ""), read_fail=None):
+        calls = []
+        def api(self_, *a):
+            calls.append(a)
+            if a[:2] == ("-X", "DELETE"):
+                return delete
+            if "/git/ref/merge-lock/" in a[0]:
+                return read_fail or (0, sha_on_read)
+            if "/git/commits/" in a[0]:
+                return 0, "merge lock\nexpires: 2000\nowner: x"
+            return 1, "unhandled"
+        patcher = unittest.mock.patch.object(merge.GhLock, "api", api)
+        patcher.start(); self.addCleanup(patcher.stop)
+        return merge.GhLock(now=lambda: 1000.0), calls
+
+    def test_delete_failure_is_reported(self):
+        lock, _ = self.lock_with("tok", delete=(1, "HTTP 500 boom"))
+        out = release_out(self, lock, "tok")
+        self.assertIn("the lock release failed", out)
+        self.assertIn("boom", out)
+
+    def test_read_failure_is_reported_and_never_raises(self):
+        lock, _ = self.lock_with("tok", read_fail=(1, "HTTP 500 down"))
+        out = release_out(self, lock, "tok")
+        self.assertIn("the lock release failed", out)
+
+    def test_a_replaced_token_is_reported_and_nothing_is_deleted(self):
+        lock, calls = self.lock_with("someone-else")
+        out = release_out(self, lock, "tok")
+        self.assertIn("not this run's", out)
+        self.assertFalse([c for c in calls if c[:2] == ("-X", "DELETE")])
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--child":

@@ -4672,7 +4672,9 @@ TEST_BASENAME = re.compile(
     r"|jest\.setup\..+|(?:.*[-_]selftest|selftest_.*)\.(?!md$).+"
     # Shell/PowerShell test suites (incident 2026-10-03): `test_*.sh`, `*_test.sh`, `*.test.ps1`,
     # `*.Tests.ps1` (match runs on the lowercased basename, so `.Tests.ps1` arrives as `.tests.ps1`).
-    r"|test_.*\.sh|.*_test\.sh|.*\.tests?\.ps1)$")
+    r"|test_.*\.sh|.*_test\.sh|.*\.tests?\.ps1"
+    # 2026-10-07: test_stamp.mjs was refused to a test-author and open to a builder: `test_*.{js,mjs,cjs,ts,jsx,tsx}`.
+    r"|test_.*\.(?:[cm]js|[jt]sx?))$")
 # SELF-TEST files (`*-selftest.*`, `*_selftest.*`, `selftest_*.*`) are test paths, except .md notes.
 # Incident 2026-10-02: Banchi self-test files had the role split inverted (builder edited them).
 # `selftestify.py`, `myselftest.py` and a bare `scripts/selftest` match no shape.

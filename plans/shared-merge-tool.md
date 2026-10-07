@@ -25,7 +25,8 @@ A command, and the existing action in `check` mode. No new action.
 
 ```
 merge <pr>              preview: what it would claim and merge. Presses nothing.
-merge <pr> --confirm    claim, push, wait, merge, then sync the local main.
+merge <pr> --confirm [--session NAME]
+                        claim, push, wait, merge, then sync the local main.
 merge --unlock          remove this repo's merge lock. Reads no other state.
 ```
 
@@ -113,16 +114,23 @@ passes its arguments through and adds nothing.
 
 ## The flow
 
-1. Take the merge lock: create the ref `refs/merge-lock/<defaultBranch>` on origin through the
-   GitHub API. The API refuses a ref that exists, so only one session holds it.
-2. Read the pull request head SHA, base and mergeable state through `gh`. Refuse a
-   closed or merged pull request, and a CONFLICTING or DIRTY one, before any claim. Read the
-   required check names. If the list is empty or unreadable, stop here, before anything is
-   pushed. Then fetch origin and check that origin holds the head `gh` named.
+`<base>` below is the pull request's own base branch, read from `gh`. It is often
+`<defaultBranch>`, and it can be an integration branch.
+
+1. Read the pull request base. Take the merge lock: create the ref `refs/merge-lock/<base>` on
+   origin through the GitHub API. The API refuses a ref that exists, so only one session holds
+   it.
+2. Read the pull request head SHA, base and mergeable state through `gh` again. If the base
+   changed since step 1, stop. Refuse a closed or merged pull request, and a CONFLICTING or
+   DIRTY one, before any claim. Read the required check names: `merge.requiredChecks`, or the
+   branch protection of `<base>`. If the list is empty or unreadable, stop here, before
+   anything is pushed. Then fetch origin and check that origin holds the head `gh` named.
 3. Make a detached temporary worktree at the head SHA. The caller's checkout is never
    touched, and the claim reads exactly the tree that merges.
-4. Run `stamp.mjs --claim --base origin/<defaultBranch>`. The ceiling is every number in the
-   tree and in the base tip, plus each `RETIRED` list. Then run `regenerate`.
+4. If `<base>` is `<defaultBranch>`, run `stamp.mjs --claim --base origin/<defaultBranch>`.
+   The ceiling is every number in the tree and in the base tip, plus each `RETIRED` list. Then
+   run `regenerate`. For any other base, claim nothing. Records stay `id: pending`, and the
+   preview says so. The pull request that takes that base into `<defaultBranch>` claims them.
 5. When nothing changed, skip to step 6 with the head as the SHA: one wait only. Else check
    first. Wait on the head with the wait of step 6 (same deadline and moved-head rules). Any
    red or cancelled check stops the run with nothing claimed and nothing pushed, names the red
@@ -140,11 +148,11 @@ passes its arguments through and adds nothing.
    cancelled check ends the wait, required or not. Every entry of a duplicate check name is
    kept. All must pass, and one red entry ends the wait. A pending check blocks in
    `gh run watch` for at most a minute, then the loop reads again.
-7. Fetch the base again. Run `stamp.mjs --check` against the base tip. Each claimed number
-   must still be free there.
+7. Fetch `<base>` again. Run the silent-undo check and `stamp.mjs --check` against its tip.
+   Each claimed number must still be free there.
 8. Run `gh pr merge <pr> --<method> --match-head-commit <sha>`. Never `--admin`.
-9. Fast-forward the local main to the merge commit that origin holds: in the worktree that
-   holds main, or by `git fetch origin main:main` when none does. Then run each `afterMerge`
+9. Fast-forward the local `<base>` to the merge commit that origin holds: in the worktree that
+   holds `<base>`, or by `git fetch origin <base>:<base>` when none does. Then run each `afterMerge`
    command with `bash -c` in the repo root. A failure of either exits non-zero. The merge
    stays.
 10. Delete the head branch, remove the temporary worktree, and release the lock.
@@ -167,6 +175,8 @@ at step 6. It does not claim twice.
 | A push of the claim or of the revert is refused. | Each push is fast-forward only, so a moved branch refuses it. Nothing is on origin. The tool removes its worktree and stops. A refused revert prints the exact revert command. |
 | Protection refuses the merge. | `gh pr merge` fails. The claim is reverted, and the full gh message is printed. The tool never adds `--admin` and never pushes the default branch. |
 | The tool stops mid-run. | The lock carries an expiry of twice `deadlineMinutes` plus ten (a run waits twice). A rerun breaks an expired lock. `merge --unlock` removes the lock and reads nothing first. |
+| A run waits on a held lock. | The "held" message names the holder (PR, branch, session, pid, host, start) and says alive, dead, or cannot tell. `--unlock` is for a dead holder only. |
+| The release fails, or finds the lock replaced. | `release` never raises. It prints one line that says which. |
 
 The pull request check needs one change. Off the default branch, `check` refuses a number
 the branch added. It must accept a number that a `Record-claim` commit added, when that
@@ -260,3 +270,20 @@ Each lane is one Sonnet builder. When every lane in its "Waits for" cell has mer
     rule "never merge failing CI"). The wait ends green only when every check has finished and
     none failed. Cause: Banchi #604 merged while a non-required check was pending, and it went
     red after the merge. A repo may list `merge.ignoreChecks`, each entry with a reason.
+11. **The lock names its holder.** The lock commit records the PR, branch, host, platform, pid
+    and start time. It also records the session name from the optional `--session NAME` flag. The "held"
+    message prints them and says alive or dead only when the host and the platform match. Another
+    host or platform, an old lock, or a garbled field reads "cannot tell".
+    `--unlock` stays unconditional, and nothing breaks a live lock by itself. A release that
+    fails, or finds another run's lock, says so in one line. Cause: q_max, 2026-10-06. A live
+    `merge 445` held an anonymous lock. An `--unlock` broke it, #451 merged in the gap, and #445
+    hit a conflict.
+12. **The pull request's own base drives every step.** The claim, the lock, the required
+    checks, the silent-undo check and the local fast-forward all use `<base>`. The claim runs
+    only into `<defaultBranch>`. `merge --unlock [<branch>]` removes the lock of `<branch>`.
+    With no branch, it removes the lock of `<defaultBranch>`. If the head holds a
+    `Record-claim` commit and `<base>` is not `<defaultBranch>`, the run stops before the
+    wait, and it names that commit to revert. Each pass of the wait reads the base. A changed
+    base ends the wait. Cause: q_max #497 merged into
+    `claude/speed-wave-2` and claimed D-720 against main's D-719, so the next claim on main
+    takes D-720 too.

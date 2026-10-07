@@ -3480,6 +3480,25 @@ for _tool in ("Edit", "Write"):
         add("test-author: %s of non-test %s is refused" % (_tool, _path), "deny", rule=TA,
             tool=_tool, file_path=_path, **A)
 
+# ---- JS/TS test files are test paths too (incident 2026-10-07): `test_*.js/.mjs/.cjs/.ts/.jsx/.tsx`.
+# The guard refused a test-author's edit of actions/stamp/test_stamp.mjs as product code, and a
+# builder could edit it. Near misses (`contest.mjs`, `latest_x.mjs`, `test_notes.md`, `stamp.mjs`)
+# stay non-test. Each path is a case through is_test_rel: refused for a builder, allowed for a test-author.
+TEST_JS_PATHS = ("actions/stamp/test_stamp.mjs", "test_x.js", "lib/test_x.cjs", "lib/test_x.ts",
+                 "web/test_x.jsx", "web/test_x.tsx")
+TEST_JS_FALSE_ALARMS = ("contest.mjs", "latest_x.mjs", "test_notes.md", "actions/stamp/stamp.mjs")
+for _tool in ("Edit", "Write"):
+    for _path in TEST_JS_PATHS:
+        add("builder-test: %s of JS/TS test %s is refused" % (_tool, _path), "deny", rule=BT,
+            tool=_tool, file_path=_path, **B)
+        add("test-author: %s of JS/TS test %s is allowed" % (_tool, _path), "allow",
+            tool=_tool, file_path=_path, **A)
+    for _path in TEST_JS_FALSE_ALARMS:
+        add("builder-test: %s of non-test %s is allowed" % (_tool, _path), "allow", tool=_tool,
+            file_path=_path, **B)
+        add("test-author: %s of non-test %s is refused" % (_tool, _path), "deny", rule=TA,
+            tool=_tool, file_path=_path, **A)
+
 # ---- the diff, judged at commit, push and SubagentStop
 BASE_FILES = {
     "src/app.py": "x = 1\n", "src/contest.py": "y = 1\n", "latest_results.md": "ok\n",
