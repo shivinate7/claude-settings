@@ -9,7 +9,7 @@ Git half: the merge lock, the temporary worktree, the claim, the push, the rever
 local main, afterMerge and the branch delete. GitHub half (`Host`): required checks, the wait,
 the minute read and `gh pr merge --match-head-commit`.
 """
-import argparse, contextlib, json, os, re, shutil, subprocess, sys, tempfile, time, uuid
+import argparse, contextlib, json, os, re, shutil, socket, subprocess, sys, tempfile, time, uuid
 
 STAMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "actions", "stamp", "stamp.mjs")
 
@@ -105,14 +105,80 @@ def say(*lines):
 # A lock is a commit that a ref points at. The commit message holds the expiry. The ref is
 # refs/merge-lock/<defaultBranch>. Two backends, one interface: acquire, release, unlock.
 
-def lock_message(ttl, now):
-    return f"merge lock\nexpires: {int(now + ttl)}\nowner: {uuid.uuid4().hex}"
+SESSION_MAX = 80  # characters of --session kept; the spec names no cap
+
+def lock_message(ttl, now, holder=None):
+    """`holder` holds pr, branch, session. The session is untrusted text: one line, capped, so it cannot add an `expires:` or `owner:` line."""
+    lines = [f"merge lock\nexpires: {int(now + ttl)}\nowner: {uuid.uuid4().hex}"]
+    if holder:
+        lines += [f"pr: {holder['pr']}", "branch: " + " ".join(str(holder["branch"]).split()), f"host: {socket.gethostname()}",
+                  f"pid: {os.getpid()}", f"started: {int(now)}"]
+        if holder.get("session"):
+            lines.append("session: " + " ".join(holder["session"].split())[:SESSION_MAX])
+    return "\n".join(lines)
 
 def expiry_of(message):
     m = re.search(r"^expires: (\d+)$", message, re.M)
     return int(m.group(1)) if m else float("inf")  # not ours: never expires, only --unlock removes it
 
-class GitLock:
+def pid_alive(pid):
+    """Windows never gets os.kill(pid, 0): signal 0 is CTRL_C_EVENT there."""
+    if os.name == "nt":
+        import ctypes
+        k = ctypes.windll.kernel32
+        h = k.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return k.GetLastError() == 5  # access denied: it exists
+        code = ctypes.c_ulong()
+        ok = k.GetExitCodeProcess(h, ctypes.byref(code))
+        k.CloseHandle(h)
+        return not ok or code.value == 259  # STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass
+    return True  # ponytail: a reused pid reads alive. That is the safe side. A start-time check would close it.
+
+def holder_text(b, held, now):
+    """The one description of a lock's holder. `held` is read()'s (sha, expiry, message)."""
+    f = dict(re.findall(r"^(\w+): (.*)$", held[2], re.M))
+    who = f"PR #{f['pr']}" if "pr" in f else "an unknown holder"
+    extra = [f"branch {f['branch']}"] if "branch" in f else []
+    if "session" in f:
+        extra.append(f'session "{f["session"]}"')
+    text = f"the merge lock on {b} is held by {who}" + (f" ({', '.join(extra)})" if extra else "")
+    if "pid" in f and "host" in f:
+        text += f", pid {f['pid']} on {f['host']}"
+    if f.get("started", "").isdigit():
+        text += ", started " + time.strftime("%H:%M:%SZ", time.gmtime(int(f["started"])))
+    text += f", expires in {held[1] - now:.0f}s." if held[1] != float("inf") else ", never expires."
+    if f.get("host") == socket.gethostname() and f.get("pid", "").isdigit():
+        if pid_alive(int(f["pid"])):
+            return text + " The holder is alive. Wait for it, or ask its session."
+        return text + " The holder is dead. Run: merge --unlock"
+    return text + " Cannot tell if the holder is alive. Ask its owner before: merge --unlock"
+
+class Lock:
+    """What both backends share: a release that reports and never raises (it runs in a `finally`)."""
+    until = holder = None  # holder: set by confirm before acquire; a dict of pr, branch, session
+
+    def release(self, b, token):
+        left = f" It expires in {max(0, self.until - self.now()):.0f}s." if self.until else ""
+        try:
+            cur = self.read(b)
+            if not cur or cur[0] != token:
+                say(f"merge: the lock on {b} was not this run's any more. Someone removed it during the run. Left as is.")
+                return
+            c, why = self.delete(b, token)
+            if not c:
+                return
+        except Exception as e:
+            why = str(e)
+        say(f"merge: the lock release failed: {why}.{left} Run merge --unlock only if no run holds it.")
+
+class GitLock(Lock):
     """Any git remote. Tests use a local bare origin. The create-only push is the one arbiter."""
     def __init__(self, root, now=time.time):
         self.root, self.now = root, now
@@ -125,17 +191,18 @@ class GitLock:
         if not out:
             return None
         if git(self.root, "fetch", "-q", "origin", ref)[0]:
-            return out.split()[0], float("inf")
-        return out.split()[0], expiry_of(git(self.root, "log", "-1", "--format=%B", "FETCH_HEAD")[1])
+            return out.split()[0], float("inf"), ""
+        msg = git(self.root, "log", "-1", "--format=%B", "FETCH_HEAD")[1]
+        return out.split()[0], expiry_of(msg), msg
 
     def acquire(self, b, ttl):
         ref = f"refs/merge-lock/{b}"
         cur = self.read(b)
         if cur and cur[1] > self.now():
-            raise Held(f"the merge lock on {b} is held (expires in {cur[1] - self.now():.0f}s). Wait, or run: merge --unlock")
+            raise Held(holder_text(b, cur, self.now()))
         tree = git(self.root, "mktree", input="")[1]
         c, sha = git(self.root, "-c", "user.name=merge", "-c", "user.email=merge@localhost",
-                     "commit-tree", tree, "-m", lock_message(ttl, self.now()))
+                     "commit-tree", tree, "-m", lock_message(ttl, self.now(), self.holder))
         if c:
             raise Stop("cannot make the lock commit: " + sha)
         # --force-with-lease with an empty expect creates only. With a sha it swaps only that
@@ -144,18 +211,19 @@ class GitLock:
         c, out = git(self.root, "push", "-q", lease, "origin", f"{sha}:{ref}")
         if c:
             raise Held("another run took the merge lock first")
+        self.until = self.now() + ttl
         return sha
 
-    def release(self, b, token):
+    def delete(self, b, token):
         ref = f"refs/merge-lock/{b}"
-        git(self.root, "push", "-q", f"--force-with-lease={ref}:{token}", "origin", f":{ref}")
+        return git(self.root, "push", "-q", f"--force-with-lease={ref}:{token}", "origin", f":{ref}")
 
     def unlock(self, b):
         c, out = git(self.root, "push", "-q", "origin", f":refs/merge-lock/{b}")
         if c and "does not exist" not in out:
             raise Stop("unlock failed: " + out)
 
-class GhLock:
+class GhLock(Lock):
     """Real use: the GitHub API. The API refuses a ref that exists, so one run wins."""
     def __init__(self, now=time.time):
         self.now = now
@@ -171,31 +239,30 @@ class GhLock:
                 return None
             raise Stop("cannot read the merge lock: " + sha)
         c, out = self.api(f"repos/{{owner}}/{{repo}}/git/commits/{sha}", "--jq", ".message")
-        return sha, (expiry_of(out) if not c else float("inf"))
+        return (sha, expiry_of(out), out) if not c else (sha, float("inf"), "")
 
     def acquire(self, b, ttl):
         cur = self.read(b)
         if cur and cur[1] > self.now():
-            raise Held(f"the merge lock on {b} is held (expires in {cur[1] - self.now():.0f}s). Wait, or run: merge --unlock")
+            raise Held(holder_text(b, cur, self.now()))
         if cur:  # ponytail: the API cannot delete "only if the ref is still X". Window: from this run's read of the expired lock to its delete. If another run breaks the lock and creates a live one inside that window, this delete removes the live lock, and the create below then succeeds, so both runs hold it. The window is a few API calls. Close it with a lock backend that has compare-and-swap.
             self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/refs/merge-lock/{b}")
         c, head = self.api(f"repos/{{owner}}/{{repo}}/git/ref/heads/{b}", "--jq", ".object.sha")
         c2, tree = self.api(f"repos/{{owner}}/{{repo}}/git/commits/{head}", "--jq", ".tree.sha") if not c else (c, head)
         if c2:
             raise Stop("cannot read the base branch: " + tree)
-        c, sha = self.api("-X", "POST", "repos/{owner}/{repo}/git/commits", "-f", f"message={lock_message(ttl, self.now())}",
+        c, sha = self.api("-X", "POST", "repos/{owner}/{repo}/git/commits", "-f", f"message={lock_message(ttl, self.now(), self.holder)}",
                           "-f", f"tree={tree}", "--jq", ".sha")
         if c:
             raise Stop("cannot make the lock commit: " + sha)
         c, out = self.api("-X", "POST", "repos/{owner}/{repo}/git/refs", "-f", f"ref=refs/merge-lock/{b}", "-f", f"sha={sha}")
         if c:
             raise Held("another run took the merge lock first")
+        self.until = self.now() + ttl
         return sha
 
-    def release(self, b, token):
-        cur = self.read(b)
-        if cur and cur[0] == token:
-            self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/refs/merge-lock/{b}")
+    def delete(self, b, token):
+        return self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/refs/merge-lock/{b}")
 
     def unlock(self, b):
         c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/refs/merge-lock/{b}")
@@ -586,22 +653,23 @@ def preview(root, cfg, cfgrel, n, host, lock):
     m = cfg.get("merge", {})
     held = lock.read(base)
     say(f"merge: PREVIEW for #{n} ({info['branch']} at {info['head'][:9]}). Nothing was pressed.",
-        f"  lock:   " + ("held" if held and held[1] > lock.now() else "free"),
+        f"  lock:   " + (holder_text(base, held, lock.now()) if held and held[1] > lock.now() else "free"),
         f"  head checks: {host.head_state(n)}",
         "  claim:  " + (f"already claimed ({resumed}); a run resumes at the wait" if resumed else trailer or "nothing to claim"),
         f"  then:   push HEAD:{info['branch']}, wait for the checks, `gh pr merge --{m.get('method', '?')} --match-head-commit`,",
         f"          move local {base}, run {len(m.get('afterMerge', []))} afterMerge command(s)" + (", delete the branch." if m.get("deleteBranch") else "."))
 
-def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok=""):
+def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session=""):
     m = cfg.get("merge", {})
     for k in ("method", "deadlineMinutes"):
         if k not in m:
             raise Stop(f"{cfgrel} has no merge.{k}. Read it from the repo; the tool never guesses it.")
     base, base_ref = cfg["defaultBranch"], f"origin/{cfg['defaultBranch']}"
+    info = host.pr(n)  # a read: acquire never waits, so the head cannot move before the lock is ours
+    lock.holder = {"pr": n, "branch": info["branch"], "session": session}
     token = lock.acquire(base, (2 * m["deadlineMinutes"] + 10) * 60)  # two waits: the head, then the claim
     tmp = wt = claim_sha = None
     try:
-        info = host.pr(n)
         refuse_bad_pr(info)
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
         branch = info["branch"]
@@ -689,6 +757,7 @@ def main(argv, host=None, lock=None):
     p.add_argument("--confirm", action="store_true")
     p.add_argument("--unlock", action="store_true")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
+    p.add_argument("--session", default="", metavar="NAME", help="your session name; the lock shows it to waiting runs")
     p.add_argument("--config", default=".github/stamp.json")
     a = p.parse_args(argv)
     if a.unlock == (a.pr is not None) or (a.unlock and a.confirm):
@@ -705,7 +774,7 @@ def main(argv, host=None, lock=None):
             return 0
         ignore = ignore_checks(cfg)
         h = host or Host(cfg.get("merge", {}).get("requiredChecks", "protection"), cfg["defaultBranch"], ignore=ignore)
-        return (confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok) if a.confirm else preview(root, cfg, a.config, a.pr, h, lock)) or 0
+        return (confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session) if a.confirm else preview(root, cfg, a.config, a.pr, h, lock)) or 0
     except Stop as e:
         print(f"merge: {e}", file=sys.stderr)
         return 1
