@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Claude Code hook: get the session's handoff ready before compaction.
 
-Spec: decisions/precompact-handoff.md. Three modes, one file. Neither mode calls a model:
+Spec: decisions/precompact-handoff.md. Three modes, one file. No mode calls a model:
 the owner rejected a `claude -p` child, since it needs its own command-line login, and
 the desktop app has none.
 
@@ -12,7 +12,7 @@ the desktop app has none.
   time).
 
   SessionStart --reorient (stdin: session_id) -- reads that state and prints a short
-  message: follow the installed prompt file, rewrite the session's own handoff at
+  message: follow the installed prompt file, patch the session's own handoff at
   ~/.claude/state/handoff/<session_id>.handoff.md, then use the digest (or, with no usable
   digest, the compaction summary and the prior handoff alone).
 
