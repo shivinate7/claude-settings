@@ -12,7 +12,7 @@ It holds the last known state.
 ## 2. Use the session's own handoff
 
 The reorient message names your handoff file:
-`~/.claude/state/handoff/<session_id>.handoff.md` (under `CLAUDE_CONFIG_DIR` when set).
+`~/.claude/handoffs/<session_id>.md` (under `CLAUDE_CONFIG_DIR` when set).
 Use that path. It is per session and
 outside git, so sessions on other branches never collide on it. Never keep the handoff
 in a scratchpad or a temp folder.
