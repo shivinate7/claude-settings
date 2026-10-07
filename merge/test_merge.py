@@ -616,7 +616,7 @@ class Stopped(Env):
             merge.drop_worktree(self.co, tmp, wt)
 
 class BaseAware(Env):
-    """Plan "The flow" and "Settled by the owner" item 11: the pull request's own base drives every
+    """Plan "The flow" and "Settled by the owner" item 12: the pull request's own base drives every
     step. Cause: q_max #497 merged into claude/speed-wave-2 and claimed D-720 against main."""
     BASE = "integ"
 
@@ -729,6 +729,55 @@ class BaseAware(Env):
         self.assertIn("claim", [m for m, _ in self.modes])
         self.assertEqual(self.claims("main"), 1)
         self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
+
+    def test_A_preview_reads_the_lock_of_the_base(self):  # mutant: lock.read(cfg["defaultBranch"]) in preview()
+        self.put_locks(self.BASE)  # live on integ, none on main
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        self.assertIn(f"lock:   the merge lock on {self.BASE} is held", out)  # say() joins its lines with spaces
+
+    def test_B_a_head_that_holds_an_old_claim_stops_before_the_wait_on_another_base(self):
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "commit", "-q", "--allow-empty", "-m", "Claim record numbers", "-m", "Record-claim: D-002")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        claim = sh(o, "git", "rev-parse", "HEAD")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn(claim[:7], out)  # names the claim commit by its short SHA
+        self.assertEqual(self.host.waits, [])  # stopped before the wait
+        self.assertFalse(getattr(self.host, "merged", False))
+        self.assertEqual(self.head(), claim)  # nothing pushed
+        self.assertNotIn("refs/merge-lock/", self.refs())
+
+    def test_C_a_base_that_changes_during_the_wait_ends_the_wait_and_merges_nothing(self):
+        fake = self.host
+        class WaitHost(merge.Host):  # the real wait loop; every other read comes from the fake
+            def __init__(h):
+                super().__init__(["gates"], minute=60, now=lambda: 0, pause=lambda s: None)
+                h.in_wait, h.passes = False, 0
+            def pr(h, n):
+                info = fake.pr(n)
+                if h.in_wait:
+                    h.passes += 1
+                    if h.passes > 1:
+                        info["base"] = "other-base"  # the second pass of the wait sees a new base
+                return info
+            def required_names(h): return ["gates"]
+            def checks(h, n): return {"gates": [("pass", "")]}
+            def runs(h, sha): return []
+            def head_state(h, n): return "green"
+            def wait_checks(h, *a, **k):
+                h.in_wait = True
+                try:
+                    return super().wait_checks(*a, **k)
+                finally:
+                    h.in_wait = False
+            def merge(h, *a): return fake.merge(*a)
+        rc, out = self.run_merge("7", "--confirm", host=WaitHost())
+        self.assertEqual(rc, 1, out)
+        self.assertFalse(getattr(fake, "merged", False), out)
+        self.assertNotIn("refs/merge-lock/", self.refs())
 
 class Unlock(Env):
     def test_unlock_removes_a_live_lock_and_reads_nothing_first(self):
