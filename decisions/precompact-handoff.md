@@ -103,6 +103,9 @@ the hook already owns. Rulings still go to tracked homes at once
 - The hook reads the limit from settings.json. Claude Code also caps compaction at the
   model's own window, which the hook cannot see. On a smaller model, compaction can fire
   before a checkpoint.
+- The reply written after a checkpoint block runs with `stop_hook_active` set, so the
+  other Stop gates skip it. When another Stop hook blocked first, the checkpoint fires one
+  stop later.
 - Each checkpoint costs one handoff update. The patch costs one read of the digest, about
   15k tokens.
 
