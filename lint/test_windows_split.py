@@ -44,24 +44,30 @@ REQUIRED = [
 
 
 def windows_jobs(text):
-    """{job name: [single-line run commands]} for each job whose runs-on is windows-latest."""
-    jobs, name, in_jobs = {}, None, False
+    """{job: {"if": job-level if or None, "steps": [{key: value}]}} for windows-latest jobs.
+
+    Step keys sit at 8 spaces, or inline after `- ` at 6. Block scalars (`run: |`) read as "|".
+    """
+    jobs, job, in_jobs = {}, None, False
     for line in text.splitlines():
         if re.match(r"^jobs:\s*$", line):
             in_jobs = True
         elif in_jobs and (m := re.match(r"^  ([\w-]+):\s*$", line)):
-            name = m.group(1)
-            jobs[name] = {"os": None, "runs": []}
-        elif name and (m := re.match(r"^    runs-on:\s*(\S+)", line)):
-            jobs[name]["os"] = m.group(1)
-        elif name and (m := re.match(r"^\s+(?:- )?run:\s+(\S.*?)\s*$", line)) and m.group(1)[0] not in "|>":
-            jobs[name]["runs"].append(m.group(1))
-    return {n: j["runs"] for n, j in jobs.items() if j["os"] == "windows-latest"}
+            job = jobs[m.group(1)] = {"os": None, "if": None, "steps": []}
+        elif not job:
+            continue
+        elif m := re.match(r"^    (runs-on|if):\s*(\S.*?)\s*$", line):
+            job["os" if m.group(1) == "runs-on" else "if"] = m.group(2)
+        elif m := re.match(r"^      - (\w+):\s*(.*?)\s*$", line):
+            job["steps"].append({m.group(1): m.group(2)})
+        elif (m := re.match(r"^        (\w+):\s*(.*?)\s*$", line)) and job["steps"]:
+            job["steps"][-1][m.group(1)] = m.group(2)
+    return {n: j for n, j in jobs.items() if j["os"] == "windows-latest"}
 
 
 def placement_problems(text):
     """Strings naming each suite not run exactly once, or too few carrying jobs."""
-    jobs = windows_jobs(text)
+    jobs = {n: [st.get("run") for st in j["steps"]] for n, j in windows_jobs(text).items()}
     problems = []
     for cmd in REQUIRED:
         homes = [n for n, runs in jobs.items() for r in runs if r == cmd]
@@ -70,6 +76,40 @@ def placement_problems(text):
     carrying = [n for n, runs in jobs.items() if any(r in REQUIRED for r in runs)]
     if len(carrying) < MIN_JOBS:
         problems.append(f"{len(carrying)} windows-latest jobs carry the suites, need {MIN_JOBS}: {carrying}")
+    return problems
+
+
+# Steps whose `shell:` is pinned. Any other REQUIRED step must set none.
+SHELL = {"sh hooks/test_install_src.sh": "bash", "bash actions/stamp/test_action.sh": "bash"}
+# Steps whose whole `if:` is pinned (the harness must stay off pull_request and on its scope flag).
+IF_PIN = {"python janitor/mutate_sweep.py":
+          "${{ !cancelled() && github.event_name != 'pull_request' && steps.scope.outputs.sweep == 'true' }}"}
+
+
+def hardening_problems(text):
+    """A carrying job has no job-level if, a scope step and setup-python; a REQUIRED step keeps
+    `!cancelled()`, its pinned shell and its pinned if."""
+    problems = []
+    for name, job in windows_jobs(text).items():
+        steps = job["steps"]
+        if not any(st.get("run") in REQUIRED for st in steps):
+            continue
+        if job["if"] is not None:
+            problems.append(f"{name}: job-level if: {job['if']}")
+        if not any(st.get("id") == "scope" and "harness-scope.sh" in st.get("run", "") for st in steps):
+            problems.append(f"{name}: no scope step")
+        if not any(st.get("uses", "").startswith("actions/setup-python@") for st in steps):
+            problems.append(f"{name}: no setup-python")
+        for st in steps:
+            cmd = st.get("run")
+            if cmd not in REQUIRED:
+                continue
+            if "!cancelled()" not in st.get("if", ""):
+                problems.append(f"{name}: {cmd!r} if lacks !cancelled(): {st.get('if')}")
+            if cmd in IF_PIN and st.get("if") != IF_PIN[cmd]:
+                problems.append(f"{name}: {cmd!r} if is not the pinned text: {st.get('if')}")
+            if st.get("shell") != SHELL.get(cmd):
+                problems.append(f"{name}: {cmd!r} shell is {st.get('shell')}, want {SHELL.get(cmd)}")
     return problems
 
 
@@ -86,6 +126,9 @@ class WindowsSplit(unittest.TestCase):
     def test_suites_spread_over_enough_jobs(self):
         bad = [p for p in placement_problems(self.text) if "carry" in p]
         self.assertEqual(bad, [])
+
+    def test_suites_keep_their_conditions(self):
+        self.assertEqual(hardening_problems(self.text), [])
 
     def test_checker_sees_drop_and_duplicate(self):
         def doc(*jobs):
