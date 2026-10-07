@@ -1282,6 +1282,47 @@ class LockHolder(Env):
         self.assertIn("pr: 7", msg.splitlines(), msg)
         self.assertLess(len(msg), 1000)
 
+    def garbled(self, **fields):
+        f = {"pid": os.getpid(), "started": 1790000000}; f.update(fields)
+        try:
+            out = self.held(f"merge lock\nexpires: {int(self.now + 600)}\nowner: abc123\npr: 445\nbranch: b\n"
+                            f"host: {socket.gethostname()}\npid: {f['pid']}\nstarted: {f['started']}")
+        except Exception as e:
+            self.fail(f"the Held text crashed: {type(e).__name__}: {e}")
+        self.assertIn("Cannot tell if the holder is alive", out)
+        self.assertNotIn("Traceback", out)
+        self.assertNotIn("The holder is dead", out)
+
+    def test_a_pid_too_big_for_the_os_reads_cannot_tell(self):
+        self.garbled(pid=10 ** 12)
+
+    def test_a_non_ascii_digit_pid_reads_cannot_tell(self):
+        self.garbled(pid="²")
+
+    def test_a_non_ascii_digit_started_reads_cannot_tell(self):
+        self.garbled(started="²")
+
+    def test_a_twenty_digit_started_reads_cannot_tell(self):
+        self.garbled(started="1" * 20)
+
+    def test_the_same_host_name_on_another_platform_reads_cannot_tell_never_dead(self):
+        other = "linux" if sys.platform == "win32" else "win32"
+        out = self.held(self.new_message(socket.gethostname(), dead_pid()) + f"\nplatform: {other}")
+        self.assertIn("Cannot tell if the holder is alive", out)
+        self.assertNotIn("The holder is dead", out)
+
+    def test_the_lock_records_this_platform(self):
+        msg, _ = self.peek()
+        self.assertIn(f"platform: {sys.platform}", msg.splitlines(), msg)
+
+    def test_the_module_usage_names_session(self):
+        self.assertIn("--session", merge.__doc__)
+
+    def test_a_blank_session_writes_no_session_line(self):
+        msg, _ = self.peek("--session", " \t ")
+        self.assertIn("pr: 7", msg.splitlines(), msg)
+        self.assertNotIn("session:", msg)
+
     @unittest.skipUnless(os.name == "nt", "the Windows probe: os.kill(pid, 0) is CTRL_C_EVENT there")
     def test_windows_liveness_never_calls_os_kill(self):
         self.push_lock(self.new_message(socket.gethostname(), os.getpid()))
@@ -1304,6 +1345,33 @@ def release_out(test, lock, token):
     return out.getvalue() + err.getvalue()
 
 class ReleaseReports(Env):
+    def test_a_normal_acquire_then_release_prints_no_line(self):
+        tok = self.lock.acquire("main", 600)
+        self.assertEqual(release_out(self, self.lock, tok), "")
+        self.assertFalse(self.lock_ref())
+
+    def test_gh_normal_acquire_then_release_prints_no_line(self):
+        S = {}
+        def api(self_, *a):
+            p = a[2] if a[0] == "-X" else a[0]
+            if a[:2] == ("-X", "DELETE"):
+                S.pop("ref", None); return 0, ""
+            if a[:2] == ("-X", "POST"):
+                if p.endswith("git/commits"): return 0, "c1"
+                if "ref" in S: return 1, "HTTP 422"
+                S["ref"] = "c1"; return 0, "{}"
+            if "/git/ref/merge-lock/" in p:
+                return (0, S["ref"]) if "ref" in S else (1, "HTTP 404: Not Found")
+            if "/git/ref/heads/" in p: return 0, "head1"
+            if "/git/commits/head1" in p: return 0, "tree1"
+            if "/git/commits/c1" in p: return 0, "merge lock\nexpires: 2000\nowner: x"
+            return 1, "unhandled " + p
+        with unittest.mock.patch.object(merge.GhLock, "api", api):
+            lock = merge.GhLock(now=lambda: 1000.0)
+            tok = lock.acquire("main", 600)
+            self.assertEqual(release_out(self, lock, tok), "")
+            self.assertNotIn("ref", S)
+
     def test_git_release_says_so_when_the_delete_fails(self):
         tok = self.lock.acquire("main", 600)
         sh(self.co, "git", "remote", "set-url", "origin", os.path.join(self.t, "gone.git"))
