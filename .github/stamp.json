@@ -1,0 +1,11 @@
+{
+  "defaultBranch": "main",
+  "kinds": [],
+  "merge": {
+    "method": "merge",
+    "requiredChecks": ["gates", "gates-windows", "gates-windows-merge", "gates-windows-rest", "gates-macos", "shell-macos", "pointer-windows"],
+    "deadlineMinutes": 30,
+    "afterMerge": [],
+    "deleteBranch": true
+  }
+}
