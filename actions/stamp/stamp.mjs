@@ -42,8 +42,8 @@ import * as headingFormat from "./formats/heading.mjs";
 
 export function loadConfig(path) {
   const config = JSON.parse(readFileSync(path, "utf8"));
-  if (!Array.isArray(config.kinds) || !config.kinds.length) {
-    throw new Error("config.kinds must be a non-empty array");
+  if (!Array.isArray(config.kinds)) {  // [] is allowed: a repo with no records
+    throw new Error("config.kinds must be an array");
   }
   if (config.regenerate !== undefined && typeof config.regenerate !== "string") {
     throw new Error("config.regenerate must be a string: a shell command");
