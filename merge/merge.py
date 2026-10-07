@@ -2,11 +2,11 @@
 """The shared merge tool, git half. Plan: plans/shared-merge-tool.md, "The flow".
 
   merge <pr>              preview: what it would claim and merge. Presses nothing.
-  merge <pr> --confirm [--session NAME]   lock, claim, push, wait, merge, sync local main, clean up.
-  merge --unlock          remove this repo's merge lock. Reads no lock state first.
+  merge <pr> --confirm [--session NAME]   lock, claim, push, wait, merge, sync the local base, clean up.
+  merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Reads no lock state first.
 
 Git half: the merge lock, the temporary worktree, the claim, the push, the revert, resume, the
-local main, afterMerge and the branch delete. GitHub half (`Host`): required checks, the wait,
+local base branch, afterMerge and the branch delete. GitHub half (`Host`): required checks, the wait,
 the minute read and `gh pr merge --match-head-commit`.
 """
 import argparse, contextlib, json, os, re, shutil, socket, subprocess, sys, tempfile, time, uuid
@@ -297,6 +297,7 @@ class Host:
         if c:
             raise Stop("gh pr view failed: " + out)
         d = json.loads(out)
+        self.base = d["baseRefName"]  # the PR's own base drives required_names
         return {"head": d["headRefOid"], "branch": d["headRefName"], "base": d["baseRefName"], "state": d["state"],
                 "mergeable": d["mergeable"], "merge_state": d["mergeStateStatus"]}
 
@@ -339,6 +340,7 @@ class Host:
         not, ends the wait, and any pending check, required or not, is waited on. No sleep: a pending check blocks in `gh run watch <id> --exit-status` for at
         most a minute, then the loop reads again."""
         names = self.required_names()
+        base = self.base  # the base read under the lock: the last pr() before the wait
         end = self.now() + deadline_minutes * 60
         settled = False
         while True:
@@ -348,6 +350,8 @@ class Host:
                     return False, f"the deadline of {deadline_minutes} minutes passed. GitHub still shows the head before the push."
                 self.pause(self.minute)
                 continue
+            if info["base"] != base:
+                return False, f"the base of the pull request changed from {base} to {info['base']} during the wait."
             if info["head"] != sha:
                 return False, f"the branch head moved to {info['head'][:9]} during the wait ({sha[:9]} was waited on). Run again."
             if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
@@ -481,9 +485,13 @@ def node_stamp(wt, cfgrel, mode, base):
     env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_REF", "GITHUB_BASE_REF")}
     return sh(["node", STAMP, f"--{mode}", "--base", base, "--config", os.path.join(wt, cfgrel), "--root", wt], env=env)
 
+def head_claim(wt):
+    """The Record-claim ids on HEAD's last commit, or ''."""
+    return git(wt, "log", "-1", "--format=%(trailers:key=Record-claim,valueonly)", "HEAD")[1].strip()
+
 def own_claim(wt, cfgrel, base):
     """The trailer ids when HEAD is this tool's claim and each number is still free, else None."""
-    ids = git(wt, "log", "-1", "--format=%(trailers:key=Record-claim,valueonly)", "HEAD")[1].strip()
+    ids = head_claim(wt)
     if not ids:
         return None
     c, out = node_stamp(wt, cfgrel, "check", base)
@@ -546,7 +554,7 @@ def holder(root, branch):
     return None
 
 def ff_main(root, base, commit):
-    """Move the local default branch onto `commit`, a commit that origin holds."""
+    """Move the local base branch onto `commit`, a commit that origin holds."""
     c, out = git(root, "fetch", "-q", "origin")
     if c:
         raise Stop("git fetch origin failed, so the local main cannot be moved: " + out)
@@ -644,21 +652,24 @@ def ignore_checks(cfg):
     return out
 
 def preview(root, cfg, cfgrel, n, host, lock):
-    base = cfg["defaultBranch"]
     info = host.pr(n)
     refuse_bad_pr(info)
-    tmp, wt = open_worktree(root, info, base)
-    try:
-        resumed = own_claim(wt, cfgrel, f"origin/{base}")
-        trailer = None if resumed else do_claim(wt, cfgrel, f"origin/{base}")
-    finally:
-        drop_worktree(root, tmp, wt)
+    base = info["base"]
+    resumed = trailer = None
+    if base == cfg["defaultBranch"]:  # ids are claimed only on the default branch
+        tmp, wt = open_worktree(root, info, base)
+        try:
+            resumed = own_claim(wt, cfgrel, f"origin/{base}")
+            trailer = None if resumed else do_claim(wt, cfgrel, f"origin/{base}")
+        finally:
+            drop_worktree(root, tmp, wt)
     m = cfg.get("merge", {})
     held = lock.read(base)
     say(f"merge: PREVIEW for #{n} ({info['branch']} at {info['head'][:9]}). Nothing was pressed.",
         f"  lock:   " + (holder_text(base, held, lock.now()) if held and held[1] > lock.now() else "free"),
         f"  head checks: {host.head_state(n)}",
         "  claim:  " + (f"already claimed ({resumed}); a run resumes at the wait" if resumed else trailer or "nothing to claim"),
+        *([] if base == cfg["defaultBranch"] else [f"  ids:    stay pending: {base} is not the default branch ({cfg['defaultBranch']}); they are claimed when it merges there."]),
         f"  then:   push HEAD:{info['branch']}, wait for the checks, `gh pr merge --{m.get('method', '?')} --match-head-commit`,",
         f"          move local {base}, run {len(m.get('afterMerge', []))} afterMerge command(s)" + (", delete the branch." if m.get("deleteBranch") else "."))
 
@@ -667,19 +678,27 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session=""):
     for k in ("method", "deadlineMinutes"):
         if k not in m:
             raise Stop(f"{cfgrel} has no merge.{k}. Read it from the repo; the tool never guesses it.")
-    base, base_ref = cfg["defaultBranch"], f"origin/{cfg['defaultBranch']}"
     info = host.pr(n)  # a read: acquire never waits, so the head cannot move before the lock is ours
+    base = info["base"]  # the PR's own base; read again under the lock
+    base_ref = f"origin/{base}"
     lock.holder = {"pr": n, "branch": info["branch"], "session": session}
     token = lock.acquire(base, (2 * m["deadlineMinutes"] + 10) * 60)  # two waits: the head, then the claim
     tmp = wt = claim_sha = None
     try:
+        info = host.pr(n)
         refuse_bad_pr(info)
+        if info["base"] != base:
+            raise Stop(f"the base of #{n} changed from {base} to {info['base']} while the lock was taken. Nothing was claimed or pushed.")
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
         branch = info["branch"]
         tmp, wt = open_worktree(root, info, base)
         undo_check(wt, base_ref, unknown_ok)
-        resumed = own_claim(wt, cfgrel, base_ref)
-        if resumed:
+        resumed = own_claim(wt, cfgrel, base_ref) if base == cfg["defaultBranch"] else None
+        if base != cfg["defaultBranch"]:
+            if head_claim(wt):  # an old claim would put real ids into a branch that is not the default
+                raise Stop(f"{info['head'][:7]} on {branch} holds a Record-claim, and {base} is not the default branch. Revert that commit and run again.")
+            say(f"merge: {base} is not the default branch. Ids stay pending; nothing to claim.")
+        elif resumed:
             claim_sha = info["head"]
             say(f"merge: resumed. {branch} already holds the claim {resumed}.")
         else:
@@ -758,12 +777,12 @@ def main(argv, host=None, lock=None):
     p = argparse.ArgumentParser(prog="merge", description=__doc__.split("\n\n")[0])
     p.add_argument("pr", nargs="?", type=int)
     p.add_argument("--confirm", action="store_true")
-    p.add_argument("--unlock", action="store_true")
+    p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
     p.add_argument("--session", default="", metavar="NAME", help="your session name; the lock shows it to waiting runs")
     p.add_argument("--config", default=".github/stamp.json")
     a = p.parse_args(argv)
-    if a.unlock == (a.pr is not None) or (a.unlock and a.confirm):
+    if (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
         p.error("give a pull request number, or --unlock")
     try:
         c, root = sh(["git", "rev-parse", "--show-toplevel"])
@@ -771,12 +790,13 @@ def main(argv, host=None, lock=None):
             raise Stop("not in a git checkout")
         cfg = load_config(root, a.config)
         lock = lock or GhLock()
-        if a.unlock:
-            lock.unlock(cfg["defaultBranch"])
-            say(f"merge: lock on {cfg['defaultBranch']} removed.")
+        if a.unlock is not None:
+            b = cfg["defaultBranch"] if a.unlock is True else a.unlock
+            lock.unlock(b)
+            say(f"merge: lock on {b} removed.")
             return 0
         ignore = ignore_checks(cfg)
-        h = host or Host(cfg.get("merge", {}).get("requiredChecks", "protection"), cfg["defaultBranch"], ignore=ignore)
+        h = host or Host(cfg.get("merge", {}).get("requiredChecks", "protection"), ignore=ignore)
         return (confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session) if a.confirm else preview(root, cfg, a.config, a.pr, h, lock)) or 0
     except Stop as e:
         print(f"merge: {e}", file=sys.stderr)
