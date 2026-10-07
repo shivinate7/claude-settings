@@ -30,7 +30,7 @@ def git(cwd, *a):
     return subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
-def run(paths, event="pull_request", base="auto", before="auto"):
+def run(paths, event="pull_request", base="auto", before="auto", existing=()):
     """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit."""
     with tempfile.TemporaryDirectory() as d:
         git(d, "init", "-q")
@@ -101,6 +101,29 @@ class Scope(unittest.TestCase):
 
     def test_push_with_an_unreadable_range_runs_everything(self):
         self.assertFlags(run(["README.md"], event="push", before="e" * 40), want_true=ALL)
+
+    # Map gaps found in review: each path is read by a suite in another job.
+    def test_merge_tool_change_turns_on_the_suites_that_load_it(self):
+        self.assertFlags(run(["merge/merge.py"]), want_true=["gates_windows", "gates_macos", "guard", "gates_windows_merge"])
+
+    def test_record_slug_checker_change_turns_on_the_guard_suites(self):
+        self.assertFlags(run(["lint/check_record_slugs.py"]), want_true=["gates_windows", "gates_macos", "guard", "code"])
+
+    def test_janitor_launcher_change_turns_on_the_install_suite(self):
+        self.assertFlags(run(["bin/claude-janitor"]), want_true=["gates_windows", "shell_macos"])
+
+    def test_silent_undo_checker_change_turns_on_the_merge_job(self):
+        self.assertFlags(run(["lint/check_silent_undo.py"]), want_true=["gates_windows_merge"])
+
+    def test_session_start_change_turns_on_the_unknown_read_contract_job(self):
+        self.assertFlags(run(["hooks/session_start.sh"]), want_true=["gates_windows_rest"])
+
+    def test_a_new_file_in_a_landed_dir_turns_on_the_install_suite(self):
+        for p in ("agents/new.md", "skills/new/SKILL.md", "output-styles/new.md", "lint/new.py"):
+            self.assertFlags(run([p]), want_true=["gates_windows", "shell_macos"])
+
+    def test_a_modified_md_under_skills_turns_on_nothing(self):
+        self.assertFlags(run(["skills/old/SKILL.md"], existing=["skills/old/SKILL.md"]), want_false=ALL)
 
 
 if __name__ == "__main__":
