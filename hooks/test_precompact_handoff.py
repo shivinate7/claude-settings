@@ -638,6 +638,66 @@ def case_handoff_path_not_frozen():
         c.cleanup()
 
 
+def case_handoffs_dir_is_made():
+    """A fresh cfg has no handoffs dir. Each run that names the path must make it."""
+    def has_dir(c):
+        return os.path.isdir(os.path.dirname(c.handoff_path()))
+
+    c = Case("hdir_reo")
+    try:
+        c.run_reorient()
+        check("handoffs-dir: --reorient without a prior PreCompact makes it", has_dir(c))
+    finally:
+        c.cleanup()
+    c = Case("hdir_reo2")
+    try:
+        tp = os.path.join(c.root, "transcript.jsonl")
+        write_transcript(tp, [transcript_line("user", [{"type": "text", "text": "hello"}])])
+        c.run_precompact(tp)
+        shutil.rmtree(os.path.dirname(c.handoff_path()), ignore_errors=True)
+        c.run_reorient()
+        check("handoffs-dir: --reorient after a PreCompact makes it", has_dir(c))
+    finally:
+        c.cleanup()
+    c = Case("hdir_nudge")
+    try:
+        p = nudge(c, 210000)
+        check("handoffs-dir: a blocking --nudge makes it", is_block(c, p) and has_dir(c),
+              "block=%r out=%r" % (is_block(c, p), p.stdout))
+    finally:
+        c.cleanup()
+    c = Case("hdir_pre")
+    try:
+        tp = os.path.join(c.root, "transcript.jsonl")
+        write_transcript(tp, [transcript_line("user", [{"type": "text", "text": "hello"}])])
+        c.run_precompact(tp)
+        check("handoffs-dir: PreCompact makes it", has_dir(c))
+    finally:
+        c.cleanup()
+
+
+def case_handoffs_dir_keeps_other_sessions():
+    """Another session's handoff stays untouched by reorient, a blocking nudge and PreCompact."""
+    c = Case("hdir_keep")
+    try:
+        other = os.path.join(c.cfg, "handoffs", "other-session.md")
+        put(other, "OTHER SESSION HANDOFF")
+        tp = os.path.join(c.root, "transcript.jsonl")
+        write_transcript(tp, [transcript_line("user", [{"type": "text", "text": "hello"}])])
+        c.run_reorient()
+        nudge(c, 210000)
+        c.run_precompact(tp)
+        try:
+            with open(other, "r", encoding="utf-8") as f:
+                got = f.read()
+        except OSError:
+            got = None
+        check("handoffs-dir: another session's handoff file is kept, content unchanged",
+              got == "OTHER SESSION HANDOFF", "got %r" % got)
+    finally:
+        c.cleanup()
+
+
 # --------------------------------------------------------------------------- the run
 
 
@@ -657,6 +717,8 @@ def main() -> int:
     case_nudge_ignores_bogus_last_entries()
     case_nudge_settings()
     case_handoff_path_not_frozen()
+    case_handoffs_dir_is_made()
+    case_handoffs_dir_keeps_other_sessions()
 
     if FAILED:
         print()
