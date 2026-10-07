@@ -25,7 +25,8 @@ A command, and the existing action in `check` mode. No new action.
 
 ```
 merge <pr>              preview: what it would claim and merge. Presses nothing.
-merge <pr> --confirm    claim, push, wait, merge, then sync the local main.
+merge <pr> --confirm [--session NAME]
+                        claim, push, wait, merge, then sync the local main.
 merge --unlock          remove this repo's merge lock. Reads no other state.
 ```
 
@@ -167,6 +168,8 @@ at step 6. It does not claim twice.
 | A push of the claim or of the revert is refused. | Each push is fast-forward only, so a moved branch refuses it. Nothing is on origin. The tool removes its worktree and stops. A refused revert prints the exact revert command. |
 | Protection refuses the merge. | `gh pr merge` fails. The claim is reverted, and the full gh message is printed. The tool never adds `--admin` and never pushes the default branch. |
 | The tool stops mid-run. | The lock carries an expiry of twice `deadlineMinutes` plus ten (a run waits twice). A rerun breaks an expired lock. `merge --unlock` removes the lock and reads nothing first. |
+| A run waits on a held lock. | The "held" message names the holder (PR, branch, session, pid, host, start) and says alive, dead, or cannot tell. `--unlock` is for a dead holder only. |
+| The release fails, or finds the lock replaced. | `release` never raises. It prints one line that says which. |
 
 The pull request check needs one change. Off the default branch, `check` refuses a number
 the branch added. It must accept a number that a `Record-claim` commit added, when that
@@ -260,3 +263,10 @@ Each lane is one Sonnet builder. When every lane in its "Waits for" cell has mer
     rule "never merge failing CI"). The wait ends green only when every check has finished and
     none failed. Cause: Banchi #604 merged while a non-required check was pending, and it went
     red after the merge. A repo may list `merge.ignoreChecks`, each entry with a reason.
+11. **The lock names its holder.** The lock commit records the PR, branch, host, pid and start
+    time. It also records the session name from the optional `--session NAME` flag. The "held"
+    message prints them and says alive, dead, or cannot tell (another host, or an old lock).
+    `--unlock` stays unconditional, and nothing breaks a live lock by itself. A release that
+    fails, or finds another run's lock, says so in one line. Cause: q_max, 2026-10-06. A live
+    `merge 445` held an anonymous lock. An `--unlock` broke it, #451 merged in the gap, and #445
+    hit a conflict.
