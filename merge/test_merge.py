@@ -1667,6 +1667,7 @@ class ResolveProgram(unittest.TestCase):
             self.assertEqual(merge.resolve_program("bash", env), git_bash)
 
 @windows_slice
+@unittest.skipUnless(os.name == "nt", "pid_alive's kernel32 branches exist only on Windows")
 class PidAlive(unittest.TestCase):
     """pid_alive (merge.py) on Windows, with kernel32 faked so it runs on any OS."""
     def probe(self, handle, last_error=0, exit_code=259):
