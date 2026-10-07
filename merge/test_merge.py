@@ -1207,9 +1207,9 @@ class LockHolder(Env):
     def old_message(self, expires):
         return f"merge lock\nexpires: {int(expires)}\nowner: abc123"
 
-    def new_message(self, host, pid, expires=None):
+    def new_message(self, host, pid, expires=None, platform=None):
         return (f"merge lock\nexpires: {int(expires or self.now + 600)}\nowner: abc123\n"
-                f"pr: 445\nbranch: b\nhost: {host}\npid: {pid}\nstarted: 1790000000")
+                f"pr: 445\nbranch: b\nhost: {host}\npid: {pid}\nstarted: 1790000000\nplatform: {platform or sys.platform}")
 
     def held(self, message):
         self.push_lock(message)
@@ -1286,7 +1286,7 @@ class LockHolder(Env):
         f = {"pid": os.getpid(), "started": 1790000000}; f.update(fields)
         try:
             out = self.held(f"merge lock\nexpires: {int(self.now + 600)}\nowner: abc123\npr: 445\nbranch: b\n"
-                            f"host: {socket.gethostname()}\npid: {f['pid']}\nstarted: {f['started']}")
+                            f"host: {socket.gethostname()}\npid: {f['pid']}\nstarted: {f['started']}\nplatform: {sys.platform}")
         except Exception as e:
             self.fail(f"the Held text crashed: {type(e).__name__}: {e}")
         self.assertIn("Cannot tell if the holder is alive", out)
@@ -1307,7 +1307,7 @@ class LockHolder(Env):
 
     def test_the_same_host_name_on_another_platform_reads_cannot_tell_never_dead(self):
         other = "linux" if sys.platform == "win32" else "win32"
-        out = self.held(self.new_message(socket.gethostname(), dead_pid()) + f"\nplatform: {other}")
+        out = self.held(self.new_message(socket.gethostname(), dead_pid(), platform=other))
         self.assertIn("Cannot tell if the holder is alive", out)
         self.assertNotIn("The holder is dead", out)
 
