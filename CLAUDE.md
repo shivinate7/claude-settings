@@ -39,7 +39,7 @@ test-author writes the new cases first and shows them red on the old code. The b
 product code until they go green. CI alone runs the full suites and the mutation harnesses. A
 reviewer hunts bypasses and false alarms and never replays a passing run. The test-author's
 recorded red run is the red proof. A reviewer re-runs it only when that record is missing or
-in doubt. The orchestrator reads CI once, on the head it merges.<!-- rule:roles-each-layer-proves-once --> Resume a dead agent by name, never fresh.<!-- rule:roles-resume-by-name -->
+in doubt. The orchestrator reads CI once, on the head it merges.<!-- rule:roles-each-layer-proves-once --> Resume a dead agent by name, never fresh. A finished reviewer's worktree is gone, so send a fresh reviewer the prior report instead.<!-- rule:roles-resume-by-name -->
 
 **Parallelism, two tiers.** Fan tasks out to workers now, each in its own checkout. A
 workflow run, the ultracode path, is a fan-out too. Give each workflow agent that writes
