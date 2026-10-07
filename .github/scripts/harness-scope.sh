@@ -52,9 +52,15 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       *) on="$on $ALL " ;;
     esac
   done <<< "$files"
-  # A new file under these folders changes what test_install_src and the guard suite see.
-  added=$(git diff --name-only --diff-filter=A --no-renames "$range" 2>/dev/null) || added="agents/"
-  grep -Eq '^(agents|skills|output-styles|lint)/' <<< "$added" && on="$on $W $S code "
+  # A new file under a landed dir (landed-dirs.txt, the one list) changes what test_install_src and
+  # the guard suite see. An unreadable or empty list turns everything on.
+  dirs=$(sed 's/#.*//; s/[[:space:]]//g' landed-dirs.txt 2>/dev/null | grep -v '^$' | paste -sd'|' -)
+  if [ -z "$dirs" ]; then
+    on="$on $ALL "
+  else
+    added=$(git diff --name-only --diff-filter=A --no-renames "$range" 2>/dev/null) || on="$on $ALL "
+    grep -Eq "^($dirs)/" <<< "$added" && on="$on $W $S code "
+  fi
 else
   on=" $ALL "
 fi
