@@ -95,9 +95,9 @@ merge would erase the others' state. So each session gets its own file in `~/.cl
 (memory-is-never-a-rulings-only-home), so a lost machine loses only short-term state.
 
 The handoff is not in `state/handoff/` beside the digest. `hooks/guard.py` freezes `state`
-(it holds the undo copies `config_watch.py` restores from), so no session can write
-there. shivinate7/claude-settings#284 first shipped that path, and sessions fell back to their scratchpads. A test
-now asks the guard whether the handoff path is frozen.
+(it holds the undo copies `config_watch.py` restores from), so no session can write there.
+shivinate7/claude-settings#284 first shipped that path, and sessions fell back to their
+scratchpads. A test now asks the guard whether the handoff path is frozen.
 
 ## Known limits
 
