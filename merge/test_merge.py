@@ -15,6 +15,28 @@ import merge  # noqa: E402
 os.environ.update(LC_ALL="C", GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
 
+def windows_slice(x):
+    """Mark a test or a leaf class as Windows-specific. MERGE_TESTS=windows-slice runs only these.
+    Put it outermost on a test, so a skip decorator below it keeps the mark. Never mark a base class."""
+    x._windows_slice = True
+    return x
+
+def iter_tests(suite):
+    for t in suite:
+        yield from iter_tests(t) if isinstance(t, unittest.TestSuite) else [t]
+
+def select_tests(suite, mode):
+    """"" keeps every test. "windows-slice" keeps the marked ones. Anything else, or an empty slice, stops the run."""
+    if mode == "":
+        return suite
+    if mode != "windows-slice":
+        raise SystemExit(f"MERGE_TESTS={mode!r}: want unset or 'windows-slice'. Nothing ran.")
+    keep = [t for t in iter_tests(suite) if t.__class__.__dict__.get("_windows_slice")
+            or getattr(getattr(t, t._testMethodName), "_windows_slice", False)]
+    if not keep:
+        raise SystemExit("MERGE_TESTS=windows-slice: no test is marked. Nothing ran.")
+    return unittest.TestSuite(keep)
+
 def sh(cwd, *cmd):
     r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
     assert r.returncode == 0, (cmd, r.stdout, r.stderr)
@@ -214,6 +236,7 @@ class Flow(Env):
         self.assertIn("nothing to claim", out)
         self.assertEqual(len(self.host.waits), 1)
 
+    @windows_slice
     def test_full_merge_claims_pushes_merges_syncs_cleans(self):
         # A name relative to afterMerge's own cwd (root, i.e. self.co): the command only needs to
         # prove afterMerge ran, not survive bash's own quoting of a native Windows path. An
@@ -239,6 +262,7 @@ class Flow(Env):
         self.assertFalse(self.lock_ref())
         self.assertEqual(self.worktrees(), 1)
 
+    @windows_slice
     def test_afterMerge_runs_in_git_bash_not_the_wsl_stub(self):
         """after_merge() (merge/merge.py:470) hands subprocess.run a bare "bash". On Windows,
         CreateProcess searches C:\\Windows\\System32 before PATH, and that folder holds the WSL
@@ -654,6 +678,7 @@ if p == "refs/merge-lock/main" and method == "DELETE":
 fail("unhandled " + p)
 '''
 
+@windows_slice
 class GhLockTest(unittest.TestCase):
     def setUp(self):
         t = tempfile.mkdtemp(prefix="test-ghlock-")
@@ -806,6 +831,7 @@ class GhHalf(Env):
         self.assertNotIn("pr merge", self.calls())
         self.assertTrue(self.reverted())
 
+    @windows_slice
     def test_an_empty_required_list_is_refused(self):
         before = self.head()
         for kw, extra in (({"required": []}, {}), ({"required": "protection"}, {"contexts": []})):
@@ -1217,6 +1243,7 @@ class LockHolder(Env):
         self.assertEqual(rc, 1, out)
         return out
 
+    @windows_slice
     def test_the_lock_records_the_holder_and_a_second_run_sees_it_alive(self):
         msg, second = self.peek("--session", "S")
         lines = msg.splitlines()
@@ -1236,6 +1263,7 @@ class LockHolder(Env):
         self.assertIn("pr: 7", msg.splitlines())
         self.assertNotIn("session:", msg)
 
+    @windows_slice
     def test_held_says_dead_for_a_lock_on_this_host_whose_pid_is_gone(self):
         out = self.held(self.new_message(socket.gethostname(), dead_pid()))
         for want in ("PR #445", "branch b", "dead", "merge --unlock"):
@@ -1305,12 +1333,14 @@ class LockHolder(Env):
     def test_a_twenty_digit_started_reads_cannot_tell(self):
         self.garbled(started="1" * 20)
 
+    @windows_slice
     def test_the_same_host_name_on_another_platform_reads_cannot_tell_never_dead(self):
         other = "linux" if sys.platform == "win32" else "win32"
         out = self.held(self.new_message(socket.gethostname(), dead_pid(), platform=other))
         self.assertIn("Cannot tell if the holder is alive", out)
         self.assertNotIn("The holder is dead", out)
 
+    @windows_slice
     def test_a_lock_with_no_platform_line_reads_cannot_tell_never_dead(self):
         msg = self.new_message(socket.gethostname(), dead_pid()).rsplit("\nplatform:", 1)[0]
         self.assertNotIn("platform:", msg)
@@ -1330,6 +1360,7 @@ class LockHolder(Env):
         self.assertIn("pr: 7", msg.splitlines(), msg)
         self.assertNotIn("session:", msg)
 
+    @windows_slice
     @unittest.skipUnless(os.name == "nt", "the Windows probe: os.kill(pid, 0) is CTRL_C_EVENT there")
     def test_windows_liveness_never_calls_os_kill(self):
         self.push_lock(self.new_message(socket.gethostname(), os.getpid()))
@@ -1428,6 +1459,62 @@ class GhReleaseReports(unittest.TestCase):
         self.assertIn("not this run's", out)
         self.assertFalse([c for c in calls if c[:2] == ("-X", "DELETE")])
 
+@windows_slice
+class ResolveProgram(unittest.TestCase):
+    """resolve_program (merge.py): bash never resolves under System32; a bare name finds its .cmd shim."""
+    @unittest.skipUnless(os.name == "nt", "the System32 WSL stub is a Windows case")
+    def test_bash_skips_system32(self):
+        t = tempfile.mkdtemp(prefix="test-resolve-"); self.addCleanup(shutil.rmtree, t, True)
+        sysroot = os.path.join(t, "Win"); good = os.path.join(t, "good")
+        for d in (os.path.join(sysroot, "System32"), good):
+            os.makedirs(d); put(os.path.join(d, "bash.exe"), "x")
+        env = {"PATH": os.pathsep.join([os.path.join(sysroot, "System32"), good]), "SystemRoot": sysroot,
+               "ProgramFiles": os.path.join(t, "none")}
+        self.assertEqual(merge.resolve_program("bash", env), os.path.join(good, "bash.exe"))
+
+    @unittest.skipUnless(os.name == "nt", "PATHEXT lookup of a .cmd shim is a Windows case")
+    def test_a_bare_name_finds_its_cmd_shim(self):
+        t = tempfile.mkdtemp(prefix="test-resolve-"); self.addCleanup(shutil.rmtree, t, True)
+        put_shim(os.path.join(t, "fakeprog"), "x")
+        got = merge.resolve_program("fakeprog", {"PATH": t})
+        self.assertEqual(os.path.normcase(got), os.path.normcase(os.path.join(t, "fakeprog.cmd")))
+
+@windows_slice
+class SliceSelector(unittest.TestCase):
+    """MERGE_TESTS=windows-slice keeps only the marked tests; no value keeps all; an unknown value stops."""
+    def all_tests(self):
+        return unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
+
+    def marked(self, t):
+        return bool(t.__class__.__dict__.get("_windows_slice") or getattr(getattr(t, t._testMethodName), "_windows_slice", False))
+
+    def test_the_slice_keeps_only_marked_tests_and_all_of_them(self):
+        full = list(iter_tests(self.all_tests()))
+        got = list(iter_tests(select_tests(self.all_tests(), "windows-slice")))
+        self.assertTrue(0 < len(got) < len(full), (len(got), len(full)))
+        self.assertTrue(all(self.marked(t) for t in got))
+        self.assertEqual(len(got), sum(self.marked(t) for t in full))
+
+    def test_the_slice_holds_the_windows_probe_and_the_bash_resolver_cases(self):
+        names = {t._testMethodName for t in iter_tests(select_tests(self.all_tests(), "windows-slice"))}
+        for want in ("test_windows_liveness_never_calls_os_kill", "test_afterMerge_runs_in_git_bash_not_the_wsl_stub",
+                     "test_the_lock_records_the_holder_and_a_second_run_sees_it_alive"):
+            self.assertIn(want, names)
+
+    def test_no_value_keeps_every_test(self):
+        full = len(list(iter_tests(self.all_tests())))
+        self.assertEqual(len(list(iter_tests(select_tests(self.all_tests(), "")))), full)
+
+    def test_an_unknown_value_fails_loudly_and_runs_nothing(self):
+        with self.assertRaises(SystemExit) as cm:
+            select_tests(self.all_tests(), "windows_slice")
+        self.assertIn("MERGE_TESTS", str(cm.exception))
+        r = subprocess.run([sys.executable, os.path.abspath(__file__)], capture_output=True, text=True,
+                           env=dict(os.environ, MERGE_TESTS="bogus"), timeout=60)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("MERGE_TESTS", r.stdout + r.stderr)
+        self.assertNotIn("Ran ", r.stdout + r.stderr)
+
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--child":
         # A run that dies without cleanup: os._exit at the wait, so no `finally` runs.
@@ -1438,4 +1525,7 @@ if __name__ == "__main__":
                 return True, ""
         os.chdir(sys.argv[2])
         sys.exit(merge.main(["7", "--confirm"], host=Die(sys.argv[2], None), lock=merge.GitLock(sys.argv[2])))
-    unittest.main()
+    class Slicer(unittest.TestLoader):
+        def loadTestsFromModule(self, *a, **k):
+            return select_tests(super().loadTestsFromModule(*a, **k), os.environ.get("MERGE_TESTS", ""))
+    unittest.main(testLoader=Slicer())

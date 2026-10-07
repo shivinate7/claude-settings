@@ -62,13 +62,34 @@ def windows_jobs(text):
             job["steps"].append({m.group(1): m.group(2)})
         elif (m := re.match(r"^        (\w+):\s*(.*?)\s*$", line)) and job["steps"]:
             job["steps"][-1][m.group(1)] = m.group(2)
+        elif (m := re.match(r"^          (\w+):\s*(.*?)\s*$", line)) and job["steps"]:  # an `env:` block key
+            if not isinstance(job["steps"][-1].get("env"), dict):
+                job["steps"][-1]["env"] = {}
+            job["steps"][-1]["env"][m.group(1)] = m.group(2)
     return {n: j for n, j in jobs.items() if j["os"] == "windows-latest"}
+
+
+# On pull_request the Windows merge job runs only the marked tests (MERGE_TESTS=windows-slice).
+# The slice step has the same `run:` as the full step, so it is told apart by its env.
+SLICE = "python merge/test_merge.py [windows-slice]"
+SLICE_ENV = {"MERGE_TESTS": "windows-slice"}
+
+
+def key(st):
+    """A step's run command; a test_merge step with a MERGE_TESTS env reads as SLICE."""
+    run = st.get("run")
+    if run == "python merge/test_merge.py" and isinstance(st.get("env"), dict) and "MERGE_TESTS" in st["env"]:
+        return SLICE
+    return run
 
 
 def placement_problems(text):
     """Strings naming each suite not run exactly once, or too few carrying jobs."""
-    jobs = {n: [st.get("run") for st in j["steps"]] for n, j in windows_jobs(text).items()}
+    jobs = {n: [key(st) for st in j["steps"]] for n, j in windows_jobs(text).items()}
     problems = []
+    homes = [n for n, runs in jobs.items() for r in runs if r == SLICE]
+    if len(homes) != 1:
+        problems.append(f"{SLICE!r} runs {len(homes)} times on windows-latest: {homes}")
     for cmd in REQUIRED:
         homes = [n for n, runs in jobs.items() for r in runs if r == cmd]
         if len(homes) != 1:
@@ -83,7 +104,11 @@ def placement_problems(text):
 SHELL = {"sh hooks/test_install_src.sh": "bash", "bash actions/stamp/test_action.sh": "bash"}
 # Steps whose whole `if:` is pinned (the harness must stay off pull_request and on its scope flag).
 IF_PIN = {"python janitor/mutate_sweep.py":
-          "${{ !cancelled() && github.event_name != 'pull_request' && steps.scope.outputs.sweep == 'true' }}"}
+          "${{ !cancelled() && github.event_name != 'pull_request' && steps.scope.outputs.sweep == 'true' }}",
+          # The full merge suite runs on every event but pull_request; the slice only on it.
+          "python merge/test_merge.py":
+          "${{ !cancelled() && github.event_name != 'pull_request' && steps.scope.outputs.code == 'true' }}",
+          SLICE: "${{ !cancelled() && github.event_name == 'pull_request' && steps.scope.outputs.code == 'true' }}"}
 
 
 def hardening_problems(text):
@@ -92,7 +117,7 @@ def hardening_problems(text):
     problems = []
     for name, job in windows_jobs(text).items():
         steps = job["steps"]
-        if not any(st.get("run") in REQUIRED for st in steps):
+        if not any(key(st) in REQUIRED for st in steps):
             continue
         if job["if"] is not None:
             problems.append(f"{name}: job-level if: {job['if']}")
@@ -101,9 +126,11 @@ def hardening_problems(text):
         if not any(st.get("uses", "").startswith("actions/setup-python@") for st in steps):
             problems.append(f"{name}: no setup-python")
         for st in steps:
-            cmd = st.get("run")
-            if cmd not in REQUIRED:
+            cmd = key(st)
+            if cmd not in REQUIRED and cmd != SLICE:
                 continue
+            if cmd == SLICE and st["env"] != SLICE_ENV:
+                problems.append(f"{name}: slice env is {st['env']}, want {SLICE_ENV}")
             if "!cancelled()" not in st.get("if", ""):
                 problems.append(f"{name}: {cmd!r} if lacks !cancelled(): {st.get('if')}")
             if cmd in IF_PIN and st.get("if") != IF_PIN[cmd]:
@@ -131,15 +158,40 @@ class WindowsSplit(unittest.TestCase):
         self.assertEqual(hardening_problems(self.text), [])
 
     def test_checker_sees_drop_and_duplicate(self):
-        def doc(*jobs):
+        def doc(*jobs, slice_=True):
             return "jobs:\n" + "".join(
                 f"  j{i}:\n    runs-on: windows-latest\n    steps:\n"
                 + "".join(f"      - run: {c}\n" for c in cmds)
+                + ("      - run: python merge/test_merge.py\n        env:\n          MERGE_TESTS: windows-slice\n"
+                   if slice_ and i == 0 else "")
                 for i, cmds in enumerate(jobs)
             )
+        self.assertTrue(placement_problems(doc(REQUIRED[:7], REQUIRED[7:14], REQUIRED[14:], slice_=False)))
         self.assertEqual(placement_problems(doc(REQUIRED[:7], REQUIRED[7:14], REQUIRED[14:])), [])
         self.assertTrue(placement_problems(doc(REQUIRED[1:7], REQUIRED[7:14], REQUIRED[14:])))
         self.assertTrue(placement_problems(doc(REQUIRED[:8], REQUIRED[7:14], REQUIRED[14:])))
+
+    def test_checker_sees_the_merge_slice_defects(self):
+        full_if = "${{ !cancelled() && github.event_name != 'pull_request' && steps.scope.outputs.code == 'true' }}"
+        slice_if = full_if.replace("!=", "==")
+
+        def doc(full_if=full_if, slice_if=slice_if, env="windows-slice", with_full=True):
+            full = (f"      - name: Full\n        if: {full_if}\n        run: python merge/test_merge.py\n"
+                    if with_full else "")
+            return ("jobs:\n  j:\n    runs-on: windows-latest\n    steps:\n"
+                    "      - id: scope\n        run: bash .github/scripts/harness-scope.sh\n"
+                    "      - uses: actions/setup-python@abc # v6\n" + full +
+                    f"      - name: Slice\n        if: {slice_if}\n        env:\n          MERGE_TESTS: {env}\n"
+                    "        run: python merge/test_merge.py\n")
+        self.assertEqual(hardening_problems(doc()), [])
+        self.assertIn("'python merge/test_merge.py' runs 0 times on windows-latest: []",
+                      placement_problems(doc(with_full=False)))  # full run removed
+        self.assertNotIn("'python merge/test_merge.py' runs 0 times on windows-latest: []", placement_problems(doc()))
+        self.assertTrue(hardening_problems(doc(slice_if=full_if)))  # slice runs on push
+        self.assertTrue(hardening_problems(doc(full_if=slice_if)))  # full run on pull_request
+        self.assertTrue(hardening_problems(doc(slice_if=slice_if.replace("!cancelled() && ", ""))))
+        self.assertTrue(hardening_problems(doc(env="full")))  # slice env not pinned
+        self.assertTrue(hardening_problems(doc(full_if=full_if.replace(" && steps.scope.outputs.code == 'true'", ""))))
 
 
 if __name__ == "__main__":
