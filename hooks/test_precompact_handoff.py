@@ -681,8 +681,7 @@ def case_handoffs_dir_keeps_other_sessions():
     c = Case("hdir_keep")
     try:
         other = os.path.join(c.cfg, "handoffs", "other-session.md")
-        put(other, "OTHER SESSION HANDOFF
-")
+        put(other, "OTHER SESSION HANDOFF")
         tp = os.path.join(c.root, "transcript.jsonl")
         write_transcript(tp, [transcript_line("user", [{"type": "text", "text": "hello"}])])
         c.run_reorient()
@@ -694,8 +693,7 @@ def case_handoffs_dir_keeps_other_sessions():
         except OSError:
             got = None
         check("handoffs-dir: another session's handoff file is kept, content unchanged",
-              got == "OTHER SESSION HANDOFF
-", "got %r" % got)
+              got == "OTHER SESSION HANDOFF", "got %r" % got)
     finally:
         c.cleanup()
 
