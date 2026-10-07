@@ -35,6 +35,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    does not prove that no line was lost either: run `lint/check_silent_undo.py` before the merge.
    GitHub's merge queue needs an organization-owned repo, so a personal repo batches by hand or
    through the merge tool.
+   Batch across sessions too. Before a PR runs CI, list the repo's open PRs. When another session's
+   PR will be ready at about the same time, offer one integration branch. A repo may name one merge
+   steward session. That session owns all merges into main.
 9. **Wait without loops.** Watch a run once, in the background, and keep its output. Never poll
    with a sleep loop.
 10. **Prove each new gate red once.** Break the gate's target on a scratch copy. Watch the gate
@@ -52,6 +55,18 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     Merged jobs can make the wait longer. Per-job rounding is measured, not a documented rule.
 14. **Cache the install.** Cache the package install, for example `actions/setup-node` with
     `cache: npm`. Measure the step before and after.
+15. **Split the slowest job in a public repo.** Step 13 does not help there. Split the slowest
+    serial job into parallel jobs instead. Measured: the longest Windows job went from about
+    20 min to 8m59s (PR 289), with no coverage lost.
+16. **Pin every suite in a split-job guard.** A guard that checks a split job's suite list must
+    also pin each suite's `if:`, `shell:` and `!cancelled()`. It must fail on a job-level `if:` or
+    env override. A list-only guard stayed green with a suite turned off (review of PR 289;
+    `MERGE_TESTS` at job level, review of PR 293).
+17. **Slice tests on a slow platform.** On PRs, run a platform-specific test slice. Run the full
+    suite on main and nightly. Measured: the Windows merge job went from 8m59s to 1m13s (PR 293).
+18. **Profile before you refactor test setup.** Compare setup time to test-body time. If
+    the saving is under 20%, stop. Measured: setup was 31% of the time, and setup reuse saved about 9%
+    (decision ci-wall-time-cuts, cut D).
 
 ## Before you skip a required job
 
