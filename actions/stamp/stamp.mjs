@@ -42,8 +42,8 @@ import * as headingFormat from "./formats/heading.mjs";
 
 export function loadConfig(path) {
   const config = JSON.parse(readFileSync(path, "utf8"));
-  if (!Array.isArray(config.kinds) || !config.kinds.length) {
-    throw new Error("config.kinds must be a non-empty array");
+  if (!Array.isArray(config.kinds)) {  // [] is allowed: a repo with no records
+    throw new Error("config.kinds must be an array");
   }
   if (config.regenerate !== undefined && typeof config.regenerate !== "string") {
     throw new Error("config.regenerate must be a string: a shell command");
@@ -890,6 +890,10 @@ if (isMain) {
     process.exit(2);
   }
   const config = loadConfig(args.config);
+  if (!config.kinds.length) {  // one early exit: nothing was read, so nothing is said to be in order
+    console.log(`stamp: kinds is empty: no records are ${args.mode === "claim" ? "claimed" : "checked"}.`);
+    process.exit(0);
+  }
   if (args.mode === "claim") {
     let result;
     try {
