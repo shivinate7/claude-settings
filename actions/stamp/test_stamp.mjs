@@ -1479,6 +1479,18 @@ test("--check with kinds: [] exits 0 and prints no UNKNOWN", () =>
     assert.equal((r.stdout + r.stderr).includes("UNKNOWN"), false);
   }));
 
+test("kinds: [] says it read nothing, never that every record is in order", () =>
+  withTempDir((tmp) => {
+    ["check", "claim"].forEach((mode) => {
+      const root = join(tmp, `repo-${mode}`);
+      const r = runStamp(root, emptyKindsRepo(root, []), mode);
+      const out = r.stdout + r.stderr;
+      assert.equal(r.status, 0, `${mode}: ${out}`);
+      assert.equal(out.includes("kinds is empty") && out.includes("no records"), true, `${mode} must say "kinds is empty" and "no records": ${out}`);
+      assert.equal(out.includes("in order"), false, `${mode} must not claim "in order": ${out}`);
+    });
+  }));
+
 test("config.kinds missing, a string, {} or null is still refused", () =>
   withTempDir((tmp) => {
     [undefined, "decision", {}, null].forEach((kinds, i) => {
