@@ -375,6 +375,151 @@ def case_settings_json():
           bool(found2), "SessionStart hooks: %r" % session_start)
 
 
+# --------------------------------------------------------------------------- Stop --nudge
+# Owner ruling 2026-10-07: on Stop, `--nudge` blocks once per 100k bucket from 200k up.
+
+
+def usage_line(inp, cc=0, cr=0):
+    return json.dumps({"type": "assistant", "timestamp": "2026-10-07T10:00:00Z",
+                       "message": {"content": [{"type": "text", "text": "hi"}],
+                                   "usage": {"input_tokens": inp,
+                                             "cache_creation_input_tokens": cc,
+                                             "cache_read_input_tokens": cr,
+                                             "output_tokens": 5}}})
+
+
+def nudge(c, size, active=False, lines=None, seed=None):
+    """Run --nudge once. `size` is split across the three input counters."""
+    tp = os.path.join(c.root, "t.jsonl")
+    if lines is None:
+        lines = [usage_line(size - 60000 - 30000, 30000, 60000)]
+    write_transcript(tp, lines)
+    if seed is not None:
+        put(c.nudge_path(), json.dumps({"bucket": seed}))
+    payload = {"session_id": c.session_id, "transcript_path": tp,
+               "hook_event_name": "Stop", "stop_hook_active": active}
+    return c.run(["--nudge"], payload)
+
+
+def stored_bucket(c):
+    try:
+        with open(c.nudge_path(), "r", encoding="utf-8") as f:
+            return json.load(f).get("bucket")
+    except Exception:
+        return None
+
+
+def is_block(c, proc):
+    try:
+        obj = json.loads(proc.stdout)
+    except Exception:
+        return False
+    r = obj.get("reason", "")
+    return (obj.get("decision") == "block" and c.handoff_path() in r
+            and "precompact_handoff_prompt.md" in r)
+
+
+def case_nudge():
+    Case.nudge_path = lambda self: os.path.join(
+        self.cfg, "state", "handoff", "%s.nudge.json" % self.session_id)
+    c = Case("nudge")
+    try:
+        p = nudge(c, 150000)
+        check("nudge: 150k is silent and exits 0", p.returncode == 0 and not p.stdout.strip(),
+              "rc=%r out=%r" % (p.returncode, p.stdout))
+        check("nudge: 150k stores bucket -1", stored_bucket(c) == -1, "got %r" % stored_bucket(c))
+
+        p = nudge(c, 210000)
+        check("nudge: 210k first time blocks, names handoff path and prompt file",
+              p.returncode == 0 and is_block(c, p), "rc=%r out=%r" % (p.returncode, p.stdout))
+        check("nudge: 210k stores bucket 0", stored_bucket(c) == 0, "got %r" % stored_bucket(c))
+
+        p = nudge(c, 250000)
+        check("nudge: 250k after 210k is silent", p.returncode == 0 and not p.stdout.strip(),
+              "out=%r" % p.stdout)
+        check("nudge: 250k keeps bucket 0", stored_bucket(c) == 0, "got %r" % stored_bucket(c))
+
+        p = nudge(c, 310000)
+        check("nudge: 310k blocks", is_block(c, p), "out=%r" % p.stdout)
+        check("nudge: 310k stores bucket 1", stored_bucket(c) == 1, "got %r" % stored_bucket(c))
+
+        p = nudge(c, 410000)
+        check("nudge: 410k blocks", is_block(c, p), "out=%r" % p.stdout)
+        check("nudge: 410k stores bucket 2", stored_bucket(c) == 2, "got %r" % stored_bucket(c))
+
+        p = nudge(c, 120000)
+        check("nudge: 120k after 410k (compaction) is silent",
+              p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
+        check("nudge: compaction resets stored bucket to -1", stored_bucket(c) == -1,
+              "got %r" % stored_bucket(c))
+
+        p = nudge(c, 210000)
+        check("nudge: 210k blocks again after reset", is_block(c, p), "out=%r" % p.stdout)
+    finally:
+        c.cleanup()
+
+
+def case_nudge_exact_boundary():
+    c = Case("nudgeb")
+    try:
+        p = nudge(c, 199999)
+        check("nudge: 199,999 is silent", not p.stdout.strip(), "out=%r" % p.stdout)
+        p = nudge(c, 200000)
+        check("nudge: exactly 200,000 blocks (bucket 0)", is_block(c, p), "out=%r" % p.stdout)
+    finally:
+        c.cleanup()
+
+
+def case_nudge_uses_last_assistant_entry_and_sums_cache():
+    c = Case("nudgel")
+    try:
+        lines = [usage_line(500000), usage_line(1000, 100000, 120000)]  # last = 221000
+        p = nudge(c, 0, lines=lines)
+        check("nudge: size is input+cache_creation+cache_read of the LAST assistant entry",
+              is_block(c, p) and stored_bucket(c) == 0,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+    finally:
+        c.cleanup()
+
+
+def case_nudge_stop_hook_active():
+    c = Case("nudgea")
+    try:
+        p = nudge(c, 410000, active=True)
+        check("nudge: stop_hook_active is silent", p.returncode == 0 and not p.stdout.strip(),
+              "out=%r" % p.stdout)
+        check("nudge: stop_hook_active changes nothing", not os.path.exists(c.nudge_path()),
+              "state file written")
+    finally:
+        c.cleanup()
+
+
+def case_nudge_failures_are_silent():
+    c = Case("nudgef")
+    try:
+        p = nudge(c, 0, lines=[transcript_line("assistant", [{"type": "text", "text": "x"}])])
+        check("nudge: no usage is silent, exit 0",
+              p.returncode == 0 and not p.stdout.strip(), "rc=%r out=%r" % (p.returncode, p.stdout))
+        p = c.run(["--nudge"], {"session_id": c.session_id,
+                                "transcript_path": os.path.join(c.root, "missing.jsonl"),
+                                "stop_hook_active": False})
+        check("nudge: unreadable transcript is silent, exit 0",
+              p.returncode == 0 and not p.stdout.strip(), "rc=%r out=%r" % (p.returncode, p.stdout))
+        put(c.nudge_path(), "{not json")
+        p = nudge(c, 210000)
+        check("nudge: corrupt state never exits 2", p.returncode == 0, "rc=%r" % p.returncode)
+    finally:
+        c.cleanup()
+
+
+def case_nudge_settings():
+    with open(os.path.join(REPO_ROOT, "settings.json"), "r", encoding="utf-8") as f:
+        stop = json.load(f).get("hooks", {}).get("Stop", [])
+    cmds = [h.get("command", "") for g in stop for h in g.get("hooks", [])]
+    check("settings: a Stop hook runs precompact_handoff.py with --nudge",
+          any("precompact_handoff.py" in x and "--nudge" in x for x in cmds), "Stop: %r" % cmds)
+
+
 # --------------------------------------------------------------------------- the run
 
 
@@ -385,6 +530,12 @@ def main() -> int:
     case_reorient_no_state_says_digest_missing()
     case_reorient_failed_state_says_digest_missing()
     case_settings_json()
+    case_nudge()
+    case_nudge_exact_boundary()
+    case_nudge_uses_last_assistant_entry_and_sums_cache()
+    case_nudge_stop_hook_active()
+    case_nudge_failures_are_silent()
+    case_nudge_settings()
 
     if FAILED:
         print()
