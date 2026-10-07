@@ -2,11 +2,11 @@
 """The shared merge tool, git half. Plan: plans/shared-merge-tool.md, "The flow".
 
   merge <pr>              preview: what it would claim and merge. Presses nothing.
-  merge <pr> --confirm    lock, claim, push, wait, merge, sync local main, clean up.
-  merge --unlock          remove this repo's merge lock. Reads no lock state first.
+  merge <pr> --confirm    lock, claim, push, wait, merge, sync the local base, clean up.
+  merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Reads no lock state first.
 
 Git half: the merge lock, the temporary worktree, the claim, the push, the revert, resume, the
-local main, afterMerge and the branch delete. GitHub half (`Host`): required checks, the wait,
+local base branch, afterMerge and the branch delete. GitHub half (`Host`): required checks, the wait,
 the minute read and `gh pr merge --match-head-commit`.
 """
 import argparse, contextlib, json, os, re, shutil, subprocess, sys, tempfile, time, uuid
@@ -227,6 +227,7 @@ class Host:
         if c:
             raise Stop("gh pr view failed: " + out)
         d = json.loads(out)
+        self.base = d["baseRefName"]  # the PR's own base drives required_names
         return {"head": d["headRefOid"], "branch": d["headRefName"], "base": d["baseRefName"], "state": d["state"],
                 "mergeable": d["mergeable"], "merge_state": d["mergeStateStatus"]}
 
@@ -476,7 +477,7 @@ def holder(root, branch):
     return None
 
 def ff_main(root, base, commit):
-    """Move the local default branch onto `commit`, a commit that origin holds."""
+    """Move the local base branch onto `commit`, a commit that origin holds."""
     c, out = git(root, "fetch", "-q", "origin")
     if c:
         raise Stop("git fetch origin failed, so the local main cannot be moved: " + out)
@@ -574,21 +575,24 @@ def ignore_checks(cfg):
     return out
 
 def preview(root, cfg, cfgrel, n, host, lock):
-    base = cfg["defaultBranch"]
     info = host.pr(n)
     refuse_bad_pr(info)
-    tmp, wt = open_worktree(root, info, base)
-    try:
-        resumed = own_claim(wt, cfgrel, f"origin/{base}")
-        trailer = None if resumed else do_claim(wt, cfgrel, f"origin/{base}")
-    finally:
-        drop_worktree(root, tmp, wt)
+    base = info["base"]
+    resumed = trailer = None
+    if base == cfg["defaultBranch"]:  # ids are claimed only on the default branch
+        tmp, wt = open_worktree(root, info, base)
+        try:
+            resumed = own_claim(wt, cfgrel, f"origin/{base}")
+            trailer = None if resumed else do_claim(wt, cfgrel, f"origin/{base}")
+        finally:
+            drop_worktree(root, tmp, wt)
     m = cfg.get("merge", {})
     held = lock.read(base)
     say(f"merge: PREVIEW for #{n} ({info['branch']} at {info['head'][:9]}). Nothing was pressed.",
         f"  lock:   " + ("held" if held and held[1] > lock.now() else "free"),
         f"  head checks: {host.head_state(n)}",
         "  claim:  " + (f"already claimed ({resumed}); a run resumes at the wait" if resumed else trailer or "nothing to claim"),
+        *([] if base == cfg["defaultBranch"] else [f"  ids:    stay pending: {base} is not the default branch ({cfg['defaultBranch']}); they are claimed when it merges there."]),
         f"  then:   push HEAD:{info['branch']}, wait for the checks, `gh pr merge --{m.get('method', '?')} --match-head-commit`,",
         f"          move local {base}, run {len(m.get('afterMerge', []))} afterMerge command(s)" + (", delete the branch." if m.get("deleteBranch") else "."))
 
@@ -597,18 +601,23 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok=""):
     for k in ("method", "deadlineMinutes"):
         if k not in m:
             raise Stop(f"{cfgrel} has no merge.{k}. Read it from the repo; the tool never guesses it.")
-    base, base_ref = cfg["defaultBranch"], f"origin/{cfg['defaultBranch']}"
+    base = host.pr(n)["base"]  # the PR's own base; read again under the lock
+    base_ref = f"origin/{base}"
     token = lock.acquire(base, (2 * m["deadlineMinutes"] + 10) * 60)  # two waits: the head, then the claim
     tmp = wt = claim_sha = None
     try:
         info = host.pr(n)
         refuse_bad_pr(info)
+        if info["base"] != base:
+            raise Stop(f"the base of #{n} changed from {base} to {info['base']} while the lock was taken. Nothing was claimed or pushed.")
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
         branch = info["branch"]
         tmp, wt = open_worktree(root, info, base)
         undo_check(wt, base_ref, unknown_ok)
-        resumed = own_claim(wt, cfgrel, base_ref)
-        if resumed:
+        resumed = own_claim(wt, cfgrel, base_ref) if base == cfg["defaultBranch"] else None
+        if base != cfg["defaultBranch"]:
+            say(f"merge: {base} is not the default branch. Ids stay pending; nothing to claim.")
+        elif resumed:
             claim_sha = info["head"]
             say(f"merge: resumed. {branch} already holds the claim {resumed}.")
         else:
@@ -687,11 +696,11 @@ def main(argv, host=None, lock=None):
     p = argparse.ArgumentParser(prog="merge", description=__doc__.split("\n\n")[0])
     p.add_argument("pr", nargs="?", type=int)
     p.add_argument("--confirm", action="store_true")
-    p.add_argument("--unlock", action="store_true")
+    p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
     p.add_argument("--config", default=".github/stamp.json")
     a = p.parse_args(argv)
-    if a.unlock == (a.pr is not None) or (a.unlock and a.confirm):
+    if (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
         p.error("give a pull request number, or --unlock")
     try:
         c, root = sh(["git", "rev-parse", "--show-toplevel"])
@@ -699,12 +708,13 @@ def main(argv, host=None, lock=None):
             raise Stop("not in a git checkout")
         cfg = load_config(root, a.config)
         lock = lock or GhLock()
-        if a.unlock:
-            lock.unlock(cfg["defaultBranch"])
-            say(f"merge: lock on {cfg['defaultBranch']} removed.")
+        if a.unlock is not None:
+            b = cfg["defaultBranch"] if a.unlock is True else a.unlock
+            lock.unlock(b)
+            say(f"merge: lock on {b} removed.")
             return 0
         ignore = ignore_checks(cfg)
-        h = host or Host(cfg.get("merge", {}).get("requiredChecks", "protection"), cfg["defaultBranch"], ignore=ignore)
+        h = host or Host(cfg.get("merge", {}).get("requiredChecks", "protection"), ignore=ignore)
         return (confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok) if a.confirm else preview(root, cfg, a.config, a.pr, h, lock)) or 0
     except Stop as e:
         print(f"merge: {e}", file=sys.stderr)
