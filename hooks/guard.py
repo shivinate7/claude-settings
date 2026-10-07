@@ -3948,8 +3948,30 @@ def writes_to(path: str, cmd: str) -> bool:
     return False
 
 
+# VARIABLE INDIRECTION. Incident 2026-10-07, q_max session 56ca874f:
+# `D=~/.claude/state/handoff/x.md; ...; cp "$S/handoff.md" "$D"` was allowed, because the parse saw
+# only the word `$D`. One pass in `_shell_write_hit` (it feeds the frozen and project-config checks)
+# now reads a simple `VAR=value` or `export VAR=value` set earlier in the same command, and
+# substitutes `$VAR` and `${VAR}`. An unassigned variable stays as written, and stays allowed.
+# RESIDUAL GAP: a value from `$(...)`, backticks, `read`, another `$VAR`, or an interpreter
+# (`python -c`) is not resolved. Fixing it needs a shell parser, not a regex.
+VAR_ASSIGN = re.compile(
+    r"""(?:^|[;&|\n])\s*(?:export\s+)?([A-Za-z_]\w*)=("[^"]*"|'[^']*'|[^\s;&|"'`]+)""")
+
+
+def _resolve_vars(cmd: str) -> str:
+    """Replace `$VAR` and `${VAR}` with the value of a simple assignment made in the command."""
+    for name, raw in VAR_ASSIGN.findall(cmd):
+        value = raw.strip("'\"")
+        if "$" in value or "`" in value:
+            continue
+        cmd = re.sub(r"\$(?:" + name + r"\b|\{" + name + r"\})", lambda _m: value, cmd)
+    return cmd
+
+
 def _shell_write_hit(cmd: str, cwd: str, predicate) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''."""
+    cmd = _resolve_vars(cmd)
     for segment in split_segments(cmd):
         if not segment.strip():
             continue
