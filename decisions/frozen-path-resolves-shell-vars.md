@@ -32,8 +32,8 @@ path was denied by settings.json. The owner deleted the leftover file.
 - **Resolve assignments in the command (chosen).** Refuses only when the
   resolved target is frozen. Ordinary commands that write to `$OUT` stay allowed.
 - **Refuse any write to an unresolved variable when a frozen path is mentioned.**
-  Rejected: it fires on `D=<frozen>; ...; cp a "$OUT"` and on reads that copy a
-  frozen file out. A guard that cries wolf is spent.
+  Rejected: it fires on `D=<frozen>; ...; cat "$D" > "$OUT"`, a read that
+  writes nowhere frozen. A guard that cries wolf is spent.
 
 ## What stays open
 
@@ -42,10 +42,24 @@ Rule 7 is a fence, not a wall. It still misses some values:
 - a value built by `$(...)`, backticks, `read`, `${D:-x}`, a loop variable or
   `eval`;
 - a write by an interpreter (`python -c`);
-- a variable set in another tool call.
+- a variable set in another tool call;
+- a value built from another env var, as `D="$CLAUDE_CONFIG_DIR/state/x"`, which
+  the owner chose to leave open on 2026-10-07;
+- a PowerShell `$env:D` assignment.
 
 settings.json deny rules still refuse a direct Write or Edit. Unmeasured: how
 often a session reaches a frozen path by those shapes.
 
-Known false alarm: the token match is loose, so `echo D=<frozen>; cp a "$D"`
-counts the echoed text as an assignment and refuses. Unmeasured, and judged rare.
+## Known false alarms
+
+The token match is loose. Text like `echo D=<frozen>`, a commit message, a URL,
+or a heredoc body counts as an assignment. A later write to `"$D"` is then
+refused.
+
+Measured 2026-10-07 over 105,260 past Bash and PowerShell commands: the change
+refused 2 more commands than main and allowed none that main refused. One was
+the incident. One was a false alarm, a script that tests the guard and holds
+`D=<frozen>` text in a here-string. The owner accepted that rate.
+
+A `cp` with a frozen source is refused. The literal form was refused before this
+change too: `MUTATING_COMMAND` over-blocks `cp` and `mv` on purpose.
