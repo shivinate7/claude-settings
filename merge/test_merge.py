@@ -81,11 +81,13 @@ class FakeHost:
         self.checks, self.refuse, self.on_wait = (True, ""), None, None
         self.head_override, self.mergeable = None, "MERGEABLE"
         self.pr_state = "OPEN"
+        self.base, self.base_seq = "main", None  # base_seq: one base per pr() read, the last one repeats
         self.waits, self.seq, self.state = [], None, "green"  # waits: (sha, prior) per call; seq: scripted results, then self.checks
 
     def pr(self, n):
         head = merge.origin_head(self.root, self.branch)
-        return {"head": self.head_override or head, "branch": self.branch, "base": "main", "state": self.pr_state,
+        base = (self.base_seq.pop(0) if len(self.base_seq) > 1 else self.base_seq[0]) if self.base_seq else self.base
+        return {"head": self.head_override or head, "branch": self.branch, "base": base, "state": self.pr_state,
                 "mergeable": self.mergeable, "merge_state": "CLEAN"}
 
     def required_names(self):
@@ -106,9 +108,9 @@ class FakeHost:
         self.merged = True
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
-        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        sh(o, "git", "checkout", "-q", "-B", self.base, f"origin/{self.base}")
         sh(o, "git", "merge", "-q", "--no-ff", "-m", f"merge #{n}", sha)
-        sh(o, "git", "push", "-q", "origin", "main")
+        sh(o, "git", "push", "-q", "origin", self.base)
         return sh(o, "git", "rev-parse", "HEAD"), ""
 
 class Env(unittest.TestCase):
@@ -637,6 +639,171 @@ class Stopped(Env):
         finally:
             merge.drop_worktree(self.co, tmp, wt)
 
+class BaseAware(Env):
+    """Plan "The flow" and "Settled by the owner" item 12: the pull request's own base drives every
+    step. Cause: q_max #497 merged into claude/speed-wave-2 and claimed D-720 against main."""
+    BASE = "integ"
+
+    def setUp(self):
+        super().setUp()
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "push", "-q", "origin", f"origin/main:refs/heads/{self.BASE}")
+        self.host.base = self.BASE
+        self.modes, self.fetches, self.undo_bases = [], [], []
+        real_stamp, real_git, real_undo = merge.node_stamp, merge.git, merge.undo_check
+        def stamp(wt, cfgrel, mode, base):
+            self.modes.append((mode, base))
+            return real_stamp(wt, cfgrel, mode, base)
+        def git(cwd, *a, **k):
+            if "fetch" in a:
+                self.fetches.append((len(self.host.waits), a))
+            return real_git(cwd, *a, **k)
+        def undo(wt, base_ref, unknown_ok=""):
+            self.undo_bases.append(base_ref)
+            return real_undo(wt, base_ref, unknown_ok)
+        for name, fn in (("node_stamp", stamp), ("git", git), ("undo_check", undo)):
+            p = unittest.mock.patch.object(merge, name, fn); p.start(); self.addCleanup(p.stop)
+
+    def put_locks(self, *branches):
+        sha = sh(self.co, "git", "commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "lock")
+        for b in branches:
+            sh(self.co, "git", "push", "-q", "origin", f"{sha}:refs/merge-lock/{b}")
+
+    def test_1_confirm_into_another_base_claims_and_pushes_nothing_but_merges(self):
+        feat_before = self.head()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertNotIn("claim", [m for m, _ in self.modes])  # stamp --claim never runs
+        # nothing pushed to the head branch. deleteBranch removes `feat` after the merge, so read the merge commit instead.
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "rev-parse", f"origin/{self.BASE}^2"), feat_before)
+        self.assertEqual(sh(self.co, "git", "log", f"{feat_before}..origin/{self.BASE}^2", "--format=%B"), "")
+        self.assertNotIn("Record-claim", sh(self.co, "git", "log", f"origin/{self.BASE}^2", "--format=%B"))
+        self.assertIn("id: pending", self.show(self.BASE, "docs/decisions/second.md"))  # ids stay pending
+        self.assertNotIn("second.md", sh(self.co, "git", "ls-tree", "-r", "--name-only", "origin/main"))  # main untouched
+
+    def test_2_preview_into_another_base_prints_no_claim_and_says_ids_stay_pending(self):
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("Record-claim", out)
+        self.assertTrue(any("pending" in l.lower() and "default branch" in l.lower() for l in out.splitlines()), out)
+
+    def test_3_the_lock_is_taken_and_released_on_the_base(self):
+        calls = []
+        acquire, release = self.lock.acquire, self.lock.release
+        self.lock.acquire = lambda b, ttl: (calls.append(("acquire", b)), acquire(b, ttl))[1]
+        self.lock.release = lambda b, tok: (calls.append(("release", b)), release(b, tok))[1]
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(calls, [("acquire", self.BASE), ("release", self.BASE)])
+
+    def test_3_unlock_with_a_branch_unlocks_that_branch_only(self):
+        self.put_locks("main", self.BASE)
+        try:
+            rc, out = self.run_merge("--unlock", self.BASE)
+        except SystemExit as e:  # today argparse refuses the branch argument
+            rc, out = e.code, "SystemExit"
+        self.assertEqual(rc, 0, out)
+        refs = self.refs()
+        self.assertNotIn(f"refs/merge-lock/{self.BASE}", refs)
+        self.assertIn("refs/merge-lock/main", refs)
+
+    def test_3_bare_unlock_still_unlocks_the_default_branch(self):  # guard, green today
+        self.put_locks("main", self.BASE)
+        rc, out = self.run_merge("--unlock")
+        self.assertEqual(rc, 0, out)
+        refs = self.refs()
+        self.assertNotIn("refs/merge-lock/main", refs)
+        self.assertIn(f"refs/merge-lock/{self.BASE}", refs)
+
+    def test_4_a_base_that_changes_between_the_reads_stops_before_any_claim_or_push(self):
+        sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/other-base")
+        self.host.base_seq = [self.BASE, "other-base"]
+        feat_before = self.head()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.head(), feat_before)
+        self.assertNotIn("claim", [m for m, _ in self.modes])
+        self.assertFalse(getattr(self.host, "merged", False))
+        self.assertNotIn("refs/merge-lock/", self.refs())
+
+    def test_6_undo_check_the_base_fetch_after_the_wait_and_stamp_check_use_the_base(self):
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        want = f"origin/{self.BASE}"
+        self.assertTrue(self.undo_bases and all(b == want for b in self.undo_bases), self.undo_bases)
+        checks = [b for m, b in self.modes if m == "check"]
+        self.assertTrue(checks and all(b == want for b in checks), self.modes)
+        after_wait = [a for n, a in self.fetches if n >= 1]  # fetches made once the wait has run
+        self.assertTrue(any(f"+refs/heads/{self.BASE}:refs/remotes/origin/{self.BASE}" in a for a in after_wait), after_wait)
+        self.assertFalse(any("+refs/heads/main:refs/remotes/origin/main" in a for a in after_wait), after_wait)
+
+    def test_7_the_local_fast_forward_moves_the_base_not_the_default_branch(self):
+        main_before = sh(self.co, "git", "rev-parse", "main")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(sh(self.co, "git", "rev-parse", self.BASE), sh(self.co, "git", "rev-parse", f"origin/{self.BASE}"))
+        self.assertEqual(sh(self.co, "git", "rev-parse", "main"), main_before)
+
+    def test_8_control_a_pr_into_the_default_branch_still_claims(self):  # green today
+        self.host.base = "main"
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("claim", [m for m, _ in self.modes])
+        self.assertEqual(self.claims("main"), 1)
+        self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
+
+    def test_A_preview_reads_the_lock_of_the_base(self):  # mutant: lock.read(cfg["defaultBranch"]) in preview()
+        self.put_locks(self.BASE)  # live on integ, none on main
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        self.assertIn(f"lock:   the merge lock on {self.BASE} is held", out)  # say() joins its lines with spaces
+
+    def test_B_a_head_that_holds_an_old_claim_stops_before_the_wait_on_another_base(self):
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "commit", "-q", "--allow-empty", "-m", "Claim record numbers", "-m", "Record-claim: D-002")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        claim = sh(o, "git", "rev-parse", "HEAD")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn(claim[:7], out)  # names the claim commit by its short SHA
+        self.assertEqual(self.host.waits, [])  # stopped before the wait
+        self.assertFalse(getattr(self.host, "merged", False))
+        self.assertEqual(self.head(), claim)  # nothing pushed
+        self.assertNotIn("refs/merge-lock/", self.refs())
+
+    def test_C_a_base_that_changes_during_the_wait_ends_the_wait_and_merges_nothing(self):
+        fake = self.host
+        class WaitHost(merge.Host):  # the real wait loop; every other read comes from the fake
+            def __init__(h):
+                super().__init__(["gates"], minute=60, now=lambda: 0, pause=lambda s: None)
+                h.in_wait, h.passes = False, 0
+            def pr(h, n):
+                info = fake.pr(n)
+                if h.in_wait:
+                    h.passes += 1
+                    if h.passes > 1:
+                        info["base"] = "other-base"  # the second pass of the wait sees a new base
+                h.base = info["base"]  # as Host.pr does: the baseline is "integ" from the reads before the wait
+                return info
+            def required_names(h): return ["gates"]
+            def checks(h, n): return {"gates": [("pass", "")]}
+            def runs(h, sha): return []
+            def head_state(h, n): return "green"
+            def wait_checks(h, *a, **k):
+                h.in_wait = True
+                try:
+                    return super().wait_checks(*a, **k)
+                finally:
+                    h.in_wait = False
+            def merge(h, *a): return fake.merge(*a)
+        rc, out = self.run_merge("7", "--confirm", host=WaitHost())
+        self.assertEqual(rc, 1, out)
+        self.assertFalse(getattr(fake, "merged", False), out)
+        self.assertNotIn("refs/merge-lock/", self.refs())
+
 class Unlock(Env):
     def test_unlock_removes_a_live_lock_and_reads_nothing_first(self):
         sha = sh(self.co, "git", "commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "unreadable, not ours")
@@ -731,7 +898,7 @@ if a[:2] == ["pr", "view"]:
         if lag and lag["n"] > 0 and head != lag["prior"]:  # GitHub still shows the head before the push
             lag["n"] -= 1; save(); head = lag["prior"]
         bad = S.get("dirty_after_checks") is not None and S["checks_calls"] >= S["dirty_after_checks"]
-        print(json.dumps({"headRefOid": head, "headRefName": "feat", "baseRefName": "main", "state": "OPEN",
+        print(json.dumps({"headRefOid": head, "headRefName": "feat", "baseRefName": S.get("base", "main"), "state": "OPEN",
                           "mergeable": "CONFLICTING" if bad else "MERGEABLE", "mergeStateStatus": "DIRTY" if bad else "CLEAN"}))
     else:
         print(json.dumps({"state": "MERGED" if S.get("oid") else "OPEN", "mergeCommit": {"oid": S["oid"]} if S.get("oid") else None}))
@@ -752,8 +919,9 @@ elif a[:2] == ["pr", "merge"]:
         print(S["merge_fail"]); sys.exit(1)
     if git("ls-remote", "origin", "refs/heads/feat").split("\t")[0] != sha:
         print("GraphQL: Head branch was modified. Review and try the merge again."); sys.exit(1)
-    git("fetch", "-q", "origin"); git("checkout", "-q", "-B", "main", "origin/main")
-    git("merge", "-q", "--no-ff", "-m", "merge", sha); git("push", "-q", "origin", "main")
+    B = S.get("base", "main")
+    git("fetch", "-q", "origin"); git("checkout", "-q", "-B", B, "origin/" + B)
+    git("merge", "-q", "--no-ff", "-m", "merge", sha); git("push", "-q", "origin", B)
     S["oid"] = git("rev-parse", "HEAD"); save()
 elif a[0] == "api" and a[1].endswith("/required_status_checks"):
     if S.get("contexts") is None:
@@ -798,6 +966,16 @@ class GhHalf(Env):
 
     def go(self, **kw):
         return self.run_merge("7", "--confirm", host=self.gh_host(**kw))
+
+    def test_5_base_aware_protection_mode_reads_the_protection_of_the_base(self):
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/integ")
+        self.set(base="integ", contexts=["gates"])
+        self.host = None  # run_merge then lets main() build the real Host from the config
+        self.run_merge("7")
+        calls = self.calls()
+        self.assertIn("branches/integ/protection/required_status_checks", calls)
+        self.assertNotIn("branches/main/protection", calls)
 
     def reverted(self):
         return "id: pending" in self.show("feat", "docs/decisions/second.md")
