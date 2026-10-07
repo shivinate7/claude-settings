@@ -1,4 +1,4 @@
-# Compaction rewrites the handoff first
+# Checkpoints keep the handoff current
 
 ## The question
 
@@ -13,8 +13,11 @@ claude-settings?
    window, so a 200k model keeps 200k. `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` is not used: it
    is a percent of a window that Claude Code picks per model, and the docs do not give
    that window's size.
-2. At each compaction, auto or manual, the session's handoff is rewritten in place. The
-   plan file is updated too, when the session works from one and its state changed.
+2. The session updates its handoff at context checkpoints, while it has full context:
+   200k tokens, then every +100k below the compaction limit minus 50k, then a last one at
+   that limit minus 50k. After each compaction, auto or manual, it patches the handoff:
+   it adds what changed since the last write and keeps the rest. The plan file is updated
+   too, when the session works from one and its state changed.
 3. After compaction, a short message reorients the session.
 4. It must work in the desktop app with no other login. The owner rejected a design that
    ran a second `claude -p` with its own command-line login.
@@ -24,7 +27,7 @@ claude-settings?
 
 ## The design
 
-One file, `hooks/precompact_handoff.py`, with two modes. Neither mode calls a model.
+One file, `hooks/precompact_handoff.py`, with three modes. No mode calls a model.
 
 **PreCompact mode** (hook `PreCompact`, no matcher, so auto and manual both fire):
 
@@ -36,25 +39,38 @@ One file, `hooks/precompact_handoff.py`, with two modes. Neither mode calls a mo
   ok or failed, and the time.
 - Never block compaction. On any error, log it and exit 0.
 
+**Nudge mode** (hook `Stop`, flag `--nudge`):
+
+- Context size: the last assistant entry's usage (input + cache creation + cache read).
+- Limit: `autoCompactWindow` from settings.json, 500,000 when missing. Checkpoints:
+  200k, +100k steps below limit-50k, then limit-50k. With limit-50k at or below 200k,
+  limit-50k is the only checkpoint.
+- When the context reaches a new checkpoint, block the stop once, with a reason that
+  names the handoff path and the prompt file. Store the checkpoint in
+  `~/.claude/state/handoff/<session_id>.nudge.json`. When the context shrinks (a
+  compaction), store the lower checkpoint and stay silent. With `stop_hook_active`, or
+  on any error, stay silent and exit 0.
+
 **Reorient mode** (hook `SessionStart`, matcher `compact`):
 
-Print one short message into context. The session itself does the rewrite, under the
+Print one short message into context. The session itself does the patch, under the
 desktop app's own login. The message tells the session to:
 
 1. Follow `~/.claude/hooks/precompact_handoff_prompt.md` before anything else.
-2. Rewrite the handoff at `~/.claude/state/handoff/<session_id>.handoff.md`. The
+2. Patch the handoff at `~/.claude/state/handoff/<session_id>.handoff.md`. The
    message names the exact path.
 3. Use the compaction summary, the digest at its path, and the prior handoff.
 4. Then confirm checkout and branch, and continue the last task.
 
 With no state file, or a failed one, the message says the digest is missing. The session
-then rewrites from the compaction summary and the prior handoff alone.
+then patches from the compaction summary and the prior handoff alone.
 
-**The prompt file** tells the session how to rewrite:
+**The prompt file** tells the session how to update and how to patch:
 
 - The handoff path: the one the reorient message names. Never a scratchpad or temp
-  folder. The repo's own handoff.md is context, never the rewrite target.
-- Read the prior handoff first. Rewrite it in place. Never make a dated copy.
+  folder. The repo's own handoff.md is context, never the update target.
+- At a checkpoint, update every section. After compaction, read the prior handoff, then
+  patch it in place. Never make a dated copy.
 - If the work names a plan file (`~/.claude/plans/*.md` or the repo's `plans/*.md`) and
   the plan's state changed, update that plan in place.
 
@@ -74,17 +90,21 @@ root handoff.md or `.claude/handoff.md`. q_max could use neither: a second hando
 breaks its DOC3 check, and its CLAUDE.md puts session state in `specs/handoff.md`.
 
 A shared, committed handoff does not fix it. Several sessions run at once, each on its
-own branch. Each would rewrite one file, every PR would conflict on it, and the last
+own branch. Each would write one file, every PR would conflict on it, and the last
 merge would erase the others' state. So each session gets its own file, in the folder
 the hook already owns. Rulings still go to tracked homes at once
 (memory-is-never-a-rulings-only-home), so a lost machine loses only short-term state.
 
 ## Known limits
 
-- The rewrite happens after compaction, so the session writes from the summary and the
-  digest, not from its full context. The digest keeps only the tail. Early detail lives on
-  through the prior handoff. A session's first compaction has no prior handoff.
-- The rewrite costs the post-compact session one read of the digest, about 15k tokens.
+- The post-compaction patch covers the work since the last checkpoint, up to about 50k
+  tokens, from the summary and the digest. The digest keeps only the last 60,000
+  characters of text, so a long, talk-heavy gap can lose detail.
+- The hook reads the limit from settings.json. Claude Code also caps compaction at the
+  model's own window, which the hook cannot see. On a smaller model, compaction can fire
+  before a checkpoint.
+- Each checkpoint costs one handoff update. The patch costs one read of the digest, about
+  15k tokens.
 
 ## Measured facts
 
