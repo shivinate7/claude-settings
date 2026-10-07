@@ -625,8 +625,11 @@ def case_handoff_path_not_frozen():
         old_path = os.path.join(c.cfg, "state", "handoff", "%s.handoff.md" % c.session_id)
         check("frozen-probe: guard calls the old state/handoff path frozen",
               guard.is_frozen(old_path, c.repo) is True)
-        check("handoff-path: a session can write it (guard does not freeze it)",
-              guard.is_frozen(c.handoff_path(), c.repo) is False, "path: %s" % c.handoff_path())
+        m = re.search(r"Your handoff is (.+?\.md)\.", c.run_reorient().stdout or "")
+        emitted = m.group(1) if m else ""
+        check("handoff-path: the path the hook emits is not frozen (a session can write it)",
+              bool(emitted) and guard.is_frozen(emitted, c.repo) is False,
+              "emitted: %r" % emitted)
     finally:
         if old is None:
             os.environ.pop("CLAUDE_CONFIG_DIR", None)
