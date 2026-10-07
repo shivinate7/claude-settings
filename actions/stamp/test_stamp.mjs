@@ -1446,6 +1446,49 @@ test("the CLI runs, and never exits 0 silent, when reached through a symlinked d
     assert.match(r.stdout, /every pending record is in order/);
   }));
 
+// ---------------------------------------------------------------- kinds: [] (plan "How a repo opts in":
+// "A repo with no records writes `[]`, and the claim step does nothing.")
+function emptyKindsRepo(root, kinds) {
+  mkdirSync(root, { recursive: true });
+  initRepo(root);
+  write(root, "README.md", "no records here\n");
+  commit(root, "main");
+  git(root, "checkout", "-q", "-b", "feat");
+  write(root, "notes.md", "a change\n");
+  commit(root, "feat");
+  const cfg = join(root, "..", `${root.split(/[\\/]/).pop()}.json`); // beside the repo, so its tree stays clean
+  writeFileSync(cfg, JSON.stringify(kinds === undefined ? {} : { kinds }));
+  return cfg;
+}
+const runStamp = (root, cfg, mode) => spawnSync("node", [join(HERE, "stamp.mjs"), `--${mode}`, "--base", "main", "--config", cfg, "--root", root], { cwd: root, encoding: "utf8" });
+
+test("--claim with kinds: [] exits 0, prints no Record-claim line and changes no file", () =>
+  withTempDir((tmp) => {
+    const root = join(tmp, "repo");
+    const r = runStamp(root, emptyKindsRepo(root, []), "claim");
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal((r.stdout + r.stderr).includes("Record-claim"), false);
+    assert.equal(git(root, "status", "--porcelain").trim(), "");
+  }));
+
+test("--check with kinds: [] exits 0 and prints no UNKNOWN", () =>
+  withTempDir((tmp) => {
+    const root = join(tmp, "repo");
+    const r = runStamp(root, emptyKindsRepo(root, []), "check");
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal((r.stdout + r.stderr).includes("UNKNOWN"), false);
+  }));
+
+test("config.kinds missing, a string, {} or null is still refused", () =>
+  withTempDir((tmp) => {
+    [undefined, "decision", {}, null].forEach((kinds, i) => {
+      const root = join(tmp, `repo${i}`);
+      const r = runStamp(root, emptyKindsRepo(root, kinds), "claim");
+      assert.notEqual(r.status, 0, `kinds ${JSON.stringify(kinds)} must refuse`);
+      assert.equal(r.stderr.includes("config.kinds must be"), true, r.stderr);
+    });
+  }));
+
 // ---------------------------------------------------------------- run
 let failed = 0;
 for (const { name, fn } of tests) {
