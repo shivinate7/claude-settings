@@ -13,7 +13,7 @@ the desktop app has none.
 
   SessionStart --reorient (stdin: session_id) -- reads that state and prints a short
   message: follow the installed prompt file, patch the session's own handoff at
-  ~/.claude/state/handoff/<session_id>.handoff.md, then use the digest (or, with no usable
+  ~/.claude/handoffs/<session_id>.md, then use the digest (or, with no usable
   digest, the compaction summary and the prior handoff alone).
 
   Stop --nudge (stdin: session_id, transcript_path, stop_hook_active) -- reads the last
@@ -57,8 +57,10 @@ def state_path(session_id):
 def handoff_path(session_id):
     """The session's own handoff: per session and outside git, so concurrent sessions on
     their own branches never collide on it, and outside Temp, so temp cleanup never
-    reaches it (decisions/precompact-handoff.md)."""
-    return os.path.join(config_dir(), "state", "handoff", "%s.handoff.md" % session_id)
+    reaches it (decisions/precompact-handoff.md). It lives in <config_dir>/handoffs/, not
+    the frozen state dir, so a session can write it. The digest, .json and .nudge.json
+    stay in state/handoff/."""
+    return os.path.join(config_dir(), "handoffs", "%s.md" % session_id)
 
 
 def prompt_path():

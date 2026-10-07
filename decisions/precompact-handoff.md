@@ -22,7 +22,7 @@ claude-settings?
 4. It must work in the desktop app with no other login. The owner rejected a design that
    ran a second `claude -p` with its own command-line login.
 5. The handoff is per session and outside git:
-   `~/.claude/state/handoff/<session_id>.handoff.md`. A repo's own handoff.md is a
+   `~/.claude/handoffs/<session_id>.md`. A repo's own handoff.md is a
    project document, changed only by PR.
 
 ## The design
@@ -57,7 +57,7 @@ Print one short message into context. The session itself does the patch, under t
 desktop app's own login. The message tells the session to:
 
 1. Follow `~/.claude/hooks/precompact_handoff_prompt.md` before anything else.
-2. Patch the handoff at `~/.claude/state/handoff/<session_id>.handoff.md`. The
+2. Patch the handoff at `~/.claude/handoffs/<session_id>.md`. The
    message names the exact path.
 3. Use the compaction summary, the digest at its path, and the prior handoff.
 4. Then confirm checkout and branch, and continue the last task.
@@ -91,9 +91,13 @@ breaks its DOC3 check, and its CLAUDE.md puts session state in `specs/handoff.md
 
 A shared, committed handoff does not fix it. Several sessions run at once, each on its
 own branch. Each would write one file, every PR would conflict on it, and the last
-merge would erase the others' state. So each session gets its own file, in the folder
-the hook already owns. Rulings still go to tracked homes at once
+merge would erase the others' state. So each session gets its own file in `~/.claude/handoffs/`. Rulings still go to tracked homes at once
 (memory-is-never-a-rulings-only-home), so a lost machine loses only short-term state.
+
+The handoff is not in `state/handoff/` beside the digest. `hooks/guard.py` freezes `state`
+(it holds the undo copies `config_watch.py` restores from), so no session can write there.
+shivinate7/claude-settings#284 first shipped that path, and sessions fell back to their
+scratchpads. A test now asks the guard whether the handoff path is frozen.
 
 ## Known limits
 
