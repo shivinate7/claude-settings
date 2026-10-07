@@ -18,7 +18,9 @@ the desktop app has none.
 
   Stop --nudge (stdin: session_id, transcript_path, stop_hook_active) -- reads the last
   assistant entry's usage (input + cache_creation + cache_read tokens) as the context
-  size. Bucket = -1 below 200,000, else (size - 200,000) // 100,000. The bucket lives in
+  size. Bucket = index of the highest checkpoint reached, -1 below the first (checkpoints():
+  200k, +100k while below limit-50k, then limit-50k; limit = autoCompactWindow in
+  <config dir>/settings.json, default 500,000). The bucket lives in
   ~/.claude/state/handoff/<session_id>.nudge.json as {"bucket": N}. A higher bucket
   than stored prints {"decision": "block", "reason": ...}: update the handoff per the
   prompt file's step 4. A lower bucket (after compaction) is stored silently. Nothing
@@ -35,6 +37,8 @@ import sys
 DIGEST_CAP = 60_000
 NUDGE_FLOOR = 200_000
 NUDGE_STEP = 100_000
+NUDGE_MARGIN = 50_000
+DEFAULT_WINDOW = 500_000
 
 
 def config_dir():
@@ -180,6 +184,29 @@ def run_reorient(payload):
     return 0
 
 
+def checkpoints(limit):
+    """Nudge sizes: 200k, then +100k while below limit-50k, then limit-50k itself
+    (500k: 200, 300, 400, 450k). When limit-50k <= 200k, only limit-50k."""
+    top = limit - NUDGE_MARGIN
+    if top <= NUDGE_FLOOR:
+        return [top]
+    cps = [NUDGE_FLOOR]
+    while cps[-1] + NUDGE_STEP < top:
+        cps.append(cps[-1] + NUDGE_STEP)
+    return cps + [top]
+
+
+def window_limit():
+    # ponytail: the model's own window can be smaller than autoCompactWindow and this
+    # hook cannot see it; nudges then come late. Upgrade: read the window from the model.
+    try:
+        with open(os.path.join(config_dir(), "settings.json"), "r", encoding="utf-8") as f:
+            v = json.load(f).get("autoCompactWindow")
+        return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else DEFAULT_WINDOW
+    except Exception:
+        return DEFAULT_WINDOW
+
+
 def run_nudge(payload):
     if payload.get("stop_hook_active"):
         return 0
@@ -201,7 +228,7 @@ def run_nudge(payload):
             return 0
         size = sum(usage.get(k) or 0 for k in (
             "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
-        bucket = -1 if size < NUDGE_FLOOR else (size - NUDGE_FLOOR) // NUDGE_STEP
+        bucket = sum(1 for c in checkpoints(window_limit()) if size >= c) - 1
         path = os.path.join(config_dir(), "state", "handoff", "%s.nudge.json" % session_id)
         try:
             with open(path, "r", encoding="utf-8") as f:
