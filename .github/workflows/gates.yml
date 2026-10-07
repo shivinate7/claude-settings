@@ -94,6 +94,9 @@ jobs:
       - name: Rule mechanization audit
         run: python3 lint/rule_audit.py
 
+      - name: Windows split guard
+        run: python3 lint/test_windows_split.py
+
       - name: Mutation verdict fixture suite
         run: python3 hooks/test_mutate_shared.py
 
@@ -187,6 +190,8 @@ jobs:
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.
   pointer-windows:
     runs-on: windows-latest
+    # Slowest of the last 10 green PR runs, 2026-10-07 (27 s); 5 min leaves room for a slow runner start.
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -212,6 +217,8 @@ jobs:
   # below covers the rest of the suite, so this job stays narrow, on purpose.
   shell-macos:
     runs-on: macos-latest
+    # Slowest of the last 10 green PR runs, 2026-10-07 (42 s); 5 min leaves room for a slow runner start.
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -334,20 +341,20 @@ jobs:
         if: ${{ !cancelled() }}
         run: bash actions/stamp/test_action.sh
 
-  # Six python suites in the gates job need a real Windows box to prove: no other
+  # The Windows suites run in three jobs (gates-windows, gates-windows-merge, gates-windows-rest). Six python suites in the gates job need a real Windows box to prove: no other
   # job in this workflow can show whether they pass there. This job runs those
   # suites on Windows and reports the environment first. It is blocking: run
   # 35766479009 went green here for the first time, on its own merit, not through
   # continue-on-error.
-  # Every step below carries `if: ${{ !cancelled() }}`. Without it, GitHub Actions
+  # Every step in all three jobs carries `if: ${{ !cancelled() }}`. Without it, GitHub Actions
   # skips every step after the first failure, even inside a job marked
   # continue-on-error. This job stayed advisory-red at its first failing step for a
   # while, and that hid eleven suites behind it that never ran on Windows at all. A
   # job that stops at its first red step proves nothing about the suites behind it.
   gates-windows:
     runs-on: windows-latest
-    # About 2x the slowest green run measured 2026-10-02 (20 min 1 s).
-    timeout-minutes: 45
+    # Split 2026-10-07 from one 20 min job. Expected about 450 s (guard 263 s, install.sh 180 s); 2x with setup is 15 min.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -435,6 +442,69 @@ jobs:
       # (run 37086259145). It runs on the gates job (Linux) only. Accepted risk: a Windows-only
       # mutation regression is not caught. No mutant is marked windows-only.
 
+      - name: install.sh checkout-detection suite
+        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
+        shell: bash
+        run: sh hooks/test_install_src.sh
+
+  gates-windows-merge:
+    runs-on: windows-latest
+    # Expected about 520 s (merge suite 464 s, launcher 31 s, cmd under 25 s); 2x is 20 min.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect which mutation harnesses this change needs
+        id: scope
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: bash .github/scripts/harness-scope.sh
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Merge launcher fixture suite
+        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
+        run: python merge/test_launch.py
+
+      - name: Merge tool git-half fixture suite
+        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
+        run: python merge/test_merge.py
+
+      - name: Merge launcher fixture suite (merge.cmd)
+        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
+        run: python merge/test_cmd.py
+
+  gates-windows-rest:
+    runs-on: windows-latest
+    # About 550 s on push (the sweep mutation harness takes about 150 s: runs 37650386161, 37606531387).
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect which mutation harnesses this change needs
+        id: scope
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: bash .github/scripts/harness-scope.sh
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.11"
+
       - name: Janitor sweep fixture suite
         if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
         run: python janitor/test_sweep.py
@@ -487,11 +557,6 @@ jobs:
         if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
         run: python janitor/test_install_schtasks.py
 
-      - name: install.sh checkout-detection suite
-        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
-        shell: bash
-        run: sh hooks/test_install_src.sh
-
       - name: Record stamp engine fixture suite
         if: ${{ !cancelled() }}
         run: node actions/stamp/test_stamp.mjs
@@ -500,15 +565,3 @@ jobs:
         if: ${{ !cancelled() }}
         shell: bash
         run: bash actions/stamp/test_action.sh
-
-      - name: Merge launcher fixture suite
-        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
-        run: python merge/test_launch.py
-
-      - name: Merge tool git-half fixture suite
-        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
-        run: python merge/test_merge.py
-
-      - name: Merge launcher fixture suite (merge.cmd)
-        if: ${{ !cancelled() && steps.scope.outputs.code == 'true' }}
-        run: python merge/test_cmd.py
