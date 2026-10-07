@@ -140,6 +140,13 @@ class Scope(unittest.TestCase):
         # A made-up dir in the scratch repo's landed-dirs.txt: the script reads the file, it does not copy the list.
         self.assertFlags(run(["zz-made-up/new.md"], landed=["zz-made-up"]), want_true=["gates_windows", "shell_macos"])
 
+    def test_an_empty_or_comment_only_landed_list_turns_everything_on(self):
+        for landed in ([], ["# only a comment", ""]):
+            self.assertFlags(run(["docs/new.md"], landed=landed), want_true=ALL)
+
+    def test_a_trailing_slash_in_landed_dirs_is_read_as_the_dir(self):
+        self.assertFlags(run(["zz-made-up/new.md"], landed=["zz-made-up/"]), want_true=["gates_windows", "shell_macos"])
+
 
 if __name__ == "__main__":
     unittest.main()
