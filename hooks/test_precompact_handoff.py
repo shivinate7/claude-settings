@@ -575,6 +575,37 @@ def case_nudge_limit_checkpoints():
         c.cleanup()
 
 
+def entry(inp, model="claude-sonnet-5-5", side=False):
+    obj = json.loads(usage_line(inp))
+    obj["message"]["model"] = model
+    if side:
+        obj["isSidechain"] = True
+    return json.dumps(obj)
+
+
+def case_nudge_ignores_bogus_last_entries():
+    Case.nudge_path = lambda self: os.path.join(
+        self.cfg, "state", "handoff", "%s.nudge.json" % self.session_id)
+    real = entry(250000)
+    for tag, bad in (("synthetic zero-usage", entry(0, model="<synthetic>")),
+                     ("non-synthetic zero-usage", entry(0)),
+                     ("sidechain 20k", entry(20000, side=True))):
+        c = Case("nbog")
+        try:
+            p = nudge(c, 0, lines=[real])
+            check("bogus: 250k blocks (%s)" % tag, is_block(c, p), "out=%r" % p.stdout)
+            p = nudge(c, 0, lines=[real, bad])
+            check("bogus: last entry %s is silent" % tag,
+                  p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
+            check("bogus: last entry %s leaves bucket 0" % tag, stored_bucket(c) == 0,
+                  "got %r" % stored_bucket(c))
+            p = nudge(c, 0, lines=[real, bad, real])
+            check("bogus: 250k again after %s is silent" % tag,
+                  p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
+        finally:
+            c.cleanup()
+
+
 def case_nudge_settings():
     with open(os.path.join(REPO_ROOT, "settings.json"), "r", encoding="utf-8") as f:
         stop = json.load(f).get("hooks", {}).get("Stop", [])
@@ -599,6 +630,7 @@ def main() -> int:
     case_nudge_stop_hook_active()
     case_nudge_failures_are_silent()
     case_nudge_limit_checkpoints()
+    case_nudge_ignores_bogus_last_entries()
     case_nudge_settings()
 
     if FAILED:
