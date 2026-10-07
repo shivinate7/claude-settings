@@ -890,6 +890,10 @@ if (isMain) {
     process.exit(2);
   }
   const config = loadConfig(args.config);
+  if (!config.kinds.length) {  // one early exit: nothing was read, so nothing is said to be in order
+    console.log(`stamp: kinds is empty: no records are ${args.mode === "claim" ? "claimed" : "checked"}.`);
+    process.exit(0);
+  }
   if (args.mode === "claim") {
     let result;
     try {
