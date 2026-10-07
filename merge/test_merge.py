@@ -6,7 +6,7 @@ No network, no real repo. Every run uses a local bare origin in a temp dir, the 
 actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
 """
-import contextlib, io, pathlib, json, os, shutil, stat, subprocess, sys, tempfile, threading, time, unittest, unittest.mock
+import contextlib, io, pathlib, json, os, re, shutil, socket, stat, subprocess, sys, tempfile, threading, time, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -1298,6 +1298,263 @@ class Identity(Env):
             self.assertEqual(sh(wt, "git", "log", "-1", "--format=%an"), "merge")
         finally:
             merge.drop_worktree(self.co, tmp, wt)
+
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+def dead_pid():
+    p = subprocess.Popen([sys.executable, "-c", "pass"]); p.wait()
+    return p.pid
+
+class LockHolder(Env):
+    """The lock names its holder; the Held text says alive, dead, or cannot tell."""
+    def push_lock(self, message):
+        sha = sh(self.co, "git", "commit-tree", EMPTY_TREE, "-m", message)
+        sh(self.co, "git", "push", "-q", "origin", f"{sha}:refs/merge-lock/main")
+
+    def lock_msg(self):
+        sh(self.co, "git", "fetch", "-q", "origin", "refs/merge-lock/main")
+        return sh(self.co, "git", "log", "-1", "--format=%B", "FETCH_HEAD")
+
+    def peek(self, *args):
+        """Run `merge 7 --confirm *args`. Inside its wait, read the lock message and run a second merge.
+        Returns (lock message, the second run's output). A run that never reaches the wait gives ("", "")."""
+        seen = {"msg": "", "second": ""}
+        orig = self.host.wait_checks
+        def wait(n, sha, d, prior=None):
+            if not seen["msg"]:
+                seen["msg"] = self.lock_msg()
+                seen["second"] = self.run_merge("8", "--confirm")[1]
+            return orig(n, sha, d, prior)
+        self.host.wait_checks = wait
+        try:
+            self.run_merge("7", "--confirm", *args)
+        except SystemExit:
+            pass  # argparse refuses an unknown flag: the lock was never taken
+        return seen["msg"], seen["second"]
+
+    def old_message(self, expires):
+        return f"merge lock\nexpires: {int(expires)}\nowner: abc123"
+
+    def new_message(self, host, pid, expires=None, platform=None):
+        return (f"merge lock\nexpires: {int(expires or self.now + 600)}\nowner: abc123\n"
+                f"pr: 445\nbranch: b\nhost: {host}\npid: {pid}\nstarted: 1790000000\nplatform: {platform or sys.platform}")
+
+    def held(self, message):
+        self.push_lock(message)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        return out
+
+    def test_the_lock_records_the_holder_and_a_second_run_sees_it_alive(self):
+        msg, second = self.peek("--session", "S")
+        lines = msg.splitlines()
+        self.assertEqual(lines[:1], ["merge lock"], msg)
+        for want in ("pr: 7", "branch: feat", f"host: {socket.gethostname()}", f"pid: {os.getpid()}", "session: S"):
+            self.assertIn(want, lines, msg)
+        self.assertTrue(any(re.fullmatch(r"started: \d+", l) for l in lines), msg)
+        self.assertTrue(any(re.fullmatch(r"expires: \d+", l) for l in lines), msg)
+        self.assertTrue(any(re.fullmatch(r"owner: \w+", l) for l in lines), msg)
+        for want in ("PR #7", "feat", '"S"', f"pid {os.getpid()}", socket.gethostname(), "alive"):
+            self.assertIn(want, second)
+        self.assertNotIn("dead", second)
+        self.assertNotIn("Cannot tell", second)
+
+    def test_no_session_flag_writes_no_session_line(self):
+        msg, _ = self.peek()
+        self.assertIn("pr: 7", msg.splitlines())
+        self.assertNotIn("session:", msg)
+
+    def test_held_says_dead_for_a_lock_on_this_host_whose_pid_is_gone(self):
+        out = self.held(self.new_message(socket.gethostname(), dead_pid()))
+        for want in ("PR #445", "branch b", "dead", "merge --unlock"):
+            self.assertIn(want, out)
+        self.assertNotIn("Cannot tell", out)
+
+    def test_held_says_cannot_tell_for_another_host(self):
+        out = self.held(self.new_message("some-other-host-xyz", os.getpid()))
+        self.assertIn("PR #445", out)
+        self.assertIn("some-other-host-xyz", out)
+        self.assertIn("Cannot tell if the holder is alive", out)
+        self.assertNotIn("The holder is alive", out)
+        self.assertNotIn("The holder is dead", out)
+
+    def test_held_says_cannot_tell_for_an_old_lock_and_the_old_lock_still_expires(self):
+        out = self.held(self.old_message(self.now + 600))
+        self.assertIn("Cannot tell if the holder is alive", out)
+        self.assertIn("merge --unlock", out)
+        self.now += 601
+        self.assertTrue(self.lock.acquire("main", 600))
+
+    def test_a_new_lock_expires_too(self):
+        self.push_lock(self.new_message(socket.gethostname(), os.getpid(), expires=self.now + 600))
+        self.now += 601
+        self.assertTrue(self.lock.acquire("main", 600))
+
+    def test_the_preview_lock_line_says_the_holder_state(self):
+        self.push_lock(self.new_message(socket.gethostname(), dead_pid()))
+        rc, out = self.run_merge("7")
+        self.assertIn("PR #445", out)
+        self.assertIn("dead", out)
+
+    def test_a_session_with_a_newline_cannot_add_an_expires_or_owner_line(self):
+        msg, _ = self.peek("--session", "x\nexpires: 1\nowner: evil\r\nexpires: 2")
+        lines = msg.splitlines()
+        self.assertIn("pr: 7", lines, msg)  # the run took the lock at all
+        self.assertEqual(len([l for l in lines if l.startswith("expires:")]), 1, msg)
+        self.assertEqual(len([l for l in lines if l.startswith("owner:")]), 1, msg)
+        self.assertNotIn("owner: evil", lines)
+        self.assertEqual(len([l for l in lines if l.startswith("session:")]), 1, msg)
+
+    def test_a_long_session_is_capped(self):
+        msg, _ = self.peek("--session", "a" * 5000)
+        self.assertIn("pr: 7", msg.splitlines(), msg)
+        self.assertLess(len(msg), 1000)
+
+    def garbled(self, **fields):
+        f = {"pid": os.getpid(), "started": 1790000000}; f.update(fields)
+        try:
+            out = self.held(f"merge lock\nexpires: {int(self.now + 600)}\nowner: abc123\npr: 445\nbranch: b\n"
+                            f"host: {socket.gethostname()}\npid: {f['pid']}\nstarted: {f['started']}\nplatform: {sys.platform}")
+        except Exception as e:
+            self.fail(f"the Held text crashed: {type(e).__name__}: {e}")
+        self.assertIn("Cannot tell if the holder is alive", out)
+        self.assertNotIn("Traceback", out)
+        self.assertNotIn("The holder is dead", out)
+
+    def test_a_pid_too_big_for_the_os_reads_cannot_tell(self):
+        self.garbled(pid=10 ** 12)
+
+    def test_a_non_ascii_digit_pid_reads_cannot_tell(self):
+        self.garbled(pid="²")
+
+    def test_a_non_ascii_digit_started_reads_cannot_tell(self):
+        self.garbled(started="²")
+
+    def test_a_twenty_digit_started_reads_cannot_tell(self):
+        self.garbled(started="1" * 20)
+
+    def test_the_same_host_name_on_another_platform_reads_cannot_tell_never_dead(self):
+        other = "linux" if sys.platform == "win32" else "win32"
+        out = self.held(self.new_message(socket.gethostname(), dead_pid(), platform=other))
+        self.assertIn("Cannot tell if the holder is alive", out)
+        self.assertNotIn("The holder is dead", out)
+
+    def test_a_lock_with_no_platform_line_reads_cannot_tell_never_dead(self):
+        msg = self.new_message(socket.gethostname(), dead_pid()).rsplit("\nplatform:", 1)[0]
+        self.assertNotIn("platform:", msg)
+        out = self.held(msg)
+        self.assertIn("Cannot tell if the holder is alive", out)
+        self.assertNotIn("The holder is dead", out)
+
+    def test_the_lock_records_this_platform(self):
+        msg, _ = self.peek()
+        self.assertIn(f"platform: {sys.platform}", msg.splitlines(), msg)
+
+    def test_the_module_usage_names_session(self):
+        self.assertIn("--session", merge.__doc__)
+
+    def test_a_blank_session_writes_no_session_line(self):
+        msg, _ = self.peek("--session", " \t ")
+        self.assertIn("pr: 7", msg.splitlines(), msg)
+        self.assertNotIn("session:", msg)
+
+    @unittest.skipUnless(os.name == "nt", "the Windows probe: os.kill(pid, 0) is CTRL_C_EVENT there")
+    def test_windows_liveness_never_calls_os_kill(self):
+        self.push_lock(self.new_message(socket.gethostname(), os.getpid()))
+        calls = []
+        def fake_kill(pid, sig):
+            calls.append((pid, sig))
+            raise OSError("must not be called")
+        with unittest.mock.patch.object(os, "kill", fake_kill):
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(calls, [])
+        self.assertIn("The holder is alive", out)
+
+def release_out(test, lock, token):
+    out, err = io.StringIO(), io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            lock.release("main", token)
+    except Exception as e:
+        test.fail(f"release raised {type(e).__name__}: {e}")
+    return out.getvalue() + err.getvalue()
+
+class ReleaseReports(Env):
+    def test_a_normal_acquire_then_release_prints_no_line(self):
+        tok = self.lock.acquire("main", 600)
+        self.assertEqual(release_out(self, self.lock, tok), "")
+        self.assertFalse(self.lock_ref())
+
+    def test_gh_normal_acquire_then_release_prints_no_line(self):
+        S = {}
+        def api(self_, *a):
+            p = a[2] if a[0] == "-X" else a[0]
+            if a[:2] == ("-X", "DELETE"):
+                S.pop("ref", None); return 0, ""
+            if a[:2] == ("-X", "POST"):
+                if p.endswith("git/commits"): return 0, "c1"
+                if "ref" in S: return 1, "HTTP 422"
+                S["ref"] = "c1"; return 0, "{}"
+            if "/git/ref/merge-lock/" in p:
+                return (0, S["ref"]) if "ref" in S else (1, "HTTP 404: Not Found")
+            if "/git/ref/heads/" in p: return 0, "head1"
+            if "/git/commits/head1" in p: return 0, "tree1"
+            if "/git/commits/c1" in p: return 0, "merge lock\nexpires: 2000\nowner: x"
+            return 1, "unhandled " + p
+        with unittest.mock.patch.object(merge.GhLock, "api", api):
+            lock = merge.GhLock(now=lambda: 1000.0)
+            tok = lock.acquire("main", 600)
+            self.assertEqual(release_out(self, lock, tok), "")
+            self.assertNotIn("ref", S)
+
+    def test_git_release_says_so_when_the_delete_fails(self):
+        tok = self.lock.acquire("main", 600)
+        sh(self.co, "git", "remote", "set-url", "origin", os.path.join(self.t, "gone.git"))
+        out = release_out(self, self.lock, tok)
+        self.assertIn("the lock release failed", out)
+        self.assertIn("merge --unlock", out)
+
+    def test_git_release_says_so_when_the_token_was_replaced(self):
+        tok = self.lock.acquire("main", 600)
+        self.lock.unlock("main")
+        merge.GitLock(self.other, now=lambda: self.now).acquire("main", 600)
+        out = release_out(self, self.lock, tok)
+        self.assertIn("not this run's", out)
+        self.assertTrue(self.lock_ref())  # the other run's lock is left
+
+class GhReleaseReports(unittest.TestCase):
+    """GhLock.api is patched, so these run on Windows too."""
+    def lock_with(self, sha_on_read, delete=(0, ""), read_fail=None):
+        calls = []
+        def api(self_, *a):
+            calls.append(a)
+            if a[:2] == ("-X", "DELETE"):
+                return delete
+            if "/git/ref/merge-lock/" in a[0]:
+                return read_fail or (0, sha_on_read)
+            if "/git/commits/" in a[0]:
+                return 0, "merge lock\nexpires: 2000\nowner: x"
+            return 1, "unhandled"
+        patcher = unittest.mock.patch.object(merge.GhLock, "api", api)
+        patcher.start(); self.addCleanup(patcher.stop)
+        return merge.GhLock(now=lambda: 1000.0), calls
+
+    def test_delete_failure_is_reported(self):
+        lock, _ = self.lock_with("tok", delete=(1, "HTTP 500 boom"))
+        out = release_out(self, lock, "tok")
+        self.assertIn("the lock release failed", out)
+        self.assertIn("boom", out)
+
+    def test_read_failure_is_reported_and_never_raises(self):
+        lock, _ = self.lock_with("tok", read_fail=(1, "HTTP 500 down"))
+        out = release_out(self, lock, "tok")
+        self.assertIn("the lock release failed", out)
+
+    def test_a_replaced_token_is_reported_and_nothing_is_deleted(self):
+        lock, calls = self.lock_with("someone-else")
+        out = release_out(self, lock, "tok")
+        self.assertIn("not this run's", out)
+        self.assertFalse([c for c in calls if c[:2] == ("-X", "DELETE")])
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--child":

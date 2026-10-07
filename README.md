@@ -98,7 +98,7 @@ Run it from inside the repo, with `gh`, `git`, `node` and Python 3 on PATH:
 
 ```
 merge <pr>              preview: what it would claim and merge. Presses nothing.
-merge <pr> --confirm    lock, claim, push, wait, merge, move the local main, clean up.
+merge <pr> --confirm [--session NAME]   lock, claim, push, wait, merge, move the local main, clean up.
 merge --unlock          remove this repo's merge lock. Reads no other state.
 merge --dev ...         run the checkout's own tree, not origin main
 ```
@@ -141,6 +141,7 @@ merge --dev ...         run the checkout's own tree, not origin main
 * **`--unlock`.** The lock is the ref `refs/merge-lock/<defaultBranch>` on origin. It expires
   after twice `merge.deadlineMinutes` plus ten minutes (a run can wait twice), and a later run breaks an expired lock.
   `--unlock` removes it at once, for a run that died. It reads no lock state. It still reads the git root and the config.
+  The lock records the PR, branch, host, pid and start time. Sessions should pass `--session NAME` with their session name. A held message names the holder and says if it is alive, dead, or unknown (another host, or an old lock). A release that fails prints one line and never hides the run's own result.
 
 Exit codes:
 
