@@ -83,7 +83,7 @@ the hook already owns. Rulings still go to tracked homes at once
 
 - The rewrite happens after compaction, so the session writes from the summary and the
   digest, not from its full context. The digest keeps only the tail. Early detail lives on
-  through the prior handoff.
+  through the prior handoff. A session's first compaction has no prior handoff.
 - The rewrite costs the post-compact session one read of the digest, about 15k tokens.
 
 ## Measured facts
