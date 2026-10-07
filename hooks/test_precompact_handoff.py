@@ -175,7 +175,7 @@ class Case(object):
         return os.path.join(self.cfg, "hooks", "precompact_handoff_prompt.md")
 
     def handoff_path(self):
-        return os.path.join(self.cfg, "state", "handoff", "%s.handoff.md" % self.session_id)
+        return os.path.join(self.cfg, "handoffs", "%s.md" % self.session_id)
 
     def read_state(self):
         path = self.state_path()
@@ -614,6 +614,27 @@ def case_nudge_settings():
           any("precompact_handoff.py" in x and "--nudge" in x for x in cmds), "Stop: %r" % cmds)
 
 
+def case_handoff_path_not_frozen():
+    """Judge the path by guard's own rule 7 probe, `is_frozen`, with cfg as the config dir."""
+    sys.path.insert(0, HERE)
+    import guard
+    c = Case("frozen")
+    old = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = c.cfg  # same lookup as guard.config_dir()
+    try:
+        old_path = os.path.join(c.cfg, "state", "handoff", "%s.handoff.md" % c.session_id)
+        check("frozen-probe: guard calls the old state/handoff path frozen",
+              guard.is_frozen(old_path, c.repo) is True)
+        check("handoff-path: a session can write it (guard does not freeze it)",
+              guard.is_frozen(c.handoff_path(), c.repo) is False, "path: %s" % c.handoff_path())
+    finally:
+        if old is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = old
+        c.cleanup()
+
+
 # --------------------------------------------------------------------------- the run
 
 
@@ -632,6 +653,7 @@ def main() -> int:
     case_nudge_limit_checkpoints()
     case_nudge_ignores_bogus_last_entries()
     case_nudge_settings()
+    case_handoff_path_not_frozen()
 
     if FAILED:
         print()
