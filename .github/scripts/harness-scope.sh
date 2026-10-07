@@ -54,7 +54,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
   done <<< "$files"
   # A new file under a landed dir (landed-dirs.txt, the one list) changes what test_install_src and
   # the guard suite see. An unreadable or empty list turns everything on.
-  dirs=$(sed 's/#.*//; s/[[:space:]]//g' landed-dirs.txt 2>/dev/null | grep -v '^$' | paste -sd'|' -)
+  dirs=$(sed 's/#.*//; s/[[:space:]]//g; s#/$##' landed-dirs.txt 2>/dev/null | grep -v '^$' | paste -sd'|' -)
   if [ -z "$dirs" ]; then
     on="$on $ALL "
   else
