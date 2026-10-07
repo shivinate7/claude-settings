@@ -1666,6 +1666,46 @@ class ResolveProgram(unittest.TestCase):
         got = merge.resolve_program("fakeprog", {"PATH": t})
         self.assertEqual(os.path.normcase(got), os.path.normcase(os.path.join(t, "fakeprog.cmd")))
 
+    def test_the_program_files_git_bash_wins_over_system32(self):
+        t = tempfile.mkdtemp(prefix="test-resolve-"); self.addCleanup(shutil.rmtree, t, True)
+        sysroot = os.path.join(t, "Win"); pf = os.path.join(t, "PF")
+        git_bash = os.path.join(pf, "Git", "bin", "bash.exe")
+        for f in (os.path.join(sysroot, "System32", "bash.exe"), git_bash):
+            os.makedirs(os.path.dirname(f)); put(f, "x")
+        env = {"PATH": os.path.join(sysroot, "System32"), "SystemRoot": sysroot, "ProgramFiles": pf}
+        with unittest.mock.patch.object(merge.os, "name", "nt"):
+            self.assertEqual(merge.resolve_program("bash", env), git_bash)
+
+@windows_slice
+@unittest.skipUnless(os.name == "nt", "pid_alive's kernel32 branches exist only on Windows")
+class PidAlive(unittest.TestCase):
+    """pid_alive (merge.py) on Windows, with kernel32 faked so it runs on any OS."""
+    def probe(self, handle, last_error=0, exit_code=259):
+        k = unittest.mock.Mock()
+        k.OpenProcess.return_value = handle
+        k.GetExitCodeProcess.side_effect = lambda h, ref: (setattr(ref._obj, "value", exit_code), 1)[1]
+        with unittest.mock.patch.object(merge.os, "name", "nt"), \
+             unittest.mock.patch("ctypes.WinDLL", create=True, return_value=k) as k_loader, \
+             unittest.mock.patch("ctypes.get_last_error", create=True, return_value=last_error):
+            result = merge.pid_alive(1234)
+        k_loader.assert_called_once_with("kernel32", use_last_error=True)
+        return result, k
+
+    def test_access_denied_reads_alive(self):
+        alive, k = self.probe(0, last_error=5)
+        self.assertTrue(alive)
+        k.GetExitCodeProcess.assert_not_called()
+
+    def test_a_process_that_exited_reads_dead_and_its_handle_is_closed(self):
+        alive, k = self.probe(77, exit_code=1)
+        self.assertFalse(alive)
+        k.CloseHandle.assert_called_once_with(77)
+
+    def test_a_still_active_process_reads_alive_and_its_handle_is_closed(self):
+        alive, k = self.probe(77, exit_code=259)
+        self.assertTrue(alive)
+        k.CloseHandle.assert_called_once_with(77)
+
 @windows_slice
 class SliceSelector(unittest.TestCase):
     """MERGE_TESTS=windows-slice keeps only the marked tests; no value keeps all; an unknown value stops."""
@@ -1695,8 +1735,12 @@ class SliceSelector(unittest.TestCase):
             "LockHolder.test_the_lock_records_the_holder_and_a_second_run_sees_it_alive",
             "LockHolder.test_the_same_host_name_on_another_platform_reads_cannot_tell_never_dead",
             "LockHolder.test_windows_liveness_never_calls_os_kill",
+            "PidAlive.test_a_process_that_exited_reads_dead_and_its_handle_is_closed",
+            "PidAlive.test_a_still_active_process_reads_alive_and_its_handle_is_closed",
+            "PidAlive.test_access_denied_reads_alive",
             "ResolveProgram.test_a_bare_name_finds_its_cmd_shim",
-            "ResolveProgram.test_bash_skips_system32"})
+            "ResolveProgram.test_bash_skips_system32",
+            "ResolveProgram.test_the_program_files_git_bash_wins_over_system32"})
 
     def test_no_value_keeps_every_test(self):
         full = len(list(iter_tests(self.all_tests())))
