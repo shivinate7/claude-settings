@@ -1,27 +1,36 @@
-# Rewrite the handoff after compaction
+# Keep the handoff current
 
-Compaction just dropped detail. Rewrite the handoff now, in this order.
+A Stop-hook checkpoint asks you to update the handoff while you still have full context:
+update every section of step 4 from what you know. After a compaction, patch it instead,
+in this order. The last checkpoint wrote it with full context, so keep what still holds.
 
 ## 1. Read the prior handoff first
 
-Read the prior handoff before you write anything. It holds the last known state.
+Read the prior handoff (the file from step 2) before you write anything, when it exists.
+It holds the last known state.
 
-## 2. Pick the handoff path
+## 2. Use the session's own handoff
 
-Check the repo root for `HANDOFF.md` or `handoff.md`, outside any `history` folder.
-Use that file when one exists. Otherwise use `.claude/handoff.md`.
+The reorient message names your handoff file:
+`~/.claude/state/handoff/<session_id>.handoff.md` (under `CLAUDE_CONFIG_DIR` when set).
+Use that path. It is per session and
+outside git, so sessions on other branches never collide on it. Never keep the handoff
+in a scratchpad or a temp folder.
+
+A repo's own `HANDOFF.md` or `handoff.md` is a project document. Read it for context.
+Change it only in a PR, never as this update.
 
 ## 3. Gather your sources
 
 Use the compaction summary above. Read the digest file the reorient message named, when
-it named one. Read the prior handoff too. Early detail may live only in that prior
-handoff, since the digest keeps only its own tail.
+it named one. Together they cover the work since the handoff's last write.
 
-## 4. Rewrite the file in place
+## 4. Patch the file in place
 
-Rewrite the handoff file at the path from step 2. Never make a dated copy.
+Add what changed since the handoff's last write, and correct what is now false. Keep the
+rest. When no handoff exists yet, write it whole. Never make a dated copy.
 
-Write these sections:
+The handoff holds these sections:
 
 - Where things stand: the branch, the head commit, open PRs, and their CI state.
 - The owner's rulings from this session. Give each ruling its tracked home, a file
