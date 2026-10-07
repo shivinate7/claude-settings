@@ -512,6 +512,69 @@ def case_nudge_failures_are_silent():
         c.cleanup()
 
 
+def set_limit(c, limit):
+    put(os.path.join(c.cfg, "settings.json"), json.dumps({"autoCompactWindow": limit}))
+
+
+def case_nudge_limit_checkpoints():
+    Case.nudge_path = lambda self: os.path.join(
+        self.cfg, "state", "handoff", "%s.nudge.json" % self.session_id)
+    # default limit 500k (no settings.json): checkpoints 200,300,400,450
+    c = Case("nlim5")
+    try:
+        nudge(c, 410000)
+        p = nudge(c, 455000)
+        check("limit: 455k blocks after 410k fired (limit-50k checkpoint, 500k limit)",
+              is_block(c, p), "out=%r" % p.stdout)
+        check("limit: 455k stores bucket 3", stored_bucket(c) == 3, "got %r" % stored_bucket(c))
+        p = nudge(c, 460000)
+        check("limit: 460k after 455k is silent", p.returncode == 0 and not p.stdout.strip(),
+              "out=%r" % p.stdout)
+    finally:
+        c.cleanup()
+    c = Case("nlimexp")
+    try:
+        set_limit(c, 500000)
+        nudge(c, 410000)
+        p = nudge(c, 455000)
+        check("limit: explicit 500k setting behaves like the default", is_block(c, p),
+              "out=%r" % p.stdout)
+    finally:
+        c.cleanup()
+    # unreadable settings: default 500k
+    c = Case("nlimbad")
+    try:
+        put(os.path.join(c.cfg, "settings.json"), "{not json")
+        nudge(c, 410000)
+        p = nudge(c, 455000)
+        check("limit: unreadable settings falls back to 500k", is_block(c, p),
+              "out=%r" % p.stdout)
+    finally:
+        c.cleanup()
+    # limit 800k: 200..700, then 750
+    c = Case("nlim8")
+    try:
+        set_limit(c, 800000)
+        nudge(c, 410000)
+        p = nudge(c, 455000)
+        check("limit 800k: 455k silent after 410k fired (next is 500k)",
+              p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
+        p = nudge(c, 755000)
+        check("limit 800k: 755k blocks", is_block(c, p), "out=%r" % p.stdout)
+        check("limit 800k: 755k stores bucket 6", stored_bucket(c) == 6, "got %r" % stored_bucket(c))
+    finally:
+        c.cleanup()
+    # limit 200k: limit-50k = 150k <= 200k, only checkpoint is 150k
+    c = Case("nlim2")
+    try:
+        set_limit(c, 200000)
+        p = nudge(c, 160000)
+        check("limit 200k: 160k blocks", is_block(c, p), "out=%r" % p.stdout)
+        check("limit 200k: 160k stores bucket 0", stored_bucket(c) == 0, "got %r" % stored_bucket(c))
+    finally:
+        c.cleanup()
+
+
 def case_nudge_settings():
     with open(os.path.join(REPO_ROOT, "settings.json"), "r", encoding="utf-8") as f:
         stop = json.load(f).get("hooks", {}).get("Stop", [])
@@ -535,6 +598,7 @@ def main() -> int:
     case_nudge_uses_last_assistant_entry_and_sums_cache()
     case_nudge_stop_hook_active()
     case_nudge_failures_are_silent()
+    case_nudge_limit_checkpoints()
     case_nudge_settings()
 
     if FAILED:
