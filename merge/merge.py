@@ -340,6 +340,7 @@ class Host:
         not, ends the wait, and any pending check, required or not, is waited on. No sleep: a pending check blocks in `gh run watch <id> --exit-status` for at
         most a minute, then the loop reads again."""
         names = self.required_names()
+        base = self.base  # the base read under the lock: the last pr() before the wait
         end = self.now() + deadline_minutes * 60
         settled = False
         while True:
@@ -349,6 +350,8 @@ class Host:
                     return False, f"the deadline of {deadline_minutes} minutes passed. GitHub still shows the head before the push."
                 self.pause(self.minute)
                 continue
+            if info["base"] != base:
+                return False, f"the base of the pull request changed from {base} to {info['base']} during the wait."
             if info["head"] != sha:
                 return False, f"the branch head moved to {info['head'][:9]} during the wait ({sha[:9]} was waited on). Run again."
             if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
@@ -482,9 +485,13 @@ def node_stamp(wt, cfgrel, mode, base):
     env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_REF", "GITHUB_BASE_REF")}
     return sh(["node", STAMP, f"--{mode}", "--base", base, "--config", os.path.join(wt, cfgrel), "--root", wt], env=env)
 
+def head_claim(wt):
+    """The Record-claim ids on HEAD's last commit, or ''."""
+    return git(wt, "log", "-1", "--format=%(trailers:key=Record-claim,valueonly)", "HEAD")[1].strip()
+
 def own_claim(wt, cfgrel, base):
     """The trailer ids when HEAD is this tool's claim and each number is still free, else None."""
-    ids = git(wt, "log", "-1", "--format=%(trailers:key=Record-claim,valueonly)", "HEAD")[1].strip()
+    ids = head_claim(wt)
     if not ids:
         return None
     c, out = node_stamp(wt, cfgrel, "check", base)
@@ -688,6 +695,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session=""):
         undo_check(wt, base_ref, unknown_ok)
         resumed = own_claim(wt, cfgrel, base_ref) if base == cfg["defaultBranch"] else None
         if base != cfg["defaultBranch"]:
+            if head_claim(wt):  # an old claim would put real ids into a branch that is not the default
+                raise Stop(f"{info['head'][:7]} on {branch} holds a Record-claim, and {base} is not the default branch. Revert that commit and run again.")
             say(f"merge: {base} is not the default branch. Ids stay pending; nothing to claim.")
         elif resumed:
             claim_sha = info["head"]
