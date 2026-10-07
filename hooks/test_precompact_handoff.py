@@ -638,6 +638,44 @@ def case_handoff_path_not_frozen():
         c.cleanup()
 
 
+def case_handoffs_dir_is_made():
+    """A fresh cfg has no handoffs dir. Each run that names the path must make it."""
+    def has_dir(c):
+        return os.path.isdir(os.path.dirname(c.handoff_path()))
+
+    c = Case("hdir_reo")
+    try:
+        c.run_reorient()
+        check("handoffs-dir: --reorient without a prior PreCompact makes it", has_dir(c))
+    finally:
+        c.cleanup()
+    c = Case("hdir_reo2")
+    try:
+        tp = os.path.join(c.root, "transcript.jsonl")
+        write_transcript(tp, [transcript_line("user", [{"type": "text", "text": "hello"}])])
+        c.run_precompact(tp)
+        shutil.rmtree(os.path.dirname(c.handoff_path()), ignore_errors=True)
+        c.run_reorient()
+        check("handoffs-dir: --reorient after a PreCompact makes it", has_dir(c))
+    finally:
+        c.cleanup()
+    c = Case("hdir_nudge")
+    try:
+        p = nudge(c, 210000)
+        check("handoffs-dir: a blocking --nudge makes it", is_block(c, p) and has_dir(c),
+              "block=%r out=%r" % (is_block(c, p), p.stdout))
+    finally:
+        c.cleanup()
+    c = Case("hdir_pre")
+    try:
+        tp = os.path.join(c.root, "transcript.jsonl")
+        write_transcript(tp, [transcript_line("user", [{"type": "text", "text": "hello"}])])
+        c.run_precompact(tp)
+        check("handoffs-dir: PreCompact makes it", has_dir(c))
+    finally:
+        c.cleanup()
+
+
 # --------------------------------------------------------------------------- the run
 
 
@@ -657,6 +695,7 @@ def main() -> int:
     case_nudge_ignores_bogus_last_entries()
     case_nudge_settings()
     case_handoff_path_not_frozen()
+    case_handoffs_dir_is_made()
 
     if FAILED:
         print()
