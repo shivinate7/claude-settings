@@ -762,6 +762,7 @@ class BaseAware(Env):
                     h.passes += 1
                     if h.passes > 1:
                         info["base"] = "other-base"  # the second pass of the wait sees a new base
+                h.base = info["base"]  # as Host.pr does: the baseline is "integ" from the reads before the wait
                 return info
             def required_names(h): return ["gates"]
             def checks(h, n): return {"gates": [("pass", "")]}
