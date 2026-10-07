@@ -63,6 +63,15 @@ def handoff_path(session_id):
     return os.path.join(config_dir(), "handoffs", "%s.md" % session_id)
 
 
+def ensure_handoff_dir(session_id):
+    """Create <config_dir>/handoffs/ so the session can write its handoff. Creates only;
+    never touches files in it. A failure never blocks."""
+    try:
+        os.makedirs(os.path.dirname(handoff_path(session_id)), exist_ok=True)
+    except Exception as e:
+        sys.stderr.write("precompact_handoff: could not create handoffs dir: %s\n" % e)
+
+
 def prompt_path():
     """The installed prompt file: ~/.claude/hooks/precompact_handoff_prompt.md, not this
     repo's own copy -- the reorient message must name the path the session actually
@@ -133,6 +142,7 @@ def run_precompact(payload):
     transcript_path = payload.get("transcript_path", "")
     cwd = payload.get("cwd") or os.getcwd()
     repo_top = _repo_top_level(cwd)
+    ensure_handoff_dir(session_id)
 
     ok = False
     digest_path_ = None
@@ -171,6 +181,7 @@ def run_reorient(payload):
         state = None
 
     prompt = prompt_path()
+    ensure_handoff_dir(session_id)
     handoff = handoff_path(session_id)
     if not state or not state.get("ok") or not state.get("digest"):
         print("Context was compacted. Follow %s before anything else. Your handoff is "
@@ -244,6 +255,7 @@ def run_nudge(payload):
         with open(path, "w", encoding="utf-8") as f:
             json.dump({"bucket": bucket}, f)
         if bucket > stored:
+            ensure_handoff_dir(session_id)
             print(json.dumps({"decision": "block", "reason": (
                 "Context is about %dk tokens. Update your handoff at %s now. Follow step 4 "
                 "of %s: where things stand, the owner's rulings with their homes, work in "
