@@ -115,6 +115,9 @@ def hardening_problems(text):
     """A carrying job has no job-level if, a scope step and setup-python; a REQUIRED step keeps
     `!cancelled()`, its pinned shell and its pinned if."""
     problems = []
+    n = text.count("MERGE_TESTS")  # one mention only: the slice step's env. Job, workflow or $GITHUB_ENV copies would slice every run.
+    if n != 1:
+        problems.append(f"MERGE_TESTS appears {n} times in gates.yml, want exactly 1 (the slice step's env)")
     for name, job in windows_jobs(text).items():
         steps = job["steps"]
         if not any(key(st) in REQUIRED for st in steps):
@@ -191,6 +194,12 @@ class WindowsSplit(unittest.TestCase):
         self.assertTrue(hardening_problems(doc(full_if=slice_if)))  # full run on pull_request
         self.assertTrue(hardening_problems(doc(slice_if=slice_if.replace("!cancelled() && ", ""))))
         self.assertTrue(hardening_problems(doc(env="full")))  # slice env not pinned
+        good = doc()
+        for bad in (good.replace("    runs-on: windows-latest\n", "    runs-on: windows-latest\n    env:\n      MERGE_TESTS: windows-slice\n"),
+                    "env:\n  MERGE_TESTS: windows-slice\n" + good,
+                    good.replace("      - id: scope\n", "      - run: echo MERGE_TESTS=windows-slice >> $GITHUB_ENV\n      - id: scope\n")):
+            self.assertTrue(any("MERGE_TESTS appears 2 times" in p for p in hardening_problems(bad)), bad)
+        self.assertFalse(any("MERGE_TESTS appears" in p for p in hardening_problems(good)))
         self.assertTrue(hardening_problems(doc(full_if=full_if.replace(" && steps.scope.outputs.code == 'true'", ""))))
 
 

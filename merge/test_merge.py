@@ -845,7 +845,6 @@ if p == "refs/merge-lock/main" and method == "DELETE":
 fail("unhandled " + p)
 '''
 
-@windows_slice
 class GhLockTest(unittest.TestCase):
     def setUp(self):
         t = tempfile.mkdtemp(prefix="test-ghlock-")
@@ -1674,10 +1673,20 @@ class SliceSelector(unittest.TestCase):
         self.assertEqual(len(got), sum(self.marked(t) for t in full))
 
     def test_the_slice_holds_the_windows_probe_and_the_bash_resolver_cases(self):
-        names = {t._testMethodName for t in iter_tests(select_tests(self.all_tests(), "windows-slice"))}
-        for want in ("test_windows_liveness_never_calls_os_kill", "test_afterMerge_runs_in_git_bash_not_the_wsl_stub",
-                     "test_the_lock_records_the_holder_and_a_second_run_sees_it_alive"):
-            self.assertIn(want, names)
+        """The exact slice, bar this class. Dropping or adding a mark must change this list on purpose."""
+        got = {f"{t.__class__.__name__}.{t._testMethodName}" for t in iter_tests(select_tests(self.all_tests(), "windows-slice"))
+               if t.__class__.__name__ != "SliceSelector"}
+        self.assertEqual(got, {
+            "Flow.test_afterMerge_runs_in_git_bash_not_the_wsl_stub",
+            "Flow.test_full_merge_claims_pushes_merges_syncs_cleans",
+            "GhHalf.test_an_empty_required_list_is_refused",
+            "LockHolder.test_a_lock_with_no_platform_line_reads_cannot_tell_never_dead",
+            "LockHolder.test_held_says_dead_for_a_lock_on_this_host_whose_pid_is_gone",
+            "LockHolder.test_the_lock_records_the_holder_and_a_second_run_sees_it_alive",
+            "LockHolder.test_the_same_host_name_on_another_platform_reads_cannot_tell_never_dead",
+            "LockHolder.test_windows_liveness_never_calls_os_kill",
+            "ResolveProgram.test_a_bare_name_finds_its_cmd_shim",
+            "ResolveProgram.test_bash_skips_system32"})
 
     def test_no_value_keeps_every_test(self):
         full = len(list(iter_tests(self.all_tests())))
