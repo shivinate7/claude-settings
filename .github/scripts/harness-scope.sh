@@ -27,13 +27,20 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       landed-dirs.txt) on="$on $W $R $X $S code guard " ;;
       hooks/test_guard.py|hooks/mutate_guard.py) on="$on $W $X code guard " ;;
       # install.sh and session_start.sh: the checkout-detection suite and test_guard read them.
-      install.sh|hooks/session_start.sh|hooks/test_install_src.sh) on="$on $W $X $S code guard " ;;
+      install.sh|hooks/test_install_src.sh) on="$on $W $X $S code guard " ;;
+      hooks/session_start.sh) on="$on $W $R $X $S code guard " ;;
       hooks/test_mutate_shared.py) on="$on code guard " ;;
       # Hook modules and suites that run on the rest and macOS jobs.
       hooks/*|lint/_transcript.py|lint/ste_lint.py|lint/ste_gate.py|lint/report_gate.py|lint/md_sweep.py|lint/ruling_census.py|lint/test_gates.py|lint/test_ruling_census.py|lint/check_unknown_reads_contract.py)
         on="$on $R $X code guard "; [ "$f" = lint/_transcript.py ] && on="$on $M " ;;
-      janitor/*|bin/claude-janitor) on="$on $R $X code sweep " ;;
+      # bin/claude-janitor: test_install_src reads it.
+      bin/claude-janitor) on="$on $W $S $R $X code sweep " ;;
+      janitor/*) on="$on $R $X code sweep " ;;
       bin/verdict|bin/verdict.cmd|lint/test_verdict.py) on="$on $R $X code " ;;
+      # merge.py: guard.py loads it. check_record_slugs.py: guard.py reads it. check_silent_undo.py: merge.py imports it.
+      merge/merge.py) on="$on $M $W $X code guard " ;;
+      lint/check_record_slugs.py) on="$on $W $X code guard " ;;
+      lint/check_silent_undo.py) on="$on $M code " ;;
       merge/*|bin/merge|bin/merge.cmd|.github/stamp.json) on="$on $M code " ;;
       actions/stamp/*.md) ;;
       actions/stamp/*) on="$on $R $X $M code " ;;
@@ -45,6 +52,9 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       *) on="$on $ALL " ;;
     esac
   done <<< "$files"
+  # A new file under these folders changes what test_install_src and the guard suite see.
+  added=$(git diff --name-only --diff-filter=A --no-renames "$range" 2>/dev/null) || added="agents/"
+  grep -Eq '^(agents|skills|output-styles|lint)/' <<< "$added" && on="$on $W $S code "
 else
   on=" $ALL "
 fi
