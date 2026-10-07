@@ -651,10 +651,11 @@ class BaseAware(Env):
         self.assertEqual(rc, 0, out)
         self.assertTrue(getattr(self.host, "merged", False), out)
         self.assertNotIn("claim", [m for m, _ in self.modes])  # stamp --claim never runs
-        self.assertEqual(self.head(), feat_before)  # nothing pushed to the head branch
+        # nothing pushed to the head branch. deleteBranch removes `feat` after the merge, so read the merge commit instead.
         sh(self.co, "git", "fetch", "-q", "origin")
-        self.assertNotIn("Record-claim", sh(self.co, "git", "log", "origin/feat", "--format=%B"))
-        self.assertEqual(self.claims("feat"), 0)
+        self.assertEqual(sh(self.co, "git", "rev-parse", f"origin/{self.BASE}^2"), feat_before)
+        self.assertEqual(sh(self.co, "git", "log", f"{feat_before}..origin/{self.BASE}^2", "--format=%B"), "")
+        self.assertNotIn("Record-claim", sh(self.co, "git", "log", f"origin/{self.BASE}^2", "--format=%B"))
         self.assertIn("id: pending", self.show(self.BASE, "docs/decisions/second.md"))  # ids stay pending
         self.assertNotIn("second.md", sh(self.co, "git", "ls-tree", "-r", "--name-only", "origin/main"))  # main untouched
 
