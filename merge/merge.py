@@ -2,7 +2,7 @@
 """The shared merge tool, git half. Plan: plans/shared-merge-tool.md, "The flow".
 
   merge <pr>              preview: what it would claim and merge. Presses nothing.
-  merge <pr> --confirm    lock, claim, push, wait, merge, sync local main, clean up.
+  merge <pr> --confirm [--session NAME]   lock, claim, push, wait, merge, sync local main, clean up.
   merge --unlock          remove this repo's merge lock. Reads no lock state first.
 
 Git half: the merge lock, the temporary worktree, the claim, the push, the revert, resume, the
@@ -111,10 +111,11 @@ def lock_message(ttl, now, holder=None):
     """`holder` holds pr, branch, session. The session is untrusted text: one line, capped, so it cannot add an `expires:` or `owner:` line."""
     lines = [f"merge lock\nexpires: {int(now + ttl)}\nowner: {uuid.uuid4().hex}"]
     if holder:
-        lines += [f"pr: {holder['pr']}", "branch: " + " ".join(str(holder["branch"]).split()), f"host: {socket.gethostname()}",
+        lines += [f"pr: {holder['pr']}", "branch: " + " ".join(str(holder["branch"]).split()), f"host: {socket.gethostname()}", f"platform: {sys.platform}",
                   f"pid: {os.getpid()}", f"started: {int(now)}"]
-        if holder.get("session"):
-            lines.append("session: " + " ".join(holder["session"].split())[:SESSION_MAX])
+        session = " ".join(holder.get("session", "").split())[:SESSION_MAX]  # fold first, then test: a blank one writes no line
+        if session:
+            lines.append("session: " + session)
     return "\n".join(lines)
 
 def expiry_of(message):
@@ -125,10 +126,10 @@ def pid_alive(pid):
     """Windows never gets os.kill(pid, 0): signal 0 is CTRL_C_EVENT there."""
     if os.name == "nt":
         import ctypes
-        k = ctypes.windll.kernel32
+        k = ctypes.WinDLL("kernel32", use_last_error=True)
         h = k.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
         if not h:
-            return k.GetLastError() == 5  # access denied: it exists
+            return ctypes.get_last_error() == 5  # access denied: it exists
         code = ctypes.c_ulong()
         ok = k.GetExitCodeProcess(h, ctypes.byref(code))
         k.CloseHandle(h)
@@ -151,11 +152,12 @@ def holder_text(b, held, now):
     text = f"the merge lock on {b} is held by {who}" + (f" ({', '.join(extra)})" if extra else "")
     if "pid" in f and "host" in f:
         text += f", pid {f['pid']} on {f['host']}"
-    if f.get("started", "").isdigit():
+    if re.fullmatch(r"[0-9]{1,10}", f.get("started", "")):
         text += ", started " + time.strftime("%H:%M:%SZ", time.gmtime(int(f["started"])))
     text += f", expires in {held[1] - now:.0f}s." if held[1] != float("inf") else ", never expires."
-    if f.get("host") == socket.gethostname() and f.get("pid", "").isdigit():
-        if pid_alive(int(f["pid"])):
+    pid = int(f["pid"]) if re.fullmatch(r"[0-9]{1,10}", f.get("pid", "")) else 0
+    if f.get("host") == socket.gethostname() and f.get("platform") == sys.platform and 0 < pid < 2 ** 31:  # a pid from another OS reads nothing
+        if pid_alive(pid):
             return text + " The holder is alive. Wait for it, or ask its session."
         return text + " The holder is dead. Run: merge --unlock"
     return text + " Cannot tell if the holder is alive. Ask its owner before: merge --unlock"
