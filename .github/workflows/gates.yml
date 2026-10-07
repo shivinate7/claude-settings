@@ -190,7 +190,7 @@ jobs:
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.
   pointer-windows:
     runs-on: windows-latest
-    # Slowest green run measured 2026-10-07 (27 s); 5 min leaves room for a slow runner start.
+    # Slowest of the last 10 green PR runs, 2026-10-07 (27 s); 5 min leaves room for a slow runner start.
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -217,7 +217,7 @@ jobs:
   # below covers the rest of the suite, so this job stays narrow, on purpose.
   shell-macos:
     runs-on: macos-latest
-    # Slowest green run measured 2026-10-07 (42 s); 5 min leaves room for a slow runner start.
+    # Slowest of the last 10 green PR runs, 2026-10-07 (42 s); 5 min leaves room for a slow runner start.
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -341,12 +341,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: bash actions/stamp/test_action.sh
 
-  # Six python suites in the gates job need a real Windows box to prove: no other
+  # The Windows suites run in three jobs (gates-windows, gates-windows-merge, gates-windows-rest). Six python suites in the gates job need a real Windows box to prove: no other
   # job in this workflow can show whether they pass there. This job runs those
   # suites on Windows and reports the environment first. It is blocking: run
   # 35766479009 went green here for the first time, on its own merit, not through
   # continue-on-error.
-  # Every step below carries `if: ${{ !cancelled() }}`. Without it, GitHub Actions
+  # Every step in all three jobs carries `if: ${{ !cancelled() }}`. Without it, GitHub Actions
   # skips every step after the first failure, even inside a job marked
   # continue-on-error. This job stayed advisory-red at its first failing step for a
   # while, and that hid eleven suites behind it that never ran on Windows at all. A
@@ -484,8 +484,8 @@ jobs:
 
   gates-windows-rest:
     runs-on: windows-latest
-    # Expected about 400 s (stamp engine 85 s, janitor sweep 67 s, 12 suites under 25 s each); the sweep mutation harness runs off pull requests only and is unmeasured here. 15 min.
-    timeout-minutes: 15
+    # About 550 s on push (the sweep mutation harness takes about 150 s: runs 37650386161, 37606531387).
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
