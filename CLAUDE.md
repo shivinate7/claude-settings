@@ -113,3 +113,8 @@ Bring my decisions as a question with options and a recommendation.<!-- rule:out
 **Reports, in order:** Done, Deviations, Input Needed, Next.<!-- rule:reports-order-of-labels --> Done: one line per item, BUILT,
 RECORDED, or OTHER. BUILT and RECORDED carry a PR or commit. Per label, one item inline, several as bullets.<!-- rule:reports-done-format --> Drop a label
 that does not apply.<!-- rule:reports-drop-unused-label --> No report when nothing landed.<!-- rule:reports-no-report-when-nothing-landed -->
+
+# Compact instructions
+
+Keep the session's handoff path (~/.claude/state/handoff/<session_id>.handoff.md) and the owner's open rulings with their homes.
+The handoff's contents are listed in hooks/precompact_handoff_prompt.md step 4.

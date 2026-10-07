@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Claude Code hook: get the session's handoff ready before compaction.
 
-Spec: decisions/precompact-handoff.md. Two modes, one file. Neither mode calls a model:
+Spec: decisions/precompact-handoff.md. Three modes, one file. Neither mode calls a model:
 the owner rejected a `claude -p` child, since it needs its own command-line login, and
 the desktop app has none.
 
@@ -16,6 +16,14 @@ the desktop app has none.
   ~/.claude/state/handoff/<session_id>.handoff.md, then use the digest (or, with no usable
   digest, the compaction summary and the prior handoff alone).
 
+  Stop --nudge (stdin: session_id, transcript_path, stop_hook_active) -- reads the last
+  assistant entry's usage (input + cache_creation + cache_read tokens) as the context
+  size. Bucket = -1 below 200,000, else (size - 200,000) // 100,000. The bucket lives in
+  ~/.claude/state/handoff/<session_id>.nudge.json as {"bucket": N}. A higher bucket
+  than stored prints {"decision": "block", "reason": ...}: update the handoff per the
+  prompt file's step 4. A lower bucket (after compaction) is stored silently. Nothing
+  prints when stop_hook_active is true or on any error.
+
 Never exits 2 and never blocks compaction: every failure is caught, logged to stderr,
 and the hook still exits 0 (case_precompact_error_is_ok_false).
 """
@@ -25,6 +33,8 @@ import os
 import sys
 
 DIGEST_CAP = 60_000
+NUDGE_FLOOR = 200_000
+NUDGE_STEP = 100_000
 
 
 def config_dir():
@@ -170,6 +180,48 @@ def run_reorient(payload):
     return 0
 
 
+def run_nudge(payload):
+    if payload.get("stop_hook_active"):
+        return 0
+    try:
+        session_id = payload.get("session_id", "")
+        usage = None
+        with open(payload.get("transcript_path", ""), "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if entry.get("type") != "assistant":
+                    continue
+                u = (entry.get("message") or {}).get("usage")
+                if isinstance(u, dict):
+                    usage = u
+        if usage is None:
+            return 0
+        size = sum(usage.get(k) or 0 for k in (
+            "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+        bucket = -1 if size < NUDGE_FLOOR else (size - NUDGE_FLOOR) // NUDGE_STEP
+        path = os.path.join(config_dir(), "state", "handoff", "%s.nudge.json" % session_id)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                stored = int(json.load(f)["bucket"])
+        except Exception:
+            stored = -1
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"bucket": bucket}, f)
+        if bucket > stored:
+            print(json.dumps({"decision": "block", "reason": (
+                "Context is about %dk tokens. Update your handoff at %s now. Follow step 4 "
+                "of %s: where things stand, the owner's rulings with their homes, work in "
+                "flight, next steps, the files and commands that matter. Then continue."
+                % (size // 1000, handoff_path(session_id), prompt_path()))}))
+    except Exception as e:
+        sys.stderr.write("precompact_handoff: nudge error: %s\n" % e)
+    return 0
+
+
 def main():
     try:
         raw = sys.stdin.read()
@@ -181,6 +233,8 @@ def main():
         payload = {}
 
     try:
+        if "--nudge" in sys.argv[1:]:
+            return run_nudge(payload)
         if "--reorient" in sys.argv[1:]:
             return run_reorient(payload)
         return run_precompact(payload)
