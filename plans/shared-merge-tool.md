@@ -263,9 +263,10 @@ Each lane is one Sonnet builder. When every lane in its "Waits for" cell has mer
     rule "never merge failing CI"). The wait ends green only when every check has finished and
     none failed. Cause: Banchi #604 merged while a non-required check was pending, and it went
     red after the merge. A repo may list `merge.ignoreChecks`, each entry with a reason.
-11. **The lock names its holder.** The lock commit records the PR, branch, host, pid and start
-    time. It also records the session name from the optional `--session NAME` flag. The "held"
-    message prints them and says alive, dead, or cannot tell (another host, or an old lock).
+11. **The lock names its holder.** The lock commit records the PR, branch, host, platform, pid
+    and start time. It also records the session name from the optional `--session NAME` flag. The "held"
+    message prints them and says alive or dead only when the host and the platform match. Another
+    host or platform, an old lock, or a garbled field reads "cannot tell".
     `--unlock` stays unconditional, and nothing breaks a live lock by itself. A release that
     fails, or finds another run's lock, says so in one line. Cause: q_max, 2026-10-06. A live
     `merge 445` held an anonymous lock. An `--unlock` broke it, #451 merged in the gap, and #445
