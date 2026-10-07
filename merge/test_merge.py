@@ -1311,6 +1311,13 @@ class LockHolder(Env):
         self.assertIn("Cannot tell if the holder is alive", out)
         self.assertNotIn("The holder is dead", out)
 
+    def test_a_lock_with_no_platform_line_reads_cannot_tell_never_dead(self):
+        msg = self.new_message(socket.gethostname(), dead_pid()).rsplit("\nplatform:", 1)[0]
+        self.assertNotIn("platform:", msg)
+        out = self.held(msg)
+        self.assertIn("Cannot tell if the holder is alive", out)
+        self.assertNotIn("The holder is dead", out)
+
     def test_the_lock_records_this_platform(self):
         msg, _ = self.peek()
         self.assertIn(f"platform: {sys.platform}", msg.splitlines(), msg)
