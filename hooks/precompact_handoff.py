@@ -17,7 +17,7 @@ the desktop app has none.
   digest, the compaction summary and the prior handoff alone).
 
   Stop --nudge (stdin: session_id, transcript_path, stop_hook_active) -- reads the last
-  assistant entry's usage (input + cache_creation + cache_read tokens) as the context
+  main-chain, non-synthetic assistant entry's usage, if above 0 (input + cache_creation + cache_read tokens) as the context
   size. Bucket = index of the highest checkpoint reached, -1 below the first (checkpoints():
   200k, +100k while below limit-50k, then limit-50k; limit = autoCompactWindow in
   <config dir>/settings.json, default 500,000). The bucket lives in
@@ -212,22 +212,25 @@ def run_nudge(payload):
         return 0
     try:
         session_id = payload.get("session_id", "")
-        usage = None
+        size = None
         with open(payload.get("transcript_path", ""), "r", encoding="utf-8") as f:
             for line in f:
                 try:
                     entry = json.loads(line)
                 except ValueError:
                     continue
-                if entry.get("type") != "assistant":
+                if entry.get("type") != "assistant" or entry.get("isSidechain") is True:
                     continue
-                u = (entry.get("message") or {}).get("usage")
-                if isinstance(u, dict):
-                    usage = u
-        if usage is None:
+                msg = entry.get("message") or {}
+                u = msg.get("usage")
+                if msg.get("model") == "<synthetic>" or not isinstance(u, dict):
+                    continue
+                n = sum(u.get(k) or 0 for k in (
+                    "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+                if n > 0:
+                    size = n
+        if size is None:
             return 0
-        size = sum(usage.get(k) or 0 for k in (
-            "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
         bucket = sum(1 for c in checkpoints(window_limit()) if size >= c) - 1
         path = os.path.join(config_dir(), "state", "handoff", "%s.nudge.json" % session_id)
         try:
