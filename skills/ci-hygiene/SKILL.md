@@ -36,8 +36,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    GitHub's merge queue needs an organization-owned repo, so a personal repo batches by hand or
    through the merge tool.
    Batch across sessions too. Before a PR runs CI, list the repo's open PRs. When another session's
-   PR will be ready at about the same time, offer one integration branch. A repo may name one merge
-   steward session. That session owns all merges into main.
+   PR will be ready at about the same time, offer one integration branch. A repo may name one
+   session to batch PRs and run each merge, on the owner's word.
 9. **Wait without loops.** Watch a run once, in the background, and keep its output. Never poll
    with a sleep loop.
 10. **Prove each new gate red once.** Break the gate's target on a scratch copy. Watch the gate
@@ -53,20 +53,21 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     under about a minute into one job. This saves money in private repos only: standard hosted
     runners are free in public repos. Measure billed minutes and wall time before and after.
     Merged jobs can make the wait longer. Per-job rounding is measured, not a documented rule.
+    For wall time, see step 15.
 14. **Cache the install.** Cache the package install, for example `actions/setup-node` with
     `cache: npm`. Measure the step before and after.
-15. **Split the slowest job in a public repo.** Step 13 does not help there. Split the slowest
-    serial job into parallel jobs instead. Measured: the longest Windows job went from about
-    20 min to 8m59s (PR 289), with no coverage lost.
-16. **Pin every suite in a split-job guard.** A guard that checks a split job's suite list must
-    also pin each suite's `if:`, `shell:` and `!cancelled()`. It must fail on a job-level `if:` or
-    env override. A list-only guard stayed green with a suite turned off (review of PR 289;
-    `MERGE_TESTS` at job level, review of PR 293).
+15. **Split the slowest job for wall time.** Use it where minutes are free, as in a
+    public repo. Step 13 saves money, not time. Split the slowest serial job into parallel jobs.
+    Measured: the longest Windows job went from about 20 min to 8m59s, with no coverage lost
+    (PR 293's CI run).
+16. **Pin every suite in a split-job guard.** The guard must pin each suite's `if:`, `shell:` and
+    `!cancelled()`, with no job-level `if:` or env override (`MERGE_TESTS` gap, review of PR 293).
 17. **Slice tests on a slow platform.** On PRs, run a platform-specific test slice. Run the full
-    suite on main and nightly. Measured: the Windows merge job went from 8m59s to 1m13s (PR 293).
+    suite on main and nightly. Measured: the Windows merge job went from 8m59s to 1m13s
+    (PR 293's own CI run).
 18. **Profile before you refactor test setup.** Compare setup time to test-body time. If
-    the saving is under 20%, stop. Measured: setup was 31% of the time, and setup reuse saved about 9%
-    (decision ci-wall-time-cuts, cut D).
+    the saving is under 20%, stop. Measured: setup was 31% of the time, and setup reuse saved
+    about 9% (decision ci-wall-time-cuts, cut D).
 
 ## Before you skip a required job
 
@@ -80,7 +81,7 @@ CI claims in README or docs go stale too. See the `fresh-prose` skill.
 ## Opt-in templates
 
 Adopt each by `uses: shivinate7/claude-settings/actions/<name>@<full-sha>`, or copy the file.
-Record: `decisions/opt-in-ci-templates-composite.md`. Steps 1 and 11 to 14: `decisions/ci-spend-rules.md`.
+Record: `decisions/opt-in-ci-templates-composite.md`. Steps 1 and 11 to 14: `decisions/ci-spend-rules.md`. Steps 15 to 18: decision ci-wall-time-cuts.
 
 - `all-jobs-passed`: in a job with `needs: [...]` and `if: always()`, pass `toJSON(needs)` as shown. A skipped needed job then fails.
 
