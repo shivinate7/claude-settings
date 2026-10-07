@@ -1674,9 +1674,11 @@ class PidAlive(unittest.TestCase):
         k.OpenProcess.return_value = handle
         k.GetExitCodeProcess.side_effect = lambda h, ref: (setattr(ref._obj, "value", exit_code), 1)[1]
         with unittest.mock.patch.object(merge.os, "name", "nt"), \
-             unittest.mock.patch("ctypes.WinDLL", create=True, return_value=k), \
+             unittest.mock.patch("ctypes.WinDLL", create=True, return_value=k) as k_loader, \
              unittest.mock.patch("ctypes.get_last_error", create=True, return_value=last_error):
-            return merge.pid_alive(1234), k
+            result = merge.pid_alive(1234)
+        k_loader.assert_called_once_with("kernel32", use_last_error=True)
+        return result, k
 
     def test_access_denied_reads_alive(self):
         alive, k = self.probe(0, last_error=5)
@@ -1686,6 +1688,11 @@ class PidAlive(unittest.TestCase):
     def test_a_process_that_exited_reads_dead_and_its_handle_is_closed(self):
         alive, k = self.probe(77, exit_code=1)
         self.assertFalse(alive)
+        k.CloseHandle.assert_called_once_with(77)
+
+    def test_a_still_active_process_reads_alive_and_its_handle_is_closed(self):
+        alive, k = self.probe(77, exit_code=259)
+        self.assertTrue(alive)
         k.CloseHandle.assert_called_once_with(77)
 
 @windows_slice
@@ -1718,6 +1725,7 @@ class SliceSelector(unittest.TestCase):
             "LockHolder.test_the_same_host_name_on_another_platform_reads_cannot_tell_never_dead",
             "LockHolder.test_windows_liveness_never_calls_os_kill",
             "PidAlive.test_a_process_that_exited_reads_dead_and_its_handle_is_closed",
+            "PidAlive.test_a_still_active_process_reads_alive_and_its_handle_is_closed",
             "PidAlive.test_access_denied_reads_alive",
             "ResolveProgram.test_a_bare_name_finds_its_cmd_shim",
             "ResolveProgram.test_bash_skips_system32",
