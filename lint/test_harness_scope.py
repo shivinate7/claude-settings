@@ -38,6 +38,9 @@ def run(paths, event="pull_request", base="auto", before="auto", existing=()):
         git(d, "config", "user.name", "t")
         git(d, "config", "commit.gpgsign", "false")
         open(os.path.join(d, "seed.txt"), "w").write("seed\n")
+        for p in existing:  # in the base commit, so the head commit modifies them
+            os.makedirs(os.path.dirname(os.path.join(d, p)), exist_ok=True)
+            open(os.path.join(d, p), "w").write("old\n")
         git(d, "add", "-A")
         git(d, "commit", "-qm", "base")
         sha = git(d, "rev-parse", "HEAD")
