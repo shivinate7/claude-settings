@@ -281,6 +281,9 @@ Each lane is one Sonnet builder. When every lane in its "Waits for" cell has mer
 12. **The pull request's own base drives every step.** The claim, the lock, the required
     checks, the silent-undo check and the local fast-forward all use `<base>`. The claim runs
     only into `<defaultBranch>`. `merge --unlock [<branch>]` removes the lock of `<branch>`.
-    With no branch, it removes the lock of `<defaultBranch>`. Cause: q_max #497 merged into
+    With no branch, it removes the lock of `<defaultBranch>`. If the head holds a
+    `Record-claim` commit and `<base>` is not `<defaultBranch>`, the run stops before the
+    wait, and it names that commit to revert. Each pass of the wait reads the base. A changed
+    base ends the wait. Cause: q_max #497 merged into
     `claude/speed-wave-2` and claimed D-720 against main's D-719, so the next claim on main
     takes D-720 too.

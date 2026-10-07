@@ -329,11 +329,12 @@ meets each item below.
    command refuses a config that lacks either, but only under `--confirm`. A preview does
    not check them. It never guesses them. Read `method` from
    the repo's own merge history.
-4. `merge.requiredChecks` is `"protection"` (the default) or a list of check names. If the
-   list is empty or cannot be read, the command stops before the claim push. A repo with no
-   branch protection must write the list.
+4. `merge.requiredChecks` is `"protection"` (the default) or a list of check names.
+   `"protection"` reads the branch protection of the pull request's base. If the list is
+   empty or cannot be read, the command stops before the claim push. A repo with no branch
+   protection on a base, such as an integration branch, must write the list.
 5. `merge.afterMerge` is a list of shell commands. Each runs with `bash -c` in the repo root,
-   after the local main moves. `merge.deleteBranch` is a boolean.
+   after the local base branch moves. `merge.deleteBranch` is a boolean.
 6. Every pull request runs mode `check`, with `fetch-depth: 0`. A number that a
    `Record-claim` commit added is accepted. Any other number a branch adds is refused.
 7. Every push to the default branch runs mode `check` too. It refuses any pending record
@@ -343,7 +344,9 @@ meets each item below.
 
 The tool keeps these behaviours. The adopting repo needs no setting for them.
 
-- It takes a lock, the ref `refs/merge-lock/<defaultBranch>` on origin. The lock expires
+- It claims only for a pull request into the default branch. For any other base, records
+  stay `id: pending` until that base merges into the default branch.
+- It takes a lock, the ref `refs/merge-lock/<base>` on origin, for the pull request's base. The lock expires
   after `deadlineMinutes` plus ten minutes.
 - It claims in a temporary worktree at the pull request head. It pushes the claim as a
   plain push, never a force push.
