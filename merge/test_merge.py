@@ -1165,6 +1165,16 @@ class GhHalf(Env):
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
 
+    def test_a_required_check_that_is_skipped_reads_green(self):
+        # B skips whole jobs on a docs-only PR. A skipped required check is not red, not pending, and the run judge agrees.
+        red, pending, _ = merge.Host.classify({"gates": [("pass", "")], "gates-windows": [("skipping", "")]}, ["gates", "gates-windows"])
+        self.assertEqual((red, pending), ([], []))
+        runs = [{"name": "gates", "status": "completed", "conclusion": c} for c in ("success", "skipped", "neutral")]
+        self.assertEqual(merge.Host.judge_runs(runs), ([], []))
+        self.set(checks_seq=[[("gates", "skipping", "")]])  # gates is the one required name in CONFIG
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+
     def test_cancelled_and_unknown_buckets_stop_the_run(self):
         for bucket in ("cancel", "startup_failure"):
             self.set(checks_seq=[[("gates", "pass", ""), ("x", bucket, "")]])
