@@ -29,12 +29,16 @@ The owner chose all four cuts on 2026-10-07. Each lands as its own PR.
 - D. Make `merge/test_merge.py` faster, with the same cases and verdicts. Tried and dropped
   on 2026-10-07. Setup takes 31% of the time, and the `git` calls inside `merge.py` take 69%.
   Reusing one setup saved about 9%, under the 20% bar. C covers the PR wait instead.
-- E. Pending, after B is measured: a macOS slice on pull requests, like C. On PR 294, guard
-  (197 s) and janitor (109 s) took most of `gates-macos`. macOS bills 10x on private repos.
+- E. Dropped on 2026-10-08. The plan was a macOS slice on pull requests, like C. On PR 296,
+  guard (197 s) and janitor sweep (93 s) took 290 of about 390 s in `gates-macos`. Both hold
+  macOS code (the `ps -o lstart=` liveness read, darwin branches in `janitor/sweep.py`), so E
+  needed a new test selector in each suite. The repo is public, so macOS minutes are free. macOS
+  ends before Windows (about 9 min), so the PR wait does not change. The ci-hygiene skill, step
+  17, keeps the pattern for private repos.
 
 A push to main, the nightly run and a manual run always run every suite on every OS.
 
 ## Accepted risk
 
-B, C and E can miss a break on a pull request. A missed input in B's path map has the same effect. The push to main and the nightly run catch it
+B and C can miss a break on a pull request. A missed input in B's path map has the same effect. The push to main and the nightly run catch it
 after the merge. A does not lose coverage.
