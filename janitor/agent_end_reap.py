@@ -42,6 +42,7 @@ import sweep  # noqa: E402
 
 AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_LOG_LINES = 200  # the payload log keeps the last 200 runs
+REPLACE_TRIES = 5  # tries at the log replace, 50 ms apart
 MAX_CLIMB = 64  # ponytail: fixed depth bound against a pid cycle, never a real tree this deep
 
 
@@ -53,7 +54,8 @@ def log(record: dict):
     """Append one line and keep only the last MAX_LOG_LINES. The log is the evidence for the hook
     fields the docs leave open (decisions/agent-end-reap-stops-what-a-finished-agent-left.md), and
     it grew to thousands of raw payloads nobody reads. Two agents ending at once can lose a line:
-    ponytail: no lock, add one only if a measured field goes missing."""
+    ponytail: no lock, add one only if a measured field goes missing. On Windows the replace can
+    raise PermissionError while the destination is held for a moment, so it retries a few times."""
     path = log_path()
     line = json.dumps(dict(record, at=time.strftime("%Y-%m-%dT%H:%M:%S%z"))) + "\n"
     try:
@@ -66,7 +68,14 @@ def log(record: dict):
         temp = path + ".tmp"
         with open(temp, "w", encoding="utf-8") as handle:
             handle.writelines(kept + [line])
-        os.replace(temp, path)  # a reader never sees an empty or half-written file
+        for attempt in range(REPLACE_TRIES):
+            try:
+                os.replace(temp, path)  # a reader never sees an empty or half-written file
+                break
+            except PermissionError:  # MEASURED 2026-10-08 on Windows: the destination is held a moment
+                if attempt == REPLACE_TRIES - 1:
+                    raise
+                time.sleep(0.05)
     except Exception:
         pass
 
