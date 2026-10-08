@@ -27,7 +27,10 @@ Owner rulings, 2026-10-08:
   machine. `invoke_model` reads that file and passes the token to the call as
   `CLAUDE_CODE_OAUTH_TOKEN`. A file works the same on Windows and macOS, needs no app
   restart, and is never in the repository. With no token file, the call keeps today's
-  path.
+  path. The file may be saved as UTF-8 (with or without a BOM) or as UTF-16.
+  Accepted risk: the guard blocks writes to `~/.claude/state`, but not reads, so a session
+  can print the token into its transcript. `.credentials.json` carries the same risk
+  today.
 - An in-app agent hook was weighed and set aside. It cannot run `git`, which
   `decision_watch` needs. In the app's `auto` permission mode it could not open the
   transcript (about 60 "Unable to verify" answers, measured for the old decision_watch
