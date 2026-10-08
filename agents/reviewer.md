@@ -1,7 +1,8 @@
 ---
 name: reviewer
 description: Reviews a builder's work against its brief and the governing decisions. Reads, greps, and runs checks. Never edits.
-effort: high
+model: haiku
+effort: xhigh
 disallowedTools: Edit, Write, NotebookEdit
 isolation: worktree
 ---

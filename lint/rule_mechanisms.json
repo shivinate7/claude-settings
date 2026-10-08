@@ -71,7 +71,7 @@
     "roles-one-role-per-worker": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Nothing inspects which role, builder, reviewer, or Explore, a spawned agent holds at runtime, or catches a worker that carries two."
+        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
       }
     },
     "roles-sonnet-is-the-default": {
@@ -135,7 +135,7 @@
     "roles-brief-contents": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No check parses a brief for the task, files, governing rulings, and a done-check. Brief quality is read by a human."
+        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
       }
     },
     "roles-resume-by-name": {
@@ -159,7 +159,7 @@
     "parallelism-no-mid-task-talk": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No hook reads inter-lane messages for content or timing to catch a mid-task exchange."
+        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
       }
     },
     "parallelism-argue-max-parallelism": {
@@ -362,7 +362,7 @@
     "tokens-point-brief-at-files": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Nothing inspects a brief's content to confirm it names files rather than pasting their contents."
+        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
       }
     },
     "tokens-read-report-not-transcript": {
@@ -429,7 +429,7 @@
     "speak-rewrite-superseded-in-place": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No hook diffs an edit to a record and judges whether superseded text was rewritten in place versus left beside a story, an old quote, or the owner's verbatim words. Judging what is still true is a human read."
+        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
       }
     },
     "output-write-in-ste": {
@@ -442,7 +442,7 @@
     "output-start-with-point": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No check reads whether the first sentence of a reply is the point rather than a preamble."
+        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
       }
     },
     "output-tracking-turn-one-line": {
@@ -460,13 +460,13 @@
     "output-never-paste-passing-output": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No check tells a pasted command stream apart from a stated verdict in a reply."
+        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
       }
     },
     "output-bring-decisions-as-question": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Whether a decision was framed as a question with options and a recommendation is a style read of the reply."
+        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
       }
     },
     "reports-order-of-labels": {
@@ -551,7 +551,7 @@
     "style-cut-narration": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No check tells narration or a recap of earlier work apart from new content in a reply."
+        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
       }
     },
     "style-simple-answer-short": {
@@ -587,7 +587,7 @@
     "style-question-states-problem": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No check finds a question to the user and reads whether one plain sentence before it states the problem and why it needs their word."
+        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
       }
     },
     "output-never-hand-off-doable-step": {
@@ -599,13 +599,13 @@
     "style-option-says-effect": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No check reads whether each option in a question says what the user gains and what the user loses."
+        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
       }
     },
     "style-question-inside-box": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No check sees the text of a reply beside its question box and reads whether the question depends on text outside the box."
+        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
       }
     },
     "roles-each-layer-proves-once": {

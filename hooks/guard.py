@@ -59,10 +59,16 @@ one fixed order, and the first match wins.
   8 subagent-model-cap a write to a settings file whose content sets or changes
                        `CLAUDE_CODE_SUBAGENT_MODEL` or `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`.
                        Always asked, never denied.
-  9 subagent-model-floor an `Agent` or legacy `Task` call whose `model` is a Haiku model, by alias or
-                       by any full id. Always denied. Sonnet is the floor (owner ruling 2026-09-28).
-                       An agent file's own `model:` key never reaches this rule, so
-                       lint/check_agent_models.py checks the files.
+  9 subagent-model-floor an `Agent` or legacy `Task` call, or a `Workflow` script `agent()` call,
+                       whose `model` is a Haiku model, by alias or by any full id, unless the
+                       role (`subagent_type` or `agentType`) is in HAIKU_ROLES. A `start_session`
+                       naming a Haiku model is always denied. Sonnet is the floor otherwise
+                       (owner ruling 2026-10-07). An agent file's own `model:` key never reaches
+                       this rule, so lint/check_agent_models.py checks the files, from HAIKU_ROLES.
+                       The Workflow scan is static: it reads string-literal `model` and `agentType`
+                       keys in each agent() call's object argument. A model or role set through a
+                       variable, a spread, an alias, a concatenation, a ternary, a computed or
+                       shorthand key, a template `${}` or a regex literal holding a quote is not seen.
 
 A project's own `.claude/settings.json`, `.claude/settings.local.json`, and
 `.claude/hooks/*` are NOT frozen (Decision 7). They are allowed, and the guard appends
@@ -5084,14 +5090,78 @@ LN_DESCENDS_REASON = (
 
 
 SPAWN_TOOLS = ("Agent", "Task")
+SESSION_TOOL = "mcp__ccd_session__start_session"
+# The one list of roles that may run Haiku. lint/check_agent_models.py reads it from here.
+HAIKU_ROLES = ("Explore", "claude-code-guide", "test-author", "reviewer")
 MODEL_FLOOR_REASON = (
-    "Sonnet is the floor for every subagent. Start the subagent with model sonnet or opus, "
+    "Sonnet is the floor for this role. Start the subagent or session with model sonnet or opus, "
     "or name no model and let the default apply."
 )
+AGENT_CALL = re.compile(r"\bagent\s*\(")
+SCRIPT_LEXEME = re.compile(r"//[^\n]*|/\*.*?\*/|([\'\"`])((?:\\.|(?!\1).)*)\1", re.DOTALL)
+SCRIPT_PAIR = re.compile(r"(?:(\w+)|\x00(\d+)\x00)\s*:\s*\x00(\d+)\x00")
+
+
+def mask_script(script: str):
+    """Drop comments and replace each string literal with a \\x00N\\x00 token. Return (text, strings)."""
+    strings = []
+
+    def swap(found):
+        if found.group(1) is None:
+            return " "
+        strings.append(found.group(2))
+        return "\x00%d\x00" % (len(strings) - 1)
+
+    return SCRIPT_LEXEME.sub(swap, script), strings
+
+
+def script_opts(text: str, start: int):
+    """Yield the string-valued keys of each object literal that is a direct argument of the call
+    whose arguments open at `start`."""
+    depth, top, i = 1, [], start
+    while i < len(text) and depth:
+        ch = text[i]
+        if ch in "([{":
+            if ch == "{" and depth == 1:
+                top.append([i + 1, ""])
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+            if ch == "}" and depth == 1 and top and top[-1][1] == "":
+                top[-1][1] = text[top[-1][0]:i]
+        i += 1
+    for _, body in top:
+        flat, level = [], 0
+        for ch in body:
+            level += ch in "([{"
+            flat.append(ch if level == 0 else " ")
+            level -= ch in ")]}"
+        yield "".join(flat)
 
 
 def below_the_floor(model) -> bool:
     return "haiku" in str(model).lower()
+
+
+def floor_hit(tool: str, tool_input) -> str:
+    """The model a call names below the floor, or "". Listed roles may run Haiku."""
+    if tool in SPAWN_TOOLS:
+        model = tool_input.get("model")
+        if below_the_floor(model) and tool_input.get("subagent_type") not in HAIKU_ROLES:
+            return str(model)
+    elif tool == SESSION_TOOL:
+        if below_the_floor(tool_input.get("model")):
+            return str(tool_input.get("model"))
+    elif tool == "Workflow" and isinstance(tool_input.get("script"), str):
+        text, strings = mask_script(tool_input["script"])
+        for call in AGENT_CALL.finditer(text):
+            for body in script_opts(text, call.end()):
+                keys = {}
+                for name, quoted, value in SCRIPT_PAIR.findall(body):
+                    keys[name or strings[int(quoted)]] = strings[int(value)]
+                if below_the_floor(keys.get("model")) and keys.get("agentType") not in HAIKU_ROLES:
+                    return keys["model"]
+    return ""
 
 
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "") -> None:
@@ -5369,8 +5439,9 @@ def judge(payload) -> None:
 
     # 9. The subagent model floor. A spawn that names a Haiku model is denied. The reason names no
     # model; the log holds what the call asked for.
-    if tool in SPAWN_TOOLS and below_the_floor(tool_input.get("model")):
-        refuse(tool, "deny", "subagent-model-floor", MODEL_FLOOR_REASON, str(tool_input.get("model")))
+    floor_model = floor_hit(tool, tool_input)
+    if floor_model:
+        refuse(tool, "deny", "subagent-model-floor", MODEL_FLOOR_REASON, floor_model)
 
     # A merge through the MCP tool is judged by the same check gate as `gh pr merge`.
     if tool in MERGE_TOOLS:
