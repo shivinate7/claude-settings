@@ -99,7 +99,7 @@ def _mark_denied(path):
 def _take_denied(path):
     """True once after a deny: the next ask passes. Reading it clears it. A state older than
     STATE_MAX_AGE seconds (file mtime) is stale: removed if possible, else ignored. Raises
-    OSError when a live state cannot be cleared: it would pass every later ask."""
+    OSError when a fresh state cannot be cleared: it would pass every later ask."""
     try:
         age = time.time() - os.path.getmtime(path)
     except OSError:
@@ -108,6 +108,10 @@ def _take_denied(path):
         os.remove(path)
     except FileNotFoundError:
         return False
+    except OSError:
+        if age > STATE_MAX_AGE:
+            return False  # stale and stuck: ignored, the ask is judged
+        raise
     return age <= STATE_MAX_AGE
 
 

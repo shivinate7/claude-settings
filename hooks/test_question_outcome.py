@@ -869,8 +869,53 @@ def case_r4_missing_you_want_reason_has_no_raw_newline_or_control_character():
     check(name + ": no model call", stub.prompts == [], len(stub.prompts))
 
 
+# --------------------------------------------------------------------------- round 4
+# R8 a stale deny state whose remove fails is ignored: the ask is judged, no did-not-run note.
+# Pin: a fresh deny state whose remove fails gives the did-not-run note and no deny.
+
+def case_r8_stale_state_whose_remove_fails_is_ignored_and_the_ask_is_judged():
+    name = "caseR8 deny-state 2 hours old, remove fails: ignored, the ask is judged once"
+    if not need_module(name):
+        return
+    session = fresh_session("r8")
+    ask_a = ask_payload(session, [question(GOOD_Q, LABELS)], default_transcript())
+    ask_b = ask_payload(session, [question(REWORDED_Q, REWORDED_LABELS)], default_transcript())
+    with model_stub(FLAG) as stub:
+        _, out_a, _ = run_main(ask_a)
+        check(name + ": first ask denied", deny_reason(out_a) is not None, out_a)
+        _age_state(session, 2 * 60 * 60)
+        stub.result = ALLOW
+        with mock.patch.object(qo.os, "remove", side_effect=PermissionError(13, "Access is denied")):
+            code_b, out_b, _ = run_main(ask_b)
+    check(name + ": the ask was judged once (one more model call)", len(stub.prompts) == 2,
+          len(stub.prompts))
+    check(name + ": no did-not-run note", "did not run" not in (system_message(out_b) or ""), out_b)
+    check(name + ": not denied", deny_reason(out_b) is None, out_b)
+    check(name + ": exit 0", code_b in (0, None), code_b)
+
+
+def case_r8b_fresh_state_whose_remove_fails_does_not_deny_and_says_so():
+    name = "caseR8b deny-state 5 minutes old, remove fails: no deny, did-not-run note"
+    if not need_module(name):
+        return
+    session = fresh_session("r8b")
+    ask_a = ask_payload(session, [question(GOOD_Q, LABELS)], default_transcript())
+    ask_b = ask_payload(session, [question(REWORDED_Q, REWORDED_LABELS)], default_transcript())
+    with model_stub(FLAG):
+        _, out_a, _ = run_main(ask_a)
+        check(name + ": first ask denied", deny_reason(out_a) is not None, out_a)
+        _age_state(session, 5 * 60)
+        with mock.patch.object(qo.os, "remove", side_effect=PermissionError(13, "Access is denied")):
+            code_b, out_b, _ = run_main(ask_b)
+    check(name + ": not denied", deny_reason(out_b) is None, out_b)
+    check(name + ": says did not run", "did not run" in (system_message(out_b) or ""), out_b)
+    check(name + ": exit 0", code_b in (0, None), code_b)
+
+
 def main():
-    cases = (case_r1_a_state_that_cannot_be_removed_does_not_pass_every_later_ask,
+    cases = (case_r8_stale_state_whose_remove_fails_is_ignored_and_the_ask_is_judged,
+             case_r8b_fresh_state_whose_remove_fails_does_not_deny_and_says_so,
+             case_r1_a_state_that_cannot_be_removed_does_not_pass_every_later_ask,
              case_r2_a_deny_state_older_than_30_minutes_is_ignored,
              case_r2b_a_deny_state_5_minutes_old_still_passes_the_next_ask,
              case_r3_utf8_stdin_read_as_cp1252_is_judged_not_allowed_on_error,
