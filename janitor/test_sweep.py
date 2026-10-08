@@ -3262,8 +3262,9 @@ class StrayFolderTests(unittest.TestCase):
 
     def test_unreadable_worktrees_base_does_not_abort_the_run(self):
         """Finding (review): find_strays called a bare os.listdir, so a PermissionError on
-        <root>/.claude/worktrees escaped sweep_repo and aborted the run. The run must finish, list
-        no stray for the unreadable folder, and still judge every registered worktree."""
+        <root>/.claude/worktrees escaped sweep_repo and aborted the run. The run must finish,
+        report the strays as UNKNOWN (result["strays"] is None, not []), and still judge every
+        registered worktree. Zero would read as a clean folder; None does not."""
         base = os.path.join(self.root, ".claude", "worktrees")
         real_listdir = os.listdir
 
@@ -3275,10 +3276,33 @@ class StrayFolderTests(unittest.TestCase):
         with mock.patch.object(sweep.os, "listdir", side_effect=denied):
             result = sweep.sweep_repo(self.root, False, self.log)
         self.assertIsNone(result["refused"])
-        listed = [s for s in result["strays"] if isinstance(s, str)]
-        self.assertEqual(listed, [], "an unreadable folder listed strays: %r" % listed)
+        self.assertIsNone(result["strays"], "an unreadable folder gave a count, not unknown: %r"
+                          % (result["strays"],))
         judged = [_norm_path(d["path"]) for d in result["worktrees"]]
         self.assertIn(_norm_path(self.registered), judged, "the registered worktree was not judged")
+
+    def test_unreadable_worktrees_base_report_says_unknown_not_zero(self):
+        """Batch review J2: the printed report must not say "strays ... (kept): 0" for a folder
+        it could not read. It must say the count is unknown or the folder unreadable."""
+        base = os.path.join(self.root, ".claude", "worktrees")
+        real_listdir = os.listdir
+
+        def denied(path="."):
+            if _norm_path(path) == _norm_path(base):
+                raise PermissionError(13, "Access is denied", path)
+            return real_listdir(path)
+
+        with mock.patch.object(sweep.os, "listdir", side_effect=denied):
+            result = sweep.sweep_repo(self.root, False, self.log)
+        out = io.StringIO()
+        sweep.print_sweep_report([result], False, out=out)
+        text = out.getvalue()
+        lines = [ln for ln in text.splitlines() if "strays under .claude/worktrees" in ln]
+        self.assertEqual(len(lines), 1, "no single strays line in the report: %r" % text)
+        self.assertNotIn("(kept): 0", lines[0], "an unreadable folder reported zero strays: %r"
+                         % lines[0])
+        self.assertRegex(lines[0], r"(?i)unknown|unreadable", "the strays line does not say the "
+                         "scan could not run: %r" % lines[0])
 
 
 def _lane_entry(root, path):
@@ -3331,6 +3355,75 @@ class DanglingDefaultBaseTests(unittest.TestCase):
         decision = sweep.decide_worktree(root, _lane_entry(root, lane), attended=True)
         self.assertEqual(decision["action"], "keep", decision)
         self.assertTrue(decision["reason"].startswith("unpushed:"), decision)
+
+    def test_unreadable_origin_head_verify_returns_none_not_local_main(self):
+        """Batch review J3: guard.resolve_default_base treated a verify read that could not RUN
+        (guard._git returns None) as "does not exist", and fell through to local main. Only a git
+        that answers "does not exist" (returncode != 0) may fall through. An unreadable verify
+        returns None, so the sweep keeps the lane."""
+        root, _ = self._squash_lane("refs/remotes/origin/main")
+        require(guard.resolve_default_base(root) == "origin/main",
+                "the unpatched base is not origin/main, so the case proves nothing")
+        real_git = guard._git
+        verify_calls = []
+
+        def unreadable_verify(where, *args):
+            if args and args[-1].endswith("^{commit}"):  # the origin/HEAD verify read
+                verify_calls.append(args)
+                return None  # guard._git could not run git
+            return real_git(where, *args)
+
+        with mock.patch.object(guard, "_git", side_effect=unreadable_verify):
+            base = guard.resolve_default_base(root)
+        self.assertGreaterEqual(len(verify_calls), 1, "the verify read never ran: no proof")
+        self.assertIsNone(base, "an unreadable origin/HEAD verify fell through to %r" % base)
+
+
+class UnreadableHuskBaseRunTests(unittest.TestCase):
+    """Batch review J1: find_husks called a bare os.listdir on <root>/.claude/worktrees. With
+    huskNames set (so find_husks reaches the listdir) and that folder unreadable, the PermissionError
+    escaped sweep_repo. The run aborted before the repository's run-log line was written. The run
+    must finish, and the repository must still get its run-log line."""
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="husk-unreadable-", dir=ROOT)
+        self.root = os.path.join(self.base, "repo")
+        make_repo(self.root, {"f.txt": "x\n"})
+        give_remote(self.root)
+        write(os.path.join(self.root, ".claude", "janitor.json"),
+              json.dumps({"huskNames": [".DS_Store"]}))
+        self.wts = os.path.join(self.root, ".claude", "worktrees")
+        os.makedirs(self.wts)
+        self.log = os.path.join(self.base, "janitor-runs.jsonl")
+        self.restore = os.path.join(self.base, "restore.log")
+        require(sweep.read_optout(self.root).get("huskNames") == [".DS_Store"],
+                "huskNames was not read from janitor.json")
+
+    def test_unreadable_worktrees_folder_still_gets_the_repository_run_line(self):
+        real_listdir = os.listdir
+        denials = []
+
+        def denied(path="."):
+            if _norm_path(path) == _norm_path(self.wts):
+                denials.append(path)
+                raise PermissionError(13, "Access is denied", path)
+            return real_listdir(path)
+
+        error = None
+        with mock.patch.object(sweep.os, "listdir", side_effect=denied), \
+                mock.patch.dict(os.environ, {"JANITOR_RUN_LOG": self.log}), _machine_quiet(), \
+                mock.patch.object(shutil, "disk_usage",
+                                  return_value=types.SimpleNamespace(total=1, used=1, free=4242)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            try:
+                sweep.main([self.root, "--confirm", "--restore-log", self.restore])
+            except PermissionError as exc:
+                error = exc
+        self.assertIsNone(error, "a PermissionError from the husk scan escaped the run: %r" % error)
+        self.assertGreaterEqual(len(denials), 1, "the unreadable folder was never read: no proof")
+        self.assertTrue(os.path.isfile(self.log), "no run log was written")
+        roots = [_norm_path(r.get("root", "")) for r in _read_run_log(self.log)]
+        self.assertIn(_norm_path(self.root), roots, "no run-log line for the repository: %r" % roots)
 
 
 if __name__ == "__main__":

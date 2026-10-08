@@ -8,10 +8,10 @@ Per question with two or more options (a clarifying question passes first):
 - Else one model call (decision_watch.invoke_model, the one model caller) judges whether the
   `You want:` line matches the owner's last messages, whether each option serves that goal,
   and whether a better option is missing. FLAG denies, and the reason goes to the session.
-- One deny per question per session, restate denies too, so no deny can loop. The next try
-  of the same question passes.
-- A failed model call or unreadable transcript lets the question through, with one
-  systemMessage saying the check did not run.
+- After a deny, the next AskUserQuestion in the session passes with no model call and clears
+  the state, so no deny can loop. When the state cannot be written, nothing is denied.
+- A failed model call, unreadable transcript, or malformed input lets the question through,
+  with one systemMessage saying the check did not run. It never echoes the prompt.
 
 Deny: stdout one PreToolUse deny JSON, exit 0. Allow: empty stdout, exit 0.
 """
@@ -27,7 +27,7 @@ if HERE not in sys.path:
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 
 from decision_watch import invoke_model  # noqa: E402  looked up at call time, in main()
-from _transcript import read_transcript, is_last_human  # noqa: E402
+from _transcript import is_last_human, safe_finding_text, tail_records  # noqa: E402
 
 RULE = "style-question-restates-goal"
 # THE TIME BUDGET. One model call per ask, so the settings.json PreToolUse entry for this
@@ -35,7 +35,9 @@ RULE = "style-question-restates-goal"
 MODEL_TIMEOUT = 90
 OWNER_MESSAGES = 3
 MESSAGE_MAX = 1500
-YOU_WANT = re.compile(r"^\s*You want:\s*\S", re.MULTILINE)
+TAIL_BYTES = 2 * 1024 * 1024
+MACHINE_TAGS = ("<system-reminder>", "<task-notification>")
+YOU_WANT = re.compile(r"^[ 	]*You want:[ 	]*\S", re.MULTILINE)
 
 PROMPT = (
     "You check a question an assistant is about to put to its owner. The owner's goal, read "
@@ -46,19 +48,32 @@ PROMPT = (
 )
 
 
+def _owner_text(rec):
+    """The genuine owner text of one transcript record, or "". A machine line is "": isMeta,
+    a compact summary, a sidechain line, an origin other than human, a tool_result, and any
+    block that opens with a harness tag."""
+    if not is_last_human(rec) or rec.get("isMeta") or rec.get("isCompactSummary"):
+        return ""
+    origin = rec.get("origin")
+    if not isinstance(origin, dict) or origin.get("kind") != "human":
+        return ""
+    content = rec["message"]["content"]
+    blocks = [content] if isinstance(content, str) else [
+        b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+    return "\n".join(b for b in blocks if not b.lstrip().startswith(MACHINE_TAGS)).strip()
+
+
 def owner_messages(path):
-    """The last OWNER_MESSAGES genuine owner messages, oldest first. Raises OSError."""
+    """The last OWNER_MESSAGES genuine owner messages, oldest first, read from the last
+    TAIL_BYTES of the transcript. Raises OSError."""
     out = []
-    for rec in read_transcript(path):
-        if not is_last_human(rec):
-            continue
-        content = rec["message"]["content"]
-        blocks = [content] if isinstance(content, str) else [
-            b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
-        text = "\n".join(b for b in blocks if not b.lstrip().startswith("<system-reminder>")).strip()
+    for rec in tail_records(path, TAIL_BYTES):
+        text = _owner_text(rec)
         if text:
             out.append(text[:MESSAGE_MAX])
-    return out[-OWNER_MESSAGES:]
+            if len(out) == OWNER_MESSAGES:
+                break
+    return out[::-1]
 
 
 def _state_path(session_id):
@@ -67,23 +82,27 @@ def _state_path(session_id):
     return os.path.join(base, "state", "question-outcome", key + ".json")
 
 
-def _load(path):
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-        return set(x for x in data if isinstance(x, str))
-    except Exception:
-        return set()
-
-
-def _save(path, keys):
+def _mark_denied(path):
+    """Record that a deny was sent. False when the state cannot be written: then no deny may
+    go out, because the retry could not pass and the deny would loop."""
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path + ".tmp", "w", encoding="utf-8") as f:
-            json.dump(sorted(keys), f)
-        os.replace(path + ".tmp", path)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"denied": True}, f)
+        return True
     except Exception:
-        pass  # a lost write re-checks the question once more, never loops a deny
+        return False
+
+
+def _take_denied(path):
+    """True once after a deny: the next ask passes. Reading it clears it."""
+    if not os.path.exists(path):
+        return False
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    return True
 
 
 def _emit(obj):
@@ -100,28 +119,27 @@ def _options(q):
     return [o.get("label", "") for o in q.get("options") or [] if isinstance(o, dict)]
 
 
+def _did_not_run(why):
+    _emit({"systemMessage": "Question outcome check did not run: %s" % why})
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
         questions = [q for q in hook["tool_input"]["questions"] if isinstance(q, dict)]
     except Exception:
-        sys.exit(0)  # not an AskUserQuestion payload we can read: nothing to judge
+        _did_not_run("the hook input was not readable.")
     state = _state_path(hook.get("session_id"))
-    seen = _load(state)
-    todo = []  # (key, question text, labels) for each real, not yet denied question
-    for q in questions:
-        labels = _options(q)
-        text = str(q.get("question", ""))
-        key = hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
-        if len(labels) < 2 or key in seen:
-            continue
-        todo.append((key, text, labels))
-
-    missing = [(k, t) for k, t, _ in todo if not YOU_WANT.search(t)]
+    if _take_denied(state):
+        sys.exit(0)  # the retry after a deny passes, whatever its text
+    todo = [(str(q.get("question", "")), _options(q)) for q in questions]
+    todo = [(t, ls) for t, ls in todo if len(ls) >= 2]
+    missing = [t for t, _ in todo if not YOU_WANT.search(t)]
     if missing:
-        _save(state, seen | {k for k, _ in missing})
+        if not _mark_denied(state):
+            _did_not_run("the state could not be written, so no deny was sent.")
         _deny("%s: open the question with one line `You want: <the goal, in the owner's "
-              "terms>`. Missing on: %s" % (RULE, "; ".join(t[:80] for _, t in missing)))
+              "terms>`. Missing on: %s" % (RULE, "; ".join(t[:80] for t in missing)))
     if not todo:
         sys.exit(0)
 
@@ -130,15 +148,17 @@ def main():
     except Exception:
         owner = []
     if not owner:
-        _emit({"systemMessage": "Question outcome check did not run: no owner messages readable."})
-    body = "\n\n".join("Question: %s\nOptions: %s" % (t, " | ".join(ls)) for _, t, ls in todo)
+        _did_not_run("no owner messages readable.")
+    body = "\n\n".join("Question: %s\nOptions: %s" % (t, " | ".join(ls)) for t, ls in todo)
     prompt = "%s\n\nOwner's last messages:\n%s\n\n%s" % (PROMPT, "\n---\n".join(owner), body)
-    verdict, err = invoke_model(prompt, timeout=MODEL_TIMEOUT)
-    if verdict is None:
-        _emit({"systemMessage": "Question outcome check did not run: %s" % err})
+    verdict, _err = invoke_model(prompt, timeout=MODEL_TIMEOUT)  # _err can hold the prompt: never printed
+    if not isinstance(verdict, dict):
+        _did_not_run("the model call failed.")
     if verdict.get("verdict") == "FLAG":
-        _save(state, seen | {k for k, _, _ in todo})
-        _deny("Question outcome check: %s Fix the question, then ask again." % verdict.get("why", ""))
+        if not _mark_denied(state):
+            _did_not_run("the state could not be written, so no deny was sent.")
+        _deny("Question outcome check: %s Fix the question, then ask again."
+              % safe_finding_text(str(verdict.get("why", ""))))
     sys.exit(0)
 
 

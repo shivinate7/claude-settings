@@ -108,19 +108,32 @@ def parse_utc_timestamp(text):
     return moment.timestamp()
 
 
-def _lines_backwards(path, chunk=1 << 18):
-    """Yield the transcript's lines (bytes), last first, reading only as far as asked."""
+def _lines_backwards(path, chunk=1 << 18, limit=None):
+    """Yield the transcript's lines (bytes), last first, reading only as far as asked.
+    `limit` caps the bytes read from the end; the line cut by the cap is dropped."""
     with open(path, "rb") as f:
         pos = f.seek(0, 2)
+        stop = 0 if limit is None else max(0, pos - limit)
         carry = b""
-        while pos > 0:
-            n = min(chunk, pos)
+        while pos > stop:
+            n = min(chunk, pos - stop)
             pos -= n
             f.seek(pos)
             lines = (f.read(n) + carry).split(b"\n")
             carry = lines[0] if pos > 0 else b""
             for line in reversed(lines[1:] if pos > 0 else lines):
                 yield line
+
+
+def tail_records(path, limit):
+    """Yield the transcript's records, last first, from the last `limit` bytes only."""
+    for line in _lines_backwards(path, limit=limit):
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(rec, dict):
+            yield rec
 
 
 def read_turn(path):
