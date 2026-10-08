@@ -55,7 +55,7 @@ def _owner_text(rec):
     if not is_last_human(rec) or rec.get("isMeta") or rec.get("isCompactSummary"):
         return ""
     origin = rec.get("origin")
-    if origin is not None and (not isinstance(origin, dict) or origin.get("kind") != "human"):
+    if not isinstance(origin, dict) or origin.get("kind") != "human":
         return ""
     content = rec["message"]["content"]
     blocks = [content] if isinstance(content, str) else [
