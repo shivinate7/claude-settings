@@ -67,7 +67,8 @@ one fixed order, and the first match wins.
                        this rule, so lint/check_agent_models.py checks the files, from HAIKU_ROLES.
                        The Workflow scan is static: it reads string-literal `model` and `agentType`
                        keys in each agent() call's object argument. A model or role set through a
-                       variable, a spread, an alias or a concatenation is not seen.
+                       variable, a spread, an alias, a concatenation, a ternary, a computed or
+                       shorthand key, a template `${}` or a regex literal holding a quote is not seen.
 
 A project's own `.claude/settings.json`, `.claude/settings.local.json`, and
 `.claude/hooks/*` are NOT frozen (Decision 7). They are allowed, and the guard appends

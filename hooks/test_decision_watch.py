@@ -639,7 +639,7 @@ def _capture_invoke(fake_run):
         dw.subprocess.run = real
 
 
-# Ruling decisions/model-hooks-warn-first.md, "decision_watch": haiku, xhigh effort, 120s.
+# Ruling decisions/haiku-prompt-hooks.md, "decision_watch": haiku, xhigh effort, 120s.
 def case_invoke_model_haiku_xhigh_120s():
     captured = {}
 
