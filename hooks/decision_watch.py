@@ -682,8 +682,10 @@ TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 def _hook_token():
     """Return the stripped token from `<config dir>/state/hook-token`, or '' if none."""
     try:
-        with open(os.path.join(guard.config_dir(), "state", "hook-token"), encoding="utf-8") as f:
-            return f.read().strip()
+        with open(os.path.join(guard.config_dir(), "state", "hook-token"), "rb") as f:
+            raw = f.read()
+        enc = "utf-16" if raw[:2] in (bytes([0xFF, 0xFE]), bytes([0xFE, 0xFF])) else "utf-8-sig"
+        return raw.decode(enc).strip()
     except Exception:
         return ""
 
@@ -708,7 +710,7 @@ JUDGE_ENV_ALLOWLIST = (
 def _judge_isolation():
     """Return (cwd, env) for the judgment subprocess: an empty directory that is not this
     project, holding only a copy of the login credential, and an environment built from
-    `JUDGE_ENV_ALLOWLIST` alone, never copied from this process's own environment, so
+    `JUDGE_ENV_ALLOWLIST` plus `TOKEN_ENV` when a token file exists, never copied from this process's own environment, so
     there is nothing here for a tool call to inherit, write into, or signal back to, even
     if one somehow ran, and the call can still authenticate and reach the API host."""
     root = tempfile.mkdtemp(prefix="decision_watch_judge_")
