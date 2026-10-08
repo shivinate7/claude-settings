@@ -62,7 +62,11 @@ is safe in two cases. Every commit on HEAD is on a remote branch, and a
 detached HEAD counts. Or HEAD is merged into the default branch by ancestry or
 by patch (owner ruling 2026-10-08). A squash-merged lane whose branch was deleted is
 therefore removable. The merged exemption needs the repository to have a
-remote; with none, every worktree stays. This covers every worktree reap,
+remote; with none, every worktree stays. Accepted risk (owner, 2026-10-08): the patch
+read matches any past commit on the default branch. If a lane's patch landed
+and was later reverted, an unpushed sole copy still reads as merged and can be
+removed. The owner chose the patch check over a check of the lines on main
+today. This covers every worktree reap,
 locked or not. Every `--confirm` run also needs the worktree merged and idle 1
 hour (`unattended-sweep-stops-proven-orphans.md`).
 `--confirm` unlocks, then removes, never with `--force`. If the removal fails,
