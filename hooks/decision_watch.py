@@ -710,7 +710,8 @@ JUDGE_ENV_ALLOWLIST = (
 def _judge_isolation():
     """Return (cwd, env) for the judgment subprocess: an empty directory that is not this
     project, holding only a copy of the login credential, and an environment built from
-    `JUDGE_ENV_ALLOWLIST` plus `TOKEN_ENV` when a token file exists, never copied from this process's own environment, so
+    `JUDGE_ENV_ALLOWLIST`, plus `TOKEN_ENV` when the token file holds a readable token, never
+    copied from this process's own environment, so
     there is nothing here for a tool call to inherit, write into, or signal back to, even
     if one somehow ran, and the call can still authenticate and reach the API host."""
     root = tempfile.mkdtemp(prefix="decision_watch_judge_")
