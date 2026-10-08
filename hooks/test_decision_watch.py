@@ -630,6 +630,43 @@ def case_judge_isolation_copies_credentials():
         shutil.rmtree(judge_cwd, ignore_errors=True)
 
 
+def _capture_invoke(fake_run):
+    real = dw.subprocess.run
+    dw.subprocess.run = fake_run
+    try:
+        return dw.invoke_model("P")
+    finally:
+        dw.subprocess.run = real
+
+
+# Ruling decisions/model-hooks-warn-first.md, "decision_watch": haiku, xhigh effort, 120s.
+def case_invoke_model_haiku_xhigh_120s():
+    captured = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"], captured["kwargs"] = argv, kwargs
+        return _FakeCompletedProcess(0, json.dumps({"result": '{"verdict": "ALLOW"}'}), "")
+
+    _capture_invoke(fake_run)
+    argv = captured.get("argv") or []
+    pairs = list(zip(argv, argv[1:]))
+    timeout = (captured.get("kwargs") or {}).get("timeout")
+    check("haiku_xhigh: --model haiku in argv", ("--model", "haiku") in pairs, argv)
+    check("haiku_xhigh: --effort xhigh in argv", ("--effort", "xhigh") in pairs, argv)
+    check("haiku_xhigh: subprocess timeout is 120", timeout == 120, timeout)
+    check("haiku_xhigh: MODEL_TIMEOUT is 120", dw.MODEL_TIMEOUT == 120, dw.MODEL_TIMEOUT)
+
+
+# A timeout is an error (UNKNOWN upstream), never an ALLOW verdict.
+def case_invoke_model_timeout_is_error():
+    def fake_run(argv, **kwargs):
+        raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
+
+    verdict, error = _capture_invoke(fake_run)
+    check("timeout: no verdict", verdict is None, verdict)
+    check("timeout: error names the failure", bool(error), error)
+
+
 def case_invoke_model_argv():
     captured = {}
 
@@ -650,9 +687,13 @@ def case_invoke_model_argv():
     check("invoke_model_argv: verdict is ALLOW", verdict == {"verdict": "ALLOW"}, verdict)
 
     argv = captured.get("argv") or []
+    # --effort xhigh is pinned by case_invoke_model_haiku_xhigh_120s; position is free here.
+    if "--effort" in argv:
+        i = argv.index("--effort")
+        argv = argv[:i] + argv[i + 2:]
     expected = [
         "claude", "-p", "JUDGE THIS PROMPT",
-        "--model", dw.MODEL,
+        "--model", "haiku",
         "--output-format", "json",
         "--tools", "",
         "--safe-mode",
@@ -790,6 +831,18 @@ def case_main_stop_hook_active_stays_quiet():
     check("main_stop_hook_active: known-bad pair prints UNKNOWN", _says_unknown(paired), paired.stdout)
 
 
+def case_settings_timeout_covers_worst_case():
+    with open(os.path.join(HERE, "..", "settings.json")) as f:
+        settings = json.load(f)
+    entries = [h for grp in settings["hooks"]["Stop"] for h in grp["hooks"]
+               if "hooks/decision_watch.py" in h.get("command", "")]
+    check("settings_timeout: one Stop entry runs decision_watch.py", len(entries) == 1, len(entries))
+    budget = 2 * dw.GIT_TIMEOUT + dw.MAX_DIFFED_FILES * dw.GIT_TIMEOUT + dw.MODEL_TIMEOUT
+    timeout = entries[0].get("timeout", 0) if entries else 0
+    check("settings_timeout: Stop timeout >= worst-case budget", timeout >= budget,
+          "timeout=%s budget=%s" % (timeout, budget))
+
+
 def main():
     case_flag_unapproved()
     case_flag_deleted_protected_file()
@@ -808,10 +861,13 @@ def main():
     case_cache_key_holds_the_repo_and_a_bounded_read()
     case_judge_isolation_copies_credentials()
     case_invoke_model_argv()
+    case_invoke_model_haiku_xhigh_120s()
+    case_invoke_model_timeout_is_error()
     case_main_ordinary_turn()
     case_main_prints_the_config_report()
     case_main_missing_transcript()
     case_main_stop_hook_active_stays_quiet()
+    case_settings_timeout_covers_worst_case()
 
     if FAILED:
         print("test_decision_watch FAIL: %d failing check(s)" % len(FAILED))

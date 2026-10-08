@@ -124,12 +124,13 @@ from _transcript import last_human_epoch, head_moved_since  # noqa: E402
 # count of protected files can grow unbounded with no matching growth in wall time.
 # Worst case, computed here rather than assumed: one `git status`
 # (GIT_TIMEOUT) + one `git log` (GIT_TIMEOUT) + MAX_DIFFED_FILES `git diff` calls
-# (MAX_DIFFED_FILES * GIT_TIMEOUT) + one model call (MODEL_TIMEOUT) = 10 + 10 + 8*10 + 60
-# = 160 seconds, against a 170-second hook timeout: 10 seconds of margin, not zero. Lowering any of these three numbers
-# without re-deriving this sum, or raising settings.json's own timeout to match, breaks
-# the proof, not just the comment.
-MODEL = "claude-sonnet-5"
-MODEL_TIMEOUT = 60
+# (MAX_DIFFED_FILES * GIT_TIMEOUT) + one model call (MODEL_TIMEOUT) = 10 + 10 + 80 + 120
+# = 220 seconds. The settings.json Stop entry for this hook must carry a timeout of at least
+# 230 seconds (10 seconds of margin). Changing any of these numbers means re-deriving this
+# sum and the settings.json timeout together. A model timeout is an error from
+# invoke_model, which the caller reports as UNKNOWN, never ALLOW.
+MODEL = "haiku"
+MODEL_TIMEOUT = 120
 GIT_TIMEOUT = 10
 MAX_DIFFED_FILES = 8
 
@@ -723,6 +724,7 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT):
             [
                 "claude", "-p", prompt,
                 "--model", model,
+                "--effort", "xhigh",
                 "--output-format", "json",
                 "--tools", "",
                 "--safe-mode",
