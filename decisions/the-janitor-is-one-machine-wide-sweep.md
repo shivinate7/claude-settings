@@ -57,17 +57,44 @@ only when the host pid is dead, or alive with another start time. The worktree
 must also pass every other check. Any other lock reason, and any unreadable
 fact, keeps it.
 
-Owner ruling: remove only a folder that is clean and fully pushed. This covers
-every worktree reap, locked or not. Every commit on HEAD must be on a remote
-branch, and a detached HEAD counts. The daily job reaped q_max agent
-worktrees before this check existed. The count is unmeasured here. Every
-`--confirm` run also needs the worktree merged and idle 1 hour
-(`unattended-sweep-stops-proven-orphans.md`).
+Owner ruling: remove only a folder that is clean, and whose work is safe. Work
+is safe in two cases. Every commit on HEAD is on a remote branch, and a
+detached HEAD counts. Or HEAD is merged into the default branch by ancestry or
+by patch (owner ruling 2026-10-08). A squash-merged lane whose branch was deleted is
+therefore removable. The merged exemption needs the repository to have a
+remote; with none, every worktree stays. Accepted risk (owner, 2026-10-08): the patch
+read matches any past commit on the default branch. If a lane's patch landed
+and was later reverted, an unpushed sole copy still reads as merged and can be
+removed. The owner chose the patch check over a check of the lines on main
+today. This covers every worktree reap,
+locked or not. Every `--confirm` run also needs the worktree merged and idle 1
+hour (`unattended-sweep-stops-proven-orphans.md`).
 `--confirm` unlocks, then removes, never with `--force`. If the removal fails,
 the sweep restores the lock.
 
 Unmeasured: q_max held no locked worktree when this was written, so the lock
 format is measured from the live lanes of this repository only.
+
+## Every automatic run leaves a trace
+
+Incident, 2026-10-07: drive C: in q_max fell to 2 GB free, and lanes failed
+with ENOSPC. About 1,000 lane worktrees, each with its own `node_modules`, held
+the space. A one-off cleanup freed about 270 GB. On 2026-10-08, q_max still held
+368 worktrees that the sweep would remove. The daily task was never registered
+on this Windows machine. The SessionEnd hook wrote no log, so nobody could tell
+whether it ran.
+
+Owner rulings, 2026-10-08:
+- A `--confirm` run appends one line per repository to
+  `${CLAUDE_CONFIG_DIR:-~/.claude}/state/janitor-runs.jsonl` (`JANITOR_RUN_LOG`
+  overrides it): removed worktrees, reaped branches, and free disk bytes. A
+  preview writes nothing. When the run removed anything, the report prints
+  free disk.
+- The sweep lists entries under `<root>/.claude/worktrees/` that git does not
+  register, as strays. It never deletes them.
+- The rule keeps git's admin-file idle time (1 hour), not folder mtime, and it
+  never calls a repository's WorktreeRemove hook (see "The sweep never runs
+  code a repository supplies").
 
 ## A branch leaves "checked out" with its worktree, in the same run
 

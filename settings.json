@@ -207,6 +207,11 @@
             "prompt": "Judge this AskUserQuestion call: $ARGUMENTS\nAnswer {\"ok\": true} at once for a clarifying question. Judge only a choice between real alternatives that have consequences. Rules: style-option-says-effect (each option says what the user gains and loses), style-question-states-problem (the question states the problem and why it needs the user's word), output-bring-decisions-as-question (a decision is a question with options and a recommendation). Block only on a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}.",
             "timeout": 30,
             "continueOnBlock": true
+          },
+          {
+            "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/question_outcome.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
+            "timeout": 105
           }
         ]
       },

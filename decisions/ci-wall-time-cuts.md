@@ -22,7 +22,8 @@ The owner chose all four cuts on 2026-10-07. Each lands as its own PR.
   suites also skip by input. An unmapped path runs everything. The owner chose job-level
   skips over step-level skips on 2026-10-07: the goal is fewer runs and billed minutes.
   `lint/test_harness_scope.py` pins the path map. Decision docs-only-prs-skip-code-suites
-  holds the detector's rules.
+  holds the detector's rules. Measured on PR 299, docs only: 2 jobs and 57 job-seconds.
+  PRs 278, 283 and 295 before B: 5 to 7 jobs and 258 to 304 job-seconds.
 - C. On a pull request, Windows runs a slice of the merge tests (`MERGE_TESTS=windows-slice`).
   Push, nightly and manual runs keep the full suite. `lint/test_windows_split.py` fails when
   the slice runs on push or the full Windows run is lost.

@@ -749,6 +749,12 @@ class StaleAgentLockTests(unittest.TestCase):
         run_vcs(cls.wt["unpushed"], "add", "-A")
         run_vcs(cls.wt["unpushed"], *IDENT, "commit", "-q", "-m", "unpushed work")
         cls.wt["detached"] = cls.add("detached", cls.reasons["dead"], detach=True)
+        # Pushed to a remote branch, NOT merged into main: the pushed check must count it alone.
+        write(os.path.join(cls.wt["detached"], "d.txt"), "pushed, not merged\n")
+        run_vcs(cls.wt["detached"], "add", "-A")
+        run_vcs(cls.wt["detached"], *IDENT, "commit", "-q", "-m", "detached pushed work")
+        pushed = run_vcs(cls.wt["detached"], "push", "-q", "origin", "HEAD:refs/heads/remote-only")
+        require(pushed.returncode == 0, "push of the detached commit failed: %s" % pushed.stderr.strip())
         # No lock at all: the pushed check covers every reap, not only a stale agent lock.
         cls.wt["free_unpushed"] = os.path.join(ROOT, "stale-lock-free-unpushed")
         run_vcs(cls.root, "worktree", "add", "-q", "--detach", cls.wt["free_unpushed"], "main")
@@ -779,6 +785,10 @@ class StaleAgentLockTests(unittest.TestCase):
         self.assertTrue(decision.get("unlock"))
 
     def test_detached_head_on_a_pushed_commit_counts_as_pushed(self):
+        path = self.wt["detached"]
+        # The fixture's point: the commit is not an ancestor of main (exit 1), yet it is pushed.
+        self.assertEqual(run_vcs(path, "merge-base", "--is-ancestor", "HEAD", "main").returncode, 1)
+        self.assertIs(sweep.fully_pushed(path), True)
         self.assertEqual(self.decide("detached")["action"], "reap")
 
     def test_reused_pid_with_other_start_time_is_stale(self):
@@ -2877,6 +2887,28 @@ class AgentEndReapTests(unittest.TestCase):
         self.assertEqual(json.loads(lines[0])["raw"], "payload 5")
         self.assertEqual(json.loads(lines[-1])["raw"], "payload 204")
 
+    def test_the_payload_log_keeps_a_line_when_the_first_replace_is_denied(self):
+        # Windows: os.replace raises PermissionError(13) while a scanner holds the destination.
+        folder = os.path.join(ROOT, "reap-log-retry")
+        real_replace = os.replace
+        denied = []
+
+        def replace_denied_once(src, dst):
+            if not denied:
+                denied.append(src)
+                raise PermissionError(13, "Access is denied")
+            return real_replace(src, dst)
+
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": folder}):
+            for number in range(3):
+                self.reap.log({"raw": "payload %d" % number})
+            with mock.patch.object(self.reap.os, "replace", new=replace_denied_once):
+                self.reap.log({"raw": "payload 3"})
+            with open(self.reap.log_path(), encoding="utf-8") as handle:
+                raws = [json.loads(line)["raw"] for line in handle.read().splitlines()]
+        self.assertEqual(len(denied), 1, "the injected PermissionError was never reached")
+        self.assertIn("payload 3", raws)
+
 
 class StrictWorktreeTests(unittest.TestCase):
     """Owner ruling: --confirm removes a worktree only when it is merged (by patch, not
@@ -3016,6 +3048,451 @@ class StrictWorktreeTests(unittest.TestCase):
                         "--restore-log", os.path.join(ROOT, "unatt.log")])
             sweep.main(["--root", self.root, "--restore-log", os.path.join(ROOT, "unatt.log")])
         self.assertEqual(seen, [True, False])
+
+
+# --------------------------------------------------------------------------- owner rulings 2026-10-08
+
+
+def _norm_path(path):
+    return os.path.normcase(os.path.realpath(path))
+
+
+def _age_admin_files(path, seconds):
+    """Make a worktree's own git admin files `seconds` old, so the strict idle rule reads it quiet."""
+    admin = run_vcs(path, "rev-parse", "--absolute-git-dir").stdout.strip()
+    then = time.time() - seconds
+    for name in ("index", "HEAD", os.path.join("logs", "HEAD")):
+        target = os.path.join(admin, name)
+        if os.path.exists(target):
+            os.utime(target, (then, then))
+
+
+def _read_run_log(path):
+    with open(path, encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle if line.strip()]
+
+
+@contextlib.contextmanager
+def _machine_quiet():
+    """Stub the two machine-wide reapers the full sweep also runs (dead rooted servers and loose
+    processes). A case here must never signal a process this suite did not start."""
+    with mock.patch.object(sweep, "find_dead_rooted", return_value=[]), \
+            mock.patch.object(sweep, "find_loose_processes", return_value=[]), \
+            contextlib.redirect_stdout(io.StringIO()):
+        yield
+
+
+class RunLogTests(unittest.TestCase):
+    """Owner ruling 2026-10-08: a --confirm run appends ONE JSON line per repository to the run
+    log: `JANITOR_RUN_LOG`, or else `${CLAUDE_CONFIG_DIR:-~/.claude}/state/janitor-runs.jsonl`.
+    Each line carries `root`, `worktrees_removed`, `branches_reaped` and `free_bytes`
+    (shutil.disk_usage on the repository's drive). A preview appends nothing."""
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="runlog-", dir=ROOT)
+        self.busy = os.path.join(self.base, "busy")
+        make_repo(self.busy, {"f.txt": "x\n"})
+        give_remote(self.busy)
+        run_vcs(self.busy, "branch", "old-merged")  # at main's tip: merged, so reapable
+        self.wt = os.path.join(self.base, "busy-wt")
+        run_vcs(self.busy, "worktree", "add", "-q", "--detach", self.wt, "main")
+        self.idle = os.path.join(self.base, "idle")
+        make_repo(self.idle, {"g.txt": "y\n"})
+        give_remote(self.idle)
+        self.log = os.path.join(self.base, "janitor-runs.jsonl")
+        self.restore = os.path.join(self.base, "restore.log")
+        require("old-merged" in (sweep.list_local_branches(self.busy) or []),
+                "branch old-merged was not created")
+        require(os.path.isdir(self.wt), "the detached worktree was not created")
+
+    def _main(self, argv):
+        with mock.patch.dict(os.environ, {"JANITOR_RUN_LOG": self.log}), _machine_quiet(), \
+                mock.patch.object(shutil, "disk_usage",
+                                  return_value=types.SimpleNamespace(total=1, used=1, free=4242)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            return sweep.main(argv + ["--restore-log", self.restore])
+
+    def test_confirm_appends_one_line_per_repository_with_the_four_fields(self):
+        _age_admin_files(self.wt, 7200)  # quiet for 2 hours: the strict idle rule allows the reap
+        self._main([self.busy, self.idle, "--confirm"])
+        self.assertTrue(os.path.isfile(self.log), "a --confirm run wrote no run log")
+        records = _read_run_log(self.log)
+        self.assertEqual(len(records), 2, records)
+        by_root = {_norm_path(r.get("root", "")): r for r in records}
+        busy = by_root.get(_norm_path(self.busy))
+        idle = by_root.get(_norm_path(self.idle))
+        self.assertIsNotNone(busy, "no run-log line names the busy repository: %r" % records)
+        self.assertIsNotNone(idle, "no run-log line names the idle repository: %r" % records)
+        self.assertEqual(busy["worktrees_removed"], 1, busy)
+        self.assertEqual(busy["branches_reaped"], 1, busy)
+        self.assertEqual(busy["free_bytes"], 4242, busy)
+        self.assertEqual(idle["worktrees_removed"], 0, idle)
+        self.assertEqual(idle["branches_reaped"], 0, idle)
+        self.assertEqual(idle["free_bytes"], 4242, idle)
+        self.assertFalse(os.path.exists(self.wt), "the subject worktree was not removed")
+
+    def test_preview_appends_no_run_line_and_the_confirm_after_it_does(self):
+        self._main([self.busy, self.idle])
+        self.assertFalse(os.path.isfile(self.log) and os.path.getsize(self.log) > 0,
+                         "a preview run appended to the run log")
+        _age_admin_files(self.wt, 7200)
+        self._main([self.busy, self.idle, "--confirm"])
+        self.assertTrue(os.path.isfile(self.log), "the confirm after the preview wrote no run log")
+        self.assertEqual(len(_read_run_log(self.log)), 2)
+
+    def test_default_run_log_sits_under_the_config_dir(self):
+        cfg = os.path.join(self.base, "cfg")
+        _age_admin_files(self.wt, 7200)
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
+            os.environ.pop("JANITOR_RUN_LOG", None)
+            with _machine_quiet():
+                sweep.main([self.busy, self.idle, "--confirm", "--restore-log", self.restore])
+        default_log = os.path.join(cfg, "state", "janitor-runs.jsonl")
+        self.assertTrue(os.path.isfile(default_log), "no run log at %s" % default_log)
+        self.assertEqual(len(_read_run_log(default_log)), 2)
+
+    def test_first_repository_line_survives_a_later_failure(self):
+        """Finding (review): the run log was written after ALL roots, so a run cut short (the
+        SessionEnd hook's 25 s kill) left no line. One line per repository, as each finishes."""
+        _age_admin_files(self.wt, 7200)
+        real = sweep.sweep_repo
+
+        def fail_second(root, *args, **kwargs):
+            if _norm_path(root) == _norm_path(self.idle):
+                raise RuntimeError("injected failure in the second repository")
+            return real(root, *args, **kwargs)
+
+        with mock.patch.object(sweep, "sweep_repo", side_effect=fail_second):
+            try:
+                self._main([self.busy, self.idle, "--confirm"])
+            except RuntimeError:
+                pass  # the run stops here; the first repository's line must already be on disk
+        self.assertTrue(os.path.isfile(self.log), "the first repository wrote no run line")
+        roots = [_norm_path(r.get("root", "")) for r in _read_run_log(self.log)]
+        self.assertIn(_norm_path(self.busy), roots, "no run-log line for the first repository")
+
+
+class MergedCountsAsSafeTests(unittest.TestCase):
+    """Owner ruling 2026-10-08: a HEAD merged into the default branch, by ancestry or by patch,
+    is not kept for "unpushed". The other checks still apply, and a truly unpushed commit is
+    still kept."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.root = os.path.join(ROOT, "merged-safe-repo")
+        make_repo(cls.root, {"f.txt": "base\n"})
+        give_remote(cls.root)
+        # lane-squash: one commit, never pushed. Main then gets the same patch as a different
+        # commit (what a squash merge does), and main is pushed.
+        cls.squash = os.path.join(ROOT, "merged-safe-squash")
+        run_vcs(cls.root, "worktree", "add", "-q", cls.squash, "-b", "lane-squash")
+        write(os.path.join(cls.squash, "s.txt"), "squashed work\n")
+        run_vcs(cls.squash, "add", "s.txt")
+        require(run_vcs(cls.squash, *IDENT, "commit", "-q", "-m", "lane work").returncode == 0,
+                "committing lane-squash failed")
+        write(os.path.join(cls.root, "s.txt"), "squashed work\n")
+        run_vcs(cls.root, "add", "s.txt")
+        require(run_vcs(cls.root, *IDENT, "commit", "-q", "-m", "squash of lane-squash").returncode == 0,
+                "squash commit on main failed")
+        require(run_vcs(cls.root, "push", "-q", "origin", "main").returncode == 0,
+                "pushing main failed")
+        # lane-unique: one commit on no default branch, never pushed.
+        cls.unique = os.path.join(ROOT, "merged-safe-unique")
+        run_vcs(cls.root, "worktree", "add", "-q", cls.unique, "-b", "lane-unique")
+        write(os.path.join(cls.unique, "u.txt"), "only on this lane\n")
+        run_vcs(cls.unique, "add", "u.txt")
+        require(run_vcs(cls.unique, *IDENT, "commit", "-q", "-m", "unique work").returncode == 0,
+                "committing lane-unique failed")
+        cls.entries = {_norm_path(e["path"]): e for e in sweep.parse_worktree_list(cls.root) or []}
+        require(_norm_path(cls.squash) in cls.entries and _norm_path(cls.unique) in cls.entries,
+                "the worktree list does not hold both lanes")
+
+    def decide(self, path):
+        return sweep.decide_worktree(self.root, self.entries[_norm_path(path)], attended=True)
+
+    def test_a_squash_merged_lane_never_pushed_is_removable(self):
+        decision = self.decide(self.squash)
+        self.assertEqual(decision["action"], "reap", decision["reason"])
+        self.assertEqual(decision["reason"], "removable")
+
+    def test_a_truly_unpushed_unique_commit_is_still_kept(self):
+        decision = self.decide(self.unique)
+        self.assertEqual(decision["action"], "keep", decision["reason"])
+        self.assertTrue(decision["reason"].startswith("unpushed"), decision["reason"])
+
+
+class StrayFolderTests(unittest.TestCase):
+    """Owner ruling 2026-10-08: an entry under <root>/.claude/worktrees/ that git does not
+    register as a worktree is a STRAY. The sweep lists it (result["strays"], and the printed
+    report) and never deletes it, in preview or confirm."""
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="strays-", dir=ROOT)
+        self.root = os.path.join(self.base, "repo")
+        make_repo(self.root, {"f.txt": "x\n"})
+        wts = os.path.join(self.root, ".claude", "worktrees")
+        self.registered = os.path.join(wts, "lane-reg")  # a real worktree: NOT a stray
+        run_vcs(self.root, "worktree", "add", "-q", "--detach", self.registered, "main")
+        self.folder = os.path.join(wts, "stray-folder")  # no .git: not registered
+        write(os.path.join(self.folder, "notes.txt"), "left behind\n")
+        self.file = os.path.join(wts, "x.bak")
+        write(self.file, "backup\n")
+        require(os.path.isdir(self.registered) and os.path.isdir(self.folder)
+                and os.path.isfile(self.file), "the stray fixtures were not built")
+        self.log = os.path.join(self.base, "strays.log")
+
+    @staticmethod
+    def _stray_names(result):
+        return sorted(os.path.basename(p) for p in (result.get("strays") or []))
+
+    def test_preview_lists_both_strays_in_the_result_and_the_report(self):
+        result = sweep.sweep_repo(self.root, False, self.log)
+        self.assertEqual(self._stray_names(result), ["stray-folder", "x.bak"], result.get("strays"))
+        out = io.StringIO()
+        sweep.print_sweep_report([result], False, out=out)
+        self.assertIn("stray-folder", out.getvalue())
+        self.assertIn("x.bak", out.getvalue())
+
+    def test_confirm_lists_both_strays_and_deletes_neither(self):
+        result = sweep.sweep_repo(self.root, True, self.log)
+        self.assertEqual(self._stray_names(result), ["stray-folder", "x.bak"], result.get("strays"))
+        self.assertTrue(os.path.isfile(os.path.join(self.folder, "notes.txt")),
+                        "a confirm run deleted a file inside a stray folder")
+        self.assertTrue(os.path.isfile(self.file), "a confirm run deleted x.bak")
+
+    def test_unreadable_worktrees_base_does_not_abort_the_run(self):
+        """Finding (review): find_strays called a bare os.listdir, so a PermissionError on
+        <root>/.claude/worktrees escaped sweep_repo and aborted the run. The run must finish,
+        report the strays as UNKNOWN (result["strays"] is None, not []), and still judge every
+        registered worktree. Zero would read as a clean folder; None does not."""
+        base = os.path.join(self.root, ".claude", "worktrees")
+        real_listdir = os.listdir
+
+        def denied(path="."):
+            if _norm_path(path) == _norm_path(base):
+                raise PermissionError(13, "Access is denied", path)
+            return real_listdir(path)
+
+        with mock.patch.object(sweep.os, "listdir", side_effect=denied):
+            result = sweep.sweep_repo(self.root, False, self.log)
+        self.assertIsNone(result["refused"])
+        self.assertIsNone(result["strays"], "an unreadable folder gave a count, not unknown: %r"
+                          % (result["strays"],))
+        judged = [_norm_path(d["path"]) for d in result["worktrees"]]
+        self.assertIn(_norm_path(self.registered), judged, "the registered worktree was not judged")
+
+    def test_unreadable_worktrees_base_report_says_unknown_not_zero(self):
+        """Batch review J2: the printed report must not say "strays ... (kept): 0" for a folder
+        it could not read. It must say the count is unknown or the folder unreadable."""
+        base = os.path.join(self.root, ".claude", "worktrees")
+        real_listdir = os.listdir
+
+        def denied(path="."):
+            if _norm_path(path) == _norm_path(base):
+                raise PermissionError(13, "Access is denied", path)
+            return real_listdir(path)
+
+        with mock.patch.object(sweep.os, "listdir", side_effect=denied):
+            result = sweep.sweep_repo(self.root, False, self.log)
+        out = io.StringIO()
+        sweep.print_sweep_report([result], False, out=out)
+        text = out.getvalue()
+        lines = [ln for ln in text.splitlines() if "strays under .claude/worktrees" in ln]
+        self.assertEqual(len(lines), 1, "no single strays line in the report: %r" % text)
+        self.assertNotIn("(kept): 0", lines[0], "an unreadable folder reported zero strays: %r"
+                         % lines[0])
+        self.assertRegex(lines[0], r"(?i)unknown|unreadable", "the strays line does not say the "
+                         "scan could not run: %r" % lines[0])
+
+
+def _lane_entry(root, path):
+    target = _norm_path(path)
+    for entry in sweep.parse_worktree_list(root) or []:
+        if _norm_path(entry["path"]) == target:
+            return entry
+    raise AssertionError("no worktree-list entry for %r" % path)
+
+
+class DanglingDefaultBaseTests(unittest.TestCase):
+    """Finding (review): guard.resolve_default_base returned origin/HEAD without checking that it
+    resolves. A dangling origin/HEAD makes every base read unreadable, so no squash-merged lane is
+    ever exempted. The base must fall back to a ref that resolves (local main, then master). An
+    origin/HEAD that resolves stays the first base (owner's order)."""
+
+    def _squash_lane(self, origin_head_target):
+        base = tempfile.mkdtemp(prefix="dangling-base-", dir=ROOT)
+        root = os.path.join(base, "repo")
+        make_repo(root, {"f.txt": "x\n"})
+        give_remote(root)  # origin/main exists and matches main's first commit
+        lane = os.path.join(base, "lane")
+        run_vcs(root, "worktree", "add", "-q", lane, "-b", "lane-squash")
+        write(os.path.join(lane, "lane.txt"), "work\n")
+        run_vcs(lane, "add", "-A")
+        run_vcs(lane, *IDENT, "commit", "-q", "-m", "lane work")
+        # The squash: the same patch lands on main as a new commit. The lane's own commit is on no
+        # remote branch and is not an ancestor of main; only the patch matches.
+        write(os.path.join(root, "lane.txt"), "work\n")
+        run_vcs(root, "add", "-A")
+        run_vcs(root, *IDENT, "commit", "-q", "-m", "squash of lane-squash")
+        set_head = run_vcs(root, "symbolic-ref", "refs/remotes/origin/HEAD", origin_head_target)
+        require(set_head.returncode == 0, "setting origin/HEAD failed: %s" % set_head.stderr.strip())
+        return root, lane
+
+    def test_dangling_origin_head_falls_back_to_a_ref_that_resolves(self):
+        root, _ = self._squash_lane("refs/remotes/origin/gone")  # a remote branch that is missing
+        self.assertEqual(guard.resolve_default_base(root), "main")
+
+    def test_squash_merged_unpushed_lane_is_removable_when_origin_head_dangles(self):
+        root, lane = self._squash_lane("refs/remotes/origin/gone")
+        decision = sweep.decide_worktree(root, _lane_entry(root, lane), attended=True)
+        self.assertEqual(decision["action"], "reap", decision)
+        self.assertEqual(decision["reason"], "removable")
+
+    def test_resolving_origin_head_keeps_a_lane_whose_squash_is_only_on_local_main(self):
+        # Local main is ahead of origin/main and holds the squash. origin/HEAD resolves, so it
+        # stays the base (owner's order), origin/main lacks the patch, and the lane is kept.
+        root, lane = self._squash_lane("refs/remotes/origin/main")
+        decision = sweep.decide_worktree(root, _lane_entry(root, lane), attended=True)
+        self.assertEqual(decision["action"], "keep", decision)
+        self.assertTrue(decision["reason"].startswith("unpushed:"), decision)
+
+    def test_unreadable_origin_head_verify_returns_none_not_local_main(self):
+        """Batch review J3: guard.resolve_default_base treated a verify read that could not RUN
+        (guard._git returns None) as "does not exist", and fell through to local main. Only a git
+        that answers "does not exist" (returncode != 0) may fall through. An unreadable verify
+        returns None, so the sweep keeps the lane."""
+        root, _ = self._squash_lane("refs/remotes/origin/main")
+        require(guard.resolve_default_base(root) == "origin/main",
+                "the unpatched base is not origin/main, so the case proves nothing")
+        real_git = guard._git
+        verify_calls = []
+
+        def unreadable_verify(where, *args):
+            if args and args[-1].endswith("^{commit}"):  # the origin/HEAD verify read
+                verify_calls.append(args)
+                return None  # guard._git could not run git
+            return real_git(where, *args)
+
+        with mock.patch.object(guard, "_git", side_effect=unreadable_verify):
+            base = guard.resolve_default_base(root)
+        self.assertGreaterEqual(len(verify_calls), 1, "the verify read never ran: no proof")
+        self.assertIsNone(base, "an unreadable origin/HEAD verify fell through to %r" % base)
+
+    def test_origin_head_verify_returncode_128_falls_back_to_local_main(self):
+        """Round 3 R7 (pin): git answers the origin/HEAD verify with returncode 128, a dangling
+        origin/HEAD. Only a live origin/HEAD keeps origin's ref, so the base falls to local main.
+        Green on the pre-round-3 code: a pin, not a red case."""
+        root, _ = self._squash_lane("refs/remotes/origin/main")
+        real_git = guard._git
+        verify_calls = []
+
+        def fatal_verify(where, *args):
+            if args and args[-1].endswith("^{commit}"):  # the origin/HEAD verify read
+                verify_calls.append(args)
+                return subprocess.CompletedProcess(["git", *args], 128, "", "fatal: bad object")
+            return real_git(where, *args)
+
+        with mock.patch.object(guard, "_git", side_effect=fatal_verify):
+            base = guard.resolve_default_base(root)
+        self.assertGreaterEqual(len(verify_calls), 1, "the verify read never ran: no proof")
+        self.assertEqual(base, "main")
+
+    def test_live_origin_head_resolves_to_origin_ref(self):
+        """Round 3 R7 (pin): a live origin/HEAD is the base, as origin/main. Green on the
+        pre-round-3 code: a pin, not a red case."""
+        root, _ = self._squash_lane("refs/remotes/origin/main")
+        self.assertEqual(guard.resolve_default_base(root), "origin/main")
+
+
+class UnreadableHuskBaseRunTests(unittest.TestCase):
+    """Batch review J1: find_husks called a bare os.listdir on <root>/.claude/worktrees. With
+    huskNames set (so find_husks reaches the listdir) and that folder unreadable, the PermissionError
+    escaped sweep_repo. The run aborted before the repository's run-log line was written. The run
+    must finish, and the repository must still get its run-log line."""
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="husk-unreadable-", dir=ROOT)
+        self.root = os.path.join(self.base, "repo")
+        make_repo(self.root, {"f.txt": "x\n"})
+        give_remote(self.root)
+        write(os.path.join(self.root, ".claude", "janitor.json"),
+              json.dumps({"huskNames": [".DS_Store"]}))
+        self.wts = os.path.join(self.root, ".claude", "worktrees")
+        os.makedirs(self.wts)
+        self.log = os.path.join(self.base, "janitor-runs.jsonl")
+        self.restore = os.path.join(self.base, "restore.log")
+        require(sweep.read_optout(self.root).get("huskNames") == [".DS_Store"],
+                "huskNames was not read from janitor.json")
+
+    def test_unreadable_worktrees_folder_still_gets_the_repository_run_line(self):
+        real_listdir = os.listdir
+        denials = []
+
+        def denied(path="."):
+            if _norm_path(path) == _norm_path(self.wts):
+                denials.append(path)
+                raise PermissionError(13, "Access is denied", path)
+            return real_listdir(path)
+
+        error = None
+        with mock.patch.object(sweep.os, "listdir", side_effect=denied), \
+                mock.patch.dict(os.environ, {"JANITOR_RUN_LOG": self.log}), _machine_quiet(), \
+                mock.patch.object(shutil, "disk_usage",
+                                  return_value=types.SimpleNamespace(total=1, used=1, free=4242)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            try:
+                sweep.main([self.root, "--confirm", "--restore-log", self.restore])
+            except PermissionError as exc:
+                error = exc
+        self.assertIsNone(error, "a PermissionError from the husk scan escaped the run: %r" % error)
+        self.assertGreaterEqual(len(denials), 1, "the unreadable folder was never read: no proof")
+        self.assertTrue(os.path.isfile(self.log), "no run log was written")
+        roots = [_norm_path(r.get("root", "")) for r in _read_run_log(self.log)]
+        self.assertIn(_norm_path(self.root), roots, "no run-log line for the repository: %r" % roots)
+
+    def _denied_worktrees_listdir(self):
+        real_listdir = os.listdir
+        denials = []
+
+        def denied(path="."):
+            if _norm_path(path) == _norm_path(self.wts):
+                denials.append(path)
+                raise PermissionError(13, "Access is denied", path)
+            return real_listdir(path)
+        return denied, denials
+
+    def test_unreadable_worktrees_folder_husk_line_says_unknown_not_zero(self):
+        """Round 3 R5: find_husks returns [] for a folder it cannot read, so the report printed
+        "leftover folders: 0, kept: 0". The husk scan must read as unknown on that line."""
+        denied, denials = self._denied_worktrees_listdir()
+        out = io.StringIO()
+        with mock.patch.object(sweep.os, "listdir", side_effect=denied), _machine_quiet():
+            result = sweep.sweep_repo(self.root, False, self.restore)
+            sweep.print_sweep_report([result], False, out=out)
+        self.assertGreaterEqual(len(denials), 1, "the unreadable folder was never read: no proof")
+        text = out.getvalue()
+        lines = [ln for ln in text.splitlines() if "leftover folders" in ln]
+        self.assertEqual(len(lines), 1, "no single leftover-folders line: %r" % text)
+        self.assertNotIn("leftover folders: 0", lines[0],
+                         "an unreadable folder reported zero leftover folders: %r" % lines[0])
+        self.assertRegex(lines[0], r"(?i)unknown|unreadable", "the husk line does not say the scan "
+                         "could not run: %r" % lines[0])
+
+    def test_unreadable_worktrees_folder_tier1_report_is_not_nothing_to_examine(self):
+        """Round 3 R6: with the stray scan unknown, the report printed "nothing to examine" for a
+        repository it had not finished examining. Tier1 runs only the husk and stray scans, so
+        every other section is empty here."""
+        denied, denials = self._denied_worktrees_listdir()
+        out = io.StringIO()
+        with mock.patch.object(sweep.os, "listdir", side_effect=denied), _machine_quiet():
+            result = sweep.sweep_repo(self.root, False, self.restore, mode="tier1")
+            sweep.print_sweep_report([result], True, out=out)
+        self.assertGreaterEqual(len(denials), 1, "the unreadable folder was never read: no proof")
+        self.assertIsNone(result["refused"], "the repository was refused: no proof of the scan")
+        text = out.getvalue()
+        self.assertNotIn("nothing to examine", text, "an unknown stray scan printed nothing to "
+                         "examine: %r" % text)
+        self.assertIn("stray     UNKNOWN", text, "the unknown stray scan is not shown: %r" % text)
 
 
 if __name__ == "__main__":

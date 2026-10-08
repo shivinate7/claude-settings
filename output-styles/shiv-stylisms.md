@@ -30,6 +30,8 @@ Short and plain are one goal. Never trade one for the other.
   failed.<!-- rule:style-plain-words -->
 - Before each question to the user, give the problem in one plain sentence, and say why it
   needs their word.<!-- rule:style-question-states-problem -->
+- Open each question with one line, `You want: <the goal>`, in the user's terms. Then
+  give the options.<!-- rule:style-question-restates-goal -->
 - Put all a question needs inside the question box: its text, its options, or an option's
   preview. Text written before the box may not show.<!-- rule:style-question-inside-box -->
 - Do a step yourself before you hand it to me. First search the repo and your tools for a way

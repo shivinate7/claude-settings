@@ -584,6 +584,13 @@
         "reason": "No check holds a list of jargon, and plain words depend on what the reader already knows."
       }
     },
+    "style-question-restates-goal": {
+      "mechanism": {
+        "kind": "gate",
+        "ref": "hooks/question_outcome.py",
+        "test": "hooks/test_question_outcome.py::case_1_missing_restate_is_denied"
+      }
+    },
     "style-question-states-problem": {
       "mechanism": {
         "kind": "unmechanized",

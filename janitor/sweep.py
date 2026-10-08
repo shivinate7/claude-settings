@@ -501,16 +501,25 @@ def worktree_idle_seconds(path: str, now=None):
     return (time.time() if now is None else now) - newest
 
 
+def _merged_read(where: str, path: str):
+    """True when HEAD in PATH holds no commit the default branch lacks, by ancestry or by patch
+    (decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md). False when it holds one. None
+    when git could not tell. HEAD is read in the worktree itself, never in WHERE. One home: the
+    strict keep and the unpushed keep both ask it."""
+    base = guard.resolve_default_base(where)
+    if base is None:
+        return None
+    merged = guard.branch_is_ancestor(path, base, "HEAD")
+    if merged is False:
+        merged = guard.branch_cherry_empty(path, base, "HEAD")
+    return merged
+
+
 def _strict_keep(where: str, path: str, idle):
     """The keep decision a run adds unless a person passed --attended, or None when the tree is merged and idle.
     Merged: HEAD holds no commit the default branch lacks, by ancestry or by patch
     (decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md). Pushed alone is not merged."""
-    base = guard.resolve_default_base(where)
-    merged = None
-    if base is not None:  # HEAD is read in the worktree itself, never in WHERE
-        merged = guard.branch_is_ancestor(path, base, "HEAD")
-        if merged is False:
-            merged = guard.branch_cherry_empty(path, base, "HEAD")
+    merged = _merged_read(where, path)
     if merged is None:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
     if not merged:
@@ -554,8 +563,17 @@ def decide_worktree(where: str, entry: dict, attended: bool = False):
     if pushed is None:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
     if not pushed:
-        return {"path": path, "action": "keep",
-                "reason": "unpushed: HEAD has a commit on no remote branch"}
+        # Unpushed is only a loss when the default branch lacks the work. A squash merge leaves
+        # a lane's own commit on no remote branch, though its patch is on main. Only when the
+        # repository has a remote: with none, nothing is pushed, so every worktree is kept.
+        remotes = guard._git(where, "remote")
+        has_remote = remotes is not None and remotes.returncode == 0 and remotes.stdout.strip()
+        merged = _merged_read(where, path) if has_remote else False
+        if merged is None:
+            return {"path": path, "action": "keep", "reason": "unreadable-subject"}
+        if not merged:
+            return {"path": path, "action": "keep",
+                    "reason": "unpushed: HEAD has a commit on no remote branch"}
     if not attended:
         kept = _strict_keep(where, path, idle)
         if kept:
@@ -1801,6 +1819,38 @@ def default_restore_log_path() -> str:
     return os.path.join(guard.config_dir(), "janitor", "restore-log.jsonl")
 
 
+def default_run_log_path() -> str:
+    return os.environ.get("JANITOR_RUN_LOG") or os.path.join(
+        guard.config_dir(), "state", "janitor-runs.jsonl")
+
+
+def _removed_count(decisions):
+    return sum(1 for d in decisions if d["action"] == "reap" and not d.get("error"))
+
+
+def append_run_log(path: str, results):
+    """One JSON line per repository, so a run's yield is readable later. Never fails the sweep:
+    the reaping is done by now, and a log that cannot be written is only a missing line."""
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        lines = []
+        for result in results:
+            try:
+                free = shutil.disk_usage(result["root"]).free
+            except OSError:
+                free = None  # unknown, never a made-up number
+            lines.append(json.dumps({
+                "root": result["root"], "free_bytes": free,
+                "worktrees_removed": _removed_count(result["worktrees"]),
+                "branches_reaped": _removed_count(result["branches"]),
+                "time_ms": int(time.time() * 1000),
+            }))
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+    except (OSError, ValueError) as exc:
+        print("janitor: run log not written (%s)" % exc)
+
+
 def append_restore_log(path: str, repo: str, branch: str, commit: str):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     line = json.dumps({
@@ -1971,13 +2021,34 @@ def husk_verdict(root: str, path: str, entries, names):
 
 
 def find_husks(root: str, entries, names):
-    """Every husk verdict under `<root>/.claude/worktrees/` (none when `names` is empty)."""
+    """Every husk verdict under `<root>/.claude/worktrees/` (none when `names` is empty).
+    None when the folder cannot be read: the scan is unknown, never zero."""
     base = os.path.join(root, ".claude", "worktrees")
     if not names or not os.path.isdir(base):
         return []
-    verdicts = (husk_verdict(root, os.path.join(base, n), entries, names)
-                for n in sorted(os.listdir(base)))
+    try:
+        listing = sorted(os.listdir(base))
+    except OSError:  # unreadable folder: unknown, the run goes on
+        return None
+    verdicts = (husk_verdict(root, os.path.join(base, n), entries, names) for n in listing)
     return [v for v in verdicts if v]
+
+
+def find_strays(root: str, entries):
+    """Absolute paths of the entries directly under `<root>/.claude/worktrees/` that git does
+    not register as a worktree: a leftover folder, a stray file, a backup. LISTED, never
+    deleted. A husk (a folder of only `huskNames`) is one of them until it is reaped."""
+    base = os.path.join(root, ".claude", "worktrees")
+    if not os.path.isdir(base):
+        return []
+    try:
+        names = sorted(os.listdir(base))
+    except OSError as exc:  # unreadable folder: no strays listed, the sweep goes on
+        print("janitor: worktrees folder unreadable (%s)" % exc)
+        return None
+    registered = {os.path.normcase(os.path.realpath(e["path"])) for e in entries}
+    return [p for p in (os.path.join(base, n) for n in names)
+            if os.path.normcase(os.path.realpath(p)) not in registered]
 
 
 def reap_husk(root: str, decision: dict, names):
@@ -2019,7 +2090,7 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     if mode == "tier1":
         confirm = True
     result = {"root": root, "refused": None, "branches": [], "worktrees": [], "listeners": [],
-              "pruned": None, "husks": []}
+              "pruned": None, "husks": [], "strays": []}
 
     optout = read_optout(root)  # once: protected prefixes and huskNames both come from it
     sweep_enabled, protected_prefixes, optout_ok = _optout_fields(optout)
@@ -2106,9 +2177,11 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     husk_names = optout.get("huskNames", [])
     result["husks"] = find_husks(root, entries, husk_names)
     if confirm:
-        for decision in result["husks"]:
+        for decision in result["husks"] or []:
             if decision["action"] == "husk":
                 reap_husk(root, decision, husk_names)
+
+    result["strays"] = find_strays(root, entries)  # after the husk reap: a deleted husk is gone
 
     if mode == "tier1":
         return result
@@ -2152,7 +2225,7 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
         pruned = result.get("pruned")
         has_prune = pruned and (pruned["names"] is None or pruned["names"])
         if not result["branches"] and not result["worktrees"] and not result["listeners"] \
-                and not has_prune and not result.get("husks"):
+                and not has_prune and result.get("husks", []) == [] and result.get("strays", []) == []:  # None is unknown
             print("  nothing to examine", file=out)
         if pruned and pruned["names"] is None:
             print("  prune     UNREADABLE -- %s; nothing pruned" % pruned["error"], file=out)
@@ -2162,7 +2235,10 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
                 if pruned["error"]:
                     line += "  [ERROR: %s]" % pruned["error"]
                 print(line, file=out)
-        for h in result.get("husks", []):
+        if result.get("husks") is None:
+            print("  husk      UNKNOWN -- the husk scan could not read the worktrees folder",
+                  file=out)
+        for h in result.get("husks") or []:
             husk_counts[h["action"]] += 1
             tag = "KEEP" if h.get("error") else {"husk": "REAP" if confirm else "WOULD"}.get(
                 h["action"], "KEEP")
@@ -2170,6 +2246,12 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
             if h.get("error"):
                 line += "  [ERROR: %s]" % h["error"]
             print(line, file=out)
+        if result.get("strays") is None:
+            print("  stray     UNKNOWN -- the stray scan could not read the worktrees folder",
+                  file=out)
+        for stray in result.get("strays") or []:
+            print("  stray     KEEP  %-60s not a registered worktree; never deleted"
+                  % os.path.basename(stray), file=out)
         for b in result["branches"]:
             branch_counts[(b["action"], b["reason"].split(":", 1)[0])] += 1
             tag = "REAP" if b["action"] == "reap" else "KEEP"
@@ -2220,8 +2302,16 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
     print("  TCP listeners examined: %d" % total_listeners, file=out)
     for (action, reason), n in sorted(listener_counts.items()):
         print("    %-5s %-20s %d" % (action, reason, n), file=out)
-    print("  leftover folders: %d, kept: %d"
-          % (husk_counts["husk"], husk_counts["keep"]), file=out)
+    if any(r.get("husks") is None and not r.get("refused") for r in results):
+        print("  leftover folders: unknown (folder unreadable)", file=out)
+    else:
+        print("  leftover folders: %d, kept: %d"
+              % (husk_counts["husk"], husk_counts["keep"]), file=out)
+    if any(r.get("strays") is None and not r.get("refused") for r in results):
+        print("  strays under .claude/worktrees (kept): unknown (folder unreadable)", file=out)
+    else:
+        print("  strays under .claude/worktrees (kept): %d"
+              % sum(len(r.get("strays") or []) for r in results), file=out)
     print("  stale worktree registrations: %d" % sum(
         len(r["pruned"]["names"] or []) for r in results if r.get("pruned")), file=out)
     if unreadable_listener_repos:
@@ -2364,10 +2454,23 @@ def main(argv=None) -> int:
 
 
 def _sweep_roots(args, roots, restore_log_path, mode):
+    def one(root):
+        result = sweep_repo(root, args.confirm, restore_log_path, mode, args.attended)
+        if args.confirm:  # one line per repository, as each finishes
+            append_run_log(default_run_log_path(), [result])
+        return result
+
     results = list(_pmap(
-        lambda root: sweep_repo(root, args.confirm, restore_log_path, mode, args.attended),
+        one,
         roots, args.confirm or mode == "tier1", _ROOT_POOL))
     print_sweep_report(results, args.confirm or mode == "tier1")
+    if args.confirm:
+        if any(_removed_count(r["worktrees"]) + _removed_count(r["branches"]) for r in results):
+            try:
+                free = min(shutil.disk_usage(r["root"]).free for r in results)
+                print("  free disk: %.1f GB" % (free / 1e9))
+            except (OSError, ValueError):
+                print("  free disk: unknown")
     if mode != "full":
         return 0
     dead = find_dead_rooted()
