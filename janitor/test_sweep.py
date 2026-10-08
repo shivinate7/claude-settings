@@ -2877,6 +2877,28 @@ class AgentEndReapTests(unittest.TestCase):
         self.assertEqual(json.loads(lines[0])["raw"], "payload 5")
         self.assertEqual(json.loads(lines[-1])["raw"], "payload 204")
 
+    def test_the_payload_log_keeps_a_line_when_the_first_replace_is_denied(self):
+        # Windows: os.replace raises PermissionError(13) while a scanner holds the destination.
+        folder = os.path.join(ROOT, "reap-log-retry")
+        real_replace = os.replace
+        denied = []
+
+        def replace_denied_once(src, dst):
+            if not denied:
+                denied.append(src)
+                raise PermissionError(13, "Access is denied")
+            return real_replace(src, dst)
+
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": folder}):
+            for number in range(3):
+                self.reap.log({"raw": "payload %d" % number})
+            with mock.patch.object(self.reap.os, "replace", new=replace_denied_once):
+                self.reap.log({"raw": "payload 3"})
+            with open(self.reap.log_path(), encoding="utf-8") as handle:
+                raws = [json.loads(line)["raw"] for line in handle.read().splitlines()]
+        self.assertEqual(len(denied), 1, "the injected PermissionError was never reached")
+        self.assertIn("payload 3", raws)
+
 
 class StrictWorktreeTests(unittest.TestCase):
     """Owner ruling: --confirm removes a worktree only when it is merged (by patch, not
