@@ -99,6 +99,9 @@ jobs:
       - name: Decision watch fixture suite
         run: python3 hooks/test_decision_watch.py
 
+      - name: Question outcome fixture suite
+        run: python3 hooks/test_question_outcome.py
+
       - name: Stop-hook gate fixture suite
         run: python3 lint/test_gates.py
 
@@ -308,6 +311,10 @@ jobs:
       - name: Decision watch fixture suite
         if: ${{ !cancelled() }}
         run: python3 hooks/test_decision_watch.py
+
+      - name: Question outcome fixture suite
+        if: ${{ !cancelled() }}
+        run: python3 hooks/test_question_outcome.py
 
       - name: Stop-hook gate fixture suite
         if: ${{ !cancelled() }}
@@ -520,6 +527,10 @@ jobs:
       - name: Decision watch fixture suite
         if: ${{ !cancelled() }}
         run: python hooks/test_decision_watch.py
+
+      - name: Question outcome fixture suite
+        if: ${{ !cancelled() }}
+        run: python hooks/test_question_outcome.py
 
       - name: Stop-hook gate fixture suite
         if: ${{ !cancelled() }}

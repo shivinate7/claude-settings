@@ -586,8 +586,9 @@
     },
     "style-question-restates-goal": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "hooks/question_outcome.py will enforce it (decision question-outcome-check); it is not built yet."
+        "kind": "gate",
+        "ref": "hooks/question_outcome.py",
+        "test": "hooks/test_question_outcome.py::case_1_missing_restate_is_denied"
       }
     },
     "style-question-states-problem": {
