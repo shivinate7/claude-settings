@@ -64,7 +64,9 @@ has Sonnet as the floor. These places enforce it.
   `agents/*.md` or `skills/*/SKILL.md` frontmatter sets a Haiku `model:`, unless the file
   is one of the four roles.
 
-Both read one list of Haiku roles. Known limit: a built-in agent with no file here picks
+Both read one list of Haiku roles, `HAIKU_ROLES` in `hooks/guard.py`. The Workflow
+check reads string literals in each `agent(` call. A model or role built from a variable
+is not seen. Known limit: a built-in agent with no file here picks
 its own model and never puts it in the tool input. Measured 2026-10-07: the built-in Plan
 ran Opus 5.5 and general-purpose ran Sonnet 5.5. `agents/plan.md` now pins Plan.
 
