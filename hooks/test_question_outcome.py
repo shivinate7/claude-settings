@@ -23,7 +23,7 @@ Interface the hook must match:
   that session passes with no model call, whatever its text or options, and clears the state.
   A third ask after that pass is judged again.
 - Owner text: `owner_messages(path)` returns only genuine owner text, oldest first, at most 3.
-  Machine lines (isMeta, origin not "human", task-notification, peer messages, Stop-hook
+  Machine lines (isMeta, no origin or origin not "human", task-notification, peer messages, Stop-hook
   feedback, compact summary, sidechain text, tool_result, system-reminder) never count.
 - The transcript is read at the tail only: at most 2 MiB of a 10 MB transcript is read.
 - `You want:` needs text on its own line. Blank or whitespace-only after the marker is missing.
@@ -534,6 +534,32 @@ def case_q1_combined_transcript_keeps_three_genuine_lines_in_the_prompt():
           re.findall(r"[A-Z]+-SENTINEL", prompt))
 
 
+# --------------------------------------------------------------------------- case q8
+# Strict origin (ruling): only a record with origin.kind == "human" is owner text. A plain-text
+# compaction summary with no origin and no tag is machine text, so it never counts.
+
+COMPACT_PLAIN = ("This session is being continued from a previous conversation that ran out of "
+                 "context. SUMMARY-SENTINEL the earlier work, in brief.")
+
+
+def case_q8_originless_plain_text_is_not_owner_text():
+    name = "caseQ8 owner text: an originless plain-text compaction summary is not owner text"
+    if not need_module(name):
+        return
+    genuine = "HUMAN-OWNER-Q8 the retry needs a three-try limit."
+    summary = {"type": "user", "message": {"role": "user", "content": COMPACT_PLAIN}}
+    path = write_transcript("q8", [owner(genuine), summary])
+    got = qo.owner_messages(path)
+    check(name + ": only the human-origin line", got == [genuine], got)
+    with model_stub(ALLOW) as stub:
+        run_main(ask_payload(fresh_session("q8"), [question(GOOD_Q, LABELS)], path))
+    prompt = stub.prompts[0] if stub.prompts else ""
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": prompt holds the human-origin line", "HUMAN-OWNER-Q8" in prompt, "prompt")
+    check(name + ": prompt omits the compaction summary", "SUMMARY-SENTINEL" not in prompt,
+          "SUMMARY-SENTINEL")
+
+
 # --------------------------------------------------------------------------- case q3
 # An unwritable state: no FLAG deny, so no loop. A "did not run" note instead.
 
@@ -736,6 +762,7 @@ def main():
              case_7_clarifying_question_passes_without_model,
              case_q1_machine_shapes_never_count_as_the_owner,
              case_q1_combined_transcript_keeps_three_genuine_lines_in_the_prompt,
+             case_q8_originless_plain_text_is_not_owner_text,
              case_q3_unwritable_state_flag_is_allowed_with_a_note,
              case_q3b_unwritable_state_restate_deny_is_not_a_loop,
              case_q4_a_big_transcript_is_read_at_the_tail_only,
