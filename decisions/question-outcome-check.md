@@ -24,11 +24,16 @@ Owner rulings, 2026-10-08:
 ## Bounds
 
 - A clarifying question, with no options or one option, passes first.
-- Any other question with no `You want:` line is denied with no model call.
+- Any other question with no `You want:` line, or an empty one, is denied with no model
+  call.
+- The hook reads only the owner's own messages from the last 2 MiB of the transcript.
+  Task notifications, hook feedback, peer messages and tool results are not the owner's.
 - A model call that fails or times out lets the question through, and the hook prints
-  one line that says so. A question is not a destructive act, so a lost check costs less
-  than a blocked question.
-- One deny per question, for every kind of deny. The next try of the same question passes, so a judge that is
-  wrong cannot loop.
+  one line that says so. That line never repeats the prompt. A question is not a
+  destructive act, so a lost check costs less than a blocked question.
+- After a deny, the next question in the session passes with no model call, whatever
+  its text. That clears the state. If the hook cannot record a deny, it does not deny.
+  So a judge that is wrong cannot loop.
+- The reason sent back to the session is capped and cleaned.
 - Agent hooks (`type: agent`) were not chosen. The docs call them experimental, and they
   do not promise that an agent hook can read the chat.
