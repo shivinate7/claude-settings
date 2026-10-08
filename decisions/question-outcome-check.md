@@ -12,29 +12,33 @@ prompt hook sees only the question, never the chat, so it judges form alone.
 Owner rulings, 2026-10-08:
 - Each question opens with one line, `You want: <the goal>`, in the owner's terms. The
   owner sees at a glance whether the goal was read right.
-- A command hook, `hooks/question_outcome.py`, runs on PreToolUse for `AskUserQuestion`.
-  It reads the owner's last messages from `transcript_path`. It asks a model whether the
-  `You want:` line matches those messages, and whether each option serves that goal. It
-  also asks whether an option that serves the goal better is missing.
-- The model call reuses `invoke_model` from `hooks/decision_watch.py`, the proven way to
-  call a model from a hook on this machine. The model is Haiku at effort `xhigh`.
-- On a miss, the hook denies the call. The reason goes back to the session, which fixes
-  the question before the owner sees it.
+- Two hooks run on PreToolUse for `AskUserQuestion`:
+  - A command hook, `hooks/question_outcome.py`, makes the checks that need no model.
+  - An agent hook (`type: agent`, Haiku) judges the outcome. It reads the owner's last
+    words from `transcript_path`. It asks whether the `You want:` line matches them,
+    whether each option serves that goal, and whether a better option is missing.
+- The agent hook runs inside the app, on the app's own login, on Windows and on macOS.
+  The first build started a second `claude` program through `invoke_model`. That
+  program's login expired on 2026-09-23 and never renews, so no check ran (measured
+  2026-10-08). Owner ruling, 2026-10-08: move the check into the app. If an agent hook
+  cannot do it, use a one-year token from `claude setup-token`.
+- Measured 2026-10-08, with a probe agent hook on this machine: it read the last owner
+  line from this session's transcript (7.4 MB) and answered in about 10 seconds.
+- On a miss, the agent hook denies the call. The reason goes back to the session, which
+  fixes the question before the owner sees it.
 
 ## Bounds
 
 - A clarifying question, with no options or one option, passes first.
 - Any other question with no `You want:` line, or an empty one, is denied with no model
   call.
-- The hook reads only the owner's own messages from the last 2 MiB of the transcript.
-  Task notifications, hook feedback, peer messages and tool results are not the owner's.
-- A model call that fails or times out lets the question through, and the hook prints
-  one line that says so. That line never repeats the prompt. A question is not a
-  destructive act, so a lost check costs less than a blocked question.
-- After a deny, the next question in the session passes with no model call, whatever
-  its text. That clears the state. A deny state older than 30 minutes is ignored. If the
-  hook cannot record or clear a deny, it does not deny, and it says the check did not run.
-  So a judge that is wrong cannot loop.
+- The owner's words are the user records with `origin.kind` "human", and the owner's
+  answers in `AskUserQuestion` tool results. Task notifications, hook feedback and peer
+  messages are not the owner's. The probe showed that question-box answers are tool
+  results, not human records.
+- A check that fails or times out lets the question through.
+- After a deny, the next question in the session passes. The command hook keeps its own
+  state, which expires after 30 minutes. The agent hook reads the transcript. When the
+  last `AskUserQuestion` call was denied by this check, it answers ok. So a judge that is
+  wrong cannot loop.
 - The reason sent back to the session is capped and cleaned.
-- Agent hooks (`type: agent`) were not chosen. The docs call them experimental, and they
-  do not promise that an agent hook can read the chat.
