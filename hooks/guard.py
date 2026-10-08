@@ -1665,7 +1665,9 @@ def resolve_default_base(where: str):
     if origin_head is not None and origin_head.returncode == 0 and origin_head.stdout.strip():
         ref = origin_head.stdout.strip()
         live = _git(where, "rev-parse", "--verify", "--quiet", ref + "^{commit}")
-        if live is not None and live.returncode == 0:  # a dangling origin/HEAD falls through
+        if live is None:  # git could not run: unreadable, never "does not exist"
+            return None
+        if live.returncode == 0:  # a dangling origin/HEAD (git answered no) falls through
             return ref
     for name in ("main", "master"):
         answer = _git(where, "rev-parse", "--verify", "-q", "refs/heads/" + name)

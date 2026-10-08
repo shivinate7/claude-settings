@@ -2025,8 +2025,11 @@ def find_husks(root: str, entries, names):
     base = os.path.join(root, ".claude", "worktrees")
     if not names or not os.path.isdir(base):
         return []
-    verdicts = (husk_verdict(root, os.path.join(base, n), entries, names)
-                for n in sorted(os.listdir(base)))
+    try:
+        listing = sorted(os.listdir(base))
+    except OSError:  # unreadable folder: no husk verdicts, the run goes on
+        return []
+    verdicts = (husk_verdict(root, os.path.join(base, n), entries, names) for n in listing)
     return [v for v in verdicts if v]
 
 
@@ -2041,7 +2044,7 @@ def find_strays(root: str, entries):
         names = sorted(os.listdir(base))
     except OSError as exc:  # unreadable folder: no strays listed, the sweep goes on
         print("janitor: worktrees folder unreadable (%s)" % exc)
-        return []
+        return None
     registered = {os.path.normcase(os.path.realpath(e["path"])) for e in entries}
     return [p for p in (os.path.join(base, n) for n in names)
             if os.path.normcase(os.path.realpath(p)) not in registered]
@@ -2239,7 +2242,10 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
             if h.get("error"):
                 line += "  [ERROR: %s]" % h["error"]
             print(line, file=out)
-        for stray in result.get("strays", []):
+        if result.get("strays") is None:
+            print("  stray     UNKNOWN -- the stray scan could not read the worktrees folder",
+                  file=out)
+        for stray in result.get("strays") or []:
             print("  stray     KEEP  %-60s not a registered worktree; never deleted"
                   % os.path.basename(stray), file=out)
         for b in result["branches"]:
@@ -2294,8 +2300,11 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
         print("    %-5s %-20s %d" % (action, reason, n), file=out)
     print("  leftover folders: %d, kept: %d"
           % (husk_counts["husk"], husk_counts["keep"]), file=out)
-    print("  strays under .claude/worktrees (kept): %d"
-          % sum(len(r.get("strays") or []) for r in results), file=out)
+    if any(r.get("strays") is None and not r.get("refused") for r in results):
+        print("  strays under .claude/worktrees (kept): unknown (folder unreadable)", file=out)
+    else:
+        print("  strays under .claude/worktrees (kept): %d"
+              % sum(len(r.get("strays") or []) for r in results), file=out)
     print("  stale worktree registrations: %d" % sum(
         len(r["pruned"]["names"] or []) for r in results if r.get("pruned")), file=out)
     if unreadable_listener_repos:
