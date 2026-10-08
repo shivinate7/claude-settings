@@ -23,12 +23,12 @@ Owner rulings, 2026-10-08:
 
 ## Bounds
 
-- A question with no `You want:` line is denied with no model call.
-- A clarifying question with no real options passes.
+- A clarifying question, with no options or one option, passes first.
+- Any other question with no `You want:` line is denied with no model call.
 - A model call that fails or times out lets the question through, and the hook prints
   one line that says so. A question is not a destructive act, so a lost check costs less
   than a blocked question.
-- One deny per question. The next try of the same question passes, so a judge that is
+- One deny per question, for every kind of deny. The next try of the same question passes, so a judge that is
   wrong cannot loop.
 - Agent hooks (`type: agent`) were not chosen. The docs call them experimental, and they
   do not promise that an agent hook can read the chat.
