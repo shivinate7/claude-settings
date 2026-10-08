@@ -26,6 +26,7 @@ REQUIRED = [
     "python hooks/test_config_watch.py",
     "python hooks/test_precompact_handoff.py",
     "python hooks/test_decision_watch.py",
+    "python hooks/test_question_outcome.py",
     "python lint/test_gates.py",
     "python hooks/test_ruling_home.py",
     "python lint/test_ruling_census.py",
