@@ -70,8 +70,13 @@
     },
     "roles-one-role-per-worker": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "Nothing inspects which role, builder, reviewer, or Explore, a spawned agent holds at runtime, or catches a worker that carries two."
+        "kind": "gate",
+        "ref": "settings.json",
+        "setting": {
+          "file": "settings.json",
+          "path": "hooks.PreToolUse[*].hooks[*].prompt",
+          "contains": "roles-one-role-per-worker"
+        }
       }
     },
     "roles-sonnet-is-the-default": {
@@ -134,8 +139,13 @@
     },
     "roles-brief-contents": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No check parses a brief for the task, files, governing rulings, and a done-check. Brief quality is read by a human."
+        "kind": "gate",
+        "ref": "settings.json",
+        "setting": {
+          "file": "settings.json",
+          "path": "hooks.PreToolUse[*].hooks[*].prompt",
+          "contains": "roles-brief-contents"
+        }
       }
     },
     "roles-resume-by-name": {
@@ -158,8 +168,13 @@
     },
     "parallelism-no-mid-task-talk": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No hook reads inter-lane messages for content or timing to catch a mid-task exchange."
+        "kind": "gate",
+        "ref": "settings.json",
+        "setting": {
+          "file": "settings.json",
+          "path": "hooks.PreToolUse[*].hooks[*].prompt",
+          "contains": "parallelism-no-mid-task-talk"
+        }
       }
     },
     "parallelism-argue-max-parallelism": {
@@ -361,8 +376,13 @@
     },
     "tokens-point-brief-at-files": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "Nothing inspects a brief's content to confirm it names files rather than pasting their contents."
+        "kind": "gate",
+        "ref": "settings.json",
+        "setting": {
+          "file": "settings.json",
+          "path": "hooks.PreToolUse[*].hooks[*].prompt",
+          "contains": "tokens-point-brief-at-files"
+        }
       }
     },
     "tokens-read-report-not-transcript": {
@@ -428,8 +448,13 @@
     },
     "speak-rewrite-superseded-in-place": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No hook diffs an edit to a record and judges whether superseded text was rewritten in place versus left beside a story, an old quote, or the owner's verbatim words. Judging what is still true is a human read."
+        "kind": "gate",
+        "ref": "settings.json",
+        "setting": {
+          "file": "settings.json",
+          "path": "hooks.PreToolUse[*].hooks[*].prompt",
+          "contains": "speak-rewrite-superseded-in-place"
+        }
       }
     },
     "output-write-in-ste": {
@@ -441,8 +466,13 @@
     },
     "output-start-with-point": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No check reads whether the first sentence of a reply is the point rather than a preamble."
+        "kind": "gate",
+        "ref": "settings.json",
+        "setting": {
+          "file": "settings.json",
+          "path": "hooks.Stop[*].hooks[*].prompt",
+          "contains": "output-start-with-point"
+        }
       }
     },
     "output-tracking-turn-one-line": {
@@ -459,14 +489,24 @@
     },
     "output-never-paste-passing-output": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No check tells a pasted command stream apart from a stated verdict in a reply."
+        "kind": "gate",
+        "ref": "settings.json",
+        "setting": {
+          "file": "settings.json",
+          "path": "hooks.Stop[*].hooks[*].prompt",
+          "contains": "output-never-paste-passing-output"
+        }
       }
     },
     "output-bring-decisions-as-question": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "Whether a decision was framed as a question with options and a recommendation is a style read of the reply."
+        "kind": "gate",
+        "ref": "settings.json",
+        "setting": {
+          "file": "settings.json",
+          "path": "hooks.PreToolUse[*].hooks[*].prompt",
+          "contains": "output-bring-decisions-as-question"
+        }
       }
     },
     "reports-order-of-labels": {
@@ -550,8 +590,13 @@
     },
     "style-cut-narration": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No check tells narration or a recap of earlier work apart from new content in a reply."
+        "kind": "gate",
+        "ref": "settings.json",
+        "setting": {
+          "file": "settings.json",
+          "path": "hooks.Stop[*].hooks[*].prompt",
+          "contains": "style-cut-narration"
+        }
       }
     },
     "style-simple-answer-short": {
@@ -586,8 +631,13 @@
     },
     "style-question-states-problem": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No check finds a question to the user and reads whether one plain sentence before it states the problem and why it needs their word."
+        "kind": "gate",
+        "ref": "settings.json",
+        "setting": {
+          "file": "settings.json",
+          "path": "hooks.PreToolUse[*].hooks[*].prompt",
+          "contains": "style-question-states-problem"
+        }
       }
     },
     "output-never-hand-off-doable-step": {
@@ -598,14 +648,24 @@
     },
     "style-option-says-effect": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No check reads whether each option in a question says what the user gains and what the user loses."
+        "kind": "gate",
+        "ref": "settings.json",
+        "setting": {
+          "file": "settings.json",
+          "path": "hooks.PreToolUse[*].hooks[*].prompt",
+          "contains": "style-option-says-effect"
+        }
       }
     },
     "style-question-inside-box": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No check sees the text of a reply beside its question box and reads whether the question depends on text outside the box."
+        "kind": "gate",
+        "ref": "settings.json",
+        "setting": {
+          "file": "settings.json",
+          "path": "hooks.PreToolUse[*].hooks[*].prompt",
+          "contains": "style-question-inside-box"
+        }
       }
     },
     "roles-each-layer-proves-once": {

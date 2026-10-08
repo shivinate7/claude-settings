@@ -1,7 +1,9 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "autoCompactWindow": 500000,
-  "fallbackModel": ["sonnet"],
+  "fallbackModel": [
+    "sonnet"
+  ],
   "advisorModel": "opus",
   "fastModePerSessionOptIn": true,
   "env": {
@@ -86,6 +88,16 @@
           {
             "type": "command",
             "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/precompact_handoff.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\" --nudge; done; exit 0",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "model": "haiku",
+            "prompt": "Judge the final reply in last_assistant_message: $ARGUMENTS\nIf stop_hook_active is true, answer {\"ok\": true} at once. Rules: output-start-with-point (the first sentence is the point, not a preamble), style-cut-narration (no narration or recap of earlier work), output-never-paste-passing-output (a passing run gets a verdict, not its pasted output). Block only on a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}.",
             "timeout": 30
           }
         ]
@@ -183,6 +195,63 @@
             "type": "command",
             "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/lint/ste_gate.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
             "timeout": 20
+          }
+        ]
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "prompt",
+            "model": "haiku",
+            "prompt": "Judge this AskUserQuestion call: $ARGUMENTS\nRules: style-option-says-effect (each option says what the user gains and loses), style-question-states-problem (the question states the problem and why it needs the user's word), style-question-inside-box (the question reads whole without text outside the box), output-bring-decisions-as-question (a decision is a question with options and a recommendation). Block only on a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}.",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "prompt",
+            "model": "haiku",
+            "prompt": "Judge this subagent spawn: $ARGUMENTS\nRules: roles-brief-contents (the brief carries the task, the files, governing rulings, and the check that proves done), tokens-point-brief-at-files (the brief names files and never pastes their contents), roles-one-role-per-worker (the worker holds one role: builder, reviewer, or Explore). Block only on a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}.",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "prompt",
+            "model": "haiku",
+            "prompt": "Judge this edit to a file: $ARGUMENTS\nIf the file path is not under a decisions/ folder, answer {\"ok\": true} at once. Rule: speak-rewrite-superseded-in-place (superseded text is rewritten in place, with no history, story, or old quote left beside the new ruling). Block only on a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}.",
+            "timeout": 30,
+            "if": "Edit(decisions/**)"
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "prompt",
+            "model": "haiku",
+            "prompt": "Judge this edit to a file: $ARGUMENTS\nIf the file path is not under a decisions/ folder, answer {\"ok\": true} at once. Rule: speak-rewrite-superseded-in-place (superseded text is rewritten in place, with no history, story, or old quote left beside the new ruling). Block only on a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}.",
+            "timeout": 30,
+            "if": "Write(decisions/**)"
+          }
+        ]
+      },
+      {
+        "matcher": "SendMessage",
+        "hooks": [
+          {
+            "type": "prompt",
+            "model": "haiku",
+            "prompt": "Judge this SendMessage call: $ARGUMENTS\nRule: parallelism-no-mid-task-talk (a lane messages a peer only when the branch must hear something that changes its work). You cannot see the receiver's task, so judge by wording only. Block only on a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}.",
+            "timeout": 30
           }
         ]
       }
