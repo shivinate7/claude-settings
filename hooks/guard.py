@@ -65,6 +65,9 @@ one fixed order, and the first match wins.
                        naming a Haiku model is always denied. Sonnet is the floor otherwise
                        (owner ruling 2026-10-07). An agent file's own `model:` key never reaches
                        this rule, so lint/check_agent_models.py checks the files, from HAIKU_ROLES.
+                       The Workflow scan is static: it reads string-literal `model` and `agentType`
+                       keys in each agent() call's object argument. A model or role set through a
+                       variable, a spread, an alias or a concatenation is not seen.
 
 A project's own `.claude/settings.json`, `.claude/settings.local.json`, and
 `.claude/hooks/*` are NOT frozen (Decision 7). They are allowed, and the guard appends
@@ -5094,8 +5097,45 @@ MODEL_FLOOR_REASON = (
     "or name no model and let the default apply."
 )
 AGENT_CALL = re.compile(r"\bagent\s*\(")
-SCRIPT_MODEL = re.compile(r"\bmodel\s*:\s*([\'\"`])(.*?)\1")
-SCRIPT_ROLE = re.compile(r"\bagentType\s*:\s*([\'\"`])(.*?)\1")
+SCRIPT_LEXEME = re.compile(r"//[^\n]*|/\*.*?\*/|([\'\"`])((?:\\.|(?!\1).)*)\1", re.DOTALL)
+SCRIPT_PAIR = re.compile(r"(?:(\w+)|\x00(\d+)\x00)\s*:\s*\x00(\d+)\x00")
+
+
+def mask_script(script: str):
+    """Drop comments and replace each string literal with a \\x00N\\x00 token. Return (text, strings)."""
+    strings = []
+
+    def swap(found):
+        if found.group(1) is None:
+            return " "
+        strings.append(found.group(2))
+        return "\x00%d\x00" % (len(strings) - 1)
+
+    return SCRIPT_LEXEME.sub(swap, script), strings
+
+
+def script_opts(text: str, start: int):
+    """Yield the string-valued keys of each object literal that is a direct argument of the call
+    whose arguments open at `start`."""
+    depth, top, i = 1, [], start
+    while i < len(text) and depth:
+        ch = text[i]
+        if ch in "([{":
+            if ch == "{" and depth == 1:
+                top.append([i + 1, ""])
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+            if ch == "}" and depth == 1 and top and top[-1][1] == "":
+                top[-1][1] = text[top[-1][0]:i]
+        i += 1
+    for _, body in top:
+        flat, level = [], 0
+        for ch in body:
+            level += ch in "([{"
+            flat.append(ch if level == 0 else " ")
+            level -= ch in ")]}"
+        yield "".join(flat)
 
 
 def below_the_floor(model) -> bool:
@@ -5112,10 +5152,14 @@ def floor_hit(tool: str, tool_input) -> str:
         if below_the_floor(tool_input.get("model")):
             return str(tool_input.get("model"))
     elif tool == "Workflow" and isinstance(tool_input.get("script"), str):
-        for chunk in AGENT_CALL.split(tool_input["script"])[1:]:
-            model, role = SCRIPT_MODEL.search(chunk), SCRIPT_ROLE.search(chunk)
-            if model and below_the_floor(model.group(2)) and (not role or role.group(2) not in HAIKU_ROLES):
-                return model.group(2)
+        text, strings = mask_script(tool_input["script"])
+        for call in AGENT_CALL.finditer(text):
+            for body in script_opts(text, call.end()):
+                keys = {}
+                for name, quoted, value in SCRIPT_PAIR.findall(body):
+                    keys[name or strings[int(quoted)]] = strings[int(value)]
+                if below_the_floor(keys.get("model")) and keys.get("agentType") not in HAIKU_ROLES:
+                    return keys["model"]
     return ""
 
 
