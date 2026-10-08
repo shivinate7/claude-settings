@@ -20,6 +20,7 @@ import json
 import os
 import re
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -35,6 +36,7 @@ RULE = "style-question-restates-goal"
 MODEL_TIMEOUT = 90
 OWNER_MESSAGES = 3
 MESSAGE_MAX = 1500
+STATE_MAX_AGE = 30 * 60  # seconds; an older deny state is ignored
 TAIL_BYTES = 2 * 1024 * 1024
 MACHINE_TAGS = ("<system-reminder>", "<task-notification>")
 YOU_WANT = re.compile(r"^[ 	]*You want:[ 	]*\S", re.MULTILINE)
@@ -95,14 +97,18 @@ def _mark_denied(path):
 
 
 def _take_denied(path):
-    """True once after a deny: the next ask passes. Reading it clears it."""
-    if not os.path.exists(path):
+    """True once after a deny: the next ask passes. Reading it clears it. A state older than
+    STATE_MAX_AGE seconds (file mtime) is stale: removed if possible, else ignored. Raises
+    OSError when a live state cannot be cleared: it would pass every later ask."""
+    try:
+        age = time.time() - os.path.getmtime(path)
+    except OSError:
         return False
     try:
         os.remove(path)
-    except OSError:
-        pass
-    return True
+    except FileNotFoundError:
+        return False
+    return age <= STATE_MAX_AGE
 
 
 def _emit(obj):
@@ -125,12 +131,16 @@ def _did_not_run(why):
 
 def main():
     try:
-        hook = json.load(sys.stdin)
+        hook = json.loads(sys.stdin.buffer.read())
         questions = [q for q in hook["tool_input"]["questions"] if isinstance(q, dict)]
     except Exception:
         _did_not_run("the hook input was not readable.")
     state = _state_path(hook.get("session_id"))
-    if _take_denied(state):
+    try:
+        passed = _take_denied(state)
+    except OSError:
+        _did_not_run("the deny state could not be cleared, so the question was not judged.")
+    if passed:
         sys.exit(0)  # the retry after a deny passes, whatever its text
     todo = [(str(q.get("question", "")), _options(q)) for q in questions]
     todo = [(t, ls) for t, ls in todo if len(ls) >= 2]
@@ -139,7 +149,7 @@ def main():
         if not _mark_denied(state):
             _did_not_run("the state could not be written, so no deny was sent.")
         _deny("%s: open the question with one line `You want: <the goal, in the owner's "
-              "terms>`. Missing on: %s" % (RULE, "; ".join(t[:80] for t in missing)))
+              "terms>`. Missing on: %s" % (RULE, safe_finding_text("; ".join(t[:80] for t in missing))))
     if not todo:
         sys.exit(0)
 
