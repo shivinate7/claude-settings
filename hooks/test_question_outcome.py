@@ -22,6 +22,14 @@ Interface the hook must match:
 - Retry rule (ruling, batch review): after ANY deny in a session, the NEXT AskUserQuestion in
   that session passes with no model call, whatever its text or options, and clears the state.
   A third ask after that pass is judged again.
+- Deny-state age: the state file's mtime is its age. A deny state older than 30 minutes is
+  not honored: the next ask is judged. A younger one still passes the next ask.
+- A deny-state that cannot be removed does not pass every later ask: a later ask is judged, or
+  gets the "did not run" note, never a silent pass.
+- Stdin is UTF-8 bytes, as Claude Code writes them. A non-cp1252 character in the question
+  text (U+201D) is parsed and judged. It is not an allow-on-error.
+- A `You want:` deny reason passes through lint/_transcript.safe_finding_text: no raw newline,
+  no control character from the question text.
 - Owner text: `owner_messages(path)` returns only genuine owner text, oldest first, at most 3.
   Machine lines (isMeta, no origin or origin not "human", task-notification, peer messages, Stop-hook
   feedback, compact summary, sidechain text, tool_result, system-reminder) never count.
@@ -50,6 +58,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -146,10 +155,16 @@ def run_main(payload):
 
 
 def run_raw(stdin_text):
-    """Run main() with `stdin_text` as the whole of stdin. Return (exit_code, stdout, stderr)."""
+    """Run main() with `stdin_text` as the whole of stdin, sent as UTF-8 bytes. Return (exit_code,
+    stdout, stderr). stdin is a TextIOWrapper, so `sys.stdin.buffer` exists, as in Claude Code."""
+    return run_stdin(io.TextIOWrapper(io.BytesIO(stdin_text.encode("utf-8")), encoding="utf-8"))
+
+
+def run_stdin(stdin_obj):
+    """Run main() with `stdin_obj` as sys.stdin. Return (exit_code, stdout, stderr)."""
     out, err = io.StringIO(), io.StringIO()
     prior_stdin = sys.stdin
-    sys.stdin = io.StringIO(stdin_text)
+    sys.stdin = stdin_obj
     code = None
     try:
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -751,8 +766,116 @@ def case_q7_model_timeout_line_does_not_echo_the_prompt():
     check(name + ": no question text echoed", "ECHO-QUESTION-SENTINEL" not in out, out[:200])
 
 
+# --------------------------------------------------------------------------- round 3
+# R1 a deny state that cannot be removed; R2 deny-state age; R3 UTF-8 stdin read as cp1252;
+# R4 the You want deny reason is sanitized.
+
+def _age_state(session, seconds):
+    """Make the session's deny-state file `seconds` old (its mtime is its age)."""
+    path = qo._state_path(session)
+    if os.path.exists(path):
+        then = time.time() - seconds
+        os.utime(path, (then, then))
+
+
+def case_r1_a_state_that_cannot_be_removed_does_not_pass_every_later_ask():
+    name = "caseR1 deny-state cannot be removed: the later asks are not all passed"
+    if not need_module(name):
+        return
+    session = fresh_session("r1")
+    ask_a = ask_payload(session, [question(GOOD_Q, LABELS)], default_transcript())
+    ask_b = ask_payload(session, [question(REWORDED_Q, REWORDED_LABELS)], default_transcript())
+    ask_c = ask_payload(session, [question(REWORDED_Q, REWORDED_LABELS)], default_transcript())
+    with model_stub(FLAG) as stub, \
+            mock.patch.object(qo.os, "remove", side_effect=OSError("file in use")), \
+            mock.patch.object(qo.os, "unlink", side_effect=OSError("file in use")):
+        _, out_a, _ = run_main(ask_a)
+        check(name + ": first ask denied", deny_reason(out_a) is not None, out_a)
+        run_main(ask_b)
+        code_c, out_c, _ = run_main(ask_c)
+    noted = "did not run" in (system_message(out_c) or "")
+    check(name + ": third ask judged by the model, or noted as did not run, never silently passed",
+          len(stub.prompts) >= 2 or noted,
+          "prompts=%d out=%r" % (len(stub.prompts), out_c))
+    check(name + ": exit 0", code_c in (0, None), code_c)
+
+
+def case_r2_a_deny_state_older_than_30_minutes_is_ignored():
+    name = "caseR2 deny-state 31 minutes old: the next ask is judged, not passed"
+    if not need_module(name):
+        return
+    session = fresh_session("r2")
+    ask_a = ask_payload(session, [question(GOOD_Q, LABELS)], default_transcript())
+    ask_b = ask_payload(session, [question(REWORDED_Q, REWORDED_LABELS)], default_transcript())
+    with model_stub(FLAG) as stub:
+        _, out_a, _ = run_main(ask_a)
+        check(name + ": first ask denied", deny_reason(out_a) is not None, out_a)
+        _age_state(session, 31 * 60)
+        _, out_b, _ = run_main(ask_b)
+    check(name + ": next ask made one more model call", len(stub.prompts) == 2, len(stub.prompts))
+    check(name + ": next ask denied by the judgment", deny_reason(out_b) is not None, out_b)
+
+
+def case_r2b_a_deny_state_5_minutes_old_still_passes_the_next_ask():
+    name = "caseR2b deny-state 5 minutes old: the next ask still passes with no model call"
+    if not need_module(name):
+        return
+    session = fresh_session("r2b")
+    ask_a = ask_payload(session, [question(GOOD_Q, LABELS)], default_transcript())
+    ask_b = ask_payload(session, [question(REWORDED_Q, REWORDED_LABELS)], default_transcript())
+    with model_stub(FLAG) as stub:
+        _, out_a, _ = run_main(ask_a)
+        check(name + ": first ask denied", deny_reason(out_a) is not None, out_a)
+        _age_state(session, 5 * 60)
+        _, out_b, _ = run_main(ask_b)
+    check(name + ": next ask passes", deny_reason(out_b) is None, out_b)
+    check(name + ": no model call on the next ask", len(stub.prompts) == 1, len(stub.prompts))
+
+
+def case_r3_utf8_stdin_read_as_cp1252_is_judged_not_allowed_on_error():
+    name = "caseR3 stdin UTF-8 with U+201D, read as cp1252: judged, not did-not-run"
+    if not need_module(name):
+        return
+    text = ("You want: a three-try limit on the upload retry.\n"
+            "Should the retry say “wait” between tries?")
+    payload = ask_payload(fresh_session("r3"), [question(text, LABELS)], default_transcript())
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")  # as Claude Code writes it
+    with model_stub(ALLOW) as stub:
+        stdin = io.TextIOWrapper(io.BytesIO(data), encoding="cp1252")  # the Windows locale
+        code, out, _ = run_stdin(stdin)
+    check(name + ": the model judged the question once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": no did-not-run line", "did not run" not in (system_message(out) or ""), out)
+    check(name + ": the prompt holds U+201D", bool(stub.prompts) and "”" in stub.prompts[0])
+    check(name + ": exit 0", code in (0, None), code)
+
+
+def case_r4_missing_you_want_reason_has_no_raw_newline_or_control_character():
+    name = "caseR4 missing You want: the deny reason is passed through safe_finding_text"
+    if not need_module(name):
+        return
+    text = "Should the retry wait\nbetween tries?\x1b[2J at the limit"
+    with model_stub(ALLOW) as stub, \
+            mock.patch.object(qo, "safe_finding_text", wraps=qo.safe_finding_text) as wrapped:
+        code, out, _ = run_main(ask_payload(fresh_session("r4"), [question(text, LABELS)],
+                                            default_transcript()))
+    reason = deny_reason(out) or ""
+    check(name + ": denied", deny_reason(out) is not None, out)
+    check(name + ": the rule is named", RESTATE_RULE in reason, repr(reason))
+    check(name + ": no control character in the reason", not CONTROL_CHARS.search(reason),
+          repr(CONTROL_CHARS.findall(reason)))
+    check(name + ": safe_finding_text was called on the question text",
+          any("Should the retry wait" in str(c.args[0]) for c in wrapped.call_args_list),
+          wrapped.call_args_list)
+    check(name + ": no model call", stub.prompts == [], len(stub.prompts))
+
+
 def main():
-    cases = (case_1_missing_restate_is_denied, case_2_restated_and_allowed,
+    cases = (case_r1_a_state_that_cannot_be_removed_does_not_pass_every_later_ask,
+             case_r2_a_deny_state_older_than_30_minutes_is_ignored,
+             case_r2b_a_deny_state_5_minutes_old_still_passes_the_next_ask,
+             case_r3_utf8_stdin_read_as_cp1252_is_judged_not_allowed_on_error,
+             case_r4_missing_you_want_reason_has_no_raw_newline_or_control_character,
+             case_1_missing_restate_is_denied, case_2_restated_and_allowed,
              case_3_flag_denies_with_why, case_4_timeout_allows_and_says_so,
              case_5_after_a_deny_the_next_ask_passes_whatever_its_text,
              case_5b_after_a_deny_the_next_ask_passes_without_you_want,

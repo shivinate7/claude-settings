@@ -2021,14 +2021,15 @@ def husk_verdict(root: str, path: str, entries, names):
 
 
 def find_husks(root: str, entries, names):
-    """Every husk verdict under `<root>/.claude/worktrees/` (none when `names` is empty)."""
+    """Every husk verdict under `<root>/.claude/worktrees/` (none when `names` is empty).
+    None when the folder cannot be read: the scan is unknown, never zero."""
     base = os.path.join(root, ".claude", "worktrees")
     if not names or not os.path.isdir(base):
         return []
     try:
         listing = sorted(os.listdir(base))
-    except OSError:  # unreadable folder: no husk verdicts, the run goes on
-        return []
+    except OSError:  # unreadable folder: unknown, the run goes on
+        return None
     verdicts = (husk_verdict(root, os.path.join(base, n), entries, names) for n in listing)
     return [v for v in verdicts if v]
 
@@ -2176,7 +2177,7 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     husk_names = optout.get("huskNames", [])
     result["husks"] = find_husks(root, entries, husk_names)
     if confirm:
-        for decision in result["husks"]:
+        for decision in result["husks"] or []:
             if decision["action"] == "husk":
                 reap_husk(root, decision, husk_names)
 
@@ -2224,7 +2225,7 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
         pruned = result.get("pruned")
         has_prune = pruned and (pruned["names"] is None or pruned["names"])
         if not result["branches"] and not result["worktrees"] and not result["listeners"] \
-                and not has_prune and not result.get("husks") and not result.get("strays"):
+                and not has_prune and result.get("husks", []) == [] and result.get("strays", []) == []:  # None is unknown
             print("  nothing to examine", file=out)
         if pruned and pruned["names"] is None:
             print("  prune     UNREADABLE -- %s; nothing pruned" % pruned["error"], file=out)
@@ -2234,7 +2235,10 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
                 if pruned["error"]:
                     line += "  [ERROR: %s]" % pruned["error"]
                 print(line, file=out)
-        for h in result.get("husks", []):
+        if result.get("husks") is None:
+            print("  husk      UNKNOWN -- the husk scan could not read the worktrees folder",
+                  file=out)
+        for h in result.get("husks") or []:
             husk_counts[h["action"]] += 1
             tag = "KEEP" if h.get("error") else {"husk": "REAP" if confirm else "WOULD"}.get(
                 h["action"], "KEEP")
@@ -2298,8 +2302,11 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
     print("  TCP listeners examined: %d" % total_listeners, file=out)
     for (action, reason), n in sorted(listener_counts.items()):
         print("    %-5s %-20s %d" % (action, reason, n), file=out)
-    print("  leftover folders: %d, kept: %d"
-          % (husk_counts["husk"], husk_counts["keep"]), file=out)
+    if any(r.get("husks") is None and not r.get("refused") for r in results):
+        print("  leftover folders: unknown (folder unreadable)", file=out)
+    else:
+        print("  leftover folders: %d, kept: %d"
+              % (husk_counts["husk"], husk_counts["keep"]), file=out)
     if any(r.get("strays") is None and not r.get("refused") for r in results):
         print("  strays under .claude/worktrees (kept): unknown (folder unreadable)", file=out)
     else:

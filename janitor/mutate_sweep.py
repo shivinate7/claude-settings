@@ -697,8 +697,8 @@ MUTATIONS = [
 
     ("husks: a preview deletes the husk",
      "sweep",
-     '    if confirm:\n        for decision in result["husks"]:',
-     '    if True:\n        for decision in result["husks"]:',
+     '    if confirm:\n        for decision in result["husks"] or []:',
+     '    if True:\n        for decision in result["husks"] or []:',
      "test_preview_lists_a_husk_as_would_and_deletes_nothing",
      "posix"),
 
