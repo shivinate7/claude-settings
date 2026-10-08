@@ -1,4 +1,4 @@
-# Model hooks warn first
+# Haiku prompt hooks
 
 The owner ruled on 2026-10-07 which hooks may call a model, and on which model.
 
@@ -9,11 +9,11 @@ The owner ruled on 2026-10-07 which hooks may call a model, and on which model.
 The hook entry's own timeout in `settings.json` grows to fit the new budget. A timeout
 still reads as UNKNOWN, never as ALLOW.
 
-## Four prompt hooks
+## Five prompt hooks
 
-Four `type: prompt` hooks run on `haiku`. Each one judges a rule that no script can parse.
-Each one warns and never blocks. A hook may block only after it catches a real defect,
-by `verification-trust-guard-after-red`, trust a guard only once it goes red.
+Five `type: prompt` hooks run on `haiku`. Each one judges a rule that no script can parse.
+Each one blocks the call when it finds a breach, by owner ruling 2026-10-07. A prompt hook
+cannot warn: it answers `ok` and shows nothing, or blocks with a reason.
 
 | Hook on | Rules it judges |
 |---|---|
@@ -21,7 +21,9 @@ by `verification-trust-guard-after-red`, trust a guard only once it goes red.
 | `Agent` | `roles-brief-contents`, `tokens-point-brief-at-files`, `roles-one-role-per-worker` |
 | `Edit` or `Write` on `decisions/` | `speak-rewrite-superseded-in-place` |
 | `SendMessage` | `parallelism-no-mid-task-talk` |
+| `Stop`, on `last_assistant_message` | reply rules such as `output-start-with-point`, `style-cut-narration`, `output-never-paste-passing-output` |
 
-A prompt hook sees only the tool call's input, never the chat. The SendMessage hook
-cannot see the receiver's task, so it judges by wording alone. A hook that cries wolf is
-spent, by `verification-cry-wolf-guard-is-spent`. Remove one that warns on good input.
+A prompt hook sees only the event's input, never the chat. The SendMessage hook cannot
+see the receiver's task, so it judges by wording alone. The Stop hook answers `ok` when
+`stop_hook_active` is true, so one block never loops. A hook that cries wolf is spent, by
+`verification-cry-wolf-guard-is-spent`. Remove one that blocks good input.
