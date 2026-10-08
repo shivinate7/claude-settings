@@ -10,6 +10,7 @@ Each case builds a real temporary git repository and a real transcript file, the
 `systemMessage` string (empty string means "print nothing"). `model_call` is stubbed so no
 case spawns a real `claude` subprocess; one case asserts it is never even called.
 """
+import contextlib
 import importlib.util
 import json
 import os
@@ -668,6 +669,13 @@ def case_invoke_model_timeout_is_error():
 
 
 def case_invoke_model_argv():
+    # Its env checks assume no token file: pin CLAUDE_CONFIG_DIR so a real one on this
+    # machine cannot change the child's env.
+    with scratch_config("argv"):
+        _invoke_model_argv_body()
+
+
+def _invoke_model_argv_body():
     captured = {}
 
     def fake_run(argv, **kwargs):
@@ -843,6 +851,143 @@ def case_settings_timeout_covers_worst_case():
           "timeout=%s budget=%s" % (timeout, budget))
 
 
+# --------------------------------------------------------------------------- case 12
+# The one-year token file (decisions/question-outcome-check.md, ruling 2026-10-08).
+# invoke_model reads `${CLAUDE_CONFIG_DIR:-~/.claude}/state/hook-token` and passes its
+# stripped content to the child as CLAUDE_CODE_OAUTH_TOKEN. Every case uses the fake
+# FAKE_TOKEN and a scratch CLAUDE_CONFIG_DIR, so no case reads a real token or this
+# machine's own config. No case prints a token value.
+
+FAKE_TOKEN = "tok-test-123"
+PARENT_TOKEN = "tok-parent-456"
+TOKEN_KEY = "CLAUDE_CODE_OAUTH_TOKEN"
+ALLOW = {"verdict": "ALLOW"}
+
+
+@contextlib.contextmanager
+def scratch_config(name, parent_token=None):
+    """Point CLAUDE_CONFIG_DIR at a scratch dir, and set or clear this process's own
+    CLAUDE_CODE_OAUTH_TOKEN, for one case. Both are restored afterwards."""
+    cfg = os.path.join(ROOT, "config-" + name)
+    os.makedirs(cfg, exist_ok=True)
+    keys = ("CLAUDE_CONFIG_DIR", TOKEN_KEY)
+    prior = {k: os.environ.get(k) for k in keys}
+    os.environ["CLAUDE_CONFIG_DIR"] = cfg
+    if parent_token is None:
+        os.environ.pop(TOKEN_KEY, None)
+    else:
+        os.environ[TOKEN_KEY] = parent_token
+    try:
+        yield cfg
+    finally:
+        for k in keys:
+            if prior[k] is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = prior[k]
+
+
+def _token_file(cfg, text):
+    write(os.path.join(cfg, "state", "hook-token"), text)
+
+
+def _run_invoke(captured, returncode=0, stderr="", raises=None):
+    """invoke_model with a fake subprocess.run that records the child's argv and env."""
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        captured["env"] = kwargs.get("env") or {}
+        if raises is not None:
+            raise raises
+        return _FakeCompletedProcess(returncode, json.dumps({"result": json.dumps(ALLOW)}), stderr)
+    return _capture_invoke(fake_run)
+
+
+def _presence(env):
+    return "present" if TOKEN_KEY in env else "absent"
+
+
+# T1. A token file present: the child's env carries its stripped content as the token.
+def case_token_t1_file_reaches_child_env():
+    captured = {}
+    with scratch_config("t1") as cfg:
+        _token_file(cfg, FAKE_TOKEN + "\n")
+        verdict, error = _run_invoke(captured)
+    env = captured.get("env") or {}
+    check("token_t1: call returns ALLOW with a token file", verdict == ALLOW and error is None, error)
+    check("token_t1: child env holds CLAUDE_CODE_OAUTH_TOKEN", TOKEN_KEY in env, sorted(env))
+    check("token_t1: child token is the file's stripped content",
+          env.get(TOKEN_KEY) == FAKE_TOKEN, "token is " + _presence(env))
+
+
+# T2. No token file: today's path, and no token key in the child env. A pin, may be green.
+def case_token_t2_no_file_no_token():
+    captured = {}
+    with scratch_config("t2"):
+        verdict, error = _run_invoke(captured)
+    env = captured.get("env") or {}
+    check("token_t2: no token key in child env without a token file", TOKEN_KEY not in env, sorted(env))
+    check("token_t2: call still returns ALLOW without a token file", verdict == ALLOW and error is None, error)
+
+
+# T3. The parent's own CLAUDE_CODE_OAUTH_TOKEN is never passed through: the file is the
+# only source. The allowlist stays closed.
+def case_token_t3_parent_env_not_passed_through():
+    captured = {}
+    with scratch_config("t3-file", parent_token=PARENT_TOKEN) as cfg:
+        _token_file(cfg, FAKE_TOKEN + "\n")
+        _run_invoke(captured)
+    env = captured.get("env") or {}
+    check("token_t3: with a file, child token is the file's, not the parent's",
+          env.get(TOKEN_KEY) == FAKE_TOKEN, "token is " + _presence(env))
+
+    captured = {}
+    with scratch_config("t3-nofile", parent_token=PARENT_TOKEN):
+        _run_invoke(captured)
+    env = captured.get("env") or {}
+    check("token_t3: with no file, parent token is not passed through", TOKEN_KEY not in env,
+          "token is " + _presence(env))
+
+
+# T4. An empty, whitespace-only, or unreadable token file behaves as no file. The
+# unreadable case is a directory where the file should be.
+def case_token_t4_empty_or_unreadable_is_no_file():
+    cases = (
+        ("empty", lambda cfg: _token_file(cfg, "")),
+        ("whitespace", lambda cfg: _token_file(cfg, "  \n")),
+        ("unreadable", lambda cfg: os.makedirs(os.path.join(cfg, "state", "hook-token"), exist_ok=True)),
+    )
+    for label, setup in cases:
+        captured = {}
+        with scratch_config("t4-" + label) as cfg:
+            setup(cfg)
+            verdict, error = _run_invoke(captured)
+        env = captured.get("env") or {}
+        check("token_t4(%s): no token key in child env" % label, TOKEN_KEY not in env,
+              "token is " + _presence(env))
+        check("token_t4(%s): call still returns ALLOW" % label, verdict == ALLOW and error is None, error)
+
+
+# T5. A model failure never puts the token in the error string. The fake child echoes
+# the token it was given on stderr, as a failing CLI can. Both failure paths are checked.
+def case_token_t5_failure_error_omits_token():
+    captured = {}
+    with scratch_config("t5") as cfg:
+        _token_file(cfg, FAKE_TOKEN + "\n")
+        verdict, error = _run_invoke(captured, returncode=1, stderr="auth failed for " + FAKE_TOKEN)
+    check("token_t5: nonzero exit is an error, not a verdict", verdict is None and bool(error),
+          "verdict=%s" % (verdict,))
+    check("token_t5: error string omits the token", FAKE_TOKEN not in (error or ""),
+          "token found in error string")
+
+    with scratch_config("t5-spawn") as cfg:
+        _token_file(cfg, FAKE_TOKEN + "\n")
+        verdict, error = _run_invoke({}, raises=OSError("could not start with " + FAKE_TOKEN))
+    check("token_t5(spawn): failure to start is an error, not a verdict", verdict is None and bool(error),
+          "verdict=%s" % (verdict,))
+    check("token_t5(spawn): error string omits the token", FAKE_TOKEN not in (error or ""),
+          "token found in error string")
+
+
 def main():
     case_flag_unapproved()
     case_flag_deleted_protected_file()
@@ -863,6 +1008,11 @@ def main():
     case_invoke_model_argv()
     case_invoke_model_haiku_xhigh_120s()
     case_invoke_model_timeout_is_error()
+    case_token_t1_file_reaches_child_env()
+    case_token_t2_no_file_no_token()
+    case_token_t3_parent_env_not_passed_through()
+    case_token_t4_empty_or_unreadable_is_no_file()
+    case_token_t5_failure_error_omits_token()
     case_main_ordinary_turn()
     case_main_prints_the_config_report()
     case_main_missing_transcript()
