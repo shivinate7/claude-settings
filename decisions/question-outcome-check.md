@@ -24,6 +24,14 @@ Owner rulings, 2026-10-08:
   cannot do it, use a one-year token from `claude setup-token`.
 - Measured 2026-10-08, with a probe agent hook on this machine: it read the last owner
   line from this session's transcript (7.4 MB) and answered in about 10 seconds.
+- Known limit: an agent hook could not open the transcript in sessions in the app's
+  `auto` permission mode (about 60 "Unable to verify" answers, measured for the old
+  decision_watch agent hook). The owner runs with permissions bypassed (owner,
+  2026-10-08), so the check runs in the owner's sessions. When the agent hook cannot read
+  the transcript, it answers ok.
+- `hooks/decision_watch.py` needs `git`, which an agent hook cannot run. So it keeps its
+  command hook and logs in with a one-year token from `claude setup-token`, by the
+  fallback in the ruling above.
 - On a miss, the agent hook denies the call. The reason goes back to the session, which
   fixes the question before the owner sees it.
 
