@@ -32,7 +32,8 @@ Owner rulings, 2026-10-08:
   one line that says so. That line never repeats the prompt. A question is not a
   destructive act, so a lost check costs less than a blocked question.
 - After a deny, the next question in the session passes with no model call, whatever
-  its text. That clears the state. If the hook cannot record a deny, it does not deny.
+  its text. That clears the state. A deny state older than 30 minutes is ignored. If the
+  hook cannot record or clear a deny, it does not deny, and it says the check did not run.
   So a judge that is wrong cannot loop.
 - The reason sent back to the session is capped and cleaned.
 - Agent hooks (`type: agent`) were not chosen. The docs call them experimental, and they
