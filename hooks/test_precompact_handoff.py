@@ -510,7 +510,7 @@ def case_nudge_failures_are_silent():
         check("nudge: unreadable transcript is silent, exit 0",
               p.returncode == 0 and not p.stdout.strip(), "rc=%r out=%r" % (p.returncode, p.stdout))
         put(c.nudge_path(), "{not json")
-        p = nudge(c, 210000)
+        p = nudge(c, 260000)
         check("nudge: corrupt state never exits 2", p.returncode == 0, "rc=%r" % p.returncode)
     finally:
         c.cleanup()
@@ -689,7 +689,7 @@ def case_handoffs_dir_keeps_other_sessions():
         tp = os.path.join(c.root, "transcript.jsonl")
         write_transcript(tp, [transcript_line("user", [{"type": "text", "text": "hello"}])])
         c.run_reorient()
-        nudge(c, 210000)
+        nudge(c, 260000)
         c.run_precompact(tp)
         try:
             with open(other, "r", encoding="utf-8") as f:
