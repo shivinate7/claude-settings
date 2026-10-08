@@ -749,6 +749,12 @@ class StaleAgentLockTests(unittest.TestCase):
         run_vcs(cls.wt["unpushed"], "add", "-A")
         run_vcs(cls.wt["unpushed"], *IDENT, "commit", "-q", "-m", "unpushed work")
         cls.wt["detached"] = cls.add("detached", cls.reasons["dead"], detach=True)
+        # Pushed to a remote branch, NOT merged into main: the pushed check must count it alone.
+        write(os.path.join(cls.wt["detached"], "d.txt"), "pushed, not merged\n")
+        run_vcs(cls.wt["detached"], "add", "-A")
+        run_vcs(cls.wt["detached"], *IDENT, "commit", "-q", "-m", "detached pushed work")
+        pushed = run_vcs(cls.wt["detached"], "push", "-q", "origin", "HEAD:refs/heads/remote-only")
+        require(pushed.returncode == 0, "push of the detached commit failed: %s" % pushed.stderr.strip())
         # No lock at all: the pushed check covers every reap, not only a stale agent lock.
         cls.wt["free_unpushed"] = os.path.join(ROOT, "stale-lock-free-unpushed")
         run_vcs(cls.root, "worktree", "add", "-q", "--detach", cls.wt["free_unpushed"], "main")
@@ -779,6 +785,10 @@ class StaleAgentLockTests(unittest.TestCase):
         self.assertTrue(decision.get("unlock"))
 
     def test_detached_head_on_a_pushed_commit_counts_as_pushed(self):
+        path = self.wt["detached"]
+        # The fixture's point: the commit is not an ancestor of main (exit 1), yet it is pushed.
+        self.assertEqual(run_vcs(path, "merge-base", "--is-ancestor", "HEAD", "main").returncode, 1)
+        self.assertIs(sweep.fully_pushed(path), True)
         self.assertEqual(self.decide("detached")["action"], "reap")
 
     def test_reused_pid_with_other_start_time_is_stale(self):
@@ -3141,6 +3151,26 @@ class RunLogTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(default_log), "no run log at %s" % default_log)
         self.assertEqual(len(_read_run_log(default_log)), 2)
 
+    def test_first_repository_line_survives_a_later_failure(self):
+        """Finding (review): the run log was written after ALL roots, so a run cut short (the
+        SessionEnd hook's 25 s kill) left no line. One line per repository, as each finishes."""
+        _age_admin_files(self.wt, 7200)
+        real = sweep.sweep_repo
+
+        def fail_second(root, *args, **kwargs):
+            if _norm_path(root) == _norm_path(self.idle):
+                raise RuntimeError("injected failure in the second repository")
+            return real(root, *args, **kwargs)
+
+        with mock.patch.object(sweep, "sweep_repo", side_effect=fail_second):
+            try:
+                self._main([self.busy, self.idle, "--confirm"])
+            except RuntimeError:
+                pass  # the run stops here; the first repository's line must already be on disk
+        self.assertTrue(os.path.isfile(self.log), "the first repository wrote no run line")
+        roots = [_norm_path(r.get("root", "")) for r in _read_run_log(self.log)]
+        self.assertIn(_norm_path(self.busy), roots, "no run-log line for the first repository")
+
 
 class MergedCountsAsSafeTests(unittest.TestCase):
     """Owner ruling 2026-10-08: a HEAD merged into the default branch, by ancestry or by patch,
@@ -3229,6 +3259,78 @@ class StrayFolderTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(self.folder, "notes.txt")),
                         "a confirm run deleted a file inside a stray folder")
         self.assertTrue(os.path.isfile(self.file), "a confirm run deleted x.bak")
+
+    def test_unreadable_worktrees_base_does_not_abort_the_run(self):
+        """Finding (review): find_strays called a bare os.listdir, so a PermissionError on
+        <root>/.claude/worktrees escaped sweep_repo and aborted the run. The run must finish, list
+        no stray for the unreadable folder, and still judge every registered worktree."""
+        base = os.path.join(self.root, ".claude", "worktrees")
+        real_listdir = os.listdir
+
+        def denied(path="."):
+            if _norm_path(path) == _norm_path(base):
+                raise PermissionError(13, "Access is denied", path)
+            return real_listdir(path)
+
+        with mock.patch.object(sweep.os, "listdir", side_effect=denied):
+            result = sweep.sweep_repo(self.root, False, self.log)
+        self.assertIsNone(result["refused"])
+        listed = [s for s in result["strays"] if isinstance(s, str)]
+        self.assertEqual(listed, [], "an unreadable folder listed strays: %r" % listed)
+        judged = [_norm_path(d["path"]) for d in result["worktrees"]]
+        self.assertIn(_norm_path(self.registered), judged, "the registered worktree was not judged")
+
+
+def _lane_entry(root, path):
+    target = _norm_path(path)
+    for entry in sweep.parse_worktree_list(root) or []:
+        if _norm_path(entry["path"]) == target:
+            return entry
+    raise AssertionError("no worktree-list entry for %r" % path)
+
+
+class DanglingDefaultBaseTests(unittest.TestCase):
+    """Finding (review): guard.resolve_default_base returned origin/HEAD without checking that it
+    resolves. A dangling origin/HEAD makes every base read unreadable, so no squash-merged lane is
+    ever exempted. The base must fall back to a ref that resolves (local main, then master). An
+    origin/HEAD that resolves stays the first base (owner's order)."""
+
+    def _squash_lane(self, origin_head_target):
+        base = tempfile.mkdtemp(prefix="dangling-base-", dir=ROOT)
+        root = os.path.join(base, "repo")
+        make_repo(root, {"f.txt": "x\n"})
+        give_remote(root)  # origin/main exists and matches main's first commit
+        lane = os.path.join(base, "lane")
+        run_vcs(root, "worktree", "add", "-q", lane, "-b", "lane-squash")
+        write(os.path.join(lane, "lane.txt"), "work\n")
+        run_vcs(lane, "add", "-A")
+        run_vcs(lane, *IDENT, "commit", "-q", "-m", "lane work")
+        # The squash: the same patch lands on main as a new commit. The lane's own commit is on no
+        # remote branch and is not an ancestor of main; only the patch matches.
+        write(os.path.join(root, "lane.txt"), "work\n")
+        run_vcs(root, "add", "-A")
+        run_vcs(root, *IDENT, "commit", "-q", "-m", "squash of lane-squash")
+        set_head = run_vcs(root, "symbolic-ref", "refs/remotes/origin/HEAD", origin_head_target)
+        require(set_head.returncode == 0, "setting origin/HEAD failed: %s" % set_head.stderr.strip())
+        return root, lane
+
+    def test_dangling_origin_head_falls_back_to_a_ref_that_resolves(self):
+        root, _ = self._squash_lane("refs/remotes/origin/gone")  # a remote branch that is missing
+        self.assertEqual(guard.resolve_default_base(root), "main")
+
+    def test_squash_merged_unpushed_lane_is_removable_when_origin_head_dangles(self):
+        root, lane = self._squash_lane("refs/remotes/origin/gone")
+        decision = sweep.decide_worktree(root, _lane_entry(root, lane), attended=True)
+        self.assertEqual(decision["action"], "reap", decision)
+        self.assertEqual(decision["reason"], "removable")
+
+    def test_resolving_origin_head_keeps_a_lane_whose_squash_is_only_on_local_main(self):
+        # Local main is ahead of origin/main and holds the squash. origin/HEAD resolves, so it
+        # stays the base (owner's order), origin/main lacks the patch, and the lane is kept.
+        root, lane = self._squash_lane("refs/remotes/origin/main")
+        decision = sweep.decide_worktree(root, _lane_entry(root, lane), attended=True)
+        self.assertEqual(decision["action"], "keep", decision)
+        self.assertTrue(decision["reason"].startswith("unpushed:"), decision)
 
 
 if __name__ == "__main__":
