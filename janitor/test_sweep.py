@@ -3018,5 +3018,196 @@ class StrictWorktreeTests(unittest.TestCase):
         self.assertEqual(seen, [True, False])
 
 
+# --------------------------------------------------------------------------- owner rulings 2026-10-08
+
+
+def _norm_path(path):
+    return os.path.normcase(os.path.realpath(path))
+
+
+def _age_admin_files(path, seconds):
+    """Make a worktree's own git admin files `seconds` old, so the strict idle rule reads it quiet."""
+    admin = run_vcs(path, "rev-parse", "--absolute-git-dir").stdout.strip()
+    then = time.time() - seconds
+    for name in ("index", "HEAD", os.path.join("logs", "HEAD")):
+        target = os.path.join(admin, name)
+        if os.path.exists(target):
+            os.utime(target, (then, then))
+
+
+def _read_run_log(path):
+    with open(path, encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle if line.strip()]
+
+
+@contextlib.contextmanager
+def _machine_quiet():
+    """Stub the two machine-wide reapers the full sweep also runs (dead rooted servers and loose
+    processes). A case here must never signal a process this suite did not start."""
+    with mock.patch.object(sweep, "find_dead_rooted", return_value=[]), \
+            mock.patch.object(sweep, "find_loose_processes", return_value=[]), \
+            contextlib.redirect_stdout(io.StringIO()):
+        yield
+
+
+class RunLogTests(unittest.TestCase):
+    """Owner ruling 2026-10-08: a --confirm run appends ONE JSON line per repository to the run
+    log: `JANITOR_RUN_LOG`, or else `${CLAUDE_CONFIG_DIR:-~/.claude}/state/janitor-runs.jsonl`.
+    Each line carries `root`, `worktrees_removed`, `branches_reaped` and `free_bytes`
+    (shutil.disk_usage on the repository's drive). A preview appends nothing."""
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="runlog-", dir=ROOT)
+        self.busy = os.path.join(self.base, "busy")
+        make_repo(self.busy, {"f.txt": "x\n"})
+        give_remote(self.busy)
+        run_vcs(self.busy, "branch", "old-merged")  # at main's tip: merged, so reapable
+        self.wt = os.path.join(self.base, "busy-wt")
+        run_vcs(self.busy, "worktree", "add", "-q", "--detach", self.wt, "main")
+        self.idle = os.path.join(self.base, "idle")
+        make_repo(self.idle, {"g.txt": "y\n"})
+        give_remote(self.idle)
+        self.log = os.path.join(self.base, "janitor-runs.jsonl")
+        self.restore = os.path.join(self.base, "restore.log")
+        require("old-merged" in (sweep.list_local_branches(self.busy) or []),
+                "branch old-merged was not created")
+        require(os.path.isdir(self.wt), "the detached worktree was not created")
+
+    def _main(self, argv):
+        with mock.patch.dict(os.environ, {"JANITOR_RUN_LOG": self.log}), _machine_quiet(), \
+                mock.patch.object(shutil, "disk_usage",
+                                  return_value=types.SimpleNamespace(total=1, used=1, free=4242)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            return sweep.main(argv + ["--restore-log", self.restore])
+
+    def test_confirm_appends_one_line_per_repository_with_the_four_fields(self):
+        _age_admin_files(self.wt, 7200)  # quiet for 2 hours: the strict idle rule allows the reap
+        self._main([self.busy, self.idle, "--confirm"])
+        self.assertTrue(os.path.isfile(self.log), "a --confirm run wrote no run log")
+        records = _read_run_log(self.log)
+        self.assertEqual(len(records), 2, records)
+        by_root = {_norm_path(r.get("root", "")): r for r in records}
+        busy = by_root.get(_norm_path(self.busy))
+        idle = by_root.get(_norm_path(self.idle))
+        self.assertIsNotNone(busy, "no run-log line names the busy repository: %r" % records)
+        self.assertIsNotNone(idle, "no run-log line names the idle repository: %r" % records)
+        self.assertEqual(busy["worktrees_removed"], 1, busy)
+        self.assertEqual(busy["branches_reaped"], 1, busy)
+        self.assertEqual(busy["free_bytes"], 4242, busy)
+        self.assertEqual(idle["worktrees_removed"], 0, idle)
+        self.assertEqual(idle["branches_reaped"], 0, idle)
+        self.assertEqual(idle["free_bytes"], 4242, idle)
+        self.assertFalse(os.path.exists(self.wt), "the subject worktree was not removed")
+
+    def test_preview_appends_no_run_line_and_the_confirm_after_it_does(self):
+        self._main([self.busy, self.idle])
+        self.assertFalse(os.path.isfile(self.log) and os.path.getsize(self.log) > 0,
+                         "a preview run appended to the run log")
+        _age_admin_files(self.wt, 7200)
+        self._main([self.busy, self.idle, "--confirm"])
+        self.assertTrue(os.path.isfile(self.log), "the confirm after the preview wrote no run log")
+        self.assertEqual(len(_read_run_log(self.log)), 2)
+
+    def test_default_run_log_sits_under_the_config_dir(self):
+        cfg = os.path.join(self.base, "cfg")
+        _age_admin_files(self.wt, 7200)
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
+            os.environ.pop("JANITOR_RUN_LOG", None)
+            with _machine_quiet():
+                sweep.main([self.busy, self.idle, "--confirm", "--restore-log", self.restore])
+        default_log = os.path.join(cfg, "state", "janitor-runs.jsonl")
+        self.assertTrue(os.path.isfile(default_log), "no run log at %s" % default_log)
+        self.assertEqual(len(_read_run_log(default_log)), 2)
+
+
+class MergedCountsAsSafeTests(unittest.TestCase):
+    """Owner ruling 2026-10-08: a HEAD merged into the default branch, by ancestry or by patch,
+    is not kept for "unpushed". The other checks still apply, and a truly unpushed commit is
+    still kept."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.root = os.path.join(ROOT, "merged-safe-repo")
+        make_repo(cls.root, {"f.txt": "base\n"})
+        give_remote(cls.root)
+        # lane-squash: one commit, never pushed. Main then gets the same patch as a different
+        # commit (what a squash merge does), and main is pushed.
+        cls.squash = os.path.join(ROOT, "merged-safe-squash")
+        run_vcs(cls.root, "worktree", "add", "-q", cls.squash, "-b", "lane-squash")
+        write(os.path.join(cls.squash, "s.txt"), "squashed work\n")
+        run_vcs(cls.squash, "add", "s.txt")
+        require(run_vcs(cls.squash, *IDENT, "commit", "-q", "-m", "lane work").returncode == 0,
+                "committing lane-squash failed")
+        write(os.path.join(cls.root, "s.txt"), "squashed work\n")
+        run_vcs(cls.root, "add", "s.txt")
+        require(run_vcs(cls.root, *IDENT, "commit", "-q", "-m", "squash of lane-squash").returncode == 0,
+                "squash commit on main failed")
+        require(run_vcs(cls.root, "push", "-q", "origin", "main").returncode == 0,
+                "pushing main failed")
+        # lane-unique: one commit on no default branch, never pushed.
+        cls.unique = os.path.join(ROOT, "merged-safe-unique")
+        run_vcs(cls.root, "worktree", "add", "-q", cls.unique, "-b", "lane-unique")
+        write(os.path.join(cls.unique, "u.txt"), "only on this lane\n")
+        run_vcs(cls.unique, "add", "u.txt")
+        require(run_vcs(cls.unique, *IDENT, "commit", "-q", "-m", "unique work").returncode == 0,
+                "committing lane-unique failed")
+        cls.entries = {_norm_path(e["path"]): e for e in sweep.parse_worktree_list(cls.root) or []}
+        require(_norm_path(cls.squash) in cls.entries and _norm_path(cls.unique) in cls.entries,
+                "the worktree list does not hold both lanes")
+
+    def decide(self, path):
+        return sweep.decide_worktree(self.root, self.entries[_norm_path(path)], attended=True)
+
+    def test_a_squash_merged_lane_never_pushed_is_removable(self):
+        decision = self.decide(self.squash)
+        self.assertEqual(decision["action"], "reap", decision["reason"])
+        self.assertEqual(decision["reason"], "removable")
+
+    def test_a_truly_unpushed_unique_commit_is_still_kept(self):
+        decision = self.decide(self.unique)
+        self.assertEqual(decision["action"], "keep", decision["reason"])
+        self.assertTrue(decision["reason"].startswith("unpushed"), decision["reason"])
+
+
+class StrayFolderTests(unittest.TestCase):
+    """Owner ruling 2026-10-08: an entry under <root>/.claude/worktrees/ that git does not
+    register as a worktree is a STRAY. The sweep lists it (result["strays"], and the printed
+    report) and never deletes it, in preview or confirm."""
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="strays-", dir=ROOT)
+        self.root = os.path.join(self.base, "repo")
+        make_repo(self.root, {"f.txt": "x\n"})
+        wts = os.path.join(self.root, ".claude", "worktrees")
+        self.registered = os.path.join(wts, "lane-reg")  # a real worktree: NOT a stray
+        run_vcs(self.root, "worktree", "add", "-q", "--detach", self.registered, "main")
+        self.folder = os.path.join(wts, "stray-folder")  # no .git: not registered
+        write(os.path.join(self.folder, "notes.txt"), "left behind\n")
+        self.file = os.path.join(wts, "x.bak")
+        write(self.file, "backup\n")
+        require(os.path.isdir(self.registered) and os.path.isdir(self.folder)
+                and os.path.isfile(self.file), "the stray fixtures were not built")
+        self.log = os.path.join(self.base, "strays.log")
+
+    @staticmethod
+    def _stray_names(result):
+        return sorted(os.path.basename(p) for p in (result.get("strays") or []))
+
+    def test_preview_lists_both_strays_in_the_result_and_the_report(self):
+        result = sweep.sweep_repo(self.root, False, self.log)
+        self.assertEqual(self._stray_names(result), ["stray-folder", "x.bak"], result.get("strays"))
+        out = io.StringIO()
+        sweep.print_sweep_report([result], False, out=out)
+        self.assertIn("stray-folder", out.getvalue())
+        self.assertIn("x.bak", out.getvalue())
+
+    def test_confirm_lists_both_strays_and_deletes_neither(self):
+        result = sweep.sweep_repo(self.root, True, self.log)
+        self.assertEqual(self._stray_names(result), ["stray-folder", "x.bak"], result.get("strays"))
+        self.assertTrue(os.path.isfile(os.path.join(self.folder, "notes.txt")),
+                        "a confirm run deleted a file inside a stray folder")
+        self.assertTrue(os.path.isfile(self.file), "a confirm run deleted x.bak")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
