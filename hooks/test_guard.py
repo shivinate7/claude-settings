@@ -4420,6 +4420,56 @@ add("floor: Agent with a full opus id is allowed", "allow", tool="Agent", prompt
 add("floor: Agent with no model is allowed", "allow", tool="Agent", prompt="x")
 add("floor: Task with no model is allowed", "allow", tool="Task", prompt="x")
 
+# ---- Rule 9, Haiku roles (owner ruling 2026-10-07). Haiku is allowed only for Explore,
+# claude-code-guide, test-author and reviewer. Failure classes: false deny (a listed role blocked),
+# false allow (a non-listed role, a near-miss name, or a missing role slips through).
+HAIKU_ROLES = ("Explore", "claude-code-guide", "test-author", "reviewer")
+HAIKU_MODELS = ("haiku", "claude-haiku-5-5")
+for _tool in ("Agent", "Task"):
+    for _role in HAIKU_ROLES:
+        for _model in HAIKU_MODELS:
+            add("floor: %s %s with model %s is allowed" % (_tool, _role, _model), "allow",
+                tool=_tool, prompt="do it", model=_model, subagent_type=_role)
+    for _role in ("builder", "Plan", "general-purpose", "claude", "reviewer-lite", "not-explore"):
+        add("floor: %s %s with model haiku is denied" % (_tool, _role), "deny",
+            "subagent-model-floor", tool=_tool, prompt="do it", model="haiku", subagent_type=_role)
+add("floor: Agent builder with the full haiku 5.5 id is denied", "deny", "subagent-model-floor",
+    tool="Agent", prompt="do it", model="claude-haiku-5-5", subagent_type="builder")
+add("floor: Agent with an empty subagent_type and haiku is denied", "deny", "subagent-model-floor",
+    tool="Agent", prompt="do it", model="haiku", subagent_type="")
+add("floor: Agent with a list role and haiku is denied", "deny", "subagent-model-floor",
+    tool="Agent", prompt="do it", model="haiku", subagent_type=["reviewer"])
+add("floor: Agent builder with model sonnet is still allowed", "allow",
+    tool="Agent", prompt="x", model="sonnet", subagent_type="builder")
+
+
+def _flow(model, role=None):
+    spec = "model: '%s'" % model + (", agentType: '%s'" % role if role else "")
+    return "const r = await agent({prompt: 'x', %s}); return r" % spec
+
+
+for _model in HAIKU_MODELS:
+    for _role in HAIKU_ROLES:
+        add("floor: Workflow agent %s on %s is allowed" % (_role, _model), "allow",
+            tool="Workflow", script=_flow(_model, _role))
+    for _role in ("builder", "Plan", "general-purpose", None):
+        add("floor: Workflow agent %s on %s is denied" % (_role or "without agentType", _model),
+            "deny", "subagent-model-floor", tool="Workflow", script=_flow(_model, _role))
+add("floor: Workflow agent with a mixed-case haiku and no agentType is denied", "deny",
+    "subagent-model-floor", tool="Workflow", script=_flow("Claude-HAIKU-5-5"))
+add("floor: Workflow with one listed and one unlisted haiku agent is denied", "deny",
+    "subagent-model-floor", tool="Workflow",
+    script=_flow("haiku", "reviewer") + "\n" + _flow("haiku", "builder"))
+add("floor: Workflow agent on sonnet with no agentType is allowed", "allow",
+    tool="Workflow", script=_flow("sonnet"))
+add("floor: start_session naming haiku is denied", "deny", "subagent-model-floor",
+    tool="mcp__ccd_session__start_session", initiation="user_asked", prompt="x", model="haiku")
+add("floor: start_session naming the full haiku id is denied", "deny", "subagent-model-floor",
+    tool="mcp__ccd_session__start_session", initiation="user_asked", prompt="x",
+    model="claude-haiku-5-5")
+add("floor: start_session naming sonnet is allowed", "allow",
+    tool="mcp__ccd_session__start_session", initiation="user_asked", prompt="x", model="sonnet")
+
 FORBIDDEN_IN_A_REASON = (ENV, ROOT, slash(ROOT), "settings.json", "CLAUDE.md", "guard.py",
                          ".claude", "app.log", "sleep", "haiku", VCS + " checkout", VCS + " switch")
 
