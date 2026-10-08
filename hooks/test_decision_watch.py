@@ -630,6 +630,43 @@ def case_judge_isolation_copies_credentials():
         shutil.rmtree(judge_cwd, ignore_errors=True)
 
 
+def _capture_invoke(fake_run):
+    real = dw.subprocess.run
+    dw.subprocess.run = fake_run
+    try:
+        return dw.invoke_model("P")
+    finally:
+        dw.subprocess.run = real
+
+
+# Ruling decisions/model-hooks-warn-first.md, "decision_watch": haiku, xhigh effort, 120s.
+def case_invoke_model_haiku_xhigh_120s():
+    captured = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"], captured["kwargs"] = argv, kwargs
+        return _FakeCompletedProcess(0, json.dumps({"result": '{"verdict": "ALLOW"}'}), "")
+
+    _capture_invoke(fake_run)
+    argv = captured.get("argv") or []
+    pairs = list(zip(argv, argv[1:]))
+    timeout = (captured.get("kwargs") or {}).get("timeout")
+    check("haiku_xhigh: --model haiku in argv", ("--model", "haiku") in pairs, argv)
+    check("haiku_xhigh: --effort xhigh in argv", ("--effort", "xhigh") in pairs, argv)
+    check("haiku_xhigh: subprocess timeout is 120", timeout == 120, timeout)
+    check("haiku_xhigh: MODEL_TIMEOUT is 120", dw.MODEL_TIMEOUT == 120, dw.MODEL_TIMEOUT)
+
+
+# A timeout is an error (UNKNOWN upstream), never an ALLOW verdict.
+def case_invoke_model_timeout_is_error():
+    def fake_run(argv, **kwargs):
+        raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
+
+    verdict, error = _capture_invoke(fake_run)
+    check("timeout: no verdict", verdict is None, verdict)
+    check("timeout: error names the failure", bool(error), error)
+
+
 def case_invoke_model_argv():
     captured = {}
 
@@ -650,9 +687,13 @@ def case_invoke_model_argv():
     check("invoke_model_argv: verdict is ALLOW", verdict == {"verdict": "ALLOW"}, verdict)
 
     argv = captured.get("argv") or []
+    # --effort xhigh is pinned by case_invoke_model_haiku_xhigh_120s; position is free here.
+    if "--effort" in argv:
+        i = argv.index("--effort")
+        argv = argv[:i] + argv[i + 2:]
     expected = [
         "claude", "-p", "JUDGE THIS PROMPT",
-        "--model", dw.MODEL,
+        "--model", "haiku",
         "--output-format", "json",
         "--tools", "",
         "--safe-mode",
@@ -808,6 +849,8 @@ def main():
     case_cache_key_holds_the_repo_and_a_bounded_read()
     case_judge_isolation_copies_credentials()
     case_invoke_model_argv()
+    case_invoke_model_haiku_xhigh_120s()
+    case_invoke_model_timeout_is_error()
     case_main_ordinary_turn()
     case_main_prints_the_config_report()
     case_main_missing_transcript()
