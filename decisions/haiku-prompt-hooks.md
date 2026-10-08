@@ -19,13 +19,17 @@ cannot warn: it answers `ok` and shows nothing, or blocks with a reason.
 
 | Hook on | Rules it judges |
 |---|---|
-| `AskUserQuestion` | `style-option-says-effect`, `style-question-states-problem`, `style-question-inside-box`, `output-bring-decisions-as-question` |
-| `Agent` | `roles-brief-contents`, `tokens-point-brief-at-files`, `roles-one-role-per-worker` |
+| `AskUserQuestion` | `style-option-says-effect`, `style-question-states-problem`, `output-bring-decisions-as-question` |
+| `Agent` | `roles-brief-contents`, `tokens-point-brief-at-files` |
 | `Edit` or `Write` on `decisions/` | `speak-rewrite-superseded-in-place` |
 | `SendMessage` | `parallelism-no-mid-task-talk` |
 | `Stop`, on `last_assistant_message` | reply rules such as `output-start-with-point`, `style-cut-narration`, `output-never-paste-passing-output` |
 
-A prompt hook sees only the event's input, never the chat. The SendMessage hook cannot
+A prompt hook sees only the event's input, never the chat. So no hook judges
+`style-question-inside-box` or `roles-one-role-per-worker`, because neither hook can see
+what those rules need. A block returns its reason to the session and the turn goes on
+(`continueOnBlock`). The rules these hooks judge stay `unmechanized` in
+`lint/rule_mechanisms.json` until a hook catches a real defect in the trial. The SendMessage hook cannot
 see the receiver's task, so it judges by wording alone. The Stop hook answers `ok` when
 `stop_hook_active` is true, so one block never loops. A hook that cries wolf is spent, by
 `verification-cry-wolf-guard-is-spent`. Remove one that blocks good input.
