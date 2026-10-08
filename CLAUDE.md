@@ -40,7 +40,7 @@ test-author writes the new cases first and shows them red on the old code. The b
 product code until they go green. CI alone runs the full suites and the mutation harnesses. A
 reviewer hunts bypasses and false alarms and never replays a passing run. The test-author's
 recorded red run is the red proof. A reviewer re-runs it only when that record is missing or
-in doubt. The orchestrator reads CI once, on the head it merges.<!-- rule:roles-each-layer-proves-once --> Resume a dead agent by name, never fresh.<!-- rule:roles-resume-by-name -->
+in doubt. The orchestrator reads CI once, on the head it merges.<!-- rule:roles-each-layer-proves-once --> Resume a dead agent by name, never fresh. A finished reviewer's worktree is gone, so send a fresh reviewer the prior report instead.<!-- rule:roles-resume-by-name -->
 
 **Parallelism, two tiers.** Fan tasks out to workers now, each in its own checkout. A
 workflow run, the ultracode path, is a fan-out too. Give each workflow agent that writes
@@ -65,7 +65,7 @@ Never merge failing CI.<!-- rule:git-never-merge-failing-ci --> Never discard a 
 never names the forbidden target.<!-- rule:git-remedy-never-names-target --> Never allocate a numbered record on a branch.
 Write a slug of 32 characters or fewer. Claim the number at merge.<!-- rule:git-slug-then-claim-number --> Cite by id, never by path.<!-- rule:git-cite-by-id --> Give each record its
 own file, one folder per kind.<!-- rule:git-record-own-file-per-kind --> One entry per question. When its ruling changes, rewrite the entry in place. Open an entry only for a new question.<!-- rule:git-one-entry-per-question --> Merge PRs that are green together into one integration branch. Keep
-each PR's own commit. Close the originals as superseded once the integration branch merges. Before you open a PR, check other sessions' open PRs and offer to batch.<!-- rule:git-integration-branch-merge -->
+each PR's own commit. Close the originals as superseded once the integration branch merges. Before you open a PR, check other sessions' open PRs and offer to batch. A repo may name one session to batch PRs and run each merge, on the owner's word.<!-- rule:git-integration-branch-merge -->
 
 **Verification.** If the repo has screens, check each screen at every size and theme it
 ships in. Give a verdict per screen, never a description.<!-- rule:verification-screens-verdict -->

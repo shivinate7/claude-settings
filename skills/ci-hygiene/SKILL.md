@@ -61,13 +61,19 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     Measured: the longest Windows job went from about 20 min to 8m59s, with no coverage lost
     (PR 293's CI run).
 16. **Pin every suite in a split-job guard.** The guard must pin each suite's `if:`, `shell:` and
-    `!cancelled()`, with no job-level `if:` or env override (`MERGE_TESTS` gap, review of PR 293).
+    `!cancelled()`, with no env override (`MERGE_TESTS` gap, review of PR 293). A job-level `if:`
+    is allowed only on the job's own scope flag (step 19).
 17. **Slice tests on a slow platform.** On PRs, run a platform-specific test slice. Run the full
     suite on main and nightly. Measured: the Windows merge job went from 8m59s to 1m13s
     (PR 293's own CI run).
 18. **Profile before you refactor test setup.** Compare setup time to test-body time. If
     the saving is under 20%, stop. Measured: setup was 31% of the time, and setup reuse saved
     about 9% (decision ci-wall-time-cuts, cut D).
+19. **Run one scope job first.** Make it a cheap Linux job. Give every other job `needs: scope`
+    and a job-level `if:` on its own flag. A job with nothing to test then starts no runner.
+    A docs-only PR runs only the lint job. Push, nightly and dispatch run everything. An
+    unreadable diff or an unmapped path runs everything. A skipped job reads as passing, so put
+    the scope job in the required checks (decision ci-wall-time-cuts, cut B).
 
 ## Before you skip a required job
 
@@ -81,7 +87,7 @@ CI claims in README or docs go stale too. See the `fresh-prose` skill.
 ## Opt-in templates
 
 Adopt each by `uses: shivinate7/claude-settings/actions/<name>@<full-sha>`, or copy the file.
-Record: `decisions/opt-in-ci-templates-composite.md`. Steps 1 and 11 to 14: `decisions/ci-spend-rules.md`. Steps 15 to 18: decision ci-wall-time-cuts.
+Record: `decisions/opt-in-ci-templates-composite.md`. Steps 1 and 11 to 14: `decisions/ci-spend-rules.md`. Steps 15 to 19: decision ci-wall-time-cuts.
 
 - `all-jobs-passed`: in a job with `needs: [...]` and `if: always()`, pass `toJSON(needs)` as shown. A skipped needed job then fails.
 

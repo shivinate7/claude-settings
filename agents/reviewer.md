@@ -53,3 +53,5 @@ Under Done, the first line is PASS, FAIL, or PARTIAL. Then list each finding wit
 range, what is wrong, and what proves it. Then list the checks run with their outcome. Drop a
 label that does not apply. Write in Simplified Technical English. Start with the point. No
 preamble. Report in under 25 lines unless the brief names another cap.
+
+Your worktree is removed when you finish. If you are resumed and it is gone, say so in one line and stop.

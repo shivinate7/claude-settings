@@ -17,19 +17,24 @@ The owner chose all four cuts on 2026-10-07. Each lands as its own PR.
   of them. `lint/test_windows_split.py` holds the suite list and fails on a dropped or
   duplicated suite. PR 277's time caps for `pointer-windows` and `shell-macos` fold into A,
   and PR 277 closes as superseded.
-- B. On a pull request, a suite runs only when its inputs change. An unmapped changed path
-  runs everything.
-- C. On a pull request, the Windows merge job runs only the Windows-specific merge tests.
+- B. A `scope` job runs first. Each other job skips at job level, with no runner, when none
+  of its inputs changed. A docs-only PR runs only `gates`. In `gates`, the guard and sweep
+  suites also skip by input. An unmapped path runs everything. The owner chose job-level
+  skips over step-level skips on 2026-10-07: the goal is fewer runs and billed minutes.
+  `lint/test_harness_scope.py` pins the path map. Decision docs-only-prs-skip-code-suites
+  holds the detector's rules.
+- C. On a pull request, Windows runs a slice of the merge tests (`MERGE_TESTS=windows-slice`).
+  Push, nightly and manual runs keep the full suite. `lint/test_windows_split.py` fails when
+  the slice runs on push or the full Windows run is lost.
 - D. Make `merge/test_merge.py` faster, with the same cases and verdicts. Tried and dropped
   on 2026-10-07. Setup takes 31% of the time, and the `git` calls inside `merge.py` take 69%.
   Reusing one setup saved about 9%, under the 20% bar. C covers the PR wait instead.
-- C, as built: on a pull request, Windows runs a 14-test slice (`MERGE_TESTS=windows-slice`).
-  Push, nightly and manual runs keep the full suite. `lint/test_windows_split.py` fails when
-  the slice runs on push or the full Windows run is lost.
+- E. Pending, after B is measured: a macOS slice on pull requests, like C. On PR 294, guard
+  (197 s) and janitor (109 s) took most of `gates-macos`. macOS bills 10x on private repos.
 
 A push to main, the nightly run and a manual run always run every suite on every OS.
 
 ## Accepted risk
 
-B and C can miss a break on a pull request. The push to main and the nightly run catch it
+B, C and E can miss a break on a pull request. A missed input in B's path map has the same effect. The push to main and the nightly run catch it
 after the merge. A does not lose coverage.
