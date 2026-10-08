@@ -831,6 +831,18 @@ def case_main_stop_hook_active_stays_quiet():
     check("main_stop_hook_active: known-bad pair prints UNKNOWN", _says_unknown(paired), paired.stdout)
 
 
+def case_settings_timeout_covers_worst_case():
+    with open(os.path.join(HERE, "..", "settings.json")) as f:
+        settings = json.load(f)
+    entries = [h for grp in settings["hooks"]["Stop"] for h in grp["hooks"]
+               if "hooks/decision_watch.py" in h.get("command", "")]
+    check("settings_timeout: one Stop entry runs decision_watch.py", len(entries) == 1, len(entries))
+    budget = 2 * dw.GIT_TIMEOUT + dw.MAX_DIFFED_FILES * dw.GIT_TIMEOUT + dw.MODEL_TIMEOUT
+    timeout = entries[0].get("timeout", 0) if entries else 0
+    check("settings_timeout: Stop timeout >= worst-case budget", timeout >= budget,
+          "timeout=%s budget=%s" % (timeout, budget))
+
+
 def main():
     case_flag_unapproved()
     case_flag_deleted_protected_file()
@@ -855,6 +867,7 @@ def main():
     case_main_prints_the_config_report()
     case_main_missing_transcript()
     case_main_stop_hook_active_stays_quiet()
+    case_settings_timeout_covers_worst_case()
 
     if FAILED:
         print("test_decision_watch FAIL: %d failing check(s)" % len(FAILED))
