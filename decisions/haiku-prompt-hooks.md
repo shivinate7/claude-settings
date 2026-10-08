@@ -12,7 +12,9 @@ still reads as UNKNOWN, never as ALLOW.
 ## Five prompt hooks
 
 Five `type: prompt` hooks run on `haiku`. Each one judges a rule that no script can parse.
-Each one blocks the call when it finds a breach, by owner ruling 2026-10-07. A prompt hook
+Each one blocks the call when it finds a breach, by owner ruling 2026-10-07. This is a trial.
+The owner reviews with the orchestrator on 2026-10-14 whether the blocks land well, and
+rules then to keep, change or remove each hook. A prompt hook
 cannot warn: it answers `ok` and shows nothing, or blocks with a reason.
 
 | Hook on | Rules it judges |
