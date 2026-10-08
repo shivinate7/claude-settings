@@ -5,53 +5,74 @@ records how the worker-model rule is mechanized after
 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is dropped. The owner dropped it. That is settled
 and this entry does not reopen it.
 
-The short answer: Sonnet is the floor and the ceiling for every agent. The ceiling is
-prose only, by owner ruling (see "The ceiling, ruled 2026-09-28").
-`CLAUDE_CODE_SUBAGENT_MODEL: sonnet` stays as the fallback, so nothing moves by default. The settings-write ask and the
+The short answer: each agent role has its own pinned model and effort, by owner ruling
+2026-10-07 (see "The model per role"). Sonnet is the default. Haiku runs only in the
+roles the owner named. Opus runs only for Plan, the advisor, and a spawn the owner names.
+`CLAUDE_CODE_SUBAGENT_MODEL: sonnet` stays as the fallback. The settings-write ask and the
 expiry both stay, because both key on the model variable and never on the force flag.
-One floor gate is added: no subagent runs Haiku (see the next section).
 
-## The ceiling, ruled 2026-09-28
+## The model per role, ruled 2026-10-07
 
-The owner ruled: "Every one of your agents must be on sonnet only. Opus as an agent is
-only used if I tell you." Sonnet is also the ceiling. An agent runs Opus, or any model
-above Sonnet, only on the owner's word, for the spawn the owner names. The reason: the
-owner wants Sonnet on every lane, whatever the cost.
+The owner ruled each point in one interview. The reason: Haiku is cheap enough for
+read-only work, tests and review, and the owner will measure cost and quality.
 
-Enforcement stays prose only, by owner ruling. The owner will not bring back the
-forcings, because prose alone is strong enough to mandate it. No hook and no
-`CLAUDE_CODE_SUBAGENT_MODEL_FORCE` enforces the ceiling. CLAUDE.md
-`roles-sonnet-is-the-ceiling` states it, and `lint/rule_mechanisms.json` records it as
-`unmechanized` with the ruling as reason. The owner's word is the only path to Opus:
-the `roles-opus-shaped-say-so` line, and then the guarded
-`settings.local.json` raise, which the owner must also order.
+| Point | Model | Effort |
+|---|---|---|
+| `CLAUDE_CODE_SUBAGENT_MODEL` | sonnet | n/a |
+| Explore, claude-code-guide | haiku | high |
+| test-author | haiku | high |
+| reviewer | haiku | xhigh |
+| builder | sonnet | medium |
+| Plan (`agents/plan.md`) | opus | high |
+| general-purpose, `claude` | sonnet, by the default | model default |
+| main session | unset, account default | model default |
+| `fallbackModel` | sonnet | n/a |
+| `advisorModel` | opus | n/a |
+| fast mode | opt-in per session | n/a |
+| `haiku` alias | not pinned, follows Claude Code | n/a |
+| skills | no `model:` pin | none |
+| cloud routines | sonnet | default |
+| Claude GitHub Action, if added | haiku | xhigh |
+| `availableModels` | none | n/a |
+| teammates, Workflow `agent()` | the role table, by `agentType` | the role table |
+| separate sessions (`start_session`) | main model unless the owner names one | default |
+| `opus`, `sonnet`, `fable` aliases | not pinned | n/a |
+| safety-classifier fallback | on, the default | n/a |
+| `/model` picker | built-in list | n/a |
 
-## The floor, ruled 2026-09-28
+Haiku means Haiku 5.5. It needs Claude Code v2.1.293 or later. Haiku 4.5 ignores effort.
+A session on an older Claude Code may run Haiku 4.5 for these roles.
 
-The owner ruled: "disallow haiku for anything." Sonnet is the floor for every lane.
-The reason: the owner prefers Sonnet's quality on every lane, whatever the cost. This
-reverses the part of this entry that reopened Haiku when the force pin was dropped.
+## The ceiling
 
-Three places enforce it.
+Sonnet is the ceiling for every role but two standing exceptions, by owner ruling
+2026-10-07. Plan runs Opus. The advisor is `opus`, and agents inherit it. The owner
+watches its cost. Any other agent runs Opus only on the owner's word, for the spawn the
+owner names. Enforcement stays prose only: CLAUDE.md `roles-sonnet-is-the-ceiling` states
+it, and `lint/rule_mechanisms.json` records it as `unmechanized`.
 
-- Guard rule `subagent-model-floor` in `hooks/guard.py` denies an `Agent` or `Task`
-  call whose `model` holds "haiku". Any case and any full id match.
+## The floor
+
+Haiku runs only in Explore, claude-code-guide, test-author and reviewer. Every other role
+has Sonnet as the floor. These places enforce it.
+
+- Guard rule `subagent-model-floor` in `hooks/guard.py` denies an `Agent` or `Task` call
+  whose `model` holds "haiku", unless its `subagent_type` is one of the four roles.
+- The same guard rule reads a `Workflow` script. It denies an `agent()` call that names a
+  Haiku model outside the four roles. It also denies a `start_session` that names Haiku.
 - `lint/check_agent_models.py`, run in `.github/workflows/gates.yml`, fails when an
-  `agents/*.md` or `skills/*/SKILL.md` frontmatter sets a Haiku `model:`. A file's own
-  key names no model in the tool input, so the guard cannot see it.
-- CLAUDE.md `roles-sonnet-is-the-floor` states the floor.
+  `agents/*.md` or `skills/*/SKILL.md` frontmatter sets a Haiku `model:`, unless the file
+  is one of the four roles.
 
-Known limit. A built-in agent that picks its own model inside Claude Code never puts
-that model in the tool input, and it has no file here. The guard and the check cannot
-reach it. Per the sub-agents docs, one built-in runs Haiku: `claude-code-guide`. This
-change does not cover it. Explore is not a limit: since v2.1.198 it inherits the main
-conversation's model, and the custom `Explore` in `agents/explore.md` (PR #179)
-overrides the built-in with `model: sonnet`. The other built-ins (Plan, general-purpose,
-`claude`, `statusline-setup`) inherit or run Sonnet. A `model` named on the call
-reaches the guard, so the floor holds for any spawn that names one.
+Both read one list of Haiku roles, `HAIKU_ROLES` in `hooks/guard.py`. The Workflow
+check reads string literals in each `agent(` call. It does not see a model or role built at
+run time. Examples: a variable, a spread, an alias, a concatenation, a ternary, a computed
+key, a template `${}`. A regex literal that holds a quote also hides the call that follows it. Known limit: a built-in agent with no file here picks
+its own model and never puts it in the tool input. Measured 2026-10-07: the built-in Plan
+ran Opus 5.5 and general-purpose ran Sonnet 5.5. `agents/plan.md` now pins Plan.
 
 Other sections below keep their Haiku sentences only as evidence of the earlier
-argument. The floor overrides them.
+argument. This ruling overrides them.
 
 ## The precedence, corrected
 

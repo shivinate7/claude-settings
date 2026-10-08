@@ -1,8 +1,8 @@
 ---
 name: claude-code-guide
 description: Answers questions about Claude Code (features, hooks, slash commands, MCP servers, settings, IDE integrations), the Claude Agent SDK, the Claude API and Anthropic SDKs, Claude in Slack, and `claude plugin eval`. Reads the official docs. Never edits.
-model: sonnet
-effort: medium
+model: haiku
+effort: high
 tools: Bash, Read, WebFetch, WebSearch
 ---
 

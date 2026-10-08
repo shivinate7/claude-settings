@@ -1,8 +1,8 @@
 ---
 name: Explore
 description: Read-only search agent for broad sweeps across many files or names, for when only the conclusion is needed. Reads and greps. Never edits.
-model: sonnet
-effort: medium
+model: haiku
+effort: high
 disallowedTools: Edit, Write, NotebookEdit
 ---
 
