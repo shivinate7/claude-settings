@@ -669,7 +669,25 @@ JUDGE_INSTRUCTIONS = (
 # `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` counts `Task`-tool spawns (a raw `subprocess.run`
 # is neither a `Task` spawn nor governed by that cap).
 
+# THE TOKEN FILE. The copied credentials file never renews: its access token expires and
+# the child cannot refresh it (measured expiry 2026-09-23). `state/hook-token` in the config
+# directory holds a one-year token. `_hook_token` reads it; the child gets it as
+# `CLAUDE_CODE_OAUTH_TOKEN`. No file, or an empty or unreadable one, means the old path. The
+# parent's own env token is never passed (the allowlist stays closed), and `invoke_model`
+# scrubs the token from any error text it returns. See decisions/question-outcome-check.md.
 CREDENTIALS_FILENAME = ".credentials.json"
+TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
+
+
+def _hook_token():
+    """Return the stripped token from `<config dir>/state/hook-token`, or '' if none."""
+    try:
+        with open(os.path.join(guard.config_dir(), "state", "hook-token"), "rb") as f:
+            raw = f.read()
+        enc = "utf-16" if raw[:2] in (bytes([0xFF, 0xFE]), bytes([0xFE, 0xFF])) else "utf-8-sig"
+        return raw.decode(enc).strip()
+    except Exception:
+        return ""
 
 # The only variables the judgment subprocess's environment is built from -- never a copy
 # of the parent's environment with entries removed. `PATH` to find the `claude` binary and
@@ -692,7 +710,7 @@ JUDGE_ENV_ALLOWLIST = (
 def _judge_isolation():
     """Return (cwd, env) for the judgment subprocess: an empty directory that is not this
     project, holding only a copy of the login credential, and an environment built from
-    `JUDGE_ENV_ALLOWLIST` alone, never copied from this process's own environment, so
+    `JUDGE_ENV_ALLOWLIST` plus `TOKEN_ENV` when a token file exists, never copied from this process's own environment, so
     there is nothing here for a tool call to inherit, write into, or signal back to, even
     if one somehow ran, and the call can still authenticate and reach the API host."""
     root = tempfile.mkdtemp(prefix="decision_watch_judge_")
@@ -707,6 +725,9 @@ def _judge_isolation():
             pass  # no credential to copy: the call below fails closed, as an auth error
     env = {name: os.environ[name] for name in JUDGE_ENV_ALLOWLIST if name in os.environ}
     env["CLAUDE_CONFIG_DIR"] = config_dir
+    token = _hook_token()
+    if token:
+        env[TOKEN_ENV] = token
     return root, env
 
 
@@ -719,6 +740,8 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT):
     None and `error` names why, for the caller to report as UNKNOWN rather than guess.
     """
     root, env = _judge_isolation()
+    token = env.get(TOKEN_ENV, "")
+    scrub = lambda text: text.replace(token, "[token]") if token else text
     try:
         run = subprocess.run(
             [
@@ -734,14 +757,14 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT):
             cwd=root, env=env,
         )
     except Exception as exc:
-        return None, "model subprocess failed to start: %s" % exc
+        return None, scrub("model subprocess failed to start: %s" % exc)
     finally:
         try:
             shutil.rmtree(root, ignore_errors=True)
         except Exception:
             pass
     if run.returncode != 0:
-        return None, "model exited %s: %s" % (run.returncode, (run.stderr or "")[:200])
+        return None, "model exited %s: %s" % (run.returncode, scrub(run.stderr or "")[:200])
     try:
         envelope = json.loads(run.stdout)
     except Exception:
