@@ -988,6 +988,48 @@ def case_token_t5_failure_error_omits_token():
           "token found in error string")
 
 
+# T6-T8. The token file's bytes, as Windows PowerShell 5.1 writes them. The reader must
+# return the bare token whatever the encoding or line ending.
+def _token_file_bytes(cfg, data):
+    path = os.path.join(cfg, "state", "hook-token")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+
+
+# T6. UTF-8 with a BOM (PowerShell 5.1 `Set-Content -Encoding utf8`): no BOM in the token.
+def case_token_t6_utf8_bom_is_stripped():
+    captured = {}
+    with scratch_config("t6") as cfg:
+        _token_file_bytes(cfg, b"\xef\xbb\xbf" + FAKE_TOKEN.encode("ascii") + b"\n")
+        _run_invoke(captured)
+    env = captured.get("env") or {}
+    check("token_t6: child token is the bare token, no BOM (UTF-8 BOM file)",
+          env.get(TOKEN_KEY) == FAKE_TOKEN, "token is " + _presence(env))
+
+
+# T7. UTF-16 LE with a BOM (PowerShell 5.1 `>` / Out-File): the bare token comes through.
+def case_token_t7_utf16_le_bom_is_read():
+    captured = {}
+    with scratch_config("t7") as cfg:
+        _token_file_bytes(cfg, b"\xff\xfe" + (FAKE_TOKEN + "\r\n").encode("utf-16-le"))
+        _run_invoke(captured)
+    env = captured.get("env") or {}
+    check("token_t7: child token is the bare token (UTF-16 LE BOM file)",
+          env.get(TOKEN_KEY) == FAKE_TOKEN, "token is " + _presence(env))
+
+
+# T8. CRLF line ending, UTF-8, no BOM: the bare token. A pin, green today.
+def case_token_t8_crlf_is_stripped():
+    captured = {}
+    with scratch_config("t8") as cfg:
+        _token_file_bytes(cfg, FAKE_TOKEN.encode("ascii") + b"\r\n")
+        _run_invoke(captured)
+    env = captured.get("env") or {}
+    check("token_t8: child token is the bare token (CRLF file)",
+          env.get(TOKEN_KEY) == FAKE_TOKEN, "token is " + _presence(env))
+
+
 def main():
     case_flag_unapproved()
     case_flag_deleted_protected_file()
@@ -1013,6 +1055,9 @@ def main():
     case_token_t3_parent_env_not_passed_through()
     case_token_t4_empty_or_unreadable_is_no_file()
     case_token_t5_failure_error_omits_token()
+    case_token_t6_utf8_bom_is_stripped()
+    case_token_t7_utf16_le_bom_is_read()
+    case_token_t8_crlf_is_stripped()
     case_main_ordinary_turn()
     case_main_prints_the_config_report()
     case_main_missing_transcript()
