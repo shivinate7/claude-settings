@@ -65,9 +65,9 @@ has Sonnet as the floor. These places enforce it.
   is one of the four roles.
 
 Both read one list of Haiku roles, `HAIKU_ROLES` in `hooks/guard.py`. The Workflow
-check reads string literals in each `agent(` call. A model or role built at run time is not
-seen: a variable, a spread, an alias, a concatenation, a ternary, a computed key, or a
-template `${}`. A regex literal that holds a quote also hides the call that follows it. Known limit: a built-in agent with no file here picks
+check reads string literals in each `agent(` call. It does not see a model or role built at
+run time. Examples: a variable, a spread, an alias, a concatenation, a ternary, a computed
+key, a template `${}`. A regex literal that holds a quote also hides the call that follows it. Known limit: a built-in agent with no file here picks
 its own model and never puts it in the tool input. Measured 2026-10-07: the built-in Plan
 ran Opus 5.5 and general-purpose ran Sonnet 5.5. `agents/plan.md` now pins Plan.
 
