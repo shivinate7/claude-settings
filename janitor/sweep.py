@@ -2037,8 +2037,13 @@ def find_strays(root: str, entries):
     base = os.path.join(root, ".claude", "worktrees")
     if not os.path.isdir(base):
         return []
+    try:
+        names = sorted(os.listdir(base))
+    except OSError as exc:  # unreadable folder: no strays listed, the sweep goes on
+        print("janitor: worktrees folder unreadable (%s)" % exc)
+        return []
     registered = {os.path.normcase(os.path.realpath(e["path"])) for e in entries}
-    return [p for p in (os.path.join(base, n) for n in sorted(os.listdir(base)))
+    return [p for p in (os.path.join(base, n) for n in names)
             if os.path.normcase(os.path.realpath(p)) not in registered]
 
 
@@ -2433,12 +2438,17 @@ def main(argv=None) -> int:
 
 
 def _sweep_roots(args, roots, restore_log_path, mode):
+    def one(root):
+        result = sweep_repo(root, args.confirm, restore_log_path, mode, args.attended)
+        if args.confirm:  # one line per repository, as each finishes
+            append_run_log(default_run_log_path(), [result])
+        return result
+
     results = list(_pmap(
-        lambda root: sweep_repo(root, args.confirm, restore_log_path, mode, args.attended),
+        one,
         roots, args.confirm or mode == "tier1", _ROOT_POOL))
     print_sweep_report(results, args.confirm or mode == "tier1")
     if args.confirm:
-        append_run_log(default_run_log_path(), results)
         if any(_removed_count(r["worktrees"]) + _removed_count(r["branches"]) for r in results):
             try:
                 free = min(shutil.disk_usage(r["root"]).free for r in results)

@@ -846,8 +846,8 @@ MUTATIONS = [
      "test_preview_lists_both_strays_in_the_result_and_the_report"),
     ("run log: a preview run writes it too",
      "sweep",
-     '    if args.confirm:\n        append_run_log(',
-     '    if True:\n        append_run_log(',
+     '        if args.confirm:  # one line per repository',
+     '        if True:  # one line per repository',
      "test_preview_appends_no_run_line_and_the_confirm_after_it_does"),
     # ---- strict default: merged and idle 1 hour (decisions/unattended-sweep-stops-proven-orphans.md) ----
     ("strict: the merged-and-idle gate is skipped",
@@ -924,8 +924,8 @@ MUTATIONS = [
      "test_the_attended_flag_reaches_the_sweep"),
     ("strict: main drops the flag before it sweeps",
      "sweep",
-     'mode, args.attended),',
-     'mode, False),',
+     'mode, args.attended)',
+     'mode, False)',
      "test_main_takes_the_attended_flag"),
 
     ("stale lock: a failed remove leaves the worktree unlocked",
@@ -1103,9 +1103,9 @@ MUTATIONS = [
     ("parallel preview: whole repositories run one after another",
      "sweep",
      '    results = list(_pmap(\n'
-     '        lambda root: sweep_repo(root, args.confirm, restore_log_path, mode, args.attended),\n'
+     '        one,\n'
      '        roots, args.confirm or mode == "tier1", _ROOT_POOL))',
-     '    results = [sweep_repo(root, args.confirm, restore_log_path, mode) for root in roots]',
+     '    results = [one(root) for root in roots]',
      "test_whole_repositories_run_side_by_side_in_a_preview",
      "posix"),
     ("parallel preview: the branch decisions run one after another",
