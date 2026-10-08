@@ -3378,6 +3378,31 @@ class DanglingDefaultBaseTests(unittest.TestCase):
         self.assertGreaterEqual(len(verify_calls), 1, "the verify read never ran: no proof")
         self.assertIsNone(base, "an unreadable origin/HEAD verify fell through to %r" % base)
 
+    def test_origin_head_verify_returncode_128_falls_back_to_local_main(self):
+        """Round 3 R7 (pin): git answers the origin/HEAD verify with returncode 128, a dangling
+        origin/HEAD. Only a live origin/HEAD keeps origin's ref, so the base falls to local main.
+        Green on the pre-round-3 code: a pin, not a red case."""
+        root, _ = self._squash_lane("refs/remotes/origin/main")
+        real_git = guard._git
+        verify_calls = []
+
+        def fatal_verify(where, *args):
+            if args and args[-1].endswith("^{commit}"):  # the origin/HEAD verify read
+                verify_calls.append(args)
+                return subprocess.CompletedProcess(["git", *args], 128, "", "fatal: bad object")
+            return real_git(where, *args)
+
+        with mock.patch.object(guard, "_git", side_effect=fatal_verify):
+            base = guard.resolve_default_base(root)
+        self.assertGreaterEqual(len(verify_calls), 1, "the verify read never ran: no proof")
+        self.assertEqual(base, "main")
+
+    def test_live_origin_head_resolves_to_origin_ref(self):
+        """Round 3 R7 (pin): a live origin/HEAD is the base, as origin/main. Green on the
+        pre-round-3 code: a pin, not a red case."""
+        root, _ = self._squash_lane("refs/remotes/origin/main")
+        self.assertEqual(guard.resolve_default_base(root), "origin/main")
+
 
 class UnreadableHuskBaseRunTests(unittest.TestCase):
     """Batch review J1: find_husks called a bare os.listdir on <root>/.claude/worktrees. With
@@ -3424,6 +3449,50 @@ class UnreadableHuskBaseRunTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(self.log), "no run log was written")
         roots = [_norm_path(r.get("root", "")) for r in _read_run_log(self.log)]
         self.assertIn(_norm_path(self.root), roots, "no run-log line for the repository: %r" % roots)
+
+    def _denied_worktrees_listdir(self):
+        real_listdir = os.listdir
+        denials = []
+
+        def denied(path="."):
+            if _norm_path(path) == _norm_path(self.wts):
+                denials.append(path)
+                raise PermissionError(13, "Access is denied", path)
+            return real_listdir(path)
+        return denied, denials
+
+    def test_unreadable_worktrees_folder_husk_line_says_unknown_not_zero(self):
+        """Round 3 R5: find_husks returns [] for a folder it cannot read, so the report printed
+        "leftover folders: 0, kept: 0". The husk scan must read as unknown on that line."""
+        denied, denials = self._denied_worktrees_listdir()
+        out = io.StringIO()
+        with mock.patch.object(sweep.os, "listdir", side_effect=denied), _machine_quiet():
+            result = sweep.sweep_repo(self.root, False, self.restore)
+            sweep.print_sweep_report([result], False, out=out)
+        self.assertGreaterEqual(len(denials), 1, "the unreadable folder was never read: no proof")
+        text = out.getvalue()
+        lines = [ln for ln in text.splitlines() if "leftover folders" in ln]
+        self.assertEqual(len(lines), 1, "no single leftover-folders line: %r" % text)
+        self.assertNotIn("leftover folders: 0", lines[0],
+                         "an unreadable folder reported zero leftover folders: %r" % lines[0])
+        self.assertRegex(lines[0], r"(?i)unknown|unreadable", "the husk line does not say the scan "
+                         "could not run: %r" % lines[0])
+
+    def test_unreadable_worktrees_folder_tier1_report_is_not_nothing_to_examine(self):
+        """Round 3 R6: with the stray scan unknown, the report printed "nothing to examine" for a
+        repository it had not finished examining. Tier1 runs only the husk and stray scans, so
+        every other section is empty here."""
+        denied, denials = self._denied_worktrees_listdir()
+        out = io.StringIO()
+        with mock.patch.object(sweep.os, "listdir", side_effect=denied), _machine_quiet():
+            result = sweep.sweep_repo(self.root, False, self.restore, mode="tier1")
+            sweep.print_sweep_report([result], True, out=out)
+        self.assertGreaterEqual(len(denials), 1, "the unreadable folder was never read: no proof")
+        self.assertIsNone(result["refused"], "the repository was refused: no proof of the scan")
+        text = out.getvalue()
+        self.assertNotIn("nothing to examine", text, "an unknown stray scan printed nothing to "
+                         "examine: %r" % text)
+        self.assertIn("stray     UNKNOWN", text, "the unknown stray scan is not shown: %r" % text)
 
 
 if __name__ == "__main__":
