@@ -4470,6 +4470,20 @@ add("floor: start_session naming the full haiku id is denied", "deny", "subagent
 add("floor: start_session naming sonnet is allowed", "allow",
     tool="mcp__ccd_session__start_session", initiation="user_asked", prompt="x", model="sonnet")
 
+# ---- Rule 9, Workflow script holes found in review. A role named in a string or label is no role;
+# a quoted key is still a key; a haiku named in a string or comment is no model.
+add("floor: Workflow role spoofed in the prompt string is denied", "deny", "subagent-model-floor",
+    tool="Workflow", script="await agent(\"use agentType: 'reviewer'\", {model:\"haiku\"})")
+add("floor: Workflow role spoofed in the label is denied", "deny", "subagent-model-floor",
+    tool="Workflow",
+    script="await agent(\"x\", {model:\"haiku\", label:\"agentType: 'reviewer'\"})")
+add("floor: Workflow quoted model key with haiku is denied", "deny", "subagent-model-floor",
+    tool="Workflow", script="await agent(\"x\", {\"model\":\"haiku\"})")
+add("floor: Workflow prompt text naming a haiku model on a sonnet agent is allowed", "allow",
+    tool="Workflow", script="await agent(\"set model: 'haiku' in file\", {model:\"sonnet\"})")
+add("floor: Workflow commented-out haiku agent call is allowed", "allow",
+    tool="Workflow", script="// agent({model:\"haiku\"})\nawait agent(\"x\", {model:\"sonnet\"})")
+
 FORBIDDEN_IN_A_REASON = (ENV, ROOT, slash(ROOT), "settings.json", "CLAUDE.md", "guard.py",
                          ".claude", "app.log", "sleep", "haiku", VCS + " checkout", VCS + " switch")
 
