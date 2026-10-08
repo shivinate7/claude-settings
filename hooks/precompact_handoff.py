@@ -19,7 +19,7 @@ the desktop app has none.
   Stop --nudge (stdin: session_id, transcript_path, stop_hook_active) -- reads the last
   main-chain, non-synthetic assistant entry's usage, if above 0 (input + cache_creation + cache_read tokens) as the context
   size. Bucket = index of the highest checkpoint reached, -1 below the first (checkpoints():
-  200k, +100k while below limit-50k, then limit-50k; limit = autoCompactWindow in
+  250k, +150k while below limit-50k, then limit-50k; limit = autoCompactWindow in
   <config dir>/settings.json, default 500,000). The bucket lives in
   ~/.claude/state/handoff/<session_id>.nudge.json as {"bucket": N}. A higher bucket
   than stored prints {"decision": "block", "reason": ...}: update the handoff per the
@@ -35,8 +35,8 @@ import os
 import sys
 
 DIGEST_CAP = 60_000
-NUDGE_FLOOR = 200_000
-NUDGE_STEP = 100_000
+NUDGE_FLOOR = 250_000
+NUDGE_STEP = 150_000
 NUDGE_MARGIN = 50_000
 DEFAULT_WINDOW = 500_000
 
@@ -198,8 +198,8 @@ def run_reorient(payload):
 
 
 def checkpoints(limit):
-    """Nudge sizes: 200k, then +100k while below limit-50k, then limit-50k itself
-    (500k: 200, 300, 400, 450k). When limit-50k <= 200k, only limit-50k."""
+    """Nudge sizes: 250k, then +150k while below limit-50k, then limit-50k itself
+    (500k: 250, 400, 450k). When limit-50k <= 250k, only limit-50k."""
     top = limit - NUDGE_MARGIN
     if top <= NUDGE_FLOOR:
         return [top]

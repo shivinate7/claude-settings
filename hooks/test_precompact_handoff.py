@@ -376,7 +376,7 @@ def case_settings_json():
 
 
 # --------------------------------------------------------------------------- Stop --nudge
-# Owner ruling 2026-10-07: on Stop, `--nudge` blocks once per 100k bucket from 200k up.
+# Owner ruling 2026-10-07: on Stop, `--nudge` blocks once per 150k bucket from 250k up.
 
 
 def usage_line(inp, cc=0, cr=0):
@@ -430,31 +430,35 @@ def case_nudge():
         check("nudge: 150k stores bucket -1", stored_bucket(c) == -1, "got %r" % stored_bucket(c))
 
         p = nudge(c, 210000)
-        check("nudge: 210k first time blocks, names handoff path and prompt file",
-              p.returncode == 0 and is_block(c, p), "rc=%r out=%r" % (p.returncode, p.stdout))
-        check("nudge: 210k stores bucket 0", stored_bucket(c) == 0, "got %r" % stored_bucket(c))
-
-        p = nudge(c, 250000)
-        check("nudge: 250k after 210k is silent", p.returncode == 0 and not p.stdout.strip(),
+        check("nudge: 210k is silent (below 250k)", p.returncode == 0 and not p.stdout.strip(),
               "out=%r" % p.stdout)
-        check("nudge: 250k keeps bucket 0", stored_bucket(c) == 0, "got %r" % stored_bucket(c))
 
-        p = nudge(c, 310000)
-        check("nudge: 310k blocks", is_block(c, p), "out=%r" % p.stdout)
-        check("nudge: 310k stores bucket 1", stored_bucket(c) == 1, "got %r" % stored_bucket(c))
+        p = nudge(c, 260000)
+        check("nudge: 260k first time blocks, names handoff path and prompt file",
+              p.returncode == 0 and is_block(c, p), "rc=%r out=%r" % (p.returncode, p.stdout))
+        check("nudge: 260k stores bucket 0", stored_bucket(c) == 0, "got %r" % stored_bucket(c))
+
+        p = nudge(c, 350000)
+        check("nudge: 350k after 260k is silent", p.returncode == 0 and not p.stdout.strip(),
+              "out=%r" % p.stdout)
+        check("nudge: 350k keeps bucket 0", stored_bucket(c) == 0, "got %r" % stored_bucket(c))
 
         p = nudge(c, 410000)
         check("nudge: 410k blocks", is_block(c, p), "out=%r" % p.stdout)
-        check("nudge: 410k stores bucket 2", stored_bucket(c) == 2, "got %r" % stored_bucket(c))
+        check("nudge: 410k stores bucket 1", stored_bucket(c) == 1, "got %r" % stored_bucket(c))
+
+        p = nudge(c, 455000)
+        check("nudge: 455k blocks", is_block(c, p), "out=%r" % p.stdout)
+        check("nudge: 455k stores bucket 2", stored_bucket(c) == 2, "got %r" % stored_bucket(c))
 
         p = nudge(c, 120000)
-        check("nudge: 120k after 410k (compaction) is silent",
+        check("nudge: 120k after 455k (compaction) is silent",
               p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
         check("nudge: compaction resets stored bucket to -1", stored_bucket(c) == -1,
               "got %r" % stored_bucket(c))
 
-        p = nudge(c, 210000)
-        check("nudge: 210k blocks again after reset", is_block(c, p), "out=%r" % p.stdout)
+        p = nudge(c, 260000)
+        check("nudge: 260k blocks again after reset", is_block(c, p), "out=%r" % p.stdout)
     finally:
         c.cleanup()
 
@@ -462,10 +466,10 @@ def case_nudge():
 def case_nudge_exact_boundary():
     c = Case("nudgeb")
     try:
-        p = nudge(c, 199999)
-        check("nudge: 199,999 is silent", not p.stdout.strip(), "out=%r" % p.stdout)
-        p = nudge(c, 200000)
-        check("nudge: exactly 200,000 blocks (bucket 0)", is_block(c, p), "out=%r" % p.stdout)
+        p = nudge(c, 249999)
+        check("nudge: 249,999 is silent", not p.stdout.strip(), "out=%r" % p.stdout)
+        p = nudge(c, 250000)
+        check("nudge: exactly 250,000 blocks (bucket 0)", is_block(c, p), "out=%r" % p.stdout)
     finally:
         c.cleanup()
 
@@ -473,7 +477,7 @@ def case_nudge_exact_boundary():
 def case_nudge_uses_last_assistant_entry_and_sums_cache():
     c = Case("nudgel")
     try:
-        lines = [usage_line(500000), usage_line(1000, 100000, 120000)]  # last = 221000
+        lines = [usage_line(500000), usage_line(1000, 120000, 130000)]  # last = 251000
         p = nudge(c, 0, lines=lines)
         check("nudge: size is input+cache_creation+cache_read of the LAST assistant entry",
               is_block(c, p) and stored_bucket(c) == 0,
@@ -519,14 +523,14 @@ def set_limit(c, limit):
 def case_nudge_limit_checkpoints():
     Case.nudge_path = lambda self: os.path.join(
         self.cfg, "state", "handoff", "%s.nudge.json" % self.session_id)
-    # default limit 500k (no settings.json): checkpoints 200,300,400,450
+    # default limit 500k (no settings.json): checkpoints 250,400,450
     c = Case("nlim5")
     try:
         nudge(c, 410000)
         p = nudge(c, 455000)
         check("limit: 455k blocks after 410k fired (limit-50k checkpoint, 500k limit)",
               is_block(c, p), "out=%r" % p.stdout)
-        check("limit: 455k stores bucket 3", stored_bucket(c) == 3, "got %r" % stored_bucket(c))
+        check("limit: 455k stores bucket 2", stored_bucket(c) == 2, "got %r" % stored_bucket(c))
         p = nudge(c, 460000)
         check("limit: 460k after 455k is silent", p.returncode == 0 and not p.stdout.strip(),
               "out=%r" % p.stdout)
@@ -551,17 +555,17 @@ def case_nudge_limit_checkpoints():
               "out=%r" % p.stdout)
     finally:
         c.cleanup()
-    # limit 800k: 200..700, then 750
+    # limit 800k: 250, 400, 550, 700, then 750
     c = Case("nlim8")
     try:
         set_limit(c, 800000)
         nudge(c, 410000)
         p = nudge(c, 455000)
-        check("limit 800k: 455k silent after 410k fired (next is 500k)",
+        check("limit 800k: 455k silent after 410k fired (next is 550k)",
               p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
         p = nudge(c, 755000)
         check("limit 800k: 755k blocks", is_block(c, p), "out=%r" % p.stdout)
-        check("limit 800k: 755k stores bucket 6", stored_bucket(c) == 6, "got %r" % stored_bucket(c))
+        check("limit 800k: 755k stores bucket 4", stored_bucket(c) == 4, "got %r" % stored_bucket(c))
     finally:
         c.cleanup()
     # limit 200k: limit-50k = 150k <= 200k, only checkpoint is 150k
@@ -661,7 +665,7 @@ def case_handoffs_dir_is_made():
         c.cleanup()
     c = Case("hdir_nudge")
     try:
-        p = nudge(c, 210000)
+        p = nudge(c, 260000)
         check("handoffs-dir: a blocking --nudge makes it", is_block(c, p) and has_dir(c),
               "block=%r out=%r" % (is_block(c, p), p.stdout))
     finally:

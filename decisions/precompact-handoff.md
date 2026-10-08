@@ -14,7 +14,7 @@ claude-settings?
    is a percent of a window that Claude Code picks per model, and the docs do not give
    that window's size.
 2. The session updates its handoff at context checkpoints, while it has full context:
-   200k tokens, then every +100k below the compaction limit minus 50k, then a last one at
+   250k tokens, then every +150k below the compaction limit minus 50k, then a last one at
    that limit minus 50k. After each compaction, auto or manual, it patches the handoff:
    it adds what changed since the last write and keeps the rest. The plan file is updated
    too, when the session works from one and its state changed.
@@ -43,7 +43,7 @@ One file, `hooks/precompact_handoff.py`, with three modes. No mode calls a model
 
 - Context size: the last assistant entry's usage (input + cache creation + cache read).
 - Limit: `autoCompactWindow` from settings.json, 500,000 when missing. Checkpoints:
-  200k, +100k steps below limit-50k, then limit-50k. With limit-50k at or below 200k,
+  250k, +150k steps below limit-50k, then limit-50k. With limit-50k at or below 250k,
   limit-50k is the only checkpoint.
 - When the context reaches a new checkpoint, block the stop once, with a reason that
   names the handoff path and the prompt file. Store the checkpoint in
