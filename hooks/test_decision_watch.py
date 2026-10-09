@@ -898,6 +898,10 @@ def _run_invoke(captured, returncode=0, stderr="", raises=None):
         captured["env"] = kwargs.get("env") or {}
         if raises is not None:
             raise raises
+        # The real subprocess.run refuses an env value that holds a NUL character.
+        for k, v in captured["env"].items():
+            if "\x00" in k or "\x00" in v:
+                raise ValueError("embedded null character")
         return _FakeCompletedProcess(returncode, json.dumps({"result": json.dumps(ALLOW)}), stderr)
     return _capture_invoke(fake_run)
 
@@ -1030,6 +1034,70 @@ def case_token_t8_crlf_is_stripped():
           env.get(TOKEN_KEY) == FAKE_TOKEN, "token is " + _presence(env))
 
 
+# T9. A token file that holds NUL characters: UTF-16 LE with no BOM, or UTF-8 with a trailing
+# NUL. The child env must carry the bare token with no NUL, and invoke_model must not fail
+# with "embedded null character". Red until the reader strips NULs.
+def case_token_t9_nul_characters_are_stripped():
+    cases = (
+        ("utf16-le-no-bom", (FAKE_TOKEN + "\r\n").encode("utf-16-le")),
+        ("utf8-trailing-nul", FAKE_TOKEN.encode("ascii") + b"\n\x00"),
+    )
+    for label, data in cases:
+        captured = {}
+        with scratch_config("t9-" + label) as cfg:
+            _token_file_bytes(cfg, data)
+            verdict, error = _run_invoke(captured)
+        env = captured.get("env") or {}
+        check("token_t9(%s): call returns ALLOW, no embedded-null error" % label,
+              verdict == ALLOW and error is None, error)
+        check("token_t9(%s): child token is the bare token, no NUL" % label,
+              env.get(TOKEN_KEY) == FAKE_TOKEN, "token is " + _presence(env))
+
+
+# T10. A token file that exists but cannot be decoded: FF FE BOM plus an odd byte count.
+# invoke_model must return an error that says the token file could not be read, the error
+# must hold no file bytes, and no subprocess may start (no silent fall back to the expired
+# credentials copy). Red until the reader fails closed on a decode error.
+def case_token_t10_undecodable_file_is_an_error():
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return _FakeCompletedProcess(0, json.dumps({"result": json.dumps(ALLOW)}), "")
+
+    undecodable = b"\xff\xfe" + FAKE_TOKEN.encode("utf-16-le") + b"\x41"
+    with scratch_config("t10") as cfg:
+        _token_file_bytes(cfg, undecodable)
+        verdict, error = _capture_invoke(fake_run)
+    text = error or ""
+    check("token_t10: no verdict for an undecodable token file", verdict is None, verdict)
+    check("token_t10: error says the token file could not be read",
+          "token file" in text.lower() and "could not be read" in text.lower(), text)
+    check("token_t10: error holds no file bytes",
+          not any(s in text for s in (FAKE_TOKEN, "\\xff", "\\xfe", "\\x41")), text)
+    check("token_t10: no subprocess started", calls == [], "%d call(s)" % len(calls))
+
+
+# T11. An empty or whitespace-only token file still means no token file: no token key in the
+# child env, and the call still returns ALLOW on the old path. A pin, green today.
+def case_token_t11_empty_or_blank_file_means_no_file():
+    cases = (
+        ("empty", b""),
+        ("spaces-crlf", b"  \r\n"),
+        ("utf16-bom-only", b"\xff\xfe"),
+    )
+    for label, data in cases:
+        captured = {}
+        with scratch_config("t11-" + label) as cfg:
+            _token_file_bytes(cfg, data)
+            verdict, error = _run_invoke(captured)
+        env = captured.get("env") or {}
+        check("token_t11(%s): no token key in child env" % label, TOKEN_KEY not in env,
+              "token is " + _presence(env))
+        check("token_t11(%s): call still returns ALLOW" % label,
+              verdict == ALLOW and error is None, error)
+
+
 def main():
     case_flag_unapproved()
     case_flag_deleted_protected_file()
@@ -1058,6 +1126,9 @@ def main():
     case_token_t6_utf8_bom_is_stripped()
     case_token_t7_utf16_le_bom_is_read()
     case_token_t8_crlf_is_stripped()
+    case_token_t9_nul_characters_are_stripped()
+    case_token_t10_undecodable_file_is_an_error()
+    case_token_t11_empty_or_blank_file_means_no_file()
     case_main_ordinary_turn()
     case_main_prints_the_config_report()
     case_main_missing_transcript()
