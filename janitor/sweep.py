@@ -479,6 +479,9 @@ def fully_pushed(path: str):
 
 
 STRICT_IDLE_SECONDS = 60 * 60  # owner ruling: a tree needs 1 hour of git quiet
+# Owner ruling 2026-10-09 (decisions/unattended-sweep-stops-proven-orphans.md): a pushed, clean,
+# NOT merged tree is removable once it is idle this long.
+STRICT_UNMERGED_IDLE_SECONDS = 24 * 60 * 60
 
 
 def worktree_idle_seconds(path: str, now=None):
@@ -518,11 +521,15 @@ def _merged_read(where: str, path: str):
 def _strict_keep(where: str, path: str, idle):
     """The keep decision a run adds unless a person passed --attended, or None when the tree is merged and idle.
     Merged: HEAD holds no commit the default branch lacks, by ancestry or by patch
-    (decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md). Pushed alone is not merged."""
+    (decisions/a-branch-is-redundant-by-patch-not-by-ancestry.md). Pushed alone is not merged,
+    except after STRICT_UNMERGED_IDLE_SECONDS: the caller already kept an unpushed tree, so an
+    unmerged tree here is pushed."""
     merged = _merged_read(where, path)
     if merged is None:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
     if not merged:
+        if idle is not None and idle >= STRICT_UNMERGED_IDLE_SECONDS:
+            return None
         return {"path": path, "action": "keep",
                 "reason": "unmerged: HEAD has a commit the default branch lacks"}
     if idle is None:

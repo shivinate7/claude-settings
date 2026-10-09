@@ -50,10 +50,26 @@ PROMPT = (
 )
 
 
+def _answer_text(rec):
+    """The owner's answers in an AskUserQuestion tool result, or "". The record has no origin;
+    its toolUseResult holds the questions and the `answers` map. Other tool results give ""."""
+    if rec.get("type") != "user" or rec.get("isSidechain") or rec.get("isMeta"):
+        return ""
+    result = rec.get("toolUseResult")
+    answers = result.get("answers") if isinstance(result, dict) else None
+    if not isinstance(answers, dict) or not isinstance(result.get("questions"), list):
+        return ""
+    return "\n".join("%s: %s" % (q, a) for q, a in answers.items()
+                     if isinstance(q, str) and isinstance(a, str)).strip()
+
+
 def _owner_text(rec):
     """The genuine owner text of one transcript record, or "". A machine line is "": isMeta,
-    a compact summary, a sidechain line, an origin other than human, a tool_result, and any
-    block that opens with a harness tag."""
+    a compact summary, a sidechain line, an origin other than human, a tool_result (except an
+    AskUserQuestion answer, the owner's own), and any block that opens with a harness tag."""
+    answer = _answer_text(rec)
+    if answer:
+        return answer
     if not is_last_human(rec) or rec.get("isMeta") or rec.get("isCompactSummary"):
         return ""
     origin = rec.get("origin")
