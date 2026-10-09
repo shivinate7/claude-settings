@@ -672,7 +672,8 @@ JUDGE_INSTRUCTIONS = (
 # THE TOKEN FILE. The copied credentials file never renews: its access token expires and
 # the child cannot refresh it (measured expiry 2026-09-23). `state/hook-token` in the config
 # directory holds a one-year token. `_hook_token` reads it; the child gets it as
-# `CLAUDE_CODE_OAUTH_TOKEN`. No file, or an empty or unreadable one, means the old path. The
+# `CLAUDE_CODE_OAUTH_TOKEN`. No file, an empty one, or one that cannot be opened means the old
+# path. A file that opens but is not text fails closed: no call is made. The
 # parent's own env token is never passed (the allowlist stays closed), and `invoke_model`
 # scrubs the token from any error text it returns. See decisions/question-outcome-check.md.
 CREDENTIALS_FILENAME = ".credentials.json"
@@ -684,7 +685,8 @@ class TokenUnreadable(Exception):
 
 
 def _hook_token():
-    """Return the stripped token from `<config dir>/state/hook-token`, or '' if none."""
+    """Return the stripped token from `<config dir>/state/hook-token`, or '' if none.
+    Raise `TokenUnreadable` when the file opens but does not decode as text."""
     try:
         with open(os.path.join(guard.config_dir(), "state", "hook-token"), "rb") as f:
             raw = f.read()
@@ -694,7 +696,7 @@ def _hook_token():
     try:
         return raw.decode(enc).replace("\0", "").strip()
     except Exception:
-        raise TokenUnreadable()  # the file exists but is not text: fail closed, no bytes kept
+        raise TokenUnreadable() from None  # not text: fail closed; `from None` drops the bytes
 
 # The only variables the judgment subprocess's environment is built from -- never a copy
 # of the parent's environment with entries removed. `PATH` to find the `claude` binary and
