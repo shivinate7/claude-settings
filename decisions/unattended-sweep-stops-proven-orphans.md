@@ -102,6 +102,10 @@ included, needs both of these to remove a worktree:
   tree has every commit on a remote branch. It is removed once it is idle 24
   hours, merged or not (owner ruling, 2026-10-09). The remote keeps every
   commit. Before that, the keep reason is `unmerged`.
+  Pushed means reachable from a head that the remote lists now
+  (`git ls-remote`, read-only). A local `origin/*` ref can name a branch that
+  the remote deleted. On 2026-10-09, 59 of 82 local `origin/*` refs in this
+  clone had no live head. A remote that cannot be read keeps the tree.
   Incident, 2026-10-09: q_max held 138 worktrees, each with a live Neon branch.
   73 were detached checkouts whose commits were on a remote, kept only for
   `unmerged`.
