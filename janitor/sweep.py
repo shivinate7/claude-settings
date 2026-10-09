@@ -487,7 +487,13 @@ def _live_remote_heads(path: str):
         shas = None
     else:
         for remote in remotes.stdout.split():
-            listed = guard._git(path, "ls-remote", "--heads", remote)
+            try:  # prompts off: an unattended run never waits on a login window
+                listed = subprocess.run(
+                    ["git", "-C", path, "ls-remote", "--heads", remote], capture_output=True,
+                    text=True, timeout=10,
+                    env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"})
+            except Exception:
+                listed = None
             if listed is None or listed.returncode != 0:
                 shas = None
                 break
