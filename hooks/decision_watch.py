@@ -766,8 +766,8 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT):
                 "--safe-mode",
                 "--permission-mode", "plan",
             ],
-            input="", capture_output=True, text=True, timeout=timeout,
-            cwd=root, env=env,
+            input="", capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=timeout, cwd=root, env=env,
         )
     except Exception as exc:
         return None, scrub("model subprocess failed to start: %s" % exc)

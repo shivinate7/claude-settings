@@ -44,7 +44,10 @@ Owner rulings, 2026-10-08:
 - Any other question with no `You want:` line, or an empty one, is denied with no model
   call.
 - The hook reads only the owner's own messages from the last 2 MiB of the transcript.
-  Task notifications, hook feedback, peer messages and tool results are not the owner's.
+  The owner's words are user records with `origin.kind` "human", plus the owner's answers
+  in `AskUserQuestion` tool results. Task notifications, hook feedback, peer messages and
+  other tool results are not the owner's. Incident, 2026-10-09: the first live check read
+  only typed messages, judged a question against an older topic, and denied it.
 - A model call that fails or times out lets the question through, and the hook prints
   one line that says so. That line never repeats the prompt. A question is not a
   destructive act, so a lost check costs less than a blocked question.
