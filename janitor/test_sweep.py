@@ -3026,6 +3026,14 @@ class StrictWorktreeTests(unittest.TestCase):
         self.assertEqual(decision["reason"], "unreadable-subject")
         self.assertIsNone(sweep.worktree_idle_seconds(os.path.join(ROOT, "no-such-tree")))
 
+    def test_an_unmerged_tree_whose_idle_time_cannot_be_read_is_unreadable_not_unmerged(self):
+        """P2 (review of 6351ac2): an unmerged tree the sweep cannot age keeps as
+        unreadable-subject. The reason "unmerged" names a fact the sweep does not have yet."""
+        with mock.patch.object(sweep, "worktree_idle_seconds", return_value=None):
+            decision = self.decide(self.unmerged)
+        self.assertEqual(decision["action"], "keep")
+        self.assertEqual(decision["reason"], "unreadable-subject", decision["reason"])
+
     def test_a_persons_run_removes_an_unmerged_active_tree_as_before(self):
         self.age(self.unmerged, 60)
         decision = self.decide(self.unmerged, attended=True)
@@ -3075,6 +3083,82 @@ class StrictWorktreeTests(unittest.TestCase):
                         "--restore-log", os.path.join(ROOT, "unatt.log")])
             sweep.main(["--root", self.root, "--restore-log", os.path.join(ROOT, "unatt.log")])
         self.assertEqual(seen, [True, False])
+
+
+class RemoteLivenessTests(unittest.TestCase):
+    """P1 (review of 6351ac2): "pushed" means reachable from a head the remote lists NOW, read
+    with `git ls-remote` (read-only). This clone is never fetched or pruned, so a branch deleted
+    on the remote leaves a local refs/remotes/origin/<branch> that still names the commit. Local
+    refs alone then call the tree pushed, and an idle one gets reaped. An unreadable remote keeps."""
+
+    @classmethod
+    def setUpClass(cls):
+        base = os.path.join(ROOT, "remote-live")
+        os.makedirs(base, exist_ok=True)
+        cls.bare = os.path.join(base, "origin.git")
+        run_vcs(base, "init", "-q", "--bare", cls.bare)
+        cls.root = os.path.join(base, "clone")
+        make_repo(cls.root, {"f.txt": "base\n"})
+        require(run_vcs(cls.root, "remote", "add", "origin", cls.bare).returncode == 0,
+                "adding origin failed")
+        require(run_vcs(cls.root, "push", "-q", "origin", "main").returncode == 0,
+                "pushing main failed")
+        cls.gone = cls._pushed_lane("lane-gone")
+        cls.live = cls._pushed_lane("lane-live")
+        # Delete lane-gone ON THE REMOTE only. The clone keeps its own refs/remotes/origin/lane-gone.
+        require(run_vcs(cls.bare, "update-ref", "-d", "refs/heads/lane-gone").returncode == 0,
+                "deleting lane-gone on the remote failed")
+        require(run_vcs(cls.root, "rev-parse", "--verify", "-q",
+                        "refs/remotes/origin/lane-gone").returncode == 0,
+                "the clone's own tracking ref for lane-gone is missing")
+        listed = run_vcs(cls.root, "ls-remote", "origin").stdout
+        require("refs/heads/lane-gone" not in listed, "lane-gone is still listed on the remote")
+
+    @classmethod
+    def _pushed_lane(cls, branch):
+        path = os.path.join(ROOT, "remote-live-" + branch)
+        require(run_vcs(cls.root, "worktree", "add", "-q", path, "-b", branch).returncode == 0,
+                "adding the worktree for %s failed" % branch)
+        write(os.path.join(path, branch + ".txt"), "work on %s\n" % branch)
+        run_vcs(path, "add", "-A")
+        require(run_vcs(path, *IDENT, "commit", "-q", "-m", branch).returncode == 0,
+                "committing on %s failed" % branch)
+        require(run_vcs(path, "push", "-q", "origin", branch).returncode == 0,
+                "pushing %s failed" % branch)
+        return path
+
+    def entry(self, path):
+        target = _norm_path(path)
+        for e in sweep.parse_worktree_list(self.root):
+            if _norm_path(e["path"]) == target:
+                return e
+        self.fail("no worktree-list entry for %r" % path)
+
+    def test_a_branch_deleted_on_the_remote_is_not_pushed_so_its_tree_is_kept(self):
+        _age_admin_files(self.gone, 25 * 3600)
+        decision = sweep.decide_worktree(self.root, self.entry(self.gone))
+        self.assertEqual(decision["action"], "keep", decision)
+        self.assertTrue(decision["reason"].startswith("unpushed"), decision["reason"])
+        self.assertIs(sweep.fully_pushed(self.gone), False)
+
+    def test_a_branch_still_live_on_the_remote_is_pushed_so_idle_25_hours_is_reaped(self):
+        self.assertIs(sweep.fully_pushed(self.live), True)
+        _age_admin_files(self.live, 25 * 3600)
+        decision = sweep.decide_worktree(self.root, self.entry(self.live))
+        self.assertEqual(decision["action"], "reap", decision)
+        self.assertEqual(decision["reason"], "removable")
+
+    def test_an_unreadable_remote_keeps_a_tree_that_looks_pushed(self):
+        missing = os.path.join(ROOT, "remote-live-no-such-origin.git")
+        require(run_vcs(self.root, "remote", "set-url", "origin", missing).returncode == 0,
+                "pointing origin at a missing path failed")
+        try:
+            _age_admin_files(self.live, 25 * 3600)
+            decision = sweep.decide_worktree(self.root, self.entry(self.live))
+        finally:
+            run_vcs(self.root, "remote", "set-url", "origin", self.bare)
+        self.assertEqual(decision["action"], "keep", decision)
+        self.assertEqual(decision["reason"], "unreadable-subject", decision["reason"])
 
 
 # --------------------------------------------------------------------------- owner rulings 2026-10-08

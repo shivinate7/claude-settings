@@ -582,17 +582,40 @@ def case_q8_originless_plain_text_is_not_owner_text():
 # "Your questions have been answered:" and ends "You can now continue with these answers in
 # mind." The toolUseResult carries the questions and the answers.
 
-def answered(question_text, answer_text):
+def answered(question_text, answer_text, tool_use_id="toolu_fixture"):
     return {"parentUuid": "p-fixture", "isSidechain": False, "type": "user",
             "sourceToolAssistantUUID": "u-fixture",
             "message": {"role": "user", "content": [{
-                "type": "tool_result", "tool_use_id": "toolu_fixture",
+                "type": "tool_result", "tool_use_id": tool_use_id,
                 "content": 'Your questions have been answered: "%s"="%s". You can now continue '
                            'with these answers in mind.' % (question_text, answer_text)}]},
             "toolUseResult": {"questions": [{"question": question_text, "header": "Round",
                                              "options": [{"label": answer_text, "description": "fixture"}],
                                              "multiSelect": False}],
                               "answers": {question_text: answer_text}}}
+
+
+def asked(tool_use_id, name="AskUserQuestion", sidechain=False):
+    """An assistant record that calls a tool, shaped as the transcripts carry it. An answer counts
+    as the owner's only when its tool_use_id names an AskUserQuestion call from here."""
+    return {"type": "assistant", "isSidechain": sidechain,
+            "message": {"role": "assistant", "content": [
+                {"type": "tool_use", "id": tool_use_id, "name": name, "input": {"questions": []}}]}}
+
+
+def answered_multi(question_text, picks, tool_use_id="toolu_fixture"):
+    """An AskUserQuestion result whose multiSelect answer is a LIST, as a real transcript holds it:
+    "answers":{<question>:[<option>, ...]} (one line of a transcript under ~/.claude/projects)."""
+    return {"parentUuid": "p-fixture", "isSidechain": False, "type": "user",
+            "sourceToolAssistantUUID": "u-fixture",
+            "message": {"role": "user", "content": [{
+                "type": "tool_result", "tool_use_id": tool_use_id,
+                "content": 'Your questions have been answered: "%s"=%s. You can now continue '
+                           'with these answers in mind.' % (question_text, json.dumps(picks))}]},
+            "toolUseResult": {"questions": [{"question": question_text, "header": "Scope",
+                                             "options": [{"label": p, "description": "fixture"} for p in picks],
+                                             "multiSelect": True}],
+                              "answers": {question_text: picks}}}
 
 
 def case_q9_an_askuserquestion_answer_is_owner_text_and_the_answer_is_last():
@@ -602,7 +625,7 @@ def case_q9_an_askuserquestion_answer_is_owner_text_and_the_answer_is_last():
     typed = "TOPIC-A-Q9 the upload retry needs a three-try limit."
     answer_q = "TOPIC-B-Q9 which backoff should the retry use?"
     answer = "ANSWER-B-Q9 fixed one second"
-    path = write_transcript("q9", [owner(typed), assistant("Asking."), answered(answer_q, answer)])
+    path = write_transcript("q9", [owner(typed), asked("toolu_fixture"), answered(answer_q, answer)])
     got = qo.owner_messages(path)
     check(name + ": two owner messages, oldest first", len(got) == 2, got)
     check(name + ": the typed message comes first", len(got) == 2 and "TOPIC-A-Q9" in got[0], got)
@@ -616,6 +639,74 @@ def case_q9_an_askuserquestion_answer_is_owner_text_and_the_answer_is_last():
     check(name + ": prompt holds the typed message", "TOPIC-A-Q9" in prompt, "prompt")
     check(name + ": answer follows the typed message in the prompt",
           0 <= prompt.find("TOPIC-A-Q9") < prompt.find("ANSWER-B-Q9"), "prompt")
+
+
+# --------------------------------------------------------------------------- case q2
+# P-Q2 (review of 6351ac2): a questions/answers tool result is the owner's words ONLY when its
+# tool_use_id matches an AskUserQuestion tool_use in a main-chain assistant record.
+
+def case_q2a_an_unlinked_questions_answers_result_is_not_owner_text():
+    name = "caseQ2a owner text: a questions/answers result with no AskUserQuestion call is excluded"
+    if not need_module(name):
+        return
+    typed = "TOPIC-A-Q2A the upload retry needs a three-try limit."
+    stray_q = "STRAY-Q-Q2A which backoff should the retry use?"
+    stray = "STRAY-ANSWER-Q2A fixed one second"
+    path = write_transcript("q2a", [owner(typed), assistant("Working."),
+                                    answered(stray_q, stray, tool_use_id="toolu_unlinked")])
+    got = qo.owner_messages(path)
+    check(name + ": only the typed message is owner text", len(got) == 1 and "TOPIC-A-Q2A" in got[0], got)
+    check(name + ": the unlinked answer never reaches the owner text",
+          not any("STRAY-ANSWER-Q2A" in m for m in got), got)
+
+
+def case_q2b_a_result_linked_to_a_main_chain_askuserquestion_is_owner_text():
+    name = "caseQ2b owner text: a questions/answers result linked to a main-chain AskUserQuestion counts"
+    if not need_module(name):
+        return
+    typed = "TOPIC-A-Q2B the upload retry needs a three-try limit."
+    answer_q = "TOPIC-B-Q2B which backoff should the retry use?"
+    answer = "ANSWER-B-Q2B fixed one second"
+    path = write_transcript("q2b", [owner(typed), asked("toolu_linked"),
+                                    answered(answer_q, answer, tool_use_id="toolu_linked")])
+    got = qo.owner_messages(path)
+    check(name + ": two owner messages, oldest first", len(got) == 2, got)
+    check(name + ": the linked answer comes last", len(got) == 2 and "ANSWER-B-Q2B" in got[-1], got)
+
+
+def case_q2c_a_result_linked_only_from_a_sidechain_or_another_tool_is_not_owner_text():
+    name = "caseQ2c owner text: a result whose id links only to a sidechain or non-AskUserQuestion call is excluded"
+    if not need_module(name):
+        return
+    typed = "TOPIC-A-Q2C the upload retry needs a three-try limit."
+    answer_q = "SIDE-Q-Q2C which backoff should the retry use?"
+    answer = "SIDE-ANSWER-Q2C fixed one second"
+    path = write_transcript("q2c-side", [owner(typed), asked("toolu_side", sidechain=True),
+                                         answered(answer_q, answer, tool_use_id="toolu_side")])
+    got = qo.owner_messages(path)
+    check(name + ": a sidechain-linked answer is excluded", len(got) == 1 and "TOPIC-A-Q2C" in got[0], got)
+    path = write_transcript("q2c-bash", [owner(typed), asked("toolu_bash", name="Bash"),
+                                         answered(answer_q, answer, tool_use_id="toolu_bash")])
+    got = qo.owner_messages(path)
+    check(name + ": a Bash-linked answer is excluded", len(got) == 1 and "TOPIC-A-Q2C" in got[0], got)
+
+
+# --------------------------------------------------------------------------- case q3c
+# P-Q3 (review of 6351ac2): an array answer (multiSelect) is included and joined, not dropped.
+
+def case_q3c_a_multiselect_array_answer_is_owner_text_with_every_pick_kept():
+    name = "caseQ3c owner text: a multiSelect array answer is included, every pick kept"
+    if not need_module(name):
+        return
+    typed = "TOPIC-A-Q3C the scope is the Windows merge suite."
+    question_text = "TOPIC-B-Q3C which cuts should the lane build?"
+    picks = ["A. Split the Windows job (Recommended)", "B. Run only the affected suites"]
+    path = write_transcript("q3c", [owner(typed), asked("toolu_multi"),
+                                    answered_multi(question_text, picks, tool_use_id="toolu_multi")])
+    got = qo.owner_messages(path)
+    check(name + ": two owner messages, oldest first", len(got) == 2, got)
+    check(name + ": the array answer comes last, not dropped", len(got) == 2 and
+          all(p in got[-1] for p in picks), got)
 
 
 # --------------------------------------------------------------------------- case q3
@@ -975,6 +1066,10 @@ def main():
              case_q1_combined_transcript_keeps_three_genuine_lines_in_the_prompt,
              case_q8_originless_plain_text_is_not_owner_text,
              case_q9_an_askuserquestion_answer_is_owner_text_and_the_answer_is_last,
+             case_q2a_an_unlinked_questions_answers_result_is_not_owner_text,
+             case_q2b_a_result_linked_to_a_main_chain_askuserquestion_is_owner_text,
+             case_q2c_a_result_linked_only_from_a_sidechain_or_another_tool_is_not_owner_text,
+             case_q3c_a_multiselect_array_answer_is_owner_text_with_every_pick_kept,
              case_q3_unwritable_state_flag_is_allowed_with_a_note,
              case_q3b_unwritable_state_restate_deny_is_not_a_loop,
              case_q4_a_big_transcript_is_read_at_the_tail_only,
