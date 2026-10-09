@@ -3160,6 +3160,41 @@ class RemoteLivenessTests(unittest.TestCase):
         self.assertEqual(decision["action"], "keep", decision)
         self.assertEqual(decision["reason"], "unreadable-subject", decision["reason"])
 
+    def test_ls_remote_runs_with_credential_prompts_off(self):
+        """P3 (coordinator, r24): the `git ls-remote` that _live_remote_heads runs must carry
+        GIT_TERMINAL_PROMPT=0 and GCM_INTERACTIVE=never, so an unattended run never waits on a
+        credential or login window. The call is observed at subprocess.run, the runner guard._git
+        uses. The real call still runs, so the answer is real."""
+        real_run = subprocess.run
+        seen = []
+
+        def observe(argv, *args, **kwargs):
+            if "ls-remote" in argv:
+                seen.append(kwargs.get("env") or {})
+            return real_run(argv, *args, **kwargs)
+
+        with mock.patch.object(subprocess, "run", side_effect=observe):
+            sweep.fully_pushed(self.live)
+        self.assertGreaterEqual(len(seen), 1, "no ls-remote call was made")
+        for env in seen:
+            self.assertEqual(env.get("GIT_TERMINAL_PROMPT"), "0", env)
+            self.assertEqual(env.get("GCM_INTERACTIVE"), "never", env)
+
+    def test_a_failed_ls_remote_keeps_the_tree(self):
+        """Pin for P3: when the ls-remote call fails, the tree is kept as unreadable-subject."""
+        real_run = subprocess.run
+
+        def failing(argv, *args, **kwargs):
+            if "ls-remote" in argv:
+                return subprocess.CompletedProcess(argv, 128, stdout="", stderr="fatal: no login")
+            return real_run(argv, *args, **kwargs)
+
+        _age_admin_files(self.live, 25 * 3600)
+        with mock.patch.object(subprocess, "run", side_effect=failing):
+            decision = sweep.decide_worktree(self.root, self.entry(self.live))
+        self.assertEqual(decision["action"], "keep", decision)
+        self.assertEqual(decision["reason"], "unreadable-subject", decision["reason"])
+
 
 # --------------------------------------------------------------------------- owner rulings 2026-10-08
 
