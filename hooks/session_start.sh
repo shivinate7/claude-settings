@@ -128,10 +128,10 @@ if [ -n "$default_branch" ] && [ "$branch" = "$default_branch" ] \
   fi
 fi
 
-# The SessionEnd sweep is disarmed. The record is
-# decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md, and it holds the two
-# conditions that re-arm it. This notice reads the installed config, never a date and never a
-# flag a person must clear, so it stops on its own the day the hook returns.
+# The SessionEnd sweep is armed. The record is
+# decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md. If the hook goes
+# missing from the config, this notice says so. It reads the installed config, never a date
+# and never a flag a person must clear, so it stops on its own the day the hook returns.
 #
 # Three answers, never two, the contract lint/check_unknown_reads_contract.py states. grep
 # exits 0 when the hook is present, 1 when the file is readable and the hook is absent, and
