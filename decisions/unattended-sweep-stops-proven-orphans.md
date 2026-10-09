@@ -106,6 +106,11 @@ included, needs both of these to remove a worktree:
   (`git ls-remote`, read-only). A local `origin/*` ref can name a branch that
   the remote deleted. On 2026-10-09, 59 of 82 local `origin/*` refs in this
   clone had no live head. A remote that cannot be read keeps the tree.
+  Accepted risks (owner, 2026-10-09):
+  - The branch reap still reads local `origin/*` refs. A reaped branch keeps
+    its 90-day tombstone, so it can come back.
+  - Git-ignored files in a removed tree are removed with it, a local secrets
+    file too.
   Incident, 2026-10-09: q_max held 138 worktrees, each with a live Neon branch.
   73 were detached checkouts whose commits were on a remote, kept only for
   `unmerged`.
