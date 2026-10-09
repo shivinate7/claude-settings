@@ -2967,6 +2967,33 @@ class StrictWorktreeTests(unittest.TestCase):
         self.assertEqual(decision["action"], "keep")
         self.assertTrue(decision["reason"].startswith("unmerged"), decision["reason"])
 
+    # Owner ruling 2026-10-09 (decisions/unattended-sweep-stops-proven-orphans.md): a pushed,
+    # clean, unmerged tree idle 24 hours is removable. Under 24 hours it is still kept.
+    def test_strict_removes_a_pushed_unmerged_tree_idle_25_hours(self):
+        self.age(self.unmerged, 25 * 3600)
+        decision = self.decide(self.unmerged)
+        self.assertEqual(decision["action"], "reap", decision["reason"])
+        self.assertEqual(decision["reason"], "removable")
+
+    def test_strict_keeps_a_pushed_unmerged_tree_idle_23_hours(self):
+        self.age(self.unmerged, 23 * 3600)
+        decision = self.decide(self.unmerged)
+        self.assertEqual(decision["action"], "keep")
+        self.assertTrue(decision["reason"].startswith("unmerged"), decision["reason"])
+
+    def test_strict_keeps_an_unpushed_tree_idle_48_hours(self):
+        path = os.path.join(ROOT, "unatt-unpushed")
+        run_vcs(self.root, "worktree", "add", "-q", path, "-b", "lane-unpushed")
+        write(os.path.join(path, "local.txt"), "a commit on no remote\n")
+        run_vcs(path, "add", "local.txt")
+        run_vcs(path, *IDENT, "commit", "-q", "-m", "local only")
+        self.age(path, 48 * 3600)
+        entries = {os.path.normcase(os.path.realpath(e["path"])): e
+                   for e in sweep.parse_worktree_list(self.root)}
+        decision = sweep.decide_worktree(self.root, entries[os.path.normcase(os.path.realpath(path))])
+        self.assertEqual(decision["action"], "keep")
+        self.assertTrue(decision["reason"].startswith("unpushed"), decision["reason"])
+
     def test_strict_keeps_a_merged_tree_active_10_minutes_ago(self):
         self.age(self.merged, 600)
         decision = self.decide(self.merged)

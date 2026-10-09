@@ -575,6 +575,49 @@ def case_q8_originless_plain_text_is_not_owner_text():
           "SUMMARY-SENTINEL")
 
 
+# --------------------------------------------------------------------------- case q9
+# Owner ruling 2026-10-08 (decisions/question-outcome-check.md): the owner's answers in
+# AskUserQuestion tool results are the owner's words. Fixture shape copied from one real
+# answer line under ~/.claude/projects: a tool_result with no origin key, whose content opens
+# "Your questions have been answered:" and ends "You can now continue with these answers in
+# mind." The toolUseResult carries the questions and the answers.
+
+def answered(question_text, answer_text):
+    return {"parentUuid": "p-fixture", "isSidechain": False, "type": "user",
+            "sourceToolAssistantUUID": "u-fixture",
+            "message": {"role": "user", "content": [{
+                "type": "tool_result", "tool_use_id": "toolu_fixture",
+                "content": 'Your questions have been answered: "%s"="%s". You can now continue '
+                           'with these answers in mind.' % (question_text, answer_text)}]},
+            "toolUseResult": {"questions": [{"question": question_text, "header": "Round",
+                                             "options": [{"label": answer_text, "description": "fixture"}],
+                                             "multiSelect": False}],
+                              "answers": {question_text: answer_text}}}
+
+
+def case_q9_an_askuserquestion_answer_is_owner_text_and_the_answer_is_last():
+    name = "caseQ9 owner text: an AskUserQuestion answer counts, last, and reaches the prompt"
+    if not need_module(name):
+        return
+    typed = "TOPIC-A-Q9 the upload retry needs a three-try limit."
+    answer_q = "TOPIC-B-Q9 which backoff should the retry use?"
+    answer = "ANSWER-B-Q9 fixed one second"
+    path = write_transcript("q9", [owner(typed), assistant("Asking."), answered(answer_q, answer)])
+    got = qo.owner_messages(path)
+    check(name + ": two owner messages, oldest first", len(got) == 2, got)
+    check(name + ": the typed message comes first", len(got) == 2 and "TOPIC-A-Q9" in got[0], got)
+    check(name + ": the answer comes last", len(got) == 2 and "ANSWER-B-Q9" in got[-1]
+          and "ANSWER-B-Q9" not in got[0], got)
+    with model_stub(ALLOW) as stub:
+        run_main(ask_payload(fresh_session("q9"), [question(GOOD_Q, LABELS)], path))
+    prompt = stub.prompts[0] if stub.prompts else ""
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": prompt holds the answer", "ANSWER-B-Q9" in prompt, "prompt")
+    check(name + ": prompt holds the typed message", "TOPIC-A-Q9" in prompt, "prompt")
+    check(name + ": answer follows the typed message in the prompt",
+          0 <= prompt.find("TOPIC-A-Q9") < prompt.find("ANSWER-B-Q9"), "prompt")
+
+
 # --------------------------------------------------------------------------- case q3
 # An unwritable state: no FLAG deny, so no loop. A "did not run" note instead.
 
@@ -931,6 +974,7 @@ def main():
              case_q1_machine_shapes_never_count_as_the_owner,
              case_q1_combined_transcript_keeps_three_genuine_lines_in_the_prompt,
              case_q8_originless_plain_text_is_not_owner_text,
+             case_q9_an_askuserquestion_answer_is_owner_text_and_the_answer_is_last,
              case_q3_unwritable_state_flag_is_allowed_with_a_note,
              case_q3b_unwritable_state_restate_deny_is_not_a_loop,
              case_q4_a_big_transcript_is_read_at_the_tail_only,

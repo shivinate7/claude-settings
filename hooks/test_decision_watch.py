@@ -1098,6 +1098,37 @@ def case_token_t11_empty_or_blank_file_means_no_file():
               verdict == ALLOW and error is None, error)
 
 
+# --------------------------------------------------------------------------- case E1
+# The child writes UTF-8 (the judge's JSON carries an em dash in the why). The fake child
+# returns BYTES, and decodes them the way subprocess.run does for the call's own arguments:
+# the named encoding when one is passed, else the Windows code page (cp1252) when text=True.
+# That is the live defect (2026-10-09): a deny reason read "â€”" instead of "—".
+E1_WHY = "The wait option answers timing — the three-try limit is not in it."
+
+
+def _decode_as_subprocess_run_would(raw, kwargs):
+    if kwargs.get("encoding"):
+        return raw.decode(kwargs["encoding"])
+    if kwargs.get("text") or kwargs.get("universal_newlines"):
+        return raw.decode("cp1252")
+    return raw
+
+
+def case_e1_model_output_is_read_as_utf8():
+    envelope = {"result": json.dumps({"verdict": "FLAG", "why": E1_WHY}, ensure_ascii=False)}
+    raw = json.dumps(envelope, ensure_ascii=False).encode("utf-8")
+
+    def fake_run(argv, **kwargs):
+        stdout = _decode_as_subprocess_run_would(raw, kwargs)
+        return _FakeCompletedProcess(0, stdout, "")
+
+    verdict, error = _capture_invoke(fake_run)
+    check("e1: no error", error is None, error)
+    why = (verdict or {}).get("why", "")
+    check("e1: why holds the em dash", why == E1_WHY, repr(why))
+    check("e1: why holds no mojibake", "â€" not in why, repr(why))
+
+
 def main():
     case_flag_unapproved()
     case_flag_deleted_protected_file()
@@ -1118,6 +1149,7 @@ def main():
     case_invoke_model_argv()
     case_invoke_model_haiku_xhigh_120s()
     case_invoke_model_timeout_is_error()
+    case_e1_model_output_is_read_as_utf8()
     case_token_t1_file_reaches_child_env()
     case_token_t2_no_file_no_token()
     case_token_t3_parent_env_not_passed_through()
