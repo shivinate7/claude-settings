@@ -872,9 +872,14 @@ MUTATIONS = [
      "test_a_persons_run_removes_an_unmerged_active_tree_as_before"),
     ("strict: an unmerged tree no longer keeps",
      "sweep",
-     '    if not merged:\n        return {"path": path, "action": "keep",\n                "reason": "unmerged',
-     '    if False:\n        return {"path": path, "action": "keep",\n                "reason": "unmerged',
+     '    if not merged:\n        if idle is None:',
+     '    if False:\n        if idle is None:',
      "test_strict_keeps_a_pushed_but_unmerged_tree"),
+    ("strict: a pushed unmerged tree idle 24 hours no longer reaps",
+     "sweep",
+     '        if idle >= STRICT_UNMERGED_IDLE_SECONDS:\n            return None\n',
+     '        if False:\n            return None\n',
+     "test_strict_removes_a_pushed_unmerged_tree_idle_25_hours"),
     ("strict: merged is tested by ancestry alone, not by patch",
      "sweep",
      '        merged = guard.branch_cherry_empty(path, base, "HEAD")',
@@ -940,11 +945,17 @@ MUTATIONS = [
      '        locked_ms = time.mktime(time.strptime(',
      "test_lock_date_is_read_as_utc_in_a_non_utc_zone",
      "posix"),
-    ("pushed check: the remote-branch filter is dropped",
+    ("pushed check: the live remote heads are ignored (local refs decide)",
      "sweep",
-     '"rev-list", "-n", "1", "HEAD", "--not", "--remotes")',
-     '"rev-list", "-n", "1", "HEAD")',
-     "test_a_persons_run_removes_an_unmerged_active_tree_as_before"),
+     '    live = _live_remote_heads(path)\n'
+     '    if live is None:\n'
+     '        return None\n',
+     '    live = _live_remote_heads(path)\n'
+     '    if live is None:\n'
+     '        return None\n'
+     '    answer = guard._git(path, "rev-list", "-n", "1", "HEAD", "--not", "--remotes")\n'
+     '    return not answer.stdout.strip()\n',
+     "test_a_branch_deleted_on_the_remote_is_not_pushed_so_its_tree_is_kept"),
     ("pushed check: an unreadable pushed read reaps instead of keeping",
      "sweep",
      '    pushed = fully_pushed(path)\n'
