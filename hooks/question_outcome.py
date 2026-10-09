@@ -50,24 +50,46 @@ PROMPT = (
 )
 
 
-def _answer_text(rec):
-    """The owner's answers in an AskUserQuestion tool result, or "". The record has no origin;
-    its toolUseResult holds the questions and the `answers` map. Other tool results give ""."""
+def _asked_ids(records):
+    """The ids of the AskUserQuestion tool_use blocks in main-chain assistant records."""
+    ids = set()
+    for rec in records:
+        content = (rec.get("message") or {}).get("content")
+        if rec.get("type") == "assistant" and not rec.get("isSidechain") and isinstance(content, list):
+            ids.update(b.get("id") for b in content if isinstance(b, dict)
+                       and b.get("type") == "tool_use" and b.get("name") == "AskUserQuestion")
+    return ids
+
+
+def _answer_text(rec, asked):
+    """The owner's answers in an AskUserQuestion tool result, or "". Counts only a result whose
+    tool_use_id is in ASKED (see _asked_ids). Its toolUseResult holds the `answers` map; a
+    multiSelect answer is a list, joined with commas."""
     if rec.get("type") != "user" or rec.get("isSidechain") or rec.get("isMeta"):
         return ""
     result = rec.get("toolUseResult")
     answers = result.get("answers") if isinstance(result, dict) else None
     if not isinstance(answers, dict) or not isinstance(result.get("questions"), list):
         return ""
-    return "\n".join("%s: %s" % (q, a) for q, a in answers.items()
-                     if isinstance(q, str) and isinstance(a, str)).strip()
+    content = (rec.get("message") or {}).get("content")
+    if not isinstance(content, list) or not any(
+            isinstance(b, dict) and b.get("type") == "tool_result" and b.get("tool_use_id") in asked
+            for b in content):
+        return ""
+    lines = []
+    for q, a in answers.items():
+        if isinstance(a, list):
+            a = ", ".join(x for x in a if isinstance(x, str))
+        if isinstance(q, str) and isinstance(a, str):
+            lines.append("%s: %s" % (q, a))
+    return "\n".join(lines).strip()
 
 
-def _owner_text(rec):
+def _owner_text(rec, asked=frozenset()):
     """The genuine owner text of one transcript record, or "". A machine line is "": isMeta,
     a compact summary, a sidechain line, an origin other than human, a tool_result (except an
     AskUserQuestion answer, the owner's own), and any block that opens with a harness tag."""
-    answer = _answer_text(rec)
+    answer = _answer_text(rec, asked)
     if answer:
         return answer
     if not is_last_human(rec) or rec.get("isMeta") or rec.get("isCompactSummary"):
@@ -85,8 +107,10 @@ def owner_messages(path):
     """The last OWNER_MESSAGES genuine owner messages, oldest first, read from the last
     TAIL_BYTES of the transcript. Raises OSError."""
     out = []
-    for rec in tail_records(path, TAIL_BYTES):
-        text = _owner_text(rec)
+    records = list(tail_records(path, TAIL_BYTES))
+    asked = _asked_ids(records)
+    for rec in records:
+        text = _owner_text(rec, asked)
         if text:
             out.append(text[:MESSAGE_MAX])
             if len(out) == OWNER_MESSAGES:

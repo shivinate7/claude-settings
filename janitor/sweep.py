@@ -468,12 +468,51 @@ def stale_agent_lock_verdict(reason: str):
     return abs(actual - locked_ms) > guard.SESSION_LIVE_TOLERANCE_MS
 
 
+_LIVE_HEADS = None  # a dict while `main` runs: one ls-remote per remote per repository per run
+
+
+def _live_remote_heads(path: str):
+    """The SHAs of every head the repository's remotes list NOW (`git ls-remote --heads`,
+    read-only: never a fetch, never a prune), or None when any read failed. Local
+    refs/remotes/* are not used: a branch deleted on the remote leaves its tracking ref behind."""
+    common = guard._git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if common is None or common.returncode != 0 or not common.stdout.strip():
+        return None
+    key = os.path.normcase(common.stdout.strip())
+    if _LIVE_HEADS is not None and key in _LIVE_HEADS:
+        return _LIVE_HEADS[key]
+    shas = set()
+    remotes = guard._git(path, "remote")
+    if remotes is None or remotes.returncode != 0:
+        shas = None
+    else:
+        for remote in remotes.stdout.split():
+            listed = guard._git(path, "ls-remote", "--heads", remote)
+            if listed is None or listed.returncode != 0:
+                shas = None
+                break
+            shas.update(line.split("\t", 1)[0] for line in listed.stdout.splitlines() if "\t" in line)
+    if _LIVE_HEADS is not None:
+        _LIVE_HEADS[key] = shas
+    return shas
+
+
 def fully_pushed(path: str):
-    """True when every commit on HEAD is on some remote branch (a detached HEAD counts too),
-    False when one is not, None when git could not tell. Every reap needs it, not only a stale
-    agent lock: a lane always commits, and a detached HEAD has no branch to tombstone."""
-    answer = guard._git(path, "rev-list", "-n", "1", "HEAD", "--not", "--remotes")
-    if answer is None or answer.returncode != 0:
+    """True when every commit on HEAD is reachable from a head the remote lists now (a detached
+    HEAD counts too), False when one is not, None when git could not tell: ls-remote failed, or
+    a live SHA is missing locally (the clone never fetched it). Every reap needs it, not only a
+    stale agent lock: a lane always commits, and a detached HEAD has no branch to tombstone."""
+    live = _live_remote_heads(path)
+    if live is None:
+        return None
+    try:
+        answer = subprocess.run(
+            ["git", "-C", path, "rev-list", "-n", "1", "--stdin"],
+            input="HEAD\n--not\n" + "".join(sha + "\n" for sha in sorted(live)),
+            capture_output=True, text=True, timeout=10)
+    except Exception:
+        return None
+    if answer.returncode != 0:
         return None
     return not answer.stdout.strip()
 
@@ -528,7 +567,9 @@ def _strict_keep(where: str, path: str, idle):
     if merged is None:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
     if not merged:
-        if idle is not None and idle >= STRICT_UNMERGED_IDLE_SECONDS:
+        if idle is None:
+            return {"path": path, "action": "keep", "reason": "unreadable-subject"}
+        if idle >= STRICT_UNMERGED_IDLE_SECONDS:
             return None
         return {"path": path, "action": "keep",
                 "reason": "unmerged: HEAD has a commit the default branch lacks"}
@@ -2453,10 +2494,13 @@ def main(argv=None) -> int:
                 return 1
 
     mode = "tier1" if args.tier1 else "branches" if args.branches else "full"
+    global _LIVE_HEADS
     undo = _begin_preview_cache() if not args.confirm and mode != "tier1" else (lambda: None)
+    _LIVE_HEADS = {}
     try:
         return _sweep_roots(args, roots, restore_log_path, mode)
     finally:
+        _LIVE_HEADS = None
         undo()
 
 
