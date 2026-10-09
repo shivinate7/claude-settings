@@ -95,10 +95,15 @@ touched.
 Owner ruling, 2026-10-01: every `--confirm` run, the daily job and SessionEnd
 included, needs both of these to remove a worktree:
 
-- Merged. HEAD holds no commit that the default branch lacks. The test is the
-  redundancy test of `a-branch-is-redundant-by-patch-not-by-ancestry.md`, by
-  ancestry or by patch, read in the worktree. A detached HEAD counts by its
-  commit. A commit that is only pushed is not merged. The keep reason is
+- Merged, or pushed and idle 24 hours. Merged means HEAD holds no commit that
+  the default branch lacks. The test is the redundancy test of
+  `a-branch-is-redundant-by-patch-not-by-ancestry.md`, by ancestry or by
+  patch, read in the worktree. A detached HEAD counts by its commit. A pushed
+  tree has every commit on a remote branch. It is removed once it is idle 24
+  hours, merged or not (owner ruling, 2026-10-09). The remote keeps every
+  commit. Before that, the keep reason is `unmerged`.
+  Incident, 2026-10-09: q_max held 138 worktrees, each with a live Neon branch.
+  73 were detached checkouts whose commits were on a remote, kept only for
   `unmerged`.
 - Idle 1 hour. Read the newest mtime of the worktree's own `index`, `HEAD`
   and `logs/HEAD`, under `.git/worktrees/<name>`. It must be 60 minutes old.
