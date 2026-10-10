@@ -4700,6 +4700,14 @@ add("floor: Workflow haiku named only in template text is not a model", "allow",
     tool="Workflow", script='agent(`set {model: "haiku"} in the file`, {model: "sonnet"})')
 add("floor: Workflow agent call written inside template text is not a spawn", "allow",
     tool="Workflow", script='agent(`agent({model: "haiku"})`, {model: "sonnet"})')
+# An interpolation is code, and a haiku value built inside it is still a model. An object literal
+# inside `${}` is an expression, never the call's options.
+add("floor: Workflow model from a template interpolation of 'haiku' is denied", "deny",
+    "subagent-model-floor", tool="Workflow", script="await agent(\"x\", {model: `${'haiku'}`})")
+add("floor: Workflow model from a template with an interpolated haiku suffix is denied", "deny",
+    "subagent-model-floor", tool="Workflow", script="await agent(\"x\", {model: `${fam}-haiku`})")
+add("floor: Workflow object literal inside a template interpolation is not call options", "allow",
+    tool="Workflow", script='agent(`x ${ {model:"haiku"}.model }`, {model:"sonnet"})')
 
 FORBIDDEN_IN_A_REASON = (ENV, ROOT, slash(ROOT), "settings.json", "CLAUDE.md", "guard.py",
                          ".claude", "app.log", "sleep", "haiku", VCS + " checkout", VCS + " switch")
