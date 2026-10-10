@@ -147,6 +147,26 @@ class Scope(unittest.TestCase):
     def test_a_trailing_slash_in_landed_dirs_is_read_as_the_dir(self):
         self.assertFlags(run(["zz-made-up/new.md"], landed=["zz-made-up/"]), want_true=["gates_windows", "shell_macos"])
 
+    # Cut F: gates-windows-guard and gates-mutate-guard skip on the `guard` flag. The slice selector
+    # (GUARD_TESTS) is read from hooks/test_guard.py, so an edit to that file must turn `guard` on,
+    # or a pull request that changes the slice would run no guard job at all.
+    def test_the_guard_selector_and_its_harness_turn_the_guard_flag_on(self):
+        for p in ("hooks/test_guard.py", "hooks/mutate_guard.py", "hooks/guard.py"):
+            self.assertFlags(run([p]), want_true=["guard"])
+
+    # Review finding on #305: the guard suite reads these two paths, but the rules did not set `guard`,
+    # so after cut F a pull request touching them ran the guard suite in no job (false green).
+    def test_a_new_file_under_a_landed_dir_turns_on_the_guard_suite(self):
+        self.assertFlags(run(["lint/zz_new.py"]), want_true=["guard"])
+
+    def test_the_janitor_launcher_turns_on_the_guard_suite(self):
+        self.assertFlags(run(["bin/claude-janitor"]), want_true=["guard"])
+
+    # Control: a docs-only path must keep `guard` off, or the new rules over-trigger (false red).
+    def test_a_docs_only_path_keeps_the_guard_flag_off(self):
+        for p in ("README.md", "decisions/some-record.md"):
+            self.assertFlags(run([p]), want_false=["guard"])
+
 
 if __name__ == "__main__":
     unittest.main()

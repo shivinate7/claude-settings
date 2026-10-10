@@ -73,7 +73,9 @@ matrix changes.
 
 ```yaml
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # A main, nightly or manual run gets its own group: GitHub keeps one pending run per group and
+  # replaces it even with cancel-in-progress false, so a shared group can drop a merge's verdict.
+  group: ${{ github.workflow }}-${{ (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.run_id || github.ref }}
   cancel-in-progress: ${{ github.ref != format('refs/heads/{0}', github.event.repository.default_branch) && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}   # never cancel a main, nightly or manual run
 ```
 
