@@ -3909,6 +3909,81 @@ for _name, _change in AUTHOR_GREEN:
         cwd=_repo, agent_id="auth1", agent_type="test-author")
 
 
+# ---- record-writer: Markdown only (owner ruling 2026-10-10). Writing prose and records is not
+# building, so a Haiku record-writer may change `*.md` files and nothing else. The limit is the
+# point: without it the role is a Haiku builder under a new label. Failure classes: false allow (a
+# non-.md path slips through) and false deny (an .md path is blocked).
+RW = dict(agent_id="rw1", agent_type="record-writer", cwd=NOGIT)
+RW_RULE = "record-writer-scope"
+for _tool in ("Edit", "Write"):
+    for _path in ("docs/x.md", "decisions/y.md", "README.md", "README.MD"):
+        add("record-writer: %s of %s is allowed" % (_tool, _path), "allow", tool=_tool,
+            file_path=_path, new_string="x", **RW)
+    for _path in ("hooks/guard.py", "lint/x.json", ".github/workflows/gates.yml",
+                  "hooks/test_guard.py", "settings.json", "notes.md.py"):
+        add("record-writer: %s of %s is refused" % (_tool, _path), "deny", rule=RW_RULE,
+            carries=("Markdown", "Report"), tool=_tool, file_path=_path, new_string="x", **RW)
+
+# The diff, judged at commit, push and stop. A non-.md path logs `writer-diff` (never blocks);
+# an all-.md diff logs nothing.
+RW_RED = (
+    ("product-edit", _put("src/app.py", "x = 2\n")),
+    ("test-new", _put("tests/test_new.py", "pass\n")),
+    ("config-new", _put("lint/x.json", "{}\n")),
+)
+RW_GREEN = (
+    ("markdown-only", lambda w: (write(os.path.join(w, "latest_results.md"), "better\n"),
+                                 write(os.path.join(w, "docs/new.md"), "# new\n"),
+                                 write(os.path.join(w, "decisions/y.md"), "# y\n"))),
+)
+for _name, _change in RW_RED:
+    _repo = diff_repo("rw-" + _name, _change)
+    sh("record-writer-diff: commit with a %s change is allowed" % _name, COMMIT, "allow",
+       cwd=_repo, agent_id="rw1", agent_type="record-writer")
+    sh("record-writer-diff: push with a %s change is allowed" % _name, PUSH, "allow",
+       cwd=_repo, agent_id="rw1", agent_type="record-writer")
+    add("record-writer-diff: stop with a %s change is allowed" % _name, "allow",
+        event="SubagentStop", cwd=_repo, agent_id="rw1", agent_type="record-writer")
+for _name, _change in RW_GREEN:
+    _repo = diff_repo("rw-" + _name, _change)
+    sh("record-writer-diff: commit with an all-.md change is allowed", COMMIT, "allow",
+       cwd=_repo, agent_id="rw1", agent_type="record-writer", silent=True)
+    sh("record-writer-diff: push with an all-.md change is allowed", PUSH, "allow",
+       cwd=_repo, agent_id="rw1", agent_type="record-writer", silent=True)
+    add("record-writer-diff: stop with an all-.md change is allowed", "allow",
+        event="SubagentStop", cwd=_repo, agent_id="rw1", agent_type="record-writer", silent=True)
+
+
+def rw_diff_logs_case():
+    """A record-writer's non-.md diff is logged once each at commit, push and stop, and never
+    blocks."""
+    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-rw-product"),
+                              os.path.join(DIFFROOT, "rw-product-edit"), "record-writer", "rw1")
+    problems = []
+    if out:
+        problems.append("expected silent allows, got %r" % out[:60])
+    hits = [r for r in rows if len(r) == 5 and r[2] == "noted" and r[3] == "writer-diff"]
+    if len(hits) != 3:
+        problems.append("expected 3 noted/writer-diff lines, found %d" % len(hits))
+    return (not problems), ("; ".join(problems) or "non-.md diff logged at commit, push and stop")
+
+
+def rw_markdown_logs_case():
+    """A record-writer's all-.md diff logs no writer-diff line at commit, push or stop."""
+    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-rw-markdown"),
+                              os.path.join(DIFFROOT, "rw-markdown-only"), "record-writer", "rw1")
+    rows = [r for r in rows if len(r) > 3 and r[3] == "writer-diff"]
+    if out or rows:
+        return False, "an all-.md diff was judged: %r %r" % (out[:60], rows)
+    return True, "an all-.md diff logs no writer-diff line"
+
+
+LOG_CHECKS_EXTRA.append(("record-writer-diff: a non-.md diff is logged at commit, push and stop",
+                         rw_diff_logs_case))
+LOG_CHECKS_EXTRA.append(("record-writer-diff: an all-.md diff logs no writer-diff line",
+                         rw_markdown_logs_case))
+
+
 # =========================================================================== failing open
 
 add("open: a payload with no command", "allow", tool="Bash", cwd=NOGIT)
@@ -4423,7 +4498,7 @@ add("floor: Task with no model is allowed", "allow", tool="Task", prompt="x")
 # ---- Rule 9, Haiku roles (owner ruling 2026-10-07). Haiku is allowed only for Explore,
 # claude-code-guide, test-author and reviewer. Failure classes: false deny (a listed role blocked),
 # false allow (a non-listed role, a near-miss name, or a missing role slips through).
-HAIKU_ROLES = ("Explore", "claude-code-guide", "test-author", "reviewer")
+HAIKU_ROLES = ("Explore", "claude-code-guide", "test-author", "reviewer", "record-writer")
 HAIKU_MODELS = ("haiku", "claude-haiku-5-5")
 for _tool in ("Agent", "Task"):
     for _role in HAIKU_ROLES:
@@ -4441,6 +4516,15 @@ add("floor: Agent with a list role and haiku is denied", "deny", "subagent-model
     tool="Agent", prompt="do it", model="haiku", subagent_type=["reviewer"])
 add("floor: Agent builder with model sonnet is still allowed", "allow",
     tool="Agent", prompt="x", model="sonnet", subagent_type="builder")
+# record-writer (owner ruling 2026-10-10): Haiku is allowed only for the exact role name. A
+# near-miss name is another role, so it is denied, the same as `reviewer-lite` above.
+for _tool in ("Agent", "Task"):
+    for _near in ("record-writers", "Record-Writer", "record_writer", "record-writer "):
+        add("floor: %s %r with model haiku is denied" % (_tool, _near), "deny",
+            "subagent-model-floor", tool=_tool, prompt="do it", model="haiku",
+            subagent_type=_near)
+add("floor: Agent record-writer with model sonnet is still allowed", "allow",
+    tool="Agent", prompt="x", model="sonnet", subagent_type="record-writer")
 
 
 def _flow(model, role=None):
@@ -4460,6 +4544,12 @@ add("floor: Workflow agent with a mixed-case haiku and no agentType is denied", 
 add("floor: Workflow with one listed and one unlisted haiku agent is denied", "deny",
     "subagent-model-floor", tool="Workflow",
     script=_flow("haiku", "reviewer") + "\n" + _flow("haiku", "builder"))
+for _near in ("record-writers", "Record-Writer"):
+    add("floor: Workflow agent %r on haiku is denied" % _near, "deny", "subagent-model-floor",
+        tool="Workflow", script=_flow("haiku", _near))
+add("floor: Workflow record-writer on haiku with a sonnet builder beside it is denied", "deny",
+    "subagent-model-floor", tool="Workflow",
+    script=_flow("haiku", "record-writer") + "\n" + _flow("haiku", "builder"))
 add("floor: Workflow agent on sonnet with no agentType is allowed", "allow",
     tool="Workflow", script=_flow("sonnet"))
 add("floor: start_session naming haiku is denied", "deny", "subagent-model-floor",
