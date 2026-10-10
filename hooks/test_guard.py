@@ -4681,6 +4681,26 @@ add("floor: Workflow prompt text naming a haiku model on a sonnet agent is allow
 add("floor: Workflow commented-out haiku agent call is allowed", "allow",
     tool="Workflow", script="// agent({model:\"haiku\"})\nawait agent(\"x\", {model:\"sonnet\"})")
 
+# ---- Rule 9, template literals. Code inside a `${...}` is code: a quote there opens no string, and
+# a haiku named in a template's own text is no model. Each expected deny lists a haiku spawn that
+# a desynced scan would hide.
+add("floor: Workflow haiku after a quote inside a template interpolation is denied", "deny",
+    "subagent-model-floor", tool="Workflow",
+    script=r"""x = `${"`"}`;
+x = 'a\"';
+agent({model: `haiku`});""")
+for _shape in (
+        r'agent(`fix ${x ? "a" : "b"}`, {model: "haiku"})',
+        'const q = `a ${`b ${c}`} d`;\nagent({prompt: q, model: "haiku"})',
+        r'agent(`p ${obj["k"]}`, {model: "haiku"})',
+        r'agent(`p ${ {a:1}.a }`, {model: "haiku"})'):
+    add("floor: Workflow haiku after template shape %r is denied" % _shape[:40], "deny",
+        "subagent-model-floor", tool="Workflow", script=_shape)
+add("floor: Workflow haiku named only in template text is not a model", "allow",
+    tool="Workflow", script='agent(`set {model: "haiku"} in the file`, {model: "sonnet"})')
+add("floor: Workflow agent call written inside template text is not a spawn", "allow",
+    tool="Workflow", script='agent(`agent({model: "haiku"})`, {model: "sonnet"})')
+
 FORBIDDEN_IN_A_REASON = (ENV, ROOT, slash(ROOT), "settings.json", "CLAUDE.md", "guard.py",
                          ".claude", "app.log", "sleep", "haiku", VCS + " checkout", VCS + " switch")
 
@@ -5483,10 +5503,10 @@ LOG_CHECKS = (
 
 # =========================================================================== mask_script lexemes
 
-# The string branch of guard.py's SCRIPT_LEXEME can take each backslash after an unclosed quote as
-# one `.` or as half of a `\\.` pair, so the paths grow like Fibonacci. Measured on the unfixed
-# guard: 30 backslashes 0.1 s, 38 about 4.9 s, 40 about 12.9 s. The child gets a 1 s limit, so a
-# slow regex fails its case and never blocks the suite.
+# The timing cases guard mask_script. Its earlier regex form could take each backslash after an
+# unclosed quote as one `.` or as half of a `\\.` pair, so the paths grew like Fibonacci. Measured
+# on that form: 30 backslashes 0.1 s, 38 about 4.9 s, 40 about 12.9 s. The child gets a 1 s limit,
+# so a slow scan fails its case and never blocks the suite.
 MASK_HANG_BACKSLASHES = 40
 MASK_HANG_LIMIT_S = 1
 MASK_PIN_LIMIT_S = 10
