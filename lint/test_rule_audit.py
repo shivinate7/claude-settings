@@ -444,9 +444,9 @@ class CitationTests(unittest.TestCase):
         self.assertIn("could not be read", problem)
 
     def test_mjs_top_level_busy_loop_says_names_could_not_be_read(self):
-        # rule_audit has no timeout constant (10 s is inline), so this case waits the full 10 s.
-        problem = self.problem(NODE_TEST + 'test("it works", () => {});\nwhile (true) {}\n',
-                               "it works", "t.mjs")
+        with mock.patch.object(rule_audit, "NODE_LIST_TIMEOUT", 1):
+            problem = self.problem(NODE_TEST + 'test("it works", () => {});\nwhile (true) {}\n',
+                                   "it works", "t.mjs")
         self.assertIsNotNone(problem)
         self.assertIn("could not be read", problem)
 
