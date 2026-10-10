@@ -27,7 +27,7 @@ Reproduction, before the fix:
 printf '{"cwd":"/Users/shivinate/Developer/pkmnscan"}' | sh hooks/session_start.sh
 ```
 
-This printed a divergence line for `pkmnscan`, a repository with its own
+This printed a divergence line for `banchi`, a repository with its own
 `CLAUDE.md` and no relation to claude-settings. The check read the file
 content. It never read the identity of the tree that held it.
 

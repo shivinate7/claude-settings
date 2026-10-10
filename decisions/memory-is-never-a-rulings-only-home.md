@@ -40,7 +40,7 @@ The owner ran `lint/ruling_census.py` on the machine that holds the transcripts.
 | Reach: not found | 762 |
 | Reach: unknown | 1,175 |
 
-The largest project is the old iCloud pkmnscan path: 52 sessions, 379 answers and 58
+The largest project is the old iCloud `pkmnscan` path: 52 sessions, 379 answers and 58
 "ruling" lines.
 
 What the numbers show:

@@ -4,7 +4,7 @@
 branch of a different name on that remote. HEAD pushes under the local branch's own name. The
 push makes a stray branch on the remote, reports success, and leaves the tracked branch
 untouched. Banchi measured this incident and recorded it in `scripts/guard-shell.py` in
-pkmnscan, in the push clause, dated 2026-09-12.
+banchi, in the push clause, dated 2026-09-12.
 
 **Why it waits.** Banchi's own copy of the rule was overridden with its hatch 4 times since
 2026-09-29. Unmeasured: how many of the 4 were false alarms and how many were real intent. The

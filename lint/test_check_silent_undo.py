@@ -3,7 +3,7 @@
 
 Every case builds a throwaway repo with a local `origin` and asks the check for a verdict.
 Red cases come from two real incidents: a squash that carried the pre-deletion copy of a file
-(pkmnscan, a revert nobody wrote), and a merge that dropped a parent's added line (q_max).
+(banchi, a revert nobody wrote), and a merge that dropped a parent's added line (q_max).
 """
 import contextlib, io, os, subprocess, sys, tempfile, unittest
 
@@ -106,7 +106,7 @@ class Red(unittest.TestCase):
         self.assertEqual(r.notes, ["ALLOWED app.txt: the owner wants Card back"])
 
     def test_stale_branch_keep_ours_merge(self):
-        """pkmnscan shape: cut before the PR, merge main keeping ours, land: the old file returns."""
+        """banchi shape: cut before the PR, merge main keeping ours, land: the old file returns."""
         r = self.r
         r.sh("checkout", "-q", "-b", "stale")
         r.sh("checkout", "-q", "main")
@@ -175,7 +175,7 @@ BLOCK = "alpha one\nbeta two\ngamma three\ndelta four\nepsilon five\nzeta six\n"
 
 
 class Debt19(unittest.TestCase):
-    """The three shapes that walked past the pkmnscan revert guard: age, re-wording, a widened hunk."""
+    """The three shapes that walked past the banchi revert guard: age, re-wording, a widened hunk."""
 
     def setUp(self):
         r = self.r = Repo()

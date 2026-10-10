@@ -217,7 +217,7 @@ repository-specific tier and runs the generic sweep first.
 It does not change what the sweep refuses to reap. It widens what the sweep can
 prove redundant. Any new refusal is a decision to raise, not one to make.
 
-It does not touch `~/Developer/pkmnscan`. Removing that repository's own tier 2
+It does not touch `~/Developer/banchi`. Removing that repository's own tier 2
 is a later step, and the owner names it.
 
 It does not port the process tier, and it does not port the service teardown.

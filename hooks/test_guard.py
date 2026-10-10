@@ -1982,7 +1982,7 @@ sh("stream: tail -f inside a loop's do-block denies unchanged",
 
 # =========================================================================== 2c. shell traps
 #
-# Three traps ported from pkmnscan's `scripts/guard-shell.py`. Each has a red case, an allowed case,
+# Three traps ported from banchi's `scripts/guard-shell.py`. Each has a red case, an allowed case,
 # and two false-alarm cases: a command that reads like the trap and is not it. Each is judged on the
 # act (the command word, the flags, what the path or the branch resolves to), never on a substring.
 
