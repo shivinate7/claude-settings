@@ -5125,12 +5125,14 @@ def mask_script(script: str):
     """Drop comments and replace each string literal with a \\x00N\\x00 token. Return (text, strings).
     One pass, linear. A backslash escapes the next character, so an escaped quote never closes a
     string. An unclosed opener stays as code. Once a scan for a closer fails, no later one can
-    succeed, so a failed closer is remembered. A template's text parts become tokens and the code
-    in each `${...}` stays visible between them. A `{` or `}` in that code moves a depth counter,
-    and the `}` at depth 0 resumes the template text. A template never closed by the end of the
-    script is undone and its backtick stays as code."""
+    succeed, so a failed closer is remembered. A template becomes one token that holds its raw
+    source, filled in at the closing backtick. The code in each `${...}` stays visible after the
+    token, in parentheses. A `{` or `}` in that code moves a depth counter, and the `}` at depth 0
+    resumes the template text. A template never closed by the end of the script is undone and its
+    backtick stays as code."""
     out, strings, dead = [], [], set()
     stack = []  # brace depth inside each open `${`
+    tstack = []  # (strings index, source start) of each open template
     mark = None  # (out length, strings length, index) where the outermost open template began
     i, n = 0, len(script)
 
@@ -5138,25 +5140,26 @@ def mask_script(script: str):
         """Mask template text from j. Return the index after the closing backtick, or after the
         `${` that opens code, or -1 when the script ends first."""
         nonlocal mark
-        m = SCRIPT_TEMPLATE_TEXT.match(script, j)
-        strings.append(m.group(1))
-        out.append("\x00%d\x00" % (len(strings) - 1))
-        k = m.end()
+        k = SCRIPT_TEMPLATE_TEXT.match(script, j).end()
         if script.startswith("${", k):
             stack.append(0)
+            out.append("(")
             return k + 2
         if script.startswith("`", k):
-            if not stack:
+            idx, start = tstack.pop()
+            strings[idx] = script[start:k]
+            if not tstack:
                 mark = None
             return k + 1
         return -1
 
     while True:
-        if i < 0 or (i >= n and stack):  # a template never closed: undo it, keep its backtick
+        if i < 0 or (i >= n and tstack):  # a template never closed: undo it, keep its backtick
             del out[mark[0]:], strings[mark[1]:]
             out.append("`")
             i, mark = mark[2] + 1, None
             stack.clear()
+            tstack.clear()
             dead.add("`")
         if i >= n:
             break
@@ -5185,8 +5188,11 @@ def mask_script(script: str):
                 out.append("\x00%d\x00" % (len(strings) - 1))
                 i = m.end()
         elif ch == "`" and "`" not in dead:
-            if not stack:
+            if not tstack:
                 mark = (len(out), len(strings), i)
+            tstack.append((len(strings), i + 1))
+            strings.append(None)
+            out.append("\x00%d\x00" % (len(strings) - 1))
             i = text(i + 1)
         elif stack and ch == "{":
             stack[-1] += 1
@@ -5199,6 +5205,7 @@ def mask_script(script: str):
                 i += 1
             else:
                 stack.pop()
+                out.append(")")
                 i = text(i + 1)
         else:
             out.append(ch)
