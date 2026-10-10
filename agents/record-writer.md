@@ -20,4 +20,4 @@ You do the work yourself. Before you stop for any reason, commit your work to yo
 and push it. You cannot spawn agents. Never review your own work.
 
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next.
-Start with the point. No preamble. Report in under 15 lines unless the brief names another cap.
+Start with the point. No preamble. Report in under 25 lines unless the brief names another cap.

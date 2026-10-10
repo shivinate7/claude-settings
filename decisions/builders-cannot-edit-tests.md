@@ -67,9 +67,12 @@ started with `--agent builder` (no `agent_id`) stay allowed.
   holds a test path. The write tool denies it.
 - `test-author` (diff rule `author-diff`, write rule `test-author-scope`,
   `agents/test-author.md`): the inverse. Logged when the diff holds anything but a test path, test config, or a dev dependency list.
+- `record-writer` (diff rule `writer-diff`, write rule `record-writer-scope`,
+  `agents/record-writer.md`): logged when the diff holds anything but a `.md` file. The write tool
+  denies it. The model ruling is in subagent-model-cap.
 
-Both write refusals name no path. They say: report the needed change, and the orchestrator assigns it
-to the other role (rule git-remedy-never-names-target).
+Each write refusal name no path. They say: report the needed change, and the orchestrator assigns it
+to another role (rule git-remedy-never-names-target).
 
 ## Test path
 

@@ -11,11 +11,11 @@ roles the owner named. Opus runs only for Plan, the advisor, and a spawn the own
 `CLAUDE_CODE_SUBAGENT_MODEL: sonnet` stays as the fallback. The settings-write ask and the
 expiry both stay, because both key on the model variable and never on the force flag.
 
-## The model per role, ruled 2026-10-07
+## The model per role, ruled 2026-10-07 and 2026-10-10
 
 The owner ruled each point in one interview. The reason: Haiku is cheap enough for
-read-only work, tests and review, and the owner will measure cost and quality. Owner ruling
-2026-10-10: writing prose and records is not building, so `record-writer` also runs Haiku.
+read-only work, tests, review and record-writing, and the owner will measure cost and quality.
+Writing prose and records is not building.
 
 | Point | Model | Effort |
 |---|---|---|
@@ -84,7 +84,8 @@ changes product code, tests, CI or config. The risk: a role name is only a label
 With no path limit, a Haiku `record-writer` is a Haiku builder under a new name, and the floor
 above means nothing. The guard enforces the limit at the same points as the builder and
 test-author limits (builders-cannot-edit-tests). A write tool call to a non-`.md` path is denied
-as `record-writer-scope`. A non-`.md` path in its diff at commit, push or stop logs `writer-diff`.
+as `record-writer-scope`, by the path as given. A non-`.md` path in its diff at commit, push or
+stop logs `writer-diff`; that also catches a `.md` link to another file.
 
 Known limit: `agents/*.md`, `skills/*/SKILL.md` and output styles are `.md` but steer behaviour.
 The ruling names CLAUDE.md-style docs, so they stay in scope. `lint/check_agent_models.py` still

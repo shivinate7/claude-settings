@@ -1171,7 +1171,7 @@ MUTATIONS = [
     # Builders do not edit tests, test-authors edit only tests. Each mutant breaks one clause; the
     # named case must go red.
     ("role-diff: every caller reads as no role",
-     '    role = role.strip().lower()\n    return role if role in (BUILDER_ROLE, AUTHOR_ROLE) else ""',
+     '    role = role.strip().lower()\n    return role if role in (BUILDER_ROLE, AUTHOR_ROLE, WRITER_ROLE) else ""',
      '    return ""', "guard", "builder-diff: the diff check logs for the reviewer and never blocks"),
     ("role-diff: SubagentStop is never judged",
      '    if payload.get("hook_event_name") == "SubagentStop":\n        judge_stop(payload)',
