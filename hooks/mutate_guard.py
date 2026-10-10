@@ -1053,6 +1053,10 @@ MUTATIONS = [
      '    for target in targets:\n        # 0b.',
      '    for target in targets[:1]:\n        # 0b.',
      "guard", "gap-control: NotebookEdit main session, an ordinary file_path beside notebook_path"),
+    ("settings-cap ask loop judges only the first path field",
+     '    for target in targets:\n        # 8. The subagent model cap.',
+     '    for target in targets[:1]:\n        # 8. The subagent model cap.',
+     "guard", "gap: NotebookEdit, settings cap in notebook_path beside file_path=docs/x.ipynb still asks"),
 
     # ---- the three git acts: context for a write, the merge gate, and cite by id. Each mutant breaks
     # one arm of one clause, and the required case is the one that must read that break.
