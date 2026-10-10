@@ -409,7 +409,7 @@ class CitationTests(unittest.TestCase):
 
     def test_mjs_division_then_quote_in_comment_hides_no_registration(self):
         self.assertIn("registers no test", self.problem(
-            NODE_TEST + "const half = total / 2 / 3;\n/* don't\ntest(\"commented\", () => {});\n*/\n",
+            NODE_TEST + "const total = 6;\nconst half = total / 2 / 3;\n/* don't\ntest(\"commented\", () => {});\n*/\n",
             "commented", "t.mjs") or "<None>")
 
     def test_mjs_without_node_on_path_says_names_could_not_be_read(self):
