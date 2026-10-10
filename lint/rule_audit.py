@@ -31,9 +31,12 @@ THE MAP. lint/rule_mechanisms.json holds one row per anchor. A row's mechanism i
         literal first argument to `add(`, `sh(` or `check(` in code that runs. All of that is
         read from the AST. "Runs" is static: module-level code and the bodies of functions it
         names; a form that cannot be proved so is refused. The test file must also be the
-        row's `ref`, or import it, or pass its file name to a call (`link_problem`). A `.mjs` id must name a top-level
-        `test("name", ...)` registration; no JavaScript parser ships here, so that one is a
-        line-anchored pattern on the registry key. That is a bandaid, named.
+        row's `ref`, or import it, or pass its file name to a call (`link_problem`). A `.mjs` id must be a name the file registers, read from Node and never
+        scanned: a file containing `node:test` runs under a stub that swaps `node:test` for a `test(n)`
+        that prints n (an import of any other export fails the check); a file containing `LIST_TESTS`
+        runs with LIST_TESTS=1 and prints one name per line; any other file is refused. Node missing,
+        a non-zero exit, or 10 s without an exit means the names could not be read, and never passes.
+        CI still runs the tests.
       - `setting`: `{"file": "settings.json", "path": "env.NAME", "equals": "v"}` or
         `"contains": "v"`. The value is read from the parsed JSON, never the name. `[*]` in a
         path fans out over a list.
@@ -65,9 +68,14 @@ import ast
 import json
 import os
 import re
+import subprocess
 import sys
 from typing import Dict, List
 
+# Stub for node:test: `test(n)` prints n and runs nothing. A file that imports another export fails.
+NODE_TEST_STUB = ('data:text/javascript,import{registerHooks}from"node:module";registerHooks({load(u,c,n){'
+                  'if(u==="node:test")return{format:"module",source:"export function test(n){console.log(n)}",'
+                  'shortCircuit:true};return n(u,c)}})')
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Paths relative to the repo root, so a fixture test reads the same list under its own root.
 RULE_FILES = ["CLAUDE.md", os.path.join("output-styles", "shiv-stylisms.md")]
@@ -185,13 +193,20 @@ def citation_problem(test_id: str, root: str = ROOT):
         return f"test file `{path}` does not exist."
     text = read(full)
     if path.endswith(".mjs"):
-        # One pass: comments and template literals blank out; "..." and '...' stay, so a comment
-        # marker inside a string opens nothing (building-scanner-respects-strings).
-        bare = re.sub(r"//[^\n]*|/\*.*?\*/"
-                      r"|(?<![\w$)\]])/(?![/*])(?:\\.|\[(?:\\.|[^\]\\\n])*\]|[^/\\\n\[])+/[a-z]*"
-                      r"|(?P<q>[\"'`])(?:\\.|(?!(?P=q))[^\\])*(?P=q)",
-                      lambda m: m.group(0) if m.group("q") in ("'", '"') else "", text, flags=re.DOTALL)
-        if re.search(r'^test\(\s*"' + re.escape(name) + r'"\s*,', bare, re.MULTILINE):
+        if "node:test" in text:
+            cmd, env = ["node", "--import", NODE_TEST_STUB, full], None
+        elif "LIST_TESTS" in text:
+            cmd, env = ["node", full], {**os.environ, "LIST_TESTS": "1"}
+        else:
+            return f"`{path}` has no known way to list its tests."
+        try:
+            run = subprocess.run(cmd, env=env, cwd=os.path.dirname(full), capture_output=True,
+                                 text=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return f"names in `{path}` could not be read: {e}."
+        if run.returncode:
+            return f"names in `{path}` could not be read: node exited {run.returncode}: {run.stderr.strip()[:200]}"
+        if name in run.stdout.splitlines():
             return None
         return f"`{path}` registers no test named {name!r}."
     if not path.endswith(".py"):
