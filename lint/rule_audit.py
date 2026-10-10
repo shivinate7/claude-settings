@@ -187,7 +187,9 @@ def citation_problem(test_id: str, root: str = ROOT):
     if path.endswith(".mjs"):
         # One pass: comments and template literals blank out; "..." and '...' stay, so a comment
         # marker inside a string opens nothing (building-scanner-respects-strings).
-        bare = re.sub(r"//[^\n]*|/\*.*?\*/|(?P<q>[\"'`])(?:\\.|(?!(?P=q)).)*(?P=q)",
+        bare = re.sub(r"//[^\n]*|/\*.*?\*/"
+                      r"|(?<![\w$)\]])/(?![/*])(?:\\.|\[(?:\\.|[^\]\\\n])*\]|[^/\\\n\[])+/[a-z]*"
+                      r"|(?P<q>[\"'`])(?:\\.|(?!(?P=q))[^\\])*(?P=q)",
                       lambda m: m.group(0) if m.group("q") in ("'", '"') else "", text, flags=re.DOTALL)
         if re.search(r'^test\(\s*"' + re.escape(name) + r'"\s*,', bare, re.MULTILINE):
             return None
