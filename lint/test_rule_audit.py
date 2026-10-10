@@ -13,9 +13,18 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rule_audit  # noqa: E402
+
+# .mjs fixtures must be listable: form 1 names node:test, form 2 names LIST_TESTS (see rule_audit).
+NODE_TEST = 'import { test } from "node:test";\n'
+
+
+def list_tests_form(body):
+    return ('const tests = [];\nconst test = (name, fn) => tests.push({ name, fn });\n' + body
+            + 'if (process.env.LIST_TESTS === "1") { for (const { name } of tests) console.log("LISTED " + JSON.stringify(name)); process.exit(0); }\n')
 
 GUARD_SRC = '''
 def dispatch():
@@ -309,8 +318,8 @@ class CitationTests(unittest.TestCase):
         self.assertIn("no test", self.problem('# sh("a case name", "ls", "allow")\n', "a case name"))
 
     def test_mjs_registration_resolves_and_a_comment_is_red(self):
-        self.assertIsNone(self.problem('test("it works", () => {});\n', "it works", "t.mjs"))
-        self.assertIn("registers no test", self.problem('// test("it works", () => {});\n',
+        self.assertIsNone(self.problem(NODE_TEST + 'test("it works", () => {});\n', "it works", "t.mjs"))
+        self.assertIn("registers no test", self.problem(NODE_TEST + '// test("it works", () => {});\n',
                                                         "it works", "t.mjs"))
 
     def test_skipped_method_is_red(self):
@@ -359,11 +368,91 @@ class CitationTests(unittest.TestCase):
 
     def test_mjs_block_comment_and_template_literal_are_red(self):
         self.assertIn("registers no test", self.problem(
-            '/*\ntest("it works", () => {});\n*/\n', "it works", "t.mjs"))
+            NODE_TEST + '/*\ntest("it works", () => {});\n*/\n', "it works", "t.mjs"))
         self.assertIn("registers no test", self.problem(
-            'const s = `\ntest("it works", () => {});\n`;\n', "it works", "t.mjs"))
+            NODE_TEST + 'const s = `\ntest("it works", () => {});\n`;\n', "it works", "t.mjs"))
         self.assertIsNone(self.problem(
-            '/* note */\ntest("it works", () => {});\n', "it works", "t.mjs"))
+            NODE_TEST + '/* note */\ntest("it works", () => {});\n', "it works", "t.mjs"))
+
+    def test_mjs_comment_marker_inside_string_hides_no_registration(self):
+        self.assertIsNone(self.problem(
+            NODE_TEST + 'const a = "image/*";\ntest("it works", () => {});\nconst b = "*/";\n', "it works", "t.mjs"))
+        self.assertIsNone(self.problem(
+            NODE_TEST + "const a = 'image/*';\ntest(\"it works\", () => {});\nconst b = '*/';\n", "it works", "t.mjs"))
+        self.assertIsNone(self.problem(
+            NODE_TEST + 'const u = "http://x";\ntest("it works", () => {});\n', "it works", "t.mjs"))
+
+    def test_mjs_regex_literal_quote_hides_no_registration(self):
+        self.assertIn("registers no test", self.problem(
+            list_tests_form("const re = /'/;\n/* don't\ntest(\"commented\", () => {});\n*/\n"),
+            "commented", "t.mjs") or "<None>")
+
+    def test_mjs_regex_with_escaped_slashes_hides_no_registration(self):
+        self.assertIn("registers no test", self.problem(
+            list_tests_form('const re = /a\\/\\/b/;\n// test("commented", () => {});\n'), "commented", "t.mjs") or "<None>")
+        self.assertIn("registers no test", self.problem(
+            list_tests_form('const re = /a\\/\\/b/;\n/*\ntest("commented", () => {});\n*/\n'), "commented", "t.mjs") or "<None>")
+
+    def test_mjs_regex_quote_before_real_registration_is_green(self):
+        self.assertIsNone(self.problem(
+            NODE_TEST + 'const re = /"/;\ntest("it works", () => {});\n', "it works", "t.mjs"))
+
+    def test_mjs_registration_in_loop_resolves(self):
+        self.assertIsNone(self.problem(
+            NODE_TEST + 'for (let i = 0; i < 2; i++) {\n  test("it works", () => {});\n}\n', "it works", "t.mjs"))
+
+    def test_mjs_registration_in_comment_or_template_does_not_resolve(self):
+        self.assertIn("registers no test", self.problem(
+            NODE_TEST + '/*\ntest("it works", () => {});\n*/\n', "it works", "t.mjs") or "<None>")
+        self.assertIn("registers no test", self.problem(
+            NODE_TEST + 'const s = `\ntest("it works", () => {});\n`;\n', "it works", "t.mjs") or "<None>")
+
+    def test_mjs_division_then_quote_in_comment_hides_no_registration(self):
+        self.assertIn("registers no test", self.problem(
+            NODE_TEST + "const total = 6;\nconst half = total / 2 / 3;\n/* don't\ntest(\"commented\", () => {});\n*/\n",
+            "commented", "t.mjs") or "<None>")
+
+    def test_mjs_without_node_on_path_says_names_could_not_be_read(self):
+        with tempfile.TemporaryDirectory() as empty_path:
+            with mock.patch.dict(os.environ, {"PATH": empty_path}):
+                problem = self.problem(NODE_TEST + 'test("it works", () => {});\n', "it works", "t.mjs")
+        self.assertIsNotNone(problem)
+        self.assertIn("could not be read", problem)
+
+    def test_mjs_form_two_registration_resolves(self):
+        self.assertIsNone(self.problem(
+            list_tests_form('test("it works", () => {});\n'), "it works", "t.mjs"))
+
+    def test_mjs_bare_stdout_line_is_not_a_listed_name(self):
+        # P1: a top-level console.log of the name is output, not a registration.
+        self.assertIn("registers no test", self.problem(
+            NODE_TEST + 'console.log("it works");\n', "it works", "t.mjs") or "<None>")
+        self.assertIn("registers no test", self.problem(
+            list_tests_form('console.log("it works");\n'), "it works", "t.mjs") or "<None>")
+
+    def test_mjs_name_with_newline_does_not_match_one_of_its_lines(self):
+        # P2: test("a\nb") registers one name, "a\nb"; citing "a" must not pass.
+        self.assertIn("registers no test", self.problem(
+            NODE_TEST + 'test("a\\nb", () => {});\n', "a", "t.mjs") or "<None>")
+        self.assertIn("registers no test", self.problem(
+            list_tests_form('test("a\\nb", () => {});\n'), "a", "t.mjs") or "<None>")
+
+    def test_mjs_nonzero_exit_says_names_could_not_be_read(self):
+        problem = self.problem(NODE_TEST + 'test("it works", () => {});\nthrow new Error("boom");\n',
+                               "it works", "t.mjs")
+        self.assertIsNotNone(problem)
+        self.assertIn("could not be read", problem)
+
+    def test_mjs_top_level_busy_loop_says_names_could_not_be_read(self):
+        with mock.patch.object(rule_audit, "NODE_LIST_TIMEOUT", 1):
+            problem = self.problem(NODE_TEST + 'test("it works", () => {});\nwhile (true) {}\n',
+                                   "it works", "t.mjs")
+        self.assertIsNotNone(problem)
+        self.assertIn("could not be read", problem)
+
+    def test_mjs_with_no_known_way_to_list_is_refused(self):
+        self.assertIn("no known way to list its tests", self.problem(
+            'test("it works", () => {});\n', "it works", "t.mjs") or "<None>")
 
     def test_test_file_that_never_touches_the_ref_is_red(self):
         with tempfile.TemporaryDirectory() as root:
