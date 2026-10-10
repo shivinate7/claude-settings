@@ -16,8 +16,11 @@ on:
 permissions:
   contents: read
 
+# A PR shares one group per ref, so a new push cancels the old run. Every other run gets its own
+# group: GitHub keeps one pending run per group and replaces it, even without cancel-in-progress,
+# so a shared group on main can leave a merged commit with no verdict.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
