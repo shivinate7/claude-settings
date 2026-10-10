@@ -5471,8 +5471,8 @@ def judge(payload) -> None:
     if tool not in WRITE_TOOLS:
         return
 
-    # Every non-empty string path field the call carries is judged, so a harmless decoy in one
-    # field hides nothing, and an ask on one field masks no deny on another: every deny (0b, 5, 7)
+    # Every non-empty string path field the call carries is judged, so a decoy in one field hides
+    # no denied path, and an ask on one field masks no deny on another: every deny (0b, 5, 7)
     # runs over all fields, then the 7b notes, then the 8 asks (decisions/builders-cannot-edit-tests.md,
     # "Judge the result").
     targets = write_targets(tool_input)
