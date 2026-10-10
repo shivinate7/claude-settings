@@ -1823,6 +1823,28 @@ sh("kill: taskkill by image name, no other flag", "taskkill /IM node.exe", "deny
 sh("kill: xargs unwraps to the real command it runs", "xargs pkill", "deny",
    "machine-wide-kill", cwd=NOGIT)
 
+# THE PLAYWRIGHT BROWSER CACHE. Owner ruling: a command that sets PLAYWRIGHT_BROWSERS_PATH is
+# refused, mechanically. INCIDENT 2026-10-10: a feed-build session pointed the variable at a scratch
+# directory to work around a missing chromium_headless_shell. The real cause was a stale `__dirlock`
+# in ~/Library/Caches/ms-playwright. The install sat 73 minutes, and the workaround hid the cause.
+sh("playwright: an inline assignment ahead of an install",
+   "PLAYWRIGHT_BROWSERS_PATH=/tmp/x npx playwright install chromium", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: an export ahead of a test run", "export PLAYWRIGHT_BROWSERS_PATH=/tmp/x; npm test",
+   "deny", "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: env names the variable for a test run",
+   "env PLAYWRIGHT_BROWSERS_PATH=/tmp/x npx playwright test", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: the PowerShell form sets it", '$env:PLAYWRIGHT_BROWSERS_PATH = "C:\\x"', "deny",
+   "playwright-browsers-path", tool="PowerShell", cwd=NOGIT)
+sh("playwright: the headless shell installs by its own name",
+   "npx playwright install chromium-headless-shell", "allow", cwd=NOGIT)
+sh("playwright: echo only reads the variable", "echo $PLAYWRIGHT_BROWSERS_PATH", "allow",
+   cwd=NOGIT)
+sh("playwright: grep only reads the name", "grep -r PLAYWRIGHT_BROWSERS_PATH .", "allow",
+   cwd=NOGIT)
+sh("playwright: unset clears the variable", "unset PLAYWRIGHT_BROWSERS_PATH", "allow", cwd=NOGIT)
+
 # THE PREDICATE IS THE ACT, NOT THE TOOL OR THE SPELLING. MEASURED: the owner ran
 # `grep -n -i "...|make reap|pkill..." CLAUDE.md` to search CLAUDE.md for the word, and it was
 # denied as a machine-wide kill, although the command calls grep. Each case below names the word
@@ -4694,6 +4716,28 @@ REASON_MAY_NAME = {
 }
 
 
+def playwright_remedy_case():
+    """The playwright refusal names the real check and points nowhere else.
+
+    The remedy must name the stale `__dirlock` and `pgrep -fl playwright`, the two checks that
+    find the real cause. It must not name the variable it refused, nor any path to set instead.
+    """
+    got, reason = decide({
+        "raw": None, "tool": "Bash", "cwd": NOGIT, "session": None,
+        "env_path": None,
+        "tool_input": {"command": "PLAYWRIGHT_BROWSERS_PATH=/tmp/x npx playwright install chromium"},
+    })
+    if got != "deny":
+        return False, "expected deny, got %s" % got
+    missing = [f for f in ("__dirlock", "pgrep -fl playwright") if f not in reason]
+    if missing:
+        return False, "the remedy does not name %r: %s" % (missing[0], reason[:90])
+    named = [f for f in ("PLAYWRIGHT_BROWSERS_PATH", "/tmp", "scratch", "C:\\") if f in reason]
+    if named:
+        return False, "the remedy names %r, a forbidden target or another path" % named[0]
+    return True, "refused, and the remedy names the stale __dirlock and pgrep -fl playwright"
+
+
 def powershell_backslash_case():
     """Under PowerShell a backslash is a path separator, so tokenizing keeps it. Under Bash it is
     an escape, so it goes. The same text reads two ways, and the tool decides which."""
@@ -5459,6 +5503,8 @@ LOG_CHECKS = (
     ("log: a branch delete with no resolvable base is allowed and noted",
      branch_base_unread_log_case),
     ("stack: the refusal never names the action it refused", stack_reason_hygiene_case),
+    ("playwright: the refusal names the stale __dirlock and pgrep, and no other path",
+     playwright_remedy_case),
     ("split_segments: a comment starting a word ends its line, "
      "letter-before-# and quoted-# stay literal", split_segments_comment_case),
     ("liveness: process_start_ms splits alive/dead/unreadable apart", process_start_ms_case),
