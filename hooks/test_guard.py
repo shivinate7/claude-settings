@@ -1844,6 +1844,40 @@ sh("playwright: echo only reads the variable", "echo $PLAYWRIGHT_BROWSERS_PATH",
 sh("playwright: grep only reads the name", "grep -r PLAYWRIGHT_BROWSERS_PATH .", "allow",
    cwd=NOGIT)
 sh("playwright: unset clears the variable", "unset PLAYWRIGHT_BROWSERS_PATH", "allow", cwd=NOGIT)
+# PR #314 review: bypasses, each allowed before the fix. Each one sets the variable.
+sh("playwright: builtin export sets it", "builtin export PLAYWRIGHT_BROWSERS_PATH=/x", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: bash -c sets it", 'bash -c "export PLAYWRIGHT_BROWSERS_PATH=/x"', "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: sh -c assigns it ahead of a test run",
+   "sh -c 'PLAYWRIGHT_BROWSERS_PATH=/x npx playwright test'", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: eval sets it", 'eval "export PLAYWRIGHT_BROWSERS_PATH=/x"', "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: a subshell assigns it ahead of a test run",
+   "(PLAYWRIGHT_BROWSERS_PATH=/x npx playwright test)", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: exec env names it", "exec env PLAYWRIGHT_BROWSERS_PATH=/x npx", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: cmd /c set sets it", "cmd /c set PLAYWRIGHT_BROWSERS_PATH=C:\\x", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: PowerShell braced env drive sets it",
+   '${env:PLAYWRIGHT_BROWSERS_PATH} = "C:\\x"', "deny", "playwright-browsers-path",
+   tool="PowerShell", cwd=NOGIT)
+sh("playwright: Set-Item on the env drive sets it", "Set-Item env:PLAYWRIGHT_BROWSERS_PATH C:\\x",
+   "deny", "playwright-browsers-path", tool="PowerShell", cwd=NOGIT)
+sh("playwright: SetEnvironmentVariable sets it",
+   '[Environment]::SetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH","C:\\x")', "deny",
+   "playwright-browsers-path", tool="PowerShell", cwd=NOGIT)
+sh("playwright: a shell rc file gets the export",
+   "echo 'export PLAYWRIGHT_BROWSERS_PATH=/x' >> ~/.zshrc", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: an envrc file gets the assignment",
+   "echo PLAYWRIGHT_BROWSERS_PATH=/x > .envrc", "deny", "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: a case-folded name still sets it", "playwright_browsers_path=/x npx", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: the bare PowerShell read is allowed", "$env:PLAYWRIGHT_BROWSERS_PATH", "allow",
+   tool="PowerShell", cwd=NOGIT)
 
 # THE PREDICATE IS THE ACT, NOT THE TOOL OR THE SPELLING. MEASURED: the owner ran
 # `grep -n -i "...|make reap|pkill..." CLAUDE.md` to search CLAUDE.md for the word, and it was
