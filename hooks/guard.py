@@ -61,7 +61,7 @@ one fixed order, and the first match wins.
                        Always asked, never denied.
   9 subagent-model-floor an `Agent` or legacy `Task` call, or a `Workflow` script `agent()` call,
                        whose `model` is a Haiku model, by alias or by any full id, unless the
-                       role (`subagent_type` or `agentType`) is in HAIKU_ROLES. A `start_session`
+                       role (`subagent_type` or `agentType`) is in HAIKU_ROLES (exact name, case-sensitive; includes `record-writer`). A `start_session`
                        naming a Haiku model is always denied. Sonnet is the floor otherwise
                        (owner ruling 2026-10-07). An agent file's own `model:` key never reaches
                        this rule, so lint/check_agent_models.py checks the files, from HAIKU_ROLES.
@@ -4666,6 +4666,8 @@ def cited_record_path(segment: str, raw: str, where: str) -> str:
 # The main session, a reviewer, an Explore agent, and a session started with `--agent builder` (no
 # `agent_id`; unmeasured, so it stays allowed) pass untouched. `test-author` is the inverse: it may
 # change ONLY test paths and test config, never product code (agents/test-author.md).
+# `record-writer` (owner ruling 2026-10-10) may change ONLY `*.md` files (case-insensitive
+# extension; agents/*.md and CLAUDE.md included), never anything else (agents/record-writer.md).
 #
 # A TEST PATH is read from the path's own parts, never from a substring: a basename shape
 # (`test_*.py`, `*_test.py`, `*_test.go`, `*.test.{ts,js,tsx,jsx}`, `*.spec.*`, `conftest.py`) or a
@@ -4678,6 +4680,7 @@ def cited_record_path(segment: str, raw: str, where: str) -> str:
 # The decisions: predicate-is-the-act, guard-that-cries-wolf-is-spent, builders-cannot-edit-tests.
 BUILDER_ROLE = "builder"
 AUTHOR_ROLE = "test-author"
+WRITER_ROLE = "record-writer"
 TEST_BASENAME = re.compile(
     r"^(?:test_.*\.py|.*_test\.(?:py|go)|.*\.test\.[cm]?[jt]sx?|.*\.spec\..+|conftest\.py"
     r"|jest\.setup\..+|(?:.*[-_]selftest|selftest_.*)\.(?!md$).+"
@@ -4735,15 +4738,19 @@ AUTHOR_SCOPE_REASON = (
     "A test-author changes only tests and test config. Report the needed product change in your "
     "report. The orchestrator assigns it to a builder."
 )
+WRITER_SCOPE_REASON = (
+    "A record-writer changes only Markdown (*.md) files. Report the needed change to any other "
+    "file in your report. The orchestrator assigns it to a builder."
+)
 
 
 def agent_role(payload) -> str:
-    """BUILDER_ROLE or AUTHOR_ROLE for a subagent of that type, else ''."""
+    """BUILDER_ROLE, AUTHOR_ROLE or WRITER_ROLE for a subagent of that type, else ''."""
     role = payload.get("agent_type")
     if not payload.get("agent_id") or not isinstance(role, str):
         return ""
     role = role.strip().lower()
-    return role if role in (BUILDER_ROLE, AUTHOR_ROLE) else ""
+    return role if role in (BUILDER_ROLE, AUTHOR_ROLE, WRITER_ROLE) else ""
 
 
 def is_test_rel(rel: str) -> bool:
@@ -4789,6 +4796,8 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str) -> str:
         return ""
     if role == AUTHOR_ROLE:
         return "" if author_path_ok(rel) else target
+    if role == WRITER_ROLE:
+        return "" if rel.lower().endswith(".md") else target
     if is_test_rel(rel):
         return target
     if is_test_config_rel(rel) and any(
@@ -4910,6 +4919,8 @@ def role_offences(root: str, top: str, base: str, role: str):
                 bad = not package_json_author_ok(base_text(root, base, rel), work_text(root, rel))
             if not bad and basename(rel) == "pyproject.toml":
                 bad = not pyproject_author_ok(base_text(root, base, rel), work_text(root, rel))
+        elif role == WRITER_ROLE:
+            bad = not all(n.lower().endswith(".md") for n in names)
         else:
             bad = any(is_test_rel(n) for n in names) or (
                 is_test_config_rel(rel) and disabling_added(root, base, rel))
@@ -4936,7 +4947,7 @@ def diff_violation(root: str, role: str):
 
 
 def diff_rule(role: str) -> str:
-    return "author-diff" if role == AUTHOR_ROLE else "builder-diff"
+    return {AUTHOR_ROLE: "author-diff", WRITER_ROLE: "writer-diff"}.get(role, "builder-diff")
 
 
 def diff_refusal(tool: str, role: str, root: str) -> None:
@@ -4951,7 +4962,7 @@ def diff_refusal(tool: str, role: str, root: str) -> None:
 
 def judge_stop(payload) -> None:
     """A builder or test-author that stops has its whole diff judged. The stop is never blocked:
-    an offence logs as `builder-diff` or `author-diff`. Every path that cannot judge logs too: a
+    an offence logs as `builder-diff`, `author-diff` or `writer-diff`. Every path that cannot judge logs too: a
     missing cwd, a cwd that is the main checkout, and a diff that could not be read."""
     role = agent_role(payload)
     if not role:
@@ -5097,7 +5108,7 @@ LN_DESCENDS_REASON = (
 SPAWN_TOOLS = ("Agent", "Task")
 SESSION_TOOL = "mcp__ccd_session__start_session"
 # The one list of roles that may run Haiku. lint/check_agent_models.py reads it from here.
-HAIKU_ROLES = ("Explore", "claude-code-guide", "test-author", "reviewer")
+HAIKU_ROLES = ("Explore", "claude-code-guide", "test-author", "reviewer", "record-writer")
 MODEL_FLOOR_REASON = (
     "Sonnet is the floor for this role. Start the subagent or session with model sonnet or opus, "
     "or name no model and let the default apply."
@@ -5480,8 +5491,10 @@ def judge(payload) -> None:
     if role and tool in WRITE_TOOLS:
         matched = role_write_hit(role, tool_input, target, cwd)
         if matched:
-            refuse(tool, "deny", "test-author-scope" if role == AUTHOR_ROLE else "builder-test-edit",
-                   AUTHOR_SCOPE_REASON if role == AUTHOR_ROLE else BUILDER_TEST_REASON, matched)
+            code, why = {AUTHOR_ROLE: ("test-author-scope", AUTHOR_SCOPE_REASON),
+                         WRITER_ROLE: ("record-writer-scope", WRITER_SCOPE_REASON)}.get(
+                role, ("builder-test-edit", BUILDER_TEST_REASON))
+            refuse(tool, "deny", code, why, matched)
 
     # 5. The environment file. Every writing tool is refused. A read is not judged here: the
     # settings deny list blocks Read(.env) and Read(.env.*). The reason names no file, and the log
