@@ -673,15 +673,15 @@ MUTATIONS = [
      '    for found in ():\n'
      '        reading.setdefault(found.group(0), "")', "guard", 'cap: a value the pattern cannot read still asks'),
     ("cap: the rule runs ahead of the frozen-path deny, so the config settings ask instead",
-     '    if is_frozen(target, cwd):\n'
-     '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)',
-     '    if is_settings_file(target, cwd):\n'
-     '        change = cap_change_parts(write_content_parts(tool_input))\n'
-     '        if change:\n'
-     '            refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, target),\n'
-     '                   target + " " + change)\n'
-     '    if is_frozen(target, cwd):\n'
-     '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)', "guard", 'cap: the config settings stay denied, never asked'),
+     '        if is_frozen(target, cwd):\n'
+     '            refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)',
+     '        if is_settings_file(target, cwd):\n'
+     '            change = cap_change_parts(write_content_parts(tool_input))\n'
+     '            if change:\n'
+     '                refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, target),\n'
+     '                       target + " " + change)\n'
+     '        if is_frozen(target, cwd):\n'
+     '            refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)', "guard", 'cap: the config settings stay denied, never asked'),
     ("cap: the shell route runs ahead of the frozen-path deny, so a heredoc onto the config "
      "settings asks instead",
      '    matched = frozen_shell_hit(stripped, cwd)\n'
@@ -1045,6 +1045,18 @@ MUTATIONS = [
      '                if (path_is_inside(resolved_target, home_primary) is True\n'
      '                        and path_is_inside(resolved_target, home) is False):',
      "guard", "worktree-home:"),
+    ("worktree-home: the write-target loop judges only the first path field",
+     '            for write_target in (write_targets(tool_input) if home_primary else ()):',
+     '            for write_target in (write_targets(tool_input)[:1] if home_primary else ()):',
+     "guard", "worktree-home: a later path field outside"),
+    ("write-target deny loop judges only the first path field, so a later field's deny is skipped",
+     '    for target in targets:\n        # 0b.',
+     '    for target in targets[:1]:\n        # 0b.',
+     "guard", "gap-control: NotebookEdit main session, an ordinary file_path beside notebook_path"),
+    ("settings-cap ask loop judges only the first path field",
+     '    for target in targets:\n        # 8. The subagent model cap.',
+     '    for target in targets[:1]:\n        # 8. The subagent model cap.',
+     "guard", "gap: NotebookEdit, settings cap in notebook_path beside file_path=docs/x.ipynb still asks"),
 
     # ---- the three git acts: context for a write, the merge gate, and cite by id. Each mutant breaks
     # one arm of one clause, and the required case is the one that must read that break.

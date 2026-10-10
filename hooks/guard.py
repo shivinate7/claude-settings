@@ -5434,13 +5434,7 @@ def judge(payload) -> None:
                 refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON,
                        "shell cwd outside recorded agent home")
         elif tool in WRITE_TOOLS:
-            write_target = (
-                tool_input.get("file_path", "")
-                or tool_input.get("path", "")
-                or tool_input.get("notebook_path", "")
-                or ""
-            )
-            if isinstance(write_target, str) and write_target and home_primary:
+            for write_target in (write_targets(tool_input) if home_primary else ()):
                 # A relative `file_path` resolves against the CALLER's cwd, the payload's own
                 # `cwd`, never the guard process's. `_resolved` (already used by `is_frozen` and
                 # `is_project_config` for the same reason) joins it before either check.
@@ -5477,48 +5471,53 @@ def judge(payload) -> None:
     if tool not in WRITE_TOOLS:
         return
 
-    target = (
-        tool_input.get("file_path", "")
-        or tool_input.get("path", "")
-        or tool_input.get("notebook_path", "")
-        or ""
-    )
-    if not isinstance(target, str) or not target:
-        return
+    # Every non-empty string path field the call carries is judged, so a decoy in one field hides
+    # no denied path, and an ask on one field masks no deny on another: every deny (0b, 5, 7)
+    # runs over all fields, then the 7b notes, then the 8 asks (decisions/builders-cannot-edit-tests.md,
+    # "Judge the result").
+    targets = write_targets(tool_input)
+    for target in targets:
+        # 0b. The early warning for a builder, test-author or record-writer write (see BUILDER_ROLE). A read is allowed.
+        role = agent_role(payload)
+        if role and tool in WRITE_TOOLS:
+            matched = role_write_hit(role, tool_input, target, cwd)
+            if matched:
+                code, why = {AUTHOR_ROLE: ("test-author-scope", AUTHOR_SCOPE_REASON),
+                             WRITER_ROLE: ("record-writer-scope", WRITER_SCOPE_REASON)}.get(
+                    role, ("builder-test-edit", BUILDER_TEST_REASON))
+                refuse(tool, "deny", code, why, matched)
 
-    # 0b. The early warning for a builder, test-author or record-writer write (see BUILDER_ROLE). A read is allowed.
-    role = agent_role(payload)
-    if role and tool in WRITE_TOOLS:
-        matched = role_write_hit(role, tool_input, target, cwd)
-        if matched:
-            code, why = {AUTHOR_ROLE: ("test-author-scope", AUTHOR_SCOPE_REASON),
-                         WRITER_ROLE: ("record-writer-scope", WRITER_SCOPE_REASON)}.get(
-                role, ("builder-test-edit", BUILDER_TEST_REASON))
-            refuse(tool, "deny", code, why, matched)
+        # 5. The environment file. Every writing tool is refused. A read is not judged here: the
+        # settings deny list blocks Read(.env) and Read(.env.*). The reason names no file, and the log
+        # holds the path the tool asked for.
+        if is_env(target):
+            refuse(tool, "deny", "env-file", ENV_TOOL_REASON + ". " + ENV_ADVICE, target)
 
-    # 5. The environment file. Every writing tool is refused. A read is not judged here: the
-    # settings deny list blocks Read(.env) and Read(.env.*). The reason names no file, and the log
-    # holds the path the tool asked for.
-    if is_env(target):
-        refuse(tool, "deny", "env-file", ENV_TOOL_REASON + ". " + ENV_ADVICE, target)
+        # 7. A frozen path. Only a writing tool reaches here, so a frozen path stays readable.
+        if is_frozen(target, cwd):
+            refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)
+    for target in targets:
+        # 7b. A project config edit: allowed (Decision 7), and noted in the log only.
+        if is_project_config(target, cwd):
+            record(tool, "noted", "config-edit", target)
+    for target in targets:
+        # 8. The subagent model cap. Rule 7 already denied the config directory's own settings, so
+        # only a project-scoped or clone-scoped settings file reaches here. The content read is what
+        # the tool would WRITE, so a file that carries the variable name anywhere in that content
+        # asks, a permission string or a comment line included. That is an over-ask and it stays:
+        # the alternative is a value test that a crafted spelling walks past. A write that does not
+        # carry the name never fires, and no other file than a settings file reaches this rule.
+        if is_settings_file(target, cwd):
+            change = cap_change_parts(write_content_parts(tool_input))
+            if change:
+                refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, target),
+                       log_path_and_text(target, change))
 
-    # 7. A frozen path. Only a writing tool reaches here, so a frozen path stays readable.
-    if is_frozen(target, cwd):
-        refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)
-    # 7b. A project config edit: allowed (Decision 7), and noted in the log only.
-    if is_project_config(target, cwd):
-        record(tool, "noted", "config-edit", target)
-    # 8. The subagent model cap. Rule 7 already denied the config directory's own settings, so
-    # only a project-scoped or clone-scoped settings file reaches here. The content read is what
-    # the tool would WRITE, so a file that carries the variable name anywhere in that content
-    # asks, a permission string or a comment line included. That is an over-ask and it stays:
-    # the alternative is a value test that a crafted spelling walks past. A write that does not
-    # carry the name never fires, and no other file than a settings file reaches this rule.
-    if is_settings_file(target, cwd):
-        change = cap_change_parts(write_content_parts(tool_input))
-        if change:
-            refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, target),
-                   log_path_and_text(target, change))
+
+def write_targets(tool_input: dict) -> list:
+    """Every non-empty string path field of a write call, in a fixed order."""
+    return [v for k in ("file_path", "path", "notebook_path")
+            if isinstance((v := tool_input.get(k)), str) and v]
 
 
 def main() -> None:
