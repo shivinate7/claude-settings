@@ -41,9 +41,9 @@ follows a letter. The `#` in `'#300'` sits inside a quote, and the earlier
 quote-tracking already protects it.
 
 The fix is a lifted copy. It is not a re-derivation. `shell_parse.py` in
-`~/Developer/pkmnscan/scripts` carried this exact three-branch addition
+`~/Developer/banchi/scripts` carried this exact three-branch addition
 already. That file wrote and measured the addition first. This change copies
-it into `hooks/guard.py:split_segments` unchanged in substance. pkmnscan's own
+it into `hooks/guard.py:split_segments` unchanged in substance. banchi's own
 copy threads a `delimiters` parameter that `hooks/guard.py`'s version does not
 have. This change does not add that parameter.
 
@@ -57,7 +57,7 @@ tokenized with `segment_tokens` (shlex). A segment counts as a `cd` or a
 `git -C` only when `resolve_command` says that word is the segment's OWN
 command. That is the same reader `LOOP_KEYWORDS` and `COMMAND_WRAPPERS`
 already use elsewhere in this file. The approach is a lifted copy of
-`~/Developer/pkmnscan/scripts/shell_parse.py`. That file paid this exact
+`~/Developer/banchi/scripts/shell_parse.py`. That file paid this exact
 debt first. It reads `cd` off parsed tokens instead of a raw-text regex.
 Its own comment says so.
 
@@ -184,7 +184,7 @@ through to the shell's own cwd, is the fail-open answer, not a wrong one.
   runtime. A `cd` hidden inside one of those forms is invisible to this
   reader, the same way it was invisible to the old regex. The direction is
   fail-open: the hidden `cd` is skipped, not misread as a literal path.
-  This is unmeasured against pkmnscan's own gaps in the same areas.
+  This is unmeasured against banchi's own gaps in the same areas.
   `shell_parse.py`'s own docstring does not claim to close them either.
 - The two bypasses above were MEASURED, in review, against real fixtures.
   They are not hypotheticals like the gaps just named. Both are fixed. Both

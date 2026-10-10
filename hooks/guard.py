@@ -106,7 +106,7 @@ discard work, so rule 1 passes it, with no log line of its own. Any other `git c
 names a path keeps rule 1's ordinary deny or ask.
 
 Rule 1c, `silent-write`, mechanizes CLAUDE.md's "Never discard a command's output" for
-git. pkmnscan's `scripts/silent-write-guard.py` carries the measurement this rule ports:
+git. banchi's `scripts/silent-write-guard.py` carries the measurement this rule ports:
 a coordinator reported work as landed twice in one session when it had not, once because
 a pre-commit refusal went to `/dev/null`, and once because the `git log` that followed
 showed the PREVIOUS commit, indistinguishable at a glance from the one that should have
@@ -1061,7 +1061,7 @@ def shared_tree_hit(segment: str) -> str:
 # whether `cd` was preceded by `^`, `;`, `&`, or `|` in the raw text — true for both, despite the
 # `cd` in each case never running. `split_segments` (quote- and comment-aware) plus
 # `segment_tokens` (shlex) are the readers already used elsewhere in this file for the same
-# reason. Lifted from `~/Developer/pkmnscan/scripts/shell_parse.py`, which paid this debt first
+# reason. Lifted from `~/Developer/banchi/scripts/shell_parse.py`, which paid this debt first
 # by reading `cd` and `git -C` off tokens instead of a raw-text regex.
 # `--work-tree` NAMES THE TREE THE FILES COME FROM, and it outranks `-C` and a `cd`, because git
 # applies it after both. MEASURED 2026-09-19 with real git: from a CLEAN checkout A,
@@ -3027,7 +3027,7 @@ LIVE_STREAM_REASON = (
 )
 
 
-# A COMMAND THAT NARRATES WHILE IT WAITS, piped into `tail` or `head`. Ported from pkmnscan's
+# A COMMAND THAT NARRATES WHILE IT WAITS, piped into `tail` or `head`. Ported from banchi's
 # `scripts/guard-shell.py` (the heartbeat clause), behaviour only. The merge tool waits minutes for
 # a claim commit's checks and prints a line a minute. A pipe block-buffers that heartbeat and the
 # filter keeps one end of it, so a working wait reads as a hang. The roster is NAMED, one entry per
@@ -3127,7 +3127,7 @@ WAITER_REASON = (
 
 # ------------------------------------------------------------------ a waiter loop over a pattern
 #
-# Ported from pkmnscan's `scripts/guard-shell.py:800-990` (predicate and wording only, not the
+# Ported from banchi's `scripts/guard-shell.py:800-990` (predicate and wording only, not the
 # file, and no override token: this repo ships none). MEASURED there, twice on 2026-09-12: a
 # session wrote `until ! pgrep -f 'scratchpad/drive.sh'` to wait out its own driver script, and
 # the condition never went false, because `pgrep -f` matches every process whose command line
@@ -4986,7 +4986,7 @@ def judge_stop(payload) -> None:
 
 # ------------------------------------------------------------------ two ported shell traps
 #
-# Ported from pkmnscan's `scripts/guard-shell.py` (behaviour, not code shape). Each clause below is
+# Ported from banchi's `scripts/guard-shell.py` (behaviour, not code shape). Each clause below is
 # self-contained so it merges cleanly beside other edits to this file.
 
 # `gh api` with a field flag and no method. `-f`/`-F` give the request a body and gh then sends POST,
@@ -5332,7 +5332,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         refuse(tool, "deny", "live-stream", NARRATED_TAIL_REASON, matched)
 
-    # 3b. Two traps ported from pkmnscan's `scripts/guard-shell.py`: `gh api` with a field and no
+    # 3b. Two traps ported from banchi's `scripts/guard-shell.py`: `gh api` with a field and no
     # method, and `ln -s` onto a directory that is already there. Each reads the segment's own
     # command word, never a substring, and `ln` reads the filesystem rather than the text.
     run_in = _run_dir(stripped, cwd)

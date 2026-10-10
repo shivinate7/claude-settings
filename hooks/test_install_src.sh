@@ -591,11 +591,11 @@ case6() {
 }
 
 case9() {
-  name="case9: unrelated repo with its own CLAUDE.md stays silent (the pkmnscan repro)"
+  name="case9: unrelated repo with its own CLAUDE.md stays silent (the banchi repro)"
   co="$work/case9-checkout"; pointer_co="$work/case9-pointer-checkout"; cfg="$work/case9-cfg"
   # $co is its own repo, a different origin than the pointer target, with its own,
-  # differing CLAUDE.md. This is the live defect: pkmnscan is not a claude-settings clone.
-  make_checkout "$co" "# unrelated repo content" "https://github.com/someone/pkmnscan.git"
+  # differing CLAUDE.md. This is the live defect: banchi is not a claude-settings clone.
+  make_checkout "$co" "# unrelated repo content" "https://github.com/someone/banchi.git"
   make_checkout "$pointer_co" "# global content, different"
   mkdir -p "$cfg"
   printf '@%s/CLAUDE.md\n' "$pointer_co" > "$cfg/CLAUDE.md"

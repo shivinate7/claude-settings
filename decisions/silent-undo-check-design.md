@@ -68,7 +68,7 @@ q_max `merge-lost-lines.mjs` compares the parents of one merge.
 - From Banchi: the landing tree (`merge-tree`, or the branch diff when it conflicts).
 - Dropped from Banchi: "a message that names the file passes". A name in a message does
   not state intent. Also dropped: the note-only tier for a partial reversal, and the
-  `PKMNSCAN_REVERT=off` switch. A switch that stops the check is not an escape.
+  `BANCHI_REVERT=off` switch. A switch that stops the check is not an escape.
 - Dropped from q_max: a conflict region is not excused, because a conflict taken "ours"
   is the incident. Also dropped: token-level rewrite rules and rename tracking.
 
