@@ -20,8 +20,8 @@ clauses.
 - A builder's `git commit` and `git push` (PreToolUse, Bash and PowerShell). It LOGS.
 - A builder's SubagentStop. It LOGS.
 - A write tool call (Edit, Write, MultiEdit, NotebookEdit). This is the early warning, by path.
-  It DENIES. Every path field the call carries is judged, so a harmless decoy field hides
-  nothing (review of PR 304).
+  It DENIES. Every path field the call carries is judged, and every deny runs on all fields
+  before any ask, so a decoy field cannot hide a denied path (reviews of PRs 304 and 306).
 
 ## Verdict: the diff check logs, it does not block
 
