@@ -5114,21 +5114,48 @@ MODEL_FLOOR_REASON = (
     "or name no model and let the default apply."
 )
 AGENT_CALL = re.compile(r"\bagent\s*\(")
-SCRIPT_LEXEME = re.compile(r"//[^\n]*|/\*.*?\*/|([\'\"`])((?:\\.|(?!\1)[^\\])*)\1", re.DOTALL)
+SCRIPT_STRING = {q: re.compile(r"((?:\\.|[^\\%s])*)%s" % (q, q), re.DOTALL) for q in "'\"`"}
 SCRIPT_PAIR = re.compile(r"(?:(\w+)|\x00(\d+)\x00)\s*:\s*\x00(\d+)\x00")
 
 
+# Known limit: a quote inside a regex literal (for example /"/) can hide an agent() call. Regex
+# literals are not lexed.
 def mask_script(script: str):
-    """Drop comments and replace each string literal with a \\x00N\\x00 token. Return (text, strings)."""
-    strings = []
-
-    def swap(found):
-        if found.group(1) is None:
-            return " "
-        strings.append(found.group(2))
-        return "\x00%d\x00" % (len(strings) - 1)
-
-    return SCRIPT_LEXEME.sub(swap, script), strings
+    """Drop comments and replace each string literal with a \\x00N\\x00 token. Return (text, strings).
+    One pass, linear. A backslash escapes the next character, so an escaped quote never closes a
+    string. An unclosed opener stays as code. Once a scan for a closer fails, no later one can
+    succeed, so a failed closer is remembered."""
+    out, strings, dead = [], [], set()
+    i, n = 0, len(script)
+    while i < n:
+        ch = script[i]
+        if ch == "/" and script.startswith("//", i):
+            j = script.find("\n", i)
+            i = n if j < 0 else j
+            out.append(" ")
+        elif ch == "/" and script.startswith("/*", i) and "*/" not in dead:
+            j = script.find("*/", i + 2)
+            if j < 0:
+                dead.add("*/")
+                out.append(ch)
+                i += 1
+            else:
+                out.append(" ")
+                i = j + 2
+        elif ch in SCRIPT_STRING and ch not in dead:
+            m = SCRIPT_STRING[ch].match(script, i + 1)
+            if m is None:
+                dead.add(ch)
+                out.append(ch)
+                i += 1
+            else:
+                strings.append(m.group(1))
+                out.append("\x00%d\x00" % (len(strings) - 1))
+                i = m.end()
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out), strings
 
 
 def script_opts(text: str, start: int):
