@@ -5114,7 +5114,7 @@ MODEL_FLOOR_REASON = (
     "or name no model and let the default apply."
 )
 AGENT_CALL = re.compile(r"\bagent\s*\(")
-SCRIPT_LEXEME = re.compile(r"//[^\n]*|/\*.*?\*/|([\'\"`])((?:\\.|(?!\1).)*)\1", re.DOTALL)
+SCRIPT_LEXEME = re.compile(r"//[^\n]*|/\*.*?\*/|([\'\"`])((?:\\.|(?!\1)[^\\])*)\1", re.DOTALL)
 SCRIPT_PAIR = re.compile(r"(?:(\w+)|\x00(\d+)\x00)\s*:\s*\x00(\d+)\x00")
 
 
