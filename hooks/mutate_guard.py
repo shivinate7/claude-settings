@@ -1045,6 +1045,14 @@ MUTATIONS = [
      '                if (path_is_inside(resolved_target, home_primary) is True\n'
      '                        and path_is_inside(resolved_target, home) is False):',
      "guard", "worktree-home:"),
+    ("worktree-home: the write-target loop judges only the first path field",
+     '            for write_target in (write_targets(tool_input) if home_primary else ()):',
+     '            for write_target in (write_targets(tool_input)[:1] if home_primary else ()):',
+     "guard", "worktree-home: a later path field outside"),
+    ("write-target deny loop judges only the first path field, so a later field's deny is skipped",
+     '    for target in targets:\n        # 0b.',
+     '    for target in targets[:1]:\n        # 0b.',
+     "guard", "gap-control: NotebookEdit main session, an ordinary file_path beside notebook_path"),
 
     # ---- the three git acts: context for a write, the merge gate, and cite by id. Each mutant breaks
     # one arm of one clause, and the required case is the one that must read that break.

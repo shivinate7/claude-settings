@@ -5472,8 +5472,11 @@ def judge(payload) -> None:
         return
 
     # Every non-empty string path field the call carries is judged, so a harmless decoy in one
-    # field hides nothing (decisions/builders-cannot-edit-tests.md, "Judge the result").
-    for target in write_targets(tool_input):
+    # field hides nothing, and an ask on one field masks no deny on another: every deny (0b, 5, 7)
+    # runs over all fields, then the 7b notes, then the 8 asks (decisions/builders-cannot-edit-tests.md,
+    # "Judge the result").
+    targets = write_targets(tool_input)
+    for target in targets:
         # 0b. The early warning for a builder, test-author or record-writer write (see BUILDER_ROLE). A read is allowed.
         role = agent_role(payload)
         if role and tool in WRITE_TOOLS:
@@ -5493,9 +5496,11 @@ def judge(payload) -> None:
         # 7. A frozen path. Only a writing tool reaches here, so a frozen path stays readable.
         if is_frozen(target, cwd):
             refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)
+    for target in targets:
         # 7b. A project config edit: allowed (Decision 7), and noted in the log only.
         if is_project_config(target, cwd):
             record(tool, "noted", "config-edit", target)
+    for target in targets:
         # 8. The subagent model cap. Rule 7 already denied the config directory's own settings, so
         # only a project-scoped or clone-scoped settings file reaches here. The content read is what
         # the tool would WRITE, so a file that carries the variable name anywhere in that content
