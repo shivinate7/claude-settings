@@ -10,8 +10,10 @@ Run with:
     python3 lint/test_rule_audit.py -v
 """
 import os
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -372,6 +374,50 @@ class CitationTests(unittest.TestCase):
             "const a = 'image/*';\ntest(\"it works\", () => {});\nconst b = '*/';\n", "it works", "t.mjs"))
         self.assertIsNone(self.problem(
             'const u = "http://x";\ntest("it works", () => {});\n', "it works", "t.mjs"))
+
+    def test_mjs_regex_literal_quote_hides_no_registration(self):
+        self.assertIn("registers no test", self.problem(
+            "const re = /'/;\n/* don't\ntest(\"commented\", () => {});\n*/\n", "commented", "t.mjs") or "<None>")
+
+    def test_mjs_regex_with_escaped_slashes_hides_no_registration(self):
+        self.assertIn("registers no test", self.problem(
+            'const re = /a\\/\\/b/;\n// test("commented", () => {});\n', "commented", "t.mjs") or "<None>")
+        self.assertIn("registers no test", self.problem(
+            'const re = /a\\/\\/b/;\n/*\ntest("commented", () => {});\n*/\n', "commented", "t.mjs") or "<None>")
+
+    def test_mjs_regex_quote_before_real_registration_is_green(self):
+        self.assertIsNone(self.problem(
+            'const re = /"/;\ntest("it works", () => {});\n', "it works", "t.mjs"))
+
+    def _finishes_within_a_second(self, src):
+        # A backtracking regex can hang on some inputs. The child process gets a hard 1 s limit,
+        # so a hang fails the test and does not block the suite.
+        child = ("import sys; sys.path.insert(0, sys.argv[1]); import rule_audit; "
+                 "print(rule_audit.citation_problem('t.mjs::it works', sys.argv[2]))")
+        with tempfile.TemporaryDirectory() as root:
+            with open(os.path.join(root, "t.mjs"), "w", encoding="utf-8") as f:
+                f.write(src)
+            start = time.monotonic()
+            try:
+                subprocess.run([sys.executable, "-c", child, os.path.dirname(os.path.abspath(__file__)), root],
+                               timeout=1.0, capture_output=True, check=False)
+                finished = True
+            except subprocess.TimeoutExpired:
+                finished = False
+            elapsed = time.monotonic() - start
+        return finished, elapsed
+
+    def test_mjs_unclosed_quote_with_backslashes_returns_within_a_second(self):
+        # Guard: the closing quote of test("...") ends the string, so this input is linear.
+        src = 'const s = "' + "\\" * 40 + '\ntest("it works", () => {});\n'
+        finished, elapsed = self._finishes_within_a_second(src)
+        self.assertTrue(finished, f"citation_problem still running after {elapsed:.1f}s")
+
+    def test_mjs_unclosed_backtick_with_backslashes_returns_within_a_second(self):
+        # Red on 7ef1098: no closing backtick follows, so the string regex backtracks over the 40 backslashes.
+        src = "const s = `" + "\\" * 40 + '\ntest("it works", () => {});\n'
+        finished, elapsed = self._finishes_within_a_second(src)
+        self.assertTrue(finished, f"citation_problem still running after {elapsed:.1f}s")
 
     def test_test_file_that_never_touches_the_ref_is_red(self):
         with tempfile.TemporaryDirectory() as root:
