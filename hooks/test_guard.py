@@ -5481,6 +5481,83 @@ LOG_CHECKS = (
 )
 
 
+# =========================================================================== mask_script lexemes
+
+# The string branch of guard.py's SCRIPT_LEXEME can take each backslash after an unclosed quote as
+# one `.` or as half of a `\\.` pair, so the paths grow like Fibonacci. Measured on the unfixed
+# guard: 30 backslashes 0.1 s, 38 about 4.9 s, 40 about 12.9 s. The child gets a 1 s limit, so a
+# slow regex fails its case and never blocks the suite.
+MASK_HANG_BACKSLASHES = 40
+MASK_HANG_LIMIT_S = 1
+MASK_PIN_LIMIT_S = 10
+
+# Normal scripts with escaped quotes. Each one is well closed: its last quote is not escaped. The
+# expected masks are the guard's own output today, so a change to any of them is a behavior change.
+MASK_PINS = (
+    (r'const a = "a\"b";', "const a = \x000\x00;", [r'a\"b']),
+    (r"say('it\'s');", "say(\x000\x00);", [r"it\'s"]),
+    (r'const t = `a\`b`;', "const t = \x000\x00;", [r'a\`b']),
+    (r'const p = "a\\";', "const p = \x000\x00;", [r'a\\']),
+    ('x = 1; // say "hi"\ny = 2;', "x = 1;  \ny = 2;", []),
+    ('/* \'q\' */ z = "ok";', "  z = \x000\x00;", ["ok"]),
+    ('f("a", \'b\')', "f(\x000\x00, \x001\x00)", ["a", "b"]),
+)
+
+
+def mask_child(scripts, limit):
+    """Run guard.mask_script on each script in a child process. Return (answers, note).
+
+    The whole child run has `limit` seconds. A run that outlives it returns (None, note), which
+    fails its case and never blocks the suite.
+    """
+    code = ("import json, importlib.util as u\n"
+            "s = u.spec_from_file_location('g', %r)\n"
+            "g = u.module_from_spec(s)\n"
+            "s.loader.exec_module(g)\n"
+            "print(json.dumps([list(g.mask_script(x)) for x in %r]))\n" % (GUARD, list(scripts)))
+    try:
+        got = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                             timeout=limit)
+    except subprocess.TimeoutExpired:
+        return None, "mask_script did not return within %d s" % limit
+    if got.returncode != 0:
+        return None, "child exited %d: %s" % (got.returncode, got.stderr.strip()[-160:])
+    return json.loads(got.stdout), "returned"
+
+
+def mask_hang_case(quote, name):
+    script = quote + "\\" * MASK_HANG_BACKSLASHES
+
+    def check():
+        answers, note = mask_child([script], MASK_HANG_LIMIT_S)
+        if answers is None:
+            return False, note
+        if answers != [[script, []]]:
+            return False, "an unclosed %s quote was masked: %r" % (name, answers)
+        return True, "unclosed %s quote, %d backslashes, returned within %d s" % (
+            name, MASK_HANG_BACKSLASHES, MASK_HANG_LIMIT_S)
+
+    return check
+
+
+def mask_pin_case():
+    want = [[text, strings] for _, text, strings in MASK_PINS]
+    answers, note = mask_child([script for script, _, _ in MASK_PINS], MASK_PIN_LIMIT_S)
+    if answers is None:
+        return False, note
+    for (script, _, _), got, exp in zip(MASK_PINS, answers, want):
+        if got != exp:
+            return False, "%r masked to %r, want %r" % (script, got, exp)
+    return True, "%d normal scripts with escaped quotes masked as pinned" % len(want)
+
+
+for quote, name in (('"', "double"), ("'", "single"), ("`", "backtick")):
+    LOG_CHECKS_EXTRA.append(("mask_script: unclosed %s quote then backslashes returns within 1 s"
+                             % name, mask_hang_case(quote, name)))
+LOG_CHECKS_EXTRA.append(("mask_script: normal scripts with escaped quotes keep their masks",
+                         mask_pin_case))
+
+
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
 
 # The log checkers tagged "windows". Each one reads a live process's start time (guard.py
