@@ -20,7 +20,8 @@ clauses.
 - A builder's `git commit` and `git push` (PreToolUse, Bash and PowerShell). It LOGS.
 - A builder's SubagentStop. It LOGS.
 - A write tool call (Edit, Write, MultiEdit, NotebookEdit). This is the early warning, by path.
-  It DENIES.
+  It DENIES. Every path field the call carries is judged, so a harmless decoy field hides
+  nothing (review of PR 304).
 
 ## Verdict: the diff check logs, it does not block
 
@@ -120,6 +121,9 @@ new code:
   reads the diff.
 - The diff check does not block, so an agent can commit a test change. The reviewer must read
   the log.
+- A file hard-linked to a file in another checkout passes the write deny, and the diff
+  check reads only this checkout. Same reach as a Bash write outside the worktree (review of
+  PR 304).
 
 Measured 2026-10-03, q_max: a test-author got an Edit refusal, then wrote the same file with
 Bash and Python. The reviewer caught it. This is the first measured deliberate evasion. The
