@@ -5501,7 +5501,14 @@ MASK_PINS = (
     ('x = 1; // say "hi"\ny = 2;', "x = 1;  \ny = 2;", []),
     ('/* \'q\' */ z = "ok";', "  z = \x000\x00;", ["ok"]),
     ('f("a", \'b\')', "f(\x000\x00, \x001\x00)", ["a", "b"]),
+    ('s = "line1\nline2";', "s = \x000\x00;", ["line1\nline2"]),
+    ("// don't\nf('x')", " \nf(\x000\x00)", ["x"]),
+    ('/* say "hi" */ f(\'x\')', "  f(\x000\x00)", ["x"]),
 )
+
+# A quote left open, then 64 KB of escaped quotes. The lexeme must stay linear on this shape:
+# quadratic on 19f3555, which took about 1 s at 16 KB and 15 s at 64 KB.
+MASK_LONG_SCRIPT = '"' + '\\"' * 32768
 
 
 def mask_child(scripts, limit):
@@ -5551,6 +5558,17 @@ def mask_pin_case():
     return True, "%d normal scripts with escaped quotes masked as pinned" % len(want)
 
 
+def mask_long_case():
+    answers, note = mask_child([MASK_LONG_SCRIPT], MASK_HANG_LIMIT_S)
+    if answers is None:
+        return False, note
+    if answers != [[MASK_LONG_SCRIPT, []]]:
+        return False, "an unclosed quote over 64 KB was masked"
+    return True, "unclosed quote then 64 KB of escaped quotes returned within 1 s"
+
+
+LOG_CHECKS_EXTRA.append(("mask_script: unclosed double quote then 64 KB of escaped quotes "
+                         "returns within 1 s", mask_long_case))
 for quote, name in (('"', "double"), ("'", "single"), ("`", "backtick")):
     LOG_CHECKS_EXTRA.append(("mask_script: unclosed %s quote then backslashes returns within 1 s"
                              % name, mask_hang_case(quote, name)))
