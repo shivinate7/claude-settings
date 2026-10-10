@@ -4961,7 +4961,7 @@ def diff_refusal(tool: str, role: str, root: str) -> None:
 
 
 def judge_stop(payload) -> None:
-    """A builder or test-author that stops has its whole diff judged. The stop is never blocked:
+    """A builder, test-author or record-writer that stops has its whole diff judged. The stop is never blocked:
     an offence logs as `builder-diff`, `author-diff` or `writer-diff`. Every path that cannot judge logs too: a
     missing cwd, a cwd that is the main checkout, and a diff that could not be read."""
     role = agent_role(payload)
@@ -5185,7 +5185,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     stripped = strip_heredoc_bodies(raw)
     cmd = norm(stripped)
 
-    # 0b. A builder or test-author's `git commit` or `git push` is judged on the diff it would send.
+    # 0b. A builder, test-author or record-writer's `git commit` or `git push` is judged on the diff it would send.
     if role:
         for segment in split_segments(stripped):
             for subcommand, _ in git_calls(segment):
@@ -5486,7 +5486,7 @@ def judge(payload) -> None:
     if not isinstance(target, str) or not target:
         return
 
-    # 0b. The early warning for a builder or test-author write (see BUILDER_ROLE). A read is allowed.
+    # 0b. The early warning for a builder, test-author or record-writer write (see BUILDER_ROLE). A read is allowed.
     role = agent_role(payload)
     if role and tool in WRITE_TOOLS:
         matched = role_write_hit(role, tool_input, target, cwd)
