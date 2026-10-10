@@ -5107,37 +5107,69 @@ LN_DESCENDS_REASON = (
 
 # THE PLAYWRIGHT BROWSER CACHE. Incident 2026-10-10: a feed-build session set
 # PLAYWRIGHT_BROWSERS_PATH to a scratch dir to work around a missing chromium_headless_shell-1208.
-# The real cause was a stale `__dirlock` left at 16:11 by an install stopped halfway. The install
-# sat 73 minutes, and the workaround hid the cause. See decisions/playwright-browsers-path.md.
-# A set is an inline `VAR=v`, `env VAR=v`, `export VAR=v`, or PowerShell `$env:VAR = v`. A read,
-# a grep, and `unset` set nothing, so they pass.
+# The real causes were a stale `__dirlock` left at 16:11 by an install stopped halfway, and an
+# install that hangs while it unpacks under Node 26.11 with Playwright 1.58. The install sat 73
+# minutes, and the workaround hid both causes. See the record playwright-browsers-path.
+# A set is an inline `VAR=v`, `env VAR=v`, `export VAR=v`, `cmd /c set VAR=v`, any of these inside
+# `bash -c` or `eval`, a write of the assignment into a file, or a PowerShell `$env:VAR = v`,
+# `Set-Item env:VAR` or `SetEnvironmentVariable`. A read, a grep, and `unset` set nothing. The name
+# is folded to upper case in every form. Shell words come from `segment_tokens`, assignments from
+# `ASSIGNMENT`, and the file write from `_VAR_TOKEN`: no parser of its own.
 PLAYWRIGHT_VAR = "PLAYWRIGHT_BROWSERS_PATH"
-ASSIGNING_BUILTINS = ("export", "declare", "typeset", "readonly", "local")
+ASSIGNING_BUILTINS = ("export", "declare", "typeset", "readonly", "local", "set")
+PLAYWRIGHT_PS_SET = re.compile(
+    r"\$\{?env:" + PLAYWRIGHT_VAR + r"\}?\s*=(?!=)"
+    r"|\b(?:set-item|si|new-item|set-content|sc)\b[^;|]*\benv:" + PLAYWRIGHT_VAR + r"\b"
+    r"|SetEnvironmentVariable\(\s*['\"]?" + PLAYWRIGHT_VAR + r"\b", re.I)
 
 
-def playwright_path_hit(segment: str) -> str:
-    """Return the matched text when a segment sets PLAYWRIGHT_BROWSERS_PATH, else ''."""
-    tokens = segment_tokens(segment)
-    if not tokens:
+def _is_playwright_assign(token: str) -> bool:
+    return bool(ASSIGNMENT.match(token)) and token.split("=", 1)[0].upper() == PLAYWRIGHT_VAR
+
+
+def _playwright_tokens_hit(tokens, depth=0) -> str:
+    tokens = [t for t in ([tokens[0].lstrip("(")] + tokens[1:] if tokens else []) if t]
+    if not tokens or depth > 3:
         return ""
-    head = tokens[0].lower().lstrip("$")
-    if head.startswith("env:" + PLAYWRIGHT_VAR.lower()):
-        return "$env:" + PLAYWRIGHT_VAR
     at = resolve_command(tokens)
-    after = []
-    if at is not None:
-        after = tokens[at + 1:] if basename(tokens[at]) in ASSIGNING_BUILTINS else []
-    assigned = tokens[:at] + after if at is not None else tokens
-    if any(t.startswith(PLAYWRIGHT_VAR + "=") for t in assigned):
+    if any(_is_playwright_assign(t) for t in tokens[:len(tokens) if at is None else at]):
         return PLAYWRIGHT_VAR + " assignment"
+    if at is None:
+        return ""
+    word, rest = basename(tokens[at]).lower(), tokens[at + 1:]
+    if word in ASSIGNING_BUILTINS and any(_is_playwright_assign(t) for t in rest):
+        return word + " " + PLAYWRIGHT_VAR
+    if word in ("builtin", "exec"):
+        return _playwright_tokens_hit(rest, depth + 1)
+    if word in CMD_EXE_NAMES and rest and rest[0].lower() in ("/c", "/k"):
+        return _playwright_tokens_hit(rest[1:], depth + 1)
+    script = " ".join(rest) if word == "eval" else inline_script(tokens)
+    for segment in split_segments(script) if script else ():
+        hit = playwright_path_hit(segment, depth + 1)
+        if hit:
+            return hit
     return ""
 
 
+def playwright_path_hit(segment: str, depth=0) -> str:
+    """Return the matched text when a segment sets PLAYWRIGHT_BROWSERS_PATH, else ''."""
+    found = PLAYWRIGHT_PS_SET.search(segment)
+    if found:
+        return found.group(0)
+    if ">" in segment and any(m.group("n") and m.group("n").upper() == PLAYWRIGHT_VAR
+                              for m in _VAR_TOKEN.finditer(segment.replace("'", " "))):
+        return PLAYWRIGHT_VAR + " written to a file"
+    return _playwright_tokens_hit(segment_tokens(segment) or [], depth)
+
+
 PLAYWRIGHT_PATH_REASON = (
-    "a missing browser build usually means a stale `__dirlock` in the Playwright cache, left by an "
-    "install that stopped halfway. A changed cache location hides that cause and does not clear it. "
-    "Remedy: run `pgrep -fl playwright` to confirm that no install is running. Then remove the "
-    "stale `__dirlock` from the Playwright cache and install again."
+    "a missing browser build has two measured causes, and a changed cache location hides both. "
+    "One is a stale `__dirlock` in the Playwright cache, left by an install that stopped "
+    "halfway. The other is an install that hangs while it unpacks under Node 26.11 with "
+    "Playwright 1.58. "
+    "Remedy: run `pgrep -fl playwright` to confirm that no install is running, then remove the "
+    "stale `__dirlock`. If the install still hangs, run it under Node 22 with `npx -y node@22 "
+    "node_modules/playwright/cli.js install`, which unpacks in under a second."
 )
 
 
