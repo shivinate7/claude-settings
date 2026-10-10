@@ -147,6 +147,13 @@ class Scope(unittest.TestCase):
     def test_a_trailing_slash_in_landed_dirs_is_read_as_the_dir(self):
         self.assertFlags(run(["zz-made-up/new.md"], landed=["zz-made-up/"]), want_true=["gates_windows", "shell_macos"])
 
+    # Cut F: gates-windows-guard and gates-mutate-guard skip on the `guard` flag. The slice selector
+    # (GUARD_TESTS) is read from hooks/test_guard.py, so an edit to that file must turn `guard` on,
+    # or a pull request that changes the slice would run no guard job at all.
+    def test_the_guard_selector_and_its_harness_turn_the_guard_flag_on(self):
+        for p in ("hooks/test_guard.py", "hooks/mutate_guard.py", "hooks/guard.py"):
+            self.assertFlags(run([p]), want_true=["guard"])
+
 
 if __name__ == "__main__":
     unittest.main()
