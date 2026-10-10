@@ -3932,7 +3932,7 @@ add("decoy: NotebookEdit record-writer, notebook_path=lint/x.ipynb beside file_p
     "deny", rule=RW_RULE, tool="NotebookEdit", carries=("Markdown", "Report"),
     notebook_path="lint/x.ipynb", file_path="docs/x.md", **RW)
 add("decoy: NotebookEdit builder, notebook_path=hooks/test_x.ipynb beside file_path=src/a.py is refused",
-    "deny", rule=BT, tool="NotebookEdit", notebook_path="hooks/test_x.ipynb",
+    "deny", rule=BT, tool="NotebookEdit", notebook_path="tests/x.ipynb",
     file_path="src/a.py", **B)
 add("decoy: Edit test-author, file_path=tests/t.py beside path=hooks/guard.py is refused",
     "deny", rule=TA, tool="Edit", file_path="tests/t.py", path="hooks/guard.py", **A)
@@ -3943,7 +3943,7 @@ add("decoy: Edit main session, file_path=docs/x.md beside path=the config hook i
 add("decoy: Edit builder, file_path=src/a.py beside path=tests/test_a.py is refused",
     "deny", rule=BT, tool="Edit", file_path="src/a.py", path="tests/test_a.py", **B)
 add("decoy: Edit builder, an empty file_path does not hide notebook_path=hooks/test_x.ipynb",
-    "deny", rule=BT, tool="NotebookEdit", file_path="", notebook_path="hooks/test_x.ipynb", **B)
+    "deny", rule=BT, tool="NotebookEdit", file_path="", notebook_path="tests/x.ipynb", **B)
 # Controls: every field on an allowed path stays allowed, and a single field keeps its verdict.
 add("decoy-control: Edit record-writer, two .md fields are allowed", "allow", tool="Edit",
     file_path="docs/x.md", path="decisions/y.md", **RW)
