@@ -3964,6 +3964,30 @@ add("decoy-control: Edit builder, a lone source path is allowed", "allow", tool=
 add("decoy-control: Edit main session, a lone config hook is refused", "deny", rule="frozen-path",
     tool="Edit", cwd=NOGIT, path=CFG_HOOK)
 
+# ---- an earlier field's ASK must not mask a later field's DENY (review gap on PR #306). The write
+# loop refused on rule 8's ask at the first settings field and exited, so a deny in a later field
+# was never judged. Every deny now runs over all fields first; the cap ask runs after them. Failure
+# classes: false allow (an ask masks a deny) and false deny (a lone ask becomes a deny).
+CAP_LINE = "CLAUDE_CODE_SUBAGENT_MODEL=haiku\n"
+CLONE_ENV = slash(os.path.join(CLONE, ENV))
+add("gap: NotebookEdit, settings cap in file_path beside notebook_path=.env is denied as env-file",
+    "deny", "env-file", tool="NotebookEdit", cwd=NOGIT, file_path=PROJ_LOCAL, new_source=CAP_LINE,
+    notebook_path=CLONE_ENV)
+add("gap-control: NotebookEdit, the env file in file_path beside the settings cap is denied as env-file",
+    "deny", "env-file", tool="NotebookEdit", cwd=NOGIT, file_path=CLONE_ENV, notebook_path=PROJ_LOCAL,
+    new_source=CAP_LINE)
+add("gap-control: NotebookEdit main session, an ordinary file_path beside notebook_path=.env is denied",
+    "deny", "env-file", tool="NotebookEdit", cwd=NOGIT, file_path="docs/x.md", notebook_path=CLONE_ENV)
+add("gap: NotebookEdit, settings cap in file_path beside notebook_path=the config hook is denied as frozen-path",
+    "deny", "frozen-path", tool="NotebookEdit", cwd=NOGIT, file_path=PROJ_LOCAL,
+    new_source=cap_settings(), notebook_path=CFG_HOOK)
+add("gap-control: NotebookEdit, a lone settings cap in file_path still asks",
+    "ask", "subagent-model-cap", tool="NotebookEdit", cwd=NOGIT, file_path=PROJ_LOCAL,
+    new_source=cap_settings(), carries=(OPUS,))
+add("gap-control: NotebookEdit, a settings cap in file_path beside an ordinary notebook still asks",
+    "ask", "subagent-model-cap", tool="NotebookEdit", cwd=NOGIT, file_path=PROJ_LOCAL,
+    new_source=cap_settings(), notebook_path="docs/x.ipynb", carries=(OPUS,))
+
 # The diff, judged at commit, push and stop. A non-.md path logs `writer-diff` (never blocks);
 # an all-.md diff logs nothing.
 RW_RED = (
@@ -5325,6 +5349,42 @@ def worktree_home_case():
     return True, "orchestrator, no-record, home, outside-home, removed-home, unreadable all correct"
 
 
+def worktree_home_later_field_case():
+    """Rule 0 judges EVERY path field of a write call, not only the first (PR #306 review gap).
+
+    A call whose first field is inside the recorded home and whose later field is outside it must
+    be refused as worktree-home. A home loop that reads only the first field lets it through.
+    """
+    agent_id = "wthomefield1"
+    primary = os.path.join(ROOT, "wthomefield_primary")
+    worktree = os.path.join(primary, ".claude", "worktrees", "agent-" + agent_id)
+    make_repo(primary, {"src/app.py": "print(1)\n", "src/other.py": "print(2)\n"})
+    run_vcs(primary, "worktree", "add", "-q", worktree, "-b", "worktree-agent-" + agent_id)
+    inside = os.path.join(worktree, "src", "app.py")
+    outside = os.path.join(primary, "src", "other.py")
+
+    problems = []
+    # The first call from inside the worktree records the home.
+    got, reason = _decide_full("Bash", worktree, agent_id=agent_id, command="echo hi")
+    if got != "allow":
+        problems.append("recording call: expected allow, got %s (%s)" % (got, reason[:120]))
+    # First field inside the home, second field in the primary checkout: refused.
+    got, reason = _decide_full("Edit", worktree, agent_id=agent_id, file_path=inside,
+                               path=outside, old_string="a", new_string="b")
+    if got != "deny" or "worktree-home" not in reason:
+        problems.append("inside then outside: expected deny worktree-home, got %s (%s)" % (
+            got, reason[:120]))
+    # Control: two fields both inside the home stay allowed.
+    got, reason = _decide_full("Edit", worktree, agent_id=agent_id, file_path=inside,
+                               path=inside, old_string="a", new_string="b")
+    if got != "allow":
+        problems.append("inside then inside: expected allow, got %s (%s)" % (got, reason[:120]))
+
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a later field outside the home is refused; two fields inside stay allowed"
+
+
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
 # literal count drifts the moment a case is added, and a suite that miscounts its own cases is a
 # suite a reader stops trusting.
@@ -5373,6 +5433,8 @@ LOG_CHECKS = (
      session_is_live_backwards_clock_step_case),
     ("worktree-home: orchestrator, no-record, home, outside-home, edit, read, removed-home, "
      "unreadable", worktree_home_case),
+    ("worktree-home: a later path field outside the recorded home is refused, not skipped",
+     worktree_home_later_field_case),
 )
 
 
