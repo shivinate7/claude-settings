@@ -5105,6 +5105,42 @@ LN_DESCENDS_REASON = (
 )
 
 
+# THE PLAYWRIGHT BROWSER CACHE. Incident 2026-10-10: a feed-build session set
+# PLAYWRIGHT_BROWSERS_PATH to a scratch dir to work around a missing chromium_headless_shell-1208.
+# The real cause was a stale `__dirlock` left at 16:11 by an install stopped halfway. The install
+# sat 73 minutes, and the workaround hid the cause. See decisions/playwright-browsers-path.md.
+# A set is an inline `VAR=v`, `env VAR=v`, `export VAR=v`, or PowerShell `$env:VAR = v`. A read,
+# a grep, and `unset` set nothing, so they pass.
+PLAYWRIGHT_VAR = "PLAYWRIGHT_BROWSERS_PATH"
+ASSIGNING_BUILTINS = ("export", "declare", "typeset", "readonly", "local")
+
+
+def playwright_path_hit(segment: str) -> str:
+    """Return the matched text when a segment sets PLAYWRIGHT_BROWSERS_PATH, else ''."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return ""
+    head = tokens[0].lower().lstrip("$")
+    if head.startswith("env:" + PLAYWRIGHT_VAR.lower()):
+        return "$env:" + PLAYWRIGHT_VAR
+    at = resolve_command(tokens)
+    after = []
+    if at is not None:
+        after = tokens[at + 1:] if basename(tokens[at]) in ASSIGNING_BUILTINS else []
+    assigned = tokens[:at] + after if at is not None else tokens
+    if any(t.startswith(PLAYWRIGHT_VAR + "=") for t in assigned):
+        return PLAYWRIGHT_VAR + " assignment"
+    return ""
+
+
+PLAYWRIGHT_PATH_REASON = (
+    "a missing browser build usually means a stale `__dirlock` in the Playwright cache, left by an "
+    "install that stopped halfway. A changed cache location hides that cause and does not clear it. "
+    "Remedy: run `pgrep -fl playwright` to confirm that no install is running. Then remove the "
+    "stale `__dirlock` from the Playwright cache and install again."
+)
+
+
 SPAWN_TOOLS = ("Agent", "Task")
 SESSION_TOOL = "mcp__ccd_session__start_session"
 # The one list of roles that may run Haiku. lint/check_agent_models.py reads it from here.
@@ -5331,6 +5367,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = narrated_tail_hit(stripped)
     if matched:
         refuse(tool, "deny", "live-stream", NARRATED_TAIL_REASON, matched)
+
+    # 3c. A command that sets the Playwright browser cache location (incident 2026-10-10).
+    for segment in split_segments(stripped):
+        matched = playwright_path_hit(segment)
+        if matched:
+            refuse(tool, "deny", "playwright-browsers-path", PLAYWRIGHT_PATH_REASON, matched)
 
     # 3b. Two traps ported from banchi's `scripts/guard-shell.py`: `gh api` with a field and no
     # method, and `ln -s` onto a directory that is already there. Each reads the segment's own
