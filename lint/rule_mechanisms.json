@@ -407,6 +407,12 @@
         "reason": "Distinguishing a cause fix from a symptom fix is a code-review judgment, not a parseable property."
       }
     },
+    "building-scanner-respects-strings": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No hook sees every scanner shape. Prompt checklists carry the rule; no check reads them. Revisit a hook if a third incident is a comment-stripping regex."
+      }
+    },
     "building-land-design-or-abandon": {
       "mechanism": {
         "kind": "unmechanized",
