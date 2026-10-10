@@ -11,7 +11,7 @@ runner minutes are free, and wall time is the only cost.
 
 ## The ruling
 
-The owner chose all four cuts on 2026-10-07. Each lands as its own PR.
+The owner chose cuts A to D on 2026-10-07. Each lands as its own PR.
 
 - A. Split `gates-windows` into parallel Windows jobs. Every Windows suite runs in exactly one
   of them. `lint/test_windows_split.py` holds the suite list and fails on a dropped or
@@ -36,10 +36,18 @@ The owner chose all four cuts on 2026-10-07. Each lands as its own PR.
   needed a new test selector in each suite. The repo is public, so macOS minutes are free. macOS
   ends before Windows (about 9 min), so the PR wait does not change. The ci-hygiene skill, step
   17, keeps the pattern for private repos.
+- F. Ruled 2026-10-10. On guard PRs, `gates-windows` was the wait again, about 9.5 min:
+  the guard suite took 382 s and the `install.sh` suite 184 s in one job (run 37968706175). In
+  `gates`, the guard mutation harness (190 s) ran after the guard suite (150 s). The owner chose
+  two cuts. First, the Windows guard suite moves to its own parallel Windows job, and the guard
+  mutation harness moves to its own Linux job. Second, on a pull request, Windows runs a slice of
+  the guard cases that touch Windows code (`GUARD_TESTS=windows-slice`), like C. Push, nightly and
+  manual runs keep the full suite. `lint/test_windows_split.py` and `lint/test_harness_scope.py`
+  pin both.
 
 A push to main, the nightly run and a manual run always run every suite on every OS.
 
 ## Accepted risk
 
-B and C can miss a break on a pull request. A missed input in B's path map has the same effect. The push to main and the nightly run catch it
+B, C and F can miss a break on a pull request. A missed input in B's path map has the same effect. The push to main and the nightly run catch it
 after the merge. A does not lose coverage.
