@@ -2780,11 +2780,33 @@ sh("merge: no number is allowed", "gh pr merge", "allow",
    cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge: reading a pull request is untouched", "gh pr view 75 --json baseRefName", "allow",
    cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
-sh("merge: opening a pull request is untouched", "gh pr create --base main --title x --body y",
+sh("merge: opening a draft pull request is untouched",
+   "gh pr create --draft --base main --title x --body y",
    "allow", cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
 add("merge: a call of the merge tool on a green head is allowed", "allow",
     tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12, repo="x", owner="y",
     env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
+
+
+# =========================================================================== 5a. draft pull requests
+#
+# `draft-pr`. Every pull request opens as a draft, and CI skips draft pull requests. The orchestrator
+# marks a pull request ready after review, so CI runs once per reviewed change. A `gh pr create`
+# without `--draft` (or `-d`) is refused, and the refusal names `--draft` and the step after it.
+
+DRAFT_REMEDY = ("--draft", "mark the PR ready after review")
+sh("draft-pr: a pull request opened without --draft is refused",
+   "gh pr create --title x --body y", "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY)
+sh("draft-pr: short flags -t and -b without -d are refused",
+   "gh pr create -t x -b y", "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY)
+sh("draft-pr: a bash -c wrapper without --draft is refused",
+   "bash -c 'gh pr create --title x --body y'", "deny", "draft-pr", cwd=NOGIT,
+   carries=DRAFT_REMEDY)
+sh("draft-pr: --draft is allowed", "gh pr create --draft --title x", "allow", cwd=NOGIT)
+sh("draft-pr: -d is allowed", "gh pr create -d -t x", "allow", cwd=NOGIT)
+sh("draft-pr: marking a pull request ready is allowed", "gh pr ready 12", "allow", cwd=NOGIT)
+sh("draft-pr: viewing a pull request is allowed", "gh pr view 12", "allow", cwd=NOGIT)
+sh("draft-pr: listing pull requests is allowed", "gh pr list", "allow", cwd=NOGIT)
 
 
 # =========================================================================== 5b. the merge gate
