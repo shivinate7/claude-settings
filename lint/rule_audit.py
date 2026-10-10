@@ -185,9 +185,10 @@ def citation_problem(test_id: str, root: str = ROOT):
         return f"test file `{path}` does not exist."
     text = read(full)
     if path.endswith(".mjs"):
-        # Comments and template literals can hold a column-0 `test("..."` that never registers.
-        bare = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
-        bare = re.sub(r"`(?:\\.|[^`\\])*`", "``", bare, flags=re.DOTALL)
+        # One pass: comments and template literals blank out; "..." and '...' stay, so a comment
+        # marker inside a string opens nothing (building-scanner-respects-strings).
+        bare = re.sub(r"//[^\n]*|/\*.*?\*/|(?P<q>[\"'`])(?:\\.|(?!(?P=q)).)*(?P=q)",
+                      lambda m: m.group(0) if m.group("q") in ("'", '"') else "", text, flags=re.DOTALL)
         if re.search(r'^test\(\s*"' + re.escape(name) + r'"\s*,', bare, re.MULTILINE):
             return None
         return f"`{path}` registers no test named {name!r}."
