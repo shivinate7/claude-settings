@@ -24,7 +24,7 @@ NODE_TEST = 'import { test } from "node:test";\n'
 
 def list_tests_form(body):
     return ('const tests = [];\nconst test = (name, fn) => tests.push({ name, fn });\n' + body
-            + 'if (process.env.LIST_TESTS === "1") { for (const { name } of tests) console.log(name); process.exit(0); }\n')
+            + 'if (process.env.LIST_TESTS === "1") { for (const { name } of tests) console.log("LISTED " + JSON.stringify(name)); process.exit(0); }\n')
 
 GUARD_SRC = '''
 def dispatch():
@@ -416,6 +416,37 @@ class CitationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as empty_path:
             with mock.patch.dict(os.environ, {"PATH": empty_path}):
                 problem = self.problem(NODE_TEST + 'test("it works", () => {});\n', "it works", "t.mjs")
+        self.assertIsNotNone(problem)
+        self.assertIn("could not be read", problem)
+
+    def test_mjs_form_two_registration_resolves(self):
+        self.assertIsNone(self.problem(
+            list_tests_form('test("it works", () => {});\n'), "it works", "t.mjs"))
+
+    def test_mjs_bare_stdout_line_is_not_a_listed_name(self):
+        # P1: a top-level console.log of the name is output, not a registration.
+        self.assertIn("registers no test", self.problem(
+            NODE_TEST + 'console.log("it works");\n', "it works", "t.mjs") or "<None>")
+        self.assertIn("registers no test", self.problem(
+            list_tests_form('console.log("it works");\n'), "it works", "t.mjs") or "<None>")
+
+    def test_mjs_name_with_newline_does_not_match_one_of_its_lines(self):
+        # P2: test("a\nb") registers one name, "a\nb"; citing "a" must not pass.
+        self.assertIn("registers no test", self.problem(
+            NODE_TEST + 'test("a\\nb", () => {});\n', "a", "t.mjs") or "<None>")
+        self.assertIn("registers no test", self.problem(
+            list_tests_form('test("a\\nb", () => {});\n'), "a", "t.mjs") or "<None>")
+
+    def test_mjs_nonzero_exit_says_names_could_not_be_read(self):
+        problem = self.problem(NODE_TEST + 'test("it works", () => {});\nthrow new Error("boom");\n',
+                               "it works", "t.mjs")
+        self.assertIsNotNone(problem)
+        self.assertIn("could not be read", problem)
+
+    def test_mjs_top_level_busy_loop_says_names_could_not_be_read(self):
+        # rule_audit has no timeout constant (10 s is inline), so this case waits the full 10 s.
+        problem = self.problem(NODE_TEST + 'test("it works", () => {});\nwhile (true) {}\n',
+                               "it works", "t.mjs")
         self.assertIsNotNone(problem)
         self.assertIn("could not be read", problem)
 

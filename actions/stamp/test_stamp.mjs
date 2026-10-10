@@ -1502,8 +1502,8 @@ test("config.kinds missing, a string, {} or null is still refused", () =>
   }));
 
 // ---------------------------------------------------------------- run
-// LIST_TESTS=1 prints each registered name and exits before any test body runs.
-if (process.env.LIST_TESTS === "1") { for (const { name } of tests) console.log(name); process.exit(0); }
+// LIST_TESTS=1 prints each registered name as `LISTED <JSON>` and exits before any test body runs.
+if (process.env.LIST_TESTS === "1") { for (const { name } of tests) console.log("LISTED " + JSON.stringify(name)); process.exit(0); }
 let failed = 0;
 for (const { name, fn } of tests) {
   try {
