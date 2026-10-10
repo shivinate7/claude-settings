@@ -54,6 +54,7 @@ one fixed order, and the first match wins.
   5 env-file           any read or write of an environment file
   6 merge-checks       a `gh pr merge` (or the MCP merge tool) while the head has a check or run
                        pending or red, or the read could not run. Denied, `--auto` too.
+    draft-pr           a `gh pr create` without `--draft` or `-d`. Denied.
   7 frozen-path        a write to the settings, the hooks or the global CLAUDE.md, under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. Always denied.
   8 subagent-model-cap a write to a settings file whose content sets or changes
@@ -4443,6 +4444,21 @@ def merge_call_of(segment: str):
     return selector, repo
 
 
+DRAFT_PR_REASON = ("draft-pr: open every PR as a draft. Add --draft (or -d) to gh pr create, and "
+                   "mark the PR ready after review. CI skips drafts.")
+
+
+def undrafted_pr_create(segment: str) -> bool:
+    """True for a `gh pr create` segment with no --draft or -d. Help creates nothing."""
+    rest = gh_call_of(segment)
+    if rest is None or rest[:2] != ["pr", "create"]:
+        return False
+    args = rest[2:]
+    if "-h" in args or "--help" in args:
+        return False
+    return not any(a in ("-d", "--draft", "--draft=true") for a in args)
+
+
 _MERGE_MODULE = []
 
 
@@ -5379,6 +5395,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),
                    "gh pr merge " + merging[0] + " " + verdict)
+
+    # 6b. A pull request opened without --draft.
+    for segment in split_segments(stripped):
+        if segment.strip() and undrafted_pr_create(segment):
+            refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
 
     # 7. A frozen path.
     matched = frozen_shell_hit(stripped, cwd)

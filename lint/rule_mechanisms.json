@@ -273,6 +273,13 @@
         "reason": "Whether a new entry restates an open question or opens a new one is a judgment about meaning. A hook sees a new file, not its question."
       }
     },
+    "git-draft-until-reviewed": {
+      "mechanism": {
+        "kind": "guard",
+        "ref": "draft-pr"
+      },
+      "test": "hooks/test_guard.py::draft-pr: a pull request opened without --draft is refused"
+    },
     "git-integration-branch-merge": {
       "mechanism": {
         "kind": "unmechanized",
