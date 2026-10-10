@@ -16,8 +16,11 @@ on:
 permissions:
   contents: read
 
+# A PR shares one group per ref, so a new push cancels the old run. Every other run gets its own
+# group: GitHub keeps one pending run per group and replaces it, even without cancel-in-progress,
+# so a shared group on main can leave a merged commit with no verdict.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -73,10 +76,6 @@ jobs:
       - name: Guard fixture suite
         if: ${{ needs.scope.outputs.code == 'true' && needs.scope.outputs.guard == 'true' }}
         run: python3 hooks/test_guard.py
-
-      - name: Guard mutation harness
-        if: ${{ needs.scope.outputs.guard == 'true' }}
-        run: python3 hooks/mutate_guard.py
 
       - name: Action metadata loads
         if: ${{ needs.scope.outputs.code == 'true' }}
@@ -356,7 +355,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: bash actions/stamp/test_action.sh
 
-  # The Windows suites run in three jobs (gates-windows, gates-windows-merge, gates-windows-rest). Six python suites in the gates job need a real Windows box to prove: no other
+  # The Windows suites run in four jobs (gates-windows, gates-windows-guard, gates-windows-merge, gates-windows-rest). Six python suites in the gates job need a real Windows box to prove: no other
   # job in this workflow can show whether they pass there. This job runs those
   # suites on Windows and reports the environment first. It is blocking: run
   # 35766479009 went green here for the first time, on its own merit, not through
@@ -370,8 +369,8 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ needs.scope.outputs.gates_windows == 'true' || github.event_name != 'pull_request' }}
-    # Split 2026-10-07 from one 20 min job. Expected about 450 s (guard 263 s, install.sh 180 s); 2x with setup is 15 min.
-    timeout-minutes: 15
+    # Cut F moved the guard suite out. Expected about 190 s (install.sh 180 s, plus setup); 10 min leaves room.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -443,18 +442,62 @@ jobs:
           echo "== mktemp -d, read from Git Bash =="
           mktemp -d
 
-      - name: Guard fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
-        run: python hooks/test_guard.py
-
-      # No Guard mutation harness here: it took 34.5 min on Windows and hit the 45 min timeout
-      # (run 37086259145). It runs on the gates job (Linux) only. Accepted risk: a Windows-only
-      # mutation regression is not caught. No mutant is marked windows-only.
+      # The guard suite runs in gates-windows-guard. No Guard mutation harness on Windows: it took 34.5 min
+      # there and hit the 45 min timeout (run 37086259145). It runs in gates-mutate-guard (Linux) only.
+      # Accepted risk: a Windows-only mutation regression is not caught. No mutant is marked windows-only.
 
       - name: install.sh checkout-detection suite
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         shell: bash
         run: sh hooks/test_install_src.sh
+
+  # The mutation harness for the guard, moved off `gates` by cut F (decisions/ci-wall-time-cuts.md) so it runs in parallel.
+  gates-mutate-guard:
+    runs-on: ubuntu-latest
+    needs: scope
+    if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+    # 2x the slowest green step (193 s) is 386 s; 10 min with setup.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Guard mutation harness
+        run: python3 hooks/mutate_guard.py
+
+  # The guard fixture suite on Windows, split off gates-windows by cut F. On pull_request it runs only the cases
+  # tagged windows (the slice step below); push, schedule and workflow_dispatch run the full suite.
+  gates-windows-guard:
+    runs-on: windows-latest
+    needs: scope
+    if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+    # 2x the slowest green step (382 s) is 764 s; 15 min with setup.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Guard fixture suite
+        if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.code == 'true' }}
+        run: python hooks/test_guard.py
+
+      - name: Guard fixture suite (Windows slice)
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true' }}
+        env:
+          GUARD_TESTS: windows-slice
+        run: python hooks/test_guard.py
 
   gates-windows-merge:
     runs-on: windows-latest

@@ -34,7 +34,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       hooks/*|lint/_transcript.py|lint/ste_lint.py|lint/ste_gate.py|lint/report_gate.py|lint/md_sweep.py|lint/ruling_census.py|lint/test_gates.py|lint/test_ruling_census.py|lint/check_unknown_reads_contract.py)
         on="$on $R $X code guard "; [ "$f" = lint/_transcript.py ] && on="$on $M " ;;
       # bin/claude-janitor: test_install_src reads it.
-      bin/claude-janitor) on="$on $W $S $R $X code sweep " ;;
+      bin/claude-janitor) on="$on $W $S $R $X code guard sweep " ;;
       janitor/*) on="$on $R $X code sweep " ;;
       bin/verdict|bin/verdict.cmd|lint/test_verdict.py) on="$on $R $X code " ;;
       # merge.py: guard.py loads it. check_record_slugs.py: guard.py reads it. check_silent_undo.py: merge.py imports it.
@@ -59,7 +59,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
     on="$on $ALL "
   else
     added=$(git diff --name-only --diff-filter=A --no-renames "$range" 2>/dev/null) || on="$on $ALL "
-    grep -Eq "^($dirs)/" <<< "$added" && on="$on $W $S code "
+    grep -Eq "^($dirs)/" <<< "$added" && on="$on $W $S code guard "
   fi
 else
   on=" $ALL "

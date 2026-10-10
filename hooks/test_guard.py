@@ -5,6 +5,9 @@ Run it from the repository root:
 
     python hooks/test_guard.py
 
+GUARD_TESTS=windows-slice runs only the cases tagged for Windows (see WINDOWS_SHAPE below); unset
+runs every case. Any other value stops the run before a case runs.
+
 Each case drives the guard as Claude Code drives it: one JSON object on stdin, and the decision read
 back off stdout. An empty stdout is an allow. Anything else is parsed for permissionDecision.
 
@@ -23,6 +26,7 @@ Two literals are assembled from parts, so that this file cannot trip the guard i
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -42,10 +46,40 @@ VCS = "g" + "it"
 
 CASES = []
 
+# GUARD_TESTS=windows-slice keeps only the cases tagged "windows": the ones that reach Windows-only
+# guard code. Unset or empty keeps every case. Any other value stops the run before a case runs.
+GUARD_TESTS_MODES = ("", "windows-slice")
+
+# A case's input carries a Windows-only shape. Each shape names the guard.py code it reaches,
+# read on 2026-10-10 (line numbers are guard.py's):
+#   a backslash: slash() L195; the PowerShell escape L307-313; is_test_rel L4903
+#   a drive letter: the subst and mapped-drive identity L1966-1970; a drive root L3170
+#   .exe, .cmd, .ps1 names: L483, L894, L2628, L3296, L4997; the *.test.ps1 suites L4684
+#   NUL and $null: L824; cmd /c and cmd.exe: L2893, L3213-3220
+#   PowerShell, its verbs and taskkill: L320, L2615-2628, L2853-2913, L3933, L3966
+WINDOWS_SHAPE = re.compile(
+    r"\\|(?<![A-Za-z])[A-Za-z]:[\\/]|\.(?:exe|cmd|ps1)\b|\bnul\b|\$null\b|\bcmd(?:\.exe)?\s+/c\b"
+    r"|\b(?:Start-Job|Start-Process|Stop-Process|Remove-Item|taskkill|powershell|pwsh)\b|PowerShell",
+    re.I)
+
+
+def windows_shaped(*parts):
+    """True when a case's literal input, or a path under the fixture root, carries a Windows shape.
+
+    A fixture path is built with os.path.join, so on Windows it carries backslashes and a drive
+    letter that Linux never sees. Both spellings of ROOT, and the path that follows it, read as
+    forward slashes first, so the tag does not depend on the platform the suite runs on.
+    """
+    text = " ".join(str(p) for p in parts if p is not None)
+    for root in {ROOT, slash(ROOT)}:
+        text = re.sub(re.escape(root) + r"[^\s\"'`;|&]*",
+                      lambda m: "<fixture>" + m.group(0)[len(root):].replace("\\", "/"), text)
+    return WINDOWS_SHAPE.search(text) is not None
+
 
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
         session=None, carries=(), config=None, agent_id=None, no_root=False, silent=False,
-        agent_type=None, event=None, stop_active=False, **tool_input):
+        agent_type=None, event=None, stop_active=False, windows=False, **tool_input):
     """Register one case.
 
     `carries` names fragments the printed reason MUST hold, which is how a case pins what an
@@ -79,6 +113,10 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         # An allow that must print NOTHING, not even context. Only a case that says so is held to it.
         "silent": silent,
         "tool_input": tool_input,
+        # Tagged for GUARD_TESTS=windows-slice. A session case reads a live process's start time,
+        # which on Windows is the ctypes arm of _process_start_ms (guard.py L1837-1905).
+        "windows": bool(windows or session is not None or windows_shaped(
+            tool, raw, cwd, env_path, config, *tool_input.values())),
     })
 
 
@@ -5440,18 +5478,43 @@ LOG_CHECKS = (
 
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
 
+# The log checkers tagged "windows". Each one reads a live process's start time (guard.py
+# L1837-1905, the ctypes arm on Windows) or a PowerShell tokenizing rule (L307-320).
+WINDOWS_CHECKERS = {
+    powershell_backslash_case,
+    process_start_ms_case,
+    process_start_ms_windows_case,
+    session_is_live_case,
+    session_is_live_backwards_clock_step_case,
+    worktree_live_session_unreadable_case,
+    worktree_live_session_two_spellings_case,
+    worktree_live_session_path_unresolvable_case,
+}
+
 
 def main():
-    total = len(CASES) + len(LOG_CHECKS)
-    print("guard cases, %d in all" % total)
+    mode = os.environ.get("GUARD_TESTS", "")
+    if mode not in GUARD_TESTS_MODES:
+        print("GUARD_TESTS=%r: want unset or 'windows-slice'. Nothing ran." % mode)
+        return 2
+    cases = [c for c in CASES if not mode or c["windows"]]
+    logs = [(label, check) for label, check in LOG_CHECKS if not mode or check in WINDOWS_CHECKERS]
+    total = len(cases) + len(logs)
+    if mode and not total:
+        print("GUARD_TESTS=windows-slice: no case is tagged. Nothing ran.")
+        return 2
+    print("guard cases, %d in all" % (len(CASES) + len(LOG_CHECKS)))
+    print("GUARD_TESTS=%s: %d cases selected to run" % (mode or "(unset)", total))
     print("fixtures under " + ROOT)
     print()
     failed = 0
+    ran = 0
     # MUTATE_ONLY: set by hooks/mutate_shared.py's first stage, run only the named cases.
     only = os.environ.get("MUTATE_ONLY")
-    for case in CASES:
+    for case in cases:
         if only and only not in case["name"]:
             continue
+        ran += 1
         got, reason = decide(case)
         ok = got == case["expected"]
         note = ""
@@ -5474,9 +5537,10 @@ def main():
         failed += 0 if ok else 1
         print("%s  %-6s(want %-6s)  [%-11s] %s%s" % (
             "PASS" if ok else "FAIL", got, case["expected"], case["tool"], case["name"], note))
-    for label, checker in LOG_CHECKS:
+    for label, checker in logs:
         if only and only not in label:
             continue
+        ran += 1
         ok, note = checker()
         failed += 0 if ok else 1
         print("%s  %-6s(want %-6s)  [%-11s] %s  (%s)" % (
@@ -5484,10 +5548,13 @@ def main():
     print()
     shutil.rmtree(ROOT, ignore_errors=True)
     OWNED.kill()
-    if failed:
-        print("test_guard FAIL: %d of %d cases wrong" % (failed, total))
+    if mode and not ran:
+        print("test_guard FAIL: GUARD_TESTS=%s ran 0 cases (MUTATE_ONLY matched none)" % mode)
         return 1
-    print("test_guard PASS: %d of %d cases right" % (total, total))
+    if failed:
+        print("test_guard FAIL: %d of %d cases wrong" % (failed, ran))
+        return 1
+    print("test_guard PASS: %d of %d cases right" % (ran, ran))
     return 0
 
 
