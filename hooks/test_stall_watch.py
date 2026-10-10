@@ -235,8 +235,14 @@ def stall_report_lists_lock_path():
         lock,
     ]
     rc, out, _secs = run_wrapper(["--quiet", "2", "--log", log, "--", *cmd], timeout=20)
-    problems = expect(rc == 3 and out.startswith("STALL:"), f"exit {rc}, want a STALL report and exit 3")
-    problems += expect(os.path.realpath(lock) in out, "report does not list the lock path held open")
+    problems = expect(rc == 3, f"exit {rc}, want exit 3")
+    lines = out.splitlines()
+    stall_at = next((i for i, line in enumerate(lines) if line.startswith("STALL:")), None)
+    if stall_at is None:
+        return problems + ["no line starts with STALL:"]
+    report = "\n".join(lines[stall_at:])
+    problems += expect(os.path.realpath(lock) in report,
+                       "report, after its STALL: line, does not list the lock path held open")
     reap()
     return problems
 
