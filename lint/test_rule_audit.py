@@ -365,6 +365,14 @@ class CitationTests(unittest.TestCase):
         self.assertIsNone(self.problem(
             '/* note */\ntest("it works", () => {});\n', "it works", "t.mjs"))
 
+    def test_mjs_comment_marker_inside_string_hides_no_registration(self):
+        self.assertIsNone(self.problem(
+            'const a = "image/*";\ntest("it works", () => {});\nconst b = "*/";\n', "it works", "t.mjs"))
+        self.assertIsNone(self.problem(
+            "const a = 'image/*';\ntest(\"it works\", () => {});\nconst b = '*/';\n", "it works", "t.mjs"))
+        self.assertIsNone(self.problem(
+            'const u = "http://x";\ntest("it works", () => {});\n', "it works", "t.mjs"))
+
     def test_test_file_that_never_touches_the_ref_is_red(self):
         with tempfile.TemporaryDirectory() as root:
             for rel, body in (("gate.py", "x = 1\n"), ("test_other.py", "import os\n"),
