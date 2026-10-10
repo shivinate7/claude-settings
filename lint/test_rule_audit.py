@@ -414,8 +414,9 @@ class CitationTests(unittest.TestCase):
         self.assertTrue(finished, f"citation_problem still running after {elapsed:.1f}s")
 
     def test_mjs_unclosed_backtick_with_backslashes_returns_within_a_second(self):
-        # Red on 7ef1098: no closing backtick follows, so the string regex backtracks over the 40 backslashes.
-        src = "const s = `" + "\\" * 40 + '\ntest("it works", () => {});\n'
+        # Red on 7ef1098: no closing backtick follows, so the string regex backtracks over the 35 backslashes
+        # (about 16 s there, past the 1 s limit on any runner).
+        src = "const s = `" + "\\" * 35 + '\ntest("it works", () => {});\n'
         finished, elapsed = self._finishes_within_a_second(src)
         self.assertTrue(finished, f"citation_problem still running after {elapsed:.1f}s")
 
