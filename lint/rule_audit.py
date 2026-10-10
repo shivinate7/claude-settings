@@ -36,7 +36,8 @@ THE MAP. lint/rule_mechanisms.json holds one row per anchor. A row's mechanism i
         that prints a `LISTED <JSON name>` line (an import of any other export fails the check); a file containing `LIST_TESTS`
         runs with LIST_TESTS=1 and prints `LISTED <JSON name>` lines; any other file is refused. Node missing,
         a non-zero exit, or 10 s without an exit means the names could not be read, and never passes.
-        CI still runs the tests.
+        CI still runs the tests. Known limit: a file that prints its own `LISTED ` line can forge a
+        name; closing that needs a channel outside stdout.
       - `setting`: `{"file": "settings.json", "path": "env.NAME", "equals": "v"}` or
         `"contains": "v"`. The value is read from the parsed JSON, never the name. `[*]` in a
         path fans out over a list.
@@ -208,7 +209,7 @@ def citation_problem(test_id: str, root: str = ROOT):
         if run.returncode:
             return f"names in `{path}` could not be read: node exited {run.returncode}: {run.stderr.strip()[:200]}"
         try:
-            listed = [json.loads(l[7:]) for l in run.stdout.splitlines() if l.startswith("LISTED ")]
+            listed = [json.loads(l[7:]) for l in run.stdout.split("\n") if l.startswith("LISTED ")]
         except ValueError as e:
             return f"names in `{path}` could not be read: malformed LISTED line: {e}."
         if name in listed:
