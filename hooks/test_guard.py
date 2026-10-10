@@ -3924,6 +3924,46 @@ for _tool in ("Edit", "Write"):
         add("record-writer: %s of %s is refused" % (_tool, _path), "deny", rule=RW_RULE,
             carries=("Markdown", "Report"), tool=_tool, file_path=_path, new_string="x", **RW)
 
+# ---- every path field a write call carries is judged (PR #304 review). The guard picks ONE target,
+# the first non-empty of file_path, path, notebook_path, so a harmless decoy in file_path hid a real
+# target in another field. Failure classes: false allow (a decoy still passes) and false deny (an
+# all-allowed multi-field call, or a normal single-field call, is blocked).
+add("decoy: NotebookEdit record-writer, notebook_path=lint/x.ipynb beside file_path=docs/x.md is refused",
+    "deny", rule=RW_RULE, tool="NotebookEdit", carries=("Markdown", "Report"),
+    notebook_path="lint/x.ipynb", file_path="docs/x.md", **RW)
+add("decoy: NotebookEdit builder, notebook_path=hooks/test_x.ipynb beside file_path=src/a.py is refused",
+    "deny", rule=BT, tool="NotebookEdit", notebook_path="hooks/test_x.ipynb",
+    file_path="src/a.py", **B)
+add("decoy: Edit test-author, file_path=tests/t.py beside path=hooks/guard.py is refused",
+    "deny", rule=TA, tool="Edit", file_path="tests/t.py", path="hooks/guard.py", **A)
+add("decoy: Edit main session, file_path=docs/x.md beside path=.env is refused",
+    "deny", rule="env-file", tool="Edit", cwd=NOGIT, file_path="docs/x.md", path=ENV)
+add("decoy: Edit main session, file_path=docs/x.md beside path=the config hook is refused",
+    "deny", rule="frozen-path", tool="Edit", cwd=NOGIT, file_path="docs/x.md", path=CFG_HOOK)
+add("decoy: Edit builder, file_path=src/a.py beside path=tests/test_a.py is refused",
+    "deny", rule=BT, tool="Edit", file_path="src/a.py", path="tests/test_a.py", **B)
+add("decoy: Edit builder, an empty file_path does not hide notebook_path=hooks/test_x.ipynb",
+    "deny", rule=BT, tool="NotebookEdit", file_path="", notebook_path="hooks/test_x.ipynb", **B)
+# Controls: every field on an allowed path stays allowed, and a single field keeps its verdict.
+add("decoy-control: Edit record-writer, two .md fields are allowed", "allow", tool="Edit",
+    file_path="docs/x.md", path="decisions/y.md", **RW)
+add("decoy-control: Edit builder, two source fields are allowed", "allow", tool="Edit",
+    file_path="src/a.py", path="src/b.py", **B)
+add("decoy-control: NotebookEdit builder, two source fields are allowed", "allow",
+    tool="NotebookEdit", notebook_path="src/a.ipynb", file_path="src/b.py", **B)
+add("decoy-control: Edit test-author, two test fields are allowed", "allow", tool="Edit",
+    file_path="tests/t.py", path="tests/u.py", **A)
+add("decoy-control: Edit main session, two ordinary fields are allowed", "allow", tool="Edit",
+    cwd=NOGIT, file_path="docs/x.md", path="src/b.py")
+add("decoy-control: NotebookEdit record-writer, a lone lint notebook is refused", "deny",
+    rule=RW_RULE, tool="NotebookEdit", notebook_path="lint/x.ipynb", **RW)
+add("decoy-control: Edit test-author, a lone test file is allowed", "allow", tool="Edit",
+    file_path="tests/t.py", **A)
+add("decoy-control: Edit builder, a lone source path is allowed", "allow", tool="Edit",
+    path="src/a.py", **B)
+add("decoy-control: Edit main session, a lone config hook is refused", "deny", rule="frozen-path",
+    tool="Edit", cwd=NOGIT, path=CFG_HOOK)
+
 # The diff, judged at commit, push and stop. A non-.md path logs `writer-diff` (never blocks);
 # an all-.md diff logs nothing.
 RW_RED = (
