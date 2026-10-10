@@ -11,10 +11,11 @@ roles the owner named. Opus runs only for Plan, the advisor, and a spawn the own
 `CLAUDE_CODE_SUBAGENT_MODEL: sonnet` stays as the fallback. The settings-write ask and the
 expiry both stay, because both key on the model variable and never on the force flag.
 
-## The model per role, ruled 2026-10-07
+## The model per role, ruled 2026-10-07 and 2026-10-10
 
 The owner ruled each point in one interview. The reason: Haiku is cheap enough for
-read-only work, tests and review, and the owner will measure cost and quality.
+read-only work, tests, review and record-writing, and the owner will measure cost and quality.
+Writing prose and records is not building.
 
 | Point | Model | Effort |
 |---|---|---|
@@ -22,6 +23,7 @@ read-only work, tests and review, and the owner will measure cost and quality.
 | Explore, claude-code-guide | haiku | high |
 | test-author | haiku | high |
 | reviewer | haiku | xhigh |
+| record-writer (`agents/record-writer.md`) | haiku | xhigh |
 | builder | sonnet | medium |
 | Plan (`agents/plan.md`) | opus | high |
 | general-purpose, `claude` | sonnet, by the default | model default |
@@ -53,16 +55,17 @@ it, and `lint/rule_mechanisms.json` records it as `unmechanized`.
 
 ## The floor
 
-Haiku runs only in Explore, claude-code-guide, test-author and reviewer. Every other role
+Haiku runs only in Explore, claude-code-guide, test-author, reviewer and record-writer. Every
+other role
 has Sonnet as the floor. These places enforce it.
 
 - Guard rule `subagent-model-floor` in `hooks/guard.py` denies an `Agent` or `Task` call
-  whose `model` holds "haiku", unless its `subagent_type` is one of the four roles.
+  whose `model` holds "haiku", unless its `subagent_type` is one of the Haiku roles.
 - The same guard rule reads a `Workflow` script. It denies an `agent()` call that names a
-  Haiku model outside the four roles. It also denies a `start_session` that names Haiku.
+  Haiku model outside the Haiku roles. It also denies a `start_session` that names Haiku.
 - `lint/check_agent_models.py`, run in `.github/workflows/gates.yml`, fails when an
   `agents/*.md` or `skills/*/SKILL.md` frontmatter sets a Haiku `model:`, unless the file
-  is one of the four roles.
+  is one of the Haiku roles.
 
 Both read one list of Haiku roles, `HAIKU_ROLES` in `hooks/guard.py`. The Workflow
 check reads string literals in each `agent(` call. It does not see a model or role built at
@@ -71,8 +74,22 @@ key, a template `${}`. A regex literal that holds a quote also hides the call th
 its own model and never puts it in the tool input. Measured 2026-10-07: the built-in Plan
 ran Opus 5.5 and general-purpose ran Sonnet 5.5. `agents/plan.md` now pins Plan.
 
-Other sections below keep their Haiku sentences only as evidence of the earlier
+Sections after the record-writer boundary keep their Haiku sentences only as evidence of the earlier
 argument. This ruling overrides them.
+
+## The record-writer boundary, ruled 2026-10-10
+
+A `record-writer` may change only `*.md` files: records, README, CLAUDE.md-style docs. It never
+changes product code, tests, CI or config. The risk: a role name is only a label on the spawn.
+With no path limit, a Haiku `record-writer` is a Haiku builder under a new name, and the floor
+above means nothing. The guard enforces the limit at the same points as the builder and
+test-author limits (builders-cannot-edit-tests). A write tool call to a non-`.md` path is denied
+as `record-writer-scope`, by the path as given. A non-`.md` path in its diff at commit, push or
+stop logs `writer-diff`; that also catches a `.md` link to another file.
+
+Known limit: `agents/*.md`, `skills/*/SKILL.md` and output styles are `.md` but steer behaviour.
+The ruling names CLAUDE.md-style docs, so they stay in scope. `lint/check_agent_models.py` still
+catches a Haiku `model:` pin written into one.
 
 ## The precedence, corrected
 
