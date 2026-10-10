@@ -673,15 +673,15 @@ MUTATIONS = [
      '    for found in ():\n'
      '        reading.setdefault(found.group(0), "")', "guard", 'cap: a value the pattern cannot read still asks'),
     ("cap: the rule runs ahead of the frozen-path deny, so the config settings ask instead",
-     '    if is_frozen(target, cwd):\n'
-     '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)',
-     '    if is_settings_file(target, cwd):\n'
-     '        change = cap_change_parts(write_content_parts(tool_input))\n'
-     '        if change:\n'
-     '            refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, target),\n'
-     '                   target + " " + change)\n'
-     '    if is_frozen(target, cwd):\n'
-     '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)', "guard", 'cap: the config settings stay denied, never asked'),
+     '        if is_frozen(target, cwd):\n'
+     '            refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)',
+     '        if is_settings_file(target, cwd):\n'
+     '            change = cap_change_parts(write_content_parts(tool_input))\n'
+     '            if change:\n'
+     '                refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, target),\n'
+     '                       target + " " + change)\n'
+     '        if is_frozen(target, cwd):\n'
+     '            refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)', "guard", 'cap: the config settings stay denied, never asked'),
     ("cap: the shell route runs ahead of the frozen-path deny, so a heredoc onto the config "
      "settings asks instead",
      '    matched = frozen_shell_hit(stripped, cwd)\n'
