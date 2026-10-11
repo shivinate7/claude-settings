@@ -9,22 +9,27 @@ How do we run CI once per reviewed change, not once per push?
 Owner ruling, 2026-10-10. Every PR opens as a draft. CI skips draft PRs. The orchestrator marks a
 PR ready, or folds it into an integration branch, only after review.
 
-- Guard gate `draft-pr` refuses `gh pr create` without `--draft` or `-d`, also inside `bash -c`.
+- Guard gate `draft-pr` refuses `gh pr create` without `--draft` or `-d`, also inside `sh -c` scripts and command substitutions. The last
+  `--draft`, `-d` or `--draft=X` wins.
 - `gates.yml` runs on `opened`, `synchronize`, `reopened` and `ready_for_review`. The `scope` job
   skips when the PR is a draft. Each other job needs `scope`, so each skips too.
 - Push to main, schedule and manual runs are unchanged.
+- Named limits: the gate does not judge a `gh api` POST to the pulls endpoint, or
+  `hub pull-request`. Each can open a non-draft PR.
+- The merge tool does not check for a draft yet. That check comes in a later PR.
 
 ## The incident
 
-2026-10-10: 46 CI runs in this repo. 6 were for PR #313, many on commits known to be red.
+2026-10-10: 52 CI runs in this repo (UTC day). 7 were on the PR #313 branch, many on commits known to be red.
 
 ## Required checks on a skipped run
 
 A job skipped by `if:` reports as passing (skill ci-hygiene, step 11). A draft needs no check,
-because GitHub does not merge a draft. Marking it ready fires `ready_for_review`, so the full run
-starts before any merge. The `scope` job stays the one required check, as in decision
-ci-wall-time-cuts, cut B.
+because GitHub does not merge a draft: "Draft pull requests cannot be merged." (GitHub docs, about
+pull request merges). Marking it ready fires `ready_for_review`. That run gets the same scoped
+range as a `synchronize` run (`.github/scripts/harness-scope.sh`, lines 9 to 11), not a full run.
+Main has no branch protection (decision main-has-no-branch-protection), so no check is required.
 
-- Unmeasured: that GitHub refuses to merge a draft, and that `ready_for_review` starts this
-  workflow. Both come from GitHub's documented behavior, not from a run here.
+- Unmeasured: that `ready_for_review` starts this workflow. It comes from GitHub's documented
+  behavior, not from a run here.
 - Unmeasured: the saving in runs.

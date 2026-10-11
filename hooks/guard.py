@@ -4448,12 +4448,20 @@ DRAFT_PR_REASON = ("draft-pr: open every PR as a draft. Add --draft (or -d) to g
                    "mark the PR ready after review. CI skips drafts.")
 
 
+# `gh pr create` flags that take a value; the next token is data, never a flag.
+PR_CREATE_VALUE_FLAGS = {"-t", "--title", "-b", "--body", "-F", "--body-file", "-B", "--base",
+                         "-H", "--head", "-l", "--label", "-a", "--assignee", "-m", "--milestone",
+                         "-p", "--project", "-r", "--reviewer", "-R", "--repo", "-T", "--template"}
+# Named limits (decision draft-until-reviewed): a `gh api` POST to the pulls endpoint and
+# `hub pull-request` open a PR and are not judged here.
+
+
 def undrafted_pr_create(segment: str) -> bool:
-    """True for a `gh pr create` segment with no --draft or -d. Help creates nothing."""
+    """True for a `gh pr create` segment (or a `sh -c` script holding one) that ends not draft.
+    The last --draft, -d or --draft=X wins. Help creates nothing."""
     tokens = segment_tokens(segment) or []
-    index = resolve_command(tokens) if tokens else None
-    if index is not None and basename(tokens[index]) in ("bash", "sh", "zsh") and "-c" in tokens[index:-1]:
-        script = tokens[tokens.index("-c", index) + 1]   # the script after -c
+    script = inline_script(tokens) if tokens else ""
+    if script:
         return any(undrafted_pr_create(part) for part in split_segments(script) if part.strip())
     rest = gh_call_of(segment)
     if rest is None or rest[:2] != ["pr", "create"]:
@@ -4461,7 +4469,17 @@ def undrafted_pr_create(segment: str) -> bool:
     args = rest[2:]
     if "-h" in args or "--help" in args:
         return False
-    return not any(a in ("-d", "--draft", "--draft=true") for a in args)
+    draft, index = False, 0
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        if arg in PR_CREATE_VALUE_FLAGS:
+            index += 1
+        elif arg in ("-d", "--draft"):
+            draft = True
+        elif arg.startswith("--draft="):
+            draft = arg[len("--draft="):].lower() not in ("false", "0", "no", "off")
+    return not draft
 
 
 _MERGE_MODULE = []
@@ -5402,8 +5420,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                    "gh pr merge " + merging[0] + " " + verdict)
 
     # 6b. A pull request opened without --draft.
-    for segment in split_segments(stripped):
-        if segment.strip() and undrafted_pr_create(segment):
+    for text, _in_message in _substitutions(stripped)[0]:
+        if any(undrafted_pr_create(seg) for seg in split_segments(text) if seg.strip()):
             refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
 
     # 7. A frozen path.
