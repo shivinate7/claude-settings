@@ -4157,6 +4157,52 @@ sh("impeccable bash: detect on folders is allowed", "npx impeccable detect src/p
    cwd=NOGIT)
 
 
+# impeccable, round two (owner ruling 2026-10-10, decisions/design-skills.md): the plugin is not
+# installed. Its skill folder is pinned at skill-v4.5.2. Every Bash form below reaches the plugin's
+# build or settings commands, through a version pin, a runner flag or a different subcommand.
+
+sh("impeccable bash: a version-pinned hooks on is denied", "npx impeccable@4.5.2 hooks on", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: npx -y latest hooks on is denied", "npx -y impeccable@latest hooks on", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: npx -p latest hooks on is denied",
+   "npx -p impeccable@latest impeccable hooks on", "deny", "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: install is denied", "npx impeccable install", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: update is denied", "npx impeccable update", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: link is denied", "npx impeccable link", "deny", "impeccable-review-only",
+   cwd=NOGIT)
+sh("impeccable bash: ignores add-file is denied", "npx impeccable ignores add-file x", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: pin is denied", "npx impeccable pin pin polish", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+
+sh("impeccable bash: hooks status is allowed", "npx impeccable hooks status", "allow", cwd=NOGIT)
+sh("impeccable bash: detect on a folder is allowed", "npx impeccable detect src", "allow",
+   cwd=NOGIT)
+
+add("impeccable skill: critique with a trailing newline is allowed", "allow", tool="Skill",
+    skill="impeccable:impeccable", args="critique\n")
+add("impeccable skill: a leading slash on the name is denied", "deny", "impeccable-review-only",
+    tool="Skill", skill="/impeccable", args="polish")
+
+
+def impeccable_settings_case():
+    """settings.json names no impeccable plugin or marketplace. The skill folder is the install."""
+    with open(os.path.join(REPO, "settings.json"), encoding="utf-8") as handle:
+        settings = json.load(handle)
+    named = [key for key in settings.get("enabledPlugins", {}) if "impeccable" in key]
+    named += [key for key in settings.get("extraKnownMarketplaces", {}) if "impeccable" in key]
+    if named:
+        return False, "settings.json still names: " + ", ".join(named)
+    return True, "no impeccable plugin or marketplace in settings.json"
+
+
+LOG_CHECKS_EXTRA.append(("impeccable: settings.json names no impeccable plugin",
+                         impeccable_settings_case))
+
+
 # --------------------------------------------------------------------------- the runner
 
 
