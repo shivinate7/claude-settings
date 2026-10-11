@@ -34,9 +34,12 @@ launchd_sim process has ppid 1. CoreSimulator.log has no requester.
    Any read that cannot tell means keep. Each device gets one `xcrun simctl shutdown
    <UDID>`. Never `all`. Never erase. A device the owner booted is never stopped.
 3. Cap 2. A guard rule refuses a session's boot when 2 devices are already booted. It
-   names them. The cap counts every booted device, whoever booted it.
+   names them. The cap counts every booted device, whoever booted it, owner-booted
+   devices included. Owner answer, 2026-10-10: RAM is the limit. With two owner-booted
+   devices, no session can boot until the owner stops one.
 4. Reuse. A guard rule refuses a boot when an idle booted device of the same type and
-   runtime exists. It names that device's UDID.
+   runtime exists. It names that device's UDID. Owner answer, 2026-10-10: "idle" is the
+   rule 2 test in full. A device that fails any part of it is not idle.
 
 Why the cap: it needs no knowledge of who booted a device.
 
@@ -47,15 +50,6 @@ Why the cap: it needs no knowledge of who booted a device.
   Executors". The article covers boot cost. It caches warm data, then overlays that data
   on a fresh simulator before boot. It does not say to reuse a booted device. Cite it for
   boot cost only. Checked on 2026-10-10 through a summarizing fetch, not the full page.
-
-## Open questions
-
-- "Idle" in rule 4 has no definition. Option A: the rule 2 test. Option B: any booted
-  device that no session holds. Recommendation: A. Under B, a device that a live session
-  uses could be named for reuse.
-- Rule 3 counts the owner's devices, and the sweep never stops those. With two
-  owner-booted devices, no session can boot until the owner stops one. The owner chose
-  this. It is recorded so the outcome is visible.
 
 ## Unmeasured
 
