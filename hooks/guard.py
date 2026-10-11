@@ -1244,6 +1244,7 @@ def segment_roots(cmd: str, shell_cwd: str) -> list:
     roots = []
     run_dir = shell_cwd
     at = 0
+    synced = 0
     for segment in kept:
         words = segment_tokens(segment)
         git_c = _segment_git_c_target(words) if words else None
@@ -1253,6 +1254,20 @@ def segment_roots(cmd: str, shell_cwd: str) -> list:
             if cd is not None:
                 run_dir = _absolute(cd, run_dir)
             at += 1
+            synced = len(roots)
+    if at < len(walked):
+        # Walk and segments diverged (a lone quote in a heredoc body splits them differently):
+        # every segment after the last match takes the walk's last `cd` root, never an earlier one.
+        final = shell_cwd
+        for segment in walked:
+            words = segment_tokens(segment)
+            cd = _segment_cd_target(words) if words else None
+            if cd is not None:
+                final = _absolute(cd, final)
+        for i in range(synced, len(roots)):
+            words = segment_tokens(kept[i])
+            git_c = _segment_git_c_target(words) if words else None
+            roots[i] = _absolute(git_c, final) if git_c is not None else final
     return roots
 
 

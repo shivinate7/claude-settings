@@ -591,6 +591,10 @@ MUTATIONS = [
      '    for segment, root in zip(split_segments(stripped), segment_roots(stripped, cwd)):',
      '    for segment, root in zip(split_segments(stripped), [command_root(stripped, cwd)] * 99):', "guard",
      'per-file deny: -C lane status, then -C shared restore f.txt, from a plain folder'),
+    ("per-file: a desynced heredoc walk roots later segments at the walk's last cd",
+     '    if at < len(walked):',
+     '    if False:', "guard",
+     'per-file deny: node heredoc, a lone apostrophe in the body, then cd shared and restore f.txt'),
     ("config-edit: stop noting project config edits, shell tool",
      '    matched = project_config_shell_hit(stripped, cwd)\n'
      '    if matched:\n'
