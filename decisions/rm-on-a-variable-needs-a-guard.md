@@ -13,6 +13,8 @@ Owner, 2026-10-11 ("Ship guard now, hook later"):
    Claude Code prompts on: a variable, then `/`, then a glob, another variable, a slash, a
    quote, or the end. Examples: `rm -rf $S/$d`, `rm -rf "$D"/*`, `rm -rf $D/`. Owner,
    2026-10-11 ("Only where Claude Code prompts"). So `rm -rf "$ROOT/dist"` is not refused.
+   A `..` right after the variable, as in `rm -rf "$S"/../*`, is refused with the literal-path
+   reason, because it can empty the cwd.
    The refusal offers one of two remedies:
    - `${NAME:?}`, only when the guard can see that each such name is safe. Safe means that each
      binding of the name in the command is `NAME=<literal>`, `for NAME in <literal words>`, or
