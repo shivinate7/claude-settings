@@ -5421,8 +5421,10 @@ _RM_PART = re.compile(r"""'[^']*'|"(?:[^"\\]|\\.)*"|[^'"]+|.""")
 _RM_EXPANSION = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
 _RM_EXPANSION_SLASH = re.compile(r"\$(?:\{\w+\}|\w+)\"?/")
 _RM_LITERAL = "literal path needed: "
-# A variable set in the command from $(pwd), `pwd`, $PWD or $HOME. HOME and PWD count as set.
-_RM_TAINT = re.compile(r"(?<![\w$])(\w+)=\"?(?:\$\(pwd\)|`pwd`|\$\{?(?:PWD|HOME)\b)")
+# A variable is tainted when its assigned value or for-loop word list holds ~, HOME, PWD or pwd.
+_RM_TAINT = re.compile(r"(?<![\w$])(\w+)=([^;&|\n]*)|\bfor\s+(\w+)\s+in\s+([^;\n]*)")
+_RM_TAINT_VALUE = re.compile(r"~|\b(?:HOME|PWD|pwd)\b")
+_RM_CWD_VALUE = re.compile(r"\b(?:PWD|pwd)\b")
 
 
 def rm_call(segment: str):
@@ -5447,10 +5449,23 @@ def rm_call(segment: str):
     return tokens, at, flags, targets, recursive
 
 
-def _rm_var_rewrite(word: str, names=("HOME", "PWD")):
+def _rm_taint_names(text: str) -> dict:
+    """Map each tainted name to its base path: the cwd for a PWD or pwd value, else the home."""
+    names = {"HOME": os.path.expanduser("~"), "PWD": os.getcwd()}
+    for m in _RM_TAINT.finditer(text):
+        name, value = (m.group(1), m.group(2)) if m.group(1) else (m.group(3), m.group(4))
+        if _RM_TAINT_VALUE.search(value):
+            home = re.search(r"~|\bHOME\b", value)
+            names[name] = names["PWD"] if _RM_CWD_VALUE.search(value) and not home else names["HOME"]
+    return names
+
+
+def _rm_var_rewrite(word: str, names=None):
     """Return (word with every expansion guarded, 1 when one unguarded expansion is followed
-    by `/`, 2 when a `names` expansion, guarded or not, is followed by `/`). Text inside single
-    quotes is a literal and stays as it is."""
+    by `/`, 2 when a `names` expansion, guarded or not, is followed by `/`; then the word is the
+    literal path: the name's base joined with "/" and the rest). Text inside single quotes is a
+    literal and stays as it is."""
+    names = names or _rm_taint_names("")
     def guard(match):
         return "${%s:?}" % (match.group(1) or match.group(2))
     out, live = [], []
@@ -5465,9 +5480,9 @@ def _rm_var_rewrite(word: str, names=("HOME", "PWD")):
             live.append(part)
     live = "".join(live)
     alt = "|".join(map(re.escape, names))
-    if re.search(r"\$(?:\{(?:%s)(?::\?)?\}|(?:%s)(?!\w))\"?/" % (alt, alt), live):
-        return re.sub(r"\$\{(\w+):\?\}|\$\{(\w+)\}", lambda m: "$" + (m.group(1) or m.group(2)),
-                      word), 2
+    m = re.search(r"\$(?:\{(%s)(?::\?)?\}|(%s)(?!\w))\"?/(.*)" % (alt, alt), live)
+    if m:
+        return names[m.group(1) or m.group(2)] + "/" + m.group(3).strip("\"'"), 2
     return "".join(out), int(bool(_RM_EXPANSION_SLASH.search(live)))
 
 
@@ -5476,16 +5491,17 @@ def rm_var_hits(text: str, depth=0) -> list:
     expansion in a flagged target guarded `:?`. A target under $HOME, $PWD or a variable set from
     them or `pwd` is flagged with _RM_LITERAL. `sh -c`, `eval` and `pwsh -Command` are walked."""
     found = []
-    names = ("HOME", "PWD") + tuple(m.group(1) for m in _RM_TAINT.finditer(text))
+    names = _rm_taint_names(text)
     for segment in split_segments(text):
         call = rm_call(segment)
         if call:
             _, _, flags, targets, recursive = call
             rewritten = [(w, hit) for w, hit in (_rm_var_rewrite(t, names) for t in targets) if hit]
             if rewritten and recursive:
-                literal = any(hit == 2 for _, hit in rewritten)
-                found.append((_RM_LITERAL if literal else "") +
-                             " ".join(["rm"] + flags + [w for w, _ in rewritten]))
+                for kind, prefix in ((2, _RM_LITERAL), (1, "")):
+                    words = [w for w, hit in rewritten if hit == kind]
+                    if words:
+                        found.append(prefix + " ".join(["rm"] + flags + words))
             continue
         tokens = segment_tokens(segment)
         at = resolve_command(tokens) if tokens else None
@@ -5500,12 +5516,15 @@ def rm_var_hits(text: str, depth=0) -> list:
 
 
 def rm_var_reason(hits) -> str:
-    if any(h.startswith(_RM_LITERAL) for h in hits):
+    literal = [h.removeprefix(_RM_LITERAL) for h in hits if h.startswith(_RM_LITERAL)]
+    hits = [h for h in hits if not h.startswith(_RM_LITERAL)]
+    if literal:
         return (
-            "a recursive delete under $HOME, $PWD or a variable set from them can remove the home "
-            "or working folder, and a ${NAME:?} guard does not clear it. Retry with a literal "
-            "path, such as " + os.path.expanduser("~") + "/.cache/x. Flagged: " +
-            "; ".join(h.removeprefix(_RM_LITERAL) for h in hits)
+            "a recursive delete under $HOME, $PWD, ~ or a variable set from them can remove the "
+            "home or working folder, and a ${NAME:?} guard does not clear it. Retry with a "
+            "literal path: " + "; ".join(literal) +
+            (". The other targets need every expansion written ${NAME:?}, which stops the "
+             "command when the variable is empty: " + "; ".join(hits) if hits else "")
         )
     return (
         "a recursive delete with an unguarded variable in its path can remove far more than "
