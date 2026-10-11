@@ -6285,6 +6285,12 @@ def register_simulator_boot_cases():
             (SIM_UB, "Beta Air", "Booted", SIM_TYPE_AIR, SIM_RT),
             (SIM_UE, "Gamma Mini", "Booted", SIM_TYPE_MINI, SIM_RT),
             (SIM_UC, "Gamma Mini", "Shutdown", SIM_TYPE_MINI, SIM_RT_OLD)]), None),
+        # Exactly two booted (the cap is full): the booted Gamma Mini is on RT (26.0), its shut-down
+        # twin on RT_OLD (25.0). OS= in a -destination picks which copy the boot names.
+        "cap_os_split": (make_fake_xcrun(os.path.join(ROOT, "sim_cap_os_split"), [
+            (SIM_UA, "Alpha Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
+            (SIM_UE, "Gamma Mini", "Booted", SIM_TYPE_MINI, SIM_RT),
+            (SIM_UC, "Gamma Mini", "Shutdown", SIM_TYPE_MINI, SIM_RT_OLD)]), None),
     }
     cfgs = {}
     for name, (folder, records) in fixtures.items():
@@ -6341,6 +6347,16 @@ def register_simulator_boot_cases():
     add("boot a shut-down copy by name, a booted copy shares the name: MCP launch",
         "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device="Gamma Mini",
         env_path=name_split_path, config=name_split_cfg, carries=(SIM_UA, SIM_UB))
+    os_split_path, os_split_cfg = on("cap_os_split")
+    # OS=26.0 names the booted copy, so the boot is a no-op: allowed.
+    sh("control: OS= picks the booted copy of a name, the boot is a no-op: xcodebuild destination",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini,OS=26.0'",
+       "allow", env_path=os_split_path, config=os_split_cfg)
+    # OS=25.0 names the shut-down copy with the cap full: the boot is refused.
+    sh("boot the shut-down copy by OS= with the cap full: xcodebuild destination",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini,OS=25.0'",
+       "deny", rule="simulator-boot-cap", env_path=os_split_path, config=os_split_cfg,
+       carries=(SIM_UA, SIM_UE))
     sh("control: one booted, a second boot is allowed",
        "xcrun simctl boot " + SIM_UC, "allow", env_path=one_path, config=one_cfg)
     sh("control: a read of the device list is not a boot",
