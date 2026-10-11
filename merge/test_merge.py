@@ -2186,6 +2186,84 @@ class SliceSelector(unittest.TestCase):
         self.assertIn("MERGE_TESTS", r.stdout + r.stderr)
         self.assertNotIn("Ran ", r.stdout + r.stderr)
 
+class TimedLines(io.StringIO):
+    """stdout that stamps each `merge: ` line with the fake clock at the moment it is written."""
+    def __init__(self, clock):
+        super().__init__()
+        self.clock, self.lines = clock, []
+
+    def write(self, s):
+        if s.startswith("merge: "):
+            self.lines.append((self.clock[0], s.rstrip("\n")))
+        return super().write(s)
+
+class ClockedHost(merge.Host):
+    """Host with no gh and a fake clock. `checks_at(t)` gives the check buckets at fake time t; `head_at(t)` the head."""
+    def __init__(self, checks_at, head_at=lambda t: "sha"):
+        self.clock, self.pauses = [0.0], []
+        self.checks_at, self.head_at = checks_at, head_at
+        super().__init__(required=["gates"], base="main", minute=60, now=lambda: self.clock[0], pause=self.advance)
+
+    def advance(self, s):
+        self.pauses.append(s)
+        self.clock[0] += s
+        assert len(self.pauses) < 500, "the wait never ended"
+
+    def pr(self, n):
+        return {"head": self.head_at(self.clock[0]), "branch": "feat", "base": "main", "state": "OPEN",
+                "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": False}
+
+    def checks(self, n):
+        return self.checks_at(self.clock[0])
+
+    def runs(self, sha):
+        return []
+
+class WaitProgress(unittest.TestCase):
+    """The wait prints progress: a `merge: waiting on` line at first sight, on a change of the pending set, and at least every 120 s."""
+    def wait(self, host, deadline, prior=None):
+        out = TimedLines(host.clock)
+        with contextlib.redirect_stdout(out):
+            ok, why = host.wait_checks(7, "sha", deadline, prior=prior)
+        return ok, why, [(t, l) for t, l in out.lines if l.startswith("merge: waiting on")], host.clock[0]
+
+    def test_a_ten_minute_pending_wait_never_goes_120_seconds_without_a_line(self):
+        host = ClockedHost(lambda t: {"gates": [("pending" if t < 600 else "pass", "")]})
+        ok, why, waits, end = self.wait(host, 15)
+        self.assertTrue(ok, why)
+        self.assertTrue(waits, "no `merge: waiting on` line during the 10-minute wait")
+        self.assertIn("gates", waits[0][1])  # the first line names the pending check
+        marks = [0.0] + [t for t, _ in waits] + [end]
+        gaps = [b - a for a, b in zip(marks, marks[1:])]
+        self.assertLessEqual(max(gaps), 120, f"longest quiet gap {max(gaps)} s; lines at {[t for t, _ in waits]}")
+
+    def test_a_change_in_the_pending_set_prints_at_once(self):
+        def checks_at(t):
+            if t < 60:
+                return {"gates": [("pending", "")]}
+            if t < 300:
+                return {"gates": [("pending", "")], "design": [("pending", "")]}
+            return {"gates": [("pass", "")], "design": [("pass", "")]}
+        host = ClockedHost(checks_at)
+        ok, why, waits, _ = self.wait(host, 15)
+        self.assertTrue(ok, why)
+        design = [t for t, l in waits if "design" in l]
+        self.assertEqual(design[:1], [60.0], f"a new pending check named at {design[:1]}; lines at {[t for t, _ in waits]}")
+
+    def test_a_wait_that_is_green_on_the_first_read_prints_no_waiting_line(self):
+        host = ClockedHost(lambda t: {"gates": [("pass", "")]})
+        ok, why, waits, _ = self.wait(host, 15)
+        self.assertTrue(ok, why)
+        self.assertEqual(waits, [])
+
+    def test_a_lagging_head_prints_no_waiting_line_until_the_head_moves(self):
+        host = ClockedHost(lambda t: {"gates": [("pending" if t < 300 else "pass", "")]},
+                           head_at=lambda t: "sha" if t >= 180 else "old")
+        ok, why, waits, _ = self.wait(host, 15, prior="old")
+        self.assertTrue(ok, why)
+        self.assertTrue(waits, "no `merge: waiting on` line once the head moved")
+        self.assertGreaterEqual(waits[0][0], 180, f"a waiting line at {waits[0][0]} s while the head still read as the old one")
+
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--child":
         # A run that dies without cleanup: os._exit at the wait, so no `finally` runs.
