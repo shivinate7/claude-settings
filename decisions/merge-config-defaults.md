@@ -18,9 +18,8 @@ Owner, 2026-10-10:
 5. A file that exists but is broken (bad JSON) stops merge with one line that names the file.
 6. When the base loses its config or its stamp kinds during the wait, merge stops with one
    line, "base lost its config", and reverts its claim.
-7. The "dirty tree" message names the checkout path it checked. Done for merge.py: the
-   message for a local base branch that did not move names the path. Not done: the "checkout
-   left as is: dirty tree" line of `merge/launch.py`, the one the field report named.
+7. The "dirty tree" message names the checkout path it checked, in `merge/merge.py` and in
+   the "checkout left as is" line of `merge/launch.py`.
 
 ## Incidents
 
