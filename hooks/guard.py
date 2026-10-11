@@ -5422,10 +5422,10 @@ _RM_EXPANSION = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
 _RM_EXPANSION_SLASH = re.compile(r"\$(?:\{\w+\}|\w+)\"?/")
 _RM_LITERAL = "literal path needed: "
 # A variable is tainted when its own assigned value or for-loop word list holds a real expansion:
-# ~ at a word start or after = or :, $HOME, ${HOME, $PWD, ${PWD, $(pwd) or backtick pwd.
+# ~ at a word start or after = or :, $HOME, ${HOME, $PWD, ${PWD, a `$(…)` or backtick span holding the word pwd.
 _RM_TAINT = re.compile(r"(?<![\w$-])(\w+)=([^;&|\n]*)|\bfor\s+(\w+)\s+in\s+([^;\n]*)")
 _RM_TAINT_VALUE = re.compile(
-    r"(?:^|[\s=:])~|\$(?:HOME|PWD)(?!\w)|\$\{(?:HOME|PWD)|\$\(\s*pwd\s*\)|`\s*pwd\s*`")
+    r"(?:^|[\s=:])~|\$(?:HOME|PWD)(?!\w)|\$\{(?:HOME|PWD)|\$\([^)]*\bpwd\b|`[^`]*\bpwd\b")
 
 
 def rm_call(segment: str):
