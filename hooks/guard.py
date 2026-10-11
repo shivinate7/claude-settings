@@ -153,6 +153,7 @@ hands, which is what the tokens were reaching for.
 """
 
 import fnmatch
+import itertools
 import json
 import os
 import re
@@ -5419,7 +5420,6 @@ PLAYWRIGHT_PATH_REASON = (
 _RAW_WORD = re.compile(r"""(?:\\.|'[^']*'|"(?:[^"\\]|\\.)*"|[^\s'"\\])+""")
 _RM_PART = re.compile(r"""'[^']*'|"(?:[^"\\]|\\.)*"|[^'"]+|.""")
 _RM_EXPANSION = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
-_RM_EXPANSION_SLASH = re.compile(r"\$(?:\{\w+\}|\w+)\"?/")
 _RM_LITERAL = "literal path needed: "
 # A variable is tainted when its assigned value or for-loop list starts with `~`, or when the command
 # holds a source (`pwd` as a command word, $HOME, ${HOME, $PWD, ${PWD) anywhere: then every name it
@@ -5460,11 +5460,82 @@ def _rm_taint_names(text: str) -> set:
     return names
 
 
-def _rm_var_rewrite(word: str, names=None):
-    """Return (word with every expansion guarded, 1 when one unguarded expansion is followed
-    by `/`, 2 when a `names` expansion, guarded or not, is followed by `/`). Text inside single
-    quotes is a literal and stays as it is."""
-    names = names or _rm_taint_names("")
+# The allow-list for `${NAME:?}` advice (ruling item 1). Every binding of a name must be
+# `NAME=<literal>`, `for NAME in <literal words>` or `NAME=$(mktemp …)`. Built once per command.
+_RM_EXPANSION_ANY = re.compile(r"\$(?:\{(\w+)(?::\?)?\}|(\w+))")
+_RM_TRIGGER = re.compile(r"""\$(?:\{(\w+)(:\?)?\}|(\w+))"?/(?=[*?\[${}/"']|\.\.|$)""")
+_RM_VALUE = re.compile(r"""(?:\\.|'[^']*'|"(?:[^"\\]|\\.)*"|[^\s'"\\;&|()<>])+""")
+_RM_BIND = re.compile(r"(?<![\w$-])(\w+)(\+|\[[^\]]*\])?=")
+_RM_MKTEMP = re.compile(r"""("?)\$\(\s*mktemp\b[^()$`;&|\n]*\)\1""")
+_RM_FOR = re.compile(r"\bfor\s+(\w+)\s+in\s+([^;\n]*)")
+_RM_OTHER_BIND = re.compile(r"\b(?:read|mapfile|readarray|getopts|select|printf\s+-v)\b[^;&|\n]*")
+_RM_CD = re.compile(r"(?<![\w.-])(?:cd|pushd|popd)(?![\w-])")
+_RM_MKTEMP_PATH = "/tmp/mktemp.X"
+
+
+def _rm_literal(word: str):
+    if len(word) > 1 and word[0] == word[-1] and word[0] in "'\"":
+        word = word[1:-1]
+    if not word or word[0] == "." or re.search(r"""\.\.|[~$`*?\[{\\'"]""", word):
+        return None
+    return word
+
+
+def _rm_values(scope: str) -> dict:
+    """Return {name: [literal values]} for names whose every binding is safe, None otherwise."""
+    vals = {}
+    def put(name, value):
+        if name in vals and vals[name] is None:
+            return
+        vals[name] = None if value is None else vals.get(name, []) + [value]
+    for m in _RM_BIND.finditer(scope):
+        mk = _RM_MKTEMP.match(scope, m.end())
+        value = _RM_MKTEMP_PATH if mk else (_RM_VALUE.match(scope, m.end()) or [""])[0]
+        put(m.group(1), None if m.group(2) else (value if mk else _rm_literal(value)))
+    for m in _RM_FOR.finditer(scope):
+        for w in _RM_VALUE.findall(m.group(2)) or [""]:
+            put(m.group(1), _rm_literal(w))
+    for m in _RM_OTHER_BIND.finditer(scope):
+        for w in re.findall(r"\w+", m.group(0)):
+            vals[w] = None
+    return vals
+
+
+def _rm_target_bad(path: str, cwd: str) -> bool:
+    """True when path, or a glob's parent, is /, home, the cwd or a parent of the cwd."""
+    if re.search(r"[*?\[]", os.path.basename(path)):
+        path = os.path.dirname(path)
+    cwd = os.path.normpath(cwd or "/")
+    q = os.path.normpath(os.path.join(cwd, path))
+    return q in ("/", cwd, os.path.expanduser("~")) or cwd.startswith(q.rstrip("/") + "/")
+
+
+def _rm_word_safe(word: str, vals: dict, cwd: str) -> bool:
+    """True when every expansion in the word has only safe bindings and no value makes the
+    target /, home or the cwd."""
+    names = sorted({a or b for a, b in _RM_EXPANSION_ANY.findall(word)})
+    if any(vals.get(n) is None for n in names):
+        return False
+    combos = [vals[n] for n in names]
+    size = 1
+    for c in combos:
+        size *= len(c)
+    if size > 64:
+        return False
+    plain = word.replace('"', "")
+    for pick in itertools.product(*combos):
+        mapping = dict(zip(names, pick))
+        path = _RM_EXPANSION_ANY.sub(lambda m: mapping[m.group(1) or m.group(2)], plain)
+        if _rm_target_bad(path, cwd):
+            return False
+    return True
+
+
+def _rm_var_rewrite(word: str, ctx):
+    """Return (word with every expansion guarded, 0 when not in the trigger shape, 1 when the
+    allow-list clears the names, 2 when only a literal path will do). Text inside single quotes is
+    a literal and stays as it is. ctx is (taint names, allow-list values, cwd, cd seen)."""
+    taint, vals, cwd, moved = ctx
     def guard(match):
         return "${%s:?}" % (match.group(1) or match.group(2))
     out, live = [], []
@@ -5478,23 +5549,29 @@ def _rm_var_rewrite(word: str, names=None):
             out.append(_RM_EXPANSION.sub(guard, part))
             live.append(part)
     live = "".join(live)
-    alt = "|".join(map(re.escape, names))
-    if re.search(r"\$(?:\{(?:%s)(?::\?)?\}|(?:%s)(?!\w))\"?/" % (alt, alt), live):
-        return "".join(out), 2
-    return "".join(out), int(bool(_RM_EXPANSION_SLASH.search(live)))
+    kind = 0
+    for m in _RM_TRIGGER.finditer(live):
+        if m.group(2):
+            kind = 2 if (m.group(1) in taint) else kind
+        elif moved or not _rm_word_safe(live, vals, cwd):
+            kind = 2
+        else:
+            kind = max(kind, 1)
+    return "".join(out), kind
 
 
-def rm_var_hits(text: str, depth=0) -> list:
+def rm_var_hits(text: str, cwd: str = "", depth=0, outer: str = "") -> list:
     """Return the flagged `rm` calls of a command, each as `rm FLAGS TARGETS` with every
-    expansion in a flagged target guarded `:?`. A target under $HOME, $PWD or a variable set from
-    them or `pwd` is flagged with _RM_LITERAL. `sh -c`, `eval` and `pwsh -Command` are walked."""
+    expansion in a flagged target guarded `:?`, or _RM_LITERAL when only a literal path will do.
+    `sh -c`, `eval` and `pwsh -Command` are walked, and outer bindings count inside them."""
     found = []
-    names = _rm_taint_names(text)
+    scope = outer + "\n" + text
+    ctx = (_rm_taint_names(scope), _rm_values(scope), cwd, bool(_RM_CD.search(scope)))
     for segment in split_segments(text):
         call = rm_call(segment)
         if call:
             _, _, flags, targets, recursive = call
-            rewritten = [(w, hit) for w, hit in (_rm_var_rewrite(t, names) for t in targets) if hit]
+            rewritten = [(w, hit) for w, hit in (_rm_var_rewrite(t, ctx) for t in targets) if hit]
             if rewritten and recursive:
                 for kind in (2, 1):
                     words = [w for w, hit in rewritten if hit == kind]
@@ -5509,7 +5586,7 @@ def rm_var_hits(text: str, depth=0) -> list:
         script = " ".join(tokens[at + 1:]).replace("\\$", "$") if word == "eval" else (
             _pwsh_script(tokens) if word in PLAYWRIGHT_PS_SHELLS else inline_script(tokens))
         if script:
-            found += rm_var_hits(script, depth + 1)
+            found += rm_var_hits(script, cwd, depth + 1, scope)
     return found
 
 
@@ -5890,7 +5967,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 3d. A recursive delete under an unguarded variable (decision rm-on-a-variable-needs-a-guard).
     # The guard syntax `${NAME:?}` is POSIX, so a PowerShell tool call is not judged.
-    hits = [] if POWERSHELL_CALL[0] else rm_var_hits(stripped)
+    hits = [] if POWERSHELL_CALL[0] else rm_var_hits(stripped, cwd)
     if hits:
         refuse(tool, "deny", "rm-var-unguarded", rm_var_reason(hits), "; ".join(hits))
 
