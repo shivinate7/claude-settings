@@ -294,6 +294,35 @@ class SimBootRecordTests(unittest.TestCase):
         self.assertEqual([r["udid"] for r in self.read_records()], [U1],
                          "a device the call did not name was recorded as its boot")
 
+    def test_an_os_pin_in_another_destination_does_not_pin_this_name(self):
+        # OS=26.0 sits in the destination that names iPad Air. iPhone 17 has two runtimes, so the
+        # name is ambiguous for its own destination and nothing is recorded.
+        ti = {"command": "xcodebuild test -scheme App "
+                         "-destination 'name=iPad Air,OS=26.0' -destination 'name=iPhone 17'"}
+        rows = [(U1, "iPhone 17", "Shutdown", TYPE_PRO, RT),
+                (U2, "iPhone 17", "Shutdown", TYPE_PRO, RT_OLD),
+                (U3, "iPad Air", "Shutdown", TYPE_AIR, RT)]
+        self.pre(rows, tool_input=ti)
+        self.post([(U1, "iPhone 17", "Booted", TYPE_PRO, RT),
+                   (U2, "iPhone 17", "Shutdown", TYPE_PRO, RT_OLD),
+                   (U3, "iPad Air", "Shutdown", TYPE_AIR, RT)], tool_input=ti)
+        self.assertEqual(self.read_records(), [],
+                         "an OS pin in another destination picked the iPhone 17 on iOS 26")
+
+    def test_an_os_pin_in_the_naming_destination_records_that_device(self):
+        # Control: the OS pin sits in the destination that names iPhone 17.
+        ti = {"command": "xcodebuild test -scheme App "
+                         "-destination 'name=iPad Air' -destination 'name=iPhone 17,OS=26.0'"}
+        rows = [(U1, "iPhone 17", "Shutdown", TYPE_PRO, RT),
+                (U2, "iPhone 17", "Shutdown", TYPE_PRO, RT_OLD),
+                (U3, "iPad Air", "Shutdown", TYPE_AIR, RT)]
+        self.pre(rows, tool_input=ti)
+        self.post([(U1, "iPhone 17", "Booted", TYPE_PRO, RT),
+                   (U2, "iPhone 17", "Shutdown", TYPE_PRO, RT_OLD),
+                   (U3, "iPad Air", "Shutdown", TYPE_AIR, RT)], tool_input=ti)
+        self.assertEqual([r["udid"] for r in self.read_records()], [U1],
+                         "an OS pin in the naming destination did not pick iPhone 17 on iOS 26")
+
     def test_a_call_naming_a_device_by_name_records_only_that_name(self):
         ti = {"command": "xcodebuild test -scheme App -destination "
                          "'platform=iOS Simulator,name=iPhone 17'"}
