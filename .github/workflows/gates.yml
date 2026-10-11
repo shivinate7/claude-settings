@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
@@ -26,7 +27,9 @@ concurrency:
 jobs:
   # Decides which jobs and suites a run needs (.github/scripts/harness-scope.sh). Every other job
   # needs it. An error in the script turns every flag on, never off. A skipped job reads as passing.
+  # A draft PR skips this job, so every job that needs it skips too (decision draft-until-reviewed).
   scope:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:

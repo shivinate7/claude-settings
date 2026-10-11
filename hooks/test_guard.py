@@ -2819,9 +2819,9 @@ for held in (
 for message in (
     VCS + ' commit -m "Copy ' + ENV + ' into worktrees"',
     VCS + " commit --message='Copy " + ENV + "'",
-    'gh pr create --title "Adds ' + ENV + '" --body "Adds an ' + ENV + ' line"',
+    'gh pr create --draft --title "Adds ' + ENV + '" --body "Adds an ' + ENV + ' line"',
     VCS + " commit -m \"$(printf 'Copy " + ENV + " into worktrees')\"",
-    'gh pr create --body "$(printf \'Adds `.worktreeinclude` with ' + ENV + "')\"",
+    'gh pr create --draft --body "$(printf \'Adds `.worktreeinclude` with ' + ENV + "')\"",
 ):
     sh("env: a message is text, " + message[:40], message, "allow", cwd=NOGIT)
 for held in (
@@ -2848,7 +2848,7 @@ for held in (
     sh("env: a substitution is judged, " + held[:40], held, "deny", "env-file", cwd=NOGIT)
 for text in (
     "printf '" + ENV + "\\n' > .worktreeinclude", VCS + ' commit -m "Copy ' + ENV + ' into worktrees"',
-    'gh pr create --body "Adds ' + ENV + '"', VCS + " check-ignore -q " + ENV,
+    'gh pr create --draft --body "Adds ' + ENV + '"', VCS + " check-ignore -q " + ENV,
     VCS + " commit -m \"$(printf 'text with " + ENV + "')\"",
 ):
     sh("env: a substitution allowance, " + text[:40], text, "allow", cwd=NOGIT)
@@ -2960,11 +2960,57 @@ sh("merge: no number is allowed", "gh pr merge", "allow",
    cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge: reading a pull request is untouched", "gh pr view 75 --json baseRefName", "allow",
    cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
-sh("merge: opening a pull request is untouched", "gh pr create --base main --title x --body y",
+sh("merge: opening a draft pull request is untouched",
+   "gh pr create --draft --base main --title x --body y",
    "allow", cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
 add("merge: a call of the merge tool on a green head is allowed", "allow",
     tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12, repo="x", owner="y",
     env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
+
+
+# =========================================================================== 5a. draft pull requests
+#
+# `draft-pr`. Every pull request opens as a draft, and CI skips draft pull requests. The orchestrator
+# marks a pull request ready after review, so CI runs once per reviewed change. A `gh pr create`
+# without `--draft` (or `-d`) is refused, and the refusal names `--draft` and the step after it.
+
+DRAFT_REMEDY = ("--draft", "mark the PR ready after review")
+sh("draft-pr: a pull request opened without --draft is refused",
+   "gh pr create --title x --body y", "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY)
+sh("draft-pr: short flags -t and -b without -d are refused",
+   "gh pr create -t x -b y", "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY)
+sh("draft-pr: a bash -c wrapper without --draft is refused",
+   "bash -c 'gh pr create --title x --body y'", "deny", "draft-pr", cwd=NOGIT,
+   carries=DRAFT_REMEDY)
+sh("draft-pr: --draft is allowed", "gh pr create --draft --title x", "allow", cwd=NOGIT)
+sh("draft-pr: -d is allowed", "gh pr create -d -t x", "allow", cwd=NOGIT)
+sh("draft-pr: marking a pull request ready is allowed", "gh pr ready 12", "allow", cwd=NOGIT)
+sh("draft-pr: viewing a pull request is allowed", "gh pr view 12", "allow", cwd=NOGIT)
+sh("draft-pr: listing pull requests is allowed", "gh pr list", "allow", cwd=NOGIT)
+# Bypasses found in review of PR #316. Each is refused, or allowed, as the owner ruled.
+for _command in (
+    "bash -lc 'gh pr create --title x'", "dash -c 'gh pr create --title x'",
+    "echo $(gh pr create --title x)", "echo `gh pr create --title x`",
+    "gh pr create --draft --draft=false --title x", "gh pr create --title --draft",
+    "cd x && (gh pr create --title y)", "gh pr create --draft --draft=f --title x",
+    "gh pr create --draft --draft=F --title x", "gh pr create -d -d=false --title x",
+):
+    sh("draft-pr: bypass refused, " + _command, _command, "deny", "draft-pr", cwd=NOGIT,
+       carries=DRAFT_REMEDY)
+for _command in ("gh pr create --draft=true --title x", "gh pr create --title x -d"):
+    sh("draft-pr: bypass allowed, " + _command, _command, "allow", cwd=NOGIT)
+# The MCP create tool carries its own `draft` field, so it is judged by that field.
+add("draft-pr: MCP create with no draft field is refused", "deny", rule="draft-pr",
+    tool="mcp__github__create_pull_request", cwd=NOGIT, title="x", head="h", base="main",
+    repo="x", owner="y", carries=("draft", "mark the PR ready after review"))
+add("draft-pr: MCP create with draft false is refused", "deny", rule="draft-pr",
+    tool="mcp__github__create_pull_request", cwd=NOGIT, title="x", head="h", base="main",
+    repo="x", owner="y", draft=False, carries=("draft", "mark the PR ready after review"))
+add("draft-pr: MCP create with draft true is allowed", "allow",
+    tool="mcp__github__create_pull_request", cwd=NOGIT, title="x", head="h", base="main",
+    repo="x", owner="y", draft=True)
+# Named limits, no case: `gh api -X POST .../pulls`, `hub pull-request`, and short-flag clusters
+# such as `-dt x` (refused, a rare false alarm).
 
 
 # =========================================================================== 5b. the merge gate
@@ -3111,7 +3157,7 @@ for _name, _command in (
     ("a record path under another folder", VCS + ' commit -m "see lint/' + CITE + '"'),
     ("a numbered record path under docs", VCS + ' commit -m "see docs/decisions/0001.md"'),
     ("a message file that cites an id", VCS + " commit -F " + slash(MSG_OK)),
-    ("a PR body with an id", 'gh pr create --title t --body "per D12, short titles for records"'),
+    ("a PR body with an id", 'gh pr create --draft --title t --body "per D12, short titles for records"'),
 ):
     sh("cite-by-id: %s is allowed" % _name, _command, "allow", cwd=NOGIT, config=MERGECFG)
 for _name, _command in (

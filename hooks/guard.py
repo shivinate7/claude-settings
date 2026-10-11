@@ -54,6 +54,7 @@ one fixed order, and the first match wins.
   5 env-file           any read or write of an environment file
   6 merge-checks       a `gh pr merge` (or the MCP merge tool) while the head has a check or run
                        pending or red, or the read could not run. Denied, `--auto` too.
+    draft-pr           a `gh pr create` without `--draft` or `-d`. Denied.
   7 frozen-path        a write to the settings, the hooks or the global CLAUDE.md, under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. Always denied.
   8 subagent-model-cap a write to a settings file whose content sets or changes
@@ -4401,6 +4402,12 @@ def gh_call_of(segment: str):
     tokens = segment_tokens(segment)
     if not tokens:
         return None
+    if tokens[0].startswith("("):   # a subshell, as detached_launch_hit reads it
+        tokens = [tokens[0].lstrip("(")] + tokens[1:]
+        tokens[-1] = tokens[-1].rstrip(")")
+        tokens = [t for t in tokens if t]
+        if not tokens:
+            return None
     index = resolve_command(tokens)
     if index is None or basename(tokens[index]) not in ("gh", "gh.exe"):
         return None
@@ -4452,6 +4459,46 @@ def merge_call_of(segment: str):
         elif not selector:
             selector = arg
     return selector, repo
+
+
+DRAFT_PR_REASON = ("draft-pr: open every PR as a draft. Add --draft (or -d) to gh pr create, and "
+                   "mark the PR ready after review. CI skips drafts.")
+
+
+# `gh pr create` flags that take a value; the next token is data, never a flag.
+PR_CREATE_VALUE_FLAGS = {"-t", "--title", "-b", "--body", "-F", "--body-file", "-B", "--base",
+                         "-H", "--head", "-l", "--label", "-a", "--assignee", "-m", "--milestone",
+                         "-p", "--project", "-r", "--reviewer", "-R", "--repo", "-T", "--template"}
+GH_TRUE = ("1", "t", "T", "TRUE", "true", "True")
+# Named limits (decision draft-until-reviewed): a `gh api` POST to the pulls endpoint and
+# `hub pull-request` open a PR and are not judged here. A short-flag cluster such as `-dt x` is
+# not read as a draft flag, so it is refused (a rare false alarm).
+
+
+def undrafted_pr_create(segment: str) -> bool:
+    """True for a `gh pr create` segment (or a `sh -c` script holding one) that ends not draft.
+    The last --draft, -d or --draft=X wins."""
+    tokens = segment_tokens(segment) or []
+    script = inline_script(tokens) if tokens else ""
+    if script:
+        return any(undrafted_pr_create(part) for part in split_segments(script) if part.strip())
+    rest = gh_call_of(segment)
+    if rest is None or rest[:2] != ["pr", "create"]:
+        return False
+    args = rest[2:]
+    draft, index = False, 0
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        if arg in PR_CREATE_VALUE_FLAGS:
+            index += 1
+        elif arg in ("-h", "--help"):
+            return False   # help creates nothing
+        elif arg in ("-d", "--draft"):
+            draft = True
+        elif arg.startswith(("--draft=", "-d=")):
+            draft = arg.split("=", 1)[1] in GH_TRUE   # gh's ParseBool set; any other value is false
+    return not draft
 
 
 _MERGE_MODULE = []
@@ -5648,6 +5695,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),
                    "gh pr merge " + merging[0] + " " + verdict)
 
+    # 6b. A pull request opened without --draft.
+    for text, _in_message in _substitutions(stripped)[0]:
+        if any(undrafted_pr_create(seg) for seg in split_segments(text) if seg.strip()):
+            refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
+
     # 7. A frozen path.
     matched = frozen_shell_hit(stripped, cwd)
     if matched:
@@ -5729,6 +5781,10 @@ def judge(payload) -> None:
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),
                    "merge tool " + verdict)
+
+    # The MCP create tool carries its own `draft` field.
+    if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:
+        refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "create_pull_request without draft")
 
     if tool in SHELL_TOOLS:
         command = tool_input.get("command", "") or ""
