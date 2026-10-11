@@ -5144,6 +5144,7 @@ PLAYWRIGHT_PROFILE = re.compile(r"\.(?:zshrc|zshenv|zlogin|bashrc|profile|zprofi
 # SILENT_WRITE_REDIRECT (the null-device redirects) leaves `N>&N` alone, because that rule wants
 # a duplicate to count as output. Here a duplicate is no file target, so it is dropped as well.
 _FD_DUP = re.compile(r"\d*>&\d+")
+_PRINTF_DIRECTIVE = re.compile(r"%%|%[-+ #0-9.]*[a-zA-Z]|\\[nrtabfv\\]")
 _REDIRECT_TO_PROFILE = re.compile(r">+\|?\s*[^\s|;&]*" + PLAYWRIGHT_PROFILE.pattern)
 
 
@@ -5215,8 +5216,10 @@ def playwright_path_hit(segment: str, depth=0, to_file=False, ps_inner=False) ->
     cleaned = _FD_DUP.sub(" ", SILENT_WRITE_REDIRECT.sub(" ", segment))
     if (to_file or _REDIRECT_TO_PROFILE.search(cleaned)) and len(tokens) > 1 and basename(
             tokens[0]) in ("echo", "printf"):
-        written = " ".join(t for t in tokens[1:] if not t.startswith("-") and (
-            "%" not in t or basename(tokens[0]) == "echo"))   # a printf format is no text
+        words = [t for t in tokens[1:] if not t.startswith("-")]
+        if basename(tokens[0]) == "printf":   # drop printf directives and escapes, keep the text
+            words = [_PRINTF_DIRECTIVE.sub("", t) for t in words]
+        written = " ".join(w for w in words if w)
         if _is_playwright_assign(written.removeprefix("export ").lstrip()):
             return PLAYWRIGHT_VAR + " written to a file"
     return _playwright_tokens_hit(tokens, depth)
