@@ -1841,10 +1841,12 @@ def spawn_live_parent(cwd):
     shape does not hold on this host. Owner ruling 2026-10-10: this left-behind shape is foreign."""
     os.makedirs(cwd, exist_ok=True)
     try:
+        # The inner shell keeps no foreground sleep: `wait` holds it alive, and P is the only
+        # sleep, redirected and tracked. Its stderr goes to /dev/null so the suite's stderr is free.
         outer = subprocess.Popen(
-            ["sh", "-c", "sh -c 'sleep 300 </dev/null >/dev/null 2>&1 & echo $!; echo $$; "
-                         "sleep 300' </dev/null &"],
-            cwd=cwd, stdout=subprocess.PIPE, text=True)
+            ["sh", "-c", "sh -c 'sleep 300 </dev/null >/dev/null 2>&1 & echo $!; echo $$; wait' "
+                         "</dev/null 2>/dev/null &"],
+            cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
         outer.wait(timeout=20)   # the outer shell exits; its background child is reparented
         child, parent = int(outer.stdout.readline()), int(outer.stdout.readline())
         ORPHAN_PIDS.extend([child, parent])
