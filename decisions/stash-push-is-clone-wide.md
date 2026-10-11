@@ -64,9 +64,12 @@ WORKING TREE for this arm, so a push over a clean tree still passes: it takes
 nothing. Once the tree is dirty enough to be taken, the call denies. The
 `is_worktree` check no longer runs for this arm.
 
-`reset --hard`, `checkout <path>` and `restore` keep their worktree ask exactly as
-before. Their subject is still the lane's own tree. TREE_ASK_REASON's argument still
-holds for them.
+In a linked worktree, `git checkout <file>` and `git restore <file>` that name only files run
+with no ask. The loss is the lane's own change to the files it named, which is what a lane
+means when it regenerates a fixture. A whole-tree discard keeps the worktree ask: `reset
+--hard`, and a `checkout` or `restore` of `.`, a folder, or a glob. A shared checkout still
+denies all of them. Owner ruling, 2026-10-11 ("Allow per-file"). Prompt frequency is
+unmeasured, because an ask leaves no line in the transcripts.
 
 ## The predicate, updated
 
