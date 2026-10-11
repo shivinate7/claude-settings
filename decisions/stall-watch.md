@@ -71,4 +71,6 @@ visible at once.
 - A command ending in an odd run of `\` behaves by shell: dash and bash 5 keep the last one as a
   literal at end of input, bash 3.2 drops it. The hook probes `/bin/sh` and, when it keeps the
   literal, doubles the last `\` so the rewrite matches bare. Measured on dash, not on Linux CI.
+  The probe reads `/bin/sh`, not the user's shell. Limit: a zsh user on a host whose `/bin/sh` is
+  dash gets an extra `\` on that last word.
 - The watcher checks the job with `ps` once each second.
