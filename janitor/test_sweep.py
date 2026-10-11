@@ -3714,6 +3714,7 @@ class SimWorld:
         self.ps_out = None          # None: the table is built from `ps_rows`
         self.xcrun_missing = False
         self.calls = []
+        self.ps_envs = []           # the env each ps call was given (None: inherited)
         self.uid = os.getuid() if hasattr(os, "getuid") else 0
 
     def simctl_text(self):
@@ -3755,6 +3756,7 @@ class SimWorld:
                 return subprocess.CompletedProcess(argv, 0, "", "")
             return subprocess.CompletedProcess(argv, self.simctl_rc, self.simctl_text(), "")
         if argv[0] == "ps":
+            self.ps_envs.append(k.get("env"))
             if any("lstart" in a for a in argv):
                 return subprocess.CompletedProcess(argv, self.ps_rc, self.lstart_text(argv), "")
             return subprocess.CompletedProcess(argv, self.ps_rc, self.ps_text(), "")
@@ -3962,6 +3964,31 @@ class SimulatorTierTests(unittest.TestCase):
         self.assertEqual(decisions[SIM_U1]["reason"], "boot-record-mismatch",
                          "a reused launchd_sim pid with a new start time matched the record")
         self.assertEqual(self.world.shutdowns(), [])
+
+    def test_two_live_launchd_sims_for_one_udid_keep_it(self):
+        # The record names pid 90. The table names two launchd_sim processes for the UDID, so no
+        # single live launchd_sim is this boot, and the device is kept.
+        self.arm([(SIM_U1, "Idle Pro", "Booted")],
+                 ps_rows=[sim_launchd_row(SIM_U1, pid=90), sim_launchd_row(SIM_U1, pid=200)],
+                 records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(2 * 3600), pid=90)])
+        decisions = self.tier(confirm=True)
+        self.assertIn(SIM_U1, decisions, "the recorded booted device was not judged")
+        self.assertEqual(decisions[SIM_U1]["action"], "keep")
+        self.assertEqual(decisions[SIM_U1]["reason"], "boot-record-mismatch",
+                         "two live launchd_sim processes matched the record by their first pid")
+        self.assertEqual(self.world.shutdowns(), [])
+
+    def test_both_ps_reads_run_under_lc_all_c(self):
+        # The table read and the lstart read force LC_ALL=C, whatever the parent's locale is.
+        self.arm([(SIM_U1, "Idle Pro", "Booted")],
+                 records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(2 * 3600))])
+        with mock.patch.dict(os.environ, {"LC_ALL": "de_DE.UTF-8"}):
+            self.tier(confirm=False)
+        self.assertGreaterEqual(len(self.world.ps_envs), 2,
+                                "the tier made fewer than two ps reads for one booted device")
+        for env in self.world.ps_envs:
+            self.assertEqual((env or {}).get("LC_ALL"), "C",
+                             "a ps read ran under %r, not C" % ((env or {}).get("LC_ALL"),))
 
     def test_a_failed_simctl_read_keeps_every_device(self):
         self.arm([(SIM_U1, "Idle Pro", "Booted")],

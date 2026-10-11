@@ -38,6 +38,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.path.join(HERE, "sim_boot_record.py")
@@ -63,8 +64,9 @@ def devices_json(rows):
     return json.dumps({"devices": grouped})
 
 
-def fake_ps_script(rows):
-    """A POSIX `ps` for ROWS, (pid, ppid, uid, command), all strings."""
+def fake_ps_script(rows, log):
+    """A POSIX `ps` for ROWS, (pid, ppid, uid, command), all strings. Each call appends its
+    LC_ALL to LOG, so a case can see the locale the hook ran the read under."""
     table = "".join("%s %s %s %s\n" % row for row in rows)
     starts = [(pid, cmd) for pid, _, _, cmd in rows if "launchd_sim" in cmd]
     pid_lines = "".join("%s %s\n" % (pid, LSTART) for pid, _ in starts)
@@ -72,6 +74,7 @@ def fake_ps_script(rows):
     for text in (table, pid_lines, start_lines):
         assert "'" not in text, "the printf body is single-quoted"
     return ("#!/bin/sh\n"
+            "echo \"${LC_ALL-unset}\" >> '" + log + "'\n"
             "case \"$*\" in\n"
             "  *lstart*) case \"$*\" in *pid=*) printf '%s' '" + pid_lines + "' ;;"
             " *) printf '%s' '" + start_lines + "' ;; esac ;;\n"
@@ -94,6 +97,7 @@ class SimBootRecordTests(unittest.TestCase):
         self.fake = os.path.join(self.bin, "xcrun")
         self.reads = os.path.join(self.root, "simctl-reads.log")
         self.records = os.path.join(self.state, "sim-boots.jsonl")
+        self.ps_log = os.path.join(self.root, "ps-locale.log")
         # A default `ps` with a launchd_sim row for each UDID, so a boot's record can name one.
         self.write_ps([(str(LAUNCHD_PIDS[u]), "1", "0", LAUNCHD_CMD + " " + u)
                        for u in (U1, U2, U3)])
@@ -104,7 +108,8 @@ class SimBootRecordTests(unittest.TestCase):
         """Make the fake `ps` answer the process table ROWS, (pid, ppid, uid, command)."""
         path = os.path.join(self.bin, "ps")
         with open(path, "w", encoding="utf-8") as handle:
-            handle.write(fake_ps_script([("1", "0", "0", "/sbin/launchd")] + list(rows)))
+            handle.write(fake_ps_script([("1", "0", "0", "/sbin/launchd")] + list(rows),
+                                        self.ps_log))
         os.chmod(path, 0o755)
 
     def simctl_reads(self):
@@ -184,10 +189,12 @@ class SimBootRecordTests(unittest.TestCase):
                          "the MCP control tool's boot was not recorded")
 
     def test_only_the_devices_that_changed_are_recorded(self):
+        # The call names U1 and U2 and not U3, so U3 (already booted) is out whatever it does.
+        ti = {"command": "xcrun simctl boot " + U1 + " " + U2}
         self.pre([(U1, "Idle Pro", "Shutdown", TYPE_PRO), (U2, "Idle Air", "Shutdown", TYPE_AIR),
-                  (U3, "Already Up", "Booted", TYPE_PRO)])
+                  (U3, "Already Up", "Booted", TYPE_PRO)], tool_input=ti)
         self.post([(U1, "Idle Pro", "Booted", TYPE_PRO), (U2, "Idle Air", "Booted", TYPE_AIR),
-                   (U3, "Already Up", "Booted", TYPE_PRO)])
+                   (U3, "Already Up", "Booted", TYPE_PRO)], tool_input=ti)
         self.assertEqual(sorted(r["udid"] for r in self.read_records()), sorted([U1, U2]),
                          "the two shut-down -> booted devices were not both recorded")
 
@@ -271,6 +278,69 @@ class SimBootRecordTests(unittest.TestCase):
         self.reset_reads()
         self.pre(rows, tool=MCP, tool_input={"action": "launch", "device": U1})
         self.assertGreaterEqual(self.simctl_reads(), 1, "an MCP launch did not read simctl")
+
+    def test_a_device_booted_by_hand_during_a_call_naming_another_is_not_recorded(self):
+        ti = {"command": "xcodebuild test -scheme App -destination id=" + U1}
+        rows = [(U1, "Named Pro", "Shutdown", TYPE_PRO), (U2, "Hand Air", "Shutdown", TYPE_AIR)]
+        self.pre(rows, tool_input=ti)
+        self.post([(U1, "Named Pro", "Booted", TYPE_PRO), (U2, "Hand Air", "Booted", TYPE_AIR)],
+                  tool_input=ti)
+        self.assertEqual([r["udid"] for r in self.read_records()], [U1],
+                         "a device the call did not name was recorded as its boot")
+
+    def test_a_call_naming_a_device_by_name_records_only_that_name(self):
+        ti = {"command": "xcodebuild test -scheme App -destination "
+                         "'platform=iOS Simulator,name=iPhone 17'"}
+        rows = [(U1, "iPhone 17", "Shutdown", TYPE_PRO), (U2, "iPhone 17 Pro", "Shutdown", TYPE_PRO)]
+        self.pre(rows, tool_input=ti)
+        self.post([(U1, "iPhone 17", "Booted", TYPE_PRO), (U2, "iPhone 17 Pro", "Booted", TYPE_PRO)],
+                  tool_input=ti)
+        self.assertEqual([r["udid"] for r in self.read_records()], [U1],
+                         "a device with another name was recorded for a call that names iPhone 17")
+
+    def test_an_mcp_launch_by_name_records_only_that_name(self):
+        ti = {"action": "launch", "device": "iPhone 17"}
+        rows = [(U1, "iPhone 17", "Shutdown", TYPE_PRO), (U2, "iPhone 17 Pro", "Shutdown", TYPE_PRO)]
+        self.pre(rows, tool=MCP, tool_input=ti)
+        self.post([(U1, "iPhone 17", "Booted", TYPE_PRO), (U2, "iPhone 17 Pro", "Booted", TYPE_PRO)],
+                  tool=MCP, tool_input=ti)
+        self.assertEqual([r["udid"] for r in self.read_records()], [U1],
+                         "a device with another name was recorded for an MCP launch by name")
+
+    def test_an_mcp_launch_by_udid_records_only_that_udid(self):
+        ti = {"action": "launch", "device": U1}
+        rows = [(U1, "Named Pro", "Shutdown", TYPE_PRO), (U2, "Hand Air", "Shutdown", TYPE_AIR)]
+        self.pre(rows, tool=MCP, tool_input=ti)
+        self.post([(U1, "Named Pro", "Booted", TYPE_PRO), (U2, "Hand Air", "Booted", TYPE_AIR)],
+                  tool=MCP, tool_input=ti)
+        self.assertEqual([r["udid"] for r in self.read_records()], [U1],
+                         "a device the MCP launch did not name was recorded")
+
+    def test_a_call_naming_no_device_records_nothing(self):
+        ti = {"command": "xcodebuild build -scheme App"}
+        self.pre([(U1, "Hand Pro", "Shutdown", TYPE_PRO)], tool_input=ti)
+        self.post([(U1, "Hand Pro", "Booted", TYPE_PRO)], tool_input=ti)
+        self.assertEqual(self.read_records(), [],
+                         "a call that names no device recorded a device booted during it")
+
+    def test_two_launchd_sims_for_one_udid_record_nothing_for_it(self):
+        self.write_ps([("90", "1", "0", LAUNCHD_CMD + " " + U1),
+                       ("200", "1", "0", LAUNCHD_CMD + " " + U1)])
+        self.pre([(U1, "Idle Pro", "Shutdown", TYPE_PRO)])
+        self.post([(U1, "Idle Pro", "Booted", TYPE_PRO)])
+        self.assertEqual(self.read_records(), [],
+                         "a UDID with two live launchd_sim processes was recorded with one pid")
+
+    def test_both_ps_reads_run_under_lc_all_c(self):
+        # The table read and the lstart read force the C locale, whatever the parent's locale is.
+        rows = [(U1, "Idle Pro", "Shutdown", TYPE_PRO)]
+        with mock.patch.dict(os.environ, {"LC_ALL": "de_DE.UTF-8"}):
+            self.pre(rows)
+            self.post([(U1, "Idle Pro", "Booted", TYPE_PRO)])
+        with open(self.ps_log, encoding="utf-8") as handle:
+            seen = handle.read().splitlines()
+        self.assertGreaterEqual(len(seen), 2, "the hook made no ps read for the boot")
+        self.assertEqual(set(seen), {"C"}, "a ps read ran under a locale other than C: %r" % seen)
 
     def test_malformed_stdin_exits_zero_and_records_nothing(self):
         self.set_devices([(U1, "Idle Pro", "Booted", TYPE_PRO)])
