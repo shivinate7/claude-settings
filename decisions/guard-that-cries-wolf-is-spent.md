@@ -68,3 +68,12 @@ either file.
 ## Ruling: an unforced worktree remove is not noted as unread
 
 The owner ruled that the `subject-unread` note must not fire for an unforced worktree remove. The VCS itself refuses a dirty or locked tree without `--force` or `-f`, so the note protects nothing. The note stays for a forced remove and for every other shared-tree command.
+
+## Ruling: an untracked link is not work in a worktree remove
+
+Owner, 2026-10-11: when the guard judges a worktree remove, an untracked entry that is a
+symlink does not count as work. Removing a link deletes only the link. Measured: after
+`git worktree remove --force`, the folder a `node_modules` link pointed to kept its file.
+Incident: feed-build, a worker linked `app/node_modules` to another worktree's packages, and
+the guard refused to remove the scratch tree. Limit: a link whose name git quotes, such as
+one with a space or an accent, still counts as work.
