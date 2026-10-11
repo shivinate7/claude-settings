@@ -24,6 +24,8 @@ The cases come from two working guards and their own test suites:
 Two literals are assembled from parts, so that this file cannot trip the guard it tests.
 """
 
+import contextlib
+import io
 import json
 import os
 import re
@@ -2414,10 +2416,25 @@ if CWDLINK:
     sh("rm-var: the cwd spelled through a symlink names a literal path, not ${D:?}",
        "D=%s; rm -rf $D/" % CWDLINK, "deny", "rm-var-unguarded", cwd=NOGIT,
        carries=("literal path",), lacks=("${D:?}", CWDLINK))
-# Time limit: 64000 bindings before one delete must be judged in under 2 s. The verdict is refused
-# (the rule names), and only the time is the point.
-add("rm-var: 64000 bindings before a delete are judged in under 2 s", "deny",
-    rule="rm-var-unguarded", cwd=NOGIT, max_seconds=2.0, command="A=x;" * 64000 + " rm -rf $A/")
+# Ruling item 1 (decisions/rm-on-a-variable-needs-a-guard.md): a binding written AFTER a wrapper
+# still comes before no rm in the wrapper's own text, so the name must get the literal-path reason,
+# never ${NAME:?}. Red on 50d9f57: the `later` scan sees only the inner text of the wrapper.
+sh("rm-var: a binding after sh -c names a literal path, not ${OLDPWD:?}",
+   "sh -c 'rm -rf $OLDPWD/*'; OLDPWD=/tmp/x", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${OLDPWD:?}",))
+sh("rm-var: a binding after bash -c names a literal path, not ${OLDPWD:?}",
+   "bash -c 'rm -rf $OLDPWD/*'; OLDPWD=/tmp/x", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${OLDPWD:?}",))
+sh("rm-var: a binding after eval names a literal path, not ${OLDPWD:?}",
+   "eval 'rm -rf $OLDPWD/*'; OLDPWD=/tmp/x", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${OLDPWD:?}",))
+# Ruling item 1, home's parents: the parent of home holds home, so a glob under it can empty home.
+# The parent is read from HOME, never fixed, so the case holds on any account. Red on 50d9f57: the
+# target /Users/* is not `home` itself, so the name gets ${D:?}.
+PARENT_OF_HOME = os.path.dirname(HOME)
+sh("rm-var: a variable set to the parent of home names a literal path, not ${D:?}",
+   "D=%s; rm -rf $D/*" % PARENT_OF_HOME, "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
 
 sh("playwright: an envrc file gets the assignment",
    "echo PLAYWRIGHT_BROWSERS_PATH=/x > .envrc", "deny", "playwright-browsers-path", cwd=NOGIT)
@@ -6885,6 +6902,102 @@ def rm_var_wide_case():
 
 WIDE_LABEL = "rm-var: 4000 assignments and 4000 targets with pwd are judged in under 2 s"
 LOG_CHECKS_EXTRA.append((WIDE_LABEL, rm_var_wide_case))
+
+
+# In-process timing (ruling item 3). guard.judge runs in this process and only its CPU time is read,
+# so the reading is the guard's own work. A hook subprocess's CPU time is not this process's, so no
+# subprocess is timed here. judge answers by printing one JSON block and exiting, so stdout is
+# captured and SystemExit is caught. The guard's log goes under CLAUDE_CONFIG_DIR, pointed at the
+# fixture config for the call and then restored.
+def judge_in_process(command, cwd):
+    """Return (decision, reason, CPU seconds) for one Bash call judged in this process."""
+    materialize(cwd)
+    guard = _load_guard_module()
+    payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd}
+    printed = io.StringIO()
+    saved = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = CFG
+    try:
+        started = time.process_time()
+        try:
+            with contextlib.redirect_stdout(printed):
+                guard.judge(payload)
+        except SystemExit:
+            pass
+        took = time.process_time() - started
+    finally:
+        if saved is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = saved
+    text = printed.getvalue().strip()
+    if not text:
+        return "allow", "", took
+    block = json.loads(text)["hookSpecificOutput"]
+    return block["permissionDecision"], block["permissionDecisionReason"], took
+
+
+# Ruling item 3: 4000 names, each bound to /tmp/a and then deleted through a glob under that name,
+# are judged in under 1 s of CPU, and the verdict is the rm-var refusal. Each flagged delete re-reads
+# the rest of the command for later bindings, so the work grows as the square of the segments.
+# The name must differ per segment: a repeated name has more than 64 values and is refused before
+# that re-read, so it never reaches the slow path. A `$D/x` target is not in the flagged shape.
+RM_VAR_LINEAR_CMD = "".join("D%d=/tmp/a; rm -rf $D%d/*; " % (n, n) for n in range(4000))
+
+
+def rm_var_linear_case():
+    got, reason, took = judge_in_process(RM_VAR_LINEAR_CMD, NOGIT)
+    if took >= 1.0:
+        return False, "judged in %.2f s CPU, not under 1 s" % took
+    if got != "deny" or "rm-var-unguarded" not in reason:
+        return False, "judged %s in %.2f s CPU, not the rm-var refusal" % (got, took)
+    return True, "judged in %.2f s CPU, under 1 s" % took
+
+
+LOG_CHECKS_EXTRA.append(("rm-var: 4000 bindings and 4000 flagged deletes are judged in under 1 s CPU",
+                         rm_var_linear_case))
+
+
+# The 64000-binding limit, moved from the wall clock of the whole hook to the CPU time of judge.
+# The bound is unchanged: under 2 s. The verdict is refused, and only the time is the point.
+def rm_var_64000_case():
+    got, reason, took = judge_in_process("A=x;" * 64000 + " rm -rf $A/", NOGIT)
+    if took >= 2.0:
+        return False, "judged in %.2f s CPU, not under 2 s" % took
+    if got != "deny" or "rm-var-unguarded" not in reason:
+        return False, "judged %s in %.2f s CPU, not the rm-var refusal" % (got, took)
+    return True, "judged in %.2f s CPU, under 2 s" % took
+
+
+LOG_CHECKS_EXTRA.append(("rm-var: 64000 bindings before a delete are judged in under 2 s CPU",
+                         rm_var_64000_case))
+
+
+# Ruling item 4: _split_segments_cached is keyed on the command alone, but split_segments reads
+# POWERSHELL_CALL[0] too. A POSIX backslash-newline is a continuation, and PowerShell ends the
+# segment there, so one text splits two ways. A split made under one flag must not be served to the
+# other. Red on 50d9f57: the second call returns the first call's cached split.
+def split_cache_power_shell_case():
+    guard = _load_guard_module()
+    text = "echo a\\\nb; ls"
+    try:
+        guard.POWERSHELL_CALL[0] = False
+        posix = guard.split_segments(text)
+        guard.POWERSHELL_CALL[0] = True
+        cached = guard.split_segments(text)
+        direct = guard.split_segments(text, [])   # the uncached path: the oracle for this flag
+    finally:
+        guard.POWERSHELL_CALL[0] = False
+    if direct == posix:
+        return False, "the two flags split alike, so the case proves nothing: %r" % (direct,)
+    if cached != direct:
+        return False, "PowerShell split served from the POSIX cache: got %r, want %r" % (
+            cached, direct)
+    return True, "PowerShell split %r differs from the POSIX split %r" % (direct, posix)
+
+
+LOG_CHECKS_EXTRA.append(("split cache: the PowerShell flag is part of the split, not only the command",
+                         split_cache_power_shell_case))
 
 
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
