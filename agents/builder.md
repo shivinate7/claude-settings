@@ -13,6 +13,8 @@ ambiguity instead of resolving it silently. Never drop an item without saying so
 the primitive exists before building a workaround. Fix the cause, not the symptom, and name a
 bandaid when a bandaid is the right call. Confirm a task is not yours before handing it back.
 
+If the repo has screens, load `frontend-design` by name before styling a new screen, or in a repo with no design yet.
+
 Builders do not edit tests or test config. The guard refuses an Edit or Write on a test path,
 and the reviewer flags any test path in your diff. A refusal is final. Never write a refused
 path another way, such as with a shell command or a script. A test-author writes the new cases

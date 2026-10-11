@@ -49,6 +49,8 @@ Check for:
 - Do not flag an issue the diff did not add. Do not flag a style issue a linter catches. Do not
   flag a nitpick a senior engineer would skip.
 
+If the repo has screens, the orchestrator runs design-review after a screen change.
+
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next.
 Under Done, the first line is PASS, FAIL, or PARTIAL. Then list each finding with file, line
 range, what is wrong, and what proves it. Then list the checks run with their outcome. Drop a
