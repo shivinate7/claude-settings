@@ -88,7 +88,7 @@ class FakeHost:
         head = merge.origin_head(self.root, self.branch)
         base = (self.base_seq.pop(0) if len(self.base_seq) > 1 else self.base_seq[0]) if self.base_seq else self.base
         return {"head": self.head_override or head, "branch": self.branch, "base": base, "state": self.pr_state,
-                "mergeable": self.mergeable, "merge_state": "CLEAN"}
+                "mergeable": self.mergeable, "merge_state": "CLEAN", "draft": False}
 
     def required_names(self):
         return ["gates"]
@@ -932,7 +932,8 @@ if a[:2] == ["pr", "view"]:
             lag["n"] -= 1; save(); head = lag["prior"]
         bad = S.get("dirty_after_checks") is not None and S["checks_calls"] >= S["dirty_after_checks"]
         print(json.dumps({"headRefOid": head, "headRefName": "feat", "baseRefName": S.get("base", "main"), "state": "OPEN",
-                          "mergeable": "CONFLICTING" if bad else "MERGEABLE", "mergeStateStatus": "DIRTY" if bad else "CLEAN"}))
+                          "mergeable": "CONFLICTING" if bad else "MERGEABLE", "mergeStateStatus": "DIRTY" if bad else "CLEAN",
+                          "isDraft": bool(S.get("draft"))}))  # set draft=True in a test; false by default
     else:
         print(json.dumps({"state": "MERGED" if S.get("oid") else "OPEN", "mergeCommit": {"oid": S["oid"]} if S.get("oid") else None}))
 elif a[:2] == ["pr", "checks"] and S.get("checks_broken") and S["checks_calls"] >= S.get("broken_from", 0):
@@ -1391,6 +1392,30 @@ class GhHalf(Env):
         self.assertIn("repo view", self.calls())
         self.assertIn("main is not the default branch (trunk)", out)
 
+    def assert_draft_refused(self, rc, out, before):
+        self.assertEqual(rc, 1, out)
+        lines = [l for l in out.splitlines() if l.strip()]
+        self.assertEqual(len(lines), 1, out)
+        self.assertTrue(lines[0].startswith("merge:"), out)
+        self.assertIn("draft", lines[0])
+        self.assertEqual(self.refs(), before)  # no claim pushed
+        self.assertEqual(self.ticks, 0, "waited on a draft")
+        self.assertNotIn("pr checks", self.calls())
+        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn("Traceback", out)
+
+    def test_a_draft_pr_is_refused_at_preview_before_any_claim_or_wait(self):
+        self.set(draft=True)
+        before = self.refs()
+        rc, out = self.run_merge("7", host=self.gh_host())
+        self.assert_draft_refused(rc, out, before)
+
+    def test_a_draft_pr_is_refused_at_confirm_before_any_claim_or_wait(self):
+        self.set(draft=True)
+        before = self.refs()
+        rc, out = self.run_merge("7", "--confirm", host=self.gh_host())
+        self.assert_draft_refused(rc, out, before)
+
 def put_base_config(env, text):
     """Commit `text` as .github/stamp.json on origin's main from the other clone. env.co keeps its local checkout."""
     o = env.other
@@ -1448,6 +1473,50 @@ class ConfigFile(Env):
         self.assertIn("ignoreChecks", lines[0])
         self.assertNotIn("TypeError", out)
         self.assertNotIn("Traceback", out)
+
+    def one_merge_line(self, out):
+        lines = [l for l in out.splitlines() if l.strip()]
+        self.assertEqual(len(lines), 1, out)
+        self.assertTrue(lines[0].startswith("merge:"), out)
+        self.assertNotIn("Traceback", out)
+        return lines[0]
+
+    def test_ignoreChecks_name_as_list_stops_with_one_line_and_no_type_error(self):
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], ignoreChecks=[{"name": ["gates"], "reason": "x"}]))))
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("merge.ignoreChecks", self.one_merge_line(out))
+        self.assertNotIn("TypeError", out)
+
+    def test_ignoreChecks_reason_null_is_refused_like_an_empty_reason(self):
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], ignoreChecks=[{"name": "design", "reason": None}]))))
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("merge.ignoreChecks", self.one_merge_line(out))
+
+    def test_ignoreChecks_name_not_a_string_is_refused_like_a_missing_name(self):  # a check name is a string; 5 never matches one
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], ignoreChecks=[{"name": 5, "reason": "x"}]))))
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("merge.ignoreChecks", self.one_merge_line(out))
+
+    def test_deadlineMinutes_must_be_a_positive_whole_number_at_preview(self):  # the file is refused at load, not at the lock
+        for bad in ("45", True, 0, -5):
+            with self.subTest(deadlineMinutes=bad):
+                put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deadlineMinutes=bad))))
+                rc, out = self.run_merge("7")
+                self.assertEqual(rc, 1, out)
+                line = self.one_merge_line(out)
+                self.assertIn("deadlineMinutes", line)
+                self.assertIn(".github/stamp.json", line)
+
+    def test_deadlineMinutes_as_a_string_stops_at_confirm_with_one_line_and_no_type_error(self):
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deadlineMinutes="45"))))
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("deadlineMinutes", self.one_merge_line(out))
+        self.assertNotIn("TypeError", out)
+        self.assertFalse(self.lock_ref())
 
     def test_an_unknown_merge_field_stops_with_one_line_naming_it(self):
         put_base_config(self, json.dumps({"merge": {"methd": "squash"}}))
