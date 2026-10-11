@@ -6,7 +6,9 @@ How do agent worktrees stop filling the disk with build output?
 
 ## Ruling
 
-Owner ruling, 2026-10-11, labeled "Agent-end hook + low-disk guard". The ruling has two parts. The orchestrator set the defaults in this record. The owner may change any default.
+Owner ruling, 2026-10-11, labeled "Agent-end hook + low-disk guard". The orchestrator set the defaults in this record. The owner may change any default.
+
+The owner agreed to Part 1. The owner deferred Part 2 until a threshold is measured. Part 2, the low-disk build guard, is deferred item `build-disk-guard`.
 
 ### Part 1. The agent-end reap deletes build folders
 
@@ -47,15 +49,12 @@ Other defaults:
 - A `buildDirs` value that is not a list of strings deletes nothing, defaults included. `sweep.read_optout` validates `.claude/janitor.json`. The builder extends it and adds no second reader.
 - A link named as a build folder is kept, not removed.
 
-### Part 2. The guard refuses builds on a low disk
+Builder decisions:
 
-A check in the `hooks/guard.py` PreToolUse rule refuses a build command when the free space on the worktree's volume is below 20 GB. Build commands are `xcodebuild`, `swift build`, and similar commands. The guard keeps one named list of them.
-
-- The 20 GB threshold is a default. The feed-build session's figures put one native worktree at up to about 10 GB of build output. So 20 GB leaves room for about two.
-- If the free-space read fails, the guard allows the build. A guard that refuses on a read error would block every build on a machine where the read breaks. The reap still runs.
-- The refusal reports the free space and the threshold. Its remedy names no path to delete.
-
-The guard is a new guard, built against the incident below, as the rules require. A guard that refuses on a disk with room is a false alarm. `guard-that-cries-wolf-is-spent` applies to the threshold.
+- Windows: the reap deletes nothing. This is the same limit as husks.
+- The hook stops its build-folder scan after 20 s and keeps what it did not reach. The hook's own limit is 60 s.
+- The sweep report shows a `trash` line for each trash folder it finds, with its action and reason.
+- The sweep deletes leftover trash only in registered, non-primary worktrees directly under `.claude/worktrees`.
 
 ## Incident
 
@@ -73,13 +72,12 @@ Arithmetic: the 77 worktrees held about 330 GB in total, and each held up to abo
 - `agent-end-reap-stops-what-a-finished-agent-left`: the process reap. Part 1 adds to it. Its gates and its 60 s reap timeout apply here.
 - `the-janitor-is-one-machine-wide-sweep`: the sweep skips registered worktrees. Its `huskNames` key covers unregistered folders only, so this record does not reuse it.
 - `unattended-sweep-stops-proven-orphans`: a sweep stops only proven orphans.
-- `guard-that-cries-wolf-is-spent`: a guard that goes red when nothing is wrong is spent.
 
 ## Named limits
 
 - A resumed agent rebuilds cold. Part 1 deletes its build output at the first agent end.
-- A crashed agent whose SubagentStop never fires keeps its build output. Only Part 2 catches it.
-- The 42 GB of derived data in the scratchpad is outside every worktree. Part 1 never touches it. Only Part 2 slows its growth.
+- A crashed agent whose SubagentStop never fires keeps its build output. Nothing covers this until deferred item `build-disk-guard` (the low-disk build guard) lands.
+- The 42 GB of derived data in the scratchpad is outside every worktree. Part 1 never touches it. Nothing slows its growth until `build-disk-guard` lands.
 - Trash names stay on disk until a later reap or the janitor deletes them.
 - Unmeasured: the rename time on the feed-build machine. The hook does one rename, so the 60 s cap applies to the rename. It does not apply to the delete.
 
@@ -88,17 +86,14 @@ Arithmetic: the 77 worktrees held about 330 GB in total, and each held up to abo
 - A test that goes red on the old reaper. A build folder in `agent-<A>` is renamed to trash and then deleted. The same folder in the primary checkout is kept. A bare `.build` at depth is renamed and deleted. A link named as a build folder is kept. A folder with a process inside is kept. A bad `buildDirs` value deletes nothing.
 - A test that a later reap deletes a leftover trash name, and that the janitor does the same. A trash name outside the pattern is kept. A trash name with a process inside is kept.
 - One mutant per refusal, as the process reap record requires.
-- A guard case that goes red on the old guard. A build command below 20 GB is refused. The same command above it is allowed. A build with a failed free-space read is allowed.
 - A timed run. The hook returns after the rename, under 60 s, on a worktree holding about 10 GB of build output.
 
 ## What reopens it
 
 - A reap that ends in `hook_cancelled` or `timedOut: true`.
 - A folder deleted outside the gates, or a link followed.
-- A build refused on a disk with room.
-- A build that fails with ENOSPC while Part 2 is on.
 - Trash names that a later reap or the janitor does not delete.
 
 ## Scope
 
-This record changes no code. The builder extends `janitor/agent_end_reap.py`, `sweep.read_optout`, and `hooks/guard.py`. The "Leftover folders" section of `janitor/GUIDE.md` needs the `buildDirs` key after the code lands.
+This record changes no code. The builder extends `janitor/agent_end_reap.py`, `janitor/sweep.py`, and `sweep.read_optout`, which adds no second reader. `janitor/GUIDE.md` documents the `buildDirs` key under "Build folders". Part 2 changes `hooks/guard.py` only after `build-disk-guard` reopens.
