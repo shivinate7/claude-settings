@@ -3,7 +3,7 @@
 
 The checker reads Markdown, plain text, source-code comments, or the copy a user
 sees in a .tsx, .jsx, .html or .vue file, and reports the sentences that break
-the rules of the simplified-technical-english skill.
+its Simplified Technical English rules. `--explain <id>` prints a rule's meaning.
 
 It needs Python 3.9 or later. It has no dependencies outside the standard
 library.

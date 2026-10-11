@@ -333,6 +333,16 @@ class Flow(Env):
         rc, out = self.run_merge("7", "--confirm")
         self.assert_git_refuses_the_overwrite(rc, out, old, "docs/decisions/second.md", "mine\n")
 
+    def test_the_dirty_tree_message_names_the_checkout_path_it_checked(self):
+        o = self.other  # same dirty-file setup as above: the merge changes first.md, which is dirty in the checkout
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        put(os.path.join(o, "docs/decisions/first.md"), record("D-001", "first") + "pr edit\n")
+        sh(o, "git", "commit", "-qam", "pr edits first"); sh(o, "git", "push", "-q", "origin", "feat")
+        put(os.path.join(self.co, "docs/decisions/first.md"), "my edit\n")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn(os.path.realpath(self.co), out)  # the checkout that was checked, by path
+
     def test_after_merge_failure_is_reported_and_the_merge_stays(self):
         sh(self.other, "git", "checkout", "-q", "main")
         cfg = dict(CONFIG, merge=dict(CONFIG["merge"], afterMerge=["exit 3"]))
@@ -372,14 +382,16 @@ class Flow(Env):
         self.assertIn("is not on origin/main", str(cm.exception))
         self.assertEqual(sh(self.co, "git", "rev-parse", "refs/heads/main"), main_before)
 
-    def test_config_without_merge_method_is_refused_never_guessed(self):
-        sh(self.co, "git", "checkout", "-q", "main")
-        cfg = dict(CONFIG, merge={"deadlineMinutes": 5})
-        put(os.path.join(self.co, ".github/stamp.json"), json.dumps(cfg))
+    def test_config_without_merge_method_takes_the_default_and_says_so(self):
+        put_base_config(self, json.dumps(dict(CONFIG, merge={"deadlineMinutes": 5})))  # the base leaves out method
+        methods = []
+        real = self.host.merge
+        self.host.merge = lambda n, m, sha: (methods.append(m), real(n, m, sha))[1]
         rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 1)
-        self.assertIn("merge.method", out)
-        self.assertFalse(self.lock_ref())
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(methods, ["merge"])  # the default method
+        filled = [l for l in out.splitlines() if ".github/stamp.json" in l and "method" in l]
+        self.assertEqual(len(filled), 1, out)  # one line names the filled field
 
 class Race(Env):
     def test_two_runs_one_lock(self):
@@ -562,9 +574,31 @@ class AfterPush(Env):
         self.host.on_wait = lambda: shutil.rmtree(os.path.dirname(self.merge_tree()))
         self.assert_clean_stop(*self.run_merge("7", "--confirm"))
 
+    def base_loses(self, text):
+        """The base moves during the wait: its .github/stamp.json is removed when text is None, else rewritten to text."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        if text is None:
+            sh(o, "git", "rm", "-q", ".github/stamp.json")
+        else:
+            put(os.path.join(o, ".github/stamp.json"), text)
+        sh(o, "git", "commit", "-qam", "base loses its config")
+        sh(o, "git", "push", "-q", "origin", "main")
+
+    def assert_base_lost(self, rc, out):
+        self.assert_clean_stop(rc, out)
+        lines = [l for l in out.splitlines() if "base lost its config" in l]
+        self.assertEqual(len(lines), 1, out)  # one line, from merge
+        self.assertTrue(lines[0].startswith("merge: "), lines[0])
+
     def test_the_config_is_gone_at_the_base_check(self):
-        self.host.on_wait = lambda: os.remove(os.path.join(self.merge_tree(), ".github/stamp.json"))
-        self.assert_clean_stop(*self.run_merge("7", "--confirm"))
+        self.host.on_wait = lambda: self.base_loses(None)
+        self.assert_base_lost(*self.run_merge("7", "--confirm"))
+
+    def test_the_kinds_are_gone_at_the_base_check(self):
+        self.host.on_wait = lambda: self.base_loses(json.dumps({k: v for k, v in CONFIG.items() if k != "kinds"}))
+        self.assert_base_lost(*self.run_merge("7", "--confirm"))
 
     def test_any_error_after_the_push_reverts_the_claim(self):
         def boom():
@@ -922,6 +956,8 @@ elif a[:2] == ["pr", "merge"]:
     git("fetch", "-q", "origin"); git("checkout", "-q", "-B", B, "origin/" + B)
     git("merge", "-q", "--no-ff", "-m", "merge", sha); git("push", "-q", "origin", B)
     S["oid"] = git("rev-parse", "HEAD"); save()
+elif a[:2] == ["repo", "view"]:
+    print(json.dumps({"defaultBranchRef": {"name": S.get("default_branch", "main")}}))
 elif a[0] == "api" and a[1].endswith("/required_status_checks"):
     if S.get("contexts") is None:
         print("HTTP 404: Branch not protected"); sys.exit(1)
@@ -929,6 +965,26 @@ elif a[0] == "api" and a[1].endswith("/required_status_checks"):
 else:
     print("unhandled " + " ".join(a)); sys.exit(1)
 """
+
+def drop_config(env):
+    """Remove .github/stamp.json from main and feat, as in 5 of the owner's 8 repos. Then pull main into env.co."""
+    o = env.other
+    for b in ("main", "feat"):
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", b, f"origin/{b}")
+        sh(o, "git", "rm", "-q", ".github/stamp.json")
+        sh(o, "git", "commit", "-qm", f"no config on {b}")
+        sh(o, "git", "push", "-q", "origin", b)
+    sh(env.co, "git", "pull", "-q", "--ff-only")
+
+def stamp_marker(env):
+    """Point merge.STAMP at a stub that writes a file when it runs. -> that file's path; absent unless stamp ran."""
+    mark = os.path.join(env.t, "stamp-ran")
+    fake = os.path.join(env.t, "marker-stamp.mjs")
+    put(fake, 'import { writeFileSync } from "node:fs";\nwriteFileSync(process.env.STAMP_MARK, "ran");\n')
+    for p in (unittest.mock.patch.object(merge, "STAMP", fake), unittest.mock.patch.dict(os.environ, {"STAMP_MARK": mark})):
+        p.start(); env.addCleanup(p.stop)
+    return mark
 
 class GhHalf(Env):
     """Host against a `gh` shim on PATH. The shim merges into the local bare origin through the `other` clone."""
@@ -1184,10 +1240,9 @@ class GhHalf(Env):
         self.assertNotIn("pr merge", self.calls())
 
     def test_an_ignore_entry_without_a_reason_refuses_the_config(self):
-        sh(self.co, "git", "checkout", "-q", "main")
         for bad in ({"name": "design"}, {"name": "design", "reason": "  "}, {"reason": "r"}):
             cfg = dict(CONFIG, merge=dict(CONFIG["merge"], ignoreChecks=[bad]))
-            put(os.path.join(self.co, ".github/stamp.json"), json.dumps(cfg))
+            put_base_config(self, json.dumps(cfg))
             rc, out = self.run_merge("7", "--confirm")
             self.assertEqual(rc, 1)
             self.assertIn("merge.ignoreChecks", out)
@@ -1252,6 +1307,236 @@ class GhHalf(Env):
         self.assertNotEqual(self.head(), before)  # the claim was pushed, then reverted
         self.assertTrue(self.reverted())
         self.assertFalse(self.lock_ref())
+
+    # ---- no .github/stamp.json: the defaults (owner ruling 2026-10-10)
+
+    def test_no_config_preview_uses_the_defaults_and_names_the_file_once(self):
+        drop_config(self)
+        rc, out = self.run_merge("7", host=self.gh_host())
+        self.assertEqual(rc, 0, out)
+        self.assertIn("gh pr merge --merge", out)  # method "merge"
+        self.assertIn("run 0 afterMerge command(s)", out)  # afterMerge empty
+        named = [l for l in out.splitlines() if ".github/stamp.json" in l]
+        self.assertEqual(len(named), 1, out)
+        self.assertIn("default", named[0].lower())
+        self.assertIn("repo view", self.calls())  # defaultBranch from the host
+
+    def test_no_config_takes_the_default_branch_from_the_host(self):
+        drop_config(self)
+        self.set(default_branch="trunk")
+        rc, out = self.run_merge("7", host=self.gh_host())
+        self.assertIn("is not the default branch (trunk)", out)
+
+    def test_no_config_merges_on_the_defaults_and_claims_nothing(self):
+        drop_config(self)
+        self.set(contexts=["gates"])
+        self.host = None  # main builds the real Host from the defaults: requiredChecks "protection"
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        log = self.calls()
+        self.assertIn("branches/main/protection/required_status_checks", log)
+        self.assertIn("pr merge 7 --merge --match-head-commit", log)
+        self.assertEqual(self.claims(), 0)
+        self.assertIn("id: pending", self.show("main", "docs/decisions/second.md"))
+        named = [l for l in out.splitlines() if ".github/stamp.json" in l]
+        self.assertEqual(len(named), 1, out)
+        self.assertIn("default", named[0].lower())
+
+    def test_no_config_waits_the_default_45_minutes(self):
+        drop_config(self)
+        self.set(contexts=["gates"], checks_seq=[[("gates", "pending", "")]])
+        rc, out = self.go(required="protection")
+        self.assertEqual(rc, 1)
+        self.assertIn("the deadline of 45 minutes passed", out)
+        self.assertNotIn("pr merge", self.calls())
+
+    def test_no_config_never_runs_stamp(self):
+        drop_config(self)
+        mark = stamp_marker(self)
+        self.set(contexts=["gates"])
+        rc, out = self.go(required="protection")
+        self.assertEqual(rc, 0, out)
+        self.assertFalse(os.path.exists(mark), "stamp.mjs ran with no config")
+        self.assertEqual(self.claims(), 0)
+
+    def test_no_config_and_no_protection_stops_with_the_remedy(self):
+        drop_config(self)
+        before = self.head()
+        for contexts, remedy in ((None, "Set merge.requiredChecks to a list"), ([], "no required checks are named")):
+            self.set(contexts=contexts)
+            rc, out = self.go(required="protection")
+            self.assertEqual(rc, 1, out)
+            self.assertIn(remedy, out)
+            self.assertEqual(self.head(), before)  # nothing was pushed
+            self.assertNotIn("pr merge", self.calls())
+
+    def test_a_partial_merge_block_takes_the_defaults_for_the_missing_fields(self):
+        put_base_config(self, json.dumps({"defaultBranch": "main", "merge": {"method": "squash"}}))
+        self.set(contexts=["gates"])
+        self.host = None  # main builds the Host from the filled defaults: requiredChecks "protection"
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        log = self.calls()
+        self.assertIn("pr merge 7 --squash --match-head-commit", log)  # method from the file
+        self.assertIn("branches/main/protection/required_status_checks", log)  # requiredChecks default
+        filled = [l for l in out.splitlines() if all(f in l for f in ("deadlineMinutes", "requiredChecks", "afterMerge"))]
+        self.assertEqual(len(filled), 1, out)  # one line names the fields it filled
+        self.assertNotIn("method", filled[0])  # the file's own field is not filled
+
+    def test_a_config_without_defaultBranch_reads_it_from_the_host(self):
+        put_base_config(self, json.dumps({"merge": dict(CONFIG["merge"])}))
+        self.set(default_branch="trunk")
+        rc, out = self.run_merge("7", host=self.gh_host())
+        self.assertEqual(rc, 0, out)
+        self.assertIn("repo view", self.calls())
+        self.assertIn("main is not the default branch (trunk)", out)
+
+def put_base_config(env, text):
+    """Commit `text` as .github/stamp.json on origin's main from the other clone. env.co keeps its local checkout."""
+    o = env.other
+    sh(o, "git", "fetch", "-q", "origin")
+    sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+    put(os.path.join(o, ".github/stamp.json"), text)
+    sh(o, "git", "commit", "-qam", "base config")
+    sh(o, "git", "push", "-q", "origin", "main")
+    sh(env.co, "git", "fetch", "-q", "origin")  # the base is visible to env.co; its checkout is not pulled
+
+def put_base_bytes(env, data):
+    """Commit raw `data` as .github/stamp.json on origin's main, as put_base_config does for text."""
+    o = env.other
+    sh(o, "git", "fetch", "-q", "origin")
+    sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+    path = os.path.join(o, ".github/stamp.json")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+    sh(o, "git", "commit", "-qam", "base config, raw bytes")
+    sh(o, "git", "push", "-q", "origin", "main")
+    sh(env.co, "git", "fetch", "-q", "origin")
+
+class ConfigFile(Env):
+    """The merge block and defaultBranch come from the base branch's .github/stamp.json, never the local checkout.
+    A base file that is broken stops with one line that names the file, never the defaults."""
+    def stops_on(self, problem):
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 1, out)
+        lines = [l for l in out.splitlines() if l.strip()]
+        self.assertEqual(len(lines), 1, out)
+        self.assertIn(".github/stamp.json", lines[0])
+        self.assertIn(problem, lines[0])
+        self.assertNotIn("defaults", out)
+
+    def test_bad_json_on_the_base_stops_with_one_line_naming_the_file(self):
+        put_base_config(self, "{not json")
+        self.stops_on("line 1")
+
+    def test_a_base_file_that_is_not_utf8_stops_with_one_line_naming_the_file(self):
+        put_base_bytes(self, json.dumps(CONFIG).encode("utf-16"))  # BOM + UTF-16 bytes, not UTF-8
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 1, out)
+        lines = [l for l in out.splitlines() if l.strip()]
+        self.assertEqual(len(lines), 1, out)
+        self.assertIn(".github/stamp.json", lines[0])
+        self.assertNotIn("Traceback", out)
+
+    def test_ignoreChecks_null_stops_with_one_line_and_no_type_error(self):
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], ignoreChecks=None))))
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 1, out)
+        lines = [l for l in out.splitlines() if l.strip()]
+        self.assertEqual(len(lines), 1, out)
+        self.assertIn("ignoreChecks", lines[0])
+        self.assertNotIn("TypeError", out)
+        self.assertNotIn("Traceback", out)
+
+    def test_an_unknown_merge_field_stops_with_one_line_naming_it(self):
+        put_base_config(self, json.dumps({"merge": {"methd": "squash"}}))
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 1, out)
+        lines = [l for l in out.splitlines() if l.strip()]
+        self.assertEqual(len(lines), 1, out)
+        self.assertIn("unknown field", lines[0])
+        self.assertIn("methd", lines[0])
+
+    def test_the_merge_block_comes_from_the_base_not_the_checkout(self):
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], method="squash"))))  # the checkout keeps "merge"
+        methods = []
+        real = self.host.merge
+        self.host.merge = lambda n, m, sha: (methods.append(m), real(n, m, sha))[1]
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(methods, ["squash"])
+        self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
+
+    def test_defaultBranch_comes_from_the_base_not_the_checkout(self):
+        put_base_config(self, json.dumps(dict(CONFIG, defaultBranch="trunk")))  # the checkout says "main"
+        rc, out = self.run_merge("7")
+        self.assertIn("main is not the default branch (trunk)", out)
+
+class ClaimSkipped(Env):
+    """A base with no stamp kinds: the claim and the numbering check are skipped, and stamp.mjs never runs."""
+    def setUp(self):
+        super().setUp()
+        self.mark = stamp_marker(self)
+
+    def base_config(self, cfg):
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, ".github/stamp.json"), json.dumps(cfg))
+        sh(o, "git", "commit", "-qam", "config without kinds"); sh(o, "git", "push", "-q", "origin", "main")
+        sh(self.co, "git", "pull", "-q", "--ff-only")
+
+    def check_skipped(self, cfg):
+        self.base_config(cfg)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertFalse(os.path.exists(self.mark), "stamp.mjs ran")
+        self.assertEqual(self.claims(), 0)
+        self.assertIn("id: pending", self.show("main", "docs/decisions/second.md"))
+
+    def test_empty_kinds_skips_the_claim_and_stamp(self):
+        self.check_skipped(dict(CONFIG, kinds=[]))
+
+    def test_no_kinds_key_skips_the_claim_and_stamp(self):
+        self.check_skipped({k: v for k, v in CONFIG.items() if k != "kinds"})
+
+class ClaimFromBase(Env):
+    """The claim reads the config from the base branch, not the pull request's tree (ios-adblock #28)."""
+    def test_a_pr_tree_without_the_config_claims_from_the_base(self):
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "rm", "-q", ".github/stamp.json")
+        sh(o, "git", "commit", "-qm", "feat predates the config")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(self.claims(), 1)
+        self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
+
+class StampFailure(Env):
+    """stamp.mjs fails for any reason: merge prints one line with the reason and a remedy, never a stack trace."""
+    def stamp_fails(self, program, reason):
+        before = self.head()
+        with unittest.mock.patch.object(merge, "STAMP", program):
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        stamp_lines = [l for l in out.splitlines() if "claim was refused" in l]  # the stamp line alone
+        self.assertEqual(len(stamp_lines), 1, out)
+        self.assertIn(reason, stamp_lines[0])
+        self.assertNotIn("    at ", out)
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(self.head(), before)  # nothing was pushed
+
+    def test_a_stamp_that_throws_prints_one_line_and_no_stack(self):
+        program = os.path.join(self.t, "throws.mjs")
+        put(program, 'throw new Error("boom: fake stamp failure");\n')
+        self.stamp_fails(program, "boom")
+
+    def test_a_missing_stamp_program_prints_one_line_and_no_stack(self):
+        self.stamp_fails(os.path.join(self.t, "no-such-stamp.mjs"), "Cannot find module")
 
 class SilentUndo(Env):
     def stale_feat(self):

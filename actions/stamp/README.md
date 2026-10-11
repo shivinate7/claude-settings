@@ -321,14 +321,14 @@ The command `merge` (`merge/merge.py`, see the claude-settings README) claims be
 merge, on the pull request branch. Main never holds a pending record. A repo that moves to it
 meets each item below.
 
-1. One config file holds everything. It is the stamp config the repo already has, or a new
-   `.github/stamp.json`. The command reads it from the repo root. A different path goes in
-   `--config`.
-2. `defaultBranch` is set. The command refuses a config without it.
-3. A `merge` block sets `method` (`merge`, `squash` or `rebase`) and `deadlineMinutes`. The
-   command refuses a config that lacks either, but only under `--confirm`. A preview does
-   not check them. It never guesses them. Read `method` from
-   the repo's own merge history.
+1. One config file holds everything: `.github/stamp.json`. The command reads it from the pull
+   request's base branch, never from the local checkout. A different path goes in `--config`.
+2. A file that leaves out a field gets that field's default. An unknown field name in the
+   `merge` block stops the command with one line. A broken file stops it with one line that
+   names the file.
+3. A `merge` block can set `method` (`merge`, `squash` or `rebase`) and `deadlineMinutes`.
+   The command says which defaults it filled. Read `method` from the repo's own merge
+   history before you set it.
 4. `merge.requiredChecks` is `"protection"` (the default) or a list of check names.
    `"protection"` reads the branch protection of the pull request's base. If the list is
    empty or cannot be read, the command stops before the claim push. A repo with no branch
@@ -359,6 +359,10 @@ The tool keeps these behaviours. The adopting repo needs no setting for them.
 ## Adoption checklist, the merge tool
 
 Do each step in your own repo, from your own tree.
+
+The config file is optional for merge. With no `.github/stamp.json`, merge uses the defaults
+(decision merge-config-defaults, merge needs no config file) and claims no numbers. If the repo has numbered records, or
+needs a non-default method, deadline, required checks or `afterMerge`, do the steps below.
 
 1. Do steps 1 to 5 of the engine checklist above, so the config reads your tree correctly.
 2. Add the `merge` block. Read `method` from the repo's merge history. Set

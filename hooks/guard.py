@@ -54,6 +54,7 @@ one fixed order, and the first match wins.
   5 env-file           any read or write of an environment file
   6 merge-checks       a `gh pr merge` (or the MCP merge tool) while the head has a check or run
                        pending or red, or the read could not run. Denied, `--auto` too.
+    draft-pr           a `gh pr create` without `--draft` or `-d`. Denied.
   7 frozen-path        a write to the settings, the hooks or the global CLAUDE.md, under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. Always denied.
   8 subagent-model-cap a write to a settings file whose content sets or changes
@@ -245,6 +246,13 @@ def split_segments(cmd: str, ends=None):
             while index < length and cmd[index] != "\n":
                 index += 1
             continue
+        if char == "\\" and cmd[index + 1:index + 2] == "\\":
+            current.append(cmd[index:index + 2])   # an escaped backslash, so no continuation
+            index += 2
+            continue
+        if char == "\\" and cmd[index + 1:index + 2] == "\n" and not POWERSHELL_CALL[0]:
+            index += 2   # a POSIX backslash-newline is a continuation; in PowerShell it ends a path
+            continue
         if char in ("'", '"'):
             quote = char
             current.append(char)
@@ -255,6 +263,10 @@ def split_segments(cmd: str, ends=None):
             ends is None or ends.append("&&")
             current = []
             index += 2
+            continue
+        if char == "|" and cmd[index - 1:index] == ">":
+            current.append(char)   # `>|` overrides noclobber: a redirect, no pipe
+            index += 1
             continue
         if char == "|":
             width = 2 if cmd[index:index + 2] == "||" else 1
@@ -4390,6 +4402,12 @@ def gh_call_of(segment: str):
     tokens = segment_tokens(segment)
     if not tokens:
         return None
+    if tokens[0].startswith("("):   # a subshell, as detached_launch_hit reads it
+        tokens = [tokens[0].lstrip("(")] + tokens[1:]
+        tokens[-1] = tokens[-1].rstrip(")")
+        tokens = [t for t in tokens if t]
+        if not tokens:
+            return None
     index = resolve_command(tokens)
     if index is None or basename(tokens[index]) not in ("gh", "gh.exe"):
         return None
@@ -4441,6 +4459,46 @@ def merge_call_of(segment: str):
         elif not selector:
             selector = arg
     return selector, repo
+
+
+DRAFT_PR_REASON = ("draft-pr: open every PR as a draft. Add --draft (or -d) to gh pr create, and "
+                   "mark the PR ready after review. CI skips drafts.")
+
+
+# `gh pr create` flags that take a value; the next token is data, never a flag.
+PR_CREATE_VALUE_FLAGS = {"-t", "--title", "-b", "--body", "-F", "--body-file", "-B", "--base",
+                         "-H", "--head", "-l", "--label", "-a", "--assignee", "-m", "--milestone",
+                         "-p", "--project", "-r", "--reviewer", "-R", "--repo", "-T", "--template"}
+GH_TRUE = ("1", "t", "T", "TRUE", "true", "True")
+# Named limits (decision draft-until-reviewed): a `gh api` POST to the pulls endpoint and
+# `hub pull-request` open a PR and are not judged here. A short-flag cluster such as `-dt x` is
+# not read as a draft flag, so it is refused (a rare false alarm).
+
+
+def undrafted_pr_create(segment: str) -> bool:
+    """True for a `gh pr create` segment (or a `sh -c` script holding one) that ends not draft.
+    The last --draft, -d or --draft=X wins."""
+    tokens = segment_tokens(segment) or []
+    script = inline_script(tokens) if tokens else ""
+    if script:
+        return any(undrafted_pr_create(part) for part in split_segments(script) if part.strip())
+    rest = gh_call_of(segment)
+    if rest is None or rest[:2] != ["pr", "create"]:
+        return False
+    args = rest[2:]
+    draft, index = False, 0
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        if arg in PR_CREATE_VALUE_FLAGS:
+            index += 1
+        elif arg in ("-h", "--help"):
+            return False   # help creates nothing
+        elif arg in ("-d", "--draft"):
+            draft = True
+        elif arg.startswith(("--draft=", "-d=")):
+            draft = arg.split("=", 1)[1] in GH_TRUE   # gh's ParseBool set; any other value is false
+    return not draft
 
 
 _MERGE_MODULE = []
@@ -5105,6 +5163,144 @@ LN_DESCENDS_REASON = (
 )
 
 
+# THE PLAYWRIGHT BROWSER CACHE. Incident 2026-10-10: a feed-build session set
+# PLAYWRIGHT_BROWSERS_PATH to a scratch dir to work around a missing chromium_headless_shell-1208.
+# The real causes were a stale `__dirlock` left at 16:11 by an install stopped halfway, and an
+# install that hangs while it unpacks under Node 26.11 with Playwright 1.58. The install sat 73
+# minutes, and the workaround hid both causes. See the record playwright-browsers-path.
+# A set is an inline `VAR=v`, `env VAR=v`, `export VAR=v`, `cmd /c set VAR=v`, any of these inside
+# `bash -c` or `eval`, a write of the assignment into a file, or a PowerShell `$env:VAR = v`,
+# `Set-Item env:VAR` or `SetEnvironmentVariable`. A read, a grep, and `unset` set nothing. The name
+# is folded to upper case in every form. Shell words come from `segment_tokens`, assignments from
+# `ASSIGNMENT`, and the file write from `_VAR_TOKEN`: no parser of its own.
+# KNOWN LIMITS: `cross-env` is refused. Not covered: `timeout N env`, `setx`, a PowerShell block,
+# a `<<<` here-string, a CI yaml `env:` key, and `node -e` or `python -c`.
+PLAYWRIGHT_VAR = "PLAYWRIGHT_BROWSERS_PATH"
+ASSIGNING_BUILTINS = ("export", "declare", "typeset", "readonly", "local", "set")
+PLAYWRIGHT_PS_SHELLS = ("pwsh", "powershell", "pwsh.exe", "powershell.exe")
+# Search tools. Local here, not in the shared ENV_PATTERN_COMMANDS.
+PLAYWRIGHT_PS_READERS = ("select-string", "sls")
+PLAYWRIGHT_PS_SET = re.compile(
+    r"\$\{?env:" + PLAYWRIGHT_VAR + r"\}?\s*[-+*/]?=(?!=)"
+    r"|^\s*(?:set-item|si|new-item|ni|set-content|sc)\b[^;|]*\benv:\\?" + PLAYWRIGHT_VAR + r"\b"
+    r"|SetEnvironmentVariable\(\s*['\"]?" + PLAYWRIGHT_VAR + r"\b", re.I)
+
+
+# A shell profile or `.envrc`: a write there sets the variable for every later shell.
+PLAYWRIGHT_PROFILE = re.compile(r"\.(?:zshrc|zshenv|zlogin|bashrc|profile|zprofile|bash_profile|bash_login|envrc)\b")
+# SILENT_WRITE_REDIRECT (the null-device redirects) leaves `N>&N` alone, because that rule wants
+# a duplicate to count as output. Here a duplicate is no file target, so it is dropped as well.
+_FD_DUP = re.compile(r"\d*>&\d+")
+_PRINTF_DIRECTIVE = re.compile(r"%%|%[-+ #0-9.]*[a-zA-Z]|\\[nrtabfv\\]")
+_REDIRECT_TO_PROFILE = re.compile(r">+\|?\s*[^\s|;&]*" + PLAYWRIGHT_PROFILE.pattern)
+
+
+def _is_playwright_assign(token: str) -> bool:
+    return bool(ASSIGNMENT.match(token)) and token.split("=", 1)[0].upper() == PLAYWRIGHT_VAR
+
+
+def _pwsh_script(tokens) -> str:
+    """The script text after `-c` or `-Command` of a pwsh launch, else ''."""
+    for at, tok in enumerate(tokens[:-1]):
+        if re.fullmatch(r"-c(?:ommand)?", tok, re.I):
+            return tokens[at + 1]
+    return ""
+
+
+def _playwright_tokens_hit(tokens, depth=0) -> str:
+    tokens = [t for t in ([tokens[0].lstrip("(")] + tokens[1:] if tokens else []) if t]
+    if not tokens or depth > 3:
+        return ""
+    at = resolve_command(tokens)
+    if any(_is_playwright_assign(t) for t in tokens[:len(tokens) if at is None else at]):
+        return PLAYWRIGHT_VAR + " assignment"
+    if at is None:
+        return ""
+    word, rest = basename(tokens[at]).lower(), tokens[at + 1:]
+    if word in ASSIGNING_BUILTINS and any(_is_playwright_assign(t) for t in rest):
+        return word + " " + PLAYWRIGHT_VAR
+    if word in ("builtin", "exec"):
+        return _playwright_tokens_hit(rest, depth + 1)
+    if word == "npx":
+        rest = [t for t in rest if not t.startswith("-")] or [""]
+        word, rest = rest[0], rest[1:]
+    if word == "cross-env":
+        for token in rest:
+            if not ASSIGNMENT.match(token):
+                break
+            if _is_playwright_assign(token):
+                return word + " " + PLAYWRIGHT_VAR
+    script = " ".join(rest[1:]) if word in CMD_EXE_NAMES and rest and rest[0].lower() in (
+        "/c", "/k") else None
+    if script is None:
+        script = " ".join(rest) if word == "eval" else (
+            _pwsh_script(tokens) if word in PLAYWRIGHT_PS_SHELLS else inline_script(tokens))
+    for segment in split_segments(script) if script else ():
+        hit = playwright_path_hit(segment, depth + 1, ps_inner=word in PLAYWRIGHT_PS_SHELLS)
+        if hit:
+            return hit
+    return ""
+
+
+def playwright_path_hit(segment: str, depth=0, to_file=False, ps_inner=False) -> str:
+    """Return the matched text when a segment sets PLAYWRIGHT_BROWSERS_PATH, else ''.
+
+    `to_file` says the segment's output goes to a profile (a `tee` further down the pipe). The
+    file-write form counts only when the written text starts with the assignment.
+    """
+    tokens = segment_tokens(segment) or []
+    at = resolve_command(tokens) if tokens else None
+    word = basename(tokens[at]).lower() if at is not None else ""
+    # A pwsh launch with a script is judged through that script (ps_inner), statement by statement.
+    outer_ps = word in PLAYWRIGHT_PS_SHELLS and not _pwsh_script(tokens)
+    if (POWERSHELL_CALL[0] or outer_ps or ps_inner) and word not in (
+            ENV_PATTERN_COMMANDS + PLAYWRIGHT_PS_READERS):
+        found = PLAYWRIGHT_PS_SET.search(segment)
+        # inside pwsh -c, a `$env:` text counts only as a statement, not inside another command's argument
+        if found and not (ps_inner and found.group(0).startswith(("$", "{")) and not re.match(
+                r"\s*" + re.escape(found.group(0)), segment)):
+            return found.group(0)
+    cleaned = _FD_DUP.sub(" ", SILENT_WRITE_REDIRECT.sub(" ", segment))
+    if (to_file or _REDIRECT_TO_PROFILE.search(cleaned)) and len(tokens) > 1 and basename(
+            tokens[0]) in ("echo", "printf"):
+        words = [t for t in tokens[1:] if not t.startswith("-")]
+        if basename(tokens[0]) == "printf":   # drop printf directives and escapes, keep the text
+            words = [_PRINTF_DIRECTIVE.sub("", t) for t in words]
+        written = " ".join(w for w in words if w)
+        if _is_playwright_assign(written.removeprefix("export ").lstrip()):
+            return PLAYWRIGHT_VAR + " written to a file"
+    return _playwright_tokens_hit(tokens, depth)
+
+
+def playwright_command_hit(raw: str, stripped: str) -> str:
+    """Judge a whole command: each segment, plus a profile-bound heredoc body and `tee` pipe."""
+    to_file = bool(re.search(r"\btee\b[^|;&]*" + PLAYWRIGHT_PROFILE.pattern, stripped))
+    for segment in split_segments(stripped):
+        matched = playwright_path_hit(segment, to_file=to_file)
+        if matched:
+            return matched
+    kept, bodies = _split_heredocs(raw)
+    headers = [line for line in kept if HEREDOC_HEADER.search(line)]
+    for header, (_, body) in zip(headers, bodies):
+        if PLAYWRIGHT_PROFILE.search(header):
+            for line in body.split("\n"):
+                matched = playwright_path_hit(line)
+                if matched:
+                    return matched
+    return ""
+
+
+PLAYWRIGHT_PATH_REASON = (
+    "a missing browser build has two measured causes, and a changed cache location hides both. "
+    "One is a stale `__dirlock` in the Playwright cache, left by an install that stopped "
+    "halfway. The other is an install that hangs while it unpacks under Node 26.11 with "
+    "Playwright 1.58. "
+    "Remedy: run `pgrep -fl playwright` to confirm that no install is running, then remove the "
+    "stale `__dirlock`. If the install still hangs, run it under Node 22 with `npx -y node@22 "
+    "node_modules/playwright/cli.js install`, which unpacks in under a second."
+)
+
+
 SPAWN_TOOLS = ("Agent", "Task")
 SESSION_TOOL = "mcp__ccd_session__start_session"
 # The one list of roles that may run Haiku. lint/check_agent_models.py reads it from here.
@@ -5114,21 +5310,129 @@ MODEL_FLOOR_REASON = (
     "or name no model and let the default apply."
 )
 AGENT_CALL = re.compile(r"\bagent\s*\(")
-SCRIPT_LEXEME = re.compile(r"//[^\n]*|/\*.*?\*/|([\'\"`])((?:\\.|(?!\1).)*)\1", re.DOTALL)
+SCRIPT_STRING = {q: re.compile(r"((?:\\.|[^\\%s])*)%s" % (q, q), re.DOTALL) for q in "'\""}
+SCRIPT_TEMPLATE_TEXT = re.compile(r"((?:\\.|[^\\`$]|\$(?!\{))*)", re.DOTALL)
+SCRIPT_REGEX = re.compile(r"/(?:\\[^\n]|\[(?:\\[^\n]|[^\]\\\n])*\]|[^/\\\[\n])+/")
+SCRIPT_REGEX_AFTER = frozenset(",=:[!&|?{;(+-*%<>^~")
 SCRIPT_PAIR = re.compile(r"(?:(\w+)|\x00(\d+)\x00)\s*:\s*\x00(\d+)\x00")
 
 
+# Known limit: a regex literal is blanked, not lexed as code, and only when the previous non-space
+# character is an operator, one of ( , = { ; : [ ! & | ? + - * % < > ^ ~, or the script starts. A
+# postfix ++ or -- reads as division. A quote inside a regex literal after any other character (for
+# example after a `)`), or a regex right after `return` or `typeof`, can hide an agent() call.
 def mask_script(script: str):
-    """Drop comments and replace each string literal with a \\x00N\\x00 token. Return (text, strings)."""
-    strings = []
+    """Drop comments and replace each string literal with a \\x00N\\x00 token. Return (text, strings).
+    One pass, linear. A backslash escapes the next character, so an escaped quote never closes a
+    string. An unclosed opener stays as code. Once a scan for a closer fails, no later one can
+    succeed, so a failed closer is remembered. A template becomes one token that holds its raw
+    source, filled in at the closing backtick; a template with a `${` holds a (start, end) span of
+    the script instead of a copy, which the reader slices. The code in each `${...}` stays visible after the
+    token, in parentheses. A `{` or `}` in that code moves a depth counter, and the `}` at depth 0
+    resumes the template text. A template never closed by the end of the script is undone and its
+    backtick stays as code."""
+    out, strings, dead = [], [], set()
+    stack = []  # brace depth inside each open `${`
+    tstack = []  # [strings index, source start, has `${`] of each open template
+    regex_dead = 0  # a regex scan that failed ran to this index: no `/` before it opens one
+    mark = None  # (out length, strings length, index) where the outermost open template began
+    i, n = 0, len(script)
 
-    def swap(found):
-        if found.group(1) is None:
-            return " "
-        strings.append(found.group(2))
-        return "\x00%d\x00" % (len(strings) - 1)
+    def regex_ok(j):
+        """True when the previous non-space character allows a regex literal, or none exists."""
+        j -= 1
+        while j >= 0 and script[j].isspace():
+            j -= 1
+        if j >= 1 and script[j] in "+-" and script[j - 1] == script[j]:
+            return False  # postfix ++ or --: a division follows
+        return j < 0 or script[j] in SCRIPT_REGEX_AFTER
 
-    return SCRIPT_LEXEME.sub(swap, script), strings
+    def text(j):
+        """Mask template text from j. Return the index after the closing backtick, or after the
+        `${` that opens code, or -1 when the script ends first."""
+        nonlocal mark
+        k = SCRIPT_TEMPLATE_TEXT.match(script, j).end()
+        if script.startswith("${", k):
+            stack.append(0)
+            tstack[-1][2] = True
+            out.append("(")
+            return k + 2
+        if script.startswith("`", k):
+            idx, start, spans = tstack.pop()
+            strings[idx] = (start, k) if spans else script[start:k]
+            if not tstack:
+                mark = None
+            return k + 1
+        return -1
+
+    while True:
+        if i < 0 or (i >= n and tstack):  # a template never closed: undo it, keep its backtick
+            del out[mark[0]:], strings[mark[1]:]
+            out.append("`")
+            i, mark = mark[2] + 1, None
+            stack.clear()
+            tstack.clear()
+            dead.add("`")
+        if i >= n:
+            break
+        ch = script[i]
+        if ch == "/" and script.startswith("//", i):
+            j = script.find("\n", i)
+            i = n if j < 0 else j
+            out.append(" ")
+        elif ch == "/" and script.startswith("/*", i) and "*/" not in dead:
+            j = script.find("*/", i + 2)
+            if j < 0:
+                dead.add("*/")
+                out.append(ch)
+                i += 1
+            else:
+                out.append(" ")
+                i = j + 2
+        elif ch == "/" and i >= regex_dead and not script.startswith("/*", i) and regex_ok(i):
+            m = SCRIPT_REGEX.match(script, i)
+            if m is None:
+                j = script.find("\n", i)
+                regex_dead = n if j < 0 else j
+                out.append(ch)
+                i += 1
+            else:
+                out.append(" ")
+                i = m.end()
+        elif ch in SCRIPT_STRING and ch not in dead:
+            m = SCRIPT_STRING[ch].match(script, i + 1)
+            if m is None:
+                dead.add(ch)
+                out.append(ch)
+                i += 1
+            else:
+                strings.append(m.group(1))
+                out.append("\x00%d\x00" % (len(strings) - 1))
+                i = m.end()
+        elif ch == "`" and "`" not in dead:
+            if not tstack:
+                mark = (len(out), len(strings), i)
+            tstack.append([len(strings), i + 1, False])
+            strings.append(None)
+            out.append("\x00%d\x00" % (len(strings) - 1))
+            i = text(i + 1)
+        elif stack and ch == "{":
+            stack[-1] += 1
+            out.append(ch)
+            i += 1
+        elif stack and ch == "}":
+            if stack[-1]:
+                stack[-1] -= 1
+                out.append(ch)
+                i += 1
+            else:
+                stack.pop()
+                out.append(")")
+                i = text(i + 1)
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out), strings
 
 
 def script_opts(text: str, start: int):
@@ -5169,12 +5473,18 @@ def floor_hit(tool: str, tool_input) -> str:
         if below_the_floor(tool_input.get("model")):
             return str(tool_input.get("model"))
     elif tool == "Workflow" and isinstance(tool_input.get("script"), str):
-        text, strings = mask_script(tool_input["script"])
+        script = tool_input["script"]
+        text, strings = mask_script(script)
+
+        def read(k):
+            v = strings[int(k)]
+            return v if isinstance(v, str) else script[v[0]:v[1]]
+
         for call in AGENT_CALL.finditer(text):
             for body in script_opts(text, call.end()):
                 keys = {}
                 for name, quoted, value in SCRIPT_PAIR.findall(body):
-                    keys[name or strings[int(quoted)]] = strings[int(value)]
+                    keys[name or read(quoted)] = read(value)
                 if below_the_floor(keys.get("model")) and keys.get("agentType") not in HAIKU_ROLES:
                     return keys["model"]
     return ""
@@ -5332,6 +5642,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         refuse(tool, "deny", "live-stream", NARRATED_TAIL_REASON, matched)
 
+    # 3c. A command that sets the Playwright browser cache location (incident 2026-10-10).
+    matched = playwright_command_hit(raw, stripped)
+    if matched:
+        refuse(tool, "deny", "playwright-browsers-path", PLAYWRIGHT_PATH_REASON, matched)
+
     # 3b. Two traps ported from banchi's `scripts/guard-shell.py`: `gh api` with a field and no
     # method, and `ln -s` onto a directory that is already there. Each reads the segment's own
     # command word, never a substring, and `ln` reads the filesystem rather than the text.
@@ -5379,6 +5694,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),
                    "gh pr merge " + merging[0] + " " + verdict)
+
+    # 6b. A pull request opened without --draft.
+    for text, _in_message in _substitutions(stripped)[0]:
+        if any(undrafted_pr_create(seg) for seg in split_segments(text) if seg.strip()):
+            refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
 
     # 7. A frozen path.
     matched = frozen_shell_hit(stripped, cwd)
@@ -5461,6 +5781,10 @@ def judge(payload) -> None:
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),
                    "merge tool " + verdict)
+
+    # The MCP create tool carries its own `draft` field.
+    if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:
+        refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "create_pull_request without draft")
 
     if tool in SHELL_TOOLS:
         command = tool_input.get("command", "") or ""
