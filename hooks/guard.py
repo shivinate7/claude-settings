@@ -5247,6 +5247,7 @@ def _pwsh_script(tokens) -> str:
 _PW_RUNNERS = ("npx", "pnpm", "yarn", "bunx", "bun", "npm")
 _PW_NAMES = ("playwright", "playwright-core", "@playwright/test")
 _PW_VALUE_FLAGS = ("-C", "--prefix", "--cwd", "--dir", "-F", "--filter", "-w", "--workspace")
+_PW_NPX_VALUE_FLAGS = ("--prefix", "-w", "--workspace")   # npm's own
 _PW_CLIS = ("playwright/cli.js", "playwright-core/cli.js")
 _PW_NODE22_CLIS = tuple("node_modules/" + c for c in _PW_CLIS)
 
@@ -5268,10 +5269,11 @@ def _playwright_install_hit(word, rest, who) -> str:
         return ""
     toks = [word] + rest
     # A name right after a folder or filter flag is that flag's value (`pnpm -C playwright
-    # install`), so it is skipped. Known ceiling: an unlisted folder flag is read as a command and
-    # can only cause a false deny, the safe direction.
+    # install`), so it is skipped. Under npx only npm's own value flags count. Known ceiling: an
+    # unlisted folder flag is read as a command and can only cause a false deny, the safe direction.
     at = next((i for i, t in enumerate(toks) if _pw_name(t) and toks[i + 1:i + 2] == ["install"]
-               and (i == 0 or toks[i - 1] not in _PW_VALUE_FLAGS)), None)
+               and (i == 0 or toks[i - 1] not in (
+                   _PW_NPX_VALUE_FLAGS if word == "npx" else _PW_VALUE_FLAGS))), None)
     if at is None:
         return ""
     allowed = toks[at].endswith(_PW_NODE22_CLIS) and toks[:1] == ["npx"] and toks[1:at] in (
