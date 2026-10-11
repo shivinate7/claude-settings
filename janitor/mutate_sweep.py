@@ -762,8 +762,8 @@ MUTATIONS = [
 
     ('macos cwd table: a lsof timeout escapes instead of reading as unknown',
      "sweep",
-     '                                timeout=60)\n    except Exception:',
-     '                                timeout=60)\n    except OSError:',
+     '                                timeout=timeout)\n    except Exception:',
+     '                                timeout=timeout)\n    except OSError:',
      'test_a_timeout_is_unreadable'),
 
     ('macos cwd table: processes_in ignores the table',
