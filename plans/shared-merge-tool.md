@@ -84,8 +84,7 @@ with no `.github/stamp.json` gets the defaults: the default branch from `gh repo
 `merge`, `deadlineMinutes` 45, `requiredChecks` `"protection"`, empty `afterMerge`. Merge prints
 one line to say so. It claims no numbers and never runs stamp.mjs. Add the file only for
 numbered records or for non-default settings. A file that exists but is broken stops merge with
-one line. A file that exists must hold `merge.method` and `merge.deadlineMinutes`: the defaults
-apply only when there is no file. The claim and the numbering read the stamp config from the base branch, never the pull request's tree. The merge settings come from the checkout merge runs in.
+one line. Left-out merge fields get the defaults (decision merge-config-defaults, defaults fill left-out fields). An unknown field name stops merge. The claim and the numbering read the stamp config from the base branch, never the pull request's tree. The settings come from the base branch's `.github/stamp.json`.
 
 The repo keeps one config file, the stamp config it already has or a new one at
 `.github/stamp.json`. A `merge` block holds the merge fields. One file, one home.
