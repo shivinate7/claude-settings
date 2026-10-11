@@ -2135,6 +2135,31 @@ sh("rm-var: a variable set from $(pwd) is refused and its remedy names no ${D:?}
    "D=$(pwd); rm -rf $D/x", "deny", "rm-var-unguarded", cwd=NOGIT, lacks=("${D:?}",))
 sh("rm-var: a guarded variable set from $(pwd) is refused and its remedy names no ${D:?} advice",
    'D=$(pwd); rm -rf "${D:?}"/x', "deny", "rm-var-unguarded", cwd=NOGIT, lacks=("${D:?}",))
+# Named limits (decision rm-on-a-variable-needs-a-guard, "Named limits" first bullet): a pwd
+# command in $(...) or backticks taints, with any flags or path. Red until the guard matches them.
+sh("rm-var: a variable set from $(pwd -P) is refused for a literal path, not ${D:?}",
+   'D=$(pwd -P); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a variable set from $(/bin/pwd) is refused for a literal path, not ${D:?}",
+   'D=$(/bin/pwd); rm -rf "$D"/x', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a variable set from $(command pwd) is refused for a literal path, not ${D:?}",
+   'D=$(command pwd); rm -rf "$D"/x', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a variable set from a backtick pwd -P is refused for a literal path, not ${D:?}",
+   'D=`pwd -P`; rm -rf "$D"/x', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a variable set from $(pwd -L) is refused for a literal path, not ${OUT:?}",
+   'OUT=$(pwd -L); rm -rf "$OUT"/x', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${OUT:?}",))
+sh("rm-var: a loop over $(pwd -P) is refused for a literal path, not ${D:?}",
+   'for D in $(pwd -P); do rm -rf "${D:?}"/x; done', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a quoted $(pwd -P) assignment is refused for a literal path, not ${D:?}",
+   'D="$(pwd -P)"; rm -rf "$D"/x', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a guarded variable from a non-pwd word that starts with pwd stays allowed",
+   'D=build-pwd; rm -rf "${D:?}"/x', "allow", cwd=NOGIT)
 sh("rm-var: a guarded variable set from $HOME is refused and its remedy names no ${D:?} advice",
    "D=$HOME; rm -rf ${D:?}/x", "deny", "rm-var-unguarded", cwd=NOGIT, lacks=("${D:?}",))
 # A guarded variable set to a literal path passes.
