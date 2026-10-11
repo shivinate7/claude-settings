@@ -217,6 +217,7 @@ class T(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout)
         self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
 
+    @unittest.skipIf(os.name == "nt", "Windows blocks deleting a file verdict holds open; the child exits 1 first")
     def test_child_deleting_log_is_fail_log_unreadable(self):
         with tempfile.TemporaryDirectory() as d:
             log = os.path.join(d, "v.log")
