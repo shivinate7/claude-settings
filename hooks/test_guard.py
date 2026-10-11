@@ -2164,6 +2164,30 @@ sh("playwright-install: a subagent Node 22 cli.js install is denied, rule 1 wins
    "playwright-install", cwd=NOGIT, agent_id="pw-sub1", agent_type="test-author")
 sh("playwright-install: a subagent test run is allowed", "npx playwright test", "allow",
    cwd=NOGIT, agent_id="pw-sub1")
+# Review of #329: a flag's value sits before the command word, so the word is still the install.
+sh("playwright-install: npx -p names the package, the install still denies",
+   "npx -p playwright playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: npx --prefix takes a value, the install still denies",
+   "npx --prefix app playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: pnpm --filter takes a value, the install still denies",
+   "pnpm --filter app exec playwright install", "deny", "playwright-install", cwd=NOGIT)
+# The scoped package's bin is playwright, so its install is the same act.
+sh("playwright-install: the scoped test package installs the browsers",
+   "npx @playwright/test install", "deny", "playwright-install", cwd=NOGIT)
+# A shell that wraps the command runs the same install.
+sh("playwright-install: cmd /c runs the install",
+   "cmd /c npx playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: powershell -Command runs the install",
+   'powershell -Command "npx playwright install"', "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: pwsh -c runs the install",
+   "pwsh -c 'npx playwright install'", "deny", "playwright-install", cwd=NOGIT)
+# False alarm: the Node 22 cli.js form with a ./ path is the allowed form.
+sh("playwright-install: the Node 22 cli.js form with a ./ path is allowed in the main session",
+   "npx -y node@22 ./node_modules/playwright/cli.js install chromium", "allow", cwd=NOGIT)
+# Rule 1 for a subagent: a flag's value does not hide the install either.
+sh("playwright-install: a subagent npx --prefix install is denied",
+   "npx --prefix app playwright install", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1")
 
 # THE PREDICATE IS THE ACT, NOT THE TOOL OR THE SPELLING. MEASURED: the owner ran
 # `grep -n -i "...|make reap|pkill..." CLAUDE.md` to search CLAUDE.md for the word, and it was
