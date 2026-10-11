@@ -2010,8 +2010,11 @@ sh("playwright: env names the variable for a test run",
    "playwright-browsers-path", cwd=NOGIT)
 sh("playwright: the PowerShell form sets it", '$env:PLAYWRIGHT_BROWSERS_PATH = "C:\\x"', "deny",
    "playwright-browsers-path", tool="PowerShell", cwd=NOGIT)
+# Re-pointed (class a): decision playwright-install-once allows a main-session install only as the
+# Node 22 cli.js form. The subject is unchanged: the headless shell installs by its own name.
 sh("playwright: the headless shell installs by its own name",
-   "npx playwright install chromium-headless-shell", "allow", cwd=NOGIT)
+   "npx -y node@22 node_modules/playwright/cli.js install chromium-headless-shell", "allow",
+   cwd=NOGIT)
 sh("playwright: echo only reads the variable", "echo $PLAYWRIGHT_BROWSERS_PATH", "allow",
    cwd=NOGIT)
 sh("playwright: grep only reads the name", "grep -r PLAYWRIGHT_BROWSERS_PATH .", "allow",
@@ -2175,6 +2178,219 @@ sh("playwright: printf with a %s format piped to tee -a zshrc, denies",
 sh("playwright: printf with a %s format writes the export to .envrc, denies",
    "printf 'export PLAYWRIGHT_BROWSERS_PATH=%s\\n' \"$HOME/pw\" >> .envrc", "deny",
    "playwright-browsers-path", cwd=NOGIT)
+
+# THE PLAYWRIGHT BROWSER INSTALL. Owner ruling: a subagent never runs a Playwright browser install.
+# A main-session install runs only as the Node 22 cli.js form. INCIDENT 2026-10-11 (feed-build):
+# three test-author subagents ran `npx playwright install chromium` at once under the Mac default
+# Node 26.11. The install hangs while it unpacks (measured, see decision playwright-browsers-path).
+# One hung 20 minutes, and they fought over the shared ~/Library/Caches/ms-playwright/__dirlock.
+# The main-session forms below are denied. Each one runs an install under the default Node.
+sh("playwright-install: npx names the browser install", "npx playwright install chromium", "deny",
+   "playwright-install", cwd=NOGIT)
+sh("playwright-install: npx -y installs without a prompt", "npx -y playwright install", "deny",
+   "playwright-install", cwd=NOGIT)
+sh("playwright-install: npx pins a version for the install", "npx playwright@1.58 install", "deny",
+   "playwright-install", cwd=NOGIT)
+sh("playwright-install: the local bin runs the install", "node_modules/.bin/playwright install",
+   "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: the local bin with deps runs the install",
+   "./node_modules/.bin/playwright install --with-deps", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: the default node runs the cli.js install",
+   "node node_modules/playwright/cli.js install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: pnpm exec runs the install", "pnpm exec playwright install", "deny",
+   "playwright-install", cwd=NOGIT)
+sh("playwright-install: yarn runs the install", "yarn playwright install", "deny",
+   "playwright-install", cwd=NOGIT)
+sh("playwright-install: bunx runs the install", "bunx playwright install", "deny",
+   "playwright-install", cwd=NOGIT)
+sh("playwright-install: bash -c wraps the install",
+   "bash -c 'npx playwright install chromium'", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: cd then && runs the install", "cd x && npx playwright install chromium",
+   "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a ; chain runs the install", "npm test; npx playwright install", "deny",
+   "playwright-install", cwd=NOGIT)
+sh("playwright-install: the Node 22 bin form is not the cli.js form",
+   "npx -y node@22 node_modules/.bin/playwright install", "deny", "playwright-install", cwd=NOGIT)
+# Scanner cases: a lone quote, a comment opener inside quotes, and a multi-line quoted string
+# must not hide an install that follows them.
+sh("playwright-install: a double-quoted apostrophe in an echo does not hide the install",
+   'echo "don\'t"; npx playwright install', "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: an apostrophe in a commit message names the install and is allowed",
+   'git commit -m "don\'t run npx playwright install"', "allow", cwd=NOGIT)
+sh("playwright-install: a hash inside quotes is no comment, the install still denies",
+   'echo "#" && npx playwright install chromium', "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a multi-line quoted string does not hide the install",
+   'echo "one\ntwo" && npx playwright install chromium', "deny", "playwright-install", cwd=NOGIT)
+# The allowed main-session form: Node 22 through the cli.js file, with or without the GC skip.
+sh("playwright-install: the Node 22 cli.js install is allowed in the main session",
+   "npx -y node@22 node_modules/playwright/cli.js install chromium", "allow", cwd=NOGIT)
+sh("playwright-install: the GC skip may lead the Node 22 cli.js install",
+   "PLAYWRIGHT_SKIP_BROWSER_GC=1 npx -y node@22 node_modules/playwright/cli.js install chromium",
+   "allow", cwd=NOGIT)
+# Not installs: a test run, a report, OS packages, and text that only names the install.
+sh("playwright-install: a test run is allowed", "npx playwright test", "allow", cwd=NOGIT)
+sh("playwright-install: show-report is allowed", "npx playwright show-report", "allow", cwd=NOGIT)
+sh("playwright-install: install-deps installs OS packages, allowed",
+   "npx playwright install-deps", "allow", cwd=NOGIT)
+sh("playwright-install: grep for the install text in a README is allowed",
+   'grep "playwright install" README.md', "allow", cwd=NOGIT)
+sh("playwright-install: echo of the install text is allowed", "echo npx playwright install",
+   "allow", cwd=NOGIT)
+# Rule 1: a subagent call that runs an install is denied whatever the form, including the Node 22
+# cli.js form, and whatever the role the subagent carries.
+sh("playwright-install: a subagent install is denied",
+   "npx playwright install chromium", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1", agent_type="builder")
+sh("playwright-install: a subagent bash -c install is denied",
+   "bash -c 'npx -y playwright install'", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1")
+sh("playwright-install: a subagent Node 22 cli.js install is denied, rule 1 wins",
+   "npx -y node@22 node_modules/playwright/cli.js install chromium", "deny",
+   "playwright-install", cwd=NOGIT, agent_id="pw-sub1", agent_type="test-author")
+sh("playwright-install: a subagent test run is allowed", "npx playwright test", "allow",
+   cwd=NOGIT, agent_id="pw-sub1")
+# Review of #329: a flag's value sits before the command word, so the word is still the install.
+sh("playwright-install: npx -p names the package, the install still denies",
+   "npx -p playwright playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: npx --prefix takes a value, the install still denies",
+   "npx --prefix app playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: pnpm --filter takes a value, the install still denies",
+   "pnpm --filter app exec playwright install", "deny", "playwright-install", cwd=NOGIT)
+# The scoped package's bin is playwright, so its install is the same act.
+sh("playwright-install: the scoped test package installs the browsers",
+   "npx @playwright/test install", "deny", "playwright-install", cwd=NOGIT)
+# A shell that wraps the command runs the same install.
+sh("playwright-install: cmd /c runs the install",
+   "cmd /c npx playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: powershell -Command runs the install",
+   'powershell -Command "npx playwright install"', "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: pwsh -c runs the install",
+   "pwsh -c 'npx playwright install'", "deny", "playwright-install", cwd=NOGIT)
+# False alarm: the Node 22 cli.js form with a ./ path is the allowed form.
+sh("playwright-install: the Node 22 cli.js form with a ./ path is allowed in the main session",
+   "npx -y node@22 ./node_modules/playwright/cli.js install chromium", "allow", cwd=NOGIT)
+# Rule 1 for a subagent: a flag's value does not hide the install either.
+sh("playwright-install: a subagent npx --prefix install is denied",
+   "npx --prefix app playwright install", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1")
+# Re-review of #329: each wrapper below hides the install behind a flag, a workspace, or a shell.
+# Each form is denied in the main session and again as a subagent.
+sh("playwright-install: npm -w exec runs the install",
+   "npm -w app exec playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent npm -w exec install is denied",
+   "npm -w app exec playwright install", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1")
+sh("playwright-install: npm --workspace exec -- runs the install",
+   "npm --workspace app exec -- playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent npm --workspace exec -- install is denied",
+   "npm --workspace app exec -- playwright install", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1")
+sh("playwright-install: npx --registry takes a value, the install still denies",
+   "npx --registry https://r.example playwright install", "deny", "playwright-install",
+   cwd=NOGIT)
+sh("playwright-install: a subagent npx --registry install is denied",
+   "npx --registry https://r.example playwright install", "deny", "playwright-install",
+   cwd=NOGIT, agent_id="pw-sub1")
+sh("playwright-install: yarn workspace runs the install",
+   "yarn workspace app playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent yarn workspace install is denied",
+   "yarn workspace app playwright install", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1")
+sh("playwright-install: pwsh -Command runs the install",
+   "pwsh -Command npx playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent pwsh -Command install is denied",
+   "pwsh -Command npx playwright install", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1")
+sh("playwright-install: npx -c runs the install in a shell string",
+   "npx -c 'npx playwright install'", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent npx -c install is denied",
+   "npx -c 'npx playwright install'", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1")
+# Allowed main-session forms: the cli.js file named by an absolute or a parent-relative path.
+sh("playwright-install: the Node 22 cli.js form with an absolute path is allowed",
+   "npx -y node@22 /abs/path/node_modules/playwright/cli.js install chromium", "allow",
+   cwd=NOGIT)
+sh("playwright-install: the Node 22 cli.js form with a parent-relative path is allowed",
+   "npx -y node@22 ../node_modules/playwright/cli.js install chromium", "allow", cwd=NOGIT)
+# Control: a workspace exec that runs a test is not an install.
+sh("playwright-install: a workspace exec test run is allowed",
+   "npm -w app exec playwright test", "allow", cwd=NOGIT)
+# Round 4 of #329: a plain node run of a cli.js named by the playwright-core package, or by a
+# path that holds the word playwright, is an install. Each is denied in the main session and as a
+# subagent.
+sh("playwright-install: node runs the playwright-core cli.js install",
+   "node node_modules/playwright-core/cli.js install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent node playwright-core cli.js install is denied",
+   "node node_modules/playwright-core/cli.js install", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1")
+sh("playwright-install: node runs a cli.js under a playwright path install",
+   "node /opt/x/playwright/cli.js install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent node cli.js under a playwright path install is denied",
+   "node /opt/x/playwright/cli.js install", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1")
+sh("playwright-install: a subagent Node 22 playwright-core cli.js install is denied",
+   "npx -y node@22 node_modules/playwright-core/cli.js install chromium", "deny",
+   "playwright-install", cwd=NOGIT, agent_id="pw-sub1")
+# Round 4 allows, main session. A package manager's own install, a flag's value, and a test
+# filter that names the word are not browser installs. The Node 22 cli.js forms are allowed.
+sh("playwright-install: pnpm -C takes a directory, its install is allowed",
+   "pnpm -C playwright install", "allow", cwd=NOGIT)
+sh("playwright-install: npm --prefix takes a directory, its install is allowed",
+   "npm --prefix ./playwright install", "allow", cwd=NOGIT)
+sh("playwright-install: yarn --cwd takes a directory, its install is allowed",
+   "yarn --cwd playwright install", "allow", cwd=NOGIT)
+sh("playwright-install: pnpm -F filters a package, its install is allowed",
+   "pnpm -F playwright install", "allow", cwd=NOGIT)
+sh("playwright-install: a test run with -g install is allowed",
+   "npx playwright test -g install", "allow", cwd=NOGIT)
+sh("playwright-install: a test run with --grep install is allowed",
+   "npx playwright test --grep install", "allow", cwd=NOGIT)
+sh("playwright-install: the Node 22 cli.js form without -y is allowed",
+   "npx node@22 node_modules/playwright/cli.js install chromium", "allow", cwd=NOGIT)
+sh("playwright-install: the Node 22 cli.js form with --yes is allowed",
+   "npx --yes node@22 node_modules/playwright/cli.js install chromium", "allow", cwd=NOGIT)
+sh("playwright-install: the Node 22 playwright-core cli.js form is allowed in the main session",
+   "npx -y node@22 node_modules/playwright-core/cli.js install chromium", "allow", cwd=NOGIT)
+# Final review of #329: regressions. Each form is denied in the main session and as a subagent.
+sh("playwright-install: node with a flag before the cli.js runs the install",
+   "node --no-warnings node_modules/playwright/cli.js install", "deny", "playwright-install",
+   cwd=NOGIT)
+sh("playwright-install: a subagent node with a flag before the cli.js install is denied",
+   "node --no-warnings node_modules/playwright/cli.js install", "deny", "playwright-install",
+   cwd=NOGIT, agent_id="pw-sub1")
+sh("playwright-install: npm exec --yes runs the install",
+   "npm exec --yes playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent npm exec --yes install is denied",
+   "npm exec --yes playwright install", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1")
+sh("playwright-install: bunx --bun runs the install",
+   "bunx --bun playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent bunx --bun install is denied",
+   "bunx --bun playwright install", "deny", "playwright-install", cwd=NOGIT, agent_id="pw-sub1")
+sh("playwright-install: npm exec --package= runs the install",
+   "npm exec --package=playwright playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent npm exec --package= install is denied",
+   "npm exec --package=playwright playwright install", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1")
+sh("playwright-install: pnpm dlx --package= runs the install",
+   "pnpm dlx --package=playwright playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent pnpm dlx --package= install is denied",
+   "pnpm dlx --package=playwright playwright install", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1")
+# npx has no --filter, -F or --dir flag, so the value's name is taken as the package and the
+# install runs. Each form is denied in the main session and as a subagent.
+sh("playwright-install: npx --filter names the package and the install runs",
+   "npx --filter playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent npx --filter install is denied",
+   "npx --filter playwright install", "deny", "playwright-install", cwd=NOGIT, agent_id="pw-sub1")
+sh("playwright-install: npx -F names the package and the install runs",
+   "npx -F playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent npx -F install is denied",
+   "npx -F playwright install", "deny", "playwright-install", cwd=NOGIT, agent_id="pw-sub1")
+sh("playwright-install: npx --dir names the package and the install runs",
+   "npx --dir playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent npx --dir install is denied",
+   "npx --dir playwright install", "deny", "playwright-install", cwd=NOGIT, agent_id="pw-sub1")
 
 # THE PREDICATE IS THE ACT, NOT THE TOOL OR THE SPELLING. MEASURED: the owner ran
 # `grep -n -i "...|make reap|pkill..." CLAUDE.md` to search CLAUDE.md for the word, and it was
