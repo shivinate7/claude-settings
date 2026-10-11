@@ -2769,6 +2769,56 @@ class PurgeTests(unittest.TestCase):
         self.assertEqual(still_there.returncode, 0)
 
 
+class AgentEndLogConcurrencyTests(unittest.TestCase):
+    """janitor/agent_end_reap.py log(): parallel hook runs (one per finished agent) each append
+    one row to the shared payload log. Every row must survive and every line must parse. The
+    reviewer measured 13 of 120 rows lost at 3 writers on b0c87cb: one shared `.tmp` name and an
+    unlocked read-modify-write. Real writer processes, real file, no fake."""
+
+    CHILD = (
+        "import sys\n"
+        "sys.path.insert(0, '__JANITOR__')\n"
+        "import agent_end_reap\n"
+        "lo, hi = int(sys.argv[1]), int(sys.argv[2])\n"
+        "for i in range(lo, hi):\n"
+        "    agent_end_reap.log({'raw': 'x', 'run': 'r' + str(i), 'state': 'done'})\n"
+    ).replace("__JANITOR__", os.path.dirname(os.path.abspath(__file__)))
+
+    def run_writers(self, writers, rows):
+        folder = tempfile.mkdtemp(prefix="reap_log_")
+        self.addCleanup(shutil.rmtree, folder, True)
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=folder)
+        step = rows // writers
+        procs = [subprocess.Popen([sys.executable, "-c", self.CHILD, str(w * step), str((w + 1) * step)],
+                                  env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                 for w in range(writers)]
+        for proc in procs:
+            _out, err = proc.communicate(timeout=120)
+            self.assertEqual(proc.returncode, 0, "writer failed: %s" % err)
+        path = os.path.join(folder, "state", "agent-end-payloads.jsonl")
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+        bad = []
+        runs = []
+        for line in lines:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                bad.append(line)
+                continue
+            if row.get("state") == "done":
+                runs.append(row.get("run"))
+        self.assertEqual(bad, [], "unparseable log lines with %d writers" % writers)
+        lost = sorted(set("r" + str(i) for i in range(rows)) - set(runs))
+        self.assertEqual(lost, [], "%d of %d rows lost with %d writers" % (len(lost), rows, writers))
+
+    def test_three_parallel_writers_lose_no_row(self):
+        self.run_writers(3, 120)
+
+    def test_twenty_four_parallel_writers_lose_no_row(self):
+        self.run_writers(24, 120)
+
+
 class AgentEndReapBatchTests(unittest.TestCase):
     """janitor/agent_end_reap.py reads every process's cwd in ONE batch call, never one call per
     pid. Owner ruling 2026-10-10: about 1,300 pids at 27 ms each overran the 60 s hook timeout,

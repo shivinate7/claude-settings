@@ -1835,6 +1835,28 @@ def spawn_orphan(cwd):
     return pid if parent == "1" else None
 
 
+def spawn_live_parent(cwd):
+    """A `sleep` (P) whose parent `sh` (Q) is still ALIVE, and Q was reparented to init (PPID 1),
+    so Q's ancestry never reaches the suite root. P sits in CWD. Returns P's pid, or None when the
+    shape does not hold on this host. Owner ruling 2026-10-10: this left-behind shape is foreign."""
+    os.makedirs(cwd, exist_ok=True)
+    try:
+        outer = subprocess.Popen(
+            ["sh", "-c", "sh -c 'sleep 300 </dev/null >/dev/null 2>&1 & echo $!; echo $$; "
+                         "sleep 300' </dev/null &"],
+            cwd=cwd, stdout=subprocess.PIPE, text=True)
+        outer.wait(timeout=20)   # the outer shell exits; its background child is reparented
+        child, parent = int(outer.stdout.readline()), int(outer.stdout.readline())
+        ORPHAN_PIDS.extend([child, parent])
+        ps_parent = subprocess.run(["ps", "-o", "ppid=", "-p", str(parent)], capture_output=True,
+                                   text=True, timeout=5).stdout.strip()
+        ps_child = subprocess.run(["ps", "-o", "ppid=", "-p", str(child)], capture_output=True,
+                                  text=True, timeout=5).stdout.strip()
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    return child if (ps_parent == "1" and ps_child == str(parent)) else None
+
+
 ORPHAN_CASES = os.name != "nt"   # Windows has no `ps`: ownership reads unknown, so none are run
 PROJECT_DIR = os.path.join(SUBCFG, "projects", "-reapbatch-slug")
 SUB_TRANSCRIPT = os.path.join(PROJECT_DIR, SUB_SESSION + ".jsonl")   # the payload's transcript_path
@@ -1847,7 +1869,8 @@ if ORPHAN_CASES:
     OWN_PID = spawn_orphan(os.path.join(SUBWT, ".claude", "worktrees", "agent-" + OWN_ID))
     OTHER_PID = spawn_orphan(os.path.join(SUBWT, ".claude", "worktrees", "agent-" + OTHER_ID))
     PLAIN_PID = spawn_orphan(os.path.join(SUBWT, ".claude", "worktrees", PLAIN_ID))
-    if None in (OWN_PID, OTHER_PID, PLAIN_PID):
+    LIVE_PID = spawn_live_parent(os.path.join(SUBWT, ".claude", "worktrees", "agent-" + OWN_ID))
+    if None in (OWN_PID, OTHER_PID, PLAIN_PID, LIVE_PID):
         print("note: no PPID-1 orphan on this host, so the agent-worktree kill cases are not run")
         ORPHAN_CASES = False
 if ORPHAN_CASES:
@@ -1859,6 +1882,9 @@ if ORPHAN_CASES:
     sh("kill: a PPID-1 pid in a worktree not named agent-<id>", "kill %d" % PLAIN_PID, "deny",
        "machine-wide-kill", cwd=NOGIT, session=SUB_SESSION, config=SUBCFG,
        transcript=SUB_TRANSCRIPT)
+    sh("kill: a pid in this session's agent worktree whose parent is alive, not init",
+       "kill %d" % LIVE_PID, "deny", "machine-wide-kill", cwd=NOGIT, session=SUB_SESSION,
+       config=SUBCFG, transcript=SUB_TRANSCRIPT, carries="did not start")
 
 sh("kill: a pid list made by pgrep", "kill $(pgrep -f node)", "deny", "machine-wide-kill",
    cwd=NOGIT)
