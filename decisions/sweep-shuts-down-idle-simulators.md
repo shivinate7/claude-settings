@@ -28,7 +28,12 @@ launchd_sim process has ppid 1. CoreSimulator.log has no requester.
    record goes to `state/sim-boots.jsonl`. Each line holds the pid and the start time of
    the device's launchd_sim, read when the device booted. If the table holds no
    launchd_sim for the UDID, or more than one, the hook records nothing for that device.
-   Owner ruling: an owner-booted device is never stopped, and an unclear case means keep.
+   A name that matches devices on more than one runtime records none, unless `OS=` in the
+   destination picks exactly one runtime. Owner ruling: an owner-booted device is never
+   stopped, and an unclear case means keep.
+   Accepted limit, owner ruling 2026-10-10: the owner may boot the very device that a
+   session's call names, during that call. The hook then records the device as the
+   session's.
 2. Stop only recorded devices. When all four of these hold for a device, the new tier in
    `janitor/sweep.py` stops it:
    - The device was booted 1 hour or more ago.

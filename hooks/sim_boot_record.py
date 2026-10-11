@@ -57,7 +57,20 @@ def launchd(udid):
 
 UDID_RE = re.compile(r"\b[0-9A-Fa-f]{8}-(?:[0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}\b")
 BOOT_ARG_RE = re.compile(r"\bsimctl\s+boot\s+(\"[^\"]+\"|'[^']+'|\S+)")
+OS_RE = re.compile(r"\bOS=([0-9][0-9.]*)")
 DEST_NAME_RE = re.compile(r"\bname=([^,'\"]+)")
+
+
+def by_name_ok(rec, now, payload):
+    """True when REC's name picks one device: the name sits on one runtime, or `OS=` picks one."""
+    runtimes = {r["runtime"] for _, r in now.values() if r["name"] == rec["name"]}
+    if len(runtimes) > 1:
+        wanted = OS_RE.findall(str((payload.get("tool_input") or {}).get("command", "")))
+        def version(runtime):
+            return runtime.split("SimRuntime.")[-1].split("-", 1)[-1].replace("-", ".")
+        runtimes = {r for r in runtimes if any(version(r) == w or version(r).startswith(w + ".")
+                                               for w in wanted)}
+    return len(runtimes) == 1 and rec["runtime"] in runtimes
 
 
 def named(payload):
@@ -68,7 +81,7 @@ def named(payload):
         found = set(UDID_RE.findall(text)) | set(DEST_NAME_RE.findall(text)) \
             | {m.strip("'\"") for m in BOOT_ARG_RE.findall(text)}
     else:
-        found = {str(tool_input.get("device") or "")}
+        found = {str(tool_input.get("device") or tool_input.get("udid") or "")}
     return {x.upper() if UDID_RE.fullmatch(x) else x for x in found if x}
 
 
@@ -105,7 +118,7 @@ def main():
             lines = []
             for u, (s, rec) in now.items():
                 if s == "Booted" and before.get(u) == "Shutdown" and (
-                        u.upper() in names or rec["name"] in names):
+                        u.upper() in names or (rec["name"] in names and by_name_ok(rec, now, payload))):
                     pid, start = launchd(u)
                     if pid is None or start is None:
                         continue  # unclear: no record, so the sweep keeps the device
