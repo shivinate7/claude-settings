@@ -55,7 +55,10 @@ custom-tour-booking (an unknown link shows Book a tour and the phone).
 ## ux-empty-one-action
 
 An empty state is one sentence that says what fills it, and one control that fills it.
-Check: pass when an empty list shows one sentence and one control, and its filters stay hidden.
+A list that has no data yet hides its filters. A list that a filter emptied keeps its filters,
+and its one control clears the filter.
+Check: pass when an empty list shows one sentence and one control. With no data, the filters
+are hidden. When a filter emptied it, the filters show and the control clears the filter.
 Source: banchi `CLAUDE.md` "Register" and `docs/DESIGN.md` `EmptyState`; q_max
 `specs/ux-plan-b.md` B2 (owner confirmed, 2026-09-29).
 
