@@ -7,8 +7,8 @@ ux-house-rules (house UX rules). A repo's own design records can add to a rule, 
 ## ux-press-moves-nothing
 
 A press, a load or a change of state moves no other content.
-Check: press each control and load each state. Pass when no other element moves or changes size.
-A loading area holds its loaded size, and a control keeps the box of its widest label or icon.
+Check: press each control and load each state. Pass when no other element moves or resizes. A
+loading area keeps its loaded size, and a control keeps the box of its widest label or icon.
 Source: banchi D118 (a press never moves other content) and D313 (nothing moves unless moved);
 home-app `SPEC.md` "Look and feel" (owner, 2026-10-11); q_max D-684 (a pick moves nothing beside
 it); ios-adblock `ios/App/AdBlockApp.swift` (the state icon has a fixed frame).
@@ -61,7 +61,7 @@ Source: banchi `CLAUDE.md` "Register" and `docs/DESIGN.md` `EmptyState`; q_max
 
 ## ux-ask-or-undo
 
-A press that cannot be undone asks first, and a press that can be undone acts and offers Undo.
+A destructive press asks first when it cannot be undone, and acts and offers Undo when it can.
 Check: pass when no destructive press does both or neither, and each ask names the act and the
 count, with first focus on Cancel.
 Source: banchi `docs/DESIGN.md` UX-099 (ask first, or undo after) and D57 (mark sold is one
