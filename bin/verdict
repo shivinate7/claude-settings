@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # verdict <cmd...>: run the command, keep the full output in a log, print only the verdict.
 # Log: $VERDICT_LOG (appended, never truncated), else a new file in $TMPDIR. Exit code is the command's.
+# While it runs, print "verdict: still running, <elapsed>, log=<path>" every $VERDICT_HEARTBEAT s (default 120).
+# Why: a quiet background verdict over 300 s drew a false STALL (decision stall-watch, "Tools that are quiet by design", 2026-10-11).
 # Killed by signal N: exit 128+N. Ctrl-C: exit 130. Windows: bin/verdict.cmd.
 import os, re, shutil, subprocess, sys, tempfile, time
 HOT = re.compile(r"FAIL|Error|assert|Traceback")
@@ -18,8 +20,19 @@ def main(argv):
     with open(log, "ab") as f:
         f.write(f"=== verdict run {time.strftime('%Y-%m-%d %H:%M:%S')}: {name}\n".encode()); f.flush()
         start = f.tell()
-        try: rc = subprocess.run(argv, stdout=f, stderr=subprocess.STDOUT).returncode
-        except KeyboardInterrupt: rc = 130
+        beat = float(os.environ.get("VERDICT_HEARTBEAT") or 120)
+        try:
+            proc = subprocess.Popen(argv, stdout=f, stderr=subprocess.STDOUT)
+            try:
+                while True:
+                    try: rc = proc.wait(timeout=beat); break
+                    except subprocess.TimeoutExpired:
+                        print(f"verdict: still running, {time.time() - t:.0f}s, log={log}", flush=True)
+            except KeyboardInterrupt:
+                proc.terminate()
+                try: proc.wait(timeout=5)
+                except subprocess.TimeoutExpired: proc.kill(); proc.wait()
+                rc = 130
         except OSError as e: f.write(f"verdict: cannot run {argv[0]}: {e}\n".encode()); rc = 127
         f.flush(); end = f.tell()
     secs = f"{time.time() - t:.1f}s"
