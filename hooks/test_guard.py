@@ -6299,6 +6299,12 @@ def register_simulator_boot_cases():
     add("boot a third simulator with two booted: simulator MCP launch",
         "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device=SIM_UC,
         env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+    add("boot a third simulator with two booted: simulator MCP launch names it by udid",
+        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", udid=SIM_UC,
+        env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+    add("boot a third simulator with two booted: MCP launch, empty device, udid names it",
+        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device="", udid=SIM_UC,
+        env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
     sh("control: one booted, a second boot is allowed",
        "xcrun simctl boot " + SIM_UC, "allow", env_path=one_path, config=one_cfg)
     sh("control: a read of the device list is not a boot",
@@ -6319,6 +6325,9 @@ def register_simulator_boot_cases():
        env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
     add("boot a device with an idle booted twin: simulator MCP launch",
         "deny", rule="simulator-boot-twin", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
+    add("boot a device with an idle booted twin: simulator MCP launch names it by udid",
+        "deny", rule="simulator-boot-twin", tool=SIM_MCP, action="launch", udid=SIM_UT1,
         env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
     sh("control: the twin booted 10 minutes ago is not idle",
        "xcrun simctl boot " + SIM_UT1, "allow", env_path=folder_path("twin_recent"),
