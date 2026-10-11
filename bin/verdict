@@ -20,9 +20,9 @@ def main(argv):
     with open(log, "ab") as f:
         f.write(f"=== verdict run {time.strftime('%Y-%m-%d %H:%M:%S')}: {name}\n".encode()); f.flush()
         start = f.tell()
-        try: beat = float(os.environ.get("VERDICT_HEARTBEAT") or 120)
+        try: beat = int(os.environ.get("VERDICT_HEARTBEAT") or 120)
         except ValueError: beat = 120
-        if not beat > 0: beat = 120  # also catches nan
+        if beat < 1: beat = 120
         try: proc = subprocess.Popen(argv, stdout=f, stderr=subprocess.STDOUT)
         except OSError as e: proc = None; f.write(f"verdict: cannot run {argv[0]}: {e}\n".encode()); rc = 127
         if proc:
