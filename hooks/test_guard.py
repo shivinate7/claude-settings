@@ -81,7 +81,7 @@ def windows_shaped(*parts):
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
         session=None, carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
         agent_type=None, event=None, stop_active=False, windows=False, transcript=None,
-        **tool_input):
+        max_seconds=None, **tool_input):
     """Register one case.
 
     `carries` names fragments the printed reason MUST hold, which is how a case pins what an
@@ -117,6 +117,8 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "event": event,
         "stop_active": stop_active,
         "no_root": no_root,
+        # A case that must be judged within this many seconds. A slower verdict fails the case.
+        "max_seconds": max_seconds,
         # An allow that must print NOTHING, not even context. Only a case that says so is held to it.
         "silent": silent,
         "tool_input": tool_input,
@@ -2363,6 +2365,60 @@ sh("rm-var: $HOME expanded inside $(…) taints D, not ${D:?}",
 # (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
 sh("rm-var: a cat of pwd.txt inside $(…) is text, not a command word, and stays allowed",
    'D=$(cat pwd.txt); rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
+# MORE CONDITIONS (decision rm-on-a-variable-needs-a-guard, item 1, "More conditions apply", and the
+# read-error line). Each case below has an unsafe binding, a value the guard cannot read, or a
+# value whose path is the home folder or the cwd, so the refusal names the literal path and never
+# ${NAME:?}. Each case must be refused. A pass, or a crash that exits 0, is a FAIL.
+HOME = os.path.expanduser("~")
+sh("rm-var: a dollar then a quoted dollar before the slash names a literal path",
+   'D=x; rm -rf $D/$"E"', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a mktemp value with a parent walk after it names a literal path, not ${N:?}",
+   "N=$(mktemp -d)/../../..; rm -rf $N/", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${N:?}",))
+sh("rm-var: a value with a space and the home path names a literal path, not ${D:?}",
+   'D="x %s"; rm -rf $D/' % HOME, "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}", HOME))
+sh("rm-var: a tilde joined to a variable before the slash names a literal path, not ${D:?}",
+   "D=/; rm -rf ~$D/", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a brace list before a variable names a literal path, not ${D:?}",
+   "D=Users; rm -rf {/,x}$D/", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a glob before a variable names a literal path, not ${D:?}",
+   "D=shivinate; rm -rf /*/$D/", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a prefix assignment before the rm names a literal path, not ${OLDPWD:?}",
+   "OLDPWD=/tmp rm -rf $OLDPWD/", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${OLDPWD:?}",))
+sh("rm-var: a binding after the rm names a literal path, not ${OLDPWD:?}",
+   "rm -rf $OLDPWD/; OLDPWD=/tmp", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${OLDPWD:?}",))
+# macOS only: the home folder's file system is case-folded, so an upper or lower spelling of it
+# is the home folder and must name a literal path. The case is not registered elsewhere.
+if sys.platform == "darwin":
+    sh("rm-var: the home path upper-cased in a variable names a literal path on macOS",
+       "D=%s; rm -rf $D/" % HOME.upper(), "deny", "rm-var-unguarded", cwd=NOGIT,
+       carries=("literal path",), lacks=("${D:?}", HOME))
+    sh("rm-var: the home path lower-cased in a variable names a literal path on macOS",
+       "D=%s; rm -rf $D/" % HOME.lower(), "deny", "rm-var-unguarded", cwd=NOGIT,
+       carries=("literal path",), lacks=("${D:?}", HOME))
+# The cwd spelled through a symlink is the cwd, so it names a literal path. Registered only where
+# the fixture can build the link (no symlink privilege means no case, and the report says so).
+CWDLINK = os.path.join(ROOT, "nogit-link")
+try:
+    os.symlink(NOGIT, CWDLINK)
+except OSError:
+    CWDLINK = None
+if CWDLINK:
+    sh("rm-var: the cwd spelled through a symlink names a literal path, not ${D:?}",
+       "D=%s; rm -rf $D/" % CWDLINK, "deny", "rm-var-unguarded", cwd=NOGIT,
+       carries=("literal path",), lacks=("${D:?}", CWDLINK))
+# Time limit: 64000 bindings before one delete must be judged in under 2 s. The verdict is refused
+# (the rule names), and only the time is the point.
+add("rm-var: 64000 bindings before a delete are judged in under 2 s", "deny",
+    rule="rm-var-unguarded", cwd=NOGIT, max_seconds=2.0, command="A=x;" * 64000 + " rm -rf $A/")
+
 sh("playwright: an envrc file gets the assignment",
    "echo PLAYWRIGHT_BROWSERS_PATH=/x > .envrc", "deny", "playwright-browsers-path", cwd=NOGIT)
 sh("playwright: a case-folded name still sets it", "playwright_browsers_path=/x npx", "deny",
@@ -5220,10 +5276,14 @@ def decide(case):
         env["PATH"] = NOPS
     if case["env_path"]:
         env["PATH"] = case["env_path"]
+    started = time.monotonic()
     result = subprocess.run(
         [sys.executable, GUARD], input=payload, capture_output=True, text=True, env=env,
         timeout=120, cwd=case.get("process_cwd") or None,
     )
+    elapsed = time.monotonic() - started
+    if case.get("max_seconds") and elapsed > case["max_seconds"]:
+        return "slow", "judged in %.2f s, over the %s s limit" % (elapsed, case["max_seconds"])
     if result.returncode != 0:
         return "error", "exit %d: %s" % (result.returncode, result.stderr.strip()[:200])
     out = result.stdout.strip()
