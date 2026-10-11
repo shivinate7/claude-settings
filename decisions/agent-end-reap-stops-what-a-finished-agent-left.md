@@ -121,7 +121,11 @@ feed-build machine, about 1,300 pids, timed under 60 s.
 MEASURED 2026-10-10, this Mac, 1,004 pids, read-only `decide()` with no signal: 0.4 s in all
 (batch `lsof` 0.3 s for 795 cwd lines; pid list and `worktree_live_session` under 0.05 s each).
 The batch timeout is 30 s (`agent_end_reap.BATCH_TIMEOUT`). Unmeasured: a run at 1,300 pids
-on the feed-build machine; the 12 timeouts were not explained by the per-pid pass alone (above).
+on the feed-build machine. MEASURED: the timed-out hook was `agent_end_reap.py` itself
+(`hook_cancelled`, durationMs 60402, 01:15:44Z) and it left no payload row, so it never reached
+`log()`. INFERRED, not measured: 7 simulators held about 15 GB and free memory was 27%, so 1,300
+separate `lsof` spawns ran far slower than 27 ms each. The run now writes a `started` row first
+and replaces it with the `done` row, so a killed run leaves a trace. The 12 timeouts were not explained by the per-pid pass alone (above).
 
 ## Payload log
 

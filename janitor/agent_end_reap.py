@@ -50,12 +50,14 @@ def log_path() -> str:
     return os.path.join(guard.config_dir(), "state", "agent-end-payloads.jsonl")
 
 
-def log(record: dict):
+def log(record: dict, replace_run=None):
     """Append one line and keep only the last MAX_LOG_LINES. The log is the evidence for the hook
     fields the docs leave open (decisions/agent-end-reap-stops-what-a-finished-agent-left.md), and
     it grew to thousands of raw payloads nobody reads. Two agents ending at once can lose a line:
     ponytail: no lock, add one only if a measured field goes missing. On Windows the replace can
-    raise PermissionError while the destination is held for a moment, so it retries a few times."""
+    raise PermissionError while the destination is held for a moment, so it retries a few times.
+    REPLACE_RUN names a start row written earlier by this run; the last line is replaced only
+    when it carries that run id, so another agent's row is never dropped."""
     path = log_path()
     line = json.dumps(dict(record, at=time.strftime("%Y-%m-%dT%H:%M:%S%z"))) + "\n"
     try:
@@ -65,6 +67,8 @@ def log(record: dict):
                 kept = handle.readlines()[-(MAX_LOG_LINES - 1):]
         except OSError:
             kept = []
+        if replace_run and kept and ('"run": "%s"' % replace_run) in kept[-1]:
+            kept = kept[:-1]  # our own start row: the finished row takes its place
         temp = path + ".tmp"
         with open(temp, "w", encoding="utf-8") as handle:
             handle.writelines(kept + [line])
@@ -210,11 +214,13 @@ def main() -> int:
         raw = sys.stdin.read()
     except Exception:
         raw = ""
+    run = "%d-%d" % (os.getpid(), time.time_ns())
+    log({"raw": raw, "run": run, "state": "started"})  # a run the hook timeout kills leaves this row
     try:
         record = handle(raw)
     except Exception as exc:
         record = {"raw": raw, "error": repr(exc)}
-    log(record)
+    log(dict(record, run=run, state="done"), replace_run=run)
     return 0
 
 

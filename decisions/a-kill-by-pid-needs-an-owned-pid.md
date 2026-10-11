@@ -30,7 +30,7 @@ The guard keeps no map. It reads the session's transcript folder.
 
 MEASURED 2026-10-10, this machine: session c52856af (feed-build) has a `subagents/` folder with 300 files. Its names follow `agent-<id>.jsonl`, with other files beside them (`.meta.json`, `.prefix.json`). The existing hooks `hooks/decision_watch.py` and `hooks/question_outcome.py` read `transcript_path` from the payload. The guard does not read it yet.
 
-Unmeasured: `transcript_path` on the guard's PreToolUse payload. That every subagent which left a process has its file on disk. That a resumed agent keeps its id. The folder layout on Windows and Linux.
+`transcript_path` is in the common input of every hook event per the Claude Code hooks docs (https://code.claude.com/docs/en/hooks, "Common input fields"). Unmeasured on a live payload until a guard run logs it. That every subagent which left a process has its file on disk. That a resumed agent keeps its id. The folder layout on Windows and Linux.
 
 ## The rule
 
