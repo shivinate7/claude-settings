@@ -4773,6 +4773,7 @@ def cited_record_path(segment: str, raw: str, where: str) -> str:
 # that disables tests (`--deselect`, `testpaths`, `testPathIgnorePatterns`, ...), so a new
 # dependency in pyproject.toml stays allowed. For a test-author, test config is always its own.
 # `contest.py` and `latest_results.md` match no shape.
+# Xcode/SPM (incident 2026-10-11, Degen): a part `^.+Tests$` (`DegenUITests`) and a basename `^\w+Tests?\.swift$`, case-sensitive.
 # The decisions: predicate-is-the-act, guard-that-cries-wolf-is-spent, builders-cannot-edit-tests.
 BUILDER_ROLE = "builder"
 AUTHOR_ROLE = "test-author"
@@ -4790,6 +4791,8 @@ TEST_BASENAME = re.compile(
 # `selftestify.py`, `myselftest.py` and a bare `scripts/selftest` match no shape.
 # Case matters: `FooTest.java` is a test, `Contest.java` is not.
 JAVA_TEST = re.compile(r"^\w*Tests?\.java$")
+SWIFT_TEST = re.compile(r"^\w+Tests?\.swift$")
+XCODE_TEST_DIR = re.compile(r"^.+Tests$")
 TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support"}
 # Dependency lists only a test-author owns. A builder may add a dev dependency.
 AUTHOR_BASENAMES = {"requirements-dev.txt"}
@@ -4854,6 +4857,7 @@ def is_test_rel(rel: str) -> bool:
     parts = [part for part in norm(rel).split("/") if part]
     return bool(parts) and (
         bool(TEST_BASENAME.match(parts[-1].lower())) or bool(JAVA_TEST.match(parts[-1]))
+        or bool(SWIFT_TEST.match(parts[-1])) or any(XCODE_TEST_DIR.match(p) for p in parts)
         or any(p.lower() in TEST_DIRS for p in parts)
     )
 
