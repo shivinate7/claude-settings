@@ -84,7 +84,8 @@ with no `.github/stamp.json` gets the defaults: the default branch from `gh repo
 `merge`, `deadlineMinutes` 45, `requiredChecks` `"protection"`, empty `afterMerge`. Merge prints
 one line to say so. It claims no numbers and never runs stamp.mjs. Add the file only for
 numbered records or for non-default settings. A file that exists but is broken stops merge with
-one line. Merge reads the file from the base branch, not from the pull request's tree.
+one line. A file that exists must hold `merge.method` and `merge.deadlineMinutes`: the defaults
+apply only when there is no file. Merge reads the file from the base branch, not from the pull request's tree.
 
 The repo keeps one config file, the stamp config it already has or a new one at
 `.github/stamp.json`. A `merge` block holds the merge fields. One file, one home.

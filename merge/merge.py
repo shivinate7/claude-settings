@@ -480,10 +480,10 @@ class Host:
 
 # ------------------------------------------------------------------ git steps
 
-def node_stamp(wt, cfg_path, mode, base):
+def node_stamp(wt, cfgrel, mode, base):  # cfgrel: relative to wt, or absolute
     # GITHUB_REF and GITHUB_BASE_REF name the runner's checkout, not this worktree. stamp would read them as the worktree's branch.
     env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_REF", "GITHUB_BASE_REF")}
-    return sh(["node", STAMP, f"--{mode}", "--base", base, "--config", cfg_path, "--root", wt], env=env)
+    return sh(["node", STAMP, f"--{mode}", "--base", base, "--config", os.path.join(wt, cfgrel), "--root", wt], env=env)
 
 def stamp_stop(what, out):
     """One line for a stamp.mjs failure: the reason, and the file that keeps the full output. Never a stack trace."""
@@ -498,9 +498,14 @@ def stamp_stop(what, out):
 def base_stamp_config(wt, tmp, cfgrel, base_ref):
     """The stamp config as the base branch holds it, never the pull request's tree (ios-adblock #28).
     -> a file path outside the worktree, or None when the base has no config or no stamp kinds."""
+    c, listed = git(wt, "ls-tree", "--name-only", base_ref, "--", cfgrel)
+    if c:  # an unreadable base is not an absent file
+        raise Stop(f"cannot read {base_ref} to look for {cfgrel}: {listed}")
+    if not listed:
+        return None
     c, text = git(wt, "show", f"{base_ref}:{cfgrel}")
     if c:
-        return None
+        raise Stop(f"cannot read {cfgrel} on {base_ref}: {text}")
     try:
         kinds = json.loads(text).get("kinds")
     except (ValueError, AttributeError) as e:
@@ -516,22 +521,22 @@ def head_claim(wt):
     """The Record-claim ids on HEAD's last commit, or ''."""
     return git(wt, "log", "-1", "--format=%(trailers:key=Record-claim,valueonly)", "HEAD")[1].strip()
 
-def own_claim(wt, cfg_path, base):
+def own_claim(wt, cfgrel, base):
     """The trailer ids when HEAD is this tool's claim and each number is still free, else None."""
     ids = head_claim(wt)
-    if not ids or not cfg_path:
+    if not ids or not cfgrel:
         return None
-    c, out = node_stamp(wt, cfg_path, "check", base)
+    c, out = node_stamp(wt, cfgrel, "check", base)
     return None if c or "UNKNOWN:" in out else ids  # UNKNOWN is a failure: it exits 0 outside Actions
 
-def do_claim(wt, cfg_path, base):
+def do_claim(wt, cfgrel, base):
     """Run the claim in the worktree. -> the Record-claim line, or None when nothing was claimed.
 
     sh() joins stdout+stderr (see sh() above), so a regenerate step's npm warn/notice lines on
     stderr can land after the trailer. Scan every line for the one starting "Record-claim: "
     instead of assuming it is the last line. Two such lines is a signal we don't understand: refuse
     rather than guess which one is real."""
-    c, out = node_stamp(wt, cfg_path, "claim", base)
+    c, out = node_stamp(wt, cfgrel, "claim", base)
     if c:
         raise stamp_stop("the claim was refused. Nothing is on origin", out)
     claims = [l for l in out.splitlines() if l.startswith("Record-claim: ")]
@@ -792,6 +797,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session=""):
                 stamp_cfg = base_stamp_config(wt, tmp, cfgrel, base_ref)
             except Stop as e:
                 fail(str(e))
+            if claim_sha and not stamp_cfg:
+                fail(f"the base no longer holds {cfgrel} with stamp kinds, so the claim cannot be proved fresh.")
             c, out = node_stamp(wt, stamp_cfg, "check", base_ref) if stamp_cfg else (0, "")  # each claimed number must still be free on the base tip
             if c or "UNKNOWN:" in out:
                 fail(str(stamp_stop("the base moved and the claim is stale, or the check could not read the base", out)))
