@@ -4773,7 +4773,7 @@ def cited_record_path(segment: str, raw: str, where: str) -> str:
 # that disables tests (`--deselect`, `testpaths`, `testPathIgnorePatterns`, ...), so a new
 # dependency in pyproject.toml stays allowed. For a test-author, test config is always its own.
 # `contest.py` and `latest_results.md` match no shape.
-# Xcode/SPM (incident 2026-10-11, Degen): a part `^.+Tests$` (`DegenUITests`) and a basename `^\w+Tests?\.swift$`, case-sensitive.
+# Xcode/SPM (incident 2026-10-11, Degen): a part `^[A-Z]\w*Tests$` (`DegenUITests`) and a basename `^\w+Tests\.swift$`, case-sensitive.
 # The decisions: predicate-is-the-act, guard-that-cries-wolf-is-spent, builders-cannot-edit-tests.
 BUILDER_ROLE = "builder"
 AUTHOR_ROLE = "test-author"
@@ -4791,19 +4791,19 @@ TEST_BASENAME = re.compile(
 # `selftestify.py`, `myselftest.py` and a bare `scripts/selftest` match no shape.
 # Case matters: `FooTest.java` is a test, `Contest.java` is not.
 JAVA_TEST = re.compile(r"^\w*Tests?\.java$")
-SWIFT_TEST = re.compile(r"^\w+Tests?\.swift$")
-XCODE_TEST_DIR = re.compile(r"^.+Tests$")
+SWIFT_TEST = re.compile(r"^\w+Tests\.swift$")
+XCODE_TEST_DIR = re.compile(r"^[A-Z]\w*Tests$")
 TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support"}
 # Dependency lists only a test-author owns. A builder may add a dev dependency.
 AUTHOR_BASENAMES = {"requirements-dev.txt"}
 TEST_CONFIG = re.compile(
     r"^(?:pytest\.ini|tox\.ini|setup\.cfg|pyproject\.toml|package\.json"
-    r"|(?:jest|vitest|playwright|karma)\.conf(?:ig)?\.\w+|vitest\.workspace\.\w+|\.mocharc(?:\.\w+)?)$")
+    r"|(?:jest|vitest|playwright|karma)\.conf(?:ig)?\.\w+|vitest\.workspace\.\w+|\.mocharc(?:\.\w+)?|[^/]+\.xctestplan)$")
 # What disables tests. NAMES are test-runner settings that no lint tool shares, so they count in any
 # test config. FLAGS (`--ignore` is also ruff's and flake8's) count only in a test-runner context:
 # pytest `addopts`, a `[tool.pytest*]` section, or a line that calls a test runner.
 TEST_DISABLE_NAMES = re.compile(
-    r"collect_ignore|norecursedirs|testpaths|testPathIgnorePatterns|testIgnore|testMatch"
+    r"collect_ignore|norecursedirs|testpaths|skippedTests|testPathIgnorePatterns|testIgnore|testMatch"
     r"|testRegex|xfail|passWithNoTests"
     r"|pytest\.(?:mark\.)?skip|unittest\.(?:skip|expectedFailure)|\.skip\(|\bx(?:it|describe)\("
     r"|\bt\.Skip(?:Now)?\(")
