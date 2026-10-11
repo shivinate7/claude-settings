@@ -2807,6 +2807,17 @@ sh("draft-pr: -d is allowed", "gh pr create -d -t x", "allow", cwd=NOGIT)
 sh("draft-pr: marking a pull request ready is allowed", "gh pr ready 12", "allow", cwd=NOGIT)
 sh("draft-pr: viewing a pull request is allowed", "gh pr view 12", "allow", cwd=NOGIT)
 sh("draft-pr: listing pull requests is allowed", "gh pr list", "allow", cwd=NOGIT)
+# Bypasses found in review of PR #316. Each is refused, or allowed, as the owner ruled.
+for _command in (
+    "bash -lc 'gh pr create --title x'", "dash -c 'gh pr create --title x'",
+    "echo $(gh pr create --title x)", "echo `gh pr create --title x`",
+    "gh pr create --draft --draft=false --title x", "gh pr create --title --draft",
+):
+    sh("draft-pr: bypass refused, " + _command, _command, "deny", "draft-pr", cwd=NOGIT,
+       carries=DRAFT_REMEDY)
+for _command in ("gh pr create --draft=true --title x", "gh pr create --title x -d"):
+    sh("draft-pr: bypass allowed, " + _command, _command, "allow", cwd=NOGIT)
+# Named limits, no case: `gh api -X POST .../pulls` and `hub pull-request` open PRs outside this gate.
 
 
 # =========================================================================== 5b. the merge gate
