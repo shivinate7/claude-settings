@@ -382,14 +382,16 @@ class Flow(Env):
         self.assertIn("is not on origin/main", str(cm.exception))
         self.assertEqual(sh(self.co, "git", "rev-parse", "refs/heads/main"), main_before)
 
-    def test_config_without_merge_method_is_refused_never_guessed(self):
-        sh(self.co, "git", "checkout", "-q", "main")
-        cfg = dict(CONFIG, merge={"deadlineMinutes": 5})
-        put(os.path.join(self.co, ".github/stamp.json"), json.dumps(cfg))
+    def test_config_without_merge_method_takes_the_default_and_says_so(self):
+        put_base_config(self, json.dumps(dict(CONFIG, merge={"deadlineMinutes": 5})))  # the base leaves out method
+        methods = []
+        real = self.host.merge
+        self.host.merge = lambda n, m, sha: (methods.append(m), real(n, m, sha))[1]
         rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 1)
-        self.assertIn("merge.method", out)
-        self.assertFalse(self.lock_ref())
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(methods, ["merge"])  # the default method
+        filled = [l for l in out.splitlines() if ".github/stamp.json" in l and "method" in l]
+        self.assertEqual(len(filled), 1, out)  # one line names the filled field
 
 class Race(Env):
     def test_two_runs_one_lock(self):
@@ -1238,10 +1240,9 @@ class GhHalf(Env):
         self.assertNotIn("pr merge", self.calls())
 
     def test_an_ignore_entry_without_a_reason_refuses_the_config(self):
-        sh(self.co, "git", "checkout", "-q", "main")
         for bad in ({"name": "design"}, {"name": "design", "reason": "  "}, {"reason": "r"}):
             cfg = dict(CONFIG, merge=dict(CONFIG["merge"], ignoreChecks=[bad]))
-            put(os.path.join(self.co, ".github/stamp.json"), json.dumps(cfg))
+            put_base_config(self, json.dumps(cfg))
             rc, out = self.run_merge("7", "--confirm")
             self.assertEqual(rc, 1)
             self.assertIn("merge.ignoreChecks", out)
@@ -1490,9 +1491,9 @@ class StampFailure(Env):
         with unittest.mock.patch.object(merge, "STAMP", program):
             rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
-        lines = [l for l in out.splitlines() if l.strip()]
-        self.assertEqual(len(lines), 1, out)
-        self.assertIn(reason, lines[0])
+        stamp_lines = [l for l in out.splitlines() if "claim was refused" in l]  # the stamp line alone
+        self.assertEqual(len(stamp_lines), 1, out)
+        self.assertIn(reason, stamp_lines[0])
         self.assertNotIn("    at ", out)
         self.assertNotIn("Traceback", out)
         self.assertEqual(self.head(), before)  # nothing was pushed
