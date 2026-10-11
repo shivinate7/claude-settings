@@ -4709,7 +4709,18 @@ add("floor: Workflow model from a template with an interpolated haiku suffix is 
 add("floor: Workflow object literal inside a template interpolation is not call options", "allow",
     tool="Workflow", script='agent(`x ${ {model:"haiku"}.model }`, {model:"sonnet"})')
 
-FORBIDDEN_IN_A_REASON = (ENV, ROOT, slash(ROOT), "settings.json", "CLAUDE.md", "guard.py",
+# F1. A regex literal inside a template interpolation holds a quote or a backtick. It is code, so it
+# opens no string, and the haiku spawn after it must still deny.
+add("floor: Workflow haiku after a regex with a quote inside a template interpolation is denied",
+    "deny", "subagent-model-floor", tool="Workflow",
+    script=r"""x = `${ s.replace(/"/g, '') }`;
+agent("x", {model: "haiku"})""")
+add("floor: Workflow haiku after a regex with a backtick inside a template interpolation is denied",
+    "deny", "subagent-model-floor", tool="Workflow",
+    script=r"""x = `${ s.replace(/`/g, '') }`;
+agent("x", {model: "haiku"})""")
+
+FORBIDDEN_IN_A_REASON = (ENV, ROOT, slash(ROOT),"settings.json", "CLAUDE.md", "guard.py",
                          ".claude", "app.log", "sleep", "haiku", VCS + " checkout", VCS + " switch")
 
 # ONE RULE MAY NAME ITS SUBJECT, and only the fragments listed beside it. Rule 8 asks rather than
@@ -5597,6 +5608,50 @@ def mask_long_case():
 
 LOG_CHECKS_EXTRA.append(("mask_script: unclosed double quote then 64 KB of escaped quotes "
                          "returns within 1 s", mask_long_case))
+# F2, a memory bound. A 64 KB script of deeply nested closed templates must scan within 200 MB. The
+# child sets RLIMIT_AS where the platform accepts it. macOS refuses that call (ValueError), so there
+# the child's peak RSS is the bound. Non-posix hosts skip the case with a note: no resource module.
+MASK_MEM_LIMIT_BYTES = 200 * 1024 * 1024
+MASK_MEM_SCRIPT = "`${" * 13000 + "1" + "}`" * 13000  # 65001 bytes, every template closed
+
+
+def mask_memory_case():
+    try:
+        import resource  # noqa: F401  posix only
+    except ImportError:
+        return True, "skipped: no resource module on this host, RLIMIT_AS not checked"
+    code = ("import json, resource, importlib.util as u\n"
+            "try:\n"
+            "    resource.setrlimit(resource.RLIMIT_AS, (%d, %d))\n"
+            "    limit = 'RLIMIT_AS'\n"
+            "except (ValueError, OSError):\n"
+            "    limit = 'peak RSS'\n"
+            "s = u.spec_from_file_location('g', %r)\n"
+            "g = u.module_from_spec(s)\n"
+            "s.loader.exec_module(g)\n"
+            "g.mask_script(%r)\n"
+            "rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss\n"
+            "print(json.dumps([limit, rss]))\n"
+            % (MASK_MEM_LIMIT_BYTES, MASK_MEM_LIMIT_BYTES, GUARD, MASK_MEM_SCRIPT))
+    try:
+        got = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                             timeout=60)
+    except subprocess.TimeoutExpired:
+        return False, "mask_script on the nested templates did not finish within 60 s"
+    if got.returncode != 0:
+        return False, "mask_script failed under the memory bound: %s" % got.stderr.strip()[-160:]
+    limit, rss = json.loads(got.stdout)
+    # ru_maxrss is bytes on darwin and kilobytes elsewhere.
+    peak = rss if sys.platform == "darwin" else rss * 1024
+    if peak > MASK_MEM_LIMIT_BYTES:
+        return False, "peak %d MB, over the %d MB bound (%s)" % (
+            peak // (1024 * 1024), MASK_MEM_LIMIT_BYTES // (1024 * 1024), limit)
+    return True, "64 KB of nested templates scanned, peak under %d MB (%s)" % (
+        MASK_MEM_LIMIT_BYTES // (1024 * 1024), limit)
+
+
+LOG_CHECKS_EXTRA.append(("mask_script: 64 KB of nested closed templates stays under 200 MB",
+                         mask_memory_case))
 for quote, name in (('"', "double"), ("'", "single"), ("`", "backtick")):
     LOG_CHECKS_EXTRA.append(("mask_script: unclosed %s quote then backslashes returns within 1 s"
                              % name, mask_hang_case(quote, name)))
