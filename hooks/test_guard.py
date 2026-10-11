@@ -4203,6 +4203,12 @@ sh("impeccable bash: sh -c pin is denied", "sh -c \"impeccable pin x\"", "deny",
 sh("impeccable powershell: call operator on the cmd shim install is denied",
    "& \"C:\\x\\impeccable.cmd\" install", "deny", "impeccable-review-only", tool="PowerShell",
    cwd=NOGIT)
+sh("impeccable powershell: call operator on bash.exe -c install is denied",
+   "& \"C:\\Program Files\\Git\\bin\\bash.exe\" -c \"impeccable install\"", "deny",
+   "impeccable-review-only", tool="PowerShell", cwd=NOGIT)
+sh("impeccable powershell: call operator on bash -c install is denied",
+   "& bash -c \"impeccable install\"", "deny", "impeccable-review-only", tool="PowerShell",
+   cwd=NOGIT)
 sh("impeccable bash: doctor --fix is denied", "npx impeccable doctor --fix", "deny",
    "impeccable-review-only", cwd=NOGIT)
 sh("impeccable bash: init is denied", "npx impeccable init", "deny", "impeccable-review-only",
