@@ -5853,7 +5853,7 @@ def _sim_boot_names(segment: str) -> list:
                 token[len("-destination="):] if token.startswith("-destination=") else "")
             fields = dict(p.split("=", 1) for p in value.split(",") if "=" in p)
             if "iOS Simulator" in fields.get("platform", "") and (fields.get("id") or fields.get("name")):
-                found.append(fields.get("id") or fields["name"])
+                found.append((fields.get("id") or fields["name"], fields.get("OS", "")))
         return found
     if word in ("xcrun", "simctl") and "simctl" in ([word] + rest):
         after = ([word] + rest)[([word] + rest).index("simctl") + 1:]
@@ -5875,7 +5875,11 @@ def sim_boot_refusal(tool: str, names: list) -> None:
     if devices is None:
         return
     for name in names:
+        name, os_ = name if isinstance(name, tuple) else (name, "")  # a destination's OS= picks a runtime
         hits = [d for d in devices if name.upper() == d["udid"].upper() or name == d["name"]]  # a UDID has no case
+        if os_:  # not importable from sim_boot_record: its version() is nested in by_name_ok
+            hits = [d for d in hits if (v := d["runtime"].split("SimRuntime.")[-1].split("-", 1)[-1].replace("-", ".")) == os_
+                    or v.startswith(os_ + ".")]
         hits = [d for d in hits if d["state"] != "Booted"]
         if not hits:
             continue  # unknown device, or every match already up: not a boot
