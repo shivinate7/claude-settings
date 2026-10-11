@@ -1904,6 +1904,20 @@ sh("playwright: a heredoc writes the export into a shell rc file",
 sh("playwright: tee appends the export to a shell rc file",
    "echo 'export PLAYWRIGHT_BROWSERS_PATH=/x' | tee -a ~/.zshrc", "deny",
    "playwright-browsers-path", cwd=NOGIT)
+# PR #314 third review: false alarms, each only writes a log or reads a docs folder.
+sh("playwright: printf into a log names the variable and is allowed",
+   "printf 'PLAYWRIGHT_BROWSERS_PATH=%s\\n' \"$P\" >> run.log", "allow", cwd=NOGIT)
+sh("playwright: echo into a log names the variable and is allowed",
+   'echo "PLAYWRIGHT_BROWSERS_PATH=$X" >> build.log', "allow", cwd=NOGIT)
+sh("playwright: grep for the PowerShell setter in docs is allowed",
+   "grep '\\$env:PLAYWRIGHT_BROWSERS_PATH *=' docs/", "allow", cwd=NOGIT)
+# PR #314 third review: gaps, each allowed on 9b22302. Each one writes the export to a profile.
+sh("playwright: unquoted echo appends the export to a shell rc file",
+   "echo export PLAYWRIGHT_BROWSERS_PATH=/x >> ~/.zshrc", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: unquoted echo piped through tee into a shell rc file",
+   "echo export PLAYWRIGHT_BROWSERS_PATH=/x | tee -a ~/.zshrc", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
 
 # THE PREDICATE IS THE ACT, NOT THE TOOL OR THE SPELLING. MEASURED: the owner ran
 # `grep -n -i "...|make reap|pkill..." CLAUDE.md` to search CLAUDE.md for the word, and it was
