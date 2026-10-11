@@ -1753,6 +1753,20 @@ sh("per-file deny: python heredoc, a lone double quote in the body, then cd shar
    "python3 <<'EOF'\ntotal = \"\nEOF\ncd " + slash(GITMAIN) + " && " + VCS
    + " restore f.txt", "deny", "shared-tree", cwd=GITWT)
 
+# SYNC LOSS RULING (fixture shape). When segment_roots (guard.py ~1228) loses sync with the
+# segments, every later segment is judged as the shared checkout, so a later discard of a dirty
+# file is denied. Both arms start in the lane, but the restore runs after `cd` into the shared
+# checkout. RED on 6c20c07: the walk's last cd is the lane, so the restore is judged there.
+sh("per-file deny: two heredocs with lone apostrophes, then cd shared and restore f.txt, cd lane last",
+   "cd " + slash(GITMAIN) + " && node <<'EOF'\nit's\nEOF\ncat <<EOF2\nwe're\nEOF2\n"
+   + VCS + " restore f.txt\ncd " + slash(GITWT), "deny", "shared-tree", cwd=GITWT)
+sh("per-file deny: the node lone-apostrophe case with && cd lane appended after the shared restore",
+   "node <<'EOF'\n// don't\nEOF\ncd " + slash(GITMAIN) + " && " + VCS + " restore f.txt && cd "
+   + slash(GITWT), "deny", "shared-tree", cwd=GITWT)
+# CONTROL, green on 6c20c07. No heredoc, so the walk stays in sync and the lane restore is an allow.
+sh("per-file allow: cd lane && restore f.txt with no heredoc stays allowed",
+   "cd " + slash(GITWT) + " && " + VCS + " restore f.txt", "allow", cwd=NOGIT)
+
 # KILL CASES for three mutate_guard entries removed in 78e8446. Each pins today's base verdict.
 # The quoted refspec and the quoted force in a commit message are verdicts; the quoted force on a
 # worktree remove is a logged note, pinned by the LOG_CHECKS_EXTRA entry beside subject_unread_*.
