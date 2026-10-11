@@ -87,7 +87,7 @@ def named(payload):
         found = set(UDID_RE.findall(text)) | set(DEST_NAME_RE.findall(text)) \
             | {m.strip("'\"") for m in BOOT_ARG_RE.findall(text)}
     else:
-        found = {str(tool_input.get("device") or tool_input.get("udid") or "")}
+        found = {v for v in map(tool_input.get, ("device", "udid")) if isinstance(v, str)}
     return {x.upper() if UDID_RE.fullmatch(x) else x for x in found if x}
 
 

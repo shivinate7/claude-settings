@@ -5876,8 +5876,9 @@ def sim_boot_refusal(tool: str, names: list) -> None:
         return
     for name in names:
         hits = [d for d in devices if name.upper() == d["udid"].upper() or name == d["name"]]  # a UDID has no case
-        if not hits or any(d["state"] == "Booted" for d in hits):
-            continue  # unknown device, or already up: not a boot
+        hits = [d for d in hits if d["state"] != "Booted"]
+        if not hits:
+            continue  # unknown device, or every match already up: not a boot
         booted = [d for d in devices if d["state"] == "Booted"]
         if len(booted) >= SIM_BOOT_CAP:
             refuse(tool, "deny", "simulator-boot-cap",
