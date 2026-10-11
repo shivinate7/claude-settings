@@ -21,7 +21,14 @@ Owner, 2026-10-11 ("Ship guard now, hook later"):
      `NAME=$(mktemp …)`. A literal does not start with `.`, and holds no `..`, `~`, `$`,
      backtick or glob. With the values put in, the target is not `/`, home, the cwd or a cwd
      parent. It is also not a glob directly under one of them. The command holds no `cd`, `pushd` or
-     `popd`.
+     `popd`. More conditions apply:
+     - The variable starts the target word.
+     - A literal holds no whitespace or brace.
+     - Each binding comes before the `rm` and is not a prefix assignment such as `X=/tmp rm …`.
+     - A `mktemp` value has nothing after the `)`.
+     - Home and the cwd are compared after `realpath`, and case-folded on macOS.
+   - If the guard cannot read a target, the refusal gives the literal-path reason. A read error
+     never lets a command through unjudged.
    - Otherwise: name the one directory as a literal path. This covers inherited names such as
      `$OLDPWD`, positionals, `read` loops, and every other binding. The remedy never computes a
      path, because a computed path such as `/Users/<you>/*` could wipe the home folder.
