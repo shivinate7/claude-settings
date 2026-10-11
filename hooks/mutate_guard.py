@@ -168,10 +168,9 @@ MUTATIONS = [
      'return _absolute(arg, where)\n    return ""', "guard",
      'worktree remove: the force flag does not skip the subject read'),
     ("worktree-remove: uncommitted and untracked work no longer denies",
-     '    lines = porcelain(target)\n    if lines is None:\n        return None\n    if lines:\n'
-     '        return False',
-     '    lines = porcelain(target)\n    if lines is None:\n        return None\n    if False:\n'
-     '        return False', "guard", 'worktree remove: uncommitted and untracked work denies'),
+     '.rstrip("/"))))]\n    if lines:\n        return False',
+     '.rstrip("/"))))]\n    if False:\n        return False',
+     "guard", 'worktree remove: uncommitted and untracked work denies'),
     ("worktree-remove: a locked tree no longer denies",
      '    locked = worktree_locked(where, target)\n    if locked is None:\n        return None\n'
      '    if locked:\n        return False',
