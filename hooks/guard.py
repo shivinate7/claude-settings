@@ -5875,7 +5875,7 @@ def sim_boot_refusal(tool: str, names: list) -> None:
     if devices is None:
         return
     for name in names:
-        hits = [d for d in devices if name in (d["udid"], d["name"])]
+        hits = [d for d in devices if name.upper() == d["udid"].upper() or name == d["name"]]  # a UDID has no case
         if not hits or any(d["state"] == "Booted" for d in hits):
             continue  # unknown device, or already up: not a boot
         booted = [d for d in devices if d["state"] == "Booted"]
@@ -5977,8 +5977,8 @@ def judge(payload) -> None:
         return
     if tool == SIM_MCP:
         # `udid` is an alias of `device`: judge each non-empty name, so one field hides no other.
-        names = [n for n in dict.fromkeys(tool_input.get(k) for k in ("device", "udid"))
-                 if isinstance(n, str) and n]
+        names = list(dict.fromkeys(v for v in map(tool_input.get, ("device", "udid"))
+                                   if isinstance(v, str) and v))
         if tool_input.get("action") == "launch" and names:
             sim_boot_refusal(tool, names)
         return
