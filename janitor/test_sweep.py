@@ -2769,6 +2769,154 @@ class PurgeTests(unittest.TestCase):
         self.assertEqual(still_there.returncode, 0)
 
 
+class AgentEndLogConcurrencyTests(unittest.TestCase):
+    """janitor/agent_end_reap.py log(): parallel hook runs (one per finished agent) each append
+    one row to the shared payload log. Every row must survive and every line must parse. The
+    reviewer measured 13 of 120 rows lost at 3 writers on b0c87cb: one shared `.tmp` name and an
+    unlocked read-modify-write. Real writer processes, real file, no fake."""
+
+    CHILD = (
+        "import sys\n"
+        "sys.path.insert(0, '__JANITOR__')\n"
+        "import agent_end_reap\n"
+        "lo, hi = int(sys.argv[1]), int(sys.argv[2])\n"
+        "for i in range(lo, hi):\n"
+        "    agent_end_reap.log({'raw': 'x', 'run': 'r' + str(i), 'state': 'done'})\n"
+    ).replace("__JANITOR__", os.path.dirname(os.path.abspath(__file__)))
+
+    def run_writers(self, writers, rows):
+        folder = tempfile.mkdtemp(prefix="reap_log_")
+        self.addCleanup(shutil.rmtree, folder, True)
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=folder)
+        step = rows // writers
+        procs = [subprocess.Popen([sys.executable, "-c", self.CHILD, str(w * step), str((w + 1) * step)],
+                                  env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                 for w in range(writers)]
+        for proc in procs:
+            _out, err = proc.communicate(timeout=120)
+            self.assertEqual(proc.returncode, 0, "writer failed: %s" % err)
+        path = os.path.join(folder, "state", "agent-end-payloads.jsonl")
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+        bad = []
+        runs = []
+        for line in lines:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                bad.append(line)
+                continue
+            if row.get("state") == "done":
+                runs.append(row.get("run"))
+        self.assertEqual(bad, [], "unparseable log lines with %d writers" % writers)
+        lost = sorted(set("r" + str(i) for i in range(rows)) - set(runs))
+        self.assertEqual(lost, [], "%d of %d rows lost with %d writers" % (len(lost), rows, writers))
+
+    def test_three_parallel_writers_lose_no_row(self):
+        self.run_writers(3, 120)
+
+    def test_twenty_four_parallel_writers_lose_no_row(self):
+        self.run_writers(24, 120)
+
+
+class AgentEndReapBatchTests(unittest.TestCase):
+    """janitor/agent_end_reap.py reads every process's cwd in ONE batch call, never one call per
+    pid. Owner ruling 2026-10-10: about 1,300 pids at 27 ms each overran the 60 s hook timeout,
+    12 times in one session. The fake table answers `lsof` only (macOS cwd read), and counts
+    every `lsof` call. A per-pid read carries `-p PID`, a batch read does not."""
+
+    @classmethod
+    def setUpClass(cls):
+        import agent_end_reap
+        cls.reap = agent_end_reap
+        cls.root = tempfile.mkdtemp(prefix="reap_batch_")
+        cls.target = os.path.realpath(os.path.join(cls.root, ".claude", "worktrees", "agent-batch"))
+        os.makedirs(os.path.join(cls.target, "sub"))
+        cls.in_reap = {100, 200}   # inside the target, orphaned, owned by this user: reaped
+        cls.in_foreign = 300       # inside the target, orphaned, another user's: kept
+        cls.table = {pid: "/elsewhere/p%d" % pid for pid in range(2, 1302)}
+        cls.table[100] = os.path.join(cls.target, "sub")
+        cls.table[200] = cls.target
+        cls.table[cls.in_foreign] = os.path.join(cls.target, "sub")
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.root, ignore_errors=True)
+
+    def setUp(self):
+        self.lsof_calls = []
+        self.fail_batch = False
+
+    def fake_lsof(self, argv, *a, **k):
+        if argv and argv[0] == "lsof":
+            self.lsof_calls.append(list(argv))
+            if "-p" in argv:   # a per-pid read
+                cwd = self.table.get(int(argv[argv.index("-p") + 1]))
+                if cwd is None:
+                    return subprocess.CompletedProcess(argv, 1, "", "")
+                return subprocess.CompletedProcess(argv, 0, "n" + cwd + "\n", "")
+            if self.fail_batch:   # the batch read itself cannot answer
+                return subprocess.CompletedProcess(argv, 2, "", "lsof failed")
+            text = "".join("p%d\nn%s\n" % (pid, cwd) for pid, cwd in self.table.items())
+            return subprocess.CompletedProcess(argv, 0, text, "")
+        return subprocess.CompletedProcess(argv, 1, "", "")
+
+    def decide_with_table(self):
+        pids = list(range(2, 1302))
+        patches = [
+            mock.patch.object(sys, "platform", "darwin"),
+            mock.patch.object(sweep.subprocess, "run", self.fake_lsof),
+            mock.patch.object(sweep, "list_all_pids", lambda: list(pids)),
+            mock.patch.object(sweep, "_is_primary_checkout", lambda path: False),
+            mock.patch.object(self.reap.guard, "worktree_live_session", lambda path: False),
+            mock.patch.object(sweep, "is_orphan", lambda pid: True),
+            mock.patch.object(sweep, "is_current_user_process",
+                              lambda pid: pid != self.in_foreign),
+            mock.patch.object(sweep, "process_command", lambda pid: "fake %d" % pid),
+        ]
+        for patch in patches:
+            patch.start()
+        try:
+            return self.reap.decide(self.target)
+        finally:
+            for patch in patches:
+                patch.stop()
+
+    def test_decide_reads_every_process_cwd_in_one_batch_call(self):
+        reason, _decisions = self.decide_with_table()
+        self.assertIsNone(reason)
+        self.assertEqual(len(self.lsof_calls), 1,
+                         "cwd reads for 1,300 pids: %d; want one batch read" % len(self.lsof_calls))
+        self.assertTrue(all("-p" not in call for call in self.lsof_calls),
+                        "the one read is per-pid, not a batch: %r" % self.lsof_calls)
+
+    def test_decide_never_calls_the_per_pid_cwd_reader_over_1300_pids(self):
+        # Counts calls, not seconds: a timing bound flakes on a loaded machine.
+        calls = []
+
+        def counting_reader(pid):
+            calls.append(pid)
+            return self.table.get(pid)
+        with mock.patch.object(sweep, "process_cwd", counting_reader):
+            self.decide_with_table()
+        self.assertEqual(calls, [], "per-pid cwd reads over 1,300 pids: %d" % len(calls))
+
+    def test_decide_still_reaps_and_keeps_the_same_pids_from_the_table(self):
+        reason, decisions = self.decide_with_table()
+        self.assertIsNone(reason)
+        reaped = {d["pid"]: d["reason"] for d in decisions if d["action"] == "reap"}
+        kept = {d["pid"]: d["reason"] for d in decisions if d["action"] == "keep"}
+        self.assertEqual(reaped, {100: "agent-ended", 200: "agent-ended"})
+        self.assertEqual(kept, {self.in_foreign: "not-current-user"})
+
+    def test_a_failed_batch_read_keeps_everything_even_when_per_pid_reads_work(self):
+        self.fail_batch = True   # per-pid reads still answer, so only the batch failure stops reaps
+        reason, decisions = self.decide_with_table()
+        self.assertNotIn("reap", [d["action"] for d in decisions],
+                         "a batch read that cannot answer must keep everything")
+        self.assertIn(reason, (None, "unreadable-subject"))
+
+
 class AgentEndReapTests(unittest.TestCase):
     """janitor/agent_end_reap.py and the deepest-checkout match it depends on. Real repo, real
     worktrees under `.claude/worktrees/`, real listener processes this suite starts itself."""
