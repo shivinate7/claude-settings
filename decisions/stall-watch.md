@@ -62,4 +62,7 @@ visible at once.
 - A job that is quiet but healthy is reported, not stopped. The session decides.
 - A command that prints progress forever is never reported, even when it is stuck.
 - After a stall report, the log stays in the temp directory. Nothing removes it.
+- A command that backgrounds its own child is not watched. The guard denies that shape anyway.
+- Allow rules still match a rewritten command. Measured: with only `Bash(echo:*)` allowed, the
+  rewritten echo ran. The hook does not widen or narrow what the allow list permits.
 - The watcher checks the job with `ps` once each second.

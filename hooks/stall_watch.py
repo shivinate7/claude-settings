@@ -49,6 +49,10 @@ def job_state(pid):
     return _run(["ps", "-o", "stat=", "-p", str(pid)]).strip()
 
 
+def ended_state(state):
+    return state == "" or state.startswith("Z")
+
+
 def job_tree(pid):
     """Return [pid, state, elapsed, command] for the job and its descendants."""
     rows = {}
@@ -98,15 +102,18 @@ def report(pid, quiet, log):
 def watch(pid, log, quiet):
     last = time.monotonic()
     next_check = 0.0
+    waited = 0
     while not os.path.exists(log):  # the shell creates it a moment before this runs
+        waited += 1
+        if waited % 10 == 0 and ended_state(job_state(pid)):  # a dead job with no log: stop
+            return 0
         time.sleep(0.05)
     with open(log, "rb") as f:
         while True:
             now = time.monotonic()
             ended = False
             if now >= next_check:  # one ps a second, not one per read
-                state = job_state(pid)
-                ended = state == "" or state.startswith("Z")
+                ended = ended_state(job_state(pid))
                 next_check = now + 1.0
             data = f.read()  # read after the state check, so the last output is not lost
             if data:
@@ -137,8 +144,12 @@ def hook():
     quiet = os.environ.get("STALL_WATCH_QUIET") or str(DEFAULT_QUIET)
     log = os.path.join(os.path.realpath(tempfile.gettempdir()), "stall-watch-%s.log" % uuid.uuid4().hex)
     q = shlex.quote
+    # A trailing `\` joins the next line. sh and bash drop it at the end of a command, and zsh
+    # reads it as an empty word. The blank line keeps `}` apart; the empty word below is
+    # expanded by zsh only, so each shell runs the original as it would bare.
+    tail = "\n${ZSH_VERSION:+''}" if len(original) - len(original.rstrip("\\")) & 1 else ""
     wrapped = (
-        "{ " + original + "\n} > " + q(log) + " 2>&1 & pid=$!; "
+        "{ " + original + tail + "\n\n} > " + q(log) + " 2>&1 & pid=$!; "
         + " ".join(q(a) for a in [sys.executable, os.path.abspath(__file__)])
         + " --watch-pid $pid --log " + q(log) + " --quiet " + q(quiet) + "; rc=$?; "
         + "[ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; rm -f " + q(log) + "; exit $rc"
