@@ -107,6 +107,12 @@ each judgment consults, and the tree the deny now covers, changes for PUT.
 - The harness's own worktree reminder still tells a worker to push a tagged entry.
   This guard change makes that path deny outright rather than ask. The reminder text
   is not in this repository and is not changed here.
+- The discard rule judges each git call in its own checkout. Other rules that read the run
+  folder still take the first `-C` in the command, so their verdict or citation can name the
+  wrong checkout. No discard depends on that read.
+- `cd -`, `pushd`, `popd` and a `cd` inside `( … )` do not move the folder that the rule judges.
+- A heredoc body line with the same text as the next real segment can shift each segment's
+  folder by one.
 - An empty tree still passes a push in every tree. A session that dirties the tree
   between the guard's read and the command's run is not covered. This is the same gap
   the earlier decision named for the TAKE arm.
