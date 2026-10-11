@@ -343,9 +343,18 @@ class Host:
         base = self.base  # the base read under the lock: the last pr() before the wait
         end = self.now() + deadline_minutes * 60
         settled = False
+        said, said_at = None, self.now()  # the text last printed, and when (the wait's start before any line)
+
+        def progress(what):
+            nonlocal said, said_at
+            if what and (what != said or self.now() - said_at >= 120):
+                say("merge: waiting on " + what)
+                said, said_at = what, self.now()
+
         while True:
             info = self.pr(n)
             if info["head"] == prior and prior != sha:
+                progress("GitHub to show the pushed head")
                 if self.now() >= end:
                     return False, f"the deadline of {deadline_minutes} minutes passed. GitHub still shows the head before the push."
                 self.pause(self.minute)
@@ -364,6 +373,9 @@ class Host:
                 return False, "a check is red: " + "; ".join(red)
             if not pending and not settled:
                 # ponytail: a workflow GitHub has not created yet still reads as green. The runs read and this settle read close most of the window. Ceiling: a workflow that appears after SETTLE_SECONDS.
+                if self.now() - said_at + SETTLE_SECONDS > 120:  # the settle pause would break the 120 s rhythm
+                    say("merge: waiting on a last read of the checks")
+                    said_at = self.now()
                 self.pause(SETTLE_SECONDS)
                 settled = True
                 continue
@@ -374,6 +386,7 @@ class Host:
             if self.now() >= end:
                 return False, f"the deadline of {deadline_minutes} minutes passed. Still pending: " + ", ".join(pending)
             settled = False
+            progress(", ".join(pending))
             self.block(pending, got)
 
     def runs(self, sha):
