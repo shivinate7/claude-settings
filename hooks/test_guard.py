@@ -258,6 +258,20 @@ WTLIVECFG = os.path.join(ROOT, "wtlivecfg")
 WTDEADCFG = os.path.join(ROOT, "wtdeadcfg")
 WTSTALESTARTCFG = os.path.join(ROOT, "wtstalestartcfg")
 
+# SYMLINK WORKTREES (owner ruling 2026-10-11, the feed-build incident). A worker linked
+# `app/node_modules` to another worktree's packages. Git lists an untracked symlink as a FILE
+# (`?? app/node_modules`), and removing the link deletes only the link, never its target. So an
+# untracked entry that is a symlink is not work. LINKMAIN is its own repository with NO
+# .gitignore, so a real `node_modules` directory is listed as untracked, not hidden.
+LINKMAIN = os.path.join(ROOT, "linkmain")
+LINKOUT = os.path.join(ROOT, "linkoutside")          # a real directory OUTSIDE every worktree
+WTLINKDIR = os.path.join(ROOT, "wtlinkdir")          # detached; its only untracked entry links to LINKOUT
+WTLINKFILE = os.path.join(ROOT, "wtlinkfile")        # detached; its only untracked entry links to a file in the tree
+WTCTRLFILE = os.path.join(ROOT, "wtctrlfile")        # a link, plus an untracked real file
+WTCTRLTRACKED = os.path.join(ROOT, "wtctrltracked")  # a link, plus a change to a tracked file
+WTCTRLDIR = os.path.join(ROOT, "wtctrldir")          # a real untracked node_modules directory with a file
+WTCTRLNESTED = os.path.join(ROOT, "wtctrlnested")    # a link inside an untracked real directory
+
 
 def slash(path):
     return path.replace("\\", "/")
@@ -355,6 +369,20 @@ def _require_dirty(where, tracked, untracked, clean_path):
         sys.exit(
             "fixture setup failed in build_fixtures: the path-scoped read of %r in %r is not "
             "empty: exit %d, %r" % (clean_path, where, scoped.returncode, scoped.stdout)
+        )
+
+
+def _require_status(where, expected):
+    """Stop the suite unless `git status --porcelain` in `where` lists exactly `expected`.
+
+    The symlink cases below prove only what their fixture is. Each fixture is read back with git
+    itself, so a link that git lists differently (a directory, or nothing) stops the run here.
+    """
+    lines = sorted(_porcelain(where))
+    if lines != sorted(expected):
+        sys.exit(
+            "fixture setup failed in build_fixtures: %r should list %r. git status --porcelain "
+            "shows: %r" % (where, sorted(expected), lines)
         )
 
 
@@ -1064,6 +1092,39 @@ def build_fixtures():
             % (prune_clean_check.stdout, prune_clean_check.stderr)
         )
 
+    # ----------------------------------------------------------------- symlink worktrees
+    # Every tree below is DETACHED, so none of them takes a branch name. `app/package.json` is
+    # tracked, which keeps `app/` a tracked directory and makes the link its own status line.
+    make_repo(LINKMAIN, {"app/package.json": "{}\n", "config.json": "{}\n"})
+    os.makedirs(LINKOUT, exist_ok=True)
+    write(os.path.join(LINKOUT, "pkg.js"), "module.exports = {};\n")
+    for where in (WTLINKDIR, WTLINKFILE, WTCTRLFILE, WTCTRLTRACKED, WTCTRLDIR, WTCTRLNESTED):
+        added = run_vcs(LINKMAIN, "worktree", "add", "-q", "--detach", where)
+        if added.returncode != 0:
+            sys.exit("fixture setup failed in build_fixtures: worktree add %r failed. stderr: %s"
+                     % (where, added.stderr.strip()))
+    # Case 1 and the link-only controls: the only untracked entry is one symlink.
+    os.symlink(LINKOUT, os.path.join(WTLINKDIR, "app", "node_modules"))
+    _require_status(WTLINKDIR, ["?? app/node_modules"])
+    # Case 2: the link targets a tracked file inside the same tree.
+    os.symlink(os.path.join("..", "config.json"), os.path.join(WTLINKFILE, "app", "node_modules"))
+    _require_status(WTLINKFILE, ["?? app/node_modules"])
+    # Control: the same link, next to an untracked real file.
+    os.symlink(LINKOUT, os.path.join(WTCTRLFILE, "app", "node_modules"))
+    write(os.path.join(WTCTRLFILE, "notes.txt"), "untracked\n")
+    _require_status(WTCTRLFILE, ["?? app/node_modules", "?? notes.txt"])
+    # Control: the same link, next to a change to a tracked file.
+    os.symlink(LINKOUT, os.path.join(WTCTRLTRACKED, "app", "node_modules"))
+    write(os.path.join(WTCTRLTRACKED, "app", "package.json"), '{"changed": true}\n')
+    _require_status(WTCTRLTRACKED, [" M app/package.json", "?? app/node_modules"])
+    # Control: a real untracked node_modules directory holding a real file.
+    write(os.path.join(WTCTRLDIR, "app", "node_modules", "index.js"), "module.exports = {};\n")
+    _require_status(WTCTRLDIR, ["?? app/node_modules/"])
+    # Control, case 4: a link inside an untracked real directory. Git lists the directory only.
+    os.makedirs(os.path.join(WTCTRLNESTED, "vendor"))
+    os.symlink(LINKOUT, os.path.join(WTCTRLNESTED, "vendor", "link"))
+    _require_status(WTCTRLNESTED, ["?? vendor/"])
+
 
 build_fixtures()
 
@@ -1609,6 +1670,30 @@ sh("worktree prune: a stale record asks, never denies",
 sh("worktree prune: nothing to prune passes", VCS + " worktree prune", "allow", cwd=WTMAIN)
 sh("worktree prune: -n itself is a read, not a discard, so it passes unconditionally",
    VCS + " worktree prune -n", "allow", cwd=WTPRUNE)
+
+# SYMLINKS ARE NOT WORK (owner ruling 2026-10-11). Git lists an untracked symlink as a file, so
+# `?? app/node_modules` read as real work and the removal was refused. Deleting a link deletes
+# only the link, never its target, so a tree whose only untracked entry is a link passes, with
+# or without the force flag. The link's target may sit outside the tree or inside it.
+sh("worktree remove: a detached tree whose only untracked entry links outside it passes",
+   VCS + " worktree remove " + slash(WTLINKDIR), "allow", cwd=LINKMAIN)
+sh("worktree remove: the same link-only tree passes with the force flag",
+   VCS + " worktree remove --force " + slash(WTLINKDIR), "allow", cwd=LINKMAIN)
+sh("worktree remove: a detached tree whose only untracked entry links to a file inside it passes",
+   VCS + " worktree remove " + slash(WTLINKFILE), "allow", cwd=LINKMAIN)
+sh("worktree remove: the same in-tree link passes with the force flag",
+   VCS + " worktree remove --force " + slash(WTLINKFILE), "allow", cwd=LINKMAIN)
+# THE CONTROLS. Each has a real piece of work beside or inside the link, so each still denies.
+sh("worktree remove: a link next to an untracked real file still denies",
+   VCS + " worktree remove " + slash(WTCTRLFILE), "deny", "shared-tree", cwd=LINKMAIN)
+sh("worktree remove: a link next to a tracked change still denies",
+   VCS + " worktree remove " + slash(WTCTRLTRACKED), "deny", "shared-tree", cwd=LINKMAIN)
+sh("worktree remove: a real untracked node_modules directory holding a file still denies",
+   VCS + " worktree remove " + slash(WTCTRLDIR), "deny", "shared-tree", cwd=LINKMAIN)
+# A link inside an untracked REAL directory: git shows the directory, not the link, so the
+# directory is the work and it denies.
+sh("worktree remove: a link inside an untracked real directory still denies",
+   VCS + " worktree remove " + slash(WTCTRLNESTED), "deny", "shared-tree", cwd=LINKMAIN)
 
 
 # =========================================================================== 1b. the pointer HEAD
