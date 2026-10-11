@@ -2197,6 +2197,8 @@ class TimedLines(io.StringIO):
             self.lines.append((self.clock[0], s.rstrip("\n")))
         return super().write(s)
 
+READ_SECONDS = 2  # fake time one gh read takes
+
 class ClockedHost(merge.Host):
     """Host with no gh and a fake clock. `checks_at(t)` gives the check buckets at fake time t; `head_at(t)` the head."""
     def __init__(self, checks_at, head_at=lambda t: "sha"):
@@ -2209,33 +2211,53 @@ class ClockedHost(merge.Host):
         self.clock[0] += s
         assert len(self.pauses) < 500, "the wait never ended"
 
+    def read(self):
+        """Each fake gh read costs READ_SECONDS of fake time, as a real call does."""
+        self.clock[0] += READ_SECONDS
+
     def pr(self, n):
+        self.read()
         return {"head": self.head_at(self.clock[0]), "branch": "feat", "base": "main", "state": "OPEN",
                 "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": False}
 
     def checks(self, n):
+        self.read()
         return self.checks_at(self.clock[0])
 
     def runs(self, sha):
+        self.read()
         return []
 
 class WaitProgress(unittest.TestCase):
     """The wait prints progress: a `merge: waiting on` line at first sight, on a change of the pending set, and at least every 120 s."""
     def wait(self, host, deadline, prior=None):
+        """-> (ok, why, merge lines, waiting lines, end time). Every `merge: ` line is stamped with fake time."""
         out = TimedLines(host.clock)
         with contextlib.redirect_stdout(out):
             ok, why = host.wait_checks(7, "sha", deadline, prior=prior)
-        return ok, why, [(t, l) for t, l in out.lines if l.startswith("merge: waiting on")], host.clock[0]
+        return ok, why, out.lines, [(t, l) for t, l in out.lines if l.startswith("merge: waiting on")], host.clock[0]
+
+    def assert_gaps_within(self, lines, start, end, bound=135):
+        """No quiet gap between start, each `merge:` line and end exceeds bound: 120 s plus one pass of the loop."""
+        marks = [start] + [t for t, _ in lines] + [end]
+        gaps = [b - a for a, b in zip(marks, marks[1:])]
+        self.assertLessEqual(max(gaps), bound, f"longest quiet gap {max(gaps):.0f} s; lines at {[round(t) for t, _ in lines]}")
 
     def test_a_ten_minute_pending_wait_never_goes_120_seconds_without_a_line(self):
         host = ClockedHost(lambda t: {"gates": [("pending" if t < 600 else "pass", "")]})
-        ok, why, waits, end = self.wait(host, 15)
+        ok, why, lines, waits, end = self.wait(host, 15)
         self.assertTrue(ok, why)
         self.assertTrue(waits, "no `merge: waiting on` line during the 10-minute wait")
         self.assertIn("gates", waits[0][1])  # the first line names the pending check
-        marks = [0.0] + [t for t, _ in waits] + [end]
-        gaps = [b - a for a, b in zip(marks, marks[1:])]
-        self.assertLessEqual(max(gaps), 120, f"longest quiet gap {max(gaps)} s; lines at {[t for t, _ in waits]}")
+        self.assert_gaps_within(lines, 0.0, end)
+
+    def test_a_lagging_head_never_goes_120_seconds_without_a_line(self):
+        # The head reads as the prior one for 600 s; the checks are pending until 900 s.
+        host = ClockedHost(lambda t: {"gates": [("pending" if t < 900 else "pass", "")]},
+                           head_at=lambda t: "old" if t < 600 else "sha")
+        ok, why, lines, _, end = self.wait(host, 30, prior="old")
+        self.assertTrue(ok, why)
+        self.assert_gaps_within(lines, 0.0, end)
 
     def test_a_change_in_the_pending_set_prints_at_once(self):
         def checks_at(t):
@@ -2245,24 +2267,17 @@ class WaitProgress(unittest.TestCase):
                 return {"gates": [("pending", "")], "design": [("pending", "")]}
             return {"gates": [("pass", "")], "design": [("pass", "")]}
         host = ClockedHost(checks_at)
-        ok, why, waits, _ = self.wait(host, 15)
+        ok, why, _, waits, _ = self.wait(host, 15)
         self.assertTrue(ok, why)
         design = [t for t, l in waits if "design" in l]
-        self.assertEqual(design[:1], [60.0], f"a new pending check named at {design[:1]}; lines at {[t for t, _ in waits]}")
+        # The change is first read at about 64 s (a read costs 2 s, the loop pauses 60 s). It must print before the next 60 s pass.
+        self.assertTrue(design and design[0] < 120, f"a new pending check named at {design[:1]}; lines at {[round(t) for t, _ in waits]}")
 
     def test_a_wait_that_is_green_on_the_first_read_prints_no_waiting_line(self):
         host = ClockedHost(lambda t: {"gates": [("pass", "")]})
-        ok, why, waits, _ = self.wait(host, 15)
+        ok, why, _, waits, _ = self.wait(host, 15)
         self.assertTrue(ok, why)
         self.assertEqual(waits, [])
-
-    def test_a_lagging_head_prints_no_waiting_line_until_the_head_moves(self):
-        host = ClockedHost(lambda t: {"gates": [("pending" if t < 300 else "pass", "")]},
-                           head_at=lambda t: "sha" if t >= 180 else "old")
-        ok, why, waits, _ = self.wait(host, 15, prior="old")
-        self.assertTrue(ok, why)
-        self.assertTrue(waits, "no `merge: waiting on` line once the head moved")
-        self.assertGreaterEqual(waits[0][0], 180, f"a waiting line at {waits[0][0]} s while the head still read as the old one")
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--child":
