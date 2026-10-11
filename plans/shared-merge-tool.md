@@ -79,6 +79,13 @@ runs it too, and there it refuses any pending record (see "q_max and the stamp a
 
 ### How a repo opts in
 
+The file is optional for merge (decision merge-config-defaults, merge needs no config file). A repo
+with no `.github/stamp.json` gets the defaults: the default branch from `gh repo view`, method
+`merge`, `deadlineMinutes` 45, `requiredChecks` `"protection"`, empty `afterMerge`. Merge prints
+one line to say so. It claims no numbers and never runs stamp.mjs. Add the file only for
+numbered records or for non-default settings. A file that exists but is broken stops merge with
+one line. Left-out merge fields get the defaults (decision merge-config-defaults, defaults fill left-out fields). An unknown field name stops merge. The claim and the numbering read the stamp config from the base branch, never the pull request's tree. The settings come from the base branch's `.github/stamp.json`.
+
 The repo keeps one config file, the stamp config it already has or a new one at
 `.github/stamp.json`. A `merge` block holds the merge fields. One file, one home.
 
@@ -102,7 +109,7 @@ The repo keeps one config file, the stamp config it already has or a new one at
 | `kinds` | The id kinds and their record folders, as the stamp README states them. A repo with no records writes `[]`, and the claim step does nothing. |
 | `regenerate` | The repo's own generator. It runs after the claim, in the same commit. It moves here from the action input, so the command and the action read one value. |
 | `cite.glossFirstUse` | New, shape 3. Globs, such as `["CLAUDE.md"]`. At a claimed cite's first use in a paragraph, the claim adds ` (gloss)`, the first six words of the record title. Shapes 1 and 2 already have `{gloss}` in `cite.template`. |
-| `merge.method` | `merge`, `squash` or `rebase`. Read it from the repo history. Never guess it. |
+| `merge.method` | `merge`, `squash` or `rebase`. Left out, it is `merge`. Read the repo history before you set it. |
 | `merge.requiredChecks` | `"protection"` reads the branch protection API. A list names the checks for a repo with no protection. |
 | `merge.ignoreChecks` | Optional. `[{"name": "...", "reason": "..."}]`. The wait leaves these checks out and names them in the output. An entry with no non-empty reason refuses the config. |
 | `merge.deadlineMinutes` | The longest wait for the claim commit's checks. |

@@ -57,7 +57,7 @@ def main(co, args):
                 if git(co, "merge", "-q", "--ff-only", "origin/main")[0]:
                     print("merge: checkout not fast-forwarded: ff-only merge refused", file=sys.stderr)
             else:
-                print(f"merge: checkout left as is: {'not on main' if branch != 'main' else 'dirty tree'}", file=sys.stderr)
+                print(f"merge: checkout left as is in {os.path.realpath(co)}: {'not on main' if branch != 'main' else 'dirty tree'}", file=sys.stderr)
         print(f"merge: running claude-settings {want[:12]} (origin/main)", file=sys.stderr)
         return run(wt, args)
     finally:
