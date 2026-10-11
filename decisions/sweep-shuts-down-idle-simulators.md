@@ -78,13 +78,15 @@ Why the cap: it needs no knowledge of who booted a device.
 - `hooks/guard.py`: rules `simulator-boot-cap` and `simulator-boot-twin`. A boot is
   `simctl boot`, an `xcodebuild -destination` with `id=` or `name=`, or MCP `launch` with
   `device` or `udid`. The guard judges each of the two that is a non-empty string. A UDID
-  matches in any case. A name must match exactly. An `OS=` in the destination keeps only
-  the copies on that runtime. Only the shut-down devices a call names count as a boot.
+  matches in any case. A name must match exactly. A numeric `OS=` in a `name=` destination
+  keeps only the copies on that runtime. An `id=` destination, `OS=latest` or no OS uses
+  no filter. Only the shut-down devices a call names count as a boot.
   `simctl list` runs for each call that names a device. A launch with neither field is not
   judged. The guard imports `sweep` on a match only.
   Named limits: a shut-down device whose name is the target's UDID string is denied at the
-  cap. An MCP name that matches a booted copy and a shut-down copy on two runtimes is
-  denied, because the MCP does not take an OS.
+  cap. A name that matches a booted copy and a shut-down copy on two runtimes is denied
+  when no numeric OS picks one. The MCP takes no OS, so it is always denied. The record hook
+  records nothing for `OS=latest` on such a name, so the sweep keeps that device.
 
 ## Measured, 2026-10-10
 
