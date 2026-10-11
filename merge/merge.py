@@ -680,6 +680,16 @@ def load_config(root, base, path):
     dm = m.get("deadlineMinutes", MERGE_DEFAULTS["deadlineMinutes"])
     if not isinstance(dm, int) or isinstance(dm, bool) or not 1 <= dm <= 360:  # 360: GitHub's longest job run
         raise Stop(f"{path} on {ref}: merge.deadlineMinutes must be a whole number from 1 to 360, not {dm!r}.")
+    ne = lambda v: isinstance(v, str) and v.strip()
+    rc, am = m.get("requiredChecks", "protection"), m.get("afterMerge", [])
+    for ok, k in ((m.get("method", "merge") in ("merge", "squash", "rebase"), "method"),
+                  (isinstance(m.get("deleteBranch", True), bool), "deleteBranch"),
+                  (isinstance(am, list) and all(map(ne, am)), "afterMerge"),
+                  (rc == "protection" or isinstance(rc, list) and rc and all(map(ne, rc)), "requiredChecks")):
+        if not ok:
+            raise Stop(f"{path} on {ref}: merge.{k} is not valid: {m[k]!r}.")
+    if "defaultBranch" in cfg and not ne(cfg["defaultBranch"]):
+        raise Stop(f"{path} on {ref}: defaultBranch must be a non-empty string, not {cfg['defaultBranch']!r}.")
     ignore_checks(cfg)  # refuse a bad entry before the defaults notice, so the refusal is the only line
     filled = [k for k in MERGE_DEFAULTS if k not in m]
     for k in filled:
