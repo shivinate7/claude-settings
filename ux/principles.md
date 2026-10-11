@@ -106,3 +106,30 @@ Pass when it is green and the hand checks there pass.
 Source: q_max D-648 (contrast floor); banchi `app/tests/gallery.spec.ts` (axe on the kit);
 sillage `CLAUDE.md` (axe reads contrast as incomplete under jsdom, and a placeholder passes axe);
 ios-adblock `ios/App/AdBlockApp.swift` (Dynamic Type).
+
+## ux-answer-at-press
+
+The answer to a press shows where the press was.
+Check: press each control that gives an answer, such as a count, a message or a state change.
+Pass when each answer appears at the control that was pressed, or beside it.
+Source: banchi D118 and UX-058, q_max D-640.
+
+## ux-long-run-stops
+
+A run that takes more than a few seconds shows a Stop control.
+Check: for each run that takes more than a few seconds, look for a Stop control that ends it.
+Source: q_max D-319.
+
+## ux-all-is-well
+
+A status summary names only what is not normal. When nothing is not normal, it says "All is well."
+Check: pass when a status summary lists only the items that are not normal. With no such item, it
+shows "All is well." and no other item.
+Source: home-app `SPEC.md`.
+
+## ux-thumb-zone
+
+On a phone layout, the main input and the main action sit in reach of the thumb.
+Check: phone layouts only. Pass when a reviewer who holds the phone in one hand reaches the main
+input and the main action with the thumb.
+Source: sillage `docs/design/system.md`.
