@@ -1694,6 +1694,27 @@ sh("per-file deny: checkout -- '*.md' in the shared checkout", VCS + " checkout 
 sh("per-file ask: checkout -- '*.md' in a worktree still asks", VCS + " checkout -- '*.md'",
    "ask", "shared-tree", cwd=GITWT)
 
+# SECOND SET (decisions/stash-push-is-clone-wide.md, "These discard forms join the rule"). The
+# operand before `--` is a path, and the clean file after `--` must not hide it. keep.txt is clean
+# in every tree; f.txt is dirty in the shared checkout and in the lane.
+sh("per-file deny: restore f.txt -- keep.txt in the shared checkout, operand before --",
+   VCS + " restore f.txt -- keep.txt", "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file ask: restore . -- keep.txt in a worktree: a dot before -- is a whole tree",
+   VCS + " restore . -- keep.txt", "ask", "shared-tree", cwd=GITWT)
+sh("per-file deny: restore \"$F\" -- keep.txt in the shared checkout, unreadable before --",
+   VCS + ' restore "$F" -- keep.txt', "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file ask: restore \"$F\" -- keep.txt in a worktree still asks, unreadable before --",
+   VCS + ' restore "$F" -- keep.txt', "ask", "shared-tree", cwd=GITWT)
+# EACH -C IN ITS OWN CALL. The second git call names the shared checkout, so it is the one judged.
+# The first call's -C reads the lane, which has f.txt dirty too and would allow a per-file restore.
+sh("per-file deny: -C lane status, then -C shared restore f.txt, from a plain folder",
+   VCS + " -C " + slash(GITWT) + " status && " + VCS + " -C " + slash(GITMAIN) + " restore f.txt",
+   "deny", "shared-tree", cwd=NOGIT)
+sh("per-file deny: cd into the shared checkout, then git -C . restore f.txt, from a worktree",
+   "cd " + slash(GITMAIN) + " && " + VCS + " -C . restore f.txt", "deny", "shared-tree", cwd=GITWT)
+sh("per-file deny: -C parent then a relative -C repo, from a plain folder",
+   VCS + " -C " + slash(ROOT) + " -C repo restore f.txt", "deny", "shared-tree", cwd=NOGIT)
+
 # KILL CASES for three mutate_guard entries removed in 78e8446. Each pins today's base verdict.
 # The quoted refspec and the quoted force in a commit message are verdicts; the quoted force on a
 # worktree remove is a logged note, pinned by the LOG_CHECKS_EXTRA entry beside subject_unread_*.
