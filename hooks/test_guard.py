@@ -2225,6 +2225,22 @@ sh("rm-var: a pwd after | inside a nested $(…) taints the variable, not ${D:?}
    carries=("literal path",), lacks=("${D:?}",))
 sh("rm-var: a guarded variable set after && in a list stays allowed",
    'D=/tmp/w; true && rm -rf "${D:?}"/x', "allow", cwd=NOGIT)
+# Named limits, first bullet (decision rm-on-a-variable-needs-a-guard): a command word pwd, or an
+# expansion of HOME or PWD, anywhere in the command taints every variable it assigns. The guard
+# reads no $(…) span, so quotes and ; inside the span cannot hide the source. Each case must deny
+# with the literal-path reason and never name ${D:?}.
+sh("rm-var: a pwd after a quoted ) in $(…) taints D, not ${D:?}",
+   'D=$(: ")" ; pwd); rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a pwd after a quoted ) in a double-quoted $(…) taints D, not ${D:?}",
+   """D="$(: ')' ; pwd)"; rm -rf "${D:?}"/*""", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: $HOME expanded inside $(…) taints D, not ${D:?}",
+   'D=$(x=1; echo $HOME); rm -rf "${D:?}"/x', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+# pwd as an argument is text, not a command word, so the value stays a literal and passes.
+sh("rm-var: a cat of pwd.txt inside $(…) is text, not a command word, and stays allowed",
+   'D=$(cat pwd.txt); rm -rf "${D:?}"/x', "allow", cwd=NOGIT)
 sh("playwright: an envrc file gets the assignment",
    "echo PLAYWRIGHT_BROWSERS_PATH=/x > .envrc", "deny", "playwright-browsers-path", cwd=NOGIT)
 sh("playwright: a case-folded name still sets it", "playwright_browsers_path=/x npx", "deny",
@@ -6632,6 +6648,31 @@ for quote, name in (('"', "double"), ("'", "single"), ("`", "backtick")):
                              % name, mask_hang_case(quote, name)))
 LOG_CHECKS_EXTRA.append(("mask_script: normal scripts with escaped quotes keep their masks",
                          mask_pin_case))
+
+
+# Time bound (decision rm-on-a-variable-needs-a-guard, Named limits): 2000 unclosed $( spans must be
+# judged in under 2 s. The case goes through add(), so it has the same shape as every other case,
+# then it is taken back out of CASES so the main loop does not judge it twice. The timer wraps the
+# same decide() call the main loop uses.
+RM_VAR_SLOW_CMD = 'a=$(' * 2000 + '; rm -rf "${a:?}"/x'
+_slow_at = len(CASES)
+add("rm-var: 2000 unclosed $( spans are judged in under 2 s", "deny", cwd=NOGIT,
+    command=RM_VAR_SLOW_CMD)
+RM_VAR_SLOW_CASE = CASES[_slow_at]
+del CASES[_slow_at:]
+
+
+def rm_var_slow_case():
+    start = time.monotonic()
+    decide(RM_VAR_SLOW_CASE)
+    took = time.monotonic() - start
+    if took >= 2.0:
+        return False, "judged in %.2f s, not under 2 s" % took
+    return True, "judged in %.2f s, under 2 s" % took
+
+
+LOG_CHECKS_EXTRA.append(("rm-var: 2000 unclosed $( spans are judged in under 2 s",
+                         rm_var_slow_case))
 
 
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
