@@ -5241,11 +5241,58 @@ def _pwsh_script(tokens) -> str:
     return ""
 
 
-def _playwright_tokens_hit(tokens, depth=0) -> str:
+# Decision playwright-install-once (one Playwright browser install, Node 22 cli.js form, never a
+# subagent). `install` below is "main" or "sub" in install mode; the parser then reports installs
+# instead of PLAYWRIGHT_BROWSERS_PATH writes.
+_PW_RUNNERS = ("npx", "pnpm", "yarn", "bunx", "bun", "npm")
+_PW_RUNNER_WORDS = ("exec", "dlx", "x", "run")
+_PW_NAMES = ("playwright", "playwright-core")
+_PW_NODE22_CLI = "node_modules/playwright/cli.js"
+
+
+def _playwright_install_hit(word, rest, who) -> str:
+    """Return the install text when `word rest` installs Playwright browsers and `who` may not."""
+    words = [t for t in rest if not t.startswith("-")]
+    cmd = word
+    if word in _PW_RUNNERS:
+        while words and words[0] in _PW_RUNNER_WORDS:
+            words.pop(0)
+        cmd = words.pop(0) if words else ""
+    if cmd == "node" or cmd.startswith("node@"):
+        if not words or not (basename(words[0]) in _PW_NAMES or (
+                basename(words[0]) == "cli.js" and "playwright" in words[0])):
+            return ""
+        args = words[1:]
+        allowed = word == "npx" and cmd == "node@22" and words[0] == _PW_NODE22_CLI
+    elif basename(cmd.rsplit("@", 1)[0] if not cmd.startswith("@") else cmd) in _PW_NAMES:
+        args, allowed = words, False
+    else:
+        return ""
+    if not args or args[0] != "install":
+        return ""
+    return "" if allowed and who == "main" else "playwright install"
+
+
+def _playwright_tokens_hit(tokens, depth=0, install=None) -> str:
     tokens = [t for t in ([tokens[0].lstrip("(")] + tokens[1:] if tokens else []) if t]
     if not tokens or depth > 3:
         return ""
     at = resolve_command(tokens)
+    if install:
+        if at is None:
+            return ""
+        word, rest = basename(tokens[at]).lower(), tokens[at + 1:]
+        if word in ("builtin", "exec"):
+            return _playwright_tokens_hit(rest, depth + 1, install)
+        hit = _playwright_install_hit(word, rest, install)
+        if hit:
+            return hit
+        script = " ".join(rest) if word == "eval" else inline_script(tokens)
+        for segment in split_segments(script) if script else ():
+            hit = _playwright_tokens_hit(segment_tokens(segment) or [], depth + 1, install)
+            if hit:
+                return hit
+        return ""
     if any(_is_playwright_assign(t) for t in tokens[:len(tokens) if at is None else at]):
         return PLAYWRIGHT_VAR + " assignment"
     if at is None:
@@ -5322,6 +5369,26 @@ def playwright_command_hit(raw: str, stripped: str) -> str:
                 if matched:
                     return matched
     return ""
+
+
+def playwright_install_hit(stripped: str, subagent: bool) -> str:
+    """Judge a command for a Playwright browser install (see playwright-install-once)."""
+    # Bandaid: an English contraction (`don't`) opens a quote that split_segments runs to the end
+    # of the text, which would hide a later install. Drop that apostrophe. Ceiling: a real
+    # `a'b'` shell concatenation is read as plain text.
+    stripped = re.sub(r"(?<=[A-Za-z])'(?=[a-z]{1,3}(?:\s|;|&|\||$))", "", stripped)
+    for segment in split_segments(stripped):
+        hit = _playwright_tokens_hit(segment_tokens(segment) or [], 0, "sub" if subagent else "main")
+        if hit:
+            return hit
+    return ""
+
+
+PLAYWRIGHT_INSTALL_REASON = (
+    "the Playwright browsers are shared in ~/Library/Caches/ms-playwright, and a parallel install "
+    "fights over its lock. A subagent asks the orchestrator for the install. The orchestrator "
+    "installs once, with `npx -y node@22 node_modules/playwright/cli.js install`."
+)
 
 
 PLAYWRIGHT_PATH_REASON = (
@@ -5525,7 +5592,7 @@ def floor_hit(tool: str, tool_input) -> str:
 
 
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
-                transcript: str = "") -> None:
+                transcript: str = "", subagent: bool = False) -> None:
     POWERSHELL_CALL[0] = tool == "PowerShell"
     stripped = strip_heredoc_bodies(raw)
     cmd = norm(stripped)
@@ -5687,6 +5754,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = playwright_command_hit(raw, stripped)
     if matched:
         refuse(tool, "deny", "playwright-browsers-path", PLAYWRIGHT_PATH_REASON, matched)
+
+    matched = playwright_install_hit(stripped, subagent)
+    if matched:
+        refuse(tool, "deny", "playwright-install", PLAYWRIGHT_INSTALL_REASON, matched)
 
     # 3b. Two traps ported from banchi's `scripts/guard-shell.py`: `gh api` with a field and no
     # method, and `ln -s` onto a directory that is already there. Each reads the segment's own
@@ -5969,7 +6040,8 @@ def judge(payload) -> None:
         if isinstance(command, str) and command.strip():
             transcript = payload.get("transcript_path") if isinstance(payload, dict) else ""
             judge_shell(tool, command, cwd, session_id_of(payload), agent_role(payload),
-                        transcript if isinstance(transcript, str) else "")
+                        transcript if isinstance(transcript, str) else "",
+                        bool(payload.get("agent_id")))
             names = [n for seg in split_segments(strip_heredoc_bodies(command))
                      for n in _sim_boot_names(seg)]
             if names:
