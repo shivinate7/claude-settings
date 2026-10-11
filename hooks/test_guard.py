@@ -83,11 +83,8 @@ def windows_shaped(*parts):
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
         session=None, carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
         agent_type=None, event=None, stop_active=False, windows=False, transcript=None,
-        max_seconds=None, env_extra=None, **tool_input):
+        max_seconds=None, **tool_input):
     """Register one case.
-
-    `env_extra` names environment variables set for this case's hook process only, such as the
-    free-space injection the disk cases below use.
 
     `carries` names fragments the printed reason MUST hold, which is how a case pins what an
     approver reads, not only the decision. A tuple inside `carries` is any-of: the reason holds
@@ -124,7 +121,6 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "no_root": no_root,
         # A case that must be judged within this many seconds. A slower verdict fails the case.
         "max_seconds": max_seconds,
-        "env_extra": dict(env_extra or {}),
         # An allow that must print NOTHING, not even context. Only a case that says so is held to it.
         "silent": silent,
         "tool_input": tool_input,
@@ -5387,7 +5383,6 @@ def decide(case):
     # after this branch started, so no run on the branch alone could have caught it. A hand-built
     # case is the shape to expect from the next such checker too, so the read tolerates it.
     env["CLAUDE_CONFIG_DIR"] = case.get("config") or CFG
-    env.update(case.get("env_extra") or {})   # per-case seams, such as the free-space injection
     # The scratchpad pass reads the session id the PAYLOAD carries, and falls back to the
     # environment only when the payload carries none. A real session id in the runner's own
     # environment would leak into every case, so it is dropped here and each case names its own.
@@ -7478,37 +7473,7 @@ if os.name != "nt":
     register_simulator_hold_cases()
 
 
-# --------------------------------------------------------------------------- the low-disk build guard
-#
-# Decision build-dirs-reaped-at-agent-end, Part 2. A build command is refused when the free space on
-# the worktree's volume is below 20 GB. The read is injected through GUARD_FREE_BYTES_FOR_TEST, an
-# integer byte count, so no case depends on the real disk. The value "unreadable" makes the read
-# fail. The builder must honor both values in guard.py.
-# ASSUMED HOOK: the PreToolUse Bash path, judge_shell (guard.py, the `def judge_shell` line).
-# Its free-space refusal must name the free space and the 20 GB threshold, and no path.
-GUARD_FREE_ENV = "GUARD_FREE_BYTES_FOR_TEST"
-GIB = 1024 ** 3
-
-
-def register_build_disk_cases():
-    low = {GUARD_FREE_ENV: str(5 * GIB)}
-    high = {GUARD_FREE_ENV: str(25 * GIB)}
-    unreadable = {GUARD_FREE_ENV: "unreadable"}
-    free_shown = ("5.0 GiB", "5.00 GiB", "5 GiB", "5.4 GB", "5.37 GB", "5.0 GB", "5 GB")
-    threshold_shown = ("20 GB", "20GB", "20.0 GB", "20 GiB")
-    for name, command in (("xcodebuild", "xcodebuild -scheme App build"),
-                          ("swift build", "swift build -c release")):
-        add("disk: %s with 5 GiB free is refused" % name, "deny", cwd=PROJ, command=command,
-            env_extra=low, carries=(free_shown, threshold_shown), lacks=(PROJ, ROOT))
-        add("disk: %s with 25 GiB free is allowed" % name, "allow", cwd=PROJ, command=command,
-            env_extra=high)
-        add("disk: %s with an unreadable free-space read is allowed" % name, "allow", cwd=PROJ,
-            command=command, env_extra=unreadable)
-    add("disk: a command that is not a build is allowed at 5 GiB free", "allow", cwd=PROJ,
-        command="ls -la", env_extra=low)
-
-
-register_build_disk_cases()
+# Deferred: build-disk-guard (decision build-dirs-reaped-at-agent-end, Part 2), until a threshold is measured.
 
 
 def main():
