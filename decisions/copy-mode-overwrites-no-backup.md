@@ -10,13 +10,16 @@ skills: 26 copies each of `ci-hygiene` and `fresh-prose`. The skills branch of
 `install.ps1` and its post-merge hook have the same fault. The copies went to the
 Recycle Bin on 2026-10-03.
 
-## The ruling, 2026-10-03
+## The ruling
 
-The owner ruled: in copy mode, an installer overwrites its own old copy. It keeps no
+Owner, 2026-10-03: in copy mode, an installer overwrites its own old copy. It keeps no
 backup.
 
-Known cost: a hand edit to an installed copy under `~/.claude` is lost at the next
-session start.
+Owner, 2026-10-11, one exception: `settings.json`. When a repeat install finds a plain file
+there and not the link, it moves the file to `settings.json.bak.<time>` first. Then it
+removes each older `settings.json.bak.*`, so only the newest backup stays. This cap keeps
+the 2026-10-03 pile-up from coming back. The reason: each merge now runs the install. A
+tool that writes `settings.json` as a plain file would lose its edits at the next merge.
 
-Status: not built. The fix touches `install.sh`, `install.ps1` and the post-merge hook
-that `install.ps1` writes. It needs the owner's word to start.
+Known cost: a hand edit to any other installed copy under `~/.claude` is lost at the next
+install.
