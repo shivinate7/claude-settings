@@ -20,8 +20,7 @@ PR ready, or folds it into an integration branch, only after review.
 - The `concurrency` group holds the PR draft state (`format('{0}-{1}', github.ref, github.event.pull_request.draft)`).
   A draft run then replaces only draft runs, and a ready run only ready runs. Turning off cancel for
   drafts is not enough: GitHub keeps one pending run per group and replaces it even with
-  `cancel-in-progress: false`. Skill ci-hygiene, step 4 and snippet 4, carry the same expression.
-  Orchestrator ruling, 2026-10-11.
+  `cancel-in-progress: false`. Snippet 4 of skill ci-hygiene carries the same expression.
 - Named limits: the gate does not judge a `gh api` POST to the pulls endpoint, or
   `hub pull-request`. Each can open a non-draft PR. A short-flag cluster such as `-dt x` is
   refused, a rare false alarm.
@@ -32,11 +31,12 @@ PR ready, or folds it into an integration branch, only after review.
 ## The incident
 
 2026-10-11, shivinate7/ios-adblock PR #61: `gh pr create --draft` then `gh pr ready` fired two
-`pull_request` runs, 1 second apart (17:19:32Z run 38159163245, 17:19:33Z run 38159163645). The
-later one carried draft=true and skipped every job (read: conclusion skipped). It was in the same
-group, so it cancelled the ready run through `cancel-in-progress`. Measured today: run 38159163245
-reads success, not cancelled, so the cancel is not seen in the run state now (maybe re-run).
-Unmeasured: the order of the `ready_for_review` run.
+`pull_request` runs. The ready run 38159163245 was created at 17:19:32Z. The draft run
+38159163645 was created at 17:19:33Z, carried draft=true, and skipped every job. The two runs
+were in one group. Attempt 1 of the ready run was cancelled at 17:19:40Z, the second the draft
+run ended. A re-run (attempt 2) then passed, so the run-level state reads success. Read
+`attempts/1` to see a cancel. The risk remains for each repo that shares one PR group. A draft
+run that arrives while a ready run is in progress cancels it. A pending ready run is replaced.
 
 2026-10-10: 52 CI runs in this repo (UTC day). 7 were on the PR #313 branch, many on commits known to be red.
 
