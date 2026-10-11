@@ -5445,6 +5445,8 @@ def impeccable_shell_hit(segment: str) -> str:
     wrappers (`bash -c`, `npx -c`) are unwrapped; a runner or script suffix (`.cmd`, `.exe`,
     `.mjs`) and PowerShell's call operator `&` are read through."""
     tokens = segment_tokens(segment)
+    if tokens and tokens[0] == "&":
+        tokens = tokens[1:]
     if not tokens:
         return ""
     script = inline_script(tokens)
@@ -5452,8 +5454,6 @@ def impeccable_shell_hit(segment: str) -> str:
         return next((hit for part in split_segments(script)
                      if (hit := impeccable_shell_hit(part))), "")
     index = resolve_command(tokens)
-    if index is not None and tokens[index] == "&":
-        index += 1
     if index is None or index >= len(tokens):
         return ""
     while index < len(tokens) and (impeccable_name(tokens[index]) in RUNNER_WORDS

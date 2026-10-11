@@ -51,6 +51,9 @@ Status: built in `hooks/guard.py` and routed in `settings.json`.
   reads through `npx -y`, `npx -p <spec> impeccable`, `npx -c`, `sh -c`, `bash -c` and
   PowerShell's call operator `&`.
 - Limit: `audit then polish` is allowed. The argument-hint says the second word is a target.
+- Limits, not read through: `pnpx`, `bun x`, `timeout N`, `cmd /c`, `powershell -Command`, npx
+  with `--registry`, `--cache` or `--call`, a subshell `( ... )`, and `| sh`.
+- Rare false alarms: `npm run impeccable -- detect` and `impeccable --json detect` are refused.
 - Accepted: `detect` may download the engine. The owner accepted this on 2026-10-10, as
   joyous did. It trusts the release checksum.
 
