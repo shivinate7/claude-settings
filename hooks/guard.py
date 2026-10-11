@@ -5276,7 +5276,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                       else SILENT_WRITE_QUIET_REASON)
             refuse(tool, "deny", "silent-write", reason, matched)
 
-    # 1e. The impeccable plugin's `hooks` and `doctor auto` commands (design-skills record).
+    # 1e. The impeccable skill's build and settings-writer commands (design-skills record).
     for segment in split_segments(stripped):
         matched = impeccable_shell_hit(segment)
         if matched:
@@ -5412,7 +5412,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
 # ------------------------------------------------------------------ impeccable is review-only
 #
-# decisions/design-skills.md, rule `impeccable-review-only`: the plugin loads only for a review
+# decisions/design-skills.md, rule `impeccable-review-only`: the skill loads only for a review
 # (`audit`, `critique`). Its build commands and its settings writers are refused. The reason names
 # no command; the log holds what the call asked for.
 IMPECCABLE_REASON = ("this plugin is for a design review only. Ask for a review of the rendered "
@@ -5421,20 +5421,28 @@ IMPECCABLE_SKILLS = ("impeccable", "impeccable:impeccable")
 IMPECCABLE_REVIEWS = ("audit", "critique")
 IMPECCABLE_CHAIN = re.compile(r"[;|\n]|&&")
 RUNNER_WORDS = ("npx", "bunx", "node", "pnpm", "yarn", "npm", "dlx", "exec", "run", "x")
+IMPECCABLE_REFUSED = ("hooks", "install", "update", "link", "ignores", "pin")
+PACKAGE_FLAGS = ("-p", "--package")
+
+
+def impeccable_name(token: str) -> str:
+    """The package or script name of a token, without a path, a `@version` or an extension."""
+    name = basename(token).split("@", 1)[0]
+    return name.rsplit(".", 1)[0]
 
 
 def impeccable_skill_hit(tool_input) -> str:
     skill, args = tool_input.get("skill"), tool_input.get("args") or ""
-    if skill not in IMPECCABLE_SKILLS:
+    if not isinstance(skill, str) or skill.lstrip("/") not in IMPECCABLE_SKILLS:
         return ""
     words = args.split() if isinstance(args, str) else []
-    if words and words[0] in IMPECCABLE_REVIEWS and not IMPECCABLE_CHAIN.search(args):
+    if words and words[0] in IMPECCABLE_REVIEWS and not IMPECCABLE_CHAIN.search(args.strip()):
         return ""
     return ("skill %s %s" % (skill, args))[:100]
 
 
 def impeccable_shell_hit(segment: str) -> str:
-    """A segment that runs the plugin's `hooks`, or its `doctor` with `auto`. `detect` passes."""
+    """A segment that runs impeccable's settings writers or its `doctor auto`. `detect` passes."""
     tokens = segment_tokens(segment)
     index = resolve_command(tokens) if tokens else None
     if index is None:
@@ -5442,12 +5450,13 @@ def impeccable_shell_hit(segment: str) -> str:
     if basename(tokens[index]) in RUNNER_WORDS:
         while index < len(tokens) and (basename(tokens[index]) in RUNNER_WORDS
                                        or tokens[index].startswith("-")):
-            index += 1
-    if index >= len(tokens) or basename(tokens[index]).rsplit(".", 1)[0] != "impeccable":
+            index += 2 if tokens[index] in PACKAGE_FLAGS else 1
+    if index >= len(tokens) or impeccable_name(tokens[index]) != "impeccable":
         return ""
     rest = tokens[index + 1:]
     sub = rest[0] if rest else ""
-    if sub == "hooks" or (sub == "doctor" and any(w in ("--auto", "auto") for w in rest[1:])):
+    if ((sub in IMPECCABLE_REFUSED and rest[:2] != ["hooks", "status"])
+            or (sub == "doctor" and any(w in ("--auto", "auto") for w in rest[1:]))):
         return segment.strip()[:100]
     return ""
 

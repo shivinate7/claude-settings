@@ -282,8 +282,7 @@
   },
   "enabledPlugins": {
     "ponytail@ponytail": true,
-    "frontend-design@claude-code-plugins": true,
-    "impeccable@impeccable": true
+    "frontend-design@claude-code-plugins": true
   },
   "extraKnownMarketplaces": {
     "compass-claude-plugins": {
@@ -303,13 +302,6 @@
         "source": "github",
         "repo": "anthropics/claude-code",
         "ref": "v2.1.296"
-      }
-    },
-    "impeccable": {
-      "source": {
-        "source": "github",
-        "repo": "pbakaus/impeccable",
-        "ref": "skill-v4.5.2"
       }
     }
   },

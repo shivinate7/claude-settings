@@ -22,9 +22,9 @@ Renovate moves each pin. The owner installs the Renovate GitHub app under their 
 release notes, and waits 14 days after a release (`minimumReleaseAge`). The owner merges or
 skips each PR.
 
-- impeccable: the `skill-v*` tag on the pinned-source line in `skills/design-review/SKILL.md`.
-  This record does not copy it. Renovate edits that tag only. The copy in `skills/impeccable`
-  must be replaced with the same release, or the PR is not complete.
+- impeccable: the `skill-v*` tag in `skills/impeccable/SOURCE.txt` and the pinned-source line in
+  `skills/design-review/SKILL.md`. This record does not copy it. Renovate edits the tag. The
+  `impeccable-sync` workflow copies the folder at the new tag into the Renovate branch.
 - Vercel rules: the commit in the URL in `skills/design-review/SKILL.md`.
 - frontend-design: the `anthropics/claude-code` ref in `settings.json`.
 - Exception to `verification-bump-first-fix-version` (bump to the first fixing version): these
@@ -46,9 +46,11 @@ Owner ruling 2026-10-10 keeps this rule on the copy. It lets impeccable load onl
 `update`, `link`, `ignores`, `pin`, `doctor auto`, and any version spec.
 
 Status: built in `hooks/guard.py` and routed in `settings.json`.
-- Built and tested: the Skill tool, for any command except `audit` and `critique`. Shell
-  `hooks` and `doctor auto`.
-- Not built: shell `install`, `update`, `link`, `ignores`, `pin`, and any version spec.
+- Skill tool: any command except `audit` and `critique` is refused. The name `/impeccable` counts.
+- Shell: `hooks` (except `hooks status`), `install`, `update`, `link`, `ignores`, `pin` and
+  `doctor auto` are refused. The package name is read without `@version`, through `npx -y` and
+  `npx -p <spec> impeccable`.
+- Limit: `audit then polish` is allowed. The argument-hint says the second word is a target.
 
 Trust each part only after it goes red on its command (verification-trust-guard-after-red: a
 guard is trusted once it goes red).

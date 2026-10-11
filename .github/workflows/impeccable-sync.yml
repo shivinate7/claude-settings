@@ -1,0 +1,55 @@
+name: impeccable-sync
+
+# A Renovate PR moves the tag in skills/impeccable/SOURCE.txt. This job copies the skill folder
+# at that tag into the same branch, so the PR is complete (decisions/design-skills.md).
+# A push made with GITHUB_TOKEN starts no other workflow: close and reopen the PR, or push by
+# hand, to run the gates on the copy.
+on:
+  pull_request:
+    branches: [main]
+    paths: [skills/impeccable/SOURCE.txt]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    if: startsWith(github.head_ref, 'renovate/') && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # The token stays in the checkout: the last step pushes with it.
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Copy the skill folder at the pinned tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag=$(grep -o 'tag=skill-v[0-9][0-9.]*' skills/impeccable/SOURCE.txt | cut -d= -f2)
+          [ -n "$tag" ] || { echo "no skill-v tag in SOURCE.txt" >&2; exit 1; }
+          src="$RUNNER_TEMP/impeccable"
+          git clone --depth 1 --branch "$tag" https://github.com/pbakaus/impeccable "$src"
+          commit=$(git -C "$src" rev-parse HEAD)
+          find skills/impeccable -mindepth 1 -delete
+          cp -R "$src/plugin/skills/impeccable/." skills/impeccable/
+          cp "$src/LICENSE" "$src/NOTICE.md" skills/impeccable/
+          echo "repo=pbakaus/impeccable path=plugin/skills/impeccable tag=$tag commit=$commit" > skills/impeccable/SOURCE.txt
+
+      - name: Push the copy to the PR branch
+        shell: bash
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          git add -A skills/impeccable
+          if git diff --cached --quiet; then echo "copy already matches"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "impeccable: copy the skill folder at the pinned tag"
+          git push origin "HEAD:refs/heads/$BRANCH"
