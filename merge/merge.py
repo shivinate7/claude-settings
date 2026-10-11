@@ -602,7 +602,8 @@ def ff_main(root, base, commit):
     if c:
         # Drop git's advice lines (commit, stash, move, remove): they name the forbidden way out.
         kept = "\n".join(l for l in out.splitlines() if not l.startswith(("Please ", "Aborting")))
-        raise Stop(f"the local main did not move. {kept}\nFast-forward {base} there by hand.")
+        where = os.path.realpath(tree or root)
+        raise Stop(f"the local main did not move in {where}. {kept}\nFast-forward {base} there by hand.")
     say(f"merge: local {base} is at {commit[:9]}.")
 
 def cut_branch(root, branch, merged):
@@ -634,26 +635,54 @@ def after_merge(root, cmds):
 
 # ------------------------------------------------------------------ the flow
 
-def load_config(root, path):
-    """The repo's config. A repo with no file gets the defaults (decision merge-config-defaults, merge needs no config file); a broken file stops."""
-    p = os.path.join(root, path)
-    if not os.path.exists(p):
-        c, out = sh(["gh", "repo", "view", "--json", "defaultBranchRef"], cwd=root)
-        try:
-            if c:
-                raise ValueError(out)
-            branch = json.loads(out)["defaultBranchRef"]["name"]
-        except (ValueError, KeyError, TypeError) as e:
-            raise Stop(f"{path} not found, and the default branch cannot be read from gh: {e}")
-        say(f"merge: {path} not found. Using the defaults: merge method merge, 45 minute deadline, required checks from branch protection, default branch {branch}.")
-        return {"defaultBranch": branch, "merge": {"method": "merge", "deadlineMinutes": 45, "requiredChecks": "protection", "afterMerge": []}}
+MERGE_DEFAULTS = {"method": "merge", "deadlineMinutes": 45, "requiredChecks": "protection", "afterMerge": []}
+MERGE_FIELDS = set(MERGE_DEFAULTS) | {"deleteBranch", "ignoreChecks"}
+
+def host_default_branch(root):
+    c, out = sh(["gh", "repo", "view", "--json", "defaultBranchRef"], cwd=root)
     try:
-        with open(p, encoding="utf-8") as f:
-            cfg = json.load(f)
-    except (OSError, ValueError) as e:
-        raise Stop(f"cannot read the config {p}: {e}")
+        if c:
+            raise ValueError(out)
+        return json.loads(out)["defaultBranchRef"]["name"]
+    except (ValueError, KeyError, TypeError) as e:
+        raise Stop(f"the default branch cannot be read from gh: {e}")
+
+def load_config(root, base, path):
+    """The repo's config, read from the base branch on origin: never the local checkout, never the PR tree.
+    No file: all defaults. A file with fields left out: defaults for those fields. A broken file stops.
+    Decision merge-config-defaults, merge needs no config file."""
+    ref = f"origin/{base}"
+    c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
+    if c:
+        raise Stop(f"git fetch origin {base} failed: {out}")
+    c, listed = git(root, "ls-tree", "--name-only", ref, "--", path)
+    if c:  # an unreadable base is not an absent file
+        raise Stop(f"cannot read {ref} to look for {path}: {listed}")
+    if not listed:
+        branch = host_default_branch(root)
+        say(f"merge: {path} not found on {ref}. Using the defaults: merge method merge, 45 minute deadline, required checks from branch protection, default branch {branch}.")
+        return {"defaultBranch": branch, "merge": dict(MERGE_DEFAULTS)}
+    c, text = git(root, "show", f"{ref}:{path}")
+    try:
+        if c:
+            raise ValueError(text)
+        cfg = json.loads(text)
+        if not isinstance(cfg, dict) or not isinstance(cfg.get("merge", {}), dict):
+            raise ValueError("not an object")
+    except ValueError as e:
+        raise Stop(f"cannot read the config {path} on {ref}: {e}")
+    m = cfg.setdefault("merge", {})
+    unknown = sorted(set(m) - MERGE_FIELDS)
+    if unknown:
+        raise Stop(f"{path} on {ref} has an unknown field in the merge block: {', '.join(unknown)}")
+    filled = [k for k in MERGE_DEFAULTS if k not in m]
+    for k in filled:
+        m[k] = MERGE_DEFAULTS[k]
     if not cfg.get("defaultBranch"):
-        raise Stop(f"{path} has no defaultBranch")
+        cfg["defaultBranch"] = host_default_branch(root)
+        filled.insert(0, "defaultBranch")
+    if filled:
+        say(f"merge: {path} on {ref} leaves out {', '.join(filled)}. Using the defaults for those.")
     return cfg
 
 def refuse_bad_pr(info):
@@ -694,8 +723,8 @@ def ignore_checks(cfg):
         out[e["name"]] = e["reason"]
     return out
 
-def preview(root, cfg, cfgrel, n, host, lock):
-    info = host.pr(n)
+def preview(root, cfg, cfgrel, n, host, lock, info=None):
+    info = info or host.pr(n)
     refuse_bad_pr(info)
     base = info["base"]
     resumed = trailer = None
@@ -718,12 +747,12 @@ def preview(root, cfg, cfgrel, n, host, lock):
         f"  then:   push HEAD:{info['branch']}, wait for the checks, `gh pr merge --{m.get('method', '?')} --match-head-commit`,",
         f"          move local {base}, run {len(m.get('afterMerge', []))} afterMerge command(s)" + (", delete the branch." if m.get("deleteBranch") else "."))
 
-def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session=""):
+def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None):
     m = cfg.get("merge", {})
     for k in ("method", "deadlineMinutes"):
         if k not in m:
             raise Stop(f"{cfgrel} has no merge.{k}. Read it from the repo; the tool never guesses it.")
-    info = host.pr(n)  # a read: acquire never waits, so the head cannot move before the lock is ours
+    info = info or host.pr(n)  # main read it once already, and the config came from that base. A read: acquire never waits, so the head cannot move before the lock is ours
     base = info["base"]  # the PR's own base; read again under the lock
     base_ref = f"origin/{base}"
     lock.holder = {"pr": n, "branch": info["branch"], "session": session}
@@ -798,7 +827,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session=""):
             except Stop as e:
                 fail(str(e))
             if claim_sha and not stamp_cfg:
-                fail(f"the base no longer holds {cfgrel} with stamp kinds, so the claim cannot be proved fresh.")
+                fail(f"base lost its config: {cfgrel} on {base_ref} no longer holds stamp kinds, so the claim cannot be proved fresh.")
             c, out = node_stamp(wt, stamp_cfg, "check", base_ref) if stamp_cfg else (0, "")  # each claimed number must still be free on the base tip
             if c or "UNKNOWN:" in out:
                 fail(str(stamp_stop("the base moved and the claim is stale, or the check could not read the base", out)))
@@ -840,16 +869,22 @@ def main(argv, host=None, lock=None):
         c, root = sh(["git", "rev-parse", "--show-toplevel"])
         if c:
             raise Stop("not in a git checkout")
-        cfg = load_config(root, a.config)
         lock = lock or GhLock()
         if a.unlock is not None:
-            b = cfg["defaultBranch"] if a.unlock is True else a.unlock
+            b = a.unlock
+            if b is True:
+                c, head = git(root, "rev-parse", "--abbrev-ref", "origin/HEAD")
+                b = head.split("/", 1)[1] if not c and "/" in head else host_default_branch(root)
             lock.unlock(b)
             say(f"merge: lock on {b} removed.")
             return 0
+        h = host or Host()
+        info = h.pr(a.pr)  # the PR's base decides which config; confirm and preview reuse this read
+        cfg = load_config(root, info["base"], a.config)
         ignore = ignore_checks(cfg)
-        h = host or Host(cfg.get("merge", {}).get("requiredChecks", "protection"), ignore=ignore)
-        return (confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session) if a.confirm else preview(root, cfg, a.config, a.pr, h, lock)) or 0
+        if not host:
+            h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore
+        return (confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info) if a.confirm else preview(root, cfg, a.config, a.pr, h, lock, info)) or 0
     except Stop as e:
         print(f"merge: {e}", file=sys.stderr)
         return 1
