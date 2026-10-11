@@ -234,22 +234,47 @@ def stall_problems(rc, text, secs, sleep_args=None):
     return problems
 
 
-@case
-def trailing_backslash_keeps_brace_apart():
-    """8. an original ending in a backslash runs as it does bare, in sh, bash and zsh"""
-    orig = "echo ends-with-backslash \\"
+def bare_run(shell, orig):
+    bare = subprocess.run([shell, "-c", orig], stdin=subprocess.DEVNULL,
+                          capture_output=True, timeout=20)
+    return bare.returncode, bare.stdout.decode("utf-8", "replace")
+
+
+def parity_problems(orig, full_output_shells=("/bin/sh", "/bin/bash"), rc_only_shells=("/bin/zsh",)):
+    """Run orig bare and rewritten in each shell. Compare exit codes everywhere, output where stated."""
     problems = []
-    for shell in shells():
-        bare = subprocess.run([shell, "-c", orig], stdin=subprocess.DEVNULL,
-                              capture_output=True, timeout=20)
-        bare_text = bare.stdout.decode("utf-8", "replace")
+    for shell in full_output_shells + rc_only_shells:
+        if not os.path.exists(shell):
+            continue
+        bare_rc, bare_text = bare_run(shell, orig)
         rc, text, _secs, _cmd = run_rewritten(orig, shell=shell)
-        problems += expect(rc == bare.returncode,
-                           f"{shell}: exit {rc}, bare exit {bare.returncode}")
-        problems += expect(text == bare_text,
-                           f"{shell}: output {text!r}, bare output {bare_text!r}")
+        problems += expect(rc == bare_rc, f"{shell}: exit {rc}, bare exit {bare_rc}")
+        if shell in full_output_shells:
+            problems += expect(text == bare_text, f"{shell}: output {text!r}, bare output {bare_text!r}")
+        else:
+            problems += expect("syntax error" not in text, f"{shell}: syntax error: {text!r}")
         reap()
     return problems
+
+
+@case
+def trailing_backslash_keeps_brace_apart():
+    """8. an original ending in a backslash: sh and bash match bare output; zsh matches exit code"""
+    return parity_problems("echo ends-with-backslash \\")
+
+
+@case
+def comment_ending_in_backslash_keeps_exit_code():
+    """10. false # note \\ keeps the bare exit code in sh, bash and zsh"""
+    return parity_problems("false # note \\", full_output_shells=(),
+                           rc_only_shells=("/bin/sh", "/bin/bash", "/bin/zsh"))
+
+
+@case
+def lone_backslash_line_keeps_exit_code():
+    """11. false, then a lone backslash line: exit code matches bare in sh, bash and zsh"""
+    return parity_problems("false\n\\", full_output_shells=(),
+                           rc_only_shells=("/bin/sh", "/bin/bash", "/bin/zsh"))
 
 
 @case
