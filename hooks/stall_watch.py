@@ -128,6 +128,15 @@ def watch(pid, log, quiet):
             time.sleep(0.2)
 
 
+def eof_backslash_literal():
+    """True when /bin/sh keeps a backslash at end of input (dash, bash 5). Bash 3.2 drops it."""
+    try:
+        return subprocess.run(["/bin/sh", "-c", "printf %s \\"], capture_output=True, text=True,
+                              timeout=TOOL_TIMEOUT).stdout == "\\"
+    except Exception:
+        return False
+
+
 def hook():
     # ponytail: posix only. The rewrite needs `&`, `$!` and `wait`, and Windows has no harness
     # shell that matches. Returning nothing leaves a Windows background call unchanged.
@@ -144,7 +153,11 @@ def hook():
     quiet = os.environ.get("STALL_WATCH_QUIET") or str(DEFAULT_QUIET)
     log = os.path.join(os.path.realpath(tempfile.gettempdir()), "stall-watch-%s.log" % uuid.uuid4().hex)
     q = shlex.quote
-    # The blank line before `}` keeps a trailing `\` in the original from joining the brace line.
+    # An odd run of trailing backslashes ends in a line continuation. Bare, a shell that keeps the
+    # backslash at end of input runs it as a literal; the rewrite's `}` line would swallow it. So
+    # there, double the last one. The blank line before `}` stops the join in shells that drop it.
+    if (len(original) - len(original.rstrip("\\"))) % 2 and eof_backslash_literal():
+        original += "\\"
     wrapped = (
         "{ " + original + "\n\n} > " + q(log) + " 2>&1 & pid=$!; "
         + " ".join(q(a) for a in [sys.executable, os.path.abspath(__file__)])

@@ -68,4 +68,7 @@ visible at once.
 - Under zsh, a trailing `\` continuation leaves one empty word. sh and bash drop it. The
   exit code differs only when a lone `\` line follows a failing command: bare zsh gives 126,
   and the rewrite keeps the failing code.
+- A command ending in an odd run of `\` behaves by shell: dash and bash 5 keep the last one as a
+  literal at end of input, bash 3.2 drops it. The hook probes `/bin/sh` and, when it keeps the
+  literal, doubles the last `\` so the rewrite matches bare. Measured on dash, not on Linux CI.
 - The watcher checks the job with `ps` once each second.
