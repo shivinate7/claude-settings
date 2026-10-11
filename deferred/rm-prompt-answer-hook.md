@@ -14,5 +14,6 @@ the `rm-var-unguarded` guard does not prevent. The owner chose "Ship guard now, 
 Every other request goes on to the owner unchanged.
 
 **Why it waits.** The first build (commit 18fddf9 on branch rm-var-guard) allowed
-`rm -rf /Users/<you>`, `rm -rf *`, `rm -rf {~,x}` and `"${S:?}"/../..`, in every mode. The
-review cases are the red tests for the rebuild.
+`rm -rf /Users/<you>`, `rm -rf *`, `rm -rf {~,x}` and `"${S:?}"/../..`, in every mode. Its
+first test file is at commit 7ea6b65. Add the four inputs above as red tests before the
+rebuild.
