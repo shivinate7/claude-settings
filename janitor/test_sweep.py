@@ -3648,11 +3648,17 @@ class UnreadableHuskBaseRunTests(unittest.TestCase):
 #     {"udid", "name", "action": "shutdown" | "keep", "reason"}.
 #   A keep reason string carries one code from SIM_KEEP_CODES. A shutdown runs ONE
 #     `xcrun simctl shutdown <UDID>`. A preview (confirm False) runs none. No call ever names `all`.
-#   Reads: `xcrun simctl list devices --json`, and one `ps -axo pid=,ppid=,uid=,command=` table
-#     (the table _read_ps_table reads). No xcrun on the PATH, or a win32 platform: no tier, no
-#     decision, nothing printed.
-#   record_path holds JSON lines {"udid", "name", "deviceTypeIdentifier", "runtime", "at"}, where
-#     "at" is ISO-8601 UTC. The NEWEST line for a UDID decides its boot time.
+#   Reads: `xcrun simctl list devices --json`, one `ps -axo pid=,ppid=,uid=,command=` table
+#     (the table _read_ps_table reads), and one `ps -o pid=,lstart= -p PIDS` call for the start
+#     time of each launchd_sim the table names. A `ps` call whose arguments name `lstart` answers
+#     "PID START" lines when its -o list names pid=, else "START" lines. No xcrun on the PATH, or a
+#     win32 platform: no tier, no decision, nothing printed.
+#   record_path holds JSON lines {"udid", "name", "deviceTypeIdentifier", "runtime", "at",
+#     "launchd_pid", "launchd_start"}, where "at" is ISO-8601 UTC, and launchd_pid and
+#     launchd_start are the launchd_sim of that boot, as ps prints them. The NEWEST line for a UDID
+#     decides its boot time. A device is idle only when its live launchd_sim has that pid AND that
+#     start time; otherwise it was booted again by hand, and the tier keeps it with the code
+#     "boot-record-mismatch".
 
 SIM_RUNTIME = "com.apple.CoreSimulator.SimRuntime.iOS-26-0"
 SIM_TYPE = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro"
@@ -3661,28 +3667,47 @@ SIM_U2 = "1A2B3C4D-0000-4000-8000-000000000002"
 SIM_U9 = "1A2B3C4D-0000-4000-8000-000000000009"
 SIM_LAUNCHD = ("/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/"
                "Resources/launchd_sim")
+SIM_LSTART = "Sat Oct 10 07:00:00 2026"  # the start time the fixtures give every launchd_sim
 SIM_KEEP_CODES = ("booted-recently", "held-by-process", "simulator-app-running",
                   "xcode-running", "simctl-unreadable", "process-table-unreadable",
-                  "start-time-unreadable")
+                  "start-time-unreadable", "boot-record-mismatch")
+
+
+def sim_launchd_pid(udid):
+    """The launchd_sim pid this file gives UDID: 1000 plus its last two digits."""
+    return 1000 + int(udid[-2:])
+
+
+def sim_launchd_row(udid, pid=None):
+    """The process-table row (pid, ppid, command) of UDID's launchd_sim, a child of launchd."""
+    return (sim_launchd_pid(udid) if pid is None else pid, 1, SIM_LAUNCHD + " " + udid)
 
 
 def sim_iso_ago(seconds):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - seconds))
 
 
-def sim_record(udid, name, at):
+def sim_record(udid, name, at, pid=None, start=SIM_LSTART):
+    """A boot-record line. The launchd_sim fields default to the ones the live table gives UDID."""
     return json.dumps({"udid": udid, "name": name, "deviceTypeIdentifier": SIM_TYPE,
-                       "runtime": SIM_RUNTIME, "at": at})
+                       "runtime": SIM_RUNTIME, "at": at,
+                       "launchd_pid": sim_launchd_pid(udid) if pid is None else pid,
+                       "launchd_start": start})
 
 
 class SimWorld:
     """In-process stand-ins for `xcrun simctl` and the process table. Replaces sweep's
     subprocess.run for one case and records every call in `calls`. Any other command fails the
-    case loudly: the tier must not read or run anything this file has not answered."""
+    case loudly: the tier must not read or run anything this file has not answered. Every Booted
+    device gets its launchd_sim row in the table unless the case names one."""
 
     def __init__(self, devices, ps_rows):
         self.devices = devices      # [(udid, name, "Booted" | "Shutdown")]
-        self.ps_rows = ps_rows      # [(pid, ppid, command)]
+        self.ps_rows = list(ps_rows)  # [(pid, ppid, command)]
+        for udid, _, state in devices:
+            if state == "Booted" and not any("launchd_sim" in cmd and udid in cmd
+                                             for _, _, cmd in self.ps_rows):
+                self.ps_rows.append(sim_launchd_row(udid))
         self.simctl_rc = 0
         self.simctl_out = None      # None: the device list is built from `devices`
         self.ps_rc = 0
@@ -3708,6 +3733,19 @@ class SimWorld:
         return "".join("%d %d %d %s\n" % (pid, ppid, self.uid, cmd)
                        for pid, ppid, cmd in self.ps_rows)
 
+    def lstart_text(self, argv):
+        """The start-time answer: "PID START" lines when the -o list names pid=, else "START"
+        lines, one per launchd_sim row (only the -p PIDS when -p is given)."""
+        wanted = argv[argv.index("-p") + 1].split(",") if "-p" in argv else None
+        with_pid = any("pid=" in a for a in argv)
+        lines = []
+        for pid, _, cmd in self.ps_rows:
+            if "launchd_sim" not in cmd or (wanted is not None and str(pid) not in wanted):
+                continue
+            start = SIM_LSTART
+            lines.append("%d %s\n" % (pid, start) if with_pid else start + "\n")
+        return "".join(lines)
+
     def run(self, argv, *a, **k):
         self.calls.append(list(argv))
         if argv[0] == "xcrun":
@@ -3717,6 +3755,8 @@ class SimWorld:
                 return subprocess.CompletedProcess(argv, 0, "", "")
             return subprocess.CompletedProcess(argv, self.simctl_rc, self.simctl_text(), "")
         if argv[0] == "ps":
+            if any("lstart" in a for a in argv):
+                return subprocess.CompletedProcess(argv, self.ps_rc, self.lstart_text(argv), "")
             return subprocess.CompletedProcess(argv, self.ps_rc, self.ps_text(), "")
         raise AssertionError("the simulator tier ran a command no case answers: %r" % (argv,))
 
@@ -3812,7 +3852,7 @@ class SimulatorTierTests(unittest.TestCase):
     def test_a_process_outside_the_device_tree_naming_its_udid_keeps_it(self):
         # The Claude.app panel holder: `simctl spawn <UDID> log stream`, under Claude, not launchd_sim.
         self.arm([(SIM_U1, "Idle Pro", "Booted")],
-                 ps_rows=[(300, 1, SIM_LAUNCHD + " " + SIM_U1),
+                 ps_rows=[sim_launchd_row(SIM_U1),
                           (400, 1, "/Applications/Claude.app/Contents/MacOS/Claude"),
                           (500, 400, "xcrun simctl spawn %s log stream --level debug" % SIM_U1)],
                  records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(2 * 3600))])
@@ -3824,7 +3864,7 @@ class SimulatorTierTests(unittest.TestCase):
 
     def test_a_process_naming_the_device_name_keeps_it(self):
         self.arm([(SIM_U1, "Idle Pro", "Booted")],
-                 ps_rows=[(300, 1, SIM_LAUNCHD + " " + SIM_U1),
+                 ps_rows=[sim_launchd_row(SIM_U1),
                           (500, 1, "/usr/local/bin/probe --device 'Idle Pro'")],
                  records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(2 * 3600))])
         decisions = self.tier(confirm=True)
@@ -3835,7 +3875,7 @@ class SimulatorTierTests(unittest.TestCase):
 
     def test_a_process_naming_booted_keeps_it(self):
         self.arm([(SIM_U1, "Idle Pro", "Booted")],
-                 ps_rows=[(300, 1, SIM_LAUNCHD + " " + SIM_U1),
+                 ps_rows=[sim_launchd_row(SIM_U1),
                           (500, 1, "xcrun simctl list devices booted")],
                  records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(2 * 3600))])
         decisions = self.tier(confirm=True)
@@ -3846,7 +3886,7 @@ class SimulatorTierTests(unittest.TestCase):
 
     def test_the_launchd_sim_argv_naming_its_own_udid_is_not_a_holder(self):
         self.arm([(SIM_U1, "Idle Pro", "Booted")],
-                 ps_rows=[(300, 1, SIM_LAUNCHD + " " + SIM_U1)],
+                 ps_rows=[sim_launchd_row(SIM_U1)],
                  records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(2 * 3600))])
         decisions = self.tier(confirm=True)
         self.assertEqual(decisions[SIM_U1]["action"], "shutdown",
@@ -3855,8 +3895,8 @@ class SimulatorTierTests(unittest.TestCase):
 
     def test_an_in_simulator_process_naming_its_udid_is_not_a_holder(self):
         self.arm([(SIM_U1, "Idle Pro", "Booted")],
-                 ps_rows=[(300, 1, SIM_LAUNCHD + " " + SIM_U1),
-                          (301, 300, "/Applications/Probe.app/Probe --udid " + SIM_U1)],
+                 ps_rows=[sim_launchd_row(SIM_U1),
+                          (1002, 1001, "/Applications/Probe.app/Probe --udid " + SIM_U1)],
                  records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(2 * 3600))])
         decisions = self.tier(confirm=True)
         self.assertEqual(decisions[SIM_U1]["action"], "shutdown",
@@ -3883,6 +3923,44 @@ class SimulatorTierTests(unittest.TestCase):
         self.assertIn(SIM_U1, decisions, "the recorded booted device was not judged")
         self.assertEqual(decisions[SIM_U1]["action"], "keep")
         self.assertIn("xcode-running", decisions[SIM_U1]["reason"])
+        self.assertEqual(self.world.shutdowns(), [])
+
+    def test_xcode_beta_running_keeps_every_device(self):
+        self.arm([(SIM_U1, "Idle Pro", "Booted"), (SIM_U2, "Idle Two", "Booted")],
+                 ps_rows=[(600, 1, "/Applications/Xcode-beta.app/Contents/MacOS/Xcode")],
+                 records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(2 * 3600)),
+                          sim_record(SIM_U2, "Idle Two", sim_iso_ago(2 * 3600))])
+        decisions = self.tier(confirm=True)
+        self.assertIn(SIM_U2, decisions, "the recorded booted devices were not judged")
+        for udid in (SIM_U1, SIM_U2):
+            self.assertEqual(decisions[udid]["action"], "keep")
+            self.assertEqual(decisions[udid]["reason"], "xcode-running",
+                             "Xcode-beta.app is not read as Xcode running")
+        self.assertEqual(self.world.shutdowns(), [])
+
+    def test_a_device_booted_again_by_hand_is_kept(self):
+        # Recorded 4 hours ago with launchd_sim pid 501. Shut down, then booted by hand: the live
+        # launchd_sim has pid 1001 and a start time. No record line for the hand boot.
+        self.arm([(SIM_U1, "Idle Pro", "Booted")],
+                 records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(4 * 3600), pid=501,
+                                     start="Sat Oct 10 00:10:00 2026")])
+        decisions = self.tier(confirm=True)
+        self.assertIn(SIM_U1, decisions, "the recorded booted device was not judged")
+        self.assertEqual(decisions[SIM_U1]["action"], "keep")
+        self.assertEqual(decisions[SIM_U1]["reason"], "boot-record-mismatch",
+                         "a device booted by hand was judged on the record of an older boot")
+        self.assertEqual(self.world.shutdowns(), [])
+
+    def test_the_same_launchd_pid_with_a_new_start_time_is_kept(self):
+        # A pid reused after the recorded launchd_sim died: same pid, different start time.
+        self.arm([(SIM_U1, "Idle Pro", "Booted")],
+                 records=[sim_record(SIM_U1, "Idle Pro", sim_iso_ago(4 * 3600),
+                                     start="Fri Oct 9 09:00:00 2026")])
+        decisions = self.tier(confirm=True)
+        self.assertIn(SIM_U1, decisions, "the recorded booted device was not judged")
+        self.assertEqual(decisions[SIM_U1]["action"], "keep")
+        self.assertEqual(decisions[SIM_U1]["reason"], "boot-record-mismatch",
+                         "a reused launchd_sim pid with a new start time matched the record")
         self.assertEqual(self.world.shutdowns(), [])
 
     def test_a_failed_simctl_read_keeps_every_device(self):

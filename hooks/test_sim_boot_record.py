@@ -13,12 +13,20 @@ with no snapshot records nothing, so a device booted before the call is never re
 
 The contract pinned here (hooks/sim_boot_record.py must match it):
   - the event is read from `hook_event_name`; the hook never blocks: stdout is empty, exit 0.
-  - a record line is {"udid", "name", "deviceTypeIdentifier", "runtime", "at"}, `at` ISO-8601 UTC.
+  - a record line is {"udid", "name", "deviceTypeIdentifier", "runtime", "at", "launchd_pid",
+    "launchd_start"}. `at` is ISO-8601 UTC. launchd_pid and launchd_start are the pid and the start
+    time of the device's launchd_sim, as `ps` prints them, read when the device is booted.
+  - the hook reads `simctl list devices` (a simctl read) only for a Bash call whose command names a
+    simulator tool as a whole word (simctl, xcodebuild, xcrun, ...), and for a simulator MCP call
+    whose action is `launch`. `export FOO=1`, `swift build` and `expo start` name no simulator tool.
+    The fake xcrun counts each run in a log, so the cases count the simctl reads.
   - the snapshot lives under <config>/state/. The cases find it by name-agnostic means: they only
     remove or corrupt files in that folder, never read the snapshot's own name.
 
 Each case runs the hook as Claude Code does: one JSON object on stdin. A fake `xcrun` stands first on
-PATH and answers `simctl list devices` from a file the case rewrites between the two events.
+PATH and answers `simctl list devices` from a file the case rewrites between the two events. A fake
+`ps` stands there too, with a launchd_sim row for each UDID. Its argv naming `lstart` answers
+"PID START" lines when the -o list names pid=, else "START" lines.
 No environment seam reaches the hook except CLAUDE_CONFIG_DIR and PATH, which Claude Code sets too.
 """
 
@@ -41,6 +49,10 @@ TYPE_AIR = "com.apple.CoreSimulator.SimDeviceType.iPad-Air"
 U1 = "1A2B3C4D-0000-4000-8000-000000000101"
 U2 = "1A2B3C4D-0000-4000-8000-000000000102"
 U3 = "1A2B3C4D-0000-4000-8000-000000000103"
+LAUNCHD_PIDS = {U1: 2001, U2: 2002, U3: 2003}  # the launchd_sim pid the fake `ps` gives each UDID
+LSTART = "Sat Oct 10 07:00:00 2026"            # the start time the fake `ps` gives every launchd_sim
+LAUNCHD_CMD = ("/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/"
+               "Resources/launchd_sim")
 POSIX = not sys.platform.startswith("win")
 
 
@@ -49,6 +61,22 @@ def devices_json(rows):
     grouped = {RT: [{"udid": u, "name": n, "state": s, "deviceTypeIdentifier": t,
                      "isAvailable": True} for u, n, s, t in rows]}
     return json.dumps({"devices": grouped})
+
+
+def fake_ps_script(rows):
+    """A POSIX `ps` for ROWS, (pid, ppid, uid, command), all strings."""
+    table = "".join("%s %s %s %s\n" % row for row in rows)
+    starts = [(pid, cmd) for pid, _, _, cmd in rows if "launchd_sim" in cmd]
+    pid_lines = "".join("%s %s\n" % (pid, LSTART) for pid, _ in starts)
+    start_lines = "".join(LSTART + "\n" for _ in starts)
+    for text in (table, pid_lines, start_lines):
+        assert "'" not in text, "the printf body is single-quoted"
+    return ("#!/bin/sh\n"
+            "case \"$*\" in\n"
+            "  *lstart*) case \"$*\" in *pid=*) printf '%s' '" + pid_lines + "' ;;"
+            " *) printf '%s' '" + start_lines + "' ;; esac ;;\n"
+            "  *) printf '%s' '" + table + "' ;;\n"
+            "esac\n")
 
 
 @unittest.skipIf(not POSIX, "the fake xcrun is a POSIX shell script")
@@ -64,12 +92,34 @@ class SimBootRecordTests(unittest.TestCase):
         os.makedirs(self.bin)
         os.makedirs(self.empty)
         self.fake = os.path.join(self.bin, "xcrun")
+        self.reads = os.path.join(self.root, "simctl-reads.log")
         self.records = os.path.join(self.state, "sim-boots.jsonl")
+        # A default `ps` with a launchd_sim row for each UDID, so a boot's record can name one.
+        self.write_ps([(str(LAUNCHD_PIDS[u]), "1", "0", LAUNCHD_CMD + " " + u)
+                       for u in (U1, U2, U3)])
 
     # ------------------------------------------------------------------ helpers
 
+    def write_ps(self, rows):
+        """Make the fake `ps` answer the process table ROWS, (pid, ppid, uid, command)."""
+        path = os.path.join(self.bin, "ps")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(fake_ps_script([("1", "0", "0", "/sbin/launchd")] + list(rows)))
+        os.chmod(path, 0o755)
+
+    def simctl_reads(self):
+        """How many times the fake xcrun ran `simctl list devices` since the last reset_reads."""
+        if not os.path.exists(self.reads):
+            return 0
+        with open(self.reads, encoding="utf-8") as handle:
+            return len(handle.read().splitlines())
+
+    def reset_reads(self):
+        if os.path.exists(self.reads):
+            os.remove(self.reads)
+
     def set_devices(self, rows, rc=0):
-        """Make the fake xcrun answer the device list ROWS, or fail with RC."""
+        """Make the fake xcrun answer the device list ROWS, or fail with RC. Each run is logged."""
         if rc:
             body = "exit %d\n" % rc
         else:
@@ -77,7 +127,7 @@ class SimBootRecordTests(unittest.TestCase):
             assert "'" not in text, "the printf body is single-quoted"
             body = "printf '%s' '" + text + "'\n"
         with open(self.fake, "w", encoding="utf-8") as handle:
-            handle.write("#!/bin/sh\n" + body)
+            handle.write("#!/bin/sh\necho read >> '" + self.reads + "'\n" + body)
         os.chmod(self.fake, 0o755)
 
     def run_hook(self, event, tool=None, tool_input=None, path=None):
@@ -179,6 +229,48 @@ class SimBootRecordTests(unittest.TestCase):
         self.pre([(U1, "Idle Pro", "Booted", TYPE_PRO)])
         self.post([(U1, "Idle Pro", "Booted", TYPE_PRO)])
         self.assertEqual(len(self.read_records()), 1, "a device already booted was recorded again")
+
+    def test_the_record_carries_the_launchd_sim_pid_and_start_time(self):
+        self.pre([(U1, "Idle Pro", "Shutdown", TYPE_PRO)])
+        self.post([(U1, "Idle Pro", "Booted", TYPE_PRO)])
+        records = self.read_records()
+        self.assertEqual(len(records), 1, "the shut-down -> booted device was not recorded")
+        self.assertEqual(str(records[0].get("launchd_pid")), str(LAUNCHD_PIDS[U1]),
+                         "the record does not name the launchd_sim pid of this boot")
+        self.assertEqual(records[0].get("launchd_start"), LSTART,
+                         "the record does not name the launchd_sim start time of this boot")
+
+    def test_bash_commands_naming_no_simulator_tool_never_read_simctl(self):
+        rows = [(U1, "Idle Pro", "Shutdown", TYPE_PRO)]
+        for command in ("export FOO=1", "swift build", "expo start"):
+            with self.subTest(command=command):
+                self.reset_reads()
+                tool_input = {"command": command}
+                self.pre(rows, tool_input=tool_input)
+                self.post([(U1, "Idle Pro", "Booted", TYPE_PRO)], tool_input=tool_input)
+                self.assertEqual(self.simctl_reads(), 0,
+                                 "the Bash command %r read simctl" % command)
+
+    def test_simulator_mcp_calls_other_than_launch_never_read_simctl(self):
+        rows = [(U1, "Idle Pro", "Shutdown", TYPE_PRO)]
+        for action in ("screenshot", "tap"):
+            with self.subTest(action=action):
+                self.reset_reads()
+                tool_input = {"action": action, "device": U1}
+                self.pre(rows, tool=MCP, tool_input=tool_input)
+                self.post(rows, tool=MCP, tool_input=tool_input)
+                self.assertEqual(self.simctl_reads(), 0,
+                                 "the simulator MCP action %r read simctl" % action)
+
+    def test_a_simctl_boot_and_an_mcp_launch_do_read_simctl(self):
+        # Controls for the read counter: the two shapes that must read.
+        rows = [(U1, "Idle Pro", "Shutdown", TYPE_PRO)]
+        self.reset_reads()
+        self.pre(rows)
+        self.assertGreaterEqual(self.simctl_reads(), 1, "a Bash simctl boot did not read simctl")
+        self.reset_reads()
+        self.pre(rows, tool=MCP, tool_input={"action": "launch", "device": U1})
+        self.assertGreaterEqual(self.simctl_reads(), 1, "an MCP launch did not read simctl")
 
     def test_malformed_stdin_exits_zero_and_records_nothing(self):
         self.set_devices([(U1, "Idle Pro", "Booted", TYPE_PRO)])
