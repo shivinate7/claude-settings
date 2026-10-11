@@ -34,3 +34,6 @@ tests`, `** TEST SUCCEEDED **`, and PASS.
   tests.
 - `verdict cmd | tail -3` drops verdict's own PASS or FAIL line. The fix is the caller's: do not
   pipe verdict.
+- verdict reads markers from its log file, which the child can reach. A child that truncates
+  the log and then writes more can hide a marker. No test runner does this. A read from a pipe
+  that verdict owns is the upgrade.
