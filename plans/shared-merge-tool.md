@@ -111,8 +111,8 @@ The repo keeps one config file, the stamp config it already has or a new one at
 | `cite.glossFirstUse` | New, shape 3. Globs, such as `["CLAUDE.md"]`. At a claimed cite's first use in a paragraph, the claim adds ` (gloss)`, the first six words of the record title. Shapes 1 and 2 already have `{gloss}` in `cite.template`. |
 | `merge.method` | `merge`, `squash` or `rebase`. Left out, it is `merge`. Read the repo history before you set it. |
 | `merge.requiredChecks` | `"protection"` reads the branch protection API. A list names the checks for a repo with no protection. |
-| `merge.ignoreChecks` | Optional. `[{"name": "...", "reason": "..."}]`. The wait leaves these checks out and names them in the output. An entry with no non-empty reason refuses the config. |
-| `merge.deadlineMinutes` | The longest wait for the claim commit's checks. |
+| `merge.ignoreChecks` | Optional. `[{"name": "...", "reason": "..."}]`. The wait leaves these checks out and names them in the output. An entry whose name or reason is not a non-empty string refuses the config. |
+| `merge.deadlineMinutes` | The longest wait for the claim commit's checks. A whole number from 1 to 360. Any other value refuses the config. |
 | `merge.afterMerge` | Commands that run after the local main moves, such as a primary-checkout sync. Each runs in the repo root. A failure is reported, the merge stays, and the command exits non-zero. |
 | `merge.deleteBranch` | Delete the head branch on origin and locally after the merge. |
 
@@ -128,7 +128,7 @@ passes its arguments through and adds nothing.
    origin through the GitHub API. The API refuses a ref that exists, so only one session holds
    it.
 2. Read the pull request head SHA, base and mergeable state through `gh` again. If the base
-   changed since step 1, stop. Refuse a closed or merged pull request, and a CONFLICTING or
+   changed since step 1, stop. Refuse a closed or merged pull request, a draft, and a CONFLICTING or
    DIRTY one, before any claim. Read the required check names: `merge.requiredChecks`, or the
    branch protection of `<base>`. If the list is empty or unreadable, stop here, before
    anything is pushed. Then fetch origin and check that origin holds the head `gh` named.
