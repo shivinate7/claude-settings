@@ -12,7 +12,7 @@ Owner, 2026-10-11 ("Ship guard now, hook later"):
 1. Rule `rm-var-unguarded` in `hooks/guard.py` refuses a recursive `rm` when a target has an
    unguarded variable expansion followed by `/`, such as `rm -rf $S/$d` or `rm -rf "$D"/*`.
    The refusal prints the flagged targets with each expansion written `${NAME:?}`. The agent
-   retries. The owner sees no prompt. For `$HOME`, the refusal names a literal path instead.
+   retries. The owner sees no prompt.
 2. A hook that answers the `rm` prompt is deferred to its own change. See deferred item
    rm-prompt-answer-hook. The first build allowed deletes of the home folder, `*`, `{~,x}` and
    `..` escapes, in every mode.
@@ -32,10 +32,17 @@ The same count found that 232 of the 246 "allow once" records were answers to
 
 ## Named limits
 
-- `$HOME`, `$PWD` and a variable set from `$(pwd)` or `$HOME` stay a prompt. The docs say a
-  `:?` guard does not clear them. The guard refuses them also when guarded, and the remedy
-  names a literal path. Rule `destructive-delete` refuses a bare `$HOME` target.
+- `$HOME`, `$PWD`, and a variable whose assigned or loop value holds `~`, `HOME`, `PWD` or
+  `pwd`, stay a prompt. The docs say a `:?` guard does not clear them. The guard refuses them
+  also when guarded, and the remedy names a literal path built from the flagged target.
+- A bare `$HOME` target is refused by rule `destructive-delete`. The brace forms `${HOME}` and
+  `${HOME:?}` are not, so Claude Code's own prompt stays the backstop.
+- The taint is read by variable name across the whole command. A later reassignment, or a
+  `D=$HOME` inside quoted text, still taints `D`. This is a rare false alarm.
+- An escaped `\$S/x` gets a hit, although the shell reads it as literal. This is a rare false
+  alarm.
 - These forms are not seen, so Claude Code's own prompt stays the backstop:
   - an `rm` inside a script file, a heredoc piped to `sh`, or `sh -c` nested 5 deep;
-  - `exec rm`, `timeout 5 rm`, `(rm …)`, `find -exec rm`, and `$cmd -rf`;
-  - `$S'/'*`, `$S\/*`, `${S:-}/*` and `$S*`.
+  - `exec rm`, `timeout 5 rm`, `nice -n 5 rm`, `! rm`, `(rm …)`, `$(rm …)`, backtick `rm`,
+    `find -exec rm`, and `$cmd -rf`;
+  - `$S'/'*`, `$S\/*`, `${S:-}/*`, `$S*`, and `rm -rf $(pwd)/dist`.
