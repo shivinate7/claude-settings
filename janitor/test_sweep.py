@@ -3935,6 +3935,22 @@ class SimulatorTierTests(unittest.TestCase):
         self.assertEqual(self.world.shutdowns(), [])
 
 
+    def test_the_run_cap_shuts_down_four_and_keeps_the_fifth(self):
+        udids = ["1A2B3C4D-0000-4000-8000-0000000001%02d" % n for n in range(5)]
+        self.arm([(u, "Idle %d" % n, "Booted") for n, u in enumerate(udids)],
+                 records=[sim_record(u, "Idle %d" % n, sim_iso_ago(2 * 3600))
+                          for n, u in enumerate(udids)])
+        decisions = self.tier(confirm=True)
+        self.assertEqual(sorted(decisions), sorted(udids), "all five recorded devices must be judged")
+        shutdowns = self.world.shutdowns()
+        self.assertEqual(len(shutdowns), 4, "the run cap must allow exactly four shutdowns")
+        self.assertEqual(len(set(shutdowns)), 4, "a device was shut down twice")
+        kept = [u for u in udids if decisions[u]["action"] == "keep"]
+        self.assertEqual(kept, [u for u in udids if u not in shutdowns])
+        self.assertEqual(len(kept), 1, "exactly one device must wait for the next run")
+        self.assertEqual(decisions[kept[0]]["reason"], "run-cap-reached")
+
+
 class SimulatorTierPlatformTests(unittest.TestCase):
     """No xcrun, or Windows: no tier. Runs on every platform, so it holds on the Windows CI too."""
 
