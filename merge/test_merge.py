@@ -1401,6 +1401,19 @@ def put_base_config(env, text):
     sh(o, "git", "push", "-q", "origin", "main")
     sh(env.co, "git", "fetch", "-q", "origin")  # the base is visible to env.co; its checkout is not pulled
 
+def put_base_bytes(env, data):
+    """Commit raw `data` as .github/stamp.json on origin's main, as put_base_config does for text."""
+    o = env.other
+    sh(o, "git", "fetch", "-q", "origin")
+    sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+    path = os.path.join(o, ".github/stamp.json")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+    sh(o, "git", "commit", "-qam", "base config, raw bytes")
+    sh(o, "git", "push", "-q", "origin", "main")
+    sh(env.co, "git", "fetch", "-q", "origin")
+
 class ConfigFile(Env):
     """The merge block and defaultBranch come from the base branch's .github/stamp.json, never the local checkout.
     A base file that is broken stops with one line that names the file, never the defaults."""
@@ -1416,6 +1429,25 @@ class ConfigFile(Env):
     def test_bad_json_on_the_base_stops_with_one_line_naming_the_file(self):
         put_base_config(self, "{not json")
         self.stops_on("line 1")
+
+    def test_a_base_file_that_is_not_utf8_stops_with_one_line_naming_the_file(self):
+        put_base_bytes(self, json.dumps(CONFIG).encode("utf-16"))  # BOM + UTF-16 bytes, not UTF-8
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 1, out)
+        lines = [l for l in out.splitlines() if l.strip()]
+        self.assertEqual(len(lines), 1, out)
+        self.assertIn(".github/stamp.json", lines[0])
+        self.assertNotIn("Traceback", out)
+
+    def test_ignoreChecks_null_stops_with_one_line_and_no_type_error(self):
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], ignoreChecks=None))))
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 1, out)
+        lines = [l for l in out.splitlines() if l.strip()]
+        self.assertEqual(len(lines), 1, out)
+        self.assertIn("ignoreChecks", lines[0])
+        self.assertNotIn("TypeError", out)
+        self.assertNotIn("Traceback", out)
 
     def test_an_unknown_merge_field_stops_with_one_line_naming_it(self):
         put_base_config(self, json.dumps({"merge": {"methd": "squash"}}))
