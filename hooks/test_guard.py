@@ -2138,6 +2138,28 @@ sh("rm-var: a guarded variable set from $HOME is refused and its remedy names no
 # A guarded variable set to a literal path passes.
 sh("rm-var: a guarded variable set to a literal path passes",
    'D=/tmp/w; rm -rf "${D:?}"/x', "allow", cwd=NOGIT)
+# Named limits, derived forms (decision rm-on-a-variable-needs-a-guard, "Named limits" first bullet):
+# a variable whose assigned or loop value holds ~, HOME, PWD or pwd is a limit, so its refusal
+# names a literal path built from the flagged target, never ${D:?} advice. Red until the
+# guard taints these forms.
+sh("rm-var: a variable set to ~ names a literal path, not ${D:?}",
+   'D=~; rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=(os.path.expanduser("~"),), lacks=("${D:?}",))
+sh("rm-var: a loop over $HOME names a literal path, not ${D:?}",
+   'for D in $HOME; do rm -rf "${D:?}"/x; done', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=(os.path.expanduser("~"),), lacks=("${D:?}",))
+sh("rm-var: a default that falls back to $HOME names a literal path, not ${D:?}",
+   "D=${X:-$HOME}; rm -rf ${D:?}/x", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=(os.path.expanduser("~"),), lacks=("${D:?}",))
+sh("rm-var: a variable set from $(echo $HOME) names a literal path, not ${D:?}",
+   "D=$(echo $HOME); rm -rf $D/x", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=(os.path.expanduser("~"),), lacks=("${D:?}",))
+sh("rm-var: $HOME joined to a path names the literal path, not a fixed example",
+   "rm -rf $HOME/x", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=(os.path.expanduser("~") + "/x",), lacks=(".cache",))
+sh("rm-var: a $HOME target and a guarded variable name both remedies",
+   "rm -rf $HOME/x $S/y", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=(os.path.expanduser("~") + "/x", "${S:?}/y"))
 sh("playwright: an envrc file gets the assignment",
    "echo PLAYWRIGHT_BROWSERS_PATH=/x > .envrc", "deny", "playwright-browsers-path", cwd=NOGIT)
 sh("playwright: a case-folded name still sets it", "playwright_browsers_path=/x npx", "deny",
