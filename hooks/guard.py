@@ -4450,6 +4450,11 @@ DRAFT_PR_REASON = ("draft-pr: open every PR as a draft. Add --draft (or -d) to g
 
 def undrafted_pr_create(segment: str) -> bool:
     """True for a `gh pr create` segment with no --draft or -d. Help creates nothing."""
+    tokens = segment_tokens(segment) or []
+    index = resolve_command(tokens) if tokens else None
+    if index is not None and basename(tokens[index]) in ("bash", "sh", "zsh") and "-c" in tokens[index:-1]:
+        script = tokens[tokens.index("-c", index) + 1]   # the script after -c
+        return any(undrafted_pr_create(part) for part in split_segments(script) if part.strip())
     rest = gh_call_of(segment)
     if rest is None or rest[:2] != ["pr", "create"]:
         return False
