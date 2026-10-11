@@ -3855,6 +3855,9 @@ CONFIG_FROZEN_DIRS = (
     # output-styles/ holds the rules for the main session's replies. A session that could rewrite
     # its own style could loosen those rules, same reasoning as agents/.
     os.path.normcase("output-styles"),
+    # ux/ holds the house rules builders and reviewers read (decision ux-house-rules). A session
+    # that could rewrite them could loosen its own review bar, same reasoning as output-styles/.
+    os.path.normcase("ux"),
     # `state` holds the baseline `hooks/config_watch.py` restores a reverted file from. A session
     # that could rewrite the baseline could launder a cap lift into it, so the store is frozen on
     # the same terms as the hooks themselves. Rule 7 needs only the PATH, never the value, so this
