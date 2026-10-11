@@ -753,6 +753,9 @@ def build_fixtures():
     write(os.path.join(GITMAIN, "a.txt"), "base\n")
     write(os.path.join(GITMAIN, "b.txt"), "base\n")
     write(os.path.join(GITMAIN, "hooks", "guard.py"), "base\n")
+    # The last-bullets cases name README.md as a restore operand. It is tracked and modified in
+    # every tree, so each one is a real subject.
+    write(os.path.join(GITMAIN, "README.md"), "base\n")
     run_vcs(GITMAIN, "add", "-A")
     run_vcs(GITMAIN, *IDENT, "commit", "-q", "-m", "files")
     run_vcs(GITMAIN, "worktree", "add", "-q", GITWT, "-b", "lane")
@@ -772,9 +775,10 @@ def build_fixtures():
         write(os.path.join(_tree, "a.txt"), "uncommitted\n")
         write(os.path.join(_tree, "b.txt"), "uncommitted\n")
         write(os.path.join(_tree, "hooks", "guard.py"), "uncommitted\n")
+        write(os.path.join(_tree, "README.md"), "uncommitted\n")
         _require_dirty(_tree, "f.txt", "new.txt", "keep.txt")
         for _name in ("fixtures/a.json", "fixtures/media-players.json", "src/app.py",
-                      "a.txt", "b.txt", "hooks/guard.py"):
+                      "a.txt", "b.txt", "hooks/guard.py", "README.md"):
             if not any(line[:2].strip() == "M" and line[3:].strip() == _name
                        for line in _porcelain(_tree)):
                 sys.exit("fixture setup failed in build_fixtures: %r is not modified in %r"
@@ -1649,6 +1653,46 @@ sh("per-file deny: -C names a worktree first and the shared checkout last, from 
 sh("per-file allow: -C names the shared checkout first and a worktree last, from a plain folder",
    VCS + " -C " + slash(GITMAIN) + " -C " + slash(GITWT) + " checkout -- f.txt", "allow",
    cwd=NOGIT)
+
+# THE LAST THREE BULLETS (decisions/stash-push-is-clone-wide.md, "These discard forms join the
+# rule"): each -C, every operand of restore as a path, and a pathspec the guard cannot read. Each
+# case is tagged "per-file".
+
+# EACH -C, FROM A CLEAN WORKTREE. The chained target is the shared checkout (GITMAIN, dirty), so
+# the rule judges it and denies. SUBJCLEANWT, the call's own tree, is clean and must not decide.
+sh("per-file deny: -C shared checkout then -C . reset --hard, from a clean worktree",
+   VCS + " -C " + slash(GITMAIN) + " -C . reset --hard", "deny", "shared-tree", cwd=SUBJCLEANWT)
+
+# EACH -C, A RELATIVE SECOND -C THAT LANDS IN A WORKTREE. The second -C joins the first, so the
+# chained target is GITWT, a linked worktree. The carve-out reads it and allows the named file.
+sh("per-file allow: -C parent then a relative -C lane, checkout -- of one file",
+   VCS + " -C " + slash(ROOT) + " -C lane checkout -- f.txt", "allow", cwd=NOGIT)
+
+# EVERY OPERAND OF restore IS A PATH. A folder or a dot named before `--` is a whole-folder
+# discard, so a linked worktree keeps the ask. README.md is dirty in every tree.
+sh("per-file ask: restore --worktree hooks -- README.md in a worktree still asks",
+   VCS + " restore --worktree hooks -- README.md", "ask", "shared-tree", cwd=GITWT)
+sh("per-file ask: restore . -- README.md in a worktree still asks",
+   VCS + " restore . -- README.md", "ask", "shared-tree", cwd=GITWT)
+
+# AN UNREADABLE PATHSPEC. A brace, a variable, a backtick or a glob the guard cannot expand is a
+# discard of unknown size. The shared checkout denies it. A linked worktree asks.
+sh("per-file deny: restore --worktree {hooks,README.md} in the shared checkout",
+   VCS + " restore --worktree {hooks,README.md}", "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file ask: restore --worktree {hooks,README.md} in a worktree still asks",
+   VCS + " restore --worktree {hooks,README.md}", "ask", "shared-tree", cwd=GITWT)
+sh("per-file deny: restore \"$F\" in the shared checkout", VCS + ' restore "$F"', "deny",
+   "shared-tree", cwd=GITMAIN)
+sh("per-file ask: restore \"$F\" in a worktree still asks", VCS + ' restore "$F"', "ask",
+   "shared-tree", cwd=GITWT)
+sh("per-file deny: restore `cat list` in the shared checkout", VCS + " restore `cat list`",
+   "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file ask: restore `cat list` in a worktree still asks", VCS + " restore `cat list`",
+   "ask", "shared-tree", cwd=GITWT)
+sh("per-file deny: checkout -- '*.md' in the shared checkout", VCS + " checkout -- '*.md'",
+   "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file ask: checkout -- '*.md' in a worktree still asks", VCS + " checkout -- '*.md'",
+   "ask", "shared-tree", cwd=GITWT)
 
 # KILL CASES for three mutate_guard entries removed in 78e8446. Each pins today's base verdict.
 # The quoted refspec and the quoted force in a commit message are verdicts; the quoted force on a
