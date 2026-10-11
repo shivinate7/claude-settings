@@ -227,5 +227,31 @@ class T(unittest.TestCase):
             self.assertIn("log unreadable", first)
             self.assertNotIn("Traceback", r.stdout + r.stderr)
 
+    def test_child_truncating_log_on_exit0_is_fail_log_unreadable(self):
+        # Marker is flushed into the log, then the child empties the log: verdict cannot read its markers.
+        code = ("import os\n"
+                "print('** TEST FAILED **', flush=True)\n"
+                "open(os.environ['VERDICT_LOG'], 'w').close()")
+        with tempfile.TemporaryDirectory() as d:
+            r = run(code, os.path.join(d, "v.log"))
+            self.assertNotEqual(r.returncode, 0, r.stdout)
+            first = r.stdout.splitlines()[0] if r.stdout else ""
+            self.assertTrue(first.startswith("FAIL "), (r.stdout[:300], r.stderr[-300:]))
+            self.assertIn("log unreadable", first)
+            self.assertNotIn("Traceback", r.stdout + r.stderr)
+
+    def test_child_truncating_log_on_exit7_keeps_rc_and_fails_log_unreadable(self):
+        code = ("import os, sys\n"
+                "print('** TEST FAILED **', flush=True)\n"
+                "open(os.environ['VERDICT_LOG'], 'w').close()\n"
+                "sys.exit(7)")
+        with tempfile.TemporaryDirectory() as d:
+            r = run(code, os.path.join(d, "v.log"))
+            self.assertEqual(r.returncode, 7, r.stdout)
+            first = r.stdout.splitlines()[0] if r.stdout else ""
+            self.assertTrue(first.startswith("FAIL ") and " rc=7 " in first, (r.stdout[:300], r.stderr[-300:]))
+            self.assertIn("log unreadable", first)
+            self.assertNotIn("Traceback", r.stdout + r.stderr)
+
 if __name__ == "__main__":
     unittest.main()
