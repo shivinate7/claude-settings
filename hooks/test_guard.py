@@ -2230,6 +2230,42 @@ sh("playwright-install: the Node 22 cli.js form with a parent-relative path is a
 # Control: a workspace exec that runs a test is not an install.
 sh("playwright-install: a workspace exec test run is allowed",
    "npm -w app exec playwright test", "allow", cwd=NOGIT)
+# Round 4 of #329: a plain node run of a cli.js named by the playwright-core package, or by a
+# path that holds the word playwright, is an install. Each is denied in the main session and as a
+# subagent.
+sh("playwright-install: node runs the playwright-core cli.js install",
+   "node node_modules/playwright-core/cli.js install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent node playwright-core cli.js install is denied",
+   "node node_modules/playwright-core/cli.js install", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1")
+sh("playwright-install: node runs a cli.js under a playwright path install",
+   "node /opt/x/playwright/cli.js install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent node cli.js under a playwright path install is denied",
+   "node /opt/x/playwright/cli.js install", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1")
+sh("playwright-install: a subagent Node 22 playwright-core cli.js install is denied",
+   "npx -y node@22 node_modules/playwright-core/cli.js install chromium", "deny",
+   "playwright-install", cwd=NOGIT, agent_id="pw-sub1")
+# Round 4 allows, main session. A package manager's own install, a flag's value, and a test
+# filter that names the word are not browser installs. The Node 22 cli.js forms are allowed.
+sh("playwright-install: pnpm -C takes a directory, its install is allowed",
+   "pnpm -C playwright install", "allow", cwd=NOGIT)
+sh("playwright-install: npm --prefix takes a directory, its install is allowed",
+   "npm --prefix ./playwright install", "allow", cwd=NOGIT)
+sh("playwright-install: yarn --cwd takes a directory, its install is allowed",
+   "yarn --cwd playwright install", "allow", cwd=NOGIT)
+sh("playwright-install: pnpm -F filters a package, its install is allowed",
+   "pnpm -F playwright install", "allow", cwd=NOGIT)
+sh("playwright-install: a test run with -g install is allowed",
+   "npx playwright test -g install", "allow", cwd=NOGIT)
+sh("playwright-install: a test run with --grep install is allowed",
+   "npx playwright test --grep install", "allow", cwd=NOGIT)
+sh("playwright-install: the Node 22 cli.js form without -y is allowed",
+   "npx node@22 node_modules/playwright/cli.js install chromium", "allow", cwd=NOGIT)
+sh("playwright-install: the Node 22 cli.js form with --yes is allowed",
+   "npx --yes node@22 node_modules/playwright/cli.js install chromium", "allow", cwd=NOGIT)
+sh("playwright-install: the Node 22 playwright-core cli.js form is allowed in the main session",
+   "npx -y node@22 node_modules/playwright-core/cli.js install chromium", "allow", cwd=NOGIT)
 
 # THE PREDICATE IS THE ACT, NOT THE TOOL OR THE SPELLING. MEASURED: the owner ran
 # `grep -n -i "...|make reap|pkill..." CLAUDE.md` to search CLAUDE.md for the word, and it was
