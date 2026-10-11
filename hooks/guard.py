@@ -5237,7 +5237,7 @@ def _pwsh_script(tokens) -> str:
     """The script text after `-c` or `-Command` of a pwsh launch, else ''."""
     for at, tok in enumerate(tokens[:-1]):
         if re.fullmatch(r"-c(?:ommand)?", tok, re.I):
-            return tokens[at + 1]
+            return " ".join(tokens[at + 1:])
     return ""
 
 
@@ -5245,45 +5245,30 @@ def _pwsh_script(tokens) -> str:
 # subagent). `install` below is "main" or "sub" in install mode: the same walk then runs, with the
 # install test as its leaf in place of the PLAYWRIGHT_BROWSERS_PATH tests.
 _PW_RUNNERS = ("npx", "pnpm", "yarn", "bunx", "bun", "npm")
-_PW_RUNNER_WORDS = ("exec", "dlx", "x", "run")
-_PW_VALUE_FLAGS = ("-p", "--package", "--prefix", "--filter", "-F", "--cwd", "--dir", "-C")
 _PW_NAMES = ("playwright", "playwright-core", "@playwright/test")
-_PW_NODE22_CLI = ("node_modules/playwright/cli.js", "./node_modules/playwright/cli.js")
+_PW_CLI = "node_modules/playwright/cli.js"
 
 
 def _pw_name(token) -> bool:
-    """True when a command token names the Playwright CLI, version suffix and bin path allowed."""
+    """True when a token names the Playwright CLI: a bin path, `name@version`, or its cli.js."""
     name = ("@" + token[1:].split("@")[0]) if token.startswith("@") else token.split("@")[0]
-    return name in _PW_NAMES or (not name.startswith("@") and basename(name) in _PW_NAMES)
+    return name in _PW_NAMES or (not name.startswith("@") and basename(name) in _PW_NAMES) or (
+        token.endswith(_PW_CLI))
 
 
 def _playwright_install_hit(word, rest, who) -> str:
-    """Return the install text when `word rest` installs Playwright browsers and `who` may not."""
-    words, skip = [], False
-    for tok in rest:
-        if skip:
-            skip = False
-        elif tok.startswith("-"):
-            skip = word in _PW_RUNNERS and tok in _PW_VALUE_FLAGS
-        else:
-            words.append(tok)
-    cmd = word
-    if word in _PW_RUNNERS:
-        while words and words[0] in _PW_RUNNER_WORDS:
-            words.pop(0)
-        cmd = words.pop(0) if words else ""
-    if cmd == "node" or cmd.startswith("node@"):
-        if not words or not (_pw_name(words[0]) or (
-                basename(words[0]) == "cli.js" and "playwright" in words[0])):
-            return ""
-        args = words[1:]
-        allowed = word == "npx" and cmd == "node@22" and words[0] in _PW_NODE22_CLI
-    elif _pw_name(cmd):
-        args, allowed = words, False
-    else:
+    """Return the install text when the call installs Playwright browsers and `who` may not.
+
+    A call is an install when a Playwright name is followed later by the word `install`. Only a
+    runner, node, or the Playwright CLI itself counts as the call, so `echo` of the text is none.
+    """
+    if not (word in _PW_RUNNERS or word == "node" or word.startswith("node@") or _pw_name(word)):
         return ""
-    if not args or args[0] != "install":
+    toks = [word] + rest
+    at = next((i for i, t in enumerate(toks) if _pw_name(t)), None)
+    if at is None or "install" not in toks[at + 1:]:
         return ""
+    allowed = toks[at].endswith(_PW_CLI) and toks[:at] == ["npx", "-y", "node@22"]
     return "" if allowed and who == "main" else "playwright install"
 
 
@@ -5306,7 +5291,12 @@ def _playwright_tokens_hit(tokens, depth=0, install=None) -> str:
         return word + " " + PLAYWRIGHT_VAR
     if word in ("builtin", "exec"):
         return _playwright_tokens_hit(rest, depth + 1, install)
+    npx_script = ""
     if word == "npx":
+        # `npx -c 'script'` runs the string in a shell: walk it like `sh -c`.
+        for flag, value in zip(rest, rest[1:]):
+            if flag in ("-c", "--call"):
+                npx_script = value
         rest = [t for t in rest if not t.startswith("-")] or [""]
         word, rest = rest[0], rest[1:]
     if word == "cross-env":
@@ -5318,8 +5308,8 @@ def _playwright_tokens_hit(tokens, depth=0, install=None) -> str:
     script = " ".join(rest[1:]) if word in CMD_EXE_NAMES and rest and rest[0].lower() in (
         "/c", "/k") else None
     if script is None:
-        script = " ".join(rest) if word == "eval" else (
-            _pwsh_script(tokens) if word in PLAYWRIGHT_PS_SHELLS else inline_script(tokens))
+        script = npx_script or (" ".join(rest) if word == "eval" else (
+            _pwsh_script(tokens) if word in PLAYWRIGHT_PS_SHELLS else inline_script(tokens)))
     for segment in split_segments(script) if script else ():
         hit = playwright_path_hit(segment, depth + 1, ps_inner=word in PLAYWRIGHT_PS_SHELLS,
                                   install=install)
