@@ -1918,6 +1918,48 @@ sh("playwright: unquoted echo appends the export to a shell rc file",
 sh("playwright: unquoted echo piped through tee into a shell rc file",
    "echo export PLAYWRIGHT_BROWSERS_PATH=/x | tee -a ~/.zshrc", "deny",
    "playwright-browsers-path", cwd=NOGIT)
+# PR #314 final review. (a) The profile list lacks these three login and env files, so each
+# write is a missed set until PLAYWRIGHT_PROFILE names them.
+sh("playwright: an echo appends the export to ~/.zshenv",
+   "echo 'export PLAYWRIGHT_BROWSERS_PATH=/x' >> ~/.zshenv", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: an echo appends the export to ~/.zlogin",
+   "echo 'export PLAYWRIGHT_BROWSERS_PATH=/x' >> ~/.zlogin", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: an echo appends the export to ~/.bash_login",
+   "echo 'export PLAYWRIGHT_BROWSERS_PATH=/x' >> ~/.bash_login", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+# (b) split_segments cuts at a backslash-newline outside quotes, so the assignment must still
+# reach the install segment after the continuation. The control keeps a quoted continuation
+# inert for an unrelated rule: the kill word inside echo's quotes is text, not a call.
+sh("playwright: an assignment continued by a backslash-newline still sets it for an install",
+   "PLAYWRIGHT_BROWSERS_PATH=/x \\\nnpx playwright install", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("control: a quoted backslash-newline echo of a kill word is allowed",
+   'echo "pkill \\\nnode"', "allow", cwd=NOGIT)
+# (c) False alarms: each form names the PowerShell setter text but only reads it, quotes it into
+# a body, or writes it to a note. The real setter, inside pwsh -c, stays denied.
+sh("playwright: sed prints the lines that name the setter, a read only",
+   "sed -n '/$env:PLAYWRIGHT_BROWSERS_PATH = /p' f", "allow", cwd=NOGIT)
+sh("playwright: a gh comment body quotes the setter text, allowed",
+   """gh pr comment 1 --body '$env:PLAYWRIGHT_BROWSERS_PATH = "x"'""", "allow", cwd=NOGIT)
+sh("playwright: an echo writes the setter text into a note, allowed",
+   """echo '$env:PLAYWRIGHT_BROWSERS_PATH = "x"' >> notes.md""", "allow", cwd=NOGIT)
+sh("playwright: Select-String reads the name, allowed",
+   "Select-String '$env:PLAYWRIGHT_BROWSERS_PATH' f.ps1", "allow", tool="PowerShell", cwd=NOGIT)
+sh("playwright: Select-String searches for the setter text with an equals sign, allowed",
+   "Select-String -Pattern '$env:PLAYWRIGHT_BROWSERS_PATH = ' f.ps1", "allow",
+   tool="PowerShell", cwd=NOGIT)
+sh("playwright: the real PowerShell setter inside pwsh -c stays denied",
+   """pwsh -c '$env:PLAYWRIGHT_BROWSERS_PATH = "x"'""", "deny", "playwright-browsers-path",
+   cwd=NOGIT)
+# Owner ruling (coordinator): cross-env sets the variable for the command it wraps, so it denies.
+sh("playwright: npx cross-env sets it ahead of an install",
+   "npx cross-env PLAYWRIGHT_BROWSERS_PATH=/x npx playwright install", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: cross-env sets it ahead of an install, bare",
+   "cross-env PLAYWRIGHT_BROWSERS_PATH=/x npx playwright install", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
 
 # THE PREDICATE IS THE ACT, NOT THE TOOL OR THE SPELLING. MEASURED: the owner ran
 # `grep -n -i "...|make reap|pkill..." CLAUDE.md` to search CLAUDE.md for the word, and it was
