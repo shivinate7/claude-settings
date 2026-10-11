@@ -56,6 +56,18 @@ visible at once.
 - Run the original in `bash -c` with quoting. The deny rules then see one quoted string, and
   the shell differs from the one the session expects.
 
+## Tools that are quiet by design
+
+A tool that waits with no output must print a short progress line at least every 120 seconds.
+The watcher does not change. A false STALL teaches the reader to scroll past a real one
+(decision guard-that-cries-wolf-is-spent).
+
+- The merge tool prints `merge: waiting on ...` while it waits on checks, and while GitHub
+  still shows the head before the push. Incident, 2026-10-11: PR #332 and PR #333 each drew a
+  false STALL during the CI wait.
+- `verdict` prints nothing until the command ends. A background suite longer than 300 seconds
+  still draws a false STALL. Open.
+
 ## Known limits
 
 - Windows is not covered. The hook returns nothing when `os.name` is not posix.
