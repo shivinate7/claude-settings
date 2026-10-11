@@ -12,7 +12,7 @@ Screen: ____ Size: ____ Theme: ____
 - [ ] ux-claims-are-true: Is each promise in the copy true of the product now?
 - [ ] ux-machine-text-hidden: Is each code, path, id and server text behind a closed disclosure?
 - [ ] ux-no-dead-end: Does each refusal, error and end page have a control that leads on?
-- [ ] ux-empty-one-action: Is each empty state one sentence and one control? Are filters hidden with no data, and shown with a clear control when a filter emptied the list?
+- [ ] ux-empty-one-action: Is each empty state one sentence and one control? With no data, are filters hidden? After a filter empties the list, do filters show with a clear control?
 - [ ] ux-ask-or-undo: Does each destructive press either ask first or offer Undo, never both or neither? Does each ask name the act and its count, with first focus on Cancel?
 - [ ] ux-keep-what-was-made: Is typed input still there after close, back, a tab change and a return?
 - [ ] ux-control-earns-place: Does each control change something, and does each disabled one say why?
