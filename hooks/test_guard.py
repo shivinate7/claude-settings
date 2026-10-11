@@ -2266,6 +2266,32 @@ sh("playwright-install: the Node 22 cli.js form with --yes is allowed",
    "npx --yes node@22 node_modules/playwright/cli.js install chromium", "allow", cwd=NOGIT)
 sh("playwright-install: the Node 22 playwright-core cli.js form is allowed in the main session",
    "npx -y node@22 node_modules/playwright-core/cli.js install chromium", "allow", cwd=NOGIT)
+# Final review of #329: regressions. Each form is denied in the main session and as a subagent.
+sh("playwright-install: node with a flag before the cli.js runs the install",
+   "node --no-warnings node_modules/playwright/cli.js install", "deny", "playwright-install",
+   cwd=NOGIT)
+sh("playwright-install: a subagent node with a flag before the cli.js install is denied",
+   "node --no-warnings node_modules/playwright/cli.js install", "deny", "playwright-install",
+   cwd=NOGIT, agent_id="pw-sub1")
+sh("playwright-install: npm exec --yes runs the install",
+   "npm exec --yes playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent npm exec --yes install is denied",
+   "npm exec --yes playwright install", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1")
+sh("playwright-install: bunx --bun runs the install",
+   "bunx --bun playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent bunx --bun install is denied",
+   "bunx --bun playwright install", "deny", "playwright-install", cwd=NOGIT, agent_id="pw-sub1")
+sh("playwright-install: npm exec --package= runs the install",
+   "npm exec --package=playwright playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent npm exec --package= install is denied",
+   "npm exec --package=playwright playwright install", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1")
+sh("playwright-install: pnpm dlx --package= runs the install",
+   "pnpm dlx --package=playwright playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent pnpm dlx --package= install is denied",
+   "pnpm dlx --package=playwright playwright install", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1")
 
 # THE PREDICATE IS THE ACT, NOT THE TOOL OR THE SPELLING. MEASURED: the owner ran
 # `grep -n -i "...|make reap|pkill..." CLAUDE.md` to search CLAUDE.md for the word, and it was
