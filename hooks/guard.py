@@ -5116,25 +5116,37 @@ MODEL_FLOOR_REASON = (
 AGENT_CALL = re.compile(r"\bagent\s*\(")
 SCRIPT_STRING = {q: re.compile(r"((?:\\.|[^\\%s])*)%s" % (q, q), re.DOTALL) for q in "'\""}
 SCRIPT_TEMPLATE_TEXT = re.compile(r"((?:\\.|[^\\`$]|\$(?!\{))*)", re.DOTALL)
+SCRIPT_REGEX = re.compile(r"/(?:\\[^\n]|\[(?:\\[^\n]|[^\]\\\n])*\]|[^/\\\[\n])+/")
+SCRIPT_REGEX_AFTER = frozenset(",=:[!&|?{;(+-*%<>^~")
 SCRIPT_PAIR = re.compile(r"(?:(\w+)|\x00(\d+)\x00)\s*:\s*\x00(\d+)\x00")
 
 
-# Known limit: a quote inside a regex literal (for example /"/) can hide an agent() call. Regex
-# literals are not lexed.
+# Known limit: a regex literal is lexed only when the previous non-space character is an operator,
+# one of ( , = { ; : [ ! & | ? + - * % < > ^ ~, or the script starts. A quote inside a regex literal
+# after any other character (for example `x++ /"/`, or after a `)`) can hide an agent() call.
 def mask_script(script: str):
     """Drop comments and replace each string literal with a \\x00N\\x00 token. Return (text, strings).
     One pass, linear. A backslash escapes the next character, so an escaped quote never closes a
     string. An unclosed opener stays as code. Once a scan for a closer fails, no later one can
     succeed, so a failed closer is remembered. A template becomes one token that holds its raw
-    source, filled in at the closing backtick. The code in each `${...}` stays visible after the
+    source, filled in at the closing backtick; a template with a `${` holds a (start, end) span of
+    the script instead of a copy, which the reader slices. The code in each `${...}` stays visible after the
     token, in parentheses. A `{` or `}` in that code moves a depth counter, and the `}` at depth 0
     resumes the template text. A template never closed by the end of the script is undone and its
     backtick stays as code."""
     out, strings, dead = [], [], set()
     stack = []  # brace depth inside each open `${`
-    tstack = []  # (strings index, source start) of each open template
+    tstack = []  # [strings index, source start, has `${`] of each open template
+    regex_dead = 0  # a regex scan that failed ran to this index: no `/` before it opens one
     mark = None  # (out length, strings length, index) where the outermost open template began
     i, n = 0, len(script)
+
+    def regex_ok(j):
+        """True when the previous non-space character allows a regex literal, or none exists."""
+        j -= 1
+        while j >= 0 and script[j].isspace():
+            j -= 1
+        return j < 0 or script[j] in SCRIPT_REGEX_AFTER
 
     def text(j):
         """Mask template text from j. Return the index after the closing backtick, or after the
@@ -5143,11 +5155,12 @@ def mask_script(script: str):
         k = SCRIPT_TEMPLATE_TEXT.match(script, j).end()
         if script.startswith("${", k):
             stack.append(0)
+            tstack[-1][2] = True
             out.append("(")
             return k + 2
         if script.startswith("`", k):
-            idx, start = tstack.pop()
-            strings[idx] = script[start:k]
+            idx, start, spans = tstack.pop()
+            strings[idx] = (start, k) if spans else script[start:k]
             if not tstack:
                 mark = None
             return k + 1
@@ -5177,6 +5190,16 @@ def mask_script(script: str):
             else:
                 out.append(" ")
                 i = j + 2
+        elif ch == "/" and i >= regex_dead and not script.startswith("/*", i) and regex_ok(i):
+            m = SCRIPT_REGEX.match(script, i)
+            if m is None:
+                j = script.find("\n", i)
+                regex_dead = n if j < 0 else j
+                out.append(ch)
+                i += 1
+            else:
+                out.append(" ")
+                i = m.end()
         elif ch in SCRIPT_STRING and ch not in dead:
             m = SCRIPT_STRING[ch].match(script, i + 1)
             if m is None:
@@ -5190,7 +5213,7 @@ def mask_script(script: str):
         elif ch == "`" and "`" not in dead:
             if not tstack:
                 mark = (len(out), len(strings), i)
-            tstack.append((len(strings), i + 1))
+            tstack.append([len(strings), i + 1, False])
             strings.append(None)
             out.append("\x00%d\x00" % (len(strings) - 1))
             i = text(i + 1)
@@ -5251,12 +5274,18 @@ def floor_hit(tool: str, tool_input) -> str:
         if below_the_floor(tool_input.get("model")):
             return str(tool_input.get("model"))
     elif tool == "Workflow" and isinstance(tool_input.get("script"), str):
-        text, strings = mask_script(tool_input["script"])
+        script = tool_input["script"]
+        text, strings = mask_script(script)
+
+        def read(k):
+            v = strings[int(k)]
+            return v if isinstance(v, str) else script[v[0]:v[1]]
+
         for call in AGENT_CALL.finditer(text):
             for body in script_opts(text, call.end()):
                 keys = {}
                 for name, quoted, value in SCRIPT_PAIR.findall(body):
-                    keys[name or strings[int(quoted)]] = strings[int(value)]
+                    keys[name or read(quoted)] = read(value)
                 if below_the_floor(keys.get("model")) and keys.get("agentType") not in HAIKU_ROLES:
                     return keys["model"]
     return ""
