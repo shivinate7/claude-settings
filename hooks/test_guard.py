@@ -4331,6 +4331,148 @@ add("open: an object with no keys at all", "allow", raw="{}")
 add("open: a tool_input that is not an object", "allow", raw='{"tool_name":"Bash","tool_input":3}')
 
 
+# --------------------------------------------------------------------------- impeccable is review-only
+#
+# Owner ruling, 2026-10-10, decisions/design-skills.md: the impeccable plugin loads only for review
+# (audit, critique). Its build commands and its settings writers are refused. Other skills pass.
+
+IMP = "impeccable:impeccable"
+
+add("impeccable: audit is allowed", "allow", tool="Skill", skill=IMP, args="audit")
+add("impeccable: audit with a folder is allowed", "allow", tool="Skill", skill=IMP,
+    args="audit src/pages")
+add("impeccable: critique is allowed", "allow", tool="Skill", skill=IMP, args="critique")
+add("impeccable: critique with a folder is allowed", "allow", tool="Skill", skill=IMP,
+    args="critique app/")
+add("impeccable: bare name with audit is allowed", "allow", tool="Skill", skill="impeccable",
+    args="audit")
+
+add("impeccable: no args is denied", "deny", "impeccable-review-only", tool="Skill", skill=IMP)
+add("impeccable: polish is denied", "deny", "impeccable-review-only", tool="Skill", skill=IMP,
+    args="polish")
+add("impeccable: shape is denied", "deny", "impeccable-review-only", tool="Skill", skill=IMP,
+    args="shape")
+add("impeccable: bolder is denied", "deny", "impeccable-review-only", tool="Skill", skill=IMP,
+    args="bolder")
+add("impeccable: hooks on is denied", "deny", "impeccable-review-only", tool="Skill", skill=IMP,
+    args="hooks on")
+add("impeccable: live is denied", "deny", "impeccable-review-only", tool="Skill", skill=IMP,
+    args="live")
+add("impeccable: init is denied", "deny", "impeccable-review-only", tool="Skill", skill=IMP,
+    args="init")
+add("impeccable: audit then polish in one args string is denied", "deny", "impeccable-review-only",
+    tool="Skill", skill=IMP, args="audit; polish")
+add("impeccable: bare name with polish is denied", "deny", "impeccable-review-only", tool="Skill",
+    skill="impeccable", args="polish")
+
+add("skill: frontend-design with args is allowed", "allow", tool="Skill", skill="frontend-design",
+    args="polish")
+add("skill: frontend-design with no args is allowed", "allow", tool="Skill",
+    skill="frontend-design")
+
+sh("impeccable bash: hooks on writes agent settings", "npx impeccable hooks on", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: hooks by script path is denied",
+   "node \"$HOME/.claude/plugins/impeccable/scripts/impeccable.mjs\" hooks on", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: doctor --auto is denied", "npx impeccable doctor --auto", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: doctor auto is denied", "npx impeccable doctor auto", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: detect on folders is allowed", "npx impeccable detect src/pages app", "allow",
+   cwd=NOGIT)
+
+
+# impeccable, round two (owner ruling 2026-10-10, decisions/design-skills.md): the plugin is not
+# installed. Its skill folder is pinned at skill-v4.5.2. Every Bash form below reaches the plugin's
+# build or settings commands, through a version pin, a runner flag or a different subcommand.
+
+sh("impeccable bash: a version-pinned hooks on is denied", "npx impeccable@4.5.2 hooks on", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: npx -y latest hooks on is denied", "npx -y impeccable@latest hooks on", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: npx -p latest hooks on is denied",
+   "npx -p impeccable@latest impeccable hooks on", "deny", "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: install is denied", "npx impeccable install", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: update is denied", "npx impeccable update", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: link is denied", "npx impeccable link", "deny", "impeccable-review-only",
+   cwd=NOGIT)
+sh("impeccable bash: ignores add-file is denied", "npx impeccable ignores add-file x", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: pin is denied", "npx impeccable pin pin polish", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+
+sh("impeccable bash: hooks status is allowed", "npx impeccable hooks status", "allow", cwd=NOGIT)
+sh("impeccable bash: detect on a folder is allowed", "npx impeccable detect src", "allow",
+   cwd=NOGIT)
+
+add("impeccable skill: critique with a trailing newline is allowed", "allow", tool="Skill",
+    skill="impeccable:impeccable", args="critique\n")
+add("impeccable skill: a leading slash on the name is denied", "deny", "impeccable-review-only",
+    tool="Skill", skill="/impeccable", args="polish")
+
+
+# impeccable, round three: the shell rule is an ALLOW list. Only `detect ...` and `hooks status`
+# pass; every other subcommand is denied, including any a later release adds. Shell wrappers
+# (bash -c, sh -c, npx -c, npx.cmd, PowerShell's call operator) reach the same rule.
+
+sh("impeccable bash: npx -c install is denied", "npx -c 'impeccable install'", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: npx.cmd install is denied", "npx.cmd impeccable install", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: bash -c install is denied", "bash -c 'npx impeccable install'", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: sh -c pin is denied", "sh -c \"impeccable pin x\"", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable powershell: call operator on the cmd shim install is denied",
+   "& \"C:\\x\\impeccable.cmd\" install", "deny", "impeccable-review-only", tool="PowerShell",
+   cwd=NOGIT)
+sh("impeccable powershell: call operator on bash.exe -c install is denied",
+   "& \"C:\\Program Files\\Git\\bin\\bash.exe\" -c \"impeccable install\"", "deny",
+   "impeccable-review-only", tool="PowerShell", cwd=NOGIT)
+sh("impeccable powershell: call operator on bash -c install is denied",
+   "& bash -c \"impeccable install\"", "deny", "impeccable-review-only", tool="PowerShell",
+   cwd=NOGIT)
+sh("impeccable powershell: an assignment around the call operator is denied",
+   "$r = & impeccable install", "deny", "impeccable-review-only", tool="PowerShell", cwd=NOGIT)
+sh("impeccable powershell: a script block around the call operator is denied",
+   "{ & impeccable install }", "deny", "impeccable-review-only", tool="PowerShell", cwd=NOGIT)
+sh("impeccable bash: doctor --fix is denied", "npx impeccable doctor --fix", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: init is denied", "npx impeccable init", "deny", "impeccable-review-only",
+   cwd=NOGIT)
+sh("impeccable bash: document is denied", "npx impeccable document", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: extract is denied", "npx impeccable extract", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: live is denied", "npx impeccable live", "deny", "impeccable-review-only",
+   cwd=NOGIT)
+sh("impeccable bash: a subcommand not yet named is denied", "npx impeccable some-future-cmd",
+   "deny", "impeccable-review-only", cwd=NOGIT)
+
+sh("impeccable bash: bash -c detect is allowed", "bash -c 'npx impeccable detect src'", "allow",
+   cwd=NOGIT)
+sh("impeccable bash: the pinned script path, detect, is allowed",
+   "skills/impeccable/scripts/impeccable detect src", "allow", cwd=NOGIT)
+
+
+def impeccable_settings_case():
+    """settings.json names no impeccable plugin or marketplace. The skill folder is the install."""
+    with open(os.path.join(REPO, "settings.json"), encoding="utf-8") as handle:
+        settings = json.load(handle)
+    named = [key for key in settings.get("enabledPlugins", {}) if "impeccable" in key]
+    named += [key for key in settings.get("extraKnownMarketplaces", {}) if "impeccable" in key]
+    if named:
+        return False, "settings.json still names: " + ", ".join(named)
+    return True, "no impeccable plugin or marketplace in settings.json"
+
+
+LOG_CHECKS_EXTRA.append(("impeccable: settings.json names no impeccable plugin",
+                         impeccable_settings_case))
+
+
 # --------------------------------------------------------------------------- the runner
 
 

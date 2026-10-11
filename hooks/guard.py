@@ -5586,6 +5586,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                       else SILENT_WRITE_QUIET_REASON)
             refuse(tool, "deny", "silent-write", reason, matched)
 
+    # 1e. The impeccable skill's build and settings-writer commands (design-skills record).
+    for segment in split_segments(stripped):
+        matched = impeccable_shell_hit(segment)
+        if matched:
+            refuse(tool, "deny", "impeccable-review-only", IMPECCABLE_REASON, matched)
+
     # 1d. A commit message or PR body that cites a record by its path.
     cite_where = command_root(stripped, cwd)
     for segment in split_segments(stripped):
@@ -5724,6 +5730,70 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, matched),
                    log_path_and_text(matched, change))
 
+# ------------------------------------------------------------------ impeccable is review-only
+#
+# decisions/design-skills.md, rule `impeccable-review-only`: the skill loads only for a review
+# (`audit`, `critique`). Its build commands and its settings writers are refused. The reason names
+# no command; the log holds what the call asked for.
+IMPECCABLE_REASON = ("impeccable is for a design review only. Ask for a review of the rendered "
+                     "screens; make any change to the design by hand.")
+IMPECCABLE_SKILLS = ("impeccable", "impeccable:impeccable")
+IMPECCABLE_REVIEWS = ("audit", "critique")
+IMPECCABLE_CHAIN = re.compile(r"[;|\n]|&&")
+RUNNER_WORDS = ("npx", "bunx", "node", "pnpm", "yarn", "npm", "dlx", "exec", "run", "x")
+PACKAGE_FLAGS = ("-p", "--package")
+
+
+def impeccable_name(token: str) -> str:
+    """The package or script name of a token, without a path, a `@version` or an extension."""
+    name = basename(token).split("@", 1)[0]
+    return name.rsplit(".", 1)[0]
+
+
+def impeccable_skill_hit(tool_input) -> str:
+    skill, args = tool_input.get("skill"), tool_input.get("args") or ""
+    if not isinstance(skill, str) or skill.lstrip("/") not in IMPECCABLE_SKILLS:
+        return ""
+    words = args.split() if isinstance(args, str) else []
+    if words and words[0] in IMPECCABLE_REVIEWS and not IMPECCABLE_CHAIN.search(args.strip()):
+        return ""
+    return ("skill %s %s" % (skill, args))[:100]
+
+
+def impeccable_shell_hit(segment: str) -> str:
+    """A segment that runs impeccable with anything but `detect ...` or `hooks status`. Shell
+    wrappers (`bash -c`, `npx -c`) are unwrapped; a runner or script suffix (`.cmd`, `.exe`,
+    `.mjs`) and PowerShell's call operator `&` are read through."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return ""
+    # PowerShell's call operator: drop it where the command starts, after `$x =` or `{`.
+    start = resolve_command(tokens)
+    if start is not None and tokens[start] == "&":
+        tokens = tokens[start + 1:]
+    if not tokens:
+        return ""
+    script = inline_script(tokens)
+    if script:
+        return next((hit for part in split_segments(script)
+                     if (hit := impeccable_shell_hit(part))), "")
+    index = resolve_command(tokens)
+    if index is None or index >= len(tokens):
+        return ""
+    while index < len(tokens) and (impeccable_name(tokens[index]) in RUNNER_WORDS
+                                   or tokens[index].startswith("-")):
+        if tokens[index] in ("-c", "--call") and index + 1 < len(tokens):
+            return next((hit for part in split_segments(tokens[index + 1])
+                         if (hit := impeccable_shell_hit(part))), "")
+        index += 2 if tokens[index] in PACKAGE_FLAGS else 1
+    if index >= len(tokens) or impeccable_name(tokens[index]) != "impeccable":
+        return ""
+    rest = tokens[index + 1:]
+    if rest[:1] == ["detect"] or rest[:2] == ["hooks", "status"]:
+        return ""
+    return segment.strip()[:100]
+
+
 def judge(payload) -> None:
     if payload.get("hook_event_name") == "SubagentStop":
         judge_stop(payload)
@@ -5785,6 +5855,12 @@ def judge(payload) -> None:
     # The MCP create tool carries its own `draft` field.
     if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:
         refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "create_pull_request without draft")
+
+    if tool == "Skill":
+        matched = impeccable_skill_hit(tool_input)
+        if matched:
+            refuse(tool, "deny", "impeccable-review-only", IMPECCABLE_REASON, matched)
+        return
 
     if tool in SHELL_TOOLS:
         command = tool_input.get("command", "") or ""
