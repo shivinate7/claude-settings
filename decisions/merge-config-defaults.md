@@ -15,9 +15,14 @@ Owner, 2026-10-10:
 3. A file that exists but leaves out merge fields gets the defaults for those fields. A missing
    `defaultBranch` is read from the host. Merge prints one line that names the fields it filled.
 4. An unknown field name in the `merge` block stops merge with one line that names it. So does
-   a value of the wrong type: `deadlineMinutes` must be a whole number from 1 to 360 (the
-   longest GitHub Actions job run), and each `ignoreChecks` entry needs a non-empty string
-   name and reason.
+   a value of the wrong type, null included. A field that is left out gets its default.
+   - `method`: `merge`, `squash` or `rebase`.
+   - `deadlineMinutes`: a whole number from 1 to 360, the longest GitHub Actions job run.
+   - `requiredChecks`: `"protection"`, or a non-empty list of non-empty strings.
+   - `afterMerge`: a list of non-empty strings.
+   - `deleteBranch`: true or false.
+   - `ignoreChecks`: each entry needs a non-empty string name and reason.
+   - `defaultBranch`: a non-empty string.
 5. A file that exists but is broken (bad JSON) stops merge with one line that names the file.
 6. When the base loses its config or its stamp kinds during the wait, merge stops with one
    line, "base lost its config", and reverts its claim.
