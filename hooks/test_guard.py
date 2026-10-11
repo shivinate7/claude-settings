@@ -4209,6 +4209,10 @@ sh("impeccable powershell: call operator on bash.exe -c install is denied",
 sh("impeccable powershell: call operator on bash -c install is denied",
    "& bash -c \"impeccable install\"", "deny", "impeccable-review-only", tool="PowerShell",
    cwd=NOGIT)
+sh("impeccable powershell: an assignment around the call operator is denied",
+   "$r = & impeccable install", "deny", "impeccable-review-only", tool="PowerShell", cwd=NOGIT)
+sh("impeccable powershell: a script block around the call operator is denied",
+   "{ & impeccable install }", "deny", "impeccable-review-only", tool="PowerShell", cwd=NOGIT)
 sh("impeccable bash: doctor --fix is denied", "npx impeccable doctor --fix", "deny",
    "impeccable-review-only", cwd=NOGIT)
 sh("impeccable bash: init is denied", "npx impeccable init", "deny", "impeccable-review-only",
