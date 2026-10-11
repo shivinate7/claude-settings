@@ -66,8 +66,11 @@ make_pair() {
 # (stdout and stderr together) and $rc. HOME and CLAUDE_CONFIG_DIR come from $h.
 run_from() {
   dir="$1"; shift
-  out=$(cd "$dir" && env HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" "$@" bash "$SCRIPT" 2>&1)
+  ( cd "$dir" && env HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" "$@" bash "$SCRIPT" ) > "$work/run.out" 2> "$work/run.err"
   rc=$?
+  outs=$(cat "$work/run.out")
+  errs=$(cat "$work/run.err")
+  out=$(cat "$work/run.out" "$work/run.err")
 }
 
 # ---- Case 1: run from a linked worktree -> main tree's install.sh runs, caller's does not --
@@ -106,27 +109,29 @@ case2() {
   fi
 }
 
-# ---- Case 3: no worktree holds main (the branch exists, unchecked-out) -> one line, exit non-0
-# Owner ruling 2026-10-11: this fails loudly. One line says install.sh was not run and tells
-# the person to switch the main folder back to main. The exit is non-zero, so the merge tool
-# reports FAILED. No install.sh runs.
+# ---- Case 3: no worktree holds main (the branch exists, unchecked-out) -> one stderr line ----
+# Owner ruling 2026-10-11: this fails loudly. One line on stderr says install.sh was not run and
+# names `git switch main`. The exit is non-zero, so the merge tool reports FAILED. No install.sh
+# runs. Nothing goes to stdout.
 case3() {
-  name="case3: no worktree holds main prints one line saying install.sh was not run and to switch main back, exits non-zero"
+  name="case3: no worktree holds main prints one stderr line naming git switch main, exits non-zero"
   d="$work/case3"; h="$d/home"; mkdir -p "$h"
   make_pair "$d/main" "$d/linked" "$d/mark-main" "$d/mark-linked"
   # Move the main tree off main. The branch main still exists, but no worktree holds it.
   ( cd "$d/main" && git checkout -q -b trunk )
   run_from "$d/linked"
-  lines=$(printf '%s\n' "$out" | grep -c .)
+  lines=$(printf '%s\n' "$errs" | grep -c .)
 
   if [ $rc -eq 0 ]; then
     bad "$name" "script exited 0, expected non-zero so the merge tool reports FAILED: $out"
+  elif [ -n "$outs" ]; then
+    bad "$name" "text went to stdout, expected stderr only: $outs"
   elif [ "$lines" -ne 1 ]; then
-    bad "$name" "expected one output line, got $lines: $out"
+    bad "$name" "expected one stderr line, got $lines: $errs"
   else
-    case "$out" in
-      *"install.sh"*"not run"*"switch"*"main"*) ;;
-      *) bad "$name" "output does not say install.sh was not run and to switch main back: $out"; return ;;
+    case "$errs" in
+      *"install.sh"*"not run"*"git switch main"*) ;;
+      *) bad "$name" "stderr does not say install.sh was not run and name git switch main: $errs"; return ;;
     esac
     if [ -e "$d/mark-main" ] || [ -e "$d/mark-linked" ]; then
       bad "$name" "an install.sh ran although no worktree holds main"
@@ -136,23 +141,25 @@ case3() {
   fi
 }
 
-# ---- Case 4: no branch named main anywhere -> one line, exit non-zero -------------------
-# Owner ruling 2026-10-11, same as case 3: non-zero exit, the one line, no install.sh run.
+# ---- Case 4: no branch named main anywhere -> one stderr line, exit non-zero ----------
+# Same ruling as case 3: non-zero exit, one stderr line naming `git switch main`, no install.sh run.
 case4() {
-  name="case4: no branch named main at all prints one line saying install.sh was not run and to switch main back, exits non-zero"
+  name="case4: no branch named main at all prints one stderr line naming git switch main, exits non-zero"
   d="$work/case4"; h="$d/home"; mkdir -p "$h"
   make_pair "$d/main" "$d/linked" "$d/mark-main" "$d/mark-linked" trunk
   run_from "$d/linked"
-  lines=$(printf '%s\n' "$out" | grep -c .)
+  lines=$(printf '%s\n' "$errs" | grep -c .)
 
   if [ $rc -eq 0 ]; then
     bad "$name" "script exited 0, expected non-zero so the merge tool reports FAILED: $out"
+  elif [ -n "$outs" ]; then
+    bad "$name" "text went to stdout, expected stderr only: $outs"
   elif [ "$lines" -ne 1 ]; then
-    bad "$name" "expected one output line, got $lines: $out"
+    bad "$name" "expected one stderr line, got $lines: $errs"
   else
-    case "$out" in
-      *"install.sh"*"not run"*"switch"*"main"*) ;;
-      *) bad "$name" "output does not say install.sh was not run and to switch main back: $out"; return ;;
+    case "$errs" in
+      *"install.sh"*"not run"*"git switch main"*) ;;
+      *) bad "$name" "stderr does not say install.sh was not run and name git switch main: $errs"; return ;;
     esac
     if [ -e "$d/mark-main" ] || [ -e "$d/mark-linked" ]; then
       bad "$name" "an install.sh ran although no branch named main exists"

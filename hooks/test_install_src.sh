@@ -1205,7 +1205,7 @@ backup_case1() {
 }
 
 backup_case2() {
-  name="backup2: a pre-existing real settings.json is moved to a backup, not replaced silently"
+  name="backup2: a pre-existing real settings.json is moved to settings.json.orig on the first install"
   if [ "$SYMLINK_CAPABLE" != 1 ]; then
     skip "$name" "$NO_SYMLINK_REASON"
     return
@@ -1217,14 +1217,15 @@ backup_case2() {
   printf '{"mine": true}\n' > "$cfg/settings.json"
 
   out=$(run_local_install "$co" "$h" "$cfg"); rc=$?
-  bak=$(ls "$cfg"/settings.json.bak.* 2>/dev/null | head -n1)
+  orig=$(cat "$cfg/settings.json.orig" 2>/dev/null)
+  bak_count=$(ls "$cfg"/settings.json.bak.* 2>/dev/null | wc -l | tr -d ' ')
 
   if [ $rc -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $out"
-  elif [ -z "$bak" ]; then
-    bad "$name" "no settings.json.bak.* file; the person's own settings.json was lost"
-  elif [ "$(cat "$bak")" != '{"mine": true}' ]; then
-    bad "$name" "the backup does not hold the original content"
+  elif [ "$orig" != '{"mine": true}' ]; then
+    bad "$name" "no settings.json.orig holding the person's own settings.json: [$orig]"
+  elif [ "$bak_count" != 0 ]; then
+    bad "$name" "the first install wrote a settings.json.bak.*; the first-ever settings.json belongs in settings.json.orig"
   elif [ ! -L "$cfg/settings.json" ]; then
     bad "$name" "settings.json is not a symlink after install"
   else
@@ -1369,6 +1370,168 @@ settings_repeat_case4() {
     bad "$name" "an old settings.json.bak.* changed content"
   elif [ ! -L "$cfg/settings.json" ]; then
     bad "$name" "settings.json is not a symlink after the repeat run"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+# ---- settings.json first-ever, clock and move cases (owner ruling, re-review of #328) ----------
+# The first local install moves a plain settings.json to settings.json.orig. Repeat installs back
+# it up to settings.json.bak.<stamp> and keep only the newest. A later install never prunes or
+# overwrites settings.json.orig. The stub bin below fixes the clock, so two runs share a stamp,
+# logs each settings.json.bak.* move, and can make that move fail.
+REAL_MV=$(command -v mv)
+REAL_DATE=$(command -v date)
+
+# $1 = stub bin dir, $2 = log file for settings.json.bak.* destinations, $3 = ok or fail.
+# ln copies (copy mode: a repeat run finds a plain settings.json). date returns a fixed stamp.
+# mv logs its last argument when the source is a settings.json.bak.* path, and exits 1 in fail
+# mode. Every other mv call goes to the real mv.
+make_settings_bin() {
+  bin="$1"; log="$2"; mode="$3"
+  make_fake_ln_bin "$bin"
+  cat > "$bin/date" <<EOF
+#!/bin/sh
+case "\$*" in
+  "+%Y%m%d%H%M%S") echo 20260301120000 ;;
+  *) exec "$REAL_DATE" "\$@" ;;
+esac
+EOF
+  cat > "$bin/mv" <<EOF
+#!/bin/sh
+case "\$*" in
+  *settings.json.bak.*)
+    for a in "\$@"; do d="\$a"; done
+    printf '%s\n' "\$d" >> "$log"
+    [ "$mode" = fail ] && exit 1
+    ;;
+esac
+exec "$REAL_MV" "\$@"
+EOF
+  chmod +x "$bin/date" "$bin/mv"
+}
+
+# $1 = checkout, $2 = HOME, $3 = CLAUDE_CONFIG_DIR, $4 = stub bin dir placed first on PATH.
+run_with_bin() {
+  ( cd "$1" && env -i PATH="$4:$PATH" HOME="$2" CLAUDE_CONFIG_DIR="$3" bash ./install.sh 2>&1 )
+}
+
+orig_case1() {
+  name="orig1: copy-mode runs 2 and 3 leave the user's first settings.json in .orig and one settings.json.bak.*"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/orig1-checkout"
+  make_checkout "$co" "# orig1 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  log="$work/orig1-mv.log"; : > "$log"
+  make_settings_bin "$work/orig1-bin" "$log" ok
+  mkdir -p "$cfg"
+  printf '{"mine": 1}\n' > "$cfg/settings.json"
+
+  out1=$(run_with_bin "$co" "$h" "$cfg" "$work/orig1-bin"); rc1=$?
+  out2=$(run_with_bin "$co" "$h" "$cfg" "$work/orig1-bin"); rc2=$?
+  out3=$(run_with_bin "$co" "$h" "$cfg" "$work/orig1-bin"); rc3=$?
+  orig=$(cat "$cfg/settings.json.orig" 2>/dev/null)
+  bak_count=$(ls "$cfg"/settings.json.bak.* 2>/dev/null | wc -l | tr -d ' ')
+
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ] || [ $rc3 -ne 0 ]; then
+    bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2 rc3=$rc3: $out1 / $out2 / $out3"
+  elif [ "$orig" != '{"mine": 1}' ]; then
+    bad "$name" "settings.json.orig holds [$orig], expected the user's own settings.json"
+  elif [ "$bak_count" != 1 ]; then
+    bad "$name" "expected one settings.json.bak.* after runs 2 and 3, found $bak_count"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+orig_case2() {
+  name="orig2: a repeat run never prunes or overwrites an existing settings.json.orig"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/orig2-checkout"
+  make_checkout "$co" "# orig2 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  log="$work/orig2-mv.log"; : > "$log"
+  make_settings_bin "$work/orig2-bin" "$log" ok
+
+  out1=$(run_with_bin "$co" "$h" "$cfg" "$work/orig2-bin"); rc1=$?
+  printf '{"orig": "kept"}\n' > "$cfg/settings.json.orig"
+  printf '{"older": "bak"}\n' > "$cfg/settings.json.bak.20260101000000"
+  printf '{"plain": 2}\n' > "$cfg/settings.json"
+  out2=$(run_with_bin "$co" "$h" "$cfg" "$work/orig2-bin"); rc2=$?
+  orig=$(cat "$cfg/settings.json.orig" 2>/dev/null)
+  bak_count=$(ls "$cfg"/settings.json.bak.* 2>/dev/null | wc -l | tr -d ' ')
+
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then
+    bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
+  elif [ "$orig" != '{"orig": "kept"}' ]; then
+    bad "$name" "settings.json.orig changed to [$orig]"
+  elif [ "$bak_count" != 1 ]; then
+    bad "$name" "expected one settings.json.bak.* after the repeat run, found $bak_count"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+bakname_case1() {
+  name="bakname1: repeat runs 2 and 3 in the same second back up to distinct names"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/bakname1-checkout"
+  make_checkout "$co" "# bakname1 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  log="$work/bakname1-mv.log"; : > "$log"
+  make_settings_bin "$work/bakname1-bin" "$log" ok
+  mkdir -p "$cfg"
+  printf '{"mine": 2}\n' > "$cfg/settings.json"
+
+  out1=$(run_with_bin "$co" "$h" "$cfg" "$work/bakname1-bin"); rc1=$?
+  : > "$log"  # run 1 is the first install: its move to .orig is not a settings.json.bak.* move
+  printf '{"second": 2}\n' > "$cfg/settings.json"
+  out2=$(run_with_bin "$co" "$h" "$cfg" "$work/bakname1-bin"); rc2=$?
+  printf '{"third": 3}\n' > "$cfg/settings.json"
+  out3=$(run_with_bin "$co" "$h" "$cfg" "$work/bakname1-bin"); rc3=$?
+  moves=$(grep -c . "$log")
+  distinct=$(sort -u "$log" | grep -c .)
+  newest=$(cat "$(ls "$cfg"/settings.json.bak.* 2>/dev/null | head -n1)" 2>/dev/null)
+
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ] || [ $rc3 -ne 0 ]; then
+    bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2 rc3=$rc3: $out1 / $out2 / $out3"
+  elif [ "$moves" != 2 ]; then
+    bad "$name" "expected two settings.json.bak.* moves (runs 2 and 3), logged $moves"
+  elif [ "$distinct" != 2 ]; then
+    bad "$name" "runs 2 and 3 both backed up to the same name [$(tr '\n' ' ' < "$log")]; the second overwrote the first"
+  elif [ "$newest" != '{"third": 3}' ]; then
+    bad "$name" "the surviving backup holds [$newest], expected the run 3 content"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+bakfail_case1() {
+  name="bakfail1: a failed settings.json backup move exits non-zero, prunes nothing, leaves settings.json as it was"
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/bakfail1-checkout"
+  make_checkout "$co" "# bakfail1 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  log="$work/bakfail1-mv.log"; : > "$log"
+  make_settings_bin "$work/bakfail1-bin" "$log" fail
+
+  out1=$(run_with_bin "$co" "$h" "$cfg" "$work/bakfail1-bin"); rc1=$?
+  printf '{"older": "a"}\n' > "$cfg/settings.json.bak.20260101000000"
+  printf '{"older": "b"}\n' > "$cfg/settings.json.bak.20260301000000"
+  printf '{"keep": 3}\n' > "$cfg/settings.json"
+  out2=$(run_with_bin "$co" "$h" "$cfg" "$work/bakfail1-bin"); rc2=$?
+  older_a=$(cat "$cfg/settings.json.bak.20260101000000" 2>/dev/null)
+  older_b=$(cat "$cfg/settings.json.bak.20260301000000" 2>/dev/null)
+  current=$(cat "$cfg/settings.json" 2>/dev/null)
+
+  if [ $rc1 -ne 0 ]; then
+    bad "$name" "setup run 1 exited $rc1: $out1"
+  elif [ $rc2 -eq 0 ]; then
+    bad "$name" "install.sh exited 0 after the backup move failed, expected non-zero: $out2"
+  elif [ "$older_a" != '{"older": "a"}' ] || [ "$older_b" != '{"older": "b"}' ]; then
+    bad "$name" "an older settings.json.bak.* was pruned or changed after the failed move"
+  elif [ "$current" != '{"keep": 3}' ]; then
+    bad "$name" "settings.json was replaced after the failed move, now [$current]"
   else
     ok "$name"
   fi
@@ -1694,6 +1857,10 @@ run settings_repeat_case1
 run settings_repeat_case2
 run settings_repeat_case3
 run settings_repeat_case4
+run orig_case1
+run orig_case2
+run bakname_case1
+run bakfail_case1
 run bin_case1
 run bin_case2
 run path_case1
