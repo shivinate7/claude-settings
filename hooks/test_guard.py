@@ -28,6 +28,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -79,7 +80,8 @@ def windows_shaped(*parts):
 
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
         session=None, carries=(), config=None, agent_id=None, no_root=False, silent=False,
-        agent_type=None, event=None, stop_active=False, windows=False, **tool_input):
+        agent_type=None, event=None, stop_active=False, windows=False, transcript=None,
+        **tool_input):
     """Register one case.
 
     `carries` names fragments the printed reason MUST hold, which is how a case pins what an
@@ -105,6 +107,9 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         # The config directory the case runs against. It decides where the global rules file is
         # read from, so a pointer case names its own and every other case keeps the default.
         "config": config,
+        # The payload's `transcript_path`, when a case names one: the subagents of the session
+        # are the folder beside it, `<session>/subagents/agent-<id>.jsonl`.
+        "transcript": transcript,
         "agent_id": agent_id,
         "agent_type": agent_type,
         "event": event,
@@ -121,10 +126,11 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
 
 
 def sh(name, command, expected, rule=None, tool="Bash", cwd=None, env_path=None, session=None,
-       carries=(), config=None, agent_id=None, no_root=False, silent=False, agent_type=None):
+       carries=(), config=None, agent_id=None, no_root=False, silent=False, agent_type=None,
+       transcript=None):
     add(name, expected, rule=rule, tool=tool, cwd=cwd, env_path=env_path, session=session,
         agent_id=agent_id, agent_type=agent_type, no_root=no_root, silent=silent,
-        carries=carries, config=config, command=command)
+        carries=carries, config=config, transcript=transcript, command=command)
 
 
 # --------------------------------------------------------------------------- the fixtures
@@ -1800,6 +1806,60 @@ sh("kill: the process group with the root unknown", "kill 0", "deny", "machine-w
    cwd=NOGIT, no_root=True)
 sh("kill: any other pid with the root unknown is unknown, so it passes", "kill %d" % FOREIGN,
    "allow", cwd=NOGIT, no_root=True)
+# AGENT WORKTREES OF THIS SESSION (owner ruling 2026-10-10). A pid whose PPID is 1 is no longer a
+# child of this session, but its cwd can still sit in `.claude/worktrees/agent-<id>`. That pid is
+# owned when `agent-<id>.jsonl` exists in THIS session's `subagents/` folder. The hook payload's
+# `transcript_path` is `<dir>/<session>.jsonl`, and that folder is `<dir>/<session>/subagents/`.
+# A worktree of another session, or one not named `agent-<id>`, stays foreign.
+SUB_SESSION = "reapbatch-session-0001"   # SESSION_ID_RE: 8 to 200 of [A-Za-z0-9._-]
+OTHER_SESSION = "reapbatch-other-0002"
+SUBCFG = os.path.join(ROOT, "subcfg")    # a config dir that holds only transcripts
+SUBWT = os.path.join(ROOT, "subwt")
+OWN_ID, OTHER_ID, PLAIN_ID = "a0246dbf02b4a0327", "b1357ecf13c5b1438", "c2468fd024d6c2549"
+ORPHAN_PIDS = []
+
+
+def spawn_orphan(cwd):
+    """A `sleep` whose shell exits first, so the kernel hands it to init (PPID 1), with CWD as its
+    working directory. Returns its pid, or None when the parent is not 1 on this host."""
+    os.makedirs(cwd, exist_ok=True)
+    try:
+        answer = subprocess.run(["sh", "-c", "sleep 300 </dev/null >/dev/null 2>&1 & echo $!"],
+                                cwd=cwd, capture_output=True, text=True, timeout=20)
+        pid = int(answer.stdout.strip())
+        ORPHAN_PIDS.append(pid)
+        parent = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True,
+                                text=True, timeout=5).stdout.strip()
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    return pid if parent == "1" else None
+
+
+ORPHAN_CASES = os.name != "nt"   # Windows has no `ps`: ownership reads unknown, so none are run
+PROJECT_DIR = os.path.join(SUBCFG, "projects", "-reapbatch-slug")
+SUB_TRANSCRIPT = os.path.join(PROJECT_DIR, SUB_SESSION + ".jsonl")   # the payload's transcript_path
+if ORPHAN_CASES:
+    write(SUB_TRANSCRIPT, "{}\n")
+    for session, agent_id in ((SUB_SESSION, OWN_ID), (OTHER_SESSION, OTHER_ID),
+                              (SUB_SESSION, PLAIN_ID)):
+        write(os.path.join(PROJECT_DIR, session, "subagents", "agent-" + agent_id + ".jsonl"),
+              "{}\n")
+    OWN_PID = spawn_orphan(os.path.join(SUBWT, ".claude", "worktrees", "agent-" + OWN_ID))
+    OTHER_PID = spawn_orphan(os.path.join(SUBWT, ".claude", "worktrees", "agent-" + OTHER_ID))
+    PLAIN_PID = spawn_orphan(os.path.join(SUBWT, ".claude", "worktrees", PLAIN_ID))
+    if None in (OWN_PID, OTHER_PID, PLAIN_PID):
+        print("note: no PPID-1 orphan on this host, so the agent-worktree kill cases are not run")
+        ORPHAN_CASES = False
+if ORPHAN_CASES:
+    sh("kill: a PPID-1 pid whose cwd is in this session's agent worktree", "kill %d" % OWN_PID,
+       "allow", cwd=NOGIT, session=SUB_SESSION, config=SUBCFG, transcript=SUB_TRANSCRIPT)
+    sh("kill: a PPID-1 pid in another session's agent worktree", "kill %d" % OTHER_PID, "deny",
+       "machine-wide-kill", cwd=NOGIT, session=SUB_SESSION, config=SUBCFG,
+       transcript=SUB_TRANSCRIPT, carries="did not start")
+    sh("kill: a PPID-1 pid in a worktree not named agent-<id>", "kill %d" % PLAIN_PID, "deny",
+       "machine-wide-kill", cwd=NOGIT, session=SUB_SESSION, config=SUBCFG,
+       transcript=SUB_TRANSCRIPT)
+
 sh("kill: a pid list made by pgrep", "kill $(pgrep -f node)", "deny", "machine-wide-kill",
    cwd=NOGIT)
 sh("kill: a pid list made by pidof", "kill -9 $(pidof node)", "deny", "machine-wide-kill",
@@ -4123,6 +4183,8 @@ def decide(case):
             body["cwd"] = case["cwd"]
         if case["session"]:
             body["session_id"] = case["session"]
+        if case.get("transcript"):
+            body["transcript_path"] = case["transcript"]
         if case.get("agent_id"):
             body["agent_id"] = case["agent_id"]
         if case.get("agent_type"):
@@ -5553,6 +5615,11 @@ def main():
     print()
     shutil.rmtree(ROOT, ignore_errors=True)
     OWNED.kill()
+    for orphan in ORPHAN_PIDS:   # the sleeps this file started, by their own pids
+        try:
+            os.kill(orphan, signal.SIGTERM)
+        except OSError:
+            pass
     if mode and not ran:
         print("test_guard FAIL: GUARD_TESTS=%s ran 0 cases (MUTATE_ONLY matched none)" % mode)
         return 1
