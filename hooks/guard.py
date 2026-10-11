@@ -5445,8 +5445,12 @@ def impeccable_shell_hit(segment: str) -> str:
     wrappers (`bash -c`, `npx -c`) are unwrapped; a runner or script suffix (`.cmd`, `.exe`,
     `.mjs`) and PowerShell's call operator `&` are read through."""
     tokens = segment_tokens(segment)
-    if tokens and tokens[0] == "&":
-        tokens = tokens[1:]
+    if not tokens:
+        return ""
+    # PowerShell's call operator: drop it where the command starts, after `$x =` or `{`.
+    start = resolve_command(tokens)
+    if start is not None and tokens[start] == "&":
+        tokens = tokens[start + 1:]
     if not tokens:
         return ""
     script = inline_script(tokens)
