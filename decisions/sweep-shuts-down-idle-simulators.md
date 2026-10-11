@@ -79,14 +79,17 @@ Why the cap: it needs no knowledge of who booted a device.
   `simctl boot`, an `xcodebuild -destination` with `id=` or `name=`, or MCP `launch` with
   `device` or `udid`. The guard judges each of the two that is a non-empty string. A UDID
   matches in any case. A name must match exactly. A numeric `OS=` in a `name=` destination
-  keeps only the copies on that runtime. An `id=` destination, `OS=latest` or no OS uses
-  no filter. Only the shut-down devices a call names count as a boot.
+  keeps only the copies on that runtime. When it keeps none, all copies count. An `id=`
+  destination, `OS=latest` or no OS uses no filter. Only the shut-down devices a call names
+  count as a boot, and the twin rule judges each of them.
   `simctl list` runs for each call that names a device. A launch with neither field is not
   judged. The guard imports `sweep` on a match only.
   Named limits: a shut-down device whose name is the target's UDID string is denied at the
-  cap. A name that matches a booted copy and a shut-down copy on two runtimes is denied
-  when no numeric OS picks one. The MCP takes no OS, so it is always denied. The record hook
-  records nothing for `OS=latest` on such a name, so the sweep keeps that device.
+  cap. A name can match a booted copy and a shut-down copy on two runtimes. With no
+  numeric OS, the call counts as a boot of the shut-down copy. The MCP takes no OS, so this
+  holds for it too. `OS=latest` with an idle twin on an older runtime is refused: the twin rule matches
+  the device type, not the runtime. The record hook records nothing for `OS=latest` on such
+  a name, so the sweep keeps that device.
 
 ## Measured, 2026-10-10
 
