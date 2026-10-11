@@ -46,8 +46,8 @@ Check for:
 - Shell hook or CI script hardening: flag an unquoted variable expansion. Flag input passed to
   `eval` or to a command with no check on it. Flag a secret or token written as plain text.
 - Scanner tests: when the diff adds or changes code that scans source text, flag it if its tests lack the cases in building-scanner-respects-strings (scanners respect strings).
-- Do not flag an issue the diff did not add. Do not flag a style issue a linter catches. Do not
-  flag a nitpick a senior engineer would skip.
+- Do not flag an issue the diff did not add, except design-review findings on the changed pages.
+  Do not flag a style issue a linter catches. Do not flag a nitpick a senior engineer would skip.
 
 If the repo has screens, the orchestrator runs design-review after a screen change.
 

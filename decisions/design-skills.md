@@ -2,17 +2,38 @@
 
 ## Ruling
 
-Owner ruling, 2026-10-10. Three third-party skills apply to any repo with screens. Each skill
-is global and version-pinned.
+Owner ruling, 2026-10-10. Three third-party skills apply to any repo with screens. Each one is
+global and pinned.
 
 - `frontend-design`: a builder loads it by name before it writes styling for a new screen, or
   in a repo with no design yet. It sets type, color and layout first.
-- Vercel `web-design-guidelines`: a blind reviewer runs it on the changed pages after the build.
-- `impeccable`: a second blind reviewer runs `/impeccable audit` and `/impeccable critique`
-  only. It never runs impeccable's build commands.
+- Vercel `web-design-guidelines`: no plugin. A blind reviewer checks the changed pages against
+  the rules at a pinned URL, after the build.
+- `impeccable`: the upstream plugin, plus the guard rule below. A second blind reviewer runs
+  `/impeccable audit` and `/impeccable critique` only.
 
 The procedure is in `skills/design-review/SKILL.md`. The builder line is in `agents/builder.md`.
-The reviewer line is in `agents/reviewer.md`.
+The reviewer clause is in `agents/reviewer.md`.
+
+## Pins
+
+- The impeccable plugin pin lives in `settings.json`. This record does not copy it.
+- The Vercel rules pin is a URL in `skills/design-review/SKILL.md`. Moving the pin is a hand
+  edit of that URL.
+- Why no Vercel plugin: the upstream skill fetches from `main` on every run. A plugin update
+  would move the rules without a decision.
+
+Dated by: the impeccable pin in `settings.json`, the Vercel URL in the skill, and the guard rule.
+A change to any of them means that this record is read again.
+
+## Guard rule: impeccable-review-only
+
+Owner chose this rule over a manual-only copy. It lets impeccable load only for `audit` or
+`critique`. It refuses its other commands.
+
+Status: not built. A builder adds it to `hooks/guard.py` separately. Trust it only after it goes
+red on an impeccable build command (verification-trust-guard-after-red: a guard is trusted once
+it goes red).
 
 ## Outcome protected
 
@@ -25,18 +46,13 @@ skill update from changing a look by itself.
 Each design reviewer judges the rendered screens before it reads the repo's design spec,
 tokens or design decisions. The orchestrator reads those only after both findings exist.
 
+Design-review findings on the changed pages are not limited to the diff (`agents/reviewer.md`).
+So a reviewer may report older defects on those pages.
+
 - Agrees with the repo, or is a plain defect (accessibility, broken layout, overflow): fixed
   before merge.
 - Clashes with the repo's design: a reviewer never fixes it and never drops it. It goes to the
   owner, one list per repo, with what the skill wants, what the repo has, and a recommendation.
-
-## Pins
-
-The pins live in `settings.json`, in `enabledPlugins` and `extraKnownMarketplaces`. This record
-does not copy them. Open: no pin is set yet for Vercel `web-design-guidelines`.
-
-Dated by: the pins in `settings.json`. A pin change, or a new owner ruling, means that this
-record is read again.
 
 ## Reopen
 
