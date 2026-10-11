@@ -143,5 +143,41 @@ class T(unittest.TestCase):
             self.assertNotIn("cannot run", open(log).read())
             self.assertNotIn("cannot run", r.stdout + r.stderr)
 
+    def test_test_failed_marker_on_exit0_is_fail(self):
+        r = run("print('Test Suite All tests')\nprint('** TEST FAILED **')")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertTrue(r.stdout.startswith("FAIL "), r.stdout)
+        self.assertIn("** TEST FAILED **", r.stdout)
+
+    def test_build_failed_marker_on_exit0_is_fail(self):
+        r = run("print('Build target app')\nprint('** BUILD FAILED **')")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertTrue(r.stdout.startswith("FAIL "), r.stdout)
+        self.assertIn("** BUILD FAILED **", r.stdout)
+
+    def test_zero_tests_on_exit0_is_fail_no_tests_ran(self):
+        r = run("print('Test Suite All tests')\nprint('Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds')\nprint('** TEST SUCCEEDED **')")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        first = r.stdout.splitlines()[0]
+        self.assertTrue(first.startswith("FAIL ") and "no tests ran" in first, first)
+
+    def test_passing_runs_raise_no_false_alarm(self):
+        cases = {
+            "xcodebuild success": "print('Executed 12 tests, with 0 failures (0 unexpected) in 1.2 (1.3) seconds')\nprint('** TEST SUCCEEDED **')",
+            "ordinary FAIL Error assert text": "print('checking FAIL paths')\nprint('Error handler: none raised')\nprint('assert 3 == 3 passed')",
+            "TEST FAILED without ** markers": "print('test_retry TEST FAILED handled, passed')",
+        }
+        for name, code in cases.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as d:
+                r = run(code, os.path.join(d, "v.log"))
+                self.assertEqual(r.returncode, 0, r.stdout)
+                self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
+
+    def test_test_failed_marker_keeps_command_exit_code(self):
+        r = run("print('** TEST FAILED **')\nraise SystemExit(65)")
+        self.assertEqual(r.returncode, 65, r.stdout)
+        first = r.stdout.splitlines()[0]
+        self.assertTrue(first.startswith("FAIL ") and " rc=65 " in first, first)
+
 if __name__ == "__main__":
     unittest.main()
