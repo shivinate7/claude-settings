@@ -5373,10 +5373,6 @@ def playwright_command_hit(raw: str, stripped: str) -> str:
 
 def playwright_install_hit(stripped: str, subagent: bool) -> str:
     """Judge a command for a Playwright browser install (see playwright-install-once)."""
-    # Bandaid: an English contraction (`don't`) opens a quote that split_segments runs to the end
-    # of the text, which would hide a later install. Drop that apostrophe. Ceiling: a real
-    # `a'b'` shell concatenation is read as plain text.
-    stripped = re.sub(r"(?<=[A-Za-z])'(?=[a-z]{1,3}(?:\s|;|&|\||$))", "", stripped)
     for segment in split_segments(stripped):
         hit = _playwright_tokens_hit(segment_tokens(segment) or [], 0, "sub" if subagent else "main")
         if hit:
