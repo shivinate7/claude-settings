@@ -28,4 +28,6 @@ The Node 26 hang is measured in decision playwright-browsers-path.
 ## Named limits
 
 - An install inside a script, such as `npm run e2e:setup`, is not seen.
+- These rarer forms are not seen: a Windows `.cmd` or `.exe` suffix, a heredoc piped into
+  `sh`, a `( ... )` subshell, `timeout`, and `env -S`.
 - When a Playwright release fixes the Node 26 hang, rule 2 is stale. Measure it again then.
