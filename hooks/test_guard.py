@@ -2115,6 +2115,29 @@ sh("rm-var: a newline inside a string that mentions the delete passes",
    'echo "a\nrm -rf $S/x"', "allow", cwd=NOGIT)
 sh("rm-var: a single-quoted dollar is a literal path",
    "rm -rf '$S/x'", "allow", cwd=NOGIT)
+# Named limits (decision rm-on-a-variable-needs-a-guard): $HOME, $PWD and a variable set from
+# $(pwd) or $HOME stay a prompt, so the guard refuses them even when guarded. The remedy names a
+# literal path and never the ${NAME:?} advice for that variable. Red on 2026-10-11: each is allowed
+# or prints ${NAME:?} advice today.
+sh("rm-var: a guarded $HOME target is refused for a literal path",
+   "rm -rf ${HOME:?}/x", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=(("literal path", os.path.expanduser("~")),), lacks=("${HOME:?}",))
+sh("rm-var: a quoted guarded $HOME before a glob is refused for a literal path",
+   'rm -rf "${HOME:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=(("literal path", os.path.expanduser("~")),), lacks=("${HOME:?}",))
+sh("rm-var: $PWD is refused and its remedy names no ${PWD:?} advice",
+   "rm -rf $PWD/x", "deny", "rm-var-unguarded", cwd=NOGIT, lacks=("${PWD:?}",))
+sh("rm-var: a quoted guarded $PWD is refused and its remedy names no ${PWD:?} advice",
+   'rm -rf "${PWD:?}"/x', "deny", "rm-var-unguarded", cwd=NOGIT, lacks=("${PWD:?}",))
+sh("rm-var: a variable set from $(pwd) is refused and its remedy names no ${D:?} advice",
+   "D=$(pwd); rm -rf $D/x", "deny", "rm-var-unguarded", cwd=NOGIT, lacks=("${D:?}",))
+sh("rm-var: a guarded variable set from $(pwd) is refused and its remedy names no ${D:?} advice",
+   'D=$(pwd); rm -rf "${D:?}"/x', "deny", "rm-var-unguarded", cwd=NOGIT, lacks=("${D:?}",))
+sh("rm-var: a guarded variable set from $HOME is refused and its remedy names no ${D:?} advice",
+   "D=$HOME; rm -rf ${D:?}/x", "deny", "rm-var-unguarded", cwd=NOGIT, lacks=("${D:?}",))
+# A guarded variable set to a literal path passes.
+sh("rm-var: a guarded variable set to a literal path passes",
+   'D=/tmp/w; rm -rf "${D:?}"/x', "allow", cwd=NOGIT)
 sh("playwright: an envrc file gets the assignment",
    "echo PLAYWRIGHT_BROWSERS_PATH=/x > .envrc", "deny", "playwright-browsers-path", cwd=NOGIT)
 sh("playwright: a case-folded name still sets it", "playwright_browsers_path=/x npx", "deny",
