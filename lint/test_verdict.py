@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """Fixture test for bin/verdict. Run: python lint/test_verdict.py -v"""
-import os, subprocess, sys, tempfile, unittest
+import os, re, subprocess, sys, tempfile, unittest
 V = os.environ.get("VERDICT_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "verdict")
+HB_FORMAT = re.compile(r"^verdict: still running, [0-9][0-9.]*s?, log=")
 
-def run(code, log=None):
+def run(code, log=None, extra=None):
     env = dict(os.environ)
     env.pop("VERDICT_LOG", None)
+    env.pop("VERDICT_HEARTBEAT", None)
     if log: env["VERDICT_LOG"] = log
+    env.update(extra or {})
     with tempfile.TemporaryDirectory() as d:
         script = os.path.join(d, "fx.py")
         open(script, "w").write(code)
         return subprocess.run([sys.executable, V, sys.executable, script], capture_output=True, text=True, env=env)
+
+def heartbeats(out):
+    return [l for l in out.splitlines() if l.startswith("verdict: still running")]
 
 class T(unittest.TestCase):
     def test_pass(self):
@@ -52,6 +58,52 @@ class T(unittest.TestCase):
         r = run("import os, signal\nos.kill(os.getpid(), signal.SIGTERM)")
         self.assertEqual(r.returncode, 128 + 15)
         self.assertIn("killed by signal 15", r.stdout)
+
+    def test_heartbeat_while_slow(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = os.path.join(d, "v.log")
+            r = run("import time\ntime.sleep(3.5)\nprint('done')", log, {"VERDICT_HEARTBEAT": "1"})
+            self.assertEqual(r.returncode, 0)
+            beats = heartbeats(r.stdout)
+            self.assertEqual(len(beats), 3, r.stdout)
+            for b in beats:
+                self.assertRegex(b, HB_FORMAT)
+                self.assertTrue(b.endswith(f"log={log}"), b)
+            self.assertTrue(r.stdout.splitlines()[-1].startswith("PASS "), r.stdout)
+
+    def test_fast_command_prints_no_heartbeat(self):
+        r = run("print('quick')", None, {"VERDICT_HEARTBEAT": "1"})
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(heartbeats(r.stdout), [], r.stdout)
+        self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
+
+    def test_slow_fail_heartbeats_then_same_excerpt(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = os.path.join(d, "v.log")
+            r = run("import sys, time\nprint('one')\ntime.sleep(2.5)\nprint('FAIL boom')\nprint('err', file=sys.stderr)\nsys.exit(7)", log, {"VERDICT_HEARTBEAT": "1"})
+            self.assertEqual(r.returncode, 7)
+            beats = heartbeats(r.stdout)
+            self.assertEqual(len(beats), 2, r.stdout)
+            lines = r.stdout.splitlines()
+            self.assertEqual(lines[:2], beats, r.stdout)
+            first = lines[2]
+            self.assertTrue(first.startswith("FAIL ") and " rc=7 " in first and f"log={log}" in first, first)
+            body = lines[3:]
+            self.assertIn("FAIL boom", body)
+            self.assertNotIn("one", body)
+            self.assertFalse(any("still running" in l for l in body), body)
+
+    def test_heartbeat_never_carries_command_output(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = os.path.join(d, "v.log")
+            r = run("import time\nprint('SECRET-OUT-7731', flush=True)\ntime.sleep(2.5)\nprint('SECRET-OUT-7731 again')", log, {"VERDICT_HEARTBEAT": "1"})
+            self.assertEqual(r.returncode, 0)
+            beats = heartbeats(r.stdout)
+            self.assertEqual(len(beats), 2, r.stdout)
+            for b in beats:
+                self.assertRegex(b, HB_FORMAT)
+                self.assertNotIn("SECRET-OUT-7731", b)
+            self.assertNotIn("SECRET-OUT-7731", r.stdout)
 
 if __name__ == "__main__":
     unittest.main()
