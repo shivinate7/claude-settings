@@ -7,19 +7,15 @@ prompt?
 
 ## The ruling
 
-Owner, 2026-10-11 ("Both"):
+Owner, 2026-10-11 ("Ship guard now, hook later"):
 
 1. Rule `rm-var-unguarded` in `hooks/guard.py` refuses a recursive `rm` when a target has an
    unguarded variable expansion followed by `/`, such as `rm -rf $S/$d` or `rm -rf "$D"/*`.
-   The refusal prints the same command with each expansion written `${NAME:?}`. The agent
-   retries. The owner sees no prompt.
-2. `hooks/rm_prompt_answer.py` is a `PermissionRequest` hook on Bash. It answers allow only
-   when each `rm` in the command meets all of these conditions:
-   - every variable expansion has a `:?` guard;
-   - no target has a command substitution or `$HOME`;
-   - no target is a literal critical path.
-
-   Every other request goes on to the owner unchanged.
+   The refusal prints the flagged targets with each expansion written `${NAME:?}`. The agent
+   retries. The owner sees no prompt. For `$HOME`, the refusal names a literal path instead.
+2. A hook that answers the `rm` prompt is deferred to its own change. See deferred item
+   rm-prompt-answer-hook. The first build allowed deletes of the home folder, `*`, `{~,x}` and
+   `..` escapes, in every mode.
 3. A bare variable target, such as `rm -rf "$d"`, is not refused. Claude Code does not treat
    it as a critical path.
 
