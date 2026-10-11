@@ -32,9 +32,10 @@ The same count found that 232 of the 246 "allow once" records were answers to
 
 ## Named limits
 
-- `$HOME` and `$PWD` stay a prompt. So does a variable whose assigned or loop value expands
-  `~`, `$HOME`, `${HOME…}` or `$PWD`. A `pwd` command in `$(…)` or backticks counts too, with
-  any flags or path. The docs say a `:?` guard does not clear them. The guard refuses them also when guarded. The remedy tells the agent to name the one
+- `$HOME` and `$PWD` stay a prompt. So does a variable whose assigned or loop value starts
+  with `~`. A command that runs `pwd` as a word, or expands `$HOME`, `${HOME…}`, `$PWD` or
+  `${PWD…}` anywhere, taints every variable it assigns. The guard does not parse `$(…)` spans,
+  so quotes and nesting cannot hide a source. A rare false alarm gets the literal-path reason. The docs say a `:?` guard does not clear them. The guard refuses them also when guarded. The remedy tells the agent to name the one
   directory it means as a literal path. The remedy never computes that path, because a computed
   path such as `/Users/<you>/*` could wipe the home folder.
 - A home path read another way, such as `D=$(getent passwd $USER | cut -d: -f6)`, is not seen.
