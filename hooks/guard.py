@@ -1225,6 +1225,26 @@ def _run_dir(cmd: str, shell_cwd: str) -> str:
     return where or shell_cwd or ""
 
 
+def segment_root(segment: str, cmd: str, shell_cwd: str) -> str:
+    """The working tree ONE segment acts on: the shell's cwd after every `cd` that runs before
+    this segment, then this segment's own `git -C` chain. `_run_dir` takes the first `-C` of ANY
+    segment, so a lane's `-C` on an earlier call would hide the shared checkout a later call names.
+    """
+    if GIT_WORK_TREE_RE.search(cmd):
+        return command_root(cmd, shell_cwd)
+    segments = split_segments(_strip_heredoc_bodies_unconditionally(cmd))
+    stop = segments.index(segment) if segment in segments else len(segments)
+    run_dir = shell_cwd
+    for earlier in segments[:stop]:
+        words = segment_tokens(earlier)
+        cd = _segment_cd_target(words) if words else None
+        if cd is not None:
+            run_dir = _absolute(cd, run_dir)
+    words = segment_tokens(segment)
+    git_c = _segment_git_c_target(words) if words else None
+    return _absolute(git_c, run_dir) if git_c is not None else run_dir
+
+
 def command_root(cmd: str, shell_cwd: str) -> str:
     """Return the WORKING TREE the command acts on.
 
@@ -1553,7 +1573,12 @@ def named_pathspecs(subcommand: str, args):
     if any(pathspec_from_file_flag(arg) for arg in args):
         return [], False
     if "--" in args:
-        return args[args.index("--") + 1:], True
+        after = args[args.index("--") + 1:]
+        if subcommand != "restore":
+            return after, True
+        # a restore operand before `--` is a path too (`--source` takes a commit, not a path)
+        before, _ = named_pathspecs(subcommand, args[:args.index("--")])
+        return before + after, True
     plain = []
     skip = False
     for arg in args:
@@ -5686,7 +5711,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     for segment in split_segments(stripped):
         if not segment.strip():
             continue
-        root = command_root(stripped, cwd)
+        root = segment_root(segment, stripped, cwd)
         match = shared_tree_match(segment, root)
         if match is None:
             continue
