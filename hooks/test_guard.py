@@ -2639,9 +2639,9 @@ for held in (
 for message in (
     VCS + ' commit -m "Copy ' + ENV + ' into worktrees"',
     VCS + " commit --message='Copy " + ENV + "'",
-    'gh pr create --title "Adds ' + ENV + '" --body "Adds an ' + ENV + ' line"',
+    'gh pr create --draft --title "Adds ' + ENV + '" --body "Adds an ' + ENV + ' line"',
     VCS + " commit -m \"$(printf 'Copy " + ENV + " into worktrees')\"",
-    'gh pr create --body "$(printf \'Adds `.worktreeinclude` with ' + ENV + "')\"",
+    'gh pr create --draft --body "$(printf \'Adds `.worktreeinclude` with ' + ENV + "')\"",
 ):
     sh("env: a message is text, " + message[:40], message, "allow", cwd=NOGIT)
 for held in (
@@ -2668,7 +2668,7 @@ for held in (
     sh("env: a substitution is judged, " + held[:40], held, "deny", "env-file", cwd=NOGIT)
 for text in (
     "printf '" + ENV + "\\n' > .worktreeinclude", VCS + ' commit -m "Copy ' + ENV + ' into worktrees"',
-    'gh pr create --body "Adds ' + ENV + '"', VCS + " check-ignore -q " + ENV,
+    'gh pr create --draft --body "Adds ' + ENV + '"', VCS + " check-ignore -q " + ENV,
     VCS + " commit -m \"$(printf 'text with " + ENV + "')\"",
 ):
     sh("env: a substitution allowance, " + text[:40], text, "allow", cwd=NOGIT)
@@ -2953,7 +2953,7 @@ for _name, _command in (
     ("a record path under another folder", VCS + ' commit -m "see lint/' + CITE + '"'),
     ("a numbered record path under docs", VCS + ' commit -m "see docs/decisions/0001.md"'),
     ("a message file that cites an id", VCS + " commit -F " + slash(MSG_OK)),
-    ("a PR body with an id", 'gh pr create --title t --body "per D12, short titles for records"'),
+    ("a PR body with an id", 'gh pr create --draft --title t --body "per D12, short titles for records"'),
 ):
     sh("cite-by-id: %s is allowed" % _name, _command, "allow", cwd=NOGIT, config=MERGECFG)
 for _name, _command in (
