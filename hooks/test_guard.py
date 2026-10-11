@@ -1925,8 +1925,11 @@ sh("playwright: env names the variable for a test run",
    "playwright-browsers-path", cwd=NOGIT)
 sh("playwright: the PowerShell form sets it", '$env:PLAYWRIGHT_BROWSERS_PATH = "C:\\x"', "deny",
    "playwright-browsers-path", tool="PowerShell", cwd=NOGIT)
+# Re-pointed (class a): decision playwright-install-once allows a main-session install only as the
+# Node 22 cli.js form. The subject is unchanged: the headless shell installs by its own name.
 sh("playwright: the headless shell installs by its own name",
-   "npx playwright install chromium-headless-shell", "allow", cwd=NOGIT)
+   "npx -y node@22 node_modules/playwright/cli.js install chromium-headless-shell", "allow",
+   cwd=NOGIT)
 sh("playwright: echo only reads the variable", "echo $PLAYWRIGHT_BROWSERS_PATH", "allow",
    cwd=NOGIT)
 sh("playwright: grep only reads the name", "grep -r PLAYWRIGHT_BROWSERS_PATH .", "allow",
@@ -2125,8 +2128,10 @@ sh("playwright-install: the Node 22 bin form is not the cli.js form",
    "npx -y node@22 node_modules/.bin/playwright install", "deny", "playwright-install", cwd=NOGIT)
 # Scanner cases: a lone quote, a comment opener inside quotes, and a multi-line quoted string
 # must not hide an install that follows them.
-sh("playwright-install: a lone apostrophe in an echo does not hide the install",
-   "echo don't; npx playwright install chromium", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a double-quoted apostrophe in an echo does not hide the install",
+   'echo "don\'t"; npx playwright install', "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: an apostrophe in a commit message names the install and is allowed",
+   'git commit -m "don\'t run npx playwright install"', "allow", cwd=NOGIT)
 sh("playwright-install: a hash inside quotes is no comment, the install still denies",
    'echo "#" && npx playwright install chromium', "deny", "playwright-install", cwd=NOGIT)
 sh("playwright-install: a multi-line quoted string does not hide the install",
