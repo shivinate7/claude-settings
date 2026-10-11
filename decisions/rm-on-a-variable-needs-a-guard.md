@@ -32,6 +32,10 @@ The same count found that 232 of the 246 "allow once" records were answers to
 
 ## Named limits
 
-- `$HOME` and a variable set from `$(pwd)` stay a prompt. The docs say a `:?` guard does not
-  clear them. The remedy names a literal path.
-- An `rm` inside a script file is not seen.
+- `$HOME`, `$PWD` and a variable set from `$(pwd)` or `$HOME` stay a prompt. The docs say a
+  `:?` guard does not clear them. The guard refuses them also when guarded, and the remedy
+  names a literal path. A bare `$HOME` target is not refused (ruling 3).
+- These forms are not seen, so Claude Code's own prompt stays the backstop:
+  - an `rm` inside a script file, a heredoc piped to `sh`, or `sh -c` nested 5 deep;
+  - `exec rm`, `timeout 5 rm`, `(rm …)`, `find -exec rm`, and `$cmd -rf`;
+  - `$S'/'*`, `$S\/*`, `${S:-}/*` and `$S*`.
