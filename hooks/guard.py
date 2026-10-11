@@ -245,6 +245,13 @@ def split_segments(cmd: str, ends=None):
             while index < length and cmd[index] != "\n":
                 index += 1
             continue
+        if char == "\\" and cmd[index + 1:index + 2] == "\\":
+            current.append(cmd[index:index + 2])   # an escaped backslash, so no continuation
+            index += 2
+            continue
+        if char == "\\" and cmd[index + 1:index + 2] == "\n" and not POWERSHELL_CALL[0]:
+            index += 2   # a POSIX backslash-newline is a continuation; in PowerShell it ends a path
+            continue
         if char in ("'", '"'):
             quote = char
             current.append(char)
@@ -255,6 +262,10 @@ def split_segments(cmd: str, ends=None):
             ends is None or ends.append("&&")
             current = []
             index += 2
+            continue
+        if char == "|" and cmd[index - 1:index] == ">":
+            current.append(char)   # `>|` overrides noclobber: a redirect, no pipe
+            index += 1
             continue
         if char == "|":
             width = 2 if cmd[index:index + 2] == "||" else 1
@@ -5105,6 +5116,144 @@ LN_DESCENDS_REASON = (
 )
 
 
+# THE PLAYWRIGHT BROWSER CACHE. Incident 2026-10-10: a feed-build session set
+# PLAYWRIGHT_BROWSERS_PATH to a scratch dir to work around a missing chromium_headless_shell-1208.
+# The real causes were a stale `__dirlock` left at 16:11 by an install stopped halfway, and an
+# install that hangs while it unpacks under Node 26.11 with Playwright 1.58. The install sat 73
+# minutes, and the workaround hid both causes. See the record playwright-browsers-path.
+# A set is an inline `VAR=v`, `env VAR=v`, `export VAR=v`, `cmd /c set VAR=v`, any of these inside
+# `bash -c` or `eval`, a write of the assignment into a file, or a PowerShell `$env:VAR = v`,
+# `Set-Item env:VAR` or `SetEnvironmentVariable`. A read, a grep, and `unset` set nothing. The name
+# is folded to upper case in every form. Shell words come from `segment_tokens`, assignments from
+# `ASSIGNMENT`, and the file write from `_VAR_TOKEN`: no parser of its own.
+# KNOWN LIMITS: `cross-env` is refused. Not covered: `timeout N env`, `setx`, a PowerShell block,
+# a `<<<` here-string, a CI yaml `env:` key, and `node -e` or `python -c`.
+PLAYWRIGHT_VAR = "PLAYWRIGHT_BROWSERS_PATH"
+ASSIGNING_BUILTINS = ("export", "declare", "typeset", "readonly", "local", "set")
+PLAYWRIGHT_PS_SHELLS = ("pwsh", "powershell", "pwsh.exe", "powershell.exe")
+# Search tools. Local here, not in the shared ENV_PATTERN_COMMANDS.
+PLAYWRIGHT_PS_READERS = ("select-string", "sls")
+PLAYWRIGHT_PS_SET = re.compile(
+    r"\$\{?env:" + PLAYWRIGHT_VAR + r"\}?\s*[-+*/]?=(?!=)"
+    r"|^\s*(?:set-item|si|new-item|ni|set-content|sc)\b[^;|]*\benv:\\?" + PLAYWRIGHT_VAR + r"\b"
+    r"|SetEnvironmentVariable\(\s*['\"]?" + PLAYWRIGHT_VAR + r"\b", re.I)
+
+
+# A shell profile or `.envrc`: a write there sets the variable for every later shell.
+PLAYWRIGHT_PROFILE = re.compile(r"\.(?:zshrc|zshenv|zlogin|bashrc|profile|zprofile|bash_profile|bash_login|envrc)\b")
+# SILENT_WRITE_REDIRECT (the null-device redirects) leaves `N>&N` alone, because that rule wants
+# a duplicate to count as output. Here a duplicate is no file target, so it is dropped as well.
+_FD_DUP = re.compile(r"\d*>&\d+")
+_PRINTF_DIRECTIVE = re.compile(r"%%|%[-+ #0-9.]*[a-zA-Z]|\\[nrtabfv\\]")
+_REDIRECT_TO_PROFILE = re.compile(r">+\|?\s*[^\s|;&]*" + PLAYWRIGHT_PROFILE.pattern)
+
+
+def _is_playwright_assign(token: str) -> bool:
+    return bool(ASSIGNMENT.match(token)) and token.split("=", 1)[0].upper() == PLAYWRIGHT_VAR
+
+
+def _pwsh_script(tokens) -> str:
+    """The script text after `-c` or `-Command` of a pwsh launch, else ''."""
+    for at, tok in enumerate(tokens[:-1]):
+        if re.fullmatch(r"-c(?:ommand)?", tok, re.I):
+            return tokens[at + 1]
+    return ""
+
+
+def _playwright_tokens_hit(tokens, depth=0) -> str:
+    tokens = [t for t in ([tokens[0].lstrip("(")] + tokens[1:] if tokens else []) if t]
+    if not tokens or depth > 3:
+        return ""
+    at = resolve_command(tokens)
+    if any(_is_playwright_assign(t) for t in tokens[:len(tokens) if at is None else at]):
+        return PLAYWRIGHT_VAR + " assignment"
+    if at is None:
+        return ""
+    word, rest = basename(tokens[at]).lower(), tokens[at + 1:]
+    if word in ASSIGNING_BUILTINS and any(_is_playwright_assign(t) for t in rest):
+        return word + " " + PLAYWRIGHT_VAR
+    if word in ("builtin", "exec"):
+        return _playwright_tokens_hit(rest, depth + 1)
+    if word == "npx":
+        rest = [t for t in rest if not t.startswith("-")] or [""]
+        word, rest = rest[0], rest[1:]
+    if word == "cross-env":
+        for token in rest:
+            if not ASSIGNMENT.match(token):
+                break
+            if _is_playwright_assign(token):
+                return word + " " + PLAYWRIGHT_VAR
+    script = " ".join(rest[1:]) if word in CMD_EXE_NAMES and rest and rest[0].lower() in (
+        "/c", "/k") else None
+    if script is None:
+        script = " ".join(rest) if word == "eval" else (
+            _pwsh_script(tokens) if word in PLAYWRIGHT_PS_SHELLS else inline_script(tokens))
+    for segment in split_segments(script) if script else ():
+        hit = playwright_path_hit(segment, depth + 1, ps_inner=word in PLAYWRIGHT_PS_SHELLS)
+        if hit:
+            return hit
+    return ""
+
+
+def playwright_path_hit(segment: str, depth=0, to_file=False, ps_inner=False) -> str:
+    """Return the matched text when a segment sets PLAYWRIGHT_BROWSERS_PATH, else ''.
+
+    `to_file` says the segment's output goes to a profile (a `tee` further down the pipe). The
+    file-write form counts only when the written text starts with the assignment.
+    """
+    tokens = segment_tokens(segment) or []
+    at = resolve_command(tokens) if tokens else None
+    word = basename(tokens[at]).lower() if at is not None else ""
+    # A pwsh launch with a script is judged through that script (ps_inner), statement by statement.
+    outer_ps = word in PLAYWRIGHT_PS_SHELLS and not _pwsh_script(tokens)
+    if (POWERSHELL_CALL[0] or outer_ps or ps_inner) and word not in (
+            ENV_PATTERN_COMMANDS + PLAYWRIGHT_PS_READERS):
+        found = PLAYWRIGHT_PS_SET.search(segment)
+        # inside pwsh -c, a `$env:` text counts only as a statement, not inside another command's argument
+        if found and not (ps_inner and found.group(0).startswith(("$", "{")) and not re.match(
+                r"\s*" + re.escape(found.group(0)), segment)):
+            return found.group(0)
+    cleaned = _FD_DUP.sub(" ", SILENT_WRITE_REDIRECT.sub(" ", segment))
+    if (to_file or _REDIRECT_TO_PROFILE.search(cleaned)) and len(tokens) > 1 and basename(
+            tokens[0]) in ("echo", "printf"):
+        words = [t for t in tokens[1:] if not t.startswith("-")]
+        if basename(tokens[0]) == "printf":   # drop printf directives and escapes, keep the text
+            words = [_PRINTF_DIRECTIVE.sub("", t) for t in words]
+        written = " ".join(w for w in words if w)
+        if _is_playwright_assign(written.removeprefix("export ").lstrip()):
+            return PLAYWRIGHT_VAR + " written to a file"
+    return _playwright_tokens_hit(tokens, depth)
+
+
+def playwright_command_hit(raw: str, stripped: str) -> str:
+    """Judge a whole command: each segment, plus a profile-bound heredoc body and `tee` pipe."""
+    to_file = bool(re.search(r"\btee\b[^|;&]*" + PLAYWRIGHT_PROFILE.pattern, stripped))
+    for segment in split_segments(stripped):
+        matched = playwright_path_hit(segment, to_file=to_file)
+        if matched:
+            return matched
+    kept, bodies = _split_heredocs(raw)
+    headers = [line for line in kept if HEREDOC_HEADER.search(line)]
+    for header, (_, body) in zip(headers, bodies):
+        if PLAYWRIGHT_PROFILE.search(header):
+            for line in body.split("\n"):
+                matched = playwright_path_hit(line)
+                if matched:
+                    return matched
+    return ""
+
+
+PLAYWRIGHT_PATH_REASON = (
+    "a missing browser build has two measured causes, and a changed cache location hides both. "
+    "One is a stale `__dirlock` in the Playwright cache, left by an install that stopped "
+    "halfway. The other is an install that hangs while it unpacks under Node 26.11 with "
+    "Playwright 1.58. "
+    "Remedy: run `pgrep -fl playwright` to confirm that no install is running, then remove the "
+    "stale `__dirlock`. If the install still hangs, run it under Node 22 with `npx -y node@22 "
+    "node_modules/playwright/cli.js install`, which unpacks in under a second."
+)
+
+
 SPAWN_TOOLS = ("Agent", "Task")
 SESSION_TOOL = "mcp__ccd_session__start_session"
 # The one list of roles that may run Haiku. lint/check_agent_models.py reads it from here.
@@ -5445,6 +5594,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = narrated_tail_hit(stripped)
     if matched:
         refuse(tool, "deny", "live-stream", NARRATED_TAIL_REASON, matched)
+
+    # 3c. A command that sets the Playwright browser cache location (incident 2026-10-10).
+    matched = playwright_command_hit(raw, stripped)
+    if matched:
+        refuse(tool, "deny", "playwright-browsers-path", PLAYWRIGHT_PATH_REASON, matched)
 
     # 3b. Two traps ported from banchi's `scripts/guard-shell.py`: `gh api` with a field and no
     # method, and `ln -s` onto a directory that is already there. Each reads the segment's own

@@ -1823,6 +1823,186 @@ sh("kill: taskkill by image name, no other flag", "taskkill /IM node.exe", "deny
 sh("kill: xargs unwraps to the real command it runs", "xargs pkill", "deny",
    "machine-wide-kill", cwd=NOGIT)
 
+# THE PLAYWRIGHT BROWSER CACHE. Owner ruling: a command that sets PLAYWRIGHT_BROWSERS_PATH is
+# refused, mechanically. INCIDENT 2026-10-10: a feed-build session pointed the variable at a scratch
+# directory to work around a missing chromium_headless_shell. The real cause was a stale `__dirlock`
+# in ~/Library/Caches/ms-playwright. The install sat 73 minutes, and the workaround hid the cause.
+sh("playwright: an inline assignment ahead of an install",
+   "PLAYWRIGHT_BROWSERS_PATH=/tmp/x npx playwright install chromium", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: an export ahead of a test run", "export PLAYWRIGHT_BROWSERS_PATH=/tmp/x; npm test",
+   "deny", "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: env names the variable for a test run",
+   "env PLAYWRIGHT_BROWSERS_PATH=/tmp/x npx playwright test", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: the PowerShell form sets it", '$env:PLAYWRIGHT_BROWSERS_PATH = "C:\\x"', "deny",
+   "playwright-browsers-path", tool="PowerShell", cwd=NOGIT)
+sh("playwright: the headless shell installs by its own name",
+   "npx playwright install chromium-headless-shell", "allow", cwd=NOGIT)
+sh("playwright: echo only reads the variable", "echo $PLAYWRIGHT_BROWSERS_PATH", "allow",
+   cwd=NOGIT)
+sh("playwright: grep only reads the name", "grep -r PLAYWRIGHT_BROWSERS_PATH .", "allow",
+   cwd=NOGIT)
+sh("playwright: unset clears the variable", "unset PLAYWRIGHT_BROWSERS_PATH", "allow", cwd=NOGIT)
+# PR #314 review: bypasses, each allowed before the fix. Each one sets the variable.
+sh("playwright: builtin export sets it", "builtin export PLAYWRIGHT_BROWSERS_PATH=/x", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: bash -c sets it", 'bash -c "export PLAYWRIGHT_BROWSERS_PATH=/x"', "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: sh -c assigns it ahead of a test run",
+   "sh -c 'PLAYWRIGHT_BROWSERS_PATH=/x npx playwright test'", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: eval sets it", 'eval "export PLAYWRIGHT_BROWSERS_PATH=/x"', "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: a subshell assigns it ahead of a test run",
+   "(PLAYWRIGHT_BROWSERS_PATH=/x npx playwright test)", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: exec env names it", "exec env PLAYWRIGHT_BROWSERS_PATH=/x npx", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: cmd /c set sets it", "cmd /c set PLAYWRIGHT_BROWSERS_PATH=C:\\x", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: PowerShell braced env drive sets it",
+   '${env:PLAYWRIGHT_BROWSERS_PATH} = "C:\\x"', "deny", "playwright-browsers-path",
+   tool="PowerShell", cwd=NOGIT)
+sh("playwright: Set-Item on the env drive sets it", "Set-Item env:PLAYWRIGHT_BROWSERS_PATH C:\\x",
+   "deny", "playwright-browsers-path", tool="PowerShell", cwd=NOGIT)
+sh("playwright: SetEnvironmentVariable sets it",
+   '[Environment]::SetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH","C:\\x")', "deny",
+   "playwright-browsers-path", tool="PowerShell", cwd=NOGIT)
+sh("playwright: a shell rc file gets the export",
+   "echo 'export PLAYWRIGHT_BROWSERS_PATH=/x' >> ~/.zshrc", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: an envrc file gets the assignment",
+   "echo PLAYWRIGHT_BROWSERS_PATH=/x > .envrc", "deny", "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: a case-folded name still sets it", "playwright_browsers_path=/x npx", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: the bare PowerShell read is allowed", "$env:PLAYWRIGHT_BROWSERS_PATH", "allow",
+   tool="PowerShell", cwd=NOGIT)
+# PR #314 re-review: false alarms. Each one only reads or writes a note, so each is allowed.
+sh("playwright: grep for the assignment only reads",
+   'grep -rn "PLAYWRIGHT_BROWSERS_PATH=" hooks/ 2>/dev/null', "allow", cwd=NOGIT)
+sh("playwright: a note that mentions the assignment is allowed",
+   'echo "set PLAYWRIGHT_BROWSERS_PATH=/x to override" >> notes.md', "allow", cwd=NOGIT)
+sh("playwright: a quoted arrow in a command that names the variable is allowed",
+   'echo "PLAYWRIGHT_BROWSERS_PATH -> cache dir"', "allow", cwd=NOGIT)
+sh("playwright: grep for the PowerShell setter only reads",
+   'grep "Set-Item env:PLAYWRIGHT_BROWSERS_PATH" -r .', "allow", cwd=NOGIT)
+sh("playwright: a doc heredoc whose body mentions an assignment is allowed",
+   "cat > README.md <<'EOF'\nset PLAYWRIGHT_BROWSERS_PATH=/x to override\nEOF", "allow", cwd=NOGIT)
+# PR #314 re-review: gaps, each allowed on 9a77504. Each one sets the variable.
+sh("playwright: cmd /c with a quoted set sets it",
+   'cmd /c "set PLAYWRIGHT_BROWSERS_PATH=C:\\x"', "deny", "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: Set-Item on the Env:\\ drive sets it",
+   "Set-Item Env:\\PLAYWRIGHT_BROWSERS_PATH C:\\x", "deny", "playwright-browsers-path",
+   tool="PowerShell", cwd=NOGIT)
+sh("playwright: PowerShell += appends to it",
+   '$env:PLAYWRIGHT_BROWSERS_PATH += ";C:\\x"', "deny", "playwright-browsers-path",
+   tool="PowerShell", cwd=NOGIT)
+sh("playwright: a heredoc writes the export into a shell rc file",
+   "cat >> ~/.zshrc <<'EOF'\nexport PLAYWRIGHT_BROWSERS_PATH=/x\nEOF", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: tee appends the export to a shell rc file",
+   "echo 'export PLAYWRIGHT_BROWSERS_PATH=/x' | tee -a ~/.zshrc", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+# PR #314 third review: false alarms, each only writes a log or reads a docs folder.
+sh("playwright: printf into a log names the variable and is allowed",
+   "printf 'PLAYWRIGHT_BROWSERS_PATH=%s\\n' \"$P\" >> run.log", "allow", cwd=NOGIT)
+sh("playwright: echo into a log names the variable and is allowed",
+   'echo "PLAYWRIGHT_BROWSERS_PATH=$X" >> build.log', "allow", cwd=NOGIT)
+sh("playwright: grep for the PowerShell setter in docs is allowed",
+   "grep '\\$env:PLAYWRIGHT_BROWSERS_PATH *=' docs/", "allow", cwd=NOGIT)
+# PR #314 third review: gaps, each allowed on 9b22302. Each one writes the export to a profile.
+sh("playwright: unquoted echo appends the export to a shell rc file",
+   "echo export PLAYWRIGHT_BROWSERS_PATH=/x >> ~/.zshrc", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: unquoted echo piped through tee into a shell rc file",
+   "echo export PLAYWRIGHT_BROWSERS_PATH=/x | tee -a ~/.zshrc", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+# PR #314 final review. (a) The profile list lacks these three login and env files, so each
+# write is a missed set until PLAYWRIGHT_PROFILE names them.
+sh("playwright: an echo appends the export to ~/.zshenv",
+   "echo 'export PLAYWRIGHT_BROWSERS_PATH=/x' >> ~/.zshenv", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: an echo appends the export to ~/.zlogin",
+   "echo 'export PLAYWRIGHT_BROWSERS_PATH=/x' >> ~/.zlogin", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: an echo appends the export to ~/.bash_login",
+   "echo 'export PLAYWRIGHT_BROWSERS_PATH=/x' >> ~/.bash_login", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+# (b) split_segments cuts at a backslash-newline outside quotes, so the assignment must still
+# reach the install segment after the continuation. The control keeps a quoted continuation
+# inert for an unrelated rule: the kill word inside echo's quotes is text, not a call.
+sh("playwright: an assignment continued by a backslash-newline still sets it for an install",
+   "PLAYWRIGHT_BROWSERS_PATH=/x \\\nnpx playwright install", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("control: a quoted backslash-newline echo of a kill word is allowed",
+   'echo "pkill \\\nnode"', "allow", cwd=NOGIT)
+# (c) False alarms: each form names the PowerShell setter text but only reads it, quotes it into
+# a body, or writes it to a note. The real setter, inside pwsh -c, stays denied.
+sh("playwright: sed prints the lines that name the setter, a read only",
+   "sed -n '/$env:PLAYWRIGHT_BROWSERS_PATH = /p' f", "allow", cwd=NOGIT)
+sh("playwright: a gh comment body quotes the setter text, allowed",
+   """gh pr comment 1 --body '$env:PLAYWRIGHT_BROWSERS_PATH = "x"'""", "allow", cwd=NOGIT)
+sh("playwright: an echo writes the setter text into a note, allowed",
+   """echo '$env:PLAYWRIGHT_BROWSERS_PATH = "x"' >> notes.md""", "allow", cwd=NOGIT)
+sh("playwright: Select-String reads the name, allowed",
+   "Select-String '$env:PLAYWRIGHT_BROWSERS_PATH' f.ps1", "allow", tool="PowerShell", cwd=NOGIT)
+sh("playwright: Select-String searches for the setter text with an equals sign, allowed",
+   "Select-String -Pattern '$env:PLAYWRIGHT_BROWSERS_PATH = ' f.ps1", "allow",
+   tool="PowerShell", cwd=NOGIT)
+sh("playwright: the real PowerShell setter inside pwsh -c stays denied",
+   """pwsh -c '$env:PLAYWRIGHT_BROWSERS_PATH = "x"'""", "deny", "playwright-browsers-path",
+   cwd=NOGIT)
+# Owner ruling (coordinator): cross-env sets the variable for the command it wraps, so it denies.
+sh("playwright: npx cross-env sets it ahead of an install",
+   "npx cross-env PLAYWRIGHT_BROWSERS_PATH=/x npx playwright install", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: cross-env sets it ahead of an install, bare",
+   "cross-env PLAYWRIGHT_BROWSERS_PATH=/x npx playwright install", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+# Coordinator ruling: an escaped backslash before a newline is not a continuation, so the kill
+# rule still sees the pkill on the next line. A variable given to node as an argument is no setting.
+sh("kill: an escaped backslash before a newline is not a continuation, pkill still denies",
+   "echo \\\\\npkill -f node", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("playwright: cross-env passes the variable to node as an argument, allowed",
+   "cross-env FOO=1 node x.js PLAYWRIGHT_BROWSERS_PATH=/x", "allow", cwd=NOGIT)
+# PR #314 final review. A backslash before a newline is a PowerShell path end, not a continuation,
+# so each line is its own command. split_segments joined them, and the setter after it went unseen.
+sh("playwright: a PowerShell path ending in a backslash, then a setter on the next line, denies",
+   "Set-Location C:\\tmp\\\nSet-Item env:PLAYWRIGHT_BROWSERS_PATH D:\\cache", "deny",
+   "playwright-browsers-path", tool="PowerShell", cwd=NOGIT)
+sh("control: a PowerShell path ending in a backslash, then a force push on the next line, denies",
+   "Set-Location C:\\tmp\\\ngit push -f origin feat", "deny", "force-push", tool="PowerShell",
+   cwd=PUSHFEAT)
+# PR #314 final review. A profile write whose text starts with a printf format, or that overrides
+# noclobber with `>|`, still writes the export line into a shell profile.
+sh("playwright: printf writes the export line into zshrc, denies",
+   'printf "%s\\n" "export PLAYWRIGHT_BROWSERS_PATH=/x" >> ~/.zshrc', "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: echo writes the export line into zshrc past noclobber with >|, denies",
+   "echo 'export PLAYWRIGHT_BROWSERS_PATH=/x' >| ~/.zshrc", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+# PR #314 final review. The setter text sits only inside a quoted argument of gh, a command that
+# sets nothing. pwsh -c is a PowerShell shell, so the whole segment reaches PLAYWRIGHT_PS_SET.
+sh("playwright: the setter text is only a gh comment body inside pwsh -c, allowed",
+   r'''pwsh -c "gh pr comment 314 --body 'Do not set \$env:PLAYWRIGHT_BROWSERS_PATH = x'"''',
+   "allow", cwd=NOGIT)
+# PR #314 final review. New-Item's alias `ni` sets an env: variable as `New-Item` does.
+sh("playwright: the New-Item alias ni sets the env drive variable, denies",
+   r"ni env:PLAYWRIGHT_BROWSERS_PATH -Value D:\x", "deny", "playwright-browsers-path",
+   tool="PowerShell", cwd=NOGIT)
+# PR #314 round 4. A printf format with %s hides the export text from the filter, which drops any
+# token with a percent sign. The export is still written to the profile.
+sh("playwright: printf with a %s format writes the export to zshrc, denies",
+   "printf 'export PLAYWRIGHT_BROWSERS_PATH=%s\\n' \"$HOME/pw\" >> ~/.zshrc", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: printf with a %s format piped to tee -a zshrc, denies",
+   "printf 'export PLAYWRIGHT_BROWSERS_PATH=%s\\n' \"$HOME/pw\" | tee -a ~/.zshrc", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: printf with a %s format writes the export to .envrc, denies",
+   "printf 'export PLAYWRIGHT_BROWSERS_PATH=%s\\n' \"$HOME/pw\" >> .envrc", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+
 # THE PREDICATE IS THE ACT, NOT THE TOOL OR THE SPELLING. MEASURED: the owner ran
 # `grep -n -i "...|make reap|pkill..." CLAUDE.md` to search CLAUDE.md for the word, and it was
 # denied as a machine-wide kill, although the command calls grep. Each case below names the word
@@ -4742,6 +4922,28 @@ REASON_MAY_NAME = {
 }
 
 
+def playwright_remedy_case():
+    """The playwright refusal names the real check and points nowhere else.
+
+    The remedy must name the stale `__dirlock` and `pgrep -fl playwright`, the two checks that
+    find the real cause. It must not name the variable it refused, nor any path to set instead.
+    """
+    got, reason = decide({
+        "raw": None, "tool": "Bash", "cwd": NOGIT, "session": None,
+        "env_path": None,
+        "tool_input": {"command": "PLAYWRIGHT_BROWSERS_PATH=/tmp/x npx playwright install chromium"},
+    })
+    if got != "deny":
+        return False, "expected deny, got %s" % got
+    missing = [f for f in ("__dirlock", "pgrep -fl playwright") if f not in reason]
+    if missing:
+        return False, "the remedy does not name %r: %s" % (missing[0], reason[:90])
+    named = [f for f in ("PLAYWRIGHT_BROWSERS_PATH", "/tmp", "scratch", "C:\\") if f in reason]
+    if named:
+        return False, "the remedy names %r, a forbidden target or another path" % named[0]
+    return True, "refused, and the remedy names the stale __dirlock and pgrep -fl playwright"
+
+
 def powershell_backslash_case():
     """Under PowerShell a backslash is a path separator, so tokenizing keeps it. Under Bash it is
     an escape, so it goes. The same text reads two ways, and the tool decides which."""
@@ -5507,6 +5709,8 @@ LOG_CHECKS = (
     ("log: a branch delete with no resolvable base is allowed and noted",
      branch_base_unread_log_case),
     ("stack: the refusal never names the action it refused", stack_reason_hygiene_case),
+    ("playwright: the refusal names the stale __dirlock and pgrep, and no other path",
+     playwright_remedy_case),
     ("split_segments: a comment starting a word ends its line, "
      "letter-before-# and quoted-# stay literal", split_segments_comment_case),
     ("liveness: process_start_ms splits alive/dead/unreadable apart", process_start_ms_case),
