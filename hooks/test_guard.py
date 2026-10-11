@@ -1714,6 +1714,31 @@ sh("per-file deny: cd into the shared checkout, then git -C . restore f.txt, fro
    "cd " + slash(GITMAIN) + " && " + VCS + " -C . restore f.txt", "deny", "shared-tree", cwd=GITWT)
 sh("per-file deny: -C parent then a relative -C repo, from a plain folder",
    VCS + " -C " + slash(ROOT) + " -C repo restore f.txt", "deny", "shared-tree", cwd=NOGIT)
+# IDENTICAL SEGMENTS. decisions/stash-push-is-clone-wide.md: each git call is judged in its own
+# checkout. The lane and the shared checkout both hold f.txt dirty, so a per-file restore is an
+# allow in the lane and a deny in the shared checkout. The segment text repeats, and the segment
+# lookup finds the FIRST copy, so the second call is judged in the lane. These MUST be red today.
+sh("per-file deny: cd lane; restore f.txt; cd shared; the same restore f.txt, joined by ;",
+   "cd " + slash(GITWT) + "; " + VCS + " restore f.txt; cd " + slash(GITMAIN) + "; "
+   + VCS + " restore f.txt", "deny", "shared-tree", cwd=NOGIT)
+# The && forms end in `&& echo done`. A segment keeps the blank before its `&&`, so the two
+# restore segments only read as identical when a later `&&` gives the second one that blank too.
+# The bare form without a trailing join is judged correctly on the base, because its last segment
+# has no trailing blank, so it is not a repeat of the first.
+sh("per-file deny: cd lane && restore f.txt && cd shared && the same restore f.txt, && joins",
+   "cd " + slash(GITWT) + " && " + VCS + " restore f.txt && cd " + slash(GITMAIN) + " && "
+   + VCS + " restore f.txt && echo done", "deny", "shared-tree", cwd=NOGIT)
+sh("per-file deny: cd lane && git -C . restore f.txt && cd shared && the same -C . restore, && joins",
+   "cd " + slash(GITWT) + " && " + VCS + " -C . restore f.txt && cd " + slash(GITMAIN) + " && "
+   + VCS + " -C . restore f.txt && echo done", "deny", "shared-tree", cwd=NOGIT)
+sh("per-file deny: cd lane; git -C . restore f.txt; cd shared; the same -C . restore",
+   "cd " + slash(GITWT) + "; " + VCS + " -C . restore f.txt; cd " + slash(GITMAIN) + "; "
+   + VCS + " -C . restore f.txt", "deny", "shared-tree", cwd=NOGIT)
+# CONTROL, green on the base. Both calls stay in the lane, so the repeat is an allow and the fix
+# must not turn a lane-only repeat into a deny.
+sh("per-file allow: cd lane && restore f.txt && cd lane && the same restore f.txt stays allowed",
+   "cd " + slash(GITWT) + " && " + VCS + " restore f.txt && cd " + slash(GITWT) + " && "
+   + VCS + " restore f.txt && echo done", "allow", cwd=NOGIT)
 
 # KILL CASES for three mutate_guard entries removed in 78e8446. Each pins today's base verdict.
 # The quoted refspec and the quoted force in a commit message are verdicts; the quoted force on a
