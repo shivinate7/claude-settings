@@ -2377,6 +2377,20 @@ sh("playwright-install: pnpm dlx --package= runs the install",
 sh("playwright-install: a subagent pnpm dlx --package= install is denied",
    "pnpm dlx --package=playwright playwright install", "deny", "playwright-install", cwd=NOGIT,
    agent_id="pw-sub1")
+# npx has no --filter, -F or --dir flag, so the value's name is taken as the package and the
+# install runs. Each form is denied in the main session and as a subagent.
+sh("playwright-install: npx --filter names the package and the install runs",
+   "npx --filter playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent npx --filter install is denied",
+   "npx --filter playwright install", "deny", "playwright-install", cwd=NOGIT, agent_id="pw-sub1")
+sh("playwright-install: npx -F names the package and the install runs",
+   "npx -F playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent npx -F install is denied",
+   "npx -F playwright install", "deny", "playwright-install", cwd=NOGIT, agent_id="pw-sub1")
+sh("playwright-install: npx --dir names the package and the install runs",
+   "npx --dir playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent npx --dir install is denied",
+   "npx --dir playwright install", "deny", "playwright-install", cwd=NOGIT, agent_id="pw-sub1")
 
 # THE PREDICATE IS THE ACT, NOT THE TOOL OR THE SPELLING. MEASURED: the owner ran
 # `grep -n -i "...|make reap|pkill..." CLAUDE.md` to search CLAUDE.md for the word, and it was
