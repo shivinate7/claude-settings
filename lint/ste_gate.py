@@ -249,8 +249,10 @@ def main():
         if not findings:
             return
         lines = [format_finding(f) for f in findings]
-        reason = "STE lint on the text for %s:\n%s\n%s Fix the text, then write again." % (
-            os.path.basename(path), "\n".join(lines), UI_NOTE if suffix in UI_SUFFIXES else NOTE)
+        reason = ("STE lint on the text for %s:\n%s\n%s Fix the text, then write again. For a "
+                  "rule's meaning, run `python3 %s --explain <id>`." % (
+            os.path.basename(path), "\n".join(lines), UI_NOTE if suffix in UI_SUFFIXES else NOTE,
+            os.path.join(HERE, "ste_lint.py")))
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
