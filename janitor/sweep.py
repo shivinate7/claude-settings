@@ -1638,7 +1638,7 @@ def _sim_device_tree(table, udid):
 
 def sim_keep_code(device, boots, table, now):
     """None when DEVICE is idle (ruling 2, all four tests), else the code naming why it is not.
-    TABLE is the `_read_ps_table` answer, or None when unreadable."""
+    DEVICE must have a line in BOOTS. TABLE is the `_read_ps_table` answer, or None when unreadable."""
     if table is None:
         return "process-table-unreadable"
     commands = [cmd for _, _, cmd in table.values()]
@@ -1646,8 +1646,6 @@ def sim_keep_code(device, boots, table, now):
         return "simulator-app-running"
     if any(_XCODE_APP_RE.match(c) for c in commands):
         return "xcode-running"
-    if device["udid"] not in boots:
-        return "not-recorded"
     if boots[device["udid"]] is None:
         return "start-time-unreadable"
     if now - boots[device["udid"]] < SIM_IDLE_SECONDS:

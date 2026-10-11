@@ -5463,7 +5463,8 @@ def sim_boot_refusal(tool: str, names: list) -> None:
         boots, table, now = (sweep.sim_read_boots(os.path.join(config_dir(), "state", "sim-boots.jsonl")),
                              sweep._read_ps_table(), time.time())
         for twin in booted:
-            if ((twin["deviceTypeIdentifier"], twin["runtime"]) == (want["deviceTypeIdentifier"], want["runtime"])
+            if (twin["udid"] in boots  # an unrecorded device is never idle
+                    and (twin["deviceTypeIdentifier"], twin["runtime"]) == (want["deviceTypeIdentifier"], want["runtime"])
                     and sweep.sim_keep_code(twin, boots, table, now) is None):
                 refuse(tool, "deny", "simulator-boot-twin",
                        "An idle booted simulator of the same type and runtime exists: %s (%s). Use it "
