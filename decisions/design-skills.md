@@ -17,19 +17,26 @@ The reviewer clause is in `agents/reviewer.md`.
 
 ## Pins
 
-- The impeccable pin is the tag on the pinned-source line in `skills/design-review/SKILL.md`.
-  This record does not copy it. Moving the pin is a hand edit of that line and of the copy in
-  `skills/impeccable`.
-- The Vercel rules pin is a URL in `skills/design-review/SKILL.md`. Moving the pin is a hand
-  edit of that URL.
+Renovate moves each pin. The owner installs the Renovate GitHub app under their login. A
+`renovate.json` in this repo tracks the three pins below. It opens a draft PR each month, with
+release notes, and waits 14 days after a release (`minimumReleaseAge`). The owner merges or
+skips each PR.
+
+- impeccable: the `skill-v*` tag on the pinned-source line in `skills/design-review/SKILL.md`.
+  This record does not copy it. Renovate edits that tag only. The copy in `skills/impeccable`
+  must be replaced with the same release, or the PR is not complete.
+- Vercel rules: the commit in the URL in `skills/design-review/SKILL.md`.
+- frontend-design: the `anthropics/claude-code` ref in `settings.json`.
+- Exception to `verification-bump-first-fix-version` (bump to the first fixing version): these
+  three sources bump to the newest release that has waited 14 days. The owner wants their
+  improvements, so the first fix is not the target.
 - Why no Vercel plugin: the upstream skill fetches from `main` on every run. A plugin update
   would move the rules without a decision.
 - Why no impeccable plugin, measured by review: the plugin installs hooks that run
   `impeccable hook` on SessionStart, PostToolUse and Stop in every session. It also installs an
   agent with Write and Edit. The guard sees neither.
 
-Dated by: the impeccable pin and the Vercel URL in `skills/design-review/SKILL.md`, and the
-guard rule.
+Dated by: the three pins and the guard rule.
 A change to any of them means that this record is read again.
 
 ## Guard rule: impeccable-review-only

@@ -9,11 +9,11 @@ The ruling is the design-skills record, 2026-10-10.
 ## Pinned sources
 
 - Vercel rules: `https://raw.githubusercontent.com/vercel-labs/web-interface-guidelines/434b7f91364665f2f733b310ec54809bf8f37937/command.md`.
-  The commit in the URL is the pin. Moving it is a hand edit of this line. The upstream skill
-  fetches from `main` on every run, so there is no plugin.
+  The commit in the URL is the pin. Renovate proposes each move (`decisions/design-skills.md`).
+  The upstream skill fetches from `main` on every run, so there is no plugin.
 - impeccable: a pinned copy of `pbakaus/impeccable` `plugin/skills/impeccable` at tag
-  `skill-v4.5.2` (Apache 2.0), in `skills/impeccable`. No plugin. Moving the pin is a hand edit
-  of this line and of the copy. Guard rule `impeccable-review-only` lets it load only for
+  `skill-v4.5.2` (Apache 2.0), in `skills/impeccable`. No plugin. Renovate proposes each move of
+  the tag, and the copy must be replaced with it. Guard rule `impeccable-review-only` lets it load only for
   `audit` or `critique`. Its settings-writer list is not fully built; see
   `decisions/design-skills.md`.
 
