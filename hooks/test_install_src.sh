@@ -1092,12 +1092,15 @@ skills_case2() {
   rm -rf "$h"
 }
 
-# ---- copy-mode case: a fake `ln` that copies instead of linking (D: copy-mode-overwrites- ---
-# no-backup) must not pile up .bak entries across repeated runs. This is the exact fault
-# measured 2026-10-03: Git Bash's `ln -sfn` on a Windows account without symlink rights
-# makes a real copy, so the next run sees a real file/dir where land_dir()/land_skills_dir()
-# expect a symlink, and backs it up before copying again. Builds a stub `ln` first on PATH
-# that always copies, so this reproduces without needing a literal no-symlink-rights host.
+# ---- copy-mode case: a fake `ln` that copies instead of linking must not pile up .bak entries
+# across repeated runs. This is the exact fault measured 2026-10-03: Git Bash's `ln -sfn` on a
+# Windows account without symlink rights makes a real copy, so the next run sees a real
+# file/dir where land_dir()/land_skills_dir() expect a symlink, and backs it up before copying
+# again. Builds a stub `ln` first on PATH that always copies, so this reproduces without needing
+# a literal no-symlink-rights host.
+# Owner ruling 2026-10-11 re-points this case for settings.json: a repeat run backs up a plain
+# settings.json (superseding D: copy-mode-overwrites-no-backup for that file), and only the
+# newest settings.json.bak.* stays. Skill and agent copies still leave no .bak entries.
 make_fake_ln_bin() {
   stub_bin="$1"
   mkdir -p "$stub_bin"
@@ -1121,7 +1124,7 @@ EOF
 }
 
 copymode_case1() {
-  name="copymode1: two runs under a copying \`ln\` leave no .bak and land current content"
+  name="copymode1: two runs under a copying \`ln\` leave no skill/agent .bak, one settings.json.bak holding run 1, and land current content"
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/copymode1-checkout"
   make_checkout "$co" "# copymode1 content"
   cp "$INSTALL_SH" "$co/install.sh"
@@ -1134,13 +1137,19 @@ copymode_case1() {
   run1=$(cd "$co" && env -i PATH="$fake_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
          bash ./install.sh 2>&1); rc1=$?
 
-  # Change a skill's source content between runs, the way a real `git pull` would.
+  # Change a skill's source content, and the settings.json source, between runs, the way a
+  # real `git pull` would. The settings.json copy run 1 made (content '{}') is what run 2 backs up.
   printf 'v2\n' > "$co/skills/sample-skill/SKILL.md"
+  printf '{"v": 2}\n' > "$co/settings.json"
 
   run2=$(cd "$co" && env -i PATH="$fake_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
          bash ./install.sh 2>&1); rc2=$?
 
-  baks=$(find "$cfg" -name '*.bak.*' 2>/dev/null)
+  baks=$(find "$cfg" -name '*.bak.*' ! -name 'settings.json.bak.*' 2>/dev/null)
+  sbak_count=$(ls "$cfg"/settings.json.bak.* 2>/dev/null | wc -l | tr -d ' ')
+  sbak=$(ls "$cfg"/settings.json.bak.* 2>/dev/null | head -n1)
+  sbak_got=$(cat "$sbak" 2>/dev/null)
+  settings_got=$(cat "$cfg/settings.json" 2>/dev/null)
   skill_got=$(cat "$cfg/skills/sample-skill/SKILL.md" 2>/dev/null)
   agent_got=$(cat "$cfg/agents/sample.md" 2>/dev/null)
   agent_src=$(cat "$co/agents/sample.md" 2>/dev/null)
@@ -1150,7 +1159,13 @@ copymode_case1() {
   elif [ $rc2 -ne 0 ]; then
     bad "$name" "run 2 exited $rc2: $run2"
   elif [ -n "$baks" ]; then
-    bad "$name" "run 2 left .bak entries under $cfg:$baks"
+    bad "$name" "run 2 left skill/agent .bak entries under $cfg:$baks"
+  elif [ "$sbak_count" != 1 ]; then
+    bad "$name" "expected one settings.json.bak.* after run 2, found $sbak_count"
+  elif [ "$sbak_got" != '{}' ]; then
+    bad "$name" "settings.json.bak.* holds [$sbak_got], expected the run 1 content [{}]"
+  elif [ "$settings_got" != '{"v": 2}' ]; then
+    bad "$name" "settings.json holds [$settings_got] after run 2, source changed to {\"v\": 2}"
   elif [ ! -f "$cfg/skills/sample-skill/SKILL.md" ]; then
     bad "$name" "$cfg/skills/sample-skill/SKILL.md does not exist after run 2"
   elif [ "$skill_got" != "v2" ]; then
@@ -1212,6 +1227,148 @@ backup_case2() {
     bad "$name" "the backup does not hold the original content"
   elif [ ! -L "$cfg/settings.json" ]; then
     bad "$name" "settings.json is not a symlink after install"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+# ---- settings.json repeat-run cases (owner ruling 2026-10-11) -----------------------------------
+# On a repeat local install (the first-run marker exists), a plain settings.json is backed up
+# before the link replaces it, and only the newest settings.json.bak.* is kept. Backups of
+# other files are never touched. A settings.json that is already the link gets no backup.
+settings_repeat_case1() {
+  name="settings_repeat1: repeat run backs up a plain settings.json, then links it"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then
+    skip "$name" "$NO_SYMLINK_REASON"
+    return
+  fi
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/settings_repeat1-checkout"
+  make_checkout "$co" "# settings_repeat1 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+
+  out1=$(run_local_install "$co" "$h" "$cfg"); rc1=$?
+  rm -f "$cfg/settings.json"
+  printf '{"old": 1}\n' > "$cfg/settings.json"
+  out2=$(run_local_install "$co" "$h" "$cfg"); rc2=$?
+  bak=$(ls "$cfg"/settings.json.bak.* 2>/dev/null | head -n1)
+  bak_count=$(ls "$cfg"/settings.json.bak.* 2>/dev/null | wc -l | tr -d ' ')
+
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then
+    bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
+  elif [ ! -e "$cfg/.claude-settings-installed" ]; then
+    bad "$name" "setup error: the first-run marker is missing, so run 2 was not a repeat run"
+  elif [ "$bak_count" != 1 ]; then
+    bad "$name" "expected one settings.json.bak.* after the repeat run, found $bak_count"
+  elif [ "$(cat "$bak")" != '{"old": 1}' ]; then
+    bad "$name" "the backup holds [$(cat "$bak")], expected the old settings.json content"
+  elif [ ! -L "$cfg/settings.json" ]; then
+    bad "$name" "settings.json is not a symlink after the repeat run"
+  elif [ "$(cat "$cfg/settings.json")" != '{}' ]; then
+    bad "$name" "settings.json does not resolve to the checkout's settings.json"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+settings_repeat_case2() {
+  name="settings_repeat2: repeat run keeps only the newest settings.json.bak.*"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then
+    skip "$name" "$NO_SYMLINK_REASON"
+    return
+  fi
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/settings_repeat2-checkout"
+  make_checkout "$co" "# settings_repeat2 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+
+  out1=$(run_local_install "$co" "$h" "$cfg"); rc1=$?
+  printf '{"older": "first"}\n' > "$cfg/settings.json.bak.20260101000000"
+  printf '{"older": "second"}\n' > "$cfg/settings.json.bak.20260301000000"
+  rm -f "$cfg/settings.json"
+  printf '{"old": 2}\n' > "$cfg/settings.json"
+  out2=$(run_local_install "$co" "$h" "$cfg"); rc2=$?
+  newest=$(ls "$cfg"/settings.json.bak.* 2>/dev/null | head -n1)
+  bak_count=$(ls "$cfg"/settings.json.bak.* 2>/dev/null | wc -l | tr -d ' ')
+
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then
+    bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
+  elif [ "$bak_count" != 1 ]; then
+    bad "$name" "expected one settings.json.bak.* after the repeat run, found $bak_count"
+  elif [ -e "$cfg/settings.json.bak.20260101000000" ] || [ -e "$cfg/settings.json.bak.20260301000000" ]; then
+    bad "$name" "an older settings.json.bak.* survived the repeat run"
+  elif [ "$(cat "$newest")" != '{"old": 2}' ]; then
+    bad "$name" "the newest backup holds [$(cat "$newest")], expected the content run 2 replaced"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+settings_repeat_case3() {
+  name="settings_repeat3: the settings.json prune leaves CLAUDE.md.bak.* and other .bak files alone"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then
+    skip "$name" "$NO_SYMLINK_REASON"
+    return
+  fi
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/settings_repeat3-checkout"
+  make_checkout "$co" "# settings_repeat3 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+
+  out1=$(run_local_install "$co" "$h" "$cfg"); rc1=$?
+  printf 'old claude backup\n' > "$cfg/CLAUDE.md.bak.20260101000000"
+  mkdir -p "$cfg/hooks"
+  printf 'old hook backup\n' > "$cfg/hooks/manual.sh.bak.20260101000000"
+  rm -f "$cfg/settings.json"
+  printf '{"plain": 3}\n' > "$cfg/settings.json"
+  out2=$(run_local_install "$co" "$h" "$cfg"); rc2=$?
+  claude_bak=$(cat "$cfg/CLAUDE.md.bak.20260101000000" 2>/dev/null)
+  hook_bak=$(cat "$cfg/hooks/manual.sh.bak.20260101000000" 2>/dev/null)
+  bak=$(ls "$cfg"/settings.json.bak.* 2>/dev/null | head -n1)
+  bak_count=$(ls "$cfg"/settings.json.bak.* 2>/dev/null | wc -l | tr -d ' ')
+
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then
+    bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
+  elif [ "$claude_bak" != 'old claude backup' ]; then
+    bad "$name" "CLAUDE.md.bak.20260101000000 was removed or changed: [$claude_bak]"
+  elif [ "$hook_bak" != 'old hook backup' ]; then
+    bad "$name" "hooks/manual.sh.bak.20260101000000 was removed or changed: [$hook_bak]"
+  elif [ "$bak_count" != 1 ]; then
+    bad "$name" "expected one settings.json.bak.* after the repeat run, found $bak_count"
+  elif [ "$(cat "$bak")" != '{"plain": 3}' ]; then
+    bad "$name" "the settings.json backup holds [$(cat "$bak")], expected the plain settings.json"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+settings_repeat_case4() {
+  name="settings_repeat4: settings.json already linked gets no backup and old settings.json.bak.* stay"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then
+    skip "$name" "$NO_SYMLINK_REASON"
+    return
+  fi
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/settings_repeat4-checkout"
+  make_checkout "$co" "# settings_repeat4 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+
+  out1=$(run_local_install "$co" "$h" "$cfg"); rc1=$?
+  printf '{"older": "first"}\n' > "$cfg/settings.json.bak.20260101000000"
+  printf '{"older": "second"}\n' > "$cfg/settings.json.bak.20260301000000"
+  before=$(ls "$cfg"/settings.json.bak.* 2>/dev/null | sort)
+  out2=$(run_local_install "$co" "$h" "$cfg"); rc2=$?
+  after=$(ls "$cfg"/settings.json.bak.* 2>/dev/null | sort)
+
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then
+    bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
+  elif [ -z "$before" ] || [ "$after" != "$before" ]; then
+    bad "$name" "settings.json.bak.* set changed on a run where settings.json was already linked: before [$before] after [$after]"
+  elif [ "$(cat "$cfg/settings.json.bak.20260101000000")" != '{"older": "first"}' ] || \
+       [ "$(cat "$cfg/settings.json.bak.20260301000000")" != '{"older": "second"}' ]; then
+    bad "$name" "an old settings.json.bak.* changed content"
+  elif [ ! -L "$cfg/settings.json" ]; then
+    bad "$name" "settings.json is not a symlink after the repeat run"
   else
     ok "$name"
   fi
@@ -1533,6 +1690,10 @@ run skills_case2
 run copymode_case1
 run backup_case1
 run backup_case2
+run settings_repeat_case1
+run settings_repeat_case2
+run settings_repeat_case3
+run settings_repeat_case4
 run bin_case1
 run bin_case2
 run path_case1
