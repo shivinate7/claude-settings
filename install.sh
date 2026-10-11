@@ -380,7 +380,7 @@ else
     # A real file here (not a symlink): on the first local install ever, it is a person's
     # own settings.json; after that, a real file may be this installer's own earlier copy
     # (a no-symlink-rights machine where `ln -sfn` fell back to copying). Either way it is
-    # backed up, and only the newest settings.json.bak.* stays. This is the one exception to
+    # backed up, and only the newest settings.json.bak.<time>.<pid> stays. This is the one exception to
     # D: copy-mode-overwrites-no-backup; skill and agent copies are still replaced with no backup.
     if [ -e "$TARGET_JSON" ] && [ ! -L "$TARGET_JSON" ]; then
       # The first-ever backup is settings.json.orig, kept for good (never overwritten, never
@@ -389,7 +389,7 @@ else
       if [ "$FIRST_LOCAL_RUN" = 1 ] && [ ! -e "$TARGET_JSON.orig" ]; then PRUNE=0; BAK="$TARGET_JSON.orig"; fi
       mv "$TARGET_JSON" "$BAK" || { log "ERROR: cannot move $TARGET_JSON to $BAK; nothing linked"; exit 1; }
       if [ "$PRUNE" = 1 ]; then
-        for old in "$TARGET_JSON".bak.*; do [ "$old" = "$BAK" ] || rm -f "$old"; done
+        for old in "$TARGET_JSON".bak.*.*; do [ "$old" = "$BAK" ] || rm -f "$old"; done
       fi
       log "existing $TARGET_JSON moved to $BAK; merge any keys you want into $SRC/settings.json"
     fi
