@@ -5976,9 +5976,11 @@ def judge(payload) -> None:
                 sim_boot_refusal(tool, names)
         return
     if tool == SIM_MCP:
-        device = tool_input.get("device")
-        if tool_input.get("action") == "launch" and isinstance(device, str) and device:
-            sim_boot_refusal(tool, [device])
+        # `udid` is an alias of `device`: judge each non-empty name, so one field hides no other.
+        names = [n for n in dict.fromkeys(tool_input.get(k) for k in ("device", "udid"))
+                 if isinstance(n, str) and n]
+        if tool_input.get("action") == "launch" and names:
+            sim_boot_refusal(tool, names)
         return
 
     if tool not in WRITE_TOOLS:
