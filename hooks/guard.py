@@ -5121,9 +5121,10 @@ SCRIPT_REGEX_AFTER = frozenset(",=:[!&|?{;(+-*%<>^~")
 SCRIPT_PAIR = re.compile(r"(?:(\w+)|\x00(\d+)\x00)\s*:\s*\x00(\d+)\x00")
 
 
-# Known limit: a regex literal is lexed only when the previous non-space character is an operator,
-# one of ( , = { ; : [ ! & | ? + - * % < > ^ ~, or the script starts. A quote inside a regex literal
-# after any other character (for example `x++ /"/`, or after a `)`) can hide an agent() call.
+# Known limit: a regex literal is blanked, not lexed as code, and only when the previous non-space
+# character is an operator, one of ( , = { ; : [ ! & | ? + - * % < > ^ ~, or the script starts. A
+# postfix ++ or -- reads as division. A quote inside a regex literal after any other character (for
+# example after a `)`), or a regex right after `return` or `typeof`, can hide an agent() call.
 def mask_script(script: str):
     """Drop comments and replace each string literal with a \\x00N\\x00 token. Return (text, strings).
     One pass, linear. A backslash escapes the next character, so an escaped quote never closes a
@@ -5146,6 +5147,8 @@ def mask_script(script: str):
         j -= 1
         while j >= 0 and script[j].isspace():
             j -= 1
+        if j >= 1 and script[j] in "+-" and script[j - 1] == script[j]:
+            return False  # postfix ++ or --: a division follows
         return j < 0 or script[j] in SCRIPT_REGEX_AFTER
 
     def text(j):
