@@ -1545,6 +1545,55 @@ class ConfigFile(Env):
                 rc, out = self.run_merge(*args)
                 self.assertEqual(rc, 0, out)
 
+    def config_text(self, fields=None, **top):
+        """A complete merge block (no defaults notice), with `fields` replaced and `top` keys set at the top level."""
+        block = dict({"method": "merge", "deadlineMinutes": 5, "requiredChecks": ["gates"], "afterMerge": [], "deleteBranch": True}, **(fields or {}))
+        return json.dumps(dict(CONFIG, merge=block, **top))
+
+    def refused_at_preview(self, text, field):
+        """One `merge:` line naming the field, at preview, before any lock, claim or merge."""
+        put_base_config(self, text)
+        before = self.refs()
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 1, out)
+        self.assertIn(field, self.one_merge_line(out))
+        self.assertEqual(self.refs(), before)  # no claim pushed, no lock taken
+        self.assertFalse(getattr(self.host, "merged", False))
+
+    def test_afterMerge_of_the_wrong_type_is_refused_at_preview(self):
+        for bad in (None, 5, True, [1], [""]):
+            with self.subTest(afterMerge=bad):
+                self.refused_at_preview(self.config_text({"afterMerge": bad}), "afterMerge")
+
+    def test_requiredChecks_of_the_wrong_shape_is_refused_at_preview(self):  # only "protection" or a non-empty list of non-empty strings
+        for bad in ([["gates"]], [{}], [1, "gates"], [], "gates", [""]):
+            with self.subTest(requiredChecks=bad):
+                self.refused_at_preview(self.config_text({"requiredChecks": bad}), "requiredChecks")
+
+    def test_deleteBranch_must_be_a_bool(self):
+        for bad in ("false", 1):
+            with self.subTest(deleteBranch=bad):
+                self.refused_at_preview(self.config_text({"deleteBranch": bad}), "deleteBranch")
+
+    def test_defaultBranch_must_be_a_non_empty_string(self):
+        with unittest.mock.patch.object(merge, "host_default_branch", return_value="main"):  # "" must not fall back to the host
+            for bad in (5, ""):
+                with self.subTest(defaultBranch=bad):
+                    self.refused_at_preview(self.config_text(defaultBranch=bad), "defaultBranch")
+
+    def test_method_must_be_merge_squash_or_rebase(self):
+        for bad in ("admin", "Squash"):
+            with self.subTest(method=bad):
+                self.refused_at_preview(self.config_text({"method": bad}), "method")
+
+    def test_a_valid_config_with_every_field_is_accepted_at_preview(self):  # the control: green today and after the fix
+        for fields in ({"method": "squash", "requiredChecks": "protection", "afterMerge": ["true"], "deleteBranch": False},
+                       {"method": "rebase", "requiredChecks": ["gates"], "afterMerge": ["true", "echo x"], "deleteBranch": True}):
+            with self.subTest(fields=fields):
+                put_base_config(self, self.config_text(fields))
+                rc, out = self.run_merge("7")
+                self.assertEqual(rc, 0, out)
+
     def test_an_unknown_merge_field_stops_with_one_line_naming_it(self):
         put_base_config(self, json.dumps({"merge": {"methd": "squash"}}))
         rc, out = self.run_merge("7")
