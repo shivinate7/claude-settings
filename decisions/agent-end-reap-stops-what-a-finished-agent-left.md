@@ -93,12 +93,12 @@ sent a signal. The harness logged `hook_cancelled` with `timedOut: true`. That s
 as owned only by ancestry (`a-kill-by-pid-needs-an-owned-pid`), and the server had PPID 1.
 The owner stopped it by hand.
 
-Cause (inferred from code). `decide()` calls `sweep.process_cwd(pid)` once per pid. On
+Cause (inferred from code; partly unmeasured). `decide()` calls `sweep.process_cwd(pid)` once per pid. On
 macOS each call starts one `lsof`. The 27 ms per pid was measured on 2026-10-10. Over
 about 1,300 pids that is about 35 s. A code comment in `_read_all_cwds_macos`
 (janitor/sweep.py, undated) puts the per-pid pass near 25 s. Both figures are under the
 60 s cap. So the per-pid pass alone does not explain 12 timeouts. Unmeasured: the machine
-load at each timeout, and any read beyond the cwd pass.
+load at each timeout, and any read beyond the cwd pass. The builder's timed run settles the cause.
 
 Owner ruling 4, 2026-10-10: the reap reads every process's cwd in one batch call. A run
 finishes well inside 60 s.

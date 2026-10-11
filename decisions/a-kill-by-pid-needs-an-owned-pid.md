@@ -13,26 +13,24 @@ the process is already dead (`ps` exits 1 with no output). Any other `ps` failur
 The `claude` process itself is not owned. Another session's process, and the owner's
 editor, do not descend from it.
 
-`ps -o ppid=` and `ps -o comm=` give the reads. The chain keeps no list, so nothing can rot.
+`ps -o ppid=` and `ps -o comm=` give the reads. Neither keeps a list, so nothing can rot.
 
 Owner ruling, 2026-10-10: a pid is also owned when its cwd is inside
-`<primary>/.claude/worktrees/agent-<id>`, for an id that this session's subagents hold.
+`<primary>/.claude/worktrees/agent-<id>` and `agent-<id>.jsonl` exists in this session's subagent folder (see below).
 A process a subagent left reads PPID 1 once its parent dies, so the chain test misses it.
-Only this session's agent ids count. Another session's agent worktree stays foreign.
+Another session's agent worktree stays foreign.
 
 ## How the guard knows the session's subagent ids
 
-Not built. `write_agent_home` and `read_agent_home` in hooks/guard.py keep
-`agent-homes/<agent_id>` under the clone's git common dir. Each record maps an agent id to
-its worktree. No record names a session. The payload `session_id` is the same for the
-orchestrator and its agents (MEASURED 2026-09-27, macOS, one Explore agent). So
-`session_id` cannot tell them apart.
+The guard keeps no map. It reads the session's transcript folder.
 
-Proposed: on each subagent call, record `agent_id` under the payload `session_id`. This
-keeps a list, unlike the pid chain, so it needs a stale-entry rule.
+- The hook payload field `transcript_path` names `<session_id>.jsonl`.
+- Its sibling folder `<session_id>/subagents/` holds `agent-<id>.jsonl` for each subagent of that session.
+- A file for an id shows that the id belongs to this session.
 
-Unmeasured: that every subagent that leaves a process made a call the guard read.
-Also unmeasured: that a resumed agent keeps its id, and that two sessions never share a `session_id`.
+MEASURED 2026-10-10, this machine: session c52856af (feed-build) has a `subagents/` folder with 300 files. Its names follow `agent-<id>.jsonl`, with other files beside them (`.meta.json`, `.prefix.json`). The existing hooks `hooks/decision_watch.py` and `hooks/question_outcome.py` read `transcript_path` from the payload. The guard does not read it yet.
+
+Unmeasured: `transcript_path` on the guard's PreToolUse payload. That every subagent which left a process has its file on disk. That a resumed agent keeps its id. The folder layout on Windows and Linux.
 
 ## The rule
 
