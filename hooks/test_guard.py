@@ -2048,6 +2048,61 @@ sh("playwright: SetEnvironmentVariable sets it",
 sh("playwright: a shell rc file gets the export",
    "echo 'export PLAYWRIGHT_BROWSERS_PATH=/x' >> ~/.zshrc", "deny",
    "playwright-browsers-path", cwd=NOGIT)
+
+# THE UNGUARDED VARIABLE DELETE. Decision rm-on-a-variable-needs-a-guard (owner ruling, 2026-10-11):
+# a recursive rm whose target has an unguarded expansion followed by "/" is refused. The refusal
+# prints the same command with each expansion written ${NAME:?}. INCIDENT 2026-10-10 to 10-11: 7 of
+# 24 Bash prompts were rm on a $var path, 5 of them `S=...; for d in ...; do rm -rf $S/$d`.
+# Each deny pins only the rewritten target (the remedy's exact shape is not decided, see the report).
+sh("rm-var: a loop deletes under an unguarded variable",
+   "S=/tmp/x; for d in a b; do rm -rf $S/$d; done", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("rm -rf ${S:?}/${d:?}",))
+sh("rm-var: a quoted variable before a glob",
+   'rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT, carries=('rm -rf "${D:?}"/*',))
+sh("rm-var: a variable before a trailing slash",
+   "rm -rf $D/", "deny", "rm-var-unguarded", cwd=NOGIT, carries=("rm -rf ${D:?}/",))
+sh("rm-var: a braced variable with no guard",
+   'rm -r "${D}"/build', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=('rm -r "${D:?}"/build',))
+sh("rm-var: sh -c runs the unguarded delete",
+   "sh -c 'rm -rf $S/x'", "deny", "rm-var-unguarded", cwd=NOGIT, carries=("rm -rf ${S:?}/x",))
+sh("rm-var: the short flag order counts too",
+   "rm -fr $S/$d", "deny", "rm-var-unguarded", cwd=NOGIT, carries=("rm -fr ${S:?}/${d:?}",))
+# Scanner cases (rule building-scanner-respects-strings): a comment opener, a double slash, a lone
+# quote, and a newline inside a quoted string must not hide the live rm that follows.
+sh("rm-var: a hash inside a string does not hide the delete",
+   'echo "#"; rm -rf $S/x', "deny", "rm-var-unguarded", cwd=NOGIT, carries=("rm -rf ${S:?}/x",))
+sh("rm-var: a double slash inside a string does not hide the delete",
+   'echo "a // b"; rm -rf $S/x', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("rm -rf ${S:?}/x",))
+sh("rm-var: a lone quote in echo text does not hide the delete",
+   'echo "it\'s"; rm -rf $S/x', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("rm -rf ${S:?}/x",))
+sh("rm-var: a newline inside a quoted string does not hide the delete",
+   'echo "a\nb"; rm -rf $S/x', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("rm -rf ${S:?}/x",))
+sh("rm-var: a trailing comment does not hide a live delete",
+   "rm -rf $S/x # note", "deny", "rm-var-unguarded", cwd=NOGIT, carries=("rm -rf ${S:?}/x",))
+# Allow cases: a guarded target, a bare variable, a literal path, a non-recursive rm, text that
+# only mentions rm, and a literal single-quoted $ (no expansion).
+sh("rm-var: a guarded loop target passes",
+   'rm -rf "${S:?}/${d:?}"', "allow", cwd=NOGIT)
+sh("rm-var: a guarded variable before a glob passes",
+   'rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
+sh("rm-var: a bare variable is not refused",
+   'rm -rf "$d"', "allow", cwd=NOGIT)
+sh("rm-var: a literal relative path passes",
+   "rm -rf build/out", "allow", cwd=NOGIT)
+sh("rm-var: a non-recursive delete passes",
+   "rm $S/file", "allow", cwd=NOGIT)
+sh("rm-var: echo only prints the delete",
+   "echo rm -rf $S/x", "allow", cwd=NOGIT)
+sh("rm-var: a quoted string that mentions the delete passes",
+   'echo "rm -rf $S/x"', "allow", cwd=NOGIT)
+sh("rm-var: a newline inside a string that mentions the delete passes",
+   'echo "a\nrm -rf $S/x"', "allow", cwd=NOGIT)
+sh("rm-var: a single-quoted dollar is a literal path",
+   "rm -rf '$S/x'", "allow", cwd=NOGIT)
 sh("playwright: an envrc file gets the assignment",
    "echo PLAYWRIGHT_BROWSERS_PATH=/x > .envrc", "deny", "playwright-browsers-path", cwd=NOGIT)
 sh("playwright: a case-folded name still sets it", "playwright_browsers_path=/x npx", "deny",
