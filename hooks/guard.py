@@ -488,7 +488,12 @@ def _git_subcommand_index(tokens, index: int) -> int:
 
 def git_calls(segment: str):
     """Return (subcommand, arguments) for every `git` call in one segment."""
-    tokens = REDIRECTION.sub(" ", segment).split()
+    text = REDIRECTION.sub(" ", segment)
+    # shlex unquotes a pathspec (`'*.json'`, `"f.txt"`); a segment it cannot parse falls back to
+    # a whitespace split, the old reader.
+    tokens = segment_tokens(text)
+    if tokens is None:
+        tokens = text.split()
     calls = []
     index = 0
     while index < len(tokens):
@@ -2219,6 +2224,23 @@ TREE_DENY_REASON = (
     "belongs to no branch, and it outlives no session that holds its tag. "
     "Run the command in a worktree of your own when the tree must change."
 )
+def names_only_files(subcommand: str, args, root: str) -> bool:
+    """True when a `git checkout` or `git restore` names only per-file pathspecs: at least one,
+    each not `.`, with no glob character or pathspec magic, and not a directory on disk under
+    `root`. A path absent on disk counts as a file."""
+    if subcommand not in ("checkout", "restore"):
+        return False
+    specs, complete = named_pathspecs(subcommand, args)
+    if not complete or not specs:
+        return False
+    for spec in specs:
+        if spec in (".", "") or spec[0] == ":" or any(c in spec for c in "*?["):
+            return False
+        if os.path.isdir(os.path.join(root, spec)):
+            return False
+    return True
+
+
 TREE_ASK_REASON = (
     "Rule (shared trees): this command throws away work in a working tree. "
     "This checkout is a worktree, so the loss is limited to this lane. "
@@ -5666,6 +5688,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             # on its own branch and in its own reflog. Allow it, logged, not asked.
             if agent_owned_worktree(root) is True:
                 record(tool, "noted", "shared-tree", matched)
+                continue
+            # stash-push-is-clone-wide, per-file paragraph: named files only write this lane's
+            # own change to those files, so no ask.
+            if names_only_files(subcommand, args, root):
                 continue
             refuse(tool, "ask", "shared-tree", TREE_ASK_REASON, matched)
         refuse(tool, "deny", "shared-tree", TREE_DENY_REASON, matched)
