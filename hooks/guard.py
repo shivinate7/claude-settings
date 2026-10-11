@@ -1141,7 +1141,9 @@ def _segment_git_c_target(tokens):
         if token == "-C":
             if cursor + 1 >= len(tokens):
                 return None
-            found = tokens[cursor + 1]  # the last `-C` sets the checkout judged
+            value = tokens[cursor + 1]
+            # git chains every `-C`: a relative one joins onto the one before it
+            found = os.path.join(found, value) if found and value else (value or found)
             cursor += 2
             continue
         if token in GIT_OPT_WITH_VALUE:
@@ -1576,6 +1578,8 @@ def _tree_subject(where: str, pathspecs=(), complete: bool = True):
     """True when the working tree holds nothing under `pathspecs`, False when it holds
     something, None when it cannot be read.
     """
+    if complete and any(c in spec for spec in pathspecs for c in "$`{}*?["):
+        return False  # a pathspec the guard cannot expand is a discard of unknown size, never clean
     lines = porcelain(where, pathspecs if complete else ())
     if lines is None:
         return None
@@ -2263,7 +2267,8 @@ def names_only_files(subcommand: str, args, root: str, segment: str = "") -> boo
     if subcommand == "restore":
         if any(f not in RESTORE_PER_FILE_FLAGS for f in flags):
             return False
-        specs = [a for a in specs if dashed or not a.startswith("-")]
+        # every non-flag operand is a path, before `--` too
+        specs = [a for a in head if not a.startswith("-")] + [a for a in specs if dashed or not a.startswith("-")]
     else:
         if flags:
             return False
@@ -2272,6 +2277,8 @@ def names_only_files(subcommand: str, args, root: str, segment: str = "") -> boo
     if not specs:
         return False
     for spec in specs:
+        if any(c in spec for c in "$`{}"):  # unreadable: a discard of unknown size
+            return False
         if spec in (".", "") or spec[0] == ":" or any(c in spec for c in "*?["):
             return False
         if os.path.isdir(os.path.join(root, spec)):
