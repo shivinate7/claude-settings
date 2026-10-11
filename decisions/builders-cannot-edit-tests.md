@@ -78,13 +78,20 @@ to another role (rule git-remedy-never-names-target).
 ## Test path
 
 A basename is `test_*.py`, `*_test.py`, `*_test.go`, `*.test.{ts,js,tsx,jsx}`, `*.spec.*`,
-`conftest.py`, `jest.setup.*`, `*Test.java`, or `*Tests.swift`. Case matters, so `Contest.java`
-and `SpeedTest.swift` are not tests.
+`conftest.py`, `jest.setup.*`, `*Test.java`, or `<Name>Tests.swift`. Case matters, so
+`Contest.java` is not a test. Swift counts the plural only, so `SpeedTest.swift` and a bare
+`Tests.swift` are not tests.
 A directory part is `tests`, `test`, `__tests__`, `spec`, `testdata`, `__snapshots__`, or
 `test_support`. An Xcode or SwiftPM test target folder also counts: a PascalCase part ending in
-`Tests`, such as `DegenUITests` (incident: Degen, 2026-10-11). Its ceiling: a product folder named
-like `ABTests` reads as a test folder. Reading the target names from the Xcode project is the
-upgrade. `FooSpec.swift` (Quick) and Objective-C `FooTests.m` are not seen. Parts count from the nearest parent that holds `.git`. So a clone under a
+`Tests`, such as `DegenUITests` (incident: Degen, 2026-10-11). Named limits of the Xcode shapes:
+
+- A product folder named like `ABTests` reads as a test folder. Reading the target names from
+  the Xcode project is the upgrade.
+- `FooSpec.swift` (Quick) and Objective-C `FooTests.m` are not seen.
+- In a `.xctestplan`, only `skippedTests` counts as disabling tests. `selectedTests` and
+  `"enabled" : false` are not read. A `.xcscheme` `<SkippedTests>` is not read.
+- Outside a git repo, every part of an absolute path counts, so `/tmp/x/AppTests/a.swift` is a
+  test path. Parts count from the nearest parent that holds `.git`. So a clone under a
 folder named `tests` is not all test files.
 
 Test config is `pytest.ini`, `tox.ini`, `setup.cfg`, `pyproject.toml`, `package.json`, an Xcode
