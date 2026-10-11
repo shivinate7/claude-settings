@@ -203,7 +203,8 @@ def basename(token: str) -> str:
 
 
 @functools.lru_cache(maxsize=8)
-def _split_segments_cached(cmd: str):
+def _split_segments_cached(cmd: str, powershell: bool):
+    # powershell is part of the key: split_segments reads POWERSHELL_CALL[0] too
     return tuple(split_segments(cmd, []))
 
 
@@ -237,7 +238,7 @@ def split_segments(cmd: str, ends=None):
     the last), so a caller can tell a segment whose stdout is piped onward from the rest.
     """
     if ends is None:   # the same command is split by many rules: split it once
-        return list(_split_segments_cached(cmd))
+        return list(_split_segments_cached(cmd, POWERSHELL_CALL[0]))
     segments = []
     current = []
     quote = ""
@@ -336,7 +337,7 @@ def segment_tokens(segment: str):
     return None if found is None else list(found)
 
 
-@functools.lru_cache(maxsize=4096)   # a command of 64000 repeated segments is split once
+@functools.lru_cache(maxsize=16384)   # holds every distinct segment of a 4000-rm command
 def _segment_tokens(segment: str):
     try:
         return tuple(shlex.split(segment, posix=True))
@@ -5546,6 +5547,19 @@ def _rm_values(scope: str) -> dict:
     return vals
 
 
+def _rm_last_bind(scope: str) -> dict:
+    """Return {name: offset of its last binding of any kind}, in one pass over scope."""
+    last = {}
+    for m in _RM_BIND.finditer(scope):
+        last[m.group(1)] = m.start()
+    for m in _RM_FOR.finditer(scope):
+        last[m.group(1)] = m.start()
+    for m in _RM_OTHER_BIND.finditer(scope):
+        for w in re.findall(r"\w+", m.group(0)):
+            last[w] = m.start()
+    return last
+
+
 @functools.lru_cache(maxsize=16)
 def _rm_real(path: str) -> str:
     """Return the real path, case-folded on macOS, where the file system folds case."""
@@ -5557,10 +5571,10 @@ def _rm_target_bad(path: str, cwd: str) -> bool:
     """True when path, or a glob's parent, is /, home, the cwd or a parent of the cwd."""
     if re.search(r"[*?\[]", os.path.basename(path)):
         path = os.path.dirname(path)
-    fold = str.lower if sys.platform == "darwin" else str
     cwd, home = _rm_real(cwd or "/"), _rm_real(os.path.expanduser("~"))
-    q = fold(os.path.realpath(os.path.join(cwd, path)))
-    return q in ("/", cwd, home) or cwd.startswith(q.rstrip("/") + "/")
+    q = _rm_real(os.path.join(cwd, path))
+    up = q.rstrip("/") + "/"
+    return q in ("/", cwd, home) or cwd.startswith(up) or home.startswith(up)
 
 
 def _rm_word_safe(word: str, vals: dict, cwd: str) -> bool:
@@ -5621,14 +5635,16 @@ def _rm_var_rewrite_raw(word: str, ctx):
     return "".join(out), kind
 
 
-def rm_var_hits(text: str, cwd: str = "", depth=0, outer: str = "") -> list:
+def rm_var_hits(text: str, cwd: str = "", depth=0, outer: str = "", after: str = "") -> list:
     """Return the flagged `rm` calls of a command, each as `rm FLAGS TARGETS` with every
     expansion in a flagged target guarded `:?`, or _RM_LITERAL when only a literal path will do.
-    `sh -c`, `eval` and `pwsh -Command` are walked, and outer bindings count inside them."""
+    `sh -c`, `eval` and `pwsh -Command` are walked, and outer bindings count inside them. `after`
+    is the outer text that follows the wrapper: a binding there comes after every inner rm."""
     found = []
     scope = outer + "\n" + text
     ctx = (_rm_taint_names(scope), _rm_values(scope), cwd, bool(_RM_CD.search(scope)))
     cursor = 0
+    last = _rm_last_bind(text + "\n" + after)   # offsets past len(text) lie in `after`
     for segment in split_segments(text):
         at_seg = text.find(segment, cursor)
         if at_seg >= 0:
@@ -5640,9 +5656,9 @@ def rm_var_hits(text: str, cwd: str = "", depth=0, outer: str = "") -> list:
             if recursive and any(hit == 1 for _, hit in rewritten):
                 # every binding precedes the rm: a name bound later is unsafe, and so is a
                 # segment whose place in the text is unknown
-                later = _rm_values(text[cursor:]) if at_seg >= 0 else None
-                rewritten = [(w, 2 if hit == 1 and (later is None or any(
-                    n in later for n in _RM_NAMES.findall(w))) else hit) for w, hit in rewritten]
+                rewritten = [(w, 2 if hit == 1 and (at_seg < 0 or any(
+                    last.get(n, -1) >= cursor for n in _RM_NAMES.findall(w))) else hit)
+                    for w, hit in rewritten]
             if rewritten and recursive:
                 for kind in (2, 1):
                     words = [w for w, hit in rewritten if hit == kind]
@@ -5657,7 +5673,8 @@ def rm_var_hits(text: str, cwd: str = "", depth=0, outer: str = "") -> list:
         script = " ".join(tokens[at + 1:]).replace("\\$", "$") if word == "eval" else (
             _pwsh_script(tokens) if word in PLAYWRIGHT_PS_SHELLS else inline_script(tokens))
         if script:
-            found += rm_var_hits(script, cwd, depth + 1, scope)
+            found += rm_var_hits(script, cwd, depth + 1, scope,
+                                 text[cursor if at_seg >= 0 else 0:] + "\n" + after)
     return found
 
 
