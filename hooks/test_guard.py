@@ -1966,6 +1966,31 @@ sh("kill: an escaped backslash before a newline is not a continuation, pkill sti
    "echo \\\\\npkill -f node", "deny", "machine-wide-kill", cwd=NOGIT)
 sh("playwright: cross-env passes the variable to node as an argument, allowed",
    "cross-env FOO=1 node x.js PLAYWRIGHT_BROWSERS_PATH=/x", "allow", cwd=NOGIT)
+# PR #314 final review. A backslash before a newline is a PowerShell path end, not a continuation,
+# so each line is its own command. split_segments joined them, and the setter after it went unseen.
+sh("playwright: a PowerShell path ending in a backslash, then a setter on the next line, denies",
+   "Set-Location C:\\tmp\\\nSet-Item env:PLAYWRIGHT_BROWSERS_PATH D:\\cache", "deny",
+   "playwright-browsers-path", tool="PowerShell", cwd=NOGIT)
+sh("control: a PowerShell path ending in a backslash, then a force push on the next line, denies",
+   "Set-Location C:\\tmp\\\ngit push -f origin feat", "deny", "force-push", tool="PowerShell",
+   cwd=PUSHFEAT)
+# PR #314 final review. A profile write whose text starts with a printf format, or that overrides
+# noclobber with `>|`, still writes the export line into a shell profile.
+sh("playwright: printf writes the export line into zshrc, denies",
+   'printf "%s\\n" "export PLAYWRIGHT_BROWSERS_PATH=/x" >> ~/.zshrc', "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: echo writes the export line into zshrc past noclobber with >|, denies",
+   "echo 'export PLAYWRIGHT_BROWSERS_PATH=/x' >| ~/.zshrc", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+# PR #314 final review. The setter text sits only inside a quoted argument of gh, a command that
+# sets nothing. pwsh -c is a PowerShell shell, so the whole segment reaches PLAYWRIGHT_PS_SET.
+sh("playwright: the setter text is only a gh comment body inside pwsh -c, allowed",
+   r'''pwsh -c "gh pr comment 314 --body 'Do not set \$env:PLAYWRIGHT_BROWSERS_PATH = x'"''',
+   "allow", cwd=NOGIT)
+# PR #314 final review. New-Item's alias `ni` sets an env: variable as `New-Item` does.
+sh("playwright: the New-Item alias ni sets the env drive variable, denies",
+   r"ni env:PLAYWRIGHT_BROWSERS_PATH -Value D:\x", "deny", "playwright-browsers-path",
+   tool="PowerShell", cwd=NOGIT)
 
 # THE PREDICATE IS THE ACT, NOT THE TOOL OR THE SPELLING. MEASURED: the owner ran
 # `grep -n -i "...|make reap|pkill..." CLAUDE.md` to search CLAUDE.md for the word, and it was
