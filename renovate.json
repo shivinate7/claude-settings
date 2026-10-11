@@ -28,7 +28,8 @@
       "datasourceTemplate": "git-refs",
       "packageNameTemplate": "https://github.com/vercel-labs/web-interface-guidelines",
       "depNameTemplate": "vercel-labs/web-interface-guidelines",
-      "currentValueTemplate": "main"
+      "currentValueTemplate": "main",
+      "minimumReleaseAgeBehaviour": "timestamp-optional"
     }
   ]
 }

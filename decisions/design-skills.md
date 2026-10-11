@@ -41,16 +41,18 @@ A change to any of them means that this record is read again.
 
 ## Guard rule: impeccable-review-only
 
-Owner ruling 2026-10-10 keeps this rule on the copy. It lets impeccable load only for `audit` or
-`critique`. It refuses the other commands and the settings writers: `hooks on`, `install`,
-`update`, `link`, `ignores`, `pin`, `doctor auto`, and any version spec.
+Owner ruling 2026-10-10 keeps this rule on the copy. The Skill tool loads impeccable only for
+`audit` or `critique`. The shell is an allow list: an impeccable call passes only for
+`detect ...` and `hooks status`. Every other subcommand is refused, also a later one.
 
 Status: built in `hooks/guard.py` and routed in `settings.json`.
 - Skill tool: any command except `audit` and `critique` is refused. The name `/impeccable` counts.
-- Shell: `hooks` (except `hooks status`), `install`, `update`, `link`, `ignores`, `pin` and
-  `doctor auto` are refused. The package name is read without `@version`, through `npx -y` and
-  `npx -p <spec> impeccable`.
+- Shell: the package name is read without `@version`, path or suffix (`.cmd`, `.exe`). The rule
+  reads through `npx -y`, `npx -p <spec> impeccable`, `npx -c`, `sh -c`, `bash -c` and
+  PowerShell's call operator `&`.
 - Limit: `audit then polish` is allowed. The argument-hint says the second word is a target.
+- Accepted: `detect` may download the engine. The owner accepted this on 2026-10-10, as
+  joyous did. It trusts the release checksum.
 
 Trust each part only after it goes red on its command (verification-trust-guard-after-red: a
 guard is trusted once it goes red).

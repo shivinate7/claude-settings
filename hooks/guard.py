@@ -5415,13 +5415,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 # decisions/design-skills.md, rule `impeccable-review-only`: the skill loads only for a review
 # (`audit`, `critique`). Its build commands and its settings writers are refused. The reason names
 # no command; the log holds what the call asked for.
-IMPECCABLE_REASON = ("this plugin is for a design review only. Ask for a review of the rendered "
+IMPECCABLE_REASON = ("impeccable is for a design review only. Ask for a review of the rendered "
                      "screens; make any change to the design by hand.")
 IMPECCABLE_SKILLS = ("impeccable", "impeccable:impeccable")
 IMPECCABLE_REVIEWS = ("audit", "critique")
 IMPECCABLE_CHAIN = re.compile(r"[;|\n]|&&")
 RUNNER_WORDS = ("npx", "bunx", "node", "pnpm", "yarn", "npm", "dlx", "exec", "run", "x")
-IMPECCABLE_REFUSED = ("hooks", "install", "update", "link", "ignores", "pin")
 PACKAGE_FLAGS = ("-p", "--package")
 
 
@@ -5442,23 +5441,33 @@ def impeccable_skill_hit(tool_input) -> str:
 
 
 def impeccable_shell_hit(segment: str) -> str:
-    """A segment that runs impeccable's settings writers or its `doctor auto`. `detect` passes."""
+    """A segment that runs impeccable with anything but `detect ...` or `hooks status`. Shell
+    wrappers (`bash -c`, `npx -c`) are unwrapped; a runner or script suffix (`.cmd`, `.exe`,
+    `.mjs`) and PowerShell's call operator `&` are read through."""
     tokens = segment_tokens(segment)
-    index = resolve_command(tokens) if tokens else None
-    if index is None:
+    if not tokens:
         return ""
-    if basename(tokens[index]) in RUNNER_WORDS:
-        while index < len(tokens) and (basename(tokens[index]) in RUNNER_WORDS
-                                       or tokens[index].startswith("-")):
-            index += 2 if tokens[index] in PACKAGE_FLAGS else 1
+    script = inline_script(tokens)
+    if script:
+        return next((hit for part in split_segments(script)
+                     if (hit := impeccable_shell_hit(part))), "")
+    index = resolve_command(tokens)
+    if index is not None and tokens[index] == "&":
+        index += 1
+    if index is None or index >= len(tokens):
+        return ""
+    while index < len(tokens) and (impeccable_name(tokens[index]) in RUNNER_WORDS
+                                   or tokens[index].startswith("-")):
+        if tokens[index] in ("-c", "--call") and index + 1 < len(tokens):
+            return next((hit for part in split_segments(tokens[index + 1])
+                         if (hit := impeccable_shell_hit(part))), "")
+        index += 2 if tokens[index] in PACKAGE_FLAGS else 1
     if index >= len(tokens) or impeccable_name(tokens[index]) != "impeccable":
         return ""
     rest = tokens[index + 1:]
-    sub = rest[0] if rest else ""
-    if ((sub in IMPECCABLE_REFUSED and rest[:2] != ["hooks", "status"])
-            or (sub == "doctor" and any(w in ("--auto", "auto") for w in rest[1:]))):
-        return segment.strip()[:100]
-    return ""
+    if rest[:1] == ["detect"] or rest[:2] == ["hooks", "status"]:
+        return ""
+    return segment.strip()[:100]
 
 
 def judge(payload) -> None:
