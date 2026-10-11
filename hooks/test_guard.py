@@ -4720,6 +4720,15 @@ add("floor: Workflow haiku after a regex with a backtick inside a template inter
     script=r"""x = `${ s.replace(/`/g, '') }`;
 agent("x", {model: "haiku"})""")
 
+# A `/` after `++` or `--` is division, not a regex literal, so the string after it is still
+# lexed and the haiku spawn after it must deny.
+add("floor: Workflow haiku after i++ divided, then a path string, is denied", "deny",
+    "subagent-model-floor", tool="Workflow",
+    script='i++ / 2; s = "a/b"; agent("x", {model: "haiku"})')
+add("floor: Workflow haiku after i-- divided, then a path string, is denied", "deny",
+    "subagent-model-floor", tool="Workflow",
+    script='i-- / 2; s = "a/b"; agent("x", {model: "haiku"})')
+
 FORBIDDEN_IN_A_REASON = (ENV, ROOT, slash(ROOT),"settings.json", "CLAUDE.md", "guard.py",
                          ".claude", "app.log", "sleep", "haiku", VCS + " checkout", VCS + " switch")
 
