@@ -2093,6 +2093,10 @@ def worktree_remove_subject(args, where: str):
     lines = porcelain(target)
     if lines is None:
         return None
+    # An untracked symlink is not work: removing it deletes the link, never its target.
+    # A path git quotes (core.quotePath) keeps its quotes here, is no link, and still counts.
+    lines = [l for l in lines
+             if not (l.startswith("?? ") and os.path.islink(os.path.join(target, l[3:].rstrip("/"))))]
     if lines:
         return False
     locked = worktree_locked(where, target)
