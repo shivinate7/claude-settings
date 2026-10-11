@@ -81,8 +81,9 @@ def new_dir():
 
 def shells():
     found = ["/bin/sh"]
-    if os.path.exists("/bin/zsh"):
-        found.append("/bin/zsh")
+    for extra in ("/bin/bash", "/bin/zsh"):
+        if os.path.exists(extra):
+            found.append(extra)
     return found
 
 
@@ -234,6 +235,24 @@ def stall_problems(rc, text, secs, sleep_args=None):
 
 
 @case
+def trailing_backslash_keeps_brace_apart():
+    """8. an original ending in a backslash runs as it does bare, in sh, bash and zsh"""
+    orig = "echo ends-with-backslash \\"
+    problems = []
+    for shell in shells():
+        bare = subprocess.run([shell, "-c", orig], stdin=subprocess.DEVNULL,
+                              capture_output=True, timeout=20)
+        bare_text = bare.stdout.decode("utf-8", "replace")
+        rc, text, _secs, _cmd = run_rewritten(orig, shell=shell)
+        problems += expect(rc == bare.returncode,
+                           f"{shell}: exit {rc}, bare exit {bare.returncode}")
+        problems += expect(text == bare_text,
+                           f"{shell}: output {text!r}, bare output {bare_text!r}")
+        reap()
+    return problems
+
+
+@case
 def hook_has_no_permission_decision():
     """1. the hook output has updatedInput and no permissionDecision key"""
     rc, out, err = hook("echo hi")
@@ -326,6 +345,26 @@ def heredoc_survives():
         problems += expect(rc == 0, f"{shell}: exit {rc}, want 0")
         problems += expect(text == HEREDOC_WANT, f"{shell}: output {text!r}, want {HEREDOC_WANT!r}")
         reap()
+    return problems
+
+
+@case
+def dead_pid_missing_log_returns_fast():
+    """9. --watch-pid on a dead pid with no log file returns within about 2 s"""
+    module_or_fail()
+    gone = subprocess.Popen([PY, "-c", "pass"])
+    gone.wait()
+    log = os.path.join(new_dir(), "never-created.log")
+    start = time.monotonic()
+    try:
+        proc = subprocess.run([PY, MODULE, "--watch-pid", str(gone.pid), "--log", log, "--quiet", "2"],
+                              stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
+    except subprocess.TimeoutExpired:
+        return ["watcher hung past 10 s on a dead pid with no log file"]
+    secs = time.monotonic() - start
+    text = proc.stdout.decode("utf-8", "replace")
+    problems = expect(secs <= 3.0, f"returned after {secs:.1f}s, want about 2s")
+    problems += expect("STALL:" not in text, "a dead pid reported a stall")
     return problems
 
 
