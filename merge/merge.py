@@ -635,7 +635,7 @@ def after_merge(root, cmds):
 # ------------------------------------------------------------------ the flow
 
 def load_config(root, path):
-    """The repo's config. A repo with no file gets the defaults (decision merge-config-defaults); a broken file stops."""
+    """The repo's config. A repo with no file gets the defaults (decision merge-config-defaults, merge needs no config file); a broken file stops."""
     p = os.path.join(root, path)
     if not os.path.exists(p):
         c, out = sh(["gh", "repo", "view", "--json", "defaultBranchRef"], cwd=root)

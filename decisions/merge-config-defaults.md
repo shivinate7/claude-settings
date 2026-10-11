@@ -30,7 +30,8 @@ Merge prints one line that says the defaults were used and names the file it loo
 
 - With no config, or a config with no `kinds`, merge skips the claim and the numbering check.
   stamp.mjs never runs.
-- Merge reads the config from the base branch, never from the PR's tree. This includes the
-  check after the wait.
+- The claim and the numbering check read the stamp config from the base branch, never from
+  the PR's tree. This includes the check after the wait. The merge settings come from the
+  checkout merge runs in.
 - A stamp.mjs failure prints one line: the reason and the path of a log with the full output.
   It never prints a stack trace.

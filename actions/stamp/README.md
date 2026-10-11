@@ -361,7 +361,7 @@ The tool keeps these behaviours. The adopting repo needs no setting for them.
 Do each step in your own repo, from your own tree.
 
 The config file is optional for merge. With no `.github/stamp.json`, merge uses the defaults
-(decision merge-config-defaults) and claims no numbers. Do the steps below only if the repo
+(decision merge-config-defaults, merge needs no config file) and claims no numbers. Do the steps below only if the repo
 has numbered records, or needs a non-default method, deadline, required checks or `afterMerge`.
 
 1. Do steps 1 to 5 of the engine checklist above, so the config reads your tree correctly.

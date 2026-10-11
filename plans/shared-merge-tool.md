@@ -79,13 +79,13 @@ runs it too, and there it refuses any pending record (see "q_max and the stamp a
 
 ### How a repo opts in
 
-The file is optional for merge (decision merge-config-defaults, no config file needed). A repo
+The file is optional for merge (decision merge-config-defaults, merge needs no config file). A repo
 with no `.github/stamp.json` gets the defaults: the default branch from `gh repo view`, method
 `merge`, `deadlineMinutes` 45, `requiredChecks` `"protection"`, empty `afterMerge`. Merge prints
 one line to say so. It claims no numbers and never runs stamp.mjs. Add the file only for
 numbered records or for non-default settings. A file that exists but is broken stops merge with
 one line. A file that exists must hold `merge.method` and `merge.deadlineMinutes`: the defaults
-apply only when there is no file. Merge reads the file from the base branch, not from the pull request's tree.
+apply only when there is no file. The claim and the numbering read the stamp config from the base branch, never the pull request's tree. The merge settings come from the checkout merge runs in.
 
 The repo keeps one config file, the stamp config it already has or a new one at
 `.github/stamp.json`. A `merge` block holds the merge fields. One file, one home.
