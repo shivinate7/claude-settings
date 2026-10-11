@@ -11,6 +11,10 @@ Owner ruling, 2026-10-11: "build a ux folder". The rules come from the owner's o
 q_max, joyous, degen, sillage, home-app, ios-adblock). Each rule cites its repo and entry. A rule
 that no repo shows is left out.
 
+Owner ruling, 2026-10-11, on the 11 candidates: four became rules (`ux-answer-at-press`,
+`ux-long-run-stops`, `ux-all-is-well` and `ux-thumb-zone`). The other seven are in "Ruled per repo
+or dropped".
+
 ## Layout, and why
 
 - `ux/principles.md`: one entry per rule, with an id (`ux-<slug>`), one rule sentence, one check
@@ -40,27 +44,27 @@ safe. The house rule `ux-ask-or-undo` adds "never both, never neither", the coun
 focus on Cancel. "Say it once, in the fewest words" (q_max D-709) is left out. impeccable
 `clarify` and the UI-string clause in `agents/reviewer.md` already hold it.
 
-## Candidates, owner to decide
+## Ruled per repo or dropped
 
-The evidence for each is thin or in conflict, so none is a rule yet.
+None of these is a house rule. Each line gives the owner's word, then the candidate's sources.
 
-- Defaults. Three principles, not one: archiving starts off (degen D3), sold items fold away
-  (banchi D132), and a default year does not move with the calendar (q_max D-733). The theme
+- Defaults: dropped. Three principles, not one. Archiving starts off (degen D3). Sold items fold
+  away (banchi D132). A default year does not move with the calendar (q_max D-733). The theme
   follows the system (degen D29).
-- The answer to a press shows where the press was (banchi D118 and UX-058, q_max D-640).
-  But banchi puts a refusal in a toast, which stays until it is dismissed.
-- A press that spends money shows the count and the cost first (banchi D33 and D224).
-- A long run can be stopped (q_max D-319).
-- A status summary names only what is not normal, else "All is well." (home-app `SPEC.md`).
-- A name is Title Case and a sentence is sentence case (q_max D-666). Vercel asks Title Case
-  for each heading and button.
-- A work screen's head holds its name, its counts and its main action. banchi puts them on one
-  line, and q_max uses a band with figure tiles (`specs/ux-plan-b.md`, choice 3).
-- Primary inputs sit in the thumb zone (sillage `docs/design/system.md`).
-- A house touch size above the WCAG 24 px: banchi uses 40 px, and sillage uses 44 px.
-- Real photos only, with no stock or AI images (joyous `docs/design-brief.md` move 7).
-- Phone-first stays per repo. joyous builds phone first. banchi (DEBT77) and q_max D-701 freeze
-  phone work.
+- Spend shows cost: per repo. A press that spends money shows the count and the cost first
+  (banchi D33 and D224).
+- Letter case: left to Vercel. A name is Title Case and a sentence is sentence case (q_max
+  D-666). Vercel asks Title Case for each heading and button.
+- Work-screen head: per repo. The head holds its name, its counts and its main action. banchi
+  puts them on one line. q_max uses a band with figure tiles (`specs/ux-plan-b.md`, choice 3).
+- Touch size: WCAG 24 stays, no house number. Candidates were a house size above 24 px: banchi
+  uses 40 px, and sillage uses 44 px.
+- Real photos only: per repo. No stock or AI images (joyous `docs/design-brief.md` move 7).
+- Phone-first: per repo. joyous builds phone first. banchi (DEBT77) and q_max D-701 freeze phone
+  work.
+
+Repo-specific flavor stays with each repo, for example banchi's refusal toasts, which stay until
+dismissed.
 
 ## Landing
 
