@@ -22,10 +22,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # The token stays in the checkout: the last step pushes with it.
+      # No credential stays in the checkout: the last step passes the token to its one push.
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           ref: ${{ github.head_ref }}
+          persist-credentials: false
 
       - name: Copy the skill folder at the pinned tag
         shell: bash
@@ -45,6 +46,8 @@ jobs:
         shell: bash
         env:
           BRANCH: ${{ github.head_ref }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           git add -A skills/impeccable
@@ -52,4 +55,4 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "impeccable: copy the skill folder at the pinned tag"
-          git push origin "HEAD:refs/heads/$BRANCH"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}" "HEAD:refs/heads/${BRANCH}"
