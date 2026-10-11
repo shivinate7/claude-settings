@@ -1375,8 +1375,11 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
     env.pop("MUTATE_ONLY", None)
     if only:
         env["MUTATE_ONLY"] = only  # the suites run just the cases whose name holds this
+    # stderr goes to DEVNULL, not a pipe: test_guard.py leaves a `sleep 300` that holds the suite's
+    # stderr (spawn_live_parent), and run() waits for a pipe's EOF. Measured: every mutant took 306 s.
     result = subprocess.run(
-        [sys.executable, suite], capture_output=True, text=True, env=env, timeout=1200,
+        [sys.executable, suite], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+        env=env, timeout=1200,
     )
     red = [line for line in result.stdout.splitlines() if line.startswith("FAIL")]
     return result.returncode, red

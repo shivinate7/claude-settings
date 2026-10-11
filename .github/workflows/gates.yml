@@ -108,6 +108,9 @@ jobs:
       - name: Stall watch fixture suite
         run: python3 hooks/test_stall_watch.py
 
+      - name: Simulator boot-record fixture suite
+        run: python3 hooks/test_sim_boot_record.py
+
       - name: Stop-hook gate fixture suite
         run: python3 lint/test_gates.py
 
@@ -178,6 +181,8 @@ jobs:
         with:
           scope: ${{ inputs.full_ste_audit && 'all' || 'changed' }}
           fail: ${{ !inputs.full_ste_audit }}
+          # Third-party prose, pinned (decisions/design-skills.md).
+          exclude: skills/impeccable/**
 
       - name: Janitor triggers fixture suite (SessionEnd hook + launchd installer)
         if: ${{ needs.scope.outputs.code == 'true' }}
@@ -326,6 +331,10 @@ jobs:
       - name: Stall watch fixture suite
         if: ${{ !cancelled() }}
         run: python3 hooks/test_stall_watch.py
+
+      - name: Simulator boot-record fixture suite
+        if: ${{ !cancelled() }}
+        run: python3 hooks/test_sim_boot_record.py
 
       - name: Stop-hook gate fixture suite
         if: ${{ !cancelled() }}

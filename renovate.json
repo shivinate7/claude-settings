@@ -1,0 +1,59 @@
+{
+  "$schema": "https://docs.renovate.com/renovate-schema.json",
+  "extends": [],
+  "enabledManagers": [
+    "custom.regex"
+  ],
+  "schedule": [
+    "* * 1 * *"
+  ],
+  "draftPR": true,
+  "minimumReleaseAge": "14 days",
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^skills/impeccable/SOURCE\\.txt$/",
+        "/^skills/design-review/SKILL\\.md$/"
+      ],
+      "matchStrings": [
+        "(?<currentValue>skill-v\\d+\\.\\d+\\.\\d+)"
+      ],
+      "datasourceTemplate": "github-tags",
+      "depNameTemplate": "pbakaus/impeccable",
+      "versioningTemplate": "regex:^skill-v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^settings\\.json$/"
+      ],
+      "matchStrings": [
+        "\"repo\": \"anthropics/claude-code\",\\s*\"ref\": \"(?<currentValue>v\\d+\\.\\d+\\.\\d+)\""
+      ],
+      "datasourceTemplate": "github-tags",
+      "depNameTemplate": "anthropics/claude-code"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^skills/design-review/SKILL\\.md$/"
+      ],
+      "matchStrings": [
+        "vercel-labs/web-interface-guidelines/(?<currentDigest>[0-9a-f]{40})/command\\.md"
+      ],
+      "datasourceTemplate": "git-refs",
+      "packageNameTemplate": "https://github.com/vercel-labs/web-interface-guidelines",
+      "depNameTemplate": "vercel-labs/web-interface-guidelines",
+      "currentValueTemplate": "main"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchDepNames": [
+        "vercel-labs/web-interface-guidelines"
+      ],
+      "minimumReleaseAgeBehaviour": "timestamp-optional"
+    }
+  ]
+}

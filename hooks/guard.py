@@ -2715,7 +2715,37 @@ def pid_is_owned(pid: int, root: int):
     return None
 
 
-def foreign_pid_kill(tokens) -> str:
+AGENT_WORKTREE_RE = re.compile(r"/\.claude/worktrees/agent-([A-Za-z0-9_-]{1,64})(?:/|$)")
+
+
+def _pid_cwd(pid: int):
+    """Current directory of `pid`, or None when it could not be read."""
+    try:
+        if sys.platform.startswith("linux"):
+            return os.readlink("/proc/%d/cwd" % pid)
+        answer = subprocess.run(["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
+                                capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in answer.stdout.splitlines():
+        if line.startswith("n"):
+            return line[1:]
+    return None
+
+
+def in_own_agent_worktree(pid: int, transcript: str) -> bool:
+    """True when `pid`'s cwd is inside `.claude/worktrees/agent-<id>` and this session's
+    `subagents/` folder holds `agent-<id>.jsonl`, and its parent is init (PPID 1). The folder is the transcript path minus `.jsonl`.
+    Any unreadable part reads False (foreign). Decision a-kill-by-pid-needs-an-owned-pid."""
+    if not transcript.endswith(".jsonl") or _ps_ppid(pid) != 1:
+        return False   # left-behind only: a pid whose parent is alive stays foreign
+    cwd = _pid_cwd(pid)
+    found = AGENT_WORKTREE_RE.search((cwd or "").replace("\\", "/"))
+    return bool(found) and os.path.isfile(
+        os.path.join(transcript[:-len(".jsonl")], "subagents", "agent-%s.jsonl" % found.group(1)))
+
+
+def foreign_pid_kill(tokens, transcript: str = "") -> str:
     """Return the first numeric pid a `kill` segment names that this session did not start.
 
     Only literal numbers are judged. `$!`, `$PID`, `%1` and `$(...)` cannot be read here, and
@@ -2748,6 +2778,8 @@ def foreign_pid_kill(tokens) -> str:
             root = session_root_pid()
         if not root:
             return ""
+        if in_own_agent_worktree(abs(number), transcript):
+            continue
         if pid_is_owned(abs(number) if number < -1 else number, root) is False:
             return arg
     return ""
@@ -3836,6 +3868,8 @@ CONFIG_FROZEN_SKILLS = (
     os.path.normcase("ci-hygiene"),
     os.path.normcase("compliance-check"),
     os.path.normcase("fresh-prose"),
+    os.path.normcase("design-review"),
+    os.path.normcase("impeccable"),
 )
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
 PROJECT_FROZEN_DIR = "/.claude/hooks/"
@@ -5490,7 +5524,8 @@ def floor_hit(tool: str, tool_input) -> str:
     return ""
 
 
-def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "") -> None:
+def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
+                transcript: str = "") -> None:
     POWERSHELL_CALL[0] = tool == "PowerShell"
     stripped = strip_heredoc_bodies(raw)
     cmd = norm(stripped)
@@ -5586,6 +5621,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                       else SILENT_WRITE_QUIET_REASON)
             refuse(tool, "deny", "silent-write", reason, matched)
 
+    # 1e. The impeccable skill's build and settings-writer commands (design-skills record).
+    for segment in split_segments(stripped):
+        matched = impeccable_shell_hit(segment)
+        if matched:
+            refuse(tool, "deny", "impeccable-review-only", IMPECCABLE_REASON, matched)
+
     # 1d. A commit message or PR body that cites a record by its path.
     cite_where = command_root(stripped, cwd)
     for segment in split_segments(stripped):
@@ -5612,7 +5653,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         previous = tokens
         if matched:
             refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
-        matched = foreign_pid_kill(tokens)
+        matched = foreign_pid_kill(tokens, transcript)
         if matched:
             refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched)
 
@@ -5724,6 +5765,137 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, matched),
                    log_path_and_text(matched, change))
 
+# ------------------------------------------------------------------ impeccable is review-only
+#
+# decisions/design-skills.md, rule `impeccable-review-only`: the skill loads only for a review
+# (`audit`, `critique`). Its build commands and its settings writers are refused. The reason names
+# no command; the log holds what the call asked for.
+IMPECCABLE_REASON = ("impeccable is for a design review only. Ask for a review of the rendered "
+                     "screens; make any change to the design by hand.")
+IMPECCABLE_SKILLS = ("impeccable", "impeccable:impeccable")
+IMPECCABLE_REVIEWS = ("audit", "critique")
+IMPECCABLE_CHAIN = re.compile(r"[;|\n]|&&")
+RUNNER_WORDS = ("npx", "bunx", "node", "pnpm", "yarn", "npm", "dlx", "exec", "run", "x")
+PACKAGE_FLAGS = ("-p", "--package")
+
+
+def impeccable_name(token: str) -> str:
+    """The package or script name of a token, without a path, a `@version` or an extension."""
+    name = basename(token).split("@", 1)[0]
+    return name.rsplit(".", 1)[0]
+
+
+def impeccable_skill_hit(tool_input) -> str:
+    skill, args = tool_input.get("skill"), tool_input.get("args") or ""
+    if not isinstance(skill, str) or skill.lstrip("/") not in IMPECCABLE_SKILLS:
+        return ""
+    words = args.split() if isinstance(args, str) else []
+    if words and words[0] in IMPECCABLE_REVIEWS and not IMPECCABLE_CHAIN.search(args.strip()):
+        return ""
+    return ("skill %s %s" % (skill, args))[:100]
+
+
+def impeccable_shell_hit(segment: str) -> str:
+    """A segment that runs impeccable with anything but `detect ...` or `hooks status`. Shell
+    wrappers (`bash -c`, `npx -c`) are unwrapped; a runner or script suffix (`.cmd`, `.exe`,
+    `.mjs`) and PowerShell's call operator `&` are read through."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return ""
+    # PowerShell's call operator: drop it where the command starts, after `$x =` or `{`.
+    start = resolve_command(tokens)
+    if start is not None and tokens[start] == "&":
+        tokens = tokens[start + 1:]
+    if not tokens:
+        return ""
+    script = inline_script(tokens)
+    if script:
+        return next((hit for part in split_segments(script)
+                     if (hit := impeccable_shell_hit(part))), "")
+    index = resolve_command(tokens)
+    if index is None or index >= len(tokens):
+        return ""
+    while index < len(tokens) and (impeccable_name(tokens[index]) in RUNNER_WORDS
+                                   or tokens[index].startswith("-")):
+        if tokens[index] in ("-c", "--call") and index + 1 < len(tokens):
+            return next((hit for part in split_segments(tokens[index + 1])
+                         if (hit := impeccable_shell_hit(part))), "")
+        index += 2 if tokens[index] in PACKAGE_FLAGS else 1
+    if index >= len(tokens) or impeccable_name(tokens[index]) != "impeccable":
+        return ""
+    rest = tokens[index + 1:]
+    if rest[:1] == ["detect"] or rest[:2] == ["hooks", "status"]:
+        return ""
+    return segment.strip()[:100]
+
+
+# ------------------------------------------------------------------ simulator boots
+#
+# decisions/sweep-shuts-down-idle-simulators.md, rulings 3 and 4. A boot is `simctl boot`, an
+# `xcodebuild -destination` that names a shut-down simulator, or the simulator MCP tool's `launch`
+# naming one. `simctl list` runs only after a call matched as a boot. The idle test is the sweep
+# tier's own (`sweep.sim_keep_code`), imported lazily: janitor/sweep.py imports this file.
+SIM_MCP = "mcp__Claude_Code_iOS_Simulator__control"
+SIM_BOOT_CAP = 2
+
+
+def _sim_boot_names(segment: str) -> list:
+    """The device names or UDIDs a segment boots, by the command word. Empty when it boots none."""
+    tokens = segment_tokens(segment)
+    index = resolve_command(tokens) if tokens else None
+    if index is None:
+        return []
+    word, rest = basename(tokens[index]), tokens[index + 1:]
+    if word == "xcodebuild":
+        found = []
+        for i, token in enumerate(rest):
+            value = rest[i + 1] if token == "-destination" and i + 1 < len(rest) else (
+                token[len("-destination="):] if token.startswith("-destination=") else "")
+            fields = dict(p.split("=", 1) for p in value.split(",") if "=" in p)
+            if "iOS Simulator" in fields.get("platform", "") and (fields.get("id") or fields.get("name")):
+                found.append(fields.get("id") or fields["name"])
+        return found
+    if word in ("xcrun", "simctl") and "simctl" in ([word] + rest):
+        after = ([word] + rest)[([word] + rest).index("simctl") + 1:]
+        if after[:1] == ["boot"] and len(after) > 1:
+            return [after[1]]
+    return []
+
+
+def sim_boot_refusal(tool: str, names: list) -> None:
+    """Refuse a boot of any of NAMES when two devices are booted, or an idle twin is booted."""
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "janitor"))
+        import sweep
+    except Exception:
+        return  # fail open: no janitor beside this file (a cloud copy)
+    if not sweep.sim_available():
+        return
+    devices = sweep.sim_read_devices()
+    if devices is None:
+        return
+    for name in names:
+        hits = [d for d in devices if name in (d["udid"], d["name"])]
+        if not hits or any(d["state"] == "Booted" for d in hits):
+            continue  # unknown device, or already up: not a boot
+        booted = [d for d in devices if d["state"] == "Booted"]
+        if len(booted) >= SIM_BOOT_CAP:
+            refuse(tool, "deny", "simulator-boot-cap",
+                   "%d simulators are already booted: %s. Use one, or ask the owner to stop one, "
+                   "then boot." % (len(booted), "; ".join("%s (%s)" % (d["name"], d["udid"]) for d in booted)),
+                   name)
+        want = hits[0]
+        boots, table, now = (sweep.sim_read_boots(os.path.join(config_dir(), "state", "sim-boots.jsonl")),
+                             sweep._read_ps_table(), time.time())
+        for twin in booted:
+            if (twin["udid"] in boots  # an unrecorded device is never idle
+                    and (twin["deviceTypeIdentifier"], twin["runtime"]) == (want["deviceTypeIdentifier"], want["runtime"])
+                    and sweep.sim_keep_code(twin, boots, table, now) is None):
+                refuse(tool, "deny", "simulator-boot-twin",
+                       "An idle booted simulator of the same type and runtime exists: %s (%s). Use it "
+                       "instead of booting another." % (twin["name"], twin["udid"]), name)
+
+
 def judge(payload) -> None:
     if payload.get("hook_event_name") == "SubagentStop":
         judge_stop(payload)
@@ -5786,10 +5958,27 @@ def judge(payload) -> None:
     if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:
         refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "create_pull_request without draft")
 
+    if tool == "Skill":
+        matched = impeccable_skill_hit(tool_input)
+        if matched:
+            refuse(tool, "deny", "impeccable-review-only", IMPECCABLE_REASON, matched)
+        return
+
     if tool in SHELL_TOOLS:
         command = tool_input.get("command", "") or ""
         if isinstance(command, str) and command.strip():
-            judge_shell(tool, command, cwd, session_id_of(payload), agent_role(payload))
+            transcript = payload.get("transcript_path") if isinstance(payload, dict) else ""
+            judge_shell(tool, command, cwd, session_id_of(payload), agent_role(payload),
+                        transcript if isinstance(transcript, str) else "")
+            names = [n for seg in split_segments(strip_heredoc_bodies(command))
+                     for n in _sim_boot_names(seg)]
+            if names:
+                sim_boot_refusal(tool, names)
+        return
+    if tool == SIM_MCP:
+        device = tool_input.get("device")
+        if tool_input.get("action") == "launch" and isinstance(device, str) and device:
+            sim_boot_refusal(tool, [device])
         return
 
     if tool not in WRITE_TOOLS:
