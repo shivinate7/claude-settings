@@ -2812,12 +2812,25 @@ for _command in (
     "bash -lc 'gh pr create --title x'", "dash -c 'gh pr create --title x'",
     "echo $(gh pr create --title x)", "echo `gh pr create --title x`",
     "gh pr create --draft --draft=false --title x", "gh pr create --title --draft",
+    "cd x && (gh pr create --title y)", "gh pr create --draft --draft=f --title x",
+    "gh pr create --draft --draft=F --title x", "gh pr create -d -d=false --title x",
 ):
     sh("draft-pr: bypass refused, " + _command, _command, "deny", "draft-pr", cwd=NOGIT,
        carries=DRAFT_REMEDY)
 for _command in ("gh pr create --draft=true --title x", "gh pr create --title x -d"):
     sh("draft-pr: bypass allowed, " + _command, _command, "allow", cwd=NOGIT)
-# Named limits, no case: `gh api -X POST .../pulls` and `hub pull-request` open PRs outside this gate.
+# The MCP create tool carries its own `draft` field, so it is judged by that field.
+add("draft-pr: MCP create with no draft field is refused", "deny", rule="draft-pr",
+    tool="mcp__github__create_pull_request", cwd=NOGIT, title="x", head="h", base="main",
+    repo="x", owner="y", carries=("draft", "mark the PR ready after review"))
+add("draft-pr: MCP create with draft false is refused", "deny", rule="draft-pr",
+    tool="mcp__github__create_pull_request", cwd=NOGIT, title="x", head="h", base="main",
+    repo="x", owner="y", draft=False, carries=("draft", "mark the PR ready after review"))
+add("draft-pr: MCP create with draft true is allowed", "allow",
+    tool="mcp__github__create_pull_request", cwd=NOGIT, title="x", head="h", base="main",
+    repo="x", owner="y", draft=True)
+# Named limits, no case: `gh api -X POST .../pulls`, `hub pull-request`, and short-flag clusters
+# such as `-dt x` (refused, a rare false alarm).
 
 
 # =========================================================================== 5b. the merge gate
