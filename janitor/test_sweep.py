@@ -3058,6 +3058,276 @@ class AgentEndReapTests(unittest.TestCase):
         self.assertIn("payload 3", raws)
 
 
+BUILD_DIRS = ("native/build", "DegenKit/.build", "DerivedData")
+REAP_HOOK = os.path.join(HERE, "agent_end_reap.py")
+JANITOR = os.path.join(HERE, "sweep.py")
+
+
+class BuildDirReapTests(unittest.TestCase):
+    """Decision build-dirs-reaped-at-agent-end, Part 1. The SubagentStop reap deletes build folders
+    in the finished agent's worktree: `native/build`, a bare `.build` at any depth, `DerivedData`,
+    and each `buildDirs` name from `.claude/janitor.json`. Each delete is a rename to a trash name,
+    then a detached child deletes the trash.
+
+    Real git repos, real hook processes (`agent_end_reap.py` run as the harness runs it). Every
+    fixture is a few small files. Each keep arm sits beside a control arm that must delete, so a
+    keep arm cannot pass on a reaper that deletes nothing. The trash-name contract is two
+    functions the builder exports: `trash_name(folder)` (the sibling path a reap renames to) and
+    `is_trash_name(basename)`.
+    """
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="bdr_cases_")
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.cfg = os.path.join(self.root, "cfg")  # the config dir the hook process reads and writes
+        import agent_end_reap
+        self.reap = agent_end_reap
+
+    def make_primary(self, tag, janitor=None):
+        primary = os.path.join(self.root, tag)
+        make_repo(primary, {"f.txt": "base\n"})
+        if janitor is not None:
+            write(os.path.join(primary, ".claude", "janitor.json"), janitor)
+        return primary
+
+    def add_agent(self, primary, agent):
+        wt = os.path.join(primary, ".claude", "worktrees", "agent-" + agent)
+        run_vcs(primary, "worktree", "add", "-q", wt, "-b", "lane-" + agent)
+        require(os.path.isdir(wt), "worktree %s was not created" % wt)
+        # One unmerged commit, so the janitor keeps the worktree itself and only trash is in play.
+        write(os.path.join(wt, "lane.txt"), agent + "\n")
+        run_vcs(wt, "add", "lane.txt")
+        commit = run_vcs(wt, *IDENT, "commit", "-q", "-m", "lane work " + agent)
+        require(commit.returncode == 0, "lane commit in %s failed: %s" % (wt, commit.stderr.strip()))
+        return wt
+
+    def fill(self, base, rels=BUILD_DIRS):
+        for rel in rels:
+            write(os.path.join(base, rel, "payload.bin"), "x" * 1024 + "\n")
+
+    def run_hook(self, agent, wt):
+        """Run the SubagentStop hook as the harness does. Return its wall time in seconds."""
+        payload = json.dumps({"hook_event_name": "SubagentStop", "agent_id": agent,
+                              "cwd": wt, "session_id": "bdr-cases"})
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg)
+        started = time.monotonic()
+        result = subprocess.run([sys.executable, REAP_HOOK], input=payload, capture_output=True,
+                                text=True, env=env, timeout=120)
+        elapsed = time.monotonic() - started
+        self.assertEqual(result.returncode, 0, "hook exited %d: %s" % (result.returncode,
+                                                                       result.stderr[-300:]))
+        return elapsed
+
+    def hold_cwd(self, folder):
+        """A live process whose cwd is FOLDER. The test started it, so the test stops it."""
+        proc = subprocess.Popen(["sleep", "120"], cwd=folder, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(self.stop_proc, proc)
+        return proc
+
+    @staticmethod
+    def stop_proc(proc):
+        proc.kill()
+        proc.wait(timeout=10)
+
+    def wait_gone(self, path, seconds=30):
+        """Bounded wait for a detached child to delete PATH. Capped at SECONDS; never unbounded."""
+        deadline = time.monotonic() + seconds
+        while os.path.exists(path) and time.monotonic() < deadline:
+            time.sleep(0.2)
+        return not os.path.exists(path)
+
+    def test_native_build_bare_build_at_depth_and_derived_data_are_reaped(self):
+        primary = self.make_primary("reap")
+        wt = self.add_agent(primary, "bdrA")
+        self.fill(wt)
+        self.run_hook("bdrA", wt)
+        for rel in BUILD_DIRS:
+            with self.subTest(folder=rel):
+                self.assertFalse(os.path.exists(os.path.join(wt, rel)),
+                                 "%s in the ended agent worktree was not reaped" % rel)
+
+    def test_the_same_folders_in_the_primary_checkout_are_kept(self):
+        primary = self.make_primary("kept-primary")
+        wt = self.add_agent(primary, "bdrA")
+        self.fill(wt)
+        self.fill(primary)
+        self.run_hook("bdrA", wt)
+        with self.subTest(control="agent worktree"):
+            for rel in BUILD_DIRS:
+                self.assertFalse(os.path.exists(os.path.join(wt, rel)), "%s not reaped" % rel)
+        with self.subTest(arm="primary checkout"):
+            for rel in BUILD_DIRS:
+                self.assertTrue(os.path.isdir(os.path.join(primary, rel)),
+                                "%s in the primary checkout was removed" % rel)
+
+    def test_a_link_named_as_a_build_folder_is_kept_and_its_target_untouched(self):
+        primary = self.make_primary("link")
+        wt = self.add_agent(primary, "bdrA")
+        self.fill(wt, ("native/build", "DerivedData"))
+        outside = os.path.join(self.root, "outside")
+        write(os.path.join(outside, "keep.txt"), "not ours\n")
+        os.symlink(outside, os.path.join(wt, ".build"))
+        self.run_hook("bdrA", wt)
+        with self.subTest(control="native/build"):
+            self.assertFalse(os.path.exists(os.path.join(wt, "native", "build")))
+        with self.subTest(arm="link .build"):
+            self.assertTrue(os.path.islink(os.path.join(wt, ".build")), "the link was removed")
+            self.assertTrue(os.path.isfile(os.path.join(outside, "keep.txt")),
+                            "the link's target was touched")
+
+    def test_a_folder_with_a_live_process_cwd_inside_is_kept(self):
+        primary = self.make_primary("proc")
+        wt = self.add_agent(primary, "bdrA")
+        self.fill(wt)
+        self.hold_cwd(os.path.join(wt, "DerivedData"))
+        self.run_hook("bdrA", wt)
+        with self.subTest(control="native/build and DegenKit/.build"):
+            self.assertFalse(os.path.exists(os.path.join(wt, "native", "build")))
+            self.assertFalse(os.path.exists(os.path.join(wt, "DegenKit", ".build")))
+        with self.subTest(arm="DerivedData with a live cwd"):
+            self.assertTrue(os.path.isdir(os.path.join(wt, "DerivedData")),
+                            "DerivedData with a live process inside was removed")
+
+    def test_a_live_session_inside_the_worktree_keeps_everything(self):
+        primary = self.make_primary("live")
+        live = self.add_agent(primary, "bdrLive")
+        other = self.add_agent(primary, "bdrB")
+        self.fill(live)
+        self.fill(other)
+        write(os.path.join(self.cfg, "sessions", "bdr-live.json"),
+              json.dumps({"pid": os.getpid(), "startedAt": this_process_start_ms(), "cwd": live}))
+        self.run_hook("bdrLive", live)
+        self.run_hook("bdrB", other)
+        with self.subTest(control="agent-bdrB with no session"):
+            for rel in BUILD_DIRS:
+                self.assertFalse(os.path.exists(os.path.join(other, rel)), "%s not reaped" % rel)
+        with self.subTest(arm="agent-bdrLive with a live session"):
+            for rel in BUILD_DIRS:
+                self.assertTrue(os.path.isdir(os.path.join(live, rel)),
+                                "%s removed under a live session" % rel)
+
+    def test_a_bad_build_dirs_value_deletes_nothing(self):
+        clean = self.make_primary("clean")
+        clean_wt = self.add_agent(clean, "bdrOk")
+        self.fill(clean_wt)
+        self.run_hook("bdrOk", clean_wt)
+        with self.subTest(control="checkout with no janitor.json reaps the defaults"):
+            for rel in BUILD_DIRS:
+                self.assertFalse(os.path.exists(os.path.join(clean_wt, rel)), "%s not reaped" % rel)
+        for number, bad in enumerate(("Pods/Build", ["Pods/Build", 7])):
+            with self.subTest(buildDirs=bad):
+                primary = self.make_primary("bad%d" % number,
+                                            janitor=json.dumps({"buildDirs": bad}))
+                wt = self.add_agent(primary, "bdrBad")
+                self.fill(wt)
+                self.run_hook("bdrBad", wt)
+                for rel in BUILD_DIRS:
+                    self.assertTrue(os.path.isdir(os.path.join(wt, rel)),
+                                    "%s deleted under a bad buildDirs value" % rel)
+
+    def test_a_buildDirs_name_adds_a_folder_at_its_depth(self):
+        primary = self.make_primary("names", janitor=json.dumps(
+            {"buildDirs": ["Pods/Build", "scratch-out"]}))
+        wt = self.add_agent(primary, "bdrA")
+        self.fill(wt)
+        self.fill(wt, ("Pods/Build", "Sub/scratch-out"))
+        self.run_hook("bdrA", wt)
+        with self.subTest(control="a default folder"):
+            self.assertFalse(os.path.exists(os.path.join(wt, "native", "build")))
+        with self.subTest(name="Pods/Build"):
+            self.assertFalse(os.path.exists(os.path.join(wt, "Pods", "Build")))
+        with self.subTest(name="scratch-out, a bare name at depth"):
+            self.assertFalse(os.path.exists(os.path.join(wt, "Sub", "scratch-out")))
+
+    def test_the_hook_renames_the_build_folder_first_and_returns_before_the_delete(self):
+        primary = self.make_primary("ret")
+        wt = self.add_agent(primary, "bdrR")
+        self.fill(wt, ("native/build",))
+        build = os.path.realpath(os.path.join(wt, "native", "build"))
+        gate = threading.Event()
+        renames = []
+        real_rename, real_replace = os.rename, os.replace
+
+        def recorded(real):
+            def inner(src, dst, *args, **kwargs):
+                renames.append((os.path.realpath(src), os.path.realpath(dst)))
+                return real(src, dst, *args, **kwargs)
+            return inner
+
+        def held_delete(*args, **kwargs):
+            gate.wait(30)  # a delete made in the hook's own process waits here, so the hook hangs
+
+        payload = json.dumps({"hook_event_name": "SubagentStop", "agent_id": "bdrR",
+                              "cwd": wt, "session_id": "bdr-cases"})
+        worker = threading.Thread(target=self.reap.handle, args=(payload,), daemon=True)
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.cfg}), \
+                mock.patch.object(os, "rename", recorded(real_rename)), \
+                mock.patch.object(os, "replace", recorded(real_replace)), \
+                mock.patch.object(shutil, "rmtree", held_delete), \
+                mock.patch.object(os, "remove", held_delete):
+            worker.start()
+            worker.join(30)
+            returned = not worker.is_alive()
+            gate.set()
+            worker.join(30)
+        self.assertTrue(returned, "the hook did not return while the delete was held")
+        moves = [(src, dst) for src, dst in renames if src == build]
+        self.assertTrue(moves, "the build folder was never renamed to a trash name first")
+        self.assertEqual(os.path.dirname(moves[0][1]), os.path.dirname(build),
+                         "the trash name is not a sibling on the same volume")
+        self.assertFalse(os.path.exists(build), "the build folder is still at its own name")
+
+    def test_a_later_reap_deletes_a_leftover_trash_name_and_keeps_a_name_outside_the_pattern(self):
+        primary = self.make_primary("later")
+        wt = self.add_agent(primary, "bdrT")
+        trash = self.reap.trash_name(os.path.join(wt, "native", "build"))
+        self.assertTrue(self.reap.is_trash_name(os.path.basename(trash)),
+                        "the trash name the reap renames to is not a trash name")
+        self.assertFalse(self.reap.is_trash_name("notes-not-trash"))
+        self.fill(os.path.dirname(trash), (os.path.basename(trash),))
+        notes = os.path.join(wt, "notes-not-trash")
+        write(os.path.join(notes, "keep.txt"), "not trash\n")
+        self.run_hook("bdrT", wt)
+        with self.subTest(arm="notes-not-trash"):
+            self.assertTrue(os.path.isfile(os.path.join(notes, "keep.txt")),
+                            "a name outside the trash pattern was deleted")
+        with self.subTest(control="leftover trash name"):
+            self.assertTrue(self.wait_gone(trash), "a later reap left the trash name on disk")
+
+    def test_a_trash_name_with_a_live_process_inside_is_kept(self):
+        primary = self.make_primary("trashproc")
+        wt = self.add_agent(primary, "bdrT")
+        free = self.reap.trash_name(os.path.join(wt, "native", "build"))
+        live = self.reap.trash_name(os.path.join(wt, "DerivedData"))
+        self.fill(os.path.dirname(free), (os.path.basename(free),))
+        self.fill(os.path.dirname(live), (os.path.basename(live),))
+        self.hold_cwd(live)
+        self.run_hook("bdrT", wt)
+        with self.subTest(control="leftover trash with no process"):
+            self.assertTrue(self.wait_gone(free), "a leftover trash name was left on disk")
+        with self.subTest(arm="leftover trash with a live cwd"):
+            self.assertTrue(os.path.isdir(live), "a trash name with a live process inside was deleted")
+
+    def test_the_janitor_deletes_a_leftover_trash_name_and_keeps_one_with_a_live_process(self):
+        primary = self.make_primary("janitor")
+        wt = self.add_agent(primary, "bdrJ")
+        free = self.reap.trash_name(os.path.join(wt, "native", "build"))
+        live = self.reap.trash_name(os.path.join(wt, "DerivedData"))
+        self.fill(os.path.dirname(free), (os.path.basename(free),))
+        self.fill(os.path.dirname(live), (os.path.basename(live),))
+        self.hold_cwd(live)
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg)
+        result = subprocess.run([sys.executable, JANITOR, primary, "--confirm"], capture_output=True,
+                                text=True, env=env, timeout=120)
+        self.assertEqual(result.returncode, 0, "janitor exited %d: %s"
+                         % (result.returncode, result.stderr[-300:]))
+        with self.subTest(control="leftover trash with no process"):
+            self.assertFalse(os.path.exists(free), "the janitor left a leftover trash name")
+        with self.subTest(arm="leftover trash with a live cwd"):
+            self.assertTrue(os.path.isdir(live), "the janitor deleted a trash name with a live process")
+
+
 class StrictWorktreeTests(unittest.TestCase):
     """Owner ruling: --confirm removes a worktree only when it is merged (by patch, not
     ancestry) and idle 1 hour. A person passes --attended for the old rules."""
