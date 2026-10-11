@@ -35,6 +35,10 @@ skips each PR.
 - Why no impeccable plugin, measured by review: the plugin installs hooks that run
   `impeccable hook` on SessionStart, PostToolUse and Stop in every session. It also installs an
   agent with Write and Edit. The guard sees neither.
+- STE lint skips `skills/impeccable/`. It is third-party prose (Apache 2.0), and the owner ruled
+  on 2026-10-10 that third-party skills need not follow our STE rules. The `exclude` input of the
+  `ste-lint` step in `gates.yml` holds the path. The local write hook `lint/ste_gate.py` has no
+  exclude list, so it is unchanged. Nobody edits the copy by hand, so the hook never meets it.
 
 Dated by: the three pins and the guard rule.
 A change to any of them means that this record is read again.
