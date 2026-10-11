@@ -45,6 +45,7 @@ HOOK = os.path.join(HERE, "sim_boot_record.py")
 
 MCP = "mcp__Claude_Code_iOS_Simulator__control"
 RT = "com.apple.CoreSimulator.SimRuntime.iOS-26-0"
+RT_OLD = "com.apple.CoreSimulator.SimRuntime.iOS-25-0"
 TYPE_PRO = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro"
 TYPE_AIR = "com.apple.CoreSimulator.SimDeviceType.iPad-Air"
 U1 = "1A2B3C4D-0000-4000-8000-000000000101"
@@ -58,9 +59,14 @@ POSIX = not sys.platform.startswith("win")
 
 
 def devices_json(rows):
-    """rows: (udid, name, state, deviceTypeIdentifier)."""
-    grouped = {RT: [{"udid": u, "name": n, "state": s, "deviceTypeIdentifier": t,
-                     "isAvailable": True} for u, n, s, t in rows]}
+    """rows: (udid, name, state, deviceTypeIdentifier[, runtime]). The runtime defaults to RT."""
+    grouped = {}
+    for row in rows:
+        udid, name, state, dtype = row[:4]
+        runtime = row[4] if len(row) > 4 else RT
+        grouped.setdefault(runtime, []).append({
+            "udid": udid, "name": name, "state": state, "deviceTypeIdentifier": dtype,
+            "isAvailable": True})
     return json.dumps({"devices": grouped})
 
 
@@ -322,6 +328,37 @@ class SimBootRecordTests(unittest.TestCase):
         self.post([(U1, "Hand Pro", "Booted", TYPE_PRO)], tool_input=ti)
         self.assertEqual(self.read_records(), [],
                          "a call that names no device recorded a device booted during it")
+
+    def test_an_mcp_launch_by_the_udid_alias_records_that_udid(self):
+        ti = {"action": "launch", "udid": U1}
+        rows = [(U1, "Named Pro", "Shutdown", TYPE_PRO), (U2, "Hand Air", "Shutdown", TYPE_AIR)]
+        self.pre(rows, tool=MCP, tool_input=ti)
+        self.post([(U1, "Named Pro", "Booted", TYPE_PRO), (U2, "Hand Air", "Booted", TYPE_AIR)],
+                  tool=MCP, tool_input=ti)
+        self.assertEqual([r["udid"] for r in self.read_records()], [U1],
+                         "an MCP launch that names its device by the udid key recorded nothing")
+
+    def test_a_name_shared_by_two_runtimes_records_neither_when_both_boot(self):
+        ti = {"command": "xcodebuild test -scheme App -destination "
+                         "'platform=iOS Simulator,name=iPhone 17'"}
+        rows = [(U1, "iPhone 17", "Shutdown", TYPE_PRO, RT),
+                (U2, "iPhone 17", "Shutdown", TYPE_PRO, RT_OLD)]
+        self.pre(rows, tool_input=ti)
+        self.post([(U1, "iPhone 17", "Booted", TYPE_PRO, RT),
+                   (U2, "iPhone 17", "Booted", TYPE_PRO, RT_OLD)], tool_input=ti)
+        self.assertEqual(self.read_records(), [],
+                         "an ambiguous name shared by two runtimes recorded a device")
+
+    def test_a_name_pinned_to_an_os_records_only_the_device_on_that_runtime(self):
+        ti = {"command": "xcodebuild test -scheme App -destination "
+                         "'platform=iOS Simulator,name=iPhone 17,OS=26.0'"}
+        rows = [(U1, "iPhone 17", "Shutdown", TYPE_PRO, RT),
+                (U2, "iPhone 17", "Shutdown", TYPE_PRO, RT_OLD)]
+        self.pre(rows, tool_input=ti)
+        self.post([(U1, "iPhone 17", "Booted", TYPE_PRO, RT),
+                   (U2, "iPhone 17", "Booted", TYPE_PRO, RT_OLD)], tool_input=ti)
+        self.assertEqual([r["udid"] for r in self.read_records()], [U1],
+                         "OS=26.0 did not pick the device on the iOS 26 runtime")
 
     def test_two_launchd_sims_for_one_udid_record_nothing_for_it(self):
         self.write_ps([("90", "1", "0", LAUNCHD_CMD + " " + U1),
