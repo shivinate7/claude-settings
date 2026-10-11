@@ -4902,7 +4902,8 @@ def repo_rel(path: str, cwd: str):
     if not path or not isinstance(path, str):
         return None
     try:
-        full = norm(_literal_resolved(path, cwd))
+        # Case kept: normcase would lowercase on Windows and break the case-sensitive Xcode/Java tests.
+        full = norm(os.path.normpath(_expanded(path, cwd)))
     except Exception:
         return None
     parent = os.path.dirname(full)
@@ -5569,8 +5570,11 @@ def _rm_last_bind(scope: str) -> dict:
 
 @functools.lru_cache(maxsize=16)
 def _rm_real(path: str) -> str:
-    """Return the real path, case-folded on macOS, where the file system folds case."""
+    """Return the real path, case-folded on macOS and Windows, where the file system folds case.
+    On Windows it has forward slashes, so the compares below hold on both systems."""
     real = os.path.realpath(path)
+    if os.name == "nt":
+        return real.replace("\\", "/").lower()
     return real.lower() if sys.platform == "darwin" else real
 
 
@@ -5581,7 +5585,8 @@ def _rm_target_bad(path: str, cwd: str) -> bool:
     cwd, home = _rm_real(cwd or "/"), _rm_real(os.path.expanduser("~"))
     q = _rm_real(os.path.join(cwd, path))
     up = q.rstrip("/") + "/"
-    return q in ("/", cwd, home) or cwd.startswith(up) or home.startswith(up)
+    root = q == "/" or q == os.path.dirname(q)   # on Windows "/" resolves to the drive root
+    return root or q in (cwd, home) or cwd.startswith(up) or home.startswith(up)
 
 
 def _rm_word_safe(word: str, vals: dict, cwd: str) -> bool:
