@@ -16,8 +16,10 @@ Owner, 2026-10-03: in copy mode, an installer overwrites its own old copy. It ke
 backup.
 
 Owner, 2026-10-11, one exception: `settings.json`. When a repeat install finds a plain file
-there and not the link, it moves the file to `settings.json.bak.<time>` first. Then it
-removes each older `settings.json.bak.*`, so only the newest backup stays. This cap keeps
+there and not the link, it moves the file to a new `settings.json.bak.<time>` first. Then
+it removes each older `settings.json.bak.*`, so only the newest backup stays. The first
+local install keeps the person's own file as `settings.json.orig`, which is never removed.
+If a move fails, the install stops before it removes or links anything. This cap keeps
 the 2026-10-03 pile-up from coming back. The reason: each merge now runs the install. A
 tool that writes `settings.json` as a plain file would lose its edits at the next merge.
 
