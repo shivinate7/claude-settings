@@ -5409,6 +5409,93 @@ PLAYWRIGHT_PATH_REASON = (
 )
 
 
+# THE UNGUARDED VARIABLE DELETE. Decision rm-on-a-variable-needs-a-guard (owner ruling, 2026-10-11):
+# a recursive `rm` whose target has an unguarded expansion followed by `/` is refused, and the
+# refusal prints the targets with every expansion written `${NAME:?}`. INCIDENT 2026-10-10 to
+# 10-11: 7 of 24 Bash prompts were `rm` on a `$var` path. Segments, the command word and the
+# `sh -c` script come from the shell walk above. `_RAW_WORD` only keeps the quote marks that
+# `segment_tokens` drops, and `rm_call` checks that both reads agree on the word count.
+# hooks/rm_prompt_answer.py imports `rm_call` and `RM_GUARDED`, so both reads share one home.
+# KNOWN LIMITS: an `rm` inside a script file is not seen. A bare `$d` target is not refused.
+_RAW_WORD = re.compile(r"""(?:\\.|'[^']*'|"(?:[^"\\]|\\.)*"|[^\s'"\\])+""")
+_RM_PART = re.compile(r"""'[^']*'|"(?:[^"\\]|\\.)*"|[^'"]+|.""")
+_RM_EXPANSION = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
+_RM_EXPANSION_SLASH = re.compile(r"\$(?:\{\w+\}|\w+)\"?/")
+RM_GUARDED = re.compile(r"\$\{(?!HOME\b)[A-Za-z_]\w*:\?[^}$`]*\}")
+
+
+def rm_call(segment: str):
+    """Return (tokens, at, flag words, target words, recursive) for an `rm` segment, else None.
+    Words are raw (quotes kept). None also when the raw and shlex reads disagree on word count."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return None
+    at = resolve_command(tokens)
+    raw = _RAW_WORD.findall(segment)
+    if at is None or basename(tokens[at]) != "rm" or len(raw) != len(tokens):
+        return None
+    flags, targets, recursive, ended = [], [], False, False
+    for token, word in zip(tokens[at + 1:], raw[at + 1:]):
+        if not ended and token.startswith("-") and len(token) > 1:
+            flags.append(word)
+            ended = token == "--"
+            recursive = recursive or token == "--recursive" or (
+                not token.startswith("--") and bool(re.search("[rR]", token)))
+        else:
+            targets.append(word)
+    return tokens, at, flags, targets, recursive
+
+
+def _rm_var_rewrite(word: str):
+    """Return (word with every expansion guarded, True when one unguarded expansion is followed
+    by `/`). Text inside single quotes is a literal and stays as it is."""
+    def guard(match):
+        return "${%s:?}" % (match.group(1) or match.group(2))
+    out, live = [], []
+    for part in _RM_PART.findall(word):
+        if part[0] == "'":
+            out.append(part)
+        elif part[0] == '"' and len(part) > 1 and part.endswith('"'):
+            out.append('"' + _RM_EXPANSION.sub(guard, part[1:-1]) + '"')
+            live.append(part)
+        else:
+            out.append(_RM_EXPANSION.sub(guard, part))
+            live.append(part)
+    return "".join(out), bool(_RM_EXPANSION_SLASH.search("".join(live)))
+
+
+def rm_var_hits(text: str, depth=0) -> list:
+    """Return the flagged `rm` calls of a command, each as `rm FLAGS TARGETS` with every
+    expansion in a flagged target guarded `:?`. `sh -c`, `eval` and `pwsh -Command` are walked."""
+    found = []
+    for segment in split_segments(text):
+        call = rm_call(segment)
+        if call:
+            _, _, flags, targets, recursive = call
+            rewritten = [w for w, hit in map(_rm_var_rewrite, targets) if hit] if recursive else []
+            if rewritten:
+                found.append(" ".join(["rm"] + flags + rewritten))
+            continue
+        tokens = segment_tokens(segment)
+        at = resolve_command(tokens) if tokens else None
+        if at is None or depth > 3:
+            continue
+        word = basename(tokens[at]).lower()
+        script = " ".join(tokens[at + 1:]) if word == "eval" else (
+            _pwsh_script(tokens) if word in PLAYWRIGHT_PS_SHELLS else inline_script(tokens))
+        if script:
+            found += rm_var_hits(script, depth + 1)
+    return found
+
+
+def rm_var_reason(hits) -> str:
+    return (
+        "a recursive delete with an unguarded variable in its path can remove far more than "
+        "intended when the variable is empty. Retry with every expansion written ${NAME:?}, "
+        "which stops the command when the variable is empty. Retry with: " + "; ".join(hits)
+    )
+
+
 SPAWN_TOOLS = ("Agent", "Task")
 SESSION_TOOL = "mcp__ccd_session__start_session"
 # The one list of roles that may run Haiku. lint/check_agent_models.py reads it from here.
@@ -5765,6 +5852,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = playwright_install_hit(stripped, subagent)
     if matched:
         refuse(tool, "deny", "playwright-install", PLAYWRIGHT_INSTALL_REASON, matched)
+
+    # 3d. A recursive delete under an unguarded variable (decision rm-on-a-variable-needs-a-guard).
+    # The guard syntax `${NAME:?}` is POSIX, so a PowerShell tool call is not judged.
+    hits = [] if POWERSHELL_CALL[0] else rm_var_hits(stripped)
+    if hits:
+        refuse(tool, "deny", "rm-var-unguarded", rm_var_reason(hits), "; ".join(hits))
 
     # 3b. Two traps ported from banchi's `scripts/guard-shell.py`: `gh api` with a field and no
     # method, and `ln -s` onto a directory that is already there. Each reads the segment's own
