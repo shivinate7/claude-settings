@@ -1629,11 +1629,11 @@ def sim_read_boots(record_path):
 def _sim_live_launchd(table, udid):
     """(pid, ps lstart text) of UDID's live launchd_sim; (None, None) when not found or unreadable."""
     pids = sorted(pid for pid, (_, _, cmd) in table.items() if "launchd_sim" in cmd and udid in cmd)
-    if not pids:
+    if len(pids) != 1:  # none, or two: no single launchd_sim is this boot, so unclear
         return None, None
     try:
         answer = subprocess.run(["ps", "-o", "pid=,lstart=", "-p", str(pids[0])],
-                                capture_output=True, text=True, timeout=30)
+                                capture_output=True, text=True, timeout=30, env=_ps_env())
         if answer.returncode == 0:
             for line in answer.stdout.splitlines():
                 parts = line.strip().split(None, 1)
@@ -1822,11 +1822,15 @@ def _pmap(fn, items, acts, pool=None):
     return pool.map(fn, items)
 
 
+def _ps_env():
+    return {**os.environ, "LC_ALL": "C"}  # lstart text must not depend on the caller's locale
+
+
 def _read_ps_table():
     """`{pid: (ppid, uid, command)}` (strings) from ONE `ps`, or None when it could not answer."""
     try:
         answer = subprocess.run(["ps", "-axo", "pid=,ppid=,uid=,command="],
-                                capture_output=True, text=True, timeout=30)
+                                capture_output=True, text=True, timeout=30, env=_ps_env())
     except Exception:
         return None
     if answer.returncode != 0:

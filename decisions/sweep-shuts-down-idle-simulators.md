@@ -21,9 +21,14 @@ launchd_sim process has ppid 1. CoreSimulator.log has no requester.
 ## Rulings
 
 1. Record. A PostToolUse hook on Bash and on `mcp__Claude_Code_iOS_Simulator__control`
-   records each device that went from `Shutdown` to `Booted` during a session call. The
+   records each device that the call names and that went from `Shutdown` to `Booted`
+   during the call. A call names a device by UDID (`-destination id=`, `simctl boot`, MCP
+   `device`). It can also name a device by a name that matches a simctl device name
+   (`-destination name=`, MCP `device`). A call that names none records nothing. The
    record goes to `state/sim-boots.jsonl`. Each line holds the pid and the start time of
-   the device's launchd_sim, read when the device booted.
+   the device's launchd_sim, read when the device booted. If the table holds no
+   launchd_sim for the UDID, or more than one, the hook records nothing for that device.
+   Owner ruling: an owner-booted device is never stopped, and an unclear case means keep.
 2. Stop only recorded devices. When all four of these hold for a device, the new tier in
    `janitor/sweep.py` stops it:
    - The device was booted 1 hour or more ago.

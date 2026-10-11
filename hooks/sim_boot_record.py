@@ -37,19 +37,39 @@ def launchd(udid):
     """(pid, ps lstart text) of UDID's launchd_sim, or (None, None). The sweep reads the same pair
     (`sweep._sim_live_launchd`); this hook stays standalone because a cloud copy has no janitor/."""
     try:
+        env = {**os.environ, "LC_ALL": "C"}  # lstart text must not depend on the caller's locale
         table = subprocess.run(["ps", "-axo", "pid=,ppid=,uid=,command="],
-                               capture_output=True, text=True, timeout=30).stdout
-        pid = next(p[0] for p in (l.split(None, 3) for l in table.splitlines())
-                   if len(p) == 4 and "launchd_sim" in p[3] and udid in p[3])
-        out = subprocess.run(["ps", "-o", "pid=,lstart=", "-p", pid],
-                             capture_output=True, text=True, timeout=30).stdout
+                               capture_output=True, text=True, timeout=30, env=env).stdout
+        pids = [p[0] for p in (l.split(None, 3) for l in table.splitlines())
+                if len(p) == 4 and "launchd_sim" in p[3] and udid in p[3]]
+        if len(pids) != 1:  # none, or two: unclear
+            return None, None
+        out = subprocess.run(["ps", "-o", "pid=,lstart=", "-p", pids[0]],
+                             capture_output=True, text=True, timeout=30, env=env).stdout
         for line in out.splitlines():
             parts = line.strip().split(None, 1)
-            if len(parts) == 2 and parts[0] == pid:
-                return int(pid), parts[1].strip()
-        return int(pid), None
+            if len(parts) == 2 and parts[0] == pids[0]:
+                return int(pids[0]), parts[1].strip()
+        return None, None
     except Exception:
         return None, None
+
+
+UDID_RE = re.compile(r"\b[0-9A-Fa-f]{8}-(?:[0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}\b")
+BOOT_ARG_RE = re.compile(r"\bsimctl\s+boot\s+(\"[^\"]+\"|'[^']+'|\S+)")
+DEST_NAME_RE = re.compile(r"\bname=([^,'\"]+)")
+
+
+def named(payload):
+    """The UDIDs (upper case) and device names that the call names. Empty when it names none."""
+    tool_input = payload.get("tool_input") or {}
+    if payload.get("tool_name") == "Bash":
+        text = str(tool_input.get("command", ""))
+        found = set(UDID_RE.findall(text)) | set(DEST_NAME_RE.findall(text)) \
+            | {m.strip("'\"") for m in BOOT_ARG_RE.findall(text)}
+    else:
+        found = {str(tool_input.get("device") or "")}
+    return {x.upper() if UDID_RE.fullmatch(x) else x for x in found if x}
 
 
 def main():
@@ -61,7 +81,8 @@ def main():
                 return
         elif tool_input.get("action") != "launch":  # the MCP tool boots only on `launch`
             return
-        if not shutil.which("xcrun"):
+        names = named(payload)
+        if not names or not shutil.which("xcrun"):  # a call that names no device records nothing
             return
         state = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), "state")
         key = re.sub(r"[^A-Za-z0-9_-]", "_", str(payload.get("tool_use_id") or payload["session_id"]))
@@ -83,8 +104,11 @@ def main():
             at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             lines = []
             for u, (s, rec) in now.items():
-                if s == "Booted" and before.get(u) == "Shutdown":
+                if s == "Booted" and before.get(u) == "Shutdown" and (
+                        u.upper() in names or rec["name"] in names):
                     pid, start = launchd(u)
+                    if pid is None or start is None:
+                        continue  # unclear: no record, so the sweep keeps the device
                     lines.append(json.dumps({**rec, "at": at, "launchd_pid": pid,
                                              "launchd_start": start}) + "\n")
             if lines:
