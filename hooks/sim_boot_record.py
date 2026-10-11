@@ -57,6 +57,7 @@ def launchd(udid):
 
 UDID_RE = re.compile(r"\b[0-9A-Fa-f]{8}-(?:[0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}\b")
 BOOT_ARG_RE = re.compile(r"\bsimctl\s+boot\s+(\"[^\"]+\"|'[^']+'|\S+)")
+DEST_RE = re.compile(r"-destination[= ]\s*('[^']*'|\"[^\"]*\"|\S+)")
 OS_RE = re.compile(r"\bOS=([0-9][0-9.]*)")
 DEST_NAME_RE = re.compile(r"\bname=([^,'\"]+)")
 
@@ -65,7 +66,12 @@ def by_name_ok(rec, now, payload):
     """True when REC's name picks one device: the name sits on one runtime, or `OS=` picks one."""
     runtimes = {r["runtime"] for _, r in now.values() if r["name"] == rec["name"]}
     if len(runtimes) > 1:
-        wanted = OS_RE.findall(str((payload.get("tool_input") or {}).get("command", "")))
+        command = str((payload.get("tool_input") or {}).get("command", ""))
+        wanted = []  # OS= counts only inside a -destination value that holds this name
+        for value in DEST_RE.findall(command):
+            value = value.strip("'\"")
+            if rec["name"] in DEST_NAME_RE.findall(value):
+                wanted += OS_RE.findall(value)
         def version(runtime):
             return runtime.split("SimRuntime.")[-1].split("-", 1)[-1].replace("-", ".")
         runtimes = {r for r in runtimes if any(version(r) == w or version(r).startswith(w + ".")
