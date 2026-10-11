@@ -2119,12 +2119,14 @@ sh("rm-var: a single-quoted dollar is a literal path",
 # $(pwd) or $HOME stay a prompt, so the guard refuses them even when guarded. The remedy names a
 # literal path and never the ${NAME:?} advice for that variable. Red on 2026-10-11: each is allowed
 # or prints ${NAME:?} advice today.
+# (b) ruling changed: the home path is no longer carried, only the literal-path advice.
 sh("rm-var: a guarded $HOME target is refused for a literal path",
    "rm -rf ${HOME:?}/x", "deny", "rm-var-unguarded", cwd=NOGIT,
-   carries=(("literal path", os.path.expanduser("~")),), lacks=("${HOME:?}",))
+   carries=("literal path",), lacks=("${HOME:?}", os.path.expanduser("~")))
+# (b) ruling changed: the home path is no longer carried, only the literal-path advice.
 sh("rm-var: a quoted guarded $HOME before a glob is refused for a literal path",
    'rm -rf "${HOME:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
-   carries=(("literal path", os.path.expanduser("~")),), lacks=("${HOME:?}",))
+   carries=("literal path",), lacks=("${HOME:?}", os.path.expanduser("~")))
 sh("rm-var: $PWD is refused and its remedy names no ${PWD:?} advice",
    "rm -rf $PWD/x", "deny", "rm-var-unguarded", cwd=NOGIT, lacks=("${PWD:?}",))
 sh("rm-var: a quoted guarded $PWD is refused and its remedy names no ${PWD:?} advice",
@@ -2142,24 +2144,42 @@ sh("rm-var: a guarded variable set to a literal path passes",
 # a variable whose assigned or loop value holds ~, HOME, PWD or pwd is a limit, so its refusal
 # names a literal path built from the flagged target, never ${D:?} advice. Red until the
 # guard taints these forms.
+# (b) ruling changed: the home path is no longer carried, only the literal-path advice.
 sh("rm-var: a variable set to ~ names a literal path, not ${D:?}",
    'D=~; rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
-   carries=(os.path.expanduser("~"),), lacks=("${D:?}",))
+   carries=("literal path",), lacks=("${D:?}", os.path.expanduser("~")))
+# (b) ruling changed: the home path is no longer carried, only the literal-path advice.
 sh("rm-var: a loop over $HOME names a literal path, not ${D:?}",
    'for D in $HOME; do rm -rf "${D:?}"/x; done', "deny", "rm-var-unguarded", cwd=NOGIT,
-   carries=(os.path.expanduser("~"),), lacks=("${D:?}",))
+   carries=("literal path",), lacks=("${D:?}", os.path.expanduser("~")))
+# (b) ruling changed: the home path is no longer carried, only the literal-path advice.
 sh("rm-var: a default that falls back to $HOME names a literal path, not ${D:?}",
    "D=${X:-$HOME}; rm -rf ${D:?}/x", "deny", "rm-var-unguarded", cwd=NOGIT,
-   carries=(os.path.expanduser("~"),), lacks=("${D:?}",))
+   carries=("literal path",), lacks=("${D:?}", os.path.expanduser("~")))
+# (b) ruling changed: the home path is no longer carried, only the literal-path advice.
 sh("rm-var: a variable set from $(echo $HOME) names a literal path, not ${D:?}",
    "D=$(echo $HOME); rm -rf $D/x", "deny", "rm-var-unguarded", cwd=NOGIT,
-   carries=(os.path.expanduser("~"),), lacks=("${D:?}",))
+   carries=("literal path",), lacks=("${D:?}", os.path.expanduser("~")))
+# (b) ruling changed: the joined home path is no longer computed, only the literal-path advice.
 sh("rm-var: $HOME joined to a path names the literal path, not a fixed example",
    "rm -rf $HOME/x", "deny", "rm-var-unguarded", cwd=NOGIT,
-   carries=(os.path.expanduser("~") + "/x",), lacks=(".cache",))
+   carries=("literal path",), lacks=(".cache", os.path.expanduser("~")))
+# (b) ruling changed: the joined home path is no longer computed, only the literal-path advice.
 sh("rm-var: a $HOME target and a guarded variable name both remedies",
    "rm -rf $HOME/x $S/y", "deny", "rm-var-unguarded", cwd=NOGIT,
-   carries=(os.path.expanduser("~") + "/x", "${S:?}/y"))
+   carries=("literal path", "${S:?}/y"), lacks=(os.path.expanduser("~"),))
+# Ruling changed (rm-on-a-variable-needs-a-guard, "Named limits" first two bullets, 781a6d6).
+# Taint comes only from a real expansion. A literal value that spells pwd or HOME is not one.
+sh("rm-var: a literal value that spells pwd is not tainted",
+   'D=build-pwd; rm -rf "${D:?}"/x', "allow", cwd=NOGIT)
+sh("rm-var: a literal HOME inside a path is not tainted",
+   'D=/tmp/HOME/x; rm -rf "${D:?}"/y', "allow", cwd=NOGIT)
+sh("rm-var: a tilde in a flag value is not a home expansion, so $dir gets its own advice",
+   'make --dir=~ && rm -rf "$dir"/build', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("${dir:?}",), lacks=("literal path",))
+sh("rm-var: $HOME under a glob names a literal path, not the computed home",
+   "rm -rf $HOME/*", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=(os.path.expanduser("~"),))
 sh("playwright: an envrc file gets the assignment",
    "echo PLAYWRIGHT_BROWSERS_PATH=/x > .envrc", "deny", "playwright-browsers-path", cwd=NOGIT)
 sh("playwright: a case-folded name still sets it", "playwright_browsers_path=/x npx", "deny",
