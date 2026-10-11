@@ -106,9 +106,12 @@ case2() {
   fi
 }
 
-# ---- Case 3: no worktree holds main (the branch exists, unchecked-out) -> one line, exit 0 -
+# ---- Case 3: no worktree holds main (the branch exists, unchecked-out) -> one line, exit non-0
+# Owner ruling 2026-10-11: this fails loudly. One line says install.sh was not run and tells
+# the person to switch the main folder back to main. The exit is non-zero, so the merge tool
+# reports FAILED. No install.sh runs.
 case3() {
-  name="case3: no worktree holds main prints one line saying install.sh was not run, exits 0"
+  name="case3: no worktree holds main prints one line saying install.sh was not run and to switch main back, exits non-zero"
   d="$work/case3"; h="$d/home"; mkdir -p "$h"
   make_pair "$d/main" "$d/linked" "$d/mark-main" "$d/mark-linked"
   # Move the main tree off main. The branch main still exists, but no worktree holds it.
@@ -116,14 +119,14 @@ case3() {
   run_from "$d/linked"
   lines=$(printf '%s\n' "$out" | grep -c .)
 
-  if [ $rc -ne 0 ]; then
-    bad "$name" "script exited $rc: $out"
+  if [ $rc -eq 0 ]; then
+    bad "$name" "script exited 0, expected non-zero so the merge tool reports FAILED: $out"
   elif [ "$lines" -ne 1 ]; then
     bad "$name" "expected one output line, got $lines: $out"
   else
     case "$out" in
-      *"install.sh"*"not run"*) ;;
-      *) bad "$name" "output does not say install.sh was not run: $out"; return ;;
+      *"install.sh"*"not run"*"switch"*"main"*) ;;
+      *) bad "$name" "output does not say install.sh was not run and to switch main back: $out"; return ;;
     esac
     if [ -e "$d/mark-main" ] || [ -e "$d/mark-linked" ]; then
       bad "$name" "an install.sh ran although no worktree holds main"
@@ -133,22 +136,23 @@ case3() {
   fi
 }
 
-# ---- Case 4: no branch named main anywhere -> one line, exit 0 ---------------------------
+# ---- Case 4: no branch named main anywhere -> one line, exit non-zero -------------------
+# Owner ruling 2026-10-11, same as case 3: non-zero exit, the one line, no install.sh run.
 case4() {
-  name="case4: no branch named main at all prints one line saying install.sh was not run, exits 0"
+  name="case4: no branch named main at all prints one line saying install.sh was not run and to switch main back, exits non-zero"
   d="$work/case4"; h="$d/home"; mkdir -p "$h"
   make_pair "$d/main" "$d/linked" "$d/mark-main" "$d/mark-linked" trunk
   run_from "$d/linked"
   lines=$(printf '%s\n' "$out" | grep -c .)
 
-  if [ $rc -ne 0 ]; then
-    bad "$name" "script exited $rc: $out"
+  if [ $rc -eq 0 ]; then
+    bad "$name" "script exited 0, expected non-zero so the merge tool reports FAILED: $out"
   elif [ "$lines" -ne 1 ]; then
     bad "$name" "expected one output line, got $lines: $out"
   else
     case "$out" in
-      *"install.sh"*"not run"*) ;;
-      *) bad "$name" "output does not say install.sh was not run: $out"; return ;;
+      *"install.sh"*"not run"*"switch"*"main"*) ;;
+      *) bad "$name" "output does not say install.sh was not run and to switch main back: $out"; return ;;
     esac
     if [ -e "$d/mark-main" ] || [ -e "$d/mark-linked" ]; then
       bad "$name" "an install.sh ran although no branch named main exists"
