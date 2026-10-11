@@ -201,6 +201,8 @@ name is never judged, so a simulator you booted yourself stays up.
 A device is stopped only when all of these hold. Any read that fails means keep.
 
 - Its newest record line is 1 hour or more old.
+- Its live `launchd_sim` has the pid and start time that the record names. If not,
+  someone booted the device again by hand, and the sweep keeps it.
 - No process outside the device's own `launchd_sim` tree names its UDID, its
   name, or `booted`.
 - Simulator.app and Xcode.app are not running.

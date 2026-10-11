@@ -22,14 +22,18 @@ launchd_sim process has ppid 1. CoreSimulator.log has no requester.
 
 1. Record. A PostToolUse hook on Bash and on `mcp__Claude_Code_iOS_Simulator__control`
    records each device that went from `Shutdown` to `Booted` during a session call. The
-   record goes to `state/sim-boots.jsonl`.
+   record goes to `state/sim-boots.jsonl`. Each line holds the pid and the start time of
+   the device's launchd_sim, read when the device booted.
 2. Stop only recorded devices. When all four of these hold for a device, the new tier in
    `janitor/sweep.py` stops it:
    - The device was booted 1 hour or more ago.
+   - The boot matches the record. The live launchd_sim has the pid and the start time of
+     the newest record line. If it does not, the owner booted the device again by hand.
+     The code is `boot-record-mismatch`.
    - No process outside that device's launchd_sim tree names its UDID, its name or
      `booted`.
-   - Simulator.app and Xcode.app are not running.
-   - Both reads succeeded.
+   - Simulator.app and Xcode.app (Xcode-beta.app too) are not running.
+   - All reads succeeded.
 
    Any read that cannot tell means keep. Each device gets one `xcrun simctl shutdown
    <UDID>`. Never `all`. Never erase. A device the owner booted is never stopped.
@@ -57,8 +61,9 @@ Why the cap: it needs no knowledge of who booted a device.
   idle test. A run stops at most 4 devices. The rest wait for the next run.
 - `hooks/sim_boot_record.py`: a PreToolUse run saves each device's state. The PostToolUse
   run of the same call records each `Shutdown` to `Booted` change. A Bash call is read only
-  when its text names simctl, xcodebuild, xcrun or a similar tool (bandaid: a boot behind a
-  script that names none goes unrecorded, and an unrecorded device is kept). Matchers for
+  when its text names a simulator tool as a whole word, such as simctl, xcodebuild or xcrun.
+  An MCP call is read only when its action is `launch`. Bandaid: a boot behind a script
+  that names no such word goes unrecorded, and an unrecorded device is kept. Matchers for
   Bash and the simulator MCP tool are in `settings.json`, Pre and Post.
 - `hooks/guard.py`: rules `simulator-boot-cap` and `simulator-boot-twin`. A boot is
   `simctl boot`, an `xcodebuild -destination` with `id=` or `name=`, or MCP `launch` with
@@ -72,5 +77,5 @@ Why the cap: it needs no knowledge of who booted a device.
 - One `simctl shutdown`: unmeasured. The only booted device was in use by a running
   `xcodebuild test`, so no shutdown ran.
 - On this Mac, `launchd_sim` argv holds the UDID, and an Xcode-bundled `python3` has
-  `Xcode.app` in its path. The Xcode test matches only the `Xcode.app/Contents/MacOS/Xcode`
+  `Xcode.app` in its path. The Xcode test matches only the `Xcode*.app/Contents/MacOS/Xcode`
   executable, so that python does not count as Xcode running.

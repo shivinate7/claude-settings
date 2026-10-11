@@ -15,7 +15,7 @@ import time
 
 # A Bash call that cannot touch a simulator skips the ~0.3 s `simctl list`. ponytail: a boot hidden
 # behind a script that never names these words goes unrecorded, and an unrecorded device is kept.
-BASH_GATE = re.compile(r"simctl|xcodebuild|xcrun|xctest|fastlane|flutter|react-native|expo|tuist|swift|Simulator")
+BASH_GATE = re.compile(r"\b(?:simctl|xcodebuild|xcrun|xctest|fastlane|flutter|react-native|tuist|Simulator)\b|\bexpo\s+run:ios\b")
 
 
 def devices():
@@ -33,11 +33,33 @@ def devices():
         return None
 
 
+def launchd(udid):
+    """(pid, ps lstart text) of UDID's launchd_sim, or (None, None). The sweep reads the same pair
+    (`sweep._sim_live_launchd`); this hook stays standalone because a cloud copy has no janitor/."""
+    try:
+        table = subprocess.run(["ps", "-axo", "pid=,ppid=,uid=,command="],
+                               capture_output=True, text=True, timeout=30).stdout
+        pid = next(p[0] for p in (l.split(None, 3) for l in table.splitlines())
+                   if len(p) == 4 and "launchd_sim" in p[3] and udid in p[3])
+        out = subprocess.run(["ps", "-o", "pid=,lstart=", "-p", pid],
+                             capture_output=True, text=True, timeout=30).stdout
+        for line in out.splitlines():
+            parts = line.strip().split(None, 1)
+            if len(parts) == 2 and parts[0] == pid:
+                return int(pid), parts[1].strip()
+        return int(pid), None
+    except Exception:
+        return None, None
+
+
 def main():
     try:
         payload = json.load(sys.stdin)
         tool_input = payload.get("tool_input") or {}
-        if payload.get("tool_name") == "Bash" and not BASH_GATE.search(str(tool_input.get("command", ""))):
+        if payload.get("tool_name") == "Bash":
+            if not BASH_GATE.search(str(tool_input.get("command", ""))):
+                return
+        elif tool_input.get("action") != "launch":  # the MCP tool boots only on `launch`
             return
         if not shutil.which("xcrun"):
             return
@@ -59,8 +81,12 @@ def main():
             if now is None:
                 return
             at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            lines = [json.dumps({**rec, "at": at}) + "\n" for u, (s, rec) in now.items()
-                     if s == "Booted" and before.get(u) == "Shutdown"]
+            lines = []
+            for u, (s, rec) in now.items():
+                if s == "Booted" and before.get(u) == "Shutdown":
+                    pid, start = launchd(u)
+                    lines.append(json.dumps({**rec, "at": at, "launchd_pid": pid,
+                                             "launchd_start": start}) + "\n")
             if lines:
                 with open(os.path.join(state, "sim-boots.jsonl"), "a", encoding="utf-8") as f:
                     f.writelines(lines)

@@ -1583,7 +1583,7 @@ def print_dead_rooted_report(decisions, out=sys.stdout):
 SIM_IDLE_SECONDS = 3600
 SIM_SHUTDOWN_CAP = 4  # per run; the rest wait for the next run
 _SIM_APP_RE = re.compile(r"^\S*/Simulator\.app/Contents/MacOS/Simulator(?:\s|$)")
-_XCODE_APP_RE = re.compile(r"^\S*/Xcode\.app/Contents/MacOS/Xcode(?:\s|$)")
+_XCODE_APP_RE = re.compile(r"^\S*/Xcode[^/]*\.app/Contents/MacOS/Xcode(?:\s|$)")
 
 
 def sim_available():
@@ -1604,7 +1604,8 @@ def sim_read_devices():
 
 
 def sim_read_boots(record_path):
-    """{udid: epoch seconds, or None when unreadable} from the NEWEST line per UDID."""
+    """{udid: {"at": epoch seconds or None when unreadable, "pid", "start"}} from the NEWEST line
+    per UDID. "pid" and "start" name the boot's launchd_sim; either is None when the line has none."""
     boots = {}
     try:
         with open(record_path, encoding="utf-8") as handle:
@@ -1615,12 +1616,32 @@ def sim_read_boots(record_path):
                 except Exception:
                     continue
                 try:
-                    boots[udid] = calendar.timegm(time.strptime(row["at"], "%Y-%m-%dT%H:%M:%SZ"))
+                    at = calendar.timegm(time.strptime(row["at"], "%Y-%m-%dT%H:%M:%SZ"))
                 except Exception:
-                    boots[udid] = None
+                    at = None
+                boots[udid] = {"at": at, "pid": row.get("launchd_pid"),
+                               "start": row.get("launchd_start")}
     except OSError:
         pass
     return boots
+
+
+def _sim_live_launchd(table, udid):
+    """(pid, ps lstart text) of UDID's live launchd_sim; (None, None) when not found or unreadable."""
+    pids = sorted(pid for pid, (_, _, cmd) in table.items() if "launchd_sim" in cmd and udid in cmd)
+    if not pids:
+        return None, None
+    try:
+        answer = subprocess.run(["ps", "-o", "pid=,lstart=", "-p", str(pids[0])],
+                                capture_output=True, text=True, timeout=30)
+        if answer.returncode == 0:
+            for line in answer.stdout.splitlines():
+                parts = line.strip().split(None, 1)
+                if len(parts) == 2 and parts[0] == str(pids[0]):
+                    return pids[0], parts[1].strip()
+    except Exception:
+        pass
+    return pids[0], None
 
 
 def _sim_device_tree(table, udid):
@@ -1646,10 +1667,15 @@ def sim_keep_code(device, boots, table, now):
         return "simulator-app-running"
     if any(_XCODE_APP_RE.match(c) for c in commands):
         return "xcode-running"
-    if boots[device["udid"]] is None:
+    record = boots[device["udid"]]
+    if record["at"] is None:
         return "start-time-unreadable"
-    if now - boots[device["udid"]] < SIM_IDLE_SECONDS:
+    if now - record["at"] < SIM_IDLE_SECONDS:
         return "booted-recently"
+    # The newest record must be THIS boot: a device booted again by hand has a new launchd_sim.
+    if _sim_live_launchd(table, device["udid"]) != (record["pid"], record["start"]) \
+            or record["start"] is None:
+        return "boot-record-mismatch"
     own = _sim_device_tree(table, device["udid"])
     needles = (device["udid"], device["name"], "booted")
     for pid, (_, _, cmd) in table.items():
