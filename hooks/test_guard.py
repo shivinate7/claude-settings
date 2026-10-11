@@ -1740,6 +1740,19 @@ sh("per-file allow: cd lane && restore f.txt && cd lane && the same restore f.tx
    "cd " + slash(GITWT) + " && " + VCS + " restore f.txt && cd " + slash(GITWT) + " && "
    + VCS + " restore f.txt && echo done", "allow", cwd=NOGIT)
 
+# HEREDOC BODY WITH A LONE QUOTE, THEN A CD. segment_roots (guard.py ~1228) loses sync when a
+# heredoc body holds a lone quote, and drops every later `cd`. The shell stays in the lane (cwd),
+# the body is data, and the restore after `cd` runs in the shared checkout, so it must deny. Both
+# arms are RED on ae09e58: the restore is judged in the lane, not the shared checkout, so the
+# verdict is ask, not deny. A lone quote inside a shell `#` comment does not desync, so the python
+# body keeps its quote outside any comment.
+sh("per-file deny: node heredoc, a lone apostrophe in the body, then cd shared and restore f.txt",
+   "node <<'EOF'\n// don't\nEOF\ncd " + slash(GITMAIN) + " && " + VCS + " restore f.txt",
+   "deny", "shared-tree", cwd=GITWT)
+sh("per-file deny: python heredoc, a lone double quote in the body, then cd shared and restore",
+   "python3 <<'EOF'\ntotal = \"\nEOF\ncd " + slash(GITMAIN) + " && " + VCS
+   + " restore f.txt", "deny", "shared-tree", cwd=GITWT)
+
 # KILL CASES for three mutate_guard entries removed in 78e8446. Each pins today's base verdict.
 # The quoted refspec and the quoted force in a commit message are verdicts; the quoted force on a
 # worktree remove is a logged note, pinned by the LOG_CHECKS_EXTRA entry beside subject_unread_*.
