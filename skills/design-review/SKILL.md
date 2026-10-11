@@ -27,14 +27,17 @@ The ruling is the design-skills record, 2026-10-10.
      rule lands, hold to the same limit by instruction.
 3. **Compare.** When both reports return, read the repo's design spec, tokens and design
    decisions. Set each finding against them.
-4. **Sort each finding.**
+4. **Write the full list first.** Record every finding before any fix starts. Tag each one
+   with its reviewer (A or B) and the commit the reviewers saw. Nobody edits a page until the
+   list is complete. Then a fix never hides a flaw or blurs the cause of one.
+5. **Sort each finding.**
    - Agrees with the repo, or is a plain defect (accessibility, broken layout, overflow): fix
      before merge. The reviewers never fix. Send the fix to the builder.
    - Clashes with the repo's design: never fix it, never drop it. Add it to the owner's list for
      that repo.
-5. **Send the owner one list per repo.** Give each clash three parts: what the skill wants,
+6. **Send the owner one list per repo.** Give each clash three parts: what the skill wants,
    what the repo has, and a recommendation.
-6. **Verdict.** Give a verdict per screen at each size and theme
+7. **Verdict.** Give a verdict per screen at each size and theme
    (verification-screens-verdict: a verdict per screen, never a description).
 
 ## Rules
