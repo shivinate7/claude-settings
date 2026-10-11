@@ -1878,6 +1878,32 @@ sh("playwright: a case-folded name still sets it", "playwright_browsers_path=/x 
    "playwright-browsers-path", cwd=NOGIT)
 sh("playwright: the bare PowerShell read is allowed", "$env:PLAYWRIGHT_BROWSERS_PATH", "allow",
    tool="PowerShell", cwd=NOGIT)
+# PR #314 re-review: false alarms. Each one only reads or writes a note, so each is allowed.
+sh("playwright: grep for the assignment only reads",
+   'grep -rn "PLAYWRIGHT_BROWSERS_PATH=" hooks/ 2>/dev/null', "allow", cwd=NOGIT)
+sh("playwright: a note that mentions the assignment is allowed",
+   'echo "set PLAYWRIGHT_BROWSERS_PATH=/x to override" >> notes.md', "allow", cwd=NOGIT)
+sh("playwright: a quoted arrow in a command that names the variable is allowed",
+   'echo "PLAYWRIGHT_BROWSERS_PATH -> cache dir"', "allow", cwd=NOGIT)
+sh("playwright: grep for the PowerShell setter only reads",
+   'grep "Set-Item env:PLAYWRIGHT_BROWSERS_PATH" -r .', "allow", cwd=NOGIT)
+sh("playwright: a doc heredoc whose body mentions an assignment is allowed",
+   "cat > README.md <<'EOF'\nset PLAYWRIGHT_BROWSERS_PATH=/x to override\nEOF", "allow", cwd=NOGIT)
+# PR #314 re-review: gaps, each allowed on 9a77504. Each one sets the variable.
+sh("playwright: cmd /c with a quoted set sets it",
+   'cmd /c "set PLAYWRIGHT_BROWSERS_PATH=C:\\x"', "deny", "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: Set-Item on the Env:\\ drive sets it",
+   "Set-Item Env:\\PLAYWRIGHT_BROWSERS_PATH C:\\x", "deny", "playwright-browsers-path",
+   tool="PowerShell", cwd=NOGIT)
+sh("playwright: PowerShell += appends to it",
+   '$env:PLAYWRIGHT_BROWSERS_PATH += ";C:\\x"', "deny", "playwright-browsers-path",
+   tool="PowerShell", cwd=NOGIT)
+sh("playwright: a heredoc writes the export into a shell rc file",
+   "cat >> ~/.zshrc <<'EOF'\nexport PLAYWRIGHT_BROWSERS_PATH=/x\nEOF", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: tee appends the export to a shell rc file",
+   "echo 'export PLAYWRIGHT_BROWSERS_PATH=/x' | tee -a ~/.zshrc", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
 
 # THE PREDICATE IS THE ACT, NOT THE TOOL OR THE SPELLING. MEASURED: the owner ran
 # `grep -n -i "...|make reap|pkill..." CLAUDE.md` to search CLAUDE.md for the word, and it was
