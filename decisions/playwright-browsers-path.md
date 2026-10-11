@@ -17,7 +17,7 @@ Home: `playwright_path_hit` in hooks/guard.py, called from `judge_shell` at step
 
 The rule refuses `cross-env` (owner ruling 2026-10-10). Named limits, rare in docs and guides:
 `setx`, `timeout N env`, a `<<<` here-string, a PowerShell block, a CI yaml `env:` key, and
-`node -e` or `python -c`.
+`node -e` or `python -c`, and an export on a later line of a multi-line `printf` format.
 
 ## Incident
 
