@@ -5404,6 +5404,72 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, matched),
                    log_path_and_text(matched, change))
 
+# ------------------------------------------------------------------ simulator boots
+#
+# decisions/sweep-shuts-down-idle-simulators.md, rulings 3 and 4. A boot is `simctl boot`, an
+# `xcodebuild -destination` that names a shut-down simulator, or the simulator MCP tool's `launch`
+# naming one. `simctl list` runs only after a call matched as a boot. The idle test is the sweep
+# tier's own (`sweep.sim_keep_code`), imported lazily: janitor/sweep.py imports this file.
+SIM_MCP = "mcp__Claude_Code_iOS_Simulator__control"
+SIM_BOOT_CAP = 2
+
+
+def _sim_boot_names(segment: str) -> list:
+    """The device names or UDIDs a segment boots, by the command word. Empty when it boots none."""
+    tokens = segment_tokens(segment)
+    index = resolve_command(tokens) if tokens else None
+    if index is None:
+        return []
+    word, rest = basename(tokens[index]), tokens[index + 1:]
+    if word == "xcodebuild":
+        found = []
+        for i, token in enumerate(rest):
+            value = rest[i + 1] if token == "-destination" and i + 1 < len(rest) else (
+                token[len("-destination="):] if token.startswith("-destination=") else "")
+            fields = dict(p.split("=", 1) for p in value.split(",") if "=" in p)
+            if "iOS Simulator" in fields.get("platform", "") and (fields.get("id") or fields.get("name")):
+                found.append(fields.get("id") or fields["name"])
+        return found
+    if word in ("xcrun", "simctl") and "simctl" in ([word] + rest):
+        after = ([word] + rest)[([word] + rest).index("simctl") + 1:]
+        if after[:1] == ["boot"] and len(after) > 1:
+            return [after[1]]
+    return []
+
+
+def sim_boot_refusal(tool: str, names: list) -> None:
+    """Refuse a boot of any of NAMES when two devices are booted, or an idle twin is booted."""
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "janitor"))
+        import sweep
+    except Exception:
+        return  # fail open: no janitor beside this file (a cloud copy)
+    if not sweep.sim_available():
+        return
+    devices = sweep.sim_read_devices()
+    if devices is None:
+        return
+    for name in names:
+        hits = [d for d in devices if name in (d["udid"], d["name"])]
+        if not hits or any(d["state"] == "Booted" for d in hits):
+            continue  # unknown device, or already up: not a boot
+        booted = [d for d in devices if d["state"] == "Booted"]
+        if len(booted) >= SIM_BOOT_CAP:
+            refuse(tool, "deny", "simulator-boot-cap",
+                   "%d simulators are already booted: %s. Use one, or ask the owner to stop one, "
+                   "then boot." % (len(booted), "; ".join("%s (%s)" % (d["name"], d["udid"]) for d in booted)),
+                   name)
+        want = hits[0]
+        boots, table, now = (sweep.sim_read_boots(os.path.join(config_dir(), "state", "sim-boots.jsonl")),
+                             sweep._read_ps_table(), time.time())
+        for twin in booted:
+            if ((twin["deviceTypeIdentifier"], twin["runtime"]) == (want["deviceTypeIdentifier"], want["runtime"])
+                    and sweep.sim_keep_code(twin, boots, table, now) is None):
+                refuse(tool, "deny", "simulator-boot-twin",
+                       "An idle booted simulator of the same type and runtime exists: %s (%s). Use it "
+                       "instead of booting another." % (twin["name"], twin["udid"]), name)
+
+
 def judge(payload) -> None:
     if payload.get("hook_event_name") == "SubagentStop":
         judge_stop(payload)
@@ -5466,6 +5532,15 @@ def judge(payload) -> None:
         command = tool_input.get("command", "") or ""
         if isinstance(command, str) and command.strip():
             judge_shell(tool, command, cwd, session_id_of(payload), agent_role(payload))
+            names = [n for seg in split_segments(strip_heredoc_bodies(command))
+                     for n in _sim_boot_names(seg)]
+            if names:
+                sim_boot_refusal(tool, names)
+        return
+    if tool == SIM_MCP:
+        device = tool_input.get("device")
+        if tool_input.get("action") == "launch" and isinstance(device, str) and device:
+            sim_boot_refusal(tool, [device])
         return
 
     if tool not in WRITE_TOOLS:

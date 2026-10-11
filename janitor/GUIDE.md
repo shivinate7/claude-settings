@@ -191,6 +191,30 @@ An unreadable answer means keep. The signal, the grace period, and the report
 are the same as for a listener. This tier is machine-wide and not tied to a
 repository, so `janitor.roots` and `.claude/janitor.json` do not narrow it.
 
+## Simulators
+
+A hook records each simulator that a session call booted, in
+`<config>/state/sim-boots.jsonl`. The last tier of a full run reads that record.
+It judges each recorded device that is `Booted`. A device the record does not
+name is never judged, so a simulator you booted yourself stays up.
+
+A device is stopped only when all of these hold. Any read that fails means keep.
+
+- Its newest record line is 1 hour or more old.
+- No process outside the device's own `launchd_sim` tree names its UDID, its
+  name, or `booted`.
+- Simulator.app and Xcode.app are not running.
+
+The preview lists each device with `WOULD STOP` or `KEEP` and a reason code.
+`--confirm` runs one `xcrun simctl shutdown <UDID>` per device, at most 4 per
+run. The rest wait for the next run. There is no `all`, and no erase. With no
+`xcrun`, or on Windows, the tier is absent and prints nothing. The tier is
+machine-wide, so `janitor.roots` and `.claude/janitor.json` do not narrow it.
+
+The guard reuses the same idle test (`sim_keep_code` in `sweep.py`) to refuse a
+boot when an idle twin exists. See decisions record
+sweep-shuts-down-idle-simulators.
+
 ## Loose processes
 
 A loose process is a process whose argv contains the shell-snapshots path

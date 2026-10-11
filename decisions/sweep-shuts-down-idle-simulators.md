@@ -51,21 +51,26 @@ Why the cap: it needs no knowledge of who booted a device.
   on a fresh simulator before boot. It does not say to reuse a booted device. Cite it for
   boot cost only. Checked on 2026-10-10 through a summarizing fetch, not the full page.
 
-## Unmeasured
+## Mechanism, built
 
-- A PostToolUse hook sees the state after a call. Knowing that a device went from
-  `Shutdown` to `Booted` needs a read from before the call. The method is not chosen.
-- Rules 3 and 4 are guard rules, so they run before a call. xcodebuild auto-boots only
-  while it runs. Which calls the guard can see as a boot is not measured.
+- `janitor/sweep.py`: `sim_tier`, the last tier of a full run. `sim_keep_code` is the one
+  idle test. A run stops at most 4 devices. The rest wait for the next run.
+- `hooks/sim_boot_record.py`: a PreToolUse run saves each device's state. The PostToolUse
+  run of the same call records each `Shutdown` to `Booted` change. A Bash call is read only
+  when its text names simctl, xcodebuild, xcrun or a similar tool (bandaid: a boot behind a
+  script that names none goes unrecorded, and an unrecorded device is kept). Matchers for
+  Bash and the simulator MCP tool are in `settings.json`, Pre and Post.
+- `hooks/guard.py`: rules `simulator-boot-cap` and `simulator-boot-twin`. A boot is
+  `simctl boot`, an `xcodebuild -destination` with `id=` or `name=`, or MCP `launch` with
+  `device`. `simctl list` runs only after a call matched as a boot of a shut-down device.
+  A launch with no `device` is not judged. The guard imports `sweep` on a match only.
 
-## Mechanism
+## Measured, 2026-10-10
 
-Not built. The builder owns these files:
-
-- `janitor/sweep.py`: the tier in rule 2.
-- `hooks/guard.py`: rules 3 and 4.
-- The new PostToolUse hook for rule 1, and its matcher in `settings.json`. The current
-  matcher is `Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit`. It lacks
-  `mcp__Claude_Code_iOS_Simulator__control`. The builder adds it.
-
-Each guard rule goes red on the defect it guards before it is trusted.
+- `xcrun simctl list devices --json`: 0.19 to 0.48 s in 3 runs. This is why the record hook
+  skips Bash calls that name no simulator tool.
+- One `simctl shutdown`: unmeasured. The only booted device was in use by a running
+  `xcodebuild test`, so no shutdown ran.
+- On this Mac, `launchd_sim` argv holds the UDID, and an Xcode-bundled `python3` has
+  `Xcode.app` in its path. The Xcode test matches only the `Xcode.app/Contents/MacOS/Xcode`
+  executable, so that python does not count as Xcode running.
