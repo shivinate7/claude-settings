@@ -79,13 +79,14 @@ def windows_shaped(*parts):
 
 
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
-        session=None, carries=(), config=None, agent_id=None, no_root=False, silent=False,
+        session=None, carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
         agent_type=None, event=None, stop_active=False, windows=False, transcript=None,
         **tool_input):
     """Register one case.
 
     `carries` names fragments the printed reason MUST hold, which is how a case pins what an
-    approver reads, not only the decision.
+    approver reads, not only the decision. A tuple inside `carries` is any-of: the reason holds
+    one of its fragments. `lacks` names fragments the printed reason MUST NOT hold.
 
     A case NEVER opts out of the generic-reason check. Which fragments a reason may name is read
     from the case's RULE, through `REASON_MAY_NAME` below, so the exemption belongs to one rule and
@@ -104,6 +105,7 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "env_path": env_path,
         "session": session,
         "carries": (carries,) if isinstance(carries, str) else tuple(carries),
+        "lacks": (lacks,) if isinstance(lacks, str) else tuple(lacks),
         # The config directory the case runs against. It decides where the global rules file is
         # read from, so a pointer case names its own and every other case keeps the default.
         "config": config,
@@ -126,11 +128,11 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
 
 
 def sh(name, command, expected, rule=None, tool="Bash", cwd=None, env_path=None, session=None,
-       carries=(), config=None, agent_id=None, no_root=False, silent=False, agent_type=None,
-       transcript=None):
+       carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
+       agent_type=None, transcript=None):
     add(name, expected, rule=rule, tool=tool, cwd=cwd, env_path=env_path, session=session,
         agent_id=agent_id, agent_type=agent_type, no_root=no_root, silent=silent,
-        carries=carries, config=config, transcript=transcript, command=command)
+        carries=carries, lacks=lacks, config=config, transcript=transcript, command=command)
 
 
 # --------------------------------------------------------------------------- the fixtures
@@ -2068,6 +2070,16 @@ sh("rm-var: sh -c runs the unguarded delete",
    "sh -c 'rm -rf $S/x'", "deny", "rm-var-unguarded", cwd=NOGIT, carries=("rm -rf ${S:?}/x",))
 sh("rm-var: the short flag order counts too",
    "rm -fr $S/$d", "deny", "rm-var-unguarded", cwd=NOGIT, carries=("rm -fr ${S:?}/${d:?}",))
+# REVIEW FINDING: $HOME is not cleared by a ${NAME:?} guard (the docs say so), so the refusal names
+# a literal path and never offers ${HOME:?}. The reason may name either form.
+sh("rm-var: $HOME under a recursive delete names a literal path, not ${HOME:?}",
+   "rm -rf $HOME/.cache", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=(("literal path", "/Users/"),), lacks=("HOME:?",))
+# REVIEW FINDING: eval's double quotes turn \$ into $, so the remedy must be the plain guarded target
+# with no backslash before $.
+sh("rm-var: eval with an escaped dollar rewrites with no backslash",
+   'eval "rm -rf \\$S/x"', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("${S:?}/x",), lacks=("\\$",))
 # Scanner cases (rule building-scanner-respects-strings): a comment opener, a double slash, a lone
 # quote, and a newline inside a quoted string must not hide the live rm that follows.
 sh("rm-var: a hash inside a string does not hide the delete",
@@ -5708,6 +5720,12 @@ def merge_hang_timeout_case():
     return True, note
 
 
+def carried(fragment, reason):
+    """True when the reason holds the fragment. A tuple is any-of: one of its options is enough."""
+    options = fragment if isinstance(fragment, tuple) else (fragment,)
+    return any(option in reason for option in options)
+
+
 def names_the_target(reason, rule=None):
     """Return the first forbidden fragment the printed reason carries, else ''.
 
@@ -6911,10 +6929,14 @@ def main():
         elif ok and case["rule"] and case["rule"] not in reason:
             ok = False
             note = "  (the reason does not name rule %r: %s)" % (case["rule"], reason[:90])
-        elif ok and case["carries"] and [f for f in case["carries"] if f not in reason]:
+        elif ok and case["carries"] and [f for f in case["carries"] if not carried(f, reason)]:
             ok = False
             note = "  (the reason does not carry %r: %s)" % (
-                [f for f in case["carries"] if f not in reason][0], reason[:90])
+                [f for f in case["carries"] if not carried(f, reason)][0], reason[:90])
+        elif ok and case["lacks"] and [f for f in case["lacks"] if f in reason]:
+            ok = False
+            note = "  (the reason carries %r, which it must not: %s)" % (
+                [f for f in case["lacks"] if f in reason][0], reason[:90])
         elif ok and got != "allow" and names_the_target(reason, case["rule"]):
             ok = False
             note = "  (the reason names the forbidden target %r)" % names_the_target(
