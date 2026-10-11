@@ -64,9 +64,10 @@ The evidence for each is thin or in conflict, so none is a rule yet.
 
 ## Landing
 
-`ux/` is not yet in `landed-dirs.txt`, so it does not reach `~/.claude/ux/`. The wiring lines
-name that path. A builder adds `ux` to `landed-dirs.txt` and to `CONFIG_FROZEN_DIRS` in
-`hooks/guard.py`. `lint/check_landed_dirs.py` keeps the two in agreement.
+`ux` is in `landed-dirs.txt`, so the installers land it at `~/.claude/ux/`. It is also in
+`CONFIG_FROZEN_DIRS` in `hooks/guard.py`, as `hooks/`, `lint/` and `agents/` are. The builder,
+design-review and reviewer wiring name that path. `lint/check_landed_dirs.py` keeps the two lists
+in agreement.
 
 ## Reopen
 

@@ -17,8 +17,8 @@ it); ios-adblock `ios/App/AdBlockApp.swift` (the state icon has a fixed frame).
 
 A list keeps a plain, predictable order, and an act on a row does not re-rank the list.
 Check: act on a row. Pass when the other rows keep their order until the person sorts again.
-Source: banchi D181 (order is taken once, a sale keeps it) and D263 (a sort press re-sorts, nothing else jumps);
-degen D11 (no AI picks what to read).
+Source: banchi D181 (order is taken once, a sale keeps it) and D263 (a sort press re-sorts,
+nothing else jumps).
 
 ## ux-unknown-is-not-empty
 
@@ -32,8 +32,8 @@ ios-adblock `ios/App/AdBlockApp.swift` (`BlockerRow` has its own error and unkno
 Screen copy claims only what the product does and what the owner confirmed.
 Check: pass when each promise (a search scope, a feature, a figure, a trust line) is true now.
 Source: joyous `docs/design-brief.md` move 6 (no unsourced claim); sillage
-`docs/product/screens.md` (search copy promises notes that search does not read); q_max check W1
-(the weights screen's claim matches the blend).
+`docs/product/screens.md` (search copy promises notes that search does not read); q_max
+`docs/rules/ui-primitives.md` W1 (the weights screen's claim matches whether the blend runs).
 
 ## ux-machine-text-hidden
 
@@ -45,16 +45,16 @@ disclosure); q_max D-640 (an error never shows the server's raw reason).
 
 ## ux-no-dead-end
 
-Each refusal, error and end page offers a next step that the person can reach from that screen.
-Check: pass when each one has a control that leads on: a fix, Try Again, or another way, such as a
-phone number. Prose that names a place is not a control.
+Each refusal, error and end page has a control on that screen that leads on: a fix, or another
+way such as a phone number.
+Check: pass when each one has that control. Prose that names a place is not a control.
 Source: q_max D-261 (a refusal names a reachable fix) and D-226 (offer the destination, not
 prose); joyous `docs/design-brief.md` move 4 (no dead end, offer a call) and record
 custom-tour-booking (an unknown link shows Book a tour and the phone).
 
 ## ux-empty-one-action
 
-An empty state is one sentence that says what fills it, and the one control that does.
+An empty state is one sentence that says what fills it, and one control that fills it.
 Check: pass when an empty list shows one sentence and one control, and its filters stay hidden.
 Source: banchi `CLAUDE.md` "Register" and `docs/DESIGN.md` `EmptyState`; q_max
 `specs/ux-plan-b.md` B2 (owner confirmed, 2026-09-29).
@@ -64,9 +64,9 @@ Source: banchi `CLAUDE.md` "Register" and `docs/DESIGN.md` `EmptyState`; q_max
 A destructive press asks first when it cannot be undone, and acts and offers Undo when it can.
 Check: pass when no destructive press does both or neither, and each ask names the act and the
 count, with first focus on Cancel.
-Source: banchi `docs/DESIGN.md` UX-099 (ask first, or undo after) and D57 (mark sold is one
-press, undoable); q_max D-497 (un-retire is an undo) and D-653 (a restore keeps the retirement in
-the log); ios-adblock `DESIGN.md` (a removed site keeps its report).
+Source: banchi `docs/DESIGN.md` ConfirmSheet row (first focus on Cancel) and UX-099 (ask first,
+or undo after; the ask names the count); banchi D57 (mark sold is one press, undoable); q_max
+D-497 (un-retire is an undo) and D-653 (a restore keeps the retirement in the log).
 
 ## ux-keep-what-was-made
 
@@ -91,7 +91,8 @@ button is absent, not disabled, until its preflight answers).
 Each screen and each act has one plain name, and each icon has one meaning.
 Check: the nav label is the page title. An act keeps one name on every screen. An icon keeps one
 meaning. Each enum value shows a label. Pass when all four hold.
-Source: q_max D-582 (one plain name for each screen) and check NAME1 (one act gets one name).
+Source: q_max D-582 (one plain name for each screen) and `docs/rules/ui-primitives.md` NAME1
+(one act gets one name).
 banchi `docs/DESIGN.md` UX-118 (one icon, one meaning) and `CLAUDE.md` "Register".
 
 ## ux-a11y-floor
@@ -100,4 +101,5 @@ Each screen meets the accessibility floor in `a11y.md`.
 Check: run the CI check in `a11y.md` on the changed screens, at each size and theme they ship in.
 Pass when it is green and the hand checks there pass.
 Source: q_max D-648 (contrast floor); banchi `app/tests/gallery.spec.ts` (axe on the kit);
-sillage `CLAUDE.md` (four test layers); ios-adblock `ios/App/AdBlockApp.swift` (Dynamic Type).
+sillage `CLAUDE.md` (axe reads contrast as incomplete under jsdom, and a placeholder passes axe);
+ios-adblock `ios/App/AdBlockApp.swift` (Dynamic Type).

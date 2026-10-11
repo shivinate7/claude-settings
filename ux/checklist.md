@@ -13,8 +13,8 @@ Screen: ____ Size: ____ Theme: ____
 - [ ] ux-machine-text-hidden: Is each code, path, id and server text behind a closed disclosure?
 - [ ] ux-no-dead-end: Does each refusal, error and end page have a control that leads on?
 - [ ] ux-empty-one-action: Is each empty state one sentence and one control, with no filters?
-- [ ] ux-ask-or-undo: Does each destructive press either ask first or offer Undo, not both?
+- [ ] ux-ask-or-undo: Does each destructive press either ask first or offer Undo, never both or neither? Does each ask name the act and its count, with first focus on Cancel?
 - [ ] ux-keep-what-was-made: Is typed input still there after close, back, a tab change and a return?
 - [ ] ux-control-earns-place: Does each control change something, and does each disabled one say why?
-- [ ] ux-one-plain-name: Do the nav label and page title match, with one name for each act?
+- [ ] ux-one-plain-name: Do the nav label and page title match? Does each act keep one name, each icon one meaning, and each enum value a label?
 - [ ] ux-a11y-floor: Is the `a11y.md` CI check green, and do its hand checks pass?
