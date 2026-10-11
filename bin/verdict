@@ -8,6 +8,8 @@
 import os, re, shutil, subprocess, sys, tempfile, time
 HOT = re.compile(r"FAIL|Error|assert|Traceback")
 CAP = 30
+CHUNK, OVERLAP = 1 << 20, 256  # OVERLAP > longest marker
+EXEC = re.compile(r"Executed (\d+) tests?")
 TAIL = 1 << 20  # read at most the last 1 MiB of this run's output for the excerpt
 def main(argv):
     if not argv: sys.exit("usage: verdict <cmd...>")
@@ -45,13 +47,23 @@ def main(argv):
         f.flush(); end = f.tell()
     secs = f"{time.time() - t:.1f}s"
     if rc < 0: note, rc = f" killed by signal {-rc}", 128 - rc
-    with open(log, "rb") as f:
-        f.seek(max(start, end - TAIL))
-        text = f.read(end - f.tell()).decode("utf-8", errors="replace")
-    lines = text.splitlines()
+    fail = zero = ran = False; lines = []
+    try:
+        with open(log, "rb") as f:
+            pos = start
+            while pos < end:  # scan the whole run region; OVERLAP keeps a marker cut by a chunk edge whole
+                f.seek(pos); buf = f.read(min(CHUNK, end - pos)).decode("utf-8", errors="replace")
+                fail = fail or "** TEST FAILED **" in buf or "** BUILD FAILED **" in buf
+                for n in EXEC.findall(buf): zero, ran = zero or n == "0", ran or n != "0"
+                pos += CHUNK - OVERLAP if pos + CHUNK < end else CHUNK
+            f.seek(max(start, end - TAIL))
+            lines = f.read(end - f.tell()).decode("utf-8", errors="replace").splitlines()
+    except OSError:
+        if rc == 0: print(f"FAIL {name} rc=1 log unreadable ({secs}) log={log}"); return 1
+        note += " log unreadable"
     if rc == 0:
-        if "** TEST FAILED **" in text or "** BUILD FAILED **" in text: rc, note = 1, " runner failure marker"
-        elif "Executed 0 tests" in text: rc, note = 1, " no tests ran"
+        if fail: rc, note = 1, " runner failure marker"
+        elif zero and not ran: rc, note = 1, " no tests ran"
         else:
             print(f"PASS {name} ({secs})"); return 0
     print(f"FAIL {name} rc={rc}{note} ({secs}) log={log}")
