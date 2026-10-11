@@ -5246,29 +5246,34 @@ def _pwsh_script(tokens) -> str:
 # install test as its leaf in place of the PLAYWRIGHT_BROWSERS_PATH tests.
 _PW_RUNNERS = ("npx", "pnpm", "yarn", "bunx", "bun", "npm")
 _PW_NAMES = ("playwright", "playwright-core", "@playwright/test")
-_PW_CLI = "node_modules/playwright/cli.js"
+_PW_CLIS = ("playwright/cli.js", "playwright-core/cli.js")
+_PW_NODE22_CLIS = tuple("node_modules/" + c for c in _PW_CLIS)
 
 
 def _pw_name(token) -> bool:
     """True when a token names the Playwright CLI: a bin path, `name@version`, or its cli.js."""
     name = ("@" + token[1:].split("@")[0]) if token.startswith("@") else token.split("@")[0]
     return name in _PW_NAMES or (not name.startswith("@") and basename(name) in _PW_NAMES) or (
-        token.endswith(_PW_CLI))
+        token.endswith(tuple("/" + c for c in _PW_CLIS)))
 
 
 def _playwright_install_hit(word, rest, who) -> str:
     """Return the install text when the call installs Playwright browsers and `who` may not.
 
-    A call is an install when a Playwright name is followed later by the word `install`. Only a
+    A call is an install when a Playwright name is followed at once by the word `install`. Only a
     runner, node, or the Playwright CLI itself counts as the call, so `echo` of the text is none.
     """
     if not (word in _PW_RUNNERS or word == "node" or word.startswith("node@") or _pw_name(word)):
         return ""
     toks = [word] + rest
-    at = next((i for i, t in enumerate(toks) if _pw_name(t)), None)
-    if at is None or "install" not in toks[at + 1:]:
+    # Bandaid: a name right after a flag is that flag's value (`pnpm -C playwright install`), except
+    # under npx, whose flags before the package are booleans (`-y`) or name it (`-p`).
+    at = next((i for i, t in enumerate(toks) if _pw_name(t) and toks[i + 1:i + 2] == ["install"]
+               and (word == "npx" or i == 0 or toks[i - 1] == "--" or not toks[i - 1].startswith("-"))), None)
+    if at is None:
         return ""
-    allowed = toks[at].endswith(_PW_CLI) and toks[:at] == ["npx", "-y", "node@22"]
+    allowed = toks[at].endswith(_PW_NODE22_CLIS) and toks[:1] == ["npx"] and toks[1:at] in (
+        ["node@22"], ["-y", "node@22"], ["--yes", "node@22"])
     return "" if allowed and who == "main" else "playwright install"
 
 
