@@ -10,12 +10,15 @@ Owner, 2026-10-11 ("start the verdict lane"):
 
 1. A run whose output holds `** TEST FAILED **` or `** BUILD FAILED **` prints FAIL, also when
    the command exits 0. xcodebuild prints these exact markers only on a real failure, so they
-   cannot raise a false alarm.
-2. An xcodebuild test run whose output holds `Executed 0 tests` prints FAIL with the note `no
-   tests ran`. A test command that ran nothing proves nothing.
+   cannot raise a false alarm. verdict reads the whole output of the run, not only its tail.
+2. A run whose output holds `Executed 0 tests` and no `Executed <n> tests` line with n above 0
+   prints FAIL with the note `no tests ran`. A test command that ran nothing proves nothing. One
+   empty bundle beside a bundle that ran tests passes.
 3. verdict reads only these markers. It does not let its broad excerpt pattern (`FAIL`,
    `Error`, `assert`) change a verdict, because that pattern matches text in passing runs.
 4. The exit code stays the command's own, except that a marker FAIL exits 1.
+5. When verdict cannot read the run's log, it prints FAIL with the note `log unreadable`. A read
+   that could not run is unknown, never a pass.
 
 ## The incident
 
