@@ -245,6 +245,13 @@ def split_segments(cmd: str, ends=None):
             while index < length and cmd[index] != "\n":
                 index += 1
             continue
+        if char == "\\" and cmd[index + 1:index + 2] == "\\":
+            current.append(cmd[index:index + 2])   # an escaped backslash, so no continuation
+            index += 2
+            continue
+        if char == "\\" and cmd[index + 1:index + 2] == "\n":
+            index += 2   # an unquoted backslash-newline is a line continuation: the shell drops it
+            continue
         if char in ("'", '"'):
             quote = char
             current.append(char)
@@ -5115,10 +5122,13 @@ LN_DESCENDS_REASON = (
 # `Set-Item env:VAR` or `SetEnvironmentVariable`. A read, a grep, and `unset` set nothing. The name
 # is folded to upper case in every form. Shell words come from `segment_tokens`, assignments from
 # `ASSIGNMENT`, and the file write from `_VAR_TOKEN`: no parser of its own.
-# KNOWN LIMITS, out of scope (the rule covers local shells): `cross-env`, `timeout N env`, `setx`,
+# KNOWN LIMITS: `cross-env` is refused. Not covered: `timeout N env`, `setx`, a PowerShell block,
 # a `<<<` here-string, a CI yaml `env:` key, and `node -e` or `python -c`.
 PLAYWRIGHT_VAR = "PLAYWRIGHT_BROWSERS_PATH"
 ASSIGNING_BUILTINS = ("export", "declare", "typeset", "readonly", "local", "set")
+PLAYWRIGHT_PS_SHELLS = ("pwsh", "powershell", "pwsh.exe", "powershell.exe")
+# Search tools. Local here, not in the shared ENV_PATTERN_COMMANDS.
+PLAYWRIGHT_PS_READERS = ("select-string", "sls")
 PLAYWRIGHT_PS_SET = re.compile(
     r"\$\{?env:" + PLAYWRIGHT_VAR + r"\}?\s*[-+*/]?=(?!=)"
     r"|^\s*(?:set-item|si|new-item|set-content|sc)\b[^;|]*\benv:\\?" + PLAYWRIGHT_VAR + r"\b"
@@ -5126,7 +5136,7 @@ PLAYWRIGHT_PS_SET = re.compile(
 
 
 # A shell profile or `.envrc`: a write there sets the variable for every later shell.
-PLAYWRIGHT_PROFILE = re.compile(r"\.(?:zshrc|bashrc|profile|zprofile|bash_profile|envrc)\b")
+PLAYWRIGHT_PROFILE = re.compile(r"\.(?:zshrc|zshenv|zlogin|bashrc|profile|zprofile|bash_profile|bash_login|envrc)\b")
 # SILENT_WRITE_REDIRECT (the null-device redirects) leaves `N>&N` alone, because that rule wants
 # a duplicate to count as output. Here a duplicate is no file target, so it is dropped as well.
 _FD_DUP = re.compile(r"\d*>&\d+")
@@ -5151,6 +5161,15 @@ def _playwright_tokens_hit(tokens, depth=0) -> str:
         return word + " " + PLAYWRIGHT_VAR
     if word in ("builtin", "exec"):
         return _playwright_tokens_hit(rest, depth + 1)
+    if word == "npx":
+        rest = [t for t in rest if not t.startswith("-")] or [""]
+        word, rest = rest[0], rest[1:]
+    if word == "cross-env":
+        for token in rest:
+            if not ASSIGNMENT.match(token):
+                break
+            if _is_playwright_assign(token):
+                return word + " " + PLAYWRIGHT_VAR
     script = " ".join(rest[1:]) if word in CMD_EXE_NAMES and rest and rest[0].lower() in (
         "/c", "/k") else None
     if script is None:
@@ -5170,7 +5189,9 @@ def playwright_path_hit(segment: str, depth=0, to_file=False) -> str:
     """
     tokens = segment_tokens(segment) or []
     at = resolve_command(tokens) if tokens else None
-    if at is None or basename(tokens[at]) not in ENV_PATTERN_COMMANDS:
+    word = basename(tokens[at]).lower() if at is not None else ""
+    if (POWERSHELL_CALL[0] or word in PLAYWRIGHT_PS_SHELLS) and word not in (
+            ENV_PATTERN_COMMANDS + PLAYWRIGHT_PS_READERS):
         found = PLAYWRIGHT_PS_SET.search(segment)
         if found:
             return found.group(0)
