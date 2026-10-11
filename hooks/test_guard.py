@@ -4681,7 +4681,55 @@ add("floor: Workflow prompt text naming a haiku model on a sonnet agent is allow
 add("floor: Workflow commented-out haiku agent call is allowed", "allow",
     tool="Workflow", script="// agent({model:\"haiku\"})\nawait agent(\"x\", {model:\"sonnet\"})")
 
-FORBIDDEN_IN_A_REASON = (ENV, ROOT, slash(ROOT), "settings.json", "CLAUDE.md", "guard.py",
+# ---- Rule 9, template literals. Code inside a `${...}` is code: a quote there opens no string, and
+# a haiku named in a template's own text is no model. Each expected deny lists a haiku spawn that
+# a desynced scan would hide.
+add("floor: Workflow haiku after a quote inside a template interpolation is denied", "deny",
+    "subagent-model-floor", tool="Workflow",
+    script=r"""x = `${"`"}`;
+x = 'a\"';
+agent({model: `haiku`});""")
+for _shape in (
+        r'agent(`fix ${x ? "a" : "b"}`, {model: "haiku"})',
+        'const q = `a ${`b ${c}`} d`;\nagent({prompt: q, model: "haiku"})',
+        r'agent(`p ${obj["k"]}`, {model: "haiku"})',
+        r'agent(`p ${ {a:1}.a }`, {model: "haiku"})'):
+    add("floor: Workflow haiku after template shape %r is denied" % _shape[:40], "deny",
+        "subagent-model-floor", tool="Workflow", script=_shape)
+add("floor: Workflow haiku named only in template text is not a model", "allow",
+    tool="Workflow", script='agent(`set {model: "haiku"} in the file`, {model: "sonnet"})')
+add("floor: Workflow agent call written inside template text is not a spawn", "allow",
+    tool="Workflow", script='agent(`agent({model: "haiku"})`, {model: "sonnet"})')
+# An interpolation is code, and a haiku value built inside it is still a model. An object literal
+# inside `${}` is an expression, never the call's options.
+add("floor: Workflow model from a template interpolation of 'haiku' is denied", "deny",
+    "subagent-model-floor", tool="Workflow", script="await agent(\"x\", {model: `${'haiku'}`})")
+add("floor: Workflow model from a template with an interpolated haiku suffix is denied", "deny",
+    "subagent-model-floor", tool="Workflow", script="await agent(\"x\", {model: `${fam}-haiku`})")
+add("floor: Workflow object literal inside a template interpolation is not call options", "allow",
+    tool="Workflow", script='agent(`x ${ {model:"haiku"}.model }`, {model:"sonnet"})')
+
+# F1. A regex literal inside a template interpolation holds a quote or a backtick. It is code, so it
+# opens no string, and the haiku spawn after it must still deny.
+add("floor: Workflow haiku after a regex with a quote inside a template interpolation is denied",
+    "deny", "subagent-model-floor", tool="Workflow",
+    script=r"""x = `${ s.replace(/"/g, '') }`;
+agent("x", {model: "haiku"})""")
+add("floor: Workflow haiku after a regex with a backtick inside a template interpolation is denied",
+    "deny", "subagent-model-floor", tool="Workflow",
+    script=r"""x = `${ s.replace(/`/g, '') }`;
+agent("x", {model: "haiku"})""")
+
+# A `/` after `++` or `--` is division, not a regex literal, so the string after it is still
+# lexed and the haiku spawn after it must deny.
+add("floor: Workflow haiku after i++ divided, then a path string, is denied", "deny",
+    "subagent-model-floor", tool="Workflow",
+    script='i++ / 2; s = "a/b"; agent("x", {model: "haiku"})')
+add("floor: Workflow haiku after i-- divided, then a path string, is denied", "deny",
+    "subagent-model-floor", tool="Workflow",
+    script='i-- / 2; s = "a/b"; agent("x", {model: "haiku"})')
+
+FORBIDDEN_IN_A_REASON = (ENV, ROOT, slash(ROOT),"settings.json", "CLAUDE.md", "guard.py",
                          ".claude", "app.log", "sleep", "haiku", VCS + " checkout", VCS + " switch")
 
 # ONE RULE MAY NAME ITS SUBJECT, and only the fragments listed beside it. Rule 8 asks rather than
@@ -5479,6 +5527,145 @@ LOG_CHECKS = (
     ("worktree-home: a later path field outside the recorded home is refused, not skipped",
      worktree_home_later_field_case),
 )
+
+
+# =========================================================================== mask_script lexemes
+
+# The timing cases guard mask_script. Its earlier regex form could take each backslash after an
+# unclosed quote as one `.` or as half of a `\\.` pair, so the paths grew like Fibonacci. Measured
+# on that form: 30 backslashes 0.1 s, 38 about 4.9 s, 40 about 12.9 s. The child gets a 1 s limit,
+# so a slow scan fails its case and never blocks the suite.
+MASK_HANG_BACKSLASHES = 40
+MASK_HANG_LIMIT_S = 1
+MASK_PIN_LIMIT_S = 10
+
+# Normal scripts with escaped quotes. Each one is well closed: its last quote is not escaped. The
+# expected masks are the guard's own output today, so a change to any of them is a behavior change.
+MASK_PINS = (
+    (r'const a = "a\"b";', "const a = \x000\x00;", [r'a\"b']),
+    (r"say('it\'s');", "say(\x000\x00);", [r"it\'s"]),
+    (r'const t = `a\`b`;', "const t = \x000\x00;", [r'a\`b']),
+    (r'const p = "a\\";', "const p = \x000\x00;", [r'a\\']),
+    ('x = 1; // say "hi"\ny = 2;', "x = 1;  \ny = 2;", []),
+    ('/* \'q\' */ z = "ok";', "  z = \x000\x00;", ["ok"]),
+    ('f("a", \'b\')', "f(\x000\x00, \x001\x00)", ["a", "b"]),
+    ('s = "line1\nline2";', "s = \x000\x00;", ["line1\nline2"]),
+    ("// don't\nf('x')", " \nf(\x000\x00)", ["x"]),
+    ('/* say "hi" */ f(\'x\')', "  f(\x000\x00)", ["x"]),
+)
+
+# A quote left open, then 64 KB of escaped quotes. The lexeme must stay linear on this shape:
+# quadratic on 19f3555, which took about 1 s at 16 KB and 15 s at 64 KB.
+MASK_LONG_SCRIPT = '"' + '\\"' * 32768
+
+
+def mask_child(scripts, limit):
+    """Run guard.mask_script on each script in a child process. Return (answers, note).
+
+    The whole child run has `limit` seconds. A run that outlives it returns (None, note), which
+    fails its case and never blocks the suite.
+    """
+    code = ("import json, importlib.util as u\n"
+            "s = u.spec_from_file_location('g', %r)\n"
+            "g = u.module_from_spec(s)\n"
+            "s.loader.exec_module(g)\n"
+            "print(json.dumps([list(g.mask_script(x)) for x in %r]))\n" % (GUARD, list(scripts)))
+    try:
+        got = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                             timeout=limit)
+    except subprocess.TimeoutExpired:
+        return None, "mask_script did not return within %d s" % limit
+    if got.returncode != 0:
+        return None, "child exited %d: %s" % (got.returncode, got.stderr.strip()[-160:])
+    return json.loads(got.stdout), "returned"
+
+
+def mask_hang_case(quote, name):
+    script = quote + "\\" * MASK_HANG_BACKSLASHES
+
+    def check():
+        answers, note = mask_child([script], MASK_HANG_LIMIT_S)
+        if answers is None:
+            return False, note
+        if answers != [[script, []]]:
+            return False, "an unclosed %s quote was masked: %r" % (name, answers)
+        return True, "unclosed %s quote, %d backslashes, returned within %d s" % (
+            name, MASK_HANG_BACKSLASHES, MASK_HANG_LIMIT_S)
+
+    return check
+
+
+def mask_pin_case():
+    want = [[text, strings] for _, text, strings in MASK_PINS]
+    answers, note = mask_child([script for script, _, _ in MASK_PINS], MASK_PIN_LIMIT_S)
+    if answers is None:
+        return False, note
+    for (script, _, _), got, exp in zip(MASK_PINS, answers, want):
+        if got != exp:
+            return False, "%r masked to %r, want %r" % (script, got, exp)
+    return True, "%d normal scripts with escaped quotes masked as pinned" % len(want)
+
+
+def mask_long_case():
+    answers, note = mask_child([MASK_LONG_SCRIPT], MASK_HANG_LIMIT_S)
+    if answers is None:
+        return False, note
+    if answers != [[MASK_LONG_SCRIPT, []]]:
+        return False, "an unclosed quote over 64 KB was masked"
+    return True, "unclosed quote then 64 KB of escaped quotes returned within 1 s"
+
+
+LOG_CHECKS_EXTRA.append(("mask_script: unclosed double quote then 64 KB of escaped quotes "
+                         "returns within 1 s", mask_long_case))
+# F2, a memory bound. A 64 KB script of deeply nested closed templates must scan within 200 MB. The
+# child sets RLIMIT_AS where the platform accepts it. macOS refuses that call (ValueError), so there
+# the child's peak RSS is the bound. Non-posix hosts skip the case with a note: no resource module.
+MASK_MEM_LIMIT_BYTES = 200 * 1024 * 1024
+MASK_MEM_SCRIPT = "`${" * 13000 + "1" + "}`" * 13000  # 65001 bytes, every template closed
+
+
+def mask_memory_case():
+    try:
+        import resource  # noqa: F401  posix only
+    except ImportError:
+        return True, "skipped: no resource module on this host, RLIMIT_AS not checked"
+    code = ("import json, resource, importlib.util as u\n"
+            "try:\n"
+            "    resource.setrlimit(resource.RLIMIT_AS, (%d, %d))\n"
+            "    limit = 'RLIMIT_AS'\n"
+            "except (ValueError, OSError):\n"
+            "    limit = 'peak RSS'\n"
+            "s = u.spec_from_file_location('g', %r)\n"
+            "g = u.module_from_spec(s)\n"
+            "s.loader.exec_module(g)\n"
+            "g.mask_script(%r)\n"
+            "rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss\n"
+            "print(json.dumps([limit, rss]))\n"
+            % (MASK_MEM_LIMIT_BYTES, MASK_MEM_LIMIT_BYTES, GUARD, MASK_MEM_SCRIPT))
+    try:
+        got = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                             timeout=60)
+    except subprocess.TimeoutExpired:
+        return False, "mask_script on the nested templates did not finish within 60 s"
+    if got.returncode != 0:
+        return False, "mask_script failed under the memory bound: %s" % got.stderr.strip()[-160:]
+    limit, rss = json.loads(got.stdout)
+    # ru_maxrss is bytes on darwin and kilobytes elsewhere.
+    peak = rss if sys.platform == "darwin" else rss * 1024
+    if peak > MASK_MEM_LIMIT_BYTES:
+        return False, "peak %d MB, over the %d MB bound (%s)" % (
+            peak // (1024 * 1024), MASK_MEM_LIMIT_BYTES // (1024 * 1024), limit)
+    return True, "64 KB of nested templates scanned, peak under %d MB (%s)" % (
+        MASK_MEM_LIMIT_BYTES // (1024 * 1024), limit)
+
+
+LOG_CHECKS_EXTRA.append(("mask_script: 64 KB of nested closed templates stays under 200 MB",
+                         mask_memory_case))
+for quote, name in (('"', "double"), ("'", "single"), ("`", "backtick")):
+    LOG_CHECKS_EXTRA.append(("mask_script: unclosed %s quote then backslashes returns within 1 s"
+                             % name, mask_hang_case(quote, name)))
+LOG_CHECKS_EXTRA.append(("mask_script: normal scripts with escaped quotes keep their masks",
+                         mask_pin_case))
 
 
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
