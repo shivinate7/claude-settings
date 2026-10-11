@@ -78,13 +78,17 @@ to another role (rule git-remedy-never-names-target).
 ## Test path
 
 A basename is `test_*.py`, `*_test.py`, `*_test.go`, `*.test.{ts,js,tsx,jsx}`, `*.spec.*`,
-`conftest.py`, `jest.setup.*`, or `*Test.java` (case matters, so `Contest.java` is not a test).
+`conftest.py`, `jest.setup.*`, `*Test.java`, or `*Tests.swift`. Case matters, so `Contest.java`
+and `SpeedTest.swift` are not tests.
 A directory part is `tests`, `test`, `__tests__`, `spec`, `testdata`, `__snapshots__`, or
-`test_support`. Parts count from the nearest parent that holds `.git`. So a clone under a
+`test_support`. An Xcode or SwiftPM test target folder also counts: a PascalCase part ending in
+`Tests`, such as `DegenUITests` (incident: Degen, 2026-10-11). Its ceiling: a product folder named
+like `ABTests` reads as a test folder. Reading the target names from the Xcode project is the
+upgrade. `FooSpec.swift` (Quick) and Objective-C `FooTests.m` are not seen. Parts count from the nearest parent that holds `.git`. So a clone under a
 folder named `tests` is not all test files.
 
-Test config is `pytest.ini`, `tox.ini`, `setup.cfg`, `pyproject.toml`, `package.json`, and the
-jest, vitest, playwright, karma, and mocha configs. If a builder change to such a file ADDS a
+Test config is `pytest.ini`, `tox.ini`, `setup.cfg`, `pyproject.toml`, `package.json`, an Xcode
+`.xctestplan`, and the jest, vitest, playwright, karma, and mocha configs. If a builder change to such a file ADDS a
 line that disables tests, it counts as a test change. Some names belong to test runners only,
 such as `testpaths` and `testPathIgnorePatterns`. They count in any test config. A flag
 (`--ignore`, `--deselect`) counts only in a test-runner context. That context is pytest
