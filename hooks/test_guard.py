@@ -6305,6 +6305,18 @@ def register_simulator_boot_cases():
     add("boot a third simulator with two booted: MCP launch, empty device, udid names it",
         "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device="", udid=SIM_UC,
         env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+    add("boot a third simulator with two booted: MCP launch, list in device, udid names it",
+        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device=["x"], udid=SIM_UC,
+        env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+    add("boot a third simulator with two booted: MCP launch, dict in udid, device names it",
+        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device=SIM_UC,
+        udid={"x": 1}, env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+    add("boot a third simulator with two booted: MCP launch, lowercase udid",
+        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", udid=SIM_UC.lower(),
+        env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+    sh("boot a third simulator with two booted: bash simctl boot, lowercase udid",
+       "xcrun simctl boot " + SIM_UC.lower(), "deny", rule="simulator-boot-cap",
+       env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
     sh("control: one booted, a second boot is allowed",
        "xcrun simctl boot " + SIM_UC, "allow", env_path=one_path, config=one_cfg)
     sh("control: a read of the device list is not a boot",
