@@ -5621,6 +5621,15 @@ def register_simulator_boot_cases():
        "xcrun simctl boot " + SIM_UC, "allow", env_path=one_path, config=one_cfg)
     sh("control: a read of the device list is not a boot",
        "xcrun simctl list devices", "allow", env_path=cap_path, config=cap_cfg)
+    # Owner ruling 2026-10-10: the cap counts every booted device. One is recorded and idle, the
+    # other is owner-booted and unrecorded; both count.
+    mixed_cap_cfg = os.path.join(ROOT, "simcfg_cap_mixed")
+    os.makedirs(mixed_cap_cfg, exist_ok=True)
+    write_sim_records(mixed_cap_cfg, [sim_boot_record(SIM_UA, "Alpha Pro", SIM_TYPE_PRO, SIM_RT,
+                                                      2 * 3600)])
+    sh("boot a third simulator: a recorded idle device and an owner-booted one both count",
+       "xcrun simctl boot " + SIM_UC, "deny", rule="simulator-boot-cap",
+       env_path=cap_path, config=mixed_cap_cfg, carries=(SIM_UA, SIM_UB))
 
     # Rule simulator-boot-twin. The reason names the idle twin's UDID.
     sh("boot a device with an idle booted twin: bash simctl boot",
