@@ -33,11 +33,12 @@ The same count found that 232 of the 246 "allow once" records were answers to
 ## Named limits
 
 - `$HOME`, `$PWD`, and a variable whose assigned or loop value expands `~`, `$HOME`, `${HOME…}`,
-  `$PWD`, `$(pwd)` or backtick `pwd`, stay a prompt. The docs say a `:?` guard does not clear
+  `$PWD`, or a `pwd` command in `$(…)` or backticks (any flags or path), stay a prompt. The docs say a `:?` guard does not clear
   them. The guard refuses them also when guarded. The remedy tells the agent to name the one
   directory it means as a literal path. The remedy never computes that path, because a computed
   path such as `/Users/<you>/*` could wipe the home folder.
 - A home path read another way, such as `D=$(getent passwd $USER | cut -d: -f6)`, is not seen.
+  Nor is a chained copy, such as `H=$HOME; X=$H`.
 - A bare `$HOME` target is refused by rule `destructive-delete`. The brace forms `${HOME}` and
   `${HOME:?}` are not, so Claude Code's own prompt stays the backstop.
 - The taint is read by variable name across the whole command. A later reassignment, or a
