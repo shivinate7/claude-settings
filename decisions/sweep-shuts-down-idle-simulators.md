@@ -78,8 +78,13 @@ Why the cap: it needs no knowledge of who booted a device.
 - `hooks/guard.py`: rules `simulator-boot-cap` and `simulator-boot-twin`. A boot is
   `simctl boot`, an `xcodebuild -destination` with `id=` or `name=`, or MCP `launch` with
   `device` or `udid`. The guard judges each of the two that is a non-empty string. A UDID
-  matches in any case. A name must match exactly. `simctl list` runs only after a call
-  matched as a boot of a shut-down device. A launch with neither field is not judged. The guard imports `sweep` on a match only.
+  matches in any case. A name must match exactly. An `OS=` in the destination keeps only
+  the copies on that runtime. Only the shut-down devices a call names count as a boot.
+  `simctl list` runs for each call that names a device. A launch with neither field is not
+  judged. The guard imports `sweep` on a match only.
+  Named limits: a shut-down device whose name is the target's UDID string is denied at the
+  cap. An MCP name that matches a booted copy and a shut-down copy on two runtimes is
+  denied, because the MCP does not take an OS.
 
 ## Measured, 2026-10-10
 
