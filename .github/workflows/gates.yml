@@ -19,9 +19,11 @@ permissions:
 
 # A PR shares one group per ref, so a new push cancels the old run. Every other run gets its own
 # group: GitHub keeps one pending run per group and replaces it, even without cancel-in-progress,
-# so a shared group on main can leave a merged commit with no verdict.
+# so a shared group on main can leave a merged commit with no verdict. The draft state is in the
+# group: `gh pr create --draft` then `gh pr ready` fires two runs, and the draft run (skips every
+# job) must not cancel the ready run (decision draft-until-reviewed).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('{0}-{1}', github.ref, github.event.pull_request.draft) || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
