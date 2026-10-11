@@ -3701,6 +3701,10 @@ class SimWorld:
     def ps_text(self):
         if self.ps_out is not None:
             return self.ps_out
+        if not self.ps_rows:
+            # A readable table with no holder in it, as the guard fixtures build. Only ps_out ""
+            # is the empty read, so the idle cases and the empty-table case do not collide.
+            return "1 0 %d /sbin/launchd\n" % self.uid
         return "".join("%d %d %d %s\n" % (pid, ppid, self.uid, cmd)
                        for pid, ppid, cmd in self.ps_rows)
 
