@@ -677,9 +677,9 @@ def load_config(root, base, path):
         raise Stop(f"{path} on {ref} has an unknown field in the merge block: {', '.join(unknown)}")
     if not isinstance(m.get("ignoreChecks", []), list):
         raise Stop(f"{path} on {ref}: merge.ignoreChecks must be a list, not {m['ignoreChecks']!r}.")
-    dm = m.get("deadlineMinutes", 1)
-    if not isinstance(dm, int) or isinstance(dm, bool) or dm < 1:
-        raise Stop(f"{path} on {ref}: merge.deadlineMinutes must be a positive whole number, not {dm!r}.")
+    dm = m.get("deadlineMinutes", MERGE_DEFAULTS["deadlineMinutes"])
+    if not isinstance(dm, int) or isinstance(dm, bool) or not 1 <= dm <= 360:  # 360: GitHub's longest job run
+        raise Stop(f"{path} on {ref}: merge.deadlineMinutes must be a whole number from 1 to 360, not {dm!r}.")
     ignore_checks(cfg)  # refuse a bad entry before the defaults notice, so the refusal is the only line
     filled = [k for k in MERGE_DEFAULTS if k not in m]
     for k in filled:
