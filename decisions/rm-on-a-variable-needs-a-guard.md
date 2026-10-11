@@ -9,10 +9,23 @@ prompt?
 
 Owner, 2026-10-11 ("Ship guard now, hook later"):
 
-1. Rule `rm-var-unguarded` in `hooks/guard.py` refuses a recursive `rm` when a target has an
-   unguarded variable expansion followed by `/`, such as `rm -rf $S/$d` or `rm -rf "$D"/*`.
-   The refusal prints the flagged targets with each expansion written `${NAME:?}`. The agent
-   retries. The owner sees no prompt.
+1. Rule `rm-var-unguarded` in `hooks/guard.py` refuses a recursive `rm` only in the shape
+   Claude Code prompts on: a variable, then `/`, then a glob, another variable, a slash, a
+   quote, or the end. Examples: `rm -rf $S/$d`, `rm -rf "$D"/*`, `rm -rf $D/`. Owner,
+   2026-10-11 ("Only where Claude Code prompts"). So `rm -rf "$ROOT/dist"` is not refused.
+   The refusal offers one of two remedies:
+   - `${NAME:?}`, only when the guard can see that each such name is safe. Safe means that each
+     binding of the name in the command is `NAME=<literal>`, `for NAME in <literal words>`, or
+     `NAME=$(mktemp …)`. A literal does not start with `.`, and holds no `..`, `~`, `$`,
+     backtick or glob. With the values put in, the target is not `/`, home, the cwd or a cwd
+     parent. It is also not a glob directly under one of them. The command holds no `cd`, `pushd` or
+     `popd`.
+   - Otherwise: name the one directory as a literal path. This covers inherited names such as
+     `$OLDPWD`, positionals, `read` loops, and every other binding. The remedy never computes a
+     path, because a computed path such as `/Users/<you>/*` could wipe the home folder.
+
+   The agent retries. The owner sees no prompt. This is an allow-list. A deny-list of unsafe
+   sources took seven review rounds and still missed classes.
 2. A hook that answers the `rm` prompt is deferred to its own change. See deferred item
    rm-prompt-answer-hook. The first build allowed deletes of the home folder, `*`, `{~,x}` and
    `..` escapes, in every mode.
@@ -32,22 +45,13 @@ The same count found that 232 of the 246 "allow once" records were answers to
 
 ## Named limits
 
-- `$HOME` and `$PWD` stay a prompt. So does a variable whose assigned or loop value starts
-  with `~`. A command that runs `pwd` as a word, or expands `$HOME`, `${HOME…}`, `$PWD` or
-  `${PWD…}` anywhere, taints every variable it assigns. The guard does not parse `$(…)` spans,
-  so quotes and nesting cannot hide a source. A rare false alarm gets the literal-path reason. The docs say a `:?` guard does not clear them. The guard refuses them also when guarded. The remedy tells the agent to name the one
-  directory it means as a literal path. The remedy never computes that path, because a computed
-  path such as `/Users/<you>/*` could wipe the home folder.
-- A home path read another way, such as `D=$(getent passwd $USER | cut -d: -f6)`, is not seen.
-  Nor is a chained copy, such as `H=$HOME; X=$H`.
 - A bare `$HOME` target is refused by rule `destructive-delete`. The brace forms `${HOME}` and
   `${HOME:?}` are not, so Claude Code's own prompt stays the backstop.
-- The taint is read by variable name across the whole command. A later reassignment, or a
-  `D=$HOME` inside quoted text, still taints `D`. This is a rare false alarm.
 - An escaped `\$S/x` gets a hit, although the shell reads it as literal. This is a rare false
   alarm.
 - These forms are not seen, so Claude Code's own prompt stays the backstop:
   - an `rm` inside a script file, a heredoc piped to `sh`, or `sh -c` nested 5 deep;
   - `exec rm`, `timeout 5 rm`, `nice -n 5 rm`, `! rm`, `(rm …)`, `$(rm …)`, backtick `rm`,
     `find -exec rm`, and `$cmd -rf`;
-  - `$S'/'*`, `$S\/*`, `${S:-}/*`, `$S*`, and `rm -rf $(pwd)/dist`.
+  - `$S'/'*`, `$S\/*`, `${S:-}/*`, `$S*`, and `rm -rf $(pwd)/dist`;
+  - `${D[0]}`, `${!D}`, `${D%…}` and zsh `$D:h`.
