@@ -1225,24 +1225,35 @@ def _run_dir(cmd: str, shell_cwd: str) -> str:
     return where or shell_cwd or ""
 
 
-def segment_root(segment: str, cmd: str, shell_cwd: str) -> str:
-    """The working tree ONE segment acts on: the shell's cwd after every `cd` that runs before
-    this segment, then this segment's own `git -C` chain. `_run_dir` takes the first `-C` of ANY
-    segment, so a lane's `-C` on an earlier call would hide the shared checkout a later call names.
+def segment_roots(cmd: str, shell_cwd: str) -> list:
+    """The working tree each segment of `split_segments(cmd)` acts on, by POSITION: the shell's
+    cwd after every `cd` that runs before that segment, then its own `git -C` chain. `_run_dir`
+    takes the first `-C` of ANY segment, so a lane's `-C` on an earlier call would hide the
+    shared checkout a later call names. Identical segment text after different `cd`s is judged
+    per position, never by a text lookup.
+
+    The `cd` walk runs over the text with every heredoc body dropped, because a `cd` in an
+    interpreter body never moves the outer shell. The two lists are then aligned in order: a
+    segment of the kept-body list with no match in the walk (a body line) takes the root as it
+    stands there and moves nothing.
     """
+    kept = split_segments(cmd)
     if GIT_WORK_TREE_RE.search(cmd):
-        return command_root(cmd, shell_cwd)
-    segments = split_segments(_strip_heredoc_bodies_unconditionally(cmd))
-    stop = segments.index(segment) if segment in segments else len(segments)
+        return [command_root(cmd, shell_cwd)] * len(kept)
+    walked = split_segments(_strip_heredoc_bodies_unconditionally(cmd))
+    roots = []
     run_dir = shell_cwd
-    for earlier in segments[:stop]:
-        words = segment_tokens(earlier)
-        cd = _segment_cd_target(words) if words else None
-        if cd is not None:
-            run_dir = _absolute(cd, run_dir)
-    words = segment_tokens(segment)
-    git_c = _segment_git_c_target(words) if words else None
-    return _absolute(git_c, run_dir) if git_c is not None else run_dir
+    at = 0
+    for segment in kept:
+        words = segment_tokens(segment)
+        git_c = _segment_git_c_target(words) if words else None
+        roots.append(_absolute(git_c, run_dir) if git_c is not None else run_dir)
+        if at < len(walked) and walked[at] == segment:
+            cd = _segment_cd_target(words) if words else None
+            if cd is not None:
+                run_dir = _absolute(cd, run_dir)
+            at += 1
+    return roots
 
 
 def command_root(cmd: str, shell_cwd: str) -> str:
@@ -5708,10 +5719,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                     diff_refusal(tool, role, command_root(stripped, cwd))
 
     # 1. Shared trees.
-    for segment in split_segments(stripped):
+    for segment, root in zip(split_segments(stripped), segment_roots(stripped, cwd)):
         if not segment.strip():
             continue
-        root = segment_root(segment, stripped, cwd)
         match = shared_tree_match(segment, root)
         if match is None:
             continue
