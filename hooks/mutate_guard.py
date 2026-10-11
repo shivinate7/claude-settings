@@ -574,7 +574,7 @@ MUTATIONS = [
     ("per-file: a second -C replaces the first, never joins onto it",
      '            found = os.path.join(found, value) if found and value else (value or found)',
      '            found = found or value', "guard",
-     'per-file deny: -C parent then a relative -C repo, from a plain folder'),
+     'per-file allow: -C parent then a relative -C lane, checkout -- of one file'),
     ("per-file: a restore operand before -- is no path",
      '        return before + after, True',
      '        return after, True', "guard",
