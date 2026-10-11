@@ -333,6 +333,16 @@ class Flow(Env):
         rc, out = self.run_merge("7", "--confirm")
         self.assert_git_refuses_the_overwrite(rc, out, old, "docs/decisions/second.md", "mine\n")
 
+    def test_the_dirty_tree_message_names_the_checkout_path_it_checked(self):
+        o = self.other  # same dirty-file setup as above: the merge changes first.md, which is dirty in the checkout
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        put(os.path.join(o, "docs/decisions/first.md"), record("D-001", "first") + "pr edit\n")
+        sh(o, "git", "commit", "-qam", "pr edits first"); sh(o, "git", "push", "-q", "origin", "feat")
+        put(os.path.join(self.co, "docs/decisions/first.md"), "my edit\n")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn(os.path.realpath(self.co), out)  # the checkout that was checked, by path
+
     def test_after_merge_failure_is_reported_and_the_merge_stays(self):
         sh(self.other, "git", "checkout", "-q", "main")
         cfg = dict(CONFIG, merge=dict(CONFIG["merge"], afterMerge=["exit 3"]))
@@ -562,9 +572,31 @@ class AfterPush(Env):
         self.host.on_wait = lambda: shutil.rmtree(os.path.dirname(self.merge_tree()))
         self.assert_clean_stop(*self.run_merge("7", "--confirm"))
 
+    def base_loses(self, text):
+        """The base moves during the wait: its .github/stamp.json is removed when text is None, else rewritten to text."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        if text is None:
+            sh(o, "git", "rm", "-q", ".github/stamp.json")
+        else:
+            put(os.path.join(o, ".github/stamp.json"), text)
+        sh(o, "git", "commit", "-qam", "base loses its config")
+        sh(o, "git", "push", "-q", "origin", "main")
+
+    def assert_base_lost(self, rc, out):
+        self.assert_clean_stop(rc, out)
+        lines = [l for l in out.splitlines() if "base lost its config" in l]
+        self.assertEqual(len(lines), 1, out)  # one line, from merge
+        self.assertTrue(lines[0].startswith("merge: "), lines[0])
+
     def test_the_config_is_gone_at_the_base_check(self):
-        self.host.on_wait = lambda: os.remove(os.path.join(self.merge_tree(), ".github/stamp.json"))
-        self.assert_clean_stop(*self.run_merge("7", "--confirm"))
+        self.host.on_wait = lambda: self.base_loses(None)
+        self.assert_base_lost(*self.run_merge("7", "--confirm"))
+
+    def test_the_kinds_are_gone_at_the_base_check(self):
+        self.host.on_wait = lambda: self.base_loses(json.dumps({k: v for k, v in CONFIG.items() if k != "kinds"}))
+        self.assert_base_lost(*self.run_merge("7", "--confirm"))
 
     def test_any_error_after_the_push_reverts_the_claim(self):
         def boom():
@@ -1337,8 +1369,40 @@ class GhHalf(Env):
             self.assertEqual(self.head(), before)  # nothing was pushed
             self.assertNotIn("pr merge", self.calls())
 
+    def test_a_partial_merge_block_takes_the_defaults_for_the_missing_fields(self):
+        put_base_config(self, json.dumps({"defaultBranch": "main", "merge": {"method": "squash"}}))
+        self.set(contexts=["gates"])
+        self.host = None  # main builds the Host from the filled defaults: requiredChecks "protection"
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        log = self.calls()
+        self.assertIn("pr merge 7 --squash --match-head-commit", log)  # method from the file
+        self.assertIn("branches/main/protection/required_status_checks", log)  # requiredChecks default
+        filled = [l for l in out.splitlines() if all(f in l for f in ("deadlineMinutes", "requiredChecks", "afterMerge"))]
+        self.assertEqual(len(filled), 1, out)  # one line names the fields it filled
+        self.assertNotIn("method", filled[0])  # the file's own field is not filled
+
+    def test_a_config_without_defaultBranch_reads_it_from_the_host(self):
+        put_base_config(self, json.dumps({"merge": dict(CONFIG["merge"])}))
+        self.set(default_branch="trunk")
+        rc, out = self.run_merge("7", host=self.gh_host())
+        self.assertEqual(rc, 0, out)
+        self.assertIn("repo view", self.calls())
+        self.assertIn("main is not the default branch (trunk)", out)
+
+def put_base_config(env, text):
+    """Commit `text` as .github/stamp.json on origin's main from the other clone. env.co keeps its local checkout."""
+    o = env.other
+    sh(o, "git", "fetch", "-q", "origin")
+    sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+    put(os.path.join(o, ".github/stamp.json"), text)
+    sh(o, "git", "commit", "-qam", "base config")
+    sh(o, "git", "push", "-q", "origin", "main")
+    sh(env.co, "git", "fetch", "-q", "origin")  # the base is visible to env.co; its checkout is not pulled
+
 class ConfigFile(Env):
-    """A config file that exists but is broken: stop with one line that names the file, never the defaults."""
+    """The merge block and defaultBranch come from the base branch's .github/stamp.json, never the local checkout.
+    A base file that is broken stops with one line that names the file, never the defaults."""
     def stops_on(self, problem):
         rc, out = self.run_merge("7")
         self.assertEqual(rc, 1, out)
@@ -1348,14 +1412,33 @@ class ConfigFile(Env):
         self.assertIn(problem, lines[0])
         self.assertNotIn("defaults", out)
 
-    def test_bad_json_stops_with_one_line_naming_the_file(self):
-        put(os.path.join(self.co, ".github/stamp.json"), "{not json")
+    def test_bad_json_on_the_base_stops_with_one_line_naming_the_file(self):
+        put_base_config(self, "{not json")
         self.stops_on("line 1")
 
-    def test_no_default_branch_stops_with_one_line_naming_the_file(self):
-        cfg = {k: v for k, v in CONFIG.items() if k != "defaultBranch"}
-        put(os.path.join(self.co, ".github/stamp.json"), json.dumps(cfg))
-        self.stops_on("defaultBranch")
+    def test_an_unknown_merge_field_stops_with_one_line_naming_it(self):
+        put_base_config(self, json.dumps({"merge": {"methd": "squash"}}))
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 1, out)
+        lines = [l for l in out.splitlines() if l.strip()]
+        self.assertEqual(len(lines), 1, out)
+        self.assertIn("unknown field", lines[0])
+        self.assertIn("methd", lines[0])
+
+    def test_the_merge_block_comes_from_the_base_not_the_checkout(self):
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], method="squash"))))  # the checkout keeps "merge"
+        methods = []
+        real = self.host.merge
+        self.host.merge = lambda n, m, sha: (methods.append(m), real(n, m, sha))[1]
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(methods, ["squash"])
+        self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
+
+    def test_defaultBranch_comes_from_the_base_not_the_checkout(self):
+        put_base_config(self, json.dumps(dict(CONFIG, defaultBranch="trunk")))  # the checkout says "main"
+        rc, out = self.run_merge("7")
+        self.assertIn("main is not the default branch (trunk)", out)
 
 class ClaimSkipped(Env):
     """A base with no stamp kinds: the claim and the numbering check are skipped, and stamp.mjs never runs."""
