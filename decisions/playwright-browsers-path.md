@@ -15,6 +15,9 @@ it unpacks in 0.75 s, through `npx -y node@22 node_modules/playwright/cli.js ins
 
 Home: `playwright_path_hit` in hooks/guard.py, called from `judge_shell` at step 3c.
 
+Known limits, out of scope because the rule covers local shells: `cross-env`, `timeout N env`,
+`setx`, a `<<<` here-string, a CI yaml `env:` key, and `node -e` or `python -c`.
+
 ## Incident
 
 On 2026-10-10 a feed-build session set the variable to a scratch directory. It wanted to work

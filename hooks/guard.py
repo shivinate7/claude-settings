@@ -5115,6 +5115,8 @@ LN_DESCENDS_REASON = (
 # `Set-Item env:VAR` or `SetEnvironmentVariable`. A read, a grep, and `unset` set nothing. The name
 # is folded to upper case in every form. Shell words come from `segment_tokens`, assignments from
 # `ASSIGNMENT`, and the file write from `_VAR_TOKEN`: no parser of its own.
+# KNOWN LIMITS, out of scope (the rule covers local shells): `cross-env`, `timeout N env`, `setx`,
+# a `<<<` here-string, a CI yaml `env:` key, and `node -e` or `python -c`.
 PLAYWRIGHT_VAR = "PLAYWRIGHT_BROWSERS_PATH"
 ASSIGNING_BUILTINS = ("export", "declare", "typeset", "readonly", "local", "set")
 PLAYWRIGHT_PS_SET = re.compile(
@@ -5125,7 +5127,10 @@ PLAYWRIGHT_PS_SET = re.compile(
 
 # A shell profile or `.envrc`: a write there sets the variable for every later shell.
 PLAYWRIGHT_PROFILE = re.compile(r"\.(?:zshrc|bashrc|profile|zprofile|bash_profile|envrc)\b")
-_NULL_OR_DUP = re.compile(r"\d*>+\s*/dev/null|\d*>&\d+")
+# SILENT_WRITE_REDIRECT (the null-device redirects) leaves `N>&N` alone, because that rule wants
+# a duplicate to count as output. Here a duplicate is no file target, so it is dropped as well.
+_FD_DUP = re.compile(r"\d*>&\d+")
+_REDIRECT_TO_PROFILE = re.compile(r">+\s*[^\s|;&]*" + PLAYWRIGHT_PROFILE.pattern)
 
 
 def _is_playwright_assign(token: str) -> bool:
@@ -5163,15 +5168,17 @@ def playwright_path_hit(segment: str, depth=0, to_file=False) -> str:
     `to_file` says the segment's output goes to a profile (a `tee` further down the pipe). The
     file-write form counts only when the written text starts with the assignment.
     """
-    found = PLAYWRIGHT_PS_SET.search(segment)
-    if found:
-        return found.group(0)
     tokens = segment_tokens(segment) or []
-    if (to_file or ">" in _NULL_OR_DUP.sub(" ", segment)) and len(tokens) > 1 and basename(
+    at = resolve_command(tokens) if tokens else None
+    if at is None or basename(tokens[at]) not in ENV_PATTERN_COMMANDS:
+        found = PLAYWRIGHT_PS_SET.search(segment)
+        if found:
+            return found.group(0)
+    cleaned = _FD_DUP.sub(" ", SILENT_WRITE_REDIRECT.sub(" ", segment))
+    if (to_file or _REDIRECT_TO_PROFILE.search(cleaned)) and len(tokens) > 1 and basename(
             tokens[0]) in ("echo", "printf"):
-        args = [t for t in tokens[1:] if not t.startswith("-")]
-        written = args[0].removeprefix("export ").lstrip() if args else ""
-        if _is_playwright_assign(written):
+        written = " ".join(t for t in tokens[1:] if not t.startswith("-"))
+        if _is_playwright_assign(written.removeprefix("export ").lstrip()):
             return PLAYWRIGHT_VAR + " written to a file"
     return _playwright_tokens_hit(tokens, depth)
 
