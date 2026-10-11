@@ -1576,6 +1576,164 @@ def print_dead_rooted_report(decisions, out=sys.stdout):
     print("  dead-rooted servers examined: %d" % len(decisions), file=out)
 
 
+# ------------------------------------------------------------------ the simulator tier
+#
+# decisions/sweep-shuts-down-idle-simulators.md. One home for "idle": `sim_keep_code` is the
+# test; the guard's reuse rule (hooks/guard.py) imports it from here.
+SIM_IDLE_SECONDS = 3600
+SIM_SHUTDOWN_CAP = 4  # per run; the rest wait for the next run
+_SIM_APP_RE = re.compile(r"^\S*/Simulator\.app/Contents/MacOS/Simulator(?:\s|$)")
+_XCODE_APP_RE = re.compile(r"^\S*/Xcode[^/]*\.app/Contents/MacOS/Xcode(?:\s|$)")
+
+
+def sim_available():
+    return not sys.platform.startswith("win") and shutil.which("xcrun") is not None
+
+
+def sim_read_devices():
+    """Every simulator as {udid, name, state, deviceTypeIdentifier, runtime}; None if unreadable."""
+    try:
+        answer = subprocess.run(["xcrun", "simctl", "list", "devices", "--json"],
+                                capture_output=True, text=True, timeout=60)
+        if answer.returncode != 0:
+            return None
+        groups = json.loads(answer.stdout)["devices"]
+        return [{**d, "runtime": runtime} for runtime, rows in groups.items() for d in rows]
+    except Exception:
+        return None
+
+
+def sim_read_boots(record_path):
+    """{udid: {"at": epoch seconds or None when unreadable, "pid", "start"}} from the NEWEST line
+    per UDID. "pid" and "start" name the boot's launchd_sim; either is None when the line has none."""
+    boots = {}
+    try:
+        with open(record_path, encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    row = json.loads(line)
+                    udid = row["udid"]
+                except Exception:
+                    continue
+                try:
+                    at = calendar.timegm(time.strptime(row["at"], "%Y-%m-%dT%H:%M:%SZ"))
+                except Exception:
+                    at = None
+                boots[udid] = {"at": at, "pid": row.get("launchd_pid"),
+                               "start": row.get("launchd_start")}
+    except OSError:
+        pass
+    return boots
+
+
+def _sim_live_launchd(table, udid):
+    """(pid, ps lstart text) of UDID's live launchd_sim; (None, None) when not found or unreadable."""
+    pids = sorted(pid for pid, (_, _, cmd) in table.items() if "launchd_sim" in cmd and udid in cmd)
+    if len(pids) != 1:  # none, or two: no single launchd_sim is this boot, so unclear
+        return None, None
+    try:
+        answer = subprocess.run(["ps", "-o", "pid=,lstart=", "-p", str(pids[0])],
+                                capture_output=True, text=True, timeout=30, env=_ps_env())
+        if answer.returncode == 0:
+            for line in answer.stdout.splitlines():
+                parts = line.strip().split(None, 1)
+                if len(parts) == 2 and parts[0] == str(pids[0]):
+                    return pids[0], parts[1].strip()
+    except Exception:
+        pass
+    return pids[0], None
+
+
+def _sim_device_tree(table, udid):
+    """The pids of UDID's launchd_sim and every descendant."""
+    tree = {pid for pid, (_, _, cmd) in table.items() if "launchd_sim" in cmd and udid in cmd}
+    grew = True
+    while grew:
+        grew = False
+        for pid, (ppid, _, _) in table.items():
+            if pid not in tree and ppid.isdigit() and int(ppid) in tree:
+                tree.add(pid)
+                grew = True
+    return tree
+
+
+def sim_keep_code(device, boots, table, now):
+    """None when DEVICE is idle (ruling 2, all four tests), else the code naming why it is not.
+    DEVICE must have a line in BOOTS. TABLE is the `_read_ps_table` answer, or None when unreadable."""
+    if table is None:
+        return "process-table-unreadable"
+    commands = [cmd for _, _, cmd in table.values()]
+    if any(_SIM_APP_RE.match(c) for c in commands):
+        return "simulator-app-running"
+    if any(_XCODE_APP_RE.match(c) for c in commands):
+        return "xcode-running"
+    record = boots[device["udid"]]
+    if record["at"] is None:
+        return "start-time-unreadable"
+    if now - record["at"] < SIM_IDLE_SECONDS:
+        return "booted-recently"
+    # The newest record must be THIS boot: a device booted again by hand has a new launchd_sim.
+    if _sim_live_launchd(table, device["udid"]) != (record["pid"], record["start"]) \
+            or record["start"] is None:
+        return "boot-record-mismatch"
+    own = _sim_device_tree(table, device["udid"])
+    needles = (device["udid"], device["name"], "booted")
+    for pid, (_, _, cmd) in table.items():
+        if pid not in own and any(n in cmd for n in needles):
+            return "held-by-process"
+    return None
+
+
+def sim_tier(confirm, record_path=None):
+    """One decision per recorded UDID that is booted: {"udid", "name", "action": "shutdown"|"keep",
+    "reason"}. A shutdown is one `xcrun simctl shutdown <UDID>`, run only under CONFIRM. Any read
+    that failed keeps. [] when there is no xcrun or the platform is Windows."""
+    if not sim_available():
+        return []
+    record_path = record_path or os.path.join(guard.config_dir(), "state", "sim-boots.jsonl")
+    boots = sim_read_boots(record_path)
+    if not boots:
+        return []
+    devices = sim_read_devices()
+    table = _read_ps_table()
+    now = time.time()
+    out, planned = [], 0
+    for udid in boots:
+        dev = next((d for d in devices or () if d["udid"] == udid), None)
+        if devices is not None and (dev is None or dev["state"] != "Booted"):
+            continue
+        code = "simctl-unreadable" if devices is None else sim_keep_code(dev, boots, table, now)
+        if code is None and planned >= SIM_SHUTDOWN_CAP:
+            code = "run-cap-reached"
+        decision = {"udid": udid, "name": dev["name"] if dev else "", "action": "keep",
+                    "reason": code or "idle"}
+        if code is None:
+            planned += 1
+            decision["action"] = "shutdown"
+            if confirm:
+                try:
+                    run = subprocess.run(["xcrun", "simctl", "shutdown", udid],
+                                         capture_output=True, text=True, timeout=60)
+                    if run.returncode != 0:
+                        decision["error"] = "exit %d" % run.returncode
+                except Exception as exc:
+                    decision["error"] = type(exc).__name__
+        out.append(decision)
+    return out
+
+
+def print_sim_report(decisions, confirm, out=sys.stdout):
+    if not decisions:
+        return
+    print("", file=out)
+    print("== simulators ==", file=out)
+    for d in decisions:
+        verb = ("STOP" if confirm else "WOULD STOP") if d["action"] == "shutdown" else "KEEP"
+        print("  simulator %-10s %s %-24s %s%s" % (
+            verb, d["udid"], d["name"], d["reason"],
+            " FAILED " + d["error"] if d.get("error") else ""), file=out)
+
+
 # A Claude Code Bash call starts every command as `zsh -c 'source ~/.claude/shell-snapshots/...
 # && <command>'`, so that path sits in the argv of the process and stays there after the
 # session is gone. Measured on this machine: 10 live processes carry it, read in 0.03 s.
@@ -1664,11 +1822,15 @@ def _pmap(fn, items, acts, pool=None):
     return pool.map(fn, items)
 
 
+def _ps_env():
+    return {**os.environ, "LC_ALL": "C"}  # lstart text must not depend on the caller's locale
+
+
 def _read_ps_table():
     """`{pid: (ppid, uid, command)}` (strings) from ONE `ps`, or None when it could not answer."""
     try:
         answer = subprocess.run(["ps", "-axo", "pid=,ppid=,uid=,command="],
-                                capture_output=True, text=True, timeout=30)
+                                capture_output=True, text=True, timeout=30, env=_ps_env())
     except Exception:
         return None
     if answer.returncode != 0:
@@ -2540,6 +2702,7 @@ def _sweep_roots(args, roots, restore_log_path, mode):
                 reap_listener(d)
                 reaped.append(d)
         print_grace_period_report(reaped)
+    print_sim_report(sim_tier(args.confirm), args.confirm)
     return 0
 
 

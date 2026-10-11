@@ -6164,6 +6164,260 @@ WINDOWS_CHECKERS = {
 }
 
 
+# --------------------------------------------------------------------------- the simulator boot rules
+#
+# Owner rulings 2026-10-10. A boot is `xcrun simctl boot`, an `xcodebuild -destination` that names a
+# shut-down simulator, or the simulator MCP control tool's `launch` naming a shut-down device.
+#   simulator-boot-cap   refuses a boot while two simulators are already booted, naming both.
+#   simulator-boot-twin  refuses a boot while an IDLE booted device of the same deviceTypeIdentifier
+#                        and runtime exists, naming its UDID. "Idle" is the shutdown tier's own
+#                        test (owner 2026-10-10): booted 1 hour or more, no outside holder process,
+#                        Simulator.app and Xcode.app not running, both reads readable. "Booted 1
+#                        hour" is the newest line in <config>/state/sim-boots.jsonl. Unrecorded is
+#                        not idle.
+#   The cap counts EVERY booted device, owner-booted and unrecorded included.
+# A fake `xcrun` and `ps` on PATH answer `simctl list devices` and the process table. A reason names
+# UDIDs and device names only, never the config folder or the record file.
+
+SIM_MCP = "mcp__Claude_Code_iOS_Simulator__control"
+SIM_RT = "com.apple.CoreSimulator.SimRuntime.iOS-26-0"
+SIM_RT_OLD = "com.apple.CoreSimulator.SimRuntime.iOS-25-0"
+SIM_TYPE_PRO = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro"
+SIM_TYPE_AIR = "com.apple.CoreSimulator.SimDeviceType.iPad-Air"
+SIM_TYPE_MINI = "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Mini"
+SIM_UA = "1A2B3C4D-0000-4000-8000-00000000000A"   # Alpha Pro, booted
+SIM_UB = "1A2B3C4D-0000-4000-8000-00000000000B"   # Beta Air, booted
+SIM_UC = "1A2B3C4D-0000-4000-8000-00000000000C"   # Gamma Mini, shut down
+SIM_UT0 = "1A2B3C4D-0000-4000-8000-0000000000D0"  # Idle Pro, booted: the twin
+SIM_UT1 = "1A2B3C4D-0000-4000-8000-0000000000D1"  # Twin Pro, shut down
+# The launchd_sim of each booted device: the pid and the start time the fake `ps` gives it, and the
+# same pair in the boot record. A record that names another pid or start time is an older boot.
+LAUNCHD_PID = {SIM_UA: 4001, SIM_UB: 4002, SIM_UT0: 4003}
+LSTART = "Sat Oct 10 07:00:00 2026"
+LAUNCHD_CMD = ("/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/"
+               "Resources/launchd_sim")
+
+
+def sim_iso(seconds_ago):
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - seconds_ago))
+
+
+def make_fake_xcrun(folder, rows):
+    """A stand-in `xcrun` that answers every call with the device list in ROWS.
+
+    ROWS are (udid, name, state, deviceTypeIdentifier, runtime). The fake prints with the shell's
+    printf builtin, so it needs no other program on the PATH. Windows has no xcrun, so no case
+    using this runs there (see register_simulator_boot_cases).
+    """
+    grouped = {}
+    for udid, name, state, dtype, runtime in rows:
+        grouped.setdefault(runtime, []).append({
+            "udid": udid, "name": name, "state": state, "deviceTypeIdentifier": dtype,
+            "isAvailable": True})
+    text = json.dumps({"devices": grouped})
+    assert "'" not in text, "the printf body is single-quoted"
+    path = os.path.join(folder, "xcrun")
+    write(path, "#!/bin/sh\nprintf '%s' '" + text + "'\n")
+    os.chmod(path, 0o755)
+    # A quiet process table beside it: readable, with each booted device's launchd_sim and no holder.
+    make_fake_ps(folder, [("1", "0", "0", "/sbin/launchd")] + [
+        (str(LAUNCHD_PID[udid]), "1", "0", LAUNCHD_CMD + " " + udid)
+        for udid, _, state, _, _ in rows if state == "Booted"])
+    return folder
+
+
+def write_sim_records(config_dir, records):
+    """The boot record, one JSON line per boot: {udid, name, deviceTypeIdentifier, runtime, at,
+    launchd_pid, launchd_start}. The last two name the boot's launchd_sim, as `ps` prints them."""
+    write(os.path.join(config_dir, "state", "sim-boots.jsonl"),
+          "".join(json.dumps(r) + "\n" for r in records))
+
+
+def register_simulator_boot_cases():
+    twin_idle_rec = {"udid": SIM_UT0, "name": "Idle Pro", "deviceTypeIdentifier": SIM_TYPE_PRO,
+                     "runtime": SIM_RT, "at": sim_iso(2 * 3600),
+                     "launchd_pid": LAUNCHD_PID[SIM_UT0], "launchd_start": LSTART}
+
+    def twin_rows(state_of_ut0_runtime=SIM_RT, type_of_ut0=SIM_TYPE_PRO):
+        return [(SIM_UT0, "Idle Pro", "Booted", type_of_ut0, state_of_ut0_runtime),
+                (SIM_UT1, "Twin Pro", "Shutdown", SIM_TYPE_PRO, SIM_RT)]
+
+    fixtures = {
+        # two booted, one shut down (a different device type, so the twin rule stays quiet)
+        "cap": (make_fake_xcrun(os.path.join(ROOT, "sim_cap"), [
+            (SIM_UA, "Alpha Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
+            (SIM_UB, "Beta Air", "Booted", SIM_TYPE_AIR, SIM_RT),
+            (SIM_UC, "Gamma Mini", "Shutdown", SIM_TYPE_MINI, SIM_RT)]), None),
+        # one booted: a second may still boot
+        "one": (make_fake_xcrun(os.path.join(ROOT, "sim_one"), [
+            (SIM_UA, "Alpha Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
+            (SIM_UC, "Gamma Mini", "Shutdown", SIM_TYPE_MINI, SIM_RT)]), None),
+        "twin": (make_fake_xcrun(os.path.join(ROOT, "sim_twin"), twin_rows()),
+                 [twin_idle_rec]),
+        "twin_recent": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_recent"), twin_rows()),
+                        [dict(twin_idle_rec, at=sim_iso(10 * 60))]),
+        "twin_unrecorded": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_unrec"), twin_rows()),
+                            []),
+        "twin_other_runtime": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_rt"),
+                                               twin_rows(state_of_ut0_runtime=SIM_RT_OLD)),
+                               [dict(twin_idle_rec, runtime=SIM_RT_OLD)]),
+        "twin_other_type": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_type"),
+                                            twin_rows(type_of_ut0=SIM_TYPE_AIR)),
+                            [dict(twin_idle_rec, deviceTypeIdentifier=SIM_TYPE_AIR)]),
+        # The twin was booted 2 hours ago and shut down, then booted by hand: the live launchd_sim
+        # has a new pid and start time, and the record is the older boot.
+        "twin_rebooted": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_rebooted"), twin_rows()),
+                          [dict(twin_idle_rec, launchd_pid=4900,
+                                launchd_start="Fri Oct 9 09:00:00 2026")]),
+    }
+    cfgs = {}
+    for name, (folder, records) in fixtures.items():
+        cfg = os.path.join(ROOT, "simcfg_" + name)
+        os.makedirs(cfg, exist_ok=True)
+        if records is not None:
+            write_sim_records(cfg, records)
+        cfgs[name] = (folder, cfg)
+
+    def on(name):
+        folder, cfg = cfgs[name]
+        return folder + os.pathsep + PY_PATH, cfg
+
+    cap_path, cap_cfg = on("cap")
+    one_path, one_cfg = on("one")
+    twin_path, twin_cfg = on("twin")
+
+    # Rule simulator-boot-cap. The reason names both booted UDIDs.
+    sh("boot a third simulator with two booted: bash simctl boot",
+       "xcrun simctl boot " + SIM_UC, "deny", rule="simulator-boot-cap",
+       env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+    sh("boot a third simulator with two booted: xcodebuild destination",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini'",
+       "deny", rule="simulator-boot-cap", env_path=cap_path, config=cap_cfg,
+       carries=(SIM_UA, SIM_UB))
+    add("boot a third simulator with two booted: simulator MCP launch",
+        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device=SIM_UC,
+        env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+    sh("control: one booted, a second boot is allowed",
+       "xcrun simctl boot " + SIM_UC, "allow", env_path=one_path, config=one_cfg)
+    sh("control: a read of the device list is not a boot",
+       "xcrun simctl list devices", "allow", env_path=cap_path, config=cap_cfg)
+    # Owner ruling 2026-10-10: the cap counts every booted device. One is recorded and idle, the
+    # other is owner-booted and unrecorded; both count.
+    mixed_cap_cfg = os.path.join(ROOT, "simcfg_cap_mixed")
+    os.makedirs(mixed_cap_cfg, exist_ok=True)
+    write_sim_records(mixed_cap_cfg, [sim_boot_record(SIM_UA, "Alpha Pro", SIM_TYPE_PRO, SIM_RT,
+                                                      2 * 3600)])
+    sh("boot a third simulator: a recorded idle device and an owner-booted one both count",
+       "xcrun simctl boot " + SIM_UC, "deny", rule="simulator-boot-cap",
+       env_path=cap_path, config=mixed_cap_cfg, carries=(SIM_UA, SIM_UB))
+
+    # Rule simulator-boot-twin. The reason names the idle twin's UDID.
+    sh("boot a device with an idle booted twin: bash simctl boot",
+       "xcrun simctl boot " + SIM_UT1, "deny", rule="simulator-boot-twin",
+       env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
+    add("boot a device with an idle booted twin: simulator MCP launch",
+        "deny", rule="simulator-boot-twin", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
+    sh("control: the twin booted 10 minutes ago is not idle",
+       "xcrun simctl boot " + SIM_UT1, "allow", env_path=folder_path("twin_recent"),
+       config=cfgs["twin_recent"][1])
+    sh("control: an unrecorded booted twin is not idle",
+       "xcrun simctl boot " + SIM_UT1, "allow", env_path=folder_path("twin_unrecorded"),
+       config=cfgs["twin_unrecorded"][1])
+    sh("control: an idle twin on another runtime does not match",
+       "xcrun simctl boot " + SIM_UT1, "allow", env_path=folder_path("twin_other_runtime"),
+       config=cfgs["twin_other_runtime"][1])
+    sh("control: an idle twin of another device type does not match",
+       "xcrun simctl boot " + SIM_UT1, "allow", env_path=folder_path("twin_other_type"),
+       config=cfgs["twin_other_type"][1])
+    sh("boot a device with a twin booted by hand after its recorded boot: the record is older",
+       "xcrun simctl boot " + SIM_UT1, "allow", env_path=folder_path("twin_rebooted"),
+       config=cfgs["twin_rebooted"][1])
+
+
+def folder_path(name):
+    return os.path.join(ROOT, "sim_" + name) + os.pathsep + PY_PATH
+
+
+def make_fake_ps(folder, rows, rc=0):
+    """Replace the quiet `ps` in FOLDER with one that answers the process table ROWS, (pid, ppid,
+    uid, command), or fails with RC. A row carries no single quote."""
+    if rc:
+        body = "exit %d\n" % rc
+    else:
+        table = "".join("%s %s %s %s\n" % row for row in rows)
+        starts = [pid for pid, _, _, cmd in rows if "launchd_sim" in cmd]
+        # A call whose argv names `lstart` gets "PID START" lines when its -o list names pid=,
+        # else "START" lines, one per launchd_sim row. Any other call gets the process table.
+        pid_lines = "".join("%s %s\n" % (pid, LSTART) for pid in starts)
+        start_lines = "".join(LSTART + "\n" for _ in starts)
+        for text in (table, pid_lines, start_lines):
+            assert "'" not in text, "the printf body is single-quoted"
+        body = ("case \"$*\" in\n"
+                "  *lstart*) case \"$*\" in *pid=*) printf '%s' '" + pid_lines + "' ;;"
+                " *) printf '%s' '" + start_lines + "' ;; esac ;;\n"
+                "  *) printf '%s' '" + table + "' ;;\n"
+                "esac\n")
+    ps = os.path.join(folder, "ps")
+    write(ps, "#!/bin/sh\n" + body)
+    os.chmod(ps, 0o755)
+    return folder
+
+
+def sim_boot_record(udid, name, dtype, runtime, seconds_ago):
+    """One boot-record line: {udid, name, deviceTypeIdentifier, runtime, at, launchd_pid,
+    launchd_start}, `at` ISO-8601 UTC. The launchd fields name the boot's launchd_sim."""
+    at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - seconds_ago))
+    return {"udid": udid, "name": name, "deviceTypeIdentifier": dtype, "runtime": runtime,
+            "at": at, "launchd_pid": LAUNCHD_PID[udid], "launchd_start": LSTART}
+
+
+def register_simulator_hold_cases():
+    """The reuse rule reads the shutdown tier's own idle test: a twin that a process holds, or that
+    Simulator.app or Xcode.app keeps in use, is not idle, so it is not offered. The device's own
+    launchd_sim is not a holder of itself. Every `ps` here is a fixture, never the real table."""
+    # The table holds the twin's own launchd_sim, which the record names, and nothing else.
+    quiet = [("1", "0", "0", "/sbin/launchd"),
+             (str(LAUNCHD_PID[SIM_UT0]), "1", "0", LAUNCHD_CMD + " " + SIM_UT0)]
+    twin = [(SIM_UT0, "Idle Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
+            (SIM_UT1, "Twin Pro", "Shutdown", SIM_TYPE_PRO, SIM_RT)]
+    cfg = os.path.join(ROOT, "simcfg_hold")
+    os.makedirs(cfg, exist_ok=True)
+    write_sim_records(cfg, [sim_boot_record(SIM_UT0, "Idle Pro", SIM_TYPE_PRO, SIM_RT, 2 * 3600)])
+
+    def env_for(name, ps_rows, ps_rc=0):
+        path = os.path.join(ROOT, "sim_" + name)
+        make_fake_xcrun(path, twin)
+        make_fake_ps(path, ps_rows, ps_rc)
+        return path + os.pathsep + PY_PATH
+
+    sh("boot a device with an idle twin: the twin's own launchd_sim is not a holder",
+       "xcrun simctl boot " + SIM_UT1, "deny", rule="simulator-boot-twin",
+       env_path=env_for("hold_own", quiet), config=cfg, carries=(SIM_UT0,))
+    holds = [
+        ("a twin held by a process outside its tree is not idle", quiet + [
+            ("500", "400", "0", "xcrun simctl spawn " + SIM_UT0 + " log stream")]),
+        ("a twin named by a process is not idle", quiet + [
+            ("500", "1", "0", "/usr/local/bin/probe --device Idle Pro")]),
+        ("a twin is not idle while Simulator.app runs", quiet + [
+            ("600", "1", "0", "/Applications/Simulator.app/Contents/MacOS/Simulator")]),
+        ("a twin is not idle while Xcode.app runs", quiet + [
+            ("600", "1", "0", "/Applications/Xcode.app/Contents/MacOS/Xcode")]),
+    ]
+    for index, (label, rows) in enumerate(holds):
+        sh("control: " + label, "xcrun simctl boot " + SIM_UT1, "allow",
+           env_path=env_for("hold_%d" % index, rows), config=cfg)
+    sh("control: a twin is not idle when the process table cannot be read",
+       "xcrun simctl boot " + SIM_UT1, "allow",
+       env_path=env_for("hold_ps_rc", [], ps_rc=1), config=cfg)
+
+
+# The simulator cases need a POSIX shell for the fake xcrun and ps. Windows has neither to fake.
+if os.name != "nt":
+    register_simulator_boot_cases()
+    register_simulator_hold_cases()
+
+
 def main():
     mode = os.environ.get("GUARD_TESTS", "")
     if mode not in GUARD_TESTS_MODES:
