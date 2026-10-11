@@ -6193,6 +6193,7 @@ SIM_UC = "1A2B3C4D-0000-4000-8000-00000000000C"   # Gamma Mini, shut down
 SIM_UT0 = "1A2B3C4D-0000-4000-8000-0000000000D0"  # Idle Pro, booted: the twin
 SIM_UT1 = "1A2B3C4D-0000-4000-8000-0000000000D1"  # Twin Pro, shut down
 SIM_UE = "1A2B3C4D-0000-4000-8000-00000000000E"  # Named-UDID Mini, booted: its name is SIM_UC
+SIM_UF = "1A2B3C4D-0000-4000-8000-00000000000F"  # Delta, shut down on RT only
 # The launchd_sim of each booted device: the pid and the start time the fake `ps` gives it, and the
 # same pair in the boot record. A record that names another pid or start time is an older boot.
 LAUNCHD_PID = {SIM_UA: 4001, SIM_UB: 4002, SIM_UT0: 4003, SIM_UE: 4004}
@@ -6291,6 +6292,11 @@ def register_simulator_boot_cases():
             (SIM_UA, "Alpha Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
             (SIM_UE, "Gamma Mini", "Booted", SIM_TYPE_MINI, SIM_RT),
             (SIM_UC, "Gamma Mini", "Shutdown", SIM_TYPE_MINI, SIM_RT_OLD)]), None),
+        # Exactly two booted (the cap is full). Delta is shut down on one runtime only.
+        "cap_latest": (make_fake_xcrun(os.path.join(ROOT, "sim_cap_latest"), [
+            (SIM_UA, "Alpha Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
+            (SIM_UE, "Gamma Mini", "Booted", SIM_TYPE_MINI, SIM_RT),
+            (SIM_UF, "Delta", "Shutdown", SIM_TYPE_AIR, SIM_RT)]), None),
     }
     cfgs = {}
     for name, (folder, records) in fixtures.items():
@@ -6357,6 +6363,18 @@ def register_simulator_boot_cases():
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini,OS=25.0'",
        "deny", rule="simulator-boot-cap", env_path=os_split_path, config=os_split_cfg,
        carries=(SIM_UA, SIM_UE))
+    # OS=latest is no version, so it matches no runtime. The guard must not allow a boot on it
+    # when the only Delta copy is shut down: the cap is full, so the boot is refused.
+    latest_path, latest_cfg = on("cap_latest")
+    sh("boot a shut-down device by name with OS=latest, cap full: xcodebuild destination",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=latest'",
+       "deny", rule="simulator-boot-cap", env_path=latest_path, config=latest_cfg,
+       carries=(SIM_UA, SIM_UE))
+    # An id= destination names one device. OS=26.0 must not hide a shut-down 25.0 copy from the check.
+    sh("boot a shut-down 25.0 copy by id with OS=26.0, cap full: xcodebuild destination",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC
+       + ",OS=26.0'", "deny", rule="simulator-boot-cap", env_path=os_split_path,
+       config=os_split_cfg, carries=(SIM_UA, SIM_UE))
     sh("control: one booted, a second boot is allowed",
        "xcrun simctl boot " + SIM_UC, "allow", env_path=one_path, config=one_cfg)
     sh("control: a read of the device list is not a boot",
