@@ -115,16 +115,20 @@ def parent_pid(pid: int):
         return None
 
 
-def tree_root_orphaned(pid: int, target: str):
+BATCH_TIMEOUT = 30  # seconds for the one cwd batch read; the hook's own limit is 60
+
+
+def tree_root_orphaned(pid: int, target: str, cwd_of=None):
     """True when the root of PID's in-TARGET process tree is orphaned. False when a live parent
     outside TARGET holds the tree. None when a read could not tell."""
+    cwd_of = cwd_of or sweep.process_cwd
     current = pid
     for _ in range(MAX_CLIMB):
         orphan = sweep.is_orphan(current)
         if orphan is not False:
             return orphan
         parent = parent_pid(current)
-        cwd = sweep.process_cwd(parent) if parent else None
+        cwd = cwd_of(parent) if parent else None
         if cwd is None:
             return None
         if not sweep._cwd_under_checkout(cwd, target):
@@ -148,15 +152,23 @@ def decide(target: str):
     pids = sweep.list_all_pids()
     if pids is None:
         return "unreadable-subject", []
+    cwd_of = sweep.process_cwd
+    if sys.platform == "darwin":
+        # One `lsof` for every pid: 1,300 per-pid reads at 27 ms overran the 60 s hook limit.
+        # A failed batch keeps everything; it never falls back to per-pid reads.
+        table = sweep._read_all_cwds_macos(BATCH_TIMEOUT)
+        if table is None:
+            return "unreadable-subject", []
+        cwd_of = sweep._first_cwd_by_pid(table).get
     decisions = []
     for pid in pids:
         if pid == os.getpid():
             continue
-        cwd = sweep.process_cwd(pid)
+        cwd = cwd_of(pid)
         if cwd is None or not sweep._cwd_under_checkout(cwd, target):
             continue
         base = {"pid": pid, "cwd": cwd, "command": sweep.process_command(pid)}
-        orphan = tree_root_orphaned(pid, target)
+        orphan = tree_root_orphaned(pid, target, cwd_of)
         if orphan is None:
             decisions.append(dict(base, action="keep", reason="unreadable-subject"))
             continue

@@ -116,8 +116,12 @@ Constraints for the batch read:
 
 Proof owed: a test that counts process reads in `decide()` and fails when the count grows
 with the pid count. It goes red on the per-pid code first. Then one full run on the
-feed-build machine, about 1,300 pids, timed under 60 s. Until that run, the timing is
-unmeasured.
+feed-build machine, about 1,300 pids, timed under 60 s.
+
+MEASURED 2026-10-10, this Mac, 1,004 pids, read-only `decide()` with no signal: 0.4 s in all
+(batch `lsof` 0.3 s for 795 cwd lines; pid list and `worktree_live_session` under 0.05 s each).
+The batch timeout is 30 s (`agent_end_reap.BATCH_TIMEOUT`). Unmeasured: a run at 1,300 pids
+on the feed-build machine; the 12 timeouts were not explained by the per-pid pass alone (above).
 
 ## Payload log
 

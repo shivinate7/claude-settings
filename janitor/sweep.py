@@ -1734,7 +1734,7 @@ def _all_cwds_macos():
     return _memo("cwds", _read_all_cwds_macos)
 
 
-def _read_all_cwds_macos():
+def _read_all_cwds_macos(timeout=60):
     """Every process's cwd as [(pid, cwd)], from ONE `lsof -d cwd -Fpn` (the per-pid read cost
     about 25 s per call on a real machine). `None` when lsof could not answer: any exit code
     but 0 or 1 (1 means some process was not readable, the same out-of-scope case as a
@@ -1742,7 +1742,7 @@ def _read_all_cwds_macos():
     "no process anywhere"."""
     try:
         answer = subprocess.run(["lsof", "-d", "cwd", "-Fpn"], capture_output=True, text=True,
-                                timeout=60)
+                                timeout=timeout)
     except Exception:
         return None
     if answer.returncode not in (0, 1):

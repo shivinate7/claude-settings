@@ -2703,7 +2703,37 @@ def pid_is_owned(pid: int, root: int):
     return None
 
 
-def foreign_pid_kill(tokens) -> str:
+AGENT_WORKTREE_RE = re.compile(r"/\.claude/worktrees/agent-([A-Za-z0-9_-]{1,64})(?:/|$)")
+
+
+def _pid_cwd(pid: int):
+    """Current directory of `pid`, or None when it could not be read."""
+    try:
+        if sys.platform.startswith("linux"):
+            return os.readlink("/proc/%d/cwd" % pid)
+        answer = subprocess.run(["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
+                                capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in answer.stdout.splitlines():
+        if line.startswith("n"):
+            return line[1:]
+    return None
+
+
+def in_own_agent_worktree(pid: int, transcript: str) -> bool:
+    """True when `pid`'s cwd is inside `.claude/worktrees/agent-<id>` and this session's
+    `subagents/` folder holds `agent-<id>.jsonl`. The folder is the transcript path minus `.jsonl`.
+    Any unreadable part reads False (foreign). Decision a-kill-by-pid-needs-an-owned-pid."""
+    if not transcript.endswith(".jsonl"):
+        return False
+    cwd = _pid_cwd(pid)
+    found = AGENT_WORKTREE_RE.search((cwd or "").replace("\\", "/"))
+    return bool(found) and os.path.isfile(
+        os.path.join(transcript[:-len(".jsonl")], "subagents", "agent-%s.jsonl" % found.group(1)))
+
+
+def foreign_pid_kill(tokens, transcript: str = "") -> str:
     """Return the first numeric pid a `kill` segment names that this session did not start.
 
     Only literal numbers are judged. `$!`, `$PID`, `%1` and `$(...)` cannot be read here, and
@@ -2736,6 +2766,8 @@ def foreign_pid_kill(tokens) -> str:
             root = session_root_pid()
         if not root:
             return ""
+        if in_own_agent_worktree(abs(number), transcript):
+            continue
         if pid_is_owned(abs(number) if number < -1 else number, root) is False:
             return arg
     return ""
@@ -5180,7 +5212,8 @@ def floor_hit(tool: str, tool_input) -> str:
     return ""
 
 
-def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "") -> None:
+def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
+                transcript: str = "") -> None:
     POWERSHELL_CALL[0] = tool == "PowerShell"
     stripped = strip_heredoc_bodies(raw)
     cmd = norm(stripped)
@@ -5302,7 +5335,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         previous = tokens
         if matched:
             refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
-        matched = foreign_pid_kill(tokens)
+        matched = foreign_pid_kill(tokens, transcript)
         if matched:
             refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched)
 
@@ -5465,7 +5498,9 @@ def judge(payload) -> None:
     if tool in SHELL_TOOLS:
         command = tool_input.get("command", "") or ""
         if isinstance(command, str) and command.strip():
-            judge_shell(tool, command, cwd, session_id_of(payload), agent_role(payload))
+            transcript = payload.get("transcript_path") if isinstance(payload, dict) else ""
+            judge_shell(tool, command, cwd, session_id_of(payload), agent_role(payload),
+                        transcript if isinstance(transcript, str) else "")
         return
 
     if tool not in WRITE_TOOLS:
