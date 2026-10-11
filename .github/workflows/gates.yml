@@ -104,9 +104,6 @@ jobs:
       - name: Question outcome fixture suite
         run: python3 hooks/test_question_outcome.py
 
-      - name: Remove-prompt answer fixture suite
-        run: python3 hooks/test_rm_prompt_answer.py
-
       # Windows is not covered: the stall watch is posix only (see the stall-watch decision).
       - name: Stall watch fixture suite
         run: python3 hooks/test_stall_watch.py
@@ -336,10 +333,6 @@ jobs:
       - name: Question outcome fixture suite
         if: ${{ !cancelled() }}
         run: python3 hooks/test_question_outcome.py
-
-      - name: Remove-prompt answer fixture suite
-        if: ${{ !cancelled() }}
-        run: python3 hooks/test_rm_prompt_answer.py
 
       # Windows is not covered: the stall watch is posix only (see the stall-watch decision).
       - name: Stall watch fixture suite

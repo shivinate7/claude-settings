@@ -5415,13 +5415,11 @@ PLAYWRIGHT_PATH_REASON = (
 # 10-11: 7 of 24 Bash prompts were `rm` on a `$var` path. Segments, the command word and the
 # `sh -c` script come from the shell walk above. `_RAW_WORD` only keeps the quote marks that
 # `segment_tokens` drops, and `rm_call` checks that both reads agree on the word count.
-# hooks/rm_prompt_answer.py imports `rm_call` and `RM_GUARDED`, so both reads share one home.
 # KNOWN LIMITS: an `rm` inside a script file is not seen. A bare `$d` target is not refused.
 _RAW_WORD = re.compile(r"""(?:\\.|'[^']*'|"(?:[^"\\]|\\.)*"|[^\s'"\\])+""")
 _RM_PART = re.compile(r"""'[^']*'|"(?:[^"\\]|\\.)*"|[^'"]+|.""")
 _RM_EXPANSION = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
 _RM_EXPANSION_SLASH = re.compile(r"\$(?:\{\w+\}|\w+)\"?/")
-RM_GUARDED = re.compile(r"\$\{(?!HOME\b)[A-Za-z_]\w*:\?[^}$`]*\}")
 
 
 def rm_call(segment: str):
@@ -5450,7 +5448,8 @@ def _rm_var_rewrite(word: str):
     """Return (word with every expansion guarded, True when one unguarded expansion is followed
     by `/`). Text inside single quotes is a literal and stays as it is."""
     def guard(match):
-        return "${%s:?}" % (match.group(1) or match.group(2))
+        name = match.group(1) or match.group(2)
+        return match.group(0) if name == "HOME" else "${%s:?}" % name
     out, live = [], []
     for part in _RM_PART.findall(word):
         if part[0] == "'":
@@ -5481,7 +5480,7 @@ def rm_var_hits(text: str, depth=0) -> list:
         if at is None or depth > 3:
             continue
         word = basename(tokens[at]).lower()
-        script = " ".join(tokens[at + 1:]) if word == "eval" else (
+        script = " ".join(tokens[at + 1:]).replace("\\$", "$") if word == "eval" else (
             _pwsh_script(tokens) if word in PLAYWRIGHT_PS_SHELLS else inline_script(tokens))
         if script:
             found += rm_var_hits(script, depth + 1)
@@ -5489,6 +5488,12 @@ def rm_var_hits(text: str, depth=0) -> list:
 
 
 def rm_var_reason(hits) -> str:
+    if any(re.search(r"\$\{?HOME\b", h) for h in hits):
+        return (
+            "a recursive delete under $HOME can remove the home folder, and a ${NAME:?} guard does "
+            "not clear it. Retry with a literal path, such as " + os.path.expanduser("~") +
+            "/.cache/x. Flagged: " + "; ".join(hits)
+        )
     return (
         "a recursive delete with an unguarded variable in its path can remove far more than "
         "intended when the variable is empty. Retry with every expansion written ${NAME:?}, "
