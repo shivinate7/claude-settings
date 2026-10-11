@@ -1,4 +1,4 @@
-# A stalled background command is reported, never killed
+# A stalled background command is reported, never stopped
 
 ## The question
 
@@ -15,21 +15,29 @@ stuck command keeps running.
 `hooks/stall_watch.py` has two modes.
 
 - Hook (`--hook`, a PreToolUse hook on Bash): for a call with `run_in_background` true, it
-  rewrites the command to run the wrapper around the original. Other calls pass unchanged.
-- Wrapper: it runs the command in its own process group, with its output going to a log file.
-  It passes that output to its own stdout. If no new output comes for 300 seconds, it prints a
-  STALL report and exits 3. The exit tells the session that the task ended. The command keeps
-  running, and its output keeps going to the log. If the command ends first, the wrapper exits
-  with the command's code.
+  returns `updatedInput` only. It sets no permission decision, so no permission changes.
+- The rewritten command runs in the harness shell, not in `bash -c`. The original command stays
+  as unquoted top-level shell code inside `{ ... }`. A settings deny rule still sees it, and
+  the shell parses it as it would without the hook. Output goes to a log file in the system
+  temp directory. The shell starts the watcher with the job's pid.
+- Watcher (`--watch-pid`): it streams the log to stdout. Any new byte, also a bare `\r`
+  progress byte, resets the timer. After 300 quiet seconds, it prints a STALL report and exits
+  3. The job keeps running, and its output keeps going to the log. If the job ends first, the
+  watcher exits 0, the shell returns the job's code, and the shell removes the log.
 
 The report holds these items:
 
-- the pid and the pgid
-- each process in the group, with state and elapsed time
+- the pid
+- the job and its descendants, with state and elapsed time
 - the open files whose path contains "lock", and the network connections (both from `lsof`,
   when it is installed)
 - the last 20 output lines
 - the log path
+
+Each `ps` and `lsof` call has a 5-second limit, so the report cannot hang.
+
+The report tells the session to ask the owner to stop the job. After the report, the job is
+not a child of the session, and the guard denies a stop of a process outside the session.
 
 `STALL_WATCH_QUIET` overrides the 300 seconds. Use it for tests and proofs only.
 
@@ -41,15 +49,17 @@ visible at once.
 
 ## Rejected
 
-- Kill the command on a timer. A slow but healthy job would die, and a kill loses the state
+- Stop the command on a timer. A slow but healthy job would die, and the stop loses the state
   that explains the stall.
 - A polling timer in the session. Rule verification-never-waiter-loop forbids a waiter loop.
-  The wrapper does the waiting, and the session is told once.
+  The watcher does the waiting, and the session is told once.
+- Run the original in `bash -c` with quoting. The deny rules then see one quoted string, and
+  the shell differs from the one the session expects.
 
 ## Known limits
 
-- Windows is not covered. The wrapper needs `ps`, process groups, and `bash`.
+- Windows is not covered. The hook returns nothing when `os.name` is not posix.
 - A job that is quiet but healthy is reported, not stopped. The session decides.
-- Quiet is the lack of output. A command that prints dots forever is never reported.
-- The wrapper reads the log by polling it every 0.2 seconds. This costs little CPU.
-- A command that closes its output and detaches fully is not followed after the wrapper ends.
+- A command that prints progress forever is never reported, even when it is stuck.
+- After a stall report, the log stays in the temp directory. Nothing removes it.
+- The watcher checks the job with `ps` once each second.
