@@ -4105,6 +4105,58 @@ add("open: an object with no keys at all", "allow", raw="{}")
 add("open: a tool_input that is not an object", "allow", raw='{"tool_name":"Bash","tool_input":3}')
 
 
+# --------------------------------------------------------------------------- impeccable is review-only
+#
+# Owner ruling, 2026-10-10, decisions/design-skills.md: the impeccable plugin loads only for review
+# (audit, critique). Its build commands and its settings writers are refused. Other skills pass.
+
+IMP = "impeccable:impeccable"
+
+add("impeccable: audit is allowed", "allow", tool="Skill", skill=IMP, args="audit")
+add("impeccable: audit with a folder is allowed", "allow", tool="Skill", skill=IMP,
+    args="audit src/pages")
+add("impeccable: critique is allowed", "allow", tool="Skill", skill=IMP, args="critique")
+add("impeccable: critique with a folder is allowed", "allow", tool="Skill", skill=IMP,
+    args="critique app/")
+add("impeccable: bare name with audit is allowed", "allow", tool="Skill", skill="impeccable",
+    args="audit")
+
+add("impeccable: no args is denied", "deny", "impeccable-review-only", tool="Skill", skill=IMP)
+add("impeccable: polish is denied", "deny", "impeccable-review-only", tool="Skill", skill=IMP,
+    args="polish")
+add("impeccable: shape is denied", "deny", "impeccable-review-only", tool="Skill", skill=IMP,
+    args="shape")
+add("impeccable: bolder is denied", "deny", "impeccable-review-only", tool="Skill", skill=IMP,
+    args="bolder")
+add("impeccable: hooks on is denied", "deny", "impeccable-review-only", tool="Skill", skill=IMP,
+    args="hooks on")
+add("impeccable: live is denied", "deny", "impeccable-review-only", tool="Skill", skill=IMP,
+    args="live")
+add("impeccable: init is denied", "deny", "impeccable-review-only", tool="Skill", skill=IMP,
+    args="init")
+add("impeccable: audit then polish in one args string is denied", "deny", "impeccable-review-only",
+    tool="Skill", skill=IMP, args="audit; polish")
+add("impeccable: bare name with polish is denied", "deny", "impeccable-review-only", tool="Skill",
+    skill="impeccable", args="polish")
+
+add("skill: frontend-design with args is allowed", "allow", tool="Skill", skill="frontend-design",
+    args="polish")
+add("skill: frontend-design with no args is allowed", "allow", tool="Skill",
+    skill="frontend-design")
+
+sh("impeccable bash: hooks on writes agent settings", "npx impeccable hooks on", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: hooks by script path is denied",
+   "node \"$HOME/.claude/plugins/impeccable/scripts/impeccable.mjs\" hooks on", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: doctor --auto is denied", "npx impeccable doctor --auto", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: doctor auto is denied", "npx impeccable doctor auto", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: detect on folders is allowed", "npx impeccable detect src/pages app", "allow",
+   cwd=NOGIT)
+
+
 # --------------------------------------------------------------------------- the runner
 
 
