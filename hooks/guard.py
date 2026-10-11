@@ -5880,7 +5880,7 @@ def sim_boot_refusal(tool: str, names: list) -> None:
         hits = [d for d in devices if name.upper() == d["udid"].upper() or name == d["name"]]  # a UDID has no case
         if os_:  # not importable from sim_boot_record: its version() is nested in by_name_ok
             hits = [d for d in hits if (v := d["runtime"].split("SimRuntime.")[-1].split("-", 1)[-1].replace("-", ".")) == os_
-                    or v.startswith(os_ + ".")]
+                    or v.startswith(os_ + ".")] or hits  # no runtime matches: judge them all
         hits = [d for d in hits if d["state"] != "Booted"]
         if not hits:
             continue  # unknown device, or every match already up: not a boot
@@ -5890,10 +5890,9 @@ def sim_boot_refusal(tool: str, names: list) -> None:
                    "%d simulators are already booted: %s. Use one, or ask the owner to stop one, "
                    "then boot." % (len(booted), "; ".join("%s (%s)" % (d["name"], d["udid"]) for d in booted)),
                    name)
-        want = hits[0]
         boots, table, now = (sweep.sim_read_boots(os.path.join(config_dir(), "state", "sim-boots.jsonl")),
                              sweep._read_ps_table(), time.time())
-        for twin in booted:
+        for twin, want in ((t, w) for t in booted for w in hits):
             if (twin["udid"] in boots  # an unrecorded device is never idle
                     and (twin["deviceTypeIdentifier"], twin["runtime"]) == (want["deviceTypeIdentifier"], want["runtime"])
                     and sweep.sim_keep_code(twin, boots, table, now) is None):
