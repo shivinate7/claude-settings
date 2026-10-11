@@ -5421,11 +5421,11 @@ _RM_PART = re.compile(r"""'[^']*'|"(?:[^"\\]|\\.)*"|[^'"]+|.""")
 _RM_EXPANSION = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
 _RM_EXPANSION_SLASH = re.compile(r"\$(?:\{\w+\}|\w+)\"?/")
 _RM_LITERAL = "literal path needed: "
-# A variable is tainted when its own assigned value or for-loop word list holds a real expansion:
-# ~ at a word start or after = or :, $HOME, ${HOME, $PWD, ${PWD, a `$(…)` or backtick span holding the word pwd.
-_RM_TAINT = re.compile(r"(?<![\w$-])(\w+)=|\bfor\s+(\w+)\s+in\s+")
-_RM_TAINT_VALUE = re.compile(
-    r"(?:^|[\s=:])~|\$(?:HOME|PWD)(?!\w)|\$\{(?:HOME|PWD)|\$\([^)]*\bpwd\b|`[^`]*\bpwd\b")
+# A variable is tainted when its assigned value or for-loop list starts with `~`, or when the command
+# holds a source (`pwd` as a command word, $HOME, ${HOME, $PWD, ${PWD) anywhere: then every name it
+# assigns or loops is tainted. No `$(…)` span parsing.
+_RM_TAINT = re.compile(r"(?<![\w$-])(\w+)=(~)?|\bfor\s+(\w+)\s+in\s+(~)?")
+_RM_SOURCE = re.compile(r"(?:^|[\s(`;&|/])pwd(?=$|[\s)`;&|])|\$(?:HOME|PWD)(?!\w)|\$\{(?:HOME|PWD)")
 
 
 def rm_call(segment: str):
@@ -5450,35 +5450,13 @@ def rm_call(segment: str):
     return tokens, at, flags, targets, recursive
 
 
-def _rm_value_end(text: str, i: int, stops: str) -> int:
-    """Return the index where the value starting at `i` ends: the first `stops` character outside
-    every `$(…)` and backtick span. An unclosed span runs to the end of the text."""
-    depth, tick = 0, False
-    while i < len(text):
-        c = text[i]
-        if c == "\\":
-            i += 2
-            continue
-        if c == "`":
-            tick = not tick
-        elif text.startswith("$(", i):
-            depth += 1
-            i += 1
-        elif c == ")" and depth:
-            depth -= 1
-        elif c in stops and not depth and not tick:
-            break
-        i += 1
-    return min(i, len(text))
-
-
 def _rm_taint_names(text: str) -> set:
-    """Return the names whose assigned value or loop list holds a real home or cwd expansion."""
+    """Return the names whose value may be a home or cwd path."""
     names = {"HOME", "PWD"}
+    source = bool(_RM_SOURCE.search(text))
     for m in _RM_TAINT.finditer(text):
-        loop = m.group(2) is not None
-        if _RM_TAINT_VALUE.search(text[m.end():_rm_value_end(text, m.end(), ";\n" if loop else ";&|\n")]):
-            names.add(m.group(2) if loop else m.group(1))
+        if source or m.group(2) or m.group(4):
+            names.add(m.group(1) or m.group(3))
     return names
 
 
