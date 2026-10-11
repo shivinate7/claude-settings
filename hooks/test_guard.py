@@ -1991,6 +1991,17 @@ sh("playwright: the setter text is only a gh comment body inside pwsh -c, allowe
 sh("playwright: the New-Item alias ni sets the env drive variable, denies",
    r"ni env:PLAYWRIGHT_BROWSERS_PATH -Value D:\x", "deny", "playwright-browsers-path",
    tool="PowerShell", cwd=NOGIT)
+# PR #314 round 4. A printf format with %s hides the export text from the filter, which drops any
+# token with a percent sign. The export is still written to the profile.
+sh("playwright: printf with a %s format writes the export to zshrc, denies",
+   "printf 'export PLAYWRIGHT_BROWSERS_PATH=%s\\n' \"$HOME/pw\" >> ~/.zshrc", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: printf with a %s format piped to tee -a zshrc, denies",
+   "printf 'export PLAYWRIGHT_BROWSERS_PATH=%s\\n' \"$HOME/pw\" | tee -a ~/.zshrc", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
+sh("playwright: printf with a %s format writes the export to .envrc, denies",
+   "printf 'export PLAYWRIGHT_BROWSERS_PATH=%s\\n' \"$HOME/pw\" >> .envrc", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
 
 # THE PREDICATE IS THE ACT, NOT THE TOOL OR THE SPELLING. MEASURED: the owner ran
 # `grep -n -i "...|make reap|pkill..." CLAUDE.md` to search CLAUDE.md for the word, and it was
