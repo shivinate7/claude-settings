@@ -31,7 +31,7 @@ A change to any of them means that this record is read again.
 Owner chose this rule over a manual-only copy. It lets impeccable load only for `audit` or
 `critique`. It refuses its other commands.
 
-Status: not built. A builder adds it to `hooks/guard.py` separately. Trust it only after it goes
+Status: built in `hooks/guard.py` and routed in `settings.json`. Trust it only after it goes
 red on an impeccable build command (verification-trust-guard-after-red: a guard is trusted once
 it goes red).
 
