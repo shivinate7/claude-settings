@@ -2188,6 +2188,48 @@ sh("playwright-install: the Node 22 cli.js form with a ./ path is allowed in the
 sh("playwright-install: a subagent npx --prefix install is denied",
    "npx --prefix app playwright install", "deny", "playwright-install", cwd=NOGIT,
    agent_id="pw-sub1")
+# Re-review of #329: each wrapper below hides the install behind a flag, a workspace, or a shell.
+# Each form is denied in the main session and again as a subagent.
+sh("playwright-install: npm -w exec runs the install",
+   "npm -w app exec playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent npm -w exec install is denied",
+   "npm -w app exec playwright install", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1")
+sh("playwright-install: npm --workspace exec -- runs the install",
+   "npm --workspace app exec -- playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent npm --workspace exec -- install is denied",
+   "npm --workspace app exec -- playwright install", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1")
+sh("playwright-install: npx --registry takes a value, the install still denies",
+   "npx --registry https://r.example playwright install", "deny", "playwright-install",
+   cwd=NOGIT)
+sh("playwright-install: a subagent npx --registry install is denied",
+   "npx --registry https://r.example playwright install", "deny", "playwright-install",
+   cwd=NOGIT, agent_id="pw-sub1")
+sh("playwright-install: yarn workspace runs the install",
+   "yarn workspace app playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent yarn workspace install is denied",
+   "yarn workspace app playwright install", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1")
+sh("playwright-install: pwsh -Command runs the install",
+   "pwsh -Command npx playwright install", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent pwsh -Command install is denied",
+   "pwsh -Command npx playwright install", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1")
+sh("playwright-install: npx -c runs the install in a shell string",
+   "npx -c 'npx playwright install'", "deny", "playwright-install", cwd=NOGIT)
+sh("playwright-install: a subagent npx -c install is denied",
+   "npx -c 'npx playwright install'", "deny", "playwright-install", cwd=NOGIT,
+   agent_id="pw-sub1")
+# Allowed main-session forms: the cli.js file named by an absolute or a parent-relative path.
+sh("playwright-install: the Node 22 cli.js form with an absolute path is allowed",
+   "npx -y node@22 /abs/path/node_modules/playwright/cli.js install chromium", "allow",
+   cwd=NOGIT)
+sh("playwright-install: the Node 22 cli.js form with a parent-relative path is allowed",
+   "npx -y node@22 ../node_modules/playwright/cli.js install chromium", "allow", cwd=NOGIT)
+# Control: a workspace exec that runs a test is not an install.
+sh("playwright-install: a workspace exec test run is allowed",
+   "npm -w app exec playwright test", "allow", cwd=NOGIT)
 
 # THE PREDICATE IS THE ACT, NOT THE TOOL OR THE SPELLING. MEASURED: the owner ran
 # `grep -n -i "...|make reap|pkill..." CLAUDE.md` to search CLAUDE.md for the word, and it was
