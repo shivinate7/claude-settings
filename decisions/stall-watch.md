@@ -65,8 +65,9 @@ The watcher does not change. A false STALL teaches the reader to scroll past a r
 - The merge tool prints `merge: waiting on ...` while it waits on checks, and while GitHub
   still shows the head before the push. Incident, 2026-10-11: PR #332 and PR #333 each drew a
   false STALL during the CI wait.
-- `verdict` prints nothing until the command ends. A background suite longer than 300 seconds
-  still draws a false STALL. Open.
+- `verdict` prints `verdict: still running, <elapsed>, log=<path>` every 120 seconds.
+  `VERDICT_HEARTBEAT` sets another whole number of seconds, for tests. Incident, 2026-10-11:
+  a ten-minute background suite drew a false STALL.
 
 ## Known limits
 
