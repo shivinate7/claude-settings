@@ -143,5 +143,116 @@ class T(unittest.TestCase):
             self.assertNotIn("cannot run", open(log).read())
             self.assertNotIn("cannot run", r.stdout + r.stderr)
 
+    def test_test_failed_marker_on_exit0_is_fail(self):
+        r = run("print('Test Suite All tests')\nprint('** TEST FAILED **')")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertTrue(r.stdout.startswith("FAIL "), r.stdout)
+        self.assertIn("** TEST FAILED **", r.stdout)
+
+    def test_build_failed_marker_on_exit0_is_fail(self):
+        r = run("print('Build target app')\nprint('** BUILD FAILED **')")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertTrue(r.stdout.startswith("FAIL "), r.stdout)
+        self.assertIn("** BUILD FAILED **", r.stdout)
+
+    def test_zero_tests_on_exit0_is_fail_no_tests_ran(self):
+        r = run("print('Test Suite All tests')\nprint('Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds')\nprint('** TEST SUCCEEDED **')")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        first = r.stdout.splitlines()[0]
+        self.assertTrue(first.startswith("FAIL ") and "no tests ran" in first, first)
+
+    def test_passing_runs_raise_no_false_alarm(self):
+        cases = {
+            "xcodebuild success": "print('Executed 12 tests, with 0 failures (0 unexpected) in 1.2 (1.3) seconds')\nprint('** TEST SUCCEEDED **')",
+            "ordinary FAIL Error assert text": "print('checking FAIL paths')\nprint('Error handler: none raised')\nprint('assert 3 == 3 passed')",
+            "TEST FAILED without ** markers": "print('test_retry TEST FAILED handled, passed')",
+        }
+        for name, code in cases.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as d:
+                r = run(code, os.path.join(d, "v.log"))
+                self.assertEqual(r.returncode, 0, r.stdout)
+                self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
+
+    def test_test_failed_marker_keeps_command_exit_code(self):
+        r = run("print('** TEST FAILED **')\nraise SystemExit(65)")
+        self.assertEqual(r.returncode, 65, r.stdout)
+        first = r.stdout.splitlines()[0]
+        self.assertTrue(first.startswith("FAIL ") and " rc=65 " in first, first)
+
+    def test_marker_early_in_2mib_output_is_fail(self):
+        code = ("import sys\n"
+                "sys.stdout.write('** TEST FAILED **\\n')\n"
+                "line = 'x' * 1023 + '\\n'\n"
+                "for _ in range(2048):\n"
+                "    sys.stdout.write(line)\n")
+        r = run(code)
+        self.assertEqual(r.returncode, 1, r.stdout[:300])
+        self.assertTrue(r.stdout.startswith("FAIL "), r.stdout[:300])
+        self.assertIn("runner failure marker", r.stdout.splitlines()[0])
+
+    def test_marker_straddling_tail_boundary_is_fail(self):
+        # Marker occupies bytes [1000, 1018) of the run. The last 1 MiB starts at byte 1009,
+        # inside the marker, so a tail-only read sees "AILED **" and no marker.
+        code = ("import sys\n"
+                "sys.stdout.write('a' * 1000)\n"
+                "sys.stdout.write('** TEST FAILED **\\n')\n"
+                "sys.stdout.write('x' * (1048576 - 9))\n")
+        r = run(code)
+        self.assertEqual(r.returncode, 1, r.stdout[:300])
+        self.assertTrue(r.stdout.startswith("FAIL "), r.stdout[:300])
+        self.assertIn("runner failure marker", r.stdout.splitlines()[0])
+
+    def test_zero_then_nonzero_tests_is_pass(self):
+        code = ("print('Test Suite Bundle A')\n"
+                "print('Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds')\n"
+                "print('Test Suite Bundle B')\n"
+                "print('Executed 12 tests, with 0 failures (0 unexpected) in 1.2 (1.3) seconds')\n"
+                "print('** TEST SUCCEEDED **')")
+        r = run(code)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
+
+    def test_singular_one_test_is_pass(self):
+        r = run("print('Executed 1 test, with 0 failures (0 unexpected) in 0.1 (0.2) seconds')")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
+
+    @unittest.skipIf(os.name == "nt", "Windows blocks deleting a file verdict holds open; the child exits 1 first")
+    def test_child_deleting_log_is_fail_log_unreadable(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = os.path.join(d, "v.log")
+            r = run("import os\nos.remove(os.environ['VERDICT_LOG'])", log)
+            self.assertNotEqual(r.returncode, 0, r.stdout)
+            first = r.stdout.splitlines()[0] if r.stdout else ""
+            self.assertTrue(first.startswith("FAIL "), (r.stdout[:300], r.stderr[-300:]))
+            self.assertIn("log unreadable", first)
+            self.assertNotIn("Traceback", r.stdout + r.stderr)
+
+    def test_child_truncating_log_on_exit0_is_fail_log_unreadable(self):
+        # Marker is flushed into the log, then the child empties the log: verdict cannot read its markers.
+        code = ("import os\n"
+                "print('** TEST FAILED **', flush=True)\n"
+                "open(os.environ['VERDICT_LOG'], 'w').close()")
+        with tempfile.TemporaryDirectory() as d:
+            r = run(code, os.path.join(d, "v.log"))
+            self.assertNotEqual(r.returncode, 0, r.stdout)
+            first = r.stdout.splitlines()[0] if r.stdout else ""
+            self.assertTrue(first.startswith("FAIL "), (r.stdout[:300], r.stderr[-300:]))
+            self.assertIn("log unreadable", first)
+            self.assertNotIn("Traceback", r.stdout + r.stderr)
+
+    def test_child_truncating_log_on_exit7_keeps_rc_and_fails_log_unreadable(self):
+        code = ("import os, sys\n"
+                "print('** TEST FAILED **', flush=True)\n"
+                "open(os.environ['VERDICT_LOG'], 'w').close()\n"
+                "sys.exit(7)")
+        with tempfile.TemporaryDirectory() as d:
+            r = run(code, os.path.join(d, "v.log"))
+            self.assertEqual(r.returncode, 7, r.stdout)
+            first = r.stdout.splitlines()[0] if r.stdout else ""
+            self.assertTrue(first.startswith("FAIL ") and " rc=7 " in first, (r.stdout[:300], r.stderr[-300:]))
+            self.assertIn("log unreadable", first)
+            self.assertNotIn("Traceback", r.stdout + r.stderr)
+
 if __name__ == "__main__":
     unittest.main()
