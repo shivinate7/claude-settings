@@ -113,7 +113,7 @@ class T(unittest.TestCase):
 
     def test_bad_heartbeat_value_still_runs_the_command(self):
         code = "import sys, time\nprint('MARK-RAN', flush=True)\ntime.sleep(2)\nsys.exit(7)"
-        for val in ["abc", "0", "-1"]:
+        for val in ["abc", "0", "-1", "1e-9", "0.001", "inf", "nan"]:
             with self.subTest(VERDICT_HEARTBEAT=val), tempfile.TemporaryDirectory() as d:
                 log = os.path.join(d, "v.log")
                 r = run(code, log, {"VERDICT_HEARTBEAT": val}, timeout=30)
