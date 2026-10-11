@@ -4188,6 +4188,40 @@ add("impeccable skill: a leading slash on the name is denied", "deny", "impeccab
     tool="Skill", skill="/impeccable", args="polish")
 
 
+# impeccable, round three: the shell rule is an ALLOW list. Only `detect ...` and `hooks status`
+# pass; every other subcommand is denied, including any a later release adds. Shell wrappers
+# (bash -c, sh -c, npx -c, npx.cmd, PowerShell's call operator) reach the same rule.
+
+sh("impeccable bash: npx -c install is denied", "npx -c 'impeccable install'", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: npx.cmd install is denied", "npx.cmd impeccable install", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: bash -c install is denied", "bash -c 'npx impeccable install'", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: sh -c pin is denied", "sh -c \"impeccable pin x\"", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable powershell: call operator on the cmd shim install is denied",
+   "& \"C:\\x\\impeccable.cmd\" install", "deny", "impeccable-review-only", tool="PowerShell",
+   cwd=NOGIT)
+sh("impeccable bash: doctor --fix is denied", "npx impeccable doctor --fix", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: init is denied", "npx impeccable init", "deny", "impeccable-review-only",
+   cwd=NOGIT)
+sh("impeccable bash: document is denied", "npx impeccable document", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: extract is denied", "npx impeccable extract", "deny",
+   "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: live is denied", "npx impeccable live", "deny", "impeccable-review-only",
+   cwd=NOGIT)
+sh("impeccable bash: a subcommand not yet named is denied", "npx impeccable some-future-cmd",
+   "deny", "impeccable-review-only", cwd=NOGIT)
+
+sh("impeccable bash: bash -c detect is allowed", "bash -c 'npx impeccable detect src'", "allow",
+   cwd=NOGIT)
+sh("impeccable bash: the pinned script path, detect, is allowed",
+   "skills/impeccable/scripts/impeccable detect src", "allow", cwd=NOGIT)
+
+
 def impeccable_settings_case():
     """settings.json names no impeccable plugin or marketplace. The skill folder is the install."""
     with open(os.path.join(REPO, "settings.json"), encoding="utf-8") as handle:
