@@ -21,8 +21,10 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 4. **Cancel superseded runs.** Set `concurrency` with `cancel-in-progress`, so a new push to a
    ref cancels the old run on that ref. Never cancel a run on the default branch: each merge
    needs its own verdict. `cancel-in-progress: false` is not enough: a group keeps one pending
-   run and a newer one replaces it. Give each default-branch run its own group. Runners with a low concurrency cap, such as hosted
-   macOS, queue first.
+   run and a newer one replaces it. Give each default-branch run its own group. Put the PR draft
+   state in the group (`format('{0}-{1}', github.ref, github.event.pull_request.draft)`). A draft
+   run skips every job (step 11), so it must never cancel a ready run. Runners with a low
+   concurrency cap, such as hosted macOS, queue first.
 5. **Cap each job's time.** Set `timeout-minutes` on each job at about 2x its slowest green run.
    Give a network step, such as a browser install, its own short cap.
 6. **After a merge, read every run the push starts.** A deploy or nightly workflow is not a
@@ -48,6 +50,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     once. A draft cannot merge, so it needs no check yet. Read the protection rules first: see
     "Before you skip a required job". A fan-in job with `if: always()` needs its own draft guard.
     A workflow that also has `on: push` for all branches still runs on a draft branch.
+    `gh pr create --draft` then `gh pr ready` fires two runs: keep the draft state in the
+    `concurrency` group (step 4), or the skipped draft run cancels an in-progress ready run.
 12. **Cheap checks first.** Give each expensive job `needs:` the cheap static job. A red static
     check then stops the shards from starting.
 13. **Merge tiny jobs.** Each job bills whole minutes, rounded up, plus its own setup. Put checks
