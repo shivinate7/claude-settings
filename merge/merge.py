@@ -480,33 +480,60 @@ class Host:
 
 # ------------------------------------------------------------------ git steps
 
-def node_stamp(wt, cfgrel, mode, base):
+def node_stamp(wt, cfg_path, mode, base):
     # GITHUB_REF and GITHUB_BASE_REF name the runner's checkout, not this worktree. stamp would read them as the worktree's branch.
     env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_REF", "GITHUB_BASE_REF")}
-    return sh(["node", STAMP, f"--{mode}", "--base", base, "--config", os.path.join(wt, cfgrel), "--root", wt], env=env)
+    return sh(["node", STAMP, f"--{mode}", "--base", base, "--config", cfg_path, "--root", wt], env=env)
+
+def stamp_stop(what, out):
+    """One line for a stamp.mjs failure: the reason, and the file that keeps the full output. Never a stack trace."""
+    fd, log = tempfile.mkstemp(prefix="merge-stamp-", suffix=".log")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(out)
+    lines = [l.strip() for l in out.splitlines() if l.strip()]
+    errs = [l for l in lines if re.match(r"(\w*Error|UNKNOWN|stamp)\b", l)]
+    reason = errs[-1] if errs else lines[0] if lines else "no output"
+    return Stop(f"{what}: {reason} (full output: {log})")
+
+def base_stamp_config(wt, tmp, cfgrel, base_ref):
+    """The stamp config as the base branch holds it, never the pull request's tree (ios-adblock #28).
+    -> a file path outside the worktree, or None when the base has no config or no stamp kinds."""
+    c, text = git(wt, "show", f"{base_ref}:{cfgrel}")
+    if c:
+        return None
+    try:
+        kinds = json.loads(text).get("kinds")
+    except (ValueError, AttributeError) as e:
+        raise Stop(f"cannot read the config {cfgrel} on {base_ref}: {e}")
+    if not kinds:
+        return None
+    path = os.path.join(tmp, "base-stamp.json")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    return path
 
 def head_claim(wt):
     """The Record-claim ids on HEAD's last commit, or ''."""
     return git(wt, "log", "-1", "--format=%(trailers:key=Record-claim,valueonly)", "HEAD")[1].strip()
 
-def own_claim(wt, cfgrel, base):
+def own_claim(wt, cfg_path, base):
     """The trailer ids when HEAD is this tool's claim and each number is still free, else None."""
     ids = head_claim(wt)
-    if not ids:
+    if not ids or not cfg_path:
         return None
-    c, out = node_stamp(wt, cfgrel, "check", base)
+    c, out = node_stamp(wt, cfg_path, "check", base)
     return None if c or "UNKNOWN:" in out else ids  # UNKNOWN is a failure: it exits 0 outside Actions
 
-def do_claim(wt, cfgrel, base):
+def do_claim(wt, cfg_path, base):
     """Run the claim in the worktree. -> the Record-claim line, or None when nothing was claimed.
 
     sh() joins stdout+stderr (see sh() above), so a regenerate step's npm warn/notice lines on
     stderr can land after the trailer. Scan every line for the one starting "Record-claim: "
     instead of assuming it is the last line. Two such lines is a signal we don't understand: refuse
     rather than guess which one is real."""
-    c, out = node_stamp(wt, cfgrel, "claim", base)
+    c, out = node_stamp(wt, cfg_path, "claim", base)
     if c:
-        raise Stop("the claim was refused. Nothing is on origin.\n" + out)
+        raise stamp_stop("the claim was refused. Nothing is on origin", out)
     claims = [l for l in out.splitlines() if l.startswith("Record-claim: ")]
     if len(claims) > 1:
         raise Stop("the claim printed more than one Record-claim line. Refusing to guess which is real.\n" + out)
@@ -603,7 +630,18 @@ def after_merge(root, cmds):
 # ------------------------------------------------------------------ the flow
 
 def load_config(root, path):
+    """The repo's config. A repo with no file gets the defaults (decision merge-config-defaults); a broken file stops."""
     p = os.path.join(root, path)
+    if not os.path.exists(p):
+        c, out = sh(["gh", "repo", "view", "--json", "defaultBranchRef"], cwd=root)
+        try:
+            if c:
+                raise ValueError(out)
+            branch = json.loads(out)["defaultBranchRef"]["name"]
+        except (ValueError, KeyError, TypeError) as e:
+            raise Stop(f"{path} not found, and the default branch cannot be read from gh: {e}")
+        say(f"merge: {path} not found. Using the defaults: merge method merge, 45 minute deadline, required checks from branch protection, default branch {branch}.")
+        return {"defaultBranch": branch, "merge": {"method": "merge", "deadlineMinutes": 45, "requiredChecks": "protection", "afterMerge": []}}
     try:
         with open(p, encoding="utf-8") as f:
             cfg = json.load(f)
@@ -659,8 +697,10 @@ def preview(root, cfg, cfgrel, n, host, lock):
     if base == cfg["defaultBranch"]:  # ids are claimed only on the default branch
         tmp, wt = open_worktree(root, info, base)
         try:
-            resumed = own_claim(wt, cfgrel, f"origin/{base}")
-            trailer = None if resumed else do_claim(wt, cfgrel, f"origin/{base}")
+            sc = base_stamp_config(wt, tmp, cfgrel, f"origin/{base}")
+            if sc:
+                resumed = own_claim(wt, sc, f"origin/{base}")
+                trailer = None if resumed else do_claim(wt, sc, f"origin/{base}")
         finally:
             drop_worktree(root, tmp, wt)
     m = cfg.get("merge", {})
@@ -693,7 +733,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session=""):
         branch = info["branch"]
         tmp, wt = open_worktree(root, info, base)
         undo_check(wt, base_ref, unknown_ok)
-        resumed = own_claim(wt, cfgrel, base_ref) if base == cfg["defaultBranch"] else None
+        stamp_cfg = base_stamp_config(wt, tmp, cfgrel, base_ref)  # None: no config or no kinds, so no claim and no stamp
+        resumed = own_claim(wt, stamp_cfg, base_ref) if base == cfg["defaultBranch"] else None
         if base != cfg["defaultBranch"]:
             if head_claim(wt):  # an old claim would put real ids into a branch that is not the default
                 raise Stop(f"{info['head'][:7]} on {branch} holds a Record-claim, and {base} is not the default branch. Revert that commit and run again.")
@@ -702,7 +743,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session=""):
             claim_sha = info["head"]
             say(f"merge: resumed. {branch} already holds the claim {resumed}.")
         else:
-            trailer = do_claim(wt, cfgrel, base_ref)
+            trailer = do_claim(wt, stamp_cfg, base_ref) if stamp_cfg else None
             if trailer:
                 # check first, then claim: a claim push cancels the head's own run and would hide a red already there
                 try:
@@ -720,7 +761,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session=""):
 
         def fail(why):
             if claim_sha:
-                if not os.path.isfile(os.path.join(wt, cfgrel)):  # the tree is gone (swept or cleaned): the revert needs one
+                if not os.path.exists(os.path.join(wt, ".git")):  # the tree is gone (swept or cleaned): the revert needs one
                     shutil.rmtree(tmp, ignore_errors=True)
                     git(root, "worktree", "unlock", wt)
                     git(root, "worktree", "prune")
@@ -745,11 +786,15 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session=""):
                 undo_check(wt, base_ref, unknown_ok)
             except Stop as e:
                 fail(str(e))
-            if not os.path.isfile(os.path.join(wt, cfgrel)):  # stamp would crash on it with a raw traceback
-                fail(f"the worktree lost {cfgrel}, so the claim cannot be proved fresh.")
-            c, out = node_stamp(wt, cfgrel, "check", base_ref)  # each claimed number must still be free on the base tip
+            if not os.path.exists(os.path.join(wt, ".git")):
+                fail("the worktree is gone, so the claim cannot be proved fresh.")
+            try:  # the config is the base tip's, read just after the fetch
+                stamp_cfg = base_stamp_config(wt, tmp, cfgrel, base_ref)
+            except Stop as e:
+                fail(str(e))
+            c, out = node_stamp(wt, stamp_cfg, "check", base_ref) if stamp_cfg else (0, "")  # each claimed number must still be free on the base tip
             if c or "UNKNOWN:" in out:
-                fail("the base moved and the claim is stale, or the check could not read the base:\n" + out)
+                fail(str(stamp_stop("the base moved and the claim is stale, or the check could not read the base", out)))
             commit, msg = host.merge(n, m["method"], sha)
             if not commit:
                 fail("the merge was refused:\n" + msg)
