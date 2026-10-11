@@ -5241,52 +5241,104 @@ def _pwsh_script(tokens) -> str:
     """The script text after `-c` or `-Command` of a pwsh launch, else ''."""
     for at, tok in enumerate(tokens[:-1]):
         if re.fullmatch(r"-c(?:ommand)?", tok, re.I):
-            return tokens[at + 1]
+            return " ".join(tokens[at + 1:])
     return ""
 
 
-def _playwright_tokens_hit(tokens, depth=0) -> str:
+# Decision playwright-install-once (one Playwright browser install, Node 22 cli.js form, never a
+# subagent). `install` below is "main" or "sub" in install mode: the same walk then runs, with the
+# install test as its leaf in place of the PLAYWRIGHT_BROWSERS_PATH tests.
+_PW_RUNNERS = ("npx", "pnpm", "yarn", "bunx", "bun", "npm")
+_PW_NAMES = ("playwright", "playwright-core", "@playwright/test")
+_PW_VALUE_FLAGS = ("-C", "--prefix", "--cwd", "--dir", "-F", "--filter", "-w", "--workspace")
+_PW_CLIS = ("playwright/cli.js", "playwright-core/cli.js")
+_PW_NODE22_CLIS = tuple("node_modules/" + c for c in _PW_CLIS)
+
+
+def _pw_name(token) -> bool:
+    """True when a token names the Playwright CLI: a bin path, `name@version`, or its cli.js."""
+    name = ("@" + token[1:].split("@")[0]) if token.startswith("@") else token.split("@")[0]
+    return name in _PW_NAMES or (not name.startswith("@") and basename(name) in _PW_NAMES) or (
+        token.endswith(tuple("/" + c for c in _PW_CLIS)))
+
+
+def _playwright_install_hit(word, rest, who) -> str:
+    """Return the install text when the call installs Playwright browsers and `who` may not.
+
+    A call is an install when a Playwright name is followed at once by the word `install`. Only a
+    runner, node, or the Playwright CLI itself counts as the call, so `echo` of the text is none.
+    """
+    if not (word in _PW_RUNNERS or word == "node" or word.startswith("node@") or _pw_name(word)):
+        return ""
+    toks = [word] + rest
+    # A name right after a folder or filter flag is that flag's value (`pnpm -C playwright
+    # install`), so it is skipped. Known ceiling: an unlisted folder flag is read as a command and
+    # can only cause a false deny, the safe direction.
+    at = next((i for i, t in enumerate(toks) if _pw_name(t) and toks[i + 1:i + 2] == ["install"]
+               and (i == 0 or toks[i - 1] not in _PW_VALUE_FLAGS)), None)
+    if at is None:
+        return ""
+    allowed = toks[at].endswith(_PW_NODE22_CLIS) and toks[:1] == ["npx"] and toks[1:at] in (
+        ["node@22"], ["-y", "node@22"], ["--yes", "node@22"])
+    return "" if allowed and who == "main" else "playwright install"
+
+
+def _playwright_tokens_hit(tokens, depth=0, install=None) -> str:
     tokens = [t for t in ([tokens[0].lstrip("(")] + tokens[1:] if tokens else []) if t]
     if not tokens or depth > 3:
         return ""
     at = resolve_command(tokens)
-    if any(_is_playwright_assign(t) for t in tokens[:len(tokens) if at is None else at]):
+    if not install and any(
+            _is_playwright_assign(t) for t in tokens[:len(tokens) if at is None else at]):
         return PLAYWRIGHT_VAR + " assignment"
     if at is None:
         return ""
     word, rest = basename(tokens[at]).lower(), tokens[at + 1:]
-    if word in ASSIGNING_BUILTINS and any(_is_playwright_assign(t) for t in rest):
+    if install:
+        hit = _playwright_install_hit(word, rest, install)
+        if hit:
+            return hit
+    elif word in ASSIGNING_BUILTINS and any(_is_playwright_assign(t) for t in rest):
         return word + " " + PLAYWRIGHT_VAR
     if word in ("builtin", "exec"):
-        return _playwright_tokens_hit(rest, depth + 1)
+        return _playwright_tokens_hit(rest, depth + 1, install)
+    npx_script = ""
     if word == "npx":
+        # `npx -c 'script'` runs the string in a shell: walk it like `sh -c`.
+        for flag, value in zip(rest, rest[1:]):
+            if flag in ("-c", "--call"):
+                npx_script = value
         rest = [t for t in rest if not t.startswith("-")] or [""]
         word, rest = rest[0], rest[1:]
     if word == "cross-env":
         for token in rest:
             if not ASSIGNMENT.match(token):
                 break
-            if _is_playwright_assign(token):
+            if _is_playwright_assign(token) and not install:
                 return word + " " + PLAYWRIGHT_VAR
     script = " ".join(rest[1:]) if word in CMD_EXE_NAMES and rest and rest[0].lower() in (
         "/c", "/k") else None
     if script is None:
-        script = " ".join(rest) if word == "eval" else (
-            _pwsh_script(tokens) if word in PLAYWRIGHT_PS_SHELLS else inline_script(tokens))
+        script = npx_script or (" ".join(rest) if word == "eval" else (
+            _pwsh_script(tokens) if word in PLAYWRIGHT_PS_SHELLS else inline_script(tokens)))
     for segment in split_segments(script) if script else ():
-        hit = playwright_path_hit(segment, depth + 1, ps_inner=word in PLAYWRIGHT_PS_SHELLS)
+        hit = playwright_path_hit(segment, depth + 1, ps_inner=word in PLAYWRIGHT_PS_SHELLS,
+                                  install=install)
         if hit:
             return hit
     return ""
 
 
-def playwright_path_hit(segment: str, depth=0, to_file=False, ps_inner=False) -> str:
+def playwright_path_hit(segment: str, depth=0, to_file=False, ps_inner=False,
+                        install=None) -> str:
     """Return the matched text when a segment sets PLAYWRIGHT_BROWSERS_PATH, else ''.
 
     `to_file` says the segment's output goes to a profile (a `tee` further down the pipe). The
     file-write form counts only when the written text starts with the assignment.
     """
     tokens = segment_tokens(segment) or []
+    if install:
+        return _playwright_tokens_hit(tokens, depth, install)
     at = resolve_command(tokens) if tokens else None
     word = basename(tokens[at]).lower() if at is not None else ""
     # A pwsh launch with a script is judged through that script (ps_inner), statement by statement.
@@ -5326,6 +5378,22 @@ def playwright_command_hit(raw: str, stripped: str) -> str:
                 if matched:
                     return matched
     return ""
+
+
+def playwright_install_hit(stripped: str, subagent: bool) -> str:
+    """Judge a command for a Playwright browser install (see playwright-install-once)."""
+    for segment in split_segments(stripped):
+        hit = playwright_path_hit(segment, install="sub" if subagent else "main")
+        if hit:
+            return hit
+    return ""
+
+
+PLAYWRIGHT_INSTALL_REASON = (
+    "the Playwright browsers are shared in ~/Library/Caches/ms-playwright, and a parallel install "
+    "fights over its lock. A subagent asks the orchestrator for the install. The orchestrator "
+    "installs once, with `npx -y node@22 node_modules/playwright/cli.js install`."
+)
 
 
 PLAYWRIGHT_PATH_REASON = (
@@ -5529,7 +5597,7 @@ def floor_hit(tool: str, tool_input) -> str:
 
 
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
-                transcript: str = "") -> None:
+                transcript: str = "", subagent: bool = False) -> None:
     POWERSHELL_CALL[0] = tool == "PowerShell"
     stripped = strip_heredoc_bodies(raw)
     cmd = norm(stripped)
@@ -5691,6 +5759,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = playwright_command_hit(raw, stripped)
     if matched:
         refuse(tool, "deny", "playwright-browsers-path", PLAYWRIGHT_PATH_REASON, matched)
+
+    matched = playwright_install_hit(stripped, subagent)
+    if matched:
+        refuse(tool, "deny", "playwright-install", PLAYWRIGHT_INSTALL_REASON, matched)
 
     # 3b. Two traps ported from banchi's `scripts/guard-shell.py`: `gh api` with a field and no
     # method, and `ln -s` onto a directory that is already there. Each reads the segment's own
@@ -5978,7 +6050,8 @@ def judge(payload) -> None:
         if isinstance(command, str) and command.strip():
             transcript = payload.get("transcript_path") if isinstance(payload, dict) else ""
             judge_shell(tool, command, cwd, session_id_of(payload), agent_role(payload),
-                        transcript if isinstance(transcript, str) else "")
+                        transcript if isinstance(transcript, str) else "",
+                        bool(payload.get("agent_id")))
             names = [n for seg in split_segments(strip_heredoc_bodies(command))
                      for n in _sim_boot_names(seg)]
             if names:
