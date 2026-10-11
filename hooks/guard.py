@@ -5853,7 +5853,8 @@ def _sim_boot_names(segment: str) -> list:
                 token[len("-destination="):] if token.startswith("-destination=") else "")
             fields = dict(p.split("=", 1) for p in value.split(",") if "=" in p)
             if "iOS Simulator" in fields.get("platform", "") and (fields.get("id") or fields.get("name")):
-                found.append((fields.get("id") or fields["name"], fields.get("OS", "")))
+                os_ = fields.get("OS", "")  # a numeric OS= filters a name; an id, or OS=latest, filters nothing
+                found.append((fields.get("id") or fields["name"], "" if fields.get("id") or not re.fullmatch(r"[0-9.]+", os_) else os_))
         return found
     if word in ("xcrun", "simctl") and "simctl" in ([word] + rest):
         after = ([word] + rest)[([word] + rest).index("simctl") + 1:]
