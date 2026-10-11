@@ -65,4 +65,7 @@ visible at once.
 - A command that backgrounds its own child is not watched. The guard denies that shape anyway.
 - Allow rules still match a rewritten command. Measured: with only `Bash(echo:*)` allowed, the
   rewritten echo ran. The hook does not widen or narrow what the allow list permits.
+- Under zsh, a trailing `\` continuation leaves one empty word. sh and bash drop it. The
+  exit code differs only when a lone `\` line follows a failing command: bare zsh gives 126,
+  and the rewrite keeps the failing code.
 - The watcher checks the job with `ps` once each second.

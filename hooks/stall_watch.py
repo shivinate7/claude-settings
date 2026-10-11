@@ -144,12 +144,9 @@ def hook():
     quiet = os.environ.get("STALL_WATCH_QUIET") or str(DEFAULT_QUIET)
     log = os.path.join(os.path.realpath(tempfile.gettempdir()), "stall-watch-%s.log" % uuid.uuid4().hex)
     q = shlex.quote
-    # A trailing `\` joins the next line. sh and bash drop it at the end of a command, and zsh
-    # reads it as an empty word. The blank line keeps `}` apart; the empty word below is
-    # expanded by zsh only, so each shell runs the original as it would bare.
-    tail = "\n${ZSH_VERSION:+''}" if len(original) - len(original.rstrip("\\")) & 1 else ""
+    # The blank line before `}` keeps a trailing `\` in the original from joining the brace line.
     wrapped = (
-        "{ " + original + tail + "\n\n} > " + q(log) + " 2>&1 & pid=$!; "
+        "{ " + original + "\n\n} > " + q(log) + " 2>&1 & pid=$!; "
         + " ".join(q(a) for a in [sys.executable, os.path.abspath(__file__)])
         + " --watch-pid $pid --log " + q(log) + " --quiet " + q(quiet) + "; rc=$?; "
         + "[ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; rm -f " + q(log) + "; exit $rc"
