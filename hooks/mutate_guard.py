@@ -1367,6 +1367,10 @@ MUTATIONS = [
      '    try:\n        reason = run(hook)\n    except Exception:',
      '    try:\n        reason = run(hook)\n        raise RuntimeError("mutant")\n    except Exception:', "ruling",
      "main_missing_git: known-bad pair"),
+    ('rm-var-unguarded: never refuse',
+     '        refuse(tool, "deny", "rm-var-unguarded", rm_var_reason(hits), "; ".join(hits))',
+     '        pass',
+     "guard", 'rm-var: a loop deletes under an unguarded variable'),
 ]
 
 

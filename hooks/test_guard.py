@@ -24,6 +24,8 @@ The cases come from two working guards and their own test suites:
 Two literals are assembled from parts, so that this file cannot trip the guard it tests.
 """
 
+import contextlib
+import io
 import json
 import os
 import re
@@ -79,13 +81,14 @@ def windows_shaped(*parts):
 
 
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
-        session=None, carries=(), config=None, agent_id=None, no_root=False, silent=False,
+        session=None, carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
         agent_type=None, event=None, stop_active=False, windows=False, transcript=None,
-        **tool_input):
+        max_seconds=None, **tool_input):
     """Register one case.
 
     `carries` names fragments the printed reason MUST hold, which is how a case pins what an
-    approver reads, not only the decision.
+    approver reads, not only the decision. A tuple inside `carries` is any-of: the reason holds
+    one of its fragments. `lacks` names fragments the printed reason MUST NOT hold.
 
     A case NEVER opts out of the generic-reason check. Which fragments a reason may name is read
     from the case's RULE, through `REASON_MAY_NAME` below, so the exemption belongs to one rule and
@@ -104,6 +107,7 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "env_path": env_path,
         "session": session,
         "carries": (carries,) if isinstance(carries, str) else tuple(carries),
+        "lacks": (lacks,) if isinstance(lacks, str) else tuple(lacks),
         # The config directory the case runs against. It decides where the global rules file is
         # read from, so a pointer case names its own and every other case keeps the default.
         "config": config,
@@ -115,6 +119,8 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "event": event,
         "stop_active": stop_active,
         "no_root": no_root,
+        # A case that must be judged within this many seconds. A slower verdict fails the case.
+        "max_seconds": max_seconds,
         # An allow that must print NOTHING, not even context. Only a case that says so is held to it.
         "silent": silent,
         "tool_input": tool_input,
@@ -126,11 +132,11 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
 
 
 def sh(name, command, expected, rule=None, tool="Bash", cwd=None, env_path=None, session=None,
-       carries=(), config=None, agent_id=None, no_root=False, silent=False, agent_type=None,
-       transcript=None):
+       carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
+       agent_type=None, transcript=None):
     add(name, expected, rule=rule, tool=tool, cwd=cwd, env_path=env_path, session=session,
         agent_id=agent_id, agent_type=agent_type, no_root=no_root, silent=silent,
-        carries=carries, config=config, transcript=transcript, command=command)
+        carries=carries, lacks=lacks, config=config, transcript=transcript, command=command)
 
 
 # --------------------------------------------------------------------------- the fixtures
@@ -2048,6 +2054,388 @@ sh("playwright: SetEnvironmentVariable sets it",
 sh("playwright: a shell rc file gets the export",
    "echo 'export PLAYWRIGHT_BROWSERS_PATH=/x' >> ~/.zshrc", "deny",
    "playwright-browsers-path", cwd=NOGIT)
+
+# THE UNGUARDED VARIABLE DELETE. Decision rm-on-a-variable-needs-a-guard (owner ruling, 2026-10-11,
+# item 1). A recursive rm whose target has an unguarded variable, then "/", then a glob, another
+# variable, a slash, a quote, or the end, is refused: Claude Code's prompt shape. A literal after
+# the slash is not refused. The remedy is ${NAME:?} only when every such name is safe (the
+# allow-list), else a literal path that prints no expanded path. INCIDENT 2026-10-10 to 10-11: 7 of
+# 24 Bash prompts were rm on a $var path, 5 of them `S=...; for d in ...; do rm -rf $S/$d`.
+# Cases marked "(b) ruling changed" were re-pointed to the 2026-10-11 ruling.
+sh("rm-var: a loop deletes under an unguarded variable",
+   "S=/tmp/x; for d in a b; do rm -rf $S/$d; done", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("rm -rf ${S:?}/${d:?}",))
+# New (allow-list passes): each name is a literal or mktemp binding, so the remedy is ${NAME:?}.
+sh("rm-var: the mailaudit incident loop gets ${NAME:?} advice",
+   "S=/tmp/mailaudit; for d in rv5 rv5full; do rm -rf $S/$d; done", "deny", "rm-var-unguarded",
+   cwd=NOGIT, carries=("rm -rf ${S:?}/${d:?}",), lacks=("literal path",))
+sh("rm-var: a variable set to a literal path before a glob gets ${D:?} advice",
+   'D=/tmp/w; rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=('rm -rf "${D:?}"/*',), lacks=("literal path",))
+sh("rm-var: a variable set from mktemp before a glob gets ${D:?} advice",
+   'D=$(mktemp -d); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=('rm -rf "${D:?}"/*',), lacks=("literal path",))
+# Trigger shape (ruling item 1): refused when an unguarded variable is followed by "/" and then a
+# glob, another variable, a slash, a quote, or the end. Each name is unassigned, so the remedy is
+# the literal path.
+sh("rm-var: a variable then a glob is refused",
+   "rm -rf $S/*", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${S:?}",))
+sh("rm-var: a quoted variable then a variable is refused",
+   'rm -rf "$S"/$d', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${S:?}",))
+sh("rm-var: a variable then a trailing slash is refused",
+   "rm -rf $S/", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${S:?}",))
+# Not refused (ruling item 1): a literal follows the slash, so Claude Code does not prompt.
+sh("rm-var: a quoted $ROOT with a literal dist is not refused",
+   'rm -rf "$ROOT/dist"', "allow", cwd=NOGIT)
+sh("rm-var: a quoted $HOME with a literal cache path is not refused",
+   'rm -rf "$HOME/.cache/x"', "allow", cwd=NOGIT)
+sh("rm-var: $TMPDIR with a literal path is not refused",
+   "rm -rf $TMPDIR/foo", "allow", cwd=NOGIT)
+# (b) ruling changed: D is unassigned, so the remedy is the literal path. Was ${D:?} advice.
+sh("rm-var: a quoted variable before a glob",
+   'rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+# (b) ruling changed: D is unassigned, so the remedy is the literal path. Was ${D:?} advice.
+sh("rm-var: a variable before a trailing slash",
+   "rm -rf $D/", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+# (b) ruling changed: the target is now a glob, which is the trigger shape. Was a literal "/build".
+sh("rm-var: a braced variable with no guard",
+   'rm -r "${D}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+# (b) ruling changed: $S is unassigned in the script, so the remedy is the literal path.
+sh("rm-var: sh -c runs the unguarded delete",
+   "sh -c 'rm -rf $S/*'", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${S:?}",))
+# (b) ruling changed: S and d are unassigned, so the remedy is the literal path.
+sh("rm-var: the short flag order counts too",
+   "rm -fr $S/$d", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${S:?}", "${d:?}"))
+# (b) ruling changed: $HOME is tainted, so the remedy is the literal path, never ${HOME:?}. The
+# target is now a variable after the slash, which is the trigger shape. Was "$HOME/.cache".
+# REVIEW FINDING: $HOME is not cleared by a ${NAME:?} guard (the docs say so), so the refusal names
+# a literal path and never offers ${HOME:?}. The reason may name either form.
+sh("rm-var: $HOME under a recursive delete names a literal path, not ${HOME:?}",
+   "rm -rf $HOME/$d", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("HOME:?", os.path.expanduser("~")))
+# (b) ruling changed: $S is unassigned in the script, so the remedy is the literal path. The
+# escaped dollar must not reach the reason. Was ${S:?}/x advice.
+# REVIEW FINDING: eval's double quotes turn \$ into $, so the remedy must be the plain guarded target
+# with no backslash before $.
+sh("rm-var: eval with an escaped dollar prints no backslash",
+   'eval "rm -rf \\$S/*"', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("\\$", "${S:?}"))
+# Scanner cases (rule building-scanner-respects-strings): a comment opener, a double slash, a lone
+# quote, and a newline inside a quoted string must not hide the live rm that follows.
+# (b) ruling changed on all five: S is now assigned a literal and the target is $S/*, so the
+# allow-list gives ${S:?} advice. Was $S/x, which the trigger shape no longer covers.
+sh("rm-var: a hash inside a string does not hide the delete",
+   'S=/tmp/x; echo "#"; rm -rf $S/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("rm -rf ${S:?}/*",))
+sh("rm-var: a double slash inside a string does not hide the delete",
+   'S=/tmp/x; echo "a // b"; rm -rf $S/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("rm -rf ${S:?}/*",))
+sh("rm-var: a lone quote in echo text does not hide the delete",
+   'S=/tmp/x; echo "it\'s"; rm -rf $S/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("rm -rf ${S:?}/*",))
+sh("rm-var: a newline inside a quoted string does not hide the delete",
+   'S=/tmp/x; echo "a\nb"; rm -rf $S/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("rm -rf ${S:?}/*",))
+sh("rm-var: a trailing comment does not hide a live delete",
+   "S=/tmp/x; rm -rf $S/* # note", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("rm -rf ${S:?}/*",))
+# New scanner case: a slash-star inside a string is not a comment, so the delete after it is found.
+sh("rm-var: a slash-star inside a string does not hide the delete",
+   'S=/tmp/x; echo "/*"; rm -rf $S/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("rm -rf ${S:?}/*",))
+# Allow cases: a guarded target, a bare variable, a literal path, a non-recursive rm, text that
+# only mentions rm, and a literal single-quoted $ (no expansion).
+sh("rm-var: a guarded loop target passes",
+   'rm -rf "${S:?}/${d:?}"', "allow", cwd=NOGIT)
+sh("rm-var: a guarded variable before a glob passes",
+   'rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
+sh("rm-var: a bare variable is not refused",
+   'rm -rf "$d"', "allow", cwd=NOGIT)
+sh("rm-var: a literal relative path passes",
+   "rm -rf build/out", "allow", cwd=NOGIT)
+sh("rm-var: a non-recursive delete passes",
+   "rm $S/file", "allow", cwd=NOGIT)
+sh("rm-var: echo only prints the delete",
+   "echo rm -rf $S/x", "allow", cwd=NOGIT)
+sh("rm-var: a quoted string that mentions the delete passes",
+   'echo "rm -rf $S/x"', "allow", cwd=NOGIT)
+sh("rm-var: a newline inside a string that mentions the delete passes",
+   'echo "a\nrm -rf $S/x"', "allow", cwd=NOGIT)
+sh("rm-var: a single-quoted dollar is a literal path",
+   "rm -rf '$S/x'", "allow", cwd=NOGIT)
+# New (ruling item 1, literal-path reason): a name with no safe binding gets the literal-path
+# reason. The reason prints no ${NAME:?} advice and no expanded path. Each lacks list names the
+# advice form and any path the shell would expand.
+sh("rm-var: an inherited OLDPWD before a glob names a literal path",
+   'rm -rf "$OLDPWD"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${OLDPWD:?}",))
+sh("rm-var: a $USER path before a glob names a literal path",
+   "rm -rf /Users/$USER/*", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${USER:?}", "/Users/"))
+sh("rm-var: an unassigned quoted variable before a glob names a literal path",
+   'rm -rf "$S"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${S:?}",))
+sh("rm-var: a variable set to .. names a literal path",
+   'D=..; rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a variable set to . names a literal path",
+   'D=.; rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a variable set to / names a literal path",
+   'D=/; rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a loop over . and .. names a literal path",
+   'for d in . ..; do rm -rf "$d"/*; done', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${d:?}",))
+sh("rm-var: a read loop names a literal path",
+   'find . -type d | while read d; do rm -rf "$d"/*; done', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${d:?}",))
+sh("rm-var: a cd before the delete names a literal path",
+   'S=build; cd .. && rm -rf "$S"/', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${S:?}",))
+sh("rm-var: a tilde value in bash -c names a literal path",
+   'D=~; bash -c "rm -rf $D/*"', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}", os.path.expanduser("~")))
+# Flagged reading (see Input Needed): the decision's shape list does not name "..", so this case
+# pins that a parent step after the slash is still refused.
+sh("rm-var: a parent step after a set literal names a literal path",
+   'S=build; rm -rf "$S"/../*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${S:?}",))
+sh("rm-var: a git toplevel value names a literal path",
+   'ROOT=$(git rev-parse --show-toplevel); rm -rf "$ROOT"/*', "deny", "rm-var-unguarded",
+   cwd=NOGIT, carries=("literal path",), lacks=("${ROOT:?}",))
+sh("rm-var: a literal value that resolves to the cwd names a literal path",
+   'D=%s; rm -rf "$D"/*' % NOGIT, "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}", NOGIT))
+# Named limits, taint (decision rm-on-a-variable-needs-a-guard): $HOME, $PWD and a variable set
+# from $(pwd) or $HOME are refused with the literal-path reason when in the trigger shape, even
+# when guarded. The reason never names ${NAME:?} advice for that name. Each case whose target
+# moved to a glob is (b) ruling changed: the trigger shape is now tested.
+sh("rm-var: a guarded $HOME target is refused for a literal path",
+   "rm -rf ${HOME:?}/*", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${HOME:?}", os.path.expanduser("~")))
+sh("rm-var: a quoted guarded $HOME before a glob is refused for a literal path",
+   'rm -rf "${HOME:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${HOME:?}", os.path.expanduser("~")))
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: $PWD is refused and its remedy names no ${PWD:?} advice",
+   'rm -rf "$PWD"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${PWD:?}",))
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a quoted guarded $PWD is refused and its remedy names no ${PWD:?} advice",
+   'rm -rf "${PWD:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${PWD:?}",))
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a variable set from $(pwd) is refused and its remedy names no ${D:?} advice",
+   "D=$(pwd); rm -rf $D/*", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a guarded variable set from $(pwd) is refused and its remedy names no ${D:?} advice",
+   'D=$(pwd); rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+# Named limits (decision rm-on-a-variable-needs-a-guard, "Named limits" first bullet): a pwd
+# command in $(...) or backticks taints, with any flags or path. Red until the guard matches them.
+sh("rm-var: a variable set from $(pwd -P) is refused for a literal path, not ${D:?}",
+   'D=$(pwd -P); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a variable set from $(/bin/pwd) is refused for a literal path, not ${D:?}",
+   'D=$(/bin/pwd); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a variable set from $(command pwd) is refused for a literal path, not ${D:?}",
+   'D=$(command pwd); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a variable set from a backtick pwd -P is refused for a literal path, not ${D:?}",
+   'D=`pwd -P`; rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a variable set from $(pwd -L) is refused for a literal path, not ${OUT:?}",
+   'OUT=$(pwd -L); rm -rf "$OUT"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${OUT:?}",))
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a loop over $(pwd -P) is refused for a literal path, not ${D:?}",
+   'for D in $(pwd -P); do rm -rf "${D:?}"/*; done', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a quoted $(pwd -P) assignment is refused for a literal path, not ${D:?}",
+   'D="$(pwd -P)"; rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a guarded variable from a non-pwd word that starts with pwd stays allowed",
+   'D=build-pwd; rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a guarded variable set from $HOME is refused and its remedy names no ${D:?} advice",
+   "D=$HOME; rm -rf ${D:?}/*", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+# A guarded variable set to a literal path passes.
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a guarded variable set to a literal path passes",
+   'D=/tmp/w; rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
+# Named limits, derived forms: a variable whose assigned or loop value holds ~, HOME, PWD or pwd is
+# tainted, so its refusal names a literal path, never ${D:?} advice.
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a variable set to ~ names a literal path, not ${D:?}",
+   'D=~; rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}", os.path.expanduser("~")))
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a loop over $HOME names a literal path, not ${D:?}",
+   'for D in $HOME; do rm -rf "${D:?}"/*; done', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}", os.path.expanduser("~")))
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a default that falls back to $HOME names a literal path, not ${D:?}",
+   "D=${X:-$HOME}; rm -rf ${D:?}/*", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}", os.path.expanduser("~")))
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a variable set from $(echo $HOME) names a literal path, not ${D:?}",
+   "D=$(echo $HOME); rm -rf $D/*", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}", os.path.expanduser("~")))
+# (b) ruling changed: $HOME/x is not the trigger shape any more, so it is not refused. The
+# literal-path case for a $HOME target is "$HOME/$d" above.
+sh("rm-var: $HOME joined to a literal path is not refused",
+   "rm -rf $HOME/x", "allow", cwd=NOGIT)
+# (b) ruling changed: a mixed command names HOME (literal-path remedy) and a safe S. Whether the
+# refusal also prints ${S:?} advice is not pinned (see Input Needed).
+sh("rm-var: a $HOME target and a safe variable name both get the literal-path remedy",
+   "S=/tmp/w; rm -rf $HOME/* $S/*", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",))
+# Ruling changed (rm-on-a-variable-needs-a-guard, named limits). Taint comes only from a real
+# expansion. A literal value that spells pwd or HOME is not one.
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a literal value that spells pwd is not tainted",
+   'D=build-pwd; rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a literal HOME inside a path is not tainted",
+   'D=/tmp/HOME/x; rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
+# (b) ruling changed: --dir=~ is a flag, not an assignment, so $dir is a set literal and gets its
+# own ${dir:?} advice. The target moved to a glob.
+sh("rm-var: a tilde in a flag value is not a home expansion, so $dir gets its own advice",
+   'make --dir=~ && dir=/tmp/b; rm -rf "$dir"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=('rm -rf "${dir:?}"/*',), lacks=("literal path",))
+sh("rm-var: $HOME under a glob names a literal path, not the computed home",
+   "rm -rf $HOME/*", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=(os.path.expanduser("~"),))
+# Named limits, substitution spans. The assigned-value reader cuts the value at ; & | even inside
+# $(...) or backticks, so a pwd after the cut is missed. Each case must deny with the literal-path
+# reason. Each case whose target moved to a glob is (b) ruling changed.
+sh("rm-var: a pwd after && inside $(…) taints the variable, not ${D:?}",
+   'D=$(cd .. && pwd); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a pwd after ; inside $(…) taints the variable, not ${D:?}",
+   'D=$(cd ..; pwd); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a pwd -P after || inside $(…) taints the variable, not ${D:?}",
+   'D=$(cd .. || exit; pwd -P); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a pwd after && inside a backtick span taints the variable, not ${D:?}",
+   'D=`cd .. && pwd`; rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a pwd after | inside a nested $(…) taints the variable, not ${D:?}",
+   'D=$(echo x | (cd .. && pwd)); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a guarded variable set after && in a list stays allowed",
+   'D=/tmp/w; true && rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
+# Named limits, first bullet (decision rm-on-a-variable-needs-a-guard): a command word pwd, or an
+# expansion of HOME or PWD, anywhere in the command taints every variable it assigns. The guard
+# reads no $(…) span, so quotes and ; inside the span cannot hide the source. Each case must deny
+# with the literal-path reason and never name ${D:?}.
+sh("rm-var: a pwd after a quoted ) in $(…) taints D, not ${D:?}",
+   'D=$(: ")" ; pwd); rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a pwd after a quoted ) in a double-quoted $(…) taints D, not ${D:?}",
+   """D="$(: ')' ; pwd)"; rm -rf "${D:?}"/*""", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: $HOME expanded inside $(…) taints D, not ${D:?}",
+   'D=$(x=1; echo $HOME); rm -rf "${D:?}"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+# pwd as an argument is text, not a command word, so the value stays a literal and passes.
+# (b) ruling changed: the target moved to a glob, so the trigger shape is tested.
+sh("rm-var: a cat of pwd.txt inside $(…) is text, not a command word, and stays allowed",
+   'D=$(cat pwd.txt); rm -rf "${D:?}"/*', "allow", cwd=NOGIT)
+# MORE CONDITIONS (decision rm-on-a-variable-needs-a-guard, item 1, "More conditions apply", and the
+# read-error line). Each case below has an unsafe binding, a value the guard cannot read, or a
+# value whose path is the home folder or the cwd, so the refusal names the literal path and never
+# ${NAME:?}. Each case must be refused. A pass, or a crash that exits 0, is a FAIL.
+HOME = os.path.expanduser("~")
+sh("rm-var: a dollar then a quoted dollar before the slash names a literal path",
+   'D=x; rm -rf $D/$"E"', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a mktemp value with a parent walk after it names a literal path, not ${N:?}",
+   "N=$(mktemp -d)/../../..; rm -rf $N/", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${N:?}",))
+sh("rm-var: a value with a space and the home path names a literal path, not ${D:?}",
+   'D="x %s"; rm -rf $D/' % HOME, "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}", HOME))
+sh("rm-var: a tilde joined to a variable before the slash names a literal path, not ${D:?}",
+   "D=/; rm -rf ~$D/", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a brace list before a variable names a literal path, not ${D:?}",
+   "D=Users; rm -rf {/,x}$D/", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a glob before a variable names a literal path, not ${D:?}",
+   "D=shivinate; rm -rf /*/$D/", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a prefix assignment before the rm names a literal path, not ${OLDPWD:?}",
+   "OLDPWD=/tmp rm -rf $OLDPWD/", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${OLDPWD:?}",))
+sh("rm-var: a binding after the rm names a literal path, not ${OLDPWD:?}",
+   "rm -rf $OLDPWD/; OLDPWD=/tmp", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${OLDPWD:?}",))
+# macOS only: the home folder's file system is case-folded, so an upper or lower spelling of it
+# is the home folder and must name a literal path. The case is not registered elsewhere.
+if sys.platform == "darwin":
+    sh("rm-var: the home path upper-cased in a variable names a literal path on macOS",
+       "D=%s; rm -rf $D/" % HOME.upper(), "deny", "rm-var-unguarded", cwd=NOGIT,
+       carries=("literal path",), lacks=("${D:?}", HOME))
+    sh("rm-var: the home path lower-cased in a variable names a literal path on macOS",
+       "D=%s; rm -rf $D/" % HOME.lower(), "deny", "rm-var-unguarded", cwd=NOGIT,
+       carries=("literal path",), lacks=("${D:?}", HOME))
+# The cwd spelled through a symlink is the cwd, so it names a literal path. Registered only where
+# the fixture can build the link (no symlink privilege means no case, and the report says so).
+CWDLINK = os.path.join(ROOT, "nogit-link")
+try:
+    os.symlink(NOGIT, CWDLINK)
+except OSError:
+    CWDLINK = None
+if CWDLINK:
+    sh("rm-var: the cwd spelled through a symlink names a literal path, not ${D:?}",
+       "D=%s; rm -rf $D/" % CWDLINK, "deny", "rm-var-unguarded", cwd=NOGIT,
+       carries=("literal path",), lacks=("${D:?}", CWDLINK))
+# Ruling item 1 (decisions/rm-on-a-variable-needs-a-guard.md): a binding written AFTER a wrapper
+# still comes before no rm in the wrapper's own text, so the name must get the literal-path reason,
+# never ${NAME:?}. Red on 50d9f57: the `later` scan sees only the inner text of the wrapper.
+sh("rm-var: a binding after sh -c names a literal path, not ${OLDPWD:?}",
+   "sh -c 'rm -rf $OLDPWD/*'; OLDPWD=/tmp/x", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${OLDPWD:?}",))
+sh("rm-var: a binding after bash -c names a literal path, not ${OLDPWD:?}",
+   "bash -c 'rm -rf $OLDPWD/*'; OLDPWD=/tmp/x", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${OLDPWD:?}",))
+sh("rm-var: a binding after eval names a literal path, not ${OLDPWD:?}",
+   "eval 'rm -rf $OLDPWD/*'; OLDPWD=/tmp/x", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${OLDPWD:?}",))
+# Ruling item 1, home's parents: the parent of home holds home, so a glob under it can empty home.
+# The parent is read from HOME, never fixed, so the case holds on any account. Red on 50d9f57: the
+# target /Users/* is not `home` itself, so the name gets ${D:?}.
+PARENT_OF_HOME = os.path.dirname(HOME)
+sh("rm-var: a variable set to the parent of home names a literal path, not ${D:?}",
+   "D=%s; rm -rf $D/*" % PARENT_OF_HOME, "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+
 sh("playwright: an envrc file gets the assignment",
    "echo PLAYWRIGHT_BROWSERS_PATH=/x > .envrc", "deny", "playwright-browsers-path", cwd=NOGIT)
 sh("playwright: a case-folded name still sets it", "playwright_browsers_path=/x npx", "deny",
@@ -5005,10 +5393,14 @@ def decide(case):
         env["PATH"] = NOPS
     if case["env_path"]:
         env["PATH"] = case["env_path"]
+    started = time.monotonic()
     result = subprocess.run(
         [sys.executable, GUARD], input=payload, capture_output=True, text=True, env=env,
         timeout=120, cwd=case.get("process_cwd") or None,
     )
+    elapsed = time.monotonic() - started
+    if case.get("max_seconds") and elapsed > case["max_seconds"]:
+        return "slow", "judged in %.2f s, over the %s s limit" % (elapsed, case["max_seconds"])
     if result.returncode != 0:
         return "error", "exit %d: %s" % (result.returncode, result.stderr.strip()[:200])
     out = result.stdout.strip()
@@ -5751,6 +6143,12 @@ def merge_hang_timeout_case():
             if os.name == "nt" else
             "denied as unknown in %.1fs, inside the 20s hook budget" % elapsed)
     return True, note
+
+
+def carried(fragment, reason):
+    """True when the reason holds the fragment. A tuple is any-of: one of its options is enough."""
+    options = fragment if isinstance(fragment, tuple) else (fragment,)
+    return any(option in reason for option in options)
 
 
 def names_the_target(reason, rule=None):
@@ -6551,6 +6949,157 @@ LOG_CHECKS_EXTRA.append(("mask_script: normal scripts with escaped quotes keep t
                          mask_pin_case))
 
 
+# Time bound (decision rm-on-a-variable-needs-a-guard, Named limits): 2000 unclosed $( spans must be
+# judged in under 2 s. The case goes through add(), so it has the same shape as every other case,
+# then it is taken back out of CASES so the main loop does not judge it twice. The timer wraps the
+# same decide() call the main loop uses.
+RM_VAR_SLOW_CMD = 'a=$(' * 2000 + '; rm -rf "${a:?}"/x'
+_slow_at = len(CASES)
+add("rm-var: 2000 unclosed $( spans are judged in under 2 s", "deny", cwd=NOGIT,
+    command=RM_VAR_SLOW_CMD)
+RM_VAR_SLOW_CASE = CASES[_slow_at]
+del CASES[_slow_at:]
+
+
+def rm_var_slow_case():
+    start = time.monotonic()
+    decide(RM_VAR_SLOW_CASE)
+    took = time.monotonic() - start
+    if took >= 2.0:
+        return False, "judged in %.2f s, not under 2 s" % took
+    return True, "judged in %.2f s, under 2 s" % took
+
+
+LOG_CHECKS_EXTRA.append(("rm-var: 2000 unclosed $( spans are judged in under 2 s",
+                         rm_var_slow_case))
+
+
+# Time bound (decision rm-on-a-variable-needs-a-guard, ruling item 1): 4000 assignments and 4000
+# targets, with a bare pwd that taints every name, are judged in under 2 s and denied. Taken out of
+# CASES after add(), as the 2000-span case above is, so the main loop does not judge it twice.
+RM_VAR_WIDE_CMD = (
+    "".join("D%d=/tmp/a%d; " % (n, n) for n in range(4000))
+    + "P=$(pwd); rm -rf "
+    + " ".join('"$D%d"/*' % n for n in range(4000))
+)
+_wide_at = len(CASES)
+add("rm-var: 4000 assignments and 4000 targets with pwd are judged in under 2 s", "deny",
+    cwd=NOGIT, command=RM_VAR_WIDE_CMD)
+RM_VAR_WIDE_CASE = CASES[_wide_at]
+del CASES[_wide_at:]
+
+
+def rm_var_wide_case():
+    start = time.monotonic()
+    got, reason = decide(RM_VAR_WIDE_CASE)
+    took = time.monotonic() - start
+    if took >= 2.0:
+        return False, "judged in %.2f s, not under 2 s" % took
+    if got != "deny":
+        return False, "judged %s in %.2f s, not deny" % (got, took)
+    return True, "judged in %.2f s, under 2 s" % took
+
+
+WIDE_LABEL = "rm-var: 4000 assignments and 4000 targets with pwd are judged in under 2 s"
+LOG_CHECKS_EXTRA.append((WIDE_LABEL, rm_var_wide_case))
+
+
+# In-process timing (ruling item 3). guard.judge runs in this process and only its CPU time is read,
+# so the reading is the guard's own work. A hook subprocess's CPU time is not this process's, so no
+# subprocess is timed here. judge answers by printing one JSON block and exiting, so stdout is
+# captured and SystemExit is caught. The guard's log goes under CLAUDE_CONFIG_DIR, pointed at the
+# fixture config for the call and then restored.
+def judge_in_process(command, cwd):
+    """Return (decision, reason, CPU seconds) for one Bash call judged in this process."""
+    materialize(cwd)
+    guard = _load_guard_module()
+    payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd}
+    printed = io.StringIO()
+    saved = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = CFG
+    try:
+        started = time.process_time()
+        try:
+            with contextlib.redirect_stdout(printed):
+                guard.judge(payload)
+        except SystemExit:
+            pass
+        took = time.process_time() - started
+    finally:
+        if saved is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = saved
+    text = printed.getvalue().strip()
+    if not text:
+        return "allow", "", took
+    block = json.loads(text)["hookSpecificOutput"]
+    return block["permissionDecision"], block["permissionDecisionReason"], took
+
+
+# Ruling item 3: 4000 names, each bound to /tmp/a and then deleted through a glob under that name,
+# are judged in under 1 s of CPU, and the verdict is the rm-var refusal. Each flagged delete re-reads
+# the rest of the command for later bindings, so the work grows as the square of the segments.
+# The name must differ per segment: a repeated name has more than 64 values and is refused before
+# that re-read, so it never reaches the slow path. A `$D/x` target is not in the flagged shape.
+RM_VAR_LINEAR_CMD = "".join("D%d=/tmp/a; rm -rf $D%d/*; " % (n, n) for n in range(4000))
+
+
+def rm_var_linear_case():
+    got, reason, took = judge_in_process(RM_VAR_LINEAR_CMD, NOGIT)
+    if took >= 1.0:
+        return False, "judged in %.2f s CPU, not under 1 s" % took
+    if got != "deny" or "rm-var-unguarded" not in reason:
+        return False, "judged %s in %.2f s CPU, not the rm-var refusal" % (got, took)
+    return True, "judged in %.2f s CPU, under 1 s" % took
+
+
+LOG_CHECKS_EXTRA.append(("rm-var: 4000 bindings and 4000 flagged deletes are judged in under 1 s CPU",
+                         rm_var_linear_case))
+
+
+# The 64000-binding limit, moved from the wall clock of the whole hook to the CPU time of judge.
+# The bound is unchanged: under 2 s. The verdict is refused, and only the time is the point.
+def rm_var_64000_case():
+    got, reason, took = judge_in_process("A=x;" * 64000 + " rm -rf $A/", NOGIT)
+    if took >= 2.0:
+        return False, "judged in %.2f s CPU, not under 2 s" % took
+    if got != "deny" or "rm-var-unguarded" not in reason:
+        return False, "judged %s in %.2f s CPU, not the rm-var refusal" % (got, took)
+    return True, "judged in %.2f s CPU, under 2 s" % took
+
+
+LOG_CHECKS_EXTRA.append(("rm-var: 64000 bindings before a delete are judged in under 2 s CPU",
+                         rm_var_64000_case))
+
+
+# Ruling item 4: _split_segments_cached is keyed on the command alone, but split_segments reads
+# POWERSHELL_CALL[0] too. A POSIX backslash-newline is a continuation, and PowerShell ends the
+# segment there, so one text splits two ways. A split made under one flag must not be served to the
+# other. Red on 50d9f57: the second call returns the first call's cached split.
+def split_cache_power_shell_case():
+    guard = _load_guard_module()
+    text = "echo a\\\nb; ls"
+    try:
+        guard.POWERSHELL_CALL[0] = False
+        posix = guard.split_segments(text)
+        guard.POWERSHELL_CALL[0] = True
+        cached = guard.split_segments(text)
+        direct = guard.split_segments(text, [])   # the uncached path: the oracle for this flag
+    finally:
+        guard.POWERSHELL_CALL[0] = False
+    if direct == posix:
+        return False, "the two flags split alike, so the case proves nothing: %r" % (direct,)
+    if cached != direct:
+        return False, "PowerShell split served from the POSIX cache: got %r, want %r" % (
+            cached, direct)
+    return True, "PowerShell split %r differs from the POSIX split %r" % (direct, posix)
+
+
+LOG_CHECKS_EXTRA.append(("split cache: the PowerShell flag is part of the split, not only the command",
+                         split_cache_power_shell_case))
+
+
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
 
 # The log checkers tagged "windows". Each one reads a live process's start time (guard.py
@@ -6956,10 +7505,14 @@ def main():
         elif ok and case["rule"] and case["rule"] not in reason:
             ok = False
             note = "  (the reason does not name rule %r: %s)" % (case["rule"], reason[:90])
-        elif ok and case["carries"] and [f for f in case["carries"] if f not in reason]:
+        elif ok and case["carries"] and [f for f in case["carries"] if not carried(f, reason)]:
             ok = False
             note = "  (the reason does not carry %r: %s)" % (
-                [f for f in case["carries"] if f not in reason][0], reason[:90])
+                [f for f in case["carries"] if not carried(f, reason)][0], reason[:90])
+        elif ok and case["lacks"] and [f for f in case["lacks"] if f in reason]:
+            ok = False
+            note = "  (the reason carries %r, which it must not: %s)" % (
+                [f for f in case["lacks"] if f in reason][0], reason[:90])
         elif ok and got != "allow" and names_the_target(reason, case["rule"]):
             ok = False
             note = "  (the reason names the forbidden target %r)" % names_the_target(
