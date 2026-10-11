@@ -2723,10 +2723,10 @@ def _pid_cwd(pid: int):
 
 def in_own_agent_worktree(pid: int, transcript: str) -> bool:
     """True when `pid`'s cwd is inside `.claude/worktrees/agent-<id>` and this session's
-    `subagents/` folder holds `agent-<id>.jsonl`. The folder is the transcript path minus `.jsonl`.
+    `subagents/` folder holds `agent-<id>.jsonl`, and its parent is init (PPID 1). The folder is the transcript path minus `.jsonl`.
     Any unreadable part reads False (foreign). Decision a-kill-by-pid-needs-an-owned-pid."""
-    if not transcript.endswith(".jsonl"):
-        return False
+    if not transcript.endswith(".jsonl") or _ps_ppid(pid) != 1:
+        return False   # left-behind only: a pid whose parent is alive stays foreign
     cwd = _pid_cwd(pid)
     found = AGENT_WORKTREE_RE.search((cwd or "").replace("\\", "/"))
     return bool(found) and os.path.isfile(

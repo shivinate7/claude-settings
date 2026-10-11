@@ -15,10 +15,11 @@ editor, do not descend from it.
 
 `ps -o ppid=` and `ps -o comm=` give the reads. Neither keeps a list, so nothing can rot.
 
-Owner ruling, 2026-10-10: a pid is also owned when its cwd is inside
-`<primary>/.claude/worktrees/agent-<id>` and `agent-<id>.jsonl` exists in this session's subagent folder (see below).
-A process a subagent left reads PPID 1 once its parent dies, so the chain test misses it.
-Another session's agent worktree stays foreign.
+Owner ruling, 2026-10-10: a pid is also owned when all three hold. Its parent is init (PPID 1).
+Its cwd is inside `<primary>/.claude/worktrees/agent-<id>`. `agent-<id>.jsonl` exists in this
+session's subagent folder (see below). The grant covers a process a subagent left behind. A pid
+whose parent is alive stays foreign, also inside the agent worktree. Another session's agent
+worktree stays foreign.
 
 ## How the guard knows the session's subagent ids
 

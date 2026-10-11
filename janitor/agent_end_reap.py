@@ -27,6 +27,7 @@ Every run appends the raw payload and the decisions to
 `${CLAUDE_CONFIG_DIR:-~/.claude}/state/agent-end-payloads.jsonl`, so the payload fields the docs
 leave unmeasured get measured. The file keeps the last 200 lines. Always exits 0: exit 2 on SubagentStop keeps the agent running.
 """
+import contextlib
 import json
 import os
 import re
@@ -50,38 +51,64 @@ def log_path() -> str:
     return os.path.join(guard.config_dir(), "state", "agent-end-payloads.jsonl")
 
 
+@contextlib.contextmanager
+def _log_lock(path: str):
+    """Hold an exclusive lock on `<log>.lock` so parallel hook runs take turns. `fcntl.flock`
+    on POSIX, `msvcrt.locking` on Windows (blocks up to about 10 s, then raises)."""
+    with open(path + ".lock", "a+") as handle:
+        if sys.platform.startswith("win"):
+            import msvcrt
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+
+
 def log(record: dict, replace_run=None):
     """Append one line and keep only the last MAX_LOG_LINES. The log is the evidence for the hook
     fields the docs leave open (decisions/agent-end-reap-stops-what-a-finished-agent-left.md), and
-    it grew to thousands of raw payloads nobody reads. Two agents ending at once can lose a line:
-    ponytail: no lock, add one only if a measured field goes missing. On Windows the replace can
+    it grew to thousands of raw payloads nobody reads. Parallel runs take turns on a lock file,
+    because MEASURED on b0c87cb (PR 322 review): 13 of 120 rows were lost at 3 writers with a
+    shared temp name and no lock. The temp name carries the pid. On Windows the replace can
     raise PermissionError while the destination is held for a moment, so it retries a few times.
     REPLACE_RUN names a start row written earlier by this run; the last line is replaced only
-    when it carries that run id, so another agent's row is never dropped."""
+    when it carries that run id, so another agent's row is never dropped.
+    A failed write never fails the hook (exit stays 0); it prints one line to stderr."""
     path = log_path()
     line = json.dumps(dict(record, at=time.strftime("%Y-%m-%dT%H:%M:%S%z"))) + "\n"
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        try:
-            with open(path, encoding="utf-8") as handle:
-                kept = handle.readlines()[-(MAX_LOG_LINES - 1):]
-        except OSError:
-            kept = []
-        if replace_run and kept and ('"run": "%s"' % replace_run) in kept[-1]:
-            kept = kept[:-1]  # our own start row: the finished row takes its place
-        temp = path + ".tmp"
-        with open(temp, "w", encoding="utf-8") as handle:
-            handle.writelines(kept + [line])
-        for attempt in range(REPLACE_TRIES):
+        with _log_lock(path):
             try:
-                os.replace(temp, path)  # a reader never sees an empty or half-written file
-                break
-            except PermissionError:  # MEASURED 2026-10-08 on Windows: the destination is held a moment
-                if attempt == REPLACE_TRIES - 1:
-                    raise
-                time.sleep(0.05)
-    except Exception:
-        pass
+                with open(path, encoding="utf-8") as handle:
+                    kept = handle.readlines()[-(MAX_LOG_LINES - 1):]
+            except OSError:
+                kept = []
+            if replace_run and kept and ('"run": "%s"' % replace_run) in kept[-1]:
+                kept = kept[:-1]  # our own start row: the finished row takes its place
+            temp = "%s.%d.tmp" % (path, os.getpid())
+            with open(temp, "w", encoding="utf-8") as handle:
+                handle.writelines(kept + [line])
+            for attempt in range(REPLACE_TRIES):
+                try:
+                    os.replace(temp, path)  # a reader never sees an empty or half-written file
+                    break
+                except PermissionError:  # MEASURED 2026-10-08 on Windows: the destination is held a moment
+                    if attempt == REPLACE_TRIES - 1:
+                        raise
+                    time.sleep(0.05)
+    except Exception as exc:
+        print("agent_end_reap: payload log write failed: %r" % exc, file=sys.stderr)
 
 
 def is_agent_worktree_shape(path: str) -> bool:
