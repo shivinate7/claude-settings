@@ -588,8 +588,8 @@ MUTATIONS = [
      '        if False:\n            return False', "guard",
      'per-file ask: restore "$F" -- keep.txt in a worktree still asks, unreadable before --'),
     ("per-file: judge every git call in the first -C of the line",
-     '        root = segment_root(segment, stripped, cwd)',
-     '        root = command_root(stripped, cwd)', "guard",
+     '    for segment, root in zip(split_segments(stripped), segment_roots(stripped, cwd)):',
+     '    for segment, root in zip(split_segments(stripped), [command_root(stripped, cwd)] * 99):', "guard",
      'per-file deny: -C lane status, then -C shared restore f.txt, from a plain folder'),
     ("config-edit: stop noting project config edits, shell tool",
      '    matched = project_config_shell_hit(stripped, cwd)\n'
