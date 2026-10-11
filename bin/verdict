@@ -20,20 +20,27 @@ def main(argv):
     with open(log, "ab") as f:
         f.write(f"=== verdict run {time.strftime('%Y-%m-%d %H:%M:%S')}: {name}\n".encode()); f.flush()
         start = f.tell()
-        beat = float(os.environ.get("VERDICT_HEARTBEAT") or 120)
-        try:
-            proc = subprocess.Popen(argv, stdout=f, stderr=subprocess.STDOUT)
+        try: beat = float(os.environ.get("VERDICT_HEARTBEAT") or 120)
+        except ValueError: beat = 120
+        if not beat > 0: beat = 120  # also catches nan
+        try: proc = subprocess.Popen(argv, stdout=f, stderr=subprocess.STDOUT)
+        except OSError as e: proc = None; f.write(f"verdict: cannot run {argv[0]}: {e}\n".encode()); rc = 127
+        if proc:
+            say = True
             try:
                 while True:
                     try: rc = proc.wait(timeout=beat); break
                     except subprocess.TimeoutExpired:
-                        print(f"verdict: still running, {time.time() - t:.0f}s, log={log}", flush=True)
+                        if say:
+                            try: print(f"verdict: still running, {time.time() - t:.0f}s, log={log}", flush=True)
+                            except OSError: say = False  # reader gone: keep waiting, keep the child's rc
             except KeyboardInterrupt:
-                proc.terminate()
-                try: proc.wait(timeout=5)
-                except subprocess.TimeoutExpired: proc.kill(); proc.wait()
                 rc = 130
-        except OSError as e: f.write(f"verdict: cannot run {argv[0]}: {e}\n".encode()); rc = 127
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=5)
+                except (subprocess.TimeoutExpired, KeyboardInterrupt): pass
+                finally: proc.kill(); proc.wait()
         f.flush(); end = f.tell()
     secs = f"{time.time() - t:.1f}s"
     if rc < 0: note, rc = f" killed by signal {-rc}", 128 - rc
