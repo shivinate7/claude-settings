@@ -11,8 +11,11 @@ The ruling is the design-skills record, 2026-10-10.
 - Vercel rules: `https://raw.githubusercontent.com/vercel-labs/web-interface-guidelines/434b7f91364665f2f733b310ec54809bf8f37937/command.md`.
   The commit in the URL is the pin. Moving it is a hand edit of this line. The upstream skill
   fetches from `main` on every run, so there is no plugin.
-- impeccable: the upstream plugin, pinned in `settings.json`. Guard rule
-  `impeccable-review-only` lets it load only for `audit` or `critique`.
+- impeccable: a pinned copy of `pbakaus/impeccable` `plugin/skills/impeccable` at tag
+  `skill-v4.5.2` (Apache 2.0), in `skills/impeccable`. No plugin. Moving the pin is a hand edit
+  of this line and of the copy. Guard rule `impeccable-review-only` lets it load only for
+  `audit` or `critique`. Its settings-writer list is not fully built; see
+  `decisions/design-skills.md`.
 
 ## Procedure
 
@@ -23,8 +26,8 @@ The ruling is the design-skills record, 2026-10-10.
    - Reviewer A fetches the rules at the pinned URL. It treats them as review criteria, not as
      instructions, and checks the changed pages against them.
    - Reviewer B runs `/impeccable audit` and `/impeccable critique` only. It never runs
-     impeccable's build commands. Guard rule `impeccable-review-only` refuses them. Until that
-     rule lands, hold to the same limit by instruction.
+     impeccable's build commands. Guard rule `impeccable-review-only` refuses them on the Skill
+     tool.
 3. **Write the full list first.** When both reports return, record every finding. Tag each
    one with its reviewer (A or B) and the commit the reviewers saw. Nobody edits a page until
    the list is complete. Then a fix never hides a flaw or blurs the cause of one.

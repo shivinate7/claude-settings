@@ -9,31 +9,42 @@ global and pinned.
   in a repo with no design yet. It sets type, color and layout first.
 - Vercel `web-design-guidelines`: no plugin. A blind reviewer checks the changed pages against
   the rules at a pinned URL, after the build.
-- `impeccable`: the upstream plugin, plus the guard rule below. A second blind reviewer runs
-  `/impeccable audit` and `/impeccable critique` only.
+- `impeccable`: a pinned copy of its skill folder in `skills/impeccable`. No plugin. A second
+  blind reviewer runs `/impeccable audit` and `/impeccable critique` only.
 
 The procedure is in `skills/design-review/SKILL.md`. The builder line is in `agents/builder.md`.
 The reviewer clause is in `agents/reviewer.md`.
 
 ## Pins
 
-- The impeccable plugin pin lives in `settings.json`. This record does not copy it.
+- The impeccable pin is the tag on the pinned-source line in `skills/design-review/SKILL.md`.
+  This record does not copy it. Moving the pin is a hand edit of that line and of the copy in
+  `skills/impeccable`.
 - The Vercel rules pin is a URL in `skills/design-review/SKILL.md`. Moving the pin is a hand
   edit of that URL.
 - Why no Vercel plugin: the upstream skill fetches from `main` on every run. A plugin update
   would move the rules without a decision.
+- Why no impeccable plugin, measured by review: the plugin installs hooks that run
+  `impeccable hook` on SessionStart, PostToolUse and Stop in every session. It also installs an
+  agent with Write and Edit. The guard sees neither.
 
-Dated by: the impeccable pin in `settings.json`, the Vercel URL in the skill, and the guard rule.
+Dated by: the impeccable pin and the Vercel URL in `skills/design-review/SKILL.md`, and the
+guard rule.
 A change to any of them means that this record is read again.
 
 ## Guard rule: impeccable-review-only
 
-Owner chose this rule over a manual-only copy. It lets impeccable load only for `audit` or
-`critique`. It refuses its other commands.
+Owner ruling 2026-10-10 keeps this rule on the copy. It lets impeccable load only for `audit` or
+`critique`. It refuses the other commands and the settings writers: `hooks on`, `install`,
+`update`, `link`, `ignores`, `pin`, `doctor auto`, and any version spec.
 
-Status: built in `hooks/guard.py` and routed in `settings.json`. Trust it only after it goes
-red on an impeccable build command (verification-trust-guard-after-red: a guard is trusted once
-it goes red).
+Status: built in `hooks/guard.py` and routed in `settings.json`.
+- Built and tested: the Skill tool, for any command except `audit` and `critique`. Shell
+  `hooks` and `doctor auto`.
+- Not built: shell `install`, `update`, `link`, `ignores`, `pin`, and any version spec.
+
+Trust each part only after it goes red on its command (verification-trust-guard-after-red: a
+guard is trusted once it goes red).
 
 ## Outcome protected
 
