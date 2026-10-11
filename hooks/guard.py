@@ -5415,11 +5415,14 @@ PLAYWRIGHT_PATH_REASON = (
 # 10-11: 7 of 24 Bash prompts were `rm` on a `$var` path. Segments, the command word and the
 # `sh -c` script come from the shell walk above. `_RAW_WORD` only keeps the quote marks that
 # `segment_tokens` drops, and `rm_call` checks that both reads agree on the word count.
-# KNOWN LIMITS: an `rm` inside a script file is not seen. A bare `$d` target is not refused.
+# Named limits: decision rm-on-a-variable-needs-a-guard.
 _RAW_WORD = re.compile(r"""(?:\\.|'[^']*'|"(?:[^"\\]|\\.)*"|[^\s'"\\])+""")
 _RM_PART = re.compile(r"""'[^']*'|"(?:[^"\\]|\\.)*"|[^'"]+|.""")
 _RM_EXPANSION = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
 _RM_EXPANSION_SLASH = re.compile(r"\$(?:\{\w+\}|\w+)\"?/")
+_RM_LITERAL = "literal path needed: "
+# A variable set in the command from $(pwd), `pwd`, $PWD or $HOME. HOME and PWD count as set.
+_RM_TAINT = re.compile(r"(?<![\w$])(\w+)=\"?(?:\$\(pwd\)|`pwd`|\$\{?(?:PWD|HOME)\b)")
 
 
 def rm_call(segment: str):
@@ -5444,12 +5447,12 @@ def rm_call(segment: str):
     return tokens, at, flags, targets, recursive
 
 
-def _rm_var_rewrite(word: str):
-    """Return (word with every expansion guarded, True when one unguarded expansion is followed
-    by `/`). Text inside single quotes is a literal and stays as it is."""
+def _rm_var_rewrite(word: str, names=("HOME", "PWD")):
+    """Return (word with every expansion guarded, 1 when one unguarded expansion is followed
+    by `/`, 2 when a `names` expansion, guarded or not, is followed by `/`). Text inside single
+    quotes is a literal and stays as it is."""
     def guard(match):
-        name = match.group(1) or match.group(2)
-        return match.group(0) if name == "HOME" else "${%s:?}" % name
+        return "${%s:?}" % (match.group(1) or match.group(2))
     out, live = [], []
     for part in _RM_PART.findall(word):
         if part[0] == "'":
@@ -5460,20 +5463,29 @@ def _rm_var_rewrite(word: str):
         else:
             out.append(_RM_EXPANSION.sub(guard, part))
             live.append(part)
-    return "".join(out), bool(_RM_EXPANSION_SLASH.search("".join(live)))
+    live = "".join(live)
+    alt = "|".join(map(re.escape, names))
+    if re.search(r"\$(?:\{(?:%s)(?::\?)?\}|(?:%s)(?!\w))\"?/" % (alt, alt), live):
+        return re.sub(r"\$\{(\w+):\?\}|\$\{(\w+)\}", lambda m: "$" + (m.group(1) or m.group(2)),
+                      word), 2
+    return "".join(out), int(bool(_RM_EXPANSION_SLASH.search(live)))
 
 
 def rm_var_hits(text: str, depth=0) -> list:
     """Return the flagged `rm` calls of a command, each as `rm FLAGS TARGETS` with every
-    expansion in a flagged target guarded `:?`. `sh -c`, `eval` and `pwsh -Command` are walked."""
+    expansion in a flagged target guarded `:?`. A target under $HOME, $PWD or a variable set from
+    them or `pwd` is flagged with _RM_LITERAL. `sh -c`, `eval` and `pwsh -Command` are walked."""
     found = []
+    names = ("HOME", "PWD") + tuple(m.group(1) for m in _RM_TAINT.finditer(text))
     for segment in split_segments(text):
         call = rm_call(segment)
         if call:
             _, _, flags, targets, recursive = call
-            rewritten = [w for w, hit in map(_rm_var_rewrite, targets) if hit] if recursive else []
-            if rewritten:
-                found.append(" ".join(["rm"] + flags + rewritten))
+            rewritten = [(w, hit) for w, hit in (_rm_var_rewrite(t, names) for t in targets) if hit]
+            if rewritten and recursive:
+                literal = any(hit == 2 for _, hit in rewritten)
+                found.append((_RM_LITERAL if literal else "") +
+                             " ".join(["rm"] + flags + [w for w, _ in rewritten]))
             continue
         tokens = segment_tokens(segment)
         at = resolve_command(tokens) if tokens else None
@@ -5488,11 +5500,12 @@ def rm_var_hits(text: str, depth=0) -> list:
 
 
 def rm_var_reason(hits) -> str:
-    if any(re.search(r"\$\{?HOME\b", h) for h in hits):
+    if any(h.startswith(_RM_LITERAL) for h in hits):
         return (
-            "a recursive delete under $HOME can remove the home folder, and a ${NAME:?} guard does "
-            "not clear it. Retry with a literal path, such as " + os.path.expanduser("~") +
-            "/.cache/x. Flagged: " + "; ".join(hits)
+            "a recursive delete under $HOME, $PWD or a variable set from them can remove the home "
+            "or working folder, and a ${NAME:?} guard does not clear it. Retry with a literal "
+            "path, such as " + os.path.expanduser("~") + "/.cache/x. Flagged: " +
+            "; ".join(h.removeprefix(_RM_LITERAL) for h in hits)
         )
     return (
         "a recursive delete with an unguarded variable in its path can remove far more than "
