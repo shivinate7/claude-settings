@@ -5118,9 +5118,14 @@ LN_DESCENDS_REASON = (
 PLAYWRIGHT_VAR = "PLAYWRIGHT_BROWSERS_PATH"
 ASSIGNING_BUILTINS = ("export", "declare", "typeset", "readonly", "local", "set")
 PLAYWRIGHT_PS_SET = re.compile(
-    r"\$\{?env:" + PLAYWRIGHT_VAR + r"\}?\s*=(?!=)"
-    r"|\b(?:set-item|si|new-item|set-content|sc)\b[^;|]*\benv:" + PLAYWRIGHT_VAR + r"\b"
+    r"\$\{?env:" + PLAYWRIGHT_VAR + r"\}?\s*[-+*/]?=(?!=)"
+    r"|^\s*(?:set-item|si|new-item|set-content|sc)\b[^;|]*\benv:\\?" + PLAYWRIGHT_VAR + r"\b"
     r"|SetEnvironmentVariable\(\s*['\"]?" + PLAYWRIGHT_VAR + r"\b", re.I)
+
+
+# A shell profile or `.envrc`: a write there sets the variable for every later shell.
+PLAYWRIGHT_PROFILE = re.compile(r"\.(?:zshrc|bashrc|profile|zprofile|bash_profile|envrc)\b")
+_NULL_OR_DUP = re.compile(r"\d*>+\s*/dev/null|\d*>&\d+")
 
 
 def _is_playwright_assign(token: str) -> bool:
@@ -5141,9 +5146,10 @@ def _playwright_tokens_hit(tokens, depth=0) -> str:
         return word + " " + PLAYWRIGHT_VAR
     if word in ("builtin", "exec"):
         return _playwright_tokens_hit(rest, depth + 1)
-    if word in CMD_EXE_NAMES and rest and rest[0].lower() in ("/c", "/k"):
-        return _playwright_tokens_hit(rest[1:], depth + 1)
-    script = " ".join(rest) if word == "eval" else inline_script(tokens)
+    script = " ".join(rest[1:]) if word in CMD_EXE_NAMES and rest and rest[0].lower() in (
+        "/c", "/k") else None
+    if script is None:
+        script = " ".join(rest) if word == "eval" else inline_script(tokens)
     for segment in split_segments(script) if script else ():
         hit = playwright_path_hit(segment, depth + 1)
         if hit:
@@ -5151,15 +5157,41 @@ def _playwright_tokens_hit(tokens, depth=0) -> str:
     return ""
 
 
-def playwright_path_hit(segment: str, depth=0) -> str:
-    """Return the matched text when a segment sets PLAYWRIGHT_BROWSERS_PATH, else ''."""
+def playwright_path_hit(segment: str, depth=0, to_file=False) -> str:
+    """Return the matched text when a segment sets PLAYWRIGHT_BROWSERS_PATH, else ''.
+
+    `to_file` says the segment's output goes to a profile (a `tee` further down the pipe). The
+    file-write form counts only when the written text starts with the assignment.
+    """
     found = PLAYWRIGHT_PS_SET.search(segment)
     if found:
         return found.group(0)
-    if ">" in segment and any(m.group("n") and m.group("n").upper() == PLAYWRIGHT_VAR
-                              for m in _VAR_TOKEN.finditer(segment.replace("'", " "))):
-        return PLAYWRIGHT_VAR + " written to a file"
-    return _playwright_tokens_hit(segment_tokens(segment) or [], depth)
+    tokens = segment_tokens(segment) or []
+    if (to_file or ">" in _NULL_OR_DUP.sub(" ", segment)) and len(tokens) > 1 and basename(
+            tokens[0]) in ("echo", "printf"):
+        args = [t for t in tokens[1:] if not t.startswith("-")]
+        written = args[0].removeprefix("export ").lstrip() if args else ""
+        if _is_playwright_assign(written):
+            return PLAYWRIGHT_VAR + " written to a file"
+    return _playwright_tokens_hit(tokens, depth)
+
+
+def playwright_command_hit(raw: str, stripped: str) -> str:
+    """Judge a whole command: each segment, plus a profile-bound heredoc body and `tee` pipe."""
+    to_file = bool(re.search(r"\btee\b[^|;&]*" + PLAYWRIGHT_PROFILE.pattern, stripped))
+    for segment in split_segments(stripped):
+        matched = playwright_path_hit(segment, to_file=to_file)
+        if matched:
+            return matched
+    kept, bodies = _split_heredocs(raw)
+    headers = [line for line in kept if HEREDOC_HEADER.search(line)]
+    for header, (_, body) in zip(headers, bodies):
+        if PLAYWRIGHT_PROFILE.search(header):
+            for line in body.split("\n"):
+                matched = playwright_path_hit(line)
+                if matched:
+                    return matched
+    return ""
 
 
 PLAYWRIGHT_PATH_REASON = (
@@ -5401,10 +5433,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "live-stream", NARRATED_TAIL_REASON, matched)
 
     # 3c. A command that sets the Playwright browser cache location (incident 2026-10-10).
-    for segment in split_segments(stripped):
-        matched = playwright_path_hit(segment)
-        if matched:
-            refuse(tool, "deny", "playwright-browsers-path", PLAYWRIGHT_PATH_REASON, matched)
+    matched = playwright_command_hit(raw, stripped)
+    if matched:
+        refuse(tool, "deny", "playwright-browsers-path", PLAYWRIGHT_PATH_REASON, matched)
 
     # 3b. Two traps ported from banchi's `scripts/guard-shell.py`: `gh api` with a field and no
     # method, and `ln -s` onto a directory that is already there. Each reads the segment's own
