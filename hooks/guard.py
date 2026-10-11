@@ -249,8 +249,8 @@ def split_segments(cmd: str, ends=None):
             current.append(cmd[index:index + 2])   # an escaped backslash, so no continuation
             index += 2
             continue
-        if char == "\\" and cmd[index + 1:index + 2] == "\n":
-            index += 2   # an unquoted backslash-newline is a line continuation: the shell drops it
+        if char == "\\" and cmd[index + 1:index + 2] == "\n" and not POWERSHELL_CALL[0]:
+            index += 2   # a POSIX backslash-newline is a continuation; in PowerShell it ends a path
             continue
         if char in ("'", '"'):
             quote = char
@@ -262,6 +262,10 @@ def split_segments(cmd: str, ends=None):
             ends is None or ends.append("&&")
             current = []
             index += 2
+            continue
+        if char == "|" and cmd[index - 1:index] == ">":
+            current.append(char)   # `>|` overrides noclobber: a redirect, no pipe
+            index += 1
             continue
         if char == "|":
             width = 2 if cmd[index:index + 2] == "||" else 1
@@ -5131,7 +5135,7 @@ PLAYWRIGHT_PS_SHELLS = ("pwsh", "powershell", "pwsh.exe", "powershell.exe")
 PLAYWRIGHT_PS_READERS = ("select-string", "sls")
 PLAYWRIGHT_PS_SET = re.compile(
     r"\$\{?env:" + PLAYWRIGHT_VAR + r"\}?\s*[-+*/]?=(?!=)"
-    r"|^\s*(?:set-item|si|new-item|set-content|sc)\b[^;|]*\benv:\\?" + PLAYWRIGHT_VAR + r"\b"
+    r"|^\s*(?:set-item|si|new-item|ni|set-content|sc)\b[^;|]*\benv:\\?" + PLAYWRIGHT_VAR + r"\b"
     r"|SetEnvironmentVariable\(\s*['\"]?" + PLAYWRIGHT_VAR + r"\b", re.I)
 
 
@@ -5140,11 +5144,19 @@ PLAYWRIGHT_PROFILE = re.compile(r"\.(?:zshrc|zshenv|zlogin|bashrc|profile|zprofi
 # SILENT_WRITE_REDIRECT (the null-device redirects) leaves `N>&N` alone, because that rule wants
 # a duplicate to count as output. Here a duplicate is no file target, so it is dropped as well.
 _FD_DUP = re.compile(r"\d*>&\d+")
-_REDIRECT_TO_PROFILE = re.compile(r">+\s*[^\s|;&]*" + PLAYWRIGHT_PROFILE.pattern)
+_REDIRECT_TO_PROFILE = re.compile(r">+\|?\s*[^\s|;&]*" + PLAYWRIGHT_PROFILE.pattern)
 
 
 def _is_playwright_assign(token: str) -> bool:
     return bool(ASSIGNMENT.match(token)) and token.split("=", 1)[0].upper() == PLAYWRIGHT_VAR
+
+
+def _pwsh_script(tokens) -> str:
+    """The script text after `-c` or `-Command` of a pwsh launch, else ''."""
+    for at, tok in enumerate(tokens[:-1]):
+        if re.fullmatch(r"-c(?:ommand)?", tok, re.I):
+            return tokens[at + 1]
+    return ""
 
 
 def _playwright_tokens_hit(tokens, depth=0) -> str:
@@ -5173,15 +5185,16 @@ def _playwright_tokens_hit(tokens, depth=0) -> str:
     script = " ".join(rest[1:]) if word in CMD_EXE_NAMES and rest and rest[0].lower() in (
         "/c", "/k") else None
     if script is None:
-        script = " ".join(rest) if word == "eval" else inline_script(tokens)
+        script = " ".join(rest) if word == "eval" else (
+            _pwsh_script(tokens) if word in PLAYWRIGHT_PS_SHELLS else inline_script(tokens))
     for segment in split_segments(script) if script else ():
-        hit = playwright_path_hit(segment, depth + 1)
+        hit = playwright_path_hit(segment, depth + 1, ps_inner=word in PLAYWRIGHT_PS_SHELLS)
         if hit:
             return hit
     return ""
 
 
-def playwright_path_hit(segment: str, depth=0, to_file=False) -> str:
+def playwright_path_hit(segment: str, depth=0, to_file=False, ps_inner=False) -> str:
     """Return the matched text when a segment sets PLAYWRIGHT_BROWSERS_PATH, else ''.
 
     `to_file` says the segment's output goes to a profile (a `tee` further down the pipe). The
@@ -5190,15 +5203,20 @@ def playwright_path_hit(segment: str, depth=0, to_file=False) -> str:
     tokens = segment_tokens(segment) or []
     at = resolve_command(tokens) if tokens else None
     word = basename(tokens[at]).lower() if at is not None else ""
-    if (POWERSHELL_CALL[0] or word in PLAYWRIGHT_PS_SHELLS) and word not in (
+    # A pwsh launch with a script is judged through that script (ps_inner), statement by statement.
+    outer_ps = word in PLAYWRIGHT_PS_SHELLS and not _pwsh_script(tokens)
+    if (POWERSHELL_CALL[0] or outer_ps or ps_inner) and word not in (
             ENV_PATTERN_COMMANDS + PLAYWRIGHT_PS_READERS):
         found = PLAYWRIGHT_PS_SET.search(segment)
-        if found:
+        # inside pwsh -c, a `$env:` text counts only as a statement, not inside another command's argument
+        if found and not (ps_inner and found.group(0).startswith(("$", "{")) and not re.match(
+                r"\s*" + re.escape(found.group(0)), segment)):
             return found.group(0)
     cleaned = _FD_DUP.sub(" ", SILENT_WRITE_REDIRECT.sub(" ", segment))
     if (to_file or _REDIRECT_TO_PROFILE.search(cleaned)) and len(tokens) > 1 and basename(
             tokens[0]) in ("echo", "printf"):
-        written = " ".join(t for t in tokens[1:] if not t.startswith("-"))
+        written = " ".join(t for t in tokens[1:] if not t.startswith("-") and (
+            "%" not in t or basename(tokens[0]) == "echo"))   # a printf format is no text
         if _is_playwright_assign(written.removeprefix("export ").lstrip()):
             return PLAYWRIGHT_VAR + " written to a file"
     return _playwright_tokens_hit(tokens, depth)
