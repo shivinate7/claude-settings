@@ -74,6 +74,16 @@ the tokenizer cannot read, keeps the ask. A whole-tree discard keeps the worktre
 denies all of them. Owner ruling, 2026-10-11 ("Allow per-file"). Prompt frequency is
 unmeasured, because an ask leaves no line in the transcripts.
 
+These discard forms join the rule: deny in a shared checkout, ask in a linked worktree.
+
+- `git checkout -f <branch>` and `git checkout --force <branch>`. A forced switch discards local
+  changes.
+- A bare `git checkout <folder>` with no `--`. Git reads it in path mode.
+- `--pathspec-from-file` and each unique prefix that git accepts, such as `--pathspec-from`.
+- Each `-C <dir>` in a git call. The last one sets the checkout that the rule judges.
+
+Found by review, 2026-10-11. Owner: "Do this task here".
+
 ## The predicate, updated
 
 `stash_takes_the_stack` already named the TAKE arm's subject as clone-wide. This
