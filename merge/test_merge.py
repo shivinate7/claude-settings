@@ -931,9 +931,11 @@ if a[:2] == ["pr", "view"]:
         if lag and lag["n"] > 0 and head != lag["prior"]:  # GitHub still shows the head before the push
             lag["n"] -= 1; save(); head = lag["prior"]
         bad = S.get("dirty_after_checks") is not None and S["checks_calls"] >= S["dirty_after_checks"]
+        views = S.get("views", 0) + 1; S["views"] = views; save()  # draft_from_view=N: read N and later ones see a draft
+        draft = bool(S.get("draft")) or (S.get("draft_from_view") is not None and views >= S["draft_from_view"])
         print(json.dumps({"headRefOid": head, "headRefName": "feat", "baseRefName": S.get("base", "main"), "state": "OPEN",
                           "mergeable": "CONFLICTING" if bad else "MERGEABLE", "mergeStateStatus": "DIRTY" if bad else "CLEAN",
-                          "isDraft": bool(S.get("draft"))}))  # set draft=True in a test; false by default
+                          "isDraft": draft}))  # set draft=True in a test; false by default
     else:
         print(json.dumps({"state": "MERGED" if S.get("oid") else "OPEN", "mergeCommit": {"oid": S["oid"]} if S.get("oid") else None}))
 elif a[:2] == ["pr", "checks"] and S.get("checks_broken") and S["checks_calls"] >= S.get("broken_from", 0):
@@ -1410,6 +1412,13 @@ class GhHalf(Env):
         rc, out = self.run_merge("7", host=self.gh_host())
         self.assert_draft_refused(rc, out, before)
 
+    def test_a_pr_that_turns_draft_after_the_preview_read_is_refused_at_confirm(self):  # guard: green once merge.py checks draft under the lock
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=["gates"]))))  # complete: no defaults notice in the output
+        self.set(draft_from_view=2)  # read 1 is main's read at the top of --confirm; read 2 is confirm's read under the lock
+        before = self.refs()
+        rc, out = self.run_merge("7", "--confirm", host=self.gh_host())
+        self.assert_draft_refused(rc, out, before)
+
     def test_a_draft_pr_is_refused_at_confirm_before_any_claim_or_wait(self):
         self.set(draft=True)
         before = self.refs()
@@ -1517,6 +1526,24 @@ class ConfigFile(Env):
         self.assertIn("deadlineMinutes", self.one_merge_line(out))
         self.assertNotIn("TypeError", out)
         self.assertFalse(self.lock_ref())
+
+    def test_deadlineMinutes_over_the_360_cap_stops_with_one_line_at_preview_and_confirm(self):  # 360 is GitHub's longest job run
+        for bad, label in ((361, "361"), (10 ** 400, "10**400")):
+            put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deadlineMinutes=bad))))
+            for args in (("7",), ("7", "--confirm")):
+                with self.subTest(deadlineMinutes=label, args=args):
+                    rc, out = self.run_merge(*args)
+                    self.assertEqual(rc, 1, out)
+                    self.assertIn("deadlineMinutes", self.one_merge_line(out))
+                    self.assertNotIn("OverflowError", out)
+                    self.assertFalse(self.lock_ref())
+
+    def test_deadlineMinutes_360_is_accepted_at_preview_and_confirm(self):  # the cap's edge: a guard, green today
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deadlineMinutes=360))))
+        for args in (("7",), ("7", "--confirm")):
+            with self.subTest(args=args):
+                rc, out = self.run_merge(*args)
+                self.assertEqual(rc, 0, out)
 
     def test_an_unknown_merge_field_stops_with_one_line_naming_it(self):
         put_base_config(self, json.dumps({"merge": {"methd": "squash"}}))
