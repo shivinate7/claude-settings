@@ -503,10 +503,10 @@ def base_stamp_config(wt, tmp, cfgrel, base_ref):
         raise Stop(f"cannot read {base_ref} to look for {cfgrel}: {listed}")
     if not listed:
         return None
-    c, text = git(wt, "show", f"{base_ref}:{cfgrel}")
-    if c:
-        raise Stop(f"cannot read {cfgrel} on {base_ref}: {text}")
     try:
+        c, text = git(wt, "show", f"{base_ref}:{cfgrel}")
+        if c:
+            raise Stop(f"cannot read {cfgrel} on {base_ref}: {text}")
         kinds = json.loads(text).get("kinds")
     except (ValueError, AttributeError) as e:
         raise Stop(f"cannot read the config {cfgrel} on {base_ref}: {e}")
@@ -662,8 +662,8 @@ def load_config(root, base, path):
         branch = host_default_branch(root)
         say(f"merge: {path} not found on {ref}. Using the defaults: merge method merge, 45 minute deadline, required checks from branch protection, default branch {branch}.")
         return {"defaultBranch": branch, "merge": dict(MERGE_DEFAULTS)}
-    c, text = git(root, "show", f"{ref}:{path}")
     try:
+        c, text = git(root, "show", f"{ref}:{path}")
         if c:
             raise ValueError(text)
         cfg = json.loads(text)
@@ -675,6 +675,8 @@ def load_config(root, base, path):
     unknown = sorted(set(m) - MERGE_FIELDS)
     if unknown:
         raise Stop(f"{path} on {ref} has an unknown field in the merge block: {', '.join(unknown)}")
+    if not isinstance(m.get("ignoreChecks", []), list):
+        raise Stop(f"{path} on {ref}: merge.ignoreChecks must be a list, not {m['ignoreChecks']!r}.")
     filled = [k for k in MERGE_DEFAULTS if k not in m]
     for k in filled:
         m[k] = MERGE_DEFAULTS[k]
@@ -749,9 +751,6 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None):
 
 def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None):
     m = cfg.get("merge", {})
-    for k in ("method", "deadlineMinutes"):
-        if k not in m:
-            raise Stop(f"{cfgrel} has no merge.{k}. Read it from the repo; the tool never guesses it.")
     info = info or host.pr(n)  # main read it once already, and the config came from that base. A read: acquire never waits, so the head cannot move before the lock is ours
     base = info["base"]  # the PR's own base; read again under the lock
     base_ref = f"origin/{base}"
