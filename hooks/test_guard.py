@@ -1960,6 +1960,12 @@ sh("playwright: npx cross-env sets it ahead of an install",
 sh("playwright: cross-env sets it ahead of an install, bare",
    "cross-env PLAYWRIGHT_BROWSERS_PATH=/x npx playwright install", "deny",
    "playwright-browsers-path", cwd=NOGIT)
+# Coordinator ruling: an escaped backslash before a newline is not a continuation, so the kill
+# rule still sees the pkill on the next line. A variable given to node as an argument is no setting.
+sh("kill: an escaped backslash before a newline is not a continuation, pkill still denies",
+   "echo \\\\\npkill -f node", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("playwright: cross-env passes the variable to node as an argument, allowed",
+   "cross-env FOO=1 node x.js PLAYWRIGHT_BROWSERS_PATH=/x", "allow", cwd=NOGIT)
 
 # THE PREDICATE IS THE ACT, NOT THE TOOL OR THE SPELLING. MEASURED: the owner ran
 # `grep -n -i "...|make reap|pkill..." CLAUDE.md` to search CLAUDE.md for the word, and it was
