@@ -6,6 +6,8 @@ A worktree made mid-session gets no setup of its untracked state (node_modules, 
 A SessionStart hook runs only when a session starts in that worktree. Should claude-settings own
 one shared fix for every repo that imports it?
 
+Scope: untracked state only. Dev-server ports are decision reuse-needs-checkout-proof.
+
 ## The ruling
 
 Owner, 2026-10-10: no. Each repo solves it itself. claude-settings ships no worktree-setup hook.
