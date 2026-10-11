@@ -4152,6 +4152,34 @@ for _tool in ("Edit", "Write"):
         add("test-author: %s of non-test %s is refused" % (_tool, _path), "deny", rule=TA,
             tool=_tool, file_path=_path, **A)
 
+# ---- Xcode/SPM test naming (incident 2026-10-11, Degen repo): a test-author was refused
+# `native/DegenUITests/NBOpenLinkUITests.swift` and `native/DegenUITests/LaunchTests.swift`, and a
+# builder could edit them. Two shapes, both case-sensitive, read from the repo-relative parts:
+# a path part ending in `Tests` after a non-empty prefix (`DegenUITests`, `DegenKitTests`), and a
+# basename `^\w+Tests?\.swift$` (the same shape as JAVA_TEST). A bare `Tests.swift` has an empty
+# prefix, so it is NOT a test file (decided 2026-10-11). A folder named exactly `Tests` is already a
+# test dir through TEST_DIRS (lowercased), so it is a case here, unchanged. `Footests` and `Attests`
+# are near misses: their `tests` is lowercase.
+SWIFT_TEST_PATHS = ("native/DegenUITests/NBOpenLinkUITests.swift",
+                    "native/DegenUITests/LaunchTests.swift", "Sources/FooTests/Helper.swift",
+                    "App/LoginTest.swift")
+SWIFT_FALSE_ALARMS = ("native/Contests/Board.swift", "native/Tests.swift",
+                      "native/LatestResults.swift", "native/Attests/x.swift",
+                      "native/UITestsHelper/x.swift", "native/Footests/x.swift")
+for _tool in ("Edit", "Write"):
+    for _path in SWIFT_TEST_PATHS:
+        add("swift-test: %s of Xcode/SPM test %s is refused" % (_tool, _path), "deny", rule=BT,
+            tool=_tool, file_path=_path, **B)
+        add("swift-test: %s of Xcode/SPM test %s is allowed for a test-author" % (_tool, _path),
+            "allow", tool=_tool, file_path=_path, **A)
+    for _path in SWIFT_FALSE_ALARMS:
+        add("swift-test: %s of non-test %s is allowed" % (_tool, _path), "allow", tool=_tool,
+            file_path=_path, **B)
+        add("swift-test: %s of non-test %s is refused for a test-author" % (_tool, _path), "deny",
+            rule=TA, tool=_tool, file_path=_path, **A)
+    add("swift-test: %s of native/Tests/Helper.swift is refused (folder Tests, unchanged)" % _tool,
+        "deny", rule=BT, tool=_tool, file_path="native/Tests/Helper.swift", **B)
+
 # ---- the diff, judged at commit, push and SubagentStop
 BASE_FILES = {
     "src/app.py": "x = 1\n", "src/contest.py": "y = 1\n", "latest_results.md": "ok\n",
