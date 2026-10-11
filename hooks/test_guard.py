@@ -6194,6 +6194,8 @@ SIM_UT0 = "1A2B3C4D-0000-4000-8000-0000000000D0"  # Idle Pro, booted: the twin
 SIM_UT1 = "1A2B3C4D-0000-4000-8000-0000000000D1"  # Twin Pro, shut down
 SIM_UE = "1A2B3C4D-0000-4000-8000-00000000000E"  # Named-UDID Mini, booted: its name is SIM_UC
 SIM_UF = "1A2B3C4D-0000-4000-8000-00000000000F"  # Delta, shut down on RT only
+SIM_UDA = "1A2B3C4D-0000-4000-8000-0000000000D3"  # Delta, shut down on RT_OLD (25.0), listed first
+SIM_UDB = "1A2B3C4D-0000-4000-8000-0000000000D4"  # Delta, shut down on RT (26.0), listed second
 # The launchd_sim of each booted device: the pid and the start time the fake `ps` gives it, and the
 # same pair in the boot record. A record that names another pid or start time is an older boot.
 LAUNCHD_PID = {SIM_UA: 4001, SIM_UB: 4002, SIM_UT0: 4003, SIM_UE: 4004}
@@ -6273,6 +6275,13 @@ def register_simulator_boot_cases():
         "twin_rebooted": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_rebooted"), twin_rows()),
                           [dict(twin_idle_rec, launchd_pid=4900,
                                 launchd_start="Fri Oct 9 09:00:00 2026")]),
+        # One idle recorded twin (Idle Pro, 26.0) and Delta shut down on two runtimes. The fake xcrun
+        # groups rows by runtime in first-seen order, so the 25.0 copy comes first in the device list:
+        # a check of only the first hit sees 25.0, not the twin's 26.0.
+        "twin_two_runtimes": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_two_rt"), [
+            (SIM_UDA, "Delta", "Shutdown", SIM_TYPE_PRO, SIM_RT_OLD),
+            (SIM_UT0, "Idle Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
+            (SIM_UDB, "Delta", "Shutdown", SIM_TYPE_PRO, SIM_RT)]), [twin_idle_rec]),
         # Two booted at the cap, plus a booted device named like the shut-down target's UDID.
         "cap_udid_name": (make_fake_xcrun(os.path.join(ROOT, "sim_cap_udid_name"), [
             (SIM_UA, "Alpha Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
@@ -6370,6 +6379,21 @@ def register_simulator_boot_cases():
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=latest'",
        "deny", rule="simulator-boot-cap", env_path=latest_path, config=latest_cfg,
        carries=(SIM_UA, SIM_UE))
+    # A numeric OS that matches no copy must not leave zero hits. Delta is shut down on 26.0.
+    sh("boot a shut-down device by name with OS=26.0.0, cap full: xcodebuild destination",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=26.0.0'",
+       "deny", rule="simulator-boot-cap", env_path=latest_path, config=latest_cfg,
+       carries=(SIM_UA, SIM_UE))
+    sh("boot a shut-down device by name with two OS keys, cap full: xcodebuild destination",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=latest,OS=25.0'",
+       "deny", rule="simulator-boot-cap", env_path=latest_path, config=latest_cfg,
+       carries=(SIM_UA, SIM_UE))
+    # Delta is on two runtimes; OS=latest names neither, so every shut-down copy must be judged.
+    twin_two_path, twin_two_cfg = on("twin_two_runtimes")
+    sh("boot a shut-down copy with an idle twin on its runtime, OS=latest: xcodebuild destination",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=latest'",
+       "deny", rule="simulator-boot-twin", env_path=twin_two_path, config=twin_two_cfg,
+       carries=(SIM_UT0,))
     # An id= destination names one device. OS=26.0 must not hide a shut-down 25.0 copy from the check.
     sh("boot a shut-down 25.0 copy by id with OS=26.0, cap full: xcodebuild destination",
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC
