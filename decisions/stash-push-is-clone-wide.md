@@ -66,7 +66,10 @@ nothing. Once the tree is dirty enough to be taken, the call denies. The
 
 In a linked worktree, `git checkout <file>` and `git restore <file>` that name only files run
 with no ask. The loss is the lane's own change to the files it named, which is what a lane
-means when it regenerates a fixture. A whole-tree discard keeps the worktree ask: `reset
+means when it regenerates a fixture. The allow is an allow-list. `git restore` passes only with the flags `--staged`, `--worktree`,
+`-S`, `-W` and `--`. `git checkout` passes with `--` before the paths. Without `--`, it passes
+only with one operand that is an existing file. Any other flag or form, or a command that
+the tokenizer cannot read, keeps the ask. A whole-tree discard keeps the worktree ask: `reset
 --hard`, and a `checkout` or `restore` of `.`, a folder, or a glob. A shared checkout still
 denies all of them. Owner ruling, 2026-10-11 ("Allow per-file"). Prompt frequency is
 unmeasured, because an ask leaves no line in the transcripts.
