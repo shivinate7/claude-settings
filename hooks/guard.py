@@ -153,6 +153,7 @@ hands, which is what the tokens were reaching for.
 """
 
 import fnmatch
+import functools
 import itertools
 import json
 import os
@@ -201,6 +202,11 @@ def basename(token: str) -> str:
     return token.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
 
 
+@functools.lru_cache(maxsize=8)
+def _split_segments_cached(cmd: str):
+    return tuple(split_segments(cmd, []))
+
+
 # ------------------------------------------------------------------ shell segments and command words
 #
 # ONE SHELL SEGMENT of the command. Each segment is judged on its own, so an allowed first half
@@ -230,6 +236,8 @@ def split_segments(cmd: str, ends=None):
     `ends`, when a list, gets what closed each segment (`|`, `||`, `&&`, `;`, newline, or '' for
     the last), so a caller can tell a segment whose stdout is piped onward from the rest.
     """
+    if ends is None:   # the same command is split by many rules: split it once
+        return list(_split_segments_cached(cmd))
     segments = []
     current = []
     quote = ""
@@ -324,8 +332,14 @@ def segment_tokens(segment: str):
     # keeps posix shlex from eating it (`C:\\repo` would read as `C:repo`).
     if POWERSHELL_CALL[0]:
         segment = segment.replace("\\", "\\\\")
+    found = _segment_tokens(segment)
+    return None if found is None else list(found)
+
+
+@functools.lru_cache(maxsize=4096)   # a command of 64000 repeated segments is split once
+def _segment_tokens(segment: str):
     try:
-        return shlex.split(segment, posix=True)
+        return tuple(shlex.split(segment, posix=True))
     except ValueError:
         return None
 
@@ -360,6 +374,11 @@ def resolve_command(tokens):
     any assignment it takes ahead of the program name, so the index returned is the program that
     actually runs, never the keyword or the wrapper carrying it there.
     """
+    return _resolve_command(tuple(tokens))
+
+
+@functools.lru_cache(maxsize=4096)   # every rule asks again for each segment of a long command
+def _resolve_command(tokens):
     end = len(tokens)
     index = _skip_assignments_and_keywords(tokens)
     while index < end and basename(tokens[index]) in COMMAND_WRAPPERS:
@@ -5463,6 +5482,7 @@ def _rm_taint_names(text: str) -> set:
 # The allow-list for `${NAME:?}` advice (ruling item 1). Every binding of a name must be
 # `NAME=<literal>`, `for NAME in <literal words>` or `NAME=$(mktemp …)`. Built once per command.
 _RM_EXPANSION_ANY = re.compile(r"\$(?:\{(\w+)(?::\?)?\}|(\w+))")
+_RM_NAMES = re.compile(r"\$\{?(\w+)")
 _RM_TRIGGER = re.compile(r"""\$(?:\{(\w+)(:\?)?\}|(\w+))"?/(?=[*?\[${}/"']|\.\.|$)""")
 _RM_VALUE = re.compile(r"""(?:\\.|'[^']*'|"(?:[^"\\]|\\.)*"|[^\s'"\\;&|()<>])+""")
 _RM_BIND = re.compile(r"(?<![\w$-])(\w+)(\+|\[[^\]]*\])?=")
@@ -5476,9 +5496,26 @@ _RM_MKTEMP_PATH = "/tmp/mktemp.X"
 def _rm_literal(word: str):
     if len(word) > 1 and word[0] == word[-1] and word[0] in "'\"":
         word = word[1:-1]
-    if not word or word[0] == "." or re.search(r"""\.\.|[~$`*?\[{\\'"]""", word):
+    if not word or word[0] == "." or re.search(r"""\.\.|[~$`*?\[{}\\'"\s]""", word):
         return None
     return word
+
+
+_RM_END = ("", ";", "&", "|", "\n", ")", "#", " ", "\t")
+_RM_BLANK = re.compile(r"[ \t]*")
+
+
+def _rm_prefixed(scope: str, i: int) -> bool:
+    """True when the assignment ending at i is a prefix assignment, such as `X=/tmp rm …`."""
+    while True:
+        i = _RM_BLANK.match(scope, i).end()
+        if scope[i:i + 1] in ("", ";", "&", "|", "\n", ")", "#"):
+            return False
+        m = _RM_BIND.match(scope, i)
+        if not m:
+            return True
+        v = _RM_VALUE.match(scope, m.end())
+        i = v.end() if v else m.end()
 
 
 def _rm_values(scope: str) -> dict:
@@ -5487,11 +5524,19 @@ def _rm_values(scope: str) -> dict:
     def put(name, value):
         if name in vals and vals[name] is None:
             return
-        vals[name] = None if value is None else vals.get(name, []) + [value]
+        if value is None:
+            vals[name] = None
+        else:
+            vals.setdefault(name, []).append(value)
     for m in _RM_BIND.finditer(scope):
         mk = _RM_MKTEMP.match(scope, m.end())
-        value = _RM_MKTEMP_PATH if mk else (_RM_VALUE.match(scope, m.end()) or [""])[0]
-        put(m.group(1), None if m.group(2) else (value if mk else _rm_literal(value)))
+        vm = None if mk else _RM_VALUE.match(scope, m.end())
+        end = mk.end() if mk else (vm.end() if vm else m.end())
+        if mk and scope[end:end + 1] not in _RM_END:   # a mktemp value has nothing after the `)`
+            value = None
+        else:
+            value = _RM_MKTEMP_PATH if mk else _rm_literal(vm[0] if vm else "")
+        put(m.group(1), None if m.group(2) or _rm_prefixed(scope, end) else value)
     for m in _RM_FOR.finditer(scope):
         for w in _RM_VALUE.findall(m.group(2)) or [""]:
             put(m.group(1), _rm_literal(w))
@@ -5501,19 +5546,28 @@ def _rm_values(scope: str) -> dict:
     return vals
 
 
+@functools.lru_cache(maxsize=16)
+def _rm_real(path: str) -> str:
+    """Return the real path, case-folded on macOS, where the file system folds case."""
+    real = os.path.realpath(path)
+    return real.lower() if sys.platform == "darwin" else real
+
+
 def _rm_target_bad(path: str, cwd: str) -> bool:
     """True when path, or a glob's parent, is /, home, the cwd or a parent of the cwd."""
     if re.search(r"[*?\[]", os.path.basename(path)):
         path = os.path.dirname(path)
-    cwd = os.path.normpath(cwd or "/")
-    q = os.path.normpath(os.path.join(cwd, path))
-    return q in ("/", cwd, os.path.expanduser("~")) or cwd.startswith(q.rstrip("/") + "/")
+    fold = str.lower if sys.platform == "darwin" else str
+    cwd, home = _rm_real(cwd or "/"), _rm_real(os.path.expanduser("~"))
+    q = fold(os.path.realpath(os.path.join(cwd, path)))
+    return q in ("/", cwd, home) or cwd.startswith(q.rstrip("/") + "/")
 
 
 def _rm_word_safe(word: str, vals: dict, cwd: str) -> bool:
     """True when every expansion in the word has only safe bindings and no value makes the
     target /, home or the cwd."""
-    names = sorted({a or b for a, b in _RM_EXPANSION_ANY.findall(word)})
+    plain = word.replace('"', "")
+    names = sorted({a or b for a, b in _RM_EXPANSION_ANY.findall(plain)})
     if any(vals.get(n) is None for n in names):
         return False
     combos = [vals[n] for n in names]
@@ -5522,7 +5576,6 @@ def _rm_word_safe(word: str, vals: dict, cwd: str) -> bool:
         size *= len(c)
     if size > 64:
         return False
-    plain = word.replace('"', "")
     for pick in itertools.product(*combos):
         mapping = dict(zip(names, pick))
         path = _RM_EXPANSION_ANY.sub(lambda m: mapping[m.group(1) or m.group(2)], plain)
@@ -5532,6 +5585,14 @@ def _rm_word_safe(word: str, vals: dict, cwd: str) -> bool:
 
 
 def _rm_var_rewrite(word: str, ctx):
+    """_rm_var_rewrite_raw, except that any error while judging gives the literal-path reason."""
+    try:
+        return _rm_var_rewrite_raw(word, ctx)
+    except Exception:
+        return word, 2
+
+
+def _rm_var_rewrite_raw(word: str, ctx):
     """Return (word with every expansion guarded, 0 when not in the trigger shape, 1 when the
     allow-list clears the names, 2 when only a literal path will do). Text inside single quotes is
     a literal and stays as it is. ctx is (taint names, allow-list values, cwd, cd seen)."""
@@ -5553,7 +5614,7 @@ def _rm_var_rewrite(word: str, ctx):
     for m in _RM_TRIGGER.finditer(live):
         if m.group(2):
             kind = 2 if (m.group(1) in taint) else kind
-        elif moved or not _rm_word_safe(live, vals, cwd):
+        elif moved or not word.lstrip('"').startswith("$") or not _rm_word_safe(live, vals, cwd):
             kind = 2
         else:
             kind = max(kind, 1)
@@ -5567,11 +5628,21 @@ def rm_var_hits(text: str, cwd: str = "", depth=0, outer: str = "") -> list:
     found = []
     scope = outer + "\n" + text
     ctx = (_rm_taint_names(scope), _rm_values(scope), cwd, bool(_RM_CD.search(scope)))
+    cursor = 0
     for segment in split_segments(text):
+        at_seg = text.find(segment, cursor)
+        if at_seg >= 0:
+            cursor = at_seg + len(segment)
         call = rm_call(segment)
         if call:
             _, _, flags, targets, recursive = call
             rewritten = [(w, hit) for w, hit in (_rm_var_rewrite(t, ctx) for t in targets) if hit]
+            if recursive and any(hit == 1 for _, hit in rewritten):
+                # every binding precedes the rm: a name bound later is unsafe, and so is a
+                # segment whose place in the text is unknown
+                later = _rm_values(text[cursor:]) if at_seg >= 0 else None
+                rewritten = [(w, 2 if hit == 1 and (later is None or any(
+                    n in later for n in _RM_NAMES.findall(w))) else hit) for w, hit in rewritten]
             if rewritten and recursive:
                 for kind in (2, 1):
                     words = [w for w, hit in rewritten if hit == kind]
