@@ -2777,12 +2777,12 @@ class AgentEndLogConcurrencyTests(unittest.TestCase):
 
     CHILD = (
         "import sys\n"
-        "sys.path.insert(0, '__JANITOR__')\n"
+        "sys.path.insert(0, __JANITOR__)\n"
         "import agent_end_reap\n"
         "lo, hi = int(sys.argv[1]), int(sys.argv[2])\n"
         "for i in range(lo, hi):\n"
         "    agent_end_reap.log({'raw': 'x', 'run': 'r' + str(i), 'state': 'done'})\n"
-    ).replace("__JANITOR__", os.path.dirname(os.path.abspath(__file__)))
+    ).replace("__JANITOR__", repr(os.path.dirname(os.path.abspath(__file__))))  # repr: Windows backslashes
 
     def run_writers(self, writers, rows):
         folder = tempfile.mkdtemp(prefix="reap_log_")
