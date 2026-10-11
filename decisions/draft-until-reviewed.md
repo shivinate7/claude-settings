@@ -20,7 +20,9 @@ PR ready, or folds it into an integration branch, only after review.
 - Named limits: the gate does not judge a `gh api` POST to the pulls endpoint, or
   `hub pull-request`. Each can open a non-draft PR. A short-flag cluster such as `-dt x` is
   refused, a rare false alarm.
-- The merge tool does not check for a draft yet. That check comes in a later PR.
+- The merge tool refuses a draft pull request in one line, before any claim or wait. It reads the
+  draft state at the start and again at `--confirm`. Named limit: a pull request that turns draft
+  during the wait is not stopped.
 
 ## The incident
 

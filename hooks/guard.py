@@ -2093,6 +2093,10 @@ def worktree_remove_subject(args, where: str):
     lines = porcelain(target)
     if lines is None:
         return None
+    # An untracked symlink is not work: removing it deletes the link, never its target.
+    # A path git quotes (core.quotePath) keeps its quotes here, is no link, and still counts.
+    lines = [l for l in lines
+             if not (l.startswith("?? ") and os.path.islink(os.path.join(target, l[3:].rstrip("/"))))]
     if lines:
         return False
     locked = worktree_locked(where, target)
@@ -5853,7 +5857,8 @@ def _sim_boot_names(segment: str) -> list:
                 token[len("-destination="):] if token.startswith("-destination=") else "")
             fields = dict(p.split("=", 1) for p in value.split(",") if "=" in p)
             if "iOS Simulator" in fields.get("platform", "") and (fields.get("id") or fields.get("name")):
-                found.append(fields.get("id") or fields["name"])
+                os_ = fields.get("OS", "")  # a numeric OS= filters a name; an id, or OS=latest, filters nothing
+                found.append((fields.get("id") or fields["name"], "" if fields.get("id") or not re.fullmatch(r"[0-9.]+", os_) else os_))
         return found
     if word in ("xcrun", "simctl") and "simctl" in ([word] + rest):
         after = ([word] + rest)[([word] + rest).index("simctl") + 1:]
@@ -5875,19 +5880,23 @@ def sim_boot_refusal(tool: str, names: list) -> None:
     if devices is None:
         return
     for name in names:
-        hits = [d for d in devices if name in (d["udid"], d["name"])]
-        if not hits or any(d["state"] == "Booted" for d in hits):
-            continue  # unknown device, or already up: not a boot
+        name, os_ = name if isinstance(name, tuple) else (name, "")  # a destination's OS= picks a runtime
+        hits = [d for d in devices if name.upper() == d["udid"].upper() or name == d["name"]]  # a UDID has no case
+        if os_:  # not importable from sim_boot_record: its version() is nested in by_name_ok
+            hits = [d for d in hits if (v := d["runtime"].split("SimRuntime.")[-1].split("-", 1)[-1].replace("-", ".")) == os_
+                    or v.startswith(os_ + ".")] or hits  # no runtime matches: judge them all
+        hits = [d for d in hits if d["state"] != "Booted"]
+        if not hits:
+            continue  # unknown device, or every match already up: not a boot
         booted = [d for d in devices if d["state"] == "Booted"]
         if len(booted) >= SIM_BOOT_CAP:
             refuse(tool, "deny", "simulator-boot-cap",
                    "%d simulators are already booted: %s. Use one, or ask the owner to stop one, "
                    "then boot." % (len(booted), "; ".join("%s (%s)" % (d["name"], d["udid"]) for d in booted)),
                    name)
-        want = hits[0]
         boots, table, now = (sweep.sim_read_boots(os.path.join(config_dir(), "state", "sim-boots.jsonl")),
                              sweep._read_ps_table(), time.time())
-        for twin in booted:
+        for twin, want in ((t, w) for t in booted for w in hits):
             if (twin["udid"] in boots  # an unrecorded device is never idle
                     and (twin["deviceTypeIdentifier"], twin["runtime"]) == (want["deviceTypeIdentifier"], want["runtime"])
                     and sweep.sim_keep_code(twin, boots, table, now) is None):
@@ -5976,9 +5985,11 @@ def judge(payload) -> None:
                 sim_boot_refusal(tool, names)
         return
     if tool == SIM_MCP:
-        device = tool_input.get("device")
-        if tool_input.get("action") == "launch" and isinstance(device, str) and device:
-            sim_boot_refusal(tool, [device])
+        # `udid` is an alias of `device`: judge each non-empty name, so one field hides no other.
+        names = list(dict.fromkeys(v for v in map(tool_input.get, ("device", "udid"))
+                                   if isinstance(v, str) and v))
+        if tool_input.get("action") == "launch" and names:
+            sim_boot_refusal(tool, names)
         return
 
     if tool not in WRITE_TOOLS:

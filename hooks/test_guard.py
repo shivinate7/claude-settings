@@ -258,6 +258,20 @@ WTLIVECFG = os.path.join(ROOT, "wtlivecfg")
 WTDEADCFG = os.path.join(ROOT, "wtdeadcfg")
 WTSTALESTARTCFG = os.path.join(ROOT, "wtstalestartcfg")
 
+# SYMLINK WORKTREES (owner ruling 2026-10-11, the feed-build incident). A worker linked
+# `app/node_modules` to another worktree's packages. Git lists an untracked symlink as a FILE
+# (`?? app/node_modules`), and removing the link deletes only the link, never its target. So an
+# untracked entry that is a symlink is not work. LINKMAIN is its own repository with NO
+# .gitignore, so a real `node_modules` directory is listed as untracked, not hidden.
+LINKMAIN = os.path.join(ROOT, "linkmain")
+LINKOUT = os.path.join(ROOT, "linkoutside")          # a real directory OUTSIDE every worktree
+WTLINKDIR = os.path.join(ROOT, "wtlinkdir")          # detached; its only untracked entry links to LINKOUT
+WTLINKFILE = os.path.join(ROOT, "wtlinkfile")        # detached; its only untracked entry links to a file in the tree
+WTCTRLFILE = os.path.join(ROOT, "wtctrlfile")        # a link, plus an untracked real file
+WTCTRLTRACKED = os.path.join(ROOT, "wtctrltracked")  # a link, plus a change to a tracked file
+WTCTRLDIR = os.path.join(ROOT, "wtctrldir")          # a real untracked node_modules directory with a file
+WTCTRLNESTED = os.path.join(ROOT, "wtctrlnested")    # a link inside an untracked real directory
+
 
 def slash(path):
     return path.replace("\\", "/")
@@ -355,6 +369,20 @@ def _require_dirty(where, tracked, untracked, clean_path):
         sys.exit(
             "fixture setup failed in build_fixtures: the path-scoped read of %r in %r is not "
             "empty: exit %d, %r" % (clean_path, where, scoped.returncode, scoped.stdout)
+        )
+
+
+def _require_status(where, expected):
+    """Stop the suite unless `git status --porcelain` in `where` lists exactly `expected`.
+
+    The symlink cases below prove only what their fixture is. Each fixture is read back with git
+    itself, so a link that git lists differently (a directory, or nothing) stops the run here.
+    """
+    lines = sorted(_porcelain(where))
+    if lines != sorted(expected):
+        sys.exit(
+            "fixture setup failed in build_fixtures: %r should list %r. git status --porcelain "
+            "shows: %r" % (where, sorted(expected), lines)
         )
 
 
@@ -558,7 +586,7 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
     # _verify_fake_gh_delay reads. `broken` answers every call with text that is not JSON.
     state = {
         "pr": {"baseRefName": base, "headRefOid": "abc1234", "headRefName": "feat",
-               "state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN"},
+               "state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": False},
         "checks": checks if checks is not None else [{"name": "gates", "bucket": "pass", "link": ""}],
         "runs": runs if runs is not None else [
             {"status": "completed", "conclusion": "success", "name": "gates"}],
@@ -1063,6 +1091,39 @@ def build_fixtures():
             "prune. git answers stdout=%r stderr=%r"
             % (prune_clean_check.stdout, prune_clean_check.stderr)
         )
+
+    # ----------------------------------------------------------------- symlink worktrees
+    # Every tree below is DETACHED, so none of them takes a branch name. `app/package.json` is
+    # tracked, which keeps `app/` a tracked directory and makes the link its own status line.
+    make_repo(LINKMAIN, {"app/package.json": "{}\n", "config.json": "{}\n"})
+    os.makedirs(LINKOUT, exist_ok=True)
+    write(os.path.join(LINKOUT, "pkg.js"), "module.exports = {};\n")
+    for where in (WTLINKDIR, WTLINKFILE, WTCTRLFILE, WTCTRLTRACKED, WTCTRLDIR, WTCTRLNESTED):
+        added = run_vcs(LINKMAIN, "worktree", "add", "-q", "--detach", where)
+        if added.returncode != 0:
+            sys.exit("fixture setup failed in build_fixtures: worktree add %r failed. stderr: %s"
+                     % (where, added.stderr.strip()))
+    # Case 1 and the link-only controls: the only untracked entry is one symlink.
+    os.symlink(LINKOUT, os.path.join(WTLINKDIR, "app", "node_modules"))
+    _require_status(WTLINKDIR, ["?? app/node_modules"])
+    # Case 2: the link targets a tracked file inside the same tree.
+    os.symlink(os.path.join("..", "config.json"), os.path.join(WTLINKFILE, "app", "node_modules"))
+    _require_status(WTLINKFILE, ["?? app/node_modules"])
+    # Control: the same link, next to an untracked real file.
+    os.symlink(LINKOUT, os.path.join(WTCTRLFILE, "app", "node_modules"))
+    write(os.path.join(WTCTRLFILE, "notes.txt"), "untracked\n")
+    _require_status(WTCTRLFILE, ["?? app/node_modules", "?? notes.txt"])
+    # Control: the same link, next to a change to a tracked file.
+    os.symlink(LINKOUT, os.path.join(WTCTRLTRACKED, "app", "node_modules"))
+    write(os.path.join(WTCTRLTRACKED, "app", "package.json"), '{"changed": true}\n')
+    _require_status(WTCTRLTRACKED, [" M app/package.json", "?? app/node_modules"])
+    # Control: a real untracked node_modules directory holding a real file.
+    write(os.path.join(WTCTRLDIR, "app", "node_modules", "index.js"), "module.exports = {};\n")
+    _require_status(WTCTRLDIR, ["?? app/node_modules/"])
+    # Control, case 4: a link inside an untracked real directory. Git lists the directory only.
+    os.makedirs(os.path.join(WTCTRLNESTED, "vendor"))
+    os.symlink(LINKOUT, os.path.join(WTCTRLNESTED, "vendor", "link"))
+    _require_status(WTCTRLNESTED, ["?? vendor/"])
 
 
 build_fixtures()
@@ -1609,6 +1670,30 @@ sh("worktree prune: a stale record asks, never denies",
 sh("worktree prune: nothing to prune passes", VCS + " worktree prune", "allow", cwd=WTMAIN)
 sh("worktree prune: -n itself is a read, not a discard, so it passes unconditionally",
    VCS + " worktree prune -n", "allow", cwd=WTPRUNE)
+
+# SYMLINKS ARE NOT WORK (owner ruling 2026-10-11). Git lists an untracked symlink as a file, so
+# `?? app/node_modules` read as real work and the removal was refused. Deleting a link deletes
+# only the link, never its target, so a tree whose only untracked entry is a link passes, with
+# or without the force flag. The link's target may sit outside the tree or inside it.
+sh("worktree remove: a detached tree whose only untracked entry links outside it passes",
+   VCS + " worktree remove " + slash(WTLINKDIR), "allow", cwd=LINKMAIN)
+sh("worktree remove: the same link-only tree passes with the force flag",
+   VCS + " worktree remove --force " + slash(WTLINKDIR), "allow", cwd=LINKMAIN)
+sh("worktree remove: a detached tree whose only untracked entry links to a file inside it passes",
+   VCS + " worktree remove " + slash(WTLINKFILE), "allow", cwd=LINKMAIN)
+sh("worktree remove: the same in-tree link passes with the force flag",
+   VCS + " worktree remove --force " + slash(WTLINKFILE), "allow", cwd=LINKMAIN)
+# THE CONTROLS. Each has a real piece of work beside or inside the link, so each still denies.
+sh("worktree remove: a link next to an untracked real file still denies",
+   VCS + " worktree remove " + slash(WTCTRLFILE), "deny", "shared-tree", cwd=LINKMAIN)
+sh("worktree remove: a link next to a tracked change still denies",
+   VCS + " worktree remove " + slash(WTCTRLTRACKED), "deny", "shared-tree", cwd=LINKMAIN)
+sh("worktree remove: a real untracked node_modules directory holding a file still denies",
+   VCS + " worktree remove " + slash(WTCTRLDIR), "deny", "shared-tree", cwd=LINKMAIN)
+# A link inside an untracked REAL directory: git shows the directory, not the link, so the
+# directory is the work and it denies.
+sh("worktree remove: a link inside an untracked real directory still denies",
+   VCS + " worktree remove " + slash(WTCTRLNESTED), "deny", "shared-tree", cwd=LINKMAIN)
 
 
 # =========================================================================== 1b. the pointer HEAD
@@ -6192,9 +6277,13 @@ SIM_UB = "1A2B3C4D-0000-4000-8000-00000000000B"   # Beta Air, booted
 SIM_UC = "1A2B3C4D-0000-4000-8000-00000000000C"   # Gamma Mini, shut down
 SIM_UT0 = "1A2B3C4D-0000-4000-8000-0000000000D0"  # Idle Pro, booted: the twin
 SIM_UT1 = "1A2B3C4D-0000-4000-8000-0000000000D1"  # Twin Pro, shut down
+SIM_UE = "1A2B3C4D-0000-4000-8000-00000000000E"  # Named-UDID Mini, booted: its name is SIM_UC
+SIM_UF = "1A2B3C4D-0000-4000-8000-00000000000F"  # Delta, shut down on RT only
+SIM_UDA = "1A2B3C4D-0000-4000-8000-0000000000D3"  # Delta, shut down on RT_OLD (25.0), listed first
+SIM_UDB = "1A2B3C4D-0000-4000-8000-0000000000D4"  # Delta, shut down on RT (26.0), listed second
 # The launchd_sim of each booted device: the pid and the start time the fake `ps` gives it, and the
 # same pair in the boot record. A record that names another pid or start time is an older boot.
-LAUNCHD_PID = {SIM_UA: 4001, SIM_UB: 4002, SIM_UT0: 4003}
+LAUNCHD_PID = {SIM_UA: 4001, SIM_UB: 4002, SIM_UT0: 4003, SIM_UE: 4004}
 LSTART = "Sat Oct 10 07:00:00 2026"
 LAUNCHD_CMD = ("/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/"
                "Resources/launchd_sim")
@@ -6271,6 +6360,37 @@ def register_simulator_boot_cases():
         "twin_rebooted": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_rebooted"), twin_rows()),
                           [dict(twin_idle_rec, launchd_pid=4900,
                                 launchd_start="Fri Oct 9 09:00:00 2026")]),
+        # One idle recorded twin (Idle Pro, 26.0) and Delta shut down on two runtimes. The fake xcrun
+        # groups rows by runtime in first-seen order, so the 25.0 copy comes first in the device list:
+        # a check of only the first hit sees 25.0, not the twin's 26.0.
+        "twin_two_runtimes": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_two_rt"), [
+            (SIM_UDA, "Delta", "Shutdown", SIM_TYPE_PRO, SIM_RT_OLD),
+            (SIM_UT0, "Idle Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
+            (SIM_UDB, "Delta", "Shutdown", SIM_TYPE_PRO, SIM_RT)]), [twin_idle_rec]),
+        # Two booted at the cap, plus a booted device named like the shut-down target's UDID.
+        "cap_udid_name": (make_fake_xcrun(os.path.join(ROOT, "sim_cap_udid_name"), [
+            (SIM_UA, "Alpha Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
+            (SIM_UB, "Beta Air", "Booted", SIM_TYPE_AIR, SIM_RT),
+            (SIM_UE, SIM_UC, "Booted", SIM_TYPE_MINI, SIM_RT),
+            (SIM_UC, "Gamma Mini", "Shutdown", SIM_TYPE_MINI, SIM_RT)]), None),
+        # Two booted at the cap, plus a Gamma Mini booted on one runtime beside a shut-down one on
+        # another runtime.
+        "cap_name_split": (make_fake_xcrun(os.path.join(ROOT, "sim_cap_name_split"), [
+            (SIM_UA, "Alpha Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
+            (SIM_UB, "Beta Air", "Booted", SIM_TYPE_AIR, SIM_RT),
+            (SIM_UE, "Gamma Mini", "Booted", SIM_TYPE_MINI, SIM_RT),
+            (SIM_UC, "Gamma Mini", "Shutdown", SIM_TYPE_MINI, SIM_RT_OLD)]), None),
+        # Exactly two booted (the cap is full): the booted Gamma Mini is on RT (26.0), its shut-down
+        # twin on RT_OLD (25.0). OS= in a -destination picks which copy the boot names.
+        "cap_os_split": (make_fake_xcrun(os.path.join(ROOT, "sim_cap_os_split"), [
+            (SIM_UA, "Alpha Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
+            (SIM_UE, "Gamma Mini", "Booted", SIM_TYPE_MINI, SIM_RT),
+            (SIM_UC, "Gamma Mini", "Shutdown", SIM_TYPE_MINI, SIM_RT_OLD)]), None),
+        # Exactly two booted (the cap is full). Delta is shut down on one runtime only.
+        "cap_latest": (make_fake_xcrun(os.path.join(ROOT, "sim_cap_latest"), [
+            (SIM_UA, "Alpha Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
+            (SIM_UE, "Gamma Mini", "Booted", SIM_TYPE_MINI, SIM_RT),
+            (SIM_UF, "Delta", "Shutdown", SIM_TYPE_AIR, SIM_RT)]), None),
     }
     cfgs = {}
     for name, (folder, records) in fixtures.items():
@@ -6299,6 +6419,71 @@ def register_simulator_boot_cases():
     add("boot a third simulator with two booted: simulator MCP launch",
         "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device=SIM_UC,
         env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+    add("boot a third simulator with two booted: simulator MCP launch names it by udid",
+        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", udid=SIM_UC,
+        env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+    add("boot a third simulator with two booted: MCP launch, empty device, udid names it",
+        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device="", udid=SIM_UC,
+        env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+    add("boot a third simulator with two booted: MCP launch, list in device, udid names it",
+        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device=["x"], udid=SIM_UC,
+        env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+    add("boot a third simulator with two booted: MCP launch, dict in udid, device names it",
+        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device=SIM_UC,
+        udid={"x": 1}, env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+    add("boot a third simulator with two booted: MCP launch, lowercase udid",
+        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", udid=SIM_UC.lower(),
+        env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+    sh("boot a third simulator with two booted: bash simctl boot, lowercase udid",
+       "xcrun simctl boot " + SIM_UC.lower(), "deny", rule="simulator-boot-cap",
+       env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+    # A booted device whose name is the shut-down target's UDID must not skip the boot check.
+    udid_name_path, udid_name_cfg = on("cap_udid_name")
+    add("boot a shut-down device by udid, a booted device is named like that udid: MCP launch",
+        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", udid=SIM_UC,
+        env_path=udid_name_path, config=udid_name_cfg, carries=(SIM_UA, SIM_UB))
+    # A name with one booted copy and one shut-down copy on another runtime is a shut-down hit.
+    name_split_path, name_split_cfg = on("cap_name_split")
+    add("boot a shut-down copy by name, a booted copy shares the name: MCP launch",
+        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device="Gamma Mini",
+        env_path=name_split_path, config=name_split_cfg, carries=(SIM_UA, SIM_UB))
+    os_split_path, os_split_cfg = on("cap_os_split")
+    # OS=26.0 names the booted copy, so the boot is a no-op: allowed.
+    sh("control: OS= picks the booted copy of a name, the boot is a no-op: xcodebuild destination",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini,OS=26.0'",
+       "allow", env_path=os_split_path, config=os_split_cfg)
+    # OS=25.0 names the shut-down copy with the cap full: the boot is refused.
+    sh("boot the shut-down copy by OS= with the cap full: xcodebuild destination",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini,OS=25.0'",
+       "deny", rule="simulator-boot-cap", env_path=os_split_path, config=os_split_cfg,
+       carries=(SIM_UA, SIM_UE))
+    # OS=latest is no version, so it matches no runtime. The guard must not allow a boot on it
+    # when the only Delta copy is shut down: the cap is full, so the boot is refused.
+    latest_path, latest_cfg = on("cap_latest")
+    sh("boot a shut-down device by name with OS=latest, cap full: xcodebuild destination",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=latest'",
+       "deny", rule="simulator-boot-cap", env_path=latest_path, config=latest_cfg,
+       carries=(SIM_UA, SIM_UE))
+    # A numeric OS that matches no copy must not leave zero hits. Delta is shut down on 26.0.
+    sh("boot a shut-down device by name with OS=26.0.0, cap full: xcodebuild destination",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=26.0.0'",
+       "deny", rule="simulator-boot-cap", env_path=latest_path, config=latest_cfg,
+       carries=(SIM_UA, SIM_UE))
+    sh("boot a shut-down device by name with two OS keys, cap full: xcodebuild destination",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=latest,OS=25.0'",
+       "deny", rule="simulator-boot-cap", env_path=latest_path, config=latest_cfg,
+       carries=(SIM_UA, SIM_UE))
+    # Delta is on two runtimes; OS=latest names neither, so every shut-down copy must be judged.
+    twin_two_path, twin_two_cfg = on("twin_two_runtimes")
+    sh("boot a shut-down copy with an idle twin on its runtime, OS=latest: xcodebuild destination",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=latest'",
+       "deny", rule="simulator-boot-twin", env_path=twin_two_path, config=twin_two_cfg,
+       carries=(SIM_UT0,))
+    # An id= destination names one device. OS=26.0 must not hide a shut-down 25.0 copy from the check.
+    sh("boot a shut-down 25.0 copy by id with OS=26.0, cap full: xcodebuild destination",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC
+       + ",OS=26.0'", "deny", rule="simulator-boot-cap", env_path=os_split_path,
+       config=os_split_cfg, carries=(SIM_UA, SIM_UE))
     sh("control: one booted, a second boot is allowed",
        "xcrun simctl boot " + SIM_UC, "allow", env_path=one_path, config=one_cfg)
     sh("control: a read of the device list is not a boot",
@@ -6319,6 +6504,9 @@ def register_simulator_boot_cases():
        env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
     add("boot a device with an idle booted twin: simulator MCP launch",
         "deny", rule="simulator-boot-twin", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
+    add("boot a device with an idle booted twin: simulator MCP launch names it by udid",
+        "deny", rule="simulator-boot-twin", tool=SIM_MCP, action="launch", udid=SIM_UT1,
         env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
     sh("control: the twin booted 10 minutes ago is not idle",
        "xcrun simctl boot " + SIM_UT1, "allow", env_path=folder_path("twin_recent"),

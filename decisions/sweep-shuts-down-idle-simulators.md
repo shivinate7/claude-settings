@@ -23,8 +23,8 @@ launchd_sim process has ppid 1. CoreSimulator.log has no requester.
 1. Record. A PostToolUse hook on Bash and on `mcp__Claude_Code_iOS_Simulator__control`
    records each device that the call names and that went from `Shutdown` to `Booted`
    during the call. A call names a device by UDID (`-destination id=`, `simctl boot`, MCP
-   `device`). It can also name a device by a name that matches a simctl device name
-   (`-destination name=`, MCP `device`). A call that names none records nothing. The
+   `device` or its alias `udid`). It can also name a device by a name that matches a simctl
+   device name (`-destination name=`, MCP `device` or `udid`). A call that names none records nothing. The
    record goes to `state/sim-boots.jsonl`. Each line holds the pid and the start time of
    the device's launchd_sim, read when the device booted. If the table holds no
    launchd_sim for the UDID, or more than one, the hook records nothing for that device.
@@ -77,8 +77,19 @@ Why the cap: it needs no knowledge of who booted a device.
   Bash and the simulator MCP tool are in `settings.json`, Pre and Post.
 - `hooks/guard.py`: rules `simulator-boot-cap` and `simulator-boot-twin`. A boot is
   `simctl boot`, an `xcodebuild -destination` with `id=` or `name=`, or MCP `launch` with
-  `device`. `simctl list` runs only after a call matched as a boot of a shut-down device.
-  A launch with no `device` is not judged. The guard imports `sweep` on a match only.
+  `device` or `udid`. The guard judges each of the two that is a non-empty string. A UDID
+  matches in any case. A name must match exactly. A numeric `OS=` in a `name=` destination
+  keeps only the copies on that runtime. When it keeps none, all copies count. An `id=`
+  destination, `OS=latest` or no OS uses no filter. Only the shut-down devices a call names
+  count as a boot, and the twin rule judges each of them.
+  `simctl list` runs for each call that names a device. A launch with neither field is not
+  judged. The guard imports `sweep` on a match only.
+  Named limits: a shut-down device whose name is the target's UDID string is denied at the
+  cap. A name can match a booted copy and a shut-down copy on two runtimes. With no
+  numeric OS, the call counts as a boot of the shut-down copy. The MCP takes no OS, so this
+  holds for it too. `OS=latest` with an idle twin on an older runtime is refused: the twin rule matches
+  the device type, not the runtime. The record hook records nothing for `OS=latest` on such
+  a name, so the sweep keeps that device.
 
 ## Measured, 2026-10-10
 

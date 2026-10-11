@@ -293,13 +293,13 @@ class Host:
 
     def pr(self, n):
         """-> {head, branch, base, state, mergeable, merge_state}"""
-        c, out = sh(["gh", "pr", "view", *self._pr_args(n), "--json", "headRefOid,headRefName,baseRefName,state,mergeable,mergeStateStatus"], cwd=self.cwd)
+        c, out = sh(["gh", "pr", "view", *self._pr_args(n), "--json", "headRefOid,headRefName,baseRefName,state,mergeable,mergeStateStatus,isDraft"], cwd=self.cwd)
         if c:
             raise Stop("gh pr view failed: " + out)
         d = json.loads(out)
         self.base = d["baseRefName"]  # the PR's own base drives required_names
         return {"head": d["headRefOid"], "branch": d["headRefName"], "base": d["baseRefName"], "state": d["state"],
-                "mergeable": d["mergeable"], "merge_state": d["mergeStateStatus"]}
+                "mergeable": d["mergeable"], "merge_state": d["mergeStateStatus"], "draft": d["isDraft"]}
 
     def required_names(self):
         """The required check names. Never empty: an empty list would pass the wait without a read."""
@@ -677,6 +677,20 @@ def load_config(root, base, path):
         raise Stop(f"{path} on {ref} has an unknown field in the merge block: {', '.join(unknown)}")
     if not isinstance(m.get("ignoreChecks", []), list):
         raise Stop(f"{path} on {ref}: merge.ignoreChecks must be a list, not {m['ignoreChecks']!r}.")
+    dm = m.get("deadlineMinutes", MERGE_DEFAULTS["deadlineMinutes"])
+    if not isinstance(dm, int) or isinstance(dm, bool) or not 1 <= dm <= 360:  # 360: GitHub's longest job run
+        raise Stop(f"{path} on {ref}: merge.deadlineMinutes must be a whole number from 1 to 360, not {dm!r}.")
+    ne = lambda v: isinstance(v, str) and v.strip()
+    rc, am = m.get("requiredChecks", "protection"), m.get("afterMerge", [])
+    for ok, k in ((m.get("method", "merge") in ("merge", "squash", "rebase"), "method"),
+                  (isinstance(m.get("deleteBranch", True), bool), "deleteBranch"),
+                  (isinstance(am, list) and all(map(ne, am)), "afterMerge"),
+                  (rc == "protection" or isinstance(rc, list) and rc and all(map(ne, rc)), "requiredChecks")):
+        if not ok:
+            raise Stop(f"{path} on {ref}: merge.{k} is not valid: {m[k]!r}.")
+    if "defaultBranch" in cfg and not ne(cfg["defaultBranch"]):
+        raise Stop(f"{path} on {ref}: defaultBranch must be a non-empty string, not {cfg['defaultBranch']!r}.")
+    ignore_checks(cfg)  # refuse a bad entry before the defaults notice, so the refusal is the only line
     filled = [k for k in MERGE_DEFAULTS if k not in m]
     for k in filled:
         m[k] = MERGE_DEFAULTS[k]
@@ -690,6 +704,8 @@ def load_config(root, base, path):
 def refuse_bad_pr(info):
     if info["state"] != "OPEN":
         raise Stop(f"the pull request is {info['state']}")
+    if info["draft"]:
+        raise Stop("the pull request is a draft. Mark it ready after review and run again. Nothing was claimed.")
     if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
         raise Stop("the pull request is CONFLICTING. Merge the base into the branch and run again. Nothing was claimed.")
 
@@ -720,7 +736,7 @@ def ignore_checks(cfg):
     """merge.ignoreChecks -> {name: reason}. An entry without a name or a non-empty reason refuses the config."""
     out = {}
     for e in cfg.get("merge", {}).get("ignoreChecks", []):
-        if not isinstance(e, dict) or not str(e.get("name", "")).strip() or not str(e.get("reason", "")).strip():
+        if not isinstance(e, dict) or not all(isinstance(e.get(k), str) and e[k].strip() for k in ("name", "reason")):
             raise Stop(f"merge.ignoreChecks entry {e!r} needs a name and a non-empty reason. Config refused.")
         out[e["name"]] = e["reason"]
     return out
@@ -879,6 +895,7 @@ def main(argv, host=None, lock=None):
             return 0
         h = host or Host()
         info = h.pr(a.pr)  # the PR's base decides which config; confirm and preview reuse this read
+        refuse_bad_pr(info)  # a draft or closed PR stops before the config notice
         cfg = load_config(root, info["base"], a.config)
         ignore = ignore_checks(cfg)
         if not host:
