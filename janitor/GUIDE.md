@@ -14,11 +14,15 @@ this machine.
 
 The sweep never touches a remote. It runs no push, and no fetch.
 
-The sweep never stops a program a live session still needs. It can stop two
-kinds only: an orphaned TCP listener inside a repository or worktree this sweep
-covers, and an orphaned dead-rooted server. Both must be owned by the account
-running the sweep. See "Orphaned TCP listeners" and "Dead-rooted servers"
-below.
+The sweep never stops a program a live session still needs. It can stop three
+kinds. The first is an orphaned TCP listener inside a repository or worktree this
+sweep covers. The second is an orphaned dead-rooted server. The third is an iOS
+simulator that a session booted. The first two must be owned by the account
+running the sweep. See "Orphaned TCP listeners" and "Dead-rooted servers" below.
+A simulator is machine-wide. The sweep stops one only under the rules of decisions
+record sweep-shuts-down-idle-simulators (the shutdown tier). Those rules allow it
+to stop only a device that a session booted, that is idle, and that the owner did
+not boot.
 
 The sweep never runs code that your repository supplies. It reads one file
 from your repository, and it reads that file as data.
