@@ -80,7 +80,11 @@ These discard forms join the rule: deny in a shared checkout, ask in a linked wo
   changes.
 - A bare `git checkout <folder>` with no `--`. Git reads it in path mode.
 - `--pathspec-from-file` and each unique prefix that git accepts, such as `--pathspec-from`.
-- Each `-C <dir>` in a git call. The last one sets the checkout that the rule judges.
+- Each `-C <dir>` in a git call. They chain as git's own chdir does: a relative `-C` joins the
+  one before it. The result sets the checkout that the rule judges.
+- Every operand of `git restore` counts as a path, before `--` as well as after it.
+- A pathspec that holds `$`, a backtick, a brace or a glob counts as a discard of unknown size.
+  The guard cannot read what it names.
 
 Found by review, 2026-10-11. Owner: "Do this task here".
 
