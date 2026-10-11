@@ -95,7 +95,7 @@ build a second. A duplicate needs a stated reason.<!-- rule:building-one-home-pe
 the code emits, never a copy of it.<!-- rule:building-allow-list-is-the-constant --> Build a new guard or gate rule
 only against a named incident or a measured risk. Cite it in the rule's record. A check that
 enforces a rule in this file needs no other incident.<!-- rule:building-guard-needs-incident --> Fix the cause, not the symptom. Name a
-bandaid as one when it is the right call.<!-- rule:building-fix-cause-not-symptom --> A capability no user can reach is not built. A design living
+bandaid as one when it is the right call.<!-- rule:building-fix-cause-not-symptom --> Scan source code with the language's own parser or tokenizer when the repo has one. Otherwise, match strings and comments in one pass. Test every scanner on comment openers (`/*`, `//`, `#`) inside strings, on a multi-line template literal, and on a lone quote in text, such as JSX `<p>Don't</p>`.<!-- rule:building-scanner-respects-strings --> A capability no user can reach is not built. A design living
 only in chat is not done. Land the design in its spec or decision entry now, or declare
 the design abandoned.<!-- rule:building-land-design-or-abandon --> A memory entry may point to a ruling. It is never the ruling's only home.<!-- rule:building-memory-never-only-home --> Memory stays on, as short-term notes. Once a fact or ruling has a tracked home on main, delete its memory
 file and its `MEMORY.md` line.<!-- rule:building-memory-is-short-term -->

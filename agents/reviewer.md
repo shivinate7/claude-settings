@@ -45,6 +45,7 @@ Check for:
   recorded decision, such as hooks/guard.py's docstring.
 - Shell hook or CI script hardening: flag an unquoted variable expansion. Flag input passed to
   `eval` or to a command with no check on it. Flag a secret or token written as plain text.
+- Scanner tests: when the diff adds or changes code that scans source text, flag it if its tests lack the cases in building-scanner-respects-strings (scanners respect strings).
 - Do not flag an issue the diff did not add. Do not flag a style issue a linter catches. Do not
   flag a nitpick a senior engineer would skip.
 

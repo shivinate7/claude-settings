@@ -31,9 +31,13 @@ THE MAP. lint/rule_mechanisms.json holds one row per anchor. A row's mechanism i
         literal first argument to `add(`, `sh(` or `check(` in code that runs. All of that is
         read from the AST. "Runs" is static: module-level code and the bodies of functions it
         names; a form that cannot be proved so is refused. The test file must also be the
-        row's `ref`, or import it, or pass its file name to a call (`link_problem`). A `.mjs` id must name a top-level
-        `test("name", ...)` registration; no JavaScript parser ships here, so that one is a
-        line-anchored pattern on the registry key. That is a bandaid, named.
+        row's `ref`, or import it, or pass its file name to a call (`link_problem`). A `.mjs` id must be a name the file registers, read from Node and never
+        scanned: a file containing `node:test` runs under a stub that swaps `node:test` for a `test(n)`
+        that prints a `LISTED <JSON name>` line (an import of any other export fails the check); a file containing `LIST_TESTS`
+        runs with LIST_TESTS=1 and prints `LISTED <JSON name>` lines; any other file is refused. Node missing,
+        a non-zero exit, or 10 s without an exit means the names could not be read, and never passes.
+        CI still runs the tests. Known limit: a file that prints its own `LISTED ` line can forge a
+        name; closing that needs a channel outside stdout.
       - `setting`: `{"file": "settings.json", "path": "env.NAME", "equals": "v"}` or
         `"contains": "v"`. The value is read from the parsed JSON, never the name. `[*]` in a
         path fans out over a list.
@@ -65,9 +69,15 @@ import ast
 import json
 import os
 import re
+import subprocess
 import sys
 from typing import Dict, List
 
+# Stub for node:test: `test(n)` prints `LISTED <JSON name>` and runs nothing. A file that imports another export fails.
+NODE_TEST_STUB = ('data:text/javascript,import{registerHooks}from"node:module";registerHooks({load(u,c,n){'
+                  'if(u==="node:test")return{format:"module",source:"export function test(n){console.log(\'LISTED \'+JSON.stringify(n))}",'
+                  'shortCircuit:true};return n(u,c)}})')
+NODE_LIST_TIMEOUT = 10
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Paths relative to the repo root, so a fixture test reads the same list under its own root.
 RULE_FILES = ["CLAUDE.md", os.path.join("output-styles", "shiv-stylisms.md")]
@@ -84,7 +94,7 @@ CI_STEP_RE = re.compile(r'^\s*-\s*name:\s*(.+?)\s*$', re.MULTILINE)
 # is deliberately removed. Update UNMECHANIZED_EXPECTED in the SAME commit that builds a
 # mechanism (lower it) or adds an unmechanized rule (raise it, and say why in the message).
 RULE_FLOOR = 98
-UNMECHANIZED_EXPECTED = 70
+UNMECHANIZED_EXPECTED = 71
 REASON_MIN_WORDS = 8
 
 KINDS = {"guard", "gate", "ci", "unmechanized"}
@@ -185,10 +195,24 @@ def citation_problem(test_id: str, root: str = ROOT):
         return f"test file `{path}` does not exist."
     text = read(full)
     if path.endswith(".mjs"):
-        # Comments and template literals can hold a column-0 `test("..."` that never registers.
-        bare = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
-        bare = re.sub(r"`(?:\\.|[^`\\])*`", "``", bare, flags=re.DOTALL)
-        if re.search(r'^test\(\s*"' + re.escape(name) + r'"\s*,', bare, re.MULTILINE):
+        if "node:test" in text:
+            cmd, env = ["node", "--import", NODE_TEST_STUB, full], None
+        elif "LIST_TESTS" in text:
+            cmd, env = ["node", full], {**os.environ, "LIST_TESTS": "1"}
+        else:
+            return f"`{path}` has no known way to list its tests."
+        try:
+            run = subprocess.run(cmd, env=env, cwd=os.path.dirname(full), capture_output=True,
+                                 text=True, timeout=NODE_LIST_TIMEOUT)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return f"names in `{path}` could not be read: {e}."
+        if run.returncode:
+            return f"names in `{path}` could not be read: node exited {run.returncode}: {run.stderr.strip()[:200]}"
+        try:
+            listed = [json.loads(l[7:]) for l in run.stdout.split("\n") if l.startswith("LISTED ")]
+        except ValueError as e:
+            return f"names in `{path}` could not be read: malformed LISTED line: {e}."
+        if name in listed:
             return None
         return f"`{path}` registers no test named {name!r}."
     if not path.endswith(".py"):
