@@ -4152,20 +4152,27 @@ for _tool in ("Edit", "Write"):
         add("test-author: %s of non-test %s is refused" % (_tool, _path), "deny", rule=TA,
             tool=_tool, file_path=_path, **A)
 
-# ---- Xcode/SPM test naming (incident 2026-10-11, Degen repo): a test-author was refused
-# `native/DegenUITests/NBOpenLinkUITests.swift` and `native/DegenUITests/LaunchTests.swift`, and a
-# builder could edit them. Two shapes, both case-sensitive, read from the repo-relative parts:
-# a path part ending in `Tests` after a non-empty prefix (`DegenUITests`, `DegenKitTests`), and a
-# basename `^\w+Tests?\.swift$` (the same shape as JAVA_TEST). A bare `Tests.swift` has an empty
-# prefix, so it is NOT a test file (decided 2026-10-11). A folder named exactly `Tests` is already a
-# test dir through TEST_DIRS (lowercased), so it is a case here, unchanged. `Footests` and `Attests`
-# are near misses: their `tests` is lowercase.
+# ---- Xcode/SPM test naming (incident 2026-10-11, Degen repo; narrowed by the ruling in
+# decisions/builders-cannot-edit-tests.md, "Test path"). Two shapes, both case-sensitive, read from
+# the repo-relative parts. A FILE is a test when its basename is `^\w+Tests\.swift$` (plural only,
+# `NBOpenLinkUITests.swift`). A FOLDER is a test when it is PascalCase and ends in `Tests`, the shape
+# `^[A-Z]\w*Tests$` (`DegenUITests`, `Sources/FooTests`). A bare `Tests.swift` has an empty prefix, so
+# it is NOT a test file (decided 2026-10-11). Singular `LoginTest.swift`, `SpeedTest.swift` and
+# `ABTest.swift` are NOT test files. A folder named exactly `Tests` is already a test dir through
+# TEST_DIRS (lowercased), so it is a case here, unchanged. `Footests`, `Attests`, `abTests` and
+# `DegenUITest` are near misses: `tests` is lowercase, the first letter is lowercase, or the name does
+# not end in `Tests`.
+# Known ceiling, pinned as current behaviour: a product folder named like `ABTests` reads as a test
+# folder, so `native/ABTests/Experiment.swift` IS a test path. Upgrade: read the target names from the
+# Xcode project.
 SWIFT_TEST_PATHS = ("native/DegenUITests/NBOpenLinkUITests.swift",
                     "native/DegenUITests/LaunchTests.swift", "Sources/FooTests/Helper.swift",
-                    "App/LoginTest.swift")
+                    "native/ABTests/Experiment.swift")
 SWIFT_FALSE_ALARMS = ("native/Contests/Board.swift", "native/Tests.swift",
                       "native/LatestResults.swift", "native/Attests/x.swift",
-                      "native/UITestsHelper/x.swift", "native/Footests/x.swift")
+                      "native/UITestsHelper/x.swift", "native/Footests/x.swift",
+                      "App/LoginTest.swift", "native/SpeedTest.swift", "native/ABTest.swift",
+                      "native/DegenUITest/x.swift", "native/abTests/x.swift")
 for _tool in ("Edit", "Write"):
     for _path in SWIFT_TEST_PATHS:
         add("swift-test: %s of Xcode/SPM test %s is refused" % (_tool, _path), "deny", rule=BT,
@@ -4179,6 +4186,18 @@ for _tool in ("Edit", "Write"):
             rule=TA, tool=_tool, file_path=_path, **A)
     add("swift-test: %s of native/Tests/Helper.swift is refused (folder Tests, unchanged)" % _tool,
         "deny", rule=BT, tool=_tool, file_path="native/Tests/Helper.swift", **B)
+
+# ---- an Xcode test plan is test config (Degen, 2026-10-11; decisions/builders-cannot-edit-tests.md,
+# "Test path"). `native/Degen.xctestplan` is test config. A builder change that ADDS a skip
+# (`skippedTests`) disables tests, so it is a test change. A new unrelated key (`codeCoverage`) stays
+# allowed. A test-author may edit the plan. The write tool judges the new text. The diff check
+# logs, and the diff case is `xctestplan_logs_case` below.
+XCTESTPLAN = "native/Degen.xctestplan"
+add("builder-test: Edit of .xctestplan that adds skippedTests is refused", "deny", rule=BT,
+    tool="Edit", file_path=XCTESTPLAN, new_string='"skippedTests" : [ "LaunchTests" ]', **B)
+add("builder-test: Edit of .xctestplan that adds codeCoverage is allowed", "allow", tool="Edit",
+    file_path=XCTESTPLAN, new_string='"codeCoverage" : true', **B)
+add("test-author: Edit of .xctestplan is allowed", "allow", tool="Edit", file_path=XCTESTPLAN, **A)
 
 # ---- the diff, judged at commit, push and SubagentStop
 BASE_FILES = {
@@ -4732,6 +4751,50 @@ LOG_CHECKS_EXTRA.append(("record-writer-diff: a non-.md diff is logged at commit
                          rw_diff_logs_case))
 LOG_CHECKS_EXTRA.append(("record-writer-diff: an all-.md diff logs no writer-diff line",
                          rw_markdown_logs_case))
+
+
+# An .xctestplan diff: a builder's ADDED skippedTests line is logged once each at commit, push and
+# stop; a builder's added codeCoverage line logs nothing; a test-author's plan edit logs nothing.
+XCTESTPLAN_BASE = '{\n  "configurations" : [ ],\n  "testTargets" : [ ]\n}\n'
+XCTESTPLAN_SKIP = ('{\n  "configurations" : [ ],\n  "testTargets" : [\n'
+                   '    {\n      "skippedTests" : [ "LaunchTests" ]\n    }\n  ]\n}\n')
+XCTESTPLAN_COVERAGE = '{\n  "codeCoverage" : true,\n  "configurations" : [ ],\n  "testTargets" : [ ]\n}\n'
+
+
+def _plan_repo(name, text):
+    """A worktree whose base holds the plan, and whose change rewrites it to `text`."""
+    return diff_repo(name, _put(XCTESTPLAN, text), files={**BASE_FILES, XCTESTPLAN: XCTESTPLAN_BASE})
+
+
+def xctestplan_logs_case():
+    """A builder's added skippedTests line logs once each at commit, push and stop, and never
+    blocks. A builder's added codeCoverage line logs nothing. A test-author's plan edit logs
+    no author-diff line."""
+    problems = []
+    skip = _plan_repo("xctestplan-skip", XCTESTPLAN_SKIP)
+    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-xctestplan-skip"), skip, "builder",
+                              "bld1")
+    if out:
+        problems.append("skip: expected silent allows, got %r" % out[:60])
+    hits = [r for r in rows if len(r) == 5 and r[2] == "noted" and r[3] == "builder-diff"]
+    if len(hits) != 3:
+        problems.append("skip: expected 3 noted/builder-diff lines, found %d" % len(hits))
+    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-xctestplan-coverage"),
+                              _plan_repo("xctestplan-coverage", XCTESTPLAN_COVERAGE), "builder",
+                              "bld1")
+    if out or rows:
+        problems.append("coverage: expected no log, got %r %r" % (out[:60], rows))
+    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-xctestplan-author"), skip,
+                              "test-author", "auth1")
+    rows = [r for r in rows if len(r) > 3 and r[3] == "author-diff"]
+    if out or rows:
+        problems.append("author: a plan edit was judged: %r %r" % (out[:60], rows))
+    return (not problems), ("; ".join(problems) or
+                            "a skippedTests line is logged; codeCoverage and a test-author's plan are not")
+
+
+LOG_CHECKS_EXTRA.append(("xctestplan-diff: a builder's skippedTests line is logged at commit, push "
+                         "and stop", xctestplan_logs_case))
 
 
 # =========================================================================== failing open
