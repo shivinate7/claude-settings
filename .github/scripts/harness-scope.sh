@@ -41,7 +41,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       merge/merge.py) on="$on $M $W $X code guard " ;;
       lint/check_record_slugs.py) on="$on $W $X code guard " ;;
       lint/check_silent_undo.py) on="$on $M code " ;;
-      merge/*|bin/merge|bin/merge.cmd|.github/stamp.json) on="$on $M code " ;;
+      merge/*|bin/merge|bin/merge.cmd|.github/stamp.json) on="$on $M $S code " ;;
       actions/stamp/*.md) ;;
       actions/stamp/*) on="$on $R $X $M code " ;;
       install.ps1|install.test.ps1) on="$on $P code " ;;

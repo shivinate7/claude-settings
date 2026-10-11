@@ -226,6 +226,10 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_cmd.py
 
+      - name: install_from_main suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: sh merge/test_install_from_main.sh
+
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.
   pointer-windows:
@@ -271,6 +275,9 @@ jobs:
       - name: install.sh checkout-detection suite
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: sh hooks/test_install_src.sh
+      - name: install_from_main suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: sh merge/test_install_from_main.sh
 
   # The owner runs this repo on macOS. Before this job, every Python suite in the gates
   # and gates-windows jobs above proved itself only on Linux and Windows, never on a real
