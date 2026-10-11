@@ -19,12 +19,13 @@ Owner, 2026-10-11 ("Ship guard now, hook later"):
    - `${NAME:?}`, only when the guard can see that each such name is safe. Safe means that each
      binding of the name in the command is `NAME=<literal>`, `for NAME in <literal words>`, or
      `NAME=$(mktemp …)`. A literal does not start with `.`, and holds no `..`, `~`, `$`,
-     backtick or glob. With the values put in, the target is not `/`, home, the cwd or a cwd
-     parent. It is also not a glob directly under one of them. The command holds no `cd`, `pushd` or
+     backtick or glob. With the values put in, the target is not `/`, home, a home parent, the
+     cwd or a cwd parent. It is also not a glob directly under one of them. The command holds no `cd`, `pushd` or
      `popd`. More conditions apply:
      - The variable starts the target word.
      - A literal holds no whitespace or brace.
      - Each binding comes before the `rm` and is not a prefix assignment such as `X=/tmp rm …`.
+       A binding after an `sh -c`, `bash -c` or `eval` that holds the `rm` also blocks `:?`.
      - A `mktemp` value has nothing after the `)`.
      - Home and the cwd are compared after `realpath`, and case-folded on macOS.
    - If the guard cannot read a target, the refusal gives the literal-path reason. A read error
