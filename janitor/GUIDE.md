@@ -271,6 +271,23 @@ On Windows, husks are never deleted. The preview lists them as `husk KEEP`,
 with the reason, because Python before 3.12 does not see a junction as a link.
 This tier runs per repository, so `sweep: false` opts it out.
 
+## Build folders
+
+When an agent ends, the SubagentStop reap renames each build folder in the
+agent's own worktree to a sibling trash name (`<name>.reap-trash-<id>`). A
+detached child then deletes the trash. The folders are `native/build`,
+`.build` and `DerivedData`, plus each name in `buildDirs` in
+`.claude/janitor.json`, for example `["Pods/Build"]`. A name with `/` matches
+one path under the worktree root. A bare name matches at any depth. `buildDirs`
+adds names and never removes a default.
+
+A folder stays when a live session or any process has its current directory
+inside, when it is a link, when the worktree is a primary checkout, or when a
+read cannot tell. A `buildDirs` value that is not a list of strings refuses
+all build-folder deletes, defaults included. A later reap and the daily sweep
+delete trash names a child left, under the same process checks. On Windows,
+nothing is deleted.
+
 ## How you opt out
 
 Write `.claude/janitor.json` at the root of your repository:
@@ -278,7 +295,8 @@ Write `.claude/janitor.json` at the root of your repository:
     {
       "sweep": false,
       "protectedPrefixes": ["archive/", "wip/"],
-      "huskNames": ["node_modules", ".serve"]
+      "huskNames": ["node_modules", ".serve"],
+      "buildDirs": ["Pods/Build"]
     }
 
 `sweep` must be the JSON literal `false` to opt out. A string, a number or a
@@ -291,6 +309,9 @@ refuses your whole repository, instead of silently protecting nothing.
 
 `huskNames` is a list of strings. A value that is not a list of strings also
 refuses your whole repository.
+
+`buildDirs` is a list of strings: see "Build folders". A value that is not a
+list of strings also refuses your whole repository.
 
 All keys are optional. A file that holds only `protectedPrefixes` stays swept,
 and protects more names.
