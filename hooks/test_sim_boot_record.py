@@ -367,6 +367,17 @@ class SimBootRecordTests(unittest.TestCase):
         self.assertEqual([r["udid"] for r in self.read_records()], [U1],
                          "an MCP launch that names its device by the udid key recorded nothing")
 
+    def test_an_mcp_launch_naming_device_and_udid_records_both(self):
+        # guard.py judges every non-empty name in device and udid. The record must do the same:
+        # the udid is dropped when device is set, so U2 (booted by the call) is not recorded.
+        ti = {"action": "launch", "device": U1, "udid": U2}
+        rows = [(U1, "Named Pro", "Shutdown", TYPE_PRO), (U2, "Hand Air", "Shutdown", TYPE_AIR)]
+        self.pre(rows, tool=MCP, tool_input=ti)
+        self.post([(U1, "Named Pro", "Booted", TYPE_PRO), (U2, "Hand Air", "Booted", TYPE_AIR)],
+                  tool=MCP, tool_input=ti)
+        self.assertEqual(sorted(r["udid"] for r in self.read_records()), sorted([U1, U2]),
+                         "an MCP launch naming device and udid did not record both devices")
+
     def test_a_name_shared_by_two_runtimes_records_neither_when_both_boot(self):
         ti = {"command": "xcodebuild test -scheme App -destination "
                          "'platform=iOS Simulator,name=iPhone 17'"}

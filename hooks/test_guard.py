@@ -6192,9 +6192,10 @@ SIM_UB = "1A2B3C4D-0000-4000-8000-00000000000B"   # Beta Air, booted
 SIM_UC = "1A2B3C4D-0000-4000-8000-00000000000C"   # Gamma Mini, shut down
 SIM_UT0 = "1A2B3C4D-0000-4000-8000-0000000000D0"  # Idle Pro, booted: the twin
 SIM_UT1 = "1A2B3C4D-0000-4000-8000-0000000000D1"  # Twin Pro, shut down
+SIM_UE = "1A2B3C4D-0000-4000-8000-00000000000E"  # Named-UDID Mini, booted: its name is SIM_UC
 # The launchd_sim of each booted device: the pid and the start time the fake `ps` gives it, and the
 # same pair in the boot record. A record that names another pid or start time is an older boot.
-LAUNCHD_PID = {SIM_UA: 4001, SIM_UB: 4002, SIM_UT0: 4003}
+LAUNCHD_PID = {SIM_UA: 4001, SIM_UB: 4002, SIM_UT0: 4003, SIM_UE: 4004}
 LSTART = "Sat Oct 10 07:00:00 2026"
 LAUNCHD_CMD = ("/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/"
                "Resources/launchd_sim")
@@ -6271,6 +6272,19 @@ def register_simulator_boot_cases():
         "twin_rebooted": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_rebooted"), twin_rows()),
                           [dict(twin_idle_rec, launchd_pid=4900,
                                 launchd_start="Fri Oct 9 09:00:00 2026")]),
+        # Two booted at the cap, plus a booted device named like the shut-down target's UDID.
+        "cap_udid_name": (make_fake_xcrun(os.path.join(ROOT, "sim_cap_udid_name"), [
+            (SIM_UA, "Alpha Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
+            (SIM_UB, "Beta Air", "Booted", SIM_TYPE_AIR, SIM_RT),
+            (SIM_UE, SIM_UC, "Booted", SIM_TYPE_MINI, SIM_RT),
+            (SIM_UC, "Gamma Mini", "Shutdown", SIM_TYPE_MINI, SIM_RT)]), None),
+        # Two booted at the cap, plus a Gamma Mini booted on one runtime beside a shut-down one on
+        # another runtime.
+        "cap_name_split": (make_fake_xcrun(os.path.join(ROOT, "sim_cap_name_split"), [
+            (SIM_UA, "Alpha Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
+            (SIM_UB, "Beta Air", "Booted", SIM_TYPE_AIR, SIM_RT),
+            (SIM_UE, "Gamma Mini", "Booted", SIM_TYPE_MINI, SIM_RT),
+            (SIM_UC, "Gamma Mini", "Shutdown", SIM_TYPE_MINI, SIM_RT_OLD)]), None),
     }
     cfgs = {}
     for name, (folder, records) in fixtures.items():
@@ -6317,6 +6331,16 @@ def register_simulator_boot_cases():
     sh("boot a third simulator with two booted: bash simctl boot, lowercase udid",
        "xcrun simctl boot " + SIM_UC.lower(), "deny", rule="simulator-boot-cap",
        env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+    # A booted device whose name is the shut-down target's UDID must not skip the boot check.
+    udid_name_path, udid_name_cfg = on("cap_udid_name")
+    add("boot a shut-down device by udid, a booted device is named like that udid: MCP launch",
+        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", udid=SIM_UC,
+        env_path=udid_name_path, config=udid_name_cfg, carries=(SIM_UA, SIM_UB))
+    # A name with one booted copy and one shut-down copy on another runtime is a shut-down hit.
+    name_split_path, name_split_cfg = on("cap_name_split")
+    add("boot a shut-down copy by name, a booted copy shares the name: MCP launch",
+        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device="Gamma Mini",
+        env_path=name_split_path, config=name_split_cfg, carries=(SIM_UA, SIM_UB))
     sh("control: one booted, a second boot is allowed",
        "xcrun simctl boot " + SIM_UC, "allow", env_path=one_path, config=one_cfg)
     sh("control: a read of the device list is not a boot",
