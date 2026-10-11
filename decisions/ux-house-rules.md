@@ -12,8 +12,15 @@ q_max, joyous, degen, sillage, home-app, ios-adblock). Each rule cites its repo 
 that no repo shows is left out.
 
 Owner ruling, 2026-10-11, on the 11 candidates: four became rules (`ux-answer-at-press`,
-`ux-long-run-stops`, `ux-all-is-well` and `ux-thumb-zone`). The other seven are in "Ruled per repo
-or dropped".
+`ux-long-run-stops`, `ux-all-is-well` and `ux-thumb-zone`). Six are ruled per repo or dropped, in
+"Ruled per repo or dropped". The seventh, touch size, is the Target size row in `ux/a11y.md`.
+
+Owner ruling, 2026-10-11, on house design values: "Spacing and radius, Color by role, light and
+dark, System font and phone bottom nav". They are in `ux/tokens.md`, and a repo may override them.
+Motion durations and easing are per repo, not a default. The owner did not pick them.
+
+Owner ruling, 2026-10-11, on touch size: "44px on touch, 24px for mouse". The rule is the Target
+size row in `ux/a11y.md`. Sources: banchi uses 40 px, and sillage uses 44 px.
 
 ## Layout, and why
 
@@ -23,9 +30,11 @@ or dropped".
 - `ux/a11y.md`: the accessibility floor (WCAG 2.2 AA) and the CI check, with axe for web and the
   XCUITest audit for iOS.
 - `ux/README.md`: what the folder is, and who loads it.
+- `ux/tokens.md`: the house design values: spacing and radius, color by role, font and phone
+  navigation. A repo may override them.
 - Why a folder and not `CLAUDE.md`: `CLAUDE.md` loads in each session, also in repos with no
-  screen. Skill design-review, `agents/builder.md` and `agents/reviewer.md` load the folder only
-  where screens exist.
+  screen. Skill design-review, `agents/builder.md` and `agents/reviewer.md` name the files they
+  read in this folder, and read them only where screens exist.
 - Why one id per rule: the checklist, a finding and a clash all cite the same id.
 
 ## What stays with the third-party sets
@@ -48,8 +57,8 @@ focus on Cancel. "Say it once, in the fewest words" (q_max D-709) is left out. i
 
 None of these is a house rule. Each line gives the owner's word, then the candidate's sources.
 
-- Defaults: dropped. Three principles, not one. Archiving starts off (degen D3). Sold items fold
-  away (banchi D132). A default year does not move with the calendar (q_max D-733). The theme
+- Behaviour defaults: dropped. Three principles, not one. Archiving starts off (degen D3). Sold
+  items fold away (banchi D132). A default year does not move with the calendar (q_max D-733). The theme
   follows the system (degen D29).
 - Spend shows cost: per repo. A press that spends money shows the count and the cost first
   (banchi D33 and D224).
@@ -57,8 +66,6 @@ None of these is a house rule. Each line gives the owner's word, then the candid
   D-666). Vercel asks Title Case for each heading and button.
 - Work-screen head: per repo. The head holds its name, its counts and its main action. banchi
   puts them on one line. q_max uses a band with figure tiles (`specs/ux-plan-b.md`, choice 3).
-- Touch size: WCAG 24 stays, no house number. Candidates were a house size above 24 px: banchi
-  uses 40 px, and sillage uses 44 px.
 - Real photos only: per repo. No stock or AI images (joyous `docs/design-brief.md` move 7).
 - Phone-first: per repo. joyous builds phone first. banchi (DEBT77) and q_max D-701 freeze phone
   work.
