@@ -49,7 +49,7 @@ Check for:
 - Do not flag an issue the diff did not add, except design-review findings on the changed pages.
   Do not flag a style issue a linter catches. Do not flag a nitpick a senior engineer would skip.
 
-If the repo has screens, the orchestrator runs design-review after a screen change.
+If the repo has screens, the orchestrator runs design-review after a screen change. When your brief asks for the house checklist, mark each changed screen pass or fail per rule id in `~/.claude/ux/checklist.md`.
 
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next.
 Under Done, the first line is PASS, FAIL, or PARTIAL. Then list each finding with file, line
