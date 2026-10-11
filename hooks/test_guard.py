@@ -2205,6 +2205,26 @@ sh("rm-var: a tilde in a flag value is not a home expansion, so $dir gets its ow
 sh("rm-var: $HOME under a glob names a literal path, not the computed home",
    "rm -rf $HOME/*", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=(os.path.expanduser("~"),))
+# Named limits, first bullet, substitution spans (decision rm-on-a-variable-needs-a-guard). The
+# assigned-value reader cuts the value at ; & | even inside $(...) or backticks, so a pwd after
+# the cut is missed. Red until the reader keeps the whole substitution.
+sh("rm-var: a pwd after && inside $(…) taints the variable, not ${D:?}",
+   'D=$(cd .. && pwd); rm -rf "$D"/*', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a pwd after ; inside $(…) taints the variable, not ${D:?}",
+   'D=$(cd ..; pwd); rm -rf "$D"/x', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a pwd -P after || inside $(…) taints the variable, not ${D:?}",
+   'D=$(cd .. || exit; pwd -P); rm -rf "$D"/x', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a pwd after && inside a backtick span taints the variable, not ${D:?}",
+   'D=`cd .. && pwd`; rm -rf "$D"/x', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a pwd after | inside a nested $(…) taints the variable, not ${D:?}",
+   'D=$(echo x | (cd .. && pwd)); rm -rf "$D"/x', "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${D:?}",))
+sh("rm-var: a guarded variable set after && in a list stays allowed",
+   'D=/tmp/w; true && rm -rf "${D:?}"/x', "allow", cwd=NOGIT)
 sh("playwright: an envrc file gets the assignment",
    "echo PLAYWRIGHT_BROWSERS_PATH=/x > .envrc", "deny", "playwright-browsers-path", cwd=NOGIT)
 sh("playwright: a case-folded name still sets it", "playwright_browsers_path=/x npx", "deny",
