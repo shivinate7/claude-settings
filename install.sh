@@ -377,17 +377,15 @@ else
     log "$TARGET_JSON already links to $SRC/settings.json"
   else
     # A real file here (not a symlink): on the first local install ever, it is a person's
-    # own settings.json, backed up. After that, a real file is this same installer's own
-    # earlier copy, from a no-symlink-rights machine where `ln -sfn` fell back to copying
-    # it: replace it, no backup (D: copy-mode-overwrites-no-backup).
+    # own settings.json; after that, a real file may be this installer's own earlier copy
+    # (a no-symlink-rights machine where `ln -sfn` fell back to copying). Either way it is
+    # backed up, and only the newest settings.json.bak.* stays. This is the one exception to
+    # D: copy-mode-overwrites-no-backup; skill and agent copies are still replaced with no backup.
     if [ -e "$TARGET_JSON" ] && [ ! -L "$TARGET_JSON" ]; then
-      if [ "$FIRST_LOCAL_RUN" = 1 ]; then
-        BAK="$TARGET_JSON.bak.$(date +%Y%m%d%H%M%S)"
-        mv "$TARGET_JSON" "$BAK"
-        log "existing $TARGET_JSON moved to $BAK; merge any keys you want into $SRC/settings.json"
-      else
-        rm -f "$TARGET_JSON"
-      fi
+      BAK="$TARGET_JSON.bak.$(date +%Y%m%d%H%M%S)"
+      mv "$TARGET_JSON" "$BAK"
+      for old in "$TARGET_JSON".bak.*; do [ "$old" = "$BAK" ] || rm -f "$old"; done
+      log "existing $TARGET_JSON moved to $BAK; merge any keys you want into $SRC/settings.json"
     fi
     ln -sfn "$SRC/settings.json" "$TARGET_JSON"
     log "linked $TARGET_JSON -> $SRC/settings.json"
