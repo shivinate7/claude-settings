@@ -50,4 +50,4 @@ The ruling is the design-skills record, 2026-10-10.
 - No conformity either way. The repo does not silence a skill. A skill does not restyle the
   repo on its own.
 - A skill update does not change a look by itself. Each source stays at its pin.
-- House rules (record ux-house-rules): a builder reads `~/.claude/ux/principles.md` before it writes UI. Reviewer A's brief asks for the house checklist (step 2).
+- House rules (record ux-house-rules): a builder reads `~/.claude/ux/principles.md` before it writes UI. Reviewer A's brief asks for the house checklist (step 2). House design values: `~/.claude/ux/tokens.md`.

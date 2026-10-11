@@ -18,6 +18,7 @@ Screen: ____ Size: ____ Theme: ____
 - [ ] ux-control-earns-place: Does each control change something, and does each disabled one say why?
 - [ ] ux-one-plain-name: Do the nav label and page title match? Does each act keep one name, each icon one meaning, and each enum value a label?
 - [ ] ux-a11y-floor: Is the `a11y.md` CI check green, and do its hand checks pass?
+- [ ] ux-a11y-floor (touch size): Are touch targets 44 by 44 CSS px on touch screens and 24 by 24 CSS px for a mouse? The axe check covers only 24 px, so 44 px on touch is a hand check.
 - [ ] ux-answer-at-press: Does the answer to each press show at the control that was pressed, or beside it?
 - [ ] ux-long-run-stops: For each run that takes more than a few seconds, is there a Stop control that ends it?
 - [ ] ux-all-is-well: Does a status summary name only what is not normal, or say "All is well." when nothing is?
