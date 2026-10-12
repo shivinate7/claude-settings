@@ -11,7 +11,6 @@
       "mcp__Claude_Browser"
     ],
     "deny": [
-      "Monitor",
       "Bash(pkill:*)",
       "Bash(killall:*)",
       "Read(.env)",
