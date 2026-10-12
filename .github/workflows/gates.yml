@@ -62,8 +62,9 @@ jobs:
   gates:
     runs-on: ubuntu-latest
     needs: scope
-    # About 2x the slowest green run measured 2026-10-02 (4 min 9 s).
-    timeout-minutes: 10
+    # About 2x the slowest green run measured 2026-10-12 (8 min 56 s: guard suite 224 s, merge-tool
+    # suite 124 s). The cap is a bandaid; the cause fix is the guard-suite split, brief step 9.
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -124,6 +125,9 @@ jobs:
 
       - name: Rule audit fixture suite
         run: python3 lint/test_rule_audit.py
+
+      - name: Guard log report fixture suite
+        run: python3 lint/test_guard_log_report.py
 
       - name: Verdict runner fixture suite
         run: python3 lint/test_verdict.py

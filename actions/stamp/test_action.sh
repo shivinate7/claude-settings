@@ -49,14 +49,16 @@ JSON
 }
 
 new_bare_remote() {
-  local remote="$WORK/remote-$RANDOM"
+  local remote
+  remote="$(mktemp -d "$WORK/remote-XXXXXX")"
   git init -q --bare -b main "$remote" >/dev/null
   echo "$remote"
 }
 
 clone_with_pending_record() {
   local remote="$1"
-  local local_dir="$WORK/local-$RANDOM"
+  local local_dir
+  local_dir="$(mktemp -d "$WORK/local-XXXXXX")"
   git clone -q "$remote" "$local_dir" >/dev/null 2>/dev/null # cloning an empty bare repo warns; harmless
   (
     cd "$local_dir" || exit 1
@@ -69,7 +71,8 @@ clone_with_pending_record() {
     git add -A
     git commit -q -m "add a pending record"
     git push -q origin main
-  )
+  ) >&2 # stdout carries only the path
+  [ -d "$local_dir/.git" ] || { echo "fixture: clone failed" >&2; return 1; }
   echo "$local_dir"
 }
 
