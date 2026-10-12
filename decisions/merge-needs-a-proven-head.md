@@ -29,9 +29,12 @@ Owner, 2026-10-12: "Fix both now, one lane."
   after `gh pr ready`.
 - A run list where every run completed as skipped, with none pending, is red for the
   same reason.
-- Only the newest run per workflow name counts. gh lists runs newest first. An older
-  cancelled run under a newer pass of the same name is superseded. A newest cancelled
-  run stays red.
+- A skipped run never outranks a run of the same name that ran. It is dropped when any
+  other run of that name is not skipped. Then only the newest run per workflow name
+  counts; gh lists runs newest first. An older cancelled run under a newer pass of the
+  same name is superseded. A newest cancelled run stays red. Incident 2026-10-12 17:05Z:
+  a draft PR made ready in the same second got two runs. The skipped `opened` run carried
+  the higher id. It outranked the green `ready_for_review` run, and #360 was refused.
 - A skipped job beside a passing check still reads as passing. A docs-only PR, with
   `scope` passed and the code suites skipped, stays green (decision
   docs-only-prs-skip-code-suites).
@@ -60,8 +63,11 @@ closed both. Round 3 found the rest, named here under the owner's three-round ca
   remedy.
 - The preview (`head_state`) prints a literal `<branch>`; the wait and the read name the
   real branch.
+- The preview reads checks only. With checks `gates pass` and every run skipped, it says
+  green while the wait and the read refuse with "skipped, no job ran".
 - Two workflow files with one `name` share one dedup slot; a job-level failure still reaches
   `classify`.
 - Pre-existing: with no required names, zero checks and zero runs, the wait reads green
   after its 30 s settle, while the read says pending.
-- "Newest" follows gh's order, not a timestamp.
+- "Newest" follows gh's order among the runs that ran, not a timestamp. A skipped run never
+  outranks a run that ran, whatever its position.
