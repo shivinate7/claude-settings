@@ -169,6 +169,27 @@ if [ -z "$SRC" ]; then
   done
 fi
 
+# Register this clone as the user-scope "claude-settings" marketplace (mods/ lives in it), so
+# `<mod>@claude-settings` keys in settings.json resolve on this machine. Idempotent: skips when
+# a marketplace of that name is listed. Never fails the installer: it prints and returns 0.
+# CLAUDE_SETTINGS_MARKETPLACE_ONLY=1 runs just this step (tests).
+register_marketplace() {
+  command -v claude >/dev/null 2>&1 || { log "claude CLI not on PATH; marketplace not registered"; return 0; }
+  mp="${SRC%/}"
+  command -v cygpath >/dev/null 2>&1 && mp=$(cygpath -w "$mp")
+  if claude plugin marketplace list </dev/null 2>/dev/null | grep -qE '^[[:space:]]*[^[:space:]]+[[:space:]]+claude-settings[[:space:]]*$'; then
+    log "marketplace claude-settings already registered"
+    return 0
+  fi
+  if out=$(claude plugin marketplace add "$mp" --scope user </dev/null 2>&1); then
+    log "registered marketplace claude-settings -> $mp"
+  else
+    log "WARN: marketplace add failed, continuing: $out"
+  fi
+  return 0
+}
+if [ "${CLAUDE_SETTINGS_MARKETPLACE_ONLY:-}" = 1 ]; then register_marketplace; exit 0; fi
+
 mkdir -p "$CLAUDE_DIR"
 
 # A real file where land_dir()/land_skills_dir() expect a symlink is
@@ -409,5 +430,7 @@ fi
 # landed name as its own earlier copy rather than a person's. See the comment above its
 # definition.
 [ "$CLOUD" = 1 ] || : > "$COPY_MARKER"
+
+register_marketplace
 
 exit 0
