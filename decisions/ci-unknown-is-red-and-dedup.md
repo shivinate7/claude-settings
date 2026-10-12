@@ -22,5 +22,5 @@
 ## Accepted risk
 
 A bug in an OS-independent suite that only shows on macOS or Windows is no longer
-caught. Unmeasured; none seen. main has no branch protection, so no required check
-can stay pending.
+caught. Unmeasured; none seen. Since 2026-10-12, main requires the `stamp.json` checks
+(decision main-branch-protection), so a required check that stays pending holds the merge.
