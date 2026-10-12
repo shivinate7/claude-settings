@@ -1535,9 +1535,11 @@ sh("per-file allow: checkout HEAD -- of one modified file", VCS + " checkout HEA
 sh("per-file allow: restore of one modified file", VCS + " restore f.txt", "allow", cwd=GITWT)
 sh("per-file allow: restore --staged --worktree of one modified file",
    VCS + " restore --staged --worktree f.txt", "allow", cwd=GITWT)
-sh("per-file allow: the incident form, a cd into the worktree, one file, then python",
+# one_place (guard.py): a cd anywhere in the command keeps the ask, because a cd can hide the shared
+# checkout behind the lane. The ask reason must name the form that does run with no ask.
+sh("per-file ask: the incident form, a cd into the worktree, one file, then python, names the -C form",
    "cd " + slash(GITWT) + " && " + VCS + " checkout fixtures/media-players.json && python3 x.py",
-   "allow", cwd=GITMAIN)
+   "ask", "shared-tree", cwd=GITMAIN, carries="git -C <lane> restore <file>")
 
 # ASK, in a linked worktree (GITWT). Each names a whole tree, a folder, a glob, or a reset.
 sh("per-file ask: checkout . in a worktree still asks", VCS + " checkout .", "ask",
@@ -1716,8 +1718,10 @@ sh("per-file ask: restore \"$F\" -- keep.txt in a worktree still asks, unreadabl
 sh("per-file deny: -C lane status, then -C shared restore f.txt, from a plain folder",
    VCS + " -C " + slash(GITWT) + " status && " + VCS + " -C " + slash(GITMAIN) + " restore f.txt",
    "deny", "shared-tree", cwd=NOGIT)
-sh("per-file deny: cd into the shared checkout, then git -C . restore f.txt, from a worktree",
-   "cd " + slash(GITMAIN) + " && " + VCS + " -C . restore f.txt", "deny", "shared-tree", cwd=GITWT)
+# Limit: _run_dir reads the first -C against the shell cwd, so a shared checkout reached by `cd`
+# gets an ask here, not a deny. Main gives the same.
+sh("per-file ask: cd into the shared checkout, then git -C . restore f.txt, from a worktree",
+   "cd " + slash(GITMAIN) + " && " + VCS + " -C . restore f.txt", "ask", "shared-tree", cwd=GITWT)
 sh("per-file deny: -C parent then a relative -C repo, from a plain folder",
    VCS + " -C " + slash(ROOT) + " -C repo restore f.txt", "deny", "shared-tree", cwd=NOGIT)
 # IDENTICAL SEGMENTS. decisions/stash-push-is-clone-wide.md: each git call is judged in its own
@@ -1742,9 +1746,9 @@ sh("per-file deny: cd lane; git -C . restore f.txt; cd shared; the same -C . res
    + VCS + " -C . restore f.txt", "deny", "shared-tree", cwd=NOGIT)
 # CONTROL, green on the base. Both calls stay in the lane, so the repeat is an allow and the fix
 # must not turn a lane-only repeat into a deny.
-sh("per-file allow: cd lane && restore f.txt && cd lane && the same restore f.txt stays allowed",
+sh("per-file ask: cd lane && restore f.txt && cd lane && the same restore f.txt asks, a cd keeps the ask",
    "cd " + slash(GITWT) + " && " + VCS + " restore f.txt && cd " + slash(GITWT) + " && "
-   + VCS + " restore f.txt && echo done", "allow", cwd=NOGIT)
+   + VCS + " restore f.txt && echo done", "ask", "shared-tree", cwd=NOGIT)
 
 # HEREDOC BODY WITH A LONE QUOTE, THEN A CD. segment_roots (guard.py ~1228) loses sync when a
 # heredoc body holds a lone quote, and drops every later `cd`. The shell stays in the lane (cwd),
@@ -1763,15 +1767,16 @@ sh("per-file deny: python heredoc, a lone double quote in the body, then cd shar
 # segments, every later segment is judged as the shared checkout, so a later discard of a dirty
 # file is denied. Both arms start in the lane, but the restore runs after `cd` into the shared
 # checkout. RED on 6c20c07: the walk's last cd is the lane, so the restore is judged there.
-sh("per-file deny: two heredocs with lone apostrophes, then cd shared and restore f.txt, cd lane last",
+# Limit: as above, a cd keeps the ask in a worktree, so the two cases below ask, not deny.
+sh("per-file ask: two heredocs with lone apostrophes, then cd shared and restore f.txt, cd lane last",
    "cd " + slash(GITMAIN) + " && node <<'EOF'\nit's\nEOF\ncat <<EOF2\nwe're\nEOF2\n"
-   + VCS + " restore f.txt\ncd " + slash(GITWT), "deny", "shared-tree", cwd=GITWT)
-sh("per-file deny: the node lone-apostrophe case with && cd lane appended after the shared restore",
+   + VCS + " restore f.txt\ncd " + slash(GITWT), "ask", "shared-tree", cwd=GITWT)
+sh("per-file ask: the node lone-apostrophe case with && cd lane appended after the shared restore",
    "node <<'EOF'\n// don't\nEOF\ncd " + slash(GITMAIN) + " && " + VCS + " restore f.txt && cd "
-   + slash(GITWT), "deny", "shared-tree", cwd=GITWT)
-# CONTROL, green on 6c20c07. No heredoc, so the walk stays in sync and the lane restore is an allow.
-sh("per-file allow: cd lane && restore f.txt with no heredoc stays allowed",
-   "cd " + slash(GITWT) + " && " + VCS + " restore f.txt", "allow", cwd=NOGIT)
+   + slash(GITWT), "ask", "shared-tree", cwd=GITWT)
+# CONTROL. No heredoc, so the walk stays in sync, but the cd still keeps the ask.
+sh("per-file ask: cd lane && restore f.txt with no heredoc asks, a cd keeps the ask",
+   "cd " + slash(GITWT) + " && " + VCS + " restore f.txt", "ask", "shared-tree", cwd=NOGIT)
 
 # KILL CASES for three mutate_guard entries removed in 78e8446. Each pins today's base verdict.
 # The quoted refspec and the quoted force in a commit message are verdicts; the quoted force on a
