@@ -289,7 +289,7 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
     }
 }
 if (-not (Get-Command python3 -ErrorAction SilentlyContinue) -and -not (Get-Command python -ErrorAction SilentlyContinue)) {
-    Log "python3 not found on PATH; the STE lint gate stays silent on this machine until Python is installed"
+    Log "python3 not found on PATH; the guard, STE gate and other gates refuse Bash, Write and Edit calls until Python 3 is installed"
 }
 
 # ---- settings.json -----------------------------------------------------------------------------
