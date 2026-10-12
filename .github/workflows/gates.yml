@@ -612,6 +612,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: python hooks/test_question_outcome.py
 
+      - name: Remove-prompt answer fixture suite
+        if: ${{ !cancelled() }}
+        run: python hooks/test_rm_prompt_answer.py
+
       - name: Stop-hook gate fixture suite
         if: ${{ !cancelled() }}
         run: python lint/test_gates.py
