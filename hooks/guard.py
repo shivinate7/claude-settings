@@ -3198,11 +3198,12 @@ def waiter_hit(segment: str) -> str:
     word = basename(tokens[index])
     if word in WAITER_COMMANDS:
         return tokens[index]
-    # `timeout` is read BEFORE the unwrap: `timeout 5 /t 5` waits, and the unwrap would hide it.
-    first = _skip_assignments_and_keywords(tokens)
-    if (first < len(tokens) and basename(tokens[first]) == "timeout"
-            and any(t.lower() == "/t" for t in tokens[first + 1:])):
-        return tokens[first] + " /t"
+    # `timeout /t` is read at the first word (`timeout 5 /t 5` waits, and the unwrap would hide
+    # it) and at the resolved word (`sudo timeout /t 5`, `verdict timeout /t 5`).
+    for at in (_skip_assignments_and_keywords(tokens), index):
+        if (at < len(tokens) and basename(tokens[at]) == "timeout"
+                and any(t.lower() == "/t" for t in tokens[at + 1:])):
+            return tokens[at] + " /t"
     return ""
 
 
