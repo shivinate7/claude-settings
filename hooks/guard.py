@@ -312,7 +312,13 @@ POWERSHELL_ASSIGNMENT = re.compile(r"^\$[A-Za-z_][A-Za-z0-9_]*$")
 # A wrapper that runs another program in its place, so the CALLED program is a segment's real
 # command word, not the wrapper. `xargs pkill foo` runs pkill, so `xargs` unwraps the same as
 # the rest: the token after it, once its own flags are skipped, is what actually runs.
-COMMAND_WRAPPERS = {"sudo", "env", "command", "nohup", "nice", "time", "doas", "xargs"}
+COMMAND_WRAPPERS = {"sudo", "env", "command", "nohup", "nice", "time", "doas", "xargs",
+                    "timeout", "verdict", "python", "python3"}
+# `timeout` and `python` unwrap only in their wrapper shape: `timeout [flags] DURATION cmd` (Windows
+# `timeout /t 5` is the waiter, not a wrapper) and `python bin/verdict cmd` (the repo's runner).
+DURATION = re.compile(r"^\d+(\.\d+)?[smhd]?$")
+TIMEOUT_FLAGS_WITH_VALUE = {"-k", "-s", "--kill-after", "--signal"}
+TIMEOUT_FLAGS_BARE = {"--preserve-status", "--foreground"}
 
 # A leading shell keyword that opens or joins a control-flow block, never a command itself.
 # `split_segments` cuts on `;`, so the segment after a loop's own semicolon starts with `do`, and
@@ -358,6 +364,9 @@ def _skip_assignments_and_keywords(tokens, index=0):
         if ASSIGNMENT.match(tokens[index]) or tokens[index] in LOOP_KEYWORDS:
             index += 1
             continue
+        if tokens[index][:1] == "(" and ASSIGNMENT.match(tokens[index][1:]):
+            index += 1   # `(VAR=x cmd`: a subshell paren glued to the first assignment
+            continue
         if (POWERSHELL_ASSIGNMENT.match(tokens[index]) and index + 1 < end
                 and tokens[index + 1] == "="):
             index += 2
@@ -383,8 +392,17 @@ def _resolve_command(tokens):
     end = len(tokens)
     index = _skip_assignments_and_keywords(tokens)
     while index < end and basename(tokens[index]) in COMMAND_WRAPPERS:
+        word, start = basename(tokens[index]), index
         index += 1
         while index < end and tokens[index].startswith("-"):
+            index += 2 if word == "timeout" and tokens[index] in TIMEOUT_FLAGS_WITH_VALUE else 1
+        if word == "timeout" and not (index < end and DURATION.match(tokens[index])):
+            return start
+        if word == "timeout":
+            index += 1
+        if word in ("python", "python3"):
+            if not (index < end and basename(tokens[index]) == "verdict"):
+                return start
             index += 1
         while index < end and ASSIGNMENT.match(tokens[index]):
             index += 1
@@ -3180,8 +3198,12 @@ def waiter_hit(segment: str) -> str:
     word = basename(tokens[index])
     if word in WAITER_COMMANDS:
         return tokens[index]
-    if word == "timeout" and any(t.lower() == "/t" for t in tokens[index + 1:]):
-        return tokens[index] + " /t"
+    # `timeout /t` is read at the first word (`timeout 5 /t 5` waits, and the unwrap would hide
+    # it) and at the resolved word (`sudo timeout /t 5`, `verdict timeout /t 5`).
+    for at in (_skip_assignments_and_keywords(tokens), index):
+        if (at < len(tokens) and basename(tokens[at]) == "timeout"
+                and any(t.lower() == "/t" for t in tokens[at + 1:])):
+            return tokens[at] + " /t"
     return ""
 
 
@@ -3716,9 +3738,31 @@ def _env_words(segment: str):
     words = READ_REDIRECT.sub(" < ", REDIRECT.sub(
         r" \1 ", _blank_messages(segment))).split()
     # The command is the first word that is not a `VAR=value` assignment.
+    # A `(` glued to the first assignment is a subshell paren, not part of the name.
+    if words and words[0][:1] == "(" and ASSIGNMENT.match(words[0][1:]):
+        words[0] = words[0][1:]
     position = 0
     while position < len(words) and ASSIGNMENT.match(words[position]):
         position = _assignment_end(words, position)
+    # Look through exactly three wrapper shapes, each by its exact form, so a flag value of some
+    # other wrapper (`env -u ls cat .env`) can never pose as the command word.
+    while position < len(words):
+        word = words[position].rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        after = position + 1
+        if word == "timeout":
+            while after < len(words) and (words[after] in TIMEOUT_FLAGS_WITH_VALUE
+                                          or words[after] in TIMEOUT_FLAGS_BARE):
+                after += 2 if words[after] in TIMEOUT_FLAGS_WITH_VALUE else 1
+            if not (after < len(words) and DURATION.match(words[after])):
+                break
+            position = after + 1
+        elif word == "verdict":
+            position = after
+        elif (word in ("python", "python3") and after < len(words)
+                and words[after].rsplit("/", 1)[-1] == "verdict"):
+            position = after + 1
+        else:
+            break
     head = words[position] if position < len(words) else ""
     command = head.strip("'\"").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     if command in ENV_TEXT_COMMANDS:
