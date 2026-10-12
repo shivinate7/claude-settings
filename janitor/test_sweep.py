@@ -2330,25 +2330,27 @@ class HuskTests(unittest.TestCase):
         self.assertIn("husk      KEEP", out.getvalue())
         self.assertIn("refused", out.getvalue())
 
-    @unittest.skipUnless(os.name == "nt", "the real Windows answer; POSIX patches the constant below")
-    def test_on_windows_a_husk_is_kept_and_not_deleted(self):
+    @unittest.skipUnless(os.name == "nt", "the Windows delete; POSIX has its own cases above")
+    def test_on_windows_a_proven_husk_is_deleted(self):
         root = self._repo("husk-nt")
         path = self._husk(root, "gone", ["node_modules"])
-        self.assertEqual(self._husks(root), {"gone": "keep"})
-        sweep.sweep_repo(root, True, os.path.join(ROOT, "husk.log"))
-        self.assertTrue(os.path.isdir(path))
+        self.assertEqual(self._husks(root), {"gone": "husk"})
+        result = sweep.sweep_repo(root, True, os.path.join(ROOT, "husk.log"))
+        self.assertFalse(os.path.exists(path), "a proven husk was kept on Windows")
+        self.assertEqual([h.get("error") for h in result["husks"]], [None])
 
-    def test_windows_keeps_husks_report_only(self):
+    @unittest.skipUnless(os.name == "nt", "a junction is a Windows folder link")
+    def test_windows_husk_delete_unlinks_a_junction_inside_and_keeps_its_target(self):
         root = self._repo("husk-windows")
-        path = self._husk(root, "gone", ["node_modules"])
-        real = sweep.HUSKS_DELETABLE
-        sweep.HUSKS_DELETABLE = False
-        try:
-            self.assertEqual(self._husks(root), {"gone": "keep"})
-            sweep.sweep_repo(root, True, os.path.join(ROOT, "husk.log"))
-        finally:
-            sweep.HUSKS_DELETABLE = real
-        self.assertTrue(os.path.isdir(path))
+        path = self._husk(root, "gone", [])
+        target = os.path.join(ROOT, "husk-windows-target")
+        write(os.path.join(target, "keep.txt"), "not ours\n")
+        make_junction(os.path.join(path, "node_modules"), target)
+        self.assertEqual(self._husks(root), {"gone": "husk"})
+        sweep.sweep_repo(root, True, os.path.join(ROOT, "husk.log"))
+        self.assertFalse(os.path.exists(path), "a proven husk was kept on Windows")
+        self.assertTrue(os.path.isfile(os.path.join(target, "keep.txt")),
+                        "the delete went through the junction into its target")
 
     def test_an_empty_process_table_keeps_the_husk(self):
         root = self._repo("husk-blind")
@@ -2380,6 +2382,89 @@ class HuskTests(unittest.TestCase):
         finally:
             proc.kill()
             proc.wait()
+
+
+def make_junction(link, target):
+    """A real Windows junction LINK -> TARGET (no admin needed). The test removes only the link."""
+    os.makedirs(target, exist_ok=True)
+    os.makedirs(os.path.dirname(link), exist_ok=True)
+    done = subprocess.run(["cmd", "/c", "mklink", "/J", link, target], capture_output=True, text=True)
+    require(done.returncode == 0, "mklink /J failed: " + (done.stdout + done.stderr).strip())
+
+
+def junction_fixture(case, keep=True):
+    """`(base, target)`: a temp dir and a real folder in it holding `node_modules/x.txt` and, with
+    KEEP, `keep.txt`. A name set of `node_modules` alone makes the target a husk-shaped folder."""
+    base = tempfile.mkdtemp(prefix="junction_")
+    case.addCleanup(shutil.rmtree, base, True)
+    target = os.path.join(base, "target")
+    write(os.path.join(target, "node_modules", "x.txt"), "x\n")
+    if keep:
+        write(os.path.join(target, "keep.txt"), "not ours\n")
+    return base, target
+
+
+@unittest.skipUnless(os.name == "nt", "a junction is a Windows folder link")
+class JunctionTests(unittest.TestCase):
+    """A Windows junction is a link `os.path.islink` does not see. `sweep.is_link` is the one check.
+    Each case builds a real junction. A reap must never delete through it."""
+
+    def _intact(self, target):
+        self.assertTrue(os.path.isfile(os.path.join(target, "node_modules", "x.txt")),
+                        "the target lost node_modules/x.txt")
+
+    def test_is_link_sees_a_junction_and_a_symlink_and_not_a_real_folder(self):
+        base, target = junction_fixture(self)
+        junction = os.path.join(base, "j")
+        make_junction(junction, target)
+        self.assertTrue(sweep.is_link(junction), "a junction is not a link")
+        self.assertFalse(sweep.is_link(target), "a real folder is a link")
+        symlink = os.path.join(base, "s")
+        try:
+            os.symlink(target, symlink, target_is_directory=True)
+        except OSError:
+            symlink = None  # no privilege to make a symlink: this assert is skipped
+        if symlink:
+            self.assertTrue(sweep.is_link(symlink), "a symlink is not a link")
+
+    def test_a_junction_under_the_worktrees_folder_is_not_a_husk_and_its_target_is_kept(self):
+        root = os.path.join(ROOT, "junction-husk-repo")
+        make_repo(root, {"f.txt": "x\n"})
+        names = ["node_modules", ".serve"]
+        write(os.path.join(root, ".claude", "janitor.json"), json.dumps({"huskNames": names}))
+        base, target = junction_fixture(self, keep=False)  # the target alone looks like a husk
+        link = os.path.join(root, ".claude", "worktrees", "gone")
+        make_junction(link, target)
+        verdict = sweep.husk_verdict(root, link, sweep.parse_worktree_list(root), names)
+        self.assertIsNone(verdict, "a junction was given a husk verdict: %s" % verdict)
+        sweep.sweep_repo(root, True, os.path.join(ROOT, "junction-husk.log"))
+        self._intact(target)
+
+    def test_scan_worktree_lists_no_junction_and_walks_none(self):
+        base, target = junction_fixture(self)
+        os.makedirs(os.path.join(target, "build"))
+        wt = os.path.join(base, "wt")
+        os.makedirs(os.path.join(wt, "real"))
+        make_junction(os.path.join(wt, "build"), target)
+        make_junction(os.path.join(wt, "other"), target)  # a walk into it would list target/build
+        builds, _ = sweep.scan_worktree(wt, {"build"})
+        self.assertEqual(builds, [], "a junction was listed, or walked into: %s" % builds)
+        self._intact(target)
+
+    def test_scan_worktree_lists_a_real_build_folder_holding_a_junction(self):
+        base, target = junction_fixture(self)
+        wt = os.path.join(base, "wt")
+        make_junction(os.path.join(wt, "build", "j"), target)
+        builds, _ = sweep.scan_worktree(wt, {"build"})
+        self.assertEqual(builds, [os.path.join(wt, "build")])
+
+    def test_trash_verdict_keeps_a_junction_with_a_trash_name(self):
+        base, target = junction_fixture(self)
+        link = sweep.trash_name(os.path.join(base, "build"))
+        make_junction(link, target)
+        delete, reason = sweep.trash_verdict(link)
+        self.assertFalse(delete, "a junction was proven as trash: %s" % reason)
+        self._intact(target)
 
 
 class AllCwdsMacosTests(unittest.TestCase):
@@ -3326,6 +3411,27 @@ class BuildDirReapTests(unittest.TestCase):
             self.assertFalse(os.path.exists(free), "the janitor left a leftover trash name")
         with self.subTest(arm="leftover trash with a live cwd"):
             self.assertTrue(os.path.isdir(live), "the janitor deleted a trash name with a live process")
+
+
+    @unittest.skipUnless(os.name == "nt", "a junction is a Windows folder link")
+    def test_junction_inside_a_build_folder_is_unlinked_and_its_target_kept(self):
+        primary = self.make_primary("junction", janitor=json.dumps({"buildDirs": ["build"]}))
+        wt = self.add_agent(primary, "bdrJ")
+        base, target = junction_fixture(self)
+        self.fill(wt, ("build",))
+        make_junction(os.path.join(wt, "build", "link"), target)
+        renamed = self.reap.reap_build_dirs(wt, [])
+        with self.subTest(control="the build folder is reaped"):
+            self.assertEqual(renamed, [os.path.join(wt, "build")])
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline and any(
+                    self.reap.is_trash_name(n) for n in os.listdir(wt)):
+                time.sleep(0.2)
+            self.assertFalse([n for n in os.listdir(wt) if self.reap.is_trash_name(n)],
+                             "the trash folder was not deleted in 10 s")
+        with self.subTest(arm="the junction target"):
+            self.assertTrue(os.path.isfile(os.path.join(target, "keep.txt")))
+            self.assertTrue(os.path.isfile(os.path.join(target, "node_modules", "x.txt")))
 
 
 class StrictWorktreeTests(unittest.TestCase):
