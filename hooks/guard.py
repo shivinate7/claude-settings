@@ -3277,7 +3277,7 @@ def waiter_hit(segment: str) -> str:
 
 WAITER_REASON = (
     "a pause between polls turns waiting into a loop of turns that each print a word. "
-    "Remedy: run the long command in the background and wait for its completion notice, "
+    "Remedy: use the Monitor tool to wait once for the condition, or run the long command in the background and wait for its completion notice, "
     "or use a tool that waits once, such as gh run watch <id> --exit-status. Avoid "
     "gh pr checks --watch, which serves a cached status. For a server warm-up, use a "
     "readiness check such as curl --retry."
