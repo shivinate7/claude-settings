@@ -1674,7 +1674,7 @@ class SteGatePreToolUseTests(unittest.TestCase):
         run = self.run_pretooluse("Edit", {
             "file_path": target,
             "old_string": "This is the clean block that gets edited.\n",
-            "new_string": "This block now isn't clean, right in the edit itself.\n",
+            "new_string": "We'd call this block clean, right in the edit itself.\n",
         })
         reason = self.assert_denied(run)
         self.assertIn("contraction", reason.lower())
@@ -1700,7 +1700,16 @@ class SteGatePreToolUseTests(unittest.TestCase):
 
     def test_62_new_file_via_write_denied_on_every_error(self):
         target = os.path.join(self.tmp.name, "new.md")  # never created: Write makes it
-        run = self.run_pretooluse("Write", {"file_path": target, "content": self.THREE_ERRORS_ONE_CLEAN})
+        # Three STE008 contractions the fixer leaves alone (ste_lint _NO_FIX: we'd, they'd),
+        # so every one is denied, not rewritten.
+        content = ("We'd keep the first block clean.\n"
+                   "\n"
+                   "They'd keep the second block clean too.\n"
+                   "\n"
+                   "We'd keep the third block clean as well.\n"
+                   "\n"
+                   "This is the clean block.\n")
+        run = self.run_pretooluse("Write", {"file_path": target, "content": content})
         reason = self.assert_denied(run)
         self.assertEqual(reason.count("STE008"), 3)
 
@@ -1727,7 +1736,7 @@ class SteGatePreToolUseTests(unittest.TestCase):
         target = self._write("notes.md", self.THREE_ERRORS_ONE_CLEAN)
         proposed = self.THREE_ERRORS_ONE_CLEAN.replace(
             "This is the clean block that gets edited.\n",
-            "This block now isn't clean, right in the edit itself.\n",
+            "We'd call this block clean, right in the edit itself.\n",
         )
         run = self.run_pretooluse("Write", {"file_path": target, "content": proposed})
         reason = self.assert_denied(run)
@@ -1743,7 +1752,7 @@ class SteGatePreToolUseTests(unittest.TestCase):
         run = self.run_pretooluse("Edit", {
             "file_path": target,
             "old_string": "text that is not actually in the file",
-            "new_string": "This new text isn't clean, introduced here.",
+            "new_string": "We'd call this new text clean, introduced here.",
         })
         reason = self.assert_denied(run)
         self.assertIn("contraction", reason.lower())
@@ -1769,7 +1778,7 @@ class SteGatePreToolUseTests(unittest.TestCase):
             {"old_string": "This is the clean block that gets edited.\n",
              "new_string": "This is the clean block that gets edited today.\n"},
             {"old_string": "text that is not actually in the file",
-             "new_string": "This new text isn't clean, introduced here."},
+             "new_string": "We'd call this new text clean, introduced here."},
         ]})
         reason = self.assert_denied(run)
         self.assertIn("contraction", reason.lower())
