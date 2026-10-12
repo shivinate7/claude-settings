@@ -2,9 +2,9 @@
 
 **What waits.** The `env-file` rule in `hooks/guard.py` allows `--env-file` only when the
 command word is a runner (`ENV_LOADER_COMMANDS`). It reads the command word with
-`resolve_command`. That unwraps `sudo`, `env`, `nohup`, `time` and a few more. It does not
-unwrap `timeout N` or `verdict`, and it does not read a `(VAR=x` token glued to a subshell
-paren.
+`resolve_command`. That unwraps `sudo`, `env`, `nohup`, `time` and a few more. It leaves
+`timeout N` and `verdict` wrapped, and it reads a `(VAR=x` token glued to a subshell paren as
+the command word.
 
 **What it must do.** `timeout 60 node --env-file=.env app.js`, `verdict npm --env-file=.env
 test` and `(VERIFY_PORT=3001 node --env-file=.env app.js)` run with no refusal. `timeout /t 5`
