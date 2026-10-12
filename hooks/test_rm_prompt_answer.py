@@ -183,6 +183,15 @@ silent("rm-prompt: bypass, a stray plain-folder binding no target uses is not al
        'T=/tmp/y; S=/tmp/x; rm -rf "${S:?}"/a')
 silent("rm-prompt: bypass, a stray binding set after the rm is not allowed",
        'S=/tmp/x; rm -rf "${S:?}"/a; T=/tmp/y')
+# Round 3: IFS and PATH are refused by name, even when a target expands the name that was bound.
+silent("rm-prompt: bypass, IFS bound and expanded unquoted is not allowed",
+       'IFS=t; rm -rf ${IFS:?}/home')
+silent("rm-prompt: bypass, IFS bound and expanded quoted is not allowed",
+       'IFS=t; rm -rf "${IFS:?}"/home')
+silent("rm-prompt: bypass, PATH bound and expanded unquoted is not allowed",
+       'PATH=/tmp/x; rm -rf ${PATH:?}/a')
+silent("rm-prompt: bypass, PATH bound and expanded quoted is not allowed",
+       'PATH=/tmp/x; rm -rf "${PATH:?}"/a')
 allow("rm-prompt: bypass, control: one binding used by its target is allowed",
       'S=/tmp/x; rm -rf "${S:?}"/a')
 allow("rm-prompt: bypass, control: two bindings, each used by a target, are allowed",
