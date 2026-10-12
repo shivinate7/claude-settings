@@ -669,6 +669,9 @@ def _verify_fake_gh_delay(ghdir, delay):
 UNDERTESTS = os.path.join(ROOT, "tests", "clone")   # a repo whose own folder sits under `tests`
 
 
+LINKS_MADE = False  # set by build_fixtures; True only where os.symlink works
+
+
 def build_fixtures():
     for folder in (CFG, LOGDIR, PROJ, CLONE, NOGIT, GITMAIN, os.path.join(UNDERTESTS, ".git")):
         os.makedirs(folder, exist_ok=True)
@@ -1137,8 +1140,19 @@ def build_fixtures():
         if added.returncode != 0:
             sys.exit("fixture setup failed in build_fixtures: worktree add %r failed. stderr: %s"
                      % (where, added.stderr.strip()))
-    # Case 1 and the link-only controls: the only untracked entry is one symlink.
-    os.symlink(LINKOUT, os.path.join(WTLINKDIR, "app", "node_modules"))
+    # A real untracked node_modules directory needs no link, so its control always runs.
+    write(os.path.join(WTCTRLDIR, "app", "node_modules", "index.js"), "module.exports = {};\n")
+    _require_status(WTCTRLDIR, ["?? app/node_modules/"])
+    # Case 1 and the link-only controls: the only untracked entry is one symlink. Degrades to
+    # skip, flag LINKS_MADE, where the account holds no symlink privilege (MEASURED: this box
+    # raises OSError: a required privilege is not held by the client).
+    global LINKS_MADE
+    try:
+        os.symlink(LINKOUT, os.path.join(WTLINKDIR, "app", "node_modules"))
+    except OSError:
+        LINKS_MADE = False
+        return
+    LINKS_MADE = True
     _require_status(WTLINKDIR, ["?? app/node_modules"])
     # Case 2: the link targets a tracked file inside the same tree.
     os.symlink(os.path.join("..", "config.json"), os.path.join(WTLINKFILE, "app", "node_modules"))
@@ -1151,9 +1165,6 @@ def build_fixtures():
     os.symlink(LINKOUT, os.path.join(WTCTRLTRACKED, "app", "node_modules"))
     write(os.path.join(WTCTRLTRACKED, "app", "package.json"), '{"changed": true}\n')
     _require_status(WTCTRLTRACKED, [" M app/package.json", "?? app/node_modules"])
-    # Control: a real untracked node_modules directory holding a real file.
-    write(os.path.join(WTCTRLDIR, "app", "node_modules", "index.js"), "module.exports = {};\n")
-    _require_status(WTCTRLDIR, ["?? app/node_modules/"])
     # Control, case 4: a link inside an untracked real directory. Git lists the directory only.
     os.makedirs(os.path.join(WTCTRLNESTED, "vendor"))
     os.symlink(LINKOUT, os.path.join(WTCTRLNESTED, "vendor", "link"))
@@ -1187,8 +1198,9 @@ TRAPLN = os.path.join(ROOT, "trapln")
 def build_trap_fixtures():
     os.makedirs(os.path.join(TRAPLN, "realdir"))
     write(os.path.join(TRAPLN, "file.txt"), "x\n")
-    os.symlink("realdir", os.path.join(TRAPLN, "linkdir"))
-    os.symlink("file.txt", os.path.join(TRAPLN, "linkfile"))
+    if LINKS_MADE:
+        os.symlink("realdir", os.path.join(TRAPLN, "linkdir"))
+        os.symlink("file.txt", os.path.join(TRAPLN, "linkfile"))
 
 
 build_trap_fixtures()
@@ -1974,25 +1986,27 @@ sh("worktree prune: -n itself is a read, not a discard, so it passes uncondition
 # `?? app/node_modules` read as real work and the removal was refused. Deleting a link deletes
 # only the link, never its target, so a tree whose only untracked entry is a link passes, with
 # or without the force flag. The link's target may sit outside the tree or inside it.
-sh("worktree remove: a detached tree whose only untracked entry links outside it passes",
-   VCS + " worktree remove " + slash(WTLINKDIR), "allow", cwd=LINKMAIN)
-sh("worktree remove: the same link-only tree passes with the force flag",
-   VCS + " worktree remove --force " + slash(WTLINKDIR), "allow", cwd=LINKMAIN)
-sh("worktree remove: a detached tree whose only untracked entry links to a file inside it passes",
-   VCS + " worktree remove " + slash(WTLINKFILE), "allow", cwd=LINKMAIN)
-sh("worktree remove: the same in-tree link passes with the force flag",
-   VCS + " worktree remove --force " + slash(WTLINKFILE), "allow", cwd=LINKMAIN)
-# THE CONTROLS. Each has a real piece of work beside or inside the link, so each still denies.
-sh("worktree remove: a link next to an untracked real file still denies",
-   VCS + " worktree remove " + slash(WTCTRLFILE), "deny", "shared-tree", cwd=LINKMAIN)
-sh("worktree remove: a link next to a tracked change still denies",
-   VCS + " worktree remove " + slash(WTCTRLTRACKED), "deny", "shared-tree", cwd=LINKMAIN)
+if LINKS_MADE:
+    sh("worktree remove: a detached tree whose only untracked entry links outside it passes",
+       VCS + " worktree remove " + slash(WTLINKDIR), "allow", cwd=LINKMAIN)
+    sh("worktree remove: the same link-only tree passes with the force flag",
+       VCS + " worktree remove --force " + slash(WTLINKDIR), "allow", cwd=LINKMAIN)
+    sh("worktree remove: a detached tree whose only untracked entry links to a file inside it passes",
+       VCS + " worktree remove " + slash(WTLINKFILE), "allow", cwd=LINKMAIN)
+    sh("worktree remove: the same in-tree link passes with the force flag",
+       VCS + " worktree remove --force " + slash(WTLINKFILE), "allow", cwd=LINKMAIN)
+    # THE CONTROLS. Each has a real piece of work beside or inside the link, so each still denies.
+    sh("worktree remove: a link next to an untracked real file still denies",
+       VCS + " worktree remove " + slash(WTCTRLFILE), "deny", "shared-tree", cwd=LINKMAIN)
+    sh("worktree remove: a link next to a tracked change still denies",
+       VCS + " worktree remove " + slash(WTCTRLTRACKED), "deny", "shared-tree", cwd=LINKMAIN)
 sh("worktree remove: a real untracked node_modules directory holding a file still denies",
    VCS + " worktree remove " + slash(WTCTRLDIR), "deny", "shared-tree", cwd=LINKMAIN)
-# A link inside an untracked REAL directory: git shows the directory, not the link, so the
-# directory is the work and it denies.
-sh("worktree remove: a link inside an untracked real directory still denies",
-   VCS + " worktree remove " + slash(WTCTRLNESTED), "deny", "shared-tree", cwd=LINKMAIN)
+if LINKS_MADE:
+    # A link inside an untracked REAL directory: git shows the directory, not the link, so the
+    # directory is the work and it denies.
+    sh("worktree remove: a link inside an untracked real directory still denies",
+       VCS + " worktree remove " + slash(WTCTRLNESTED), "deny", "shared-tree", cwd=LINKMAIN)
 
 
 # =========================================================================== 1b. the pointer HEAD
@@ -3278,12 +3292,13 @@ sh("gh-api: -f on another program is not gh api", "curl -f https://example.inval
 # --- ln -s onto a directory that is already there
 sh("ln: -s over a real directory nests the link inside it",
    "ln -s /opt/tool/realdir realdir", "deny", "ln-over-directory", cwd=TRAPLN)
-sh("ln: -sf over a link to a directory descends into it",
-   "ln -sf /opt/tool/linkdir linkdir", "deny", "ln-over-directory", cwd=TRAPLN)
-sh("ln: -sfn replaces a link to a directory", "ln -sfn /opt/tool/linkdir linkdir", "allow",
-   cwd=TRAPLN)
-sh("ln: -sf over a link to a file replaces the link, as -f says",
-   "ln -sf /opt/tool/other linkfile", "allow", cwd=TRAPLN)
+if LINKS_MADE:
+    sh("ln: -sf over a link to a directory descends into it",
+       "ln -sf /opt/tool/linkdir linkdir", "deny", "ln-over-directory", cwd=TRAPLN)
+    sh("ln: -sfn replaces a link to a directory", "ln -sfn /opt/tool/linkdir linkdir", "allow",
+       cwd=TRAPLN)
+    sh("ln: -sf over a link to a file replaces the link, as -f says",
+       "ln -sf /opt/tool/other linkfile", "allow", cwd=TRAPLN)
 sh("ln: a free name", "ln -s /opt/tool/x brand-new", "allow", cwd=TRAPLN)
 sh("ln: a trailing slash says the destination is a directory",
    "ln -s /opt/tool/x realdir/", "allow", cwd=TRAPLN)
@@ -4335,11 +4350,15 @@ try:
     SYM_MADE = True
 except Exception:
     SYM_MADE = False
-add("frozen: the live path stays frozen even though it is a real symlink into the clone "
-    "[resolve-branch proof]",
-    "deny" if SYM_MADE else "allow", "frozen-path" if SYM_MADE else None,
-    tool="Edit", cwd=NOGIT, config=os.path.join(SYMFROZEN, "cfg"), file_path=slash(SYM_CFG_HOOK),
-    old_string="# stand-in", new_string="# rewritten by a session")
+# Skipped where the link cannot be made: the literal path under the config dir is frozen with or
+# without a link, so an "allow" there is wrong and the case proves nothing about the resolve branch.
+if SYM_MADE:
+    add("frozen: the live path stays frozen even though it is a real symlink into the clone "
+        "[resolve-branch proof]",
+        "deny", "frozen-path",
+        tool="Edit", cwd=NOGIT, config=os.path.join(SYMFROZEN, "cfg"),
+        file_path=slash(SYM_CFG_HOOK), old_string="# stand-in",
+        new_string="# rewritten by a session")
 # THE CLONE PATH BEHIND THAT SYMLINK STAYS EDITABLE (decisions/recovery-must-not-gate-on-its-
 # own-state.md, "the clone is not frozen"): the literal-path check must not freeze the clone
 # just because a symlink elsewhere happens to point at it.
@@ -4370,11 +4389,13 @@ try:
     SYM_SKILL_MADE = True
 except Exception:
     SYM_SKILL_MADE = False
-add("frozen: a shipped skill's SKILL.md stays frozen through the directory symlink into the "
-    "clone [resolve-branch proof]",
-    "deny" if SYM_SKILL_MADE else "allow", "frozen-path" if SYM_SKILL_MADE else None,
-    tool="Edit", cwd=NOGIT, config=os.path.join(SYMFROZEN, "cfg"), file_path=slash(SYM_CFG_SKILL_MD),
-    old_string="# stand-in", new_string="# rewritten by a session")
+if SYM_SKILL_MADE:
+    add("frozen: a shipped skill's SKILL.md stays frozen through the directory symlink into the "
+        "clone [resolve-branch proof]",
+        "deny", "frozen-path",
+        tool="Edit", cwd=NOGIT, config=os.path.join(SYMFROZEN, "cfg"),
+        file_path=slash(SYM_CFG_SKILL_MD), old_string="# stand-in",
+        new_string="# rewritten by a session")
 add("frozen: a user's own, unshipped skill directory is allowed", "allow", tool="Edit",
     cwd=NOGIT, config=os.path.join(SYMFROZEN, "cfg"), file_path=SYM_CFG_OWN_SKILL_MD,
     old_string="# stand-in", new_string="# rewritten by hand")
@@ -4966,6 +4987,7 @@ def _link(target, rel):
     def go(w):
         os.makedirs(os.path.dirname(os.path.join(w, rel)), exist_ok=True)
         os.symlink(target, os.path.join(w, rel))
+    go.needs_link = True  # the loops below skip it where os.symlink is refused
     return go
 
 
@@ -5022,6 +5044,8 @@ BUILDER_GREEN = [
 ]
 COMMIT, PUSH = VCS + " commit -m x", VCS + " push origin work"
 for _name, _change in BUILDER_RED:
+    if getattr(_change, "needs_link", False) and not LINKS_MADE:
+        continue
     _repo = diff_repo("b-" + _name, _change)
     sh("builder-diff: commit with a %s change is allowed and logged" % _name, COMMIT, "allow",
        cwd=_repo, agent_id="bld1", agent_type="builder")
@@ -5227,6 +5251,8 @@ LOG_CHECKS_EXTRA = [
      long_lived_no_log_case),
 ]
 for _name, _change in BUILDER_GREEN:
+    if getattr(_change, "needs_link", False) and not LINKS_MADE:
+        continue
     _repo = diff_repo("g-" + _name, _change)
     sh("builder-diff: commit with %s is allowed" % _name, COMMIT, "allow", cwd=_repo,
        agent_id="bld1", agent_type="builder")
@@ -5284,6 +5310,8 @@ AUTHOR_RED = [
     ("test-symlink-to-product", _link("../src/app.py", "tests/alias.py")),
 ]
 for _name, _change in AUTHOR_RED:
+    if getattr(_change, "needs_link", False) and not LINKS_MADE:
+        continue
     _repo = diff_repo("a-" + _name, _change)
     sh("author-diff: commit with a %s change is allowed and logged" % _name, COMMIT, "allow",
        cwd=_repo, agent_id="auth1", agent_type="test-author")
