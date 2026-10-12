@@ -33,9 +33,8 @@ Owner, 2026-10-12: "Fix both now, one lane."
   other run of that name is not skipped. Then only the newest run per workflow name
   counts; gh lists runs newest first. An older cancelled run under a newer pass of the
   same name is superseded. A newest cancelled run stays red. Incident 2026-10-12 17:05Z:
-  a draft PR made ready in the same second got two runs, and the skipped `opened` run
-  carried the higher id, so the green `ready_for_review` run was outranked and #360 was
-  refused.
+  a draft PR made ready in the same second got two runs. The skipped `opened` run carried
+  the higher id. It outranked the green `ready_for_review` run, and #360 was refused.
 - A skipped job beside a passing check still reads as passing. A docs-only PR, with
   `scope` passed and the code suites skipped, stays green (decision
   docs-only-prs-skip-code-suites).
