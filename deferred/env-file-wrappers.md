@@ -11,7 +11,7 @@ stays a `waiter` hit, so the `timeout` unwrap applies only when a duration follo
 first, in `hooks/test_guard.py`.
 
 **Why it waits.** MEASURED in this Windows machine's `~/.claude/guard.log`, 30 days to
-2026-10-11: 303 of 766 `env-file` denies name one of those three shapes as the command
-(`timeout` 160, `verdict` 78, a word glued to `(` 65). The
+2026-10-11: 296 of 766 `env-file` denies name one of those three shapes as the command
+(`timeout` 160, `verdict` 78, a word glued to `(` 58). The
 rule's own remedy tells the agent to use the form it then refuses. See decision
 guard-log-read-weekly.

@@ -44,8 +44,8 @@ expiry on 2026-10-06.
 
 What the matched text says:
 
-- `env-file`, 766: 303 of them (40%) refused a loader flag behind a word the rule does not
-  look through: `timeout` (160), `verdict` (78), and a word glued to a `(` (65). Counted by the
+- `env-file`, 766: 296 of them (39%) refused a loader flag behind a word the rule does not
+  look through: `timeout` (160), `verdict` (78), and a word glued to a `(` (58). Counted by the
   command word the deny names; the log holds the word, not its arguments. The rule's own
   remedy names the `--env-file` form it then refuses. See deferred item env-file-wrappers.
 - `waiter`, 464: every one `sleep` or `Start-Sleep`. Ruled in decision agents-wait-with-monitor.
