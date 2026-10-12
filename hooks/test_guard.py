@@ -6456,6 +6456,48 @@ for _tool in ("Agent", "Task"):
 add("floor: Agent record-writer with model sonnet is still allowed", "allow",
     tool="Agent", prompt="x", model="sonnet", subagent_type="record-writer")
 
+# ---- Step-up (owner ruling 2026-10-12, rule roles-third-try-steps-up). The brief's fixed form
+# "Round N of 3" steps a reviewer up: rounds 2 and 3 need sonnet, and opus is the ceiling. The
+# fixed form "Try N of 3" steps a builder up: try 3 needs opus, tries 1 and 2 stay on sonnet.
+# A reviewer's round 1 runs on the role's table model. Prose that quotes a round without the
+# fixed form is never a signal. A missing model is not read from the env default by the floor,
+# so the floor allows it (pinned below).
+STEP_UP = "roles-third-try-steps-up"
+add("floor step-up: reviewer Round 2 of 3 on haiku is denied", "deny", STEP_UP,
+    tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="haiku", subagent_type="reviewer")
+add("floor step-up: reviewer Round 3 of 3 on haiku is denied", "deny", STEP_UP,
+    tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="haiku", subagent_type="reviewer")
+add("floor step-up: reviewer Round 2 of 3 on opus is denied (ceiling)", "deny", STEP_UP,
+    tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="opus", subagent_type="reviewer")
+add("floor step-up: reviewer Round 2 of 3 on sonnet is allowed", "allow",
+    tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="sonnet", subagent_type="reviewer")
+add("floor step-up: reviewer Round 2 of 3 with no model is allowed (floor pin)", "allow",
+    tool="Agent", prompt="Round 2 of 3. Re-check the diff.", subagent_type="reviewer")
+add("floor step-up: builder Try 3 of 3 on sonnet is denied", "deny", STEP_UP,
+    tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="sonnet", subagent_type="builder")
+add("floor step-up: builder Try 3 of 3 on opus is allowed (standing word)", "allow",
+    tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="opus", subagent_type="builder")
+add("floor step-up: builder Try 1 of 3 on opus is allowed (main ceiling pin)", "allow",
+    tool="Agent", prompt="Try 1 of 3. Start the fix.", model="opus", subagent_type="builder")
+add("floor step-up: reviewer Round 1 of 3 on haiku with prose round 2 and round 3 is allowed",
+    "allow", tool="Agent", subagent_type="reviewer", model="haiku",
+    prompt="Round 1 of 3. The earlier review round 2 and round 3 notes are in the record.")
+add("floor step-up: reviewer with no round line on haiku is allowed", "allow",
+    tool="Agent", prompt="Check the diff for typos.", model="haiku", subagent_type="reviewer")
+add("floor step-up: reviewer Round 2 of 3 on the full opus id is denied", "deny", STEP_UP,
+    tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="claude-opus-5",
+    subagent_type="reviewer")
+add("floor step-up: reviewer Round 2 of 3 on the full haiku id is denied", "deny", STEP_UP,
+    tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="claude-haiku-5-5",
+    subagent_type="reviewer")
+add("floor step-up: round line after a lone quote on line two is denied", "deny", STEP_UP,
+    tool="Agent", prompt="Don't skip the check.\nRound 2 of 3. Re-check the diff.",
+    model="haiku", subagent_type="reviewer")
+add("floor step-up: reviewer Round 3 of 3 on sonnet is allowed", "allow",
+    tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="sonnet", subagent_type="reviewer")
+add("floor step-up: builder Try 2 of 3 on sonnet is allowed", "allow",
+    tool="Agent", prompt="Try 2 of 3. Continue the fix.", model="sonnet", subagent_type="builder")
+
 
 def _flow(model, role=None):
     spec = "model: '%s'" % model + (", agentType: '%s'" % role if role else "")
