@@ -5572,6 +5572,8 @@ def _rm_last_bind(scope: str) -> dict:
 def _rm_real(path: str) -> str:
     """Return the real path, case-folded on macOS and Windows, where the file system folds case.
     On Windows it has forward slashes, so the compares below hold on both systems."""
+    if os.name == "nt":   # Git Bash `/c/...` and `/c` name drive C:. Not `_expanded`: no ~ or $VAR here.
+        path = re.sub(r"^/([A-Za-z])(?=/|$)", r"\1:/", path)
     real = os.path.realpath(path)
     if os.name == "nt":
         return real.replace("\\", "/").lower()
@@ -5583,7 +5585,8 @@ def _rm_target_bad(path: str, cwd: str) -> bool:
     if re.search(r"[*?\[]", os.path.basename(path)):
         path = os.path.dirname(path)
     cwd, home = _rm_real(cwd or "/"), _rm_real(os.path.expanduser("~"))
-    q = _rm_real(os.path.join(cwd, path))
+    # An absolute path skips the join, so on Windows a Git Bash `/c/...` reaches _rm_real intact.
+    q = _rm_real(path if path.startswith("/") else os.path.join(cwd, path))
     up = q.rstrip("/") + "/"
     root = q == "/" or q == os.path.dirname(q)   # on Windows "/" resolves to the drive root
     return root or q in (cwd, home) or cwd.startswith(up) or home.startswith(up)
