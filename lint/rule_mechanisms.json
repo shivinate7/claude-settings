@@ -639,6 +639,12 @@
         "kind": "unmechanized",
         "reason": "Whether a named incident or measured risk justifies a rule is a human read of the rule's record."
       }
+    },
+    "roles-review-cap-three": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Round counts live in briefs and reviewer reports. No check reads how many rounds a PR had."
+      }
     }
   }
 }
