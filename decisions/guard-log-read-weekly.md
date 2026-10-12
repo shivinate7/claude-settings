@@ -36,19 +36,22 @@ Rules with a deny. The reader prints the rest.
 | live-stream | 41 | 0 | 0 |
 | frozen-path | 39 | 0 | 0 |
 | force-push | 16 | 15 | 0 |
-| nine more rules | 53 | 4 | 0 |
+| nine more rules | 54 | 0 | 0 |
+| subagent-model-cap | 0 | 4 | 0 |
 
 Denies per day peaked at 636 on 2026-10-10. The one `reverted` row is a `subagent-model-cap`
 expiry on 2026-10-06.
 
 What the matched text says:
 
-- `env-file`, 766: 256 of them (33%) refused a loader flag behind a word the rule does not
-  look through: `timeout N` (146), `verdict` (70), and a `(VAR=x` token (40). The rule's own
+- `env-file`, 766: 303 of them (40%) refused a loader flag behind a word the rule does not
+  look through: `timeout` (160), `verdict` (78), and a word glued to a `(` (65). Counted by the
+  command word the deny names; the log holds the word, not its arguments. The rule's own
   remedy names the `--env-file` form it then refuses. See deferred item env-file-wrappers.
 - `waiter`, 464: every one `sleep` or `Start-Sleep`. Ruled in decision agents-wait-with-monitor.
-- `silent-write`, 290: `-q` on `git pull`, `git merge` and `git push`. Right by rule
-  `git-never-discard-output`. The cost is 290 retries. Unjudged: whether the rule earns it.
+- `silent-write`, 290: `-q` on a git write: `push` 215, `merge` 38, `pull` 17, `commit` 12,
+  and 8 others. Right by rule `git-never-discard-output`. The cost is 290 retries. Unjudged:
+  whether the rule earns it.
 - `test-author-scope`, 375, and `detached-launch`, 206: unjudged.
 - `shared-tree`, 26 asks in 30 days: about one a day. This is the count the per-file discard
   record (stash-push-is-clone-wide) called unmeasured.
