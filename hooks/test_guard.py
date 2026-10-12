@@ -4454,6 +4454,51 @@ for _name, _command in (
 ):
     sh("cite-by-id: %s is no message" % _name, _command, "allow", silent=True, cwd=NOGIT, config=MERGECFG)
 
+# The Drops-lines trailer (owner ruling 2026-10-12): the one place a record path may stand in a
+# commit message is `Drops-lines: <path> -- <reason>`, the shape lint/check_silent_undo.py reads
+# from the last paragraph of a commit. A trailer with no ` -- reason` excuses nothing. The reason
+# may not cite a record path. Every other line is still judged by the cite rule.
+DROPS_BODY = "title\n\nbody\n\nDrops-lines: deferred/a.md -- replaced by a decision"
+sh("cite-by-id: Drops-lines trailer in a commit -m body is allowed",
+   VCS + ' commit -m "' + DROPS_BODY + '"', "allow", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: Drops-lines trailer in a heredoc -F - body is allowed",
+   VCS + " commit -F - <<'EOF'\n" + DROPS_BODY + "\nEOF", "allow", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: two Drops-lines trailers with two paths are allowed",
+   VCS + ' commit -m "title\n\nDrops-lines: deferred/a.md -- replaced by a decision\n'
+   'Drops-lines: deferred/b.md -- folded into a decision"', "allow", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: a prose cite beside a Drops-lines trailer is denied",
+   VCS + ' commit -m "title\n\nbody cites deferred/a.md\n\n'
+   'Drops-lines: deferred/a.md -- replaced by a decision"', "deny", "cite-by-id",
+   cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: a Drops-lines reason that cites a record path is denied",
+   VCS + ' commit -m "title\n\nDrops-lines: deferred/a.md -- see decisions/b.md"', "deny",
+   "cite-by-id", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: a Drops-lines trailer in a gh pr create body is denied",
+   'gh pr create --draft --title t --body "title\n\nDrops-lines: deferred/a.md -- replaced by a decision"',
+   "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: Drops-lines key spelled drops-lines: is allowed",
+   VCS + ' commit -m "title\n\nbody\n\ndrops-lines: deferred/a.md -- replaced by a decision"',
+   "allow", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: a Drops-lines trailer with no reason is denied",
+   VCS + ' commit -m "title\n\nbody\n\nDrops-lines: deferred/a.md"', "deny", "cite-by-id",
+   cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: a Drops-lines line in a middle paragraph is denied",
+   VCS + ' commit -m "title\n\nDrops-lines: deferred/a.md -- replaced by a decision\n\n'
+   'body after the trailer"', "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
+# Round 2 (owner ruling 2026-10-12). The exemption must blank one path, not the whole token after
+# the key, so a second path in the same token is still judged. The lint reads that token as one path,
+# which excuses no record path. A space before the colon is still the key `Drops-lines`, which
+# `git interpret-trailers` reads and the lint accepts.
+sh("cite-by-id: Drops-lines token with a comma-joined second path is denied",
+   VCS + ' commit -m "title\n\nbody\n\nDrops-lines: deferred/a.md,deferred/b.md -- replaced"',
+   "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: Drops-lines token with a semicolon-joined second path is denied",
+   VCS + ' commit -m "title\n\nbody\n\nDrops-lines: deferred/a.md;deferred/b.md -- replaced"',
+   "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: Drops-lines key with a space before the colon is allowed",
+   VCS + ' commit -m "title\n\nbody\n\nDrops-lines : deferred/a.md -- replaced"',
+   "allow", cwd=NOGIT, config=MERGECFG)
+
 
 # =========================================================================== 6. frozen paths
 #
