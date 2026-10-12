@@ -32,12 +32,29 @@ and never a PR body.
 
 ## What protects it
 
-`hooks/test_guard.py`: nine cases named "Drops-lines", four of them red before the change.
-`hooks/mutate_guard.py`: the mutant "excused in every paragraph", killed by the
-middle-paragraph case.
+`hooks/test_guard.py`: twelve cases named "Drops-lines", seven of them red first over two
+review rounds. `hooks/mutate_guard.py`: the mutant "excused in every paragraph", killed by
+the middle-paragraph case. The exemption blanks the token after the key only when the record
+pattern matches the whole token, so `deferred/a.md,deferred/b.md` stays in the searched text.
 
 ## Holes, named
 
+Three review rounds, 2026-10-12. Round 1 found a second path hiding behind a comma-joined
+token, and a space before the colon refused. Round 2 closed both.
+
+- `./deferred/a.md` after the key passes the guard; the lint's exact match refuses it. The
+  cost is one lint refusal, then a new commit.
 - A last paragraph that mixes a prose line with the trailer is exempt in the guard. Git does
-  not read such a paragraph as trailers, so the undo check never sees that path. The guard
-  allows a commit the lint then refuses; the cost is one more commit.
+  not read such a paragraph as trailers, so the undo check refuses it. The cite then stays in
+  the branch history.
+- A reason that names a record path is refused, by ruling, even where the lint would accept
+  it.
+- Pre-existing, outside this change: `git commit --trailer`, a `Refs:deferred/a.md` token
+  with no space, `git merge -m` and `git tag -m` are never cite-checked.
+- No mutant removes the whole-token match; the comma and semicolon cases stand for it.
+- Round 3 found three false refusals, named here under the cap; none is a wrong allow. A
+  folded trailer (`Drops-lines: deferred/a.md`, then ` -- reason` on the next line) is
+  refused; git unfolds it and the lint accepts it. A heredoc body given with `--file=-`
+  beside `-m` parts is read last by the guard, while git orders the parts as typed. A
+  message from `-F -` stdin is never read, so a prose cite there passes; pre-existing, and
+  the undo lint grants no excuse there.
