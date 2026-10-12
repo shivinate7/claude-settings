@@ -11,12 +11,9 @@ Owner, 2026-10-12: no. A gate that cannot run refuses the call. The four command
 `guard.py`, `ste_gate.py` and `question_outcome.py`, and PermissionRequest
 `rm_prompt_answer.py`. For the three PreToolUse gates, exit 2 refuses the call and one stderr
 line names the remedy. For `rm_prompt_answer.py`, exit 2 leaves the normal permission prompt
-(see Holes). A missing script names
-`sh install.sh`, or on Windows `powershell -ExecutionPolicy Bypass -File ./install.ps1`. A
-missing python says to install Python 3 first. Each gate carries `"onFailure": "block"`
-(Claude Code 2.1.295 and later), so a process that cannot start, times out, or dies with
-an unexpected exit code refuses the call too. An error the script catches itself does not
-reach `onFailure` (see Holes).
+(see Holes). A missing script names `sh install.sh`, or on Windows `powershell -ExecutionPolicy Bypass -File ./install.ps1`. A
+missing python says to install Python 3 first. No gate carries `onFailure`: a gate that
+times out or crashes lets the call through (see Holes).
 
 Advisory hooks stay fail-open, because a session must still start, stop and compact. They
 are SessionStart, Stop, PreCompact, SessionEnd, PostToolUse, and the SubagentStop guard.
@@ -46,10 +43,16 @@ names the remedy. `install.ps1` says so when python is missing.
 `hooks/test_wrappers.py`, 39 cases. Each gate wrapper exits 2 with the remedy line on a
 missing script and on a missing python. With a script present it execs the script, passes
 stdin through, and returns the script's exit code. Advisory entries still exit 0.
-`onFailure` is on every gate and on no advisory entry. The suite is red on main's
+No entry carries `onFailure`. The suite is red on main's
 `settings.json`.
 
 ## Holes, named
+
+- Incident 2026-10-12: with `"onFailure": "block"` on the gates, `guard.py` ran past its
+  20 s timeout under load (about nine busy sessions). Every Bash, PowerShell and Agent call
+  in every session on the machine was refused. The key was removed the same day. So a guard
+  that times out lets the call through, with no line in guard.log. Fix the guard's start time
+  before `onFailure` comes back.
 
 - The remedy names `sh install.sh`, but a missing guard refuses Bash too. The owner runs the
   installer in a terminal of their own.
@@ -64,13 +67,11 @@ stdin through, and returns the script's exit code. Advisory entries still exit 0
 - Errors a gate catches itself fail open. `question_outcome.py` exits 0 when it cannot read
   its input, its state or its model. `guard.py` logs an internal error, then exits 0.
   `ste_gate.py` returns on bad input. `rm_prompt_answer.py` returns on any exception, which
-  leaves the prompt. Only an uncaught failure or a timeout reaches
-  `onFailure`.
-- The runtime's behaviour on exit 7 and on a timeout was not probed (`claude -p` had no
-  login on this box). The docs say both block.
+  leaves the prompt.
+- With `onFailure: block`, a timeout refused the call (measured in the incident above). Exit 7
+  was not probed.
 - On this box `python3` resolves to the Windows Store alias. Run from an agent's shell, it
   hung (5 s timeout). The hook context runs it fine: every guard call this session answered.
-  If the alias ever hangs in the hook context, every gated call times out and is refused.
-- The Mac's runtime version is unknown; below 2.1.295 only the exit-2 wrapper protects.
+  If the alias ever hangs in the hook context, every gated call times out and runs unguarded.
 - The same change adds `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL: sonnet` beside the subagent
   model (changelog 2.1.296), so workflow agents follow the same default.
