@@ -71,8 +71,18 @@ means when it regenerates a fixture. The allow is an allow-list. `git restore` p
 only with one operand that is an existing file. Any other flag or form, or a command that
 the tokenizer cannot read, keeps the ask. A whole-tree discard keeps the worktree ask: `reset
 --hard`, and a `checkout` or `restore` of `.`, a folder, or a glob. A shared checkout still
-denies all of them. Owner ruling, 2026-10-11 ("Allow per-file"). Prompt frequency is
-unmeasured, because an ask leaves no line in the transcripts.
+denies all of them. Owner ruling, 2026-10-11 ("Allow per-file").
+
+The allow applies only when the whole command acts in one place (`one_place` in
+`hooks/guard.py`). One place is no `cd`, `pushd` or `popd` anywhere in the command, and at
+most one distinct `git -C` target. Every other shape can hide the shared checkout behind the lane, so it keeps the ask,
+and the ask reason names the allowed form: `git -C <lane> restore <file>`. The incident form,
+a `cd` into the worktree and then one file, asks. Five review rounds of folder tracking
+(`segment_roots`) could not tell the two apart; the gate replaced them (2026-10-11 to 12).
+
+MEASURED in this Windows machine's `~/.claude/guard.log`, 30 days to 2026-10-11: 26
+`shared-tree` asks, about one a day (decision guard-log-read-weekly). The ask writes a line
+there; it is the transcript that holds none.
 
 These discard forms join the rule: deny in a shared checkout, ask in a linked worktree.
 
@@ -110,9 +120,11 @@ each judgment consults, and the tree the deny now covers, changes for PUT.
 - The discard rule judges each git call in its own checkout. Other rules that read the run
   folder still take the first `-C` in the command, so their verdict or citation can name the
   wrong checkout. No discard depends on that read.
-- `cd -`, `pushd`, `popd` and a `cd` inside `( … )` do not move the folder that the rule judges.
-- A heredoc body line with the same text as the next real segment can shift each segment's
-  folder by one.
+- A shared checkout reached by `cd`, then `git -C . restore <file>`, gets ask, not deny: the
+  run folder is read against the shell's cwd, not the `cd`. Main gives the same. Safe, since
+  an ask reaches the owner; the cost is one prompt.
+- A `cd` of any kind, a `pushd`, a `popd`, or two distinct `git -C` targets keep the ask even
+  when every segment is in the lane. The remedy names the `-C` form.
 - An empty tree still passes a push in every tree. A session that dirties the tree
   between the guard's read and the command's run is not covered. This is the same gap
   the earlier decision named for the TAKE arm.
