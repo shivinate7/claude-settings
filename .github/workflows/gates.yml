@@ -125,6 +125,9 @@ jobs:
       - name: Rule audit fixture suite
         run: python3 lint/test_rule_audit.py
 
+      - name: Guard log report fixture suite
+        run: python3 lint/test_guard_log_report.py
+
       - name: Verdict runner fixture suite
         run: python3 lint/test_verdict.py
 
