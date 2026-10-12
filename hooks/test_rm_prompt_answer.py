@@ -158,6 +158,35 @@ silent("rm-prompt: bypass, S reassigned to / later is not allowed",
 silent("rm-prompt: bypass, an unbound guarded variable is not allowed", 'rm -rf "${S:?}"/build')
 silent("rm-prompt: bypass, a variable bound to the wrong name is not allowed",
        'T=/tmp/x; rm -rf "${S:?}"/build')
+# Round 2: an assignment to a name that no rm target uses changes how the shell runs the rm
+# (IFS splits an unquoted expansion, PATH picks another rm, CDPATH, any stray binding), so it
+# stops the allow. The allow cases are the controls: every binding is used by a target.
+silent("rm-prompt: bypass, IFS=: splits S into two targets, one the home folder",
+       'IFS=:; S=%s:/tmp/x; rm -rf ${S:?}/y' % HOME)
+silent("rm-prompt: bypass, IFS=x turns /tmp/x/a into /tmp/ and /a",
+       'IFS=x; S=/tmp/x; rm -rf ${S:?}/a')
+silent("rm-prompt: bypass, export IFS=: before the split is not allowed",
+       'export IFS=:; S=%s:/tmp/x; rm -rf ${S:?}/y' % HOME)
+silent("rm-prompt: bypass, export IFS=x before the split is not allowed",
+       'export IFS=x; S=/tmp/x; rm -rf ${S:?}/a')
+silent("rm-prompt: bypass, IFS=: with a quoted target is not allowed",
+       'IFS=:; S=/tmp/x; rm -rf "${S:?}"/a')
+silent("rm-prompt: bypass, PATH set to another folder is not allowed",
+       'PATH=/tmp/evil; S=/tmp/x; rm -rf "${S:?}"/a')
+silent("rm-prompt: bypass, CDPATH set is not allowed",
+       'CDPATH=/; S=/tmp/x; rm -rf "${S:?}"/a')
+silent("rm-prompt: bypass, a stray safe-looking binding no target uses is not allowed",
+       'T=/; S=/tmp/x; rm -rf "${S:?}"/a')
+silent("rm-prompt: bypass, CDPATH set to a plain folder is not allowed",
+       'CDPATH=/tmp/c; S=/tmp/x; rm -rf "${S:?}"/a')
+silent("rm-prompt: bypass, a stray plain-folder binding no target uses is not allowed",
+       'T=/tmp/y; S=/tmp/x; rm -rf "${S:?}"/a')
+silent("rm-prompt: bypass, a stray binding set after the rm is not allowed",
+       'S=/tmp/x; rm -rf "${S:?}"/a; T=/tmp/y')
+allow("rm-prompt: bypass, control: one binding used by its target is allowed",
+      'S=/tmp/x; rm -rf "${S:?}"/a')
+allow("rm-prompt: bypass, control: two bindings, each used by a target, are allowed",
+      'S=/tmp/x; D=/tmp/y; rm -rf "${S:?}"/a "${D:?}"/b')
 # Scanner controls: a hash that opens a real comment hides a fake assignment; a hash inside a
 # string does not hide the real one.
 silent("rm-prompt: bypass, a comment holding a safe assignment does not bind S",
