@@ -31,7 +31,7 @@ line to stderr, and exits 0.
 
 ## Why
 
-Every brief this session retyped the same six lines. A brief that forgot one let an agent
+Every brief this session retyped the same seven lines. A brief that forgot one let an agent
 stash, or push in the wrong form. Found 2026-10-12 while reading the hooks reference:
 `additionalContext` on SubagentStart lands in the agent's context before its first prompt.
 
@@ -47,6 +47,8 @@ line, the general line, and exit 0 on junk input. CI steps in `gates`, `gates-ma
   change both. The test pins the text, not the source.
 - No matcher: every agent type gets the context.
 - The type match is case-sensitive. `Builder` or `explore` gets the general writer set.
+- Plan and claude-code-guide get the general scope line, which names only reviewer and
+  Explore as never-edit. Their reader line set is right; only the scope text is general.
 - Fail-open: a crashed hook injects nothing. Claude never sees stderr from a hook that exits
   0, so the `agent_brief:` line shows only with debug logging.
 - Review rounds 1 to 3 found the reader lines, the scope bodies, the builder's mutant carve-out
