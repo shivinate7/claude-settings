@@ -34,6 +34,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -183,35 +184,44 @@ def resolve(tool, ti, old_text):
 
 # ------------------------------------------------------------------ the fixer (Markdown only)
 
-def fix_fragment(context, idx, fragment):
-    """Return `fragment` fixed by ste_lint.apply_fixes as it reads at `idx` in `context`, or
-    None when it sits inside a code fence there. The part of its first line before `idx` is
-    kept as blanked text, so indented code still reads as code."""
+def fix_fragment(context, idx, old_len, fragment):
+    """Return `fragment` fixed by ste_lint.apply_fixes as it reads at `idx` in `context`
+    (where it replaces `old_len` characters), or None when it sits in front matter or a code
+    fence, or its fix reaches past its own text. The fixer reads the real line around the
+    fragment, so an open code span, link or indent is known. The text around the fragment is
+    fixed in a second run, and the fragment's fix must leave it as that run did."""
     head = context[:idx]
     line_start = head.rfind("\n") + 1
-    in_fence = False
-    for line in head[:line_start].split("\n"):
-        if ste_lint.FENCE.match(line):
-            in_fence = not in_fence
-    if in_fence:
+    if head.count("\n") < ste_lint.front_matter_lines(context):
         return None
-    pre = re.sub(r"\S", "\x01", head[line_start:])
-    fixed, _ = ste_lint.apply_fixes(pre + fragment)
-    return fixed[len(pre):] if fixed.startswith(pre) else None
+    state = None
+    for line in head[:line_start].split("\n"):
+        state = ste_lint.fence_step(state, line)
+    if state is not None:
+        return None
+    prefix = head[line_start:]
+    tail = context[idx + old_len:].split("\n", 1)[0]
+    mark = "\x01"
+    keep, _ = ste_lint.apply_fixes(prefix + mark + tail)
+    fixed, _ = ste_lint.apply_fixes(prefix + fragment + tail)
+    left, right = keep.split(mark)
+    if not (fixed.startswith(left) and fixed.endswith(right)) or len(fixed) < len(left + right):
+        return None
+    return fixed[len(left):len(fixed) - len(right)]
 
 
 def fix_edit(context, old_string, new_string, replace_all):
     """Fix the `new_string` of one Edit, in the context of the text it lands in. `context` is
     None when the edit cannot be replayed: the string is then fixed on its own."""
     if context is None or not old_string or old_string not in context:
-        return fix_fragment("", 0, new_string)
+        return fix_fragment("", 0, 0, new_string)
     spots, at = [], context.find(old_string)
     while at != -1:
         spots.append(at)
         at = context.find(old_string, at + len(old_string))
     if len(spots) > 1 and not replace_all:
-        return fix_fragment("", 0, new_string)
-    results = {fix_fragment(context, i, new_string) for i in spots}
+        return fix_fragment("", 0, 0, new_string)
+    results = {fix_fragment(context, i, len(old_string), new_string) for i in spots}
     return results.pop() if len(results) == 1 else None
 
 
@@ -219,7 +229,8 @@ def autofix(tool, ti, old_text, scope):
     """Return (updated tool input, codes fixed), or None when nothing changed. `scope` is the
     set of changed lines of a Write, or None for all. A Write is fixed as a whole file, so the
     fences are read right, and only the lines in scope keep their fix. The fix never changes
-    the line count."""
+    the line count. An Edit chain that the fix would break (a later `old_string` no longer
+    matches) is not rewritten at all."""
     new_ti, codes = dict(ti), []
     if tool == "Write":
         content = ti.get("content") or ""
@@ -249,7 +260,41 @@ def autofix(tool, ti, old_text, scope):
             new_ti = fixed_edits[0]
         else:
             new_ti["edits"] = fixed_edits
+        if (old_text is not None and resolve(tool, ti, old_text)[1] is not None
+                and resolve(tool, new_ti, old_text)[1] is None):
+            return None
     return (new_ti, codes) if new_ti != ti else None
+
+
+def fixer_limit():
+    """Seconds the fixer may run: env STE_FIXER_LIMIT_S, default 5."""
+    try:
+        return float(os.environ.get("STE_FIXER_LIMIT_S", "5"))
+    except ValueError:
+        return 5.0
+
+
+def run_autofix(tool, ti, old_text, scope):
+    """Run autofix in a thread, bounded by fixer_limit(). Return its result, or raise
+    TimeoutError when it ran over, or its own error: the caller then lints the plain text.
+    ponytail: a thread cannot stop a regex stuck in C code. The fixer's patterns are
+    linear, so a subprocess waits until one measures slow."""
+    box = []
+
+    def work():
+        try:
+            box.append((True, autofix(tool, ti, old_text, scope)))
+        except Exception as exc:  # noqa: BLE001
+            box.append((False, exc))
+    thread = threading.Thread(target=work, daemon=True)
+    thread.start()
+    thread.join(fixer_limit())
+    if not box:
+        raise TimeoutError("the STE fixer ran over its time limit")
+    ok, value = box[0]
+    if not ok:
+        raise value
+    return value
 
 
 def rewrite_output(updated_input, note):
@@ -372,7 +417,7 @@ def main():
         fixed_ti, note = None, ""
         if not is_ui:
             try:
-                result = autofix(tool, ti, old_text, scope)
+                result = run_autofix(tool, ti, old_text, scope)
                 if result:
                     fixed_ti, codes = result
                     text, resolved = resolve(tool, fixed_ti, old_text)

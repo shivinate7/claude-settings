@@ -127,6 +127,7 @@ jobs:
         run: python3 lint/test_gates.py
 
       - name: STE auto-fix fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 lint/test_ste_autofix.py
 
       - name: Ruling home fixture suite

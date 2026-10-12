@@ -869,7 +869,7 @@ def segment_markdown(lines: Sequence[str], default_mode: str) -> Tuple[List[Para
     suppressed: Dict[int, Optional[List[str]]] = {}
     file_disable: Optional[List[str]] = None
     current: Optional[Paragraph] = None
-    in_fence = False
+    in_fence = None
     in_frontmatter = False
     heading_mode = default_mode
     explicit_mode: Optional[str] = None
@@ -906,11 +906,12 @@ def segment_markdown(lines: Sequence[str], default_mode: str) -> Tuple[List[Para
             suppressed[lineno] = pending_next[1]
             pending_next = None
 
-        if FENCE.match(stripped):
-            in_fence = not in_fence
+        was_fenced = in_fence is not None
+        in_fence = fence_step(in_fence, stripped)
+        if was_fenced != (in_fence is not None):  # an opening or a closing fence line
             flush()
             continue
-        if in_fence:
+        if in_fence is not None:
             continue
 
         marker = re.search(r"<!--\s*ste:\s*(procedural|descriptive|auto)\s*-->", stripped)
@@ -1839,20 +1840,47 @@ class Linter:
 # Automatic fixes
 # --------------------------------------------------------------------------
 
-# A pattern is fixable only when the swap reads as correct English in every sentence.
-# These keep their lint finding, and the writer fixes them by hand. Each reads wrong when
-# swapped without grammar: "vs", "cf" and "via" change meaning or grammar, "they'd" and
-# "we'd" may mean "had", and a deletion leaves a lowercase start, a stray comma or a space.
-_NO_FIX = {r"\bvs\.?(?=\s)", r"\bcf\.", r"\bvia\b", r"\bwe'd\b", r"\bthey'd\b",
+# A pattern is fixable only when the swap reads as correct English, with the same punctuation,
+# in every sentence. These keep their lint finding, and the writer fixes them by hand. "vs",
+# "cf", "via" and "per se" change meaning or grammar, a deletion leaves a lowercase start, a
+# stray comma or a space, and "we'd", "they'd", "he'd", "she'd" and "it'd" may mean "had".
+_NO_FIX = {r"\bvs\.?(?=\s)", r"\bcf\.", r"\bvia\b", r"\bper\s+se\b", r"\bwe'd\b", r"\bthey'd\b",
            r"\bthe majority of\b"}
-# Fixer-only rewrites of a table row. The lint rule keeps the original pattern.
+
+# An 's is "is" or "has", and an 'd is "would" or "had". These forms are fixed only when the
+# next word makes the meaning clear. Data, not code: pattern -> words that may follow.
+_S_FOLLOW = (r"a|an|the|not|very|too|so|also|just|still|always|never|now|here|there|only|more|"
+             r"less|better|best|worse|no|any|all|each|every|another|my|your|our|their|his|her|its|"
+             r"safe|full|fine|true|ready|clear|open|closed|important|possible|easy|hard|good|bad|"
+             r"correct|wrong|okay|ok|likely|enough|about|in|on|at|for|to|from|\w+ing")
+_THERE_FOLLOW = r"a|an|no|one|not|also|still|always|never|now|only|nothing|something|another|enough"
+_D_FOLLOW = r"like|love|prefer|rather|need|want|be"
+_CONTEXT_FIX = {
+    r"\bit's\b": _S_FOLLOW, r"\bthat's\b": _S_FOLLOW, r"\bwhat's\b": _S_FOLLOW,
+    r"\bthere's\b": _THERE_FOLLOW, r"\byou'd\b": _D_FOLLOW,
+}
+# Any other 's or 'd form here stays unfixed.
+_NO_FIX |= {r"\bhe's\b", r"\bshe's\b", r"\bhe'd\b", r"\bshe'd\b", r"\bit'd\b"}
+
+# Fixer-only rewrites of a table row. The lint rule keeps the original pattern. A row whose
+# swap would double or drop punctuation has a guard, so it fixes only where the result is right.
+_EG_CLOSE = r"(?=\s*\))"
 _FIX_PATTERN = {
     # Keep the period when "etc." ends the sentence.
     r"\betc\.": [(r"\betc\.(?=\s*$|\s+(?-i:[A-Z]))", "and so on."), (r"\betc\.", "and so on")],
+    # "e.g." before a bracket or at the end of the line takes no comma.
+    r"\be\.\s?g\.(?:,)?": [
+        (r"\be\.\s?g\.,?" + _EG_CLOSE, "for example"),
+        (r"\be\.\s?g\.\s*$", "for example."),
+        (r"\be\.\s?g\.,?(?=\s+[\w\"'(\[`])", "for example,")],
+    r"\bi\.\s?e\.(?:,)?": [
+        (r"\bi\.\s?e\.,?" + _EG_CLOSE, "that is"),
+        (r"\bi\.\s?e\.\s*$", "that is."),
+        (r"\bi\.\s?e\.,?(?=\s+[\w\"'(\[`])", "that is,")],
     # A comma before it leaves "Stop, to test".
     r"\bin order to\b": [(r"(?<!,)(?<!, )\bin order to\b", "to")],
-    # The verb must agree with the subject.
     r"\bmake a decision about\b": [(r"\bmake a decision about\b", "decide about")],
+    # The verb must agree with the subject.
     r"\bmake(?:s)? use of\b": [(r"\bmakes use of\b", "uses"), (r"\bmake use of\b", "use")],
     r"\bgive(?:s)? consideration to\b": [(r"\bgives consideration to\b", "considers"),
                                          (r"\bgive consideration to\b", "consider")],
@@ -1867,8 +1895,10 @@ def _fixable():
                         ("STE008", CONTRACTIONS), ("STE011", BLOAT),
                         ("STE003", [(p, r) for p, r, _ in NOMINALIZATION_PHRASES])):
         for pattern, replacement in table:
-            if not replacement or pattern in _NO_FIX:
+            if not replacement or (pattern in _NO_FIX and pattern not in _CONTEXT_FIX):
                 continue
+            if pattern in _CONTEXT_FIX:
+                pattern = pattern + r"(?=\s+(?:%s)\b)" % _CONTEXT_FIX[pattern]
             for p2, r2 in _FIX_PATTERN.get(pattern, [(pattern, replacement)]):
                 rows.append((p2, r2, code))
     return rows
@@ -1876,45 +1906,104 @@ def _fixable():
 
 FIXABLE = _fixable()
 
+_NUL = "\x00"
 _QUOTED = re.compile(r'(?<!\w)"[^"\n]+"(?!\w)|“[^”\n]*”')
+# Spans the fixer never reads: code, whole links and images (label and URL), URLs, e-mail
+# addresses, HTML tags, placeholders. A quote around one of them masks it all.
+_FIX_MASK = [
+    re.compile(r"`[^`\n]*`"),
+    re.compile(r"!?\[[^\]\n]*\]\([^)\n]*\)"),
+    re.compile(r"\[[^\]\n]*\]\[[^\]\n]*\]"),
+    re.compile(r"<https?://[^>\s]+>"),
+    re.compile(r"https?://\S+"),
+    re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.]+\b"),
+    re.compile(r"<[^>\s][^>]*>"),
+    re.compile(r"\{\{[^}]*\}\}"),
+    re.compile(r"\$\{[^}]*\}"),
+    _QUOTED,
+]
 _LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
+_FENCE_LINE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+_REF_DEF = re.compile(r"^ {0,3}\[[^\]\n]+\]:\s")
 # Lines the last apply_fixes call changed: {1-based line: [rule codes]}.
 LAST_FIX_CODES: dict = {}
 
 
+def fence_step(state, line):
+    """Return the fence state after `line`: None outside a fence, else (marker char, length).
+    A fence closes only on the same char, at least as long, with nothing after it."""
+    m = _FENCE_LINE.match(line.rstrip("\r\n"))
+    if state is None:
+        if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+            return (m.group(1)[0], len(m.group(1)))
+        return None
+    if m and m.group(1)[0] == state[0] and len(m.group(1)) >= state[1] and not m.group(2).strip():
+        return None
+    return state
+
+
+def front_matter_lines(text: str) -> int:
+    """Return how many leading lines are YAML or TOML front matter, 0 when there is none."""
+    lines = text.split("\n")
+    if not lines or lines[0].rstrip() not in ("---", "+++"):
+        return 0
+    for n, line in enumerate(lines[1:], 2):
+        if line.rstrip() in (lines[0].rstrip(), "..."):
+            return n
+    return 0
+
+
+def _fix_line(body: str):
+    """Fix one line of prose. Return (fixed line, codes)."""
+    tokens: List[str] = []
+
+    def hide(match):
+        tokens.append(match.group(0))
+        return "%s%d%s" % (_NUL, len(tokens) - 1, _NUL)
+    masked = body
+    for pattern in _FIX_MASK:
+        masked = pattern.sub(hide, masked)
+    codes: List[str] = []
+    for pattern, replacement, code in FIXABLE:
+        def repl(match, replacement=replacement, code=code):
+            codes.append(code)
+            if match.group(0)[:1].isupper():
+                return replacement[:1].upper() + replacement[1:]
+            return replacement
+        masked = re.sub(pattern, repl, masked, flags=re.I)
+    if not codes:
+        return body, codes
+    while _NUL in masked:  # a quote can hold a token: restore until none is left
+        restored = re.sub(r"\x00(\d+)\x00", lambda m: tokens[int(m.group(1))], masked)
+        if restored == masked:
+            break
+        masked = restored
+    return masked, codes
+
+
 def apply_fixes(text: str) -> Tuple[str, int]:
     """Apply the substitutions that are safe without context, line by line. The line count
-    never changes. Fenced and indented code, inline code, links and quoted text stay as they
-    are, and a line with no match is returned byte for byte."""
+    never changes. Front matter, fenced and indented code, inline code, links, images and
+    quoted text stay as they are, and a line with no match is returned byte for byte."""
     LAST_FIX_CODES.clear()
     out: List[str] = []
-    in_fence = False
+    fence = None
     total = 0
+    skip_to = front_matter_lines(text)
     for number, raw in enumerate(re.findall(r"[^\n]*\n|[^\n]+", text), 1):
         body = raw.rstrip("\n")
-        if FENCE.match(body):
-            in_fence = not in_fence
+        was_fenced = fence is not None
+        fence = fence_step(fence, body)
+        if (number <= skip_to or was_fenced or fence is not None or _FENCE_LINE.match(body)
+                or _REF_DEF.match(body)
+                or (re.match(r"(?: {4}|\t)", body) and not _LIST_ITEM.match(body))):
             out.append(raw)
             continue
-        if in_fence or (re.match(r"(?: {4}|\t)", body) and not _LIST_ITEM.match(body)):
-            out.append(raw)
-            continue
-        masker = Masker(body)
-        masked = _QUOTED.sub(lambda m: masker._token(m.group(0)), masker.text)
-        codes: List[str] = []
-        for pattern, replacement, code in FIXABLE:
-            def repl(match, replacement=replacement, code=code):
-                codes.append(code)
-                if match.group(0)[:1].isupper():
-                    return replacement[:1].upper() + replacement[1:]
-                return replacement
-            masked = re.sub(pattern, repl, masked, flags=re.I)
+        fixed, codes = _fix_line(body)
         if codes:
             total += len(codes)
             LAST_FIX_CODES[number] = codes
-            out.append(masker.unmask(masked) + raw[len(body):])
-        else:
-            out.append(raw)
+        out.append(fixed + raw[len(body):])
     return "".join(out), total
 
 
