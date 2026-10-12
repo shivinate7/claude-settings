@@ -3553,6 +3553,23 @@ sh("env: timeout N does not make cat a runner", "timeout 60 cat --env-file=" + E
 sh("env: timeout /t is still a waiter", "timeout /t 5", "deny", "waiter", cwd=NOGIT)
 sh("env: timeout N ahead of sleep is still a waiter", "timeout 60 sleep 5", "deny", "waiter",
    cwd=NOGIT)
+sh("env: timeout N ahead of a slash switch is still a waiter", "timeout 5 /t 5", "deny",
+   "waiter", cwd=NOGIT)
+for reader in (
+    # A wrapper flag's VALUE is not the command word: the real command still reads the file.
+    "env -u ls cat " + ENV,
+    "echo x | xargs -I ls cat " + ENV,
+    "env -u echo cat " + ENV,
+    "sudo -u ls cat " + ENV,
+    "command -p ls cat " + ENV,
+    "env -u node cat -- --env-file " + ENV,
+    # A quoted assignment value with a space, and an assignment glued to a subshell paren.
+    "(X='a ls' cat " + ENV + ")",
+    "env X='a ls' cat " + ENV,
+    "timeout 5 env X='a ls' cat " + ENV,
+):
+    sh("env: a wrapper flag or quoted value does not hide the reader, " + reader[:40], reader,
+       "deny", "env-file", cwd=NOGIT)
 
 for printer in (
     "cat " + ENV, "type " + ENV, "head -5 " + ENV, "tail -1 " + ENV, "less " + ENV,
