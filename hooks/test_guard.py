@@ -3525,6 +3525,20 @@ for runner in (
 sh("env: the loader flag is not a way to print the file", "cat --env-file=" + ENV, "deny",
    "env-file", cwd=NOGIT)
 
+for wrapped in (
+    "timeout 60 node --env-file=" + ENV + " app.js",
+    "verdict npm --env-file=" + ENV + " test",
+    "python bin/verdict node --env-file=" + ENV + " app.js",
+    "(VERIFY_PORT=3001 node --env-file=" + ENV + " app.js)",
+):
+    sh("env: a wrapped runner may be handed the file, " + wrapped[:40], wrapped, "allow",
+       cwd=NOGIT)
+sh("env: timeout N does not make cat a runner", "timeout 60 cat --env-file=" + ENV, "deny",
+   "env-file", cwd=NOGIT)
+sh("env: timeout /t is still a waiter", "timeout /t 5", "deny", "waiter", cwd=NOGIT)
+sh("env: timeout N ahead of sleep is still a waiter", "timeout 60 sleep 5", "deny", "waiter",
+   cwd=NOGIT)
+
 for printer in (
     "cat " + ENV, "type " + ENV, "head -5 " + ENV, "tail -1 " + ENV, "less " + ENV,
     "more " + ENV, "strings " + ENV, "xxd " + ENV, "od -c " + ENV, "sed -n 1p " + ENV,
