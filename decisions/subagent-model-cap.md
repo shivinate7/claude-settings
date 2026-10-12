@@ -76,7 +76,7 @@ key, a template `${}`. A regex literal that holds a quote also hides the call th
 its own model and never puts it in the tool input. Measured 2026-10-07: the built-in Plan
 ran Opus 5.5 and general-purpose ran Sonnet 5.5. `agents/plan.md` now pins Plan.
 
-The step-up check moves to `hooks/guard.py`, beside the model floor (rule `subagent-model-floor`). It does not stay in the Agent prompt hook in `settings.json`. A builder is moving it. The check reads the `Round N of 3` or `Try N of 3` line in the brief. A round 2 or 3 reviewer needs Sonnet or higher. A try 3 builder needs Opus.
+The step-up check moves to `hooks/guard.py`, beside the model floor (rule `subagent-model-floor`). It does not stay in the Agent prompt hook in `settings.json`. A builder is moving it. The check reads the `Round N of 3` or `Try N of 3` line in the brief. A round 2 or 3 reviewer runs on Sonnet, its ceiling. A try 3 builder needs Opus.
 
 Sections after the record-writer boundary keep their Haiku sentences only as evidence of the earlier
 argument. This ruling overrides them.
