@@ -54,8 +54,9 @@ where a gate carries it.
   box that is the Windows Store alias. Through it the guard took over 30 s; through `python`
   it took about 0.4 s. Every Bash, PowerShell and Agent call
   in every session on the machine was refused. The key was removed the same day. So a guard
-  that times out lets the call through, with no line in guard.log. Skip the Store alias in the
-  wrappers before `onFailure` comes back.
+  that times out lets the call through, with no line in guard.log. Every python wrapper now skips a
+  `command -v` result under `/WindowsApps/`. Through the fix the guard took 0.36 s on this box.
+  `onFailure` stays off until the owner rules again.
 
 - The remedy names `sh install.sh`, but a missing guard refuses Bash too. The owner runs the
   installer in a terminal of their own.
@@ -73,8 +74,10 @@ where a gate carries it.
   leaves the prompt.
 - With `onFailure: block`, a timeout refused the call (measured in the incident above). Exit 7
   was not probed.
-- On this box `python3` resolves to the Windows Store alias. Run from an agent's shell, it
-  hung (5 s timeout). The hook context runs it fine: every guard call this session answered.
-  If the alias ever hangs in the hook context, every gated call times out and runs unguarded.
+- The alias skip matches `/WindowsApps/` in the POSIX path Git Bash prints. A mixed-case or
+  backslash form is not skipped. Git Bash prints the canonical form, so this is theoretical.
+- A machine whose only python is the Store python gets the no-python remedy on every gated
+  call, and `install.ps1` still passes: it counts the alias as python 3.
+- `bin/claude-janitor` keeps the old loop with no skip. It is a user command, not a hook.
 - The same change adds `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL: sonnet` beside the subagent
   model (changelog 2.1.296), so workflow agents follow the same default.
