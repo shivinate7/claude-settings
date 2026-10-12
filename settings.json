@@ -228,7 +228,7 @@
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "Judge this subagent spawn: $ARGUMENTS\nAnswer {\"ok\": true} at once when subagent_type is Explore or claude-code-guide, when the brief is under 60 words, or when the call resumes an existing agent. Only for builder, reviewer, and test-author briefs, apply roles-brief-contents (the brief carries the task, the files, governing rulings, and the check that proves done) and tokens-point-brief-at-files (the brief names files and never pastes their contents). Block only on a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}.",
+            "prompt": "Judge this subagent spawn: $ARGUMENTS\nAnswer {\"ok\": true} at once when subagent_type is Explore or claude-code-guide, when the brief is under 60 words, or when the call resumes an existing agent. Only for builder, reviewer, and test-author briefs, apply roles-brief-contents (the brief carries the task, the files, governing rulings, and the check that proves done) and tokens-point-brief-at-files (the brief names files and never pastes their contents). Also judge the step-up: a brief that says \"round 2\" or \"round 3\" for a reviewer needs a model in the tool input of sonnet or higher, and one that says \"try 3\" for a builder needs opus; a brief with no round or try wording passes. Block only on a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}.",
             "timeout": 30,
             "model": "haiku",
             "continueOnBlock": true
