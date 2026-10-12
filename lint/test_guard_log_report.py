@@ -20,7 +20,8 @@ import os
 import sys
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import guard_log_report as glr  # noqa: E402
@@ -120,7 +121,7 @@ class MainTests(unittest.TestCase):
 
     def test_reads_log_file_with_days_flag(self):
         now = datetime.now().replace(microsecond=0)
-        old = now.replace(year=now.year - 1)
+        old = now - timedelta(days=365)
         body = "\n".join([
             now.isoformat() + "\tBash\tdeny\tlive-rule\tgit stash",
             old.isoformat() + "\tBash\tdeny\told-rule\tgit stash",
@@ -135,6 +136,17 @@ class MainTests(unittest.TestCase):
         self.assertIn("| live-rule | 1 | 0 | 0 |", out)
         self.assertNotIn("old-rule", out)
         self.assertIn("unreadable: 1", out)
+
+    def test_default_log_follows_claude_config_dir(self):
+        # The hook writes to $CLAUDE_CONFIG_DIR or else ~/.claude (guard.py config_dir()).
+        now = datetime.now().replace(microsecond=0)
+        with tempfile.TemporaryDirectory() as folder:
+            with open(os.path.join(folder, "guard.log"), "w", encoding="utf-8") as handle:
+                handle.write(now.isoformat() + "\tBash\tdeny\tconfig-dir-rule\tgit stash\n")
+            with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": folder}):
+                rc, out = run_main([])
+        self.assertEqual(rc, 0)
+        self.assertIn("| config-dir-rule | 1 | 0 | 0 |", out)
 
 
 if __name__ == "__main__":
