@@ -123,12 +123,12 @@ each judgment consults, and the tree the deny now covers, changes for PUT.
 - A shared checkout reached by `cd`, then `git -C . restore <file>`, gets ask, not deny: the
   run folder is read against the shell's cwd, not the `cd`. Main gives the same. Safe, since
   an ask reaches the owner; the cost is one prompt.
-- The gate fails closed on shape, so these keep the ask even when every segment is in the
-  lane: a `cd`, `pushd`, `popd`, `Set-Location`, `sl`, `chdir`, `Push-Location` or
-  `env -C`/`--chdir`; two distinct `-C` targets, or one lane spelled two ways; a bare git call
-  beside a `-C` call; any `--work-tree`, `--git-dir`, `core.worktree`, `GIT_WORK_TREE`,
-  `GIT_DIR` or `GIT_COMMON_DIR` token; `restore --source`, `-p` or `-f`; a glob or `$(…)`
-  pathspec; a segment the tokenizer cannot read. The remedy names the `-C` form.
+- The gate fails closed on shape. These keep the ask even when every segment is in the lane.
+  A `cd`, `pushd`, `popd`, `Set-Location`, `sl`, `chdir`, `Push-Location` or
+  `env -C`/`--chdir`. Two distinct `-C` targets, or one lane spelled two ways. A bare git call
+  beside a `-C` call. Any `--work-tree`, `--git-dir`, `core.worktree`, `GIT_WORK_TREE`,
+  `GIT_DIR` or `GIT_COMMON_DIR` token. `restore --source`, `-p` or `-f`. A glob or `$(…)`
+  pathspec. A segment the tokenizer cannot read. The remedy names the `-C` form.
 - Any linked worktree passes the allow, not only the caller's own.
 - Unread, as on main: a discard inside `sh -c`, `eval`, or a `$(…)` substitution, such as
   `echo $(cd <shared>; git restore f.txt)`. Review 2026-10-12, three rounds, eight shapes
