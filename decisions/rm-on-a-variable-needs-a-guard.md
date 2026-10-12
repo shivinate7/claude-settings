@@ -49,8 +49,8 @@ Owner, 2026-10-11 ("Ship guard now, hook later"):
      `hooks/guard.py` says the literal is not a critical path. That function is the one home.
    - The command binds no other name, and the names `IFS` and `PATH` are refused outright,
      bound or expanded. A bound `IFS` splits an unquoted expansion into two targets, even when
-     `IFS` is the target's own name, and a bound `PATH` picks the `rm` that runs (found by
-     review, 2026-10-12, three rounds).
+     `IFS` is the target's own name. A bound `PATH` picks the `rm` that runs. Found by review,
+     2026-10-12, three rounds.
 
    Every other request prints nothing, so the prompt reaches the owner unchanged. The cases
    are in `hooks/test_rm_prompt_answer.py` (104). Named limits, silent on purpose: the
