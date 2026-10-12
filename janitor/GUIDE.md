@@ -271,17 +271,17 @@ This tier runs per repository, so `sweep: false` opts it out.
 
 ## Build folders
 
-When an agent ends, the SubagentStop reap renames each build folder in the
-agent's own worktree to a sibling trash name (`<name>.reap-trash-<id>`). A
+At agent end, the SubagentStop reap renames each build folder in the agent's
+worktree to a sibling trash name (`<name>.reap-trash-<id>`). A
 detached child then deletes the trash. The folders are `native/build`,
 `.build` and `DerivedData`, plus each name in `buildDirs` in
 `.claude/janitor.json`, for example `["Pods/Build"]`. A name with `/` matches
 one path under the worktree root. A bare name matches at any depth. `buildDirs`
 adds names and never removes a default.
 
-A folder stays when a live session or any process has its current directory
-inside, when it is a link, when the worktree is a primary checkout, or when a
-read cannot tell. A `buildDirs` value that is not a list of strings refuses
+Four cases keep a folder. A live session or any process has its current
+directory inside it. It is a link. The worktree is a primary checkout. A read
+cannot tell. A `buildDirs` value that is not a list of strings refuses
 all build-folder deletes, defaults included. A later reap and the daily sweep
 delete trash names a child left, under the same process checks. Windows deletes build folders, husks and trash the same way, with `is_link` as the gate.
 
