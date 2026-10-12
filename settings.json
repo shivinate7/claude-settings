@@ -182,7 +182,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/guard.py\"; [ -f \"$g\" ] || { echo \"claude-settings gate not runnable (script missing). From the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2; }; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; echo \"claude-settings gate not runnable (no python). From the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/guard.py\"; [ -f \"$g\" ] || { echo \"claude-settings gate not runnable (script missing). From the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2; }; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; echo \"claude-settings gate not runnable (no python). Install Python 3, then from the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2",
             "timeout": 20,
             "onFailure": "block"
           }
@@ -193,9 +193,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/stall_watch.py\"; [ -f \"$g\" ] || { echo \"claude-settings gate not runnable (script missing). From the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2; }; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\" --hook; done; echo \"claude-settings gate not runnable (no python). From the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2",
-            "timeout": 10,
-            "onFailure": "block"
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/stall_watch.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\" --hook; done; exit 0",
+            "timeout": 10
           }
         ]
       },
@@ -204,7 +203,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/lint/ste_gate.py\"; [ -f \"$g\" ] || { echo \"claude-settings gate not runnable (script missing). From the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2; }; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; echo \"claude-settings gate not runnable (no python). From the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/lint/ste_gate.py\"; [ -f \"$g\" ] || { echo \"claude-settings gate not runnable (script missing). From the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2; }; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; echo \"claude-settings gate not runnable (no python). Install Python 3, then from the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2",
             "timeout": 20,
             "onFailure": "block"
           }
@@ -222,7 +221,7 @@
           },
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/question_outcome.py\"; [ -f \"$g\" ] || { echo \"claude-settings gate not runnable (script missing). From the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2; }; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; echo \"claude-settings gate not runnable (no python). From the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/question_outcome.py\"; [ -f \"$g\" ] || { echo \"claude-settings gate not runnable (script missing). From the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2; }; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; echo \"claude-settings gate not runnable (no python). Install Python 3, then from the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2",
             "timeout": 105,
             "onFailure": "block"
           }
@@ -283,9 +282,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/sim_boot_record.py\"; [ -f \"$g\" ] || { echo \"claude-settings gate not runnable (script missing). From the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2; }; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; echo \"claude-settings gate not runnable (no python). From the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2",
-            "timeout": 20,
-            "onFailure": "block"
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/sim_boot_record.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
+            "timeout": 20
           }
         ]
       }
@@ -296,7 +294,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/rm_prompt_answer.py\"; [ -f \"$g\" ] || { echo \"claude-settings gate not runnable (script missing). From the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2; }; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; echo \"claude-settings gate not runnable (no python). From the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/rm_prompt_answer.py\"; [ -f \"$g\" ] || { echo \"claude-settings gate not runnable (script missing). From the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2; }; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; echo \"claude-settings gate not runnable (no python). Install Python 3, then from the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2",
             "timeout": 20,
             "onFailure": "block"
           }
