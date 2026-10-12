@@ -669,6 +669,9 @@ def _verify_fake_gh_delay(ghdir, delay):
 UNDERTESTS = os.path.join(ROOT, "tests", "clone")   # a repo whose own folder sits under `tests`
 
 
+LINKS_MADE = False  # set by build_fixtures; True only where os.symlink works
+
+
 def build_fixtures():
     for folder in (CFG, LOGDIR, PROJ, CLONE, NOGIT, GITMAIN, os.path.join(UNDERTESTS, ".git")):
         os.makedirs(folder, exist_ok=True)
@@ -1137,8 +1140,19 @@ def build_fixtures():
         if added.returncode != 0:
             sys.exit("fixture setup failed in build_fixtures: worktree add %r failed. stderr: %s"
                      % (where, added.stderr.strip()))
-    # Case 1 and the link-only controls: the only untracked entry is one symlink.
-    os.symlink(LINKOUT, os.path.join(WTLINKDIR, "app", "node_modules"))
+    # A real untracked node_modules directory needs no link, so its control always runs.
+    write(os.path.join(WTCTRLDIR, "app", "node_modules", "index.js"), "module.exports = {};\n")
+    _require_status(WTCTRLDIR, ["?? app/node_modules/"])
+    # Case 1 and the link-only controls: the only untracked entry is one symlink. Degrades to
+    # skip, flag LINKS_MADE, where the account holds no symlink privilege (MEASURED: this box
+    # raises OSError: a required privilege is not held by the client).
+    global LINKS_MADE
+    try:
+        os.symlink(LINKOUT, os.path.join(WTLINKDIR, "app", "node_modules"))
+    except OSError:
+        LINKS_MADE = False
+        return
+    LINKS_MADE = True
     _require_status(WTLINKDIR, ["?? app/node_modules"])
     # Case 2: the link targets a tracked file inside the same tree.
     os.symlink(os.path.join("..", "config.json"), os.path.join(WTLINKFILE, "app", "node_modules"))
@@ -1151,9 +1165,6 @@ def build_fixtures():
     os.symlink(LINKOUT, os.path.join(WTCTRLTRACKED, "app", "node_modules"))
     write(os.path.join(WTCTRLTRACKED, "app", "package.json"), '{"changed": true}\n')
     _require_status(WTCTRLTRACKED, [" M app/package.json", "?? app/node_modules"])
-    # Control: a real untracked node_modules directory holding a real file.
-    write(os.path.join(WTCTRLDIR, "app", "node_modules", "index.js"), "module.exports = {};\n")
-    _require_status(WTCTRLDIR, ["?? app/node_modules/"])
     # Control, case 4: a link inside an untracked real directory. Git lists the directory only.
     os.makedirs(os.path.join(WTCTRLNESTED, "vendor"))
     os.symlink(LINKOUT, os.path.join(WTCTRLNESTED, "vendor", "link"))
@@ -1187,8 +1198,9 @@ TRAPLN = os.path.join(ROOT, "trapln")
 def build_trap_fixtures():
     os.makedirs(os.path.join(TRAPLN, "realdir"))
     write(os.path.join(TRAPLN, "file.txt"), "x\n")
-    os.symlink("realdir", os.path.join(TRAPLN, "linkdir"))
-    os.symlink("file.txt", os.path.join(TRAPLN, "linkfile"))
+    if LINKS_MADE:
+        os.symlink("realdir", os.path.join(TRAPLN, "linkdir"))
+        os.symlink("file.txt", os.path.join(TRAPLN, "linkfile"))
 
 
 build_trap_fixtures()
@@ -1777,6 +1789,89 @@ sh("per-file ask: the node lone-apostrophe case with && cd lane appended after t
 # CONTROL. No heredoc, so the walk stays in sync, but the cd still keeps the ask.
 sh("per-file ask: cd lane && restore f.txt with no heredoc asks, a cd keeps the ask",
    "cd " + slash(GITWT) + " && " + VCS + " restore f.txt", "ask", "shared-tree", cwd=NOGIT)
+# TWO -C TARGETS (one_place, `len(targets) <= 1`). No cd, both calls are per-file forms in a linked
+# worktree, but they name two different trees (lane, and FARWT, a second linked worktree). One
+# verdict cannot cover two trees, so it asks. FARWT holds b.txt dirty (the fixtures have no g.txt).
+sh("per-file ask: two -C targets, lane then a second linked worktree, both per-file restores",
+   VCS + " -C " + slash(GITWT) + " restore f.txt && " + VCS + " -C " + slash(FARWT)
+   + " restore b.txt", "ask", "shared-tree", cwd=GITWT)
+# CONTROL. One -C target, repeated, no cd: the per-file allow stands.
+sh("per-file allow: one -C target repeated, lane restore f.txt then lane restore b.txt",
+   VCS + " -C " + slash(GITWT) + " restore f.txt && " + VCS + " -C " + slash(GITWT)
+   + " restore b.txt", "allow", cwd=GITWT)
+
+# FIVE SHAPES THAT RUN A PER-FILE DISCARD IN THE SHARED CHECKOUT. Each one points the discard at
+# the shared checkout while the shell, or a `-C` that names the lane, still reads as the lane. Each
+# verdict is the one main's guard.py gives, probed with GUARD_UNDER_TEST: deny for 1, ask for 2 to
+# 5 (main reads the lane for those, so it asks and does not deny; the branch must not allow).
+# Controls that stay allowed are pinned above: "per-file allow: restore of one modified file"
+# (cwd lane) and "one -C target repeated".
+# 1. --work-tree names the shared checkout, whatever -C says.
+sh("per-file deny: -C lane with --work-tree naming the shared checkout, from a worktree",
+   VCS + " -C " + slash(GITWT) + " --work-tree=" + slash(GITMAIN) + " restore f.txt",
+   "deny", "shared-tree", cwd=GITWT)
+# 2. GIT_WORK_TREE, alone or with GIT_DIR, set by prefix, by `env`, or by `export`.
+for _label, _lead in (("a prefix assignment", ""), ("env", "env "), ("export", None)):
+    for _gitdir in (False, True):
+        _vars = "GIT_WORK_TREE=" + slash(GITMAIN)
+        if _gitdir:
+            _vars += " GIT_DIR=" + slash(GITMAIN) + "/.git"
+        if _lead is None:
+            _cmd = "export " + _vars + "; " + VCS + " restore f.txt"
+        else:
+            _cmd = _lead + _vars + " " + VCS + " restore f.txt"
+        sh("per-file ask: GIT_WORK_TREE naming the shared checkout by %s%s, from a worktree"
+           % (_label, " with GIT_DIR" if _gitdir else ""), _cmd, "ask", "shared-tree", cwd=GITWT)
+# 3. A segment with no -C must not borrow another segment's -C. From the shared checkout, the bare
+# restore runs in the shared checkout whichever side the lane's -C status stands on. main asks.
+sh("per-file ask: -C lane status, then a bare restore f.txt, from the shared checkout",
+   VCS + " -C " + slash(GITWT) + " status && " + VCS + " restore f.txt", "ask", "shared-tree",
+   cwd=GITMAIN)
+sh("per-file ask: a bare restore f.txt, then -C lane status, from the shared checkout",
+   VCS + " restore f.txt && " + VCS + " -C " + slash(GITWT) + " status", "ask", "shared-tree",
+   cwd=GITMAIN)
+# 4. A PowerShell cd into the shared checkout. main asks; the branch must not allow.
+for _cd in ("Set-Location", "sl", "chdir", "Push-Location"):
+    sh("per-file ask: PowerShell %s into the shared checkout, then restore f.txt, from a worktree"
+       % _cd, _cd + " " + slash(GITMAIN) + "; " + VCS + " restore f.txt", "ask", "shared-tree",
+       tool="PowerShell", cwd=GITWT)
+# 5. env's own chdir flags. main does not read them and asks, so ask is pinned.
+sh("per-file ask: env -C into the shared checkout, then restore f.txt, from a worktree",
+   "env -C " + slash(GITMAIN) + " " + VCS + " restore f.txt", "ask", "shared-tree", cwd=GITWT)
+sh("per-file ask: env --chdir into the shared checkout, then restore f.txt, from a worktree",
+   "env --chdir=" + slash(GITMAIN) + " " + VCS + " restore f.txt", "ask", "shared-tree",
+   cwd=GITWT)
+
+# LATE PROBES (named "late probe", so MUTATE_ONLY="late probe" runs this block alone). Each runs a
+# per-file restore in the shared checkout from the lane by a spelling the guard did not read yet.
+# Main reads the lane for all of them and asks, so ask is pinned. The controls stay allowed.
+_SH = slash(GITMAIN)
+for _label, _cmd in (
+    ("lower-case git_work_tree prefix", "git_work_tree=" + _SH + " " + VCS + " restore f.txt"),
+    ("read -r then export", "read -r GIT_WORK_TREE <<< \"" + _SH + "\"; export GIT_WORK_TREE; "
+     + VCS + " restore f.txt"),
+    ("export with +=", "export GIT_WORK_TREE+=" + _SH + "; " + VCS + " restore f.txt"),
+    ("printf -v then export", "printf -v GIT_WORK_TREE %s " + _SH + "; export GIT_WORK_TREE; "
+     + VCS + " restore f.txt"),
+    ("env -vC", "env -vC " + _SH + " " + VCS + " restore f.txt"),
+    ("env --ch= abbreviation", "env --ch=" + _SH + " " + VCS + " restore f.txt"),
+):
+    sh("per-file ask: late probe, %s names the shared checkout, from a worktree" % _label, _cmd,
+       "ask", "shared-tree", cwd=GITWT)
+for _label, _cmd in (
+    ("$env: assignment", '$env:GIT_WORK_TREE = "' + _SH + '"; ' + VCS + " restore f.txt"),
+    ("lower-case $env: assignment", '$env:git_work_tree = "' + _SH + '"; ' + VCS
+     + " restore f.txt"),
+    ("Set-Item Env:", 'Set-Item Env:GIT_WORK_TREE "' + _SH + '"; ' + VCS + " restore f.txt"),
+    ("SetEnvironmentVariable", '[Environment]::SetEnvironmentVariable("GIT_WORK_TREE","' + _SH
+     + '"); ' + VCS + " restore f.txt"),
+):
+    sh("per-file ask: late probe, PowerShell %s names the shared checkout, from a worktree" % _label,
+       _cmd, "ask", "shared-tree", tool="PowerShell", cwd=GITWT)
+sh("per-file allow: late probe control, a plain restore f.txt in the lane",
+   VCS + " restore f.txt", "allow", cwd=GITWT)
+sh("per-file allow: late probe control, a harmless GIT_TRACE prefix in the lane",
+   "GIT_TRACE=1 " + VCS + " restore f.txt", "allow", cwd=GITWT)
 
 # KILL CASES for three mutate_guard entries removed in 78e8446. Each pins today's base verdict.
 # The quoted refspec and the quoted force in a commit message are verdicts; the quoted force on a
@@ -1974,25 +2069,27 @@ sh("worktree prune: -n itself is a read, not a discard, so it passes uncondition
 # `?? app/node_modules` read as real work and the removal was refused. Deleting a link deletes
 # only the link, never its target, so a tree whose only untracked entry is a link passes, with
 # or without the force flag. The link's target may sit outside the tree or inside it.
-sh("worktree remove: a detached tree whose only untracked entry links outside it passes",
-   VCS + " worktree remove " + slash(WTLINKDIR), "allow", cwd=LINKMAIN)
-sh("worktree remove: the same link-only tree passes with the force flag",
-   VCS + " worktree remove --force " + slash(WTLINKDIR), "allow", cwd=LINKMAIN)
-sh("worktree remove: a detached tree whose only untracked entry links to a file inside it passes",
-   VCS + " worktree remove " + slash(WTLINKFILE), "allow", cwd=LINKMAIN)
-sh("worktree remove: the same in-tree link passes with the force flag",
-   VCS + " worktree remove --force " + slash(WTLINKFILE), "allow", cwd=LINKMAIN)
-# THE CONTROLS. Each has a real piece of work beside or inside the link, so each still denies.
-sh("worktree remove: a link next to an untracked real file still denies",
-   VCS + " worktree remove " + slash(WTCTRLFILE), "deny", "shared-tree", cwd=LINKMAIN)
-sh("worktree remove: a link next to a tracked change still denies",
-   VCS + " worktree remove " + slash(WTCTRLTRACKED), "deny", "shared-tree", cwd=LINKMAIN)
+if LINKS_MADE:
+    sh("worktree remove: a detached tree whose only untracked entry links outside it passes",
+       VCS + " worktree remove " + slash(WTLINKDIR), "allow", cwd=LINKMAIN)
+    sh("worktree remove: the same link-only tree passes with the force flag",
+       VCS + " worktree remove --force " + slash(WTLINKDIR), "allow", cwd=LINKMAIN)
+    sh("worktree remove: a detached tree whose only untracked entry links to a file inside it passes",
+       VCS + " worktree remove " + slash(WTLINKFILE), "allow", cwd=LINKMAIN)
+    sh("worktree remove: the same in-tree link passes with the force flag",
+       VCS + " worktree remove --force " + slash(WTLINKFILE), "allow", cwd=LINKMAIN)
+    # THE CONTROLS. Each has a real piece of work beside or inside the link, so each still denies.
+    sh("worktree remove: a link next to an untracked real file still denies",
+       VCS + " worktree remove " + slash(WTCTRLFILE), "deny", "shared-tree", cwd=LINKMAIN)
+    sh("worktree remove: a link next to a tracked change still denies",
+       VCS + " worktree remove " + slash(WTCTRLTRACKED), "deny", "shared-tree", cwd=LINKMAIN)
 sh("worktree remove: a real untracked node_modules directory holding a file still denies",
    VCS + " worktree remove " + slash(WTCTRLDIR), "deny", "shared-tree", cwd=LINKMAIN)
-# A link inside an untracked REAL directory: git shows the directory, not the link, so the
-# directory is the work and it denies.
-sh("worktree remove: a link inside an untracked real directory still denies",
-   VCS + " worktree remove " + slash(WTCTRLNESTED), "deny", "shared-tree", cwd=LINKMAIN)
+if LINKS_MADE:
+    # A link inside an untracked REAL directory: git shows the directory, not the link, so the
+    # directory is the work and it denies.
+    sh("worktree remove: a link inside an untracked real directory still denies",
+       VCS + " worktree remove " + slash(WTCTRLNESTED), "deny", "shared-tree", cwd=LINKMAIN)
 
 
 # =========================================================================== 1b. the pointer HEAD
@@ -3278,12 +3375,13 @@ sh("gh-api: -f on another program is not gh api", "curl -f https://example.inval
 # --- ln -s onto a directory that is already there
 sh("ln: -s over a real directory nests the link inside it",
    "ln -s /opt/tool/realdir realdir", "deny", "ln-over-directory", cwd=TRAPLN)
-sh("ln: -sf over a link to a directory descends into it",
-   "ln -sf /opt/tool/linkdir linkdir", "deny", "ln-over-directory", cwd=TRAPLN)
-sh("ln: -sfn replaces a link to a directory", "ln -sfn /opt/tool/linkdir linkdir", "allow",
-   cwd=TRAPLN)
-sh("ln: -sf over a link to a file replaces the link, as -f says",
-   "ln -sf /opt/tool/other linkfile", "allow", cwd=TRAPLN)
+if LINKS_MADE:
+    sh("ln: -sf over a link to a directory descends into it",
+       "ln -sf /opt/tool/linkdir linkdir", "deny", "ln-over-directory", cwd=TRAPLN)
+    sh("ln: -sfn replaces a link to a directory", "ln -sfn /opt/tool/linkdir linkdir", "allow",
+       cwd=TRAPLN)
+    sh("ln: -sf over a link to a file replaces the link, as -f says",
+       "ln -sf /opt/tool/other linkfile", "allow", cwd=TRAPLN)
 sh("ln: a free name", "ln -s /opt/tool/x brand-new", "allow", cwd=TRAPLN)
 sh("ln: a trailing slash says the destination is a directory",
    "ln -s /opt/tool/x realdir/", "allow", cwd=TRAPLN)
@@ -4335,11 +4433,15 @@ try:
     SYM_MADE = True
 except Exception:
     SYM_MADE = False
-add("frozen: the live path stays frozen even though it is a real symlink into the clone "
-    "[resolve-branch proof]",
-    "deny" if SYM_MADE else "allow", "frozen-path" if SYM_MADE else None,
-    tool="Edit", cwd=NOGIT, config=os.path.join(SYMFROZEN, "cfg"), file_path=slash(SYM_CFG_HOOK),
-    old_string="# stand-in", new_string="# rewritten by a session")
+# Skipped where the link cannot be made: the literal path under the config dir is frozen with or
+# without a link, so an "allow" there is wrong and the case proves nothing about the resolve branch.
+if SYM_MADE:
+    add("frozen: the live path stays frozen even though it is a real symlink into the clone "
+        "[resolve-branch proof]",
+        "deny", "frozen-path",
+        tool="Edit", cwd=NOGIT, config=os.path.join(SYMFROZEN, "cfg"),
+        file_path=slash(SYM_CFG_HOOK), old_string="# stand-in",
+        new_string="# rewritten by a session")
 # THE CLONE PATH BEHIND THAT SYMLINK STAYS EDITABLE (decisions/recovery-must-not-gate-on-its-
 # own-state.md, "the clone is not frozen"): the literal-path check must not freeze the clone
 # just because a symlink elsewhere happens to point at it.
@@ -4370,11 +4472,13 @@ try:
     SYM_SKILL_MADE = True
 except Exception:
     SYM_SKILL_MADE = False
-add("frozen: a shipped skill's SKILL.md stays frozen through the directory symlink into the "
-    "clone [resolve-branch proof]",
-    "deny" if SYM_SKILL_MADE else "allow", "frozen-path" if SYM_SKILL_MADE else None,
-    tool="Edit", cwd=NOGIT, config=os.path.join(SYMFROZEN, "cfg"), file_path=slash(SYM_CFG_SKILL_MD),
-    old_string="# stand-in", new_string="# rewritten by a session")
+if SYM_SKILL_MADE:
+    add("frozen: a shipped skill's SKILL.md stays frozen through the directory symlink into the "
+        "clone [resolve-branch proof]",
+        "deny", "frozen-path",
+        tool="Edit", cwd=NOGIT, config=os.path.join(SYMFROZEN, "cfg"),
+        file_path=slash(SYM_CFG_SKILL_MD), old_string="# stand-in",
+        new_string="# rewritten by a session")
 add("frozen: a user's own, unshipped skill directory is allowed", "allow", tool="Edit",
     cwd=NOGIT, config=os.path.join(SYMFROZEN, "cfg"), file_path=SYM_CFG_OWN_SKILL_MD,
     old_string="# stand-in", new_string="# rewritten by hand")
@@ -4966,6 +5070,7 @@ def _link(target, rel):
     def go(w):
         os.makedirs(os.path.dirname(os.path.join(w, rel)), exist_ok=True)
         os.symlink(target, os.path.join(w, rel))
+    go.needs_link = True  # the loops below skip it where os.symlink is refused
     return go
 
 
@@ -5022,6 +5127,8 @@ BUILDER_GREEN = [
 ]
 COMMIT, PUSH = VCS + " commit -m x", VCS + " push origin work"
 for _name, _change in BUILDER_RED:
+    if getattr(_change, "needs_link", False) and not LINKS_MADE:
+        continue
     _repo = diff_repo("b-" + _name, _change)
     sh("builder-diff: commit with a %s change is allowed and logged" % _name, COMMIT, "allow",
        cwd=_repo, agent_id="bld1", agent_type="builder")
@@ -5227,6 +5334,8 @@ LOG_CHECKS_EXTRA = [
      long_lived_no_log_case),
 ]
 for _name, _change in BUILDER_GREEN:
+    if getattr(_change, "needs_link", False) and not LINKS_MADE:
+        continue
     _repo = diff_repo("g-" + _name, _change)
     sh("builder-diff: commit with %s is allowed" % _name, COMMIT, "allow", cwd=_repo,
        agent_id="bld1", agent_type="builder")
@@ -5284,6 +5393,8 @@ AUTHOR_RED = [
     ("test-symlink-to-product", _link("../src/app.py", "tests/alias.py")),
 ]
 for _name, _change in AUTHOR_RED:
+    if getattr(_change, "needs_link", False) and not LINKS_MADE:
+        continue
     _repo = diff_repo("a-" + _name, _change)
     sh("author-diff: commit with a %s change is allowed and logged" % _name, COMMIT, "allow",
        cwd=_repo, agent_id="auth1", agent_type="test-author")

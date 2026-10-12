@@ -2274,7 +2274,11 @@ TREE_DENY_REASON = (
     "belongs to no branch, and it outlives no session that holds its tag. "
     "Run the command in a worktree of your own when the tree must change."
 )
-_MOVES_SHELL = re.compile(r"(?<![\w.-])(?:cd|pushd|popd)(?![\w-])")
+_MOVES_SHELL = re.compile(
+    r"(?<![\w.-])(?:cd|pushd|popd|set-location|sl|chdir|push-location|pop-location)(?![\w-])"
+    r"|(?<![\w.-])env\s[^;&|\n]*?(?<![\w-])(?:-[a-z]*c[a-z]*|--c(?:h(?:d(?:i(?:r)?)?)?)?)(?![\w-])", re.I)
+# a option, variable or config that points the call at another work tree than the cwd or `-C`
+_REPOINTS_GIT = re.compile(r"--work-tree|--git-dir|GIT_WORK_TREE|GIT_DIR|GIT_COMMON_DIR|core\.worktree", re.I)
 
 
 def one_place(cmd: str) -> bool:
@@ -2283,12 +2287,20 @@ def one_place(cmd: str) -> bool:
     every other shape can hide a shared checkout behind the lane."""
     if _MOVES_SHELL.search(cmd):
         return False
+    if _REPOINTS_GIT.search(cmd):
+        return False
     targets = set()
+    git_targets = []   # one entry per call segment: its `-C` target, or None
     for segment in split_segments(cmd):
         words = segment_tokens(segment)
         target = _segment_git_c_target(words) if words else None
         if target is not None:
             targets.add(target)
+        at = resolve_command(words) if words else None
+        if at is not None and basename(words[at]) in ("git", "git.exe"):
+            git_targets.append(target)
+    if targets and None in git_targets:
+        return False   # a call with no `-C` runs in the cwd, not in the lane another call names
     return len(targets) <= 1
 
 
@@ -6010,7 +6022,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         words = segment_tokens(segment)
         own_c = _segment_git_c_target(words) if words else None
         if own_c is not None:
-            root = _absolute(own_c, cwd)
+            # a `--work-tree` beside the `-C` moves the files the call discards to that tree
+            root = command_root(segment, cwd) if GIT_WORK_TREE_RE.search(segment) else _absolute(own_c, cwd)
         else:
             whole_root = whole_root or [command_root(stripped, cwd)]
             root = whole_root[0]
