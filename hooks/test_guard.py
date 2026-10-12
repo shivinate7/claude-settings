@@ -1789,6 +1789,16 @@ sh("per-file ask: the node lone-apostrophe case with && cd lane appended after t
 # CONTROL. No heredoc, so the walk stays in sync, but the cd still keeps the ask.
 sh("per-file ask: cd lane && restore f.txt with no heredoc asks, a cd keeps the ask",
    "cd " + slash(GITWT) + " && " + VCS + " restore f.txt", "ask", "shared-tree", cwd=NOGIT)
+# TWO -C TARGETS (one_place, `len(targets) <= 1`). No cd, both calls are per-file forms in a linked
+# worktree, but they name two different trees (lane, and FARWT, a second linked worktree). One
+# verdict cannot cover two trees, so it asks. FARWT holds b.txt dirty (the fixtures have no g.txt).
+sh("per-file ask: two -C targets, lane then a second linked worktree, both per-file restores",
+   VCS + " -C " + slash(GITWT) + " restore f.txt && " + VCS + " -C " + slash(FARWT)
+   + " restore b.txt", "ask", "shared-tree", cwd=GITWT)
+# CONTROL. One -C target, repeated, no cd: the per-file allow stands.
+sh("per-file allow: one -C target repeated, lane restore f.txt then lane restore b.txt",
+   VCS + " -C " + slash(GITWT) + " restore f.txt && " + VCS + " -C " + slash(GITWT)
+   + " restore b.txt", "allow", cwd=GITWT)
 
 # KILL CASES for three mutate_guard entries removed in 78e8446. Each pins today's base verdict.
 # The quoted refspec and the quoted force in a commit message are verdicts; the quoted force on a
