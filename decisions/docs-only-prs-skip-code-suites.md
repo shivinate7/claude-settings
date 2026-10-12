@@ -28,9 +28,10 @@ Windows) for two cases. The Janitor sweep mutation harness ran on every OS.
   `hooks/test_ruling_home.py` and `actions/stamp/test_stamp.mjs` found no read of the
   live `CLAUDE.md` or `decisions/`. Each builds its own fixture tree.
 - main has no branch protection. The merge tool reads `.github/stamp.json`
-  requiredChecks, and it reads a skipped job as passing (`merge/test_merge.py`,
-  `test_a_required_check_that_is_skipped_reads_green`). A failed `scope` job is red, so a
-  skip caused by it cannot pass.
+  requiredChecks. It reads a skipped job as passing only beside a passing check
+  (`merge/test_merge.py`, `test_a_required_check_that_is_skipped_reads_green`). A head
+  whose checks all skipped is unproven (decision merge-needs-a-proven-head). A failed
+  `scope` job is red, so a skip caused by it cannot pass.
 
 ## Accepted risk
 
