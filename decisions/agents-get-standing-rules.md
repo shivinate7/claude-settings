@@ -7,12 +7,18 @@ Where do an agent's standing rules live, so that a brief need not retype them?
 ## The ruling
 
 Owner, 2026-10-12: a SubagentStart hook injects them. `hooks/agent_brief.py` prints
-`additionalContext` with the rules every brief used to carry: no `git stash`, `git reset`,
-`git checkout <path>` or `git restore`; push only with `git push origin HEAD:<branch>`; no gh
-call unless the brief names it; the role's scope; the report cap and label order; the commit
-trailer; no record path in a commit message except the `Drops-lines:` trailer. The scope line
-varies by agent type (builder, test-author, reviewer, Explore, record-writer). An unknown type
-gets a general line. The hook is advisory: on any error it prints nothing and exits 0
+`additionalContext` with the rules every brief used to carry:
+
+- no `git stash`, `git reset`, `git checkout <path>` or `git restore`;
+- push only with `git push origin HEAD:<branch>`;
+- no gh call unless the brief names it;
+- the role's scope;
+- the report cap and label order;
+- the commit trailer;
+- no record path in a commit message except the `Drops-lines:` trailer.
+
+The scope line varies by agent type (builder, test-author, reviewer, Explore,
+record-writer). An unknown type gets a general line. The hook is advisory: on any error it prints nothing and exits 0
 (decision gate-hooks-fail-closed names the advisory class).
 
 ## Why
