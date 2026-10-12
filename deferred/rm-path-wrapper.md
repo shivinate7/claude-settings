@@ -14,8 +14,8 @@ in every Bash tool process. `CLAUDE_CODE_ENTRYPOINT` names the host (`claude-des
 The wrapper reads `CLAUDECODE`. Unset means pass through to the real `rm` untouched.
 
 **Why it waits.** The guard rule and the hook land first (brief step 7). The wrapper needs its
-own red cases: the four critical targets, a relative path that resolves to one, a symlink to
-one, and a call with `CLAUDECODE` unset that must reach the real `rm`. It also needs an
+own red cases. Those are the four critical targets, a relative path that resolves to one, and a
+symlink to one. One more: a call with `CLAUDECODE` unset must reach the real `rm`. It also needs an
 install step per OS (`install.sh`, `install.ps1`). `_rm_target_bad` in hooks/guard.py is the
 one home for the critical-path reading, so the wrapper calls it rather than copying it.
 
