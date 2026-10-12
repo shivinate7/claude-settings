@@ -140,13 +140,8 @@
     },
     "roles-third-try-steps-up": {
       "mechanism": {
-        "kind": "gate",
-        "ref": "settings.json",
-        "setting": {
-          "file": "settings.json",
-          "path": "hooks.PreToolUse[*].hooks[*].prompt",
-          "contains": "Also judge the step-up"
-        }
+        "kind": "guard",
+        "ref": "roles-third-try-steps-up"
       }
     },
     "roles-resume-by-name": {
