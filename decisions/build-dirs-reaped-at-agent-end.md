@@ -51,7 +51,14 @@ Other defaults:
 
 Builder decisions:
 
-- Windows: the reap deletes nothing. This is the same limit as husks.
+- Windows deletes the same as macOS and Linux, since 2026-10-12. `sweep.is_link` is the one
+  link test: a symlink, or a reparse point read from `os.lstat`, because `os.path.islink` never
+  sees a junction. Proven on this box with real junctions (`mklink /J`): a junction named as a
+  build folder is kept, a junction inside a build folder is unlinked and its target untouched,
+  and a worktree that is itself a junction is not scanned. Owner's word: the junction check
+  was the first task of the 2026-10-12 audit session. Named limit: `shutil.rmtree` on Windows
+  has no symlink-attack guard, so a link swapped in after the rename and before the child's
+  delete is not covered; the same window the janitor names for every tier.
 - The hook stops its build-folder scan after 20 s and keeps what it did not reach. The hook's own limit is 60 s.
 - The sweep report shows a `trash` line for each trash folder it finds, with its action and reason.
 - The sweep deletes leftover trash only in registered, non-primary worktrees directly under `.claude/worktrees`.

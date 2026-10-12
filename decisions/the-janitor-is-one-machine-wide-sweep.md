@@ -123,8 +123,11 @@ delete. The sweep never follows a link, and it walks only the repository's own
 `.claude/worktrees`, never a link out of it. Any error keeps the folder. An
 empty process table keeps it too. The process check reads the current directory
 only, so a process outside the folder that holds a file inside is not seen.
-On Windows the tier stays report only: Python before 3.12 does not see a
-junction as a link, and `rmtree` there has no symlink-attack guard.
+Windows deletes too, since 2026-10-12: `sweep.is_link` reads a junction from the
+reparse-point flag, because `os.path.islink` never sees one (decision
+build-dirs-reaped-at-agent-end, "Builder decisions"). `rmtree` on Windows has no
+symlink-attack guard, so a link swapped in between the read and the delete is
+not covered; that window is the same on every platform.
 
 ## The sweep never runs code a repository supplies
 
