@@ -3525,6 +3525,39 @@ sh("waiter: a loop inside a heredoc body is allowed",
    "cat <<'EOF'\nwhile true; do sleep 5; done\nEOF", "allow", cwd=NOGIT)
 sh("waiter: a comment opener in quotes does not hide a loop, refused",
    'echo "it\'s # fine"; while true; do sleep 5; done', "deny", "waiter", cwd=NOGIT)
+
+# Review round 1 on ca4f96d (FAIL). Each refused shape below waits by repeating or by a long
+# pause; each allowed shape is a false alarm the guard raised on a non-waiting command.
+# A bare `&` job is refused first by detached-launch (rule 2b), so the waiter rule is not reached
+# for these two. They pin the refusal; the rule named is the one that fires.
+sh("waiter: two sleeps joined by a background & are refused", "sleep 5 & sleep 5", "deny",
+   "detached-launch", cwd=NOGIT)
+sh("waiter: a sleep then a foreground watcher, joined by &, is refused",
+   "sleep 5 & gh run watch 1", "deny", "detached-launch", cwd=NOGIT)
+sh("waiter: a PowerShell while-loop with Start-Sleep in braces is refused",
+   "while(1){Start-Sleep 1}", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
+sh("waiter: a PowerShell range piped to % with Start-Sleep is refused",
+   "1..10 | % { Start-Sleep 2 }", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
+sh("waiter: a PowerShell range piped to ForEach-Object with Start-Sleep is refused",
+   "1..10 | ForEach-Object { Start-Sleep 2 }", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
+sh("waiter: gh.exe run watch in the foreground is refused", "gh.exe run watch 1", "deny",
+   "waiter", cwd=NOGIT)
+sh("waiter: gh pr checks --watch=true in the foreground is refused",
+   "gh pr checks 5 --watch=true", "deny", "waiter", cwd=NOGIT)
+sh("waiter: sleep 1m, 60 seconds, is refused", "sleep 1m", "deny", "waiter", cwd=NOGIT)
+sh("waiter: Start-Sleep -Milliseconds 30000, 30 seconds, is refused",
+   "Start-Sleep -Milliseconds 30000", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
+sh("waiter: Start-Sleep -Milliseconds 5000, 5 seconds, is allowed",
+   "Start-Sleep -Milliseconds 5000", "allow", tool="PowerShell", cwd=NOGIT)
+add("waiter: a loop under run_in_background is still refused", "deny", "waiter", cwd=NOGIT,
+    command="until [ -s f ]; do sleep 2; done", run_in_background=True)
+sh("waiter: gh pr view -w is allowed (no watch)", "gh pr view 1 -w", "allow", cwd=NOGIT)
+sh("waiter: gh repo view -w is allowed (no watch)", "gh repo view -w", "allow", cwd=NOGIT)
+sh("waiter: gh pr list -w is allowed (no watch)", "gh pr list -w", "allow", cwd=NOGIT)
+sh("waiter: gh issue list --label watch is allowed", "gh issue list --label watch", "allow",
+   cwd=NOGIT)
+sh("waiter: gh issue create --title watch is allowed", "gh issue create --title watch", "allow",
+   cwd=NOGIT)
 sh("waiter: a readiness check is allowed", "curl --retry 5 http://localhost:3000", "allow",
    cwd=NOGIT)
 sh("waiter: an unrelated log query is allowed", VCS + " log --since=yesterday", "allow", cwd=NOGIT)
@@ -4052,8 +4085,10 @@ for wrapped in (
 sh("env: timeout N does not make cat a runner", "timeout 60 cat --env-file=" + ENV, "deny",
    "env-file", cwd=NOGIT)
 sh("env: timeout /t is still a waiter", "timeout /t 5", "deny", "waiter", cwd=NOGIT)
-sh("env: timeout N ahead of one short sleep is allowed", "timeout 60 sleep 5", "allow",
+sh("waiter: timeout 60 over one short sleep is allowed", "timeout 60 sleep 5", "allow",
    cwd=NOGIT)
+sh("waiter: a timeout wrapper does not hide a 30 s sleep, refused", "timeout 60 sleep 30",
+   "deny", "waiter", cwd=NOGIT)
 sh("env: timeout N ahead of a slash switch is still a waiter", "timeout 5 /t 5", "deny",
    "waiter", cwd=NOGIT)
 for waiting in (
