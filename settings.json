@@ -2,6 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "env": {
     "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
+    "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL": "sonnet",
     "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "1",
     "PLAYWRIGHT_SKIP_BROWSER_GC": "1"
   },
@@ -40,7 +41,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/decision_watch.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/decision_watch.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 230
           }
         ]
@@ -49,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/lint/report_gate.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/lint/report_gate.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 20
           }
         ]
@@ -58,7 +59,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/lint/md_sweep.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/lint/md_sweep.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 20
           }
         ]
@@ -67,7 +68,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/config_watch.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/config_watch.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 20
           }
         ]
@@ -76,7 +77,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/ruling_home.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/ruling_home.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 20
           }
         ]
@@ -85,7 +86,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/precompact_handoff.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\" --nudge; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/precompact_handoff.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\" --nudge; done; exit 0",
             "timeout": 30
           }
         ]
@@ -106,7 +107,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/precompact_handoff.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/precompact_handoff.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 30
           }
         ]
@@ -118,7 +119,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/precompact_handoff.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\" --reorient; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/precompact_handoff.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\" --reorient; done; exit 0",
             "timeout": 10
           }
         ]
@@ -149,7 +150,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/janitor/session_end_sweep.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/janitor/session_end_sweep.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 55
           }
         ]
@@ -160,7 +161,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/janitor/agent_end_reap.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/janitor/agent_end_reap.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 60
           }
         ]
@@ -169,7 +170,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/guard.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/guard.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 20
           }
         ]
@@ -181,7 +182,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/guard.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/guard.py\"; [ -f \"$g\" ] || { echo \"claude-settings gate not runnable (script missing). From the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2; }; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; echo \"claude-settings gate not runnable (no python). Install Python 3, then from the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2",
             "timeout": 20
           }
         ]
@@ -191,7 +192,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/stall_watch.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\" --hook; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/stall_watch.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\" --hook; done; exit 0",
             "timeout": 10
           }
         ]
@@ -201,7 +202,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/lint/ste_gate.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/lint/ste_gate.py\"; [ -f \"$g\" ] || { echo \"claude-settings gate not runnable (script missing). From the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2; }; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; echo \"claude-settings gate not runnable (no python). Install Python 3, then from the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2",
             "timeout": 20
           }
         ]
@@ -218,7 +219,7 @@
           },
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/question_outcome.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/question_outcome.py\"; [ -f \"$g\" ] || { echo \"claude-settings gate not runnable (script missing). From the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2; }; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; echo \"claude-settings gate not runnable (no python). Install Python 3, then from the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2",
             "timeout": 105
           }
         ]
@@ -240,8 +241,8 @@
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "Judge this edit to a file: $ARGUMENTS\nIf the file path is not under a decisions/ folder, answer {\"ok\": true} at once. Rule: speak-rewrite-superseded-in-place (superseded text is rewritten in place; no story, no old quote, and no superseded ruling kept beside the new one). A record may state a current fact with its history in one clause; that is not a breach. Block only on a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}.",
-            "if": "Edit(decisions/**)",
+            "prompt": "Judge this edit to a file: $ARGUMENTS\nRule: speak-rewrite-superseded-in-place (superseded text is rewritten in place; no story, no old quote, and no superseded ruling kept beside the new one). A record may state a current fact with its history in one clause; that is not a breach. Block only on a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}.",
+            "if": "Edit(**/decisions/**)",
             "timeout": 30,
             "model": "haiku",
             "continueOnBlock": true
@@ -253,8 +254,8 @@
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "Judge this edit to a file: $ARGUMENTS\nIf the file path is not under a decisions/ folder, answer {\"ok\": true} at once. Rule: speak-rewrite-superseded-in-place (superseded text is rewritten in place; no story, no old quote, and no superseded ruling kept beside the new one). A record may state a current fact with its history in one clause; that is not a breach. Block only on a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}.",
-            "if": "Write(decisions/**)",
+            "prompt": "Judge this edit to a file: $ARGUMENTS\nRule: speak-rewrite-superseded-in-place (superseded text is rewritten in place; no story, no old quote, and no superseded ruling kept beside the new one). A record may state a current fact with its history in one clause; that is not a breach. Block only on a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}.",
+            "if": "Write(**/decisions/**)",
             "timeout": 30,
             "model": "haiku",
             "continueOnBlock": true
@@ -278,7 +279,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/sim_boot_record.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/sim_boot_record.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 20
           }
         ]
@@ -290,7 +291,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/rm_prompt_answer.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/rm_prompt_answer.py\"; [ -f \"$g\" ] || { echo \"claude-settings gate not runnable (script missing). From the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2; }; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; echo \"claude-settings gate not runnable (no python). Install Python 3, then from the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/agent_brief.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 20
           }
         ]
@@ -302,7 +314,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/config_watch.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/config_watch.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 20
           }
         ]
@@ -312,7 +324,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/sim_boot_record.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do command -v \"$p\" >/dev/null 2>&1 && exec \"$p\" \"$g\"; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/sim_boot_record.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 20
           }
         ]

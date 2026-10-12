@@ -69,6 +69,14 @@ a path filter on the whole workflow, blocks the merge. Prefer `if:` on the job.
 Require a matrix through one fan-in job with `if: always()`. Its check name stays fixed when the
 matrix changes.
 
+Rename a required check in both places: `merge.requiredChecks` in `.github/stamp.json`, and the
+protection rule. A PUT needs an admin login. Push rights are not enough. A PUT replaces the whole
+rule, so send every field from the read above, with the new names:
+
+```sh
+gh api -X PUT repos/<owner>/<repo>/branches/<branch>/protection --input <json>
+```
+
 ## 4. Cancel superseded runs
 
 ```yaml
@@ -106,6 +114,16 @@ jobs:
 A skipped `needs` job skips the job that needs it, so `if:` on `shards` stays: a draft skips both.
 A fan-in job (`all-jobs-passed`) runs on `if: always()` and fails on a skipped need. Give it
 `if: ${{ always() && !github.event.pull_request.draft }}`, so a draft skips it too.
+
+## 5b. Prove the head after `gh pr ready`
+
+```sh
+gh run list --commit <head-sha> --json name,status,conclusion   # completed, and not skipped
+gh workflow run <workflow-file> --ref <branch>           # none ran: dispatch one
+```
+
+`gh workflow run` needs a `workflow_dispatch` trigger in the workflow. (Decision
+merge-needs-a-proven-head: a merge needs a proven head.)
 
 ## 6. Read every run after a merge
 
@@ -145,10 +163,11 @@ zizmor .github/workflows .github/dependabot.yml
 ## 9. Wait without loops
 
 ```sh
-gh run watch <run-id> --exit-status > watch.log 2>&1   # run in the background
+gh run watch <run-id> --exit-status > run-watch.log 2>&1   # run in the background, once
+gh pr checks <pr-number> --watch > pr-checks.log 2>&1      # run in the background, once
 ```
 
-Read `watch.log` when it exits. Never send the output to `/dev/null`.
+Read the log when it exits. Never send the output to `/dev/null`.
 
 ## 10. Prove a gate red
 
@@ -157,3 +176,14 @@ cp -R . "$(mktemp -d)/scratch" && cd "$_"   # scratch copy
 # break one target, for example replace one pinned SHA with a tag
 zizmor .github/workflows .github/dependabot.yml   # must exit non-zero
 ```
+
+Gate a commit on the gate's own exit code. A pipe takes the exit code of its last command:
+
+```sh
+# Wrong: tail's exit code is the pipe's. A red gate still commits.
+<gate> | tail -1 && git commit -m "<subject>"
+# Right: the gate's exit code decides. Its output goes to a log.
+if <gate> > gate.log 2>&1; then git commit -m "<subject>"; else tail -n 20 gate.log; fi
+```
+
+In bash, `set -o pipefail` makes a pipe fail when any stage fails.

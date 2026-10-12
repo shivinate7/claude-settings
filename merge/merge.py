@@ -366,9 +366,8 @@ class Host:
             if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
                 return False, "the pull request went DIRTY during the wait. Merge the base into the branch and run again."
             got = self.checks(n)
-            red, pending, ignored = self.classify(got, names, self.ignore)
-            r_red, r_pending = self.run_state(sha)
-            red, pending = red + r_red, pending + r_pending
+            red, pending, ignored = self.classify(got, names, self.ignore, info["branch"])
+            red, pending = self.settle(red, pending, *self.run_state(sha))
             if red:
                 return False, "a check is red: " + "; ".join(red)
             if not pending and not settled:
@@ -400,26 +399,46 @@ class Host:
 
     def run_state(self, sha):
         """-> (red, pending) from the workflow runs of `sha`. A run that is not completed holds the wait even
-        when its jobs are not listed as checks yet. Only success, skipped and neutral pass."""
+        when its jobs are not listed as checks yet. Success, skipped and neutral pass, but see judge_runs."""
         return self.judge_runs(self.runs(sha))
 
     @staticmethod
     def judge_runs(runs):
-        """-> (red, pending) from a list of workflow runs."""
-        red = [f"workflow {r['name']}: {r['conclusion']}" for r in runs if r["status"] == "completed" and r["conclusion"] not in ("success", "skipped", "neutral")]
+        """-> (red, pending) from a list of workflow runs, newest first. Pending: any run not completed, even an
+        older one. Red: judged on the newest run per workflow name, after a skipped run is dropped when another run
+        of that name is not skipped (a skip never outranks a run that ran). Success, skipped and neutral pass, but when
+        every run is completed/skipped and none is pending, no job ran on this head: red (GitHub counts a
+        skipped job as passing, so required checks miss it)."""
         pending = [f"workflow {r['name']}" for r in runs if r["status"] != "completed"]
+        ran = {r["name"] for r in runs if r["conclusion"] != "skipped"}
+        runs = [r for r in runs if not (r["conclusion"] == "skipped" and r["name"] in ran)]
+        runs = list({r["name"]: r for r in reversed(runs)}.values())[::-1]
+        red = [f"workflow {r['name']}: {r['conclusion']}" for r in runs if r["status"] == "completed" and r["conclusion"] not in ("success", "skipped", "neutral")]
+        if runs and not pending and all(r["conclusion"] == "skipped" for r in runs):
+            red = [f"workflow {r['name']}: skipped, no job ran" for r in runs]
         return red, pending
 
     @staticmethod
-    def classify(got, names, ignore=None):
+    def settle(red, pending, r_red, r_pending):
+        """Join the checks' and the runs' (red, pending). Anything still pending holds the wait, so a
+        "no check ran" or "no job ran" red is dropped: the run the remedy just started is not refused."""
+        red, pending = red + r_red, pending + r_pending
+        return ([x for x in red if "no check ran" not in x and "no job ran" not in x] if pending else red), pending
+
+    @staticmethod
+    def classify(got, names, ignore=None, branch="<branch>"):
         """-> (red, pending, ignored). Every check on the head counts, required or not. Red: any bucket
         that is not pass, skipping or pending (fail, cancel, and any bucket gh adds later: closed).
+        Also red: a head with entries where none is pass or pending (all skipping): no check ran on it,
+        unless something is pending. `branch` fills the remedy's `--ref`.
         Pending: a pending entry, or a required name with no entry. `ignore` maps a name to its reason:
         those checks are left out of red and pending, and named in `ignored`."""
         ignore = ignore or {}
         live = {k: rows for k, rows in got.items() if k not in ignore or k in names}
         red = [f"{k}: {b} {l}".strip() for k, rows in live.items() for b, l in rows if b not in ("pass", "skipping", "pending")]
         pending = sorted({k for k, rows in live.items() if any(b == "pending" for b, _ in rows)} | {k for k in names if not got.get(k)})
+        if live and not red and not pending and not any(b == "pass" for rows in live.values() for b, _ in rows):
+            red = [f"no check ran on this head (every check skipped). Run `gh workflow run gates.yml --ref {branch}`, or push anew after `gh pr ready`"]
         ignored = [f"{k} ({ignore[k]}): " + "/".join(sorted({b for b, _ in rows})) for k, rows in got.items() if k in ignore]
         return red, pending, ignored
 
@@ -446,16 +465,15 @@ class Host:
             with shared_deadline(SH_TIMEOUT):
                 info = self.pr(n)
                 got = self.checks(n)
-                red, pending, _ = self.classify(got, [], self.ignore)
+                red, pending, _ = self.classify(got, [], self.ignore, info["branch"])
                 runs = self.runs(info["head"])
         except subprocess.TimeoutExpired:  # its text names the resolved program path
             return "unknown", "a gh call timed out"
         except Exception as e:  # Stop, a missing gh, malformed JSON: all unread
             return "unknown", str(e)
-        r_red, r_pending = self.judge_runs(runs)
-        red, pending = red + r_red, pending + r_pending
+        red, pending = self.settle(red, pending, *self.judge_runs(runs))
         if red:
-            return "red", "; ".join(red)
+            return "red","; ".join(red)
         if pending:
             return "pending", ", ".join(pending)
         if not got and not runs and not nothing_is_green:

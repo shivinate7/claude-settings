@@ -1230,9 +1230,117 @@ class GhHalf(Env):
         self.assertEqual((red, pending), ([], []))
         runs = [{"name": "gates", "status": "completed", "conclusion": c} for c in ("success", "skipped", "neutral")]
         self.assertEqual(merge.Host.judge_runs(runs), ([], []))
-        self.set(checks_seq=[[("gates", "skipping", "")]])  # gates is the one required name in CONFIG
+        self.set(checks_seq=[[("gates", "skipping", ""), ("scope", "pass", "")]])  # a required check skipped beside a passing check reads green
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
+
+    def test_a_head_where_no_check_ran_is_unproven_not_green(self):
+        # Incident 2026-10-12: PR #352 merged while every check on f18b6d9 skipped. The synchronize run skipped as a draft.
+        red, pending, _ = merge.Host.classify({"gates": [("skipping", "")], "gates-windows": [("skipping", "")]}, ["gates", "gates-windows"])
+        self.assertEqual(pending, [])
+        self.assertTrue(any("no check ran on this head" in r for r in red), red)
+        self.assertTrue(any("gh workflow run gates.yml --ref" in r for r in red), red)
+        self.assertTrue(any("gh pr ready" in r for r in red), red)
+
+    def test_a_docs_only_head_whose_scope_check_passed_is_not_unproven(self):
+        red, pending, _ = merge.Host.classify({"scope": [("pass", "")], "gates": [("skipping", "")], "gates-windows": [("skipping", "")]}, ["gates", "gates-windows"])
+        self.assertEqual((red, pending), ([], []))
+
+    def test_a_run_list_where_every_run_skipped_and_none_pending_is_red(self):
+        red, pending = merge.Host.judge_runs([{"name": "gates", "status": "completed", "conclusion": "skipped"}])
+        self.assertEqual(red, ["workflow gates: skipped, no job ran"])
+        self.assertEqual(pending, [])
+
+    def test_a_success_run_and_a_skipped_run_on_the_same_head_are_green(self):
+        runs = [{"name": "gates", "status": "completed", "conclusion": "success"}, {"name": "gates-windows", "status": "completed", "conclusion": "skipped"}]
+        self.assertEqual(merge.Host.judge_runs(runs), ([], []))
+
+    def test_an_older_cancelled_run_under_a_newer_success_of_the_same_name_is_superseded(self):
+        # gh lists the newest run first. Only the newest run per workflow name counts.
+        runs = [{"name": "gates", "status": "completed", "conclusion": "success"}, {"name": "gates", "status": "completed", "conclusion": "cancelled"}]
+        self.assertEqual(merge.Host.judge_runs(runs), ([], []))
+
+    def test_a_newest_cancelled_run_is_red_even_under_an_older_success(self):
+        runs = [{"name": "gates", "status": "completed", "conclusion": "cancelled"}, {"name": "gates", "status": "completed", "conclusion": "success"}]
+        red, pending = merge.Host.judge_runs(runs)
+        self.assertEqual(red, ["workflow gates: cancelled"])
+        self.assertEqual(pending, [])
+
+    def test_a_cancelled_run_with_no_newer_run_of_its_name_is_red(self):
+        runs = [{"name": "gates", "status": "completed", "conclusion": "success"}, {"name": "ci", "status": "completed", "conclusion": "cancelled"}]
+        red, pending = merge.Host.judge_runs(runs)
+        self.assertEqual(red, ["workflow ci: cancelled"])
+        self.assertEqual(pending, [])
+
+    def test_a_newer_skipped_run_does_not_outrank_an_older_success_of_the_same_name(self):
+        # Incident 2026-10-12, bin/merge 360: a draft PR marked ready in the same second. The skipped `opened` run is
+        # newer than the green `ready_for_review` run of the same workflow. A skip never outranks a run that ran.
+        runs = [{"name": "gates", "status": "completed", "conclusion": "skipped"}, {"name": "gates", "status": "completed", "conclusion": "success"}]
+        self.assertEqual(merge.Host.judge_runs(runs), ([], []))
+
+    def test_a_newer_skipped_run_does_not_hide_an_older_run_in_progress(self):
+        runs = [{"name": "gates", "status": "completed", "conclusion": "skipped"}, {"name": "gates", "status": "in_progress", "conclusion": ""}]
+        self.assertEqual(merge.Host.judge_runs(runs), ([], ["workflow gates"]))
+
+    def test_a_newer_skipped_run_does_not_erase_an_older_cancelled_run(self):
+        runs = [{"name": "gates", "status": "completed", "conclusion": "skipped"}, {"name": "gates", "status": "completed", "conclusion": "cancelled"}]
+        self.assertEqual(merge.Host.judge_runs(runs), (["workflow gates: cancelled"], []))
+
+    def test_a_newer_skipped_run_does_not_erase_an_older_failure(self):
+        runs = [{"name": "gates", "status": "completed", "conclusion": "skipped"}, {"name": "gates", "status": "completed", "conclusion": "failure"}]
+        self.assertEqual(merge.Host.judge_runs(runs), (["workflow gates: failure"], []))
+
+    def test_a_head_where_every_check_skipped_is_refused_with_the_remedy(self):
+        before = self.head()
+        self.set(checks_seq=[[("gates", "skipping", "")]], runs_seq=[[("gates", "completed", "skipped")]])
+        rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("no check ran on this head", out)
+        self.assertIn("gh workflow run gates.yml --ref", out)
+        self.assertNotIn("pr merge", self.calls())
+        self.assertEqual(self.head(), before)
+
+    def test_a_newer_skipped_run_on_the_wait_path_does_not_refuse_an_older_success(self):
+        # Incident 2026-10-12, bin/merge 360: the same race through run_state. Checks pass; the runs are skipped then success.
+        before = self.head()
+        self.set(checks_seq=[[("gates", "pass", "")]], runs_seq=[[("gates", "completed", "skipped"), ("gates", "completed", "success")]])
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertIn("pr merge", self.calls())
+        self.assertNotEqual(self.head(), before)
+
+    def test_a_missing_required_check_beside_a_skipped_one_is_pending_not_red(self):
+        # B1: nothing has reported gates yet. The skipped gates-windows row is not proof that no check ran.
+        red, pending, _ = merge.Host.classify({"gates-windows": [("skipping", "")]}, ["gates", "gates-windows"])
+        self.assertEqual((red, pending), ([], ["gates"]))
+
+    def test_a_skipped_head_with_a_run_in_progress_waits_for_the_run(self):
+        # B1: the skipped rows are old. The gates run is still in progress with no job rows, so the wait holds.
+        self.set(checks_seq=[[("gates", "skipping", "")]], runs_seq=[[("gates", "in_progress", "")], [("gates", "completed", "skipped")]])
+        rc, out = self.go()
+        self.assertGreaterEqual(self.paused.count(60), 1, out)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("no check ran on this head", out)
+        self.assertNotIn("pr merge", self.calls())
+
+    def test_the_remedy_run_in_progress_beside_old_skipped_rows_waits(self):
+        # B1: the remedy's own run. Old skipped rows and a run in progress hold the wait, then the pass lets it merge.
+        self.set(checks_seq=[[("gates", "skipping", "")], [("gates", "pass", "")]], runs_seq=[[("gates", "in_progress", "")], [("gates", "completed", "success")]])
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertGreaterEqual(self.paused.count(60), 1, out)
+
+    def test_an_older_run_still_in_progress_holds_the_wait_under_a_newer_success(self):
+        # B2: gh lists the newest run first. The older in-progress run is read as pending before the dedup.
+        runs = [{"name": "gates", "status": "completed", "conclusion": "success"}, {"name": "gates", "status": "in_progress", "conclusion": ""}]
+        self.assertEqual(merge.Host.judge_runs(runs), ([], ["workflow gates"]))
+
+    def test_the_no_check_ran_remedy_names_the_real_branch(self):
+        self.set(checks_seq=[[("gates", "skipping", "")]])
+        rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("gh workflow run gates.yml --ref feat", out)
+        self.assertNotIn("<branch>", out)
 
     def test_cancelled_and_unknown_buckets_stop_the_run(self):
         for bucket in ("cancel", "startup_failure"):

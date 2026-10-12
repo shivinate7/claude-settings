@@ -3037,6 +3037,67 @@ sh("rm-var: a variable set to the parent of home names a literal path, not ${D:?
    "D=%s; rm -rf $D/*" % PARENT_OF_HOME, "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
 
+# REDIRECT SHAPES. Claude Code's built-in rm check lost its safeguard when the command also redirected
+# to ~ or a wildcard (changelog 2.1.287, Oct 2026). Each pair is the plain command (a control) and the
+# same command with a redirect. A redirect must not change the verdict the plain command gets. Probed on
+# main (adf0bd7): every shape matched its plain verdict, so these pin that and start green.
+sh("rm-var redirect: plain $S/x is not refused",
+   "rm -rf $S/x", "allow", cwd=NOGIT)
+sh("rm-var redirect: $S/x with a redirect to ~ is not refused",
+   "rm -rf $S/x > ~/rm.log", "allow", cwd=NOGIT)
+sh("rm-var redirect: plain quoted $S is not refused",
+   'rm -rf "$S"', "allow", cwd=NOGIT)
+sh("rm-var redirect: quoted $S with a stderr redirect to ~ is not refused",
+   'rm -rf "$S" 2> ~/err.txt', "allow", cwd=NOGIT)
+sh("rm-var redirect: plain $S/* is refused",
+   "rm -rf $S/*", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${S:?}",))
+sh("rm-var redirect: $S/* with an append to ~ is refused",
+   "rm -rf $S/* >> ~/.cache/log", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${S:?}",))
+sh("rm-var redirect: $S/* with a stderr redirect to /dev/null is refused",
+   "rm -rf $S/* 2>/dev/null", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${S:?}",))
+sh("rm-var redirect: plain ~/.cache/* is not refused",
+   "rm -rf ~/.cache/*", "allow", cwd=NOGIT)
+sh("rm-var redirect: ~/.cache/* with a redirect to /dev/null is not refused",
+   "rm -rf ~/.cache/* > /dev/null", "allow", cwd=NOGIT)
+sh("rm-var redirect: $S/x piped through tee to ~ is not refused",
+   "rm -rf $S/x 2>&1 | tee ~/log", "allow", cwd=NOGIT)
+sh("rm-var redirect: $S/x with a quoted $HOME redirect is not refused",
+   'rm -rf $S/x > "$HOME/log"', "allow", cwd=NOGIT)
+sh("rm-var redirect: a redirect before the command does not change the verdict",
+   "> ~/log rm -rf $S/x", "allow", cwd=NOGIT)
+sh("rm-var redirect: a redirect with no space before ~ does not change the verdict",
+   "rm -rf $S/x >~/log", "allow", cwd=NOGIT)
+sh("rm-var redirect: plain $S/x with a stderr redirect to /dev/null is not refused",
+   "rm -rf $S/x 2>/dev/null", "allow", cwd=NOGIT)
+sh("rm-var redirect: plain ~/x is not refused",
+   "rm -rf ~/x", "allow", cwd=NOGIT)
+sh("rm-var redirect: ~/x with a redirect to ~ is not refused",
+   "rm -rf ~/x > ~/log", "allow", cwd=NOGIT)
+sh("rm-var redirect: plain root is refused",
+   "rm -rf /", "deny", "destructive-delete", cwd=NOGIT)
+sh("rm-var redirect: root with a redirect to ~ is refused",
+   "rm -rf / > ~/log", "deny", "destructive-delete", cwd=NOGIT)
+sh("rm-var redirect: plain home is refused",
+   "rm -rf ~", "deny", "destructive-delete", cwd=NOGIT)
+sh("rm-var redirect: home with a stderr redirect to /dev/null is refused",
+   "rm -rf ~ 2>/dev/null", "deny", "destructive-delete", cwd=NOGIT)
+sh("rm-var redirect: PowerShell plain $S\\x is not refused",
+   "Remove-Item -Recurse $S\\x", "allow", tool="PowerShell", cwd=NOGIT)
+sh("rm-var redirect: PowerShell $S\\x with a redirect to $HOME is not refused",
+   "Remove-Item -Recurse $S\\x > $HOME\\log", "allow", tool="PowerShell", cwd=NOGIT)
+sh("rm-var redirect: PowerShell plain $S\\* is not refused",
+   "Remove-Item -Recurse -Force $S\\*", "allow", tool="PowerShell", cwd=NOGIT)
+sh("rm-var redirect: PowerShell $S\\* with a redirect to $HOME is not refused",
+   "Remove-Item -Recurse -Force $S\\* > $HOME\\log", "allow", tool="PowerShell", cwd=NOGIT)
+sh("rm-var redirect: PowerShell plain drive root is refused",
+   "Remove-Item -Recurse -Force C:\\", "deny", "destructive-delete", tool="PowerShell", cwd=NOGIT)
+sh("rm-var redirect: PowerShell drive root with a redirect to $HOME is refused",
+   "Remove-Item -Recurse -Force C:\\ > $HOME\\log", "deny", "destructive-delete",
+   tool="PowerShell", cwd=NOGIT)
+
 sh("playwright: an envrc file gets the assignment",
    "echo PLAYWRIGHT_BROWSERS_PATH=/x > .envrc", "deny", "playwright-browsers-path", cwd=NOGIT)
 sh("playwright: a case-folded name still sets it", "playwright_browsers_path=/x npx", "deny",
@@ -4596,6 +4657,51 @@ for _name, _command in (
     ("a PR view", "gh pr view 12 --json body"),
 ):
     sh("cite-by-id: %s is no message" % _name, _command, "allow", silent=True, cwd=NOGIT, config=MERGECFG)
+
+# The Drops-lines trailer (owner ruling 2026-10-12): the one place a record path may stand in a
+# commit message is `Drops-lines: <path> -- <reason>`, the shape lint/check_silent_undo.py reads
+# from the last paragraph of a commit. A trailer with no ` -- reason` excuses nothing. The reason
+# may not cite a record path. Every other line is still judged by the cite rule.
+DROPS_BODY = "title\n\nbody\n\nDrops-lines: deferred/a.md -- replaced by a decision"
+sh("cite-by-id: Drops-lines trailer in a commit -m body is allowed",
+   VCS + ' commit -m "' + DROPS_BODY + '"', "allow", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: Drops-lines trailer in a heredoc -F - body is allowed",
+   VCS + " commit -F - <<'EOF'\n" + DROPS_BODY + "\nEOF", "allow", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: two Drops-lines trailers with two paths are allowed",
+   VCS + ' commit -m "title\n\nDrops-lines: deferred/a.md -- replaced by a decision\n'
+   'Drops-lines: deferred/b.md -- folded into a decision"', "allow", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: a prose cite beside a Drops-lines trailer is denied",
+   VCS + ' commit -m "title\n\nbody cites deferred/a.md\n\n'
+   'Drops-lines: deferred/a.md -- replaced by a decision"', "deny", "cite-by-id",
+   cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: a Drops-lines reason that cites a record path is denied",
+   VCS + ' commit -m "title\n\nDrops-lines: deferred/a.md -- see decisions/b.md"', "deny",
+   "cite-by-id", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: a Drops-lines trailer in a gh pr create body is denied",
+   'gh pr create --draft --title t --body "title\n\nDrops-lines: deferred/a.md -- replaced by a decision"',
+   "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: Drops-lines key spelled drops-lines: is allowed",
+   VCS + ' commit -m "title\n\nbody\n\ndrops-lines: deferred/a.md -- replaced by a decision"',
+   "allow", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: a Drops-lines trailer with no reason is denied",
+   VCS + ' commit -m "title\n\nbody\n\nDrops-lines: deferred/a.md"', "deny", "cite-by-id",
+   cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: a Drops-lines line in a middle paragraph is denied",
+   VCS + ' commit -m "title\n\nDrops-lines: deferred/a.md -- replaced by a decision\n\n'
+   'body after the trailer"', "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
+# Round 2 (owner ruling 2026-10-12). The exemption must blank one path, not the whole token after
+# the key, so a second path in the same token is still judged. The lint reads that token as one path,
+# which excuses no record path. A space before the colon is still the key `Drops-lines`, which
+# `git interpret-trailers` reads and the lint accepts.
+sh("cite-by-id: Drops-lines token with a comma-joined second path is denied",
+   VCS + ' commit -m "title\n\nbody\n\nDrops-lines: deferred/a.md,deferred/b.md -- replaced"',
+   "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: Drops-lines token with a semicolon-joined second path is denied",
+   VCS + ' commit -m "title\n\nbody\n\nDrops-lines: deferred/a.md;deferred/b.md -- replaced"',
+   "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: Drops-lines key with a space before the colon is allowed",
+   VCS + ' commit -m "title\n\nbody\n\nDrops-lines : deferred/a.md -- replaced"',
+   "allow", cwd=NOGIT, config=MERGECFG)
 
 
 # =========================================================================== 6. frozen paths
@@ -6545,6 +6651,55 @@ for _tool in ("Agent", "Task"):
             subagent_type=_near)
 add("floor: Agent record-writer with model sonnet is still allowed", "allow",
     tool="Agent", prompt="x", model="sonnet", subagent_type="record-writer")
+
+# ---- Step-up (owner ruling 2026-10-12, rule roles-third-try-steps-up). The brief's fixed form
+# "Round N of 3" steps a reviewer up: rounds 2 and 3 need sonnet, and opus is the ceiling. The
+# fixed form "Try N of 3" steps a builder up: try 3 needs opus, tries 1 and 2 stay on sonnet.
+# A reviewer's round 1 runs on the role's table model. Prose that quotes a round without the
+# fixed form is never a signal. A missing model is not read from the env default by the floor,
+# so the floor allows it. Step-up still denies a reviewer round 2 or 3 that does not name sonnet
+# (pinned below).
+STEP_UP ="roles-third-try-steps-up"
+add("floor step-up: reviewer Round 2 of 3 on haiku is denied", "deny", STEP_UP,
+    tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="haiku", subagent_type="reviewer")
+add("floor step-up: reviewer Round 3 of 3 on haiku is denied", "deny", STEP_UP,
+    tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="haiku", subagent_type="reviewer")
+add("floor step-up: reviewer Round 2 of 3 on opus is denied (ceiling)", "deny", STEP_UP,
+    tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="opus", subagent_type="reviewer")
+add("floor step-up: reviewer Round 2 of 3 on sonnet is allowed", "allow",
+    tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="sonnet", subagent_type="reviewer")
+add("floor step-up: reviewer Round 2 of 3 with no model is denied (no sonnet named)", "deny",
+    STEP_UP, tool="Agent", prompt="Round 2 of 3. Re-check the diff.", subagent_type="reviewer")
+add("floor step-up: reviewer Round 3 of 3 with model inherit is denied", "deny", STEP_UP,
+    tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="inherit",
+    subagent_type="reviewer")
+add("floor step-up: reviewer Round 2 of 3 on claude-sonnet-5-5 is allowed", "allow",
+    tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="claude-sonnet-5-5",
+    subagent_type="reviewer")
+add("floor step-up: builder Try 3 of 3 on sonnet is denied", "deny", STEP_UP,
+    tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="sonnet", subagent_type="builder")
+add("floor step-up: builder Try 3 of 3 on opus is allowed (standing word)", "allow",
+    tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="opus", subagent_type="builder")
+add("floor step-up: builder Try 1 of 3 on opus is allowed (main ceiling pin)", "allow",
+    tool="Agent", prompt="Try 1 of 3. Start the fix.", model="opus", subagent_type="builder")
+add("floor step-up: reviewer Round 1 of 3 on haiku with prose round 2 and round 3 is allowed",
+    "allow", tool="Agent", subagent_type="reviewer", model="haiku",
+    prompt="Round 1 of 3. The earlier review round 2 and round 3 notes are in the record.")
+add("floor step-up: reviewer with no round line on haiku is allowed", "allow",
+    tool="Agent", prompt="Check the diff for typos.", model="haiku", subagent_type="reviewer")
+add("floor step-up: reviewer Round 2 of 3 on the full opus id is denied", "deny", STEP_UP,
+    tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="claude-opus-5",
+    subagent_type="reviewer")
+add("floor step-up: reviewer Round 2 of 3 on the full haiku id is denied", "deny", STEP_UP,
+    tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="claude-haiku-5-5",
+    subagent_type="reviewer")
+add("floor step-up: round line after a lone quote on line two is denied", "deny", STEP_UP,
+    tool="Agent", prompt="Don't skip the check.\nRound 2 of 3. Re-check the diff.",
+    model="haiku", subagent_type="reviewer")
+add("floor step-up: reviewer Round 3 of 3 on sonnet is allowed", "allow",
+    tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="sonnet", subagent_type="reviewer")
+add("floor step-up: builder Try 2 of 3 on sonnet is allowed", "allow",
+    tool="Agent", prompt="Try 2 of 3. Continue the fix.", model="sonnet", subagent_type="builder")
 
 
 def _flow(model, role=None):

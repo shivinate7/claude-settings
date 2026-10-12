@@ -4814,6 +4814,7 @@ def record_path_pattern():
             _RECORD_PATTERN.append(pattern)
             return pattern
     return None
+DROPS_LINES_PATH = re.compile(r"(?im)^(drops-lines[ \t]*:[ \t]*)(\S+)(?=[ \t]+--[ \t]+\S)")
 MESSAGE_VALUE_FLAGS = {"-m", "--message", "-b", "--body"}
 MESSAGE_FILE_FLAGS = {"-F", "--file", "--body-file"}
 MESSAGE_FILE_MAX = 64 * 1024
@@ -4822,7 +4823,8 @@ CITE_REASON = (
     "Rule (Git): this message cites a record by its path. A record is cited by its id, with a "
     "short gloss, like \"D12, short titles for records\". "
     "Remedy: write the id the record carries, or its slug while the number is unclaimed, "
-    "and leave the folder and the file extension out."
+    "and leave the folder and the file extension out. Only a commit's last-paragraph trailer "
+    "`Drops-lines: <path> -- <reason>` may name a path."
 )
 
 
@@ -4908,6 +4910,16 @@ def cited_record_path(segment: str, raw: str, where: str) -> str:
             return UNREAD_MARK + name   # unknown, never a pass
     if "<<" in segment:
         texts.extend(body for _, body in _split_heredocs(raw)[1])
+    if call is not None:
+        # Owner ruling 2026-10-12: a commit's trailer `Drops-lines: <path> -- <reason>`, the shape
+        # lint/check_silent_undo.py reads, may name its path. Git joins -m values as paragraphs and
+        # reads trailers from the last one only, never from a lone subject. Only a token that is one
+        # whole record path is blanked: `a.md,b.md` stays judged, as the lint keys on the token.
+        paras = re.split(r"\n\s*\n", "\n\n".join(texts).strip())
+        if len(paras) > 1:
+            paras[-1] = DROPS_LINES_PATH.sub(
+                lambda m: m.group(1) if pattern.fullmatch(m.group(2)) else m.group(0), paras[-1])
+        texts = ["\n\n".join(paras)]
     for text in texts:
         found = pattern.search(norm(text))
         if found:
@@ -6048,6 +6060,26 @@ def floor_hit(tool: str, tool_input) -> str:
     return ""
 
 
+STEP_UP_MARKER = re.compile(r"(?im)^[ \t]*(round|try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
+
+
+def step_up_hit(tool: str, tool_input) -> str:
+    """The step-up reason for a spawn whose marker line and model disagree, or "". Only a line
+    that is the marker counts. A missing model runs the env default, which is Sonnet for a builder; a reviewer's
+    frontmatter model is haiku, so a reviewer round 2 or 3 must name sonnet."""
+    if tool not in SPAWN_TOOLS or not isinstance(tool_input.get("prompt"), str):
+        return ""
+    model = str(tool_input.get("model") or "").lower()
+    role = tool_input.get("subagent_type")
+    for kind, n in STEP_UP_MARKER.findall(tool_input["prompt"]):
+        kind = kind.lower()
+        if role == "reviewer" and kind == "round" and n in "23" and "sonnet" not in model:
+            return "Reviewer rounds 2 and 3 run on Sonnet. Spawn it with model sonnet."
+        if role == "builder" and kind == "try" and n == "3" and "opus" not in model:
+            return "Builder try 3 runs on Opus. Spawn it with model opus."
+    return ""
+
+
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
                 transcript: str = "", subagent: bool = False) -> None:
     POWERSHELL_CALL[0] = tool == "PowerShell"
@@ -6497,6 +6529,11 @@ def judge(payload) -> None:
     floor_model = floor_hit(tool, tool_input)
     if floor_model:
         refuse(tool, "deny", "subagent-model-floor", MODEL_FLOOR_REASON, floor_model)
+
+    # 9b. Step-up: reviewer rounds 2 and 3 run on Sonnet, builder try 3 on Opus.
+    step_up = step_up_hit(tool, tool_input)
+    if step_up:
+        refuse(tool, "deny", "roles-third-try-steps-up", step_up, str(tool_input.get("model")))
 
     # A merge through the MCP tool is judged by the same check gate as `gh pr merge`.
     if tool in MERGE_TOOLS:
