@@ -21,7 +21,7 @@ COMMON = [
     (False, "- End each commit message with: Co-Authored-By: <model> <noreply@anthropic.com>"),
     (False, "- Name no record path in a commit message. The only exception is the Drops-lines: trailer."),
 ]
-READ_ONLY = {"reviewer", "Explore"}
+READ_ONLY = {"reviewer", "Explore", "Plan", "claude-code-guide"}
 
 SCOPE = {
     "builder": "Scope: builder. Never edit tests or test config. Add mutants to hooks/mutate_guard.py when the brief asks. Report a test change you need.",
