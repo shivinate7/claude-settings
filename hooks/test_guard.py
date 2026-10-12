@@ -2839,6 +2839,67 @@ sh("rm-var: a variable set to the parent of home names a literal path, not ${D:?
    "D=%s; rm -rf $D/*" % PARENT_OF_HOME, "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${D:?}",))
 
+# REDIRECT SHAPES. Claude Code's built-in rm check lost its safeguard when the command also redirected
+# to ~ or a wildcard (changelog 2.1.287, Oct 2026). Each pair is the plain command (a control) and the
+# same command with a redirect. A redirect must not change the verdict the plain command gets. Probed on
+# main (adf0bd7): every shape matched its plain verdict, so these pin that and start green.
+sh("rm-var redirect: plain $S/x is not refused",
+   "rm -rf $S/x", "allow", cwd=NOGIT)
+sh("rm-var redirect: $S/x with a redirect to ~ is not refused",
+   "rm -rf $S/x > ~/rm.log", "allow", cwd=NOGIT)
+sh("rm-var redirect: plain quoted $S is not refused",
+   'rm -rf "$S"', "allow", cwd=NOGIT)
+sh("rm-var redirect: quoted $S with a stderr redirect to ~ is not refused",
+   'rm -rf "$S" 2> ~/err.txt', "allow", cwd=NOGIT)
+sh("rm-var redirect: plain $S/* is refused",
+   "rm -rf $S/*", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${S:?}",))
+sh("rm-var redirect: $S/* with an append to ~ is refused",
+   "rm -rf $S/* >> ~/.cache/log", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${S:?}",))
+sh("rm-var redirect: $S/* with a stderr redirect to /dev/null is refused",
+   "rm -rf $S/* 2>/dev/null", "deny", "rm-var-unguarded", cwd=NOGIT,
+   carries=("literal path",), lacks=("${S:?}",))
+sh("rm-var redirect: plain ~/.cache/* is not refused",
+   "rm -rf ~/.cache/*", "allow", cwd=NOGIT)
+sh("rm-var redirect: ~/.cache/* with a redirect to /dev/null is not refused",
+   "rm -rf ~/.cache/* > /dev/null", "allow", cwd=NOGIT)
+sh("rm-var redirect: $S/x piped through tee to ~ is not refused",
+   "rm -rf $S/x 2>&1 | tee ~/log", "allow", cwd=NOGIT)
+sh("rm-var redirect: $S/x with a quoted $HOME redirect is not refused",
+   'rm -rf $S/x > "$HOME/log"', "allow", cwd=NOGIT)
+sh("rm-var redirect: a redirect before the command does not change the verdict",
+   "> ~/log rm -rf $S/x", "allow", cwd=NOGIT)
+sh("rm-var redirect: a redirect with no space before ~ does not change the verdict",
+   "rm -rf $S/x >~/log", "allow", cwd=NOGIT)
+sh("rm-var redirect: plain $S/x with a stderr redirect to /dev/null is not refused",
+   "rm -rf $S/x 2>/dev/null", "allow", cwd=NOGIT)
+sh("rm-var redirect: plain ~/x is not refused",
+   "rm -rf ~/x", "allow", cwd=NOGIT)
+sh("rm-var redirect: ~/x with a redirect to ~ is not refused",
+   "rm -rf ~/x > ~/log", "allow", cwd=NOGIT)
+sh("rm-var redirect: plain root is refused",
+   "rm -rf /", "deny", "destructive-delete", cwd=NOGIT)
+sh("rm-var redirect: root with a redirect to ~ is refused",
+   "rm -rf / > ~/log", "deny", "destructive-delete", cwd=NOGIT)
+sh("rm-var redirect: plain home is refused",
+   "rm -rf ~", "deny", "destructive-delete", cwd=NOGIT)
+sh("rm-var redirect: home with a stderr redirect to /dev/null is refused",
+   "rm -rf ~ 2>/dev/null", "deny", "destructive-delete", cwd=NOGIT)
+sh("rm-var redirect: PowerShell plain $S\\x is not refused",
+   "Remove-Item -Recurse $S\\x", "allow", tool="PowerShell", cwd=NOGIT)
+sh("rm-var redirect: PowerShell $S\\x with a redirect to $HOME is not refused",
+   "Remove-Item -Recurse $S\\x > $HOME\\log", "allow", tool="PowerShell", cwd=NOGIT)
+sh("rm-var redirect: PowerShell plain $S\\* is not refused",
+   "Remove-Item -Recurse -Force $S\\*", "allow", tool="PowerShell", cwd=NOGIT)
+sh("rm-var redirect: PowerShell $S\\* with a redirect to $HOME is not refused",
+   "Remove-Item -Recurse -Force $S\\* > $HOME\\log", "allow", tool="PowerShell", cwd=NOGIT)
+sh("rm-var redirect: PowerShell plain drive root is refused",
+   "Remove-Item -Recurse -Force C:\\", "deny", "destructive-delete", tool="PowerShell", cwd=NOGIT)
+sh("rm-var redirect: PowerShell drive root with a redirect to $HOME is refused",
+   "Remove-Item -Recurse -Force C:\\ > $HOME\\log", "deny", "destructive-delete",
+   tool="PowerShell", cwd=NOGIT)
+
 sh("playwright: an envrc file gets the assignment",
    "echo PLAYWRIGHT_BROWSERS_PATH=/x > .envrc", "deny", "playwright-browsers-path", cwd=NOGIT)
 sh("playwright: a case-folded name still sets it", "playwright_browsers_path=/x npx", "deny",
