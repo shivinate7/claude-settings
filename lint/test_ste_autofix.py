@@ -42,8 +42,10 @@ def hso(run):
 
 
 # ------------------------------------------------------------------ 1. golden grammar set
-# (id, before, after). `after` is correct English. Where apply_fixes reads wrong today, the row
-# still holds the correct text, so it is red. Those rows are the unsafe-pattern candidates.
+# (id, before, after). `after` is correct English. Rows whose id ends in `_unsafe_keep` are
+# unsafe patterns: the fixer must leave the text UNCHANGED, and the gate still denies on the
+# lint error (see GateFixTests test_14 to test_16). Other rows hold the correct fixed text.
+# Red today: the rows where apply_fixes output differs from `after`.
 
 GOLDEN = [
     ("g01_latin_start_cap", "E.g. the pump stops.", "For example, the pump stops."),
@@ -53,10 +55,10 @@ GOLDEN = [
     ("g05_ie_mid", "Check the valves, i.e. the inlets.", "Check the valves, that is, the inlets."),
     ("g06_etc_sentence_end", "Test the unit at the end, etc.", "Test the unit at the end, and so on."),
     ("g07_etc_mid", "Pumps, valves, etc. must be checked.", "Pumps, valves, and so on must be checked."),
-    ("g08_vs_mid", "The rule applies to pumps vs. valves.", "The rule applies to pumps compared with valves."),
-    ("g09_vs_compare", "Compare Option A vs. Option B.", "Compare Option A with Option B."),
-    ("g10_cf_see", "See cf. section 4 for details.", "See section 4 for details."),
-    ("g11_via_email", "Send the report via email.", "Send the report by email."),
+    ("g08_vs_unsafe_keep", "The rule applies to pumps vs. valves.", "The rule applies to pumps vs. valves."),
+    ("g09_vs_unsafe_keep", "Compare Option A vs. Option B.", "Compare Option A vs. Option B."),
+    ("g10_cf_unsafe_keep", "See cf. section 4 for details.", "See cf. section 4 for details."),
+    ("g11_via_unsafe_keep", "Send the report via email.", "Send the report via email."),
     ("g12_et_al_commas", "The team, et al., reviewed the design.", "The team, and others, reviewed the design."),
     ("g13_ad_hoc", "This is an ad hoc fix.", "This is an unplanned fix."),
     ("g14_contraction_mid", "We don't stop the pump.", "We do not stop the pump."),
@@ -67,15 +69,17 @@ GOLDEN = [
     ("g19_wont", "The pump won't start.", "The pump will not start."),
     ("g20_youd", "You'd like the valve closed.", "You would like the valve closed."),
     ("g21_theyve", "The crews say they've finished.", "The crews say they have finished."),
-    ("g22_thed_had", "They'd finished the work.", "They had finished the work."),
+    ("g22_thed_unsafe_keep", "They'd finished the work.", "They'd finished the work."),
     ("g23_in_order_to", "Close the valve in order to stop the flow.", "Close the valve to stop the flow."),
     ("g24_due_to_start", "Due to the fact that the seal wore, the pump failed.",
      "Because the seal wore, the pump failed."),
     ("g25_in_the_event", "In the event that the alarm sounds, leave the room.", "If the alarm sounds, leave the room."),
-    ("g26_noted_start_delete", "It should be noted that the pump runs hot.", "The pump runs hot."),
-    ("g27_note_mid_delete", "Check it. Please note that the door is locked.", "Check it. The door is locked."),
-    ("g28_conclusion_delete", "In conclusion, the plan works.", "The plan works."),
-    ("g29_majority_of", "The majority of the valves are open.", "Most of the valves are open."),
+    ("g26_noted_delete_unsafe_keep", "It should be noted that the pump runs hot.",
+     "It should be noted that the pump runs hot."),
+    ("g27_note_delete_unsafe_keep", "Check it. Please note that the door is locked.",
+     "Check it. Please note that the door is locked."),
+    ("g28_conclusion_delete_unsafe_keep", "In conclusion, the plan works.", "In conclusion, the plan works."),
+    ("g29_majority_unsafe_keep", "The majority of the valves are open.", "The majority of the valves are open."),
     ("g30_large_number", "We saw a large number of faults.", "We saw many faults."),
     ("g31_able_to", "We are able to finish today.", "We can finish today."),
     ("g32_first_of_all", "First of all, lock the door.", "First, lock the door."),
@@ -91,7 +95,7 @@ GOLDEN = [
     ("g41_in_terms_of", "The check is good in terms of safety.", "The check is good for safety."),
     ("g42_list_item", "- Test the pump, e.g. the inlet.", "- Test the pump, for example, the inlet."),
     ("g43_table_cell", "| 1 | Close it in order to isolate. |", "| 1 | Close it to isolate. |"),
-    ("g44_comma_after_phrase", "Stop, in order to test.", "Stop to test."),
+    ("g44_comma_unsafe_keep", "Stop, in order to test.", "Stop, in order to test."),
     ("g45_prior_to_start", "Prior to startup, check the oil.", "Before startup, check the oil."),
 ]
 
@@ -277,10 +281,8 @@ class GateFixTests(_GateCase):
         self.assertNotEqual(hso(run).get("permissionDecision"), "deny")
         self.assertIn("STE008", run.stdout)
 
-    def test_11_fixer_crash_refuses_the_write(self):
-        # Plan 2b: a fixer crash must refuse the write. decisions/gate-hooks-fail-closed.md is on
-        # origin/main, and its ruling covers a process crash, not a Python exception caught in
-        # the gate. This case follows the plan. Report the conflict; see the brief.
+    def _crash_gate(self):
+        # A copy of the gate whose apply_fixes writes a marker and then raises.
         d = os.path.join(self.tmp.name, "gate")
         os.makedirs(d)
         for src in glob.glob(os.path.join(HERE, "*.py")):
@@ -290,14 +292,32 @@ class GateFixTests(_GateCase):
         with open(os.path.join(d, "ste_lint.py"), "a", encoding="utf-8") as f:
             f.write("\n\ndef apply_fixes(text):\n    open(%r, 'w').close()\n"
                     "    raise RuntimeError('fixer crash')\n" % marker)
-        run = run_gate(os.path.join(d, "ste_gate.py"), {
-            "hook_event_name": "PreToolUse", "tool_name": "Write",
-            "tool_input": {"file_path": self._path("crash.md"),
-                           "content": "We don't stop the pump.\n"}})
+        return os.path.join(d, "ste_gate.py"), marker
+
+    def test_11_fixer_crash_falls_back_to_deny_and_exits_zero(self):
+        # Ruling (decisions/gate-hooks-fail-closed.md): a crash does not refuse. The gate skips
+        # the rewrite, keeps today's behaviour (deny on the lint errors), exits 0, never 2.
+        gate, marker = self._crash_gate()
+        run = run_gate(gate, {"hook_event_name": "PreToolUse", "tool_name": "Write",
+                              "tool_input": {"file_path": self._path("crash.md"),
+                                             "content": "We don't stop the pump.\n"}})
+        self.assertNotEqual(run.returncode, 2)
+        self.assertEqual(run.returncode, 0, run.stderr)
         self.assertTrue(os.path.exists(marker), "the fixer never ran")
         out = hso(run)
         self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertIn("STE008", out["permissionDecisionReason"])
         self.assertNotIn("updatedInput", out)
+
+    def test_11b_fixer_crash_on_clean_text_allows(self):
+        gate, marker = self._crash_gate()
+        run = run_gate(gate, {"hook_event_name": "PreToolUse", "tool_name": "Write",
+                              "tool_input": {"file_path": self._path("clean.md"),
+                                             "content": "The pump runs at low speed.\n"}})
+        self.assertNotEqual(run.returncode, 2)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertTrue(os.path.exists(marker), "the fixer never ran")
+        self.assertEqual(run.stdout.strip(), "")
 
     def test_12_fence_only_write_no_output(self):
         run = self._pre("Write", {"file_path": self._path("fence.md"),
@@ -312,6 +332,31 @@ class GateFixTests(_GateCase):
         reason = out["permissionDecisionReason"]
         self.assertIn("STE001", reason)
         self.assertNotIn("STE008", reason)
+
+    # Unsafe patterns (ruling 2): the fixer leaves the text unchanged, so the gate must not
+    # rewrite it, and must still deny on the lint error.
+
+    def test_14_unsafe_latin_vs_cf_via_denied_not_rewritten(self):
+        content = "Compare Option A vs. Option B.\n\nSee cf. section 4.\n\nSend it via email.\n"
+        out = hso(self._pre("Write", {"file_path": self._path("latin.md"), "content": content}))
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertIn("STE007", out["permissionDecisionReason"])
+        self.assertNotIn("updatedInput", out)
+
+    def test_15_unsafe_would_denied_not_rewritten(self):
+        out = hso(self._pre("Write", {"file_path": self._path("would.md"),
+                                      "content": "They'd finished the work.\n"}))
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertIn("STE008", out["permissionDecisionReason"])
+        self.assertNotIn("updatedInput", out)
+
+    def test_16_unsafe_deletions_and_majority_denied_not_rewritten(self):
+        content = ("In conclusion, the plan works.\n\nThe majority of the valves are open.\n\n"
+                   "We will check it.\n")
+        out = hso(self._pre("Write", {"file_path": self._path("bloat.md"), "content": content}))
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertIn("STE011", out["permissionDecisionReason"])
+        self.assertNotIn("updatedInput", out)
 
 
 # ------------------------------------------------------------------ UI files: no rewrite
