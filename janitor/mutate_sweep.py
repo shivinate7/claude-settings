@@ -740,7 +740,8 @@ MUTATIONS = [
      "sweep",
      '    return bool(hasattr(st, "st_file_attributes")\n                and st.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)\n',
      '    return False\n',
-     'test_is_link_sees_a_junction_and_a_symlink_and_not_a_real_folder'),
+     'test_is_link_sees_a_junction_and_a_symlink_and_not_a_real_folder',
+     "windows"),
 
     # ---- build folders reaped at agent end (decisions/build-dirs-reaped-at-agent-end.md) ----
     ('build dirs: a link named as a build folder is renamed',

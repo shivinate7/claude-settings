@@ -267,8 +267,6 @@ link out of the repository, it finds nothing. A process counts as inside by its
 current directory alone. A process outside the folder that holds a file inside
 is not seen. If the process table is empty or unreadable, the husk is kept.
 
-On Windows, husks are never deleted. The preview lists them as `husk KEEP`,
-with the reason, because Python before 3.12 does not see a junction as a link.
 This tier runs per repository, so `sweep: false` opts it out.
 
 ## Build folders
@@ -285,8 +283,7 @@ A folder stays when a live session or any process has its current directory
 inside, when it is a link, when the worktree is a primary checkout, or when a
 read cannot tell. A `buildDirs` value that is not a list of strings refuses
 all build-folder deletes, defaults included. A later reap and the daily sweep
-delete trash names a child left, under the same process checks. On Windows,
-nothing is deleted.
+delete trash names a child left, under the same process checks. Windows deletes build folders, husks and trash the same way, with `is_link` as the gate.
 
 ## How you opt out
 
