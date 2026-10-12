@@ -6461,8 +6461,9 @@ add("floor: Agent record-writer with model sonnet is still allowed", "allow",
 # fixed form "Try N of 3" steps a builder up: try 3 needs opus, tries 1 and 2 stay on sonnet.
 # A reviewer's round 1 runs on the role's table model. Prose that quotes a round without the
 # fixed form is never a signal. A missing model is not read from the env default by the floor,
-# so the floor allows it (pinned below).
-STEP_UP = "roles-third-try-steps-up"
+# so the floor allows it. Step-up still denies a reviewer round 2 or 3 that does not name sonnet
+# (pinned below).
+STEP_UP ="roles-third-try-steps-up"
 add("floor step-up: reviewer Round 2 of 3 on haiku is denied", "deny", STEP_UP,
     tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="haiku", subagent_type="reviewer")
 add("floor step-up: reviewer Round 3 of 3 on haiku is denied", "deny", STEP_UP,
@@ -6471,8 +6472,14 @@ add("floor step-up: reviewer Round 2 of 3 on opus is denied (ceiling)", "deny", 
     tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="opus", subagent_type="reviewer")
 add("floor step-up: reviewer Round 2 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="sonnet", subagent_type="reviewer")
-add("floor step-up: reviewer Round 2 of 3 with no model is allowed (floor pin)", "allow",
-    tool="Agent", prompt="Round 2 of 3. Re-check the diff.", subagent_type="reviewer")
+add("floor step-up: reviewer Round 2 of 3 with no model is denied (no sonnet named)", "deny",
+    STEP_UP, tool="Agent", prompt="Round 2 of 3. Re-check the diff.", subagent_type="reviewer")
+add("floor step-up: reviewer Round 3 of 3 with model inherit is denied", "deny", STEP_UP,
+    tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="inherit",
+    subagent_type="reviewer")
+add("floor step-up: reviewer Round 2 of 3 on claude-sonnet-5-5 is allowed", "allow",
+    tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="claude-sonnet-5-5",
+    subagent_type="reviewer")
 add("floor step-up: builder Try 3 of 3 on sonnet is denied", "deny", STEP_UP,
     tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="sonnet", subagent_type="builder")
 add("floor step-up: builder Try 3 of 3 on opus is allowed (standing word)", "allow",
