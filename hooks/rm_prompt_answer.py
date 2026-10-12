@@ -4,7 +4,8 @@
 Deferred item rm-prompt-answer-hook, decision rm-on-a-variable-needs-a-guard (owner, 2026-10-11).
 It answers allow only when all of these hold, and prints nothing otherwise:
 - `permission_mode` is "bypassPermissions";
-- the command is only simple assignments and `rm` calls, with no pipe;
+- the command is only simple assignments and `rm` calls, with no pipe, and it binds no name
+  that an rm target does not expand;
 - each `rm` target is one `${NAME:?}` plus plain folder names;
 - NAME is assigned once, before the rm, to a plain literal that guard.py's `_rm_target_bad`
   does not read as /, home, the cwd or a parent of either.
@@ -33,7 +34,7 @@ def allowed(command: str, cwd: str) -> bool:
     segments = guard.split_segments(command, ends)
     if "|" in ends or "||" in ends:
         return False
-    bound, deletes = {}, 0
+    bound, used, deletes = {}, set(), 0
     for segment in segments:
         tokens = guard.segment_tokens(segment)
         if tokens is None:
@@ -53,6 +54,7 @@ def allowed(command: str, cwd: str) -> bool:
                     return False
                 if guard._rm_target_bad(bound[m.group(1)] + m.group(2), cwd):
                     return False
+                used.add(m.group(1))
             deletes += 1
             continue
         for token in tokens:
@@ -62,7 +64,7 @@ def allowed(command: str, cwd: str) -> bool:
             if name in bound or not _VALUE.fullmatch(value) or guard._rm_target_bad(value, cwd):
                 return False
             bound[name] = value
-    return deletes > 0
+    return deletes > 0 and used == set(bound)   # a stray binding (IFS, PATH, T=) can redirect the rm
 
 
 def main() -> None:
