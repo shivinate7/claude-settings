@@ -1230,7 +1230,7 @@ class GhHalf(Env):
         self.assertEqual((red, pending), ([], []))
         runs = [{"name": "gates", "status": "completed", "conclusion": c} for c in ("success", "skipped", "neutral")]
         self.assertEqual(merge.Host.judge_runs(runs), ([], []))
-        self.set(checks_seq=[[("gates", "skipping", "")]])  # gates is the one required name in CONFIG
+        self.set(checks_seq=[[("gates", "skipping", ""), ("scope", "pass", "")]])  # a required check skipped beside a passing check reads green
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
 
