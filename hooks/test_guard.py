@@ -1800,6 +1800,48 @@ sh("per-file allow: one -C target repeated, lane restore f.txt then lane restore
    VCS + " -C " + slash(GITWT) + " restore f.txt && " + VCS + " -C " + slash(GITWT)
    + " restore b.txt", "allow", cwd=GITWT)
 
+# FIVE SHAPES THAT RUN A PER-FILE DISCARD IN THE SHARED CHECKOUT. Each one points the discard at
+# the shared checkout while the shell, or a `-C` that names the lane, still reads as the lane. Each
+# verdict is the one main's guard.py gives, probed with GUARD_UNDER_TEST: deny for 1, ask for 2 to
+# 5 (main reads the lane for those, so it asks and does not deny; the branch must not allow).
+# Controls that stay allowed are pinned above: "per-file allow: restore of one modified file"
+# (cwd lane) and "one -C target repeated".
+# 1. --work-tree names the shared checkout, whatever -C says.
+sh("per-file deny: -C lane with --work-tree naming the shared checkout, from a worktree",
+   VCS + " -C " + slash(GITWT) + " --work-tree=" + slash(GITMAIN) + " restore f.txt",
+   "deny", "shared-tree", cwd=GITWT)
+# 2. GIT_WORK_TREE, alone or with GIT_DIR, set by prefix, by `env`, or by `export`.
+for _label, _lead in (("a prefix assignment", ""), ("env", "env "), ("export", None)):
+    for _gitdir in (False, True):
+        _vars = "GIT_WORK_TREE=" + slash(GITMAIN)
+        if _gitdir:
+            _vars += " GIT_DIR=" + slash(GITMAIN) + "/.git"
+        if _lead is None:
+            _cmd = "export " + _vars + "; " + VCS + " restore f.txt"
+        else:
+            _cmd = _lead + _vars + " " + VCS + " restore f.txt"
+        sh("per-file ask: GIT_WORK_TREE naming the shared checkout by %s%s, from a worktree"
+           % (_label, " with GIT_DIR" if _gitdir else ""), _cmd, "ask", "shared-tree", cwd=GITWT)
+# 3. A segment with no -C must not borrow another segment's -C. From the shared checkout, the bare
+# restore runs in the shared checkout whichever side the lane's -C status stands on. main asks.
+sh("per-file ask: -C lane status, then a bare restore f.txt, from the shared checkout",
+   VCS + " -C " + slash(GITWT) + " status && " + VCS + " restore f.txt", "ask", "shared-tree",
+   cwd=GITMAIN)
+sh("per-file ask: a bare restore f.txt, then -C lane status, from the shared checkout",
+   VCS + " restore f.txt && " + VCS + " -C " + slash(GITWT) + " status", "ask", "shared-tree",
+   cwd=GITMAIN)
+# 4. A PowerShell cd into the shared checkout. main asks; the branch must not allow.
+for _cd in ("Set-Location", "sl", "chdir", "Push-Location"):
+    sh("per-file ask: PowerShell %s into the shared checkout, then restore f.txt, from a worktree"
+       % _cd, _cd + " " + slash(GITMAIN) + "; " + VCS + " restore f.txt", "ask", "shared-tree",
+       tool="PowerShell", cwd=GITWT)
+# 5. env's own chdir flags. main does not read them and asks, so ask is pinned.
+sh("per-file ask: env -C into the shared checkout, then restore f.txt, from a worktree",
+   "env -C " + slash(GITMAIN) + " " + VCS + " restore f.txt", "ask", "shared-tree", cwd=GITWT)
+sh("per-file ask: env --chdir into the shared checkout, then restore f.txt, from a worktree",
+   "env --chdir=" + slash(GITMAIN) + " " + VCS + " restore f.txt", "ask", "shared-tree",
+   cwd=GITWT)
+
 # KILL CASES for three mutate_guard entries removed in 78e8446. Each pins today's base verdict.
 # The quoted refspec and the quoted force in a commit message are verdicts; the quoted force on a
 # worktree remove is a logged note, pinned by the LOG_CHECKS_EXTRA entry beside subject_unread_*.
