@@ -6,4 +6,4 @@
 - Licence: Apache-2.0 (LICENSE is the repo-root file)
 - Vendored on 2026-10-12.
 
-Copied unmodified; markdown docs omitted.
+Copied unmodified; markdown docs and unused screenshots omitted.

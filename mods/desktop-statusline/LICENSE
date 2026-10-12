@@ -12,11 +12,6 @@ furnished to do so, subject to the following conditions:
 The above copyright notice and this permission notice shall be included in all
 copies or substantial portions of the Software.
 
-Individual plugins in `plugins/*/` may carry their own LICENSE file. Vendored
-third-party libraries retain their upstream licenses — see each plugin's
-vendor directory (e.g. `plugins/session-metrics/skills/session-metrics/scripts/vendor/charts/`)
-for per-library LICENSE.txt files and terms.
-
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
