@@ -22,7 +22,8 @@ or Explore,
 never two.<!-- rule:roles-one-role-per-worker --> A workflow agent takes the builder or reviewer role through `agentType`. Each
 agent runs its role's model and effort from `subagent-model-cap`, the model-per-role table. An
 unlisted agent runs Sonnet, and that needs no word.<!-- rule:roles-sonnet-is-the-default --> Haiku runs only in the roles that table names. Sonnet is the floor for every other agent.<!-- rule:roles-sonnet-is-the-floor --> Sonnet is
-the ceiling, except Plan and the advisor, which run Opus. Any other agent runs Opus, or any
+the ceiling, except Plan, the advisor, and a builder's third try
+(`roles-third-try-steps-up`), which run Opus. Any other agent runs Opus, or any
 model above Sonnet, only on my word, for the spawn I name.<!-- rule:roles-sonnet-is-the-ceiling --> When a task is Opus-shaped (long-horizon, whole-codebase, or many-hour
 autonomous work), say so in one line before you dispatch, name why, and offer the switch. Then
 wait for my word.<!-- rule:roles-opus-shaped-say-so --> Only on my word, write the repo's
@@ -40,7 +41,7 @@ test-author writes the new cases first and shows them red on the old code. The b
 product code until they go green. CI alone runs the full suites and the mutation harnesses. A
 reviewer hunts bypasses and false alarms and never replays a passing run. The test-author's
 recorded red run is the red proof. A reviewer re-runs it only when that record is missing or
-in doubt. The orchestrator reads CI once, on the head it merges.<!-- rule:roles-each-layer-proves-once --> A change gets at most three review rounds. After round 3, each open finding becomes a limit named under "Holes, named" in the change's decision record, and the PR merges on green.<!-- rule:roles-review-cap-three --> Resume a dead agent by name, never fresh. A finished reviewer's worktree is gone, so send a fresh reviewer the prior report instead.<!-- rule:roles-resume-by-name -->
+in doubt. The orchestrator reads CI once, on the head it merges.<!-- rule:roles-each-layer-proves-once --> A change gets at most three review rounds. After round 3, each open finding becomes a limit named under "Holes, named" in the change's decision record, and the PR merges on green.<!-- rule:roles-review-cap-three --> Builders get two Sonnet tries; if review round 2 fails, the third (`Try 3 of 3`) runs on Opus by the owner's standing word. From round 2 on, a reviewer runs on Sonnet, its ceiling; a reviewer already on Sonnet stays there.<!-- rule:roles-third-try-steps-up --> Resume a dead agent by name, never fresh. A finished reviewer's worktree is gone, so send a fresh reviewer the prior report instead.<!-- rule:roles-resume-by-name -->
 
 **Parallelism, two tiers.** Fan tasks out to workers now, each in its own checkout. A
 workflow run, the ultracode path, is a fan-out too. Give each workflow agent that writes

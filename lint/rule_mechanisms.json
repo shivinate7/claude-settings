@@ -138,6 +138,12 @@
         "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
       }
     },
+    "roles-third-try-steps-up": {
+      "mechanism": {
+        "kind": "guard",
+        "ref": "roles-third-try-steps-up"
+      }
+    },
     "roles-resume-by-name": {
       "mechanism": {
         "kind": "unmechanized",

@@ -7,11 +7,11 @@ and this entry does not reopen it.
 
 The short answer: each agent role has its own pinned model and effort, by owner ruling
 2026-10-07 (see "The model per role"). Sonnet is the default. Haiku runs only in the
-roles the owner named. Opus runs only for Plan, the advisor, and a spawn the owner names.
+roles the owner named. Opus runs only for Plan, the advisor, the builder's third try by standing word (2026-10-12), and a spawn the owner names.
 `CLAUDE_CODE_SUBAGENT_MODEL: sonnet` stays as the fallback. The settings-write ask and the
 expiry both stay, because both key on the model variable and never on the force flag.
 
-## The model per role, ruled 2026-10-07 and 2026-10-10
+## The model per role, ruled 2026-10-07, 2026-10-10 and 2026-10-12
 
 The owner ruled each point in one interview. The reason: Haiku is cheap enough for
 read-only work, tests, review and record-writing, and the owner will measure cost and quality.
@@ -23,8 +23,10 @@ Writing prose and records is not building.
 | Explore, claude-code-guide | haiku | high |
 | test-author | haiku | high |
 | reviewer | haiku | xhigh |
+| reviewer, rounds 2 and 3 | sonnet, the ceiling; set per spawn, which overrides the frontmatter `haiku` | the role's effort |
 | record-writer (`agents/record-writer.md`) | haiku | xhigh |
 | builder | sonnet | medium |
+| builder, try 3 after a FAIL at review round 2 | opus, the owner's standing word of 2026-10-12; set per spawn, which overrides `CLAUDE_CODE_SUBAGENT_MODEL` | the role's effort |
 | Plan (`agents/plan.md`) | opus | high |
 | general-purpose, `claude` | sonnet, by the default | model default |
 | main session | unset, account default | model default |
@@ -47,8 +49,8 @@ A session on an older Claude Code may run Haiku 4.5 for these roles.
 
 ## The ceiling
 
-Sonnet is the ceiling for every role but two standing exceptions, by owner ruling
-2026-10-07. Plan runs Opus. The advisor is `opus`, and agents inherit it. The owner
+Sonnet is the ceiling for every role but three standing exceptions, by owner rulings
+2026-10-07 and 2026-10-12. Plan runs Opus. The advisor is `opus`, and agents inherit it. The builder's third try runs Opus by the owner's standing word of 2026-10-12. The owner
 watches its cost. Any other agent runs Opus only on the owner's word, for the spawn the
 owner names. Enforcement stays prose only: CLAUDE.md `roles-sonnet-is-the-ceiling` states
 it, and `lint/rule_mechanisms.json` records it as `unmechanized`.
@@ -73,6 +75,8 @@ run time. Examples: a variable, a spread, an alias, a concatenation, a ternary, 
 key, a template `${}`. A regex literal that holds a quote also hides the call that follows it. Known limit: a built-in agent with no file here picks
 its own model and never puts it in the tool input. Measured 2026-10-07: the built-in Plan
 ran Opus 5.5 and general-purpose ran Sonnet 5.5. `agents/plan.md` now pins Plan.
+
+The step-up check moves to `hooks/guard.py`, beside the model floor (rule `subagent-model-floor`). It does not stay in the Agent prompt hook in `settings.json`. The check reads the `Round N of 3` or `Try N of 3` line in the brief. A round 2 or 3 reviewer runs on Sonnet, its ceiling. A try 3 builder needs Opus.
 
 Sections after the record-writer boundary keep their Haiku sentences only as evidence of the earlier
 argument. This ruling overrides them.
@@ -403,9 +407,21 @@ Over-provisioning of one lane, a spawn above Sonnet with no word from the owner,
 passes without a prompt. Only prose forbids it, by owner ruling. The Stop guardrail
 reads it after the turn. Question 4 accepts that gap and prices it.
 
-Under-provisioning is caught by nothing before the rework cycle. That was also true
-before the pin was dropped, and it is true again under the floor, which forbids
-Haiku outright.
+Under-provisioning is caught by nothing before the rework cycle, except the step-up.
+The step-up covers a round 2 or 3 reviewer below Sonnet, and a try 3 builder below Opus.
+Elsewhere that was also true before the pin was dropped, and it is true again under the
+floor, which forbids Haiku outright.
+
+The step-up check has named limits, from review rounds 2 and 3:
+
+- Only a line that starts with `Round N of 3` or `Try N of 3` counts. `Round 2/3`,
+  `- Round 2 of 3`, `**Round 2 of 3**` and `# Round 2 of 3` pass unseen.
+- The role compare is exact, so a plugin type such as `x:reviewer` is not checked.
+- A `Workflow` script `agent()` call is not checked.
+- The reviewer test is a substring match on "sonnet". A made-up model such as
+  `opus-sonnet` passes. No real model id holds both names.
+- A round 1 reviewer brief with a prose line that starts `Round 2 of 3` is denied. The
+  refusal names the fix.
 
 ## Where this lives
 
