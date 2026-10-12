@@ -126,8 +126,9 @@ only, so a process outside the folder that holds a file inside is not seen.
 Windows deletes too, since 2026-10-12: `sweep.is_link` reads a junction from the
 reparse-point flag, because `os.path.islink` never sees one (decision
 build-dirs-reaped-at-agent-end, "Builder decisions"). `rmtree` on Windows has no
-symlink-attack guard, so a link swapped in between the read and the delete is
-not covered; that window is the same on every platform.
+symlink-attack guard (`shutil.rmtree.avoids_symlink_attacks` is False there, True on
+POSIX), so on Windows a link swapped in between the read and the delete is not
+covered.
 
 ## The sweep never runs code a repository supplies
 
