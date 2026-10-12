@@ -18,6 +18,11 @@ Contract, from decision gate-hooks-fail-closed:
 - Advisory entries (SessionStart, Stop, PreCompact, SessionEnd, PostToolUse, SubagentStop) exit 0
   when their script is missing, and carry no `onFailure`.
 - CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL equals CLAUDE_CODE_SUBAGENT_MODEL in `env`.
+- Python launcher: every command hook that runs a script through a `g="..."` assignment never
+  execs a python candidate whose `command -v` path contains `/WindowsApps/`. The Microsoft Store
+  alias there hung the guard for 30 s (2026-10-12). A stub alias ahead of a real python must be
+  skipped, so every wrapper runs the real one. With only the alias on PATH, a gate exits 2 with
+  the no-python remedy and an advisory hook exits 0.
 
 Each command string runs through `sh -c` (Git Bash on Windows). The no-python case runs with
 PATH set to one empty folder. The gate commands use only shell builtins, so no python can be found.
@@ -28,6 +33,7 @@ main: `git show origin/main:settings.json > <scratch>/settings.json`).
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -193,6 +199,90 @@ def check_env_subagent_model():
     return w is not None and w == s, "workflow=%r subagent=%r" % (w, s)
 
 
+# a wrapper's script: the `g="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/<script>"` assignment
+LAUNCH_RE = re.compile(r'g="\$\{CLAUDE_CONFIG_DIR:-\$HOME/\.claude\}/([^"]+)"')
+
+
+def launcher_wrappers():
+    """Every command hook that runs a python script, as (id, script, hook)."""
+    out = []
+    for n, (ev, h) in enumerate(hook_entries(load())):
+        m = LAUNCH_RE.search(command_of(h))
+        if m:
+            out.append(("%s#%d %s" % (ev, n, m.group(1)), m.group(1), h))
+    return out
+
+
+def write_file(path, body=""):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:  # LF: the shebang must not get a CR
+        f.write(body)
+
+
+def make_stubs(root):
+    """A fake WindowsApps alias that prints ALIAS and exits 9, and a fake real python that prints REAL."""
+    alias_dir = os.path.join(root, "WindowsApps")
+    real_dir = os.path.join(root, "real")
+    for d, name, body in ((alias_dir, "python3", "echo ALIAS\nexit 9"), (real_dir, "python", "echo REAL")):
+        path = os.path.join(d, name)
+        write_file(path, "#!/bin/sh\n%s\n" % body)
+        os.chmod(path, 0o755)
+    return alias_dir, real_dir
+
+
+def run_launcher(h, script, path_value):
+    """Run one wrapper with the script present, so the python loop is reached."""
+    with tempfile.TemporaryDirectory() as cfg:
+        write_file(os.path.join(cfg, script))
+        return run_sh(command_of(h), {"CLAUDE_CONFIG_DIR": cfg, "PATH": path_value}, PAYLOAD)
+
+
+def launcher_real_ok(r):
+    ok = r.returncode == 0 and r.stdout.strip() == "REAL"
+    return ok, "exit %d; stdout %r; stderr %s" % (r.returncode, r.stdout.strip()[:120], r.stderr.strip()[:120])
+
+
+def case_launcher(h, script, alias_first):
+    def check():
+        with tempfile.TemporaryDirectory() as stubs:
+            alias_dir, real_dir = make_stubs(stubs)
+            path = os.pathsep.join([alias_dir, real_dir]) if alias_first else real_dir
+            r = run_launcher(h, script, path)
+        return launcher_real_ok(r)
+    return check
+
+
+def check_launcher_selection():
+    scripts = {s for _id, s, _h in launcher_wrappers()}
+    missing = sorted(set(GATES) - scripts)
+    return not missing and len(scripts) > 0, "wrapper scripts found: %d; gates missing: %s" % (len(scripts), missing)
+
+
+def check_alias_only_gates():
+    gates = [(i, s, h) for i, s, h in launcher_wrappers() if "exit 2" in command_of(h)]
+    bad = []
+    for i, s, h in gates:
+        with tempfile.TemporaryDirectory() as stubs:
+            alias_dir, _real = make_stubs(stubs)
+            r = run_launcher(h, s, alias_dir)
+        ok, note = remedy_ok(r, "Python")
+        if not ok or "ALIAS" in r.stdout:
+            bad.append("%s: %s, stdout %r" % (i, note, r.stdout.strip()[:40]))
+    return (not bad and len(gates) == len(GATES)), "gates checked %d; wrong: %s" % (len(gates), bad)
+
+
+def check_alias_only_advisory():
+    adv = [(i, s, h) for i, s, h in launcher_wrappers() if "exit 2" not in command_of(h)]
+    bad = []
+    for i, s, h in adv:
+        with tempfile.TemporaryDirectory() as stubs:
+            alias_dir, _real = make_stubs(stubs)
+            r = run_launcher(h, s, alias_dir)
+        if r.returncode != 0 or "ALIAS" in r.stdout:
+            bad.append("%s: exit %d, stdout %r" % (i, r.returncode, r.stdout.strip()[:40]))
+    return (not bad and len(adv) > 0), "advisory checked %d; wrong: %s" % (len(adv), bad)
+
+
 def build_cases():
     settings = load()
     cases = []
@@ -213,6 +303,13 @@ def build_cases():
         if ev in ADVISORY_EVENTS and command_of(h):
             cases.append(("advisory %s exits 0 when script missing: %s" % (ev, command_of(h)[:60]),
                           case_advisory_exit0(h)))
+    cases.append(("launcher selection: python wrappers found, includes every GATE", check_launcher_selection))
+    for i, s, h in launcher_wrappers():
+        cases.append(("launcher control %s: real python alone runs REAL" % i, case_launcher(h, s, False)))
+    for i, s, h in launcher_wrappers():
+        cases.append(("launcher %s: WindowsApps python3 skipped, REAL runs" % i, case_launcher(h, s, True)))
+    cases.append(("launcher alias-only gates: exit 2 with no-python remedy, no ALIAS", check_alias_only_gates))
+    cases.append(("launcher alias-only advisory: exit 0, no ALIAS", check_alias_only_advisory))
     cases.append(("no advisory entry carries onFailure", check_advisory_no_onfailure))
     cases.append(("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL equals CLAUDE_CODE_SUBAGENT_MODEL",
                   check_env_subagent_model))
