@@ -18,6 +18,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -376,6 +377,212 @@ class UiFileTests(_GateCase):
         out = hso(run)
         self.assertEqual(out.get("permissionDecision"), "deny")
         self.assertNotIn("updatedInput", out)
+
+
+# ------------------------------------------------------------------ review round 1 (PR 367)
+# Red pins for the reviewer's findings. Each name starts with its finding number.
+# test_r1_guard_* cases pass today: they hold a failure class the fix must not break.
+
+class ReviewRound1FixerTests(unittest.TestCase):
+    """apply_fixes on Markdown text: links, quotes, fences, front matter, English."""
+
+    # F1 links keep their URL
+    def test_r1_f1_link_url_kept(self):
+        inp = "See [the guide](https://a.example/g) and it's done.\n"
+        out = ste_lint.apply_fixes(inp)[0]
+        self.assertIn("https://a.example/g", out)
+        self.assertIn(out, (inp, "See [the guide](https://a.example/g) and it is done.\n"))
+
+    def test_r1_f1_image_url_kept(self):
+        inp = "See ![alt](u) and it's done.\n"
+        out = ste_lint.apply_fixes(inp)[0]
+        self.assertIn("![alt](u)", out)
+        self.assertIn(out, (inp, "See ![alt](u) and it is done.\n"))
+
+    def test_r1_guard_reference_link_kept(self):
+        inp = "See [a][b] and it's done.\n\n[b]: https://x.y\n"
+        out = ste_lint.apply_fixes(inp)[0]
+        self.assertIn("[a][b]", out)
+        self.assertIn("[b]: https://x.y", out)
+
+    def test_r1_guard_autolink_kept(self):
+        out = ste_lint.apply_fixes("See <https://x.y> and it's done.\n")[0]
+        self.assertIn("<https://x.y>", out)
+
+    # F2 quoted code and quoted links survive
+    def test_r1_f2_quoted_code_kept(self):
+        inp = 'He said "run `x`" and don\'t stop.\n'
+        out = ste_lint.apply_fixes(inp)[0]
+        self.assertIn("run `x`", out)
+        self.assertIn(out, (inp, 'He said "run `x`" and do not stop.\n'))
+
+    def test_r1_f2_quoted_link_url_kept(self):
+        inp = '"[guide](https://a.example/g)" and don\'t stop.\n'
+        out = ste_lint.apply_fixes(inp)[0]
+        self.assertIn("https://a.example/g", out)
+        self.assertIn(out, (inp, '"[guide](https://a.example/g)" and do not stop.\n'))
+
+    # F3a fence content is never rewritten
+    def test_r1_f3a_four_backtick_fence_unchanged(self):
+        inp = "````\n```\nrun don't e.g. here\n```\n````\n"
+        self.assertEqual(ste_lint.apply_fixes(inp)[0], inp)
+
+    def test_r1_f3a_tilde_fence_unchanged(self):
+        inp = "~~~\n```\nrun don't e.g. here\n```\n~~~\n"
+        self.assertEqual(ste_lint.apply_fixes(inp)[0], inp)
+
+    # F4 front matter, and fixes that break English
+    def test_r1_f4_front_matter_unchanged(self):
+        inp = "---\ntags: [a, e.g. b]\n---\n\nText.\n"
+        self.assertEqual(ste_lint.apply_fixes(inp)[0], inp)
+
+    def test_r1_f4_its_been_unchanged(self):
+        # "it is been" is wrong English: 's here is has, not is.
+        self.assertEqual(ste_lint.apply_fixes("It's been tested.\n")[0], "It's been tested.\n")
+
+    def test_r1_f4_there_is_two_unchanged(self):
+        self.assertEqual(ste_lint.apply_fixes("There's two pumps.\n")[0], "There's two pumps.\n")
+
+    def test_r1_f4_per_se_unchanged(self):
+        self.assertEqual(ste_lint.apply_fixes("This is a per se violation.\n")[0],
+                         "This is a per se violation.\n")
+
+    def test_r1_f4_paren_eg_no_stray_comma(self):
+        out = ste_lint.apply_fixes("Check it (e.g.)\n")[0]
+        self.assertIn(out, ("Check it (e.g.)\n", "Check it (for example)\n"))
+
+    def test_r1_f4_final_eg_keeps_period(self):
+        out = ste_lint.apply_fixes("Use tools, e.g.\n")[0]
+        self.assertIn(out, ("Use tools, e.g.\n", "Use tools, for example.\n"))
+
+    # Failure-class guards: CRLF, multi-byte text, lone quote in HTML text
+    def test_r1_guard_crlf_kept(self):
+        self.assertEqual(ste_lint.apply_fixes("We don't stop.\r\nWe don't stop.\r\n")[0],
+                         "We do not stop.\r\nWe do not stop.\r\n")
+
+    def test_r1_guard_multibyte_kept(self):
+        self.assertEqual(ste_lint.apply_fixes("Café — don't stop, e.g. naïve.\n")[0],
+                         "Café — do not stop, for example, naïve.\n")
+
+    def test_r1_guard_jsx_text_in_md_kept(self):
+        self.assertEqual(ste_lint.apply_fixes("<p>Don't</p>\n")[0], "<p>Do not</p>\n")
+
+
+# F4: an ambiguous 's (is or has) or 'd (would or had) stays unchanged. Each form gets its own
+# test, in an ambiguous sentence. Clear forms stay fixable: g16 (it's full), g20 (You'd like).
+AMBIGUOUS_FORMS = [
+    ("youd", "You'd finished the job.\n"),
+    ("wed", "We'd finished the job.\n"),
+    ("theyd", "They'd finished the work.\n"),
+    ("hed", "He'd finished the job.\n"),
+    ("shed", "She'd finished the job.\n"),
+    ("itd", "It'd been finished by noon.\n"),
+    ("thats", "That's been checked.\n"),
+    ("hes", "He's finished the check.\n"),
+    ("shes", "She's finished the check.\n"),
+    ("whats", "What's been done?\n"),
+]
+
+
+def _ambiguous_case(text):
+    def test(self):
+        self.assertEqual(ste_lint.apply_fixes(text)[0], text)
+    return test
+
+
+for _aid, _text in AMBIGUOUS_FORMS:
+    setattr(ReviewRound1FixerTests, "test_r1_f4_ambiguous_" + _aid, _ambiguous_case(_text))
+
+
+class ReviewRound1GateTests(_GateCase):
+    """ste_gate.py, through PreToolUse: the rewrite must match what the file will hold."""
+
+    def _copy_gate(self, appended):
+        # A copy of the gate with `appended` added to the copied ste_lint.py, the seam
+        # _crash_gate uses. The appended apply_fixes overrides the real one.
+        d = os.path.join(self.tmp.name, "gate-%d" % len(appended))
+        os.makedirs(d)
+        for src in glob.glob(os.path.join(HERE, "*.py")):
+            if not os.path.basename(src).startswith("test_"):
+                shutil.copy(src, d)
+        with open(os.path.join(d, "ste_lint.py"), "a", encoding="utf-8") as f:
+            f.write(appended)
+        return os.path.join(d, "ste_gate.py")
+
+    # F3 an Edit that lands inside a code span or a fence is not rewritten inside it
+    def test_r1_f3b_gate_edit_mid_inline_code_not_rewritten(self):
+        target = self._write("span.md", "Run `x` and `don't e.g. stop` now.\n")
+        new = "e.g. stop` now.\n"
+        out = hso(self._pre("Edit", {"file_path": target,
+                                     "old_string": "don't e.g. stop` now.\n", "new_string": new}))
+        self.assertIn(out.get("updatedInput", {}).get("new_string"), (None, new))
+
+    def test_r1_f3_gate_edit_fence_not_rewritten(self):
+        target = self._write("fence.md", "Intro.\n")
+        out = hso(self._pre("Edit", {"file_path": target, "old_string": "Intro.\n",
+                                     "new_string": "````\n```\nrun don't e.g. here\n```\n````\n"}))
+        self.assertNotIn("updatedInput", out)
+
+    # F4 an ambiguous contraction is denied, not rewritten; front matter is never rewritten
+    def test_r1_f4_gate_its_been_denied_not_rewritten(self):
+        out = hso(self._pre("Write", {"file_path": self._path("its.md"),
+                                      "content": "It's been tested.\n"}))
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertIn("STE008", out["permissionDecisionReason"])
+        self.assertNotIn("updatedInput", out)
+
+    def test_r1_f4_gate_front_matter_write_not_rewritten(self):
+        out = hso(self._pre("Write", {"file_path": self._path("fm.md"),
+                                      "content": "---\ntags: [a, e.g. b]\n---\n\nText.\n"}))
+        self.assertNotIn("updatedInput", out)
+
+    def test_r1_f4_gate_front_matter_edit_not_rewritten(self):
+        target = self._write("fm2.md", "---\ntags: [a]\n---\n\nText.\n")
+        out = hso(self._pre("Edit", {"file_path": target, "old_string": "tags: [a]\n",
+                                     "new_string": "tags: [a, e.g. b]\n"}))
+        self.assertNotIn("updatedInput", out)
+
+    # F5 a fix that removes text a later edit needs: no rewrite for the chain
+    def test_r1_f5_multiedit_chain_no_rewrite(self):
+        target = self._write("chain.md", "Old A\n")
+        out = hso(self._pre("MultiEdit", {"file_path": target, "edits": [
+            {"old_string": "Old A\n", "new_string": "We don't stop it.\n"},
+            {"old_string": "We don't stop it.\n", "new_string": "We won't stop it.\n"},
+        ]}))
+        self.assertNotIn("updatedInput", out)
+
+    def test_r1_guard_multiedit_independent_edits_rewritten(self):
+        target = self._write("indep.md", "Old A\n\nOld B\n")
+        out = hso(self._pre("MultiEdit", {"file_path": target, "edits": [
+            {"old_string": "Old A\n", "new_string": "We don't stop it.\n"},
+            {"old_string": "Old B\n", "new_string": "We won't stop it.\n"},
+        ]}))
+        self.assertEqual(out.get("updatedInput"), {"file_path": target, "edits": [
+            {"old_string": "Old A\n", "new_string": "We do not stop it.\n"},
+            {"old_string": "Old B\n", "new_string": "We will not stop it.\n"},
+        ]})
+
+    # F6 a fixer over its time limit: plain lint, exit 0, no rewrite. Seam: the builder adds
+    # the env var STE_FIXER_LIMIT_S (seconds) to ste_gate.py. Today nothing reads it.
+    def test_r1_f6_slow_fixer_falls_back_to_plain_lint(self):
+        gate = self._copy_gate("\n\ndef apply_fixes(text):\n    import time\n    time.sleep(4)\n"
+                               "    return text.replace(\"don't\", \"do not\"), 0\n")
+        with mock.patch.dict(os.environ, {"STE_FIXER_LIMIT_S": "1"}):
+            run = run_gate(gate, {"hook_event_name": "PreToolUse", "tool_name": "Write",
+                                  "tool_input": {"file_path": self._path("slow.md"),
+                                                 "content": "We don't stop the pump.\n"}})
+        self.assertEqual(run.returncode, 0, run.stderr)
+        out = hso(run)
+        self.assertNotIn("updatedInput", out)
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertIn("STE008", out["permissionDecisionReason"])
+
+    # Failure-class guard: multi-byte text through the JSON stdin and stdout of the gate
+    def test_r1_guard_multibyte_gate_write(self):
+        out = hso(self._pre("Write", {"file_path": self._path("mb.md"),
+                                      "content": "Café — don't stop, e.g. naïve.\n"}))
+        self.assertEqual(out.get("updatedInput", {}).get("content"),
+                         "Café — do not stop, for example, naïve.\n")
 
 
 if __name__ == "__main__":
