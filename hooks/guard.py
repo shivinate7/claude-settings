@@ -312,7 +312,12 @@ POWERSHELL_ASSIGNMENT = re.compile(r"^\$[A-Za-z_][A-Za-z0-9_]*$")
 # A wrapper that runs another program in its place, so the CALLED program is a segment's real
 # command word, not the wrapper. `xargs pkill foo` runs pkill, so `xargs` unwraps the same as
 # the rest: the token after it, once its own flags are skipped, is what actually runs.
-COMMAND_WRAPPERS = {"sudo", "env", "command", "nohup", "nice", "time", "doas", "xargs"}
+COMMAND_WRAPPERS = {"sudo", "env", "command", "nohup", "nice", "time", "doas", "xargs",
+                    "timeout", "verdict", "python", "python3"}
+# `timeout` and `python` unwrap only in their wrapper shape: `timeout [flags] DURATION cmd` (Windows
+# `timeout /t 5` is the waiter, not a wrapper) and `python bin/verdict cmd` (the repo's runner).
+DURATION = re.compile(r"^\d+(\.\d+)?[smhd]?$")
+TIMEOUT_FLAGS_WITH_VALUE = {"-k", "-s", "--kill-after", "--signal"}
 
 # A leading shell keyword that opens or joins a control-flow block, never a command itself.
 # `split_segments` cuts on `;`, so the segment after a loop's own semicolon starts with `do`, and
@@ -355,7 +360,8 @@ def _skip_assignments_and_keywords(tokens, index=0):
     checks below, which must see a wrapper such as `nohup` BEFORE any unwrap, not after."""
     end = len(tokens)
     while index < end:
-        if ASSIGNMENT.match(tokens[index]) or tokens[index] in LOOP_KEYWORDS:
+        if (ASSIGNMENT.match(tokens[index]) or tokens[index] in LOOP_KEYWORDS
+                or (tokens[index][:1] == "(" and ASSIGNMENT.match(tokens[index][1:]))):
             index += 1
             continue
         if (POWERSHELL_ASSIGNMENT.match(tokens[index]) and index + 1 < end
@@ -383,8 +389,17 @@ def _resolve_command(tokens):
     end = len(tokens)
     index = _skip_assignments_and_keywords(tokens)
     while index < end and basename(tokens[index]) in COMMAND_WRAPPERS:
+        word, start = basename(tokens[index]), index
         index += 1
         while index < end and tokens[index].startswith("-"):
+            index += 2 if word == "timeout" and tokens[index] in TIMEOUT_FLAGS_WITH_VALUE else 1
+        if word == "timeout" and not (index < end and DURATION.match(tokens[index])):
+            return start
+        if word == "timeout":
+            index += 1
+        if word in ("python", "python3"):
+            if not (index < end and basename(tokens[index]) == "verdict"):
+                return start
             index += 1
         while index < end and ASSIGNMENT.match(tokens[index]):
             index += 1
