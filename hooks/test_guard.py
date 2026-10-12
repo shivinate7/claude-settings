@@ -3467,13 +3467,64 @@ sh("ln: a hard link over a directory name is not symbolic", "ln /opt/tool/x real
 # Rule 9, approved by the owner. A pause between polls turns waiting into a loop of turns that
 # each print a word.
 
+# Narrowed by the owner, 2026-10-12. One foreground sleep under 25 seconds is allowed, anywhere
+# in the command. A loop, two sleeps with a check between them, and a sleep of 25 seconds or
+# more are refused. A watcher is refused in the foreground and allowed in the background.
+# "waiter: a bare sleep" keeps its name: hooks/mutate_guard.py selects this case by that name.
 sh("waiter: a bare sleep", "sleep 30", "deny", "waiter", cwd=NOGIT)
-sh("waiter: sleep ahead of a poll", "sleep 5 && gh pr list", "deny", "waiter", cwd=NOGIT)
-sh("waiter: Start-Sleep on PowerShell", "Start-Sleep -Seconds 10", "deny", "waiter",
+sh("waiter: one sleep 5 is allowed", "sleep 5", "allow", cwd=NOGIT)
+sh("waiter: sleep 24, under 25 seconds, is allowed", "sleep 24", "allow", cwd=NOGIT)
+sh("waiter: sleep 25, at the limit, is refused", "sleep 25", "deny", "waiter", cwd=NOGIT)
+sh("waiter: one short sleep ahead of a poll is allowed", "sleep 5 && gh pr list", "allow",
+   cwd=NOGIT)
+sh("waiter: a short sleep ahead of a later call is allowed", "cd a && sleep 15; gh run list",
+   "allow", cwd=NOGIT)
+sh("waiter: a 30 s sleep ahead of a later call is refused", "cd a && sleep 30; gh run list",
+   "deny", "waiter", cwd=NOGIT)
+sh("waiter: an until-loop waiting on a file is refused", "until [ -s f ]; do sleep 2; done",
+   "deny", "waiter", cwd=NOGIT)
+sh("waiter: two sleeps, each followed by a check, are refused",
+   "sleep 5; gh run view 1; sleep 5; gh run view 1", "deny", "waiter", cwd=NOGIT)
+sh("waiter: Start-Sleep -Seconds 10 is allowed", "Start-Sleep -Seconds 10", "allow",
+   tool="PowerShell", cwd=NOGIT)
+sh("waiter: a PowerShell while-loop with Start-Sleep is refused",
+   "while (-not (Test-Path f)) { Start-Sleep -Seconds 2 }", "deny", "waiter",
+   tool="PowerShell", cwd=NOGIT)
+sh("waiter: a PowerShell for-loop with Start-Sleep is refused",
+   "for ($i = 0; $i -lt 5; $i++) { Start-Sleep -Seconds 2 }", "deny", "waiter",
    tool="PowerShell", cwd=NOGIT)
 sh("waiter: timeout /t on Windows cmd", "timeout /t 5", "deny", "waiter", cwd=NOGIT)
 
-sh("waiter: a tool that waits once is allowed", "gh pr checks 12 --watch", "allow", cwd=NOGIT)
+# A watcher blocks the foreground call. The same watcher is allowed under run_in_background,
+# because the harness tracks that job and the session waits for its completion notice.
+sh("waiter: a foreground gh pr checks --watch is refused", "gh pr checks 12 --watch", "deny",
+   "waiter", cwd=NOGIT)
+sh("waiter: a foreground gh run watch is refused", "gh run watch 7", "deny", "waiter",
+   cwd=NOGIT)
+add("waiter: gh run watch under run_in_background is allowed", "allow", cwd=NOGIT,
+    command="gh run watch 7", run_in_background=True)
+add("waiter: gh pr checks --watch under run_in_background is allowed", "allow", cwd=NOGIT,
+    command="gh pr checks 5 --watch", run_in_background=True)
+add("waiter: a short sleep before a background watcher is allowed", "allow", cwd=NOGIT,
+    command="sleep 5; gh run watch 7", run_in_background=True)
+
+# A sleep, a timeout /t, or a loop inside quoted text or a heredoc body is data, not a command.
+# Each shape is one that split_segments could cut in the wrong place.
+sh('waiter: sleep inside double quotes is allowed', 'echo "sleep 99"', "allow", cwd=NOGIT)
+sh('waiter: a semicolon then sleep inside double quotes is allowed', 'echo "a; sleep 99"',
+   "allow", cwd=NOGIT)
+sh('waiter: timeout /t inside double quotes is allowed', 'echo "timeout /t 5"', "allow",
+   cwd=NOGIT)
+sh("waiter: a multi-line quoted string with a sleep line is allowed",
+   'echo "first line\nsleep 5 later"', "allow", cwd=NOGIT)
+sh("waiter: a sleep line in a heredoc body is allowed",
+   "cat > notes.txt <<'EOF'\nsleep 5\nEOF", "allow", cwd=NOGIT)
+sh("waiter: a lone apostrophe in a heredoc body is allowed",
+   "cat <<'EOF'\nDon't sleep 5 here\nEOF", "allow", cwd=NOGIT)
+sh("waiter: a loop inside a heredoc body is allowed",
+   "cat <<'EOF'\nwhile true; do sleep 5; done\nEOF", "allow", cwd=NOGIT)
+sh("waiter: a comment opener in quotes does not hide a loop, refused",
+   'echo "it\'s # fine"; while true; do sleep 5; done', "deny", "waiter", cwd=NOGIT)
 sh("waiter: a readiness check is allowed", "curl --retry 5 http://localhost:3000", "allow",
    cwd=NOGIT)
 sh("waiter: an unrelated log query is allowed", VCS + " log --since=yesterday", "allow", cwd=NOGIT)
@@ -4001,7 +4052,7 @@ for wrapped in (
 sh("env: timeout N does not make cat a runner", "timeout 60 cat --env-file=" + ENV, "deny",
    "env-file", cwd=NOGIT)
 sh("env: timeout /t is still a waiter", "timeout /t 5", "deny", "waiter", cwd=NOGIT)
-sh("env: timeout N ahead of sleep is still a waiter", "timeout 60 sleep 5", "deny", "waiter",
+sh("env: timeout N ahead of one short sleep is allowed", "timeout 60 sleep 5", "allow",
    cwd=NOGIT)
 sh("env: timeout N ahead of a slash switch is still a waiter", "timeout 5 /t 5", "deny",
    "waiter", cwd=NOGIT)
