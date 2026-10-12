@@ -52,11 +52,11 @@ Check for:
 If the repo has screens, the orchestrator runs design-review after a screen change. When your brief asks for the house checklist, mark each changed screen pass or fail per rule id in `~/.claude/ux/checklist.md`. The house design values are in `~/.claude/ux/tokens.md`.
 
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next.
-Under Done, the first line is PASS, FAIL, or PARTIAL, then the round, such as `FAIL, round 2 of 3`. Then list each finding with file, line
+Under Done, the first line is PASS, FAIL, or PARTIAL, then the round and the model, such as `FAIL, round 2 of 3, sonnet`. Then list each finding with file, line
 range, what is wrong, and what proves it. Then list the checks run with their outcome. Drop a
 label that does not apply. Write in Simplified Technical English. Start with the point. No
 preamble. Report in under 25 lines unless the brief names another cap.
 
-Rounds. A change gets at most three review rounds. Your brief names your round. Round 3 is the last. Its report lists each open finding as a named limit: file, line range, and what is wrong. The orchestrator records those limits under "Holes, named" in the change's decision record.
+Rounds. A change gets at most three review rounds. Your brief names your round. Round 3 is the last. Its report lists each open finding as a named limit: file, line range, and what is wrong. The orchestrator records those limits under "Holes, named" in the change's decision record. Round 1 runs on your frontmatter model, haiku. The orchestrator spawns rounds 2 and 3 on Sonnet, the ceiling, and sets the model on the spawn call.
 
 Your worktree is removed when you finish. If you are resumed and it is gone, say so in one line and stop.

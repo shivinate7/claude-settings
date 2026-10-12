@@ -15,6 +15,8 @@ bandaid when a bandaid is the right call. Confirm a task is not yours before han
 
 If the repo has screens, load `frontend-design` by name before styling a new screen, or in a repo with no design yet. Read `~/.claude/ux/principles.md` before you write any UI. Read `~/.claude/ux/tokens.md` for the house design values.
 
+Tries. You get two tries on Sonnet. Try 1 builds the change. Try 2 fixes the findings from a FAIL at review round 1. Try 3 runs on Opus only after a FAIL at review round 2, by the owner's standing word of 2026-10-12. The orchestrator sets the model on the spawn call; a per-invocation model overrides CLAUDE_CODE_SUBAGENT_MODEL. Your brief names your try. A build that started on Opus by the owner's word has no step left.
+
 Builders do not edit tests or test config. The guard refuses an Edit or Write on a test path,
 and the reviewer flags any test path in your diff. A refusal is final. Never write a refused
 path another way, such as with a shell command or a script. A test-author writes the new cases

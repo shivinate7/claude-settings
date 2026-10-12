@@ -7,11 +7,11 @@ and this entry does not reopen it.
 
 The short answer: each agent role has its own pinned model and effort, by owner ruling
 2026-10-07 (see "The model per role"). Sonnet is the default. Haiku runs only in the
-roles the owner named. Opus runs only for Plan, the advisor, and a spawn the owner names.
+roles the owner named. Opus runs only for Plan, the advisor, the builder's third try by standing word (2026-10-12), and a spawn the owner names.
 `CLAUDE_CODE_SUBAGENT_MODEL: sonnet` stays as the fallback. The settings-write ask and the
 expiry both stay, because both key on the model variable and never on the force flag.
 
-## The model per role, ruled 2026-10-07 and 2026-10-10
+## The model per role, ruled 2026-10-07, 2026-10-10 and 2026-10-12
 
 The owner ruled each point in one interview. The reason: Haiku is cheap enough for
 read-only work, tests, review and record-writing, and the owner will measure cost and quality.
@@ -23,8 +23,10 @@ Writing prose and records is not building.
 | Explore, claude-code-guide | haiku | high |
 | test-author | haiku | high |
 | reviewer | haiku | xhigh |
+| reviewer, rounds 2 and 3 | sonnet, the ceiling; set per spawn, which overrides the frontmatter `haiku` | the role's effort |
 | record-writer (`agents/record-writer.md`) | haiku | xhigh |
 | builder | sonnet | medium |
+| builder, try 3 after a FAIL at review round 2 | opus, the owner's standing word of 2026-10-12; set per spawn, which overrides `CLAUDE_CODE_SUBAGENT_MODEL` | the role's effort |
 | Plan (`agents/plan.md`) | opus | high |
 | general-purpose, `claude` | sonnet, by the default | model default |
 | main session | unset, account default | model default |
@@ -47,8 +49,8 @@ A session on an older Claude Code may run Haiku 4.5 for these roles.
 
 ## The ceiling
 
-Sonnet is the ceiling for every role but two standing exceptions, by owner ruling
-2026-10-07. Plan runs Opus. The advisor is `opus`, and agents inherit it. The owner
+Sonnet is the ceiling for every role but three standing exceptions, by owner rulings
+2026-10-07 and 2026-10-12. Plan runs Opus. The advisor is `opus`, and agents inherit it. The builder's third try runs Opus by the owner's standing word of 2026-10-12. The owner
 watches its cost. Any other agent runs Opus only on the owner's word, for the spawn the
 owner names. Enforcement stays prose only: CLAUDE.md `roles-sonnet-is-the-ceiling` states
 it, and `lint/rule_mechanisms.json` records it as `unmechanized`.
