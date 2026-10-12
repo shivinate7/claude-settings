@@ -12,6 +12,10 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    Never guess which step is slow. Measure wall time on the slowest job, not runner minutes
    alone: a cut off a job that is not the slowest saves money, not waiting. Also read the billed
    minutes each week, and set a spending alarm in the billing settings. See `snippets.md`.
+   Time the before and the after back to back, under the same machine load. Note the load
+   beside each time: CPU use, and what else ran. A time taken under load does not compare with
+   one taken on a quiet machine. (2026-10-12: a guard suite read 3500 s under load, against
+   929 s and 1123 s on a quieter machine.)
 2. **Check what exists.** Read the current workflow and the log before you build a speedup. The
    step may already run in parallel, or be cached.
 3. **Gate slow checks on their inputs.** Run a slow check after a change to the files it reads.
@@ -42,9 +46,15 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    PR will be ready at about the same time, offer one integration branch. A repo may name one
    session to batch PRs and run each merge, on the owner's word.
 9. **Wait without loops.** Watch a run once, in the background, and keep its output. Never poll
-   with a sleep loop.
+   with a sleep loop. A repeated `gh run view` or `gh pr checks` without `--watch` is a poll. Use
+   a one-shot wait: `gh pr checks <n> --watch` or `gh run watch <id>`, run once. (About 1,600
+   such calls in transcripts, mods plan B5. Decision agents-wait-with-monitor: agents wait with
+   the Monitor tool.) See `snippets.md`.
 10. **Prove each new gate red once.** Break the gate's target on a scratch copy. Watch the gate
    fail. Restore the target. A gate you did not see go red is not proven.
+   A pipe hides a gate's exit code. `lint | tail -1` exits 0 when lint fails, so a commit after
+   it runs on a red gate. Gate on the command's own exit code. See `snippets.md`, section 10.
+   (Incident 2026-10-12: three records pushed with STE errors.)
 11. **No CI on a draft.** Run the PR workflow on `opened`, `synchronize`, `reopened` and
     `ready_for_review`, and skip each job while the PR is a draft. Work in a draft. Mark it ready
     once. A draft cannot merge, so it needs no check yet. Read the protection rules first: see
@@ -52,6 +62,10 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     A workflow that also has `on: push` for all branches still runs on a draft branch.
     `gh pr create --draft` then `gh pr ready` fires two runs: keep the draft state in the
     `concurrency` group (step 4), or the skipped draft run cancels an in-progress ready run.
+    After `gh pr ready`, a run of only skipped jobs proves nothing. Wait for a run on the head
+    that ran, or dispatch one. See `snippets.md`, section 5b. Never mark ready in the same second
+    as the create. (Decision merge-needs-a-proven-head: a merge needs a proven head. PRs 357 and
+    362.)
 12. **Cheap checks first.** Give each expensive job `needs:` the cheap static job. A red static
     check then stops the shards from starting.
 13. **Merge tiny jobs.** Each job bills whole minutes, rounded up, plus its own setup. Put checks
@@ -84,6 +98,10 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 
 Branch protection decides if a skipped job counts as passing. Read the protection rules first.
 See `snippets.md`.
+
+The required check names are a copy of `merge.requiredChecks` in `.github/stamp.json`. A rename
+edits both. A PUT on the protection API replaces the whole rule, so it drops any field you leave
+out. (Decision main-branch-protection: the required checks on main.)
 
 ## Docs
 
