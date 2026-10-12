@@ -53,13 +53,13 @@ Builder decisions:
 
 - Windows deletes the same as macOS and Linux, since 2026-10-12. `sweep.is_link` is the one
   link test: a symlink, or a reparse point read from `os.lstat`, because `os.path.islink` never
-  sees a junction. Proven on this box with real junctions (`mklink /J`): a junction named as a
-  build folder is kept, a junction inside a build folder is unlinked and its target untouched,
-  and a worktree that is itself a junction is not scanned. Owner's word, 2026-10-12: "the
+  sees a junction. Proven on this box with real junctions (`mklink /J`). A junction named as a
+  build folder is kept. A junction inside a build folder is unlinked, and its target is
+  untouched. A worktree that is itself a junction is not scanned. Owner's word, 2026-10-12: "the
   Windows junction check for #345", the brief's first task, whose stated end is a reap that
   deletes on Windows behind that check. Named limits: `shutil.rmtree` on Windows has no
-  symlink-attack guard (POSIX has one), so there a link swapped in after the rename and before
-  the child's delete is not covered. No mutant covers the `is_link(target)` guard in
+  symlink-attack guard, and POSIX has one. So on Windows a link swapped in after the rename
+  and before the child's delete is not covered. No mutant covers the `is_link(target)` guard in
   `reap_build_dirs`, nor the `is_link` refusals in `trash_verdict` and `find_trash`; their
   cases are Windows-only. The `DELETE_CHILD` check cannot go red, because `rmtree` refuses a
   top-level junction by itself.
