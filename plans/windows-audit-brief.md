@@ -3,18 +3,28 @@
 Owner: shivinate7. Repo: shivinate7/claude-settings. Written 2026-10-11 by the orchestrator of session
 1b2c13df, at wind-down.
 
-## The two outcomes
+## What this repo is for
 
-Judge every change by these two outcomes for the owner:
+Read `README.md` and `CLAUDE.md` first. The repo is the one source of truth for the owner's
+user-level Claude Code config. Every local and cloud session, in every repo and on every machine,
+installs it. `CLAUDE.md` is the set of rules that each of those sessions follows. Judge the repo by
+how well those sessions serve the owner: correct work, no lost work, and little of the owner's time
+and attention spent. The rule `outcomes-judge-by-outcome` in `CLAUDE.md` governs.
 
-1. No "allow once" prompts for actions the owner always allows. The owner denies about 1 in 10,000.
-2. Agents and sessions stay tidy. Each one cleans up after itself. None runs a command that can affect
-   a fellow agent, another session or the parent session.
+## Two recent owner concerns
+
+These came from the last session. They are two concerns among many, not the repo's purpose:
+
+1. Claude prompts the owner to "allow once" for actions the owner always allows. The owner denies
+   about 1 in 10,000.
+2. Agents and sessions must clean up after themselves, and never run a command that can affect a
+   fellow agent, another session or the parent session.
 
 ## Read first
 
 - `plans/windows-audit-grade.txt`: a Fable grade of the whole repo (C+). It has the evidence, the cut
-  list and the next steps in order. Its main finding: `~/.claude/guard.log` logs every guard verdict
+  list and the next steps in order. Caveat: it scored the repo against the two concerns above, so
+  check its cut list against the purpose of the repo before you act on it. Its main finding: `~/.claude/guard.log` logs every guard verdict
   and nobody reads it. 3,838 denies in 23 days. The `waiter` rule alone gave 1,087 denies, because the
   guard refuses `sleep` and `settings.json` denies the Monitor tool. An agent that must wait has no
   allowed way to wait.
@@ -98,8 +108,8 @@ paragraph "In a linked worktree".
 1. #346: green Windows CI, then required checks on main.
 2. #345: the Windows junction check, a review, then merge.
 3. `worktree-file-discard`: finish the gate, re-point the tests, review, PR, merge.
-4. A weekly reader of `guard.log`: denies and asks by rule and by day. This is the meter for both
-   outcomes.
+4. A weekly reader of `guard.log`: denies and asks by rule and by day. It measures what the
+   guard costs every session.
 5. Fix the `waiter` and Monitor collision: give agents one allowed way to wait.
 6. Look at the next two rules by deny count: `silent-write` (920) and `env-file` (558).
 7. Build the `PermissionRequest` hook from `deferred/rm-prompt-answer-hook.md`. The owner granted one
