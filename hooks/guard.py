@@ -360,9 +360,11 @@ def _skip_assignments_and_keywords(tokens, index=0):
     checks below, which must see a wrapper such as `nohup` BEFORE any unwrap, not after."""
     end = len(tokens)
     while index < end:
-        if (ASSIGNMENT.match(tokens[index]) or tokens[index] in LOOP_KEYWORDS
-                or (tokens[index][:1] == "(" and ASSIGNMENT.match(tokens[index][1:]))):
+        if ASSIGNMENT.match(tokens[index]) or tokens[index] in LOOP_KEYWORDS:
             index += 1
+            continue
+        if tokens[index][:1] == "(" and ASSIGNMENT.match(tokens[index][1:]):
+            index += 1   # `(VAR=x cmd`: a subshell paren glued to the first assignment
             continue
         if (POWERSHELL_ASSIGNMENT.match(tokens[index]) and index + 1 < end
                 and tokens[index + 1] == "="):
@@ -3735,6 +3737,11 @@ def _env_words(segment: str):
     while position < len(words) and ASSIGNMENT.match(words[position]):
         position = _assignment_end(words, position)
     head = words[position] if position < len(words) else ""
+    # Look through `timeout N`, `verdict` and a glued `(` the same way every rule does.
+    wrapped = resolve_command(words[position:])
+    if wrapped:
+        position += wrapped
+        head = words[position]
     command = head.strip("'\"").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     if command in ENV_TEXT_COMMANDS:
         # `printf '<name>\n'` prints the name and a newline: the escape ends the word.
