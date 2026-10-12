@@ -1,0 +1,78 @@
+**Whole-repo grade: C+.** Four weeks old (first commit 2026-09-14), 1,383 commits, 327 merged PRs, 52k lines of code of which 60% are tests, 101 rules, 79 decision records. The machinery is serious and mostly honest about its limits. It is not yet pointed at the two outcomes: the repo measures its code well and its outcomes almost never. The one log that does measure outcomes, `~/.claude/guard.log`, nobody reads.
+
+## The number that frames everything
+
+`hooks/guard.py:4401-4412` appends every verdict to `~/.claude/guard.log`. 23 days, 9,537 lines: 5,508 noted, 3,837 deny, 174 ask. On 2026-10-10 and 10-11: 594 and 523 denies per day. Each deny is one agent turn thrown away, then a retry.
+
+Top deny rules: `waiter` 1,087, `silent-write` 920, `env-file` 558, `detached-launch` 296, `test-author-scope` 237, `shared-tree` 205, `machine-wide-kill` 135. `waiter` alone is 28% of all denies: agents reach for `sleep`, the guard refuses, and `settings.json` also denies the `Monitor` tool, so an agent that must wait on a condition has no allowed way to do it. The repo's two wait rules collide with each other and cost about 47 denies per day.
+
+The asks: 94 `shared-tree`, 58 `force-push`, 22 `subagent-model-cap` in 23 days. Only 42 of the 94 are `git checkout`/`restore`, and the last 8 days hold 9 asks in total. So the worktree-discard branch's "prompt frequency is unmeasured" is wrong: it is measured, in this log, at about 1 to 2 per day. The record's claim that "an ask leaves no line" names the wrong file.
+
+## Area 1: review rounds. Grade C
+
+- 327 merged PRs: median 2 commits, mean 4.9, p90 12, max 76. 39 PRs (12%) carry 10 or more commits; 12 carry 20 or more. Median open-to-merge 0.5 h, p90 2.6 h. GitHub reviews: 0. GitHub comments: 4. Every review happens inside agent lanes, so the PR record cannot show rounds; only PR bodies and records do (`decisions/rm-on-a-variable-needs-a-guard.md:39`: "seven review rounds"; PR #340 body: six; #342: three; #338: two).
+- Why rounds pile up: the long PRs are all shell or script scanners in `hooks/guard.py` (6,443 lines, 71 rule names). A reviewer told to "hunt bypasses" (CLAUDE.md `roles-each-layer-proves-once`) against a regex-and-tokenizer model of bash will always find one more form. The day's three largest PRs each ended by writing the remaining forms as "Named limits" (12 such bullets across records) and merging. That is the right end state; it arrives three rounds late.
+- `agents/reviewer.md` and `agents/test-author.md` run on `haiku`; `agents/builder.md` names no model. Whether the model drives the round count: unmeasured.
+- A round takes about one full CI wall clock (8 min) plus the lane. The cost is agent time and owner attention, not GitHub minutes (billable 0: public repo).
+
+Fix shape: a round cap, not a better reviewer. Two rounds; after that every open bypass becomes a named limit in the record and the PR merges. The repo already does this by instinct; make it the rule and the reviewer brief.
+
+## Area 2: CI. Grade C-
+
+`.github/workflows/gates.yml` (705 lines with `impeccable-sync.yml`), ten jobs, one `scope` job that picks the rest from the diff (`gates.yml:33-61`, `.github/scripts/harness-scope.sh`). Draft PRs skip everything (`gates.yml:34`). A full main run is about 8 min wall, about 35 job-minutes: `gates` 4m, `gates-macos` 6m, `gates-windows-guard` 5m, `gates-windows-merge` 8m, `gates-windows-rest` 7m. 1,096 runs in four weeks; 209 on 2026-10-11 alone.
+
+What is wrong:
+
+- No required status checks on main (GitHub 404 on the protection endpoint). CLAUDE.md `git-never-merge-failing-ci` has no mechanism behind it.
+- `gates-windows-guard` red on every main run from 02:47 to 22:25 on 10-11, 14 merges, and still red. The last run fails today's `rm-var` and `swift-test` cases. The repo's own rule says a green check "proves only its platform"; here the Windows platform said red and nothing listened.
+- The draft skip works and is cheap. The `scope` filter is good engineering. Both are keepers.
+- Three Windows jobs with 15 to 20 min timeouts for guard code that runs on the owner's Mac. The Windows cases exist for one measured incident (`decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md`). Whether the owner runs sessions on Windows today: unknown.
+
+## Area 3: testing. Grade B- for code, D for outcomes
+
+- `hooks/test_guard.py`: 7,552 lines, about 1,219 verdict tuples, one process; 173 s on Linux, 122 s on macOS, 330 s on Windows. `hooks/mutate_guard.py` (1,527 lines, about 288 anchors) runs the whole suite per mutant: 176 s. `janitor/mutate_sweep.py` (1,318 lines, about 131 anchors) exists because, per its own docstring, "the builder mutated 22 assertions BY HAND, reported 22 kills, and committed nothing". That is a real incident and a right fix.
+- Red-then-green is practiced: the day's PR bodies cite red commits, and the test-author writes first. The "WRONG CAUSE" verdict in the harnesses (a kill must name the case the mutant claims to break) is above-average rigor.
+- Ratio: 31.8k test lines to 20.1k product lines. For a guard that fires 3,837 times in 23 days, that ratio is defensible. For 7,552 lines in one file with no family split, it is a 3 to 5 minute tax on every guard change, and the mutation harness multiplies it.
+- What the tests prove: that `guard.py` returns the fixture's verdict, and that the janitor stops a fixture process. What they do not prove: that the owner saw fewer prompts, that a false deny rate fell, that two sessions did not collide. The telemetry for those exists and is unread: `guard.log` (asks and denies by rule), `state/agent-end-payloads.jsonl` (199 lines), `state/janitor-runs.jsonl` (44 lines). No check in `lint/` or CI reads any of them. `decisions/` says "unmeasured" 43 times.
+
+## The other areas, briefly
+
+- `hooks/` (guard C+, the rest B): `guard.py` is the repo's centre of mass and its risk. 71 rules, every one a scanner over shell text, each with a named ceiling. The non-guard hooks (`question_outcome.py`, `stall_watch.py`, `precompact_handoff.py`, `sim_boot_record.py`) are small and single-purpose.
+- `janitor/` B: gated on "any read that cannot tell means keep" (`agent_end_reap.py:22-29`), measured incidents, an end-to-end proof script. The closest thing in the repo to outcome 2 done right.
+- `bin/` B: `verdict` is 78 lines and earns its place; today's false-green fix shows the right instinct.
+- `agents/` B-: seven short files, roles clear. The reviewer brief is the lever for Area 1 and it is 60 lines on Haiku.
+- `skills/` B: `impeccable` is vendored Apache-2.0 from `pbakaus/impeccable` with a sync workflow, not home-grown; fine. The four house skills total about 530 lines. `design-review` and `impeccable` serve neither outcome; they serve the owner's other repos.
+- `lint/` B-: `rule_audit.py` is the honest piece: it measures whether CLAUDE.md's "turn each rule into a hook" is true. Answer in `lint/rule_mechanisms.json`: 101 rules, 30 mechanized, 71 argued `unmechanized`. The STE gate and md sweep are prose police; cost per Stop: unknown.
+- `ux/` C: 250 lines, four PRs on 10-11, serves no outcome of this repo.
+- `decisions/` and `deferred/` B-: the form is the best thing in the repo: question, ruling, incident, named limits, what reopens it. 79 records, 6,254 lines; 12 deferred items, the oldest from 2026-09-25. Weakness: 43 "unmeasured" and no record ever closes by measurement.
+- CLAUDE.md and `shiv-stylisms` C: 86 rule anchors in CLAUDE.md plus the style's own; 101 in the audit map. 70% unmechanized means the file is the enforcement after all, in prose, read by every agent every turn. Rule count grows weekly; nothing retires one.
+
+## Cut
+
+1. The `waiter` and `Monitor` deny pair as it stands. Pick one allowed way to wait (a bounded `sleep N`, N at most 60, or the harness's `Monitor` tool) and allow it. 1,087 denies say the current pair is a false block by volume.
+2. `gates-windows-guard` as a silent job. Either it gates main or it leaves; a red job nobody reads is spent (`verification-cry-wolf-guard-is-spent`).
+3. The two remaining heredoc and `cd`-walk scanners on `origin/worktree-file-discard`, as graded earlier: keep the +27 allow and the operand fixes, drop `segment_roots`.
+4. `ux/` and `design-review` from this repo. Move them to the repo they serve, or to a `sharables` repo; they dilute this repo's purpose.
+5. Any CLAUDE.md rule that is unmechanized, has no incident cited, and no deny in `guard.log`. Candidates come from joining `rule_mechanisms.json` with the log; count: unknown until that join runs.
+
+## Keep
+
+The janitor gates and end-to-end proof. The mutation harnesses with WRONG CAUSE. The record form. `verdict`. The draft skip and `scope` filter. `rule_audit.py`. `guard.log` itself, which is the dashboard the repo did not know it had.
+
+## Next, in order
+
+1. Enable required checks on main; make `gates-windows-guard` green or demote it with a record. One PR, under 40 lines.
+2. Land a weekly reader of `guard.log`: denies and asks by rule, denies per day, and the `reverted` and `crash` rows. Publish the first table in a record. This is the outcome meter for both outcomes, and it also settles the ask count the discard branch needed.
+3. Act on the first table: fix the wait collision (cut item 1), then the next two rules by deny volume (`silent-write` 920, `env-file` 558), each by asking whether the deny is right or the agent has no allowed path.
+4. Build the `PermissionRequest` hook from `deferred/rm-prompt-answer-hook.md`; it retires the rm-var guard's remedy text and covers the other 17 Bash prompts if their shapes allow.
+5. Write the round cap into `agents/reviewer.md` and CLAUDE.md: two rounds, then named limits and merge.
+6. Split `hooks/test_guard.py` into case families and teach `harness-scope.sh` to run only the touched families on PRs. Target: under 60 s per PR for a one-rule change.
+7. Retire rules: run the join from cut item 5; rewrite CLAUDE.md in place with the survivors.
+
+## Open questions
+
+- Does the owner run sessions on Windows today? Three Windows jobs and 20-minute timeouts rest on it.
+- Does `shiv-stylisms` or the STE gate reduce the owner's reading time? Unmeasured; no check reads the owner's side.
+- Which of the 594 denies on 10-10 were right? The log holds the matched text; a sample of 50, hand-graded, is a day's work and would set the false-deny rate the whole repo is tuned on.
+
+Files: `/Users/shivinate/.claude/guard.log`, `/Users/shivinate/Developer/claude-settings/hooks/guard.py` (4401-4418), `/Users/shivinate/Developer/claude-settings/.github/workflows/gates.yml` (33-61, 485-531), `/Users/shivinate/Developer/claude-settings/lint/rule_mechanisms.json`, `/Users/shivinate/Developer/claude-settings/hooks/mutate_guard.py`, `/Users/shivinate/Developer/claude-settings/janitor/mutate_sweep.py`, `/Users/shivinate/Developer/claude-settings/agents/reviewer.md`, `/Users/shivinate/Developer/claude-settings/settings.json`.
