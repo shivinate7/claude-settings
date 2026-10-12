@@ -38,15 +38,30 @@ Owner, 2026-10-12: "Fix both now, one lane."
 
 ## What protects it
 
-`merge/test_merge.py`, class `GhHalf`: eight cases added 2026-10-12, four of them red on
-the old reader. The re-pointed `test_a_required_check_that_is_skipped_reads_green` now
-carries a passing `scope` entry beside the skipped one.
+`merge/test_merge.py`, class `GhHalf`: thirteen cases added 2026-10-12 over two rounds,
+nine of them red first. The re-pointed `test_a_required_check_that_is_skipped_reads_green`
+now carries a passing `scope` entry beside the skipped one.
 
 ## Holes, named
 
+Three review rounds, 2026-10-12. Round 1 found two defects: the all-skipped red fired
+while a check was pending, and the dedup hid an older run still in progress. Round 2
+closed both. Round 3 found the rest, named here under the owner's three-round cap.
+
 - The race itself stays. Mark a PR ready only after its push run exists, or dispatch the
   workflow by hand. The tool refuses now; it does not dispatch.
-- A head with one passing check and a skipped required job still reads green. The
-  `scope` job decides which jobs skip, so a passing `scope` check is the proof that a
-  skip is intended. The tool does not check that the passing check is `scope`.
+- Any passing check licenses a skipped required job, not only `scope`. The tool does not
+  check which check passed.
+- An older failure under a newer pass of the same name is superseded, like a cancelled one.
+- `neutral` reads red in `classify` and green in `judge_runs`. Pre-existing split.
+- A passing check beside runs that all skipped reads red, with no remedy. Rare: it needs a
+  newest run that skipped under a check that passed.
+- A required name with no entry beside skipped runs holds the wait to the deadline, with no
+  remedy.
+- The preview (`head_state`) prints a literal `<branch>`; the wait and the read name the
+  real branch.
+- Two workflow files with one `name` share one dedup slot; a job-level failure still reaches
+  `classify`.
+- Pre-existing: with no required names, zero checks and zero runs, the wait reads green
+  after its 30 s settle, while the read says pending.
 - "Newest" follows gh's order, not a timestamp.
