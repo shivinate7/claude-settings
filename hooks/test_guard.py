@@ -57,11 +57,13 @@ GUARD_TESTS_MODES = ("", "windows-slice")
 # read on 2026-10-10 (line numbers are guard.py's):
 #   a backslash: slash() L195; the PowerShell escape L307-313; is_test_rel L4903
 #   a drive letter: the subst and mapped-drive identity L1966-1970; a drive root L3170
+#   a Git Bash drive spelling, /c/...: the nt mapping in _rm_real L5724 (read 2026-10-12)
 #   .exe, .cmd, .ps1 names: L483, L894, L2628, L3296, L4997; the *.test.ps1 suites L4684
 #   NUL and $null: L824; cmd /c and cmd.exe: L2893, L3213-3220
 #   PowerShell, its verbs and taskkill: L320, L2615-2628, L2853-2913, L3933, L3966
 WINDOWS_SHAPE = re.compile(
     r"\\|(?<![A-Za-z])[A-Za-z]:[\\/]|\.(?:exe|cmd|ps1)\b|\bnul\b|\$null\b|\bcmd(?:\.exe)?\s+/c\b"
+    r"|(?<![\w./-])/[A-Za-z](?=/|[\s;\"']|$)"
     r"|\b(?:Start-Job|Start-Process|Stop-Process|Remove-Item|taskkill|powershell|pwsh)\b|PowerShell",
     re.I)
 
