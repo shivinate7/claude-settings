@@ -220,6 +220,8 @@ MUTATIONS = [
      '    for target, root in ((resolved, resolved_root),):', "guard",
      'frozen: the live path stays frozen even though it is a real symlink into the clone '
      '[resolve-branch proof]'),
+    ("frozen-path: drop ux from the frozen config dirs",
+     '    os.path.normcase("ux"),\n', '', "guard", 'frozen: Write of the config ux house rules'),
     ("force-push: forget every forced push",
      '    if not (force or leased or plus or mirror or delete):\n        return ""',
      '    if True:\n        return ""', "guard", 'push: the long force flag'),
@@ -1394,6 +1396,10 @@ MUTATIONS = [
      '    try:\n        reason = run(hook)\n    except Exception:',
      '    try:\n        reason = run(hook)\n        raise RuntimeError("mutant")\n    except Exception:', "ruling",
      "main_missing_git: known-bad pair"),
+    ('rm-var-unguarded: never refuse',
+     '        refuse(tool, "deny", "rm-var-unguarded", rm_var_reason(hits), "; ".join(hits))',
+     '        pass',
+     "guard", 'rm-var: a loop deletes under an unguarded variable'),
 ]
 
 
