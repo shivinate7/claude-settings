@@ -3291,17 +3291,31 @@ NARRATED_TAIL_REASON = (
 WAITER_COMMANDS = ("sleep", "start-sleep")
 
 
+SLEEP_LIMIT = 25   # owner ruling 2026-10-12: one sleep under 25 s is allowed
+LOOP_WORDS = {"while", "until", "for", "foreach", "do"}
+
+
+def sleep_seconds(tokens, index) -> float:
+    """Seconds of one `sleep N` / `Start-Sleep [-Seconds] N`; infinity when unreadable."""
+    scale = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    unit = 1.0
+    for token in tokens[index + 1:]:
+        if token.lower() in ("-milliseconds", "-m"):
+            unit = 0.001
+        if DURATION.match(token):
+            return float(token.rstrip("smhd")) * scale.get(token[-1], 1) * unit
+    return float("inf")
+
+
 def waiter_hit(segment: str) -> str:
-    """Return the matched text when one segment's command word is a sleep-and-poll, else ''."""
+    """Return the matched text for a `timeout /t` wait, else ''. Sleeps and watchers are
+    judged over the whole command by `waiter_verdict`."""
     tokens = segment_tokens(segment)
     if not tokens:
         return ""
     index = resolve_command(tokens)
     if index is None:
         return ""
-    word = basename(tokens[index])
-    if word in WAITER_COMMANDS:
-        return tokens[index]
     # `timeout /t` is read at the first word (`timeout 5 /t 5` waits, and the unwrap would hide
     # it) and at the resolved word (`sudo timeout /t 5`, `verdict timeout /t 5`).
     for at in (_skip_assignments_and_keywords(tokens), index):
@@ -3311,10 +3325,44 @@ def waiter_hit(segment: str) -> str:
     return ""
 
 
+def waiter_verdict(segments, background: bool) -> str:
+    """Return the matched text when a command waits by looping, else ''.
+
+    Refused: a loop around a sleep, two or more sleeps, one sleep of SLEEP_LIMIT seconds or
+    more, `timeout /t`, and a foreground watcher. Allowed: one short sleep, and a watcher that
+    runs with run_in_background."""
+    sleeps, loop, watcher = [], False, ""
+    for segment in segments:
+        tokens = segment_tokens(segment)
+        if not tokens:
+            continue
+        loop = loop or tokens[0].lower() in LOOP_WORDS
+        index = resolve_command(tokens)
+        if index is None:
+            continue
+        word = basename(tokens[index]).lower()
+        # A PowerShell loop keeps its sleep in a `{ ... }` block inside the same segment.
+        for at in sorted({index, *(i + 1 for i, t in enumerate(tokens[:-1]) if t == "{")}):
+            if basename(tokens[at]).lower() in WAITER_COMMANDS:
+                sleeps.append((tokens[at], sleep_seconds(tokens, at)))
+        if word in WAITER_COMMANDS:
+            pass
+        elif word == "gh" and ({"watch", "--watch", "-w"} & set(tokens[index + 1:])):
+            watcher = watcher or "gh " + " ".join(tokens[index + 1:index + 3])
+        elif waiter_hit(segment):
+            return waiter_hit(segment)
+    if sleeps and loop:
+        return sleeps[0][0]
+    if len(sleeps) > 1 or any(seconds >= SLEEP_LIMIT for _, seconds in sleeps):
+        return sleeps[0][0]
+    return "" if background else watcher
+
+
 WAITER_REASON = (
     "a pause between polls turns waiting into a loop of turns that each print a word. "
     "Remedy: use the Monitor tool to wait once for the condition, or run the long command in the background and wait for its completion notice, "
-    "or use a tool that waits once, such as gh run watch <id> --exit-status. Avoid "
+    "or run a watcher such as gh run watch <id> --exit-status once, with run_in_background. "
+    "A single pause under 25 seconds is allowed. Avoid "
     "gh pr checks --watch, which serves a cached status. For a server warm-up, use a "
     "readiness check such as curl --retry."
 )
@@ -3351,7 +3399,7 @@ PATTERN_POLLER_REASON = (
     "every process whose command line names it, including this session's own wrapper for the "
     "same wait, so the condition can stay true long after the work is done. "
     "Remedy: wait on one pid this session started, such as `kill -0 $PID`, or use a tool that "
-    "waits once, such as gh run watch <id> --exit-status."
+    "waits once, such as gh run watch <id> --exit-status run with run_in_background."
 )
 
 
@@ -6083,7 +6131,8 @@ def step_up_hit(tool: str, tool_input) -> str:
 
 
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
-                transcript: str = "", subagent: bool = False) -> None:
+                transcript: str = "", subagent: bool = False,
+                background: bool = False) -> None:
     POWERSHELL_CALL[0] = tool == "PowerShell"
     stripped = strip_heredoc_bodies(raw)
     cmd = norm(stripped)
@@ -6246,11 +6295,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if matched:
             refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)
         poller = loop_condition_polls_a_pattern(segment) or poller
-        matched = waiter_hit(segment)
-        if matched:
-            if poller:
-                refuse(tool, "deny", "waiter", PATTERN_POLLER_REASON, poller + " " + matched)
-            refuse(tool, "deny", "waiter", WAITER_REASON, matched)
+    matched = waiter_verdict(split_segments(stripped), background)
+    if matched:
+        if poller:
+            refuse(tool, "deny", "waiter", PATTERN_POLLER_REASON, poller + " " + matched)
+        refuse(tool, "deny", "waiter", WAITER_REASON, matched)
     matched = narrated_tail_hit(stripped)
     if matched:
         refuse(tool, "deny", "live-stream", NARRATED_TAIL_REASON, matched)
@@ -6562,7 +6611,8 @@ def judge(payload) -> None:
             transcript = payload.get("transcript_path") if isinstance(payload, dict) else ""
             judge_shell(tool, command, cwd, session_id_of(payload), agent_role(payload),
                         transcript if isinstance(transcript, str) else "",
-                        bool(payload.get("agent_id")))
+                        bool(payload.get("agent_id")),
+                        tool_input.get("run_in_background") is True)
             names = [n for seg in split_segments(strip_heredoc_bodies(command))
                      for n in _sim_boot_names(seg)]
             if names:

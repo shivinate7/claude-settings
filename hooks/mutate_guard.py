@@ -529,17 +529,29 @@ MUTATIONS = [
      '        if False:\n'
      '            refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)', "guard", 'stream: tail -f never ends'),
     ("waiter: never refuse a waiter loop (Rule 9)",
-     '        matched = waiter_hit(segment)\n'
-     '        if matched:\n'
-     '            if poller:\n'
-     '                refuse(tool, "deny", "waiter", PATTERN_POLLER_REASON, poller + " " + matched)\n'
-     '            refuse(tool, "deny", "waiter", WAITER_REASON, matched)',
-     '        matched = waiter_hit(segment)\n'
-     '        if False:\n'
-     '            if poller:\n'
-     '                refuse(tool, "deny", "waiter", PATTERN_POLLER_REASON, poller + " " + matched)\n'
-     '            refuse(tool, "deny", "waiter", WAITER_REASON, matched)', "guard",
+     '    matched = waiter_verdict(split_segments(stripped), background)
+'
+     '    if matched:
+'
+     '        if poller:',
+     '    matched = waiter_verdict(split_segments(stripped), background)
+'
+     '    if False:
+'
+     '        if poller:', "guard",
      'waiter: a bare sleep'),
+    ("waiter: a loop around a short sleep is let through",
+     '    if sleeps and loop:
+        return sleeps[0][0]
+',
+     '    if False:
+        return sleeps[0][0]
+', "guard",
+     'waiter: an until-loop waiting on a file is refused'),
+    ("waiter: a foreground watcher is let through",
+     '    return "" if background else watcher',
+     '    return ""', "guard",
+     'waiter: a foreground gh run watch is refused'),
     ("command word: a loop keyword no longer yields to the command inside it (Rule 9's own gap)",
      '        if ASSIGNMENT.match(tokens[index]) or tokens[index] in LOOP_KEYWORDS:',
      '        if ASSIGNMENT.match(tokens[index]):', "guard",
