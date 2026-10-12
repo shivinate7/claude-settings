@@ -76,6 +76,8 @@ key, a template `${}`. A regex literal that holds a quote also hides the call th
 its own model and never puts it in the tool input. Measured 2026-10-07: the built-in Plan
 ran Opus 5.5 and general-purpose ran Sonnet 5.5. `agents/plan.md` now pins Plan.
 
+The step-up check moves to `hooks/guard.py`, beside the model floor (rule `subagent-model-floor`). It does not stay in the Agent prompt hook in `settings.json`. A builder is moving it. The check reads the `Round N of 3` or `Try N of 3` line in the brief. A round 2 or 3 reviewer needs Sonnet or higher. A try 3 builder needs Opus.
+
 Sections after the record-writer boundary keep their Haiku sentences only as evidence of the earlier
 argument. This ruling overrides them.
 
@@ -405,9 +407,10 @@ Over-provisioning of one lane, a spawn above Sonnet with no word from the owner,
 passes without a prompt. Only prose forbids it, by owner ruling. The Stop guardrail
 reads it after the turn. Question 4 accepts that gap and prices it.
 
-Under-provisioning is caught by nothing before the rework cycle. That was also true
-before the pin was dropped, and it is true again under the floor, which forbids
-Haiku outright.
+Under-provisioning is caught by nothing before the rework cycle, except the step-up.
+The step-up covers a round 2 or 3 reviewer below Sonnet, and a try 3 builder below Opus.
+Elsewhere that was also true before the pin was dropped, and it is true again under the
+floor, which forbids Haiku outright.
 
 ## Where this lives
 

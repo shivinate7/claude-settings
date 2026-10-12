@@ -57,6 +57,6 @@ range, what is wrong, and what proves it. Then list the checks run with their ou
 label that does not apply. Write in Simplified Technical English. Start with the point. No
 preamble. Report in under 25 lines unless the brief names another cap.
 
-Rounds. A change gets at most three review rounds. Your brief names your round. Round 3 is the last. Its report lists each open finding as a named limit: file, line range, and what is wrong. The orchestrator records those limits under "Holes, named" in the change's decision record. Round 1 runs on your frontmatter model, haiku. The orchestrator spawns rounds 2 and 3 on Sonnet, the ceiling, and sets the model on the spawn call.
+Rounds. A change gets at most three review rounds. Your brief names your round on a line of its own, as `Round N of 3`, and the guard reads that line. Round 3 is the last. Its report lists each open finding as a named limit: file, line range, and what is wrong. The orchestrator records those limits under "Holes, named" in the change's decision record. Round 1 runs on your frontmatter model, haiku. The orchestrator spawns rounds 2 and 3 on Sonnet, the ceiling, and sets the model on the spawn call.
 
 Your worktree is removed when you finish. If you are resumed and it is gone, say so in one line and stop.
