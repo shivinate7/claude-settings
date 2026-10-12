@@ -232,6 +232,8 @@ def _decide(target: str):
 
 
 BUILD_SCAN_SECONDS = 20  # the scan stops here and keeps the rest; the hook's own limit is 60
+# The check is inlined on purpose: the child runs after the rename, and `rmtree` refusing a
+# top-level junction is a stdlib promise, not ours. The child cannot import sweep.
 DELETE_CHILD = ("import os, shutil, stat, sys\n"
                 "def link(p):\n"
                 "    try: st = os.lstat(p)\n"
@@ -251,6 +253,8 @@ def reap_build_dirs(target: str, cwds):
     root = os.path.dirname(os.path.dirname(os.path.dirname(target)))
     names = sweep.build_dir_names(sweep.read_optout(root))
     if names is None:  # bad file: nothing, defaults included
+        return []
+    if sweep.is_link(target):  # a link as the worktree would send the rename and delete elsewhere
         return []
     builds, trash = sweep.scan_worktree(target, names, time.monotonic() + BUILD_SCAN_SECONDS)
 

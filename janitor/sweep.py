@@ -2195,8 +2195,8 @@ def prune_registrations(root: str, confirm: bool):
 
 
 def is_link(path) -> bool:
-    """True for a symlink or a Windows reparse point (a junction, which `os.path.islink` misses
-    before Python 3.12). True when the path cannot be read: it is not ours to delete."""
+    """True for a symlink or a Windows reparse point (a junction, which `os.path.islink`
+    never reports). True when the path cannot be read: it is not ours to delete."""
     try:
         st = os.lstat(path)
     except OSError:
