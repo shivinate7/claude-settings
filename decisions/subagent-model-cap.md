@@ -412,6 +412,17 @@ The step-up covers a round 2 or 3 reviewer below Sonnet, and a try 3 builder bel
 Elsewhere that was also true before the pin was dropped, and it is true again under the
 floor, which forbids Haiku outright.
 
+The step-up check has named limits, from review rounds 2 and 3:
+
+- Only a line that starts with `Round N of 3` or `Try N of 3` counts. `Round 2/3`,
+  `- Round 2 of 3`, `**Round 2 of 3**` and `# Round 2 of 3` pass unseen.
+- The role compare is exact, so a plugin type such as `x:reviewer` is not checked.
+- A `Workflow` script `agent()` call is not checked.
+- The reviewer test is a substring match on "sonnet". A made-up model such as
+  `opus-sonnet` passes. No real model id holds both names.
+- A round 1 reviewer brief with a prose line that starts `Round 2 of 3` is denied. The
+  refusal names the fix.
+
 ## Where this lives
 
 This file keeps its slug name. No number is claimed on a branch.
