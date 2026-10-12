@@ -400,13 +400,18 @@ class Host:
 
     def run_state(self, sha):
         """-> (red, pending) from the workflow runs of `sha`. A run that is not completed holds the wait even
-        when its jobs are not listed as checks yet. Only success, skipped and neutral pass."""
+        when its jobs are not listed as checks yet. Success, skipped and neutral pass, but see judge_runs."""
         return self.judge_runs(self.runs(sha))
 
     @staticmethod
     def judge_runs(runs):
-        """-> (red, pending) from a list of workflow runs."""
+        """-> (red, pending) from a list of workflow runs, newest first. Only the newest run per workflow name
+        counts. Success, skipped and neutral pass, but when every run is completed/skipped and none is pending,
+        no job ran on this head: red (GitHub counts a skipped job as passing, so required checks miss it)."""
+        runs = list({r["name"]: r for r in reversed(runs)}.values())[::-1]
         red = [f"workflow {r['name']}: {r['conclusion']}" for r in runs if r["status"] == "completed" and r["conclusion"] not in ("success", "skipped", "neutral")]
+        if runs and all(r["status"] == "completed" and r["conclusion"] == "skipped" for r in runs):
+            red = [f"workflow {r['name']}: skipped, no job ran" for r in runs]
         pending = [f"workflow {r['name']}" for r in runs if r["status"] != "completed"]
         return red, pending
 
@@ -414,11 +419,14 @@ class Host:
     def classify(got, names, ignore=None):
         """-> (red, pending, ignored). Every check on the head counts, required or not. Red: any bucket
         that is not pass, skipping or pending (fail, cancel, and any bucket gh adds later: closed).
+        Also red: a head with entries where none is pass or pending (all skipping): no check ran on it.
         Pending: a pending entry, or a required name with no entry. `ignore` maps a name to its reason:
         those checks are left out of red and pending, and named in `ignored`."""
         ignore = ignore or {}
         live = {k: rows for k, rows in got.items() if k not in ignore or k in names}
         red = [f"{k}: {b} {l}".strip() for k, rows in live.items() for b, l in rows if b not in ("pass", "skipping", "pending")]
+        if live and not red and not any(b in ("pass", "pending") for rows in live.values() for b, _ in rows):
+            red = ["no check ran on this head (every check skipped). Run `gh workflow run gates.yml --ref <branch>`, or push anew after `gh pr ready`"]
         pending = sorted({k for k, rows in live.items() if any(b == "pending" for b, _ in rows)} | {k for k in names if not got.get(k)})
         ignored = [f"{k} ({ignore[k]}): " + "/".join(sorted({b for b, _ in rows})) for k, rows in got.items() if k in ignore]
         return red, pending, ignored
