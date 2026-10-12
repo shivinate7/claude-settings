@@ -26,6 +26,7 @@ ALLOW = {"hookSpecificOutput": {"hookEventName": "PermissionRequest",
 _PLAIN = r"[\w.#@%+=:,'-]+"
 _VALUE = re.compile(r"(?!.*(?:^|/)\.\.(?:/|$))[\w./#@%+=:,-]+")
 _TARGET = re.compile(r"\$\{([A-Za-z_]\w*):\?\}((?:/%s)*)" % _PLAIN)
+_REFUSED = {"IFS", "PATH"}   # word splitting and command lookup: never bound, never expanded
 _FLAG = re.compile(r"-[A-Za-z]+|--")
 
 
@@ -49,7 +50,7 @@ def allowed(command: str, cwd: str) -> bool:
                 return False
             for word in words:
                 m = _TARGET.fullmatch(word)
-                if not m or m.group(1) not in bound or any(
+                if not m or m.group(1) not in bound or m.group(1) in _REFUSED or any(
                         p in (".", "..") for p in m.group(2).split("/")[1:]):
                     return False
                 if guard._rm_target_bad(bound[m.group(1)] + m.group(2), cwd):
@@ -61,7 +62,8 @@ def allowed(command: str, cwd: str) -> bool:
             if not guard.ASSIGNMENT.match(token):
                 return False
             name, value = token.split("=", 1)
-            if name in bound or not _VALUE.fullmatch(value) or guard._rm_target_bad(value, cwd):
+            if (name in bound or name in _REFUSED or not _VALUE.fullmatch(value)
+                    or guard._rm_target_bad(value, cwd)):
                 return False
             bound[name] = value
     return deletes > 0 and used == set(bound)   # a stray binding (IFS, PATH, T=) can redirect the rm
