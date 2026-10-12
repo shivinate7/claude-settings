@@ -3555,6 +3555,14 @@ sh("env: timeout N ahead of sleep is still a waiter", "timeout 60 sleep 5", "den
    cwd=NOGIT)
 sh("env: timeout N ahead of a slash switch is still a waiter", "timeout 5 /t 5", "deny",
    "waiter", cwd=NOGIT)
+for waiting in (
+    "sudo timeout /t 5", "env X=1 timeout /t 5", "command timeout /t 5", "time timeout /t 5",
+    "xargs timeout /t 5", "verdict timeout /t 5",
+):
+    sh("waiter-wrap: timeout /t behind a wrapper, " + waiting, waiting, "deny", "waiter",
+       cwd=NOGIT)
+sh("waiter-wrap: a bare timeout is no pause", "timeout 5", "allow", cwd=NOGIT)
+sh("waiter-wrap: timeout /help is no pause", "timeout /help", "allow", cwd=NOGIT)
 for reader in (
     # A wrapper flag's VALUE is not the command word: the real command still reads the file.
     "env -u ls cat " + ENV,
