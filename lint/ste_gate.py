@@ -34,7 +34,6 @@ import re
 import subprocess
 import sys
 import tempfile
-import threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -48,6 +47,7 @@ except Exception:
 
 MD_SUFFIXES = (".md", ".markdown")
 MAX_SHOWN = 5
+ABBREVIATIONS = {"e.g.", "i.e.", "etc.", "al.", "vs.", "cf.", "n.b.", "viz."}
 CLAUSE_WORDS = {"and", "but", "which", "because", "so", "then", "while", "when", "if"}
 NOTE = ("Code in backticks or a fence is exempt. Errors only: sentence length, nominalization, "
         "Latin abbreviation, contraction, phrasal verb, bloat, double negative, "
@@ -274,27 +274,37 @@ def fixer_limit():
         return 5.0
 
 
-def run_autofix(tool, ti, old_text, scope):
-    """Run autofix in a thread, bounded by fixer_limit(). Return its result, or raise
-    TimeoutError when it ran over, or its own error: the caller then lints the plain text.
-    ponytail: a thread cannot stop a regex stuck in C code. The fixer's patterns are
-    linear, so a subprocess waits until one measures slow."""
-    box = []
+def max_bytes():
+    """Largest text the fixer reads: env STE_FIXER_MAX_BYTES, default 262144."""
+    try:
+        return int(os.environ.get("STE_FIXER_MAX_BYTES", "262144"))
+    except ValueError:
+        return 262144
 
-    def work():
-        try:
-            box.append((True, autofix(tool, ti, old_text, scope)))
-        except Exception as exc:  # noqa: BLE001
-            box.append((False, exc))
-    thread = threading.Thread(target=work, daemon=True)
-    thread.start()
-    thread.join(fixer_limit())
-    if not box:
-        raise TimeoutError("the STE fixer ran over its time limit")
-    ok, value = box[0]
-    if not ok:
-        raise value
-    return value
+
+def run_autofix(tool, ti, old_text, scope):
+    """Run autofix in a child process, bounded by fixer_limit(). The child is killed when it
+    runs over, because a thread cannot stop a regex stuck in C code. Return its result, or
+    raise on a timeout or a crash: the caller then lints the plain text. The size bound,
+    max_bytes(), is checked by the caller. The fixer is not proven linear in line length:
+    the time limit is the bound that holds."""
+    payload = json.dumps({"tool": tool, "ti": ti, "old_text": old_text,
+                          "scope": None if scope is None else sorted(scope)})
+    run = subprocess.run([sys.executable, os.path.abspath(__file__), "--autofix"],
+                         input=payload.encode("ascii"), capture_output=True,
+                         timeout=fixer_limit())
+    if run.returncode != 0:
+        raise RuntimeError("the STE fixer failed")
+    out = json.loads(run.stdout.decode("ascii"))
+    return (out["ti"], out["codes"]) if out else None
+
+
+def autofix_child():
+    """Entry of the child process: read the request on stdin, print the autofix result."""
+    req = json.loads(sys.stdin.buffer.read().decode("ascii"))
+    result = autofix(req["tool"], req["ti"], req["old_text"],
+                     None if req["scope"] is None else set(req["scope"]))
+    print(json.dumps({"ti": result[0], "codes": result[1]} if result else None))
 
 
 def rewrite_output(updated_input, note):
@@ -306,17 +316,23 @@ def rewrite_output(updated_input, note):
             "systemMessage": note}
 
 
-def split_hint(text, line, limit):
-    """Return a short split point for the sentence that starts at `line` of `text`: a clause
-    break before word `limit`, else word `limit`."""
+def sentence_words(text, line):
+    """Return the words of the sentence that starts at `line` of `text`."""
     block = []
     for ln in text.split("\n")[line - 1:]:
         if not ln.strip():
             break
         block.append(ln)
     words = re.sub(r"^\s*(?:[-*+]|\d+[.)])\s+", "", " ".join(block)).split()
-    end = next((i for i, w in enumerate(words) if re.search(r"[.!?]$", w)), len(words))
-    words = words[:end + 1]
+    end = next((i for i, w in enumerate(words) if re.search(r"[.!?]$", w) and w.lower() not in ABBREVIATIONS),
+               len(words))
+    return words[:end + 1]
+
+
+def split_hint(text, line, limit):
+    """Return a short split point for the sentence that starts at `line` of `text`: a clause
+    break before word `limit`, else word `limit`."""
+    words = sentence_words(text, line)
     cut = next((i for i in range(min(limit, len(words) - 1) - 1, 3, -1)
                 if re.search(r"[,;:]$", words[i]) or words[i + 1].lower() in CLAUSE_WORDS), None)
     cut = limit - 1 if cut is None else cut
@@ -324,15 +340,17 @@ def split_hint(text, line, limit):
 
 
 def deny_reason(path, findings, text, is_ui):
-    """The denial text. It lists 5 findings at most. A sentence-length finding names the
-    sentence start, its word count, the limit, and one split point."""
+    """The denial text. `text` is what the writer wrote, not the fixed text: the sentence
+    quoted here is the writer's own, and a finding's line number is the same in both. It lists
+    5 findings at most. A sentence-length finding names the sentence start, its word count, the
+    limit, and one split point."""
     lines = []
     for f in findings[:MAX_SHOWN]:
         line = format_finding(f)
         m = re.search(r"holds (\d+) words\. The \w+ limit is (\d+)", f.get("message") or "")
         if f.get("code") == "STE001" and m and not is_ui:
             line += '\n  Starts: "%s". %s' % (
-                (f.get("excerpt") or "")[:60], split_hint(text, f.get("line") or 1, int(m.group(2))))
+                " ".join(sentence_words(text, f.get("line") or 1))[:60], split_hint(text, f.get("line") or 1, int(m.group(2))))
         lines.append(line)
     if len(findings) > MAX_SHOWN:
         lines.append("%d more findings not shown." % (len(findings) - MAX_SHOWN))
@@ -414,8 +432,9 @@ def main():
 
         # Markdown only: fix what a word swap fixes, then lint the fixed text. A fixer crash
         # keeps today's behaviour (decisions/gate-hooks-fail-closed.md): no rewrite, no refusal.
-        fixed_ti, note = None, ""
-        if not is_ui:
+        fixed_ti, note, written = None, "", full_text
+        # Over STE_FIXER_MAX_BYTES the fixer is skipped and the plain lint decides.
+        if not is_ui and len(text.encode("utf-8", "replace")) <= max_bytes():
             try:
                 result = run_autofix(tool, ti, old_text, scope)
                 if result:
@@ -443,11 +462,14 @@ def main():
             print(json.dumps({"hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "deny",
-                "permissionDecisionReason": deny_reason(path, findings, full_text, is_ui),
+                "permissionDecisionReason": deny_reason(path, findings, written, is_ui),
             }}))
         elif fixed_ti:
             print(json.dumps(rewrite_output(fixed_ti, note)))
 
 
 if __name__ == "__main__":
-    main()
+    if "--autofix" in sys.argv[1:]:
+        autofix_child()
+    else:
+        main()
