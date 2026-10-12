@@ -1842,6 +1842,37 @@ sh("per-file ask: env --chdir into the shared checkout, then restore f.txt, from
    "env --chdir=" + slash(GITMAIN) + " " + VCS + " restore f.txt", "ask", "shared-tree",
    cwd=GITWT)
 
+# LATE PROBES (named "late probe", so MUTATE_ONLY="late probe" runs this block alone). Each runs a
+# per-file restore in the shared checkout from the lane by a spelling the guard did not read yet.
+# Main reads the lane for all of them and asks, so ask is pinned. The controls stay allowed.
+_SH = slash(GITMAIN)
+for _label, _cmd in (
+    ("lower-case git_work_tree prefix", "git_work_tree=" + _SH + " " + VCS + " restore f.txt"),
+    ("read -r then export", "read -r GIT_WORK_TREE <<< \"" + _SH + "\"; export GIT_WORK_TREE; "
+     + VCS + " restore f.txt"),
+    ("export with +=", "export GIT_WORK_TREE+=" + _SH + "; " + VCS + " restore f.txt"),
+    ("printf -v then export", "printf -v GIT_WORK_TREE %s " + _SH + "; export GIT_WORK_TREE; "
+     + VCS + " restore f.txt"),
+    ("env -vC", "env -vC " + _SH + " " + VCS + " restore f.txt"),
+    ("env --ch= abbreviation", "env --ch=" + _SH + " " + VCS + " restore f.txt"),
+):
+    sh("per-file ask: late probe, %s names the shared checkout, from a worktree" % _label, _cmd,
+       "ask", "shared-tree", cwd=GITWT)
+for _label, _cmd in (
+    ("$env: assignment", '$env:GIT_WORK_TREE = "' + _SH + '"; ' + VCS + " restore f.txt"),
+    ("lower-case $env: assignment", '$env:git_work_tree = "' + _SH + '"; ' + VCS
+     + " restore f.txt"),
+    ("Set-Item Env:", 'Set-Item Env:GIT_WORK_TREE "' + _SH + '"; ' + VCS + " restore f.txt"),
+    ("SetEnvironmentVariable", '[Environment]::SetEnvironmentVariable("GIT_WORK_TREE","' + _SH
+     + '"); ' + VCS + " restore f.txt"),
+):
+    sh("per-file ask: late probe, PowerShell %s names the shared checkout, from a worktree" % _label,
+       _cmd, "ask", "shared-tree", tool="PowerShell", cwd=GITWT)
+sh("per-file allow: late probe control, a plain restore f.txt in the lane",
+   VCS + " restore f.txt", "allow", cwd=GITWT)
+sh("per-file allow: late probe control, a harmless GIT_TRACE prefix in the lane",
+   "GIT_TRACE=1 " + VCS + " restore f.txt", "allow", cwd=GITWT)
+
 # KILL CASES for three mutate_guard entries removed in 78e8446. Each pins today's base verdict.
 # The quoted refspec and the quoted force in a commit message are verdicts; the quoted force on a
 # worktree remove is a logged note, pinned by the LOG_CHECKS_EXTRA entry beside subject_unread_*.
