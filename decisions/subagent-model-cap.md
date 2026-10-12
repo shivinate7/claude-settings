@@ -23,7 +23,7 @@ Writing prose and records is not building.
 | Explore, claude-code-guide | haiku | high |
 | test-author | haiku | high |
 | reviewer | haiku | xhigh |
-| reviewer, rounds 2 and 3 | sonnet, the ceiling; set per spawn, which overrides the frontmatter `haiku` | the role's effort |
+| reviewer, rounds 2 and 3 | sonnet, the ceiling; round 3 may run opus on the owner's word for that spawn; set per spawn, which overrides the frontmatter `haiku` | the role's effort |
 | record-writer (`agents/record-writer.md`) | haiku | xhigh |
 | builder | sonnet | medium |
 | builder, try 3 after a FAIL at review round 2 | opus, the owner's standing word of 2026-10-12; set per spawn, which overrides `CLAUDE_CODE_SUBAGENT_MODEL` | the role's effort |
@@ -51,7 +51,9 @@ A session on an older Claude Code may run Haiku 4.5 for these roles.
 
 Sonnet is the ceiling for every role but three standing exceptions, by owner rulings
 2026-10-07 and 2026-10-12. Plan runs Opus. The advisor is `opus`, and agents inherit it. The builder's third try runs Opus by the owner's standing word of 2026-10-12. The owner
-watches its cost. Any other agent runs Opus only on the owner's word, for the spawn the
+watches its cost. A reviewer's round 3 may run Opus on the owner's word for that spawn
+(owner, 2026-10-12). A permission prompt cannot time out in Claude Code, so the guard allows
+Opus at round 3 and the owner's word stays prose. Round 2 stays Sonnet only. Any other agent runs Opus only on the owner's word, for the spawn the
 owner names. Enforcement stays prose only: CLAUDE.md `roles-sonnet-is-the-ceiling` states
 it, and `lint/rule_mechanisms.json` records it as `unmechanized`.
 
