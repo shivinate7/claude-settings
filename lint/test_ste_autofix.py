@@ -15,8 +15,10 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -583,6 +585,158 @@ class ReviewRound1GateTests(_GateCase):
                                       "content": "Café — don't stop, e.g. naïve.\n"}))
         self.assertEqual(out.get("updatedInput", {}).get("content"),
                          "Café — do not stop, for example, naïve.\n")
+
+
+# ------------------------------------------------------------------ review round 2 (PR 367)
+# Red pins for review round 2. Names start with the finding number. test_r2_guard_* cases
+# pass today and hold a failure class the fix must keep.
+
+# F1: an adverb between 's or 'd and a perfect verb. "is" never follows "been" or "had".
+ADVERBS = ["never", "always", "also", "just", "still", "now", "only", "not"]
+
+
+class ReviewRound2FixerTests(unittest.TestCase):
+    """apply_fixes on Markdown text, round 2."""
+
+    # F2 code in a blockquote fence and in a raw HTML block stays unchanged
+    def test_r2_f2_blockquote_fence_unchanged(self):
+        inp = "> ```\n> e.g. the code\n> ```\n"
+        self.assertEqual(ste_lint.apply_fixes(inp)[0], inp)
+
+    def test_r2_f2_pre_block_unchanged(self):
+        inp = "<pre>\ne.g. x\n</pre>\n"
+        self.assertEqual(ste_lint.apply_fixes(inp)[0], inp)
+
+    def test_r2_guard_list_item_fence_two_spaces_unchanged(self):
+        inp = "- item\n\n  ```\n  e.g. the code\n  ```\n"
+        self.assertEqual(ste_lint.apply_fixes(inp)[0], inp)
+
+    def test_r2_guard_list_item_fence_four_spaces_unchanged(self):
+        inp = "1. Step one:\n\n    ```sh\n    e.g. run this\n    ```\n"
+        self.assertEqual(ste_lint.apply_fixes(inp)[0], inp)
+
+    # F3 et al. keeps its period; N.B. never gives "Note:,"
+    def test_r2_f3_et_al_keeps_period(self):
+        inp = "The paper is by Smith et al. The next section is done.\n"
+        out = ste_lint.apply_fixes(inp)[0]
+        self.assertIn(out, (inp, "The paper is by Smith and others. The next section is done.\n"))
+
+    def test_r2_f3_nb_no_note_colon(self):
+        inp = "N.B., the file is locked.\n"
+        out = ste_lint.apply_fixes(inp)[0]
+        self.assertNotIn("Note:,", out)
+        self.assertIn(out, (inp, "Note, the file is locked.\n"))
+
+    # F4 a shortcut reference label and its definition stay in sync
+    def test_r2_f4_shortcut_label_in_sync(self):
+        inp = "See [it's here] now.\n\n[it's here]: notes.md\n"
+        out = ste_lint.apply_fixes(inp)[0]
+        self.assertIn(out, (inp, "See [it is here] now.\n\n[it is here]: notes.md\n"))
+
+    # F5 CRLF: every line keeps \r\n, no mixed endings
+    def test_r2_f5_crlf_no_mixed_endings(self):
+        inp = "Use tools, e.g.\r\nWe don't stop.\r\n"
+        out = ste_lint.apply_fixes(inp)[0]
+        self.assertIn(out, (inp, "Use tools, for example.\r\nWe do not stop.\r\n"))
+
+    # F6 pure-function speed: "a." * 40000 finishes in under 3 s. Run in a child process
+    # with a 20 s cap, so a quadratic fixer fails the test instead of hanging it.
+    def test_r2_f6_apply_fixes_40000_pairs_under_3s(self):
+        code = ("import sys, time; sys.path.insert(0, %r); import ste_lint; "
+                "t = time.perf_counter(); ste_lint.apply_fixes('a.' * 40000); "
+                "print(time.perf_counter() - t)" % HERE)
+        try:
+            run = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                                 timeout=20)
+        except subprocess.TimeoutExpired:
+            self.fail("apply_fixes on 'a.' * 40000 ran past 20 s")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertLess(float(run.stdout), 3.0)
+
+
+def _pin_unchanged(text):
+    def test(self):
+        self.assertEqual(ste_lint.apply_fixes(text)[0], text)
+    return test
+
+
+for _adv in ADVERBS:
+    setattr(ReviewRound2FixerTests, "test_r2_f1_its_" + _adv,
+            _pin_unchanged("It's %s been tested.\n" % _adv))
+    setattr(ReviewRound2FixerTests, "test_r2_f1_theres_" + _adv,
+            _pin_unchanged("There's %s been a way.\n" % _adv))
+setattr(ReviewRound2FixerTests, "test_r2_guard_had_its", _pin_unchanged("It's had a fault.\n"))
+setattr(ReviewRound2FixerTests, "test_r2_guard_had_theres", _pin_unchanged("There's had a fault.\n"))
+
+
+class ReviewRound2GateTests(_GateCase):
+    """ste_gate.py, round 2."""
+
+    def _gate_copy_env(self):
+        env = dict(os.environ)
+        env.pop("STE_FIXER_MAX_BYTES", None)
+        return env
+
+    # F1 the gate does not rewrite an adverb-perfect form; it still denies
+    def test_r2_f1_gate_its_not_been_denied_not_rewritten(self):
+        out = hso(self._pre("Write", {"file_path": self._path("adv1.md"),
+                                      "content": "It's not been tested.\n"}))
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertNotIn("updatedInput", out)
+
+    def test_r2_f1_gate_theres_always_been_denied_not_rewritten(self):
+        out = hso(self._pre("Write", {"file_path": self._path("adv2.md"),
+                                      "content": "There's always been a way.\n"}))
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertNotIn("updatedInput", out)
+
+    # F5 the gate's Write path keeps CRLF endings on every line
+    def test_r2_f5_gate_crlf_write_no_mixed_endings(self):
+        inp = "Use tools, e.g.\r\nWe don't stop.\r\n"
+        out = hso(self._pre("Write", {"file_path": self._path("crlf.md"), "content": inp}))
+        content = out.get("updatedInput", {}).get("content", inp)
+        self.assertIn(content, (inp, "Use tools, for example.\r\nWe do not stop.\r\n"))
+
+    # F6 size ceiling: over STE_FIXER_MAX_BYTES the fixer is skipped and plain lint decides
+    def test_r2_f6_size_ceiling_skips_fixer(self):
+        with mock.patch.dict(os.environ, {"STE_FIXER_MAX_BYTES": "5"}):
+            out = hso(self._pre("Write", {"file_path": self._path("ceil.md"),
+                                          "content": "We don't stop.\n"}))
+        self.assertNotIn("updatedInput", out)
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertIn("STE008", out["permissionDecisionReason"])
+
+    def test_r2_guard_under_size_ceiling_still_fixed(self):
+        with mock.patch.dict(os.environ, {"STE_FIXER_MAX_BYTES": "100"}):
+            out = hso(self._pre("Write", {"file_path": self._path("under.md"),
+                                          "content": "We don't stop.\n"}))
+        self.assertEqual(out.get("updatedInput", {}).get("content"), "We do not stop.\n")
+
+    def test_r2_f6_gate_1p5mb_within_budget(self):
+        # 1.5 MB of "a. " with one fixable contraction at the end: over the 256 KB default, so
+        # the fixer is skipped and plain lint decides: deny on STE008, no rewrite, under 9 s.
+        content = "a. " * 500000 + "We don't stop.\n"
+        target = self._path("big.md")
+        start = time.perf_counter()
+        run = run_gate(STE_GATE, {"hook_event_name": "PreToolUse", "tool_name": "Write",
+                                  "tool_input": {"file_path": target, "content": content}},
+                       env=self._gate_copy_env())
+        elapsed = time.perf_counter() - start
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertLess(elapsed, 9.0)
+        out = hso(run)
+        self.assertNotIn("updatedInput", out)
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        self.assertIn("STE008", out["permissionDecisionReason"])
+
+    # F7 the deny text quotes the writer's own sentence, not the fixed text
+    def test_r2_f7_deny_quotes_writers_sentence(self):
+        content = "Use tools, e.g. " + " ".join(["word"] * 40) + ".\n"
+        out = hso(self._pre("Write", {"file_path": self._path("quote.md"), "content": content}))
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        reason = out["permissionDecisionReason"]
+        self.assertIn("e.g.", reason)
+        self.assertNotIn("for example", reason)
 
 
 if __name__ == "__main__":
