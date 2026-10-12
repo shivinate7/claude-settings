@@ -37,5 +37,5 @@ needed: `ssemwal-cdc` has push, not admin.
 ## How to apply
 
 Before every merge, read the checks yourself and refuse on red. The `merge` tool reads its
-required checks from `.github/stamp.json`. The protection mirrors that list, and it now
-blocks a red merge through the GitHub UI and the API as well.
+required checks from `.github/stamp.json`. The protection mirrors that list. It now blocks
+a red merge through the GitHub UI and the API too.
