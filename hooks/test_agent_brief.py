@@ -12,7 +12,8 @@ the hook prints one JSON object on stdout and exits 0:
   input (builder, test-author, reviewer, Explore, record-writer), the general scope line for any
   other or missing type, and fewer than 20 lines in all. Each scope line is pinned in full.
 - The push line, the commit-trailer line and the record-path line appear for builder,
-  test-author, record-writer and the general case; never for reviewer or Explore.
+  test-author, record-writer and any other type; never for reviewer, Explore, Plan or
+  claude-code-guide, which only read.
 - A plugin-namespaced type (`my-plugin:builder`) gets the scope of its bare name.
 - Junk or empty stdin, or an internal error: no output on stdout, exit 0, and at most one stderr
   line that starts `agent_brief:`. The hook fails open.
@@ -46,8 +47,8 @@ GENERAL_LINE = ("- Scope: do only what your brief names. A builder never edits t
                 "a test-author never edits product code; a reviewer and Explore never edit; "
                 "a record-writer edits Markdown only.")
 STASH_LINE = "- Never run git stash, git reset, git checkout <path>, or git restore."
-# Non-scope lines in hook order. Builder, test-author, record-writer and the general case commit
-# and push; reviewer and Explore do not (F2 round 2), so they get the shorter set.
+# Non-scope lines in hook order. Builder, test-author, record-writer and any unknown type commit
+# and push; reviewer, Explore, Plan and claude-code-guide do not, so they get the shorter set.
 WRITER_RULES = [
     "Standing rules for this agent:",
     STASH_LINE,
@@ -281,12 +282,16 @@ def line_set_check(expected):
 for _t in ["builder", "test-author", "record-writer"]:
     add("line set: %s gets the eight-line set" % _t, "context", payload(_t),
         line_set_check(WRITER_RULES))
-add("line set: a general (unknown) type gets the eight-line set", "context", payload("Plan"),
-    line_set_check(WRITER_RULES))
+add("line set: a general (unknown) type gets the eight-line set", "context",
+    payload("some-new-agent"), line_set_check(WRITER_RULES))
 add("line set: a missing agent type gets the eight-line set", "context", payload(),
     line_set_check(WRITER_RULES))
-for _t in ["reviewer", "Explore"]:
+for _t in ["reviewer", "Explore", "Plan", "claude-code-guide"]:
     add("line set: %s gets the five-line set" % _t, "context", payload(_t),
+        line_set_check(READER_RULES))
+# Plugin-prefixed read-only types take the reader set too (the prefix split must reach them).
+for _t in ["my-plugin:reviewer", "ns:Explore"]:
+    add("line set: plugin-prefixed %s gets the five-line set" % _t, "context", payload(_t),
         line_set_check(READER_RULES))
 
 
@@ -384,7 +389,8 @@ def internal_error_check():
 add("error: an internal error gives no stdout, one agent_brief: stderr line, exit 0", "custom",
     fn=internal_error_check)
 
-# SILENT: junk or empty stdin gives no output, no stderr, exit 0.
+# SILENT: junk or empty stdin gives no stdout, exit 0, and at most one stderr line that starts
+# `agent_brief:`.
 BAD_CASES = [
     ("empty stdin", ""),
     ("whitespace-only stdin", "  \n"),
