@@ -587,14 +587,10 @@ MUTATIONS = [
      '        if any(c in spec for c in "$`{}"):  # unreadable: a discard of unknown size\n            return False',
      '        if False:\n            return False', "guard",
      'per-file ask: restore "$F" -- keep.txt in a worktree still asks, unreadable before --'),
-    ("per-file: judge every git call in the first -C of the line",
-     '    for segment, root in zip(split_segments(stripped), segment_roots(stripped, cwd)):',
-     '    for segment, root in zip(split_segments(stripped), [command_root(stripped, cwd)] * 99):', "guard",
-     'per-file deny: -C lane status, then -C shared restore f.txt, from a plain folder'),
-    ("per-file: a desynced heredoc walk roots later segments at the walk's last cd",
-     '    if at < len(walked):',
-     '    if False:', "guard",
-     'per-file deny: node heredoc, a lone apostrophe in the body, then cd shared and restore f.txt'),
+    ("per-file: the allow ignores a cd, pushd, popd or a second -C in the command",
+     '    return len(targets) <= 1',
+     '    return True', "guard",
+     'per-file ask: cd shared, restore f.txt, then cd lane'),
     ("config-edit: stop noting project config edits, shell tool",
      '    matched = project_config_shell_hit(stripped, cwd)\n'
      '    if matched:\n'

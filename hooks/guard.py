@@ -1225,52 +1225,6 @@ def _run_dir(cmd: str, shell_cwd: str) -> str:
     return where or shell_cwd or ""
 
 
-def segment_roots(cmd: str, shell_cwd: str) -> list:
-    """The working tree each segment of `split_segments(cmd)` acts on, by POSITION: the shell's
-    cwd after every `cd` that runs before that segment, then its own `git -C` chain. `_run_dir`
-    takes the first `-C` of ANY segment, so a lane's `-C` on an earlier call would hide the
-    shared checkout a later call names. Identical segment text after different `cd`s is judged
-    per position, never by a text lookup.
-
-    The `cd` walk runs over the text with every heredoc body dropped, because a `cd` in an
-    interpreter body never moves the outer shell. The two lists are then aligned in order: a
-    segment of the kept-body list with no match in the walk (a body line) takes the root as it
-    stands there and moves nothing.
-    """
-    kept = split_segments(cmd)
-    if GIT_WORK_TREE_RE.search(cmd):
-        return [command_root(cmd, shell_cwd)] * len(kept)
-    walked = split_segments(_strip_heredoc_bodies_unconditionally(cmd))
-    roots = []
-    run_dir = shell_cwd
-    at = 0
-    synced = 0
-    for segment in kept:
-        words = segment_tokens(segment)
-        git_c = _segment_git_c_target(words) if words else None
-        roots.append(_absolute(git_c, run_dir) if git_c is not None else run_dir)
-        if at < len(walked) and walked[at] == segment:
-            cd = _segment_cd_target(words) if words else None
-            if cd is not None:
-                run_dir = _absolute(cd, run_dir)
-            at += 1
-            synced = len(roots)
-    if at < len(walked):
-        # Walk and segments diverged (a lone quote in a heredoc body splits them differently):
-        # every segment after the last match takes the walk's last `cd` root, never an earlier one.
-        final = shell_cwd
-        for segment in walked:
-            words = segment_tokens(segment)
-            cd = _segment_cd_target(words) if words else None
-            if cd is not None:
-                final = _absolute(cd, final)
-        for i in range(synced, len(roots)):
-            words = segment_tokens(kept[i])
-            git_c = _segment_git_c_target(words) if words else None
-            roots[i] = _absolute(git_c, final) if git_c is not None else final
-    return roots
-
-
 def command_root(cmd: str, shell_cwd: str) -> str:
     """Return the WORKING TREE the command acts on.
 
@@ -2299,6 +2253,24 @@ TREE_DENY_REASON = (
     "belongs to no branch, and it outlives no session that holds its tag. "
     "Run the command in a worktree of your own when the tree must change."
 )
+_MOVES_SHELL = re.compile(r"(?<![\w.-])(?:cd|pushd|popd)(?![\w-])")
+
+
+def one_place(cmd: str) -> bool:
+    """True when the whole command acts on one tree: no `cd`, `pushd` or `popd` token anywhere
+    and at most one distinct `git -C` target. Only then may the per-file allow apply, because
+    every other shape can hide a shared checkout behind the lane."""
+    if _MOVES_SHELL.search(cmd):
+        return False
+    targets = set()
+    for segment in split_segments(cmd):
+        words = segment_tokens(segment)
+        target = _segment_git_c_target(words) if words else None
+        if target is not None:
+            targets.add(target)
+    return len(targets) <= 1
+
+
 RESTORE_PER_FILE_FLAGS = {"--staged", "--worktree", "-S", "-W"}
 
 
@@ -5734,9 +5706,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                     diff_refusal(tool, role, command_root(stripped, cwd))
 
     # 1. Shared trees.
-    for segment, root in zip(split_segments(stripped), segment_roots(stripped, cwd)):
+    for segment in split_segments(stripped):
         if not segment.strip():
             continue
+        words = segment_tokens(segment)
+        own_c = _segment_git_c_target(words) if words else None
+        root = _absolute(own_c, cwd) if own_c is not None else command_root(stripped, cwd)
         match = shared_tree_match(segment, root)
         if match is None:
             continue
@@ -5788,7 +5763,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 continue
             # stash-push-is-clone-wide, per-file paragraph: named files only write this lane's
             # own change to those files, so no ask.
-            if names_only_files(subcommand, args, root, segment):
+            if names_only_files(subcommand, args, root, segment) and one_place(stripped):
                 continue
             refuse(tool, "ask", "shared-tree", TREE_ASK_REASON, matched)
         refuse(tool, "deny", "shared-tree", TREE_DENY_REASON, matched)
