@@ -6532,7 +6532,7 @@ def judge(payload) -> None:
     if floor_model:
         refuse(tool, "deny", "subagent-model-floor", MODEL_FLOOR_REASON, floor_model)
 
-    # 9b. Step-up: reviewer rounds 2 and 3 run on Sonnet, builder try 3 on Opus.
+    # 9b. Step-up: reviewer round 2 on Sonnet, round 3 on Sonnet or Opus, builder try 3 on Opus.
     step_up = step_up_hit(tool, tool_input)
     if step_up:
         refuse(tool, "deny", "roles-third-try-steps-up", step_up, str(tool_input.get("model")))

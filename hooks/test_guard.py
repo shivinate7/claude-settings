@@ -6457,7 +6457,7 @@ add("floor: Agent record-writer with model sonnet is still allowed", "allow",
     tool="Agent", prompt="x", model="sonnet", subagent_type="record-writer")
 
 # ---- Step-up (owner ruling 2026-10-12, rule roles-third-try-steps-up). The brief's fixed form
-# "Round N of 3" steps a reviewer up: rounds 2 and 3 need sonnet, and opus is the ceiling. The
+# "Round N of 3" steps a reviewer up: round 2 needs sonnet, round 3 sonnet or opus. The
 # fixed form "Try N of 3" steps a builder up: try 3 needs opus, tries 1 and 2 stay on sonnet.
 # Owner ruling 2026-10-12: a reviewer on "Round 3 of 3" may run opus. Round 2 stays sonnet only.
 # A reviewer's round 1 runs on the role's table model. Prose that quotes a round without the
