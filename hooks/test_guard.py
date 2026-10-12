@@ -7150,7 +7150,9 @@ def mask_child(scripts, limit):
             "s.loader.exec_module(g)\n"
             "print(json.dumps([list(g.mask_script(x)) for x in %r]))\n" % (GUARD, list(scripts)))
     try:
-        got = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+        # The program goes on stdin, not in argv: Windows caps argv at 32 KB (WinError 206),
+        # and a 64 KB case script alone makes the command line about 98 KB.
+        got = subprocess.run([sys.executable, "-"], input=code, capture_output=True, text=True,
                              timeout=limit)
     except subprocess.TimeoutExpired:
         return None, "mask_script did not return within %d s" % limit
