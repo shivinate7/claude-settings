@@ -36,25 +36,6 @@ function Write-InstallLog([string]$SettingsMode, [string]$AgentsMode, [string]$H
     [System.IO.File]::AppendAllText($InstallLogPath, $line, (New-Object System.Text.UTF8Encoding $false))
 }
 
-# Registers this clone as the user-scope "claude-settings" marketplace (mods\ lives in it), so
-# <mod>@claude-settings keys in settings.json resolve on this machine. Idempotent: skips when a
-# marketplace of that name is listed. Never fails the installer: it prints and returns.
-function Register-Marketplace([string]$Dir) {
-    if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { Log "claude CLI not on PATH; marketplace not registered"; return }
-    # 5.1 turns native stderr into a terminating error under 'Stop'; relax it for this step.
-    $ErrorActionPreference = 'Continue'
-    try {
-        $mp = $Dir.TrimEnd('\', '/')
-        $list = (& claude plugin marketplace list 2>&1 | Out-String)
-        if ($list -match '(?m)^\s*\S+\s+claude-settings\s*$') { Log "marketplace claude-settings already registered"; return }
-        $out = (& claude plugin marketplace add $mp --scope user 2>&1 | Out-String).Trim()
-        if ($LASTEXITCODE -eq 0) { Log "registered marketplace claude-settings -> $mp" }
-        else { Log "WARN: marketplace add failed, continuing: $out" }
-    } catch { Log "WARN: marketplace step failed, continuing: $_" }
-}
-# CLAUDE_SETTINGS_MARKETPLACE_ONLY=1 runs just this step (tests).
-if ($env:CLAUDE_SETTINGS_MARKETPLACE_ONLY -eq '1') { Register-Marketplace $RepoDir; exit 0 }
-
 # Pure: returns $Current with $Bin appended when absent (case-insensitive, trailing \ ignored).
 function Join-BinPath([string]$Current, [string]$Bin, [Microsoft.Win32.RegistryValueKind]$Kind = "ExpandString") {
     if (-not $Current) { return $Bin }
@@ -323,7 +304,6 @@ if ($item -and $item.LinkType -eq 'SymbolicLink' -and $item.Target -eq $SrcJson)
     if ($AgentCopied) { $HookMode = Install-PostMergeHook }
     Write-InstallLog -SettingsMode 'symlink' -AgentsMode $AgentsMode -HookMode $HookMode
     Write-CopyMarker
-    Register-Marketplace $RepoDir
     exit 0
 }
 
@@ -355,7 +335,6 @@ try {
     Write-InstallLog -SettingsMode 'copy' -AgentsMode $AgentsMode -HookMode $HookMode
 }
 Write-CopyMarker
-Register-Marketplace $RepoDir
 
 # ~\.claude\bin on the user PATH, so `merge` and `verdict` resolve in new sessions.
 if ($env:OS -ne 'Windows_NT') {
