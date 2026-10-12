@@ -318,6 +318,7 @@ COMMAND_WRAPPERS = {"sudo", "env", "command", "nohup", "nice", "time", "doas", "
 # `timeout /t 5` is the waiter, not a wrapper) and `python bin/verdict cmd` (the repo's runner).
 DURATION = re.compile(r"^\d+(\.\d+)?[smhd]?$")
 TIMEOUT_FLAGS_WITH_VALUE = {"-k", "-s", "--kill-after", "--signal"}
+TIMEOUT_FLAGS_BARE = {"--preserve-status", "--foreground"}
 
 # A leading shell keyword that opens or joins a control-flow block, never a command itself.
 # `split_segments` cuts on `;`, so the segment after a loop's own semicolon starts with `do`, and
@@ -3197,8 +3198,11 @@ def waiter_hit(segment: str) -> str:
     word = basename(tokens[index])
     if word in WAITER_COMMANDS:
         return tokens[index]
-    if word == "timeout" and any(t.lower() == "/t" for t in tokens[index + 1:]):
-        return tokens[index] + " /t"
+    # `timeout` is read BEFORE the unwrap: `timeout 5 /t 5` waits, and the unwrap would hide it.
+    first = _skip_assignments_and_keywords(tokens)
+    if (first < len(tokens) and basename(tokens[first]) == "timeout"
+            and any(t.lower() == "/t" for t in tokens[first + 1:])):
+        return tokens[first] + " /t"
     return ""
 
 
@@ -3733,15 +3737,32 @@ def _env_words(segment: str):
     words = READ_REDIRECT.sub(" < ", REDIRECT.sub(
         r" \1 ", _blank_messages(segment))).split()
     # The command is the first word that is not a `VAR=value` assignment.
+    # A `(` glued to the first assignment is a subshell paren, not part of the name.
+    if words and words[0][:1] == "(" and ASSIGNMENT.match(words[0][1:]):
+        words[0] = words[0][1:]
     position = 0
     while position < len(words) and ASSIGNMENT.match(words[position]):
         position = _assignment_end(words, position)
+    # Look through exactly three wrapper shapes, each by its exact form, so a flag value of some
+    # other wrapper (`env -u ls cat .env`) can never pose as the command word.
+    while position < len(words):
+        word = words[position].rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        after = position + 1
+        if word == "timeout":
+            while after < len(words) and (words[after] in TIMEOUT_FLAGS_WITH_VALUE
+                                          or words[after] in TIMEOUT_FLAGS_BARE):
+                after += 2 if words[after] in TIMEOUT_FLAGS_WITH_VALUE else 1
+            if not (after < len(words) and DURATION.match(words[after])):
+                break
+            position = after + 1
+        elif word == "verdict":
+            position = after
+        elif (word in ("python", "python3") and after < len(words)
+                and words[after].rsplit("/", 1)[-1] == "verdict"):
+            position = after + 1
+        else:
+            break
     head = words[position] if position < len(words) else ""
-    # Look through `timeout N`, `verdict` and a glued `(` the same way every rule does.
-    wrapped = resolve_command(words[position:])
-    if wrapped:
-        position += wrapped
-        head = words[position]
     command = head.strip("'\"").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     if command in ENV_TEXT_COMMANDS:
         # `printf '<name>\n'` prints the name and a newline: the escape ends the word.
