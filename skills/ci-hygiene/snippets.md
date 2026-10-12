@@ -118,7 +118,7 @@ A fan-in job (`all-jobs-passed`) runs on `if: always()` and fails on a skipped n
 ## 5b. Prove the head after `gh pr ready`
 
 ```sh
-gh run list --commit <head-sha> --json name,conclusion   # look for a conclusion other than skipped
+gh run list --commit <head-sha> --json name,status,conclusion   # completed, and not skipped
 gh workflow run <workflow-file> --ref <branch>           # none ran: dispatch one
 ```
 
@@ -163,11 +163,11 @@ zizmor .github/workflows .github/dependabot.yml
 ## 9. Wait without loops
 
 ```sh
-gh run watch <run-id> --exit-status > watch.log 2>&1   # run in the background, once
-gh pr checks <pr-number> --watch > watch.log 2>&1      # run in the background, once
+gh run watch <run-id> --exit-status > run-watch.log 2>&1   # run in the background, once
+gh pr checks <pr-number> --watch > pr-checks.log 2>&1      # run in the background, once
 ```
 
-Read `watch.log` when it exits. Never send the output to `/dev/null`.
+Read the log when it exits. Never send the output to `/dev/null`.
 
 ## 10. Prove a gate red
 

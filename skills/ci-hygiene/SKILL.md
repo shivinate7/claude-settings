@@ -64,8 +64,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     `concurrency` group (step 4), or the skipped draft run cancels an in-progress ready run.
     After `gh pr ready`, a run of only skipped jobs proves nothing. Wait for a run on the head
     that ran, or dispatch one. See `snippets.md`, section 5b. Never mark ready in the same second
-    as the create. (Decision merge-needs-a-proven-head: a merge needs a proven head. PRs 357 and
-    362.)
+    as the create. (Decision merge-needs-a-proven-head: a merge needs a proven head. The merge
+    tool refuses an all-skipped head. PRs 357 and 362.)
 12. **Cheap checks first.** Give each expensive job `needs:` the cheap static job. A red static
     check then stops the shards from starting.
 13. **Merge tiny jobs.** Each job bills whole minutes, rounded up, plus its own setup. Put checks
