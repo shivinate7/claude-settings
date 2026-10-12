@@ -2276,9 +2276,9 @@ TREE_DENY_REASON = (
 )
 _MOVES_SHELL = re.compile(
     r"(?<![\w.-])(?:cd|pushd|popd|set-location|sl|chdir|push-location|pop-location)(?![\w-])"
-    r"|(?<![\w.-])env\s[^;&|\n]*?(?<!\w)(?:-C|--chdir)(?![\w-])", re.I)
+    r"|(?<![\w.-])env\s[^;&|\n]*?(?<![\w-])(?:-[a-z]*c[a-z]*|--c(?:h(?:d(?:i(?:r)?)?)?)?)(?![\w-])", re.I)
 # a option, variable or config that points the call at another work tree than the cwd or `-C`
-_REPOINTS_GIT = re.compile(r"--work-tree|--git-dir|GIT_WORK_TREE=|GIT_DIR=|GIT_COMMON_DIR=|core\.worktree")
+_REPOINTS_GIT = re.compile(r"--work-tree|--git-dir|GIT_WORK_TREE|GIT_DIR|GIT_COMMON_DIR|core\.worktree", re.I)
 
 
 def one_place(cmd: str) -> bool:
