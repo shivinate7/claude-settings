@@ -191,6 +191,7 @@ GHBLANK = os.path.join(ROOT, "ghblank")    # green checks, a base that reads as 
 CTXREPO = os.path.join(ROOT, "ctxrepo")      # a checkout on main with one merged branch, `done`
 MSG_BAD = os.path.join(ROOT, "msg_bad.txt")  # a message file that cites a record by path
 MSG_OK = os.path.join(ROOT, "msg_ok.txt")    # a message file that cites a record by id
+PATHSPEC_LIST = os.path.join(ROOT, "pathspec_list.txt")  # a pathspec file naming f.txt, for --pathspec-from-file
 MERGECFG = os.path.join(ROOT, "mergecfg")  # a config directory whose rules file points at this repo
 GHNONE = os.path.join(ROOT, "ghnone")      # an empty directory, so the tool is missing
 # The WHOLE PATH of every "gh missing" case: GHNONE and nothing else, never PY_PATH beside it.
@@ -690,6 +691,7 @@ def build_fixtures():
     make_fake_gh(GHMAIN, "main")
     write(MSG_BAD, "title\n\ncites decisions/one-shared-record-stamp.md\n")
     write(MSG_OK, "title\n\ncites D12, short titles for records\n")
+    write(PATHSPEC_LIST, "f.txt\n")
     os.makedirs(CTXREPO, exist_ok=True)
     run_vcs(CTXREPO, "init", "-q", "-b", "main", ".")
     run_vcs(CTXREPO, *IDENT, "commit", "-q", "--allow-empty", "-m", "first")
@@ -750,6 +752,19 @@ def build_fixtures():
     write(os.path.join(GITMAIN, "docs", "DEBTS.md"), "base\n")
     write(os.path.join(GITMAIN, "f.txt"), "base\n")
     write(os.path.join(GITMAIN, "keep.txt"), "base\n")
+    # The per-file cases name these three: two JSON fixtures a lane regenerates, and a source file
+    # for the folder case. All three are tracked, so each one is a real subject once modified.
+    write(os.path.join(GITMAIN, "fixtures", "a.json"), "base\n")
+    write(os.path.join(GITMAIN, "fixtures", "media-players.json"), "base\n")
+    write(os.path.join(GITMAIN, "src", "app.py"), "base\n")
+    # The per-file allow cases also name two root files, a.txt and b.txt, and a folder, hooks/. A
+    # bare `checkout hooks` must read as a folder: the folder is tracked and each tree modifies it.
+    write(os.path.join(GITMAIN, "a.txt"), "base\n")
+    write(os.path.join(GITMAIN, "b.txt"), "base\n")
+    write(os.path.join(GITMAIN, "hooks", "guard.py"), "base\n")
+    # The last-bullets cases name README.md as a restore operand. It is tracked and modified in
+    # every tree, so each one is a real subject.
+    write(os.path.join(GITMAIN, "README.md"), "base\n")
     run_vcs(GITMAIN, "add", "-A")
     run_vcs(GITMAIN, *IDENT, "commit", "-q", "-m", "files")
     run_vcs(GITMAIN, "worktree", "add", "-q", GITWT, "-b", "lane")
@@ -763,7 +778,20 @@ def build_fixtures():
         write(os.path.join(_tree, "docs", "DEBTS.md"), "uncommitted\n")
         write(os.path.join(_tree, "f.txt"), "uncommitted\n")
         write(os.path.join(_tree, "new.txt"), "untracked\n")
+        write(os.path.join(_tree, "fixtures", "a.json"), "uncommitted\n")
+        write(os.path.join(_tree, "fixtures", "media-players.json"), "uncommitted\n")
+        write(os.path.join(_tree, "src", "app.py"), "uncommitted\n")
+        write(os.path.join(_tree, "a.txt"), "uncommitted\n")
+        write(os.path.join(_tree, "b.txt"), "uncommitted\n")
+        write(os.path.join(_tree, "hooks", "guard.py"), "uncommitted\n")
+        write(os.path.join(_tree, "README.md"), "uncommitted\n")
         _require_dirty(_tree, "f.txt", "new.txt", "keep.txt")
+        for _name in ("fixtures/a.json", "fixtures/media-players.json", "src/app.py",
+                      "a.txt", "b.txt", "hooks/guard.py", "README.md"):
+            if not any(line[:2].strip() == "M" and line[3:].strip() == _name
+                       for line in _porcelain(_tree)):
+                sys.exit("fixture setup failed in build_fixtures: %r is not modified in %r"
+                         % (_name, _tree))
     # DECOYMAIN: an ordinary MAIN checkout whose own folder happens to be nested under a path
     # spelled ".claude/worktrees/<name>". It is not a linked worktree of anything, so the
     # coincidence in its path must not earn it the agent-owned allowance.
@@ -1489,9 +1517,10 @@ sh("shared tree: a fast-forward merge is not a discard", VCS + " merge --ff-only
 sh("shared tree: a compound of allowed commands", VCS + " checkout -b lane; " + VCS + " status",
    "allow", tool="PowerShell", cwd=NOGIT)
 
-# THE WORKTREE HALF. A discard in a linked worktree loses only that lane's own work, so it asks. In
-# the shared checkout it denies. The guard asks git which tree it stands in, so these four cases
-# drive a real checkout and a real worktree built beside it.
+# THE WORKTREE HALF. A discard in a linked worktree asks, because the lane is the only thing it can
+# lose. In the shared checkout it denies. The guard asks git which tree it stands in, so these four
+# cases drive a real checkout and a real worktree built beside it. The per-file carve-out that
+# lifts the ask for a checkout or restore of named files is in the block below.
 sh("worktree: a hard reset in the shared checkout denies", VCS + " reset --hard", "deny",
    "shared-tree", cwd=GITMAIN)
 sh("worktree: the same reset inside a worktree asks", VCS + " reset --hard", "ask",
@@ -1500,10 +1529,357 @@ sh("worktree: -C naming the worktree asks, from the shared checkout",
    VCS + " -C " + slash(GITWT) + " reset --hard", "ask", "shared-tree", cwd=GITMAIN)
 sh("worktree: a cd into the worktree asks, from the shared checkout",
    "cd " + slash(GITWT) + " && " + VCS + " reset --hard", "ask", "shared-tree", cwd=GITMAIN)
-sh("worktree: restore of a dirty path still asks, unchanged", VCS + " restore f.txt", "ask",
+
+# THE PER-FILE CARVE-OUT (owner ruling 2026-10-11, "Allow per-file"; decisions/stash-push-is-
+# clone-wide.md). In a linked worktree, a checkout or restore that names only FILES writes the
+# lane's own change to those files, so it runs with no ask. A folder, a glob, `.`, and a whole-tree
+# reset keep the ask. A shared checkout denies every form here. Each case is tagged "per-file", so
+# MUTATE_ONLY=per-file runs this block alone. The fixtures are real: fixtures/a.json,
+# fixtures/media-players.json and src/app.py are tracked and modified in all four trees.
+
+# ALLOW, in a linked worktree (GITWT). Each names one tracked file the lane changed.
+sh("per-file allow: checkout of one modified file", VCS + " checkout fixtures/a.json",
+   "allow", cwd=GITWT)
+sh("per-file allow: checkout -- of one modified file", VCS + " checkout -- f.txt",
+   "allow", cwd=GITWT)
+sh("per-file allow: checkout HEAD -- of one modified file", VCS + " checkout HEAD -- f.txt",
+   "allow", cwd=GITWT)
+sh("per-file allow: restore of one modified file", VCS + " restore f.txt", "allow", cwd=GITWT)
+sh("per-file allow: restore --staged --worktree of one modified file",
+   VCS + " restore --staged --worktree f.txt", "allow", cwd=GITWT)
+# one_place (guard.py): a cd anywhere in the command keeps the ask, because a cd can hide the shared
+# checkout behind the lane. The ask reason must name the form that does run with no ask.
+sh("per-file ask: the incident form, a cd into the worktree, one file, then python, names the -C form",
+   "cd " + slash(GITWT) + " && " + VCS + " checkout fixtures/media-players.json && python3 x.py",
+   "ask", "shared-tree", cwd=GITMAIN, carries="git -C <lane> restore <file>")
+
+# ASK, in a linked worktree (GITWT). Each names a whole tree, a folder, a glob, or a reset.
+sh("per-file ask: checkout . in a worktree still asks", VCS + " checkout .", "ask",
    "shared-tree", cwd=GITWT)
-sh("worktree: checkout -- of a dirty path still asks, unchanged", VCS + " checkout -- f.txt",
+sh("per-file ask: restore . in a worktree still asks", VCS + " restore .", "ask",
+   "shared-tree", cwd=GITWT)
+sh("per-file ask: checkout -- of a folder in a worktree still asks", VCS + " checkout -- src/",
    "ask", "shared-tree", cwd=GITWT)
+sh("per-file ask: restore of a glob in a worktree still asks", VCS + " restore '*.json'",
+   "ask", "shared-tree", cwd=GITWT)
+sh("per-file ask: reset --hard in a worktree still asks", VCS + " reset --hard", "ask",
+   "shared-tree", cwd=GITWT)
+
+# DENY, in the shared checkout (GITMAIN). Every form above, the allow and the ask rows alike.
+sh("per-file deny: checkout of one file in the shared checkout", VCS + " checkout fixtures/a.json",
+   "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file deny: checkout -- of one file in the shared checkout", VCS + " checkout -- f.txt",
+   "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file deny: checkout HEAD -- of one file in the shared checkout",
+   VCS + " checkout HEAD -- f.txt", "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file deny: restore of one file in the shared checkout", VCS + " restore f.txt", "deny",
+   "shared-tree", cwd=GITMAIN)
+sh("per-file deny: restore --staged --worktree of one file in the shared checkout",
+   VCS + " restore --staged --worktree f.txt", "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file deny: the incident form, a cd into the shared checkout, from a worktree",
+   "cd " + slash(GITMAIN) + " && " + VCS + " checkout fixtures/media-players.json && python3 x.py",
+   "deny", "shared-tree", cwd=GITWT)
+sh("per-file deny: checkout . in the shared checkout", VCS + " checkout .", "deny",
+   "shared-tree", cwd=GITMAIN)
+sh("per-file deny: restore . in the shared checkout", VCS + " restore .", "deny",
+   "shared-tree", cwd=GITMAIN)
+sh("per-file deny: checkout -- of a folder in the shared checkout", VCS + " checkout -- src/",
+   "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file deny: restore of a glob in the shared checkout", VCS + " restore '*.json'",
+   "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file deny: reset --hard in the shared checkout", VCS + " reset --hard", "deny",
+   "shared-tree", cwd=GITMAIN)
+# A QUOTED PATHSPEC. The guard splits the command on whitespace and does not strip the quotes, so
+# `'*.json'` reaches git's status read as the literal text `'*.json'`, matches nothing, and reads
+# as an empty subject. A discard then passes. The shared checkout must still deny it.
+sh("per-file deny: a double-quoted path in the shared checkout", VCS + ' restore "f.txt"',
+   "deny", "shared-tree", cwd=GITMAIN)
+
+# BRANCH SWITCH, pinned to today's answer. `checkout main` names no path, so the shared-tree rule
+# never reads it, and a worktree keeps whatever it does now. This case must pass before and after.
+sh("per-file branch switch: checkout main in a worktree keeps today's answer",
+   VCS + " checkout main", "allow", cwd=GITWT)
+
+# THE DISCARD FORMS THAT JOIN THE RULE (decisions/stash-push-is-clone-wide.md, "These discard forms
+# join the rule"). A linked worktree keeps the ask for each one: the lane's own change is not a
+# named file. The shared checkout denies each one. Each case is tagged "per-file".
+
+# ASK, in a linked worktree (GITWT). A folder, a whole tree, an option the carve-out does not read,
+# a quote the tokenizer cannot close, or a form with more than one operand.
+sh("per-file ask: checkout . with a second operand in a worktree still asks",
+   VCS + " checkout . guard.py", "ask", "shared-tree", cwd=GITWT)
+sh("per-file ask: checkout of a folder and a file in a worktree still asks",
+   VCS + " checkout hooks guard.py", "ask", "shared-tree", cwd=GITWT)
+sh("per-file ask: restore --pathspec-from in a worktree still asks",
+   VCS + " restore --pathspec-from " + slash(PATHSPEC_LIST) + " f.txt", "ask", "shared-tree",
+   cwd=GITWT)
+sh("per-file ask: restore --pathspec-from-file in a worktree still asks",
+   VCS + " restore --pathspec-from-file=" + slash(PATHSPEC_LIST), "ask", "shared-tree", cwd=GITWT)
+sh("per-file ask: restore -p of one file in a worktree still asks",
+   VCS + " restore -p f.txt", "ask", "shared-tree", cwd=GITWT)
+sh("per-file ask: restore -s HEAD~5 of one file in a worktree still asks",
+   VCS + " restore -s HEAD~5 f.txt", "ask", "shared-tree", cwd=GITWT)
+sh("per-file ask: restore of an unterminated quote in a worktree still asks",
+   VCS + ' restore "f.txt', "ask", "shared-tree", cwd=GITWT)
+sh("per-file ask: checkout -f of one file in a worktree still asks",
+   VCS + " checkout -f f.txt", "ask", "shared-tree", cwd=GITWT)
+
+# ALLOW, in a linked worktree (GITWT). Each names only existing tracked files, with a form the
+# carve-out reads. `checkout fixtures/a.json` is already pinned above as "per-file allow: checkout
+# of one modified file", so it is not repeated here.
+sh("per-file allow: checkout -- of two modified files in a worktree",
+   VCS + " checkout -- a.txt b.txt", "allow", cwd=GITWT)
+sh("per-file allow: restore --staged --worktree -- of one modified file in a worktree",
+   VCS + " restore --staged --worktree -- a.txt", "allow", cwd=GITWT)
+sh("per-file allow: restore -S -W of one modified file in a worktree",
+   VCS + " restore -S -W a.txt", "allow", cwd=GITWT)
+
+# A FORCED BRANCH SWITCH. The shared checkout denies it, and a worktree asks, because a forced
+# switch throws away the local changes of the tree it runs in.
+sh("per-file deny: checkout -f main in the shared checkout", VCS + " checkout -f main", "deny",
+   "shared-tree", cwd=GITMAIN)
+sh("per-file ask: checkout -f main in a worktree still asks", VCS + " checkout -f main", "ask",
+   "shared-tree", cwd=GITWT)
+sh("per-file deny: checkout --force main in the shared checkout", VCS + " checkout --force main",
+   "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file ask: checkout --force main in a worktree still asks",
+   VCS + " checkout --force main", "ask", "shared-tree", cwd=GITWT)
+
+# A FOLDER WITH NO `--`. Git reads a bare name as a path, so a folder is a whole-folder discard.
+sh("per-file deny: checkout of a folder with no -- in the shared checkout",
+   VCS + " checkout hooks", "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file ask: checkout of a folder with no -- in a worktree still asks",
+   VCS + " checkout hooks", "ask", "shared-tree", cwd=GITWT)
+
+# A PATHSPEC FILE, under the long name and under a unique prefix git accepts.
+sh("per-file deny: checkout --pathspec-from-file in the shared checkout",
+   VCS + " checkout --pathspec-from-file=" + slash(PATHSPEC_LIST), "deny", "shared-tree",
+   cwd=GITMAIN)
+sh("per-file ask: checkout --pathspec-from-file in a worktree still asks",
+   VCS + " checkout --pathspec-from-file=" + slash(PATHSPEC_LIST), "ask", "shared-tree",
+   cwd=GITWT)
+sh("per-file deny: checkout --pathspec-from in the shared checkout",
+   VCS + " checkout --pathspec-from " + slash(PATHSPEC_LIST), "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file ask: checkout --pathspec-from in a worktree still asks",
+   VCS + " checkout --pathspec-from " + slash(PATHSPEC_LIST), "ask", "shared-tree", cwd=GITWT)
+
+# EACH -C. The last -C sets the checkout the rule judges, whichever -C comes first.
+sh("per-file deny: -C names the shared checkout last, from a worktree",
+   VCS + " -C " + slash(NOGIT) + " -C " + slash(GITMAIN) + " checkout -- f.txt", "deny",
+   "shared-tree", cwd=GITWT)
+sh("per-file deny: -C names a worktree first and the shared checkout last, from a plain folder",
+   VCS + " -C " + slash(GITWT) + " -C " + slash(GITMAIN) + " checkout -- f.txt", "deny",
+   "shared-tree", cwd=NOGIT)
+sh("per-file allow: -C names the shared checkout first and a worktree last, from a plain folder",
+   VCS + " -C " + slash(GITMAIN) + " -C " + slash(GITWT) + " checkout -- f.txt", "allow",
+   cwd=NOGIT)
+
+# THE LAST THREE BULLETS (decisions/stash-push-is-clone-wide.md, "These discard forms join the
+# rule"): each -C, every operand of restore as a path, and a pathspec the guard cannot read. Each
+# case is tagged "per-file".
+
+# EACH -C, FROM A CLEAN WORKTREE. The chained target is the shared checkout (GITMAIN, dirty), so
+# the rule judges it and denies. SUBJCLEANWT, the call's own tree, is clean and must not decide.
+sh("per-file deny: -C shared checkout then -C . reset --hard, from a clean worktree",
+   VCS + " -C " + slash(GITMAIN) + " -C . reset --hard", "deny", "shared-tree", cwd=SUBJCLEANWT)
+
+# EACH -C, A RELATIVE SECOND -C THAT LANDS IN A WORKTREE. The second -C joins the first, so the
+# chained target is GITWT, a linked worktree. The carve-out reads it and allows the named file.
+sh("per-file allow: -C parent then a relative -C lane, checkout -- of one file",
+   VCS + " -C " + slash(ROOT) + " -C lane checkout -- f.txt", "allow", cwd=NOGIT)
+
+# EVERY OPERAND OF restore IS A PATH. A folder or a dot named before `--` is a whole-folder
+# discard, so a linked worktree keeps the ask. README.md is dirty in every tree.
+sh("per-file ask: restore --worktree hooks -- README.md in a worktree still asks",
+   VCS + " restore --worktree hooks -- README.md", "ask", "shared-tree", cwd=GITWT)
+sh("per-file ask: restore . -- README.md in a worktree still asks",
+   VCS + " restore . -- README.md", "ask", "shared-tree", cwd=GITWT)
+
+# AN UNREADABLE PATHSPEC. A brace, a variable, a backtick or a glob the guard cannot expand is a
+# discard of unknown size. The shared checkout denies it. A linked worktree asks.
+sh("per-file deny: restore --worktree {hooks,README.md} in the shared checkout",
+   VCS + " restore --worktree {hooks,README.md}", "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file ask: restore --worktree {hooks,README.md} in a worktree still asks",
+   VCS + " restore --worktree {hooks,README.md}", "ask", "shared-tree", cwd=GITWT)
+sh("per-file deny: restore \"$F\" in the shared checkout", VCS + ' restore "$F"', "deny",
+   "shared-tree", cwd=GITMAIN)
+sh("per-file ask: restore \"$F\" in a worktree still asks", VCS + ' restore "$F"', "ask",
+   "shared-tree", cwd=GITWT)
+sh("per-file deny: restore `cat list` in the shared checkout", VCS + " restore `cat list`",
+   "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file ask: restore `cat list` in a worktree still asks", VCS + " restore `cat list`",
+   "ask", "shared-tree", cwd=GITWT)
+sh("per-file deny: checkout -- '*.md' in the shared checkout", VCS + " checkout -- '*.md'",
+   "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file ask: checkout -- '*.md' in a worktree still asks", VCS + " checkout -- '*.md'",
+   "ask", "shared-tree", cwd=GITWT)
+
+# SECOND SET (decisions/stash-push-is-clone-wide.md, "These discard forms join the rule"). The
+# operand before `--` is a path, and the clean file after `--` must not hide it. keep.txt is clean
+# in every tree; f.txt is dirty in the shared checkout and in the lane.
+sh("per-file deny: restore f.txt -- keep.txt in the shared checkout, operand before --",
+   VCS + " restore f.txt -- keep.txt", "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file ask: restore . -- keep.txt in a worktree: a dot before -- is a whole tree",
+   VCS + " restore . -- keep.txt", "ask", "shared-tree", cwd=GITWT)
+sh("per-file deny: restore \"$F\" -- keep.txt in the shared checkout, unreadable before --",
+   VCS + ' restore "$F" -- keep.txt', "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file ask: restore \"$F\" -- keep.txt in a worktree still asks, unreadable before --",
+   VCS + ' restore "$F" -- keep.txt', "ask", "shared-tree", cwd=GITWT)
+# EACH -C IN ITS OWN CALL. The second git call names the shared checkout, so it is the one judged.
+# The first call's -C reads the lane, which has f.txt dirty too and would allow a per-file restore.
+sh("per-file deny: -C lane status, then -C shared restore f.txt, from a plain folder",
+   VCS + " -C " + slash(GITWT) + " status && " + VCS + " -C " + slash(GITMAIN) + " restore f.txt",
+   "deny", "shared-tree", cwd=NOGIT)
+# Limit: _run_dir reads the first -C against the shell cwd, so a shared checkout reached by `cd`
+# gets an ask here, not a deny. Main gives the same.
+sh("per-file ask: cd into the shared checkout, then git -C . restore f.txt, from a worktree",
+   "cd " + slash(GITMAIN) + " && " + VCS + " -C . restore f.txt", "ask", "shared-tree", cwd=GITWT)
+sh("per-file deny: -C parent then a relative -C repo, from a plain folder",
+   VCS + " -C " + slash(ROOT) + " -C repo restore f.txt", "deny", "shared-tree", cwd=NOGIT)
+# IDENTICAL SEGMENTS. decisions/stash-push-is-clone-wide.md: each git call is judged in its own
+# checkout. The lane and the shared checkout both hold f.txt dirty, so a per-file restore is an
+# allow in the lane and a deny in the shared checkout. The segment text repeats, and the segment
+# lookup finds the FIRST copy, so the second call is judged in the lane. These MUST be red today.
+sh("per-file deny: cd lane; restore f.txt; cd shared; the same restore f.txt, joined by ;",
+   "cd " + slash(GITWT) + "; " + VCS + " restore f.txt; cd " + slash(GITMAIN) + "; "
+   + VCS + " restore f.txt", "deny", "shared-tree", cwd=NOGIT)
+# The && forms end in `&& echo done`. A segment keeps the blank before its `&&`, so the two
+# restore segments only read as identical when a later `&&` gives the second one that blank too.
+# The bare form without a trailing join is judged correctly on the base, because its last segment
+# has no trailing blank, so it is not a repeat of the first.
+sh("per-file deny: cd lane && restore f.txt && cd shared && the same restore f.txt, && joins",
+   "cd " + slash(GITWT) + " && " + VCS + " restore f.txt && cd " + slash(GITMAIN) + " && "
+   + VCS + " restore f.txt && echo done", "deny", "shared-tree", cwd=NOGIT)
+sh("per-file deny: cd lane && git -C . restore f.txt && cd shared && the same -C . restore, && joins",
+   "cd " + slash(GITWT) + " && " + VCS + " -C . restore f.txt && cd " + slash(GITMAIN) + " && "
+   + VCS + " -C . restore f.txt && echo done", "deny", "shared-tree", cwd=NOGIT)
+sh("per-file deny: cd lane; git -C . restore f.txt; cd shared; the same -C . restore",
+   "cd " + slash(GITWT) + "; " + VCS + " -C . restore f.txt; cd " + slash(GITMAIN) + "; "
+   + VCS + " -C . restore f.txt", "deny", "shared-tree", cwd=NOGIT)
+# CONTROL, green on the base. Both calls stay in the lane, so the repeat is an allow and the fix
+# must not turn a lane-only repeat into a deny.
+sh("per-file ask: cd lane && restore f.txt && cd lane && the same restore f.txt asks, a cd keeps the ask",
+   "cd " + slash(GITWT) + " && " + VCS + " restore f.txt && cd " + slash(GITWT) + " && "
+   + VCS + " restore f.txt && echo done", "ask", "shared-tree", cwd=NOGIT)
+
+# HEREDOC BODY WITH A LONE QUOTE, THEN A CD. segment_roots (guard.py ~1228) loses sync when a
+# heredoc body holds a lone quote, and drops every later `cd`. The shell stays in the lane (cwd),
+# the body is data, and the restore after `cd` runs in the shared checkout, so it must deny. Both
+# arms are RED on ae09e58: the restore is judged in the lane, not the shared checkout, so the
+# verdict is ask, not deny. A lone quote inside a shell `#` comment does not desync, so the python
+# body keeps its quote outside any comment.
+sh("per-file deny: node heredoc, a lone apostrophe in the body, then cd shared and restore f.txt",
+   "node <<'EOF'\n// don't\nEOF\ncd " + slash(GITMAIN) + " && " + VCS + " restore f.txt",
+   "deny", "shared-tree", cwd=GITWT)
+sh("per-file deny: python heredoc, a lone double quote in the body, then cd shared and restore",
+   "python3 <<'EOF'\ntotal = \"\nEOF\ncd " + slash(GITMAIN) + " && " + VCS
+   + " restore f.txt", "deny", "shared-tree", cwd=GITWT)
+
+# SYNC LOSS RULING (fixture shape). When segment_roots (guard.py ~1228) loses sync with the
+# segments, every later segment is judged as the shared checkout, so a later discard of a dirty
+# file is denied. Both arms start in the lane, but the restore runs after `cd` into the shared
+# checkout. RED on 6c20c07: the walk's last cd is the lane, so the restore is judged there.
+# Limit: as above, a cd keeps the ask in a worktree, so the two cases below ask, not deny.
+sh("per-file ask: two heredocs with lone apostrophes, then cd shared and restore f.txt, cd lane last",
+   "cd " + slash(GITMAIN) + " && node <<'EOF'\nit's\nEOF\ncat <<EOF2\nwe're\nEOF2\n"
+   + VCS + " restore f.txt\ncd " + slash(GITWT), "ask", "shared-tree", cwd=GITWT)
+sh("per-file ask: the node lone-apostrophe case with && cd lane appended after the shared restore",
+   "node <<'EOF'\n// don't\nEOF\ncd " + slash(GITMAIN) + " && " + VCS + " restore f.txt && cd "
+   + slash(GITWT), "ask", "shared-tree", cwd=GITWT)
+# CONTROL. No heredoc, so the walk stays in sync, but the cd still keeps the ask.
+sh("per-file ask: cd lane && restore f.txt with no heredoc asks, a cd keeps the ask",
+   "cd " + slash(GITWT) + " && " + VCS + " restore f.txt", "ask", "shared-tree", cwd=NOGIT)
+# TWO -C TARGETS (one_place, `len(targets) <= 1`). No cd, both calls are per-file forms in a linked
+# worktree, but they name two different trees (lane, and FARWT, a second linked worktree). One
+# verdict cannot cover two trees, so it asks. FARWT holds b.txt dirty (the fixtures have no g.txt).
+sh("per-file ask: two -C targets, lane then a second linked worktree, both per-file restores",
+   VCS + " -C " + slash(GITWT) + " restore f.txt && " + VCS + " -C " + slash(FARWT)
+   + " restore b.txt", "ask", "shared-tree", cwd=GITWT)
+# CONTROL. One -C target, repeated, no cd: the per-file allow stands.
+sh("per-file allow: one -C target repeated, lane restore f.txt then lane restore b.txt",
+   VCS + " -C " + slash(GITWT) + " restore f.txt && " + VCS + " -C " + slash(GITWT)
+   + " restore b.txt", "allow", cwd=GITWT)
+
+# FIVE SHAPES THAT RUN A PER-FILE DISCARD IN THE SHARED CHECKOUT. Each one points the discard at
+# the shared checkout while the shell, or a `-C` that names the lane, still reads as the lane. Each
+# verdict is the one main's guard.py gives, probed with GUARD_UNDER_TEST: deny for 1, ask for 2 to
+# 5 (main reads the lane for those, so it asks and does not deny; the branch must not allow).
+# Controls that stay allowed are pinned above: "per-file allow: restore of one modified file"
+# (cwd lane) and "one -C target repeated".
+# 1. --work-tree names the shared checkout, whatever -C says.
+sh("per-file deny: -C lane with --work-tree naming the shared checkout, from a worktree",
+   VCS + " -C " + slash(GITWT) + " --work-tree=" + slash(GITMAIN) + " restore f.txt",
+   "deny", "shared-tree", cwd=GITWT)
+# 2. GIT_WORK_TREE, alone or with GIT_DIR, set by prefix, by `env`, or by `export`.
+for _label, _lead in (("a prefix assignment", ""), ("env", "env "), ("export", None)):
+    for _gitdir in (False, True):
+        _vars = "GIT_WORK_TREE=" + slash(GITMAIN)
+        if _gitdir:
+            _vars += " GIT_DIR=" + slash(GITMAIN) + "/.git"
+        if _lead is None:
+            _cmd = "export " + _vars + "; " + VCS + " restore f.txt"
+        else:
+            _cmd = _lead + _vars + " " + VCS + " restore f.txt"
+        sh("per-file ask: GIT_WORK_TREE naming the shared checkout by %s%s, from a worktree"
+           % (_label, " with GIT_DIR" if _gitdir else ""), _cmd, "ask", "shared-tree", cwd=GITWT)
+# 3. A segment with no -C must not borrow another segment's -C. From the shared checkout, the bare
+# restore runs in the shared checkout whichever side the lane's -C status stands on. main asks.
+sh("per-file ask: -C lane status, then a bare restore f.txt, from the shared checkout",
+   VCS + " -C " + slash(GITWT) + " status && " + VCS + " restore f.txt", "ask", "shared-tree",
+   cwd=GITMAIN)
+sh("per-file ask: a bare restore f.txt, then -C lane status, from the shared checkout",
+   VCS + " restore f.txt && " + VCS + " -C " + slash(GITWT) + " status", "ask", "shared-tree",
+   cwd=GITMAIN)
+# 4. A PowerShell cd into the shared checkout. main asks; the branch must not allow.
+for _cd in ("Set-Location", "sl", "chdir", "Push-Location"):
+    sh("per-file ask: PowerShell %s into the shared checkout, then restore f.txt, from a worktree"
+       % _cd, _cd + " " + slash(GITMAIN) + "; " + VCS + " restore f.txt", "ask", "shared-tree",
+       tool="PowerShell", cwd=GITWT)
+# 5. env's own chdir flags. main does not read them and asks, so ask is pinned.
+sh("per-file ask: env -C into the shared checkout, then restore f.txt, from a worktree",
+   "env -C " + slash(GITMAIN) + " " + VCS + " restore f.txt", "ask", "shared-tree", cwd=GITWT)
+sh("per-file ask: env --chdir into the shared checkout, then restore f.txt, from a worktree",
+   "env --chdir=" + slash(GITMAIN) + " " + VCS + " restore f.txt", "ask", "shared-tree",
+   cwd=GITWT)
+
+# LATE PROBES (named "late probe", so MUTATE_ONLY="late probe" runs this block alone). Each runs a
+# per-file restore in the shared checkout from the lane by a spelling the guard did not read yet.
+# Main reads the lane for all of them and asks, so ask is pinned. The controls stay allowed.
+_SH = slash(GITMAIN)
+for _label, _cmd in (
+    ("lower-case git_work_tree prefix", "git_work_tree=" + _SH + " " + VCS + " restore f.txt"),
+    ("read -r then export", "read -r GIT_WORK_TREE <<< \"" + _SH + "\"; export GIT_WORK_TREE; "
+     + VCS + " restore f.txt"),
+    ("export with +=", "export GIT_WORK_TREE+=" + _SH + "; " + VCS + " restore f.txt"),
+    ("printf -v then export", "printf -v GIT_WORK_TREE %s " + _SH + "; export GIT_WORK_TREE; "
+     + VCS + " restore f.txt"),
+    ("env -vC", "env -vC " + _SH + " " + VCS + " restore f.txt"),
+    ("env --ch= abbreviation", "env --ch=" + _SH + " " + VCS + " restore f.txt"),
+):
+    sh("per-file ask: late probe, %s names the shared checkout, from a worktree" % _label, _cmd,
+       "ask", "shared-tree", cwd=GITWT)
+for _label, _cmd in (
+    ("$env: assignment", '$env:GIT_WORK_TREE = "' + _SH + '"; ' + VCS + " restore f.txt"),
+    ("lower-case $env: assignment", '$env:git_work_tree = "' + _SH + '"; ' + VCS
+     + " restore f.txt"),
+    ("Set-Item Env:", 'Set-Item Env:GIT_WORK_TREE "' + _SH + '"; ' + VCS + " restore f.txt"),
+    ("SetEnvironmentVariable", '[Environment]::SetEnvironmentVariable("GIT_WORK_TREE","' + _SH
+     + '"); ' + VCS + " restore f.txt"),
+):
+    sh("per-file ask: late probe, PowerShell %s names the shared checkout, from a worktree" % _label,
+       _cmd, "ask", "shared-tree", tool="PowerShell", cwd=GITWT)
+sh("per-file allow: late probe control, a plain restore f.txt in the lane",
+   VCS + " restore f.txt", "allow", cwd=GITWT)
+sh("per-file allow: late probe control, a harmless GIT_TRACE prefix in the lane",
+   "GIT_TRACE=1 " + VCS + " restore f.txt", "allow", cwd=GITWT)
+
+# KILL CASES for three mutate_guard entries removed in 78e8446. Each pins today's base verdict.
+# The quoted refspec and the quoted force in a commit message are verdicts; the quoted force on a
+# worktree remove is a logged note, pinned by the LOG_CHECKS_EXTRA entry beside subject_unread_*.
+sh("per-file kill: a quoted refspec keeps its quotes, so a force push asks",
+   VCS + " push origin \"+main\" $'it\\'s'", "ask", cwd=GITWT)
+sh("per-file kill: false alarm: --force quoted in a commit message stays allowed",
+   VCS + " commit -m $'release git push --force notes\\'s'", "allow", cwd=GITWT)
 
 # THE AGENT-OWNED CARVE-OUT (owner ruling 2026-10-03, decisions/guard-agent-worktree-discard.md).
 # A linked worktree under <repo>/.claude/worktrees/ is agent-owned: a discard there is ALLOWED,
@@ -1511,8 +1887,8 @@ sh("worktree: checkout -- of a dirty path still asks, unchanged", VCS + " checko
 # Near misses must still ask or deny, proven against real git state, not a path guess.
 sh("agent worktree: a linked worktree elsewhere that merely says \"worktrees\" still asks",
    VCS + " reset --hard", "ask", "shared-tree", cwd=FARWT)
-sh("agent worktree: checkout -- in that near-miss worktree still asks",
-   VCS + " checkout -- f.txt", "ask", "shared-tree", cwd=FARWT)
+sh("agent worktree: checkout -- . in that near-miss worktree still asks",
+   VCS + " checkout -- .", "ask", "shared-tree", cwd=FARWT)
 sh("agent worktree: a textual .claude/worktrees/.. that resolves back outside still asks",
    VCS + " reset --hard", "ask", "shared-tree", cwd=DOTDOTWT)
 if SYMWT_MADE:
@@ -5803,6 +6179,16 @@ def subject_unread_log_case(command=None, expect_note=True):
     if ("worktree remove" if command else "reset") not in fields[4]:
         return False, "the line does not carry the matched command: %r" % fields[4]
     return True, "one noted/subject-unread line, distinct from a refusal"
+
+
+def per_file_quoted_force_noted_case():
+    """KILL CASE for a mutate_guard entry removed in 78e8446: a quoted force on a worktree remove.
+    The base reads the quoted `--force`, so the unread subject is noted, not silent."""
+    return subject_unread_log_case(VCS + " worktree remove \"--force\" $'x\\'y' /x")
+
+
+LOG_CHECKS_EXTRA.append(("per-file kill: log: a quoted or abbreviated force on a worktree remove "
+                         "is still noted", per_file_quoted_force_noted_case))
 
 
 def agent_worktree_noted_case(command):

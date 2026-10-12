@@ -527,7 +527,12 @@ def _git_subcommand_index(tokens, index: int) -> int:
 
 def git_calls(segment: str):
     """Return (subcommand, arguments) for every `git` call in one segment."""
-    tokens = REDIRECTION.sub(" ", segment).split()
+    text = REDIRECTION.sub(" ", segment)
+    # shlex unquotes a pathspec (`'*.json'`, `"f.txt"`); a segment it cannot parse falls back to
+    # a whitespace split, the old reader.
+    tokens = segment_tokens(text)
+    if tokens is None:
+        tokens = text.split()
     calls = []
     index = 0
     while index < len(tokens):
@@ -541,8 +546,17 @@ def git_calls(segment: str):
     return calls
 
 
-def checkout_names_a_path(args) -> str:
-    """Return the matched text when a `git checkout` names a path, else ''."""
+def pathspec_from_file_flag(arg: str) -> bool:
+    """True for `--pathspec-from-file` or any prefix of it git accepts (`--pathspec-from`, ...)."""
+    name = arg.split("=", 1)[0]
+    return len(name) >= len("--pathspec-f") and "--pathspec-from-file".startswith(name)
+
+
+def checkout_names_a_path(args, root: str = "") -> str:
+    """Return the matched text when a `git checkout` names a path, else ''.
+
+    Also matched: a forced switch (`-f`, `--force`), a pathspec file, and, when `root` is given,
+    a lone bare operand that is a folder under `root` (git reads it as a path)."""
     if "--" in args:
         return " ".join(["--"] + args[args.index("--") + 1:]).strip()
     plain = []
@@ -564,6 +578,11 @@ def checkout_names_a_path(args) -> str:
             or "\\" in arg
             or arg.endswith("/")
         ):
+            return arg
+    if root and len(plain) == 1 and os.path.isdir(os.path.join(root, plain[0])):
+        return plain[0]
+    for arg in args:
+        if arg in ("-f", "--force") or pathspec_from_file_flag(arg):
             return arg
     return ""
 
@@ -1043,7 +1062,7 @@ def restore_discards(args) -> bool:
     return worktree or not staged
 
 
-def shared_tree_match(segment: str):
+def shared_tree_match(segment: str, root: str = ""):
     """Return (matched text, subcommand, arguments) for the first call in one segment that
     discards a working tree, else None.
 
@@ -1067,7 +1086,7 @@ def shared_tree_match(segment: str):
         if subcommand == "clean" and clean_deletes_files(args):
             return ("git clean " + " ".join(args)).strip(), subcommand, args
         if subcommand == "checkout":
-            named = checkout_names_a_path(args)
+            named = checkout_names_a_path(args, root)
             if named:
                 return "git checkout " + named, subcommand, args
         if subcommand == "branch":
@@ -1155,10 +1174,17 @@ def _segment_git_c_target(tokens):
     if index is None or basename(tokens[index]) not in ("git", "git.exe"):
         return None
     cursor = index + 1
+    found = None
     while cursor < len(tokens):
         token = tokens[cursor]
         if token == "-C":
-            return tokens[cursor + 1] if cursor + 1 < len(tokens) else None
+            if cursor + 1 >= len(tokens):
+                return None
+            value = tokens[cursor + 1]
+            # git chains every `-C`: a relative one joins onto the one before it
+            found = os.path.join(found, value) if found and value else (value or found)
+            cursor += 2
+            continue
         if token in GIT_OPT_WITH_VALUE:
             cursor += 2
             continue
@@ -1166,7 +1192,7 @@ def _segment_git_c_target(tokens):
             cursor += 1
             continue
         break
-    return None
+    return found
 
 
 def _absolute(where: str, shell_cwd: str) -> str:
@@ -1563,11 +1589,15 @@ def named_pathspecs(subcommand: str, args):
     `complete` is False when the call's paths cannot be enumerated from its own arguments, and
     the caller then reads the whole tree rather than a subset it is not sure of.
     """
-    if any(arg == PATHSPEC_FROM_FILE or arg.startswith(PATHSPEC_FROM_FILE + "=")
-           for arg in args):
+    if any(pathspec_from_file_flag(arg) for arg in args):
         return [], False
     if "--" in args:
-        return args[args.index("--") + 1:], True
+        after = args[args.index("--") + 1:]
+        if subcommand != "restore":
+            return after, True
+        # a restore operand before `--` is a path too (`--source` takes a commit, not a path)
+        before, _ = named_pathspecs(subcommand, args[:args.index("--")])
+        return before + after, True
     plain = []
     skip = False
     for arg in args:
@@ -1584,7 +1614,7 @@ def named_pathspecs(subcommand: str, args):
             continue
         plain.append(arg)
     if subcommand == "checkout" and len(plain) >= 2:
-        return plain[1:], True  # a start point, then the paths
+        return plain, True  # a start point, then the paths; the start point is read as a path too
     return plain, True
 
 
@@ -1592,6 +1622,8 @@ def _tree_subject(where: str, pathspecs=(), complete: bool = True):
     """True when the working tree holds nothing under `pathspecs`, False when it holds
     something, None when it cannot be read.
     """
+    if complete and any(c in spec for spec in pathspecs for c in "$`{}*?["):
+        return False  # a pathspec the guard cannot expand is a discard of unknown size, never clean
     lines = porcelain(where, pathspecs if complete else ())
     if lines is None:
         return None
@@ -1660,6 +1692,8 @@ def restore_subject(args, where: str):
 
 def checkout_subject(args, where: str):
     """`git checkout <path>` writes the paths it names, so the read is per path."""
+    if "--" not in args and any(a in ("-f", "--force") for a in args):
+        return _tree_subject(where)  # a forced switch rewrites the whole tree
     specs, complete = named_pathspecs("checkout", args)
     return _tree_subject(where, specs, complete)
 
@@ -2258,10 +2292,80 @@ TREE_DENY_REASON = (
     "belongs to no branch, and it outlives no session that holds its tag. "
     "Run the command in a worktree of your own when the tree must change."
 )
+_MOVES_SHELL = re.compile(
+    r"(?<![\w.-])(?:cd|pushd|popd|set-location|sl|chdir|push-location|pop-location)(?![\w-])"
+    r"|(?<![\w.-])env\s[^;&|\n]*?(?<![\w-])(?:-[a-z]*c[a-z]*|--c(?:h(?:d(?:i(?:r)?)?)?)?)(?![\w-])", re.I)
+# a option, variable or config that points the call at another work tree than the cwd or `-C`
+_REPOINTS_GIT = re.compile(r"--work-tree|--git-dir|GIT_WORK_TREE|GIT_DIR|GIT_COMMON_DIR|core\.worktree", re.I)
+
+
+def one_place(cmd: str) -> bool:
+    """True when the whole command acts on one tree: no `cd`, `pushd` or `popd` token anywhere
+    and at most one distinct `git -C` target. Only then may the per-file allow apply, because
+    every other shape can hide a shared checkout behind the lane."""
+    if _MOVES_SHELL.search(cmd):
+        return False
+    if _REPOINTS_GIT.search(cmd):
+        return False
+    targets = set()
+    git_targets = []   # one entry per call segment: its `-C` target, or None
+    for segment in split_segments(cmd):
+        words = segment_tokens(segment)
+        target = _segment_git_c_target(words) if words else None
+        if target is not None:
+            targets.add(target)
+        at = resolve_command(words) if words else None
+        if at is not None and basename(words[at]) in ("git", "git.exe"):
+            git_targets.append(target)
+    if targets and None in git_targets:
+        return False   # a call with no `-C` runs in the cwd, not in the lane another call names
+    return len(targets) <= 1
+
+
+RESTORE_PER_FILE_FLAGS = {"--staged", "--worktree", "-S", "-W"}
+
+
+def names_only_files(subcommand: str, args, root: str, segment: str = "") -> bool:
+    """True when a `git checkout` or `git restore` is one of the per-file forms: `restore` with
+    only the flags in RESTORE_PER_FILE_FLAGS, `checkout` with `--` before the paths or, without
+    `--`, one operand that is an existing file. Every path is not `.`, has no glob character or
+    pathspec magic, and is not a directory. Any other flag or form, or a segment that cannot be
+    tokenized, is False."""
+    if subcommand not in ("checkout", "restore"):
+        return False
+    if segment and segment_tokens(REDIRECTION.sub(" ", segment)) is None:
+        return False
+    dashed = "--" in args
+    head, specs = (args[:args.index("--")], args[args.index("--") + 1:]) if dashed else ([], list(args))
+    flags = [a for a in head + ([] if dashed else specs) if a.startswith("-")]
+    if subcommand == "restore":
+        if any(f not in RESTORE_PER_FILE_FLAGS for f in flags):
+            return False
+        # every non-flag operand is a path, before `--` too
+        specs = [a for a in head if not a.startswith("-")] + [a for a in specs if dashed or not a.startswith("-")]
+    else:
+        if flags:
+            return False
+        if not dashed and not (len(specs) == 1 and os.path.isfile(os.path.join(root, specs[0]))):
+            return False
+    if not specs:
+        return False
+    for spec in specs:
+        if any(c in spec for c in "$`{}"):  # unreadable: a discard of unknown size
+            return False
+        if spec in (".", "") or spec[0] == ":" or any(c in spec for c in "*?["):
+            return False
+        if os.path.isdir(os.path.join(root, spec)):
+            return False
+    return True
+
+
 TREE_ASK_REASON = (
     "Rule (shared trees): this command throws away work in a working tree. "
     "This checkout is a worktree, so the loss is limited to this lane. "
     "Commit work you must set aside on your own branch, never a stash. "
+    "A per-file discard in a worktree runs with no ask when the command holds no cd: "
+    "git -C <lane> restore <file>. "
     "The click in this prompt is the grant."
 )
 # agent-worktree-discard-is-noted: inside a worktree the harness made FOR an agent
@@ -5958,14 +6062,22 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                     diff_refusal(tool, role, command_root(stripped, cwd))
 
     # 1. Shared trees.
+    whole_root = []   # command_root reads the whole command: once per command, never per segment
     for segment in split_segments(stripped):
         if not segment.strip():
             continue
-        match = shared_tree_match(segment)
+        words = segment_tokens(segment)
+        own_c = _segment_git_c_target(words) if words else None
+        if own_c is not None:
+            # a `--work-tree` beside the `-C` moves the files the call discards to that tree
+            root = command_root(segment, cwd) if GIT_WORK_TREE_RE.search(segment) else _absolute(own_c, cwd)
+        else:
+            whole_root = whole_root or [command_root(stripped, cwd)]
+            root = whole_root[0]
+        match = shared_tree_match(segment, root)
         if match is None:
             continue
         matched, subcommand, args = match
-        root = command_root(stripped, cwd)
         resolved = checkout_conflict_resolve(segment, root)
         if resolved:
             continue
@@ -5976,6 +6088,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         # and logged under its OWN rule, so a reader can tell "I could not confirm this" from
         # "this destroys something", and the Stop hook names it at the end of the turn.
         state = subject_state(subcommand, args, root)
+        if subcommand in ("checkout", "restore") and segment_tokens(REDIRECTION.sub(" ", segment)) is None:
+            state = False  # an unparsable segment: the paths read above are a guess, keep the ask
         if state is None:
             # An unforced remove is refused by the VCS itself when the tree is dirty or locked,
             # so a note protects nothing (owner ruling, decisions/guard-that-cries-wolf-is-spent.md).
@@ -6008,6 +6122,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             # on its own branch and in its own reflog. Allow it, logged, not asked.
             if agent_owned_worktree(root) is True:
                 record(tool, "noted", "shared-tree", matched)
+                continue
+            # stash-push-is-clone-wide, per-file paragraph: named files only write this lane's
+            # own change to those files, so no ask.
+            if names_only_files(subcommand, args, root, segment) and one_place(stripped):
                 continue
             refuse(tool, "ask", "shared-tree", TREE_ASK_REASON, matched)
         refuse(tool, "deny", "shared-tree", TREE_DENY_REASON, matched)
