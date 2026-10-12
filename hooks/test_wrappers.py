@@ -6,10 +6,15 @@ Run it from the repository root:
     python hooks/test_wrappers.py
 
 Contract, from decision gate-hooks-fail-closed:
-- The six gate entries (PreToolUse guard, stall_watch, ste_gate, question_outcome,
-  sim_boot_record; PermissionRequest rm_prompt_answer) carry `"onFailure": "block"`.
+- The four gate entries (PreToolUse guard, ste_gate, question_outcome; PermissionRequest
+  rm_prompt_answer) carry `"onFailure": "block"`.
 - A gate whose script is missing exits 2 and prints a remedy line naming install.sh and install.ps1.
-- A gate whose script exists but has no python on PATH exits 2 with the same remedy names.
+- A gate whose script exists but has no python on PATH exits 2. Its remedy line names "Python"
+  and both installers, so the reader installs Python 3 before running either one.
+- A gate whose script exists runs it: stdin reaches the script, its stdout comes back, and its
+  exit code is the script's own. Checked for exit 0 and exit 3.
+- stall_watch and sim_boot_record are advisory: every entry that runs them carries no `onFailure`
+  and exits 0 when the script is missing.
 - Advisory entries (SessionStart, Stop, PreCompact, SessionEnd, PostToolUse, SubagentStop) exit 0
   when their script is missing, and carry no `onFailure`.
 - CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL equals CLAUDE_CODE_SUBAGENT_MODEL in `env`.
@@ -35,14 +40,17 @@ SH = shutil.which("sh")
 # gate script -> the event whose entry must run it
 GATES = {
     "hooks/guard.py": "PreToolUse",
-    "hooks/stall_watch.py": "PreToolUse",
     "lint/ste_gate.py": "PreToolUse",
     "hooks/question_outcome.py": "PreToolUse",
-    "hooks/sim_boot_record.py": "PreToolUse",
     "hooks/rm_prompt_answer.py": "PermissionRequest",
 }
+# scripts in the advisory class: they never deny
+MOVED = ("hooks/stall_watch.py", "hooks/sim_boot_record.py")
 ADVISORY_EVENTS = ("SessionStart", "Stop", "PreCompact", "SessionEnd", "PostToolUse", "SubagentStop")
 REMEDY = ("install.sh", "install.ps1")
+PAYLOAD = '{"probe": "d1-7f3a"}'
+# a stand-in gate: echoes its stdin with a marker, then exits with the code the case picks
+FAKE_GATE = "import sys\nprint('stdin=' + sys.stdin.read())\nsys.exit(%d)\n"
 
 
 def load():
@@ -69,10 +77,16 @@ def gate_entry(settings, script):
     return hits[0] if len(hits) == 1 else None
 
 
-def run_sh(cmd, env):
+def entries_running(settings, script):
+    """Every hook entry, in any event, whose command runs the script."""
+    needle = "/%s\"" % script
+    return [h for _ev, h in hook_entries(settings) if needle in command_of(h)]
+
+
+def run_sh(cmd, env, stdin="{}"):
     if SH is None:
         raise RuntimeError("no sh on PATH; these tests need Git Bash on Windows")
-    return subprocess.run([SH, "-c", cmd], env=env, capture_output=True, text=True, input="{}", timeout=60)
+    return subprocess.run([SH, "-c", cmd], env=env, capture_output=True, text=True, input=stdin, timeout=60)
 
 
 def remedy_ok(r, reason):
@@ -81,7 +95,7 @@ def remedy_ok(r, reason):
     missing = [n for n in REMEDY if n not in r.stderr]
     if missing or reason not in r.stderr:
         return False, "stderr lacks %s / %r: %s" % (missing, reason, r.stderr.strip()[:120])
-    return True, "exit 2, remedy names install.sh and install.ps1"
+    return True, "exit 2, remedy names %r and install.sh and install.ps1" % reason
 
 
 def case_on_failure(script):
@@ -116,7 +130,29 @@ def case_no_python(script):
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 open(path, "w").close()
             r = run_sh(command_of(h), {"CLAUDE_CONFIG_DIR": cfg, "PATH": empty})
-        return remedy_ok(r, "no python")
+        return remedy_ok(r, "Python")
+    return check
+
+
+def case_exec_runs_script(script, code):
+    def check():
+        h = gate_entry(load(), script)
+        if h is None:
+            return False, "no single %s entry for %s" % (GATES[script], script)
+        with tempfile.TemporaryDirectory() as cfg:
+            path = os.path.join(cfg, script)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(FAKE_GATE % code)
+            # PATH holds only the folder of the interpreter running this suite. The wrapper tries
+            # python3 first, and on Windows that name can be an App Execution Alias that hangs on
+            # piped stdin. That folder has no python3, so the wrapper falls through to python.
+            py_dir = os.path.dirname(os.path.abspath(sys.executable))
+            r = run_sh(command_of(h), {"CLAUDE_CONFIG_DIR": cfg, "PATH": py_dir}, PAYLOAD)
+        want = "stdin=" + PAYLOAD
+        ok = r.returncode == code and r.stdout.strip() == want
+        return ok, "exit %d want %d; stdout %r want %r; stderr %s" % (
+            r.returncode, code, r.stdout.strip()[:120], want, r.stderr.strip()[:120])
     return check
 
 
@@ -127,6 +163,21 @@ def case_advisory_exit0(h):
             env.pop("CLAUDE_CODE_REMOTE", None)
             r = run_sh(command_of(h), env)
         return r.returncode == 0, "exit %d: %s" % (r.returncode, r.stderr.strip()[:120])
+    return check
+
+
+def case_moved_advisory(script):
+    def check():
+        hits = entries_running(load(), script)
+        if not hits:
+            return False, "no entry runs %s" % script
+        for h in hits:
+            if "onFailure" in h:
+                return False, "onFailure on an entry that runs %s" % script
+            ok, note = case_advisory_exit0(h)()
+            if not ok:
+                return False, note
+        return True, "%d entry/entries: no onFailure, exit 0 when missing" % len(hits)
     return check
 
 
@@ -151,6 +202,13 @@ def build_cases():
         cases.append(("gate %s exits 2 when script missing" % s, case_missing_script(s)))
     for s in GATES:
         cases.append(("gate %s exits 2 when no python" % s, case_no_python(s)))
+    for s in GATES:
+        for code in (0, 3):
+            cases.append(("gate %s runs present script, exit %d, stdin and stdout pass" % (s, code),
+                          case_exec_runs_script(s, code)))
+    for s in MOVED:
+        cases.append(("moved %s is advisory: no onFailure, exit 0 when script missing" % s,
+                      case_moved_advisory(s)))
     for ev, h in hook_entries(settings):
         if ev in ADVISORY_EVENTS and command_of(h):
             cases.append(("advisory %s exits 0 when script missing: %s" % (ev, command_of(h)[:60]),
