@@ -4424,6 +4424,19 @@ sh("cite-by-id: a Drops-lines trailer with no reason is denied",
 sh("cite-by-id: a Drops-lines line in a middle paragraph is denied",
    VCS + ' commit -m "title\n\nDrops-lines: deferred/a.md -- replaced by a decision\n\n'
    'body after the trailer"', "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
+# Round 2 (owner ruling 2026-10-12). The exemption must blank one path, not the whole token after
+# the key, so a second path in the same token is still judged. The lint reads that token as one path,
+# which excuses no record path. A space before the colon is still the key `Drops-lines`, which
+# `git interpret-trailers` reads and the lint accepts.
+sh("cite-by-id: Drops-lines token with a comma-joined second path is denied",
+   VCS + ' commit -m "title\n\nbody\n\nDrops-lines: deferred/a.md,deferred/b.md -- replaced"',
+   "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: Drops-lines token with a semicolon-joined second path is denied",
+   VCS + ' commit -m "title\n\nbody\n\nDrops-lines: deferred/a.md;deferred/b.md -- replaced"',
+   "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: Drops-lines key with a space before the colon is allowed",
+   VCS + ' commit -m "title\n\nbody\n\nDrops-lines : deferred/a.md -- replaced"',
+   "allow", cwd=NOGIT, config=MERGECFG)
 
 
 # =========================================================================== 6. frozen paths
