@@ -49,14 +49,20 @@ def render(s):
 
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--log", default=os.path.expanduser("~/.claude/guard.log"))
+    # Same dir as hooks/guard.py config_dir(); a copy, since importing guard is heavy.
+    home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    ap.add_argument("--log", default=os.path.join(home, "guard.log"))
     ap.add_argument("--days", type=int, default=7)
     args = ap.parse_args(argv)
+    if hasattr(sys.stdout, "reconfigure"):  # absent when stdout is redirected to StringIO
+        sys.stdout.reconfigure(errors="replace")
     try:
         with open(args.log, encoding="utf-8", errors="replace") as handle:
             print(render(summarize(handle, args.days, datetime.now())))
     except FileNotFoundError:
         print("unreadable: log not found")
+    except OSError as err:
+        print("unreadable: log not readable (%s)" % type(err).__name__)
     return 0
 
 
