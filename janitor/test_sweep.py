@@ -3414,6 +3414,21 @@ class BuildDirReapTests(unittest.TestCase):
 
 
     @unittest.skipUnless(os.name == "nt", "a junction is a Windows folder link")
+    def test_junction_as_the_worktree_path_is_never_reaped_through(self):
+        primary = self.make_primary("junction-wt")
+        base = os.path.join(self.root, "elsewhere")
+        write(os.path.join(base, "DerivedData", "payload.bin"), "x\n")
+        link = os.path.join(primary, ".claude", "worktrees", "agent-x")
+        make_junction(link, base)
+        self.assertEqual(self.reap.reap_build_dirs(link, []), [])
+        deadline = time.monotonic() + 2  # a detached child, if one ran, would act inside this window
+        while time.monotonic() < deadline:
+            time.sleep(0.2)
+        self.assertEqual(os.listdir(base), ["DerivedData"], "the target was renamed or gained a trash name")
+        self.assertTrue(os.path.isfile(os.path.join(base, "DerivedData", "payload.bin")),
+                        "the target's DerivedData lost its file")
+
+    @unittest.skipUnless(os.name == "nt", "a junction is a Windows folder link")
     def test_junction_inside_a_build_folder_is_unlinked_and_its_target_kept(self):
         primary = self.make_primary("junction", janitor=json.dumps({"buildDirs": ["build"]}))
         wt = self.add_agent(primary, "bdrJ")
