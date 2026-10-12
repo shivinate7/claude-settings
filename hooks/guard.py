@@ -4814,6 +4814,7 @@ def record_path_pattern():
             _RECORD_PATTERN.append(pattern)
             return pattern
     return None
+DROPS_LINES_PATH = re.compile(r"(?im)^(drops-lines[ \t]*:[ \t]*)(\S+)(?=[ \t]+--[ \t]+\S)")
 MESSAGE_VALUE_FLAGS = {"-m", "--message", "-b", "--body"}
 MESSAGE_FILE_FLAGS = {"-F", "--file", "--body-file"}
 MESSAGE_FILE_MAX = 64 * 1024
@@ -4822,7 +4823,8 @@ CITE_REASON = (
     "Rule (Git): this message cites a record by its path. A record is cited by its id, with a "
     "short gloss, like \"D12, short titles for records\". "
     "Remedy: write the id the record carries, or its slug while the number is unclaimed, "
-    "and leave the folder and the file extension out."
+    "and leave the folder and the file extension out. Only a commit's last-paragraph trailer "
+    "`Drops-lines: <path> -- <reason>` may name a path."
 )
 
 
@@ -4908,6 +4910,16 @@ def cited_record_path(segment: str, raw: str, where: str) -> str:
             return UNREAD_MARK + name   # unknown, never a pass
     if "<<" in segment:
         texts.extend(body for _, body in _split_heredocs(raw)[1])
+    if call is not None:
+        # Owner ruling 2026-10-12: a commit's trailer `Drops-lines: <path> -- <reason>`, the shape
+        # lint/check_silent_undo.py reads, may name its path. Git joins -m values as paragraphs and
+        # reads trailers from the last one only, never from a lone subject. Only a token that is one
+        # whole record path is blanked: `a.md,b.md` stays judged, as the lint keys on the token.
+        paras = re.split(r"\n\s*\n", "\n\n".join(texts).strip())
+        if len(paras) > 1:
+            paras[-1] = DROPS_LINES_PATH.sub(
+                lambda m: m.group(1) if pattern.fullmatch(m.group(2)) else m.group(0), paras[-1])
+        texts = ["\n\n".join(paras)]
     for text in texts:
         found = pattern.search(norm(text))
         if found:
