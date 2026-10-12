@@ -75,6 +75,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -2193,9 +2194,17 @@ def prune_registrations(root: str, confirm: bool):
     return result
 
 
-# Windows junctions are not seen by `os.path.islink` before Python 3.12, and `rmtree` there has no
-# symlink-attack guard, so husks are never deleted on Windows.
-HUSKS_DELETABLE = os.name != "nt"
+def is_link(path) -> bool:
+    """True for a symlink or a Windows reparse point (a junction, which `os.path.islink` misses
+    before Python 3.12). True when the path cannot be read: it is not ours to delete."""
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return True
+    if os.path.islink(path):
+        return True
+    return bool(hasattr(st, "st_file_attributes")
+                and st.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
 
 
 def husk_verdict(root: str, path: str, entries, names):
@@ -2210,7 +2219,7 @@ def husk_verdict(root: str, path: str, entries, names):
     own_base = os.path.join(os.path.realpath(root), ".claude", "worktrees")
     if os.path.normcase(os.path.realpath(os.path.dirname(path))) != os.path.normcase(own_base):
         return None
-    if os.path.islink(path) or not os.path.isdir(path):
+    if is_link(path) or not os.path.isdir(path):
         return None
     registered = {os.path.normcase(os.path.realpath(e["path"])) for e in entries}
     if os.path.normcase(os.path.realpath(path)) in registered:
@@ -2231,9 +2240,6 @@ def husk_verdict(root: str, path: str, entries, names):
     if inside:
         return {"path": path, "action": "keep", "reason": "process-inside: pid %s"
                 % ", ".join(str(p) for p in sorted(inside))}
-    if not HUSKS_DELETABLE:
-        return {"path": path, "action": "keep",
-                "reason": "windows: report only (no link-safe delete)"}
     return {"path": path, "action": "husk", "reason": "only " + ", ".join(sorted(contents))}
 
 
@@ -2325,7 +2331,7 @@ def scan_worktree(wt: str, names, stop_at=None):
         walk = []
         for d in dirnames:
             full = os.path.join(dirpath, d)
-            if d == ".git" or os.path.islink(full):
+            if d == ".git" or is_link(full):
                 continue
             if is_trash_name(d):
                 trash.append(full)
@@ -2340,7 +2346,7 @@ def scan_worktree(wt: str, names, stop_at=None):
 def trash_verdict(path: str):
     """`(delete, reason)` for one trash folder. Keep on a live session, a process inside, or any
     read that cannot tell."""
-    if os.path.islink(path) or not os.path.isdir(path):
+    if is_link(path) or not os.path.isdir(path):
         return False, "not a real folder"
     live = guard.worktree_live_session(path)
     inside, _ = processes_in(path)
@@ -2361,7 +2367,7 @@ def find_trash(root: str, entries):
     for entry in entries:
         path = entry["path"]
         if (entry.get("bare") or os.path.normcase(os.path.dirname(os.path.realpath(path))) != base
-                or _is_primary_checkout(path) is not False or os.path.islink(path)):
+                or _is_primary_checkout(path) is not False or is_link(path)):
             continue
         for folder in scan_worktree(path, set())[1]:
             delete, reason = trash_verdict(folder)
@@ -2491,12 +2497,11 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
             if decision["action"] == "husk":
                 reap_husk(root, decision, husk_names)
 
-    if HUSKS_DELETABLE:  # same link-safety limit as husks
-        result["trash"] = find_trash(root, entries)
-        if confirm:
-            for decision in result["trash"]:
-                if decision["action"] == "trash":
-                    reap_trash(decision)
+    result["trash"] = find_trash(root, entries)
+    if confirm:
+        for decision in result["trash"]:
+            if decision["action"] == "trash":
+                reap_trash(decision)
 
     result["strays"] = find_strays(root, entries)  # after the husk reap: a deleted husk is gone
 

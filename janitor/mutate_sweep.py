@@ -736,16 +736,16 @@ MUTATIONS = [
      'test_a_failed_delete_prints_keep_with_the_error',
      "posix"),
 
-    ('husks: Windows deletes husks',
+    ('husks: a Windows junction is not seen as a link',
      "sweep",
-     '    if not HUSKS_DELETABLE:\n',
-     '    if False:\n',
-     'test_windows_keeps_husks_report_only'),
+     '    return bool(hasattr(st, "st_file_attributes")\n                and st.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)\n',
+     '    return False\n',
+     'test_is_link_sees_a_junction_and_a_symlink_and_not_a_real_folder'),
 
     # ---- build folders reaped at agent end (decisions/build-dirs-reaped-at-agent-end.md) ----
     ('build dirs: a link named as a build folder is renamed',
      'sweep',
-     '            if d == ".git" or os.path.islink(full):',
+     '            if d == ".git" or is_link(full):',
      '            if d == ".git":',
      'test_a_link_named_as_a_build_folder_is_kept_and_its_target_untouched',
      "posix"),

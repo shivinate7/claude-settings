@@ -232,9 +232,14 @@ def _decide(target: str):
 
 
 BUILD_SCAN_SECONDS = 20  # the scan stops here and keeps the rest; the hook's own limit is 60
-DELETE_CHILD = ("import os, shutil, sys\n"
+DELETE_CHILD = ("import os, shutil, stat, sys\n"
+                "def link(p):\n"
+                "    try: st = os.lstat(p)\n"
+                "    except OSError: return True\n"
+                "    return os.path.islink(p) or bool(getattr(st, 'st_file_attributes', 0)"
+                " & getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0))\n"
                 "for p in sys.argv[1:]:\n"
-                "    if not os.path.islink(p): shutil.rmtree(p, ignore_errors=True)\n")
+                "    if not link(p): shutil.rmtree(p, ignore_errors=True)\n")
 
 trash_name, is_trash_name = sweep.trash_name, sweep.is_trash_name  # one home: sweep.py
 
@@ -245,7 +250,7 @@ def reap_build_dirs(target: str, cwds):
     proven the worktree gates; this proves the folder gates: no link, no process cwd inside."""
     root = os.path.dirname(os.path.dirname(os.path.dirname(target)))
     names = sweep.build_dir_names(sweep.read_optout(root))
-    if names is None or not sweep.HUSKS_DELETABLE:  # bad file: nothing, defaults included
+    if names is None:  # bad file: nothing, defaults included
         return []
     builds, trash = sweep.scan_worktree(target, names, time.monotonic() + BUILD_SCAN_SECONDS)
 
