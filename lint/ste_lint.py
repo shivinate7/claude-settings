@@ -1839,44 +1839,82 @@ class Linter:
 # Automatic fixes
 # --------------------------------------------------------------------------
 
-FIXABLE = [(p, r) for p, r, _ in LATIN if r] + CONTRACTIONS + \
-          [(p, r) for p, r in BLOAT] + \
-          [(p, r) for p, r, _ in NOMINALIZATION_PHRASES if r]
+# A pattern is fixable only when the swap reads as correct English in every sentence.
+# These keep their lint finding, and the writer fixes them by hand. Each reads wrong when
+# swapped without grammar: "vs", "cf" and "via" change meaning or grammar, "they'd" and
+# "we'd" may mean "had", and a deletion leaves a lowercase start, a stray comma or a space.
+_NO_FIX = {r"\bvs\.?(?=\s)", r"\bcf\.", r"\bvia\b", r"\bwe'd\b", r"\bthey'd\b",
+           r"\bthe majority of\b"}
+# Fixer-only rewrites of a table row. The lint rule keeps the original pattern.
+_FIX_PATTERN = {
+    # Keep the period when "etc." ends the sentence.
+    r"\betc\.": [(r"\betc\.(?=\s*$|\s+(?-i:[A-Z]))", "and so on."), (r"\betc\.", "and so on")],
+    # A comma before it leaves "Stop, to test".
+    r"\bin order to\b": [(r"(?<!,)(?<!, )\bin order to\b", "to")],
+    # The verb must agree with the subject.
+    r"\bmake a decision about\b": [(r"\bmake a decision about\b", "decide about")],
+    r"\bmake(?:s)? use of\b": [(r"\bmakes use of\b", "uses"), (r"\bmake use of\b", "use")],
+    r"\bgive(?:s)? consideration to\b": [(r"\bgives consideration to\b", "considers"),
+                                         (r"\bgive consideration to\b", "consider")],
+    r"\bprovide(?:s)? support for\b": [(r"\bprovides support for\b", "supports"),
+                                       (r"\bprovide support for\b", "support")],
+}
+
+
+def _fixable():
+    rows = []
+    for code, table in (("STE007", [(p, r) for p, r, _ in LATIN]),
+                        ("STE008", CONTRACTIONS), ("STE011", BLOAT),
+                        ("STE003", [(p, r) for p, r, _ in NOMINALIZATION_PHRASES])):
+        for pattern, replacement in table:
+            if not replacement or pattern in _NO_FIX:
+                continue
+            for p2, r2 in _FIX_PATTERN.get(pattern, [(pattern, replacement)]):
+                rows.append((p2, r2, code))
+    return rows
+
+
+FIXABLE = _fixable()
+
+_QUOTED = re.compile(r'(?<!\w)"[^"\n]+"(?!\w)|“[^”\n]*”')
+_LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
+# Lines the last apply_fixes call changed: {1-based line: [rule codes]}.
+LAST_FIX_CODES: dict = {}
 
 
 def apply_fixes(text: str) -> Tuple[str, int]:
-    """Apply the substitutions that are safe without context."""
-    lines = text.splitlines(keepends=True)
+    """Apply the substitutions that are safe without context, line by line. The line count
+    never changes. Fenced and indented code, inline code, links and quoted text stay as they
+    are, and a line with no match is returned byte for byte."""
+    LAST_FIX_CODES.clear()
     out: List[str] = []
     in_fence = False
     total = 0
-    for raw in lines:
+    for number, raw in enumerate(re.findall(r"[^\n]*\n|[^\n]+", text), 1):
         body = raw.rstrip("\n")
-        newline = raw[len(body):]
         if FENCE.match(body):
             in_fence = not in_fence
             out.append(raw)
             continue
-        if in_fence:
+        if in_fence or (re.match(r"(?: {4}|\t)", body) and not _LIST_ITEM.match(body)):
             out.append(raw)
             continue
         masker = Masker(body)
-        masked = masker.text
-        for pattern, replacement in FIXABLE:
-            def repl(match, replacement=replacement):
-                nonlocal total
-                total += 1
-                original = match.group(0)
-                if not replacement:
-                    return ""
-                if original[:1].isupper():
+        masked = _QUOTED.sub(lambda m: masker._token(m.group(0)), masker.text)
+        codes: List[str] = []
+        for pattern, replacement, code in FIXABLE:
+            def repl(match, replacement=replacement, code=code):
+                codes.append(code)
+                if match.group(0)[:1].isupper():
                     return replacement[:1].upper() + replacement[1:]
                 return replacement
             masked = re.sub(pattern, repl, masked, flags=re.I)
-        fixed = masker.unmask(masked)
-        fixed = re.sub(r"  +", " ", fixed)
-        fixed = re.sub(r"\s+([.,;:])", r"\1", fixed)
-        out.append(fixed.rstrip() + newline if newline else fixed.rstrip())
+        if codes:
+            total += len(codes)
+            LAST_FIX_CODES[number] = codes
+            out.append(masker.unmask(masked) + raw[len(body):])
+        else:
+            out.append(raw)
     return "".join(out), total
 
 

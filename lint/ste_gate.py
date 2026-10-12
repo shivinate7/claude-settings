@@ -9,6 +9,11 @@ PreToolUse on Write, Edit, MultiEdit for a *.md path, or a UI file (ste_lint.UI_
 findings back so the writer fixes them first. For a UI file ste_lint reads only the copy a
 user sees, never the code.
 
+AUTO-FIX. For a Markdown file the hook first runs ste_lint.apply_fixes on the changed blocks
+and returns the fixed text through updatedInput (rewrite_output, the one rewrite function).
+It denies only for the errors that remain. A UI file is never fixed. A fixer crash falls
+back to the plain lint: no rewrite, never a refusal.
+
 SCOPING TO CHANGED BLOCKS. This hook sees the proposed content before the write lands. It
 replays the tool's own edit onto the file currently on disk to get the FULL proposed text,
 the same content the write would leave behind, then lints only the BLOCKS that differ from
@@ -25,6 +30,7 @@ changed, it lints the whole proposed text, the strict, no-worse-than-before defa
 import difflib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -40,6 +46,8 @@ except Exception:
     UI_SUFFIXES = set()  # no linter next to this file: main() returns before it lints
 
 MD_SUFFIXES = (".md", ".markdown")
+MAX_SHOWN = 5
+CLAUSE_WORDS = {"and", "but", "which", "because", "so", "then", "while", "when", "if"}
 NOTE = ("Code in backticks or a fence is exempt. Errors only: sentence length, nominalization, "
         "Latin abbreviation, contraction, phrasal verb, bloat, double negative, "
         "condition order, omitted 'that'.")
@@ -146,6 +154,149 @@ def apply_edit(text, old_string, new_string, replace_all):
     return text[:index] + new_string + text[index + len(old_string):]
 
 
+def resolve(tool, ti, old_text):
+    """Return (text, resolved) for a Write, Edit or MultiEdit input. `text` is the new text
+    the tool carries. `resolved` is the full proposed file, or None when the edit cannot be
+    replayed against `old_text` alone."""
+    resolved = None
+    if tool == "Write":
+        text = ti.get("content") or ""
+        resolved = text
+    elif tool == "Edit":
+        text = ti.get("new_string") or ""
+        if old_text is not None:
+            resolved = apply_edit(old_text, ti.get("old_string") or "", text,
+                                   bool(ti.get("replace_all")))
+    else:  # MultiEdit
+        edits = ti.get("edits") or []
+        text = "\n\n".join((e or {}).get("new_string") or "" for e in edits)
+        if old_text is not None:
+            resolved = old_text
+            for e in edits:
+                e = e or {}
+                resolved = apply_edit(resolved, e.get("old_string") or "",
+                                      e.get("new_string") or "", bool(e.get("replace_all")))
+                if resolved is None:
+                    break
+    return text, resolved
+
+
+# ------------------------------------------------------------------ the fixer (Markdown only)
+
+def fix_fragment(context, idx, fragment):
+    """Return `fragment` fixed by ste_lint.apply_fixes as it reads at `idx` in `context`, or
+    None when it sits inside a code fence there. The part of its first line before `idx` is
+    kept as blanked text, so indented code still reads as code."""
+    head = context[:idx]
+    line_start = head.rfind("\n") + 1
+    in_fence = False
+    for line in head[:line_start].split("\n"):
+        if ste_lint.FENCE.match(line):
+            in_fence = not in_fence
+    if in_fence:
+        return None
+    pre = re.sub(r"\S", "\x01", head[line_start:])
+    fixed, _ = ste_lint.apply_fixes(pre + fragment)
+    return fixed[len(pre):] if fixed.startswith(pre) else None
+
+
+def fix_edit(context, old_string, new_string, replace_all):
+    """Fix the `new_string` of one Edit, in the context of the text it lands in. `context` is
+    None when the edit cannot be replayed: the string is then fixed on its own."""
+    if context is None or not old_string or old_string not in context:
+        return fix_fragment("", 0, new_string)
+    spots, at = [], context.find(old_string)
+    while at != -1:
+        spots.append(at)
+        at = context.find(old_string, at + len(old_string))
+    if len(spots) > 1 and not replace_all:
+        return fix_fragment("", 0, new_string)
+    results = {fix_fragment(context, i, new_string) for i in spots}
+    return results.pop() if len(results) == 1 else None
+
+
+def autofix(tool, ti, old_text, scope):
+    """Return (updated tool input, codes fixed), or None when nothing changed. `scope` is the
+    set of changed lines of a Write, or None for all. A Write is fixed as a whole file, so the
+    fences are read right, and only the lines in scope keep their fix. The fix never changes
+    the line count."""
+    new_ti, codes = dict(ti), []
+    if tool == "Write":
+        content = ti.get("content") or ""
+        fixed, _ = ste_lint.apply_fixes(content)
+        old_lines, new_lines = content.split("\n"), fixed.split("\n")
+        if len(old_lines) != len(new_lines):
+            raise ValueError("the fixer changed the line count")
+        for n, (a, b) in enumerate(zip(old_lines, new_lines), 1):
+            if a != b and (scope is None or n in scope):
+                old_lines[n - 1] = b
+                codes += ste_lint.LAST_FIX_CODES.get(n, [])
+        new_ti["content"] = "\n".join(old_lines)
+    else:
+        edits = [ti] if tool == "Edit" else [e or {} for e in ti.get("edits") or []]
+        context, fixed_edits = old_text, []
+        for e in edits:
+            new = e.get("new_string") or ""
+            fixed = fix_edit(context, e.get("old_string") or "", new, bool(e.get("replace_all")))
+            if fixed is not None and fixed != new:
+                codes += [c for v in ste_lint.LAST_FIX_CODES.values() for c in v]
+                e = dict(e, new_string=fixed)
+            fixed_edits.append(e)
+            if context is not None:
+                context = apply_edit(context, e.get("old_string") or "", e.get("new_string") or "",
+                                     bool(e.get("replace_all")))
+        if tool == "Edit":
+            new_ti = fixed_edits[0]
+        else:
+            new_ti["edits"] = fixed_edits
+    return (new_ti, codes) if new_ti != ti else None
+
+
+def rewrite_output(updated_input, note):
+    """The one PreToolUse rewrite. It carries no permissionDecision: "allow" would approve
+    the call, and "defer" makes Claude Code drop updatedInput. Deny and ask rules still apply
+    to the rewritten input. Later rewrites reuse this function."""
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": updated_input,
+                                   "additionalContext": note},
+            "systemMessage": note}
+
+
+def split_hint(text, line, limit):
+    """Return a short split point for the sentence that starts at `line` of `text`: a clause
+    break before word `limit`, else word `limit`."""
+    block = []
+    for ln in text.split("\n")[line - 1:]:
+        if not ln.strip():
+            break
+        block.append(ln)
+    words = re.sub(r"^\s*(?:[-*+]|\d+[.)])\s+", "", " ".join(block)).split()
+    end = next((i for i, w in enumerate(words) if re.search(r"[.!?]$", w)), len(words))
+    words = words[:end + 1]
+    cut = next((i for i in range(min(limit, len(words) - 1) - 1, 3, -1)
+                if re.search(r"[,;:]$", words[i]) or words[i + 1].lower() in CLAUSE_WORDS), None)
+    cut = limit - 1 if cut is None else cut
+    return 'Split after word %d, "%s".' % (cut + 1, " ".join(words[max(0, cut - 3):cut + 1]))
+
+
+def deny_reason(path, findings, text, is_ui):
+    """The denial text. It lists 5 findings at most. A sentence-length finding names the
+    sentence start, its word count, the limit, and one split point."""
+    lines = []
+    for f in findings[:MAX_SHOWN]:
+        line = format_finding(f)
+        m = re.search(r"holds (\d+) words\. The \w+ limit is (\d+)", f.get("message") or "")
+        if f.get("code") == "STE001" and m and not is_ui:
+            line += '\n  Starts: "%s". %s' % (
+                (f.get("excerpt") or "")[:60], split_hint(text, f.get("line") or 1, int(m.group(2))))
+        lines.append(line)
+    if len(findings) > MAX_SHOWN:
+        lines.append("%d more findings not shown." % (len(findings) - MAX_SHOWN))
+    return ("STE lint on the text for %s:\n%s\n%s Fix the text, then write again. For a "
+            "rule's meaning, run `python3 %s --explain <id>`." % (
+                os.path.basename(path), "\n".join(lines), UI_NOTE if is_ui else NOTE,
+                os.path.join(HERE, "ste_lint.py")))
+
+
 def last_reply(hook):
     text = hook.get("last_assistant_message")
     if text:
@@ -198,66 +349,59 @@ def main():
         except Exception:
             old_text = None  # no file on disk yet: entirely new, lint in full
 
+        if tool not in ("Write", "Edit", "MultiEdit"):
+            return
         # `resolved` holds the full proposed content once known. None means the edit could
         # not be replayed against disk content alone, so the fallback text below is linted
         # in full rather than guessed at.
-        resolved = None
-        if tool == "Write":
-            text = ti.get("content") or ""
-            resolved = text
-        elif tool == "Edit":
-            text = ti.get("new_string") or ""
-            if old_text is not None:
-                resolved = apply_edit(old_text, ti.get("old_string") or "", text,
-                                       bool(ti.get("replace_all")))
-        elif tool == "MultiEdit":
-            edits = ti.get("edits") or []
-            text = "\n\n".join((e or {}).get("new_string") or "" for e in edits)
-            if old_text is not None:
-                resolved = old_text
-                for e in edits:
-                    e = e or {}
-                    applied = apply_edit(resolved, e.get("old_string") or "",
-                                          e.get("new_string") or "", bool(e.get("replace_all")))
-                    if applied is None:
-                        resolved = None
-                        break
-                    resolved = applied
-        else:
-            return
+        text, resolved = resolve(tool, ti, old_text)
+        is_ui = suffix in UI_SUFFIXES
 
         if old_text is None or resolved is None:
             scope = None  # new file, or an edit this hook could not replay: lint in full
             full_text = resolved if resolved is not None else text
         else:
             full_text = resolved
-            if suffix in UI_SUFFIXES:
+            if is_ui:
                 scope = ui_scope_of_change(old_text, full_text, suffix)
             else:
                 scope = scope_of_change(old_text, full_text)
 
-        findings = lint(linter, full_text, suffix if suffix in UI_SUFFIXES else ".md", path)
+        # Markdown only: fix what a word swap fixes, then lint the fixed text. A fixer crash
+        # keeps today's behaviour (decisions/gate-hooks-fail-closed.md): no rewrite, no refusal.
+        fixed_ti, note = None, ""
+        if not is_ui:
+            try:
+                result = autofix(tool, ti, old_text, scope)
+                if result:
+                    fixed_ti, codes = result
+                    text, resolved = resolve(tool, fixed_ti, old_text)
+                    full_text = resolved if resolved is not None else text
+                    counts = ["%s x%d" % (c, codes.count(c)) for c in sorted(set(codes))]
+                    note = "STE lint fixed %s in %s." % (
+                        ", ".join(counts) or "wording", os.path.basename(path))
+            except Exception:
+                fixed_ti, note = None, ""
+
+        findings = lint(linter, full_text, suffix if is_ui else ".md", path)
         if findings is None:
             # "Report a read that could not run as unknown, never as clear or broken."
             # The write goes ahead, and the message says that nobody checked it.
-            print(json.dumps({"systemMessage": (
-                "STE lint could not run on the text for %s. The result is unknown: the "
-                "write was not checked." % os.path.basename(path))}))
+            unknown = ("STE lint could not run on the text for %s. The result is unknown: the "
+                       "write was not checked." % os.path.basename(path))
+            print(json.dumps(rewrite_output(fixed_ti, note + " " + unknown) if fixed_ti
+                             else {"systemMessage": unknown}))
             return
         if scope is not None:
             findings = [f for f in findings if f.get("line") in scope]
-        if not findings:
-            return
-        lines = [format_finding(f) for f in findings]
-        reason = ("STE lint on the text for %s:\n%s\n%s Fix the text, then write again. For a "
-                  "rule's meaning, run `python3 %s --explain <id>`." % (
-            os.path.basename(path), "\n".join(lines), UI_NOTE if suffix in UI_SUFFIXES else NOTE,
-            os.path.join(HERE, "ste_lint.py")))
-        print(json.dumps({"hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": reason,
-        }}))
+        if findings:
+            print(json.dumps({"hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": deny_reason(path, findings, full_text, is_ui),
+            }}))
+        elif fixed_ti:
+            print(json.dumps(rewrite_output(fixed_ti, note)))
 
 
 if __name__ == "__main__":

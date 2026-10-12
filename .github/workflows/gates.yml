@@ -126,6 +126,9 @@ jobs:
       - name: Stop-hook gate fixture suite
         run: python3 lint/test_gates.py
 
+      - name: STE auto-fix fixture suite
+        run: python3 lint/test_ste_autofix.py
+
       - name: Ruling home fixture suite
         run: python3 hooks/test_ruling_home.py
 
