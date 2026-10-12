@@ -7503,6 +7503,9 @@ if os.name != "nt":
     register_simulator_hold_cases()
 
 
+# Deferred: build-disk-guard (decision build-dirs-reaped-at-agent-end, Part 2), until a threshold is measured.
+
+
 def main():
     mode = os.environ.get("GUARD_TESTS", "")
     if mode not in GUARD_TESTS_MODES:

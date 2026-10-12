@@ -23,6 +23,12 @@ A process is stopped only when all of these answer a confirmed yes:
 
 Any read that cannot tell means keep. One signal, by pid, through `sweep.send_signal`.
 
+Build folders (decisions/build-dirs-reaped-at-agent-end.md): when the gates above hold for the whole
+worktree, the reap also renames each build folder (`sweep.DEFAULT_BUILD_DIRS` plus `buildDirs`) to
+a sibling trash name, then starts a detached child that deletes the trash. The hook never waits for
+the child. A folder with a process cwd inside, a link, or any unreadable read stays. A later reap
+deletes trash names a child left.
+
 Every run appends the raw payload and the decisions to
 `${CLAUDE_CONFIG_DIR:-~/.claude}/state/agent-end-payloads.jsonl`, so the payload fields the docs
 leave unmeasured get measured. The file keeps the last 200 lines. Always exits 0: exit 2 on SubagentStop keeps the agent running.
@@ -170,32 +176,40 @@ def tree_root_orphaned(pid: int, target: str, cwd_of=None):
 
 def decide(target: str):
     """Return (reason, decisions). REASON is set when nothing in TARGET may be touched."""
+    reason, decisions, _ = _decide(target)
+    return reason, decisions
+
+
+def _decide(target: str):
+    """`decide` plus the cwd of every process read, for the build-folder gate."""
     primary = sweep._is_primary_checkout(target)
     if primary is None:
-        return "unreadable-subject", []
+        return "unreadable-subject", [], []
     if primary:
-        return "primary-checkout", []
+        return "primary-checkout", [], []
     live = guard.worktree_live_session(target)
     if live is None:
-        return "unreadable-subject", []
+        return "unreadable-subject", [], []
     if live:
-        return "live-session", []
+        return "live-session", [], []
     pids = sweep.list_all_pids()
     if pids is None:
-        return "unreadable-subject", []
+        return "unreadable-subject", [], []
     cwd_of = sweep.process_cwd
     if sys.platform == "darwin":
         # One `lsof` for every pid: 1,300 per-pid reads at 27 ms overran the 60 s hook limit.
         # A failed batch keeps everything; it never falls back to per-pid reads.
         table = sweep._read_all_cwds_macos(BATCH_TIMEOUT)
         if table is None:
-            return "unreadable-subject", []
+            return "unreadable-subject", [], []
         cwd_of = sweep._first_cwd_by_pid(table).get
-    decisions = []
+    decisions, cwds = [], []
     for pid in pids:
         if pid == os.getpid():
             continue
         cwd = cwd_of(pid)
+        if cwd is not None:
+            cwds.append(cwd)
         if cwd is None or not sweep._cwd_under_checkout(cwd, target):
             continue
         base = {"pid": pid, "cwd": cwd, "command": sweep.process_command(pid)}
@@ -214,7 +228,59 @@ def decide(target: str):
             decisions.append(dict(base, action="keep", reason="not-current-user"))
             continue
         decisions.append(dict(base, action="reap", reason="agent-ended"))
-    return None, decisions
+    return None, decisions, cwds
+
+
+BUILD_SCAN_SECONDS = 20  # the scan stops here and keeps the rest; the hook's own limit is 60
+# The check is inlined on purpose: the child runs after the rename, and `rmtree` refusing a
+# top-level junction is a stdlib promise, not ours. The child cannot import sweep.
+DELETE_CHILD = ("import os, shutil, stat, sys\n"
+                "def link(p):\n"
+                "    try: st = os.lstat(p)\n"
+                "    except OSError: return True\n"
+                "    return os.path.islink(p) or bool(getattr(st, 'st_file_attributes', 0)"
+                " & getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0))\n"
+                "for p in sys.argv[1:]:\n"
+                "    if not link(p): shutil.rmtree(p, ignore_errors=True)\n")
+
+trash_name, is_trash_name = sweep.trash_name, sweep.is_trash_name  # one home: sweep.py
+
+
+def reap_build_dirs(target: str, cwds):
+    """Rename each proven build folder in TARGET to a trash name, then start one detached child
+    that deletes those and every leftover trash name. Returns the folders renamed. The caller has
+    proven the worktree gates; this proves the folder gates: no link, no process cwd inside."""
+    root = os.path.dirname(os.path.dirname(os.path.dirname(target)))
+    names = sweep.build_dir_names(sweep.read_optout(root))
+    if names is None:  # bad file: nothing, defaults included
+        return []
+    if sweep.is_link(target):  # a link as the worktree would send the rename and delete elsewhere
+        return []
+    builds, trash = sweep.scan_worktree(target, names, time.monotonic() + BUILD_SCAN_SECONDS)
+
+    def busy(folder):
+        return any(sweep._cwd_under_checkout(c, folder) for c in cwds)
+
+    doomed = [t for t in trash if not busy(t)]
+    renamed = []
+    for folder in builds:
+        if busy(folder):
+            continue
+        new = trash_name(folder)
+        try:
+            os.rename(folder, new)
+        except OSError:
+            continue  # a failed rename keeps the folder
+        renamed.append(folder)
+        doomed.append(new)
+    if doomed:
+        try:
+            subprocess.Popen([sys.executable, "-c", DELETE_CHILD, *doomed], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+        except OSError:
+            pass  # the trash stays; a later reap or the janitor deletes it
+    return renamed
 
 
 def handle(raw: str):
@@ -228,11 +294,13 @@ def handle(raw: str):
     record = {"raw": raw, "target": target}
     if not target:
         return record
-    reason, decisions = decide(target)
+    reason, decisions, cwds = _decide(target)
     for decision in decisions:
         if decision["action"] == "reap":
             decision["signalled"] = sweep.send_signal(decision["pid"])
     record.update(reason=reason, decisions=decisions)
+    if reason is None:
+        record["buildDirs"] = reap_build_dirs(target, cwds)
     return record
 
 

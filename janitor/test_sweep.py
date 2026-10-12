@@ -2330,25 +2330,27 @@ class HuskTests(unittest.TestCase):
         self.assertIn("husk      KEEP", out.getvalue())
         self.assertIn("refused", out.getvalue())
 
-    @unittest.skipUnless(os.name == "nt", "the real Windows answer; POSIX patches the constant below")
-    def test_on_windows_a_husk_is_kept_and_not_deleted(self):
+    @unittest.skipUnless(os.name == "nt", "the Windows delete; POSIX has its own cases above")
+    def test_on_windows_a_proven_husk_is_deleted(self):
         root = self._repo("husk-nt")
         path = self._husk(root, "gone", ["node_modules"])
-        self.assertEqual(self._husks(root), {"gone": "keep"})
-        sweep.sweep_repo(root, True, os.path.join(ROOT, "husk.log"))
-        self.assertTrue(os.path.isdir(path))
+        self.assertEqual(self._husks(root), {"gone": "husk"})
+        result = sweep.sweep_repo(root, True, os.path.join(ROOT, "husk.log"))
+        self.assertFalse(os.path.exists(path), "a proven husk was kept on Windows")
+        self.assertEqual([h.get("error") for h in result["husks"]], [None])
 
-    def test_windows_keeps_husks_report_only(self):
+    @unittest.skipUnless(os.name == "nt", "a junction is a Windows folder link")
+    def test_windows_husk_delete_unlinks_a_junction_inside_and_keeps_its_target(self):
         root = self._repo("husk-windows")
-        path = self._husk(root, "gone", ["node_modules"])
-        real = sweep.HUSKS_DELETABLE
-        sweep.HUSKS_DELETABLE = False
-        try:
-            self.assertEqual(self._husks(root), {"gone": "keep"})
-            sweep.sweep_repo(root, True, os.path.join(ROOT, "husk.log"))
-        finally:
-            sweep.HUSKS_DELETABLE = real
-        self.assertTrue(os.path.isdir(path))
+        path = self._husk(root, "gone", [])
+        target = os.path.join(ROOT, "husk-windows-target")
+        write(os.path.join(target, "keep.txt"), "not ours\n")
+        make_junction(os.path.join(path, "node_modules"), target)
+        self.assertEqual(self._husks(root), {"gone": "husk"})
+        sweep.sweep_repo(root, True, os.path.join(ROOT, "husk.log"))
+        self.assertFalse(os.path.exists(path), "a proven husk was kept on Windows")
+        self.assertTrue(os.path.isfile(os.path.join(target, "keep.txt")),
+                        "the delete went through the junction into its target")
 
     def test_an_empty_process_table_keeps_the_husk(self):
         root = self._repo("husk-blind")
@@ -2380,6 +2382,89 @@ class HuskTests(unittest.TestCase):
         finally:
             proc.kill()
             proc.wait()
+
+
+def make_junction(link, target):
+    """A real Windows junction LINK -> TARGET (no admin needed). The test removes only the link."""
+    os.makedirs(target, exist_ok=True)
+    os.makedirs(os.path.dirname(link), exist_ok=True)
+    done = subprocess.run(["cmd", "/c", "mklink", "/J", link, target], capture_output=True, text=True)
+    require(done.returncode == 0, "mklink /J failed: " + (done.stdout + done.stderr).strip())
+
+
+def junction_fixture(case, keep=True):
+    """`(base, target)`: a temp dir and a real folder in it holding `node_modules/x.txt` and, with
+    KEEP, `keep.txt`. A name set of `node_modules` alone makes the target a husk-shaped folder."""
+    base = tempfile.mkdtemp(prefix="junction_")
+    case.addCleanup(shutil.rmtree, base, True)
+    target = os.path.join(base, "target")
+    write(os.path.join(target, "node_modules", "x.txt"), "x\n")
+    if keep:
+        write(os.path.join(target, "keep.txt"), "not ours\n")
+    return base, target
+
+
+@unittest.skipUnless(os.name == "nt", "a junction is a Windows folder link")
+class JunctionTests(unittest.TestCase):
+    """A Windows junction is a link `os.path.islink` does not see. `sweep.is_link` is the one check.
+    Each case builds a real junction. A reap must never delete through it."""
+
+    def _intact(self, target):
+        self.assertTrue(os.path.isfile(os.path.join(target, "node_modules", "x.txt")),
+                        "the target lost node_modules/x.txt")
+
+    def test_is_link_sees_a_junction_and_a_symlink_and_not_a_real_folder(self):
+        base, target = junction_fixture(self)
+        junction = os.path.join(base, "j")
+        make_junction(junction, target)
+        self.assertTrue(sweep.is_link(junction), "a junction is not a link")
+        self.assertFalse(sweep.is_link(target), "a real folder is a link")
+        symlink = os.path.join(base, "s")
+        try:
+            os.symlink(target, symlink, target_is_directory=True)
+        except OSError:
+            symlink = None  # no privilege to make a symlink: this assert is skipped
+        if symlink:
+            self.assertTrue(sweep.is_link(symlink), "a symlink is not a link")
+
+    def test_a_junction_under_the_worktrees_folder_is_not_a_husk_and_its_target_is_kept(self):
+        root = os.path.join(ROOT, "junction-husk-repo")
+        make_repo(root, {"f.txt": "x\n"})
+        names = ["node_modules", ".serve"]
+        write(os.path.join(root, ".claude", "janitor.json"), json.dumps({"huskNames": names}))
+        base, target = junction_fixture(self, keep=False)  # the target alone looks like a husk
+        link = os.path.join(root, ".claude", "worktrees", "gone")
+        make_junction(link, target)
+        verdict = sweep.husk_verdict(root, link, sweep.parse_worktree_list(root), names)
+        self.assertIsNone(verdict, "a junction was given a husk verdict: %s" % verdict)
+        sweep.sweep_repo(root, True, os.path.join(ROOT, "junction-husk.log"))
+        self._intact(target)
+
+    def test_scan_worktree_lists_no_junction_and_walks_none(self):
+        base, target = junction_fixture(self)
+        os.makedirs(os.path.join(target, "build"))
+        wt = os.path.join(base, "wt")
+        os.makedirs(os.path.join(wt, "real"))
+        make_junction(os.path.join(wt, "build"), target)
+        make_junction(os.path.join(wt, "other"), target)  # a walk into it would list target/build
+        builds, _ = sweep.scan_worktree(wt, {"build"})
+        self.assertEqual(builds, [], "a junction was listed, or walked into: %s" % builds)
+        self._intact(target)
+
+    def test_scan_worktree_lists_a_real_build_folder_holding_a_junction(self):
+        base, target = junction_fixture(self)
+        wt = os.path.join(base, "wt")
+        make_junction(os.path.join(wt, "build", "j"), target)
+        builds, _ = sweep.scan_worktree(wt, {"build"})
+        self.assertEqual(builds, [os.path.join(wt, "build")])
+
+    def test_trash_verdict_keeps_a_junction_with_a_trash_name(self):
+        base, target = junction_fixture(self)
+        link = sweep.trash_name(os.path.join(base, "build"))
+        make_junction(link, target)
+        delete, reason = sweep.trash_verdict(link)
+        self.assertFalse(delete, "a junction was proven as trash: %s" % reason)
+        self._intact(target)
 
 
 class AllCwdsMacosTests(unittest.TestCase):
@@ -3056,6 +3141,312 @@ class AgentEndReapTests(unittest.TestCase):
                 raws = [json.loads(line)["raw"] for line in handle.read().splitlines()]
         self.assertEqual(len(denied), 1, "the injected PermissionError was never reached")
         self.assertIn("payload 3", raws)
+
+
+BUILD_DIRS = ("native/build", "DegenKit/.build", "DerivedData")
+REAP_HOOK = os.path.join(HERE, "agent_end_reap.py")
+JANITOR = os.path.join(HERE, "sweep.py")
+
+
+class BuildDirReapTests(unittest.TestCase):
+    """Decision build-dirs-reaped-at-agent-end, Part 1. The SubagentStop reap deletes build folders
+    in the finished agent's worktree: `native/build`, a bare `.build` at any depth, `DerivedData`,
+    and each `buildDirs` name from `.claude/janitor.json`. Each delete is a rename to a trash name,
+    then a detached child deletes the trash.
+
+    Real git repos, real hook processes (`agent_end_reap.py` run as the harness runs it). Every
+    fixture is a few small files. Each keep arm sits beside a control arm that must delete, so a
+    keep arm cannot pass on a reaper that deletes nothing. The trash-name contract is two
+    functions the builder exports: `trash_name(folder)` (the sibling path a reap renames to) and
+    `is_trash_name(basename)`.
+    """
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="bdr_cases_")
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.cfg = os.path.join(self.root, "cfg")  # the config dir the hook process reads and writes
+        import agent_end_reap
+        self.reap = agent_end_reap
+
+    def make_primary(self, tag, janitor=None):
+        primary = os.path.join(self.root, tag)
+        make_repo(primary, {"f.txt": "base\n"})
+        if janitor is not None:
+            write(os.path.join(primary, ".claude", "janitor.json"), janitor)
+        return primary
+
+    def add_agent(self, primary, agent):
+        wt = os.path.join(primary, ".claude", "worktrees", "agent-" + agent)
+        run_vcs(primary, "worktree", "add", "-q", wt, "-b", "lane-" + agent)
+        require(os.path.isdir(wt), "worktree %s was not created" % wt)
+        # One unmerged commit, so the janitor keeps the worktree itself and only trash is in play.
+        write(os.path.join(wt, "lane.txt"), agent + "\n")
+        run_vcs(wt, "add", "lane.txt")
+        commit = run_vcs(wt, *IDENT, "commit", "-q", "-m", "lane work " + agent)
+        require(commit.returncode == 0, "lane commit in %s failed: %s" % (wt, commit.stderr.strip()))
+        return wt
+
+    def fill(self, base, rels=BUILD_DIRS):
+        for rel in rels:
+            write(os.path.join(base, rel, "payload.bin"), "x" * 1024 + "\n")
+
+    def run_hook(self, agent, wt):
+        """Run the SubagentStop hook as the harness does. Return its wall time in seconds."""
+        payload = json.dumps({"hook_event_name": "SubagentStop", "agent_id": agent,
+                              "cwd": wt, "session_id": "bdr-cases"})
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg)
+        started = time.monotonic()
+        result = subprocess.run([sys.executable, REAP_HOOK], input=payload, capture_output=True,
+                                text=True, env=env, timeout=120)
+        elapsed = time.monotonic() - started
+        self.assertEqual(result.returncode, 0, "hook exited %d: %s" % (result.returncode,
+                                                                       result.stderr[-300:]))
+        return elapsed
+
+    def hold_cwd(self, folder):
+        """A live process whose cwd is FOLDER. The test started it, so the test stops it."""
+        proc = subprocess.Popen(["sleep", "120"], cwd=folder, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(self.stop_proc, proc)
+        return proc
+
+    @staticmethod
+    def stop_proc(proc):
+        proc.kill()
+        proc.wait(timeout=10)
+
+    def wait_gone(self, path, seconds=30):
+        """Bounded wait for a detached child to delete PATH. Capped at SECONDS; never unbounded."""
+        deadline = time.monotonic() + seconds
+        while os.path.exists(path) and time.monotonic() < deadline:
+            time.sleep(0.2)
+        return not os.path.exists(path)
+
+    def test_native_build_bare_build_at_depth_and_derived_data_are_reaped(self):
+        primary = self.make_primary("reap")
+        wt = self.add_agent(primary, "bdrA")
+        self.fill(wt)
+        self.run_hook("bdrA", wt)
+        for rel in BUILD_DIRS:
+            with self.subTest(folder=rel):
+                self.assertFalse(os.path.exists(os.path.join(wt, rel)),
+                                 "%s in the ended agent worktree was not reaped" % rel)
+
+    def test_the_same_folders_in_the_primary_checkout_are_kept(self):
+        primary = self.make_primary("kept-primary")
+        wt = self.add_agent(primary, "bdrA")
+        self.fill(wt)
+        self.fill(primary)
+        self.run_hook("bdrA", wt)
+        with self.subTest(control="agent worktree"):
+            for rel in BUILD_DIRS:
+                self.assertFalse(os.path.exists(os.path.join(wt, rel)), "%s not reaped" % rel)
+        with self.subTest(arm="primary checkout"):
+            for rel in BUILD_DIRS:
+                self.assertTrue(os.path.isdir(os.path.join(primary, rel)),
+                                "%s in the primary checkout was removed" % rel)
+
+    def test_a_link_named_as_a_build_folder_is_kept_and_its_target_untouched(self):
+        primary = self.make_primary("link")
+        wt = self.add_agent(primary, "bdrA")
+        self.fill(wt, ("native/build", "DerivedData"))
+        outside = os.path.join(self.root, "outside")
+        write(os.path.join(outside, "keep.txt"), "not ours\n")
+        os.symlink(outside, os.path.join(wt, ".build"))
+        self.run_hook("bdrA", wt)
+        with self.subTest(control="native/build"):
+            self.assertFalse(os.path.exists(os.path.join(wt, "native", "build")))
+        with self.subTest(arm="link .build"):
+            self.assertTrue(os.path.islink(os.path.join(wt, ".build")), "the link was removed")
+            self.assertTrue(os.path.isfile(os.path.join(outside, "keep.txt")),
+                            "the link's target was touched")
+
+    def test_a_folder_with_a_live_process_cwd_inside_is_kept(self):
+        primary = self.make_primary("proc")
+        wt = self.add_agent(primary, "bdrA")
+        self.fill(wt)
+        self.hold_cwd(os.path.join(wt, "DerivedData"))
+        self.run_hook("bdrA", wt)
+        with self.subTest(control="native/build and DegenKit/.build"):
+            self.assertFalse(os.path.exists(os.path.join(wt, "native", "build")))
+            self.assertFalse(os.path.exists(os.path.join(wt, "DegenKit", ".build")))
+        with self.subTest(arm="DerivedData with a live cwd"):
+            self.assertTrue(os.path.isdir(os.path.join(wt, "DerivedData")),
+                            "DerivedData with a live process inside was removed")
+
+    def test_a_live_session_inside_the_worktree_keeps_everything(self):
+        primary = self.make_primary("live")
+        live = self.add_agent(primary, "bdrLive")
+        other = self.add_agent(primary, "bdrB")
+        self.fill(live)
+        self.fill(other)
+        write(os.path.join(self.cfg, "sessions", "bdr-live.json"),
+              json.dumps({"pid": os.getpid(), "startedAt": this_process_start_ms(), "cwd": live}))
+        self.run_hook("bdrLive", live)
+        self.run_hook("bdrB", other)
+        with self.subTest(control="agent-bdrB with no session"):
+            for rel in BUILD_DIRS:
+                self.assertFalse(os.path.exists(os.path.join(other, rel)), "%s not reaped" % rel)
+        with self.subTest(arm="agent-bdrLive with a live session"):
+            for rel in BUILD_DIRS:
+                self.assertTrue(os.path.isdir(os.path.join(live, rel)),
+                                "%s removed under a live session" % rel)
+
+    def test_a_bad_build_dirs_value_deletes_nothing(self):
+        clean = self.make_primary("clean")
+        clean_wt = self.add_agent(clean, "bdrOk")
+        self.fill(clean_wt)
+        self.run_hook("bdrOk", clean_wt)
+        with self.subTest(control="checkout with no janitor.json reaps the defaults"):
+            for rel in BUILD_DIRS:
+                self.assertFalse(os.path.exists(os.path.join(clean_wt, rel)), "%s not reaped" % rel)
+        for number, bad in enumerate(("Pods/Build", ["Pods/Build", 7])):
+            with self.subTest(buildDirs=bad):
+                primary = self.make_primary("bad%d" % number,
+                                            janitor=json.dumps({"buildDirs": bad}))
+                wt = self.add_agent(primary, "bdrBad")
+                self.fill(wt)
+                self.run_hook("bdrBad", wt)
+                for rel in BUILD_DIRS:
+                    self.assertTrue(os.path.isdir(os.path.join(wt, rel)),
+                                    "%s deleted under a bad buildDirs value" % rel)
+
+    def test_a_buildDirs_name_adds_a_folder_at_its_depth(self):
+        primary = self.make_primary("names", janitor=json.dumps(
+            {"buildDirs": ["Pods/Build", "scratch-out"]}))
+        wt = self.add_agent(primary, "bdrA")
+        self.fill(wt)
+        self.fill(wt, ("Pods/Build", "Sub/scratch-out"))
+        self.run_hook("bdrA", wt)
+        with self.subTest(control="a default folder"):
+            self.assertFalse(os.path.exists(os.path.join(wt, "native", "build")))
+        with self.subTest(name="Pods/Build"):
+            self.assertFalse(os.path.exists(os.path.join(wt, "Pods", "Build")))
+        with self.subTest(name="scratch-out, a bare name at depth"):
+            self.assertFalse(os.path.exists(os.path.join(wt, "Sub", "scratch-out")))
+
+    def test_the_hook_renames_the_build_folder_first_and_returns_before_the_delete(self):
+        primary = self.make_primary("ret")
+        wt = self.add_agent(primary, "bdrR")
+        self.fill(wt, ("native/build",))
+        build = os.path.realpath(os.path.join(wt, "native", "build"))
+        gate = threading.Event()
+        renames = []
+        real_rename, real_replace = os.rename, os.replace
+
+        def recorded(real):
+            def inner(src, dst, *args, **kwargs):
+                renames.append((os.path.realpath(src), os.path.realpath(dst)))
+                return real(src, dst, *args, **kwargs)
+            return inner
+
+        def held_delete(*args, **kwargs):
+            gate.wait(30)  # a delete made in the hook's own process waits here, so the hook hangs
+
+        payload = json.dumps({"hook_event_name": "SubagentStop", "agent_id": "bdrR",
+                              "cwd": wt, "session_id": "bdr-cases"})
+        worker = threading.Thread(target=self.reap.handle, args=(payload,), daemon=True)
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.cfg}), \
+                mock.patch.object(os, "rename", recorded(real_rename)), \
+                mock.patch.object(os, "replace", recorded(real_replace)), \
+                mock.patch.object(shutil, "rmtree", held_delete), \
+                mock.patch.object(os, "remove", held_delete):
+            worker.start()
+            worker.join(30)
+            returned = not worker.is_alive()
+            gate.set()
+            worker.join(30)
+        self.assertTrue(returned, "the hook did not return while the delete was held")
+        moves = [(src, dst) for src, dst in renames if src == build]
+        self.assertTrue(moves, "the build folder was never renamed to a trash name first")
+        self.assertEqual(os.path.dirname(moves[0][1]), os.path.dirname(build),
+                         "the trash name is not a sibling on the same volume")
+        self.assertFalse(os.path.exists(build), "the build folder is still at its own name")
+
+    def test_a_later_reap_deletes_a_leftover_trash_name_and_keeps_a_name_outside_the_pattern(self):
+        primary = self.make_primary("later")
+        wt = self.add_agent(primary, "bdrT")
+        trash = self.reap.trash_name(os.path.join(wt, "native", "build"))
+        self.assertTrue(self.reap.is_trash_name(os.path.basename(trash)),
+                        "the trash name the reap renames to is not a trash name")
+        self.assertFalse(self.reap.is_trash_name("notes-not-trash"))
+        self.fill(os.path.dirname(trash), (os.path.basename(trash),))
+        notes = os.path.join(wt, "notes-not-trash")
+        write(os.path.join(notes, "keep.txt"), "not trash\n")
+        self.run_hook("bdrT", wt)
+        with self.subTest(arm="notes-not-trash"):
+            self.assertTrue(os.path.isfile(os.path.join(notes, "keep.txt")),
+                            "a name outside the trash pattern was deleted")
+        with self.subTest(control="leftover trash name"):
+            self.assertTrue(self.wait_gone(trash), "a later reap left the trash name on disk")
+
+    def test_a_trash_name_with_a_live_process_inside_is_kept(self):
+        primary = self.make_primary("trashproc")
+        wt = self.add_agent(primary, "bdrT")
+        free = self.reap.trash_name(os.path.join(wt, "native", "build"))
+        live = self.reap.trash_name(os.path.join(wt, "DerivedData"))
+        self.fill(os.path.dirname(free), (os.path.basename(free),))
+        self.fill(os.path.dirname(live), (os.path.basename(live),))
+        self.hold_cwd(live)
+        self.run_hook("bdrT", wt)
+        with self.subTest(control="leftover trash with no process"):
+            self.assertTrue(self.wait_gone(free), "a leftover trash name was left on disk")
+        with self.subTest(arm="leftover trash with a live cwd"):
+            self.assertTrue(os.path.isdir(live), "a trash name with a live process inside was deleted")
+
+    def test_the_janitor_deletes_a_leftover_trash_name_and_keeps_one_with_a_live_process(self):
+        primary = self.make_primary("janitor")
+        wt = self.add_agent(primary, "bdrJ")
+        free = self.reap.trash_name(os.path.join(wt, "native", "build"))
+        live = self.reap.trash_name(os.path.join(wt, "DerivedData"))
+        self.fill(os.path.dirname(free), (os.path.basename(free),))
+        self.fill(os.path.dirname(live), (os.path.basename(live),))
+        self.hold_cwd(live)
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg)
+        result = subprocess.run([sys.executable, JANITOR, primary, "--confirm"], capture_output=True,
+                                text=True, env=env, timeout=120)
+        self.assertEqual(result.returncode, 0, "janitor exited %d: %s"
+                         % (result.returncode, result.stderr[-300:]))
+        with self.subTest(control="leftover trash with no process"):
+            self.assertFalse(os.path.exists(free), "the janitor left a leftover trash name")
+        with self.subTest(arm="leftover trash with a live cwd"):
+            self.assertTrue(os.path.isdir(live), "the janitor deleted a trash name with a live process")
+
+
+    @unittest.skipUnless(os.name == "nt", "a junction is a Windows folder link")
+    def test_junction_as_the_worktree_path_is_never_reaped_through(self):
+        primary = self.make_primary("junction-wt")
+        base = os.path.join(self.root, "elsewhere")
+        write(os.path.join(base, "DerivedData", "payload.bin"), "x\n")
+        link = os.path.join(primary, ".claude", "worktrees", "agent-x")
+        make_junction(link, base)
+        self.assertEqual(self.reap.reap_build_dirs(link, []), [])
+        deadline = time.monotonic() + 2  # a detached child, if one ran, would act inside this window
+        while time.monotonic() < deadline:
+            time.sleep(0.2)
+        self.assertEqual(os.listdir(base), ["DerivedData"], "the target was renamed or gained a trash name")
+        self.assertTrue(os.path.isfile(os.path.join(base, "DerivedData", "payload.bin")),
+                        "the target's DerivedData lost its file")
+
+    @unittest.skipUnless(os.name == "nt", "a junction is a Windows folder link")
+    def test_junction_inside_a_build_folder_is_unlinked_and_its_target_kept(self):
+        primary = self.make_primary("junction", janitor=json.dumps({"buildDirs": ["build"]}))
+        wt = self.add_agent(primary, "bdrJ")
+        base, target = junction_fixture(self)
+        self.fill(wt, ("build",))
+        make_junction(os.path.join(wt, "build", "link"), target)
+        renamed = self.reap.reap_build_dirs(wt, [])
+        with self.subTest(control="the build folder is reaped"):
+            self.assertEqual(renamed, [os.path.join(wt, "build")])
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline and any(
+                    self.reap.is_trash_name(n) for n in os.listdir(wt)):
+                time.sleep(0.2)
+            self.assertFalse([n for n in os.listdir(wt) if self.reap.is_trash_name(n)],
+                             "the trash folder was not deleted in 10 s")
+        with self.subTest(arm="the junction target"):
+            self.assertTrue(os.path.isfile(os.path.join(target, "keep.txt")))
+            self.assertTrue(os.path.isfile(os.path.join(target, "node_modules", "x.txt")))
 
 
 class StrictWorktreeTests(unittest.TestCase):

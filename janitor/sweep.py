@@ -75,10 +75,12 @@ import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import threading
 import time
+import uuid
 from collections import Counter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -276,7 +278,7 @@ def _optout_fields(data):
 def read_optout(root: str):
     """The one reader of `.claude/janitor.json`: its keys as a dict ({} when the file is absent),
     or None when the file is unreadable or a key it holds is mis-shaped (`sweep` not a boolean,
-    `protectedPrefixes` or `huskNames` not a list of strings). `load_optout` and `find_husks`
+    `protectedPrefixes`, `huskNames` or `buildDirs` not a list of strings). `load_optout` and `find_husks`
     both read through this."""
     path = os.path.join(root, OPTOUT_FILENAME)
     if not os.path.isfile(path):
@@ -290,7 +292,7 @@ def read_optout(root: str):
         return None
     if "sweep" in data and not isinstance(data["sweep"], bool):
         return None
-    for key in ("protectedPrefixes", "huskNames"):
+    for key in ("protectedPrefixes", "huskNames", "buildDirs"):
         if key in data and (not isinstance(data[key], list)
                             or not all(isinstance(item, str) for item in data[key])):
             return None
@@ -2192,9 +2194,17 @@ def prune_registrations(root: str, confirm: bool):
     return result
 
 
-# Windows junctions are not seen by `os.path.islink` before Python 3.12, and `rmtree` there has no
-# symlink-attack guard, so husks are never deleted on Windows.
-HUSKS_DELETABLE = os.name != "nt"
+def is_link(path) -> bool:
+    """True for a symlink or a Windows reparse point (a junction, which `os.path.islink`
+    never reports). True when the path cannot be read: it is not ours to delete."""
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return True
+    if os.path.islink(path):
+        return True
+    return bool(hasattr(st, "st_file_attributes")
+                and st.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
 
 
 def husk_verdict(root: str, path: str, entries, names):
@@ -2209,7 +2219,7 @@ def husk_verdict(root: str, path: str, entries, names):
     own_base = os.path.join(os.path.realpath(root), ".claude", "worktrees")
     if os.path.normcase(os.path.realpath(os.path.dirname(path))) != os.path.normcase(own_base):
         return None
-    if os.path.islink(path) or not os.path.isdir(path):
+    if is_link(path) or not os.path.isdir(path):
         return None
     registered = {os.path.normcase(os.path.realpath(e["path"])) for e in entries}
     if os.path.normcase(os.path.realpath(path)) in registered:
@@ -2230,9 +2240,6 @@ def husk_verdict(root: str, path: str, entries, names):
     if inside:
         return {"path": path, "action": "keep", "reason": "process-inside: pid %s"
                 % ", ".join(str(p) for p in sorted(inside))}
-    if not HUSKS_DELETABLE:
-        return {"path": path, "action": "keep",
-                "reason": "windows: report only (no link-safe delete)"}
     return {"path": path, "action": "husk", "reason": "only " + ", ".join(sorted(contents))}
 
 
@@ -2287,6 +2294,99 @@ def reap_husk(root: str, decision: dict, names):
         decision["error"] = "delete failed: %s" % exc
 
 
+# ------------------------------------------------------------------ build folders and their trash
+#
+# decisions/build-dirs-reaped-at-agent-end.md. The agent-end reap renames a proven build folder to a
+# trash name, and a detached child deletes it. The pattern and the scan live here, one home: the reap
+# (agent_end_reap.py) and the sweep below both call them.
+
+DEFAULT_BUILD_DIRS = ("native/build", ".build", "DerivedData")
+TRASH_RE = re.compile(r"^.+\.reap-trash-[0-9a-f]{12}$")
+
+
+def trash_name(folder: str) -> str:
+    """The sibling path a reap renames FOLDER to."""
+    return "%s.reap-trash-%s" % (folder, uuid.uuid4().hex[:12])
+
+
+def is_trash_name(basename: str) -> bool:
+    return bool(TRASH_RE.match(basename))
+
+
+def build_dir_names(optout):
+    """The folder names a reap deletes: the defaults plus `buildDirs`. None (delete nothing) when
+    the opt-out file is unreadable or mis-shaped."""
+    return None if optout is None else set(DEFAULT_BUILD_DIRS) | set(optout.get("buildDirs", []))
+
+
+def scan_worktree(wt: str, names, stop_at=None):
+    """`(builds, trash)`: the real folders under WT named in NAMES, and the trash names. A name with
+    `/` matches one path under WT. A bare name matches at any depth. A link is never listed and
+    never walked. A folder the walk could not read, or the time STOP_AT cut off, is not listed:
+    unlisted means keep."""
+    builds, trash = [], []
+    for dirpath, dirnames, _ in os.walk(wt):
+        if stop_at is not None and time.monotonic() > stop_at:
+            break
+        walk = []
+        for d in dirnames:
+            full = os.path.join(dirpath, d)
+            if d == ".git" or is_link(full):
+                continue
+            if is_trash_name(d):
+                trash.append(full)
+            elif d in names or os.path.relpath(full, wt).replace(os.sep, "/") in names:
+                builds.append(full)
+            else:
+                walk.append(d)
+        dirnames[:] = walk
+    return builds, trash
+
+
+def trash_verdict(path: str):
+    """`(delete, reason)` for one trash folder. Keep on a live session, a process inside, or any
+    read that cannot tell."""
+    if is_link(path) or not os.path.isdir(path):
+        return False, "not a real folder"
+    live = guard.worktree_live_session(path)
+    inside, _ = processes_in(path)
+    if live is None or inside is None:
+        return False, "unreadable-subject"
+    if live:
+        return False, "live-session"
+    if inside:
+        return False, "process-inside: pid %s" % ", ".join(str(p) for p in sorted(inside))
+    return True, "leftover trash"
+
+
+def find_trash(root: str, entries):
+    """Every trash folder in a registered, non-primary worktree directly under
+    `<root>/.claude/worktrees/`, as {"path", "action": "trash"|"keep", "reason"}."""
+    base = os.path.normcase(os.path.join(os.path.realpath(root), ".claude", "worktrees"))
+    found = []
+    for entry in entries:
+        path = entry["path"]
+        if (entry.get("bare") or os.path.normcase(os.path.dirname(os.path.realpath(path))) != base
+                or _is_primary_checkout(path) is not False or is_link(path)):
+            continue
+        for folder in scan_worktree(path, set())[1]:
+            delete, reason = trash_verdict(folder)
+            found.append({"path": folder, "action": "trash" if delete else "keep", "reason": reason})
+    return found
+
+
+def reap_trash(decision: dict):
+    """Delete one trash folder, proven again right before. `rmtree` never follows a link inside."""
+    delete, reason = trash_verdict(decision["path"])
+    if not delete:
+        decision["action"], decision["reason"] = "keep", "changed before delete: " + reason
+        return
+    try:
+        shutil.rmtree(decision["path"])
+    except OSError as exc:
+        decision["error"] = "delete failed: %s" % exc
+
+
 def _is_toplevel(path: str) -> bool:
     """True when the VCS says PATH is its own repository's top level."""
     answer = guard._git(path, "rev-parse", "--show-toplevel")
@@ -2306,7 +2406,7 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     if mode == "tier1":
         confirm = True
     result = {"root": root, "refused": None, "branches": [], "worktrees": [], "listeners": [],
-              "pruned": None, "husks": [], "strays": []}
+              "pruned": None, "husks": [], "strays": [], "trash": []}
 
     optout = read_optout(root)  # once: protected prefixes and huskNames both come from it
     sweep_enabled, protected_prefixes, optout_ok = _optout_fields(optout)
@@ -2397,6 +2497,12 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
             if decision["action"] == "husk":
                 reap_husk(root, decision, husk_names)
 
+    result["trash"] = find_trash(root, entries)
+    if confirm:
+        for decision in result["trash"]:
+            if decision["action"] == "trash":
+                reap_trash(decision)
+
     result["strays"] = find_strays(root, entries)  # after the husk reap: a deleted husk is gone
 
     if mode == "tier1":
@@ -2462,6 +2568,11 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
             if h.get("error"):
                 line += "  [ERROR: %s]" % h["error"]
             print(line, file=out)
+        for t in result.get("trash") or []:
+            tag = "KEEP" if t["action"] == "keep" or t.get("error") else ("REAP" if confirm else "WOULD")
+            print("  trash     %-5s %-60s %s%s" % (tag, t["path"], t["reason"],
+                                                   "  [ERROR: %s]" % t["error"] if t.get("error") else ""),
+                  file=out)
         if result.get("strays") is None:
             print("  stray     UNKNOWN -- the stray scan could not read the worktrees folder",
                   file=out)

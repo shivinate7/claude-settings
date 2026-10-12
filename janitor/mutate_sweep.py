@@ -464,7 +464,7 @@ MUTATIONS = [
      "sweep",
      '    if "sweep" in data and not isinstance(data["sweep"], bool):\n'
      '        return None\n'
-     '    for key in ("protectedPrefixes", "huskNames"):\n'
+     '    for key in ("protectedPrefixes", "huskNames", "buildDirs"):\n'
      '        if key in data and (not isinstance(data[key], list)\n'
      '                            or not all(isinstance(item, str) for item in data[key])):\n'
      '            return None\n'
@@ -711,7 +711,7 @@ MUTATIONS = [
 
     ("husks: a folder that became a link is no longer refused",
      "sweep",
-     '    if os.path.islink(path) or not os.path.isdir(path):\n        return None\n    registered',
+     '    if is_link(path) or not os.path.isdir(path):\n        return None\n    registered',
      '    if not os.path.isdir(path):\n        return None\n    registered',
      "test_confirm_refuses_a_folder_that_became_a_link",
      "posix"),
@@ -736,11 +736,76 @@ MUTATIONS = [
      'test_a_failed_delete_prints_keep_with_the_error',
      "posix"),
 
-    ('husks: Windows deletes husks',
+    ('husks: a Windows junction is not seen as a link',
      "sweep",
-     '    if not HUSKS_DELETABLE:\n',
-     '    if False:\n',
-     'test_windows_keeps_husks_report_only'),
+     '    return bool(hasattr(st, "st_file_attributes")\n                and st.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)\n',
+     '    return False\n',
+     'test_is_link_sees_a_junction_and_a_symlink_and_not_a_real_folder',
+     "windows"),
+
+    # ---- build folders reaped at agent end (decisions/build-dirs-reaped-at-agent-end.md) ----
+    ('build dirs: a link named as a build folder is renamed',
+     'sweep',
+     '            if d == ".git" or is_link(full):',
+     '            if d == ".git":',
+     'test_a_link_named_as_a_build_folder_is_kept_and_its_target_untouched',
+     "posix"),
+
+    ('build dirs: a bare name matches only at the worktree root',
+     'sweep',
+     '            elif d in names or os.path.relpath',
+     '            elif os.path.relpath',
+     'test_native_build_bare_build_at_depth_and_derived_data_are_reaped',
+     "posix"),
+
+    ('build dirs: a folder with a live process cwd inside is renamed',
+     'agent_end_reap',
+     '        if busy(folder):\n            continue\n        new',
+     '        if False:\n            continue\n        new',
+     'test_a_folder_with_a_live_process_cwd_inside_is_kept',
+     "posix"),
+
+    ('build dirs: a trash name with a live process cwd inside is deleted by the reap',
+     'agent_end_reap',
+     'doomed = [t for t in trash if not busy(t)]',
+     'doomed = list(trash)',
+     'test_a_trash_name_with_a_live_process_inside_is_kept',
+     "posix"),
+
+    ('build dirs: the reap deletes under a live session or a primary checkout',
+     'agent_end_reap',
+     '    if reason is None:\n        record["buildDirs"]',
+     '    if True:\n        record["buildDirs"]',
+     'test_a_live_session_inside_the_worktree_keeps_everything',
+     "posix"),
+
+    ('build dirs: a mis-shaped buildDirs value is not validated',
+     'sweep',
+     '("protectedPrefixes", "huskNames", "buildDirs")',
+     '("protectedPrefixes", "huskNames")',
+     'test_a_bad_build_dirs_value_deletes_nothing',
+     "posix"),
+
+    ('build dirs: any folder name is a trash name',
+     'sweep',
+     'TRASH_RE = re.compile(r"^.+\\.reap-trash-[0-9a-f]{12}$")',
+     'TRASH_RE = re.compile(r"^.+$")',
+     'test_a_later_reap_deletes_a_leftover_trash_name_and_keeps_a_name_outside_the_pattern',
+     "posix"),
+
+    ('build dirs: the janitor deletes a trash name with a process inside',
+     'sweep',
+     '    if inside:\n        return False, "process-inside: pid %s" % ", ".join(str(p) for p in sorted(inside))\n    return True, "leftover trash"',
+     '    return True, "leftover trash"',
+     'test_the_janitor_deletes_a_leftover_trash_name_and_keeps_one_with_a_live_process',
+     "posix"),
+
+    ('build dirs: the hook deletes in its own process before it returns',
+     'agent_end_reap',
+     '            os.rename(folder, new)\n',
+     '            os.rename(folder, new)\n            __import__("shutil").rmtree(new)\n',
+     'test_the_hook_renames_the_build_folder_first_and_returns_before_the_delete',
+     "posix"),
 
     ('macos cwd table: the pid and path lines are mis-parsed',
      "sweep",
