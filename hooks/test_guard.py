@@ -77,7 +77,6 @@ FAMILIES = {
     "paths": "path rules, builders and the test-author",
     "diff": "the diff judged at commit, push and stop",
     "impeccable": "impeccable is review-only",
-    "runner": "the runner section",
     "rule9": "rule 9, the subagent model floor",
     "mask-script": "mask_script lexemes",
     "simulator": "the simulator boot and hold rules",
@@ -808,9 +807,11 @@ def materialize_for(case):
 
 
 def materialize_all():
-    """Build every lazy fixture. For a log check, which names its fixtures in its own code."""
-    for once in list(LAZY.values()):
-        once()
+    """Build every lazy fixture except the diff repos. A log check builds its own diff repos (see
+    diff_repo), so the run loop need not build all ~170 of them for any log check."""
+    for key, once in list(LAZY.items()):
+        if slash(DIFFROOT) not in key:
+            once()
 
 
 def build_fixtures():
@@ -6106,7 +6107,6 @@ LOG_CHECKS_EXTRA.append(("impeccable: settings.json names no impeccable plugin",
 
 
 # --------------------------------------------------------------------------- the runner
-FAMILY = "runner"
 
 
 def decide(case):
@@ -6447,7 +6447,8 @@ def subject_unread_log_case(command=None, expect_note=True):
     """
     if os.name == "nt":
         return True, "skipped: a stand-in git is not reached through CreateProcess"
-    materialize_all()  # lint calls this directly, with no run loop to build its fixtures
+    materialize(GITBLIND)  # lint calls this directly, with no run loop to build what it names
+    materialize(SUBJDIRTY)
     folder = os.path.join(ROOT, "unreadlog")
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, "guard.log")
@@ -7122,7 +7123,6 @@ def process_start_ms_case():
     proven separately and deterministically by `process_start_ms_windows_case`, which stubs
     `ctypes.windll` instead of depending on real OS timing.
     """
-    materialize_all()  # lint calls this directly, with no run loop to build its fixtures
     guard = _load_guard_module()
     problems = []
 
@@ -8299,10 +8299,57 @@ if os.name != "nt":
     register_simulator_boot_cases()
     register_simulator_hold_cases()
 
+# Log checks in the literal and the appended extras are tagged by section above. These prefixes give
+# each one its rule's family instead, so GUARD_FAMILY=<rule> runs its log checks too. A prefix that
+# matches no label, or more than one, stops the run: a typo must not leave a log check untagged.
+LOG_RULE_FAMILY = (
+    ("log: one line per refusal", "frozen"),
+    ("log: the refused file is named", "frozen"),
+    ("log: a project config edit", "frozen"),
+    ("log: a cap lift is asked", "model-cap"),
+    ("log: a cap lift under a deep path", "model-cap"),
+    ("cap: the printed reason is bounded", "model-cap"),
+    ("trim: a merge into main", "merge"),
+    ("trim: a guard crash fails open", "paths"),
+    ("merge-checks: a merge tool that cannot load", "merge"),
+    ("merge-checks: a gh that never answers", "merge"),
+    ("powershell: a backslash path survives", "paths"),
+    ("trim: a conflict-side checkout", "shared-tree"),
+    ("log: an unreadable subject", "shared-tree"),
+    ("log: a hard reset in an agent-owned", "shared-tree"),
+    ("log: checkout -- in an agent-owned", "shared-tree"),
+    ("log: an unforced worktree remove", "branch-worktree"),
+    ("log: a forced worktree remove", "branch-worktree"),
+    ("log: a quoted or abbreviated force", "branch-worktree"),
+    ("per-file kill: log: a quoted or abbreviated force", "branch-worktree"),
+    ("log: a branch delete with no resolvable base", "branch-worktree"),
+    ("stack: the refusal never names", "shared-tree"),
+    ("playwright: the refusal names the stale", "env"),
+    ("split_segments: a comment starting a word", "paths"),
+    ("liveness: process_start_ms splits", "kill"),
+    ("liveness: windows arm splits", "kill"),
+    ("liveness: session_is_live carries", "branch-worktree"),
+    ("liveness: worktree_live_session answers None on an unreadable", "branch-worktree"),
+    ("liveness: worktree_live_session matches two", "branch-worktree"),
+    ("liveness: worktree_live_session answers None when", "branch-worktree"),
+    ("liveness: session_is_live reads an implied", "branch-worktree"),
+    ("worktree-home: orchestrator", "branch-worktree"),
+    ("worktree-home: a later path field", "branch-worktree"),
+)
+for _prefix, _family_name in LOG_RULE_FAMILY:
+    _hits = [label for label in LOG_FAMILY if label.startswith(_prefix)]
+    if len(_hits) != 1:
+        sys.exit("fixture setup failed: log family prefix %r matches %d log checks, want 1"
+                 % (_prefix, len(_hits)))
+    LOG_FAMILY[_hits[0]] = _family_name
+
 # A case or log check with a family that FAMILIES does not name would hide from GUARD_FAMILY.
 _UNNAMED = sorted({c["family"] for c in CASES} - set(FAMILIES))
-if _UNNAMED or any(label not in LOG_FAMILY for label, _ in LOG_CHECKS):
-    sys.exit("fixture setup failed: families not in FAMILIES: %s" % _UNNAMED)
+_BAD_LOG = [(label, LOG_FAMILY.get(label)) for label, _ in LOG_CHECKS
+            if LOG_FAMILY.get(label) not in FAMILIES]
+if _UNNAMED or _BAD_LOG:
+    sys.exit("fixture setup failed: families not in FAMILIES: cases %s, log checks %s"
+             % (_UNNAMED, _BAD_LOG))
 
 
 # Deferred: build-disk-guard (decision build-dirs-reaped-at-agent-end, Part 2), until a threshold is measured.

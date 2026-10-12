@@ -266,6 +266,10 @@ def guard_problems(text):
     g = text.count("GUARD_TESTS")  # one mention only: the slice step's env
     if g != 1:
         problems.append(f"GUARD_TESTS appears {g} times in gates.yml, want exactly 1 (the guard slice step's env)")
+    # CI runs the whole guard suite. A GUARD_FAMILY here would make CI run one family and call it green.
+    f = text.count("GUARD_FAMILY")
+    if f:
+        problems.append(f"GUARD_FAMILY appears {f} times in gates.yml, want 0 (CI runs every case)")
     return problems
 
 
@@ -360,6 +364,13 @@ class WindowsSplit(unittest.TestCase):
 
     def test_the_guard_suite_has_its_own_windows_job(self):
         self.assertEqual(guard_problems(self.text), [])
+
+    def test_gates_sets_no_guard_family(self):
+        self.assertEqual([p for p in guard_problems(self.text) if "GUARD_FAMILY" in p], [])
+
+    def test_checker_sees_a_guard_family_in_gates(self):
+        bad = [p for p in guard_problems(self.text + "\n# GUARD_FAMILY=shared-tree\n") if "GUARD_FAMILY" in p]
+        self.assertTrue(bad)
 
     def test_the_mutation_harness_has_its_own_linux_job(self):
         self.assertEqual(mutate_problems(self.text), [])
