@@ -10,8 +10,12 @@ the hook prints one JSON object on stdout and exits 0:
     {"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": "<text>"}}
 - additionalContext holds the standing rules: a scope line that follows `agent_type` from the hook
   input (builder, test-author, reviewer, Explore, record-writer), the general scope line for any
-  other or missing type, and fewer than 20 lines in all.
-- Junk or empty stdin: no output on stdout, no stderr, exit 0. The hook fails open.
+  other or missing type, and fewer than 20 lines in all. Each scope line is pinned in full.
+- The push line, the commit-trailer line and the record-path line appear for builder,
+  test-author, record-writer and the general case; never for reviewer or Explore.
+- A plugin-namespaced type (`my-plugin:builder`) gets the scope of its bare name.
+- Junk or empty stdin, or an internal error: no output on stdout, exit 0, and at most one stderr
+  line that starts `agent_brief:`. The hook fails open.
 
 Interface (Claude Code hooks reference, SubagentStart): stdin is one JSON object with
 `hook_event_name` "SubagentStart", `agent_id`, and `agent_type`.
@@ -29,14 +33,48 @@ HOOK = os.environ.get("AGENT_BRIEF_UNDER_TEST") or os.path.join(HERE, "agent_bri
 CWD = "/tmp/agent-brief-test"
 MISSING = object()  # payload() leaves agent_type out of the JSON when this is passed
 TYPES = ["builder", "test-author", "reviewer", "Explore", "record-writer"]
-SCOPE_PREFIX = {
-    "builder": "Scope: builder.",
-    "test-author": "Scope: test-author.",
-    "reviewer": "Scope: reviewer.",
-    "Explore": "Scope: Explore.",
-    "record-writer": "Scope: record-writer.",
+
+# Full scope line per type, pinned verbatim. Edit here only when the hook's text changes on purpose.
+SCOPE_LINE = {
+    "builder": "- Scope: builder. Never edit tests or test config. Add mutants to hooks/mutate_guard.py when the brief asks. Report a test change you need.",
+    "test-author": "- Scope: test-author. Edit tests and test config only. Never edit product code.",
+    "reviewer": "- Scope: reviewer. Never edit, write, stage, commit, or push. Read and run checks only.",
+    "Explore": "- Scope: Explore. Never edit. Read and search only.",
+    "record-writer": "- Scope: record-writer. Edit Markdown (*.md) files only. Report any other change needed.",
 }
-GENERAL_PREFIX = "Scope: do only what your brief names"
+GENERAL_LINE = ("- Scope: do only what your brief names. A builder never edits tests; "
+                "a test-author never edits product code; a reviewer and Explore never edit; "
+                "a record-writer edits Markdown only.")
+STASH_LINE = "- Never run git stash, git reset, git checkout <path>, or git restore."
+# Non-scope lines in hook order. Builder, test-author, record-writer and the general case commit
+# and push; reviewer and Explore do not (F2 round 2), so they get the shorter set.
+WRITER_RULES = [
+    "Standing rules for this agent:",
+    STASH_LINE,
+    "- Push only with: git push origin HEAD:<branch>.",
+    "- Make no gh call unless your brief names it.",
+    "- Report in 25 lines or fewer unless the brief sets a cap. Order: Done, Deviations, Input Needed, Next.",
+    "- End each commit message with: Co-Authored-By: <model> <noreply@anthropic.com>",
+    "- Name no record path in a commit message. The only exception is the Drops-lines: trailer.",
+]
+READER_RULES = [
+    "Standing rules for this agent:",
+    STASH_LINE,
+    "- Make no gh call unless your brief names it.",
+    "- Report in 25 lines or fewer unless the brief sets a cap. Order: Done, Deviations, Input Needed, Next.",
+]
+PUSH_KEY = "Push only with"
+TRAILER_KEY = "End each commit message with"
+RECORD_KEY = "Name no record path"
+INJECT_ERROR = (  # runs the hook with json.loads and json.dumps raising, to force an internal error
+    "import json, runpy, sys\n"
+    "def boom(*args, **kwargs):\n"
+    "    raise RuntimeError('injected by test_agent_brief')\n"
+    "json.loads = boom\n"
+    "json.dumps = boom\n"
+    "sys.argv = sys.argv[1:]\n"
+    "runpy.run_path(sys.argv[0], run_name='__main__')\n"
+)
 
 CASES = []
 
@@ -115,16 +153,49 @@ def has_line(text, *parts):
     return False
 
 
+def scope_lines(text):
+    return [line for line in text.split("\n") if line.startswith("- Scope")]
+
+
 def scope_check(expected):
-    """Build a check: exactly one scope line, and it starts with the expected scope text."""
-    want = SCOPE_PREFIX.get(expected, GENERAL_PREFIX)
+    """Build a check: exactly one scope line, and it equals the pinned line for `expected`.
+    Any key not in SCOPE_LINE (such as "general") pins GENERAL_LINE."""
+    want = SCOPE_LINE.get(expected, GENERAL_LINE)
 
     def check(text):
-        scopes = [line for line in text.split("\n") if line.startswith("- Scope")]
+        scopes = scope_lines(text)
         if len(scopes) != 1:
             return "want one scope line, got %d" % len(scopes)
-        if not scopes[0].startswith("- " + want):
-            return "scope line is %r" % scopes[0][:90]
+        if scopes[0] != want:
+            return "scope line is %r, want %r" % (scopes[0][:120], want[:120])
+        return None
+    return check
+
+
+def builder_scope_check(*parts):
+    """Build a check: exactly one scope line, and it holds every part, case-insensitively."""
+    def check(text):
+        scopes = scope_lines(text)
+        if len(scopes) != 1:
+            return "want one scope line, got %d" % len(scopes)
+        low = scopes[0].lower()
+        for part in parts:
+            if part not in low:
+                return "scope line lacks %r: %r" % (part, scopes[0][:120])
+        return None
+    return check
+
+
+def brief_lines_check(present):
+    """Build a check: the push, trailer and record-path lines are all there (present=True), or
+    none of them is (present=False)."""
+    def check(text):
+        for key in (PUSH_KEY, TRAILER_KEY, RECORD_KEY):
+            found = [line for line in text.split("\n") if key in line]
+            if present and not found:
+                return "no line holds %r" % key
+            if not present and found:
+                return "a line holds %r: %r" % (key, found[0][:90])
         return None
     return check
 
@@ -145,7 +216,7 @@ def dispatch(case):
     """Return None when the case passes, else a note saying why not."""
     if case["kind"] == "custom":
         return case["fn"]()
-    if case["kind"] == "silent":
+    if case["kind"] == "bad":
         got = run(case["stdin"])
         if got is None:
             return "the hook file is missing: %s" % HOOK
@@ -153,9 +224,12 @@ def dispatch(case):
         if rc != 0:
             return "exit %d: %s" % (rc, err.strip()[:120])
         if out.strip():
-            return "expected no output, got %s" % out.strip()[:120]
-        if err.strip():
-            return "expected no stderr, got %s" % err.strip()[:120]
+            return "expected no stdout, got %s" % out.strip()[:120]
+        err_lines = err.strip().splitlines() if err.strip() else []
+        if len(err_lines) > 1:
+            return "want at most one stderr line, got %d" % len(err_lines)
+        if err_lines and not err_lines[0].startswith("agent_brief:"):
+            return "stderr line is %r, want it to start 'agent_brief:'" % err_lines[0][:120]
         return None
     text, problem = context_for(case["stdin"])
     if problem:
@@ -189,22 +263,46 @@ for _label, _parts in RULES:
     add(_label, "context", payload("builder"), rule_check(_parts))
 
 
-def common_rules_check():
-    base = None
+def line_set_check(expected):
+    """Build a check: the non-scope lines equal `expected`, in order."""
+    def check(text):
+        rules = [line for line in text.split("\n") if not line.startswith("- Scope")]
+        if rules == expected:
+            return None
+        if len(rules) != len(expected):
+            return "%d non-scope lines, want %d" % (len(rules), len(expected))
+        for got, want in zip(rules, expected):
+            if got != want:
+                return "line is %r, want %r" % (got[:90], want[:90])
+        return None
+    return check
+
+
+for _t in ["builder", "test-author", "record-writer"]:
+    add("line set: %s gets the eight-line set" % _t, "context", payload(_t),
+        line_set_check(WRITER_RULES))
+add("line set: a general (unknown) type gets the eight-line set", "context", payload("Plan"),
+    line_set_check(WRITER_RULES))
+add("line set: a missing agent type gets the eight-line set", "context", payload(),
+    line_set_check(WRITER_RULES))
+for _t in ["reviewer", "Explore"]:
+    add("line set: %s gets the five-line set" % _t, "context", payload(_t),
+        line_set_check(READER_RULES))
+
+
+def stash_check():
+    """The stash line is exact, for every agent type."""
     for agent_type in TYPES + ["Plan", MISSING]:
         text, problem = context_for(payload(agent_type))
         if problem:
             return problem
-        rules = [line for line in text.split("\n") if not line.startswith("- Scope")]
-        if base is None:
-            base = rules
-        elif rules != base:
-            return "the non-scope lines differ for agent type %r" % (agent_type,)
+        if STASH_LINE not in text.split("\n"):
+            return "agent type %r lacks the exact stash line" % (agent_type,)
     return None
 
 
-add("rules: the non-scope lines are identical for every agent type", "custom",
-    fn=common_rules_check)
+add("rules: the stash line is exactly 'Never run git stash, git reset, git checkout <path>, "
+    "or git restore' for every agent type", "custom", fn=stash_check)
 
 
 def length_check():
@@ -220,11 +318,11 @@ def length_check():
 
 add("length: the context stays under 20 lines for every agent type", "custom", fn=length_check)
 
-# SCOPE: each of the five types gets its own scope line, and only that one.
+# SCOPE: each of the five types gets its own full scope line, and only that one.
 for _t in TYPES:
-    add("scope: %s gets its own scope line" % _t, "context", payload(_t), scope_check(_t))
+    add("scope: %s gets its own full scope line" % _t, "context", payload(_t), scope_check(_t))
 
-# GENERAL: an unknown, odd, or missing type gets the general scope line.
+# GENERAL: an unknown, odd, or missing type gets the full general scope line.
 GENERAL_CASES = [
     ("an unknown agent type gets the general line", payload("Plan")),
     ("an empty agent type gets the general line", payload("")),
@@ -240,16 +338,63 @@ GENERAL_CASES = [
 for _name, _stdin in GENERAL_CASES:
     add("general: " + _name, "context", _stdin, scope_check("general"))
 
+# BUILDER ROUND 2 (F2): the push, trailer and record-path lines are for the write-capable types
+# and the general case, and never for reviewer or Explore.
+for _t in ["builder", "test-author", "record-writer"]:
+    add("brief lines: %s gets the push, trailer and record-path lines" % _t, "context",
+        payload(_t), brief_lines_check(True))
+add("brief lines: a missing agent type (general case) gets the push, trailer and record-path lines",
+    "context", payload(), brief_lines_check(True))
+for _t in ["reviewer", "Explore"]:
+    add("brief lines: %s gets none of the push, trailer and record-path lines" % _t, "context",
+        payload(_t), brief_lines_check(False))
+
+# BUILDER ROUND 2 (F3): the builder never edits tests, and may add mutants to hooks/mutate_guard.py
+# only when the brief asks.
+add("builder scope: says never edit tests", "context", payload("builder"),
+    builder_scope_check("never edit tests"))
+add("builder scope: allows adding mutants to hooks/mutate_guard.py when the brief asks",
+    "context", payload("builder"),
+    builder_scope_check("mutant", "hooks/mutate_guard.py", "brief asks"))
+
+# PLUGIN NAMESPACE (F4): `plugin:type` takes the scope of its bare type name.
+add("namespace: my-plugin:builder gets the builder scope line", "context",
+    payload("my-plugin:builder"), scope_check("builder"))
+
+
+def internal_error_check():
+    """An internal error prints nothing on stdout, one stderr line that starts `agent_brief:`,
+    and exits 0."""
+    if not os.path.exists(HOOK):
+        return "the hook file is missing: %s" % HOOK
+    result = subprocess.run([sys.executable, "-c", INJECT_ERROR, HOOK], input=payload("builder"),
+                            capture_output=True, encoding="utf-8", timeout=30)
+    if result.returncode != 0:
+        return "exit %d: %s" % (result.returncode, result.stderr.strip()[:120])
+    if result.stdout.strip():
+        return "expected no stdout, got %s" % result.stdout.strip()[:120]
+    err = result.stderr.strip().split("\n") if result.stderr.strip() else []
+    if len(err) != 1:
+        return "want one stderr line, got %d" % len(err)
+    if not err[0].startswith("agent_brief:"):
+        return "stderr line is %r, want it to start 'agent_brief:'" % err[0][:120]
+    return None
+
+
+add("error: an internal error gives no stdout, one agent_brief: stderr line, exit 0", "custom",
+    fn=internal_error_check)
+
 # SILENT: junk or empty stdin gives no output, no stderr, exit 0.
-SILENT_CASES = [
-    ("empty stdin gives no output", ""),
-    ("whitespace-only stdin gives no output", "  \n"),
-    ("junk stdin gives no output", "not json"),
-    ("truncated JSON gives no output", '{"agent_type": "builder"'),
-    ("non-text bytes on stdin give no output", "\x00\x01 junk {"),
+BAD_CASES = [
+    ("empty stdin", ""),
+    ("whitespace-only stdin", "  \n"),
+    ("junk stdin", "not json"),
+    ("truncated JSON", '{"agent_type": "builder"'),
+    ("non-text bytes on stdin", "\x00\x01 junk {"),
 ]
-for _name, _stdin in SILENT_CASES:
-    add("silent: " + _name, "silent", _stdin)
+for _name, _stdin in BAD_CASES:
+    add("bad input: %s gives no stdout, exit 0, at most one agent_brief: stderr line" % _name,
+        "bad", _stdin)
 
 
 def main():
