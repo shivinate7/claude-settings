@@ -12,8 +12,9 @@ Owner, 2026-10-12: no. A gate that cannot run refuses the call. The four command
 `rm_prompt_answer.py`. One stderr line names the remedy. A missing script names
 `sh install.sh`, or on Windows `powershell -ExecutionPolicy Bypass -File ./install.ps1`. A
 missing python says to install Python 3 first. Each gate carries `"onFailure": "block"`
-(Claude Code 2.1.295 and later), so a crash, a timeout or an unexpected exit code refuses
-the call too.
+(Claude Code 2.1.295 and later), so a process that cannot start, times out, or dies with
+an unexpected exit code refuses the call too. An error the script catches itself does not
+reach `onFailure` (see Holes).
 
 Advisory hooks stay fail-open, because a session must still start, stop and compact. They
 are SessionStart, Stop, PreCompact, SessionEnd, PostToolUse, and the SubagentStop guard.
@@ -33,8 +34,9 @@ changelog: `onFailure` landed in 2.1.295.
 
 A machine with `settings.json` but no hooks refuses calls until the hooks are installed.
 The refused tools are Bash, PowerShell, Edit, Write, MultiEdit, NotebookEdit, Agent, Task,
-Workflow, Skill and AskUserQuestion, plus every PermissionRequest prompt. That is a fresh install
-before `install.sh`, or a cloud session that gets the settings file alone. The refusal
+Workflow, Skill, AskUserQuestion and two MCP tools the guard matches. Every Bash permission
+prompt is refused too. The case is a fresh install before `install.sh`, or a cloud session
+that gets the settings file alone. The refusal
 names the remedy. `install.ps1` says so when python is missing.
 
 ## What protects it
@@ -47,10 +49,16 @@ stdin through, and returns the script's exit code. Advisory entries still exit 0
 
 ## Holes, named
 
+- The remedy names `sh install.sh`, but a missing guard refuses Bash too. The owner runs the
+  installer in a terminal of their own.
+- A Mac without `python3` gets no warning from `install.sh`; every gated call is then
+  refused with the no-python remedy.
 - Prompt hooks (Agent, AskUserQuestion, Edit and Write under `decisions/`, SendMessage) can
   deny, but the docs give them no `onFailure`. A failed prompt hook lets the call through.
-- `question_outcome.py` exits 0 when it cannot read its input, its state or its model. It
-  is a gate that fails open inside its own script.
+- Errors a gate catches itself fail open. `question_outcome.py` exits 0 when it cannot read
+  its input, its state or its model. `guard.py` logs an internal error, then exits 0.
+  `ste_gate.py` returns on bad input. Only an uncaught failure or a timeout reaches
+  `onFailure`.
 - The runtime's behaviour on exit 7 and on a timeout was not probed (`claude -p` had no
   login on this box). The docs say both block.
 - On this box `python3` resolves to the Windows Store alias. Run from an agent's shell, it
