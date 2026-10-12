@@ -2486,7 +2486,7 @@ if os.name == "nt":
        "S=%s; rm -rf $S/" % _gb, "deny", "rm-var-unguarded", cwd=NOGIT,
        carries=("literal path",), lacks=("${S:?}",))
     sh("rm-var: a variable set to the drive root in Git Bash spelling names a literal path",
-       "S=/%s; rm -rf $S/x" % _home[0].lower(), "deny", "rm-var-unguarded", cwd=NOGIT,
+       "S=/%s; rm -rf $S/" % _home[0].lower(), "deny", "rm-var-unguarded", cwd=NOGIT,
        carries=("literal path",), lacks=("${S:?}",))
 # Not refused (ruling item 1): a literal follows the slash, so Claude Code does not prompt.
 sh("rm-var: a quoted $ROOT with a literal dist is not refused",
