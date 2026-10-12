@@ -589,10 +589,10 @@ MUTATIONS = [
      '        if any(c in spec for c in "$`{}"):  # unreadable: a discard of unknown size\n            return False',
      '        if False:\n            return False', "guard",
      'per-file ask: restore "$F" -- keep.txt in a worktree still asks, unreadable before --'),
-    ("per-file: the allow ignores a cd, pushd, popd or a second -C in the command",
-     '    return len(targets) <= 1',
-     '    return True', "guard",
-     'per-file ask: cd shared, restore f.txt, then cd lane'),
+    ("per-file: the allow ignores a cd, pushd or popd in the command",
+     '    if _MOVES_SHELL.search(cmd):\n        return False',
+     '    if False:\n        return False', "guard",
+     'per-file ask: cd lane && restore f.txt with no heredoc asks'),
     ("config-edit: stop noting project config edits, shell tool",
      '    matched = project_config_shell_hit(stripped, cwd)\n'
      '    if matched:\n'

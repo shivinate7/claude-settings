@@ -2334,6 +2334,8 @@ TREE_ASK_REASON = (
     "Rule (shared trees): this command throws away work in a working tree. "
     "This checkout is a worktree, so the loss is limited to this lane. "
     "Commit work you must set aside on your own branch, never a stash. "
+    "A per-file discard in a worktree runs with no ask when the command holds no cd: "
+    "git -C <lane> restore <file>. "
     "The click in this prompt is the grant."
 )
 # agent-worktree-discard-is-noted: inside a worktree the harness made FOR an agent
@@ -6001,12 +6003,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                     diff_refusal(tool, role, command_root(stripped, cwd))
 
     # 1. Shared trees.
+    whole_root = []   # command_root reads the whole command: once per command, never per segment
     for segment in split_segments(stripped):
         if not segment.strip():
             continue
         words = segment_tokens(segment)
         own_c = _segment_git_c_target(words) if words else None
-        root = _absolute(own_c, cwd) if own_c is not None else command_root(stripped, cwd)
+        if own_c is not None:
+            root = _absolute(own_c, cwd)
+        else:
+            whole_root = whole_root or [command_root(stripped, cwd)]
+            root = whole_root[0]
         match = shared_tree_match(segment, root)
         if match is None:
             continue
