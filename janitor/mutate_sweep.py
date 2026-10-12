@@ -711,7 +711,7 @@ MUTATIONS = [
 
     ("husks: a folder that became a link is no longer refused",
      "sweep",
-     '    if os.path.islink(path) or not os.path.isdir(path):\n        return None\n    registered',
+     '    if is_link(path) or not os.path.isdir(path):\n        return None\n    registered',
      '    if not os.path.isdir(path):\n        return None\n    registered',
      "test_confirm_refuses_a_folder_that_became_a_link",
      "posix"),
