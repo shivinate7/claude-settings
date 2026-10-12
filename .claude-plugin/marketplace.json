@@ -1,0 +1,19 @@
+{
+  "name": "claude-settings",
+  "description": "Vetted mods vendored in the claude-settings repo",
+  "owner": {
+    "name": "shivinate7"
+  },
+  "plugins": [
+    {
+      "name": "token-weather",
+      "source": "./mods/token-weather",
+      "description": "token-weather mod (Apache-2.0, vendored unmodified)"
+    },
+    {
+      "name": "desktop-statusline",
+      "source": "./mods/desktop-statusline",
+      "description": "Desktop Statusline mod (MIT, vendored unmodified)"
+    }
+  ]
+}
