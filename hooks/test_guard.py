@@ -2087,6 +2087,17 @@ sh("rm-var: a quoted variable then a variable is refused",
 sh("rm-var: a variable then a trailing slash is refused",
    "rm -rf $S/", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${S:?}",))
+# Windows only: a Git Bash drive spelling (/c/Users/<name>) names the real home, so the variable
+# is the home folder or the drive root and the remedy is the literal path, never ${S:?}.
+if os.name == "nt":
+    _home = os.path.expanduser("~")
+    _gb = "/" + _home[0].lower() + _home[2:].replace("\\", "/")
+    sh("rm-var: a variable set to the home folder in Git Bash spelling names a literal path",
+       "S=%s; rm -rf $S/" % _gb, "deny", "rm-var-unguarded", cwd=NOGIT,
+       carries=("literal path",), lacks=("${S:?}",))
+    sh("rm-var: a variable set to the drive root in Git Bash spelling names a literal path",
+       "S=/%s; rm -rf $S/x" % _home[0].lower(), "deny", "rm-var-unguarded", cwd=NOGIT,
+       carries=("literal path",), lacks=("${S:?}",))
 # Not refused (ruling item 1): a literal follows the slash, so Claude Code does not prompt.
 sh("rm-var: a quoted $ROOT with a literal dist is not refused",
    'rm -rf "$ROOT/dist"', "allow", cwd=NOGIT)

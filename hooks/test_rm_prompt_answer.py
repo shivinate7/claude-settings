@@ -69,12 +69,14 @@ def payload(command=None, tool="Bash", raw=None, mode=BYPASS):
     return json.dumps(body)
 
 
-def allow(name, command, mode=BYPASS):
-    CASES.append({"name": name, "kind": "allow", "stdin": payload(command, mode=mode)})
+def allow(name, command, mode=BYPASS, real_home=False):
+    CASES.append({"name": name, "kind": "allow", "stdin": payload(command, mode=mode),
+                  "real_home": real_home})
 
 
-def silent(name, command=None, tool="Bash", raw=None, mode=BYPASS):
-    CASES.append({"name": name, "kind": "silent", "stdin": payload(command, tool, raw, mode)})
+def silent(name, command=None, tool="Bash", raw=None, mode=BYPASS, real_home=False):
+    CASES.append({"name": name, "kind": "silent", "stdin": payload(command, tool, raw, mode),
+                  "real_home": real_home})
 
 
 # ALLOW: bypass mode, each target is a guarded variable plus plain folders, each value is bound
@@ -221,18 +223,31 @@ silent("rm-prompt: bypass, a loop with a guarded rm stays a prompt",
        'S=/tmp/x; for d in a b; do rm -rf "${S:?}"/a; done')
 
 
-def run(stdin_text):
+# WINDOWS ONLY: a Git Bash drive spelling (/c/Users/<name>) names the real folder C:/Users/<name>.
+# The hook runs with the real home for these cases, so the spelling can match it.
+if os.name == "nt":
+    _real = os.path.expanduser("~")
+    GB_HOME = "/" + _real[0].lower() + _real[2:].replace("\\", "/")
+    silent("rm-prompt: bypass, S=/c/Users/<home> in Git Bash spelling is not allowed",
+           'S=%s; rm -rf "${S:?}"' % GB_HOME, real_home=True)
+    silent("rm-prompt: bypass, S=/c, the drive root in Git Bash spelling, is not allowed",
+           'S=/%s; rm -rf "${S:?}"/x' % _real[0].lower(), real_home=True)
+    allow("rm-prompt: bypass, a child of /c/Users/<home> in Git Bash spelling is allowed",
+          'S=%s/rm-test-child; rm -rf "${S:?}"' % GB_HOME, real_home=True)
+
+
+def run(stdin_text, real_home=False):
     """Return (rc, stdout, stderr) for one run of the hook, or None when the hook file is absent."""
     if not os.path.exists(HOOK):
         return None
-    env = dict(os.environ, HOME=HOME, USERPROFILE=HOME)
+    env = os.environ.copy() if real_home else dict(os.environ, HOME=HOME, USERPROFILE=HOME)
     result = subprocess.run([sys.executable, HOOK], input=stdin_text, capture_output=True,
                             text=True, timeout=30, env=env)
     return result.returncode, result.stdout, result.stderr
 
 
 def check(case):
-    got = run(case["stdin"])
+    got = run(case["stdin"], case.get("real_home", False))
     if got is None:
         return False, "the hook file is missing: %s" % HOOK
     rc, out, err = got
