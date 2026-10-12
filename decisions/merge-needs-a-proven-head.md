@@ -63,6 +63,8 @@ closed both. Round 3 found the rest, named here under the owner's three-round ca
   remedy.
 - The preview (`head_state`) prints a literal `<branch>`; the wait and the read name the
   real branch.
+- The preview reads checks only. With checks `gates pass` and every run skipped, it says
+  green while the wait and the read refuse with "skipped, no job ran".
 - Two workflow files with one `name` share one dedup slot; a job-level failure still reaches
   `classify`.
 - Pre-existing: with no required names, zero checks and zero runs, the wait reads green
