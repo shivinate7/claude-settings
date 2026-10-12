@@ -6457,12 +6457,13 @@ add("floor: Agent record-writer with model sonnet is still allowed", "allow",
     tool="Agent", prompt="x", model="sonnet", subagent_type="record-writer")
 
 # ---- Step-up (owner ruling 2026-10-12, rule roles-third-try-steps-up). The brief's fixed form
-# "Round N of 3" steps a reviewer up: rounds 2 and 3 need sonnet, and opus is the ceiling. The
+# "Round N of 3" steps a reviewer up: round 2 needs sonnet, round 3 sonnet or opus. The
 # fixed form "Try N of 3" steps a builder up: try 3 needs opus, tries 1 and 2 stay on sonnet.
+# Owner ruling 2026-10-12: a reviewer on "Round 3 of 3" may run opus. Round 2 stays sonnet only.
 # A reviewer's round 1 runs on the role's table model. Prose that quotes a round without the
 # fixed form is never a signal. A missing model is not read from the env default by the floor,
-# so the floor allows it. Step-up still denies a reviewer round 2 or 3 that does not name sonnet
-# (pinned below).
+# so the floor allows it. Step-up still denies a reviewer round 2 that does not name sonnet, and
+# a round 2 or round 3 that names haiku or inherit (pinned below).
 STEP_UP ="roles-third-try-steps-up"
 add("floor step-up: reviewer Round 2 of 3 on haiku is denied", "deny", STEP_UP,
     tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="haiku", subagent_type="reviewer")
@@ -6502,6 +6503,9 @@ add("floor step-up: round line after a lone quote on line two is denied", "deny"
     model="haiku", subagent_type="reviewer")
 add("floor step-up: reviewer Round 3 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="sonnet", subagent_type="reviewer")
+add("floor step-up: reviewer Round 3 of 3 on opus is allowed (owner ruling 2026-10-12)", "allow",
+    tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="claude-opus-5-5",
+    subagent_type="reviewer")
 add("floor step-up: builder Try 2 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Try 2 of 3. Continue the fix.", model="sonnet", subagent_type="builder")
 

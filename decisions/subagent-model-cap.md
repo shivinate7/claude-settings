@@ -23,7 +23,7 @@ Writing prose and records is not building.
 | Explore, claude-code-guide | haiku | high |
 | test-author | haiku | high |
 | reviewer | haiku | xhigh |
-| reviewer, rounds 2 and 3 | sonnet, the ceiling; set per spawn, which overrides the frontmatter `haiku` | the role's effort |
+| reviewer, rounds 2 and 3 | sonnet, the ceiling; round 3 may run opus on the owner's word for that spawn; set per spawn, which overrides the frontmatter `haiku` | the role's effort |
 | record-writer (`agents/record-writer.md`) | haiku | xhigh |
 | builder | sonnet | medium |
 | builder, try 3 after a FAIL at review round 2 | opus, the owner's standing word of 2026-10-12; set per spawn, which overrides `CLAUDE_CODE_SUBAGENT_MODEL` | the role's effort |
@@ -51,7 +51,9 @@ A session on an older Claude Code may run Haiku 4.5 for these roles.
 
 Sonnet is the ceiling for every role but three standing exceptions, by owner rulings
 2026-10-07 and 2026-10-12. Plan runs Opus. The advisor is `opus`, and agents inherit it. The builder's third try runs Opus by the owner's standing word of 2026-10-12. The owner
-watches its cost. Any other agent runs Opus only on the owner's word, for the spawn the
+watches its cost. A reviewer's round 3 may run Opus on the owner's word for that spawn
+(owner, 2026-10-12). A permission prompt cannot time out in Claude Code, so the guard allows
+Opus at round 3 and the owner's word stays prose. Round 2 stays Sonnet only. Any other agent runs Opus only on the owner's word, for the spawn the
 owner names. Enforcement stays prose only: CLAUDE.md `roles-sonnet-is-the-ceiling` states
 it, and `lint/rule_mechanisms.json` records it as `unmechanized`.
 
@@ -76,7 +78,7 @@ key, a template `${}`. A regex literal that holds a quote also hides the call th
 its own model and never puts it in the tool input. Measured 2026-10-07: the built-in Plan
 ran Opus 5.5 and general-purpose ran Sonnet 5.5. `agents/plan.md` now pins Plan.
 
-The step-up check moves to `hooks/guard.py`, beside the model floor (rule `subagent-model-floor`). It does not stay in the Agent prompt hook in `settings.json`. The check reads the `Round N of 3` or `Try N of 3` line in the brief. A round 2 or 3 reviewer runs on Sonnet, its ceiling. A try 3 builder needs Opus.
+The step-up check moves to `hooks/guard.py`, beside the model floor (rule `subagent-model-floor`). It does not stay in the Agent prompt hook in `settings.json`. The check reads the `Round N of 3` or `Try N of 3` line in the brief. A round 2 reviewer runs on Sonnet, its ceiling. A round 3 reviewer runs Sonnet, or Opus on the owner's word. A try 3 builder needs Opus.
 
 Sections after the record-writer boundary keep their Haiku sentences only as evidence of the earlier
 argument. This ruling overrides them.
