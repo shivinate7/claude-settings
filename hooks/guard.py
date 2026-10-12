@@ -6066,15 +6066,17 @@ STEP_UP_MARKER = re.compile(r"(?im)^[ \t]*(round|try)[ \t]+(\d)[ \t]+of[ \t]+3\b
 def step_up_hit(tool: str, tool_input) -> str:
     """The step-up reason for a spawn whose marker line and model disagree, or "". Only a line
     that is the marker counts. A missing model runs the env default, which is Sonnet for a builder; a reviewer's
-    frontmatter model is haiku, so a reviewer round 2 or 3 must name sonnet."""
+    frontmatter model is haiku, so a reviewer round 2 must name sonnet and round 3 must name sonnet or opus."""
     if tool not in SPAWN_TOOLS or not isinstance(tool_input.get("prompt"), str):
         return ""
     model = str(tool_input.get("model") or "").lower()
     role = tool_input.get("subagent_type")
     for kind, n in STEP_UP_MARKER.findall(tool_input["prompt"]):
         kind = kind.lower()
-        if role == "reviewer" and kind == "round" and n in "23" and "sonnet" not in model:
-            return "Reviewer rounds 2 and 3 run on Sonnet. Spawn it with model sonnet."
+        if role == "reviewer" and kind == "round" and n == "2" and "sonnet" not in model:
+            return "Reviewer round 2 runs on Sonnet. Spawn it with model sonnet."
+        if role == "reviewer" and kind == "round" and n == "3" and "sonnet" not in model and "opus" not in model:
+            return "Reviewer round 3 runs on Sonnet or Opus. Spawn it with model sonnet or opus."
         if role == "builder" and kind == "try" and n == "3" and "opus" not in model:
             return "Builder try 3 runs on Opus. Spawn it with model opus."
     return ""
@@ -6530,7 +6532,7 @@ def judge(payload) -> None:
     if floor_model:
         refuse(tool, "deny", "subagent-model-floor", MODEL_FLOOR_REASON, floor_model)
 
-    # 9b. Step-up: reviewer rounds 2 and 3 run on Sonnet, builder try 3 on Opus.
+    # 9b. Step-up: reviewer round 2 on Sonnet, round 3 on Sonnet or Opus, builder try 3 on Opus.
     step_up = step_up_hit(tool, tool_input)
     if step_up:
         refuse(tool, "deny", "roles-third-try-steps-up", step_up, str(tool_input.get("model")))
