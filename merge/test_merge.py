@@ -1282,6 +1282,39 @@ class GhHalf(Env):
         self.assertNotIn("pr merge", self.calls())
         self.assertEqual(self.head(), before)
 
+    def test_a_missing_required_check_beside_a_skipped_one_is_pending_not_red(self):
+        # B1: nothing has reported gates yet. The skipped gates-windows row is not proof that no check ran.
+        red, pending, _ = merge.Host.classify({"gates-windows": [("skipping", "")]}, ["gates", "gates-windows"])
+        self.assertEqual((red, pending), ([], ["gates"]))
+
+    def test_a_skipped_head_with_a_run_in_progress_waits_for_the_run(self):
+        # B1: the skipped rows are old. The gates run is still in progress with no job rows, so the wait holds.
+        self.set(checks_seq=[[("gates", "skipping", "")]], runs_seq=[[("gates", "in_progress", "")], [("gates", "completed", "skipped")]])
+        rc, out = self.go()
+        self.assertGreaterEqual(self.paused.count(60), 1, out)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("no check ran on this head", out)
+        self.assertNotIn("pr merge", self.calls())
+
+    def test_the_remedy_run_in_progress_beside_old_skipped_rows_waits(self):
+        # B1: the remedy's own run. Old skipped rows and a run in progress hold the wait, then the pass lets it merge.
+        self.set(checks_seq=[[("gates", "skipping", "")], [("gates", "pass", "")]], runs_seq=[[("gates", "in_progress", "")], [("gates", "completed", "success")]])
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertGreaterEqual(self.paused.count(60), 1, out)
+
+    def test_an_older_run_still_in_progress_holds_the_wait_under_a_newer_success(self):
+        # B2: gh lists the newest run first. The older in-progress run is read as pending before the dedup.
+        runs = [{"name": "gates", "status": "completed", "conclusion": "success"}, {"name": "gates", "status": "in_progress", "conclusion": ""}]
+        self.assertEqual(merge.Host.judge_runs(runs), ([], ["workflow gates"]))
+
+    def test_the_no_check_ran_remedy_names_the_real_branch(self):
+        self.set(checks_seq=[[("gates", "skipping", "")]])
+        rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("gh workflow run gates.yml --ref feat", out)
+        self.assertNotIn("<branch>", out)
+
     def test_cancelled_and_unknown_buckets_stop_the_run(self):
         for bucket in ("cancel", "startup_failure"):
             self.set(checks_seq=[[("gates", "pass", ""), ("x", bucket, "")]])
