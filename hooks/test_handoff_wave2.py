@@ -12,14 +12,18 @@ Part 1, hooks/precompact_handoff.py:
   --session-end  (SessionEnd; session_id, reason, cwd). Reason `clear` writes one new file that
                  holds the old session id and the project dir as values. A value is a JSON
                  string or key, or a line or word of plain text. Any other reason writes no
-                 file under CLAUDE_CONFIG_DIR, and changes none.
-  --reorient     (SessionStart; session_id, source, cwd). Source `clear` or `fork`: names the
-                 OLD session's handoff path, taken from the newest pointer for cwd. With no
-                 pointer, it names the newest handoff for cwd. With none, it prints the words
-                 "no handoff". It also names the NEW session's own handoff path.
-                 A handoff belongs to a project dir through the PreCompact state record
-                 (state/handoff/<sid>.json, field "repo"). The fixtures seed each session with
-                 a real PreCompact run in its dir.
+                 pointer. Every reason records the session's project dir, in a place the
+                 fallback reads. The cases check that by behavior, not by file.
+  --reorient     (SessionStart; session_id, source, cwd). Source `clear`: names the OLD
+                 session's handoff path, taken from the newest pointer for cwd. With no
+                 pointer, it names the newest handoff for cwd. Source `fork`: reads no pointer.
+                 It names the newest handoff for cwd, by handoff file mtime. With none, it
+                 prints the words "no handoff". Both sources also name the NEW session's own
+                 handoff path.
+                 A handoff belongs to a project dir through a record of that dir. A PreCompact,
+                 a --nudge, or a SessionEnd run writes the record. Most fixtures seed a session
+                 with a real PreCompact run in its dir. The quiet-session case uses --nudge and
+                 SessionEnd only.
   (no flag)      PreCompact. Unchanged.
   /safe-stop     The pin. The mod runs HANDOFF_PY (mods/session-board/hooks/register.mjs) with
                  `-I -B -c`, cwd = the config dir. It reads JSON with exactly the keys handoff
@@ -29,12 +33,17 @@ Part 2, hooks/reread_check.py (new file):
   --post-compact (PostCompact; session_id, trigger, cwd). Sets the session's flag.
   --pre-read     (PreToolUse, tool Read; session_id, tool_name, tool_input.file_path, cwd).
                  Clears the flag when the path names this session's handoff, in any spelling:
-                 full path, forward slashes (Windows only), or `~/.claude/...`. It never denies
-                 the read: exit 0 and no deny or block in stdout.
-  --stop         (Stop; session_id, stop_hook_active, cwd). With the flag set and
-                 stop_hook_active false, prints {"decision": "block", "reason": ...}, and the
-                 reason names the handoff path. Otherwise exits 0 and blocks nothing. Flags are
-                 per session.
+                 full path, forward slashes (Windows only), 8.3 short name (Windows only),
+                 long name, or `~/.claude/...`. It never denies the read: exit 0 and no deny or
+                 block in stdout.
+  --stop         (Stop; session_id, stop_hook_active, cwd). With the flag set, stop_hook_active
+                 false, and the handoff file present, prints {"decision": "block", "reason": ...},
+                 and the reason names the handoff path. Otherwise exits 0 and blocks nothing.
+                 Flags are per session.
+
+Bad stdin. Every mode of both modules exits 0 on empty stdin, a JSON list, JSON null, or
+text that is not JSON. reread_check.py imports precompact_handoff.py; if that import fails,
+every reread_check mode still exits 0.
 
 Config. CLAUDE_CONFIG_DIR is <scratch>/home/.claude. HOME and USERPROFILE are <scratch>/home,
 so `~/.claude` names the same folder as CLAUDE_CONFIG_DIR.
@@ -42,8 +51,8 @@ so `~/.claude` names the same folder as CLAUDE_CONFIG_DIR.
 Stubs. PRECOMPACT_HANDOFF_UNDER_TEST and READ_CHECK_UNDER_TEST replace the two modules. An
 always-pass stub (exit 0, no output) must fail every case, the /safe-stop pin included.
 
-Red on the current tree: every case except the /safe-stop pin. The pin passes on purpose,
-because it guards a signature that works today.
+Red on 8b9607e: the FAIL lines of one run name the open ruling items. The /safe-stop pin
+passes on purpose, because it guards a signature that works today.
 
 Each negative case carries a positive twin on a separate session. So a pass cannot come from
 a hook that does nothing. The Read spelling cases and the twin use the same live check.
@@ -175,6 +184,37 @@ def spell(c, sid, label):
     raise ValueError(label)
 
 
+def set_age(path, age):
+    """Make a file `age` seconds old."""
+    t = time.time() - age
+    os.utime(path, (t, t))
+
+
+def spellings(path):
+    """(short, long, reason) for an existing path on Windows: its 8.3 short spelling and its
+    long spelling. short is None, with the reason, on a platform with no 8.3 names, or when
+    the volume gives this path no short name."""
+    if sys.platform != "win32":
+        return None, None, "no 8.3 short names on %s" % sys.platform
+    import ctypes
+    kernel = ctypes.windll.kernel32
+
+    def convert(fn, p):
+        buf = ctypes.create_unicode_buffer(32768)
+        return buf.value if fn(p, buf, 32768) else None
+
+    long_name = convert(kernel.GetLongPathNameW, path)
+    short_name = convert(kernel.GetShortPathNameW, long_name) if long_name else None
+    if not long_name or not short_name:
+        return None, None, "Windows could not convert the path"
+    if short_name == long_name:
+        return None, None, "the volume gives this path no 8.3 short name"
+    return short_name, long_name, ""
+
+
+BAD_STDIN = (("empty", ""), ("JSON list", "[]"), ("JSON null", "null"), ("not JSON", "{not json"))
+
+
 class Case(object):
     """A scratch home: config dir, one project dir, and a helper to make more dirs."""
 
@@ -275,6 +315,29 @@ class Case(object):
             "session_id": sid, "hook_event_name": "Stop", "stop_hook_active": active,
             "cwd": self.proj})
 
+    def seed_handoff(self, sid):
+        """This session's handoff file exists, so a Stop block has a path to name."""
+        put(self.handoff(sid), "HANDOFF %s\n" % sid)
+
+    def nudge(self, sid, cwd=None, size=1000):
+        """A --nudge run for one session, with one assistant usage line of `size` input tokens."""
+        tp = os.path.join(self.root, "nudge-%s.jsonl" % sid)
+        usage = {"input_tokens": size, "cache_creation_input_tokens": 0,
+                 "cache_read_input_tokens": 0}
+        line = json.dumps({"type": "assistant", "message": {
+            "model": "claude-test", "content": [], "usage": usage}})
+        write_transcript(tp, [line])
+        return self.run(PRECOMPACT, "--nudge", {
+            "session_id": sid, "hook_event_name": "Stop", "stop_hook_active": False,
+            "transcript_path": tp, "cwd": cwd or self.proj})
+
+    def run_text(self, module, flag, text):
+        """One hook mode with raw text on stdin. Case.run sends JSON only, so bad stdin goes here."""
+        args = [sys.executable, module] + ([flag] if flag else [])
+        proc = subprocess.run(args, input=text, capture_output=True, text=True,
+                              env=self.env(), cwd=self.proj)
+        return Result(proc.returncode, proc.stdout or "", proc.stderr or "")
+
     def cleanup(self):
         shutil.rmtree(self.root, ignore_errors=True)
 
@@ -299,49 +362,54 @@ def case_session_end_clear_writes_pointer():
         c.cleanup()
 
 
-def case_session_end_other_reason_writes_nothing():
-    """SessionEnd with any other reason writes no file. Each case first proves that a clear
-    run does write, so a silent hook cannot pass."""
+def case_session_end_other_reason_writes_no_pointer():
+    """SessionEnd with any other reason writes no pointer, but it still records the dir. Check
+    by behavior: a clear run's pointer still names its handoff, though a newer session ended
+    for another reason in the same dir. Each reason first gets a positive twin, a clear run
+    that writes a pointer holding the old session id and the dir."""
     for reason in ("logout", "prompt_input_exit", "other"):
         c = Case("end_" + reason)
         try:
+            c.link("old-1", c.proj, age=100)
             before = c.snapshot()
-            c.session_end("twin-1", "clear")
+            c.session_end("old-1", "clear")
             twin = [d for d in c.changed(before).values() if d is not None]
             check("session-end %s: positive twin, a clear run writes the pointer" % reason,
-                  any(holds_pointer(d, "twin-1", c.proj) for d in twin),
+                  any(holds_pointer(d, "old-1", c.proj) for d in twin),
                   "changed files: %d" % len(twin))
-            before = c.snapshot()
-            proc = c.session_end("other-1", reason)
-            changed = c.changed(before)
-            check("session-end %s: writes no file and exits 0" % reason,
-                  not changed and proc.returncode == 0,
-                  "changed: %r rc=%r" % (sorted(changed), proc.returncode))
+            put(c.handoff("other-1"), "HANDOFF other-1\n")
+            c.session_end("other-1", reason)
+            out = c.reorient("new-1", "clear").stdout
+            check("session-end %s: clear start names the pointer's handoff (old-1)" % reason,
+                  c.handoff("old-1") in out, "stdout: %r" % tail(out, 300))
+            check("session-end %s: a newer session that ended for this reason is not named "
+                  "(other-1)" % reason, c.handoff("other-1") not in out,
+                  "stdout: %r" % tail(out, 300))
         finally:
             c.cleanup()
 
 
 def case_reorient_names_newest_pointer_same_dir():
-    """SessionStart clear or fork names the handoff of the NEWEST pointer for the same dir.
-    The older handoff is newer by mtime, so the pointer, not the mtime, must decide."""
-    for source in ("clear", "fork"):
-        c = Case("ptr_" + source)
-        try:
-            c.link("old-1", c.proj, age=0)
-            c.link("old-2", c.proj, age=100)
-            before = c.snapshot()
-            c.session_end("old-1", "clear")
-            c.backdate(c.changed(before), 100)
-            c.session_end("old-2", "clear")
-            out = c.reorient("new-1", source).stdout
-            check("reorient %s: names the newest pointer's handoff (old-2)" % source,
-                  c.handoff("old-2") in out, "stdout: %r" % tail(out, 300))
-            check("reorient %s: does not name the older pointer's handoff (old-1)" % source,
-                  c.handoff("old-1") not in out, "stdout: %r" % tail(out, 300))
-            check("reorient %s: names the new session's own handoff path" % source,
-                  c.handoff("new-1") in out, "stdout: %r" % tail(out, 300))
-        finally:
-            c.cleanup()
+    """SessionStart clear names the handoff of the NEWEST pointer for the same dir. The older
+    handoff is newer by mtime, so the pointer, not the mtime, must decide. Fork reads no
+    pointer: see case_fork_ignores_stale_pointer."""
+    c = Case("ptr_clear")
+    try:
+        c.link("old-1", c.proj, age=0)
+        c.link("old-2", c.proj, age=100)
+        before = c.snapshot()
+        c.session_end("old-1", "clear")
+        c.backdate(c.changed(before), 100)
+        c.session_end("old-2", "clear")
+        out = c.reorient("new-1", "clear").stdout
+        check("reorient clear: names the newest pointer's handoff (old-2)",
+              c.handoff("old-2") in out, "stdout: %r" % tail(out, 300))
+        check("reorient clear: does not name the older pointer's handoff (old-1)",
+              c.handoff("old-1") not in out, "stdout: %r" % tail(out, 300))
+        check("reorient clear: names the new session's own handoff path",
+              c.handoff("new-1") in out, "stdout: %r" % tail(out, 300))
+    finally:
+        c.cleanup()
 
 
 def case_reorient_ignores_pointer_for_other_dir():
@@ -397,6 +465,78 @@ def case_reorient_none_says_so():
             c.cleanup()
 
 
+def case_fork_ignores_stale_pointer():
+    """Fork names the newest handoff for the dir and reads no pointer. Setup: a session cleared
+    first, so its pointer is the only pointer. Then a parent links in the same dir, so the
+    parent's handoff is the newest. The clear twin in the same setup names the pointer's
+    handoff, so a stub that always names the newest file fails this case."""
+    c = Case("fork_stale")
+    try:
+        c.link("stale-1", c.proj, age=100)
+        c.session_end("stale-1", "clear")
+        c.link("parent-1", c.proj, age=0)
+        fork = c.reorient("fork-1", "fork").stdout
+        check("fork with a stale /clear pointer: names the parent's handoff (parent-1)",
+              c.handoff("parent-1") in fork, "stdout: %r" % tail(fork, 300))
+        check("fork with a stale /clear pointer: does not name the pointer's handoff (stale-1)",
+              c.handoff("stale-1") not in fork, "stdout: %r" % tail(fork, 300))
+        clear = c.reorient("clear-1", "clear").stdout
+        check("twin, clear in the same setup: names the pointer's handoff (stale-1)",
+              c.handoff("stale-1") in clear, "stdout: %r" % tail(clear, 300))
+    finally:
+        c.cleanup()
+
+
+def case_quiet_session_found_by_fallback():
+    """A session that never compacted is still found by fork. Its dir is recorded when a
+    --nudge run or a SessionEnd run (any reason) happens for it. Negative twin: a newer handoff
+    in another dir, from a session that ran only --nudge there, is not named."""
+    for label in ("nudge", "session end"):
+        c = Case("quiet_" + label.replace(" ", "_"))
+        try:
+            put(c.handoff("quiet-1"), "HANDOFF quiet-1\n")
+            set_age(c.handoff("quiet-1"), 100)
+            if label == "nudge":
+                ran = c.nudge("quiet-1", cwd=c.proj)
+            else:
+                ran = c.session_end("quiet-1", "logout", cwd=c.proj)
+            check("%s run for a quiet session: exits 0" % label, ran.returncode == 0,
+                  "rc=%r err=%r" % (ran.returncode, tail(ran.stderr)))
+            other = c.dir("other")
+            put(c.handoff("other-1"), "HANDOFF other-1\n")
+            c.nudge("other-1", cwd=other)
+            out = c.reorient("new-1", "fork").stdout
+            check("fork after a %s run: names the quiet session's handoff (quiet-1)" % label,
+                  c.handoff("quiet-1") in out, "stdout: %r" % tail(out, 300))
+            check("fork after a %s run: does not name the newer handoff in another dir "
+                  "(other-1)" % label, c.handoff("other-1") not in out,
+                  "stdout: %r" % tail(out, 300))
+        finally:
+            c.cleanup()
+
+
+def case_reorient_matches_either_spelling_of_proj():
+    """The project dir given as its 8.3 short name or its long name names the same handoff,
+    for clear (through the pointer) and for fork (through the newest handoff). Skips, with the
+    reason, where this platform or volume has no 8.3 name for the dir."""
+    c = Case("dot3_dir")
+    try:
+        short, long_name, why = spellings(c.proj)
+        if short is None:
+            print("SKIP: reorient by 8.3 dir spelling: %s" % why)
+            return
+        c.link("p-old", c.proj, age=0)
+        c.session_end("p-old", "clear", cwd=c.proj)
+        for source in ("clear", "fork"):
+            for label, cwd in (("short", short), ("long", long_name)):
+                out = c.reorient("new-%s-%s" % (source, label), source, cwd=cwd).stdout
+                check("reorient %s, dir given as its %s name: names the project's handoff "
+                      "(p-old)" % (source, label), c.handoff("p-old") in out,
+                      "stdout: %r" % tail(out, 300))
+    finally:
+        c.cleanup()
+
+
 def case_safe_stop_entry_pinned():
     """The /safe-stop seam, pinned as it is today. Passes on the current tree on purpose."""
     c = Case("safe_stop")
@@ -440,6 +580,7 @@ def live_ok():
     nothing unless this holds."""
     c = Case("live")
     try:
+        c.seed_handoff("live-1")
         c.post_compact("live-1")
         return blocks(c, c.stop("live-1"), "live-1")
     finally:
@@ -450,12 +591,30 @@ def case_post_compact_sets_flag():
     """PostCompact sets the flag. The next Stop blocks once and names the handoff path."""
     c = Case("flag")
     try:
+        c.seed_handoff("s-1")
         proc = c.post_compact("s-1")
         check("post-compact: exits 0", proc.returncode == 0,
               "rc=%r err=%r" % (proc.returncode, tail(proc.stderr)))
         stop = c.stop("s-1")
         check("post-compact sets the flag: the next Stop blocks and names the handoff",
               blocks(c, stop, "s-1"), "rc=%r out=%r" % (stop.returncode, tail(stop.stdout)))
+    finally:
+        c.cleanup()
+
+
+def case_stop_needs_handoff_file():
+    """A flagged session with no handoff file: Stop does not block, since there is no path to
+    name. The same session, once its handoff file exists, blocks (positive twin)."""
+    c = Case("nofile")
+    try:
+        c.post_compact("nf-1")
+        absent = c.stop("nf-1")
+        check("flag set, handoff file absent: Stop does not block",
+              passes(absent), "rc=%r out=%r" % (absent.returncode, tail(absent.stdout)))
+        c.seed_handoff("nf-1")
+        present = c.stop("nf-1")
+        check("the same flagged session, handoff file present: Stop blocks (positive twin)",
+              blocks(c, present, "nf-1"), "rc=%r out=%r" % (present.returncode, tail(present.stdout)))
     finally:
         c.cleanup()
 
@@ -470,7 +629,10 @@ def case_read_of_handoff_clears_flag():
             if spelled is None:
                 print("SKIP: read by %s: no such spelling on this platform" % label)
                 continue
+            c.seed_handoff("r-1")
             c.post_compact("r-1")
+            check("read by %s, live control: the flagged session blocks before the read" % label,
+                  blocks(c, c.stop("r-1"), "r-1"), "")
             rd = c.read("r-1", spelled)
             check("read by %s: the read is not denied" % label, read_allowed(rd),
                   "rc=%r out=%r" % (rd.returncode, tail(rd.stdout)))
@@ -486,6 +648,7 @@ def case_read_of_other_file_keeps_flag():
     check("read keeps flag: live control, a flagged session blocks", live_ok())
     c = Case("other")
     try:
+        c.seed_handoff("o-1")
         c.post_compact("o-1")
         others = [
             os.path.join(c.proj, "README.md"),
@@ -508,6 +671,8 @@ def case_stop_hook_active_passes():
     state without the flag, must block."""
     c = Case("active")
     try:
+        c.seed_handoff("a-1")
+        c.seed_handoff("a-2")
         c.post_compact("a-1")
         c.post_compact("a-2")
         twin = c.stop("a-2", active=False)
@@ -524,6 +689,7 @@ def case_stop_no_flag_passes():
     """A session with no flag passes. Flags are per session: a flagged sibling still blocks."""
     c = Case("noflag")
     try:
+        c.seed_handoff("n-2")
         c.post_compact("n-2")
         plain = c.stop("n-1")
         check("no flag: a session that never compacted passes", passes(plain),
@@ -538,24 +704,152 @@ def case_stop_no_flag_passes():
 # --------------------------------------------------------------------------- the run
 
 
+def case_read_by_8dot3_spelling_clears_flag():
+    """A Read of this session's handoff clears the flag by its 8.3 short name and by its long
+    name. Each spelling gets its own flagged session, checked live before the read. Skips,
+    with the reason, where this platform or volume has no 8.3 name for the file."""
+    for tag, want_short in (("short", True), ("long", False)):
+        c = Case("dot3_read_" + tag)
+        try:
+            c.seed_handoff("d-1")
+            short, long_name, why = spellings(c.handoff("d-1"))
+            if short is None:
+                print("SKIP: read by %s name: %s" % (tag, why))
+                continue
+            spelled = short if want_short else long_name
+            c.post_compact("d-1")
+            check("read by %s name, live control: the flagged session blocks before the read"
+                  % tag, blocks(c, c.stop("d-1"), "d-1"), "")
+            rd = c.read("d-1", spelled)
+            check("read by %s name: the read is not denied" % tag, read_allowed(rd),
+                  "rc=%r out=%r" % (rd.returncode, tail(rd.stdout)))
+            check("read by %s name clears the flag: the next Stop passes" % tag,
+                  passes(c.stop("d-1")), "rc=%r out=%r" % (rd.returncode, tail(rd.stdout)))
+        finally:
+            c.cleanup()
+
+
+def case_sibling_import_failure_exits_zero():
+    """reread_check.py imports its sibling precompact_handoff.py. With the sibling missing, or
+    present but raising on import, each reread_check mode exits 0. Live control: a copy that
+    has the real sibling still blocks. The copies sit in this case's scratch dir."""
+    c = Case("import")
+    try:
+        probe = {"session_id": "imp-1", "hook_event_name": "Stop", "stop_hook_active": False,
+                 "tool_name": "Read", "tool_input": {"file_path": c.handoff("imp-1")},
+                 "cwd": c.proj}
+        for tag, variant in (("missing", "no sibling"), ("raises", "sibling raises on import")):
+            d = c.dir("sib_" + tag)
+            shutil.copy(READ_CHECK, os.path.join(d, "reread_check.py"))
+            if tag == "raises":
+                put(os.path.join(d, "precompact_handoff.py"),
+                    "raise ImportError('test stub: sibling import fails')\n")
+            for flag in ("--post-compact", "--pre-read", "--stop"):
+                proc = c.run(os.path.join(d, "reread_check.py"), flag, probe)
+                check("%s, %s: exits 0" % (variant, flag), proc.returncode == 0,
+                      "rc=%r err=%r" % (proc.returncode, tail(proc.stderr)))
+        d = c.dir("sib_real")
+        shutil.copy(READ_CHECK, os.path.join(d, "reread_check.py"))
+        shutil.copy(PRECOMPACT, os.path.join(d, "precompact_handoff.py"))
+        mod = os.path.join(d, "reread_check.py")
+        c.seed_handoff("imp-1")
+        c.run(mod, "--post-compact", probe)
+        stop = c.run(mod, "--stop", probe)
+        check("live control, copied real sibling: Stop still blocks", blocks(c, stop, "imp-1"),
+              "rc=%r out=%r" % (stop.returncode, tail(stop.stdout)))
+    finally:
+        c.cleanup()
+
+
+def _live_session_end(c):
+    before = c.snapshot()
+    proc = c.session_end("live-1", "clear")
+    new = [d for d in c.changed(before).values() if d is not None]
+    return proc.returncode == 0 and any(holds_pointer(d, "live-1", c.proj) for d in new)
+
+
+def _live_reorient(c):
+    return "no handoff" in c.reorient("live-1", "clear").stdout.lower()
+
+
+def _live_precompact(c):
+    proc = c.pre_compact("live-1", c.proj)
+    c.seed_handoff("live-1")
+    return proc.returncode == 0 and c.handoff("live-1") in c.reorient("new-1", "fork").stdout
+
+
+def _live_nudge(c):
+    return blocks(c, c.nudge("live-1", size=250000), "live-1")
+
+
+def _live_post_compact(c):
+    c.seed_handoff("live-1")
+    c.post_compact("live-1")
+    return blocks(c, c.stop("live-1"), "live-1")
+
+
+def _live_pre_read(c):
+    c.seed_handoff("live-1")
+    c.post_compact("live-1")
+    if not blocks(c, c.stop("live-1"), "live-1"):
+        return False
+    c.read("live-1", c.handoff("live-1"))
+    return passes(c.stop("live-1"))
+
+
+def case_bad_stdin_and_live_control_per_mode():
+    """Every mode of both modules exits 0 on bad stdin: empty, a JSON list, JSON null, or text
+    that is not JSON. Each mode also has a live control in the same case: the mode must still
+    do its job on a valid payload. An always-pass stub fails the controls."""
+    modes = (
+        (PRECOMPACT, "--session-end", _live_session_end),
+        (PRECOMPACT, "--reorient", _live_reorient),
+        (PRECOMPACT, "--nudge", _live_nudge),
+        (PRECOMPACT, "", _live_precompact),
+        (READ_CHECK, "--post-compact", _live_post_compact),
+        (READ_CHECK, "--pre-read", _live_pre_read),
+        (READ_CHECK, "--stop", _live_post_compact),
+    )
+    for module, flag, live in modes:
+        mode = flag or "(no flag, PreCompact)"
+        c = Case("bad_" + (flag.strip("-") or "precompact"))
+        try:
+            check("live control %s: the mode works on a valid payload" % mode, live(c), "")
+            for label, text in BAD_STDIN:
+                proc = c.run_text(module, flag, text)
+                check("bad stdin (%s) to %s: exits 0" % (label, mode), proc.returncode == 0,
+                      "rc=%r err=%r" % (proc.returncode, tail(proc.stderr)))
+        finally:
+            c.cleanup()
+
+
 def main() -> int:
-    print("Part 1: SessionEnd pointer and SessionStart reorient (hooks/precompact_handoff.py)")
+    print("Part 1: SessionEnd pointer, SessionStart reorient (hooks/precompact_handoff.py)")
     case_session_end_clear_writes_pointer()
-    case_session_end_other_reason_writes_nothing()
+    case_session_end_other_reason_writes_no_pointer()
     case_reorient_names_newest_pointer_same_dir()
+    case_fork_ignores_stale_pointer()
+    case_quiet_session_found_by_fallback()
     case_reorient_ignores_pointer_for_other_dir()
     case_reorient_no_pointer_names_newest_handoff_same_dir()
     case_reorient_none_says_so()
+    case_reorient_matches_either_spelling_of_proj()
     case_safe_stop_entry_pinned()
 
     print("Part 2: PostCompact flag, Read clears it, Stop blocks (hooks/reread_check.py)")
     check("reread_check: the module exists", os.path.isfile(READ_CHECK),
           "missing: %s" % READ_CHECK)
     case_post_compact_sets_flag()
+    case_stop_needs_handoff_file()
+    case_read_by_8dot3_spelling_clears_flag()
     case_read_of_handoff_clears_flag()
     case_read_of_other_file_keeps_flag()
     case_stop_hook_active_passes()
     case_stop_no_flag_passes()
+    case_sibling_import_failure_exits_zero()
+
+    print("Part 3: bad stdin and live controls, both modules")
+    case_bad_stdin_and_live_control_per_mode()
 
     if FAILED:
         print()
