@@ -6,7 +6,7 @@ Which time zone does a session use when it tells the owner a time?
 
 ## The ruling
 
-Owner, 2026-10-13: US Central (America/Chicago), DST-aware, 24-hour clock. A session says
+Owner, 2026-10-12: US Central (America/Chicago), DST-aware, 24-hour clock. A session says
 "21:40 CDT", never a UTC time and never a 12-hour time.
 
 `hooks/local_time.py` gives each session the current Central time. It prints one line, for
@@ -26,7 +26,7 @@ UTC-06:00.
 
 ## Why
 
-Incident, found 2026-10-13: sessions saw only UTC, so they answered in UTC. A UTC answer
+Incident, found 2026-10-12: sessions saw only UTC, so they answered in UTC. A UTC answer
 shows the wrong date for the owner every evening.
 
 ## What protects it
