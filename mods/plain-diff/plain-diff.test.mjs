@@ -36,7 +36,7 @@
 // Known hole, not pinned: a rename that git shows as a new file (no 'rename from' line).
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -644,6 +644,127 @@ await test('R2-8 README: no "at most 5 calls at one time"; says per run, shared 
   assert.ok(readme.includes('at most 5 calls per run'), 'missing per-run wording')
   assert.ok(readme.includes('shared by overlapping runs'), 'missing shared wording')
   assert.ok(/empty tree/i.test(readme), 'unborn-repo base not named')
+})
+
+// ---------- Review round 3 (PR 375) ----------
+// Seams the builder adds in round 3:
+//   hooks/lib.mjs: looksSecret rewritten without catastrophic backtracking; it must accept lines with
+//     trailing text (';', ',', '#', '//') and a quoted value, and must still skip `const API_KEY = process.env.API_KEY;`.
+//     gitDiffArgs(base) carries '-c', 'core.fsmonitor=false' and '--no-textconv' and '--no-ext-diff'.
+//   hooks/register.mjs: every git call gets the same '-c core.fsmonitor=false' pair; the secret scan
+//     runs on sanitizeForCode(diff), the same text the model gets.
+// Timing runs in a child process with a wall-clock cap, so a hang is a failure, not a stall.
+const SCAN_CHILD = `
+const { looksSecret, sanitizeForCode, isTooLargeForModel } = await import(process.argv[1]);
+const one = { a: 'a'.repeat(80000), deadbeef: 'deadbeef'.repeat(10000), API_KEY: 'API_KEY'.repeat(20000), 'a.a.': 'a.a.'.repeat(20000) };
+const kind = process.argv[2];
+const text = kind === 'mixed' ? Array.from({ length: 3 }, () => Object.values(one).join('\\n')).join('\\n') : one[kind];
+const t0 = performance.now();
+looksSecret(sanitizeForCode(text));
+isTooLargeForModel(text);
+console.log(JSON.stringify({ ms: performance.now() - t0, chars: text.length }));
+`
+function timeScan(kind, capMs) {
+  const url = new URL('./hooks/lib.mjs', import.meta.url).href
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', SCAN_CHILD, url, kind], { encoding: 'utf8', timeout: capMs })
+  if (r.error || r.signal) return { hung: true }
+  if (r.status !== 0) return { error: String(r.stderr).split('\n')[0] }
+  return JSON.parse(String(r.stdout).trim().split('\n').pop())
+}
+
+// R3-1 freeze
+for (const [label, kind] of [
+  ['a', 'a'],
+  ['deadbeef', 'deadbeef'],
+  ['API_KEY repeated 20000 times', 'API_KEY'],
+  ['a.a. repeated', 'a.a.'],
+]) {
+  await test(`R3-1 freeze: looksSecret on one line of ${label} takes under 150 ms`, () => {
+    const r = timeScan(kind, 2500)
+    assert.ok(!r.hung, 'hung: no result within 2.5 s')
+    assert.ok(!r.error, r.error)
+    assert.ok(r.ms < 150, `took ${Math.round(r.ms)} ms`)
+  })
+}
+await test('R3-1 freeze: looksSecret on a 1 MB input of those lines takes under 1 s', () => {
+  const r = timeScan('mixed', 3000)
+  assert.ok(!r.hung, 'hung: no result within 3 s')
+  assert.ok(!r.error, r.error)
+  assert.ok(r.chars >= 1000000, `input ${r.chars} chars`)
+  assert.ok(r.ms < 1000, `took ${Math.round(r.ms)} ms`)
+})
+
+// R3-2 missed secrets: the five lines flagged; the two code and name lines not flagged.
+for (const line of [
+  '+const SECRET = "abcdEFGH12345678";',
+  '+  "apiKey": "AbCdEf1234567890",',
+  '+SECRET_KEY = "abcdef1234567890"  # prod',
+  '+define("DB_PASSWORD", "abcdef1234567890");',
+  "+password: 'abcdef1234567890' // note",
+]) {
+  await test(`R3-2 looksSecret flags: ${line}`, () => {
+    assert.equal(need('looksSecret')(line), true)
+  })
+}
+await test('R3-2 looksSecret does not flag const API_KEY = process.env.API_KEY, or api_key_name = "name"', () => {
+  const f = need('looksSecret')
+  assert.equal(f('+const API_KEY = process.env.API_KEY;'), false)
+  assert.equal(f('+api_key_name = "name"'), false)
+})
+
+// R3-3 git argv: no textconv, no external diff, no fsmonitor command.
+await test('R3-3 gitDiffArgs carries --no-textconv and --no-ext-diff', () => {
+  const a = need('gitDiffArgs')('HEAD')
+  assert.ok(a.includes('--no-textconv'), a.join(' '))
+  assert.ok(a.includes('--no-ext-diff'), a.join(' '))
+})
+await test('R3-3 gitDiffArgs carries -c core.fsmonitor=false', () => {
+  const a = need('gitDiffArgs')('HEAD')
+  const i = a.indexOf('core.fsmonitor=false')
+  assert.ok(i > 0 && a[i - 1] === '-c', a.join(' '))
+})
+await test('R3-3 register: every git call (rev-parse and diff) carries -c core.fsmonitor=false', async () => {
+  const t = host({ diff: fileDiff('g.txt', 'x') })
+  await t.run()
+  assert.ok(t.argvs.length >= 3, `only ${t.argvs.length} git calls`)
+  for (const a of t.argvs) {
+    const i = a.indexOf('core.fsmonitor=false')
+    assert.ok(i > 0 && a[i - 1] === '-c', a.join(' '))
+  }
+})
+await test('R3-3 real repo: a textconv driver and a core.fsmonitor command do not run during the mod diff', async () => {
+  const dir = repoWith(
+    { '.gitattributes': '* diff=evil\n', 'a.txt': 'one\n' },
+    { 'a.txt': 'two\n' },
+    { 'diff.evil.textconv': 'touch textconv-ran.marker && cat', 'core.fsmonitor': 'touch fsmonitor-ran.marker' },
+  )
+  try {
+    assert.deepEqual(
+      [existsSync(join(dir, 'textconv-ran.marker')), existsSync(join(dir, 'fsmonitor-ran.marker'))],
+      [false, false],
+      'a marker exists before the run',
+    )
+    const t = host({ run: realRun(dir) })
+    await t.run()
+    assert.equal(existsSync(join(dir, 'textconv-ran.marker')), false, 'textconv driver ran')
+    assert.equal(existsSync(join(dir, 'fsmonitor-ran.marker')), false, 'fsmonitor command ran')
+    assert.ok((await t.rows()).includes('a.txt'), 'a.txt row missing')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// R3-4 scan what the model gets: a control character inside a key must not hide it.
+await test('R3-4 register: a control character inside a key value is still skipped; zero model calls for that file', async () => {
+  const t = host({ diff: fileDiff('config.txt', 'key = sk-ant-abcdefghij\x01klmnopqrstuvwxyz') + fileDiff('ok.js', 'const a = 1') })
+  await t.run()
+  assert.equal(t.calls.length, 1, `calls: ${t.calls.length}`)
+  assert.ok(t.calls[0].prompt.includes('File: ok.js'), t.calls[0].prompt.split('\n')[4])
+  assert.ok(!JSON.stringify(t.calls).includes('sk-ant'), 'secret text sent to the model')
+  assert.equal(count(await t.rows(), 'Skipped: secret file'), 1)
+})
+await test('R3-4 looksSecret on the sanitized line is true (the scan may run after sanitizeForCode)', () => {
+  assert.equal(need('looksSecret')(lib.sanitizeForCode('+key = sk-ant-abcdefghij\x01klmnopqrstuvwxyz')), true)
 })
 
 const r1Failed = r1.filter(r => r.startsWith('FAIL')).length
