@@ -48,3 +48,6 @@ database, a child with `TZ=Asia/Tokyo`, and the hook run as a script. CI steps i
 - The hook reaches a machine only after `install.sh` copies it to `~/.claude/hooks`. Until
   then the wrapper exits 0 and no line shows.
 - Unmeasured: the token cost of one line per prompt.
+
+Kind: process
+Home: hooks/local_time.py
