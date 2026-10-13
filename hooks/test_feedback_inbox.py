@@ -19,19 +19,24 @@ run's scratch folder, never into the repo.
 Seams the builder codes against.
 
 Capture: hooks/local_time.py (env LOCAL_TIME_UNDER_TEST overrides the path). A UserPromptSubmit
-  hook. Stdin is one JSON object: hook_event_name, session_id, prompt, cwd. Stdout stays exactly one
-  "Local time: ..." line. Exit 0.
+  hook. Stdin is one JSON object: hook_event_name, session_id, prompt, cwd. Stdout is one
+  "Local time: ..." line. Exit 0. A write failure adds one stdout line; see below.
   - The first word of the prompt is `fb` or `fb:`: capture opens. The opening prompt is captured.
-  - A prompt that is only `fb done` (surrounding whitespace ignored) closes capture and is not
-    captured. `fb done` never opens capture.
-  - While open, every owner prompt is captured verbatim, including `x fb` and `fbi ...`. Neither
-    closes capture. Only `fb done` closes it.
+  - While open, a prompt that is only `fb done` closes capture and is not captured. Surrounding
+    whitespace and trailing punctuation are ignored, and letter case does not matter: `fb done.`,
+    `fb done!` and `FB done` all close. `fb done now` does not close. Plain `fb done` never opens
+    capture.
+  - While open, every owner prompt is captured verbatim, including `x fb`, `fbi ...` and
+    `fb done now`. Neither closes capture. Only the close forms of `fb done` close it.
   - While closed, nothing is captured.
   - State is per session_id and survives across runs. Another session's prompts are never captured.
   - `--subagent` (a SubagentStart payload) prints the same hookSpecificOutput JSON and never opens,
     closes or captures.
   - Fail open: empty stdin, non-JSON stdin, or a payload with no session_id gives exit 0, one
     Central line, and no file written.
+  - Write failure: when the inbox cannot be written (a directory at its path, for example), stdout
+    keeps the Local time line and adds one line that contains `not saved`. The message is not
+    captured. The session jots it by hand. Exit 0.
 
 Inbox: <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.inbox.md, outside git. Format:
 
@@ -42,8 +47,11 @@ Inbox: <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.inbox.md, outside git. Format:
     - fb-0958-2 [task] -> handoff
     - fb-0958-3 [note] -> noted
 
-  - A block starts at a line beginning `### `, outside a fence. The hook writes the header, the
-    opener fence, the verbatim text and the closer fence. The session writes the item lines.
+  - A block starts at a header line, outside a fence. The hook's header is `### ` and the Central
+    stamp, for example `### 2026-10-13 10:04 CDT (UTC-05:00)`, or CST with `(UTC-06:00)`. Any other
+    `### ` line, such as `### Notes`, is plain text: it starts no block, and it is no message with
+    no items. The hook writes the header, the opener fence, the verbatim text and the closer fence.
+    The session writes the item lines.
   - The fence is at least three backticks and longer than the longest backtick run in the text.
     Opener and closer are bare backtick lines. Lines inside a fence are never headers or items.
   - An item line starts with `- fb-` and follows its block's closer, before the next header.
@@ -61,6 +69,11 @@ Gate: hooks/feedback_gate.py (env FEEDBACK_GATE_UNDER_TEST overrides the path). 
     items; an item with no kind, an unknown kind, or no home; an open item (ruling, task, standing)
     whose id is not in the handoff as a whole token. A missing handoff file means every open id is
     missing.
+  - A malformed item line is an offence: a `- fb-` line whose id is not a token, such as
+    `- fb- [task] -> x` or a bare `- fb-`. The reason quotes the line's text after the leading
+    `- `, for example `fb- [task] -> x`. The gate does not crash on it.
+  - An item line that ends with `[closed]` is closed. Its id is not required in the handoff. Its
+    kind and home are still checked.
   - An unreadable inbox (a directory at its path, or bytes that are not UTF-8) gives one block that
     names the inbox file. Why: a Stop hook's stderr does not reach the owner, so a silent pass would
     drop feedback. stop_hook_active still gives nothing, so the block costs one turn at most.
@@ -76,6 +89,7 @@ Reorient: hooks/precompact_handoff.py `--reorient` (env PRECOMPACT_HANDOFF_UNDER
     sent `fb done`."
   - both, items first. Neither: the message is unchanged. An unreadable inbox gives no note, one
     stderr line, and the message still prints.
+  - A malformed item line is never listed as an id. The other ids and the capture line still print.
   Stub kinds for the reorient cases: FEEDBACK_INBOX_STUB=empty-inbox-note (inbox_note returns
   "") and always-capture-line (inbox_note always returns the capture line). Each is a copy of the
   real file with that one body swapped, written into this run's scratch folder, never the repo.
@@ -492,6 +506,26 @@ def case_fb_done_closes_and_is_not_captured():
           captured_texts(cfg, sid) == ["fb: two"], captured_texts(cfg, sid))
 
 
+def case_fb_done_forms_close_capture():
+    for sid, closer in (("done-period", "fb done."), ("done-bang", "fb done!"),
+                        ("done-caps", "FB done")):
+        cfg = new_cfg()
+        opened(cfg, sid, "fb: open the burst")
+        p = capture(cfg, sid, closer)
+        check("close form %r: hook ran" % closer, ran_central(p), p.desc())
+        check("close form %r: closes capture, and is not captured" % closer,
+              not os.path.exists(marker_of(cfg, sid))
+              and captured_texts(cfg, sid) == ["fb: open the burst"], captured_texts(cfg, sid))
+    cfg, sid = new_cfg(), "done-now"
+    opened(cfg, sid, "fb: open the burst")
+    p = capture(cfg, sid, "fb done now")
+    check("fb done now: hook ran", ran_central(p), p.desc())
+    check("fb done now: does not close; it is captured and capture stays open",
+          os.path.exists(marker_of(cfg, sid))
+          and captured_texts(cfg, sid) == ["fb: open the burst", "fb done now"],
+          captured_texts(cfg, sid))
+
+
 def case_verbatim_scanner_text_is_fenced():
     cfg, sid = new_cfg(), "scanner"
     p = capture(cfg, sid, SCANNER)
@@ -521,6 +555,27 @@ def case_fail_open_writes_nothing():
         check("fail open, %s: exit 0 and one Central line" % label, ran_central(p), p.desc())
         files = [os.path.join(d, f) for d, _, fs in os.walk(cfg) for f in fs]
         check("fail open, %s: no file written" % label, files == [], files)
+
+
+def not_saved_check(name, p):
+    """Stdout is the Local time line, then a line that says the message was not saved."""
+    lines = [ln.strip() for ln in p.out.splitlines() if ln.strip()]
+    check("%s: exit 0, Local time line first" % name,
+          p.code == 0 and bool(lines) and CENTRAL.fullmatch(lines[0]) is not None, p.desc())
+    check("%s: a further stdout line says the message was not saved" % name,
+          any("not saved" in ln.lower() for ln in lines[1:]), p.desc())
+
+
+def case_capture_write_failure_says_not_saved():
+    cfg, sid = new_cfg(), "write-fail-opener"
+    os.makedirs(inbox_of(cfg, sid))  # a directory at the inbox path: no write can land
+    not_saved_check("write failure, opener",
+                    capture(cfg, sid, "fb: a message the inbox cannot take"))
+    cfg, sid = new_cfg(), "write-fail-open"
+    os.makedirs(inbox_of(cfg, sid))
+    write_file(marker_of(cfg, sid), "")  # capture is already open
+    not_saved_check("write failure, capture open",
+                    capture(cfg, sid, "a later message in the burst"))
 
 
 def subagent_ok(p):
@@ -687,6 +742,46 @@ def case_gate_scanner_text_with_real_items_passes_silently():
                   gate(cfg, sid))
 
 
+def case_gate_malformed_item_line_blocks_and_names_it():
+    cfg, sid = new_cfg(), "malformed-item"
+    write_file(inbox_of(cfg, sid), render_block("malformed item beside a good one", items=(
+        "- fb- [task] -> x", "- fb-0958-2 [task] -> handoff")))
+    write_file(handoff_of(cfg, sid), "- fb-0958-2 task\n")
+    expect_block("gate: malformed `- fb- [task] -> x` beside a handed-off item", gate(cfg, sid),
+                 named=("fb- [task] -> x",), unnamed=("fb-0958-2",))
+    cfg, sid = new_cfg(), "malformed-bare"
+    write_file(inbox_of(cfg, sid), render_block("a bare fb- line", items=("- fb-",)))
+    expect_block("gate: bare `- fb-` line", gate(cfg, sid), named=("fb-",))
+
+
+def case_gate_closed_item_is_not_required_in_handoff():
+    cfg, sid = new_cfg(), "closed-item"
+    write_file(inbox_of(cfg, sid), render_block("closed task and ruling", items=(
+        "- fb-0958-2 [task] -> handoff: done [closed]",
+        "- fb-0958-3 [ruling] -> NO HOME YET [closed]")))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    expect_silent("gate: closed task and ruling missing from the handoff pass silently",
+                  gate(cfg, sid))
+    cfg, sid = new_cfg(), "closed-and-open"
+    write_file(inbox_of(cfg, sid), render_block("one closed, one open", items=(
+        "- fb-0958-2 [task] -> handoff: done [closed]", "- fb-0958-4 [task] -> handoff")))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    expect_block("gate: open task still required beside a closed one", gate(cfg, sid),
+                 named=("fb-0958-4",), unnamed=("fb-0958-2",))
+
+
+def case_gate_notes_heading_is_plain_text():
+    cfg, sid = new_cfg(), "notes-heading"
+    write_file(inbox_of(cfg, sid), render_block("jotted burst", items=(
+        "- fb-0958-2 [task] -> handoff",)) + "### Notes\nsome notes the session wrote by hand\n")
+    write_file(handoff_of(cfg, sid), "- fb-0958-2 task\n")
+    expect_silent("gate: a ### Notes heading after a jotted message passes silently",
+                  gate(cfg, sid))
+    cfg, sid = new_cfg(), "notes-only"
+    write_file(inbox_of(cfg, sid), "### Notes\nno captured message here\n")
+    expect_silent("gate: an inbox with only a ### Notes heading passes silently", gate(cfg, sid))
+
+
 def case_gate_reminder_follows_capture_state():
     cfg, sid = new_cfg(), "open-jotted"
     if opened(cfg, sid, "fb: reminder check, jotted"):
@@ -801,6 +896,22 @@ def case_reorient_items_and_capture_line_together():
               ends_with_note(p, note), p.desc())
 
 
+def case_reorient_malformed_line_keeps_the_note():
+    cfg, sid = new_cfg(), "reo-malformed"
+    write_file(inbox_of(cfg, sid), render_block("burst with malformed lines", items=(
+        "- fb- [task] -> x", "- fb-0958-2 [task] -> handoff", "- fb-",
+        "- fb-0958-3 [ruling] -> NO HOME YET")))
+    write_file(marker_of(cfg, sid), "")
+    note = " Open feedback items: fb-0958-2, fb-0958-3. Keep each in the handoff." + NOTE_CAPTURE
+    for ok_state in (False, True):
+        p = reorient(cfg, sid, ok_state)
+        tag = state_tag(ok_state)
+        check("reorient malformed (%s): good open ids and the capture line still print"
+              % tag, ends_with_note(p, note), p.desc())
+        check("reorient malformed (%s): the note does not fail on stderr" % tag,
+              "inbox note failed" not in p.err, p.desc())
+
+
 def case_reorient_nothing_when_no_open_items_and_no_marker():
     cfg = new_cfg()  # no inbox file at all
     sid = "reo-absent"
@@ -842,26 +953,32 @@ CASES = (
     case_opener_forms,
     case_open_survives_across_runs,
     case_fb_done_closes_and_is_not_captured,
+    case_fb_done_forms_close_capture,
     case_verbatim_scanner_text_is_fenced,
     case_fail_open_writes_nothing,
+    case_capture_write_failure_says_not_saved,
     case_subagent_never_opens_closes_or_captures,
     case_sessions_are_isolated,
     case_gate_no_inbox_and_empty_inbox_pass_silently,
     case_gate_all_jotted_passes_silently,
     case_gate_message_without_items_blocks_and_names_it,
     case_gate_item_without_kind_or_home_blocks,
+    case_gate_malformed_item_line_blocks_and_names_it,
     case_gate_open_item_missing_from_handoff_blocks,
+    case_gate_closed_item_is_not_required_in_handoff,
     case_gate_id_match_is_a_whole_token,
     case_gate_handoff_rewrite_that_drops_an_item_blocks,
     case_gate_missing_handoff_counts_every_open_id_missing,
     case_gate_scanner_text_yields_no_phantom_block_or_item,
     case_gate_scanner_text_with_real_items_passes_silently,
+    case_gate_notes_heading_is_plain_text,
     case_gate_reminder_follows_capture_state,
     case_gate_unreadable_inbox_blocks_and_names_the_file,
     case_gate_reads_only_its_own_session,
     case_reorient_lists_open_items_only,
     case_reorient_capture_open_line,
     case_reorient_items_and_capture_line_together,
+    case_reorient_malformed_line_keeps_the_note,
     case_reorient_nothing_when_no_open_items_and_no_marker,
     case_reorient_unreadable_inbox_prints_message_and_one_stderr_line,
 )
