@@ -51,6 +51,22 @@ stdin through, and returns the script's exit code. Advisory entries still exit 0
 No gate, moved or advisory entry carries `onFailure`. The suite is red on a `settings.json`
 where a gate carries it.
 
+## Judge model id
+
+Each judge hook (prompt or agent) names a full model id, `claude-haiku-5-5`. The alias
+`haiku` is not valid. When the model retires, change it in the judge hooks of
+`settings.json`, and nowhere else. `lint/test_settings_matcher.py` pins it: the suite is red
+when a judge hook has a model that does not start with `claude-`.
+
+Incident 2026-10-08 to 2026-10-12: the evaluator rejected `"model": "haiku"`
+(`unrecognized_model`), so all six judges failed open. Measured: `claude-haiku-5-5` runs in
+the headless CLI 2.1.296.
+
+Limits, named:
+
+- Tested in the headless CLI only, not in the desktop app.
+- Long judge prompts were not tested.
+
 ## Holes, named
 
 - Incident 2026-10-12: with `"onFailure": "block"` on the gates, the guard hook ran past its
