@@ -3,7 +3,7 @@
 // The host reads on(...) and $.noun.method(...) from source, so they are spelled literally,
 // and helpers that take $ are top-level functions.
 import {
-  AGENTS_TIMEOUT_MS, GC_MS, GIT_TIMEOUT_MS, GRACE_MS, HEARTBEAT_MS, MAX_KEYS, MAX_POLLS, READ_BUDGET_MS,
+  AGENTS_TIMEOUT_MS, GC_MS, GIT_BACKOFF_MAX_MS, GIT_SLOW_MS, GIT_TIMEOUT_MS, GRACE_MS, HEARTBEAT_MS, MAX_KEYS, MAX_PATH, MAX_POLLS, READ_BUDGET_MS,
   bandText, baseName, clean, cleanPath, detailLines, gitArgs, headerText, isSessionId, isUserOrigin, makeTracker,
   mergeRows, num, parseAgentsJson, parseStatus, readDetail, readEntry, rowText, safeStopMessage, safeStopPlan,
 } from './lib.mjs'
@@ -16,6 +16,10 @@ let staleId = '' // after /clear: the id the host may still answer until the new
 let watching = false // /board ran and its pane is open: the heartbeat also refreshes the board
 let polls = 0 // board refreshes on the heartbeat since the last /board
 let gitBusy = false // a heartbeat git read is running
+let gen = 0 // counts turn starts: a git read that began in an earlier count is dropped when it lands
+let ended = false // the session ended: nothing is written after that
+let gitEvery = HEARTBEAT_MS // idle git read interval: doubles after a slow read, back to 30 s on a quick one
+let gitNextAt = 0
 let lastDetail = '' // the detail record as last written, without its stamp
 let board = null // { rows, band, note, now, hidden }
 let view = { id: null, detail: null } // id null: all-sessions view
@@ -29,13 +33,15 @@ export function register(on) {
 
   on('session.end', async ($, e, next) => {
     try {
+      if (e.reason !== 'clear' && e.reason !== 'resume') ended = true // first: no write lands between the deletes and the flag
       if (isSessionId(e.sessionId)) {
         await $.store.delete('sess:' + e.sessionId)
         await $.store.delete('detail:' + e.sessionId)
       }
-      if (e.reason === 'clear') {
+      if (e.reason === 'clear' || e.reason === 'resume') {
         // The process goes on under a new id and no session.start fires. The heartbeat keeps
-        // running. Until the new id binds the host still answers the old one: write nothing for it.
+        // running and reads the id again each beat. Until the new id binds the host still
+        // answers the old one: write nothing for it.
         staleId = e.sessionId
         lastDetail = ''
         tracker.reset()
@@ -53,8 +59,9 @@ export function register(on) {
   on('turn.start', async ($, e, next) => {
     const result = await next(e)
     if (!e.agentId) {
+      gen++
       tracker.turnStart()
-      await flush($, false)
+      await soon($, flush($, false)) // the write runs on its own; the hook waits at most GRACE_MS
     }
     return result
   })
@@ -63,7 +70,7 @@ export function register(on) {
     const result = await next(e)
     try {
       if (!e.agentId) tracker.turnComplete(e)
-      await refreshSoon($, !e.agentId)
+      await soon($, refreshAll($, !e.agentId))
     } catch (err) { note($, 'turn end failed: ' + (err && err.message)) }
     return result
   })
@@ -74,7 +81,7 @@ export function register(on) {
     try {
       const verdict = result && typeof result === 'object' ? result.decision : undefined
       tracker.toolCheck({ tool: e.tool, input: e.input, id: e.tool_use_id, verdict })
-      if (verdict === 'ask') await flush($, false)
+      if (verdict === 'ask' && e.tool_use_id) await soon($, flush($, false))
     } catch { /* observing never changes the verdict */ }
     return result
   }).catch(($, e, next) => next(e)) // a failure here lets the tool run as the others decided
@@ -84,7 +91,7 @@ export function register(on) {
     try {
       return await next(e)
     } finally {
-      try { if (tracker.toolCall(e.tool_use_id)) await flush($, false) } catch { /* ignore */ }
+      try { if (tracker.toolCall(e.tool_use_id)) await soon($, flush($, false)) } catch { /* ignore */ }
     }
   }).catch(($, e, next) => next(e))
 
@@ -127,14 +134,15 @@ export function register(on) {
 async function startUp($) {
   tracker.reset()
   staleId = ''
+  ended = false
   lastDetail = ''
   await $.command.register({ name: 'board', description: 'Show every session on this machine: state, update-ready, agents', argumentHint: '[text]' })
   await $.command.register({ name: 'safe-stop', description: 'Reach a stopping point and write this session\'s handoff', argumentHint: '[plan]' })
   await setRepo($)
   if (beat) beat.cancel()
   beat = $.clock.every(HEARTBEAT_MS, () => { void tick($) })
-  await refreshSoon($, true)
-  await readEntries($) // sweeps entries of killed sessions
+  // The first reading and the sweep of killed sessions' entries share one wait of GRACE_MS.
+  await soon($, Promise.all([refreshAll($, true), sweepAll($)]))
 }
 
 async function setRepo($) {
@@ -164,13 +172,13 @@ async function refreshAll($, withGit) {
   await flush($, true)
 }
 
-// The refresh runs on its own. A hook waits for it at most GRACE_MS, so a slow or hung read
-// never holds session start or a turn end, and a quick one is in the first entry.
-async function refreshSoon($, withGit) {
-  const work = refreshAll($, withGit).catch(() => {})
+// The work (a refresh, a store write) runs on its own. A hook waits for it at most GRACE_MS, so
+// a slow or hung read or write never holds a hook, and a quick one is done before the hook returns.
+async function soon($, work) {
+  const w = Promise.resolve(work).catch(() => {})
   let timer
   const grace = new Promise(resolve => { timer = $.clock.after(GRACE_MS, resolve) })
-  await Promise.race([work, grace])
+  await Promise.race([w, grace])
   timer.cancel()
 }
 
@@ -179,9 +187,16 @@ async function refreshSoon($, withGit) {
 // runs from a timer, never inside a hook. A failed read makes the counts unknown.
 async function tick($) {
   try {
-    if (tracker.isIdle() && !gitBusy) {
+    if (tracker.isIdle() && !gitBusy && (gitEvery <= HEARTBEAT_MS || (await $.clock.now()) >= gitNextAt)) {
       gitBusy = true
-      try { await refreshGit($) } finally { gitBusy = false }
+      try {
+        const started = await $.clock.now()
+        const { slow } = await refreshGit($)
+        // A read that needed over 5 s: wait twice as long before the next one, up to 5 minutes.
+        // A quick read: back to every beat.
+        gitEvery = slow ? Math.min(gitEvery * 2, GIT_BACKOFF_MAX_MS) : HEARTBEAT_MS
+        gitNextAt = started + gitEvery
+      } finally { gitBusy = false }
     }
     await refreshAll($, false)
     if (watching) {
@@ -198,14 +213,17 @@ async function ident($) {
 
 // The entry always; the detail record at turn end and on a beat, only when its content changed.
 async function flush($, withDetail) {
+  if (ended) return // the session ended: a refresh that lands now writes nothing
   try {
     const id = await ident($)
+    if (ended) return
     if (!isSessionId(id)) return note($, 'no usable session id: entry not written')
     if (id === staleId) return // /clear ran and the new id is not bound yet
     staleId = ''
     const now = await $.clock.now()
+    if (ended) return
     await $.store.set('sess:' + id, tracker.entry(now))
-    if (withDetail) {
+    if (withDetail && !ended) {
       const detail = tracker.detail(now)
       const key = id + JSON.stringify({ ...detail, at: 0 })
       if (key !== lastDetail) {
@@ -216,17 +234,29 @@ async function flush($, withDetail) {
   } catch (err) { note($, 'store write failed: ' + (err && err.message)) } // the entry goes stale and hides: the safe failure
 }
 
-// One cheap git call per turn. A failed or slow read makes the counts unknown.
+// One cheap git call per turn end and per idle beat. A failed or slow read makes the counts
+// unknown. A read that began before the latest turn start is dropped when it lands: it may
+// describe the tree from before the turn. Gives { slow }: the read took GIT_SLOW_MS or more.
 async function refreshGit($) {
+  const mine = gen
+  let slow = false
   try {
+    const started = await $.clock.now()
     const cwd = await bounded($, $.session.cwd())
     const r = await bounded($, $.process.run(gitArgs(), { cwd, timeoutMs: GIT_TIMEOUT_MS }), GIT_TIMEOUT_MS + 1000)
+    const at = await $.clock.now()
+    slow = at - started >= GIT_SLOW_MS
+    if (mine !== gen) return { slow }
     if (r.exitCode !== 0) throw new Error('git exited ' + r.exitCode)
-    tracker.setGit(parseStatus(r.stdout), await $.clock.now())
+    tracker.setGit(parseStatus(r.stdout), at)
   } catch (err) {
-    tracker.setGit(null)
-    note($, 'git read failed: ' + (err && err.message))
+    slow = slow || (err && err.message === 'timed out')
+    if (mine === gen) {
+      tracker.setGit(null)
+      note($, 'git read failed: ' + (err && err.message))
+    }
   }
+  return { slow }
 }
 
 async function refreshAgents($) {
@@ -241,9 +271,10 @@ async function refreshCtx($) {
 }
 
 // Store entries by session id, newest key first, at most MAX_KEYS. total counts every entry key,
-// read or not. Entries a day past their last beat are removed.
+// read or not. old lists the ids of entries a day past their last beat: sweep() decides on those.
 async function readEntries($) {
   const entries = new Map()
+  const old = []
   const now = await $.clock.now()
   const keys = (await $.store.keys()).filter(k => typeof k === 'string' && k.startsWith('sess:'))
   const newest = keys.slice().reverse().slice(0, MAX_KEYS)
@@ -251,23 +282,41 @@ async function readEntries($) {
     try {
       const e = readEntry(await $.store.get(k))
       if (!e) return
-      if (now - e.at > GC_MS) {
-        await $.store.delete(k)
-        await $.store.delete('detail:' + k.slice(5))
-      } else entries.set(k.slice(5), e)
+      if (now - e.at > GC_MS) old.push(k.slice(5))
+      else entries.set(k.slice(5), e)
     } catch { /* one bad key hides one row */ }
   }))
-  return { entries, total: keys.length, read: newest.length }
+  return { entries, old, total: keys.length, read: newest.length }
+}
+
+// Removes the records of sessions a day past their last beat, except a session that
+// `claude agents` lists as live. live: a Set of ids, or null when that list is unknown: then
+// nothing is removed. Removing this session's own detail makes the next beat write it again.
+async function sweep($, old, live) {
+  if (!live) return
+  for (const id of old) {
+    if (live.has(id)) continue
+    try {
+      await $.store.delete('sess:' + id)
+      await $.store.delete('detail:' + id)
+      if (id === sid) lastDetail = ''
+    } catch { /* the next sweep tries again */ }
+  }
+}
+
+async function sweepAll($) {
+  const [agents, store] = await Promise.all([readAgents($), readEntries($)])
+  await sweep($, store.old, agents.ok ? new Set(agents.rows.map(r => r.id)) : null)
 }
 
 // One process call to `claude agents --json`. Never fatal: the note says what is missing.
 async function readAgents($) {
   try {
     const r = await bounded($, $.process.run(['claude', 'agents', '--json'], { timeoutMs: AGENTS_TIMEOUT_MS }), AGENTS_TIMEOUT_MS + 1000)
-    if (r.exitCode !== 0) return { rows: [], note: 'claude agents failed: shown from the store only' }
-    return { rows: parseAgentsJson(r.stdout), note: '' }
+    if (r.exitCode !== 0) return { rows: [], ok: false, note: 'claude agents failed: shown from the store only' }
+    return { rows: parseAgentsJson(r.stdout), ok: true, note: '' }
   } catch {
-    return { rows: [], note: 'claude agents unavailable: shown from the store only' }
+    return { rows: [], ok: false, note: 'claude agents unavailable: shown from the store only' }
   }
 }
 
@@ -275,6 +324,7 @@ async function loadBoard($) {
   const [agents, store, now] = await Promise.all([readAgents($), readEntries($), $.clock.now()])
   const rows = mergeRows(agents.rows, store.entries, now)
   board = { rows, band: bandText(rows), note: agents.note, now, hidden: store.total - store.read }
+  await sweep($, store.old, agents.ok ? new Set(agents.rows.map(r => r.id)) : null)
   if (view.id) await loadDetail($, view.id, rows)
 }
 
@@ -330,7 +380,7 @@ async function openSession($, id) {
 // the handoff path rules lives here. argv: hooks folder, session id, mode ("plan" makes no folder).
 const HANDOFF_PY = [
   'import sys, json',
-  'sys.path.insert(0, sys.argv[1])',
+  'sys.path.append(sys.argv[1])',
   'import precompact_handoff as p',
   'if sys.argv[3] != "plan": p.ensure_handoff_dir(sys.argv[2])',
   'print(json.dumps({"handoff": p.handoff_path(sys.argv[2]), "prompt": p.prompt_path()}))',
@@ -346,7 +396,9 @@ async function safeStop($, args) {
   let paths = null
   for (const py of ['python3', 'python']) {
     try {
-      const r = await $.process.run([py, '-B', '-c', HANDOFF_PY, config + '/hooks', id, plan ? 'plan' : 'run'], { timeoutMs: 10_000 })
+      // -I: no current-folder or user-site imports. cwd is the config folder, never the session's:
+      // a json.py or datetime.py in a repo must not run.
+      const r = await $.process.run([py, '-I', '-B', '-c', HANDOFF_PY, config + '/hooks', id, plan ? 'plan' : 'run'], { cwd: config, timeoutMs: 10_000 })
       const o = r.exitCode === 0 ? JSON.parse(String(r.stdout).trim().split('\n').pop()) : null
       if (o && typeof o.handoff === 'string' && typeof o.prompt === 'string') { paths = o; break }
       why.push(`${py}: ${clean(String(r.stderr).trim().split('\n').pop(), 100) || 'no usable output'}`)
@@ -355,6 +407,10 @@ async function safeStop($, args) {
     }
   }
   if (!paths) return safeStopPlan(null, [`python with ${config}/hooks/precompact_handoff.py (${why.join('; ')})`])
+  for (const p of [paths.handoff, paths.prompt]) {
+    // A path is shown and sent whole or not at all: never a cut path.
+    if (Array.from(p).length > MAX_PATH) return `Safe stop: a path from the handoff hook is over ${MAX_PATH} characters. Nothing was sent.`
+  }
   const handoff = cleanPath(paths.handoff)
   const text = safeStopMessage(cleanPath(paths.prompt), handoff)
   if (plan) return safeStopPlan(text, [])

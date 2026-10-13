@@ -24,7 +24,9 @@ One session: agents with status, the last 5 tool calls, files touched, context p
 A session is update-ready when all five hold: no running agents, state is waiting, no permission ask, no unpushed commits, and a clean tree.
 
 - Running servers and background tasks are not part of it. A session with a dev server can read "ready".
-- The git counts come from a reading at turn end. While the session waits, each heartbeat reads git again, one read at a time. An idle session keeps a fresh reading.
+- The git counts come from a reading at turn end. While the session waits, the heartbeat reads git again every 30 s, one read at a time. An idle session keeps a fresh reading.
+- A git read that needs 5 s or more makes the idle read back off. The wait doubles, up to 5 minutes. A quick read resets it to 30 s.
+- A read that began before the latest turn start is dropped when it lands.
 - A reading older than 60 s is "unknown". A failed or slow git call is "unknown". A branch with no upstream is "unknown". Unknown is never ready.
 - The 60 s rule guards against a stuck reader, not against idleness.
 
@@ -33,10 +35,12 @@ A session is update-ready when all five hold: no running agents, state is waitin
 - `claude agents --json` seeds the list. One call per refresh, 8 s timeout. A session without this mod shows as "no detail".
 - Each session with the mod writes `sess:<sessionId>` to `$.store`. The entry holds repo folder name, branch, and state. It also holds the git counts with their reading time, and the running agent count. It holds spawn counts by agent type, the context percent, and a time stamp. It stays under 1 KB.
 - It also writes `detail:<sessionId>`, under about 3 KB, for the one-session view. The mod writes it again only when its content changes.
-- A heartbeat refreshes the entry every 30 s. The board hides an entry older than 2 minutes, or stamped more than 30 s ahead of now. The session removes both records at session end. A killed session leaves them. The 2-minute rule hides them. An entry older than one day is deleted at the next session start or `/board`.
+- A heartbeat refreshes the entry every 30 s. The board hides an entry older than 2 minutes, or stamped more than 30 s ahead of now. The session removes both records at session end. A killed session leaves them. The 2-minute rule hides them. An entry older than one day is deleted at the next session start or `/board`, unless `claude agents` lists that session as live. If the list is not available, nothing is deleted.
 - The board reads the 200 newest entries. It says how many more exist.
-- After `/clear`, the mod writes nothing for the old id and starts again when the new id binds.
-- The git call runs once per turn and once per heartbeat while the session waits: argv array, no shell, `core.fsmonitor=false`, `--no-optional-locks`, 5 s timeout. Session start and turn end wait at most 100 ms for it. The refresh then finishes on its own.
+- After `/clear` or a resume, the mod writes nothing for the old id and reads the id again on each beat. It writes under the new id when that binds. After session end it writes nothing.
+- The git call runs once per turn end and once per idle heartbeat: argv array, no shell, `core.fsmonitor=false`, `--no-optional-locks`, 5 s timeout.
+- These steps each wait at most 100 ms for their reads and writes: session start, turn start, turn end, a permission ask, and the end of a tool call. The work then finishes on its own.
+- A permission ask with no tool id writes nothing.
 - The pane refreshes the board on the heartbeat while it is open. It stops when the pane closes, or after 10 refreshes with no `/board` call.
 
 ## Privacy
@@ -62,7 +66,9 @@ The mod writes no handoff. The session does, by the hook's own rules.
 
 `/safe-stop plan` prints the prompt and sends nothing. If python or the hook is missing, `/safe-stop` prints what is missing and sends nothing.
 
-Only the person starts it. A run from a plugin, a peer session, a coordinator, a schedule, or an auto-continuation does nothing.
+The origin check is a block-list. A run from a plugin, a peer session, a coordinator, a schedule, or an auto-continuation is refused. Other origins run, such as `unclassified`, `sdk`, and `bridge`. The check does not prove that a person typed the command.
+
+The python call runs with `-I` and with the config folder as its working directory, never the session folder. A repo file named `json.py` cannot run. A path over 4000 characters is refused, not cut.
 
 ## Unknown
 
@@ -83,7 +89,7 @@ Checked: the session id in `claude agents --json` equals the id the mod writes. 
 - A session without the mod shows repo and state only.
 - The store file name carries the install: a `--plugin-dir` run wrote `session-board_inline-<hash>.json`. Sessions loaded two ways probably do not share one file. Load every session the same way.
 - The running agent count is as of the last turn end or heartbeat. It can lag by 30 s.
-- A rejected permission prompt keeps "permission" until the turn ends.
+- A denied permission clears when the tool call returns, the same as an approved one. Turn end also clears it.
 - A mod error is not shown in the session. It goes to the debug log (`claude --debug`), one line starting "session-board:".
 
 ## Try in the desktop app
