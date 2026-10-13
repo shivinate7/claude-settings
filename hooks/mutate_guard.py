@@ -87,7 +87,7 @@ MUTATIONS = [
      'GIT_DIR_RE = re.compile(r"--never-a-real-option(\\A\\Z)(\\A\\Z)")', "guard", 'pointer: --git-dir reaches the pointer HEAD from an unrelated directory'),
     ("pointer-head: the HEAD root falls back through the work tree, naming the wrong HEAD",
      '        return run_dir\n    return _absolute(match.group(2), run_dir)',
-     '        return command_root(cmd, shell_cwd)\n    return _absolute(match.group(2), run_dir)', "guard", 'pointer: --work-tree alone moves no HEAD in the pointer checkout'),
+     '        return guard_core.command_root(cmd, shell_cwd)\n    return _absolute(match.group(2), run_dir)', "guard", 'pointer: --work-tree alone moves no HEAD in the pointer checkout'),
     ("pointer-head: read the shared common git directory, so a worktree reads as its primary",
      '        answer = guard_core._git(where, "rev-parse", "--absolute-git-dir")',
      '        answer = guard_core._git(where, "rev-parse", "--git-common-dir")', "guard", 'pointer: switch of a branch in another checkout is allowed'),
