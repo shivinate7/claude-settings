@@ -35,8 +35,10 @@ Interface the hook must match:
   feedback, compact summary, sidechain text, tool_result, system-reminder) never count.
 - The transcript is read at the tail only: at most 2 MiB of a 10 MB transcript is read.
 - `Goal:` needs text on its own line. Blank or whitespace-only after the marker is missing.
-- Goal format (owner ruling 2026-10-13): a question with a `Goal:` line passes the presence check.
-  A question with only `You want:` is denied, with a reason that names `Goal:`, and no model call.
+- Goal format (owner ruling 2026-10-13): a question with options needs a `Goal:` line and a
+  `Problem:` line to pass the presence check. A question with only `You want:` is denied, with a
+  reason that names `Goal:`, and no model call. A question with `Goal:` but no `Problem:` is denied,
+  with a reason that names `Problem:`, and no model call (owner ruling 2026-10-13 14:13 CDT).
 - The model prompt names `Goal:` and `Problem:`. It holds the two rule bullets
   (style-question-states-problem, style-question-restates-goal) read at call time from
   output-styles/shiv-stylisms.md, found from the hook's own folder (hooks/../output-styles).
@@ -493,7 +495,8 @@ def case_6_prompt_holds_last_three_owner_messages():
         owner("OWNER-3 keep it to three tries."),
         owner("OWNER-4 the wait matters less than the limit."),
     ])
-    qtext = "Goal: a three-try limit on the upload retry.\nQSENT-Q should the retry wait?"
+    qtext = ("Goal: a three-try limit on the upload retry.\nProblem: the upload retry has no limit.\n"
+             "QSENT-Q should the retry wait?")
     labels = ["LABEL-ALPHA wait", "LABEL-BETA no wait"]
     with model_stub(ALLOW) as stub:
         run_main(ask_payload(fresh_session("c6"), [question(qtext, labels)], transcript))
@@ -897,7 +900,8 @@ def case_q7_model_timeout_line_does_not_echo_the_prompt():
     if not need_module(name):
         return
     transcript = write_transcript("q7b", [owner("ECHO-OWNER-SENTINEL the owner's goal.")])
-    qtext = "Goal: a three-try limit on the upload retry.\nECHO-QUESTION-SENTINEL should it wait?"
+    qtext = ("Goal: a three-try limit on the upload retry.\nProblem: the upload retry has no limit.\n"
+             "ECHO-QUESTION-SENTINEL should it wait?")
 
     def timed_out(prompt):
         # The real invoke_model returns str(exc) for a timeout, and str(TimeoutExpired) carries
@@ -988,6 +992,7 @@ def case_r3_utf8_stdin_read_as_cp1252_is_judged_not_allowed_on_error():
     if not need_module(name):
         return
     text = ("Goal: a three-try limit on the upload retry.\n"
+            "Problem: the upload retry has no limit.\n"
             "Should the retry say “wait” between tries?")
     payload = ask_payload(fresh_session("r3"), [question(text, LABELS)], default_transcript())
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")  # as Claude Code writes it
@@ -1070,8 +1075,11 @@ def case_r8b_fresh_state_whose_remove_fails_does_not_deny_and_says_so():
 GOAL_RULE = "style-question-restates-goal"
 PROBLEM_RULE = "style-question-states-problem"
 STYLE_PATH = os.path.join(HERE, "..", "output-styles", "shiv-stylisms.md")
-GOAL_Q = "Goal: a three-try limit on the upload retry.\nShould the retry wait between tries?"
-GOAL_LINE_Q = "Goal: QGOAL-TOKEN\nShould the retry wait between tries?"
+GOAL_Q = ("Goal: a three-try limit on the upload retry.\nProblem: the upload retry has no limit.\n"
+          "Should the retry wait between tries?")
+# A Goal: line with no Problem: line: the presence check denies it (owner ruling 14:13 CDT).
+GOAL_ONLY_Q = "Goal: a three-try limit on the upload retry.\nShould the retry wait between tries?"
+GOAL_LINE_Q = "Goal: QGOAL-TOKEN\nProblem: PROBLEM-TOKEN\nShould the retry wait between tries?"
 YOU_WANT_ONLY_Q = "You want: a three-try limit on the upload retry.\nShould the retry wait between tries?"
 # A scratch style file for the hook copy. Its rule bullets carry sentinels, so the prompt must hold
 # them, read from this file. The problem bullet wraps over two lines and has a lone apostrophe. The
@@ -1150,7 +1158,7 @@ def hook_as(mod):
 
 
 def case_g1_goal_line_passes_the_presence_check_and_reaches_the_model():
-    name = "caseG1 Goal: line: passes the presence check, the model is called once"
+    name = "caseG1 Goal: and Problem: lines: pass the presence step, the model is called once"
     if not need_module(name):
         return
     with model_stub(ALLOW) as stub:
@@ -1186,7 +1194,7 @@ def case_g3_prompt_names_goal_and_problem():
     with hook_as(mod), model_stub(ALLOW) as stub:
         run_main(ask_payload(fresh_session("g3"), [question(GOAL_LINE_Q, LABELS)], default_transcript()))
     prompt = stub.prompts[0] if stub.prompts else ""
-    rest = prompt.replace("Goal: QGOAL-TOKEN", "")  # the question's own Goal: line is not counted
+    rest = prompt.replace(GOAL_LINE_Q, "")  # the question's own Goal: and Problem: lines are not counted
     check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
     check(name + ": names Goal:", "Goal:" in rest, "")
     check(name + ": names Problem:", "Problem:" in rest, "")
@@ -1367,6 +1375,20 @@ def case_g11_missing_problem_anchor_still_judges_and_names_it_on_stderr():
     check_style_gap(name, mod, PROBLEM_RULE, GOAL_RULE)
 
 
+def case_g12_goal_without_problem_is_denied_with_no_model_call():
+    name = "caseG12 Goal: line with no Problem: line: deny, reason names Problem:, no model call"
+    if not need_module(name):
+        return
+    with model_stub(ALLOW) as stub:
+        code, out, _ = run_main(ask_payload(fresh_session("g12"), [question(GOAL_ONLY_Q, LABELS)],
+                                            default_transcript()))
+    reason = deny_reason(out) or ""
+    check(name + ": denied", deny_reason(out) is not None, out)
+    check(name + ": reason names Problem:", "Problem:" in reason, reason)
+    check(name + ": no model call", stub.prompts == [], len(stub.prompts))
+    check(name + ": exit 0", code in (0, None), code)
+
+
 def main():
     cases = (case_g1_goal_line_passes_the_presence_check_and_reaches_the_model,
              case_g2_you_want_alone_is_denied_and_the_reason_names_goal,
@@ -1379,6 +1401,7 @@ def main():
              case_g9_missing_style_file_still_judges_and_names_it_on_stderr,
              case_g10_missing_goal_anchor_still_judges_and_names_it_on_stderr,
              case_g11_missing_problem_anchor_still_judges_and_names_it_on_stderr,
+             case_g12_goal_without_problem_is_denied_with_no_model_call,
              case_r8_stale_state_whose_remove_fails_is_ignored_and_the_ask_is_judged,
              case_r8b_fresh_state_whose_remove_fails_does_not_deny_and_says_so,
              case_r1_a_state_that_cannot_be_removed_does_not_pass_every_later_ask,
