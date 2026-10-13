@@ -1251,17 +1251,57 @@ def log_path_and_text(where: str, text: str) -> str:
     return short + " " + log_cut(text, room - len(short))
 
 
+SESSION_LOG_PLACEHOLDER = "-"
+SESSION_LOG_MAX = 64
+# Controls and line separators go before the cut. A lone surrogate cannot be encoded as UTF-8, so
+# one in the id would lose the whole log line at the write. It goes after the cut, so the cut
+# never leaves one at the end.
+_SESSION_LOG_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
+_SESSION_LOG_SURROGATE = re.compile(r"[\ud800-\udfff]")
+_log_session = SESSION_LOG_PLACEHOLDER
+
+
+def session_log_field(value) -> str:
+    """Return the guard.log session column: the id without control characters, cut at 64, else "-".
+
+    A guard.log line ends in this field. It reads the hook input's id only, never the environment
+    (an environment id can belong to a parent session), so it is not session_id_of. It never raises.
+    """
+    try:
+        if not isinstance(value, str):
+            return SESSION_LOG_PLACEHOLDER
+        text = _SESSION_LOG_CONTROL.sub("", value).strip()[:SESSION_LOG_MAX]
+        text = _SESSION_LOG_SURROGATE.sub("", text).strip()
+        return text or SESSION_LOG_PLACEHOLDER
+    except Exception:
+        return SESSION_LOG_PLACEHOLDER
+
+
+def set_log_session(value) -> None:
+    """Name the session whose hook call this process judges. Each `record` line carries it.
+
+    A hook process judges one call, so the entry point sets it once instead of every rule passing it
+    down to every `record` and `refuse` call.
+    """
+    global _log_session
+    _log_session = session_log_field(value)
+
+
 def record(tool: str, decision: str, rule: str, matched: str) -> None:
     try:
         folder = config_dir()
         os.makedirs(folder, exist_ok=True)
-        line = "\t".join([
+        fields = [
             datetime.now().isoformat(timespec="seconds"),
             tool or "",
             decision,
             rule,
             log_cut(matched, LOG_MAX_MATCHED),
-        ])
+        ]
+        session = globals().get("_log_session")  # absent: a five-field line, never a lost one
+        if session is not None:
+            fields.append(session)
+        line = "\t".join(fields)
         with open(os.path.join(folder, "guard.log"), "a", encoding="utf-8") as handle:
             handle.write(line + "\n")
     except Exception:

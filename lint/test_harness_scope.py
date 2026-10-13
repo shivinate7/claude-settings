@@ -167,6 +167,14 @@ class Scope(unittest.TestCase):
         for p in ("README.md", "decisions/some-record.md"):
             self.assertFlags(run([p]), want_false=["guard"])
 
+    # Round 2 hole: lint/guard_log_report.py imports hooks/guard_core.py at load, and decision_watch
+    # reads guard.log through it at run time. So a change to it must select the same jobs as
+    # lint/_transcript.py, the other module the decision watch loads (the rules at its line 36, 51).
+    def test_guard_log_reader_change_selects_the_jobs_of_the_transcript_reader(self):
+        reader = self.true_set(run(["lint/guard_log_report.py"]))
+        self.assertEqual(reader, self.true_set(run(["lint/_transcript.py"])))
+        self.assertTrue({"gates_windows_rest", "gates_macos", "code", "guard"} <= reader, reader)
+
     # Guard family: hooks/guard_<anything>.py is split out of hooks/guard.py. Each sibling must set
     # exactly the flags guard.py sets, as a new file and as an edit. Today the generic hooks/* rule
     # gives a new sibling no sweep flag, and an edited one no Windows or shell job.

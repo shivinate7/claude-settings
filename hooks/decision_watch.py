@@ -1143,17 +1143,28 @@ def collect_unread(stamp):
             lines = handle.read().splitlines()
     except Exception:
         return []
+    reader = None
+    try:
+        if LINT_DIR not in sys.path:
+            sys.path.insert(0, LINT_DIR)
+        import guard_log_report  # lint/guard_log_report.py, the one reader of guard.log lines
+        reader = guard_log_report
+    except Exception:
+        pass  # an unimportable reader falls back to a local split below: no note vanishes
     for line in lines:
-        fields = line.split("\t")
-        if len(fields) != 5 or fields[3] != UNREAD_RULE:
+        if reader is not None:
+            row = reader.parse_line(line)
+            parsed = None if row is None else (row.rule, row.when, row.matched)
+        else:
+            # Fallback, a second parser on purpose: the first five tab fields, extras ignored.
+            fields = line.split("\t")[:5]
+            try:
+                parsed = (fields[3], datetime.fromisoformat(fields[0]), fields[4])
+            except Exception:
+                parsed = None
+        if parsed is None or parsed[0] != UNREAD_RULE or parsed[1] < bound:
             continue
-        try:
-            when = datetime.fromisoformat(fields[0])
-        except Exception:
-            continue
-        if when < bound:
-            continue
-        text = fields[4].strip()
+        text = parsed[2].strip()
         if text and text not in seen:
             seen.append(text)
     return seen

@@ -673,6 +673,87 @@ def expectation(entry, result):
             "passed through untouched" if lifted else "an APPROVED write was reverted")
 
 
+# --------------------------------------------------------------------------- the session column
+#
+# A revert writes one guard.log line through guard.record. Its last field must be the hook's
+# session_id, and "-" when the hook sends none. The check runs IN THIS PROCESS through sweep, so a
+# test can patch guard_core.set_log_session. A patch to a no-op is the mutant of deleting the call in
+# config_watch.sweep: the watch then never sets the session, and the placeholder stays.
+
+SWEEP_SESSION = "sess-config-watch-0001"
+SWEEP_ABSENT = object()  # the hook sends no session_id key
+
+
+def _load_watch():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("config_watch_sweep_under_test", WATCH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _unexplained_revert(session):
+    """Run one cap lift through sweep, in this process. The lift arrives as a Bash call the guard
+    cannot read, so the watch reverts it and writes one `reverted` line. Return the guard.log lines
+    of that folder, split on tabs, and sweep's messages. The module's session is reset to the
+    placeholder directly, not through set_log_session, so a watch that never sets it leaves '-'.
+    """
+    watch = _load_watch()
+    core = sys.modules["guard_core"]  # the module the writer reads its session from
+    core._log_session = "-"
+    root = tempfile.mkdtemp(prefix="config_watch_sweep_")
+    saved = os.environ.get("CLAUDE_CONFIG_DIR")
+    try:
+        proj = os.path.join(root, "proj")
+        cfg = os.path.join(root, "cfg")
+        settings = os.path.join(proj, ".claude", "settings.local.json")
+        write(settings, SONNET)  # the baseline: the file as it stands
+        os.environ["CLAUDE_CONFIG_DIR"] = cfg
+        payload = {"tool_name": "Bash", "tool_input": {"command": "true"}, "cwd": proj}
+        if session is not SWEEP_ABSENT:
+            payload["session_id"] = session
+        watch.sweep(dict(payload))
+        write(settings, LIFT)  # a lift the guard never explained
+        messages = watch.sweep(dict(payload))
+        path = os.path.join(cfg, "guard.log")
+        if not os.path.exists(path):
+            return [], messages
+        with open(path, encoding="utf-8") as handle:
+            rows = [line.split("\t") for line in handle.read().splitlines() if line.strip()]
+        return rows, messages
+    finally:
+        if saved is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = saved
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def _reverted_rows(rows):
+    return [fields for fields in rows if len(fields) > 2 and fields[2] == "reverted"]
+
+
+def sweep_session_check():
+    """config_watch names the session in its revert line: the last field is the hook's session_id,
+    and '-' when the hook sends none. Returns (ok, note).
+    """
+    rows, messages = _unexplained_revert(SWEEP_SESSION)
+    if not messages:
+        return False, "the watch judged nothing: the lift was not reverted"
+    reverted = _reverted_rows(rows)
+    if len(reverted) != 1:
+        return False, "expected one reverted line, found %d" % len(reverted)
+    if len(reverted[0]) != 6 or reverted[0][5] != SWEEP_SESSION:
+        return False, "the revert line ends in %r, want the hook's session_id" % (
+            reverted[0][-1])
+    rows, messages = _unexplained_revert(SWEEP_ABSENT)
+    reverted = _reverted_rows(rows)
+    if len(reverted) != 1 or len(reverted[0]) != 6 or reverted[0][5] != "-":
+        return False, "with no session_id the revert line must end in '-', got %r" % (
+            reverted[0][-1] if reverted else rows)
+    return True, "the revert line ends in the session_id, and in '-' with none"
+
+
 def main() -> int:
     print("config_watch cases, %d in all%s" % (len(CASES), "  [BASELINE: no watch]" if BASELINE
                                                else ""))
@@ -714,6 +795,11 @@ def main() -> int:
         print("%s  %-9s pre=%-5s  %s  (%s)" % (
             "PASS" if ok else "FAIL", "[" + entry["group"] + "]",
             result["pre"], entry["name"], note))
+    if not only:
+        sweep_ok, sweep_note = sweep_session_check()
+        failed += 0 if sweep_ok else 1
+        print("%s  [sweep]  config_watch names the session in its revert line  (%s)" % (
+            "PASS" if sweep_ok else "FAIL", sweep_note))
     print()
     if failed:
         print("test_config_watch FAIL: %d of %d cases wrong" % (failed, len(CASES)))
