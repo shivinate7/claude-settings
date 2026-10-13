@@ -2444,6 +2444,9 @@ GL_SIX_CODE_DOC = (  # six findings after the fix: STE003, STE008, STE009, STE01
     "We ensure the seals are sound.\n")
 GL_STRIPPED = ("STE_FIXER_LIMIT_S", "STE_FIXER_MAX_BYTES", "CLAUDE_CODE_SESSION_ID",
                "MD_SWEEP_DISABLE", "MD_SWEEP_EXCLUDE")
+# Characters a guard.log field must never hold: C0 and C1 controls, line and paragraph separators,
+# the bidi overrides and isolates, and a lone surrogate.
+GL_HOSTILE = re.compile("[\x00-\x1f\x7f-\x9f  ‪-‮⁦-⁩\ud800-\udfff]")
 # Appended to a copy of guard_core.py. Each record and set_log_session call is written to MARKER.
 GL_PROBE = '''
 
@@ -2523,6 +2526,43 @@ def gl_blocked_cfg(tmp):
     with open(blocker, "w", encoding="utf-8") as handle:
         handle.write("not a folder")
     return os.path.join(blocker, "cfg")
+
+
+def gl_copy_tree(root, old_transcript=False):
+    """Copy lint/*.py (no tests) to <root>/lint and hooks/guard_core.py to <root>/hooks. With
+    old_transcript, the copy's _transcript.py stops before guard_logger: the module of an older
+    install, beside the new scripts. Returns the copied lint folder."""
+    lint_copy = os.path.join(root, "lint")
+    os.makedirs(lint_copy)
+    for src in glob.glob(os.path.join(HERE, "*.py")):
+        if not os.path.basename(src).startswith("test_"):
+            shutil.copy(src, lint_copy)
+    os.makedirs(os.path.join(root, "hooks"))
+    shutil.copy(os.path.join(HOOKS, "guard_core.py"), os.path.join(root, "hooks"))
+    if old_transcript:
+        path = os.path.join(lint_copy, "_transcript.py")
+        with open(path, encoding="utf-8") as handle:
+            old = handle.read().split("\ndef guard_logger(")[0]
+        if "def guard_logger" in old:
+            raise AssertionError("the cut did not remove guard_logger")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(old)
+    return lint_copy
+
+
+def gl_linter_tree(root, entry):
+    """A gate tree whose linter, run as a script, does `entry` where its main() runs, so the gate
+    gets no findings from the child: a crash, or silence. Returns the copied ste_gate.py."""
+    lint_copy = gl_copy_tree(root)
+    linter = os.path.join(lint_copy, "ste_lint.py")
+    with open(linter, encoding="utf-8") as handle:
+        text = handle.read()
+    entry_main = 'if __name__ == "__main__":\n    sys.exit(main())'
+    if text.count(entry_main) != 1:
+        raise AssertionError("the linter entry point moved")
+    with open(linter, "w", encoding="utf-8") as handle:
+        handle.write(text.replace(entry_main, 'if __name__ == "__main__":\n    ' + entry))
+    return os.path.join(lint_copy, "ste_gate.py")
 
 
 def gl_guard_core():
@@ -2885,6 +2925,72 @@ class SteGateLogTests(unittest.TestCase):
         self.assertEqual([c for c in calls if c.startswith("record|")],
                          ["record|Write|fixed|STE007,STE008|notes.md fixed=2"], calls)
 
+    # (2) import skew: the new gate beside an old _transcript.py that has no guard_logger. The gate
+    # prints what it prints with logging, exits as it does, and writes no line. No ImportError.
+    def test_21_old_transcript_without_guard_logger_keeps_the_gate_output(self):
+        gate = os.path.join(gl_copy_tree(os.path.join(self.tmp.name, "skew"), old_transcript=True),
+                            "ste_gate.py")
+        skew_cfg = os.path.join(self.tmp.name, "skew-cfg")
+        content = {"file_path": self._path(), "content": GL_FIXED_DOC}
+        skewed = gl_gate(skew_cfg, "Write", content, gate=gate)
+        full = gl_gate(self.cfg, "Write", content)
+        self.assertIn("updatedInput", gl_out(full).get("hookSpecificOutput", {}))  # precondition
+        self.assertNotIn("Traceback", skewed.stderr)
+        self.assertEqual(skewed.returncode, full.returncode, skewed.stderr)
+        self.assertEqual(skewed.returncode, 0)
+        self.assertEqual(skewed.stdout, full.stdout)
+        self.assertIsNone(gl_lines(skew_cfg), "an old _transcript wrote a line")
+
+    # (4) the linter returns nothing (a crash, or silence): findings are None, the write is unknown.
+    # One line names the unchecked write. The output and the exit code do not change.
+    def _unchecked(self, name, entry):
+        gate = gl_linter_tree(os.path.join(self.tmp.name, name), entry)
+        clean = {"file_path": self._path(), "content": GL_CLEAN_DOC}
+        run = gl_gate(self.cfg, "Write", clean, gate=gate)
+        bare = gl_gate(gl_blocked_cfg(self.tmp.name), "Write", clean, gate=gate)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertNotIn("Traceback", run.stderr)
+        self.assertIn("was not checked", run.stdout)  # precondition: the unknown path
+        self.assertEqual((run.returncode, run.stdout), (bare.returncode, bare.stdout))
+        rows = self._rows("an unchecked write")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(gl_fields(rows[0])[1:],
+                         ["Write", "noted", "STE-unchecked", "notes.md unchecked", GL_SESSION])
+
+    def test_22_linter_crash_logs_unchecked_and_keeps_the_output(self):
+        self._unchecked("crashlint", 'raise RuntimeError("linter crash")')
+
+    def test_23_silent_linter_logs_unchecked_and_keeps_the_output(self):
+        self._unchecked("silentlint", "pass")
+
+    # (6) name hygiene: a lone surrogate in the name. The line is still written, and it is one line.
+    def test_24_lone_surrogate_in_the_name_still_writes_one_line(self):
+        run = gl_gate(self.cfg, "Write", {"file_path": self._path("notes\ud800.md"),
+                                          "content": GL_FIXED_DOC})
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertNotIn("Traceback", run.stderr)
+        rows = self._rows("a write named with a lone surrogate")
+        self.assertEqual(len(rows), 1)
+        when, tool, decision, _rule, _matched, session = gl_fields(rows[0])
+        datetime.fromisoformat(when)
+        self.assertEqual((tool, session), ("Write", GL_SESSION))
+        self.assertIn(decision, ("fixed", "noted", "deny"))
+
+    # (6) name hygiene: tab, NUL, controls, U+2028 and U+202E, and a name over 80 characters. The
+    # line is one whole line, the name is cleaned, and the matched field is at most 80 characters.
+    def test_25_control_characters_in_the_name_are_cleaned_and_the_field_is_capped(self):
+        name = "p\tq\x00r\x01s\x1bt‮u v" + "x" * 90 + ".md"
+        run = gl_gate(self.cfg, "Write", {"file_path": self._path(name), "content": GL_FIXED_DOC})
+        self.assertEqual(run.returncode, 0, run.stderr)
+        rows = self._rows("a write named with control characters")
+        self.assertEqual(len(gl_text(self.cfg).splitlines()), 1, "a name split the log line")
+        when, tool, decision, _rule, matched, session = gl_fields(rows[0])
+        datetime.fromisoformat(when)
+        self.assertEqual((tool, session), ("Write", GL_SESSION))
+        self.assertIn(decision, ("fixed", "noted", "deny"))
+        self.assertLessEqual(len(matched), 80, matched)
+        self.assertIsNone(GL_HOSTILE.search(matched), repr(matched))
+
 
 class MdSweepLogTests(unittest.TestCase):
     """md_sweep (Stop) writes one guard.log line per run that blocks. A clean run writes none."""
@@ -2906,7 +3012,7 @@ class MdSweepLogTests(unittest.TestCase):
         with open(os.path.join(self.proj, name), "w", encoding="utf-8") as handle:
             handle.write(text)
 
-    def _sweep(self, cfg=None, extra=None):
+    def _sweep(self, cfg=None, extra=None, script=None):
         """Run md_sweep as a Stop hook. The last human message is 5 s old, so each file written
         here is newer than it and dirty in the work tree."""
         first = human("write the doc")
@@ -2917,7 +3023,7 @@ class MdSweepLogTests(unittest.TestCase):
         transcript = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": transcript, "cwd": self.proj,
                 "stop_hook_active": False, "session_id": GL_SESSION}
-        return run_gate(MD_SWEEP, hook, env=gl_env(cfg or self.cfg, extra))
+        return run_gate(script or MD_SWEEP, hook, env=gl_env(cfg or self.cfg, extra))
 
     def _rows(self, what):
         rows = gl_lines(self.cfg)
@@ -2982,6 +3088,20 @@ class MdSweepLogTests(unittest.TestCase):
         run = self._sweep(extra={"MD_SWEEP_DISABLE": "1"})
         self.assertEqual(run.stdout.strip(), "")
         self.assertIsNone(gl_lines(self.cfg))
+
+    # (2) import skew, on the sweep side: the new md_sweep beside an old _transcript.py that has no
+    # guard_logger. The sweep blocks as it does with logging, exits 0, and writes no line.
+    def test_07_old_transcript_without_guard_logger_keeps_the_sweep_output(self):
+        self._md("notes.md", self.ERROR_TEXT)
+        real = self._sweep()
+        self.assertEqual(json.loads(real.stdout).get("decision"), "block")  # precondition
+        lint_copy = gl_copy_tree(os.path.join(self.tmp.name, "skew"), old_transcript=True)
+        skew_cfg = os.path.join(self.tmp.name, "skew-cfg")
+        skewed = self._sweep(cfg=skew_cfg, script=os.path.join(lint_copy, "md_sweep.py"))
+        self.assertNotIn("Traceback", skewed.stderr)
+        self.assertEqual(skewed.returncode, 0, skewed.stderr)
+        self.assertEqual(skewed.stdout, real.stdout)
+        self.assertIsNone(gl_lines(skew_cfg), "an old _transcript wrote a line")
 
 
 if __name__ == "__main__":
