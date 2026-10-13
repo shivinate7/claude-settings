@@ -37,14 +37,20 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    a comment. Let a bot keep the pins current. Disable credential persistence on checkout. Run
    an audit tool in CI, and run it locally with the exact CI command and paths.
    If the installed tool's `--version` matches the CI pin, use it. If it does not, install a copy.
-8. **Batch green PRs.** Merge PRs that are green together through one integration branch. One CI
-   run then covers the combined code. "No conflicts" does not prove they work together. Green CI
-   does not prove that no line was lost either: run `lint/check_silent_undo.py` before the merge.
+8. **Batch lanes.** Batch the lane PRs that pass their local checks into one integration branch.
+   A lane joins only after review. Only the integration PR goes ready. Its CI run is the only run
+   for the batch, and it covers the combined code. "No conflicts" does not prove the lanes work
+   together. A green integration run does not prove that no line was lost either: run
+   `lint/check_silent_undo.py` before the merge. Each lane PR stays a draft until the integration
+   PR merges, then closes as replaced. A lone lane is its own integration PR.
+   A red integration run: read the failing job. Find the lane whose files it touches. Drop that
+   lane from the branch. Run CI again, once, and merge the rest. Fix the dropped lane in its own
+   lane. It joins the next batch after its fix. Never fix inside the integration branch.
    GitHub's merge queue needs an organization-owned repo, so a personal repo batches by hand or
    through the merge tool.
    Batch across sessions too. Before a PR runs CI, list the repo's open PRs. When another session's
-   PR will be ready at about the same time, offer one integration branch. A repo may name one
-   session to batch PRs and run each merge, on the owner's word.
+   lane passes its local checks at about the same time, offer one integration branch. A repo may
+   name one session to batch PRs and run each merge, on the owner's word.
 9. **Wait without loops.** Watch a run once, in the background, and keep its output. Never poll
    with a sleep loop. A repeated `gh run view` or `gh pr checks` without `--watch` is a poll. Use
    a one-shot wait: `gh pr checks <n> --watch` or `gh run watch <id>`, run once. (About 1,600
@@ -56,8 +62,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    it runs on a red gate. Gate on the command's own exit code. See `snippets.md`, section 10.
    (Incident 2026-10-12: three records pushed with STE errors.)
 11. **No CI on a draft.** Run the PR workflow on `opened`, `synchronize`, `reopened` and
-    `ready_for_review`, and skip each job while the PR is a draft. Work in a draft. Mark it ready
-    once. A draft cannot merge, so it needs no check yet. Read the protection rules first: see
+    `ready_for_review`. Skip every job while the PR is a draft, the required check included. Work
+    in a draft. Only the integration PR goes ready, once (step 8). A draft cannot merge, so it
+    needs no check yet. Read the protection rules first: see
     "Before you skip a required job". A fan-in job with `if: always()` needs its own draft guard.
     A workflow that also has `on: push` for all branches still runs on a draft branch.
     `gh pr create --draft` then `gh pr ready` fires two runs: keep the draft state in the
