@@ -12,6 +12,8 @@ case spawns a real `claude` subprocess; one case asserts it is never even called
 """
 import contextlib
 import importlib.util
+import inspect
+import io
 import json
 import os
 import shutil
@@ -1129,6 +1131,335 @@ def case_e1_model_output_is_read_as_utf8():
     check("e1: why holds no mojibake", "â€" not in why, repr(why))
 
 
+# --------------------------------------------------------------------------- the verdict parse
+# parse_verdict(text, shape) is the one home of the verdict parse. invoke_model calls it, and
+# so does the --model-text entry. The shape is the caller's accepted answer, as before.
+
+ALLOW_JSON = '{"verdict": "ALLOW"}'
+
+
+def _invoke_with(fake_run, *args, **kwargs):
+    real = dw.subprocess.run
+    dw.subprocess.run = fake_run
+    try:
+        return dw.invoke_model("P", *args, **kwargs)
+    finally:
+        dw.subprocess.run = real
+
+
+def _envelope(result_text):
+    def fake_run(argv, **kwargs):
+        return _FakeCompletedProcess(0, json.dumps({"result": result_text}), "")
+    return fake_run
+
+
+def _timeout_run(argv, **kwargs):
+    raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
+
+
+def case_invoke_model_signature_and_return_shape_pinned():
+    # Pin, green on main. reply_judge and question_outcome call invoke_model, so its signature
+    # and its (verdict | None, error | None) return must not move.
+    params = inspect.signature(dw.invoke_model).parameters
+    check("invoke_model signature: parameters are prompt, model, timeout, shape",
+          list(params) == ["prompt", "model", "timeout", "shape"], list(params))
+    check("invoke_model signature: model defaults to MODEL",
+          params["model"].default == dw.MODEL, params["model"].default)
+    check("invoke_model signature: timeout defaults to MODEL_TIMEOUT",
+          params["timeout"].default == dw.MODEL_TIMEOUT, params["timeout"].default)
+    check("invoke_model signature: shape defaults to VERDICT_SHAPE",
+          params["shape"].default is dw.VERDICT_SHAPE, params["shape"].default)
+    with scratch_config("invoke_signature"):
+        ok = _invoke_with(_envelope(ALLOW_JSON))
+        bad = _invoke_with(_timeout_run)
+    check("invoke_model return: success is (verdict, None)", ok == ({"verdict": "ALLOW"}, None), ok)
+    check("invoke_model return: failure is (None, error text)", bad[0] is None and bool(bad[1]), bad)
+
+
+def case_parse_verdict_default_shape():
+    # Red on main until parse_verdict exists. Default shape: ALLOW or FLAG, one JSON object.
+    pv = dw.parse_verdict
+    v, e = pv(ALLOW_JSON)
+    check("parse_verdict: ALLOW", v == {"verdict": "ALLOW"} and e is None, (v, e))
+    v, e = pv('Here you go: {"verdict": "FLAG", "why": "r"} thanks')
+    check("parse_verdict: FLAG with why, prose around it", v == {"verdict": "FLAG", "why": "r"} and e is None, (v, e))
+    for text, label in [("no json here", "no JSON"), ('{"verdict": "PERHAPS"}', "value outside ALLOW/FLAG"),
+                        ("{not json}", "unparseable JSON")]:
+        v, e = pv(text)
+        check("parse_verdict: %s gives no verdict and an error" % label, v is None and bool(e), (v, e))
+
+
+def case_parse_verdict_honours_a_custom_shape():
+    # reply_judge's shape: one key, ok true or false. A value outside it is an error, never a pass.
+    shape = {"ok": (True, False)}
+    v, e = dw.parse_verdict('{"ok": true}', shape)
+    check("parse_verdict shape: ok true (positional shape)", v == {"ok": True} and e is None, (v, e))
+    v, e = dw.parse_verdict('{"ok": false}', shape=shape)
+    check("parse_verdict shape: ok false (keyword shape)", v == {"ok": False} and e is None, (v, e))
+    v, e = dw.parse_verdict('{"ok": "maybe"}', shape)
+    check("parse_verdict shape: a value outside the shape is an error", v is None and bool(e), (v, e))
+    v, e = dw.parse_verdict(ALLOW_JSON, shape)
+    check("parse_verdict shape: the default key is refused under a custom shape", v is None and bool(e), (v, e))
+
+
+def case_parse_verdict_is_the_one_home():
+    # invoke_model reads its reply through parse_verdict: the same reply text gives the same answer.
+    shape = {"ok": (True, False)}
+    with scratch_config("one_home"):
+        for text in ['{"ok": true}', '{"verdict": "FLAG", "why": "r"}', "junk"]:
+            got = _invoke_with(_envelope(text), shape=shape)
+            want = dw.parse_verdict(text, shape)
+            check("parse_verdict is the one home: invoke_model matches it for %r" % text[:24],
+                  got == want, (got, want))
+
+
+def case_invoke_model_custom_shape_end_to_end():
+    # Pin, green on main. invoke_model with reply_judge's shape, through a fake subprocess.
+    shape = {"ok": (True, False)}
+    with scratch_config("custom_shape"):
+        got = _invoke_with(_envelope('{"ok": true}'), shape=shape)
+        refused = _invoke_with(_envelope(ALLOW_JSON), shape=shape)
+    check("invoke_model custom shape: ok true returns the verdict", got == ({"ok": True}, None), got)
+    check("invoke_model custom shape: the default key is an error", refused[0] is None and bool(refused[1]), refused)
+
+
+# --------------------------------------------------------------------------- the two-phase run
+# The mod runs this file twice on the same Stop JSON: --emit-prompt, then --model-text or
+# --model-error. These cases call main() in this process. A `claude` spawn is counted and
+# answered with ALLOW, never run; git and every other spawn are real. Each case has its own
+# scratch config, so the "already judged" cache never carries from one case to the next.
+
+BAD_ARGV = [
+    ["--emit-prompt", "x"], ["--model-text"], ["--model-error"], ["--model-text", "a", "b"],
+    ["--emit-prompt", "--model-text", "x"], ["--model-error", "a", "b"], ["--foo"],
+]
+
+
+def run_case(case):
+    """A missing seam is one FAIL line for its case, not a crash that hides the other cases."""
+    try:
+        case()
+    except Exception as exc:
+        check("%s: raised" % case.__name__, False, "%s: %s" % (type(exc).__name__, exc))
+
+
+def _judged_hook(name):
+    """A protected CLAUDE.md edit with no approval in chat, so run() reaches the model call."""
+    repo = make_repo(name)
+    write(os.path.join(repo, "CLAUDE.md"), "# Rules\n\nAlways X.\n")
+    commit_all(repo)
+    write(os.path.join(repo, "CLAUDE.md"), "# Rules\n\nAlways Y.\n")
+    records = [human_record("edit claude.md", T0), assistant_record(text="Done.")]
+    return {"transcript_path": write_transcript(repo, records), "cwd": repo, "session_id": "sess-" + name}
+
+
+def _main_in_process(hook, argv):
+    """Run main() here with argv and the hook on stdin. Return (stdout, claude_spawn_count)."""
+    out = io.StringIO()
+    spawns = []
+    real_run = dw.subprocess.run
+
+    def fake_run(argv_, *args, **kwargs):
+        if argv_ and argv_[0] == "claude":
+            spawns.append(argv_)
+            return _FakeCompletedProcess(0, json.dumps({"result": ALLOW_JSON}), "")
+        return real_run(argv_, *args, **kwargs)
+
+    saved_argv, saved_stdin = sys.argv, sys.stdin
+    sys.argv = ["decision_watch.py"] + list(argv)
+    sys.stdin = io.StringIO(json.dumps(hook))
+    dw.subprocess.run = fake_run
+    try:
+        with contextlib.redirect_stdout(out):
+            try:
+                dw.main()
+            except SystemExit:
+                pass
+    finally:
+        dw.subprocess.run = real_run
+        sys.argv, sys.stdin = saved_argv, saved_stdin
+    return out.getvalue().strip(), len(spawns)
+
+
+def _json_or_none(text):
+    try:
+        return json.loads(text)
+    except Exception:
+        return None
+
+
+def _system_message(text):
+    got = _json_or_none(text)
+    return got.get("systemMessage", "") if isinstance(got, dict) else ""
+
+
+def _run_script(hook, argv, cfg):
+    """Run decision_watch.py the way the mod spawns it: python -I, the Stop JSON on stdin, and a
+    PATH that holds git and no claude. A default-path model call fails fast there and never runs."""
+    git = shutil.which("git")
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=cfg, PATH=os.path.dirname(git) if git else "")
+    return subprocess.run(
+        [sys.executable, "-I", MODULE_PATH] + list(argv),
+        input=json.dumps(hook), capture_output=True, text=True, timeout=60, env=env,
+    )
+
+
+def case_argv_bad_combinations_fall_back_to_invoke_model():
+    # Red on main until _model_call_from_argv exists. Any argv that is not one well-formed flag
+    # falls back to the default model call, which is invoke_model.
+    pick = dw._model_call_from_argv
+    check("argv: no flags is invoke_model", pick([]) is dw.invoke_model)
+    for argv in BAD_ARGV:
+        check("argv %r falls back to invoke_model" % (argv,), pick(argv) is dw.invoke_model)
+
+
+def case_bad_flag_runs_the_default_model_call():
+    # Pin, green on main. A malformed flag run is the default path: one claude call, in-process.
+    for i, argv in enumerate((["--model-text"], ["--foo"])):
+        name = "argv_fallback_%d" % i
+        with scratch_config(name):
+            _, spawns = _main_in_process(_judged_hook(name), argv)
+        check("argv %r: the default path calls claude once" % (argv,), spawns == 1, spawns)
+
+
+def case_emit_prompt_prints_needs_model_and_calls_no_model():
+    # Red on main. --emit-prompt on a due model call prints {needs_model, prompt, model} and
+    # spawns no model. It writes no cache, so a second run still asks.
+    name = "emit_needs"
+    with scratch_config(name):
+        hook = _judged_hook(name)
+        out1, spawns1 = _main_in_process(hook, ["--emit-prompt"])
+        out2, _ = _main_in_process(hook, ["--emit-prompt"])
+        captured = []
+
+        def spy(prompt):
+            captured.append(prompt)
+            return None, "spy: not a verdict"
+
+        dw.run(hook, model_call=spy)
+    got = _json_or_none(out1)
+    check("emit-prompt: no model subprocess", spawns1 == 0, spawns1)
+    check("emit-prompt: prints exactly needs_model, prompt, model",
+          isinstance(got, dict) and set(got) == {"needs_model", "prompt", "model"}, out1[:200])
+    check("emit-prompt: needs_model is true", isinstance(got, dict) and got.get("needs_model") is True, out1[:200])
+    check("emit-prompt: model is MODEL", isinstance(got, dict) and got.get("model") == dw.MODEL, out1[:200])
+    check("emit-prompt: prompt names the protected file",
+          isinstance(got, dict) and "CLAUDE.md" in str(got.get("prompt")), out1[:200])
+    check("emit-prompt: the prompt is the one run() would send",
+          isinstance(got, dict) and bool(captured) and got.get("prompt") == captured[0], out1[:200])
+    again = _json_or_none(out2)
+    check("emit-prompt: a second run still asks for the model (phase 1 writes no cache)",
+          isinstance(again, dict) and again.get("needs_model") is True, out2[:200])
+
+
+def case_emit_prompt_is_silent_when_nothing_is_due():
+    # Pin, green on main. A clean turn prints nothing, and never a needs_model.
+    name = "emit_clean"
+    with scratch_config(name):
+        repo = make_repo(name)
+        write(os.path.join(repo, "src", "app.py"), "print('hello')\n")
+        commit_all(repo)
+        write(os.path.join(repo, "src", "app.py"), "print('hello world')\n")
+        path = write_transcript(repo, [human_record("say hello world instead", T0),
+                                       assistant_record(text="Updated src/app.py.")])
+        out, spawns = _main_in_process({"transcript_path": path, "cwd": repo, "session_id": "sess-" + name},
+                                       ["--emit-prompt"])
+    check("emit-prompt quiet: nothing printed", out == "", out[:200])
+    check("emit-prompt quiet: no model subprocess", spawns == 0, spawns)
+
+
+def case_emit_prompt_missing_transcript_never_asks_for_a_model():
+    # Pin, green on main. A missing transcript is UNKNOWN, and the cheap path never asks for a model.
+    name = "emit_missing"
+    with scratch_config(name):
+        hook = {"transcript_path": os.path.join(ROOT, "no-such-transcript.jsonl"), "cwd": ROOT,
+                "session_id": "sess-" + name}
+        out, spawns = _main_in_process(hook, ["--emit-prompt"])
+    check("emit-prompt missing transcript: no needs_model", "needs_model" not in out, out[:200])
+    check("emit-prompt missing transcript: reads as UNKNOWN",
+          _system_message(out).startswith(dw.UNKNOWN_PREFIX), out[:200])
+    check("emit-prompt missing transcript: no model subprocess", spawns == 0, spawns)
+
+
+def case_model_text_flag_prints_flag_and_calls_no_model():
+    # Red on main. --model-text with a FLAG prints the FLAG message and spawns no model.
+    name = "text_flag"
+    with scratch_config(name):
+        out, spawns = _main_in_process(_judged_hook(name),
+                                       ["--model-text", '{"verdict": "FLAG", "why": "reversed silently"}'])
+    msg = _system_message(out)
+    check("model-text FLAG: no model subprocess", spawns == 0, spawns)
+    check("model-text FLAG: prints the FLAG message", msg.startswith(dw.FLAG_PREFIX) and "reversed silently" in msg,
+          out[:200])
+
+
+def case_model_text_allow_is_silent_and_cached():
+    # Red on main. --model-text with an ALLOW prints nothing, spawns no model, and caches the
+    # verdict: the next --emit-prompt on this session is silent too.
+    name = "text_allow"
+    with scratch_config(name):
+        hook = _judged_hook(name)
+        out, spawns = _main_in_process(hook, ["--model-text", ALLOW_JSON])
+        again, spawns2 = _main_in_process(hook, ["--emit-prompt"])
+    check("model-text ALLOW: prints nothing", out == "", out[:200])
+    check("model-text ALLOW: no model subprocess", spawns == 0, spawns)
+    check("model-text ALLOW: the verdict is cached, so the next Stop asks nothing",
+          again == "" and spawns2 == 0, (again[:200], spawns2))
+
+
+def case_model_text_without_a_verdict_is_unknown_never_a_pass():
+    # Red on main. A reply with no verdict reads as UNKNOWN, never as silence.
+    for name, reply in [("text_unknown_prose", "The change looks fine to me."),
+                        ("text_unknown_shape", '{"ok": true}')]:
+        with scratch_config(name):
+            out, spawns = _main_in_process(_judged_hook(name), ["--model-text", reply])
+        check("model-text %s: reads as UNKNOWN" % name, _system_message(out).startswith(dw.UNKNOWN_PREFIX), out[:200])
+        check("model-text %s: no model subprocess" % name, spawns == 0, spawns)
+
+
+def case_model_error_is_unknown_cut_to_200_and_not_cached():
+    # Red on main. --model-error reads as UNKNOWN, keeps the first 200 characters of the error,
+    # and is not cached: a later reply still judges.
+    name = "model_error"
+    with scratch_config(name):
+        hook = _judged_hook(name)
+        out, spawns = _main_in_process(hook, ["--model-error", "Z" * 300])
+        later, _ = _main_in_process(hook, ["--model-text", '{"verdict": "FLAG", "why": "later"}'])
+    msg = _system_message(out)
+    check("model-error: reads as UNKNOWN", msg.startswith(dw.UNKNOWN_PREFIX), out[:200])
+    check("model-error: no model subprocess", spawns == 0, spawns)
+    check("model-error: message holds the first 200 characters", ("Z" * 200) in msg and ("Z" * 201) not in msg,
+          len(msg))
+    check("model-error: not cached, so a later reply still judges",
+          _system_message(later).startswith(dw.FLAG_PREFIX), later[:200])
+
+
+def case_emit_prompt_runs_with_dash_I_as_the_mod_spawns_it():
+    # Red on main. The mod spawns `python -I decision_watch.py --emit-prompt`. The file must
+    # import under -I and print needs_model.
+    name = "emit_dash_i"
+    with scratch_config(name) as cfg:
+        result = _run_script(_judged_hook(name), ["--emit-prompt"], cfg)
+    got = _json_or_none(result.stdout.strip())
+    check("-I emit-prompt: exit 0", result.returncode == 0, result.returncode)
+    check("-I emit-prompt: prints needs_model",
+          isinstance(got, dict) and got.get("needs_model") is True,
+          (result.stdout[:200], result.stderr[-200:]))
+
+
+def case_default_path_still_calls_claude_without_a_flag():
+    # Pin, green on main. With no flag the watch calls the model itself. With no claude on PATH
+    # that call fails, and the answer is UNKNOWN, never needs_model.
+    name = "default_subproc"
+    with scratch_config(name) as cfg:
+        result = _run_script(_judged_hook(name), [], cfg)
+    got = _json_or_none(result.stdout.strip()) or {}
+    check("default path: no needs_model without a flag", "needs_model" not in got, result.stdout[:200])
+    check("default path: a missing model reads as UNKNOWN",
+          _system_message(result.stdout).startswith(dw.UNKNOWN_PREFIX),
+          (result.stdout[:200], result.stderr[-200:]))
+
+
 def main():
     case_flag_unapproved()
     case_flag_deleted_protected_file()
@@ -1166,6 +1497,26 @@ def main():
     case_main_missing_transcript()
     case_main_stop_hook_active_stays_quiet()
     case_settings_timeout_covers_worst_case()
+
+    for case in (
+        case_invoke_model_signature_and_return_shape_pinned,
+        case_parse_verdict_default_shape,
+        case_parse_verdict_honours_a_custom_shape,
+        case_parse_verdict_is_the_one_home,
+        case_invoke_model_custom_shape_end_to_end,
+        case_argv_bad_combinations_fall_back_to_invoke_model,
+        case_bad_flag_runs_the_default_model_call,
+        case_emit_prompt_prints_needs_model_and_calls_no_model,
+        case_emit_prompt_is_silent_when_nothing_is_due,
+        case_emit_prompt_missing_transcript_never_asks_for_a_model,
+        case_model_text_flag_prints_flag_and_calls_no_model,
+        case_model_text_allow_is_silent_and_cached,
+        case_model_text_without_a_verdict_is_unknown_never_a_pass,
+        case_model_error_is_unknown_cut_to_200_and_not_cached,
+        case_emit_prompt_runs_with_dash_I_as_the_mod_spawns_it,
+        case_default_path_still_calls_claude_without_a_flag,
+    ):
+        run_case(case)
 
     if FAILED:
         print("test_decision_watch FAIL: %d failing check(s)" % len(FAILED))
