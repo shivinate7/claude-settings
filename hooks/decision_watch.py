@@ -741,13 +741,19 @@ def _judge_isolation():
     return root, env
 
 
-def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT):
+VERDICT_SHAPE = {"verdict": ("ALLOW", "FLAG")}
+
+
+def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE):
     """Run the judgment prompt through `claude -p`, isolated. Return (verdict_dict, error).
 
     `verdict_dict` is `{"verdict": "ALLOW"}` or `{"verdict": "FLAG", "why": "..."}` on
     success, and `error` is None. On any failure -- the binary missing, a timeout, a
     non-zero exit, or output that is not the JSON verdict asked for -- `verdict_dict` is
     None and `error` names why, for the caller to report as UNKNOWN rather than guess.
+
+    `shape` is the caller's accepted answer: one key and the values it may hold. The default
+    is this hook's own ALLOW/FLAG verdict. `hooks/reply_judge.py` passes `{"ok": (True, False)}`.
     """
     try:
         root, env = _judge_isolation()
@@ -792,8 +798,9 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT):
         verdict = json.loads(match.group(0))
     except Exception:
         return None, "model result's JSON verdict did not parse"
-    if verdict.get("verdict") not in ("ALLOW", "FLAG"):
-        return None, "model result named neither ALLOW nor FLAG"
+    (key, values), = shape.items()
+    if verdict.get(key) not in values:
+        return None, "model result named neither %s" % " nor ".join(map(str, values))
     return verdict, None
 
 

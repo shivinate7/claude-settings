@@ -461,7 +461,7 @@
     "output-start-with-point": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
+        "reason": "Judged by hooks/reply_judge.py, a Stop command hook that calls Haiku at xhigh, per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
       }
     },
     "output-tracking-turn-one-line": {
@@ -479,7 +479,7 @@
     "output-never-paste-passing-output": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
+        "reason": "Judged by hooks/reply_judge.py, a Stop command hook that calls Haiku at xhigh, per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
       }
     },
     "output-bring-decisions-as-question": {
@@ -570,7 +570,7 @@
     "style-cut-narration": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
+        "reason": "Judged by hooks/reply_judge.py, a Stop command hook that calls Haiku at xhigh, per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
       }
     },
     "style-simple-answer-short": {
