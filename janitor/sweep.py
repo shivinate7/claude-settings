@@ -2148,7 +2148,8 @@ def purge_tombstones(restore_log_path: str, confirm: bool, now_ms=None):
     "reason"}. With confirm, a "purge" decision also drops that repository's tombstone ref."""
     now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
     decisions = []
-    for entry in read_restore_log(restore_log_path):
+    entries = read_restore_log(restore_log_path)
+    for entry in entries:
         repo = entry.get("repo")
         branch = entry.get("branch")
         when = entry.get("time_ms")
@@ -2172,8 +2173,22 @@ def purge_tombstones(restore_log_path: str, confirm: bool, now_ms=None):
             # Drop it only while it still holds THIS entry's commit; the old-value argument
             # makes git refuse on a mismatch. A mismatch keeps the ref and is not an error.
             ref = TOMBSTONE_REF_PREFIX + branch
+            # One commit can have two log rows (a branch reaped twice at one tip). The ref stays
+            # while any unexpired row for the same repo, branch and commit still needs it.
+            if any(e.get("repo") == repo and e.get("branch") == branch
+                   and e.get("commit") == commit
+                   and isinstance(e.get("time_ms"), (int, float))
+                   and not isinstance(e.get("time_ms"), bool)
+                   and now_ms - e["time_ms"] < TOMBSTONE_TTL_MS for e in entries):
+                decision["reason"] += "; ref kept: an unexpired entry names the same commit"
+                continue
             held = guard._git(repo, "rev-parse", "-q", "--verify", ref)
-            if held is not None and (held.returncode != 0 or held.stdout.strip() != commit):
+            if held is None or held.returncode not in (0, 1):
+                # Exit 1 means the ref is gone. Any other failure is not an answer: keep the ref.
+                decision["error"] = "ref read failed: %s" % (
+                    held.stderr.strip() if held is not None else "git gave no answer")
+                continue
+            if held.returncode == 1 or held.stdout.strip() != commit:
                 if held.returncode == 0:
                     decision["reason"] += "; ref kept: it holds a younger restore point"
                 continue

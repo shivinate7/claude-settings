@@ -460,13 +460,28 @@ MUTATIONS = [
     ("purge: the ref is dropped by branch name, with no check that it holds the entry's commit",
      "sweep",
      '            held = guard._git(repo, "rev-parse", "-q", "--verify", ref)\n'
-     '            if held is not None and (held.returncode != 0 or held.stdout.strip() != commit):\n'
+     '            if held is None or held.returncode not in (0, 1):\n'
+     '                # Exit 1 means the ref is gone. Any other failure is not an answer: keep the ref.\n'
+     '                decision["error"] = "ref read failed: %s" % (\n'
+     '                    held.stderr.strip() if held is not None else "git gave no answer")\n'
+     '                continue\n'
+     '            if held.returncode == 1 or held.stdout.strip() != commit:\n'
      '                if held.returncode == 0:\n'
      '                    decision["reason"] += "; ref kept: it holds a younger restore point"\n'
      '                continue\n'
      '            dropped = guard._git(repo, "update-ref", "-d", ref, commit)',
      '            dropped = guard._git(repo, "update-ref", "-d", ref)',
      "test_an_expired_entry_keeps_the_ref_that_holds_the_younger_commit"),
+    ("purge: an unexpired entry for the same commit no longer keeps the ref",
+     "sweep",
+     '            if any(e.get("repo") == repo and e.get("branch") == branch\n',
+     '            if False and any(e.get("repo") == repo and e.get("branch") == branch\n',
+     "test_an_expired_entry_keeps_the_ref_while_an_unexpired_entry_names_its_commit"),
+    ("purge: a git failure reading the ref is read as a gone ref",
+     "sweep",
+     '            if held is None or held.returncode not in (0, 1):\n',
+     '            if held is None:\n',
+     "test_a_failed_ref_read_is_reported_and_keeps_the_ref"),
 
     # ---- --confirm (plan, "the refusals"). See the module docstring: MEASURED to survive. ----
     ("--confirm: reap branches for real with no --confirm on the line",
