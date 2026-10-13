@@ -613,7 +613,7 @@
     "style-question-states-problem": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
+        "reason": "Judged by the AskUserQuestion prompt hook (model claude-sonnet-5-5, in settings.json); it moves to a mechanism after the hook makes a real catch."
       }
     },
     "output-never-hand-off-doable-step": {
@@ -625,13 +625,31 @@
     "style-option-says-effect": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
+        "reason": "Judged by the AskUserQuestion prompt hook (model claude-sonnet-5-5, in settings.json); it moves to a mechanism after the hook makes a real catch."
       }
     },
     "style-question-inside-box": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
+        "reason": "No check can see the question box. A hook reads the call input, not what the user sees, so whether the text sat inside the box or before it is unseen."
+      }
+    },
+    "style-time-central-24h": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "A hook for this rule is built on branch local-time-line and is not yet on main. This entry moves to a gate when that branch merges."
+      }
+    },
+    "style-no-unmeasured-estimate": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No check can tell an estimate from a measured range, or know whether a sample count backs a duration. It is a content judgment on the reply."
+      }
+    },
+    "style-status-is-report": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Whether a question was a status question, and whether the reply took the report shape, is a content judgment. No check reads that."
       }
     },
     "roles-each-layer-proves-once": {
