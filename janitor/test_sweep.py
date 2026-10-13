@@ -2854,6 +2854,195 @@ class PurgeTests(unittest.TestCase):
         self.assertEqual(still_there.returncode, 0)
 
 
+class PurgeRefOwnershipTests(unittest.TestCase):
+    """The restore ref is keyed by branch name, so one name reaped twice shares one ref. The
+    purge must drop a ref only while it still holds the expired entry's own commit, and must
+    drop the expired log line. Each case has a ref half and a log half. The ref half pins what
+    the purge already does; the log half is the builder's work."""
+
+    DAY_MS = 86400000
+
+    def fresh_repo(self, tag):
+        repo = os.path.join(ROOT, "pown-" + tag)
+        make_repo(repo, {"f.txt": "x\n"})
+        return repo
+
+    def log_path(self, tag):
+        return os.path.join(ROOT, "pown-%s.jsonl" % tag)
+
+    def rev(self, repo, rev):
+        out = run_vcs(repo, "rev-parse", "-q", "--verify", rev)
+        return out.stdout.strip() if out.returncode == 0 else None
+
+    def ref(self, repo, branch):
+        return self.rev(repo, sweep.TOMBSTONE_REF_PREFIX + branch)
+
+    def younger_commit(self, repo, message):
+        made = run_vcs(repo, *IDENT, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", message)
+        self.assertEqual(made.returncode, 0, "fixture: commit-tree failed: %s" % made.stderr.strip())
+        return made.stdout.strip()
+
+    def reap(self, repo, branch, commit, log):
+        made = run_vcs(repo, "branch", branch, commit)
+        self.assertEqual(made.returncode, 0, "fixture: could not create branch %s" % branch)
+        decision = {}
+        sweep.reap_branch(repo, branch, decision, log)
+        self.assertNotIn("error", decision, "fixture: reap of %s failed" % branch)
+
+    def age_log(self, log, ages_days, now):
+        entries = sweep.read_restore_log(log)
+        self.assertEqual(len(entries), len(ages_days), "fixture: restore-log row count")
+        with open(log, "w", encoding="utf-8") as handle:
+            for entry, days in zip(entries, ages_days):
+                entry["time_ms"] = now - days * self.DAY_MS
+                handle.write(json.dumps(entry) + "\n")
+
+    def test_an_expired_entry_keeps_the_ref_that_holds_the_younger_commit(self):
+        repo = self.fresh_repo("twice-ref")
+        log = self.log_path("twice-ref")
+        now = int(time.time() * 1000)
+        old = self.rev(repo, "HEAD")
+        self.reap(repo, "lane-twice", old, log)
+        young = self.younger_commit(repo, "younger reap of the same name")
+        self.reap(repo, "lane-twice", young, log)
+        self.age_log(log, [91, 5], now)
+        self.assertEqual(self.ref(repo, "lane-twice"), young,
+                         "fixture: the second reap of one name must overwrite the ref")
+
+        decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertEqual(decisions[0]["action"], "purge")
+        self.assertEqual(decisions[1]["action"], "keep")
+        self.assertEqual(self.ref(repo, "lane-twice"), young,
+                         "the expired entry dropped the ref that holds the younger restore "
+                         "point: purge drops by branch name, not by commit")
+
+    def test_an_expired_entry_is_dropped_from_the_log_and_the_younger_line_stays(self):
+        repo = self.fresh_repo("twice-log")
+        log = self.log_path("twice-log")
+        now = int(time.time() * 1000)
+        self.reap(repo, "lane-twice-log", self.rev(repo, "HEAD"), log)
+        young = self.younger_commit(repo, "younger reap of the same name")
+        self.reap(repo, "lane-twice-log", young, log)
+        self.age_log(log, [91, 5], now)
+
+        sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertEqual([e["commit"] for e in sweep.read_restore_log(log)], [young],
+                         "the expired line must leave the log; the younger line must stay")
+
+    def test_a_lone_expired_entry_whose_ref_holds_its_commit_drops_the_ref(self):
+        repo = self.fresh_repo("lone-ref")
+        log = self.log_path("lone-ref")
+        now = int(time.time() * 1000)
+        self.reap(repo, "lane-lone", self.rev(repo, "HEAD"), log)
+        self.age_log(log, [91], now)
+
+        decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertEqual(decisions[0]["action"], "purge")
+        self.assertNotIn("error", decisions[0])
+        self.assertIsNone(self.ref(repo, "lane-lone"), "the ref must be dropped")
+
+    def test_a_lone_expired_entry_is_dropped_from_the_log(self):
+        repo = self.fresh_repo("lone-log")
+        log = self.log_path("lone-log")
+        now = int(time.time() * 1000)
+        self.reap(repo, "lane-lone-log", self.rev(repo, "HEAD"), log)
+        self.age_log(log, [91], now)
+
+        sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertEqual(sweep.read_restore_log(log), [],
+                         "the expired line must leave the log once its ref is dropped")
+
+    def test_an_expired_entry_whose_ref_was_deleted_by_hand_purges_without_error(self):
+        repo = self.fresh_repo("gone-ref")
+        log = self.log_path("gone-ref")
+        now = int(time.time() * 1000)
+        self.reap(repo, "lane-gone", self.rev(repo, "HEAD"), log)
+        self.age_log(log, [91], now)
+        gone = run_vcs(repo, "update-ref", "-d", sweep.TOMBSTONE_REF_PREFIX + "lane-gone")
+        self.assertEqual(gone.returncode, 0, "fixture: deleting the ref by hand failed")
+        self.assertIsNone(self.ref(repo, "lane-gone"))
+
+        decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertEqual(decisions[0]["action"], "purge")
+        self.assertNotIn("error", decisions[0],
+                         "a ref already gone must not read as a failed drop")
+
+    def test_an_expired_entry_whose_ref_was_deleted_by_hand_is_dropped_from_the_log(self):
+        repo = self.fresh_repo("gone-log")
+        log = self.log_path("gone-log")
+        now = int(time.time() * 1000)
+        self.reap(repo, "lane-gone-log", self.rev(repo, "HEAD"), log)
+        self.age_log(log, [91], now)
+        run_vcs(repo, "update-ref", "-d", sweep.TOMBSTONE_REF_PREFIX + "lane-gone-log")
+
+        sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertEqual(sweep.read_restore_log(log), [],
+                         "the expired line must leave the log even though its ref is gone")
+
+    def test_an_expired_entry_does_not_drop_a_ref_that_holds_another_commit(self):
+        """The ref holds a commit no log line records (a reap whose line was lost). It is not
+        this entry's restore point, so the purge must leave it alone."""
+        repo = self.fresh_repo("moved-ref")
+        log = self.log_path("moved-ref")
+        now = int(time.time() * 1000)
+        self.reap(repo, "lane-moved", self.rev(repo, "HEAD"), log)
+        self.age_log(log, [91], now)
+        other = self.younger_commit(repo, "a reap whose log line was lost")
+        moved = run_vcs(repo, "update-ref", sweep.TOMBSTONE_REF_PREFIX + "lane-moved", other)
+        self.assertEqual(moved.returncode, 0, "fixture: moving the ref failed")
+
+        sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertEqual(self.ref(repo, "lane-moved"), other,
+                         "the expired entry dropped a ref that holds another commit")
+
+    def test_an_expired_entry_whose_ref_moved_on_is_dropped_from_the_log(self):
+        repo = self.fresh_repo("moved-log")
+        log = self.log_path("moved-log")
+        now = int(time.time() * 1000)
+        self.reap(repo, "lane-moved-log", self.rev(repo, "HEAD"), log)
+        self.age_log(log, [91], now)
+        other = self.younger_commit(repo, "a reap whose log line was lost")
+        run_vcs(repo, "update-ref", sweep.TOMBSTONE_REF_PREFIX + "lane-moved-log", other)
+
+        sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertEqual(sweep.read_restore_log(log), [],
+                         "the expired line must leave the log while its ref stays")
+
+    def test_a_failed_ref_delete_keeps_the_ref_and_the_log_line(self):
+        repo = self.fresh_repo("failed-drop")
+        log = self.log_path("failed-drop")
+        now = int(time.time() * 1000)
+        commit = self.rev(repo, "HEAD")
+        self.reap(repo, "lane-failed", commit, log)
+        self.age_log(log, [91], now)
+        real = sys.modules["guard_core"]._git
+        failed = subprocess.CompletedProcess([], 1, "", "simulated failure")
+
+        def failing_delete(where, *args):
+            if args[:2] == ("update-ref", "-d"):
+                return failed
+            return real(where, *args)
+
+        sys.modules["guard_core"]._git = failing_delete
+        try:
+            decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+        finally:
+            sys.modules["guard_core"]._git = real
+
+        self.assertIn("error", decisions[0], "a failed drop must be reported")
+        self.assertEqual(self.ref(repo, "lane-failed"), commit, "a failed drop must keep the ref")
+        self.assertEqual([e["commit"] for e in sweep.read_restore_log(log)], [commit],
+                         "a failed drop must keep its log line: never log-without-ref")
+
+
 class AgentEndLogConcurrencyTests(unittest.TestCase):
     """janitor/agent_end_reap.py log(): parallel hook runs (one per finished agent) each append
     one row to the shared payload log. Every row must survive and every line must parse. The
