@@ -93,6 +93,15 @@ if os.environ.get("RJ_FAIL_REPLACE"):
     def _refused_replace(src, dst, *args, **kwargs):
         raise OSError("fake write failure: os.replace refused")
     os.replace = _refused_replace
+if os.environ.get("RJ_FAIL_REMOVE"):
+    # Fake read-only counter, in the hook process only: os.remove refuses a counter file, so a
+    # failed write cannot drop the file either. Every other remove goes to the real os.remove.
+    _real_remove = os.remove
+    def _refused_remove(path, *args, **kwargs):
+        if str(path).endswith(".count"):
+            raise PermissionError("fake remove failure: counter file is read-only")
+        return _real_remove(path, *args, **kwargs)
+    os.remove = _refused_remove
 '''
 
 
@@ -131,11 +140,12 @@ class Run:
 
 
 def run_hook(text, scenario="ok", answer="", stop_active=False, config=None, session=REPLY_SESSION,
-             fail_replace=False):
+             fail_replace=False, fail_remove=False):
     """One Stop, one new process. With no `config`, the config dir is fresh and empty, so the
     Stop is the session's first. A shared `config` carries the counter from Stop to Stop.
     `text` may be ABSENT: the payload then has no last_assistant_message key at all.
-    `fail_replace` makes every os.replace in the hook process raise (a fake write failure)."""
+    `fail_replace` makes every os.replace in the hook process raise (a fake write failure).
+    `fail_remove` makes os.remove raise on a counter file (a fake read-only counter)."""
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     os.makedirs(base, exist_ok=True)
@@ -149,6 +159,10 @@ def run_hook(text, scenario="ok", answer="", stop_active=False, config=None, ses
         env["RJ_FAIL_REPLACE"] = "1"
     else:
         env.pop("RJ_FAIL_REPLACE", None)
+    if fail_remove:
+        env["RJ_FAIL_REMOVE"] = "1"
+    else:
+        env.pop("RJ_FAIL_REMOVE", None)
     env.update(
         CLAUDE_CONFIG_DIR=config,
         PYTHONPATH=STUB_DIR,
@@ -609,6 +623,83 @@ def case_empty_stops_between_replies_do_not_shift_samples():
           judged == [1, 6, 11], judged)
 
 
+# --------------------------------------------------------------------------- cases 17-20
+# Freeze defect: after a good read, a failed write removes the counter file. If that remove also
+# fails (a read-only file on Windows), the old count stays on disk, so every later Stop reads it
+# and is skipped. Pin: when the write and the remove both fail, the Stop is judged, as a damaged
+# counter is (n = 1). Stops 1 to 3 with good writes leave the stored count at 3, so Stop 4 reads 3.
+
+FREEZE_SETUP_JUDGED = [1]  # Stop 1 is judged; Stops 2 and 3 are skipped by sampling
+
+
+def freeze_counter_at_three(config):
+    """Stops 1 to 3 with good writes. Afterwards the stored count is 3."""
+    judged = []
+    for n in range(1, 4):
+        run = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)
+        if run.calls:
+            judged.append(n)
+    check("freeze setup: Stops 1 to 3 judged on Stop 1 only", judged == FREEZE_SETUP_JUDGED, judged)
+
+
+def case_write_and_remove_both_fail_judges_the_stop():
+    config = sample_config("both-fail")
+    freeze_counter_at_three(config)
+    frozen = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA,
+                      fail_replace=True, fail_remove=True)  # Stop 4: reads 3, write and remove fail
+    check("both fail: Stop 4 exit 0, no traceback on stderr",
+          frozen.code == 0 and "Traceback" not in frozen.err, frozen.err)
+    check("both fail: Stop 4 prints nothing on stdout or stderr",
+          frozen.out.strip() == "" and frozen.err.strip() == "", (frozen.out, frozen.err))
+    check("both fail: Stop 4 is judged, as a damaged counter is (n = 1)",
+          len(frozen.calls) == 1, frozen.calls)
+
+
+def case_frozen_counter_judges_every_later_stop():
+    config = sample_config("frozen-six")
+    freeze_counter_at_three(config)
+    judged = []
+    bad = []
+    for n in range(4, 10):  # Stops 4 to 9 of one session: every write fails, every remove fails
+        run = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA,
+                       fail_replace=True, fail_remove=True)
+        if run.code != 0 or run.err.strip() != "":
+            bad.append(n)
+        if run.calls:
+            judged.append(n)
+    check("frozen six: exit 0 and no stderr on Stops 4 to 9", bad == [], bad)
+    check("frozen six: each of Stops 4 to 9 is judged, none skipped",
+          judged == list(range(4, 10)), judged)
+
+
+def case_write_fails_remove_ok_judges_the_next_stop():
+    config = sample_config("write-only-fails")
+    freeze_counter_at_three(config)
+    failed = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA,
+                      fail_replace=True)  # Stop 4: write fails, remove succeeds, counter dropped
+    check("write fails, remove ok: Stop 4 exit 0, no stderr",
+          failed.code == 0 and failed.err.strip() == "", failed.err)
+    nxt = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 5
+    check("write fails, remove ok: Stop 5 is judged once",
+          len(nxt.calls) == 1, nxt.calls)
+    check("write fails, remove ok: Stop 5 exit 0, no stderr",
+          nxt.code == 0 and nxt.err.strip() == "", nxt.err)
+
+
+def case_good_write_path_judges_stops_1_6_11():
+    config = sample_config("good-path")
+    judged = []
+    bad = []
+    for n in range(1, 12):  # no fault injected: the good write path must keep its sampling
+        run = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)
+        if run.code != 0 or run.err.strip() != "":
+            bad.append(n)
+        if run.calls:
+            judged.append(n)
+    check("good path: exit 0 and no stderr on Stops 1 to 11", bad == [], bad)
+    check("good path: judged on Stops 1, 6 and 11 only", judged == [1, 6, 11], judged)
+
+
 CASES = (
     case_stop_hook_active_never_calls_model,
     case_model_ok_is_silent,
@@ -629,6 +720,10 @@ CASES = (
     case_failed_write_does_not_freeze_the_count,
     case_empty_stop_writes_nothing_and_counts_nothing,
     case_empty_stops_between_replies_do_not_shift_samples,
+    case_write_and_remove_both_fail_judges_the_stop,
+    case_frozen_counter_judges_every_later_stop,
+    case_write_fails_remove_ok_judges_the_next_stop,
+    case_good_write_path_judges_stops_1_6_11,
 )
 
 
