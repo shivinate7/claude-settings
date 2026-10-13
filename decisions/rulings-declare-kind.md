@@ -49,10 +49,10 @@ still carries a Kind line, because the lint cannot tell the two apart.
   `actions/ruling-kind` runs the same lint on another repo's pull request, against its base.
   Adopt it with `uses: shivinate7/claude-settings/actions/ruling-kind@<full-sha>` after
   `actions/checkout` with `fetch-depth: 0`. It is red when the base cannot be read.
-- Write judge. The Edit and Write prompt judges in `settings.json` fire on any `decisions/`
-  path. They refuse a record whose written text has no `Kind: build` (with Plan lines) or
-  `Kind: process` (with a Home line). The check runs at write time, in any repo with these
-  settings. Only the Write judge sees a whole record.
+- Write judge. The Write prompt judge in `settings.json` fires on any `decisions/` path. It
+  refuses a record whose text has no `Kind: build` (with Plan lines) or `Kind: process` (with a
+  Home line). The Edit judge sees only the changed text, so its scope is narrower (see the
+  limits). Both run at write time, in any repo with these settings.
 
 ## Named limits
 
@@ -69,8 +69,10 @@ still carries a Kind line, because the lint cannot tell the two apart.
   It refuses an edit whose new text deletes a `Kind:`, `Plan:` or `Home:` line. It also
   refuses an edit that adds a ruling section with no `Kind:` line in the same text. Only the
   Write judge and the lint check a whole record. The lint runs in no other repo yet.
-- `actions/ruling-kind/check.sh` copies the `RULE_FILES` list of the lint. If the two drift,
-  the check fails red.
+- The Edit judge allowed an edit that deleted one of two `Plan:` lines (review round 3, two
+  runs). No other check catches it: the lint checks only the lines that are present.
+- `actions/ruling-kind/check.sh` copies the `RULE_FILES` list of the lint. No test compares the
+  two lists. They match today.
 - The action is not adopted anywhere yet. It has not run on a hosted runner (unmeasured).
 - The lint checks that a plan heading exists. It does not check that the plan lane does the work.
 
