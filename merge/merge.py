@@ -17,6 +17,9 @@ STAMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "actions"
 class Stop(Exception):
     """A refusal. The message is the whole report."""
 
+class NetStop(Stop):
+    """A `gh` call kept failing with a network error. Not a refusal: the caller must not revert a claim for it."""
+
 class Held(Stop):
     pass
 
@@ -79,6 +82,8 @@ def git(cwd, *a, input=None):
     return sh(["git", "-C", cwd, *a], input=input)
 
 SETTLE_SECONDS = 30
+NET_RETRIES, NET_PAUSE = 3, 5  # owner ruling 2026-10-13: retry a network error 3 times, a short pause between
+NET_ERROR = re.compile(r"TLS handshake timeout|i/o timeout|connection reset|\bEOF\b|HTTP 50[234]\b|\b50[234] (?:Bad Gateway|Service Unavailable|Gateway Time-?out)", re.I)
 
 def undo_check(wt, base_ref, unknown_ok=""):
     """The shared silent-undo lint (lint/check_silent_undo.py), run on the branch before anything is pushed.
@@ -285,6 +290,20 @@ class Host:
         self.cwd = cwd    # where `gh` runs, so it names the repo of that directory
         self.ignore = ignore or {}  # check name -> reason, from ignore_checks()
 
+    def gh(self, args, cwd=None):
+        """-> (code, output). The one home of every Host `gh` call. A network error is retried NET_RETRIES times with
+        `self.pause`; after that NetStop. Any other failure returns at once. `self.net_retries` counts the retries
+        of the last call. ponytail: no retry inside `shared_deadline` (the guard's hard hook budget has no room for a pause)."""
+        self.net_retries = 0
+        while True:
+            c, out = sh(["gh", *args], cwd=cwd)
+            if not (c and NET_ERROR.search(out)):
+                return c, out
+            if self.net_retries >= (NET_RETRIES if _READ_DEADLINE is None else 0):
+                raise NetStop(f"network error from `gh {' '.join(args[:2])}`, still failing after {self.net_retries} retries. Nothing was reverted. Run again.\n{out}")
+            self.net_retries += 1
+            self.pause(NET_PAUSE)
+
     def _repo_args(self):
         return ["-R", self.repo] if self.repo else []
 
@@ -294,7 +313,7 @@ class Host:
 
     def pr(self, n):
         """-> {head, branch, base, state, mergeable, merge_state}"""
-        c, out = sh(["gh", "pr", "view", *self._pr_args(n), "--json", "headRefOid,headRefName,baseRefName,state,mergeable,mergeStateStatus,isDraft"], cwd=self.cwd)
+        c, out = self.gh(["pr", "view", *self._pr_args(n), "--json", "headRefOid,headRefName,baseRefName,state,mergeable,mergeStateStatus,isDraft"], self.cwd)
         if c:
             raise Stop("gh pr view failed: " + out)
         d = json.loads(out)
@@ -307,7 +326,7 @@ class Host:
         if isinstance(self.required, list):
             names = self.required
         else:
-            c, out = sh(["gh", "api", f"repos/{{owner}}/{{repo}}/branches/{self.base}/protection/required_status_checks", "--jq", ".contexts"])
+            c, out = self.gh(["api", f"repos/{{owner}}/{{repo}}/branches/{self.base}/protection/required_status_checks", "--jq", ".contexts"])
             if c:
                 raise Stop(f"cannot read the required checks of {self.base} (no branch protection?). "
                            f"Set merge.requiredChecks to a list of check names.\n{out}")
@@ -322,7 +341,7 @@ class Host:
 
     def checks(self, n):
         """-> {check name: [(bucket, link), ...]} from `gh pr checks`, every entry kept. It exits non-zero on red or pending, so read the JSON, not the code."""
-        c, out = sh(["gh", "pr", "checks", *self._pr_args(n), "--json", "name,bucket,link"], cwd=self.cwd)
+        c, out = self.gh(["pr", "checks", *self._pr_args(n), "--json", "name,bucket,link"], self.cwd)
         try:
             rows = json.loads(out)
         except ValueError:
@@ -391,7 +410,7 @@ class Host:
 
     def runs(self, sha):
         """The workflow runs of `sha`, less the ignored ones."""
-        c, out = sh(["gh", "run", "list", *self._repo_args(), "--commit", sha, "--limit", "100", "--json", "status,conclusion,name"], cwd=self.cwd)
+        c, out = self.gh(["run", "list", *self._repo_args(), "--commit", sha, "--limit", "100", "--json", "status,conclusion,name"], self.cwd)
         try:
             runs = json.loads(out)
         except ValueError:
@@ -501,10 +520,13 @@ class Host:
     def merge(self, n, method, sha):
         """`gh pr merge --match-head-commit sha`. Never --admin, never --delete-branch (cut_branch does that).
         -> (merge commit oid or None, message)."""
-        c, out = sh(["gh", "pr", "merge", str(n), f"--{method}", "--match-head-commit", sha])
-        if c:
+        c, out = self.gh(["pr", "merge", str(n), f"--{method}", "--match-head-commit", sha])
+        if c and not (self.net_retries and "already merged" in out.lower()):  # a retry that answers "already merged": the lost reply had landed
             return None, out
-        c, out = sh(["gh", "pr", "view", str(n), "--json", "state,mergeCommit"])
+        try:
+            c, out = self.gh(["pr", "view", str(n), "--json", "state,mergeCommit"])
+        except NetStop as e:
+            raise NetStop(f"the merge of #{n} landed, but its merge commit cannot be read: {e}")
         try:
             d = json.loads(out)
             if d["state"] == "MERGED" and d["mergeCommit"]:
@@ -835,6 +857,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 # check first, then claim: a claim push cancels the head's own run and would hide a red already there
                 try:
                     ok, why = host.wait_checks(n, info["head"], m["deadlineMinutes"])
+                except NetStop:
+                    raise
                 except Stop as e:
                     ok, why = False, str(e)
                 if not ok:
@@ -862,6 +886,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         try:  # after the push only a Stop may leave: any other error reverts the claim first
             try:
                 ok, why = host.wait_checks(n, sha, m["deadlineMinutes"], info["head"] if claim_sha else None)
+            except NetStop:  # a network error is not a refusal: the claim stays
+                raise
             except Stop as e:  # a read that fails in the wait still reverts the claim
                 ok, why = False, str(e)
             if not ok:
