@@ -4,9 +4,9 @@
 Spec: decisions/question-outcome-check.md. Rule: style-question-restates-goal.
 
 Per question with two or more options (a clarifying question passes first):
-- No `You want:` line: deny, no model call.
+- No `Goal:` line: deny, no model call.
 - Else one model call (decision_watch.invoke_model, the one model caller) judges whether the
-  `You want:` line matches the owner's last messages, whether each option serves that goal,
+  `Goal:` line matches the owner's last messages, whether each option serves that goal,
   and whether a better option is missing. FLAG denies, and the reason goes to the session.
 - After a deny, the next AskUserQuestion in the session passes with no model call and clears
   the state, so no deny can loop. When the state cannot be written, nothing is denied.
@@ -39,15 +39,42 @@ MESSAGE_MAX = 1500
 STATE_MAX_AGE = 30 * 60  # seconds; an older deny state is ignored
 TAIL_BYTES = 2 * 1024 * 1024
 MACHINE_TAGS = ("<system-reminder>", "<task-notification>")
-YOU_WANT = re.compile(r"^[ 	]*You want:[ 	]*\S", re.MULTILINE)
+GOAL_LINE = re.compile(r"^[ 	]*Goal:[ 	]*\S", re.MULTILINE)
+
+STYLE_FILE = os.path.join(HERE, "..", "output-styles", "shiv-stylisms.md")
+STYLE_RULES = ("style-question-states-problem", "style-question-restates-goal")
 
 PROMPT = (
     "You check a question an assistant is about to put to its owner. The owner's goal, read "
-    "from their last messages, is below. Check three things: (1) does the `You want:` line "
+    "from their last messages, is below. The standard question format is: a `Problem:` sentence, "
+    "a `Goal:` line, then the options. Check three things: (1) does the `Goal:` line "
     "match that goal; (2) does each option serve it; (3) is an option that serves it better "
-    "missing. Be conservative: FLAG only a clear miss. Reply with one JSON object only: "
+    "missing. A goal line is a paraphrase of the goal in plain words; a paraphrase is not grounds "
+    "to deny or flag. Be conservative: FLAG only a clear miss. Reply with one JSON object only: "
     '{"verdict": "ALLOW"} or {"verdict": "FLAG", "why": "<one line: what misses, and the fix>"}.'
 )
+
+
+def _style_rules():
+    """The two question-rule bullets of the style file, marker removed, whitespace collapsed,
+    one per line. "" when the file cannot be read: the check goes on without them."""
+    try:
+        with open(STYLE_FILE, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except Exception:
+        return ""
+    out = []
+    for rule in STYLE_RULES:
+        marker = "<!-- rule:%s -->" % rule
+        for i, line in enumerate(lines):
+            if line.rstrip().endswith(marker):
+                start = i
+                while start > 0 and not lines[start].startswith("- "):
+                    start -= 1
+                body = "\n".join(lines[start:i + 1]).replace(marker, "")
+                out.append(" ".join(body[2:].split()))
+                break
+    return "\n".join("- " + r for r in out)
 
 
 def _asked_ids(records):
@@ -188,11 +215,11 @@ def main():
         sys.exit(0)  # the retry after a deny passes, whatever its text
     todo = [(str(q.get("question", "")), _options(q)) for q in questions]
     todo = [(t, ls) for t, ls in todo if len(ls) >= 2]
-    missing = [t for t, _ in todo if not YOU_WANT.search(t)]
+    missing = [t for t, _ in todo if not GOAL_LINE.search(t)]
     if missing:
         if not _mark_denied(state):
             _did_not_run("the state could not be written, so no deny was sent.")
-        _deny("%s: open the question with one line `You want: <the goal, in the owner's "
+        _deny("%s: open the question with one line `Goal: <the goal, in the owner's "
               "terms>`. Missing on: %s" % (RULE, safe_finding_text("; ".join(t[:80] for t in missing))))
     if not todo:
         sys.exit(0)
@@ -204,7 +231,9 @@ def main():
     if not owner:
         _did_not_run("no owner messages readable.")
     body = "\n\n".join("Question: %s\nOptions: %s" % (t, " | ".join(ls)) for t, ls in todo)
-    prompt = "%s\n\nOwner's last messages:\n%s\n\n%s" % (PROMPT, "\n---\n".join(owner), body)
+    rules = _style_rules()
+    rules = "Question rules, from the style file:\n%s\n\n" % rules if rules else ""
+    prompt = "%s\n\n%sOwner's last messages:\n%s\n\n%s" % (PROMPT, rules, "\n---\n".join(owner), body)
     verdict, _err = invoke_model(prompt, timeout=MODEL_TIMEOUT)  # _err can hold the prompt: never printed
     if not isinstance(verdict, dict):
         _did_not_run("the model call failed.")
