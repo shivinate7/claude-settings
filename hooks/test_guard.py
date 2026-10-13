@@ -4618,6 +4618,33 @@ for _cmd in (
     sh("audit-high env: a real path after a pattern or a value flag is refused, " + _cmd[:24],
        _cmd, "deny", "env-file", cwd=NOGIT)
 
+# ---- audit-high (owner ruling 1, guard-audit-high): a file-reading flag reads the file it names,
+# so that file is judged as a path. The flag may stand alone, carry its value attached, sit inside a
+# cluster of short flags, or be written `--long=value`. `-e` and `--regexp=` name a pattern, but the
+# operand after them is still a file. Each shape is red on 8e69e42. Controls: `grep '.*' file` and
+# `grep -e '--env-file=.*' f` stay allowed in the block above.
+for _cmd in (
+    "grep -f " + ENV + " x",
+    "grep -f" + ENV + " x",
+    "grep -nf " + ENV + " x",
+    "grep -rf " + ENV + " .",
+    "grep -ex " + ENV,
+    "grep --regexp=x " + ENV,
+    "sed -f" + ENV + " x",
+    "awk -f" + ENV + " x",
+):
+    sh("audit-high env: a file-reading flag reads its file, " + _cmd[:24], _cmd, "deny", "env-file",
+       cwd=NOGIT)
+# ---- audit-high regression (13cebec refused these, 8e69e42 allows them): a sed or awk program
+# flag, or a file operand after a long option, reads the file.
+for _cmd in (
+    "sed --expression=p " + ENV,
+    "sed -nf " + ENV + " x",
+    "awk --source='{print}' " + ENV,
+):
+    sh("audit-high env regression: a program flag still reads its file, " + _cmd[:24], _cmd,
+       "deny", "env-file", cwd=NOGIT)
+
 
 # =========================================================================== 5. merge into main
 FAMILY = "merge"
@@ -6001,6 +6028,19 @@ for _tool in ("Edit", "Write"):
         rule=TA, tool=_tool, file_path=os.path.join(GITMAIN, "src", "app.py"), **A)
 add("audit-high paths: record-writer Write of a temp file in no repo is still refused", "deny",
     rule=RW_RULE, carries=("Markdown", "Report"), tool="Write", file_path=OUTSIDE_TEMP, **RW)
+# The ruling covers ITS OWN session scratchpad. Another session's scratchpad outside every
+# repository is refused too: the outside-repo allowance above does not reach it. Red on 8e69e42.
+OTHER_SCRATCH_OUT = os.path.join(ROOT, SCRATCH_OTHER, "scratchpad", "notes", "out.txt")
+for _tool in ("Edit", "Write"):
+    add("audit-high paths: test-author %s of another session's scratchpad outside a repo is refused"
+        % _tool, "deny", rule=TA, tool=_tool, file_path=OTHER_SCRATCH_OUT, session=SCRATCH_SID, **A)
+# A git clone under the test-author's own scratchpad (PRIVREPO sits under FAKE_SESSION's
+# scratchpad): a write to a file in that clone stays allowed, with the clone as the cwd. Pinned,
+# green on 8e69e42.
+for _tool in ("Edit", "Write"):
+    add("audit-high paths: test-author %s of a file in a clone under its own scratchpad is allowed"
+        % _tool, "allow", tool=_tool, file_path=os.path.join(PRIVREPO, "f.txt"),
+        session=FAKE_SESSION, **dict(A, cwd=PRIVREPO))
 
 # ---- every path field a write call carries is judged (PR #304 review). The guard picks ONE target,
 # the first non-empty of file_path, path, notebook_path, so a harmless decoy in file_path hid a real
