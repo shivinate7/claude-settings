@@ -56,7 +56,7 @@ def count_this_stop(decision_watch, session_id):
     """Return this Stop's number n in its session and store it. Never raises. A counter that is
     missing, corrupt, unreadable or unkeyed reads as none, so this Stop is n = 1 and is judged;
     after a good read, a failed write removes the counter file, so the next Stop is judged; if
-    the remove also fails, the count stays frozen (the ponytail limit below)."""
+    the remove also fails, this Stop is judged (n = 1) and the stored count is left as it was."""
     path = None
     n = 1
     try:
@@ -82,7 +82,7 @@ def count_this_stop(decision_watch, session_id):
         try:
             os.remove(path)
         except Exception:
-            pass  # ponytail: if the remove fails too, the count stays frozen; nothing else to try
+            n = 1  # ponytail: write and remove both failed; judge this Stop, so no freeze
     return n
 
 
