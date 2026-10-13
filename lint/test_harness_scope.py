@@ -6,12 +6,17 @@ with EVENT, BASE_SHA and BEFORE_SHA set, and reads the name=value lines it wrote
 HARNESS_SCOPE overrides the script path (for a successor). Needs bash on PATH.
 
 Output names pinned (the `scope` job re-exports them as job outputs):
-  JOB_FLAGS  one per gate job except the lint job `gates`: gates_windows, gates_windows_merge,
-             gates_windows_rest, gates_macos, shell_macos, pointer_windows
-  STEP_FLAGS code, guard, sweep (the suite flags the steps inside a job read)
+  JOB_FLAGS       one per gate job except the lint job `gates`: gates_windows, gates_windows_merge,
+                  gates_windows_rest, gates_macos, shell_macos, pointer_windows
+  STEP_FLAGS      code, guard, sweep (the suite flags the steps inside a job read)
+  guard_families  the families the guard suite runs. "" when no guard path changed, "all" when any
+                  changed path cannot be mapped, else a sorted, comma-joined list of names from
+                  FAMILIES in hooks/test_guard.py, with no spaces. Only a case line of
+                  hooks/test_guard.py maps to a family. Everything else maps to "all".
 
 Run with:  python3 lint/test_harness_scope.py -v
 """
+import ast
 import os
 import shutil
 import subprocess
@@ -20,9 +25,12 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.environ.get("HARNESS_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "harness-scope.sh")
+GUARD_SUITE = os.path.join(HERE, "..", "hooks", "test_guard.py")
+GUARD_PATH = "hooks/test_guard.py"
 JOB_FLAGS = ["gates_windows", "gates_windows_merge", "gates_windows_rest", "gates_macos", "shell_macos", "pointer_windows"]
 STEP_FLAGS = ["code", "guard", "sweep"]
 ALL = JOB_FLAGS + STEP_FLAGS
+GF = "guard_families"
 BASH = shutil.which("bash")
 
 
@@ -30,28 +38,35 @@ def git(cwd, *a):
     return subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
-def run(paths, event="pull_request", base="auto", before="auto", existing=(), landed=None):
-    """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit."""
+def landed_text(landed=None):
+    """The base's landed-dirs.txt: the repo's own, or `landed` (a list of dir names) in its place."""
+    if landed is None:
+        with open(os.path.join(HERE, "..", "landed-dirs.txt")) as f:
+            return f.read()
+    return chr(10).join(landed) + chr(10)
+
+
+def write_all(d, files):
+    for p, text in files.items():
+        full = os.path.join(d, p)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "w") as f:
+            f.write(text)
+
+
+def scope(base_files, head_files, event="pull_request", base="auto", before="auto"):
+    """-> {name: value} the script wrote. The base commit holds base_files (path -> text). The head
+    commit writes head_files (path -> text) on top of it."""
     with tempfile.TemporaryDirectory() as d:
         git(d, "init", "-q")
         git(d, "config", "user.email", "t@t")
         git(d, "config", "user.name", "t")
         git(d, "config", "commit.gpgsign", "false")
-        open(os.path.join(d, "seed.txt"), "w").write("seed\n")
-        # The base holds landed-dirs.txt: the repo's own, or `landed` (a list of dir names) in its place.
-        with open(os.path.join(HERE, "..", "landed-dirs.txt")) as f:
-            real = f.read()
-        open(os.path.join(d, "landed-dirs.txt"), "w").write(real if landed is None else chr(10).join(landed) + chr(10))
-        for p in existing:  # in the base commit, so the head commit modifies them
-            os.makedirs(os.path.dirname(os.path.join(d, p)), exist_ok=True)
-            open(os.path.join(d, p), "w").write("old\n")
+        write_all(d, base_files)
         git(d, "add", "-A")
         git(d, "commit", "-qm", "base")
         sha = git(d, "rev-parse", "HEAD")
-        for p in paths:
-            full = os.path.join(d, p)
-            os.makedirs(os.path.dirname(full), exist_ok=True)
-            open(full, "w").write("changed\n")
+        write_all(d, head_files)
         git(d, "add", "-A")
         git(d, "commit", "-qm", "head", "--allow-empty")
         out = os.path.join(d, "..", f"out-{os.getpid()}.txt")
@@ -59,9 +74,91 @@ def run(paths, event="pull_request", base="auto", before="auto", existing=(), la
                    BASE_SHA=sha if base == "auto" else base, BEFORE_SHA=sha if before == "auto" else before)
         r = subprocess.run([BASH, os.path.abspath(SCRIPT)], cwd=d, env=env, capture_output=True, text=True)
         assert r.returncode == 0, r.stdout + r.stderr
-        lines = open(out).read().split()
+        with open(out) as f:
+            lines = f.read().split()
         os.remove(out)
         return dict(l.split("=", 1) for l in lines)
+
+
+def run(paths, event="pull_request", base="auto", before="auto", existing=(), landed=None):
+    """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit."""
+    base_files = {"seed.txt": "seed\n", "landed-dirs.txt": landed_text(landed)}
+    base_files.update({p: "old\n" for p in existing})  # in the base commit, so the head commit modifies them
+    return scope(base_files, {p: "changed\n" for p in paths}, event, base, before)
+
+
+def known_families():
+    """The names in FAMILIES of hooks/test_guard.py, read with the language's own parser."""
+    with open(GUARD_SUITE, encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "FAMILIES" for t in node.targets):
+            return set(ast.literal_eval(node.value))
+    raise AssertionError("no FAMILIES in hooks/test_guard.py")
+
+
+# A synthetic guard suite: four sections, a docstring that holds a FAMILY line, a comment opener and
+# a lone quote inside case strings, an rm-var case, a LOG_CHECKS table, and a helper def.
+SYNTH_GUARD = r'''FAMILIES = {
+    "pointer": "the pointer",
+    "kill": "machine-wide kills",
+    "rm-var": "every case named rm-var",
+    "misc": "anything outside a tagged section",
+}
+FAMILY = "misc"
+
+
+def helper():
+    return 1
+
+
+FAMILY = "pointer"
+sh("pointer: first case", "git status", "allow")
+sh("pointer: a hash # inside a string", "echo # FAMILY = \"kill\"", "allow")
+sh("pointer: a lone quote in text", "echo Don't", "allow")
+DOC = """
+FAMILY = "frozen"
+"""
+sh("pointer: after the docstring", "git status", "allow")
+
+FAMILY = "kill"
+sh("kill: a case", "kill -9 1", "deny")
+sh("rm-var: a loop", "rm -rf $S/x", "deny")
+
+LOG_CHECKS = (
+    ("log: one", "pointer"),
+)
+'''
+
+# (old, new) edits to SYNTH_GUARD. Each `old` must occur once.
+E_CASE = (r'''sh("pointer: first case", "git status", "allow")''', r'''sh("pointer: first case", "git status -s", "allow")''')
+E_HASH = (r'''"echo # FAMILY = \"kill\"", "allow")''', r'''"echo # FAMILY = \"kill\"", "deny")''')
+E_LONE = (r'''"echo Don't", "allow")''', r'''"echo Don't now", "allow")''')
+E_AFTER = (r'''sh("pointer: after the docstring", "git status", "allow")''', r'''sh("pointer: after the docstring", "git status -s", "allow")''')
+E_KILL = (r'''sh("kill: a case", "kill -9 1", "deny")''', r'''sh("kill: a case", "kill -9 2", "deny")''')
+E_RMVAR = (r'''sh("rm-var: a loop", "rm -rf $S/x", "deny")''', r'''sh("rm-var: a loop", "rm -rf $S/y", "deny")''')
+E_DEF = ("    return 1", "    return 2")
+E_FAMILY_LINE = ('FAMILY = "kill"', 'FAMILY = "misc"')
+E_LOGS = ('("log: one", "pointer"),', '("log: one", "kill"),')
+E_TABLE = ('"pointer": "the pointer",', '"pointer": "the pointer family",')
+
+GUARD_PATHS = ["hooks/guard.py", "hooks/test_guard.py", "lint/check_record_slugs.py", "CLAUDE.md",
+               "settings.json", "merge/merge.py"]
+NO_GUARD_PATHS = ["README.md", "bin/verdict", "merge/launch.py"]
+
+
+def synth(edits=(), landed=None, extra_head=None, event="pull_request"):
+    """-> the outputs when the head edits the synthetic guard suite (and writes extra_head)."""
+    head = SYNTH_GUARD
+    for old, new in edits:
+        assert head.count(old) == 1, old
+        head = head.replace(old, new)
+    base_files = {"seed.txt": "seed\n", "landed-dirs.txt": landed_text(landed),
+                  "hooks/guard.py": "old\n", GUARD_PATH: SYNTH_GUARD}
+    head_files = {GUARD_PATH: head, **(extra_head or {})}
+    got = scope(base_files, head_files, event)
+    assert GF in got, f"output {GF} missing: {got}"  # a failure, not a KeyError, on a tree without the output
+    return got
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")
@@ -166,6 +263,107 @@ class Scope(unittest.TestCase):
     def test_a_docs_only_path_keeps_the_guard_flag_off(self):
         for p in ("README.md", "decisions/some-record.md"):
             self.assertFlags(run([p]), want_false=["guard"])
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class GuardFamilies(unittest.TestCase):
+    """The guard_families output: which families of hooks/test_guard.py the guard job runs."""
+
+    def scope_of(self, paths, **kw):
+        got = run(paths, **kw)
+        self.assertIn(GF, got, f"output {GF} missing: {got}")
+        return got
+
+    def test_guard_families_is_written_on_every_run(self):
+        self.scope_of(["README.md"])
+
+    def test_no_guard_path_gives_guard_off_and_no_families(self):
+        for p in NO_GUARD_PATHS:
+            with self.subTest(path=p):
+                got = self.scope_of([p], existing=[p])
+                self.assertEqual(got["guard"], "false", got)
+                self.assertEqual(got[GF], "", got)
+
+    def test_guard_flag_and_families_never_disagree(self):
+        for p in GUARD_PATHS + NO_GUARD_PATHS:
+            with self.subTest(path=p):
+                got = self.scope_of([p], existing=[p])
+                self.assertEqual(got["guard"] == "true", got[GF] != "", got)
+
+    def test_values_are_all_or_sorted_known_family_names(self):
+        known = known_families()
+        for p in GUARD_PATHS:
+            with self.subTest(path=p):
+                value = self.scope_of([p], existing=[p])[GF]
+                if value == "all":
+                    continue
+                names = value.split(",")
+                self.assertTrue(names == sorted(set(names)) and set(names) <= known, value)
+
+    def test_guard_readers_outside_the_case_lines_give_all(self):
+        for p in ("hooks/guard.py", "hooks/mutate_guard.py", "hooks/mutate_shared.py",
+                  "hooks/test_mutate_shared.py", GUARD_PATH, "hooks/decision_watch.py",
+                  "lint/check_record_slugs.py", "merge/merge.py", "settings.json", "CLAUDE.md",
+                  "landed-dirs.txt", "install.sh", "hooks/session_start.sh", "bin/claude-janitor"):
+            with self.subTest(path=p):
+                got = self.scope_of([p], existing=[p])
+                self.assertEqual(got["guard"], "true", got)
+                self.assertEqual(got[GF], "all", got)
+
+    def test_a_new_file_in_a_landed_dir_gives_all(self):
+        self.assertEqual(self.scope_of(["lint/zz_new.py"])[GF], "all")
+
+    def test_push_schedule_dispatch_and_an_empty_diff_give_all(self):
+        for ev in ("push", "schedule", "workflow_dispatch"):
+            with self.subTest(event=ev):
+                self.assertEqual(self.scope_of(["README.md"], event=ev)[GF], "all")
+        with self.subTest(event="push", path="case line"):
+            self.assertEqual(synth([E_CASE], event="push")[GF], "all")
+        with self.subTest(event="pull_request", path="empty diff"):
+            self.assertEqual(self.scope_of([])[GF], "all")
+
+    def test_an_unreadable_diff_gives_all(self):
+        for base in ("f" * 40, ""):
+            with self.subTest(base=base):
+                self.assertEqual(self.scope_of(["README.md"], base=base)[GF], "all")
+
+    def test_an_empty_landed_list_gives_all_even_for_a_case_line(self):
+        self.assertEqual(synth([E_CASE], landed=[])[GF], "all")
+
+    # The case-line map. A line of a case (sh/add call or its tuple table) maps to the family of the
+    # nearest FAMILY assignment above it in the file. The scanner must read Python source, not text.
+    def test_a_case_line_maps_to_its_section_family(self):
+        self.assertEqual(synth([E_CASE])[GF], "pointer")
+
+    def test_a_comment_opener_inside_a_string_does_not_move_the_family(self):
+        self.assertEqual(synth([E_HASH])[GF], "pointer")
+
+    def test_a_lone_quote_in_text_does_not_move_the_family(self):
+        self.assertEqual(synth([E_LONE])[GF], "pointer")
+
+    def test_a_family_line_inside_a_docstring_does_not_switch_the_family(self):
+        self.assertEqual(synth([E_AFTER])[GF], "pointer")
+
+    def test_a_kill_case_line_maps_to_kill(self):
+        self.assertEqual(synth([E_KILL])[GF], "kill")
+
+    def test_an_rm_var_named_line_adds_rm_var(self):
+        self.assertEqual(synth([E_RMVAR])[GF], "kill,rm-var")
+
+    def test_two_sections_name_both_families(self):
+        self.assertEqual(synth([E_CASE, E_KILL])[GF], "kill,pointer")
+
+    def test_harness_edits_give_all(self):
+        for name, edit in (("def body", E_DEF), ("FAMILY line", E_FAMILY_LINE),
+                           ("LOG_CHECKS table", E_LOGS), ("FAMILIES table", E_TABLE)):
+            with self.subTest(edit=name):
+                self.assertEqual(synth([edit])[GF], "all")
+
+    def test_a_case_line_with_a_guard_py_change_gives_all(self):
+        self.assertEqual(synth([E_CASE], extra_head={"hooks/guard.py": "changed\n"})[GF], "all")
+
+    def test_a_docs_change_beside_a_case_line_adds_no_family(self):
+        self.assertEqual(synth([E_CASE], extra_head={"README.md": "changed\n"})[GF], "pointer")
 
 
 if __name__ == "__main__":
