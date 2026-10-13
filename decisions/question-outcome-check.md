@@ -13,10 +13,12 @@ Owner ruling, 2026-10-13: the standard question format is a `Problem:` sentence,
 the `Goal:` line, then the options. The check reads the two rule lines for that format
 from its home, `output-styles/shiv-stylisms.md` (rules `style-question-states-problem`
 and `style-question-restates-goal`), at run time, and puts them in its model prompt.
-So it raises no false alarm on a question that follows the style file. A missing
-`Problem:` line is not a deny. A `Goal:` line is a plain-words paraphrase of the goal,
-and a paraphrase is no reason to deny. Incident, 2026-10-13 12:09: the check refused a
-correct question because its goal line was not in the owner's exact words.
+So it raises no false alarm on a question that follows the style file. A question with
+no `Problem:` line is denied by the presence check, with no model call, and the reason
+names `Problem:` (owner ruling, 2026-10-13 14:12 CDT, "Block it too"). A `Goal:` line is
+a plain-words paraphrase of the goal, and a paraphrase is no reason to deny. Incident,
+2026-10-13 12:09: the check refused a correct question because its goal line was not in
+the owner's exact words.
 
 Owner rulings, 2026-10-08:
 - Each question opens with one line, `Goal: <the goal>`, in the owner's terms. The
@@ -50,8 +52,10 @@ Owner rulings, 2026-10-08:
 ## Bounds
 
 - A clarifying question, with no options or one option, passes first.
-- Any other question with no `Goal:` line, or an empty one, is denied with no model
-  call.
+- Any other question with no `Goal:` line, no `Problem:` line, or an empty one, is denied
+  with no model call. The reason names each missing label.
+- Only the question text counts. A `Problem:` or `Goal:` line in an option (its label,
+  preview or description) does not count.
 - The hook reads only the owner's own messages from the last 2 MiB of the transcript.
   The owner's words are user records with `origin.kind` "human", plus the owner's answers
   in `AskUserQuestion` tool results. Task notifications, hook feedback, peer messages and
@@ -65,6 +69,13 @@ Owner rulings, 2026-10-08:
   hook cannot record or clear a deny, it does not deny, and it says the check did not run.
   So a judge that is wrong cannot loop.
 - The reason sent back to the session is capped and cleaned.
+
+## Limits
+
+- `_style_rules` walks up from a rule's anchor to a line that starts with "- ", then cuts
+  the first 2 characters off that text. A style file with no such line above an anchor
+  would lose 2 characters from that rule. Not reachable today: both rule bullets start
+  with "- ".
 
 Kind: process
 Home: hooks/question_outcome.py
