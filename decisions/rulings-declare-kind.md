@@ -48,9 +48,11 @@ Home: <path>
 
 `lint/check_ruling_kind.py` checks every record the pull request adds or changes. It runs in CI
 against the pull request base. `--dir <folder>` names the records folder, relative to the
-checkout. The default is `decisions`. Only `.md` files under it are checked. The lint has no
-"not a ruling" exemption. A record with no ruling
-still carries a Kind line, because the lint cannot tell the two apart.
+checkout. The default is `decisions`. Only `.md` files under it are checked. A `--dir` or
+`records-dir` that is empty, `.`, missing, wrongly cased, or not a folder makes the lint exit
+non-zero and name the folder (decision gate-hooks-fail-closed: a gate fails closed). The lint
+has no "not a ruling" exemption. A record with no ruling still carries a Kind line, because
+the lint cannot tell the two apart.
 
 ## The two routes
 
@@ -86,8 +88,9 @@ still carries a Kind line, because the lint cannot tell the two apart.
   two lists. They match today.
 - The action is not adopted anywhere yet. It has not run on a hosted runner (unmeasured).
 - The lint checks that a plan heading exists. It does not check that the plan lane does the work.
-- The lint accepts any `--dir`. It does not refuse `..` or a leading `/`. `actions/ruling-kind/check.sh`
-  refuses both in `records-dir`. No test covers that refusal.
+- The lint refuses a `--dir` of `..` or a leading `/`, as it refuses any unusable folder.
+  `actions/ruling-kind/check.sh` refuses both in `records-dir`. No test covers `..` or a leading
+  `/` in either.
 - `lint/check_record_slugs.py` still reads only `decisions/` and `deferred/`, at the top level. It
   does not read a records folder such as `docs/decisions/`.
 
