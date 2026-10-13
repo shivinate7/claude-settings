@@ -3,6 +3,7 @@
 // fake host (store, clock, git, claude agents, python, ui, prompt). The clock is fixed at NOW.
 // register.mjs keeps state at module level, so each host case loads a fresh copy of it.
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import * as lib from './hooks/lib.mjs'
 
@@ -347,7 +348,8 @@ function host(opts) {
     git: '# branch.head main\n# branch.ab +0 -0\n', gitFail: null, agents: [], agentsExit: 0, liveAgents: [],
     agentListThrow: false, usageThrow: false, hang: false, submitFails: false,
     python: null, context: { window: 1000, percent: 42 }, env: {}, placed: true,
-    hooks: [], beats: [], registered: [], opened: [], logs: [], submitted: [], pythonCalls: [], agentCalls: [], writes: [], gitCalls: [], gitHang: false,
+    hooks: [], beats: [], registered: [], opened: [], logs: [], submitted: [], pythonCalls: [], pythonOpts: [], agentCalls: [], writes: [], gitCalls: [], gitHang: false,
+    gitManual: false, gitPending: [], hangStore: false, hangId: false,
     ...opts,
   }
   h.store = new Map(opts.seed ?? [])
@@ -357,32 +359,34 @@ function host(opts) {
   h.$ = {
     store: {
       get: async k => { const v = h.store.get(k); if (v === THROWS) throw new Error('store read failed'); return clone(v) },
-      set: async (k, v) => { h.writes.push(k); h.store.set(k, clone(v)) },
+      set: async (k, v) => { h.writes.push(k); if (h.hangStore) return never(); h.store.set(k, clone(v)) },
       delete: async k => { h.store.delete(k) },
       keys: async () => [...h.store.keys()],
     },
     clock: {
       now: async () => h.now,
-      every: (ms, fn) => { h.beats.push(fn); return { cancel() {} } },
-      after: (ms, fn) => { const t = setTimeout(fn, ms); t.unref?.(); return { cancel() { clearTimeout(t) } } },
+      every: (ms, fn) => { const b = { fn, live: true }; h.beats.push(b); return { cancel() { b.live = false } } },
+      after: (ms, fn) => { const t = setTimeout(fn, ms); return { cancel() { clearTimeout(t) } } },
     },
     session: {
-      id: async () => h.sid, cwd: async () => h.cwd, repo: async () => ({ root: h.repoRoot }),
+      id: async () => { if (h.hangId) return never(); return h.sid }, cwd: async () => h.cwd, repo: async () => ({ root: h.repoRoot }),
       usage: async () => { if (h.hang) return never(); if (h.usageThrow) throw new Error('usage read failed'); return { context: h.context } },
     },
     agent: { list: async () => { if (h.hang) return never(); if (h.agentListThrow) throw new Error('agent list failed'); return h.liveAgents } },
     process: {
-      run: async argv => {
+      run: async (argv, opts) => {
         if (h.hang) return never()
         if (argv[0] === 'git') {
           h.gitCalls.push(argv)
           if (h.gitHang) return never() // a stuck reader: the read starts and never answers
+          if (h.gitManual) return new Promise(resolve => h.gitPending.push({ resolve })) // held until the test lands it
           if (h.gitFail === 'throw') throw new Error('git timed out')
           if (h.gitFail === 'exit') return { exitCode: 128, stdout: '', stderr: 'fatal: not a git repository' }
           return { exitCode: 0, stdout: h.git, stderr: '' }
         }
         if (argv[0] === 'claude') { h.agentCalls.push(argv); return { exitCode: h.agentsExit, stdout: typeof h.agents === 'string' ? h.agents : JSON.stringify(h.agents), stderr: '' } }
         h.pythonCalls.push(argv)
+        h.pythonOpts.push(opts ?? {})
         if (!h.python) throw Object.assign(new Error(`spawn ${argv[0]} ENOENT`), { code: 'ENOENT' })
         return h.python(argv)
       },
@@ -423,7 +427,7 @@ const pyOk = (handoff = HANDOFF, prompt = PROMPT) => argv => ({ exitCode: 0, std
 const safe = (h, args) => fire(h, 'command.run', { command: 'safe-stop', args })
 const NEW_ID = 'dddddddd-1111-2222-3333-444444444444'
 const settle = () => new Promise(r => setTimeout(r, 5))
-const tickBeat = async h => { h.beats[0](); await settle() } // one heartbeat, then let its async work finish
+const tickBeat = async h => { for (const b of h.beats.filter(x => x.live)) b.fn(); await settle() } // one heartbeat, then let its async work finish
 // A pane close, as the host raises it (ui.close, origin person). No hook for it means the close is ignored.
 const closePane = async h => {
   const hook = h.hooks.find(x => x.event === 'ui.close')
@@ -897,6 +901,134 @@ await test('heartbeat: a failing git read makes the reading unknown, so no updat
     await tickBeat(h)
     same((await lines(h))[0], '0 working, 1 waiting, update-ready 0 of 1', `band after a ${mode} on the beat`)
   }
+})
+
+// ---- review round 3 pins (PR 380)
+
+const CLEAN_REPLY = { exitCode: 0, stdout: '# branch.head main\n# branch.ab +0 -0\n', stderr: '' }
+const DIRTY_REPLY = { exitCode: 0, stdout: '# branch.head main\n# branch.ab +0 -0\n1 .M N... 100644 100644 100644 a b a.ts\n', stderr: '' }
+const README = readFileSync(new URL('./README.md', import.meta.url), 'utf8')
+
+await test('safe-stop: python runs isolated (-I) with its cwd at the config folder, plan and run', async () => {
+  for (const args of ['plan', '']) {
+    const h = await start({ python: pyOk(), env: { HOME: '/home/u' } })
+    await safe(h, args)
+    const argv = h.pythonCalls[0] ?? []
+    assert.ok(argv.includes('-I'), `argv has no -I (args ${JSON.stringify(args)}): ${argv.join(' ')}`)
+    same((h.pythonOpts[0] ?? {}).cwd, '/home/u/.claude', `init cwd (args ${JSON.stringify(args)})`)
+  }
+})
+
+await test('turn start and a permission ask return within 200 ms when a store write or the session id never answers', async () => {
+  for (const flag of ['hangStore', 'hangId']) {
+    const h = await start()
+    await fire(h, 'session.start', {})
+    h[flag] = true
+    same(await within(200, fire(h, 'turn.start', { text: '', turnId: 't1' })), 'done', `turn.start with ${flag}`)
+  }
+  for (const flag of ['hangStore', 'hangId']) {
+    const h = await start()
+    await fire(h, 'session.start', {})
+    h[flag] = true
+    same(await within(200, fire(h, 'tool.check', { tool: 'Edit', input: { file_path: '/r/a.ts' }, tool_use_id: 'e1' }, 'ask')), 'done', `ask with ${flag}`)
+  }
+})
+
+await test('resume: after a resume end the beat keeps running and writes under the new id; entry fresh at 130 s', async () => {
+  const h = await start()
+  await fire(h, 'session.start', {})
+  await fire(h, 'session.end', { sessionId: ID, reason: 'resume' })
+  h.sid = NEW_ID
+  for (let i = 0; i < 4; i++) { h.now += 30_000; await tickBeat(h) }
+  h.now += 10_000 // 130 s after the resume; the last beat was at 120 s
+  const e = h.store.get('sess:' + NEW_ID)
+  assert.ok(e, 'no entry under the new id')
+  assert.ok(lib.isFresh(e, h.now), `entry stamped ${e && e.at}, not fresh at ${h.now}`)
+})
+
+await test('git: a read started before the latest turn start is dropped when it lands late', async () => {
+  const h = await start()
+  await fire(h, 'session.start', {})
+  h.gitManual = true
+  h.now += 30_000
+  await tickBeat(h) // idle beat: a clean read starts and is held
+  const cleanRead = h.gitPending[0]
+  await fire(h, 'turn.start', { text: '', turnId: 't1' })
+  await fire(h, 'tool.check', { tool: 'Edit', input: { file_path: '/r/a.ts' }, tool_use_id: 'e1' }, 'allow')
+  await fire(h, 'turn.complete', { durationMs: 500, isAborted: false, turnId: 't1' }) // turn-end read starts and is held
+  h.gitPending[1].resolve(DIRTY_REPLY) // the dirty read lands first
+  await settle()
+  cleanRead.resolve(CLEAN_REPLY) // the old clean read lands last
+  await settle()
+  same(h.store.get('sess:' + ID).dirty, 1, 'final entry dirty count')
+  same((await lines(h))[0], '0 working, 1 waiting, update-ready 0 of 1', 'band after the late landing')
+})
+
+await test('session end: a read in flight when the session ends writes neither record', async () => {
+  const h = await start()
+  await fire(h, 'session.start', {})
+  h.gitManual = true
+  h.now += 30_000
+  await tickBeat(h) // beat read held
+  await fire(h, 'turn.complete', { durationMs: 500, isAborted: false, turnId: 't1' }) // turn-end read held
+  await fire(h, 'session.end', { sessionId: ID, reason: 'other' })
+  h.gitPending[0].resolve(CLEAN_REPLY)
+  h.gitPending[1].resolve(DIRTY_REPLY)
+  await settle()
+  same([h.store.has('sess:' + ID), h.store.has('detail:' + ID)], [false, false], 'records after the late landings')
+})
+
+await test('sweep: an entry and detail past a day stay while claude agents lists that session', async () => {
+  const h = await start({
+    agents: [{ sessionId: OTHER, cwd: '/x/other', status: 'busy' }],
+    seed: [
+      ['sess:' + OTHER, raw({ repo: 'other', at: NOW - 86_400_001 })],
+      ['detail:' + OTHER, { v: 1, at: NOW - 86_400_001, recent: [], files: 0, agents: [], spawns: {}, perm: { ask: 0, deny: 0, wait: 0 }, receipt: null }],
+    ],
+  })
+  await boardText(h)
+  same([h.store.has('sess:' + OTHER), h.store.has('detail:' + OTHER)], [true, true], 'live session records after the sweep')
+})
+
+await test('sweep: when the sweep removes this session\'s detail, the next beat writes it again', async () => {
+  const h = await start()
+  await fire(h, 'session.start', {})
+  h.now += 2 * 86_400_000 // the own entry is now a day past its last beat
+  await boardText(h) // the sweep removes the own entry and detail
+  same(h.store.has('detail:' + ID), false, 'sweep removed the detail')
+  h.now += 30_000
+  await tickBeat(h)
+  same(h.store.has('detail:' + ID), true, 'detail written again on the next beat')
+})
+
+await test('safe-stop: a prompt path past the 4000-character cap is not reported as sent without saying it was cut', async () => {
+  const longPrompt = '/home/u/' + 'p'.repeat(4500) + '.md'
+  const h = await start({ python: pyOk(HANDOFF, longPrompt), env: { HOME: '/home/u' } })
+  const out = await safe(h, '')
+  if (out.text.startsWith('Safe stop sent')) {
+    assert.ok(/cut|truncat|shortened/i.test(out.text), `sent without saying the prompt was cut: ${out.text.slice(0, 120)}`)
+  }
+})
+
+await test('permission ask with no tool id writes nothing to the store', async () => {
+  const h = await start()
+  await fire(h, 'session.start', {})
+  h.writes.length = 0
+  await fire(h, 'tool.check', { tool: 'Edit', input: { file_path: '/r/a.ts' } }, 'ask')
+  same(h.writes, [], 'store writes for an ask with no id')
+})
+
+await test('README: does not say "Only the person starts it"', () => {
+  assert.ok(!/Only the person starts it/i.test(README), 'README still says "Only the person starts it"')
+})
+
+await test('README: calls the origin check a block-list', () => {
+  assert.ok(/block-?list/i.test(README), 'README does not call the origin check a block-list')
+})
+
+await test('README: a sentence says a denied permission clears when the call returns', () => {
+  const sentences = README.split(/[.\n]/)
+  assert.ok(sentences.some(s => /denied/i.test(s) && /clear/i.test(s) && /return/i.test(s)), 'no sentence says a denied permission clears when the call returns')
 })
 
 const fails = results.filter(r => r.startsWith('FAIL')).length
