@@ -4,7 +4,7 @@
 Spec: decisions/question-outcome-check.md. Rule: style-question-restates-goal.
 
 Per question with two or more options (a clarifying question passes first):
-- No `Goal:` line: deny, no model call.
+- No `Goal:` line, or no `Problem:` line: deny, no model call.
 - Else one model call (decision_watch.invoke_model, the one model caller) judges whether the
   `Goal:` line matches the owner's last messages, whether each option serves that goal,
   and whether a better option is missing. FLAG denies, and the reason goes to the session.
@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 
 from decision_watch import invoke_model  # noqa: E402  looked up at call time, in main()
 from _transcript import is_last_human, safe_finding_text, tail_records  # noqa: E402
+from rule_audit import ANCHOR_RE  # noqa: E402  the one anchor parser (lint/ lands beside hooks/)
 
 RULE = "style-question-restates-goal"
 # THE TIME BUDGET. One model call per ask, so the settings.json PreToolUse entry for this
@@ -39,41 +40,53 @@ MESSAGE_MAX = 1500
 STATE_MAX_AGE = 30 * 60  # seconds; an older deny state is ignored
 TAIL_BYTES = 2 * 1024 * 1024
 MACHINE_TAGS = ("<system-reminder>", "<task-notification>")
-GOAL_LINE = re.compile(r"^[ 	]*Goal:[ 	]*\S", re.MULTILINE)
+# The two labels. Each sits in its style-file rule bullet; every use below reads these.
+GOAL_LABEL = "Goal:"
+PROBLEM_LABEL = "Problem:"
+GOAL_LINE = re.compile(r"^[ \t]*%s[ \t]*\S" % re.escape(GOAL_LABEL), re.MULTILINE)
+PROBLEM_LINE = re.compile(r"^[ \t]*%s[ \t]*\S" % re.escape(PROBLEM_LABEL), re.MULTILINE)
 
 STYLE_FILE = os.path.join(HERE, "..", "output-styles", "shiv-stylisms.md")
-STYLE_RULES = ("style-question-states-problem", "style-question-restates-goal")
+PROBLEM_RULE = "style-question-states-problem"
+STYLE_RULES = (PROBLEM_RULE, RULE)
 
 PROMPT = (
     "You check a question an assistant is about to put to its owner. The owner's goal, read "
-    "from their last messages, is below. The standard question format is: a `Problem:` sentence, "
-    "a `Goal:` line, then the options. Check three things: (1) does the `Goal:` line "
+    "from their last messages, is below. The standard question has a `%s` line, a `%s` line, "
+    "and options. Check three things: (1) does the `%s` line "
     "match that goal; (2) does each option serve it; (3) is an option that serves it better "
     "missing. A goal line is a paraphrase of the goal in plain words; a paraphrase is not grounds "
     "to deny or flag. Be conservative: FLAG only a clear miss. Reply with one JSON object only: "
     '{"verdict": "ALLOW"} or {"verdict": "FLAG", "why": "<one line: what misses, and the fix>"}.'
+    % (PROBLEM_LABEL, GOAL_LABEL, GOAL_LABEL)
 )
 
 
 def _style_rules():
     """The two question-rule bullets of the style file, marker removed, whitespace collapsed,
-    one per line. "" when the file cannot be read: the check goes on without them."""
+    one per line. The check goes on without what is missing, and one stderr line names the
+    missing file or anchor. A marker counts only at the end of a line, so a quoted one is no rule."""
     try:
         with open(STYLE_FILE, encoding="utf-8") as f:
             lines = f.read().splitlines()
     except Exception:
+        print("question_outcome: style file not readable: %s" % os.path.basename(STYLE_FILE),
+              file=sys.stderr)
         return ""
     out = []
     for rule in STYLE_RULES:
-        marker = "<!-- rule:%s -->" % rule
         for i, line in enumerate(lines):
-            if line.rstrip().endswith(marker):
+            m = next((m for m in ANCHOR_RE.finditer(line)
+                      if m.group(1) == rule and not line[m.end():].strip()), None)
+            if m:
                 start = i
                 while start > 0 and not lines[start].startswith("- "):
                     start -= 1
-                body = "\n".join(lines[start:i + 1]).replace(marker, "")
+                body = "\n".join(lines[start:i] + [line[:m.start()]])
                 out.append(" ".join(body[2:].split()))
                 break
+        else:
+            print("question_outcome: style rule anchor not found: %s" % rule, file=sys.stderr)
     return "\n".join("- " + r for r in out)
 
 
@@ -215,12 +228,17 @@ def main():
         sys.exit(0)  # the retry after a deny passes, whatever its text
     todo = [(str(q.get("question", "")), _options(q)) for q in questions]
     todo = [(t, ls) for t, ls in todo if len(ls) >= 2]
-    missing = [t for t, _ in todo if not GOAL_LINE.search(t)]
-    if missing:
+    absent = [(t, [lab for lab, rx in ((GOAL_LABEL, GOAL_LINE), (PROBLEM_LABEL, PROBLEM_LINE))
+                   if not rx.search(t)]) for t, _ in todo]
+    absent = [(t, labs) for t, labs in absent if labs]
+    if absent:
         if not _mark_denied(state):
             _did_not_run("the state could not be written, so no deny was sent.")
-        _deny("%s: open the question with one line `Goal: <the goal, in the owner's "
-              "terms>`. Missing on: %s" % (RULE, safe_finding_text("; ".join(t[:80] for t in missing))))
+        labs = [lab for lab in (GOAL_LABEL, PROBLEM_LABEL) if any(lab in l for _, l in absent)]
+        _deny("%s: each question needs a line that opens with %s (`%s <the goal, in the owner's "
+              "terms>`, `%s <the problem, in one plain sentence>`). Missing on: %s"
+              % (RULE, " and ".join("`%s`" % l for l in labs), GOAL_LABEL, PROBLEM_LABEL,
+                 safe_finding_text("; ".join("%s (no %s)" % (t[:80], " or ".join(l)) for t, l in absent))))
     if not todo:
         sys.exit(0)
 

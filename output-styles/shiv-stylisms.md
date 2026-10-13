@@ -28,8 +28,9 @@ Short and plain are one goal. Never trade one for the other.
 - Use plain words everywhere. Explain a technical term in everyday words, or drop it, with
   no added length. If the user asks "explain it like I'm five", the message
   failed.<!-- rule:style-plain-words -->
-- Before each question to the user, give the problem in one plain sentence that opens with
-  `Problem:`, and say why it needs their word.<!-- rule:style-question-states-problem -->
+- Before each question to the user, give the problem in one plain sentence, and say why it
+  needs their word. Put that line inside the question box, and open it with
+  `Problem:`.<!-- rule:style-question-states-problem -->
 - Open each question with one line, `Goal: <the goal>`, in the user's terms. Then
   give the options.<!-- rule:style-question-restates-goal -->
 - Put all a question needs inside the question box: its text, its options, or an option's
