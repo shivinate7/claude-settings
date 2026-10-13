@@ -89,8 +89,8 @@ MUTATIONS = [
      '        return run_dir\n    return _absolute(match.group(2), run_dir)',
      '        return command_root(cmd, shell_cwd)\n    return _absolute(match.group(2), run_dir)', "guard", 'pointer: --work-tree alone moves no HEAD in the pointer checkout'),
     ("pointer-head: read the shared common git directory, so a worktree reads as its primary",
-     '        answer = _git(where, "rev-parse", "--absolute-git-dir")',
-     '        answer = _git(where, "rev-parse", "--git-common-dir")', "guard", 'pointer: switch of a branch in another checkout is allowed'),
+     '        answer = guard_core._git(where, "rev-parse", "--absolute-git-dir")',
+     '        answer = guard_core._git(where, "rev-parse", "--git-common-dir")', "guard", 'pointer: switch of a branch in another checkout is allowed'),
     # RULE 1b, the pointer checkout's HEAD. Each mutant breaks one arm: the act test, the tree
     # test, the main exemption, the two path-operation arms, the `switch` subcommand, the top-level
     # read, and the pointer parse.
@@ -1002,13 +1002,13 @@ MUTATIONS = [
     ("fail-open: is_frozen's resolve is forced to raise, so every frozen write is missed",
      '    try:\n        literal = _literal_resolved(path, cwd)\n'
      '        resolved = _resolved(path, cwd)\n'
-     '        literal_root = os.path.normcase(os.path.normpath(config_dir()))\n'
-     '        resolved_root = os.path.normcase(os.path.realpath(config_dir()))\n'
+     '        literal_root = os.path.normcase(os.path.normpath(guard_core.config_dir()))\n'
+     '        resolved_root = os.path.normcase(os.path.realpath(guard_core.config_dir()))\n'
      '    except Exception:\n        return False',
      '    try:\n        raise Exception("mutant")\n        literal = _literal_resolved(path, cwd)\n'
      '        resolved = _resolved(path, cwd)\n'
-     '        literal_root = os.path.normcase(os.path.normpath(config_dir()))\n'
-     '        resolved_root = os.path.normcase(os.path.realpath(config_dir()))\n'
+     '        literal_root = os.path.normcase(os.path.normpath(guard_core.config_dir()))\n'
+     '        resolved_root = os.path.normcase(os.path.realpath(guard_core.config_dir()))\n'
      '    except Exception:\n        return False',
      "guard", "frozen: Write of the global CLAUDE.md"),
     ("fail-open: is_project_config's resolve is forced to raise, so no edit is ever noted",
@@ -1031,11 +1031,11 @@ MUTATIONS = [
      '    except Exception:\n        return False',
      "guard", "[resolve-branch proof]"),
     ("fail-open: pointer_checkout's read is forced to raise, silencing the whole pointer-head rule",
-     '    try:\n        with open(os.path.join(config_dir(), "CLAUDE.md"), encoding="utf-8-sig") '
+     '    try:\n        with open(os.path.join(guard_core.config_dir(), "CLAUDE.md"), encoding="utf-8-sig") '
      'as handle:\n            text = handle.read(POINTER_READ_MAX)\n    except Exception:\n'
      '        return ""',
      '    try:\n        raise Exception("mutant")\n'
-     '        with open(os.path.join(config_dir(), "CLAUDE.md"), encoding="utf-8-sig") as handle:\n'
+     '        with open(os.path.join(guard_core.config_dir(), "CLAUDE.md"), encoding="utf-8-sig") as handle:\n'
      '            text = handle.read(POINTER_READ_MAX)\n    except Exception:\n        return ""',
      "guard", "pointer: checkout of a branch in the pointer checkout is refused"),
 

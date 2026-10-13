@@ -87,6 +87,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
 import guard  # noqa: E402
+import guard_core  # noqa: E402  (the preview cache patches the guard reads where they live)
 
 OPTOUT_FILENAME = os.path.join(".claude", "janitor.json")
 DEFAULT_PROTECTED_PREFIXES = ("backup/",)
@@ -1873,8 +1874,8 @@ def _begin_preview_cache():
             return _memo(("git", where), lambda: real_git(where, *args))
         return real_git(where, *args)
 
-    guard._git = run_git
-    guard.session_records = lambda: _memo("sessions", real_records)
+    guard_core._git = run_git
+    guard_core.session_records = lambda: _memo("sessions", real_records)
 
     def undo():
         global _RUN, _POOL, _ROOT_POOL
@@ -1883,7 +1884,7 @@ def _begin_preview_cache():
                 pool.shutdown()
         _POOL = _ROOT_POOL = None
         _RUN = None
-        guard._git, guard.session_records = real_git, real_records
+        guard_core._git, guard_core.session_records = real_git, real_records
     return undo
 
 
