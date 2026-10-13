@@ -179,6 +179,30 @@ def write_stub():
 write_stub()
 
 
+FLUSH_SRC = r'''
+import runpy, sys
+
+class FlakyFlush(object):
+    """A stderr whose flush raises. Writes pass through, so the hook's own lines still arrive."""
+    def __init__(self, real):
+        self._real = real
+        self.buffer = real.buffer
+
+    def write(self, text):
+        return self._real.write(text)
+
+    def flush(self):
+        raise OSError("stderr flush failed (test)")
+
+sys.stderr = FlakyFlush(sys.stderr)
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+'''
+FLUSH_LAUNCHER = os.path.join(TMP, "flaky_flush.py")
+with open(FLUSH_LAUNCHER, "w", encoding="utf-8") as f:
+    f.write(FLUSH_SRC)
+
+
 def pr(number, draft=False, branch="hook-wave-2", sha=SHA):
     return {"number": number, "isDraft": draft, "headRefName": branch, "headRefOid": sha,
             "state": "OPEN", "url": "https://github.com/shivinate7/claude-settings/pull/%d" % number}
@@ -287,10 +311,12 @@ def base_env(search, fixture_path, log, lock, extra):
     return env
 
 
-def run_hook(payload, scen, path="stub", extra=None, lock=None, stdin=None):
+def run_hook(payload, scen, path="stub", extra=None, lock=None, stdin=None, module=None,
+             launcher=None):
     """Run the real hook once and wait for it. path "stub": PATH is the stub folder only.
     path "missing": PATH is empty. lock: the watch-lock folder (default: this case's folder).
-    stdin: raw text for stdin, in place of the JSON of payload."""
+    stdin: raw text for stdin, in place of the JSON of payload. module: a copy of the hook to
+    run instead. launcher: a script that runs the module with a changed stderr, given the module."""
     case, fixture_path, log = new_case(scen)
     search = BIN
     if path == "missing":
@@ -305,7 +331,8 @@ def run_hook(payload, scen, path="stub", extra=None, lock=None, stdin=None):
     # Output goes to files, not pipes: a killed hook can leave a stub child that holds pipes open.
     with open(out_p, "w", encoding="utf-8") as fo, open(err_p, "w", encoding="utf-8") as fe:
         try:
-            p = subprocess.run([PY, MODULE], input=text, stdout=fo, stderr=fe, encoding="utf-8",
+            cmd = [PY, launcher, module or MODULE] if launcher else [PY, module or MODULE]
+            p = subprocess.run(cmd, input=text, stdout=fo, stderr=fe, encoding="utf-8",
                                env=env, cwd=case, timeout=TIMEOUT)
             rc, hung = p.returncode, False
         except subprocess.TimeoutExpired:
@@ -439,6 +466,87 @@ def case_one_watcher_per_pr():
     expect_verdict("watcher after the first was killed (its lock is released)", after_kill, "green")
     after_end = run_hook(bash("gh pr ready 12"), fixture(READY, [GREEN]), lock=lock)
     expect_verdict("watcher after the previous one ended (lock released on exit)", after_end, "green")
+
+
+def case_skipped_only_head_is_no_run_yet():
+    """A head whose only run is skipped (a draft PR's skipped run) is no run yet: one pause,
+    one re-list, then unknown "no run yet". It is never read as red."""
+    skipped = run(910, "gates", "skipped", [job("unit", "skipped")])
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [skipped]), extra={"CI_WAKE_DEADLINE": "4"})
+    expect_verdict("head whose only run is skipped", res, "unknown")
+    v = verdict_of(res)
+    check("head whose only run is skipped: the line says no run yet",
+          v is not None and "no run yet" in v[2], why(res))
+    check("head whose only run is skipped: run list read twice (one pause, then re-list)",
+          count(res, "run", "list") == 2, why(res))
+
+
+def case_draft_pr_starts_no_watch():
+    """gh pr ready on a PR whose view says isDraft true starts no watch: silent, no run read."""
+    res = run_hook(bash("gh pr ready 12"), fixture([pr(12, draft=True)], [GREEN]))
+    expect_silent("gh pr ready 12, PR isDraft true", res)
+    expect_no_watch("gh pr ready 12, PR isDraft true", res)
+    check("gh pr ready 12, PR isDraft true: no run list read", count(res, "run", "list") == 0,
+          why(res))
+
+
+def case_import_error_wakes_unknown():
+    """A copy of the hook with no guard_core.py beside it. An import error must end in one
+    unknown line and exit 2, never a traceback and exit 1."""
+    folder = tempfile.mkdtemp(prefix="ci-wake-solo-", dir=TMP)
+    copy = os.path.join(folder, "ci_wake.py")
+    shutil.copy(MODULE, copy)
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [GREEN]), module=copy)
+    expect_verdict("import error: guard_core.py missing beside the hook", res, "unknown")
+
+
+def case_final_flush_error_wakes_unknown():
+    """stderr whose flush raises. The final flush sits outside the try today. It must end in a
+    wake with an unknown line, not a crash."""
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [GREEN]), launcher=FLUSH_LAUNCHER)
+    unknown = []
+    for line in res.lines:
+        m = LINE.match(line.strip())
+        if m and m.group(1) == "unknown":
+            unknown.append(line)
+    check("final flush raises: exit 2, not a crash", res.rc == 2 and not res.hung, why(res))
+    check("final flush raises: no traceback on stderr", "Traceback" not in res.err, why(res))
+    check("final flush raises: one CI unknown line", len(unknown) == 1, why(res))
+
+
+def case_background_separator_starts_each_watch():
+    """A single `&` separates commands too: each gh pr ready after it gets its own watch in the
+    same process. The `2>&1` redirect is no separator (a guard for any fix)."""
+    res = run_hook(bash("gh pr ready 12 & gh pr ready 13"), fixture(TWO_PRS, [GREEN, RED_B]))
+    vs = verdicts_of(res)
+    check("gh pr ready 12 & gh pr ready 13: one process, one CI line per PR (12 green, 13 red)",
+          res.rc == 2 and not res.hung and vs is not None
+          and sorted((v[0], v[1]) for v in vs) == sorted([("green", SHA7), ("red", SHA7_B)]),
+          why(res))
+    check("gh pr ready 12 & gh pr ready 13: watches runs 901 and 911, one each",
+          sorted(watched(res)) == ["901", "911"], why(res))
+    watch_pr12("gh pr ready 12 2>&1: the redirect starts one watch", "gh pr ready 12 2>&1")
+    # A single & inside quotes or after a comment opener is no separator (guards for the fix).
+    guard_silent("single & inside double quotes is no separator", 'echo "a & gh pr ready 12"')
+    guard_silent("single & inside single quotes is no separator", "echo 'a & gh pr ready 12'")
+    guard_silent("single & after an unquoted # is comment text", "echo ok # a & gh pr ready 12")
+
+
+def case_deadline_not_a_number_uses_default():
+    """CI_WAKE_DEADLINE that is not a number falls back to the default budget: green verdict."""
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [GREEN]),
+                   extra={"CI_WAKE_DEADLINE": "abc"})
+    expect_verdict("CI_WAKE_DEADLINE=abc: default budget, green verdict", res, "green")
+
+
+def case_lock_folder_unusable_wakes_unknown():
+    """The lock folder is a file. The OSError at the lock must end in one unknown line, no watch."""
+    blocker = os.path.join(TMP, "lock-folder-is-a-file")
+    with open(blocker, "w", encoding="utf-8") as f:
+        f.write("not a folder\n")
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [GREEN]), lock=blocker)
+    expect_verdict("lock folder is a file (OSError at the lock)", res, "unknown")
+    expect_no_watch("lock folder is a file", res)
 
 
 def main():
@@ -599,6 +707,15 @@ def main():
 
     res = run_hook({"tool_name": "Bash", "tool_input": "ls -la"}, fixture(READY, [GREEN]))
     expect_verdict("uncaught error: tool_input is not an object", res, "unknown")
+
+    # Review round 2: skipped-only head, draft PR, import and flush errors, separators, low items.
+    case_skipped_only_head_is_no_run_yet()
+    case_draft_pr_starts_no_watch()
+    case_import_error_wakes_unknown()
+    case_final_flush_error_wakes_unknown()
+    case_background_separator_starts_each_watch()
+    case_deadline_not_a_number_uses_default()
+    case_lock_folder_unusable_wakes_unknown()
 
     print()
     print("%d checks, %d failed" % (COUNT[0], len(FAILS)))

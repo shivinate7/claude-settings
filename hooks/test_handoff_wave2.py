@@ -61,6 +61,7 @@ import collections
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -248,6 +249,14 @@ class Case(object):
 
     def handoff(self, sid):
         return os.path.join(self.cfg, "handoffs", "%s.md" % sid)
+
+    def pointer(self, sid):
+        """The /clear pointer of a session: state/handoff/pointers/<sid>.json."""
+        return os.path.join(self.cfg, "state", "handoff", "pointers", "%s.json" % sid)
+
+    def state(self, name):
+        """A file in state/handoff/, such as <sid>.dir or <sid>.reread."""
+        return os.path.join(self.cfg, "state", "handoff", name)
 
     def snapshot(self):
         """Every file under the config dir: {absolute path: bytes}. Folders are not counted."""
@@ -823,6 +832,161 @@ def case_bad_stdin_and_live_control_per_mode():
             c.cleanup()
 
 
+# --------------------------------------------------------------------------- review round 2
+
+STALE_AGE = 400 * 86400  # seconds: no live session is this old
+
+UNREADABLE_SRC = "\n".join([
+    "import runpy, sys",
+    "class Unreadable(object):",
+    "    def read(self, *args):",
+    "        raise OSError('stdin unreadable (test)')",
+    "sys.stdin = Unreadable()",
+    "sys.argv = sys.argv[1:]",
+    "runpy.run_path(sys.argv[0], run_name='__main__')",
+    "",
+])
+
+
+def run_unreadable(c, launcher, module, flag):
+    """One hook mode whose stdin read raises OSError. Not a JSON error: a failed read."""
+    proc = subprocess.run([sys.executable, launcher, module, flag], input="", capture_output=True,
+                          text=True, env=c.env(), cwd=c.proj)
+    return Result(proc.returncode, proc.stdout or "", proc.stderr or "")
+
+
+def lock_against_delete(c, sid):
+    """Make the pointer of `sid` impossible to delete in this run -> an undo function, and
+    whether the lock holds. Windows: the file is read-only. POSIX: its folder is read-only. A
+    root run cannot be locked, so the lock check fails the case rather than passing it."""
+    ptr, pdir = c.pointer(sid), os.path.dirname(c.pointer(sid))
+    if os.name == "nt":
+        os.chmod(ptr, stat.S_IREAD)
+        target, undo = ptr, (lambda: os.chmod(ptr, stat.S_IREAD | stat.S_IWRITE))
+    else:
+        os.chmod(pdir, 0o555)
+        target, undo = pdir, (lambda: os.chmod(pdir, 0o755))
+    return undo, not os.access(target, os.W_OK)
+
+
+def case_clear_pointer_without_handoff_names_none():
+    """The newest /clear pointer names a session with no handoff. The reorient names no other
+    session's handoff (old-a has one, under an older pointer), says none, and consumes the newest
+    pointer. Twin: the same setup, but the newest session has a handoff, and it is named."""
+    c = Case("ptr_no_handoff")
+    try:
+        c.link("old-a", c.proj, age=100)
+        c.session_end("old-a", "clear")
+        set_age(c.pointer("old-a"), 200)
+        c.session_end("old-b", "clear")   # the newest pointer; old-b never had a handoff
+        out = c.reorient("new-1", "clear").stdout
+        check("clear, newest pointer has no handoff: says no handoff", "no handoff" in out.lower(),
+              "stdout: %r" % tail(out, 300))
+        check("clear, newest pointer has no handoff: names no other session's handoff (old-a)",
+              c.handoff("old-a") not in out, "stdout: %r" % tail(out, 300))
+        check("clear, newest pointer has no handoff: the newest pointer (old-b) is consumed",
+              not os.path.exists(c.pointer("old-b")), "")
+    finally:
+        c.cleanup()
+
+    t = Case("ptr_no_handoff_twin")
+    try:
+        t.link("old-a", t.proj, age=100)
+        t.session_end("old-a", "clear")
+        set_age(t.pointer("old-a"), 200)
+        t.link("old-b", t.proj, age=50)
+        t.session_end("old-b", "clear")
+        out = t.reorient("new-1", "clear").stdout
+        check("twin, newest pointer has a handoff: names it (old-b)", t.handoff("old-b") in out,
+              "stdout: %r" % tail(out, 300))
+    finally:
+        t.cleanup()
+
+
+def case_unusable_pointers_are_removed():
+    """Pointers that can never be used do not pile up: a malformed pointer, and an older pointer
+    whose session has no handoff. A reorient run for the dir removes them, and the newest pointer
+    is consumed."""
+    c = Case("junk_ptrs")
+    try:
+        put(c.pointer("junk-1"), "{not json")
+        c.session_end("gone-1", "clear")
+        set_age(c.pointer("gone-1"), 300)
+        c.session_end("gone-2", "clear")
+        c.reorient("new-1", "clear")
+        for sid in ("junk-1", "gone-1", "gone-2"):
+            check("unusable pointer %s is removed after the reorient run" % sid,
+                  not os.path.exists(c.pointer(sid)), "still on disk")
+    finally:
+        c.cleanup()
+
+
+def case_stale_records_are_swept():
+    """A .dir record and a .reread flag with no live session behind them are stale: a reorient
+    run removes both. A live session's fresh .dir record and fresh flag stay. The sweep point is
+    SessionStart reorient, the mode that already reads these records."""
+    c = Case("stale_records")
+    try:
+        c.link("live-1", c.proj, age=0)
+        c.session_end("live-1", "logout")   # records live-1.dir, any reason
+        put(c.state("live-1.reread"), "1")
+        put(c.state("dead-1.dir"), c.proj)
+        put(c.state("dead-1.reread"), "1")
+        set_age(c.state("dead-1.dir"), STALE_AGE)
+        set_age(c.state("dead-1.reread"), STALE_AGE)
+        c.reorient("new-1", "clear")
+        check("stale .dir record (dead-1, 400 days old, no session) is removed",
+              not os.path.exists(c.state("dead-1.dir")), "still on disk")
+        check("stale .reread flag (dead-1, 400 days old) is removed",
+              not os.path.exists(c.state("dead-1.reread")), "still on disk")
+        check("live session's .dir record stays", os.path.exists(c.state("live-1.dir")),
+              "removed")
+        check("live session's fresh .reread flag stays", os.path.exists(c.state("live-1.reread")),
+              "removed")
+    finally:
+        c.cleanup()
+
+
+def case_failed_pointer_delete_is_logged():
+    """A pointer that cannot be deleted is logged to stderr, naming the pointer. The reorient
+    still exits 0. Silence hides the stale pointer."""
+    c = Case("delete_logged")
+    undo = None
+    try:
+        c.link("old-1", c.proj, age=100)
+        c.session_end("old-1", "clear")
+        undo, locked = lock_against_delete(c, "old-1")
+        check("failed pointer delete, precondition: the pointer cannot be deleted in this run",
+              locked, "")
+        proc = c.reorient("new-1", "clear")
+        check("failed pointer delete: the reorient still exits 0", proc.returncode == 0,
+              "rc=%r" % proc.returncode)
+        check("failed pointer delete: logged to stderr, naming the pointer (old-1)",
+              "old-1" in proc.stderr, "stderr: %r" % tail(proc.stderr, 300))
+    finally:
+        if undo is not None:
+            undo()
+        c.cleanup()
+
+
+def case_unreadable_stdin_reread_exits_zero():
+    """reread_check reads stdin in a try that catches only ValueError. A stdin whose read raises
+    OSError must still exit 0 in every mode. The control proves the launcher is not what exits 0."""
+    c = Case("unreadable")
+    try:
+        launcher = os.path.join(c.root, "unreadable_stdin.py")
+        put(launcher, UNREADABLE_SRC)
+        for flag in ("--post-compact", "--pre-read", "--stop"):
+            proc = run_unreadable(c, launcher, READ_CHECK, flag)
+            check("unreadable stdin (read raises OSError), reread_check %s: exits 0" % flag,
+                  proc.returncode == 0, "rc=%r err=%r" % (proc.returncode, tail(proc.stderr)))
+        control = run_unreadable(c, launcher, os.path.join(c.root, "no_such_module.py"), "--stop")
+        check("control: a missing module under the same launcher does not exit 0",
+              control.returncode != 0, "rc=%r" % control.returncode)
+    finally:
+        c.cleanup()
+
+
 def main() -> int:
     print("Part 1: SessionEnd pointer, SessionStart reorient (hooks/precompact_handoff.py)")
     case_session_end_clear_writes_pointer()
@@ -835,6 +999,10 @@ def main() -> int:
     case_reorient_none_says_so()
     case_reorient_matches_either_spelling_of_proj()
     case_safe_stop_entry_pinned()
+    case_clear_pointer_without_handoff_names_none()
+    case_unusable_pointers_are_removed()
+    case_stale_records_are_swept()
+    case_failed_pointer_delete_is_logged()
 
     print("Part 2: PostCompact flag, Read clears it, Stop blocks (hooks/reread_check.py)")
     check("reread_check: the module exists", os.path.isfile(READ_CHECK),
@@ -847,6 +1015,7 @@ def main() -> int:
     case_stop_hook_active_passes()
     case_stop_no_flag_passes()
     case_sibling_import_failure_exits_zero()
+    case_unreadable_stdin_reread_exits_zero()
 
     print("Part 3: bad stdin and live controls, both modules")
     case_bad_stdin_and_live_control_per_mode()
