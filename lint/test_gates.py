@@ -2551,18 +2551,24 @@ def gl_copy_tree(root, old_transcript=False):
     return lint_copy
 
 
-def gl_linter_tree(root, entry):
-    """A gate tree whose linter, run as a script, does `entry` where its main() runs, so the gate
-    gets no findings from the child: a crash, or silence. Returns the copied ste_gate.py."""
-    lint_copy = gl_copy_tree(root)
-    linter = os.path.join(lint_copy, "ste_lint.py")
-    with open(linter, encoding="utf-8") as handle:
+def gl_set_linter(lint_copy, entry):
+    """Make the linter in `lint_copy` run `entry` where its main() runs: a fresh copy of lint/ste_lint.py
+    with that entry. Calling it again swaps the entry and leaves the folder, and so every path a gate
+    prints, the same."""
+    with open(os.path.join(HERE, "ste_lint.py"), encoding="utf-8") as handle:
         text = handle.read()
     entry_main = 'if __name__ == "__main__":\n    sys.exit(main())'
     if text.count(entry_main) != 1:
         raise AssertionError("the linter entry point moved")
-    with open(linter, "w", encoding="utf-8") as handle:
+    with open(os.path.join(lint_copy, "ste_lint.py"), "w", encoding="utf-8") as handle:
         handle.write(text.replace(entry_main, 'if __name__ == "__main__":\n    ' + entry))
+
+
+def gl_linter_tree(root, entry):
+    """A gate tree whose linter, run as a script, does `entry` where its main() runs, so the gate
+    gets no findings from the child: a crash, or silence. Returns the copied ste_gate.py."""
+    lint_copy = gl_copy_tree(root)
+    gl_set_linter(lint_copy, entry)
     return os.path.join(lint_copy, "ste_gate.py")
 
 
@@ -3033,14 +3039,20 @@ class SteGateLogTests(unittest.TestCase):
     # (H1) finding codes of two types, an int and a string. The sort that builds the log rule must not
     # take the answer with it: the gate denies with the same stdout and rc 0 as it does with strings.
     def test_26_mixed_code_types_keep_the_deny_and_the_exit_code(self):
+        # One gate folder for both runs: the deny text names the gate's own folder, so two folders
+        # would differ there and not in the answer. Only the linter's entry is swapped.
+        lint_copy = gl_copy_tree(os.path.join(self.tmp.name, "codes"))
+        gate = os.path.join(lint_copy, "ste_gate.py")
         content = {"file_path": self._path(), "content": GL_CLEAN_DOC}
-        mixed = gl_gate(self.cfg, "Write", content, gate=gl_linter_tree(
-            os.path.join(self.tmp.name, "mixed"), gl_print_findings([5, "STE001"])))
-        plain = gl_gate(self.cfg, "Write", content, gate=gl_linter_tree(
-            os.path.join(self.tmp.name, "plain"), gl_print_findings(["5", "STE001"])))
-        self.assertEqual(gl_decision(plain), "deny")  # precondition: the string codes deny
+        gl_set_linter(lint_copy, gl_print_findings(["5", "STE001"]))
+        plain = gl_gate(self.cfg, "Write", content, gate=gate)
+        gl_set_linter(lint_copy, gl_print_findings([5, "STE001"]))
+        mixed = gl_gate(self.cfg, "Write", content, gate=gate)
+        self.assertEqual(plain.returncode, 0, plain.stderr)  # precondition: the string codes
+        self.assertEqual(gl_decision(plain), "deny")
         self.assertNotIn("Traceback", mixed.stderr)
         self.assertEqual(mixed.returncode, 0, mixed.stderr)
+        self.assertEqual(gl_decision(mixed), "deny")
         self.assertEqual(mixed.stdout, plain.stdout)
 
     # (H3) the answer leaves before the log write. The log write sleeps 4 s; the first stdout line
@@ -3192,12 +3204,12 @@ class MdSweepLogTests(unittest.TestCase):
     # as it does with the same code written as a string.
     def test_08_unhashable_code_keeps_the_sweep_output_and_exit_code(self):
         self._md("notes.md", self.ERROR_TEXT)
-        plain_gate = gl_linter_tree(os.path.join(self.tmp.name, "plain"),
-                                    gl_print_findings(["['STE008']"]))
-        listed_gate = gl_linter_tree(os.path.join(self.tmp.name, "listed"),
-                                     gl_print_findings([["STE008"]]))
-        plain = self._sweep(script=os.path.join(os.path.dirname(plain_gate), "md_sweep.py"))
-        listed = self._sweep(script=os.path.join(os.path.dirname(listed_gate), "md_sweep.py"))
+        lint_copy = gl_copy_tree(os.path.join(self.tmp.name, "codes"))
+        script = os.path.join(lint_copy, "md_sweep.py")  # one folder for both runs
+        gl_set_linter(lint_copy, gl_print_findings(["['STE008']"]))
+        plain = self._sweep(script=script)
+        gl_set_linter(lint_copy, gl_print_findings([["STE008"]]))
+        listed = self._sweep(script=script)
         self.assertEqual(json.loads(plain.stdout).get("decision"), "block")  # precondition
         self.assertNotIn("Traceback", listed.stderr)
         self.assertEqual(listed.returncode, plain.returncode)
