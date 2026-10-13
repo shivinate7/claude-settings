@@ -30,6 +30,27 @@ from _transcript import format_finding, landed_work  # noqa: E402
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 
+# Isolation. Every spawned gate and sweep inherits this process's environment (env=None, or a copy
+# of os.environ). Point CLAUDE_CONFIG_DIR at a temporary folder for the whole module, so no test
+# appends to the user's guard.log. tearDownModule restores the value it found. A test that sets its
+# own folder (gl_env, the config report) still wins. Also imported by lint/test_ste_autofix.py.
+_ISOLATION = {}
+
+
+def setUpModule():
+    _ISOLATION["dir"] = tempfile.TemporaryDirectory()
+    _ISOLATION["prev"] = os.environ.get("CLAUDE_CONFIG_DIR")  # None means unset
+    os.environ["CLAUDE_CONFIG_DIR"] = _ISOLATION["dir"].name
+
+
+def tearDownModule():
+    prev = _ISOLATION.pop("prev")
+    if prev is None:
+        os.environ.pop("CLAUDE_CONFIG_DIR", None)
+    else:
+        os.environ["CLAUDE_CONFIG_DIR"] = prev
+    _ISOLATION.pop("dir").cleanup()
+
 
 def human(text):
     return {"type": "user", "isSidechain": False, "message": {"role": "user", "content": text}}
