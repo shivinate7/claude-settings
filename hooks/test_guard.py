@@ -8263,6 +8263,146 @@ LOG_CHECKS_EXTRA.append(("session-log: an unwritable log never raises and never 
                          "verdict", session_log_unwritable_case))
 
 
+# ------------------------------------------- review round 1 (PR 383): red until the builder fixes
+
+
+def session_log_no_setter_case():
+    """session-log: a guard_core that lacks set_log_session still judges and denies. The entry
+    point calls that name outside the guarded import and outside main's try, so a missing name must
+    not become a traceback or a changed exit (decisions/gate-hooks-fail-closed.md: a crash does not
+    change a verdict). The same payload runs with the name and without it. Verdict and exit must
+    match, and the deny line must end in the placeholder.
+    """
+    payload = _session_log_payload(SESSION_LOG_ID)
+    results = []
+    for label, drop in (("with", False), ("without", True)):
+        folder = _session_log_fresh("sessionlog-nosetter-" + label)
+        code = ("import io, sys, importlib.util as u\n"
+                "spec = u.spec_from_file_location('g', %r)\n"
+                "g = u.module_from_spec(spec)\n"
+                "spec.loader.exec_module(g)\n" % GUARD
+                + ("del sys.modules['guard_core'].set_log_session\n" if drop else "")
+                + "sys.stdin = io.StringIO(%r)\n"
+                  "g.main()\n" % payload)
+        env = dict(os.environ)
+        env["CLAUDE_CONFIG_DIR"] = folder
+        env.pop("CLAUDE_CODE_SESSION_ID", None)
+        run = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                             env=env, timeout=60)
+        results.append((run, _session_log_rows(folder)))
+    (with_run, _), (without_run, without_rows) = results
+    if without_run.returncode != with_run.returncode:
+        return False, "exit %d without the setter, %d with it" % (
+            without_run.returncode, with_run.returncode)
+    if "Traceback" in without_run.stderr:
+        return False, "a traceback without the setter: %r" % without_run.stderr.strip()[-160:]
+    if not without_run.stdout.strip():
+        return False, "the deny was not printed without the setter"
+    if without_run.stdout != with_run.stdout:
+        return False, "the verdict changed without the setter"
+    if without_rows is None or len(without_rows) != 1:
+        return False, "expected one line without the setter, found %s" % (
+            "none" if without_rows is None else len(without_rows))
+    fields = without_rows[0].split("\t")
+    if len(fields) != 6 or fields[5] != SESSION_LOG_PLACEHOLDER:
+        return False, "the line without the setter is %r, want the placeholder last" % (
+            without_rows[0])
+    return True, "same verdict and exit with the setter missing, and the line ends in '-'"
+
+
+def session_log_lone_surrogate_case():
+    """session-log: a lone surrogate in session_id loses only itself. Today the writer's utf-8
+    encode fails on it and the whole line is dropped. The line must be written, the surrogate
+    dropped or replaced, the exit 0 and the deny printed. Two shapes: a surrogate in the middle,
+    and one that a 64-character cut leaves at the end.
+    """
+    cases = (
+        ("in the middle", "ab\ud800cd", ("abcd", "ab�cd")),
+        ("at the 64-character cut", "a" * 63 + "\ud800" + "zz", ("a" * 63, "a" * 63 + "�")),
+    )
+    for index, (label, session, wants) in enumerate(cases):
+        folder = _session_log_fresh("sessionlog-surrogate-%d" % index)
+        run = _session_log_run(folder, _session_log_payload(session))
+        if run.returncode != 0:
+            return False, "%s: exit %d" % (label, run.returncode)
+        if not run.stdout.strip():
+            return False, "%s: the deny was not printed" % label
+        path = os.path.join(folder, "guard.log")
+        if not os.path.exists(path):
+            return False, "%s: no guard.log was written" % label
+        with open(path, "rb") as handle:
+            raw = handle.read()
+        try:
+            text = raw.decode("utf-8")  # strict: a surrogate written as-is fails here
+        except UnicodeDecodeError:
+            return False, "%s: the log holds bytes that are not UTF-8" % label
+        lines = [line for line in text.replace("\r\n", "\n").split("\n") if line]
+        if len(lines) != 1:
+            return False, "%s: expected one line, found %d" % (label, len(lines))
+        fields = lines[0].split("\t")
+        if len(fields) != 6 or fields[5] not in wants:
+            return False, "%s: the session cell is %r, want one of %r" % (
+                label, fields[5] if len(fields) == 6 else fields, wants)
+    return True, "both lone surrogates dropped or replaced, and each line kept"
+
+
+def session_log_astral_cut_case():
+    """session-log: a 64-character cut keeps an astral character whole. The id is 63 letters and
+    one character outside the BMP (a surrogate pair in UTF-16), then more text. The cut must keep
+    the character and drop the rest, so the field is exactly the 63 letters and the character.
+    """
+    session = "a" * 63 + "\U0001F600" + "zz"
+    folder = _session_log_fresh("sessionlog-astral")
+    run = _session_log_run(folder, _session_log_payload(session))
+    if run.returncode != 0 or not run.stdout.strip():
+        return False, "the deny was not printed (exit %d)" % run.returncode
+    rows = _session_log_rows(folder)
+    if rows is None or len(rows) != 1:
+        return False, "expected one line, found %s" % ("none" if rows is None else len(rows))
+    fields = rows[0].split("\t")
+    want = "a" * 63 + "\U0001F600"
+    if len(fields) != 6 or fields[5] != want:
+        return False, "the session cell is %r, want the 63 letters and the character" % (
+            fields[5] if len(fields) == 6 else fields)
+    return True, "the astral character survives the 64-character cut whole"
+
+
+def session_log_control_id_time_case():
+    """session-log: the sanitizer takes a 1 MB id of control characters in under 100 ms (the best
+    of three runs), and cuts a 1 MB id of mixed text to 64 characters. The sanitizer is timed
+    in-process: a subprocess run would time Python's own start-up.
+    """
+    if HERE not in sys.path:
+        sys.path.insert(0, HERE)
+    import guard_core  # noqa: F401  (imported for its sys.modules entry)
+    core = sys.modules["guard_core"]
+    control = "\x01" * (1 << 20)
+    best = None
+    for _ in range(3):
+        start = time.perf_counter()
+        got = core.session_log_field(control)
+        elapsed = time.perf_counter() - start
+        best = elapsed if best is None else min(best, elapsed)
+    if got != SESSION_LOG_PLACEHOLDER:
+        return False, "the control-only id gave %r, want the placeholder" % got[:20]
+    if best >= 0.1:
+        return False, "the 1 MB control-character id took %.0f ms, want under 100 ms" % (best * 1000)
+    mixed = core.session_log_field("\x01a" * (1 << 19))
+    if mixed != "a" * 64:
+        return False, "the 1 MB mixed id gave %d characters, want 64 a's" % len(mixed)
+    return True, "1 MB of control characters in %.0f ms, best of three" % (best * 1000)
+
+
+LOG_CHECKS_EXTRA.append(("session-log: a guard_core without set_log_session still judges and "
+                         "denies, as with it", session_log_no_setter_case))
+LOG_CHECKS_EXTRA.append(("session-log: a lone surrogate in session_id drops or replaces itself "
+                         "and keeps the line", session_log_lone_surrogate_case))
+LOG_CHECKS_EXTRA.append(("session-log: a 64-character cut keeps an astral character whole",
+                         session_log_astral_cut_case))
+LOG_CHECKS_EXTRA.append(("session-log: a 1 MB control-character id is sanitized in under "
+                         "100 ms", session_log_control_id_time_case))
+
+
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
 
 # The log checkers tagged "windows". Each one reads a live process's start time (guard.py

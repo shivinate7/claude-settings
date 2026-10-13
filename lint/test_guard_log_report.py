@@ -22,7 +22,9 @@ Run with:
 """
 import ast
 import contextlib
+import importlib.util
 import io
+import json
 import os
 import sys
 import tempfile
@@ -421,6 +423,141 @@ class OneReaderTests(unittest.TestCase):
     def test_only_the_reader_parses_guard_log_lines(self):
         others = [name for name in guard_log_readers() if name != READER]
         self.assertEqual(others, [], "files other than the one reader parse guard.log lines")
+
+
+# ------------------------------------------- review round 1 (PR 383): reader nits, red until fixed
+#
+# Decisions pinned here:
+# - "-" is reserved for the placeholder. A hook id of "-" is written as "-", so it reads as
+#   unknown session. --session - selects the unknown lines. A real "-" session cannot be told apart
+#   in one column without an escape, and none is added.
+# - The session cell is field 6 (index 5) only. A tab beyond field 6 stays in matched text, and the
+#   cell never holds a raw tab.
+# - --by-session prints at most BY_SESSION_ROWS rows, most denies first, then "... and K more".
+
+class SessionReaderNitTests(unittest.TestCase):
+    def test_dash_session_selects_the_unknown_lines(self):
+        now = datetime.now()
+        lines = [
+            session_line(hours_ago(now, 1), "deny", "shared-tree", "git stash", SID),
+            session_line(hours_ago(now, 2), "deny", "merge-main", "gh pr merge 5", "-"),
+            "\t".join([hours_ago(now, 3), "Bash", "deny", "merge-main", "gh pr merge 6"]),
+        ]
+        with tempfile.TemporaryDirectory() as folder:
+            path = write_log(os.path.join(folder, "guard.log"), lines)
+            rc, out = run_main(["--log", path, "--session", "-", "--days", "7"])
+        self.assertEqual(rc, 0)
+        self.assertIn("| merge-main | 2 | 0 | 0 |", out)  # the "-" line and the five-field line
+        self.assertNotIn("| shared-tree |", out)  # SID's line is not unknown
+
+    def test_seven_field_line_puts_no_raw_tab_in_the_session_cell(self):
+        now = datetime.now()
+        lines = ["\t".join([hours_ago(now, 1), "Bash", "deny", "multi", "a", "b", "c"])]
+        with tempfile.TemporaryDirectory() as folder:
+            path = write_log(os.path.join(folder, "guard.log"), lines)
+            rc, out = run_main(["--log", path, "--by-session", "--days", "7"])
+        self.assertEqual(rc, 0)
+        self.assertIn("| b | multi | 1 | 0 | 0 |", out)  # field 6 only; "c" stays in matched
+        for line in out.splitlines():
+            if line.startswith("|"):
+                self.assertNotIn("\t", line)
+
+    def test_by_session_output_is_bounded_and_sorted_by_denies(self):
+        limit = getattr(glr, "BY_SESSION_ROWS", None)  # the reader's named constant
+        self.assertEqual(limit, 200)
+        now = datetime.now()
+        lines = []
+        for i in range(3000):  # session i holds (i % 50) + 1 denies: 60 sessions hold 50
+            for _ in range(i % 50 + 1):
+                lines.append(session_line(hours_ago(now, 1), "deny", "rule-x", "git stash",
+                                          "s%04d" % i))
+        with tempfile.TemporaryDirectory() as folder:
+            path = write_log(os.path.join(folder, "guard.log"), lines)
+            rc, out = run_main(["--log", path, "--by-session", "--days", "7"])
+        self.assertEqual(rc, 0)
+        rows = by_session_rows(out)
+        self.assertEqual(len(rows), limit)
+        self.assertEqual(sum(1 for row in rows if row[2] == 50), 60)  # all 60 top sessions shown
+        self.assertIn("... and %d more" % (3000 - limit), out)
+
+
+class PlaceholderHomeTests(unittest.TestCase):
+    def test_reader_names_the_placeholder_from_its_one_home(self):
+        # One home: guard_core.SESSION_LOG_PLACEHOLDER. The reader may name it, never spell it.
+        path = os.path.join(REPO_ROOT, "lint", "guard_log_report.py")
+        with open(path, encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+        docstrings = set()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef)) and node.body:
+                first = node.body[0]
+                if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                    docstrings.add(id(first.value))
+        spelled = sorted(node.lineno for node in ast.walk(tree)
+                         if isinstance(node, ast.Constant) and node.value == "-"
+                         and id(node) not in docstrings)
+        self.assertEqual(spelled, [], "the reader spells the placeholder at lines %s" % spelled)
+        named = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)} | {
+            node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
+        self.assertIn("SESSION_LOG_PLACEHOLDER", named)
+
+
+class ReaderImporterTests(unittest.TestCase):
+    # decision_watch imports this reader lazily in collect_unread. With the import failing, its
+    # config report must keep the config-edit and merge messages (the fail-open contract). The
+    # import is blocked by a None entry in sys.modules, which makes `import` raise ImportError.
+    def test_config_report_survives_an_unimportable_reader(self):
+        spec = importlib.util.spec_from_file_location(
+            "decision_watch_fail_open", os.path.join(REPO_ROOT, "hooks", "decision_watch.py"))
+        dw = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(dw)
+        records = [
+            {"type": "user", "timestamp": "2026-09-22T10:00:00.000Z",
+             "message": {"role": "user", "content": [
+                 {"type": "text", "text": "tune the settings and merge"}]}},
+            {"type": "assistant", "message": {"role": "assistant", "content": [
+                {"type": "tool_use", "name": "Edit", "input": {}}]}},
+            {"type": "assistant", "message": {"role": "assistant", "content": [
+                {"type": "tool_use", "name": "Bash",
+                 "input": {"command": "gh pr merge 5 --squash"}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as folder:
+            proj = os.path.join(folder, "proj")
+            os.makedirs(os.path.join(proj, ".claude"))
+            target = os.path.join(proj, ".claude", "settings.local.json")
+            for rec in records[1:2]:  # the Edit names the real settings file
+                rec["message"]["content"][0]["input"]["file_path"] = target
+            transcript = os.path.join(folder, "transcript.jsonl")
+            with open(transcript, "w", encoding="utf-8") as handle:
+                handle.write("".join(json.dumps(rec) + "\n" for rec in records))
+            hook = {"transcript_path": transcript, "cwd": proj}
+            saved_env = os.environ.get("CLAUDE_CONFIG_DIR")
+            # collect_unread returns before the import unless guard.log exists, so the log is here,
+            # holding one line that is not an unread subject.
+            config = os.path.join(folder, "config")
+            os.makedirs(config)
+            with open(os.path.join(config, "guard.log"), "w", encoding="utf-8") as handle:
+                handle.write("2026-10-12T10:00:00\tBash\tdeny\tshared-tree\tgit stash\t-\n")
+            os.environ["CLAUDE_CONFIG_DIR"] = config
+            had = "guard_log_report" in sys.modules
+            saved = sys.modules.get("guard_log_report")
+            try:
+                healthy = dw.config_report(hook)
+                sys.modules["guard_log_report"] = None  # the reader's import now fails
+                blocked = dw.config_report(hook)
+            finally:
+                if had:
+                    sys.modules["guard_log_report"] = saved
+                else:
+                    sys.modules.pop("guard_log_report", None)
+                if saved_env is None:
+                    os.environ.pop("CLAUDE_CONFIG_DIR", None)
+                else:
+                    os.environ["CLAUDE_CONFIG_DIR"] = saved_env
+        self.assertIn("Config files changed this turn", healthy)  # the fixture is live
+        self.assertIn("Merges into main this turn", healthy)
+        self.assertIn("Config files changed this turn", blocked)
+        self.assertIn("Merges into main this turn", blocked)
 
 
 if __name__ == "__main__":
