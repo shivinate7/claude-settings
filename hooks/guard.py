@@ -796,18 +796,29 @@ CITE_REASON = (
 )
 
 
-# A short flag whose value is no message. The walk over a cluster stops at one: `-C HEAD`, `-Rowner`.
-SHORT_STOP = set("CcuSRt")
+# The short flags of each act, from `git commit -h` and `gh pr <act> --help`. "text" and "file"
+# carry the message, "title" a gh title or squash subject. "value" takes a value that is no message,
+# glued or the next argument (`-Bmain`, `-B main`), and "glued" takes only a glued one (`-uno`). A
+# letter not named takes no value, so the walk over a cluster goes on past it (`-am x`, `-db x`).
+# In gh, `-m` is a milestone, or a merge with no value: never a message.
+SHORT_FLAGS = {
+    "commit": dict(m="text", F="file", C="value", c="value", t="value", u="glued", S="glued"),
+    "create": dict(b="text", F="file", t="title", a="value", B="value", H="value", l="value",
+                   m="value", p="value", r="value", R="value", T="value"),
+    "edit": dict(b="text", F="file", t="title", B="value", m="value", R="value"),
+    "merge": dict(b="text", F="file", t="title", A="value", R="value"),
+}
 
 
-def message_sources(args, titles=False):
+def message_sources(args, act, titles=False):
     """Return (texts, files, stdin) the message flags of a commit or PR call carry.
 
     `texts` are the inline values, `files` the named files, `stdin` True for `-F -`. Reads a long
     flag (`--message x`, `--message=x`) or any unique prefix of one of at least four characters
     (git takes `--mess=x`), and a short cluster such as `-am x`, `-amx`, `-mx`, `-m=x`, `-bx`,
-    `-Fx`: the walk reads each letter until one takes a value, and what follows it is the value.
-    `titles` also reads `--title`, `--subject` and `-t`, which are a gh call's title or squash
+    `-Fx`: the walk reads each letter of `act`'s SHORT_FLAGS until one takes a value, and what
+    follows it is the value. A letter whose value is no message ends the walk, so `-BmN20` (base
+    `mN20`) holds no message. `titles` also reads `--title`, `--subject` and `-t`, which are a gh call's title or squash
     subject (a commit's `-t` is a template file, so a commit never passes it).
     """
     texts, files, stdin = [], [], False
@@ -827,13 +838,18 @@ def message_sources(args, titles=False):
             value = glued if equals else None
         elif re.match(r"^-[A-Za-z]", arg):
             for pos, letter in enumerate(arg[1:], 1):
-                if letter in "mbF" or (titles and letter == "t"):
-                    name = "--file" if letter == "F" else letter
-                    rest = arg[pos + 1:]
+                role = SHORT_FLAGS[act].get(letter)
+                if role == "title":
+                    role = "text" if titles else "value"
+                if role is None:
+                    continue
+                rest = arg[pos + 1:]
+                if role in ("text", "file"):
+                    name = "--file" if role == "file" else letter
                     value = (rest[1:] if rest.startswith("=") else rest) if rest else None
-                    break
-                if letter in SHORT_STOP:
-                    break
+                elif role == "value" and not rest:
+                    index += 1   # its value is the next argument, never a flag
+                break
         if name is None:
             continue
         if value is None:
@@ -856,48 +872,85 @@ UNREAD_REASON = (
 )
 
 
-def own_heredoc_bodies(segment: str, raw: str):
-    """Return the bodies of the heredocs whose headers sit inside this segment, in order. A heredoc
-    of another command on the same line (`cat <<A && git commit -F - <<B`) is not the message.
-
-    Every header on a line takes its body in turn, as the shell reads them. The segment is found in
-    the raw command by its text. A segment that is not there verbatim (its heredoc bodies were
-    dropped, so a header may sit past a newline) falls back to the headers whose delimiter the
-    segment names.
+def heredoc_heads(text: str, quote: str = ""):
+    """Return (delimiters, quote) for the heredoc headers in `text` that sit outside quotes and
+    comments, in order, and what is still open at its end. `quote` is a stack of open quotes and
+    parentheses. `echo "<<EOF"` and `<<<word` hold no header, but `-m "$(cat <<EOF` does: a `$(`
+    inside double quotes is shell again. Quotes are read as split_segments reads them: no escape.
     """
-    found = []   # (offset of the header in raw, delimiter, body)
+    heads = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        top = quote[-1:]
+        if top == "'":
+            quote = quote[:-1] if char == "'" else quote
+        elif top == '"':
+            if text.startswith("$(", index):
+                quote += "("
+                index += 1
+            elif char == '"':
+                quote = quote[:-1]
+        elif char == "(":
+            quote += "("
+        elif char == ")" and top == "(":
+            quote = quote[:-1]
+        elif char == "#" and (index == 0 or text[index - 1] in " \t\n;|&("):
+            while index < len(text) and text[index] != "\n":
+                index += 1
+            continue
+        elif char in "'\"":
+            quote += char
+        elif text.startswith("<<<", index):
+            index += 3
+            continue
+        elif char == "<":
+            header = HEREDOC_HEADER.match(text, index)
+            if header:
+                heads.append(header.group(2))
+                index = header.end()
+                continue
+        index += 1
+    return heads, quote
+
+
+def own_heredoc_bodies(segment: str, raw: str, before: int):
+    """Return the bodies of the heredocs whose headers sit inside this segment, in order. A heredoc
+    of another command (`cat <<A && git commit -F - <<B`) is not the message.
+
+    `before` is the count of headers in the segments ahead of this one. Raw is walked once, as the
+    shell reads it: each header outside quotes and comments takes the next body in turn, and a body
+    line is never read for headers. This segment takes the bodies `before` onward, one per header
+    it holds, so two commits with the same text each take their own body.
+    """
+    count = len(heredoc_heads(segment)[0])
+    if not count:
+        return []
+    found = []
     lines = raw.split("\n")
-    base = 0
+    quote = ""
     index = 0
     while index < len(lines):
-        line = lines[index]
-        heads = [(base + m.start(), m.group(2)) for m in HEREDOC_HEADER.finditer(line)]
-        base += len(line) + 1
+        heads, quote = heredoc_heads(lines[index], quote)
         index += 1
-        for offset, delimiter in heads:
+        for delimiter in heads:
             start = index
             while index < len(lines) and lines[index].strip() != delimiter:
-                base += len(lines[index]) + 1
                 index += 1
-            found.append((offset, delimiter, "\n".join(lines[start:index])))
-            if index < len(lines):
-                base += len(lines[index]) + 1
-                index += 1
-    at = raw.find(segment)
-    if at >= 0:
-        return [body for offset, _, body in found if at <= offset < at + len(segment)]
-    wanted = {m.group(2) for m in HEREDOC_HEADER.finditer(segment)}
-    return [body for _, delimiter, body in found if delimiter in wanted]
+            found.append("\n".join(lines[start:index]))
+            index += 1   # past the closing delimiter line
+    return found[before:before + count]
 
 
-def message_texts(segment: str, raw: str, where: str, titles: bool = False):
+def message_texts(segment: str, raw: str, where: str, before: int, titles: bool = False):
     """Return (is_commit, texts, unread) for a `git commit` or `gh pr create|edit` segment, or None
     when the segment is neither. `titles` also takes `gh pr merge`, whose squash subject and body
     become a commit on main. `unread` is the name of a message file that could not be read, else
     ''. An unread message is not a clean one.
 
     A heredoc body belongs to the act only when the segment itself carries the `<<` header, so a
-    heredoc that writes a record file never counts.
+    heredoc that writes a record file never counts. `before` is the count of heredoc headers in the
+    segments ahead of this one (own_heredoc_bodies).
     """
     call = git_call_of(segment)
     if call is not None:
@@ -910,7 +963,8 @@ def message_texts(segment: str, raw: str, where: str, titles: bool = False):
         if rest is None or rest[:1] != ["pr"] or rest[1:2] not in acts:
             return None
         args = rest[2:]
-    texts, files, stdin = message_sources(args, titles=titles and call is None)
+    act = "commit" if call is not None else rest[1]
+    texts, files, stdin = message_sources(args, act, titles=titles and call is None)
     for name in files:
         if is_env(name):
             continue   # never opened here: the environment-file rule judges it, and refuses
@@ -921,17 +975,17 @@ def message_texts(segment: str, raw: str, where: str, titles: bool = False):
         except Exception:
             return call is not None, texts, name   # unknown, never a pass
     if "<<" in segment:
-        texts.extend(own_heredoc_bodies(segment, raw))
+        texts.extend(own_heredoc_bodies(segment, raw, before))
     return call is not None, texts, ""
 
 
-def cited_record_path(segment: str, raw: str, where: str) -> str:
+def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
     """Return the first record path a commit message or PR body cites, else ''. A message file
     that cannot be read returns UNREAD_MARK + its name.
 
     Acts: `git commit` and `gh pr create|edit`.
     """
-    read = message_texts(segment, raw, where)
+    read = message_texts(segment, raw, where, before)
     if read is None:
         return ""
     is_commit, texts, unread = read
@@ -971,13 +1025,13 @@ LANE_REASON = (
 )
 
 
-def lane_number_named(segment: str, raw: str, where: str) -> str:
+def lane_number_named(segment: str, raw: str, where: str, before: int) -> str:
     """Return the first session-number lane name (`N20`) in a commit message, PR body or title, or
     `gh pr merge` subject or body, else ''. Fenced blocks and backtick spans are quoted text and
     skipped. Same text extraction as cite-by-id. An unread message file returns UNREAD_MARK + its
     name: cite-by-id refuses an unread create or edit file first, so this covers merge.
     """
-    read = message_texts(segment, raw, where, titles=True)
+    read = message_texts(segment, raw, where, before, titles=True)
     if read is None:
         return ""
     if read[2]:
@@ -1496,15 +1550,18 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 1d. A commit message or PR body that cites a record by its path.
     cite_where = command_root(stripped, cwd)
+    heads = 0   # heredoc headers in the segments so far: each segment takes its own bodies
     for segment in split_segments(stripped):
+        before = heads
+        heads += len(heredoc_heads(segment)[0])
         if not segment.strip():
             continue
-        matched = cited_record_path(segment, raw, cite_where)
+        matched = cited_record_path(segment, raw, cite_where, before)
         if matched.startswith(UNREAD_MARK):
             refuse(tool, "deny", "cite-by-id", UNREAD_REASON, matched[len(UNREAD_MARK):])
         if matched:
             refuse(tool, "deny", "cite-by-id", CITE_REASON, matched)
-        matched = lane_number_named(segment, raw, cite_where)
+        matched = lane_number_named(segment, raw, cite_where, before)
         if matched.startswith(UNREAD_MARK):   # a gh pr merge file: cite-by-id never reads merge
             refuse(tool, "deny", "cite-by-id", UNREAD_REASON, matched[len(UNREAD_MARK):])
         if matched:
