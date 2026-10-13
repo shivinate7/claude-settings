@@ -857,11 +857,11 @@ class StaleAgentLockTests(unittest.TestCase):
 
     def test_unreadable_process_start_is_unknown_not_stale(self):
         real = guard._process_start_ms
-        guard._process_start_ms = lambda pid: guard.PROCESS_START_UNREADABLE
+        sys.modules["guard_core"]._process_start_ms = lambda pid: guard.PROCESS_START_UNREADABLE
         try:
             self.assertIsNone(sweep.stale_agent_lock_verdict(self.reasons["dead"]))
         finally:
-            guard._process_start_ms = real
+            sys.modules["guard_core"]._process_start_ms = real
 
     def test_unreadable_pushed_check_keeps(self):
         real = sweep.fully_pushed
@@ -1788,11 +1788,11 @@ class TombstoneTests(unittest.TestCase):
 
         log_path = os.path.join(ROOT, "tomb-restore-fail.jsonl")
         decision = {"name": "old-topic-2", "action": "reap", "reason": "ancestor"}
-        guard._git = failing_git
+        sys.modules["guard_core"]._git = failing_git
         try:
             sweep.reap_branch(root, "old-topic-2", decision, log_path)
         finally:
-            guard._git = real_git
+            sys.modules["guard_core"]._git = real_git
 
         self.assertIn("error", decision)
         self.assertIn("old-topic-2", sweep.list_local_branches(root))
@@ -1819,11 +1819,11 @@ class TombstoneTests(unittest.TestCase):
 
         log_path = os.path.join(ROOT, "tomb-gitfail-%s.jsonl" % name)
         decision = {"name": name, "action": "reap", "reason": "ancestor"}
-        guard._git = failing_git
+        sys.modules["guard_core"]._git = failing_git
         try:
             sweep.reap_branch(root, name, decision, log_path)
         finally:
-            guard._git = real_git
+            sys.modules["guard_core"]._git = real_git
         return decision, log_path, root
 
     def test_a_failed_tombstone_write_stops_the_delete(self):
@@ -2175,12 +2175,12 @@ class WorktreePruneTests(unittest.TestCase):
         root, registration = self._stale("prune-fails")
         failed = subprocess.CompletedProcess([], 1, "", "fatal")
         real = guard._git
-        guard._git = lambda where, *a: (failed if a == ("worktree", "prune")
+        sys.modules["guard_core"]._git = lambda where, *a: (failed if a == ("worktree", "prune")
                                         else real(where, *a))
         try:
             result = sweep.sweep_repo(root, True, os.path.join(ROOT, "prune-fails.log"))
         finally:
-            guard._git = real
+            sys.modules["guard_core"]._git = real
         self.assertTrue(result["pruned"]["error"])
         self.assertTrue(os.path.isdir(registration))
         verdict = [b for b in result["branches"] if b["name"] == "lane-prune-fails"]
@@ -2192,12 +2192,12 @@ class WorktreePruneTests(unittest.TestCase):
         for name, answer in (("none", None), ("failed", failed)):
             root, registration = self._stale("prune-blind-" + name)
             real = guard._git
-            guard._git = lambda where, *a: (answer if a[:2] == ("worktree", "prune")
+            sys.modules["guard_core"]._git = lambda where, *a: (answer if a[:2] == ("worktree", "prune")
                                             else real(where, *a))
             try:
                 found = sweep.prune_registrations(root, True)
             finally:
-                guard._git = real
+                sys.modules["guard_core"]._git = real
             self.assertIsNone(found["names"])
             self.assertTrue(os.path.isdir(registration))
 
@@ -2598,7 +2598,7 @@ class PreviewCacheTests(unittest.TestCase):
     def test_worktree_list_is_read_once_per_repository_and_other_git_reads_are_not_cached(self):
         seen = []
         real = sweep.guard._git
-        sweep.guard._git = lambda where, *args: seen.append((where, args))
+        sys.modules["guard_core"]._git = lambda where, *args: seen.append((where, args))
         try:
             self.begin()
             for where in ("a", "a", "b"):
@@ -2608,13 +2608,13 @@ class PreviewCacheTests(unittest.TestCase):
         finally:
             self.undo()
             self.undo = None
-            sweep.guard._git = real
+            sys.modules["guard_core"]._git = real
         self.assertEqual(len(seen), 4)
 
     def test_session_records_are_read_once_per_preview(self):
         seen = []
         real = sweep.guard.session_records
-        sweep.guard.session_records = lambda: seen.append(1) or []
+        sys.modules["guard_core"].session_records = lambda: seen.append(1) or []
         try:
             self.begin()
             sweep.guard.session_records()
@@ -2622,7 +2622,7 @@ class PreviewCacheTests(unittest.TestCase):
         finally:
             self.undo()
             self.undo = None
-            sweep.guard.session_records = real
+            sys.modules["guard_core"].session_records = real
         self.assertEqual(len(seen), 1)
 
     def test_only_a_preview_caches_and_the_guard_reads_come_back_after(self):
@@ -2953,7 +2953,7 @@ class AgentEndReapBatchTests(unittest.TestCase):
             mock.patch.object(sweep.subprocess, "run", self.fake_lsof),
             mock.patch.object(sweep, "list_all_pids", lambda: list(pids)),
             mock.patch.object(sweep, "_is_primary_checkout", lambda path: False),
-            mock.patch.object(self.reap.guard, "worktree_live_session", lambda path: False),
+            mock.patch.object(sys.modules["guard_core"], "worktree_live_session", lambda path: False),
             mock.patch.object(sweep, "is_orphan", lambda pid: True),
             mock.patch.object(sweep, "is_current_user_process",
                               lambda pid: pid != self.in_foreign),
@@ -4058,7 +4058,7 @@ class DanglingDefaultBaseTests(unittest.TestCase):
                 return None  # guard._git could not run git
             return real_git(where, *args)
 
-        with mock.patch.object(guard, "_git", side_effect=unreadable_verify):
+        with mock.patch.object(sys.modules["guard_core"], "_git", side_effect=unreadable_verify):
             base = guard.resolve_default_base(root)
         self.assertGreaterEqual(len(verify_calls), 1, "the verify read never ran: no proof")
         self.assertIsNone(base, "an unreadable origin/HEAD verify fell through to %r" % base)
@@ -4077,7 +4077,7 @@ class DanglingDefaultBaseTests(unittest.TestCase):
                 return subprocess.CompletedProcess(["git", *args], 128, "", "fatal: bad object")
             return real_git(where, *args)
 
-        with mock.patch.object(guard, "_git", side_effect=fatal_verify):
+        with mock.patch.object(sys.modules["guard_core"], "_git", side_effect=fatal_verify):
             base = guard.resolve_default_base(root)
         self.assertGreaterEqual(len(verify_calls), 1, "the verify read never ran: no proof")
         self.assertEqual(base, "main")
