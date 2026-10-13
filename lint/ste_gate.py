@@ -37,7 +37,12 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from _transcript import paragraph_blocks, format_finding, guard_logger  # noqa: E402
+from _transcript import paragraph_blocks, format_finding  # noqa: E402
+try:
+    from _transcript import guard_logger  # noqa: E402
+except Exception:  # an older _transcript.py beside this script: the gate runs, with no log line
+    def guard_logger(hook):
+        return lambda *line: None
 try:
     import ste_lint  # noqa: E402
     from ste_lint import UI_SUFFIXES  # noqa: E402
@@ -400,6 +405,16 @@ def main():
         return
     event = hook.get("hook_event_name")
     log = guard_logger(hook)  # one guard.log line per outcome; a clean write adds none
+    pending = []  # log lines, written after the answer is out
+
+    def answer(out=None):
+        # The answer goes out first, so a slow log write cannot delay its first byte. A stalled
+        # disk can still delay the process exit: that is not solved here.
+        if out is not None:
+            print(json.dumps(out))
+            sys.stdout.flush()
+        for line in pending:
+            log(*line)
 
     if event == "PreToolUse":
         tool = hook.get("tool_name")
@@ -439,7 +454,7 @@ def main():
         # Over STE_FIXER_MAX_BYTES the fixer is skipped and the plain lint decides.
         oversize = len(text.encode("utf-8", "replace")) > max_bytes()
         if oversize and not is_ui:
-            log(tool, "noted", "STE-fallback", path, "fallback", "oversize")
+            pending.append((tool, "noted", "STE-fallback", path, "fallback=oversize"))
         if not is_ui and not oversize:
             try:
                 result = run_autofix(tool, ti, old_text, scope)
@@ -453,35 +468,37 @@ def main():
                         ", ".join(counts) or "wording", os.path.basename(path))
             except Exception as err:
                 fixed_ti, note = None, ""
-                log(tool, "noted", "STE-fallback", path, "fallback",
-                    "timeout" if isinstance(err, subprocess.TimeoutExpired) else "crash")
+                pending.append((tool, "noted", "STE-fallback", path, "fallback=%s" % (
+                    "timeout" if isinstance(err, subprocess.TimeoutExpired) else "crash")))
 
         findings = lint(linter, full_text, suffix if is_ui else ".md", path)
         if findings is None:
             # "Report a read that could not run as unknown, never as clear or broken."
             # The write goes ahead, and the message says that nobody checked it.
-            if fixed_ti:
-                log(tool, "fixed", ",".join(sorted(set(fixed_codes))) or "STE-wording", path,
-                    "fixed", len(fixed_codes))
+            # One line for the unknown, even when a rewrite landed: the unknown is what a reader
+            # of the log needs to see.
+            pending.append((tool, "noted", "STE-unchecked", path, "unchecked"))
             unknown = ("STE lint could not run on the text for %s. The result is unknown: the "
                        "write was not checked." % os.path.basename(path))
-            print(json.dumps(rewrite_output(fixed_ti, note + " " + unknown) if fixed_ti
-                             else {"systemMessage": unknown}))
+            answer(rewrite_output(fixed_ti, note + " " + unknown) if fixed_ti
+                   else {"systemMessage": unknown})
             return
         if scope is not None:
             findings = [f for f in findings if f.get("line") in scope]
         if findings:
-            log(tool, "deny", ",".join(sorted({f.get("code") or "STE" for f in findings})), path,
-                "denied", len(findings))
-            print(json.dumps({"hookSpecificOutput": {
+            pending.append((tool, "deny", ",".join(sorted({f.get("code") or "STE" for f in findings})),
+                            path, "denied=%d" % len(findings)))
+            answer({"hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "deny",
                 "permissionDecisionReason": deny_reason(path, findings, written, is_ui),
-            }}))
+            }})
         elif fixed_ti:
-            log(tool, "fixed", ",".join(sorted(set(fixed_codes))) or "STE-wording", path, "fixed",
-                len(fixed_codes))
-            print(json.dumps(rewrite_output(fixed_ti, note)))
+            pending.append((tool, "fixed", ",".join(sorted(set(fixed_codes))) or "STE-wording",
+                            path, "fixed=%d" % len(fixed_codes)))
+            answer(rewrite_output(fixed_ti, note))
+        else:
+            answer()
 
 
 if __name__ == "__main__":

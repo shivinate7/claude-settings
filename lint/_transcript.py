@@ -293,34 +293,46 @@ def format_finding(f):
 # (decisions/gate-hooks-fail-closed.md): every step is inside a try, and a failed import turns
 # logging off.
 GUARD_LOG_RULE_MAX = 40
+GUARD_LOG_MATCHED_MAX = 80
+# Never in a log field: C0 and C1 controls, line and paragraph separators, bidi marks, overrides and
+# isolates, and a lone surrogate (it cannot be encoded, so one would lose the line and leave an
+# empty file behind). guard_core.session_log_field cleans the same way but keeps bidi marks and
+# cuts at 64, so it is not reused. Code points, so no hostile character sits in this source.
+_GUARD_LOG_NAME_BAD = re.compile("[" + "".join(
+    chr(lo) + "-" + chr(hi) for lo, hi in (
+        (0x00, 0x1F), (0x7F, 0x9F), (0x61C, 0x61C), (0x200E, 0x200F), (0x2028, 0x2029),
+        (0x202A, 0x202E), (0x2066, 0x2069), (0xD800, 0xDFFF))) + "]")
 
 
 def guard_logger(hook):
-    """Return log(tool, decision, rule, matched_name, label, count) for one hook call.
+    """Return log(tool, decision, rule, path, detail) for one hook call.
 
-    The line reads `<tool> <decision> <rule> <name> <label>=<count>`: matched is the basename and
-    the count, composed so a long name is shortened from its head and the count survives. The
+    matched is `<basename> <detail>`, such as `notes.md fixed=2`. The basename is cleaned of
+    hostile characters, and the field is at most 80 characters: a long name is shortened from
+    its head and the detail survives. The
     first call loads guard_core from the hooks/ folder beside lint/ and names the hook's session
     once. A call that cannot log does nothing.
     """
     state = {}
 
-    def log(tool, decision, rule, name, label, count):
+    def log(tool, decision, rule, path, detail):
         try:
             if "core" not in state:
                 state["core"] = None
                 import importlib.util
-                path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks",
-                                    "guard_core.py")
-                spec = importlib.util.spec_from_file_location("guard_core", path)
+                source = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks",
+                                      "guard_core.py")
+                spec = importlib.util.spec_from_file_location("guard_core", source)
                 core = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(core)
                 core.set_log_session(hook.get("session_id"))
                 state["core"] = core
             core = state["core"]
             if core is not None:
-                core.record(tool, decision, core.log_cut(rule, GUARD_LOG_RULE_MAX),
-                            core.log_path_and_text(os.path.basename(name), "%s=%s" % (label, count)))
+                name = _GUARD_LOG_NAME_BAD.sub("", os.path.basename(path)).strip() or "-"
+                matched = (core.log_path(name, GUARD_LOG_MATCHED_MAX - 1 - len(detail)) + " "
+                           + detail)
+                core.record(tool, decision, core.log_cut(rule, GUARD_LOG_RULE_MAX), matched)
         except Exception:
             pass
 
