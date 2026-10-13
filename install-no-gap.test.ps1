@@ -12,10 +12,12 @@
 # the clone no longer ships may be removed. The fixture skill has nested dirs, so the same check
 # covers nested files, and a nested file the source drops must be pruned.
 #
-# Two more cases, each in its own scratch tree. Both need symlink rights. On a runner without
-# them they print SKIP with the reason and do not count:
+# Three more cases, each in its own scratch tree. symrun and linkfail need symlink rights. On a
+# runner without them they print SKIP with the reason and do not count:
 #   symrun    a real file from an earlier copy, then a run where links can be made: no gap event.
 #   linkfail  dest is a symlink to elsewhere and the copy fails: a file must still exist at dest.
+#   lock1     first local run, skill locked: a .bak or no copy marker after run 1, and no person
+#             file lost after run 2. Needs no symlink rights; copy mode is forced.
 #
 # Seams. install.ps1 must honour each one:
 #   CLAUDE_CONFIG_DIR              target dir.
@@ -380,6 +382,52 @@ try {
             Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY, Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
         }
     }
+
+    # ---- lock1: first local run, the person's skill is locked, so its backup rename fails ----------
+    # Review finding 1. No copy marker yet, so the person's own skill dir is a first-run backup
+    # candidate. A handle held open on one of its files, with FileShare.Read (no Delete), makes the
+    # rename of the directory fail. Run 1 must leave a .bak of that skill, or no copy marker, so
+    # run 2 is still a first run. After the lock is released, run 2 must keep the person's files at
+    # the skill dir or in a .bak, and prune none of them. Copy mode is forced: no symlink needed.
+    $L1      = New-Scratch 'lock1' @('skills')
+    Write-FixtureFile (Join-Path $L1.Clone 'skills\lockskill\SKILL.md') '# shipped lockskill'
+    $L1Skill  = Join-Path $L1.Cfg 'skills\lockskill'
+    $L1Notes  = Join-Path $L1Skill 'my-notes.md'
+    $L1Marker = Join-Path $L1.Cfg '.claude-settings-installed'
+    Write-FixtureFile (Join-Path $L1Skill 'SKILL.md') "person's own skill"
+    Write-FixtureFile $L1Notes "person's own notes"
+
+    $L1Lock = [IO.File]::Open($L1Notes, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $env:CLAUDE_CONFIG_DIR = $L1.Cfg
+    $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+    try {
+        # Fixture: the open handle must block a rename of the skill dir, or run 1 proves nothing.
+        $Blocked = $false
+        try { [IO.Directory]::Move($L1Skill, "$L1Skill.probe") } catch { $Blocked = $true }
+        if (-not $Blocked) { [IO.Directory]::Move("$L1Skill.probe", $L1Skill) }
+        Check "lock1 fixture: a rename of the locked skill dir is refused while the handle is open" $Blocked
+
+        $rcL1 = Invoke-Install $L1.Clone 'lock1-run1.log'
+        Write-Host "info: lock1 run 1 exit $rcL1"
+        $BakL1    = @(Get-ChildItem -LiteralPath (Join-Path $L1.Cfg 'skills') -Directory -Filter 'lockskill.bak.*' -ErrorAction SilentlyContinue)
+        $MarkerL1 = Test-Path -LiteralPath $L1Marker
+        Check "lock1: run 1 leaves a .bak of the skill, or no copy marker ($($BakL1.Count) bak, marker $MarkerL1)" (($BakL1.Count -gt 0) -or (-not $MarkerL1))
+    } finally {
+        $L1Lock.Dispose()
+    }
+
+    # The lock is released. Run 2 must keep the person's files and prune none of them.
+    try {
+        $rcL2 = Invoke-Install $L1.Clone 'lock1-run2.log'
+        Write-Host "info: lock1 run 2 exit $rcL2"
+    } finally {
+        Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+    }
+    $L1Roots   = @($L1Skill) + @(Get-ChildItem -LiteralPath (Join-Path $L1.Cfg 'skills') -Directory -Filter 'lockskill.bak.*' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+    $NotesKept = @($L1Roots | Where-Object { (Test-Path -LiteralPath (Join-Path $_ 'my-notes.md')) -and ((Get-Content -Raw -LiteralPath (Join-Path $_ 'my-notes.md')).Trim() -eq "person's own notes") }).Count -gt 0
+    $SkillKept = @($L1Roots | Where-Object { (Test-Path -LiteralPath (Join-Path $_ 'SKILL.md')) -and ((Get-Content -Raw -LiteralPath (Join-Path $_ 'SKILL.md')).Trim() -eq "person's own skill") }).Count -gt 0
+    Check "lock1: run 2 keeps the person's my-notes.md at the skill dir or in a .bak, never pruned" $NotesKept
+    Check "lock1: run 2 keeps the person's SKILL.md content at the skill dir or in a .bak" $SkillKept
 } finally {
     if ($Rec) { $Rec.Dispose() }
     Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY, Env:\CLAUDE_SETTINGS_USER_ENV_KEY -ErrorAction SilentlyContinue
