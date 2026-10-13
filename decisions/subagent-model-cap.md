@@ -440,3 +440,4 @@ This file keeps its slug name. No number is claimed on a branch.
 
 Kind: process
 Home: lint/check_agent_models.py
+Home: settings.json
