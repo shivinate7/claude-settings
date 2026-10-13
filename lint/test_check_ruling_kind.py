@@ -389,6 +389,9 @@ class RulingKindTests(unittest.TestCase):
                 self.assert_passes(NESTED, "--dir", DOCS)
 
     def test_dir_ignores_folders_that_only_look_like_it(self):
+        # The named folder must exist, so it holds one valid record. The look-alikes hold none.
+        self.put(NESTED, record(BUILD_OK))
+        self.assert_passes(NESTED, "--dir", DOCS)
         for rel in (IGNORED, SIBLING):
             with self.subTest(rel=rel):
                 self.put(rel, record("Owner ruling. No kind line."))
