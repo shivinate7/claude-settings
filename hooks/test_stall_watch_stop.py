@@ -18,8 +18,8 @@ stdin, scans the session transcript for background shells, and prints ONE JSON l
 - A job is also dropped once a TaskStop result says `Successfully stopped task: <id>` for its id.
   The result is a JSON string, or a list of text blocks. A stop result, or any other text, that
   names another id closes nothing.
-- A record whose tool_use_id is not a string is skipped. It does not stop the scan of the other
-  records, so the jobs before and after it are still listed.
+- A record whose tool_use_id is not a string does not stop the scan: a job after it is still
+  listed.
 - A job is stale when its output file has not changed for the quiet age (STALL_WATCH_QUIET,
   default 300 s). A job whose output file is missing is listed as "unknown", never dropped.
 - Any error prints nothing and exits 0.
@@ -733,7 +733,7 @@ def stopped_notice_in_attachment_form_closes_job():
 @case
 def running_notice_does_not_close_job_and_stopped_notice_does():
     """S16c. a running notice in user-record form leaves its job listed once. A stopped notice in
-    attachment form closes its own job, so that job is not listed. Red today on the second half"""
+    attachment form closes its own job, so that job is not listed."""
     base = new_dir()
     output_file(base, "brunrun600", 600)
     output_file(base, "bstpb600", 600)
