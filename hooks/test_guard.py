@@ -6034,6 +6034,15 @@ OTHER_SCRATCH_OUT = os.path.join(ROOT, SCRATCH_OTHER, "scratchpad", "notes", "ou
 for _tool in ("Edit", "Write"):
     add("audit-high paths: test-author %s of another session's scratchpad outside a repo is refused"
         % _tool, "deny", rule=TA, tool=_tool, file_path=OTHER_SCRATCH_OUT, session=SCRATCH_SID, **A)
+# Windows folder names are case-insensitive: `Scratchpad` and `SCRATCHPAD` are the same folder as
+# `scratchpad`. Another session's folder spelled either way is refused too. Red on 5535b17: the
+# scratchpad check compares case-exactly, so the spelling reads as no scratchpad at all.
+for _tool in ("Edit", "Write"):
+    for _spelling in ("Scratchpad", "SCRATCHPAD"):
+        _path = os.path.join(ROOT, SCRATCH_OTHER, _spelling, "notes", "out.txt")
+        add("audit-high paths: test-author %s of another session's %s outside a repo is refused"
+            % (_tool, _spelling), "deny", rule=TA, tool=_tool, file_path=_path,
+            session=SCRATCH_SID, **A)
 # A git clone under the test-author's own scratchpad (PRIVREPO sits under FAKE_SESSION's
 # scratchpad): a write to a file in that clone stays allowed, with the clone as the cwd. Pinned,
 # green on 8e69e42.
