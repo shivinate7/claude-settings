@@ -49,6 +49,17 @@ def parse(text):
     return blocks
 
 
+def open_ids(blocks):
+    """Ids of well-formed open items (ruling, task, standing), in file order."""
+    ids = []
+    for b in blocks:
+        for ln in b["items"]:
+            m = ITEM.match(ln)
+            if JOT.match(m.group(2) or "") and m.group(2).startswith(OPEN_KINDS):
+                ids.append(m.group(1))
+    return ids
+
+
 def problems(blocks, handoff):
     out = []
     for b in blocks:

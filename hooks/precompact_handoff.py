@@ -169,6 +169,30 @@ def run_precompact(payload):
     return 0
 
 
+def inbox_note(session_id):
+    """The owner feedback inbox's "After compaction" line (decision owner-feedback-inbox): the open
+    item ids (ruling, task, standing) from <session_id>.inbox.md, and whether `fb` capture is still
+    open. "" when there is nothing to say. Never raises: the reorient message must still print."""
+    try:
+        import feedback_gate
+        import local_time
+        paths = local_time.inbox_paths(session_id)
+        if paths is None:
+            return ""
+        note = ""
+        if os.path.exists(paths[0]):
+            with open(paths[0], encoding="utf-8") as f:
+                ids = feedback_gate.open_ids(feedback_gate.parse(f.read()))
+            if ids:
+                note += " Open feedback items: %s. Keep each in the handoff." % ", ".join(ids)
+        if os.path.exists(paths[1]):
+            note += " Feedback capture is still open: the owner has not sent `fb done`."
+        return note
+    except Exception as e:
+        sys.stderr.write("precompact_handoff: inbox note failed: %s\n" % e)
+        return ""
+
+
 def run_reorient(payload):
     session_id = payload.get("session_id", "")
     state = None
@@ -187,13 +211,13 @@ def run_reorient(payload):
         print("Context was compacted. Follow %s before anything else. Your handoff is "
               "%s. Rewrite it whole; never append. The digest is missing: use the "
               "compaction summary and the prior handoff instead. Confirm checkout and branch before any git write. Then "
-              "continue the last task." % (prompt, handoff))
+              "continue the last task.%s" % (prompt, handoff, inbox_note(session_id)))
         return 0
 
     print("Context was compacted. Follow %s before anything else. Your handoff is %s. "
           "Rewrite it whole; never append. Use the compaction summary, the digest at %s, and the prior handoff. Confirm "
-          "checkout and branch before any git write. Then continue the last task."
-          % (prompt, handoff, state.get("digest")))
+          "checkout and branch before any git write. Then continue the last task.%s"
+          % (prompt, handoff, state.get("digest"), inbox_note(session_id)))
     return 0
 
 
