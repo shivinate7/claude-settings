@@ -9,9 +9,9 @@ The owner ruled on 2026-10-07 which hooks may call a model, and on which model.
 The hook entry's own timeout in `settings.json` grows to fit the new budget. A timeout
 still reads as UNKNOWN, never as ALLOW.
 
-## Five prompt hooks
+## Six prompt hooks
 
-Five `type: prompt` hooks run on `claude-haiku-5-5`. Each one judges a rule that no script can parse.
+Six `type: prompt` hooks run on `claude-haiku-5-5`. Each one judges a rule that no script can parse.
 Each one blocks the call when it finds a breach, by owner ruling 2026-10-07. This is a trial.
 The owner reviews with the orchestrator on 2026-10-14 whether the blocks land well, and
 rules then to keep, change or remove each hook. A prompt hook
@@ -41,7 +41,7 @@ alias `haiku` (`unrecognized_model`), so every judge failed open until 2026-10-1
 Measured: `claude-haiku-5-5` runs in the headless CLI 2.1.296. When the model retires, change
 the `model` value in the judge hooks of `settings.json`, the one place.
 `lint/test_settings_matcher.py` pins it. `hooks/decision_watch.py` is a script that calls the
-CLI itself, and it keeps `haiku`.
+CLI itself, and it keeps `haiku`. Its `claude -p --model haiku` call works (measured 2026-10-13: it replied "ok"). Only the settings prompt-hook evaluator rejects the alias.
 
 Limits, named:
 
