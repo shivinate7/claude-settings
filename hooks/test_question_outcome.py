@@ -50,6 +50,12 @@ Interface the hook must match:
 - The model caller is `invoke_model` from hooks/decision_watch.py, returning (verdict, error).
 - The state file is `<CLAUDE_CONFIG_DIR>/state/question-outcome/<sha256(session_id)>.json`.
 - The model prompt is the first positional argument of `invoke_model`.
+- The judge prompt states no order for the Problem and Goal lines: no sentence that names both
+  `Problem:` and `Goal:` holds an order word. Goal-first is correct.
+- The module exposes the literals as GOAL_LABEL ("Goal:") and PROBLEM_LABEL ("Problem:"). Each
+  one is in its rule bullet in output-styles/shiv-stylisms.md.
+- A missing style file, or a missing rule anchor: the check still runs (ALLOW gives empty
+  stdout, FLAG gives a deny), and writes one stderr line that names the file or the anchor.
 - Override the module under test with the env var QUESTION_OUTCOME_UNDER_TEST.
 """
 import atexit
@@ -1240,6 +1246,127 @@ def case_g6_judge_prompt_says_a_goal_line_is_a_paraphrase_not_grounds_to_deny():
               for s in sentences), sentences[:3])
 
 
+# --------------------------------------------------------------------------- goal format, review round 1
+# No order between the Problem and Goal lines; the literals tied to the style file by module
+# constants; one stderr line when the style file or a rule anchor is missing.
+ORDER_WORD = re.compile(
+    r"\b(then|before|after|first|followed|precedes?|preceded|next|finally|order|sequence)\b", re.IGNORECASE)
+GOAL_ANCHOR_END = "options.<!-- rule:%s -->" % GOAL_RULE  # the goal bullet's last line
+PROBLEM_ANCHOR_END = "word.<!-- rule:%s -->" % PROBLEM_RULE  # the problem bullet's last line
+
+
+def case_g7_prompt_states_no_order_between_problem_and_goal():
+    name = "caseG7 prompt: no sentence naming Problem: and Goal: states an order (Goal-first is correct)"
+    if not need_module(name):
+        return
+    with model_stub(ALLOW) as stub:
+        run_main(ask_payload(fresh_session("g7"), [question(GOAL_Q, LABELS)], default_transcript()))
+    prompt = stub.prompts[0] if stub.prompts else ""
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    for sentence in re.split(r"[.;\n]", prompt):
+        if "Problem:" in sentence and "Goal:" in sentence:
+            check(name + ": no order word in a sentence that names both lines",
+                  not ORDER_WORD.search(sentence), " ".join(sentence.split())[:160])
+
+
+def case_g8_literals_are_module_constants_that_the_style_rules_hold():
+    name = "caseG8 Goal: and Problem: literals: module constants, each in its style-file rule bullet"
+    if not need_module(name):
+        return
+    with open(STYLE_PATH, encoding="utf-8") as f:
+        style = f.read()
+    for const, rule in (("GOAL_LABEL", GOAL_RULE), ("PROBLEM_LABEL", PROBLEM_RULE)):
+        literal = getattr(qo, const, None)
+        check(name + ": module has " + const, isinstance(literal, str) and literal != "",
+              "question_outcome has no %s, so the literal is not tied to its home" % const)
+        if not isinstance(literal, str) or not literal:
+            continue
+        bullet = rule_bullet(style, rule)
+        check(name + ": bullet found in the style file: " + rule, bullet != "", "")
+        check(name + ": %s is in the %s bullet" % (const, rule), literal in bullet, bullet[:90])
+
+
+def load_on(name, style_text):
+    """The hook copy on `style_text`. None, after one FAIL line, when the copy does not load."""
+    try:
+        return hook_on_style(style_text)
+    except Exception as exc:
+        check(name + ": the hook copy loads", False, "%s: %s" % (type(exc).__name__, exc))
+        return None
+
+
+def stderr_lines(err):
+    return [line for line in err.splitlines() if line.strip()]
+
+
+def judge_on_copy(mod, verdict):
+    """One ask through the hook copy `mod`, with the model stubbed to `verdict`. A crash is caught,
+    so it is one FAIL line and the run goes on. Return (stub, exit code, stdout, stderr, crashed)."""
+    with hook_as(mod), model_stub(verdict) as stub:
+        try:
+            code, out, err = run_main(ask_payload(fresh_session("s"), [question(GOAL_Q, LABELS)],
+                                                  default_transcript()))
+            return stub, code, out, err, False
+        except Exception as exc:
+            return stub, None, "", "%s: %s" % (type(exc).__name__, exc), True
+
+
+def check_style_gap(name, mod, must_name, must_not_name=None):
+    """A missing style file or anchor: the same verdict path runs (ALLOW gives an empty stdout, FLAG
+    gives a deny), and one stderr line names the gap."""
+    stub, code, out, err, crashed = judge_on_copy(mod, ALLOW)
+    lines = stderr_lines(err)
+    line = lines[0] if len(lines) == 1 else ""
+    check(name + ": no crash", not crashed, err[:160])
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": allow leaves stdout empty", out.strip() == "", out[:120])
+    check(name + ": exit 0", code in (0, None), code)
+    check(name + ": one stderr line", len(lines) == 1, lines)
+    check(name + ": the line names " + must_name, must_name in line, line)
+    if must_not_name:
+        check(name + ": the line does not name " + must_not_name, must_not_name not in line, line)
+    stub, code, out, err, crashed = judge_on_copy(mod, FLAG)
+    check(name + ": flag still denies", deny_reason(out) is not None, out[:120])
+    check(name + ": flag: one stderr line", len(stderr_lines(err)) == 1, stderr_lines(err))
+
+
+def case_g9_missing_style_file_still_judges_and_names_it_on_stderr():
+    name = "caseG9 style file missing: the check still runs, one stderr line names the file"
+    if not need_module(name):
+        return
+    mod = fixture_hook(name)
+    if mod is None:
+        return
+    os.remove(mod.STYLE_FILE)
+    check_style_gap(name, mod, "shiv-stylisms.md")
+
+
+def case_g10_missing_goal_anchor_still_judges_and_names_it_on_stderr():
+    # The decoy still quotes the goal marker in a code span. A scanner that takes any marker
+    # text, not a marker at the line's end, finds the decoy and writes no line: red.
+    name = "caseG10 restates-goal anchor missing: the check still runs, one stderr line names the anchor"
+    if not need_module(name):
+        return
+    cut = STYLE_FIXTURE.replace(GOAL_ANCHOR_END, "options.")
+    check(name + ": the fixture holds the anchor to cut", cut != STYLE_FIXTURE, "")
+    mod = load_on(name, cut)
+    if mod is None:
+        return
+    check_style_gap(name, mod, GOAL_RULE, PROBLEM_RULE)
+
+
+def case_g11_missing_problem_anchor_still_judges_and_names_it_on_stderr():
+    name = "caseG11 states-problem anchor missing: the check still runs, one stderr line names the anchor"
+    if not need_module(name):
+        return
+    cut = STYLE_FIXTURE.replace(PROBLEM_ANCHOR_END, "word.")
+    check(name + ": the fixture holds the anchor to cut", cut != STYLE_FIXTURE, "")
+    mod = load_on(name, cut)
+    if mod is None:
+        return
+    check_style_gap(name, mod, PROBLEM_RULE, GOAL_RULE)
+
+
 def main():
     cases = (case_g1_goal_line_passes_the_presence_check_and_reaches_the_model,
              case_g2_you_want_alone_is_denied_and_the_reason_names_goal,
@@ -1247,6 +1374,11 @@ def main():
              case_g4_prompt_holds_the_two_rule_bullets_of_the_real_style_file,
              case_g5_prompt_reads_the_style_file_not_a_copy,
              case_g6_judge_prompt_says_a_goal_line_is_a_paraphrase_not_grounds_to_deny,
+             case_g7_prompt_states_no_order_between_problem_and_goal,
+             case_g8_literals_are_module_constants_that_the_style_rules_hold,
+             case_g9_missing_style_file_still_judges_and_names_it_on_stderr,
+             case_g10_missing_goal_anchor_still_judges_and_names_it_on_stderr,
+             case_g11_missing_problem_anchor_still_judges_and_names_it_on_stderr,
              case_r8_stale_state_whose_remove_fails_is_ignored_and_the_ask_is_judged,
              case_r8b_fresh_state_whose_remove_fails_does_not_deny_and_says_so,
              case_r1_a_state_that_cannot_be_removed_does_not_pass_every_later_ask,
