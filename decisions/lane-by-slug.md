@@ -66,6 +66,12 @@ cite-by-id rule, for the message, body, file and title flags.
 - A tilde fence (`~~~`) is not blanked. A session number inside one is denied.
 - Any `N` plus one to three digits, as a whole word, is denied. A part code such as `N12` is
   refused. This is a false positive, named here and not fixed.
+- Thin scanner tests for heredoc_heads: no test pins a `#` inside a string, a lone apostrophe in a comment, or multi-line quoted text before a header. The code handles them.
+- No mutant covers heredoc_heads or the gh flag value roles.
+- guard_core._split_heredocs reads a quoted or commented `<<X`, or a here-string `<<<word`, as a real heredoc, and strips later lines, so no rule sees them. Example: `cat <<<word`, then a newline, then a commit naming N20, is allowed. This is shared guard code; lane guard-command-position.
+- An unquoted `<<word` in an interpreter-fed heredoc body, such as `x = 1 << y`, or a `case` `)` inside `$(`, shifts the header count.
+- A piped body (`echo ... | gh pr create -F -`) is not read.
+- In gh, `-m` is a milestone or merge flag, never a message. `gh pr create -m N20` is allowed.
 
 ## What reopens it
 
