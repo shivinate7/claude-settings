@@ -72,20 +72,18 @@ cannot exit on a field in code.
 Holes, named:
 
 - Old counter files are not removed. Cause: no code purges `state/`. Effect: one file of at most
-  70 bytes stays per session. Fix: delete counter files older than a set age.
-- Lost updates under parallel calls of one session. Cause: two calls read and write the count at
-  once. Effect: a measured stress of 4 threads by 300 calls ended at 30 of 1200. It errs toward
-  judging, and real Stops of one session come seconds apart. Fix: hold a file lock across the
-  read and the write.
-- A failed remove after a failed write. Cause: the remove also fails. Effect: the count stays
-  frozen, and the judge skips silently. Unmeasured in practice. Fix: judge the Stop when the
-  remove fails.
+  70 bytes stays per session. Fix: none named yet.
+- Lost updates. Cause: heavy parallel calls of one session. Effect: a measured stress of 4 threads
+  by 300 calls ended at 30 of 1200. It errs toward judging. Real Stops of one session come seconds
+  apart. Fix: none named yet.
+- Frozen count after a failed remove. Cause: the remove after a failed write also fails. Effect:
+  the count stays frozen, and the judge skips silently. Unmeasured in practice. Fix: none named yet.
 - Session key copied. Cause: the session key line is copied from
   `decision_watch._seen_store_path`, with no stated reason. Rule `building-one-home-per-capability`
-  (one home per capability) asks for one. Effect: the two copies can drift apart. Fix: one shared
-  helper that both call.
-- Stop with no reply text. Cause: the counter moves only on Stops that carry a reply. Effect: such
-  a Stop neither counts nor judges. Fix: count every Stop, or record the skip as intended.
+  (one home per capability) asks for a stated reason. Effect: the key line lives in two places.
+  Fix: a shared helper that both call.
+- Stop with no reply text. Cause: the counter counts only Stops that carry a reply. Effect: such a
+  Stop neither counts nor judges. Fix: none named yet.
 
 ## Judge model
 
