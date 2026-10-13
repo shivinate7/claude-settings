@@ -118,8 +118,9 @@ SUITE_FOR_TARGET = {
 # mutant per PROTECTION, not per line: the seven refusals, the keep rule in both directions, the
 # only-copy remote-contains test, the pid-vs-start-time liveness read, the tombstone's write
 # order, the purge's age source, and the --confirm gate. `target` says which file's copy carries
-# the anchor: "sweep" for janitor/sweep.py's own code, "guard" for the hooks/guard.py primitive
-# sweep.py calls and never re-implements (see the module docstring above).
+# the anchor: "sweep" for janitor/sweep.py's own code, "guard" or "guard_<name>" for the guard
+# module that holds the primitive sweep.py calls and never re-implements (see the module docstring
+# above).
 MUTATIONS = [
     # ---- the seven refusals (plan, "the refusals") ----
     ("refusal: the protected prefix never keeps a branch",
@@ -319,7 +320,7 @@ MUTATIONS = [
 
     # ---- the keep rule, both directions (plan, "Phase 2") ----
     ("keep rule: the ancestry test never proves a branch empty",
-     "guard",
+     "guard_core",
      '    answer = _git(where, "merge-base", "--is-ancestor", branch, base)\n'
      '    if answer is None:\n'
      '        return None\n'
@@ -334,7 +335,7 @@ MUTATIONS = [
      '    return False',
      "test_ancestor_reaps"),
     ("keep rule: the git-cherry patch test never proves a branch empty",
-     "guard",
+     "guard_core",
      '    answer = _git(where, "cherry", base, branch)\n'
      '    if answer is None or answer.returncode != 0:\n'
      '        return None\n'
@@ -347,7 +348,7 @@ MUTATIONS = [
 
     # ---- the only-copy rule (plan, "Phase 2") ----
     ("only-copy: stop asking whether a remote carries the branch",
-     "guard",
+     "guard_core",
      '    answer = _git(\n'
      '        where, "for-each-ref", "--contains", branch, "--format=%(refname)", "refs/remotes"\n'
      '    )\n'
@@ -364,7 +365,7 @@ MUTATIONS = [
 
     # ---- the liveness test (plan, "Phase 2") ----
     ("liveness: match the process id alone, ignore the recorded start time",
-     "guard",
+     "guard_core",
      '    if not isinstance(record, dict):\n'
      '        return False\n'
      '    pid = record.get("pid")\n'
@@ -1074,7 +1075,7 @@ MUTATIONS = [
      "test_only_a_preview_caches_and_the_guard_reads_come_back_after"),
     ("preview cache: the guard reads stay wrapped after the run",
      "sweep",
-     '        guard._git, guard.session_records = real_git, real_records',
+     '        guard_core._git, guard_core.session_records = real_git, real_records',
      '        pass',
      "test_only_a_preview_caches_and_the_guard_reads_come_back_after"),
     ("preview cache: a read is never stored",
@@ -1084,8 +1085,8 @@ MUTATIONS = [
      "test_cwd_table_is_read_once_per_preview_and_never_outside_one"),
     ("preview cache: the cache is not cleared after the run",
      "sweep",
-     '        _RUN = None\n        guard._git, guard.session_records = real_git, real_records',
-     '        pass\n        guard._git, guard.session_records = real_git, real_records',
+     '        _RUN = None\n        guard_core._git, guard_core.session_records = real_git, real_records',
+     '        pass\n        guard_core._git, guard_core.session_records = real_git, real_records',
      "test_cwd_table_is_read_once_per_preview_and_never_outside_one"),
     ("preview cache: every git read is cached, not only the worktree list",
      "sweep",
@@ -1099,8 +1100,8 @@ MUTATIONS = [
      "test_worktree_list_is_read_once_per_repository_and_other_git_reads_are_not_cached"),
     ("preview cache: the session records are read every time",
      "sweep",
-     '    guard.session_records = lambda: _memo("sessions", real_records)',
-     '    guard.session_records = real_records',
+     '    guard_core.session_records = lambda: _memo("sessions", real_records)',
+     '    guard_core.session_records = real_records',
      "test_session_records_are_read_once_per_preview"),
     ("preview cache: a failed ps table reads as an empty table",
      "sweep",
