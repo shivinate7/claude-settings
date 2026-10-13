@@ -81,6 +81,7 @@ class FakeHost:
         self.checks, self.refuse, self.on_wait = (True, ""), None, None
         self.head_override, self.mergeable = None, "MERGEABLE"
         self.pr_state = "OPEN"
+        self.draft = False
         self.base, self.base_seq = "main", None  # base_seq: one base per pr() read, the last one repeats
         self.waits, self.seq, self.state = [], None, "green"  # waits: (sha, prior) per call; seq: scripted results, then self.checks
 
@@ -88,7 +89,7 @@ class FakeHost:
         head = merge.origin_head(self.root, self.branch)
         base = (self.base_seq.pop(0) if len(self.base_seq) > 1 else self.base_seq[0]) if self.base_seq else self.base
         return {"head": self.head_override or head, "branch": self.branch, "base": base, "state": self.pr_state,
-                "mergeable": self.mergeable, "merge_state": "CLEAN", "draft": False}
+                "mergeable": self.mergeable, "merge_state": "CLEAN", "draft": self.draft}
 
     def required_names(self):
         return ["gates"]
@@ -1537,11 +1538,22 @@ class GhHalf(Env):
         self.assertNotIn("pr merge", self.calls())
         self.assertNotIn("Traceback", out)
 
-    def test_a_draft_pr_is_refused_at_preview_before_any_claim_or_wait(self):
+    def test_a_draft_pr_previews_with_the_undo_check_and_claims_nothing_or_waits(self):  # re-pointed: a draft is a preview now
         self.set(draft=True)
         before = self.refs()
-        rc, out = self.run_merge("7", host=self.gh_host())
-        self.assert_draft_refused(rc, out, before)
+        real, seen = merge.undo_check, []
+        def spy(wt, base_ref, unknown_ok=""):
+            seen.append((base_ref, sh(wt, "git", "rev-parse", "HEAD")))  # the check runs on the PR head's worktree
+            return real(wt, base_ref, unknown_ok)
+        with unittest.mock.patch.object(merge, "undo_check", spy):
+            rc, out = self.run_merge("7", host=self.gh_host())
+        self.assertEqual(rc, 0, out)
+        self.assertIn("draft", out.lower())
+        self.assertEqual(seen, [("origin/main", self.head("feat"))])
+        self.assertEqual(self.refs(), before)  # no claim pushed
+        self.assertEqual(self.ticks, 0, "waited on a draft")
+        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn("Traceback", out)
 
     def test_a_pr_that_turns_draft_after_the_preview_read_is_refused_at_confirm(self):  # guard: green once merge.py checks draft under the lock
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=["gates"]))))  # complete: no defaults notice in the output
@@ -1859,6 +1871,63 @@ class SilentUndo(Env):
         self.assertEqual(rc, 1)
         self.assertEqual(self.claims(), 0)
         self.assertFalse(getattr(self.host, "merged", False))
+
+
+class DraftPreview(Env):
+    """`merge <pr>` with no --confirm: a draft is previewed, not refused. The silent-undo check runs on the head
+    in every preview. A closed or merged PR is refused, and the check never runs on it."""
+
+    def test_a_draft_preview_reports_a_dropped_line(self):
+        SilentUndo.stale_feat(self)
+        self.host.draft = True
+        before = self.refs()
+        rc, out = self.run_merge("7")  # the exit code is not pinned here: see the report
+        self.assertIn("silently undoes", out)
+        self.assertIn("first.md", out)
+        self.assertIn("draft", out.lower())
+        self.assertEqual(self.refs(), before)
+        self.assertFalse(self.lock_ref())
+        self.assertEqual(self.host.waits, [])
+        self.assertEqual(self.worktrees(), 1)
+
+    def test_a_ready_preview_reports_a_dropped_line(self):  # today preview never runs the check at all
+        SilentUndo.stale_feat(self)
+        before = self.refs()
+        rc, out = self.run_merge("7")
+        self.assertIn("silently undoes", out)
+        self.assertIn("first.md", out)
+        self.assertEqual(self.refs(), before)
+        self.assertFalse(self.lock_ref())
+        self.assertEqual(self.host.waits, [])
+
+    def test_a_clean_draft_preview_passes_and_names_the_draft(self):
+        self.host.draft = True
+        before = self.refs()
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("PREVIEW", out)
+        self.assertIn("Nothing was pressed", out)
+        self.assertIn("draft", out.lower())
+        self.assertNotIn("silently undoes", out)
+        self.assertEqual(self.refs(), before)
+        self.assertFalse(self.lock_ref())
+        self.assertEqual(self.host.waits, [])
+
+    def test_a_closed_or_merged_pr_is_refused_at_preview_and_the_check_never_runs(self):  # control: green today
+        real, calls = merge.undo_check, []
+        def spy(wt, base_ref, unknown_ok=""):
+            calls.append(base_ref)
+            return real(wt, base_ref, unknown_ok)
+        before = self.refs()
+        with unittest.mock.patch.object(merge, "undo_check", spy):
+            for state in ("CLOSED", "MERGED"):
+                self.host.pr_state = state
+                rc, out = self.run_merge("7")
+                self.assertEqual(rc, 1, out)
+                self.assertIn("the pull request is " + state, out)
+        self.assertEqual(calls, [])
+        self.assertEqual(self.refs(), before)
+
 
 class StampEnv(unittest.TestCase):
     def test_the_stamp_child_never_sees_the_runners_ref(self):
