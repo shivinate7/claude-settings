@@ -9,11 +9,18 @@ Pinned contract (the spec lives here until the builder lands the module):
 - unreadable counts lines with fewer than 4 tab fields or a bad timestamp, window-independent.
   Field 5 is everything after the 4th tab, so extra tabs stay in the matched text.
 - main() returns 0 and prints render(...). A missing log prints "unreadable: log not found".
+- Session column (owner ruling: guard.log gets a session_id column): a line with six tab fields
+  carries the hook's session_id as field 6, last. A line with five fields, or a "-" in field 6,
+  reads as "unknown session". --session <id> keeps the lines of one session, exact match.
+  --by-session prints counts per session, by rule and decision. The session value is a label
+  only: it never changes a decision, a rule, or the other list.
+- One reader: no file outside this one may parse guard.log lines. OneReaderTests checks it.
 
 Run with:
 
     python3 lint/test_guard_log_report.py -v
 """
+import ast
 import contextlib
 import io
 import os
@@ -147,6 +154,273 @@ class MainTests(unittest.TestCase):
                 rc, out = run_main([])
         self.assertEqual(rc, 0)
         self.assertIn("| config-dir-rule | 1 | 0 | 0 |", out)
+
+
+# ----------------------------------------------------------- the session column (red until built)
+#
+# Six fields: time, tool, decision, rule, matched, session. Session is LAST, so every old reader
+# keeps its index 0..4. The writer folds whitespace in matched, so matched never holds a tab.
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+READER = "lint/guard_log_report.py"
+SID = "9f2c4e1a-7b3d-4c8e-9a10-5d6e7f8a9b0c"
+OTHER_SID = "4d1e2f3a-0b9c-4d8e-8f7a-6b5c4d3e2f1a"
+UNKNOWN = "unknown session"
+BY_SESSION_HEADER = "| session | rule | deny | ask | noted |"
+OLD_ONLY = [
+    "2026-10-11T09:00:00\tBash\tdeny\tshared-tree\tgit stash",
+    "2026-10-11T10:00:00\tBash\tdeny\tshared-tree\tgit reset --hard",
+    "2026-10-11T10:30:00\tBash\task\tmerge-main\tgh pr merge 5",
+    "2026-10-09T09:00:00\tBash\tnoted\tmerge-main\tgh pr merge 6",
+    "2026-10-09T11:00:00\tBash\treverted\tshared-tree\tgit stash drop",
+]
+# Byte-exact render of OLD_ONLY at NOW, captured from the reader before the session column landed.
+GOLDEN_OLD_ONLY = "\n".join([
+    "| rule | deny | ask | noted |",
+    "|---|---|---|---|",
+    "| shared-tree | 2 | 0 | 0 |",
+    "| merge-main | 0 | 1 | 1 |",
+    "",
+    "| day | denies |",
+    "|---|---|",
+    "| 2026-10-05 | 0 |",
+    "| 2026-10-06 | 0 |",
+    "| 2026-10-07 | 0 |",
+    "| 2026-10-08 | 0 |",
+    "| 2026-10-09 | 0 |",
+    "| 2026-10-10 | 0 |",
+    "| 2026-10-11 | 2 |",
+    "",
+    "```",
+    "2026-10-09T11:00:00\tBash\treverted\tshared-tree\tgit stash drop",
+    "```",
+    "",
+    "unreadable: 0",
+])
+
+
+def session_line(stamp, decision, rule, matched, session):
+    return "\t".join([stamp, "Bash", decision, rule, matched, session])
+
+
+def hours_ago(now, hours):
+    return (now - timedelta(hours=hours)).isoformat(timespec="seconds")
+
+
+def session_fixture(now):
+    """Six lines: two of SID, one of OTHER_SID, one old five-field line, one placeholder line."""
+    return [
+        session_line(hours_ago(now, 1), "deny", "shared-tree", "git stash", SID),
+        session_line(hours_ago(now, 2), "deny", "shared-tree", "git reset --hard", SID),
+        session_line(hours_ago(now, 3), "ask", "merge-main", "gh pr merge 5", SID),
+        session_line(hours_ago(now, 4), "noted", "merge-main", "gh pr merge 6", OTHER_SID),
+        "\t".join([hours_ago(now, 5), "Bash", "deny", "shared-tree", "git checkout f.py"]),
+        session_line(hours_ago(now, 6), "deny", "shared-tree", "git restore f.py", "-"),
+    ]
+
+
+EXPECTED_BY_SESSION = {
+    (SID, "shared-tree", 2, 0, 0),
+    (SID, "merge-main", 0, 1, 0),
+    (OTHER_SID, "merge-main", 0, 0, 1),
+    (UNKNOWN, "shared-tree", 2, 0, 0),  # the five-field line and the "-" line
+}
+
+
+def write_log(path, lines, crlf=False):
+    """Write lines with no ending on the last one, LF or CRLF between them."""
+    with open(path, "w", encoding="utf-8", newline="") as handle:
+        handle.write(("\r\n" if crlf else "\n").join(lines))
+    return path
+
+
+def by_session_rows(out):
+    """Return the data rows of the by-session table as (session, rule, deny, ask, noted)."""
+    rows = set()
+    inside = False
+    for line in out.splitlines():
+        if line == BY_SESSION_HEADER:
+            inside = True
+            continue
+        if not inside:
+            continue
+        if not line.startswith("|"):
+            break
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) == 5 and all(cell.isdigit() for cell in cells[2:]):
+            rows.add((cells[0], cells[1], int(cells[2]), int(cells[3]), int(cells[4])))
+    return rows
+
+
+class SessionColumnReadTests(unittest.TestCase):
+    def test_counts_match_the_same_lines_without_the_column(self):
+        lines = session_fixture(NOW)
+        bare = ["\t".join(line.split("\t")[:5]) for line in lines]
+        with_column = glr.summarize(lines, 7, NOW)
+        without = glr.summarize(bare, 7, NOW)
+        self.assertEqual(with_column["by_rule"], without["by_rule"])
+        self.assertEqual(with_column["per_day"], without["per_day"])
+        self.assertEqual(with_column["unreadable"], without["unreadable"])
+
+    def test_session_value_is_a_label_never_a_decision_or_a_rule(self):
+        lines = [
+            session_line("2026-10-11T09:00:00", "deny", "shared-tree", "git stash", "deny"),
+            session_line("2026-10-11T10:00:00", "noted", "shared-tree", "git stash", "shared-tree"),
+            session_line("2026-10-11T10:30:00", "ask", "merge-main", "gh pr merge 5", "ask"),
+            session_line("2026-10-11T11:00:00", "reverted", "shared-tree", "git stash drop", "noted"),
+        ]
+        s = glr.summarize(lines, 7, NOW)
+        self.assertEqual(s["by_rule"], {
+            "shared-tree": {"deny": 1, "ask": 0, "noted": 1},
+            "merge-main": {"deny": 0, "ask": 1, "noted": 0},
+        })
+        self.assertEqual(s["other"], [lines[3]])  # the reverted line, verbatim, once
+
+    def test_old_only_output_is_byte_identical(self):
+        self.assertEqual(glr.render(glr.summarize(OLD_ONLY, 7, NOW)), GOLDEN_OLD_ONLY)
+
+    def test_crlf_old_only_matches_lf_and_counts_a_partial_last_line(self):
+        now = datetime.now().replace(microsecond=0)
+        lines = [
+            "\t".join([hours_ago(now, 1), "Bash", "deny", "shared-tree", "git stash"]),
+            "\t".join([hours_ago(now, 2), "Bash", "deny", "shared-tree", "git reset --hard"]),
+            "\t".join([hours_ago(now, 3), "Bash", "ask", "merge-main", "gh pr merge 5"]),
+            "\t".join([hours_ago(now, 4), "Bash", "deny", "shared-tree", "git st"]),  # no ending
+        ]
+        with tempfile.TemporaryDirectory() as folder:
+            lf = write_log(os.path.join(folder, "lf.log"), lines)
+            crlf = write_log(os.path.join(folder, "crlf.log"), lines, crlf=True)
+            rc_lf, out_lf = run_main(["--log", lf, "--days", "7"])
+            rc_crlf, out_crlf = run_main(["--log", crlf, "--days", "7"])
+        self.assertEqual((rc_lf, rc_crlf), (0, 0))
+        self.assertEqual(out_crlf, out_lf)
+        self.assertIn("| shared-tree | 3 | 0 | 0 |", out_crlf)  # the partial line counts
+
+
+class SessionFilterTests(unittest.TestCase):
+    def test_session_filter_keeps_one_session(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = write_log(os.path.join(folder, "guard.log"), session_fixture(datetime.now()))
+            rc, out = run_main(["--log", path, "--session", SID, "--days", "7"])
+        self.assertEqual(rc, 0)
+        self.assertIn("| shared-tree | 2 | 0 | 0 |", out)  # the unfiltered count is 4
+        self.assertIn("| merge-main | 0 | 1 | 0 |", out)
+        self.assertNotIn("| shared-tree | 4 | 0 | 0 |", out)
+        self.assertNotIn("| merge-main | 0 | 1 | 1 |", out)  # OTHER_SID's noted line is out
+
+    def test_session_filter_is_an_exact_match(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = write_log(os.path.join(folder, "guard.log"), session_fixture(datetime.now()))
+            rc, out = run_main(["--log", path, "--session", SID[:8], "--days", "7"])
+        self.assertEqual(rc, 0)
+        self.assertNotIn("| shared-tree |", out)  # a prefix of the id matches no line
+        self.assertNotIn("| merge-main |", out)
+
+    def test_crlf_session_filter_keeps_one_session_and_skips_the_partial_line(self):
+        now = datetime.now().replace(microsecond=0)
+        lines = [
+            session_line(hours_ago(now, 1), "deny", "shared-tree", "git stash", SID),
+            session_line(hours_ago(now, 2), "deny", "shared-tree", "git stash", OTHER_SID),
+            "\t".join([hours_ago(now, 3), "Bash", "deny", "shared-tree", "git stash"]),
+            "\t".join([hours_ago(now, 4), "Bash", "deny", "shared-tree", "git st"]),  # no ending
+        ]
+        with tempfile.TemporaryDirectory() as folder:
+            path = write_log(os.path.join(folder, "guard.log"), lines, crlf=True)
+            rc, out = run_main(["--log", path, "--session", SID, "--days", "7"])
+        self.assertEqual(rc, 0)
+        self.assertIn("| shared-tree | 1 | 0 | 0 |", out)  # one SID line, not 4, not 3
+
+
+class SessionBySessionTests(unittest.TestCase):
+    def test_by_session_counts_per_session_rule_and_decision(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = write_log(os.path.join(folder, "guard.log"), session_fixture(datetime.now()))
+            rc, out = run_main(["--log", path, "--by-session", "--days", "7"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(by_session_rows(out), EXPECTED_BY_SESSION)
+
+    def test_session_value_shaped_like_a_rule_or_decision_is_a_label(self):
+        now = datetime.now()
+        lines = [
+            session_line(hours_ago(now, 1), "deny", "shared-tree", "git stash", "deny"),
+            session_line(hours_ago(now, 2), "noted", "shared-tree", "git stash", "shared-tree"),
+            session_line(hours_ago(now, 3), "ask", "merge-main", "gh pr merge 5", "ask"),
+            session_line(hours_ago(now, 4), "reverted", "shared-tree", "git stash drop", "noted"),
+        ]
+        with tempfile.TemporaryDirectory() as folder:
+            path = write_log(os.path.join(folder, "guard.log"), lines)
+            rc, out = run_main(["--log", path, "--by-session", "--days", "7"])
+        self.assertEqual(rc, 0)
+        # The reverted line is `other`, so the session "noted" has no counted row.
+        self.assertEqual(by_session_rows(out), {
+            ("deny", "shared-tree", 1, 0, 0),
+            ("shared-tree", "shared-tree", 0, 0, 1),
+            ("ask", "merge-main", 0, 1, 0),
+        })
+
+
+def reads_guard_log(source):
+    """True when this Python source reads guard.log lines: a string names guard.log, and a call
+    splits text on a tab. The parser reads the code, so a mention in a comment or a docstring does
+    not count, and a tab or a quote inside a string is data, not a token.
+    """
+    tree = ast.parse(source)
+    docstrings = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            first = node.body[0] if node.body else None
+            if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
+                    and isinstance(first.value.value, str)):
+                docstrings.add(id(first.value))
+    names_log = False
+    splits_tab = False
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                and id(node) not in docstrings and "guard.log" in node.value):
+            names_log = True
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "split" and node.args
+                and isinstance(node.args[0], ast.Constant) and node.args[0].value == "\t"):
+            splits_tab = True
+    return names_log and splits_tab
+
+
+def guard_log_readers(folders=("hooks", "lint")):
+    """Return the repo files, outside test files, that read guard.log lines."""
+    found = []
+    for folder in folders:
+        base = os.path.join(REPO_ROOT, folder)
+        for name in sorted(os.listdir(base)):
+            if not name.endswith(".py") or name.startswith("test_"):
+                continue
+            with open(os.path.join(base, name), encoding="utf-8") as handle:
+                if reads_guard_log(handle.read()):
+                    found.append(folder + "/" + name)
+    return found
+
+
+class OneReaderTests(unittest.TestCase):
+    # The scanner is ast-based. These cases pin it on the shapes a text scanner gets wrong.
+    def test_scanner_finds_a_real_reader(self):
+        self.assertTrue(reads_guard_log('LOG = "guard.log"\nfields = line.split("\\t")\n'))
+
+    def test_scanner_ignores_a_comment_opener_inside_a_string(self):
+        self.assertFalse(reads_guard_log('PREFIX = "# "\nLOG = "guard.log"\nparts = t.split(",")\n'))
+        self.assertTrue(reads_guard_log('OPEN = "/*"\nLOG = "guard.log"\nf = x.split("\\t")\n'))
+
+    def test_scanner_ignores_a_multi_line_string_that_only_describes_a_read(self):
+        source = 'DOC = """\nRead guard.log, then line.split("\\t").\n"""\n'
+        self.assertFalse(reads_guard_log(source))
+
+    def test_scanner_ignores_a_lone_quote_in_text(self):
+        self.assertFalse(reads_guard_log('def f(line):\n    """Don\'t parse guard.log here."""\n'
+                                         '    return line\n'))
+        self.assertTrue(reads_guard_log('LOG = "guard.log"\nNOTE = "Don\'t"\n'
+                                        'f = line.split("\\t")\n'))
+
+    def test_only_the_reader_parses_guard_log_lines(self):
+        others = [name for name in guard_log_readers() if name != READER]
+        self.assertEqual(others, [], "files other than the one reader parse guard.log lines")
 
 
 if __name__ == "__main__":

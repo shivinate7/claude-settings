@@ -81,6 +81,7 @@ FAMILIES = {
     "mask-script": "mask_script lexemes",
     "simulator": "the simulator boot and hold rules",
     "rm-var": "every case named rm-var, wherever it sits",
+    "session-log": "the session id column of guard.log",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -91,7 +92,9 @@ FAMILY = "misc"  # set at each section header below
 
 
 def _family(name):
-    """The family a case or a log check takes: rm-var by name, else the section's FAMILY."""
+    """The family a case or a log check takes: session-log and rm-var by name, else FAMILY."""
+    if name.startswith("session-log:"):
+        return "session-log"
     return "rm-var" if "rm-var" in name else FAMILY
 
 
@@ -6298,8 +6301,8 @@ def log_case():
     if len(lines) != 1:
         return False, "expected one line, found %d" % len(lines)
     fields = lines[0].split("\t")
-    if len(fields) != 5:
-        return False, "expected five tab-separated fields, found %d" % len(fields)
+    if len(fields) != 6:
+        return False, "expected six tab-separated fields, found %d" % len(fields)
     if fields[2] != "deny" or fields[3] != "machine-wide-kill":
         return False, "the line names %r and %r" % (fields[2], fields[3])
     return True, "one line, and nothing for the allow"
@@ -6342,7 +6345,7 @@ def config_edit_log_case():
         return False, "expected three lines, found %d" % len(lines)
     for line in lines:
         fields = line.split("\t")
-        if len(fields) != 5 or fields[2] != "noted" or fields[3] != "config-edit":
+        if len(fields) != 6 or fields[2] != "noted" or fields[3] != "config-edit":
             return False, "line does not read noted/config-edit: %r" % line
     return True, "three noted lines, one per config edit"
 
@@ -6387,7 +6390,7 @@ def cap_log_case():
     if len(asks) != 2:
         return False, "expected two ask lines, found %d of %d" % (len(asks), len(lines))
     for fields in asks:
-        if len(fields) != 5 or OPUS not in fields[4] or "settings" not in fields[4]:
+        if len(fields) != 6 or OPUS not in fields[4] or "settings" not in fields[4]:
             return False, "the log line does not carry the file and the value: %r" % fields[-1:]
     return True, "two ask lines, each naming the file and the model"
 
@@ -6510,7 +6513,7 @@ def crash_log_case():
     if not os.path.exists(path):
         return False, "no crash line was logged"
     fields = open(path, encoding="utf-8").read().strip().split("\t")
-    if len(fields) != 5 or fields[2:4] != ["crash", "guard-crash"] or "ZeroDivisionError" not in fields[4]:
+    if len(fields) != 6 or fields[2:4] != ["crash", "guard-crash"] or "ZeroDivisionError" not in fields[4]:
         return False, "unexpected crash line: %r" % fields
     return True, "allowed, and one crash line logged"
 
@@ -6580,7 +6583,7 @@ def subject_unread_log_case(command=None, expect_note=True):
     if len(lines) != 1:
         return False, "expected one line, found %d" % len(lines)
     fields = lines[0].split("\t")
-    if len(fields) != 5 or fields[2] != "noted" or fields[3] != "subject-unread":
+    if len(fields) != 6 or fields[2] != "noted" or fields[3] != "subject-unread":
         return False, "line does not read noted/subject-unread: %r" % lines[0]
     if ("worktree remove" if command else "reset") not in fields[4]:
         return False, "the line does not carry the matched command: %r" % fields[4]
@@ -6627,7 +6630,7 @@ def agent_worktree_noted_case(command):
     if len(lines) != 1:
         return False, "expected one line, found %d: %r" % (len(lines), lines)
     fields = lines[0].split("\t")
-    if len(fields) != 5 or fields[2] != "noted" or fields[3] != "shared-tree":
+    if len(fields) != 6 or fields[2] != "noted" or fields[3] != "shared-tree":
         return False, "line does not read noted/shared-tree: %r" % lines[0]
     return True, "one noted/shared-tree line, allowed not asked"
 
@@ -6689,7 +6692,7 @@ def branch_base_unread_log_case():
     if len(lines) != 1:
         return False, "expected one line, found %d" % len(lines)
     fields = lines[0].split("\t")
-    if len(fields) != 5 or fields[2] != "noted" or fields[3] != "subject-unread":
+    if len(fields) != 6 or fields[2] != "noted" or fields[3] != "subject-unread":
         return False, "line does not read noted/subject-unread: %r" % lines[0]
     if "branch" not in fields[4]:
         return False, "the line does not carry the matched command: %r" % fields[4]
@@ -8035,6 +8038,229 @@ def split_cache_power_shell_case():
 
 LOG_CHECKS_EXTRA.append(("split cache: the PowerShell flag is part of the split, not only the command",
                          split_cache_power_shell_case))
+
+
+# --------------------------------------------------------------------------- session-log
+#
+# guard.log gets ONE column for the hook's session_id, LAST, after the matched text. The five
+# columns before it keep their index, so a reader that splits by tab reads what it read before.
+# The id comes from the hook input alone; the environment is never read. A missing, empty,
+# non-string or blank id writes SESSION_LOG_PLACEHOLDER. A control character is stripped, and the
+# id is capped at 64 characters. The writer never raises, and a log that cannot land never changes
+# the verdict.
+
+SESSION_LOG_ID = "9f2c4e1a-7b3d-4c8e-9a10-5d6e7f8a9b0c"
+SESSION_LOG_ENV_ID = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+SESSION_LOG_PLACEHOLDER = "-"
+SESSION_LOG_ABSENT = object()  # a payload with no session_id key at all
+SESSION_LOG_DENY = {"tool_name": "Bash", "tool_input": {"command": "pkill -f node"}}
+
+
+def _session_log_run(folder, body, extra_env=None):
+    """Run the guard once on a raw payload string, with CLAUDE_CONFIG_DIR set to `folder`."""
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env.update(extra_env or {})
+    return subprocess.run([sys.executable, GUARD], input=body, capture_output=True, text=True,
+                          env=env, timeout=60)
+
+
+def _session_log_rows(folder):
+    """Return the lines of folder's guard.log, or None when no file exists. The text is read the
+    way the report reads it: universal newlines, so CRLF comes back as LF."""
+    path = os.path.join(folder, "guard.log")
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read()
+    if text.endswith("\n"):
+        text = text[:-1]
+    return text.split("\n")
+
+
+def _session_log_payload(session):
+    """The deny payload, carrying `session` as its session_id. SESSION_LOG_ABSENT means no key."""
+    body = dict(SESSION_LOG_DENY, cwd=ROOT)
+    if session is not SESSION_LOG_ABSENT:
+        body["session_id"] = session
+    return json.dumps(body)
+
+
+def _session_log_fresh(name):
+    folder = os.path.join(ROOT, name)
+    shutil.rmtree(folder, ignore_errors=True)
+    os.makedirs(folder)
+    return folder
+
+
+def session_log_each_decision_case():
+    """session-log: every decision line ends in the hook's session_id.
+
+    Three calls under one session id: a deny (a machine-wide kill), an allow that writes nothing
+    (git status), and a noted line (a project config edit). The two decision lines must each have
+    six tab fields, and the sixth must be the id.
+    """
+    folder = _session_log_fresh("sessionlog-each")
+    bodies = [
+        dict(SESSION_LOG_DENY, cwd=ROOT, session_id=SESSION_LOG_ID),
+        {"tool_name": "Bash", "tool_input": {"command": VCS + " status"}, "cwd": ROOT,
+         "session_id": SESSION_LOG_ID},
+        {"tool_name": "Edit", "tool_input": {"file_path": PROJ_SETTINGS}, "cwd": ROOT,
+         "session_id": SESSION_LOG_ID},
+    ]
+    for body in bodies:
+        run = _session_log_run(folder, json.dumps(body))
+        if run.returncode != 0:
+            return False, "guard exited %d" % run.returncode
+    rows = _session_log_rows(folder)
+    if rows is None:
+        return False, "no guard.log was written"
+    if len(rows) != 2:
+        return False, "expected two lines (one deny, one noted), found %d" % len(rows)
+    for row in rows:
+        fields = row.split("\t")
+        if len(fields) != 6:
+            return False, "expected six tab fields, found %d: %r" % (len(fields), row)
+        if fields[5] != SESSION_LOG_ID:
+            return False, "the last field is %r, want the hook's session_id" % fields[5]
+    return True, "a deny and a noted line, each ending in the hook's session_id"
+
+
+# (label, session_id as the hook sends it, the last field the log must hold)
+SESSION_LOG_COLUMN_CASES = (
+    ("no session_id key", SESSION_LOG_ABSENT, SESSION_LOG_PLACEHOLDER),
+    ("empty string", "", SESSION_LOG_PLACEHOLDER),
+    ("integer", 12345, SESSION_LOG_PLACEHOLDER),
+    ("list", ["x"], SESSION_LOG_PLACEHOLDER),
+    ("null", None, SESSION_LOG_PLACEHOLDER),
+    ("tab inside", "abc\tdef", "abcdef"),
+    ("newline inside", "ghi\njkl", "ghijkl"),
+    ("only control characters", "\t\r\n", SESSION_LOG_PLACEHOLDER),
+    ("exactly 64 characters", "t" * 64, "t" * 64),
+    ("300 characters", "s" * 300, "s" * 64),
+)
+
+
+def session_log_column_case():
+    """session-log: the column is the placeholder, or the id with control characters stripped and
+    capped at 64. Each case is one deny: the deny must still print, and exactly one six-field line
+    must land, never a second line and never a line broken by the id.
+    """
+    for index, (label, session, want) in enumerate(SESSION_LOG_COLUMN_CASES):
+        folder = _session_log_fresh("sessionlog-col-%d" % index)
+        run = _session_log_run(folder, _session_log_payload(session))
+        if run.returncode != 0:
+            return False, "%s: guard exited %d" % (label, run.returncode)
+        if not run.stdout.strip():
+            return False, "%s: the deny was not printed" % label
+        rows = _session_log_rows(folder)
+        if rows is None or len(rows) != 1:
+            return False, "%s: expected one line, found %s" % (
+                label, "none" if rows is None else len(rows))
+        fields = rows[0].split("\t")
+        if len(fields) != 6:
+            return False, "%s: expected six tab fields, found %d: %r" % (label, len(fields), rows[0])
+        if fields[5] != want:
+            return False, "%s: the last field is %r, want %r" % (label, fields[5], want)
+    return True, "%d session values: placeholder, or stripped and capped, one line each" % (
+        len(SESSION_LOG_COLUMN_CASES))
+
+
+def session_log_env_case():
+    """session-log: the column comes from the hook input only. A payload with no session_id writes
+    the placeholder even when the environment names a session, because an environment value can
+    belong to a parent session.
+    """
+    folder = _session_log_fresh("sessionlog-env")
+    run = _session_log_run(folder, _session_log_payload(SESSION_LOG_ABSENT),
+                           extra_env={"CLAUDE_CODE_SESSION_ID": SESSION_LOG_ENV_ID})
+    if not run.stdout.strip():
+        return False, "the deny was not printed"
+    rows = _session_log_rows(folder)
+    if rows is None or len(rows) != 1:
+        return False, "expected one line, found %s" % ("none" if rows is None else len(rows))
+    fields = rows[0].split("\t")
+    if len(fields) != 6 or fields[5] != SESSION_LOG_PLACEHOLDER:
+        return False, "the last field is %r, want the placeholder %r" % (
+            fields[-1], SESSION_LOG_PLACEHOLDER)
+    return True, "the placeholder, not the environment's session id"
+
+
+def session_log_writer_case():
+    """session-log: the writer, called as today with no session argument, writes one six-field line
+    that ends in the placeholder. The config folder is patched on sys.modules["guard_core"], the
+    module the writer reads it from. guard.py only re-exports the name, so a patch on guard would
+    never reach the writer.
+    """
+    if HERE not in sys.path:
+        sys.path.insert(0, HERE)
+    import guard_core  # noqa: F401  (imported for its sys.modules entry)
+    core = sys.modules["guard_core"]
+    folder = _session_log_fresh("sessionlog-writer")
+    saved = core.config_dir
+    core.config_dir = lambda: folder
+    try:
+        core.record("Bash", "deny", "shared-tree", "git stash")
+    finally:
+        core.config_dir = saved
+    rows = _session_log_rows(folder)
+    if rows is None or len(rows) != 1:
+        return False, "expected one line, found %s" % ("none" if rows is None else len(rows))
+    fields = rows[0].split("\t")
+    if len(fields) != 6 or fields[5] != SESSION_LOG_PLACEHOLDER:
+        return False, "expected six fields ending in the placeholder, got %r" % rows[0]
+    return True, "one six-field line, ending in the placeholder"
+
+
+def session_log_unwritable_case():
+    """session-log: a log that cannot be written never raises from the writer and never changes a
+    verdict. The writer is run with a config_dir that raises, then the guard runs with a config
+    folder that is a file, so every write fails. The deny still prints, and the exit is 0.
+    """
+    if HERE not in sys.path:
+        sys.path.insert(0, HERE)
+    import guard_core  # noqa: F401  (imported for its sys.modules entry)
+    core = sys.modules["guard_core"]
+
+    def unreadable_folder():
+        raise OSError("no config folder")
+
+    saved = core.config_dir
+    core.config_dir = unreadable_folder
+    try:
+        core.record("Bash", "deny", "shared-tree", "git stash")
+    except Exception as exc:  # the writer must swallow this, never pass it up
+        return False, "record raised %s when the config folder was unreadable" % type(exc).__name__
+    finally:
+        core.config_dir = saved
+    blocker = os.path.join(ROOT, "sessionlog-blocker")
+    with open(blocker, "w", encoding="utf-8") as handle:
+        handle.write("a file, not a folder\n")
+    run = _session_log_run(blocker, _session_log_payload(SESSION_LOG_ID))
+    if run.returncode != 0:
+        return False, "guard exited %d" % run.returncode
+    if not run.stdout.strip():
+        return False, "the deny was not printed: a log failure changed the verdict"
+    try:
+        decision = json.loads(run.stdout)["hookSpecificOutput"]["permissionDecision"]
+    except (ValueError, KeyError, TypeError):
+        return False, "the output is not a PreToolUse answer: %r" % run.stdout[:120]
+    if decision != "deny":
+        return False, "the verdict is %r, want deny" % decision
+    return True, "a raising config_dir is swallowed, and a file in its place still denies"
+
+
+LOG_CHECKS_EXTRA.append(("session-log: every decision line ends in the hook's session_id",
+                         session_log_each_decision_case))
+LOG_CHECKS_EXTRA.append(("session-log: the column is the placeholder, or the id stripped and "
+                         "capped at 64", session_log_column_case))
+LOG_CHECKS_EXTRA.append(("session-log: the environment's session id is never read",
+                         session_log_env_case))
+LOG_CHECKS_EXTRA.append(("session-log: the writer with no session argument writes a six-field "
+                         "line", session_log_writer_case))
+LOG_CHECKS_EXTRA.append(("session-log: an unwritable log never raises and never changes the "
+                         "verdict", session_log_unwritable_case))
 
 
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
