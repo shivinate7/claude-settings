@@ -347,7 +347,7 @@ function host(opts) {
     git: '# branch.head main\n# branch.ab +0 -0\n', gitFail: null, agents: [], agentsExit: 0, liveAgents: [],
     agentListThrow: false, usageThrow: false, hang: false, submitFails: false,
     python: null, context: { window: 1000, percent: 42 }, env: {}, placed: true,
-    hooks: [], beats: [], registered: [], opened: [], logs: [], submitted: [], pythonCalls: [], agentCalls: [], writes: [],
+    hooks: [], beats: [], registered: [], opened: [], logs: [], submitted: [], pythonCalls: [], agentCalls: [], writes: [], gitCalls: [], gitHang: false,
     ...opts,
   }
   h.store = new Map(opts.seed ?? [])
@@ -375,6 +375,8 @@ function host(opts) {
       run: async argv => {
         if (h.hang) return never()
         if (argv[0] === 'git') {
+          h.gitCalls.push(argv)
+          if (h.gitHang) return never() // a stuck reader: the read starts and never answers
           if (h.gitFail === 'throw') throw new Error('git timed out')
           if (h.gitFail === 'exit') return { exitCode: 128, stdout: '', stderr: 'fatal: not a git repository' }
           return { exitCode: 0, stdout: h.git, stderr: '' }
@@ -677,15 +679,21 @@ await test('git: a failed readiness read makes the reading unknown, so no update
   }
 })
 
-await test('git: a reading older than 60 s counts as unknown; one 59 s old still counts', async () => {
+// Re-pointed in review round 2: the boundary is pinned on readiness(); the host case uses a stuck reader.
+// An idle session re-reads git on each beat, so a working reader keeps the reading fresh.
+await test('git: a reading 59 s and 60 s old still counts; 60.001 s old is unknown (pure)', () => {
+  const e = lib.readEntry(raw({ rt: NOW }))
+  same([lib.readiness(e, NOW + 59_000), lib.readiness(e, NOW + 60_000)], [true, true], 'reading 59 s and 60 s old')
+  same(lib.readiness(e, NOW + 60_001), 'unknown', 'reading 60.001 s old')
+})
+
+await test('git: a stuck reader leaves the reading to age out; at 61 s it is unknown, so no update-ready', async () => {
   const h = await start()
   await fire(h, 'session.start', {})
-  h.now = NOW + 59_000
-  await tickBeat(h)
-  same((await lines(h))[0], '0 working, 1 waiting, update-ready 1 of 1', 'reading 59 s old')
+  h.gitHang = true
   h.now = NOW + 61_000
   await tickBeat(h)
-  same((await lines(h))[0], '0 working, 1 waiting, update-ready 0 of 1', 'reading 61 s old')
+  same((await lines(h))[0], '0 working, 1 waiting, update-ready 0 of 1', 'reading 61 s old, reader stuck')
 })
 
 await test('hooks: session start returns within 200 ms when git, agents and usage never answer', async () => {
@@ -849,6 +857,46 @@ await test('read cap: above 200, the pane gives the true count not shown and nev
   for (let i = 1; i <= 5; i++) assert.ok(text.includes('live-' + i), `live-${i} is missing from the board`)
   const texts = paneTexts(await pane(h))
   assert.ok(texts.includes('+210 more not shown'), `pane says ${JSON.stringify(texts.filter(t => t.includes('more')))}, want +210`)
+})
+
+// ---- review round 2 pins (PR 380): heartbeat git reads while idle
+
+await test('heartbeat: an idle session with a working git reader stays update-ready after 10 minutes of beats', async () => {
+  const h = await start()
+  await fire(h, 'session.start', {})
+  const before = h.gitCalls.length
+  for (let i = 0; i < 20; i++) { h.now += 30_000; await tickBeat(h) }
+  same(h.gitCalls.length - before, 20, 'git reads over 20 idle beats')
+  same((await lines(h))[0], '0 working, 1 waiting, update-ready 1 of 1', 'band after 10 min')
+})
+
+await test('heartbeat: a working session starts no git read on the beat', async () => {
+  const h = await start()
+  await fire(h, 'session.start', {})
+  await fire(h, 'turn.start', { text: '', turnId: 't1' })
+  const before = h.gitCalls.length
+  for (let i = 0; i < 3; i++) { h.now += 30_000; await tickBeat(h) }
+  same(h.gitCalls.length - before, 0, 'git reads started over 3 beats while working')
+})
+
+await test('heartbeat: one git read at a time; with a stuck reader, 3 beats start one read', async () => {
+  const h = await start()
+  await fire(h, 'session.start', {})
+  h.gitHang = true
+  const before = h.gitCalls.length
+  for (let i = 0; i < 3; i++) { h.now += 30_000; await tickBeat(h) }
+  same(h.gitCalls.length - before, 1, 'git reads started over 3 beats with one in flight')
+})
+
+await test('heartbeat: a failing git read makes the reading unknown, so no update-ready', async () => {
+  for (const mode of ['throw', 'exit']) {
+    const h = await start()
+    await fire(h, 'session.start', {})
+    h.gitFail = mode
+    h.now += 30_000
+    await tickBeat(h)
+    same((await lines(h))[0], '0 working, 1 waiting, update-ready 0 of 1', `band after a ${mode} on the beat`)
+  }
 })
 
 const fails = results.filter(r => r.startsWith('FAIL')).length
