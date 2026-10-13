@@ -13,8 +13,12 @@ GATES_YML overrides the path (used for red proofs on a scratch copy).
 
 Run with:  python3 lint/test_windows_split.py -v
 """
+import json
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -410,6 +414,220 @@ class WindowsSplit(unittest.TestCase):
                                         "      - run: python3 hooks/mutate_guard.py\n"
                                         "  gates-mutate-guard:\n    runs-on: ubuntu-latest\n    steps:\n"
                                         "      - run: python3 hooks/mutate_guard.py\n"))  # runs twice
+
+
+# Mod tests: one step of the `gates` job (Linux), on the `mods` scope flag. The step runs one glob, so a
+# new mods/<name>/ joins with no edit here. It carries the exit code of every file: a failing first or
+# last file fails the step. The real-file checks are red until the step exists. The checker's own
+# self-tests (ModTestStepChecker) run on synthetic text and pass now: they show each defect is seen.
+MOD_GLOB = "mods/*/*.test.mjs"
+MOD_FLAG = "mods"
+GATES_JOB = "gates"
+STAMP = os.path.join(HERE, "..", ".github", "stamp.json")
+CHECKOUT = re.compile(r"^(?:      - |        )uses:[ \t]*actions/checkout@", re.M)
+
+
+def job_block(text, name):
+    """Raw text of one job: from its `  name:` line to the next job line. None when the job is absent."""
+    m = re.search(rf"^  {re.escape(name)}:\s*$(.*?)(?=^  [\w-]+:\s*$|\Z)", text, re.M | re.S)
+    return m.group(1) if m else None
+
+
+def step_blocks(block):
+    """Each `      - ` step of a job block, as raw text. Block scalars stay whole."""
+    return [p for p in re.split(r"^(?=      - )", block or "", flags=re.M) if p.startswith("      - ")]
+
+
+def step_key(step, key):
+    """A step's own `key:` value (`        key:` or inline `      - key:`), or None. Body lines sit deeper."""
+    m = re.search(rf"^(?:      - |        ){re.escape(key)}:[ \t]*(.*?)[ \t]*$", step, re.M)
+    return m.group(1) if m else None
+
+
+def run_body(step):
+    """A step's `run:` text: the one line, or a `run: |` block with its 10-space indent removed. None if absent."""
+    lines = step.split("\n")
+    for i, line in enumerate(lines):
+        m = re.match(r"^(?:      - |        )run:[ \t]*(.*?)[ \t]*$", line)
+        if not m:
+            continue
+        if m.group(1) != "|":
+            return m.group(1)
+        body = []
+        for ln in lines[i + 1:]:
+            if ln.strip() and not ln.startswith("          "):
+                break
+            body.append(ln[10:] if ln.strip() else "")
+        return "\n".join(body).strip("\n") + "\n"
+    return None
+
+
+def mod_steps(text):
+    """The steps of the gates job whose run names the mod glob."""
+    return [st for st in step_blocks(job_block(text, GATES_JOB)) if MOD_GLOB in (run_body(st) or "")]
+
+
+def mods_scope_problems(text):
+    """The scope job must export the mods output. Without it needs.scope.outputs.mods is empty and the step never runs."""
+    scope = job_block(text, "scope") or ""
+    if not re.search(r"^      mods:[ \t]*\$\{\{[ \t]*steps\.scope\.outputs\.mods[ \t]*\}\}[ \t]*$", scope, re.M):
+        return ["scope job does not export the mods output"]
+    return []
+
+
+def mods_step_problems(text):
+    """Pins on the one mod-test step of the gates job. [] when the step is right."""
+    homes = mod_steps(text)
+    if len(homes) != 1:
+        return [f"{len(homes)} steps in {GATES_JOB} run {MOD_GLOB}, want 1"]
+    st = homes[0]
+    steps = step_blocks(job_block(text, GATES_JOB))
+    i = steps.index(st)
+    problems = []
+    cond = step_key(st, "if") or ""
+    if "!cancelled()" not in cond:
+        problems.append(f"mod step if lacks !cancelled(): {cond}")
+    if f"needs.scope.outputs.{MOD_FLAG} == 'true'" not in cond:
+        problems.append(f"mod step if does not read needs.scope.outputs.{MOD_FLAG}: {cond}")
+    if "github.event_name" in cond:
+        problems.append(f"mod step if reads the event; the {MOD_FLAG} flag alone decides: {cond}")
+    if step_key(st, "shell") != "bash":
+        problems.append(f"mod step shell is {step_key(st, 'shell')}, want bash")
+    if step_key(st, "continue-on-error") is not None:
+        problems.append("mod step sets continue-on-error, which swallows the exit code")
+    body = run_body(st)
+    if re.search(r"(?<!\|)\|(?!\|)", body):
+        problems.append("mod step pipes a command: the pipe takes the last command's exit code")
+    if re.search(r"\|\|\s*(true|:)\b", body):
+        problems.append("mod step ends a command with || true or || :")
+    checkout = [j for j, s in enumerate(steps) if CHECKOUT.search(s)]
+    if not checkout or checkout[0] > i:
+        problems.append("no actions/checkout before the mod step")
+    return problems
+
+
+def mods_problems(text):
+    return mods_scope_problems(text) + mods_step_problems(text)
+
+
+def unpinned_problems(text):
+    """Every `uses:` in the gates job that names an `@` ref must name a full commit SHA. A step this lane
+    adds may not use an unpinned third-party action. The runner's Node needs no action. Local actions
+    (no `@`) are not checked."""
+    block = job_block(text, GATES_JOB) or ""
+    return [f"unpinned action in {GATES_JOB}: {m.group(1)}"
+            for m in re.finditer(r"^(?:      - |        )uses:[ \t]*(\S+)", block, re.M)
+            if "@" in m.group(1) and not re.search(r"@[0-9a-f]{40}$", m.group(1))]
+
+
+def run_mod_body(body, files):
+    """Run a step body as `shell: bash` does, in a scratch repo. files maps a path to True (passes) or False (fails).
+    Returns the exit code."""
+    with tempfile.TemporaryDirectory() as root:
+        work = os.path.join(root, "repo")
+        for rel, ok in files.items():
+            full = os.path.join(work, rel)
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            with open(full, "w", encoding="utf-8") as f:
+                f.write("// fixture\n" if ok else 'throw new Error("planted failure");\n')
+        script = os.path.join(root, "step.sh")
+        with open(script, "w", encoding="utf-8", newline="\n") as f:
+            f.write(body)
+        r = subprocess.run([shutil.which("bash"), "--noprofile", "--norc", "-eo", "pipefail", script.replace("\\", "/")],
+                           cwd=work, capture_output=True, text=True, timeout=300)
+        return r.returncode
+
+
+class ModTestStep(unittest.TestCase):
+    def setUp(self):
+        with open(GATES, encoding="utf-8") as f:
+            self.text = f.read()
+
+    def test_the_scope_job_exports_the_mods_flag(self):
+        self.assertEqual(mods_scope_problems(self.text), [])
+
+    def test_gates_runs_the_mod_glob_in_one_pinned_step(self):
+        self.assertEqual(mods_step_problems(self.text), [])
+
+    def test_gates_adds_no_unpinned_third_party_action(self):
+        """Control, green now: the lane's steps use the runner's Node, and every action ref in gates is a full SHA."""
+        self.assertEqual(unpinned_problems(self.text), [])
+
+    @unittest.skipUnless(shutil.which("bash") and shutil.which("node"), "needs bash and node on PATH")
+    def test_the_step_fails_when_any_mod_test_fails(self):
+        steps = mod_steps(self.text)
+        self.assertEqual(len(steps), 1, "no step runs the mod glob, so no mod test runs in CI")
+        body = run_body(steps[0])
+        cases = [
+            ("all pass", {"mods/a/a.test.mjs": True, "mods/b/b.test.mjs": True}, True),
+            ("first file fails", {"mods/a/first.test.mjs": False, "mods/b/b.test.mjs": True}, False),
+            ("last file fails, in a new mod", {"mods/a/a.test.mjs": True, "mods/zz-new/last.test.mjs": False}, False),
+        ]
+        for label, files, ok in cases:
+            with self.subTest(case=label):
+                rc = run_mod_body(body, files)
+                self.assertEqual(rc == 0, ok, f"{label}: exit {rc}")
+
+    def test_gates_stays_a_required_check_and_mods_adds_no_name(self):
+        """Control, green now: the mod step rides the required `gates` job, so the list gains no name."""
+        with open(STAMP, encoding="utf-8") as f:
+            required = json.load(f)["merge"]["requiredChecks"]
+        self.assertIn(GATES_JOB, required)
+        self.assertEqual([n for n in required if "mod" in n.lower()], [])
+
+
+UNPINNED_STEP = "      - uses: actions/setup-node@v4\n        with:\n          node-version: \"22\"\n\n"
+PINNED_STEP = "      - uses: actions/setup-node@0123456789abcdef0123456789abcdef01234567 # v4\n\n"
+MOD_CHECKOUT = ("      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0\n"
+                "        with:\n          fetch-depth: 0\n\n")
+MOD_STEP = ("      - name: Mod tests\n"
+            "        if: ${{ !cancelled() && needs.scope.outputs.mods == 'true' }}\n"
+            "        shell: bash\n"
+            "        run: |\n"
+            "          fail=0\n"
+            "          for f in mods/*/*.test.mjs; do\n"
+            "            node --test \"$f\" || fail=1\n"
+            "          done\n"
+            "          exit $fail\n")
+
+
+def mod_doc(body=MOD_STEP, extra="", checkout=True, scope_out=True):
+    """A synthetic gates fragment: checkout, the mod step, then any extra step. Each argument changes one pin."""
+    gates = (MOD_CHECKOUT if checkout else "") + body + extra
+    scope = "      mods: ${{ steps.scope.outputs.mods }}\n" if scope_out else "      code: ${{ steps.scope.outputs.code }}\n"
+    return ("jobs:\n  scope:\n    outputs:\n" + scope +
+            "  gates:\n    runs-on: ubuntu-latest\n    needs: scope\n    steps:\n" + gates +
+            "  pointer-windows:\n    runs-on: windows-latest\n    steps:\n      - run: echo\n")
+
+
+class ModTestStepChecker(unittest.TestCase):
+    def test_the_checker_passes_the_right_step(self):
+        self.assertEqual(mods_problems(mod_doc()), [])
+
+    def test_the_checker_sees_each_defect(self):
+        defects = {
+            "pipe": mod_doc(body=MOD_STEP.replace("|| fail=1", "| tail -1")),
+            "or true": mod_doc(body=MOD_STEP.replace("|| fail=1", "|| true")),
+            "continue-on-error": mod_doc(body=MOD_STEP.replace("        shell: bash\n", "        shell: bash\n        continue-on-error: true\n")),
+            "one hardcoded file": mod_doc(body=MOD_STEP.replace("mods/*/*.test.mjs", "mods/plain-diff/plain-diff.test.mjs")),
+            "no step": mod_doc(body=""),
+            "wrong flag": mod_doc(body=MOD_STEP.replace("needs.scope.outputs.mods", "needs.scope.outputs.code")),
+            "no !cancelled()": mod_doc(body=MOD_STEP.replace("!cancelled() && ", "")),
+            "reads the event": mod_doc(body=MOD_STEP.replace("== 'true' }}", "== 'true' && github.event_name != 'pull_request' }}")),
+            "no shell": mod_doc(body=MOD_STEP.replace("        shell: bash\n", "")),
+            "shell sh": mod_doc(body=MOD_STEP.replace("shell: bash", "shell: sh")),
+            "no checkout": mod_doc(checkout=False),
+            "scope lacks the mods output": mod_doc(scope_out=False),
+        }
+        for label, doc in defects.items():
+            with self.subTest(defect=label):
+                self.assertTrue(mods_problems(doc), label)
+
+    def test_the_checker_sees_an_unpinned_action(self):
+        self.assertEqual(unpinned_problems(mod_doc(extra=PINNED_STEP)), [])  # a pinned action is allowed
+        self.assertEqual(unpinned_problems(mod_doc(extra="      - uses: $/actions/local-thing\n")), [])  # local: no @
+        self.assertTrue(unpinned_problems(mod_doc(extra=UNPINNED_STEP)))  # setup-node@v4 is not a full SHA
+        self.assertTrue(unpinned_problems(mod_doc(extra="        uses: some/tool@main\n")))
 
 
 if __name__ == "__main__":

@@ -793,6 +793,12 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
     text = envelope.get("result") if isinstance(envelope, dict) else None
     if not isinstance(text, str):
         return None, "model output carried no result text"
+    return parse_verdict(text, shape)
+
+
+def parse_verdict(text, shape=VERDICT_SHAPE):
+    """Return (verdict_dict, error) from the model's reply text. The one home of this parse:
+    `invoke_model` and the `--model-text` entry below both call it."""
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if not match:
         return None, "model result carried no JSON verdict"
@@ -1211,6 +1217,31 @@ def config_report(hook):
     return " ".join(parts) + TAIL
 
 
+LOST_MESSAGE = UNKNOWN_PREFIX + "verdict lost: the model reply was not used (the watch ended before the model step)."
+
+
+class NeedsModel(Exception):
+    """`--emit-prompt`: the cheap path ended at the model call. `args[0]` is the prompt."""
+
+
+def _model_call_from_argv(argv):
+    """Pick `run`'s model_call. Default: `claude -p`. A caller with its own model login (a
+    Claude Code mod) splits the call in two runs of this file, same Stop JSON on stdin each:
+      --emit-prompt       prints {"needs_model": true, "prompt", "model"} and exits, only when
+                          a model call is due; otherwise the normal output (usually nothing).
+      --model-text TEXT   the model's reply text; parsed by parse_verdict, then normal output.
+      --model-error TEXT  the call failed; prints the UNKNOWN message, never a pass."""
+    if argv[:1] == ["--emit-prompt"] and len(argv) == 1:
+        def emit(prompt):
+            raise NeedsModel(prompt)
+        return emit
+    if argv[:1] == ["--model-text"] and len(argv) == 2:
+        return lambda prompt: parse_verdict(argv[1])
+    if argv[:1] == ["--model-error"] and len(argv) == 2:
+        return lambda prompt: (None, argv[1][:200])
+    return invoke_model
+
+
 def main():
     guard._force_utf8_streams()
     try:
@@ -1225,7 +1256,22 @@ def main():
         sys.exit(0)  # this Stop firing is already a rewrite; do not re-judge it
 
     try:
-        message = run(hook)
+        model_call = _model_call_from_argv(sys.argv[1:])
+        used = []
+
+        def tracked(prompt):
+            used.append(True)
+            return model_call(prompt)
+
+        message = run(hook, tracked)
+        handed_reply = sys.argv[1:2] in (["--model-text"], ["--model-error"]) and model_call is not invoke_model
+        if handed_reply and not message and not used:
+            # A reply was handed in, but the run ended before the model step (the turn's verdict
+            # is already recorded). Silence here would read as an ALLOW. Say it was lost.
+            message = LOST_MESSAGE
+    except NeedsModel as need:
+        print(json.dumps({"needs_model": True, "prompt": need.args[0], "model": MODEL}))
+        sys.exit(0)
     except Exception as exc:
         print(json.dumps({"systemMessage": UNKNOWN_PREFIX + "the watch itself raised (%s)." % exc}))
         sys.exit(0)
