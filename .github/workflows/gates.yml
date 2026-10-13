@@ -247,6 +247,7 @@ jobs:
         run: |
           bash actions/all-jobs-passed/test_action.sh
           bash actions/ci-alarm/test_action.sh
+          bash actions/ruling-kind/test_action.sh
           python3 actions/readme-links/test_readme_links.py
           bash githooks/main-ref/test_hook.sh
           node --test testing/skip-locally-fail-in-ci.test.mjs
