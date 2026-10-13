@@ -424,7 +424,6 @@ MOD_GLOB = "mods/*/*.test.mjs"
 MOD_FLAG = "mods"
 GATES_JOB = "gates"
 STAMP = os.path.join(HERE, "..", ".github", "stamp.json")
-SETUP_PIN = re.compile(r"^(?:      - |        )uses:[ \t]*actions/setup-node@[0-9a-f]{40}\b", re.M)
 CHECKOUT = re.compile(r"^(?:      - |        )uses:[ \t]*actions/checkout@", re.M)
 
 
@@ -504,18 +503,21 @@ def mods_step_problems(text):
     checkout = [j for j, s in enumerate(steps) if CHECKOUT.search(s)]
     if not checkout or checkout[0] > i:
         problems.append("no actions/checkout before the mod step")
-    setup = [j for j, s in enumerate(steps) if SETUP_PIN.search(s)]
-    if not setup:
-        problems.append("no actions/setup-node pinned to a full SHA in gates")
-    elif setup[0] > i:
-        problems.append("actions/setup-node comes after the mod step")
-    elif not re.search(r"^ +node-version:", steps[setup[0]], re.M):
-        problems.append("actions/setup-node has no node-version")
     return problems
 
 
 def mods_problems(text):
     return mods_scope_problems(text) + mods_step_problems(text)
+
+
+def unpinned_problems(text):
+    """Every `uses:` in the gates job that names an `@` ref must name a full commit SHA. A step this lane
+    adds may not use an unpinned third-party action. The runner's Node needs no action. Local actions
+    (no `@`) are not checked."""
+    block = job_block(text, GATES_JOB) or ""
+    return [f"unpinned action in {GATES_JOB}: {m.group(1)}"
+            for m in re.finditer(r"^(?:      - |        )uses:[ \t]*(\S+)", block, re.M)
+            if "@" in m.group(1) and not re.search(r"@[0-9a-f]{40}$", m.group(1))]
 
 
 def run_mod_body(body, files):
@@ -547,6 +549,10 @@ class ModTestStep(unittest.TestCase):
     def test_gates_runs_the_mod_glob_in_one_pinned_step(self):
         self.assertEqual(mods_step_problems(self.text), [])
 
+    def test_gates_adds_no_unpinned_third_party_action(self):
+        """Control, green now: the lane's steps use the runner's Node, and every action ref in gates is a full SHA."""
+        self.assertEqual(unpinned_problems(self.text), [])
+
     @unittest.skipUnless(shutil.which("bash") and shutil.which("node"), "needs bash and node on PATH")
     def test_the_step_fails_when_any_mod_test_fails(self):
         steps = mod_steps(self.text)
@@ -570,8 +576,8 @@ class ModTestStep(unittest.TestCase):
         self.assertEqual([n for n in required if "mod" in n.lower()], [])
 
 
-MOD_SETUP = ("      - uses: actions/setup-node@0123456789abcdef0123456789abcdef01234567 # v4\n"
-             "        with:\n          node-version: \"22\"\n\n")
+UNPINNED_STEP = "      - uses: actions/setup-node@v4\n        with:\n          node-version: \"22\"\n\n"
+PINNED_STEP = "      - uses: actions/setup-node@0123456789abcdef0123456789abcdef01234567 # v4\n\n"
 MOD_CHECKOUT = ("      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0\n"
                 "        with:\n          fetch-depth: 0\n\n")
 MOD_STEP = ("      - name: Mod tests\n"
@@ -585,9 +591,9 @@ MOD_STEP = ("      - name: Mod tests\n"
             "          exit $fail\n")
 
 
-def mod_doc(body=MOD_STEP, setup=MOD_SETUP, setup_first=True, checkout=True, scope_out=True):
-    """A synthetic gates fragment with one mod step. Each argument changes one pin."""
-    gates = (MOD_CHECKOUT if checkout else "") + (setup + body if setup_first else body + setup)
+def mod_doc(body=MOD_STEP, extra="", checkout=True, scope_out=True):
+    """A synthetic gates fragment: checkout, the mod step, then any extra step. Each argument changes one pin."""
+    gates = (MOD_CHECKOUT if checkout else "") + body + extra
     scope = "      mods: ${{ steps.scope.outputs.mods }}\n" if scope_out else "      code: ${{ steps.scope.outputs.code }}\n"
     return ("jobs:\n  scope:\n    outputs:\n" + scope +
             "  gates:\n    runs-on: ubuntu-latest\n    needs: scope\n    steps:\n" + gates +
@@ -610,16 +616,18 @@ class ModTestStepChecker(unittest.TestCase):
             "reads the event": mod_doc(body=MOD_STEP.replace("== 'true' }}", "== 'true' && github.event_name != 'pull_request' }}")),
             "no shell": mod_doc(body=MOD_STEP.replace("        shell: bash\n", "")),
             "shell sh": mod_doc(body=MOD_STEP.replace("shell: bash", "shell: sh")),
-            "no setup-node": mod_doc(setup=""),
-            "setup-node after the step": mod_doc(setup_first=False),
-            "setup-node not SHA-pinned": mod_doc(setup=MOD_SETUP.replace("@0123456789abcdef0123456789abcdef01234567", "@v4")),
-            "setup-node without node-version": mod_doc(setup=MOD_SETUP.replace('          node-version: "22"\n', "")),
             "no checkout": mod_doc(checkout=False),
             "scope lacks the mods output": mod_doc(scope_out=False),
         }
         for label, doc in defects.items():
             with self.subTest(defect=label):
                 self.assertTrue(mods_problems(doc), label)
+
+    def test_the_checker_sees_an_unpinned_action(self):
+        self.assertEqual(unpinned_problems(mod_doc(extra=PINNED_STEP)), [])  # a pinned action is allowed
+        self.assertEqual(unpinned_problems(mod_doc(extra="      - uses: $/actions/local-thing\n")), [])  # local: no @
+        self.assertTrue(unpinned_problems(mod_doc(extra=UNPINNED_STEP)))  # setup-node@v4 is not a full SHA
+        self.assertTrue(unpinned_problems(mod_doc(extra="        uses: some/tool@main\n")))
 
 
 if __name__ == "__main__":
