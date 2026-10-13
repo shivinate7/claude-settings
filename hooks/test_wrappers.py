@@ -438,6 +438,28 @@ def guard_names_case():
     return True, "all %d names resolve on guard" % len(GUARD_NAMES)
 
 
+def guard_sentinel_case():
+    """A name no guard module defines must raise AttributeError through `guard`. A catch-all
+    module __getattr__ would answer it and still pass guard_names_case, so this pins the other side."""
+    path = os.environ.get("GUARD_UNDER_TEST") or GUARD_PY
+    code = ("import sys\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "import guard\n"
+            "try:\n"
+            "    getattr(guard, 'no_such_guard_name')\n"
+            "except AttributeError:\n"
+            "    print('raised')\n"
+            "else:\n"
+            "    print('resolved')\n")
+    run = subprocess.run([sys.executable, "-c", code, os.path.dirname(path)],
+                         capture_output=True, text=True, env=clean_env(), timeout=60)
+    if run.returncode != 0:
+        return False, "import guard failed: %s" % run.stderr.strip()[-160:]
+    if run.stdout.strip() != "raised":
+        return False, "the sentinel name resolved on guard: a catch-all __getattr__?"
+    return True, "the sentinel name raises AttributeError"
+
+
 def build_cases():
     settings = load()
     cases = []
@@ -476,6 +498,8 @@ def build_cases():
                   missing_sibling_case))
     cases.append(("guard split: every name other files reach through guard still resolves",
                   guard_names_case))
+    cases.append(("guard split: a name no guard module defines raises AttributeError through guard",
+                  guard_sentinel_case))
     return cases
 
 

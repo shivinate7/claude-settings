@@ -7160,6 +7160,9 @@ def _load_guard_module():
     in the bug report does.
     """
     import importlib.util
+    # guard.py imports guard_core by name. A cached core would carry one case's patches into the
+    # next, so drop it: each load gets a core of its own, as each load always got its own module.
+    sys.modules.pop("guard_core", None)
     spec = importlib.util.spec_from_file_location("guard_under_test", GUARD)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -7387,17 +7390,17 @@ def session_is_live_case():
     problems = []
     record = {"pid": 4321, "startedAt": 1_000_000}
 
-    guard._process_start_ms = lambda pid: 1_000_000
+    sys.modules["guard_core"]._process_start_ms = lambda pid: 1_000_000
     live = guard.session_is_live(record)
     if live is not True:
         problems.append("live: got %r want True" % (live,))
 
-    guard._process_start_ms = lambda pid: None
+    sys.modules["guard_core"]._process_start_ms = lambda pid: None
     dead = guard.session_is_live(record)
     if dead is not False:
         problems.append("dead: got %r want False" % (dead,))
 
-    guard._process_start_ms = lambda pid: guard.PROCESS_START_UNREADABLE
+    sys.modules["guard_core"]._process_start_ms = lambda pid: guard.PROCESS_START_UNREADABLE
     try:
         unreadable = guard.session_is_live(record)
     except Exception as e:
@@ -7421,8 +7424,8 @@ def worktree_live_session_unreadable_case():
     problems = []
     target = tempfile.mkdtemp(prefix="wt-live-unreadable-")
     try:
-        guard.session_records = lambda: [{"pid": 1, "startedAt": 1, "cwd": target}]
-        guard.session_is_live = lambda record: None
+        sys.modules["guard_core"].session_records = lambda: [{"pid": 1, "startedAt": 1, "cwd": target}]
+        sys.modules["guard_core"].session_is_live = lambda record: None
         got = guard.worktree_live_session(target)
         if got is not None:
             problems.append(
@@ -7457,8 +7460,8 @@ def worktree_live_session_two_spellings_case():
     other_spelling = tempfile.mkdtemp(prefix="wt-live-other-spelling-")
     real_identity = guard._path_identity
     try:
-        guard.session_records = lambda: [{"pid": 1, "startedAt": 1, "cwd": other_spelling}]
-        guard.session_is_live = lambda record: True
+        sys.modules["guard_core"].session_records = lambda: [{"pid": 1, "startedAt": 1, "cwd": other_spelling}]
+        sys.modules["guard_core"].session_is_live = lambda record: True
         target_resolved = os.path.realpath(target)
         other_resolved = os.path.realpath(other_spelling)
         shared = ("same-underlying-file",)
@@ -7468,13 +7471,13 @@ def worktree_live_session_two_spellings_case():
                 return shared
             return real_identity(path)
 
-        guard._path_identity = fake_identity
+        sys.modules["guard_core"]._path_identity = fake_identity
         got = guard.worktree_live_session(target)
         if got is not True:
             problems.append(
                 "two spellings, one identity, live session: got %r want True" % (got,))
     finally:
-        guard._path_identity = real_identity
+        sys.modules["guard_core"]._path_identity = real_identity
         shutil.rmtree(target, ignore_errors=True)
         shutil.rmtree(other_spelling, ignore_errors=True)
 
@@ -7494,15 +7497,15 @@ def worktree_live_session_path_unresolvable_case():
     other_spelling = tempfile.mkdtemp(prefix="wt-live-other-unresolvable-")
     real_identity = guard._path_identity
     try:
-        guard.session_records = lambda: [{"pid": 1, "startedAt": 1, "cwd": other_spelling}]
-        guard.session_is_live = lambda record: True  # must not even matter: identity is unresolvable
-        guard._path_identity = lambda path: None
+        sys.modules["guard_core"].session_records = lambda: [{"pid": 1, "startedAt": 1, "cwd": other_spelling}]
+        sys.modules["guard_core"].session_is_live = lambda record: True  # must not even matter: identity is unresolvable
+        sys.modules["guard_core"]._path_identity = lambda path: None
         got = guard.worktree_live_session(target)
         if got is not None:
             problems.append(
                 "identity unresolvable, differing spellings: got %r want None, not False" % (got,))
     finally:
-        guard._path_identity = real_identity
+        sys.modules["guard_core"]._path_identity = real_identity
         shutil.rmtree(target, ignore_errors=True)
         shutil.rmtree(other_spelling, ignore_errors=True)
 
@@ -7526,7 +7529,7 @@ def session_is_live_backwards_clock_step_case():
     record = {"pid": 4321, "startedAt": 1_000_000}
 
     # actual is 5 minutes AFTER started: the ambiguous, must-not-be-confident-False direction.
-    guard._process_start_ms = lambda pid: 1_000_000 + 300_000
+    sys.modules["guard_core"]._process_start_ms = lambda pid: 1_000_000 + 300_000
     implied_backwards = guard.session_is_live(record)
     if implied_backwards is not None:
         problems.append(
@@ -7534,14 +7537,14 @@ def session_is_live_backwards_clock_step_case():
                 implied_backwards,))
 
     # actual is 5 minutes BEFORE started: never produced by the same live process, stays False.
-    guard._process_start_ms = lambda pid: 1_000_000 - 300_000
+    sys.modules["guard_core"]._process_start_ms = lambda pid: 1_000_000 - 300_000
     still_dead = guard.session_is_live(record)
     if still_dead is not False:
         problems.append(
             "actual far behind started: got %r want False (unchanged)" % (still_dead,))
 
     # within tolerance, either side: unaffected by the fix.
-    guard._process_start_ms = lambda pid: 1_000_000 + 2_000
+    sys.modules["guard_core"]._process_start_ms = lambda pid: 1_000_000 + 2_000
     within = guard.session_is_live(record)
     if within is not True:
         problems.append("within tolerance: got %r want True (unaffected)" % (within,))
