@@ -23,7 +23,9 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       # Fail safe: this script, the workflow, and git settings that change every checkout.
       .github/scripts/harness-scope.sh|.github/workflows/gates.yml|.gitattributes) on="$on $ALL " ;;
       # Guard and its installers' inputs: test_guard, the janitor suites and config_watch run guard.py.
-      hooks/guard.py|hooks/mutate_shared.py|settings.json) on="$on $W $R $X code guard sweep " ;;
+      # guard_<family>.py modules are guard.py; guard_test_* is not (it falls to hooks/* below).
+      hooks/guard_test_*) on="$on $R $X code guard " ;;
+      hooks/guard.py|hooks/guard_*.py|hooks/mutate_shared.py|settings.json) on="$on $W $R $X code guard sweep " ;;
       landed-dirs.txt) on="$on $W $R $X $S code guard " ;;
       hooks/test_guard.py|hooks/mutate_guard.py) on="$on $W $X code guard " ;;
       # install.sh and session_start.sh: the checkout-detection suite and test_guard read them.
