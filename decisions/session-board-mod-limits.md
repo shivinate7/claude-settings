@@ -23,7 +23,7 @@ Update-ready holds only when all five conditions hold:
 - No unpushed commits.
 - A clean tree.
 
-Unknown is never ready. Git counts are unknown in three cases. The reading is older than 60 s. The git call failed or was slow. The branch has no upstream.
+Unknown is never ready. Git counts are unknown in four cases. The reading is older than 60 s, or stamped more than 30 s ahead. The git call failed or was slow. The branch has no upstream.
 
 Timing:
 
@@ -108,4 +108,4 @@ Each hole ships under the three-round review cap.
 - The store is per plugin and per config folder. Sessions loaded another way, or under another config folder, do not show. Example: a `--plugin-dir` run writes `session-board_inline-<hash>.json`. Why it ships: the host names the file. Whether the app and the terminal share one store is unknown.
 - The API notes `$.process` as CLI only. If it fails in the desktop app, no session reads ready, and the `claude agents` seed is missing. Example: the board shows store entries alone. Why it ships: the desktop app is untested.
 - It is unknown whether a prompt sent from a command starts a turn in the app. Example: `/safe-stop` reports "queued", and no turn starts. Why it ships: untested in the app.
-- The secret name rule misses some names. Example: `terraform.tfstate` shows by name. The same gap is in `plain-diff-mod-limits`. Why it ships: same as that entry.
+- The secret name rule misses some names. Example: `terraform.tfstate` shows by name. The same gap is in `plain-diff-mod-limits` (the plain-diff secret filter). Why it ships: the name list holds only the names known so far.
