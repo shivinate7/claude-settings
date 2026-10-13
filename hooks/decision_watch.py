@@ -1217,6 +1217,9 @@ def config_report(hook):
     return " ".join(parts) + TAIL
 
 
+LOST_MESSAGE = UNKNOWN_PREFIX + "verdict lost: the model reply was not used (the watch ended before the model step)."
+
+
 class NeedsModel(Exception):
     """`--emit-prompt`: the cheap path ended at the model call. `args[0]` is the prompt."""
 
@@ -1253,7 +1256,19 @@ def main():
         sys.exit(0)  # this Stop firing is already a rewrite; do not re-judge it
 
     try:
-        message = run(hook, _model_call_from_argv(sys.argv[1:]))
+        model_call = _model_call_from_argv(sys.argv[1:])
+        used = []
+
+        def tracked(prompt):
+            used.append(True)
+            return model_call(prompt)
+
+        message = run(hook, tracked)
+        handed_reply = sys.argv[1:2] in (["--model-text"], ["--model-error"]) and model_call is not invoke_model
+        if handed_reply and not message and not used:
+            # A reply was handed in, but the run ended before the model step (the turn's verdict
+            # is already recorded). Silence here would read as an ALLOW. Say it was lost.
+            message = LOST_MESSAGE
     except NeedsModel as need:
         print(json.dumps({"needs_model": True, "prompt": need.args[0], "model": MODEL}))
         sys.exit(0)

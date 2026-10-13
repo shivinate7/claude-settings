@@ -4,35 +4,54 @@ A mod. It runs the Stop-time decision watch with this session's own model login.
 
 ## What it does
 
-- On every Stop, the mod returns at once. It then judges the turn in the background.
-- It skips a Stop that has `stop_hook_active` set.
+- On every Stop, the mod writes one "STOP seen" line to the log. It waits at most 0.5 s for that write. Then it returns at once.
+- It then judges the turn in the background. It skips the judge when `stop_hook_active` is set.
+- One shadow judge runs at a time. A Stop that arrives during a judge logs "SKIP busy" and does not judge.
 - The judging uses `hooks/decision_watch.py` in your Claude config folder, in two steps.
   1. `--emit-prompt` runs the cheap path. It prints a prompt only when a model call is due.
-  2. The mod calls the model with that prompt. Then `--model-text` or `--model-error` gives the verdict.
+  2. The mod calls the model with that prompt. The call has a 50 s limit. Then `--model-text` or `--model-error` gives the verdict.
 - Every failure reads as UNKNOWN. A failure never reads as ALLOW.
-- The log holds one START line and one END line for each judged Stop. The END line holds the timings and the verdict line. The log never holds the prompt.
+- A model verdict that the script cannot use reads as "verdict lost". This happens when another judge already recorded the same turn. The script prints this marker whenever it gets a model reply and ends before the model step. A valid ALLOW that the script uses stays ALLOW.
+- The mod sends the Stop JSON to python as ASCII only. It escapes each other character as `\uXXXX`.
+
+## Log
+
+- The log is `shadow.log` in the state folder `decision-watch-shadow`, inside the config folder.
+- Each judged Stop has a START line and an END line. The END line holds the timings and the verdict line. The log never holds the prompt.
+- The log keeps the newest 500 lines. A line is cut at 2000 characters.
+- Writes go one at a time. The host writes the folder if it is missing.
+- If the host refuses to read a log that is too big, the log starts over with the new line.
+- A log write waits at most 2 s. A late write can be lost.
 
 ## Where things live
 
 - The script path is `CLAUDE_CONFIG_DIR/hooks/decision_watch.py`. With no `CLAUDE_CONFIG_DIR`, the mod uses `USERPROFILE` or `HOME`, then `.claude`.
-- The mod gives the script its own state folder, `decision-watch-mod`, inside the config folder. The real Stop hook keeps its own "already judged" cache and the mod never touches it.
-- The log is `shadow.log` in that state folder.
+- The shadow judge and `/dw` each have their own state folder: `decision-watch-shadow` and `decision-watch-dw`. Neither is the real config folder. The real Stop hook keeps its own "already judged" cache and the mod never touches it. A shadow verdict does not mute `/dw`.
 - The mod picks the first `python3` or `python` on PATH that is not the Windows Store stub.
 
 ## /dw
 
 The command runs the same judgment on the latest turn. It shows the timings and the result. It never shows the prompt. Before the first Stop, it finds the transcript from the session id.
 
+The last line is "Stops seen: N". N counts the STOP seen lines now in the log. The log keeps 500 lines, so N is at most 500.
+
+`/dw` has its own cache. Run on the same turn twice, the second run says "nothing to say".
+
 ## Unknown
 
-- Whether `$.fs.write` makes a missing folder. The mod calls `$.fs.mkdir` only when the host has it. If neither works, the mod writes no log and shadow mode shows nothing.
 - Whether the desktop app and the terminal both give the model call the same login.
+- Whether `$.model.complete` stops at `timeoutMs`. The mod also sets one judge at a time, so a hung call holds the slot.
 
 ## Limits
 
 - The script must be the version that knows `--emit-prompt`, `--model-text`, and `--model-error`.
 - A bad flag combination on the script falls back to the normal `claude -p` call. This is a hole: a wrong flag from a caller runs the old path.
-- Two Stops that end close together can write the log at the same time. One line can then be lost.
+- A Stop that arrives during a judge is not judged. The next Stop on an unchanged turn judges it.
+
+## Try in the desktop app
+
+1. Install: `/plugin install decision-watch --marketplace shivinate7/claude-settings`, then restart the session.
+2. Finish a turn. Run `/dw`. Check that the last line counts the Stop.
 
 ## Check
 
