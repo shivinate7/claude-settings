@@ -4901,6 +4901,91 @@ for _name, _command in (
        config=MERGECFG)
 
 
+# ---- lane-by-slug, review round 1. The red cases name the shape they pin. A glued short flag
+# (-tN16, -t=N16, -bN16, -amN20, -am"x") and a long-option prefix (--mess=, --messa=) carry the
+# message, so they are read. A double-backtick span and a ~~~ fence are quoted text, as a single
+# backtick span and a ``` fence already are. A cat heredoc is no commit message, so only the
+# commit's own -F - body counts. An unreadable -F file on gh pr merge fails closed, as on create and
+# edit (decision gate-hooks-fail-closed).
+sh("lane-by-slug: an unreadable -F file on gh pr merge is refused, not read as clean",
+   "gh pr merge 5 --squash -F /nonexistent/msg.md", "deny", "cite-by-id",
+   carries="could not be read", cwd=NOGIT, env_path=GREEN_ON, config=MERGECFG)
+for _name, _command in (
+    ("a glued -tN16 title", "gh pr create --draft -tN16 -b x"),
+    ("a glued -t=N16 title", "gh pr create --draft -t=N16 -b x"),
+    ("a glued -bN16 body", "gh pr create --draft -t x -bN16"),
+    ("a glued -amN20 cluster", VCS + " commit -amN20"),
+    ("a glued -am cluster with a quoted value", VCS + ' commit -am"fix (N16)"'),
+    ("a long --mess= prefix", VCS + ' commit --mess="fix N16"'),
+    ("a long --messa= prefix", VCS + ' commit --messa="fix N16"'),
+):
+    sh("lane-by-slug: %s denies" % _name, _command, "deny", "lane-by-slug", cwd=NOGIT,
+       config=MERGECFG)
+for _name, _command in (
+    ("a double-backtick code span", VCS + " commit -m 'title\n\nsee ``N16`` for the lane'"),
+    ("a ~~~ fence", VCS + " commit -F - <<'EOF'\ntitle\n\n~~~\nLane N16 lands\n~~~\nEOF"),
+    ("a cat heredoc naming N16, then a clean commit heredoc",
+     "cat <<'A' && " + VCS + " commit -F - <<'B'\nN16 notes\nA\ntitle\n\nclean body\nB"),
+    ("a cat heredoc with clean notes, then a clean commit heredoc",
+     "cat <<'A' && " + VCS + " commit -F - <<'B'\nclean notes\nA\ntitle\n\nclean body\nB"),
+    ("a lowercase n16", VCS + ' commit -m "title\n\nsee n16 for the lane"'),
+    ("N16a, the shape stops at a letter", VCS + ' commit -m "title\n\nsee N16a for the lane"'),
+):
+    sh("lane-by-slug: %s is allowed" % _name, _command, "allow", cwd=NOGIT, config=MERGECFG)
+for _name, _command in (
+    ("a number after a closed double-backtick span",
+     VCS + " commit -m 'title\n\n``a`` then N16 lands'"),
+    ("a number after a closed ~~~ fence",
+     VCS + " commit -F - <<'EOF'\ntitle\n\n~~~\nx = 1\n~~~\nLane N16 lands\nEOF"),
+):
+    sh("lane-by-slug: %s denies" % _name, _command, "deny", "lane-by-slug", cwd=NOGIT,
+       config=MERGECFG)
+
+
+def cite_unread_folders_case():
+    """A -F message file that cannot be read is refused even when the record folders cannot be read
+    either. The copy has no lint/ folder and no pointer, so the folder list is unread. The inline
+    probe runs first: it must stand down and log the unread folders, so the pin proves that state.
+    Fail closed: decision gate-hooks-fail-closed."""
+    folder = os.path.join(ROOT, "unreadfolders")
+    os.makedirs(os.path.join(folder, "cfg"), exist_ok=True)
+    copy = os.path.join(folder, "hooks", "guard.py")
+    os.makedirs(os.path.dirname(copy), exist_ok=True)
+    for name in os.listdir(os.path.dirname(GUARD)):
+        if name.startswith("guard") and name.endswith(".py"):
+            shutil.copy(os.path.join(os.path.dirname(GUARD), name), os.path.dirname(copy))
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = os.path.join(folder, "cfg")
+    env["PATH"] = GHMAIN + os.pathsep + PY_PATH
+
+    def ask(command):
+        return subprocess.run(
+            [sys.executable, copy],
+            input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command},
+                              "cwd": NOGIT}),
+            capture_output=True, text=True, env=env, timeout=60)
+
+    probe = ask(VCS + ' commit -m "cites decisions/one-shared-record-stamp.md"')
+    if "permissionDecision" in probe.stdout:
+        return False, "the inline probe must stand down, got %r" % probe.stdout[:120]
+    try:
+        with open(os.path.join(folder, "cfg", "guard.log"), encoding="utf-8") as handle:
+            logged = "cite-by-id: record folders unread" in handle.read()
+    except OSError:
+        logged = False
+    if not logged:
+        return False, "the probe must log that the record folders are unread"
+    result = ask(VCS + " commit -F " + slash(ROOT) + "/no-such-message.txt")
+    try:
+        block = json.loads(result.stdout)["hookSpecificOutput"]
+    except (ValueError, KeyError):
+        return False, "an unreadable -F file must deny, got %r" % result.stdout[:120]
+    if block.get("permissionDecision") != "deny" or \
+            "could not be read" not in block.get("permissionDecisionReason", ""):
+        return False, "want a deny that says could not be read, got %r" % result.stdout[:120]
+    return True, "deny: the -F file is unread, and the record folders are unread too"
+
+
 # =========================================================================== 6. frozen paths
 FAMILY = "frozen"
 #
@@ -7799,6 +7884,8 @@ LOG_CHECKS = (
     ("trim: a merge into main is allowed and logs nothing", merge_log_case),
     ("trim: a guard crash fails open and logs a crash line", crash_log_case),
     ("merge-checks: a merge tool that cannot load is unknown, and denies", merge_tool_missing_case),
+    ("cite-by-id: a -F file that cannot be read is denied with the folders unread too",
+     cite_unread_folders_case),
     ("merge-checks: a gh that never answers still denies, well inside the hook's 20s budget",
      merge_hang_timeout_case),
     ("powershell: a backslash path survives tokenizing, a Bash one does not", powershell_backslash_case),
@@ -8957,6 +9044,7 @@ LOG_RULE_FAMILY = (
     ("liveness: session_is_live reads an implied", "branch-worktree"),
     ("worktree-home: orchestrator", "branch-worktree"),
     ("worktree-home: a later path field", "branch-worktree"),
+    ("cite-by-id: a -F file that cannot be read", "cite"),
 )
 for _prefix, _family_name in LOG_RULE_FAMILY:
     _hits = [label for label in LOG_FAMILY if label.startswith(_prefix)]
