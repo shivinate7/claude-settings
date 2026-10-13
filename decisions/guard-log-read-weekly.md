@@ -18,6 +18,18 @@ python lint/guard_log_report.py --days 7
 The session is the last field. A missing field or `-` means unknown session. The reader has
 `--session <id>` and `--by-session`.
 
+The STE gate and the Stop sweep (`lint/md_sweep.py`) write their own lines through `guard_logger`
+in `lint/_transcript.py`. A `fixed` line means that a Markdown rewrite landed. Its rule is the
+sorted STE codes, capped at 40 characters, or `STE-wording` when there are none. Its matched field
+is `<basename> fixed=N`. A `deny` line means that a refusal was made, with matched field
+`<basename> denied=N`. A `noted` line with rule `STE-fallback` means that the fixer timed out,
+crashed, or skipped oversize text. Its matched field is `<basename> fallback=timeout|oversize|crash`.
+A `noted` line with rule `STE-unchecked` means that the lint could not run. Its matched field is
+`<basename> unchecked`. A Stop `deny` line names one blocked sweep run, with matched field
+`<first basename> files=N`. A write with no fix, deny, fallback or unchecked outcome writes no
+line. The reader counts `fixed` under noted. Its denies per day now include the STE denies and the
+sweep blocks, and its by-rule table shows the STE rows as their own rows.
+
 The table is the outcome meter for the two owner concerns: prompts the owner did not need,
 and agents refused with no allowed path. A rule is judged by its row here, not by its test
 count.
@@ -99,7 +111,27 @@ no traceback.
   line gets a seventh field only through the `tool` field, which is not folded. Not every
   caller of `tool` was checked for a tab. `log_cut` folds tabs out of `matched`, and the
   session cell strips control characters.
+- **Stalled disk.** The gate prints its answer before the log write. A log write that stalls can
+  still delay process exit. The hook timeout then lets the call through, as the old lint timeout
+  did.
+- **Logging off with no marker.** A missing `hooks/guard_core.py`, or an older one without
+  `set_log_session`, turns STE logging off. No marker line is written. The reader then prints
+  empty tables, which read as no events.
+- **Lines lost on Windows.** A plain append from many processes is not atomic on Windows.
+  Measured: a line was lost in 1 round of 12, each round with 20 processes calling `record`. A
+  lost line costs one count and never changes a verdict. `lint/test_gates.py` skips test_19, the
+  exact-count test, on win32. Test_19b checks a range of 17 to 20 lines.
+- **Rewrite, then failed lint.** The fixer rewrites the text, then the lint cannot run. The
+  rewrite still lands. The log holds `STE-unchecked` and no `fixed` line.
+- **Closed stdout pipe.** If the reader closes stdout early, the STE gate raises at its flush in
+  `answer()`, before the log call. Measured on Windows: `OSError` Errno 22, 21 stderr lines, exit
+  120, and no log line. On POSIX the error is `BrokenPipeError`, not measured. md_sweep catches the
+  same error in its own try, not measured. It ships because the exit code is unchanged and a
+  closed pipe means that the host has already gone.
 
 ## What reopens it
 
 A hand-graded sample, or a rule whose denies the table shows as mostly false.
+
+Kind: process
+Home: lint/guard_log_report.py

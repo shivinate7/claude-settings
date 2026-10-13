@@ -101,6 +101,11 @@ from datetime import datetime, timezone
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import is_last_human, last_human_epoch, paragraph_blocks, format_finding, landed_work  # noqa: E402
+try:
+    from _transcript import guard_logger  # noqa: E402
+except Exception:  # an older _transcript.py beside this script: the sweep runs, with no log line
+    def guard_logger(hook):
+        return lambda *line: None
 
 LINTER = os.path.join(HERE, "ste_lint.py")
 
@@ -516,7 +521,7 @@ def main():
     if not by_path:
         return
 
-    lines = []
+    lines, blocked, codes = [], [], []
     for resolved in lintable:
         findings = by_path.get(resolved)
         if not findings:
@@ -526,6 +531,8 @@ def main():
             findings = [f for f in findings if f.get("line") in scope]
         if not findings:
             continue
+        blocked.append(resolved)
+        codes.extend(f.get("code") for f in findings)
         lines.append("%s:" % os.path.basename(resolved))
         lines.extend("  " + format_finding(f) for f in findings)
     if not lines:
@@ -537,6 +544,8 @@ def main():
         % ("\n".join(lines), NOTE)
     )
     print(json.dumps({"decision": "block", "reason": reason}))
+    sys.stdout.flush()  # the answer is out before the log write; a stalled disk can still delay exit
+    guard_logger(hook)("Stop", "deny", codes, blocked[0], "files=%d" % len(blocked))
 
 
 if __name__ == "__main__":

@@ -25,7 +25,7 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import ste_lint  # noqa: E402
-from test_gates import STE_GATE, run_gate  # noqa: E402  (the helper only; no TestCase is collected)
+from test_gates import STE_GATE, run_gate, setUpModule, tearDownModule  # noqa: E402,F401  (the helper and the module isolation hooks; no TestCase is collected)
 
 # 29 words: STE001 at the descriptive limit of 25.
 LONG = ("The operators on each shift must record every valve position, every pressure reading, "
