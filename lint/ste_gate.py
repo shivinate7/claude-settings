@@ -388,7 +388,9 @@ def last_reply(hook):
 
 def main():
     try:
-        hook = json.load(sys.stdin)
+        # Bytes, decoded as UTF-8: the locale codec (cp1252 on a Windows pipe) would turn
+        # raw UTF-8 into mojibake. Output stays ASCII (json.dumps escapes), so it is exact.
+        hook = json.loads(sys.stdin.buffer.read().decode("utf-8"))
     except Exception:
         return
     if not isinstance(hook, dict):
