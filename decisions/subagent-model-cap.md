@@ -50,8 +50,12 @@ Writing prose and records is not building.
 | decision watch (`hooks/decision_watch.py`) | haiku | xhigh |
 | every other hook and gate | no model; plain code | n/a |
 
-The Explore audit row is prose only. The guard cannot tell an audit Explore from a search
-Explore. The caller spot-checks 3 findings before it acts on an audit.
+The Agent prompt judge checks the Explore audit row (owner ruling, 2026-10-13 12:09 CDT). It
+blocks an Explore whose brief asks it to audit, review, judge, rate or compare meaning, when the
+call does not set model sonnet. A plain search passes on the Haiku default. Incident: the row
+rested on the session's own label, and the judge passed every Explore. The judge is a model, so
+it can misread a borderline brief. The caller still spot-checks 3 findings before it acts on an
+audit.
 
 Haiku means Haiku 5.5. It needs Claude Code v2.1.293 or later. Haiku 4.5 ignores effort.
 A session on an older Claude Code may run Haiku 4.5 for these roles.
