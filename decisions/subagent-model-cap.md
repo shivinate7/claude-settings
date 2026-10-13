@@ -434,6 +434,14 @@ The step-up check has named limits, from review rounds 2 and 3:
 - A round 1 reviewer brief with a prose line that starts `Round 2 of 3` is denied. The
   refusal names the fix.
 
+## Audit Explore is checked
+
+Owner ruling, 2026-10-13 12:09 CDT. The Agent prompt judge in settings.json checks each Explore
+spawn. It blocks an Explore whose brief asks it to audit, review, judge, rate or compare
+meaning, when the call does not set model sonnet. A plain search still passes on the Haiku
+default. Incident: the rule rested on the session's own label, and the judge passed every
+Explore. The judge is a model, so it can misread a borderline brief.
+
 ## Where this lives
 
 This file keeps its slug name. No number is claimed on a branch.
