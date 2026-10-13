@@ -7,18 +7,24 @@ Each row says "no model pin; runs on the caller's model". These cases pin the ch
 Interface the check must meet (the builder builds to it):
 - A standalone script. It finds the repo from its own path, as lint/check_landed_dirs.py does.
   It reads decisions/subagent-model-cap.md and the folders directly under skills/.
-- A skill is a folder directly under skills/ that holds SKILL.md (the sibling check's definition).
+- A skill is a folder directly under skills/ that holds a file named exactly SKILL.md (case
+  exact, so skill.md does not count). Dot folders and __pycache__ are never skills.
   A folder without SKILL.md, and a stray file, need no row.
 - A row is a markdown table line whose first cell is: skill `NAME`. NAME must equal the folder
   name exactly: no case folding, no prefix stripping. A plugin prefix is not stripped.
 - A row line must contain "no model pin" and "runs on the caller's model" (ASCII apostrophe).
 - Each skill needs exactly one row. A row for a missing skill is stale. Both fail.
-- Rows inside a fenced block or a multi-line HTML comment do not count. Text after a row's first
-  cell is row text: "<!--", "/*", "//", "#", a lone backtick or an apostrophe must not hide later rows.
+- Fenced blocks: a fence closes only on a fence of the same character and at least the same
+  length. A ~~~ or a shorter line does not close a ``` fence.
+- HTML comments: a "<!--" with no "-->" on the same line opens a multi-line comment, unless it
+  sits inside a code span or a fence. Rows inside the comment do not count.
+- Other text after a row's first cell is plain: "/*", "//", "#", a lone backtick, an apostrophe.
+- A clean run prints nothing, not even a blank line.
 - Exit 0 when clean. Exit 1 when a row disagrees: one line per problem, naming the skill.
-  Exit non-zero, with a message naming the path, when the record or skills/ cannot be read.
+  Exit 2, with a message naming the path, when the record or skills/ cannot be read, or a
+  skill folder cannot be read (POSIX permissions; pinned on POSIX only, see CHECK_LOCKED).
 
-Every case fails until lint/check_skill_model_rows.py exists, and names that as the cause.
+Each case names the defect it pins in its docstring or comment. Red cases are marked "Red".
 """
 import glob
 import os
@@ -68,8 +74,17 @@ def need_check():
         raise AssertionError("lint/check_skill_model_rows.py does not exist: no check reads the skill rows")
 
 
-def run(files, real_skills=False):
-    """Build a temp repo from {relpath: text}, run the check in it. Returns (exit code, output)."""
+# chmod 000 stops reads only for a non-root POSIX user. CI runs the gates job on ubuntu.
+POSIX_USER = hasattr(os, "geteuid") and os.geteuid() != 0
+CHECK_LOCKED = "needs POSIX chmod and a non-root user; not pinned on Windows (no ACL change made)"
+
+
+def run(files, real_skills=False, locked=()):
+    """Build a temp repo from {relpath: text}, run the check in it. Returns (exit code, output).
+
+    `locked` names folders to chmod 000 after the files are written. They are restored before
+    the temp tree is removed.
+    """
     need_check()
     tree = tempfile.mkdtemp(prefix="skill_rows_")
     try:
@@ -83,10 +98,17 @@ def run(files, real_skills=False):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w", encoding="utf-8", newline="") as handle:
                 handle.write(text)
+        for rel in locked:
+            os.chmod(os.path.join(tree, *rel.split("/")), 0o000)
         proc = subprocess.run([sys.executable, script], capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=120)
         return proc.returncode, proc.stdout + proc.stderr
     finally:
+        for rel in locked:
+            try:
+                os.chmod(os.path.join(tree, *rel.split("/")), 0o755)
+            except OSError:
+                pass
         shutil.rmtree(tree, ignore_errors=True)
 
 
@@ -109,6 +131,14 @@ class Coverage(unittest.TestCase):
         files[RECORD] = record([row("alpha"), row("beta")], prose="Don't edit this table by hand.\n\n")
         code, out = run(files)
         self.assertEqual(code, 0, out)
+
+    def test_clean_run_prints_nothing(self):
+        # Red: the check prints a blank line on a clean run today (item 5, 2026-10-13 review).
+        files = skills("alpha")
+        files[RECORD] = record([row("alpha")])
+        code, out = run(files)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out, "")
 
     def test_crlf_record_reads_the_same(self):
         files = skills("alpha")
@@ -208,9 +238,11 @@ class Coverage(unittest.TestCase):
         self.assertIn("alpha", out)
 
     def test_scanner_markers_in_row_text_do_not_hide_later_rows(self):
+        # The "<!--" sits in a code span, so it is plain text (re-pointed 2026-10-13: a bare
+        # "<!--" outside a code span now opens a comment; see the Fences class).
         files = skills("alpha", "beta", "gamma")
         files[RECORD] = record(
-            [row("alpha", PHRASE + " <!-- open a comment"),
+            [row("alpha", PHRASE + " `<!-- open a comment`"),
              row("beta", PHRASE + " /* open a block"),
              row("gamma", PHRASE + " // and # and a lone ` backtick")],
             extra="\nA closing remark --> and */ and don't stop here.\n",
@@ -232,7 +264,102 @@ class Coverage(unittest.TestCase):
                 self.assertIn(named, out)
 
 
+class Fences(unittest.TestCase):
+    """Items 1 and 2 of the 2026-10-13 review: fence length, and mid-line comment openers."""
+
+    def test_fence_closes_only_on_a_fence_at_least_as_long(self):
+        # Red: a 4-backtick (or 4-tilde) fence must not close on a 3-character line inside it.
+        cases = {
+            "4-backtick fence, inner 3-backtick line": "````text\n```\n%s\n````\n" % row("alpha"),
+            "4-tilde fence, inner 3-tilde line": "~~~~text\n~~~\n%s\n~~~~\n" % row("alpha"),
+        }
+        for label, extra in cases.items():
+            with self.subTest(case=label):
+                files = skills("alpha")
+                files[RECORD] = record([], extra=extra)
+                code, out = run(files)
+                self.assertEqual(code, 1, out)
+                self.assertIn("alpha", out)
+
+    def test_longer_closer_closes_the_fence(self):
+        # Green pin: the row inside the fence does not count, the row after its closer does.
+        cases = {
+            "3-backtick fence, 4-backtick closer": "```text\n%s\n````\n%s\n",
+            "3-tilde fence, 4-tilde closer": "~~~text\n%s\n~~~~\n%s\n",
+        }
+        for label, pattern in cases.items():
+            with self.subTest(case=label):
+                files = skills("alpha")
+                files[RECORD] = record([], extra=pattern % (row("alpha"), row("alpha")))
+                code, out = run(files)
+                self.assertEqual(code, 0, out)
+
+    def test_mid_line_comment_opener_hides_the_rows_it_wraps(self):
+        # Red: "intro <!--" opens a multi-line comment on a prose line. The row inside must not count.
+        files = skills("alpha", "beta")
+        files[RECORD] = record([row("beta")], extra="intro <!--\n%s\n-->\n" % row("alpha"))
+        code, out = run(files)
+        self.assertEqual(code, 1, out)
+        self.assertIn("alpha", out)
+
+    def test_comment_closed_on_its_own_line_hides_nothing(self):
+        # Green pin: "<!-- note -->" closes on its line, so the next row counts.
+        files = skills("alpha")
+        files[RECORD] = record([], extra="intro <!-- note --> text\n%s\n" % row("alpha"))
+        code, out = run(files)
+        self.assertEqual(code, 0, out)
+
+    def test_comment_opener_in_code_span_or_fence_is_plain_text(self):
+        # Green pin: a lone "<!--" in a code span or in a fence opens nothing.
+        files = skills("alpha", "beta")
+        extra = ("Write `<!--` to open a comment.\n"
+                 "```text\n<!-- lone opener in a fence\n```\n"
+                 "%s\n" % row("beta"))
+        files[RECORD] = record([row("alpha", PHRASE + " `<!-- open`")], extra=extra)
+        code, out = run(files)
+        self.assertEqual(code, 0, out)
+
+
+class Folders(unittest.TestCase):
+    """Items 3, 4 and 6 of the 2026-10-13 review: exact SKILL.md, dot folders, unreadable folders."""
+
+    def test_skill_md_name_is_exact_case(self):
+        # Red on Windows, where NTFS matches skill.md to SKILL.md. Green on a case-sensitive FS.
+        files = {"skills/lc/skill.md": "lowercase name, not a skill\n"}
+        files[RECORD] = record([])
+        code, out = run(files)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out, "")
+
+    def test_dot_folders_and_pycache_need_no_row(self):
+        cases = {
+            "dot folder with SKILL.md": {"skills/.foo/SKILL.md": "---\nname: foo\n---\n"},
+            "__pycache__ with a .pyc": {"skills/__pycache__/check.cpython-311.pyc": "x"},
+        }
+        for label, folder_files in cases.items():
+            with self.subTest(case=label):
+                files = dict(folder_files)
+                files[RECORD] = record([])
+                code, out = run(files)
+                self.assertEqual(code, 0, out)
+
+    @unittest.skipUnless(POSIX_USER, CHECK_LOCKED)
+    def test_unreadable_skill_folder_without_a_row_exits_2(self):
+        # Red: a folder whose SKILL.md cannot be stat'ed is read as "not a skill", so the run passes.
+        files = skills("locked")
+        files[RECORD] = record([])
+        code, out = run(files, locked=("skills/locked",))
+        self.assertEqual(code, 2, out)
+        self.assertIn("locked", out)
+
+
 class RealRepo(unittest.TestCase):
+    def test_real_clean_run_prints_nothing(self):
+        # Red today: the real run prints a blank line (item 5, 2026-10-13 review).
+        code, out = run_real()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out, "")
+
     def test_real_record_and_skills_pass(self):
         code, out = run_real()
         self.assertEqual(code, 0, out)
