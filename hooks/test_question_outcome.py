@@ -28,13 +28,20 @@ Interface the hook must match:
   gets the "did not run" note, never a silent pass.
 - Stdin is UTF-8 bytes, as Claude Code writes them. A non-cp1252 character in the question
   text (U+201D) is parsed and judged. It is not an allow-on-error.
-- A `You want:` deny reason passes through lint/_transcript.safe_finding_text: no raw newline,
+- A `Goal:` deny reason passes through lint/_transcript.safe_finding_text: no raw newline,
   no control character from the question text.
 - Owner text: `owner_messages(path)` returns only genuine owner text, oldest first, at most 3.
   Machine lines (isMeta, no origin or origin not "human", task-notification, peer messages, Stop-hook
   feedback, compact summary, sidechain text, tool_result, system-reminder) never count.
 - The transcript is read at the tail only: at most 2 MiB of a 10 MB transcript is read.
-- `You want:` needs text on its own line. Blank or whitespace-only after the marker is missing.
+- `Goal:` needs text on its own line. Blank or whitespace-only after the marker is missing.
+- Goal format (owner ruling 2026-10-13): a question with a `Goal:` line passes the presence check.
+  A question with only `You want:` is denied, with a reason that names `Goal:`, and no model call.
+- The model prompt names `Goal:` and `Problem:`. It holds the two rule bullets
+  (style-question-states-problem, style-question-restates-goal) read at call time from
+  output-styles/shiv-stylisms.md, found from the hook's own folder (hooks/../output-styles).
+  Nothing is copied into the hook. The judge prompt says a goal line is a paraphrase in plain
+  words, and that a paraphrase is not grounds to deny.
 - The `why` in a FLAG deny is capped and sanitized with lint/_transcript.safe_finding_text
   (FINDING_MAX, FINDING_CUT_MARK). No control character reaches the reason.
 - Unwritable state: a FLAG is allowed with a "did not run" note, never denied (no loop).
@@ -100,9 +107,11 @@ RESTATE_RULE = "style-question-restates-goal"
 WHY = "The wait option answers timing, not the three-try limit."
 ALLOW = ({"verdict": "ALLOW"}, None)
 FLAG = ({"verdict": "FLAG", "why": WHY}, None)
-GOOD_Q = "You want: a three-try limit on the upload retry.\nShould the retry wait between tries?"
+GOOD_Q = ("Goal: a three-try limit on the upload retry.\nProblem: the upload retry has no limit, so it can loop.\n"
+          "Should the retry wait between tries?")
 BAD_Q = "Should the retry wait between tries?"
-REWORDED_Q = "You want: a three-try limit on the upload retry.\nShould each retry pause before it runs?"
+REWORDED_Q = ("Goal: a three-try limit on the upload retry.\nProblem: the upload retry has no limit, so it can loop.\n"
+              "Should each retry pause before it runs?")
 LABELS = ["Wait one second", "No wait"]
 REWORDED_LABELS = ["Pause first", "Run now"]
 CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
@@ -344,6 +353,7 @@ def case_1_missing_restate_is_denied():
     check(name + ": exit 0", code in (0, None), code)
     check(name + ": denied", reason is not None, out)
     check(name + ": reason names " + RESTATE_RULE, reason is not None and RESTATE_RULE in reason, reason)
+    check(name + ": reason names Goal:", reason is not None and "Goal:" in reason, reason)
     check(name + ": invoke_model not called", stub.prompts == [], len(stub.prompts))
 
 
@@ -412,7 +422,7 @@ def case_5_after_a_deny_the_next_ask_passes_whatever_its_text():
 
 
 def case_5b_after_a_deny_the_next_ask_passes_without_you_want():
-    name = "case5b after a flag deny, the next ask passes even with no You want line"
+    name = "case5b after a flag deny, the next ask passes even with no Goal line"
     if not need_module(name):
         return
     session = fresh_session("c5b")
@@ -477,7 +487,7 @@ def case_6_prompt_holds_last_three_owner_messages():
         owner("OWNER-3 keep it to three tries."),
         owner("OWNER-4 the wait matters less than the limit."),
     ])
-    qtext = "You want: a three-try limit on the upload retry.\nQSENT-Q should the retry wait?"
+    qtext = "Goal: a three-try limit on the upload retry.\nQSENT-Q should the retry wait?"
     labels = ["LABEL-ALPHA wait", "LABEL-BETA no wait"]
     with model_stub(ALLOW) as stub:
         run_main(ask_payload(fresh_session("c6"), [question(qtext, labels)], transcript))
@@ -817,16 +827,16 @@ def case_q4_a_big_transcript_is_read_at_the_tail_only():
 
 
 # --------------------------------------------------------------------------- case q5
-# `You want:` with nothing after it on its own line is missing.
+# `Goal:` with nothing after it on its own line is missing.
 
-def case_q5_you_want_with_no_text_on_its_line_is_missing():
-    name = "caseQ5 You want: with only whitespace or a newline after it: deny, no model call"
+def case_q5_goal_with_no_text_on_its_line_is_missing():
+    name = "caseQ5 Goal: with only whitespace or a newline after it: deny, no model call"
     if not need_module(name):
         return
     variants = [
-        ("spaces then a newline", "You want:   \nShould the retry wait between tries?"),
-        ("a blank line then the question", "You want:\n\nShould the retry wait between tries?"),
-        ("the marker alone, at the end", "Should the retry wait between tries?\nYou want:"),
+        ("spaces then a newline", "Goal:   \nShould the retry wait between tries?"),
+        ("a blank line then the question", "Goal:\n\nShould the retry wait between tries?"),
+        ("the marker alone, at the end", "Should the retry wait between tries?\nGoal:"),
     ]
     for label, text in variants:
         with model_stub(ALLOW) as stub:
@@ -834,6 +844,7 @@ def case_q5_you_want_with_no_text_on_its_line_is_missing():
                                                 default_transcript()))
         reason = deny_reason(out)
         check(name + ": " + label + ": denied", reason is not None and RESTATE_RULE in reason, out)
+        check(name + ": " + label + ": reason names Goal:", reason is not None and "Goal:" in reason, out)
         check(name + ": " + label + ": no model call", stub.prompts == [], len(stub.prompts))
         check(name + ": " + label + ": exit 0", code in (0, None), code)
 
@@ -880,7 +891,7 @@ def case_q7_model_timeout_line_does_not_echo_the_prompt():
     if not need_module(name):
         return
     transcript = write_transcript("q7b", [owner("ECHO-OWNER-SENTINEL the owner's goal.")])
-    qtext = "You want: a three-try limit on the upload retry.\nECHO-QUESTION-SENTINEL should it wait?"
+    qtext = "Goal: a three-try limit on the upload retry.\nECHO-QUESTION-SENTINEL should it wait?"
 
     def timed_out(prompt):
         # The real invoke_model returns str(exc) for a timeout, and str(TimeoutExpired) carries
@@ -902,7 +913,7 @@ def case_q7_model_timeout_line_does_not_echo_the_prompt():
 
 # --------------------------------------------------------------------------- round 3
 # R1 a deny state that cannot be removed; R2 deny-state age; R3 UTF-8 stdin read as cp1252;
-# R4 the You want deny reason is sanitized.
+# R4 the Goal: deny reason is sanitized.
 
 def _age_state(session, seconds):
     """Make the session's deny-state file `seconds` old (its mtime is its age)."""
@@ -970,7 +981,7 @@ def case_r3_utf8_stdin_read_as_cp1252_is_judged_not_allowed_on_error():
     name = "caseR3 stdin UTF-8 with U+201D, read as cp1252: judged, not did-not-run"
     if not need_module(name):
         return
-    text = ("You want: a three-try limit on the upload retry.\n"
+    text = ("Goal: a three-try limit on the upload retry.\n"
             "Should the retry say “wait” between tries?")
     payload = ask_payload(fresh_session("r3"), [question(text, LABELS)], default_transcript())
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")  # as Claude Code writes it
@@ -984,7 +995,7 @@ def case_r3_utf8_stdin_read_as_cp1252_is_judged_not_allowed_on_error():
 
 
 def case_r4_missing_you_want_reason_has_no_raw_newline_or_control_character():
-    name = "caseR4 missing You want: the deny reason is passed through safe_finding_text"
+    name = "caseR4 missing Goal: the deny reason is passed through safe_finding_text"
     if not need_module(name):
         return
     text = "Should the retry wait\nbetween tries?\x1b[2J at the limit"
@@ -1046,8 +1057,197 @@ def case_r8b_fresh_state_whose_remove_fails_does_not_deny_and_says_so():
     check(name + ": exit 0", code_b in (0, None), code_b)
 
 
+# --------------------------------------------------------------------------- goal format
+# Owner ruling 2026-10-13: `You want:` is renamed `Goal:`, and the problem sentence opens with
+# `Problem:`. The prompt carries the two rule bullets, read from output-styles/shiv-stylisms.md.
+
+GOAL_RULE = "style-question-restates-goal"
+PROBLEM_RULE = "style-question-states-problem"
+STYLE_PATH = os.path.join(HERE, "..", "output-styles", "shiv-stylisms.md")
+GOAL_Q = "Goal: a three-try limit on the upload retry.\nShould the retry wait between tries?"
+GOAL_LINE_Q = "Goal: QGOAL-TOKEN\nShould the retry wait between tries?"
+YOU_WANT_ONLY_Q = "You want: a three-try limit on the upload retry.\nShould the retry wait between tries?"
+# A scratch style file for the hook copy. Its rule bullets carry sentinels, so the prompt must hold
+# them, read from this file. The problem bullet wraps over two lines and has a lone apostrophe. The
+# decoy quotes a marker inside a code span, so a scanner keyed on the marker alone takes the decoy.
+# It has no literal "Goal:" or "Problem:", so the names in the prompt must come from the hook.
+STYLE_FIXTURE = """# shiv-stylisms
+
+## Plain
+
+- Before each question to the user, give the problem in one plain sentence, PROBSENT-FIX,
+  and say why it needs their word.<!-- rule:style-question-states-problem -->
+- Quote a marker only in code, as `<!-- rule:style-question-restates-goal -->`, DECOY-FIX.
+- Open each question with one goal line, in the user's terms, GOALSENT-FIX. Then give
+  the options.<!-- rule:style-question-restates-goal -->
+"""
+
+
+def norm(text):
+    return " ".join(text.split())
+
+
+def rule_bullet(text, rule_id):
+    """The bullet that ends with the rule's marker, read from a style file: its "- " line down to
+    the marker, the marker removed, whitespace collapsed. Only a marker at a line's end counts, so
+    a marker quoted mid-line is not a rule. "" when there is none."""
+    lines = text.splitlines()
+    marker = "<!-- rule:%s -->" % rule_id
+    for i, line in enumerate(lines):
+        if line.rstrip().endswith(marker):
+            start = i
+            while start > 0 and not lines[start].startswith("- "):
+                start -= 1
+            body = "\n".join(lines[start:i + 1]).replace(marker, "")
+            return norm(body[2:] if body.startswith("- ") else body)
+    return ""
+
+
+def hook_on_style(style_text):
+    """The hook module, loaded from a scratch tree: copies of hooks/ and lint/, and an
+    output-styles/shiv-stylisms.md holding style_text. The hook finds the style file from its own
+    folder, so this shows it reads the file and holds no copy. Raises on a load failure."""
+    tree = tempfile.mkdtemp(prefix="style-tree-", dir=ROOT)
+    ignore = shutil.ignore_patterns("test_*", "__pycache__")
+    shutil.copytree(HERE, os.path.join(tree, "hooks"), ignore=ignore)
+    shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(tree, "lint"), ignore=ignore)
+    shutil.copy(MODULE_PATH, os.path.join(tree, "hooks", "question_outcome.py"))
+    os.makedirs(os.path.join(tree, "output-styles"))
+    with open(os.path.join(tree, "output-styles", "shiv-stylisms.md"), "w", encoding="utf-8") as f:
+        f.write(style_text)
+    spec = importlib.util.spec_from_file_location(
+        "question_outcome_copy", os.path.join(tree, "hooks", "question_outcome.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def fixture_hook(name):
+    """The hook copy on STYLE_FIXTURE. None, after one FAIL line, when the copy does not load."""
+    try:
+        return hook_on_style(STYLE_FIXTURE)
+    except Exception as exc:
+        check(name + ": the hook copy loads", False, "%s: %s" % (type(exc).__name__, exc))
+        return None
+
+
+@contextlib.contextmanager
+def hook_as(mod):
+    """Run the cases inside this block on `mod` instead of the module under test."""
+    global qo
+    prior = qo
+    qo = mod
+    try:
+        yield
+    finally:
+        qo = prior
+
+
+def case_g1_goal_line_passes_the_presence_check_and_reaches_the_model():
+    name = "caseG1 Goal: line: passes the presence check, the model is called once"
+    if not need_module(name):
+        return
+    with model_stub(ALLOW) as stub:
+        code, out, _ = run_main(ask_payload(fresh_session("g1"), [question(GOAL_Q, LABELS)],
+                                            default_transcript()))
+    check(name + ": not denied", deny_reason(out) is None, out)
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": exit 0", code in (0, None), code)
+
+
+def case_g2_you_want_alone_is_denied_and_the_reason_names_goal():
+    name = "caseG2 You want: alone (no Goal: line): deny, reason names Goal:, no model call"
+    if not need_module(name):
+        return
+    with model_stub(ALLOW) as stub:
+        code, out, _ = run_main(ask_payload(fresh_session("g2"), [question(YOU_WANT_ONLY_Q, LABELS)],
+                                            default_transcript()))
+    reason = deny_reason(out) or ""
+    check(name + ": denied", deny_reason(out) is not None, out)
+    check(name + ": reason names Goal:", "Goal:" in reason, reason)
+    check(name + ": reason names " + RESTATE_RULE, RESTATE_RULE in reason, reason)
+    check(name + ": no model call", stub.prompts == [], len(stub.prompts))
+    check(name + ": exit 0", code in (0, None), code)
+
+
+def case_g3_prompt_names_goal_and_problem():
+    name = "caseG3 prompt: the hook's own text names Goal: and Problem:"
+    if not need_module(name):
+        return
+    mod = fixture_hook(name)
+    if mod is None:
+        return
+    with hook_as(mod), model_stub(ALLOW) as stub:
+        run_main(ask_payload(fresh_session("g3"), [question(GOAL_LINE_Q, LABELS)], default_transcript()))
+    prompt = stub.prompts[0] if stub.prompts else ""
+    rest = prompt.replace("Goal: QGOAL-TOKEN", "")  # the question's own Goal: line is not counted
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": names Goal:", "Goal:" in rest, "")
+    check(name + ": names Problem:", "Problem:" in rest, "")
+
+
+def case_g4_prompt_holds_the_two_rule_bullets_of_the_real_style_file():
+    name = "caseG4 prompt: holds the two rule bullets of output-styles/shiv-stylisms.md"
+    if not need_module(name):
+        return
+    with open(STYLE_PATH, encoding="utf-8") as f:
+        style = f.read()
+    with model_stub(ALLOW) as stub:
+        run_main(ask_payload(fresh_session("g4"), [question(GOAL_Q, LABELS)], default_transcript()))
+    prompt = norm(stub.prompts[0]) if stub.prompts else ""
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    for rule in (PROBLEM_RULE, GOAL_RULE):
+        bullet = rule_bullet(style, rule)
+        check(name + ": bullet found in the file: " + rule, bullet != "", "")
+        check(name + ": prompt holds the bullet: " + rule, bullet in prompt, bullet[:90])
+
+
+def case_g5_prompt_reads_the_style_file_not_a_copy():
+    name = "caseG5 prompt: the rule bullets come from the style file beside the hook (wrap, apostrophe, decoy)"
+    if not need_module(name):
+        return
+    mod = fixture_hook(name)
+    if mod is None:
+        return
+    with hook_as(mod), model_stub(ALLOW) as stub:
+        run_main(ask_payload(fresh_session("g5"), [question(GOAL_Q, LABELS)], default_transcript()))
+    prompt = norm(stub.prompts[0]) if stub.prompts else ""
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    for rule in (PROBLEM_RULE, GOAL_RULE):
+        bullet = rule_bullet(STYLE_FIXTURE, rule)
+        check(name + ": fixture bullet read: " + rule, bullet != "", "")
+        check(name + ": prompt holds the whole bullet: " + rule, bullet in prompt, bullet[:90])
+    check(name + ": the decoy that quotes a marker is not in the prompt", "DECOY-FIX" not in prompt,
+          "DECOY-FIX found")
+
+
+def case_g6_judge_prompt_says_a_goal_line_is_a_paraphrase_not_grounds_to_deny():
+    name = "caseG6 judge prompt: a goal line is a paraphrase in plain words, not grounds to deny"
+    if not need_module(name):
+        return
+    mod = fixture_hook(name)
+    if mod is None:
+        return
+    with hook_as(mod), model_stub(ALLOW) as stub:
+        run_main(ask_payload(fresh_session("g6"), [question(GOAL_Q, LABELS)], default_transcript()))
+    prompt = (stub.prompts[0] if stub.prompts else "").lower()
+    sentences = [s for s in re.split(r"[.;\n]", prompt) if "paraphrase" in s]
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": says a goal line is a paraphrase", "paraphrase" in prompt, "")
+    check(name + ": says the paraphrase is in plain words", "plain words" in prompt, "")
+    check(name + ": a sentence on paraphrase says it is not grounds to deny or flag",
+          any(re.search(r"\b(not|never|no)\b", s) and re.search(r"\b(deny|denied|flag)", s)
+              for s in sentences), sentences[:3])
+
+
 def main():
-    cases = (case_r8_stale_state_whose_remove_fails_is_ignored_and_the_ask_is_judged,
+    cases = (case_g1_goal_line_passes_the_presence_check_and_reaches_the_model,
+             case_g2_you_want_alone_is_denied_and_the_reason_names_goal,
+             case_g3_prompt_names_goal_and_problem,
+             case_g4_prompt_holds_the_two_rule_bullets_of_the_real_style_file,
+             case_g5_prompt_reads_the_style_file_not_a_copy,
+             case_g6_judge_prompt_says_a_goal_line_is_a_paraphrase_not_grounds_to_deny,
+             case_r8_stale_state_whose_remove_fails_is_ignored_and_the_ask_is_judged,
              case_r8b_fresh_state_whose_remove_fails_does_not_deny_and_says_so,
              case_r1_a_state_that_cannot_be_removed_does_not_pass_every_later_ask,
              case_r2_a_deny_state_older_than_30_minutes_is_ignored,
@@ -1073,7 +1273,7 @@ def main():
              case_q3_unwritable_state_flag_is_allowed_with_a_note,
              case_q3b_unwritable_state_restate_deny_is_not_a_loop,
              case_q4_a_big_transcript_is_read_at_the_tail_only,
-             case_q5_you_want_with_no_text_on_its_line_is_missing,
+             case_q5_goal_with_no_text_on_its_line_is_missing,
              case_q6_the_why_is_capped_and_sanitized,
              case_q7_malformed_stdin_is_allowed_with_one_did_not_run_line,
              case_q7_model_timeout_line_does_not_echo_the_prompt)
