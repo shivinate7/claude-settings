@@ -11,8 +11,10 @@ other step took under 2 min. A pull request that changed one sentence in
 
 - `.github/scripts/harness-scope.sh` reads `git diff --name-only` against the merge
   base and sets one output per harness. Each harness step reads that output.
-- Guard harness runs when `hooks/**` or `lint/_transcript.py` changes. The guard and its
-  suites import only the standard library, so `hooks/**` is the whole import set.
+- Guard harness runs when `hooks/**`, `lint/_transcript.py` or `lint/guard_log_report.py`
+  changes. The guard and its suites import only the standard library, so `hooks/**` and
+  those two lint files are the whole import set. `decision_watch` imports the reader at
+  run time, as it does `_transcript.py`. That is why the reader selects this harness.
 - Janitor harness runs when `janitor/**`, `hooks/guard.py`, `hooks/mutate_shared.py`
   or `settings.json` changes. The janitor imports guard, the harness imports
   `mutate_shared`, and the session-end suite reads `settings.json`.
