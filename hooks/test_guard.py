@@ -3918,6 +3918,31 @@ sh("wsl: a lone apostrophe in text does not hide a refused verb",
 sh("wsl: a comment opener in a string does not hide a refused verb",
    "echo \"# note\"; wsl --shutdown", "deny", rule=WSL_RULE, cwd=NOGIT)
 
+# Round 1 (coordinator): launchers by path, WSLENV set in an earlier statement, test paths that
+# leave the repo, and a glob in a test path. A bare `bash -c` is Git bash and keeps its verdict.
+sh("wsl: a bash.exe launcher by forward-slash path",
+   "C:/Windows/System32/bash.exe -c id", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a bash.exe launcher by backslash path",
+   r"C:\Windows\System32\bash.exe -c id", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: the wsl.exe launcher by path, through sh",
+   r"C:\Windows\System32\wsl.exe -e sh -c id", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a distro launcher run id", "ubuntu.exe run id", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a versioned distro launcher run id", "ubuntu2204.exe run id", "deny", rule=WSL_RULE,
+   cwd=NOGIT)
+sh("wsl: a bare bash -c is Git bash and keeps its verdict", "bash -c x", "allow", cwd=NOGIT)
+sh("wsl: WSLENV exported in an earlier statement",
+   "export WSLENV=PATH/p; wsl -e node --test a.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: WSLENV set in PowerShell in an earlier statement",
+   "$env:WSLENV='PATH/p'; wsl -e node --test a.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a test path that climbs out of the repo with ..",
+   "wsl -e node --test ../../x.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a test path that is absolute from the root",
+   "wsl -e node --test /tmp/evil.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a test path with a drive letter",
+   "wsl -e node --test C:/x/y.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a glob in a test path is allowed",
+   "wsl -e node --test mods/*/x.test.mjs", "allow", cwd=NOGIT)
+
 
 # =========================================================================== 2d. the silent write
 FAMILY = "write"
