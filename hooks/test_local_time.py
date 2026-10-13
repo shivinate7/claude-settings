@@ -14,7 +14,8 @@ Contract the builder codes against:
         24-hour clock, America/Chicago, DST-aware. Winter reads CST and UTC-06:00.
 
     As a script: reads and ignores stdin, prints line() once, exits 0 (also when
-    no tz database is present).
+    no tz database is present). With --subagent, prints one JSON object:
+    {"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": line}}.
 
 Set LOCAL_TIME_UNDER_TEST to test another file.
 
@@ -67,6 +68,8 @@ TABLE = [
      "Local time: 2026-11-01 01:30 CDT (UTC-05:00)"),
     ("fall back, second 01:30 is CST", utc(2026, 11, 1, 7, 30),
      "Local time: 2026-11-01 01:30 CST (UTC-06:00)"),
+    ("fall back, switch instant is CST (DST end bound)", utc(2026, 11, 1, 7, 0),
+     "Local time: 2026-11-01 01:00 CST (UTC-06:00)"),
     ("24-hour afternoon", utc(2026, 7, 1, 18, 5),
      "Local time: 2026-07-01 13:05 CDT (UTC-05:00)"),
     ("leading zero after midnight", utc(2026, 7, 1, 5, 7),
@@ -226,6 +229,32 @@ def case_cli_hook_shape():
           "stderr=%r" % proc.stderr[-300:])
 
 
+def case_cli_subagent():
+    payload = json.dumps({"hook_event_name": "SubagentStart", "agent_type": "test-author",
+                          "cwd": HERE})
+    try:
+        proc = subprocess.run([sys.executable, MODULE_PATH, "--subagent"], input=payload,
+                              capture_output=True, text=True, timeout=20)
+    except subprocess.TimeoutExpired:
+        check("CLI --subagent: finishes within 20 s", False, "timed out")
+        return
+    check("CLI --subagent: exit 0", proc.returncode == 0,
+          "rc=%d stderr=%s" % (proc.returncode, proc.stderr.strip()[-300:]))
+    try:
+        hso = json.loads(proc.stdout)["hookSpecificOutput"]
+        event, ctx = hso["hookEventName"], hso["additionalContext"]
+    except (ValueError, KeyError, TypeError) as e:
+        check("CLI --subagent: stdout is hookSpecificOutput JSON", False,
+              "stdout=%r (%s)" % (proc.stdout[-200:], e))
+        return
+    check("CLI --subagent: hookEventName is SubagentStart", event == "SubagentStart",
+          "got %r" % (event,))
+    check("CLI --subagent: additionalContext starts with 'Local time: '",
+          isinstance(ctx, str) and ctx.startswith("Local time: "), "got %r" % (ctx,))
+    check("CLI --subagent: additionalContext is one Central line",
+          isinstance(ctx, str) and LINE_FULL.fullmatch(ctx) is not None, "got %r" % (ctx,))
+
+
 # Runs the real script as __main__ with the tz database blocked. Only the shape is checked here:
 # the clock is real, and the exact answers are covered by the driver cases above.
 CLI_BLOCKED = (
@@ -261,6 +290,7 @@ def main():
         case_no_tz_database()
         case_machine_zone_is_not_used()
         case_cli_hook_shape()
+        case_cli_subagent()
         case_cli_no_tz_database()
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
