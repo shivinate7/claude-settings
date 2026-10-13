@@ -14,6 +14,8 @@
 #    The run uses the local ref and passes. A check.sh that fetches first goes red.
 #  - shallow-no-merge-base-red: a depth-1 clone with no merge base is red, with the lint's
 #    message. It is never a silent green.
+#  - action-only-rule-passes, caller-only-rule-passes, neither-rule-fails: a rule Home resolves
+#    against the action's CLAUDE.md or the caller's, and fails in neither.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
 tmp="$(mktemp -d)"
@@ -82,4 +84,37 @@ quiet git -C "$tmp/unpersisted" rev-parse --verify -q origin/main
 quiet git -C "$tmp/unpersisted" remote set-url origin "$tmp/unreachable.git"
 expect 0 unpersisted-local-base-passes "$tmp/unpersisted" main ""
 expect 1 shallow-no-merge-base-red "$tmp/shallow" main "git diff failed"
+# A Home: rule:<id> resolves against the action's own CLAUDE.md and the caller's. The action root
+# is a copy of check.sh and the lint, with its own CLAUDE.md (one rule). Each caller clone adds one
+# declared record, and maybe a CLAUDE.md with one rule of its own.
+actroot="$tmp/actroot"
+mkdir -p "$actroot/actions/ruling-kind" "$actroot/lint"
+quiet cp "$here/check.sh" "$actroot/actions/ruling-kind/"
+quiet cp "$here/../../lint/check_ruling_kind.py" "$actroot/lint/"
+printf '# Action rules\n\nRule text. <!-- rule:action-rule -->\n' > "$actroot/CLAUDE.md"
+# Case 1: the rule lives only in the action's CLAUDE.md. The caller has no CLAUDE.md.
+quiet git clone -q "$remote" "$tmp/rule-action"
+quiet git -C "$tmp/rule-action" switch -q -c rule-action
+mkdir -p "$tmp/rule-action/decisions"
+printf 'Kind: process\nHome: rule:action-rule\n' > "$tmp/rule-action/decisions/action-only.md"
+quiet git -C "$tmp/rule-action" add -A
+quiet git -C "$tmp/rule-action" commit -q -m rule-action
+expect 0 action-only-rule-passes "$tmp/rule-action" main "" "$actroot/actions/ruling-kind/check.sh"
+# Case 2: the rule lives only in the caller's CLAUDE.md.
+quiet git clone -q "$remote" "$tmp/rule-caller"
+quiet git -C "$tmp/rule-caller" switch -q -c rule-caller
+mkdir -p "$tmp/rule-caller/decisions"
+printf 'Kind: process\nHome: rule:caller-rule\n' > "$tmp/rule-caller/decisions/caller-only.md"
+printf '# Caller rules\n\nRule text. <!-- rule:caller-rule -->\n' > "$tmp/rule-caller/CLAUDE.md"
+quiet git -C "$tmp/rule-caller" add -A
+quiet git -C "$tmp/rule-caller" commit -q -m rule-caller
+expect 0 caller-only-rule-passes "$tmp/rule-caller" main "" "$actroot/actions/ruling-kind/check.sh"
+# Case 3: the rule lives in neither CLAUDE.md. Red, and the lint names the Home.
+quiet git clone -q "$remote" "$tmp/rule-none"
+quiet git -C "$tmp/rule-none" switch -q -c rule-none
+mkdir -p "$tmp/rule-none/decisions"
+printf 'Kind: process\nHome: rule:no-such-rule\n' > "$tmp/rule-none/decisions/neither-rule.md"
+quiet git -C "$tmp/rule-none" add -A
+quiet git -C "$tmp/rule-none" commit -q -m rule-none
+expect 1 neither-rule-fails "$tmp/rule-none" main "Home rule:no-such-rule is not a rule marker" "$actroot/actions/ruling-kind/check.sh"
 exit $bad
