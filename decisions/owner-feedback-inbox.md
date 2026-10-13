@@ -59,6 +59,8 @@ Same files. Prove on the Mac clone after `git pull` and install.sh.
 ## Named limits
 
 - The trigger is the owner's to type. A burst sent without `fb` is not captured.
+- Closing is self-attested. A `[closed]` mark waives the handoff check, and nothing checks
+  that the item's home holds it.
 - The gate checks that items exist and are homed. It does not check that the work is done.
 - `!` was not used as the opener: in the Claude Code terminal a leading `!` runs a shell command.
 
