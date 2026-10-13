@@ -20,7 +20,26 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RECORD = os.path.join(ROOT, "decisions", "subagent-model-cap.md")
 SKILLS = os.path.join(ROOT, "skills")
 ROW = re.compile(r"^\|\s*skill `([^`]+)`\s*\|")
+FENCE = re.compile(r"^(`{3,}|~{3,})")
+CODE_SPAN = re.compile(r"(`+)(?!`).+?(?<!`)\1(?!`)")
 PHRASES = ("no model pin", "runs on the caller's model")
+
+
+def opens_comment(s, inside):
+    """True when s leaves an HTML comment open at its end. `inside` says s starts in one.
+    A "<!--" in a code span is plain text."""
+    if inside:
+        if "-->" not in s:
+            return True
+        s = s.split("-->", 1)[1]
+    s = CODE_SPAN.sub("", s)
+    pos = s.find("<!--")
+    while pos != -1:
+        end = s.find("-->", pos + 4)
+        if end == -1:
+            return True
+        pos = s.find("<!--", end + 3)
+    return False
 
 
 def live_lines(text):
@@ -29,24 +48,36 @@ def live_lines(text):
     for line in text.splitlines():
         s = line.strip()
         if fence:
-            if s.startswith(fence):
+            # A fence closes only on the same character, at least as long, with nothing after it.
+            if s and set(s) == {fence[0]} and len(s) >= len(fence):
                 fence = None
-        elif comment:
-            comment = "-->" not in s
-        elif s.startswith(("```", "~~~")):
-            fence = s[:3]
-        elif s.startswith("<!--") and "-->" not in s:
-            comment = True
-        else:
+            continue
+        if not comment:
+            opener = FENCE.match(s)
+            if opener:
+                fence = opener.group(1)
+                continue
             yield line
+        comment = opens_comment(s, comment)
+
+
+def skill_names():
+    """Folders directly under skills/ that hold a file named exactly SKILL.md."""
+    names = []
+    for name in os.listdir(SKILLS):
+        folder = os.path.join(SKILLS, name)
+        if name.startswith(".") or name == "__pycache__" or not os.path.isdir(folder):
+            continue
+        if "SKILL.md" in os.listdir(folder):  # listdir gives the real case on every platform
+            names.append(name)
+    return sorted(names)
 
 
 def main():
     try:
         with open(RECORD, encoding="utf-8-sig") as handle:
             text = handle.read()
-        names = sorted(n for n in os.listdir(SKILLS)
-                       if os.path.isfile(os.path.join(SKILLS, n, "SKILL.md")))
+        names = skill_names()
     except (OSError, UnicodeDecodeError) as err:
         print("check_skill_model_rows: cannot read input: %s" % err)
         return 2
@@ -68,7 +99,8 @@ def main():
             problems.append("skill `%s`: stale row, no skills/%s/SKILL.md" % (name, name))
         if count > 1:
             problems.append("skill `%s`: %d rows, need exactly one" % (name, count))
-    print("\n".join(problems))
+    if problems:
+        print("\n".join(problems))
     return 1 if problems else 0
 
 
