@@ -5,7 +5,7 @@
 #   mutation harness). The `gates` lint job always runs, so it has no flag.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
-# BASE_SHA, BEFORE_SHA, and for the claim narrowing EVENT_ACTION, HEAD_SHA, GITHUB_REPOSITORY, GH_TOKEN. decisions/docs-only-prs-skip-code-suites.md.
+# BASE_SHA, BEFORE_SHA, and for the claim narrowing EVENT_ACTION, HEAD_SHA, PR_NUMBER, GITHUB_REPOSITORY, GH_TOKEN. decisions/docs-only-prs-skip-code-suites.md.
 set -u
 JOBS="gates_windows gates_windows_merge gates_windows_rest gates_macos shell_macos pointer_windows"
 ALL="$JOBS code guard sweep"
@@ -72,18 +72,36 @@ scope_of() {
 }
 scope_of "$range"
 full_on=$on
+# prior_run_ok SHA: the newest gates.yml pull_request run on SHA concluded success, and one of its
+# pull_requests entries is this PR (PR_NUMBER) with this base (BASE_SHA). A run holds the base sha of
+# its own time, so a base that moved since, a run for another PR, and an unreadable read all fail.
+prior_run_ok() {
+  local json
+  json=$(gh api "repos/${GITHUB_REPOSITORY:-}/actions/workflows/gates.yml/runs?head_sha=$1&event=pull_request&per_page=100" 2>/dev/null) || return 1
+  python3 -c '
+import json, os, sys
+try:
+    runs = [r for r in json.load(sys.stdin)["workflow_runs"] if r.get("head_sha") == sys.argv[1] and r.get("event") == "pull_request"]
+    r = max(runs, key=lambda r: r["created_at"])
+    ok = r["conclusion"] == "success" and any(
+        str(q["number"]) == os.environ.get("PR_NUMBER", "") and q["base"]["sha"] == os.environ.get("BASE_SHA", "") != ""
+        for q in r["pull_requests"])
+except Exception:
+    ok = False
+sys.exit(0 if ok else 1)
+' "$1" <<< "$json"
+}
 # A claim commit alone (decisions/docs-only-prs-skip-code-suites.md): a synchronize whose head is one
 # commit on BEFORE_SHA, carries a Record-claim trailer, touches only paths the table maps to no flag,
-# and follows a gates run on BEFORE_SHA that concluded success. Any false or unreadable condition
+# and follows a green gates run on BEFORE_SHA for this PR and base. Any false or unreadable condition
 # keeps the full scope. The `gates` lint job runs either way.
 b=${BEFORE_SHA:-}
 if [ "${EVENT:-}" = pull_request ] && [ "${EVENT_ACTION:-}" = synchronize ] && [ -n "${b//0/}" ] && [ -n "${HEAD_SHA:-}" ] \
    && [ "$(git rev-list --parents -n1 "$HEAD_SHA" 2>/dev/null)" = "$HEAD_SHA $b" ] \
    && [ -n "$(git log -1 --format='%(trailers:key=Record-claim,valueonly)' "$HEAD_SHA" 2>/dev/null)" ]; then
   scope_of "$b..$HEAD_SHA"
-  if [ -z "${on// /}" ] && runs=$(gh run list --repo "${GITHUB_REPOSITORY:-}" --workflow gates.yml --commit "$b" \
-       --event pull_request --json conclusion --jq '.[].conclusion' 2>/dev/null) && grep -qx success <<< "$runs"; then
-    echo "harness scope: claim commit on a green $b, lint only"
+  if [ -z "${on// /}" ] && prior_run_ok "$b"; then
+    echo "harness scope: claim commit on a green run for this PR and base, lint only"
   else
     on=$full_on
   fi
