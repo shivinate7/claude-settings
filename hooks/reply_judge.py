@@ -11,7 +11,9 @@ The model call is `decision_watch.invoke_model`, the one home for it: Haiku at e
 hook again. This file passes its own accepted answer, `{"ok": true|false}`.
 
 Fail open. Any model error, timeout or odd answer prints one line on stderr, exits 0, and
-blocks nothing. A block prints `{"decision": "block", "reason": ...}` on stdout.
+blocks nothing. A finding never blocks: the hook runs async, and a finding prints
+`{"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": NOTE}}` on stdout, which the
+session reads as a note on the next turn.
 """
 import json
 import os
@@ -65,7 +67,7 @@ def main():
         reason = verdict.get("reason")
         if not isinstance(reason, str) or not reason.strip():
             reason = "reply judge: the reply breaks a style rule."
-        print(json.dumps({"decision": "block", "reason": reason}))
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": reason}}))
     return 0
 
 
