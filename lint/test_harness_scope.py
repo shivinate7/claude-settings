@@ -212,6 +212,38 @@ class Scope(unittest.TestCase):
         self.assertEqual(self.true_set(run([p])), {"gates_windows", "gates_macos", "shell_macos", "code", "guard"})
         self.assertEqual(self.true_set(run([p], existing=[p])), {"gates_windows", "gates_macos", "code", "guard"})
 
+    # Mod tests run as a step of the `gates` job (Linux), gated on the `mods` flag. The flag is its
+    # own: today a mods/ path falls to the unmapped rule, which turns every flag on. ALL stays as it
+    # is, so the cases below carry the mods check, and a missing flag reads as a FAIL here.
+    def test_a_mods_path_sets_the_mods_flag(self):
+        for p in ("mods/plain-diff/check.mjs", "mods/session-board/session-board.test.mjs"):
+            with self.subTest(path=p):
+                self.assertEqual(run([p]).get("mods"), "true")
+        self.assertEqual(run(["README.md", "mods/plain-diff/check.mjs"]).get("mods"), "true")
+
+    def test_a_mods_only_diff_sets_no_other_flag(self):
+        got = run(["mods/plain-diff/check.mjs"])
+        self.assertEqual(got.get("mods"), "true", got)
+        self.assertFlags(got, want_false=ALL)
+
+    def test_a_docs_only_diff_leaves_the_mods_flag_off(self):
+        self.assertEqual(run(["README.md", "decisions/some-record.md"]).get("mods"), "false")
+
+    def test_the_fail_safe_cases_set_the_mods_flag(self):
+        cases = {
+            "scope script": run([".github/scripts/harness-scope.sh"]),
+            "workflow": run([".github/workflows/gates.yml"]),
+            "unmapped path": run(["zz-unmapped/blob.bin"]),
+            "unreadable diff": run(["README.md"], base="f" * 40),
+            "empty base": run(["README.md"], base=""),
+            "push": run(["README.md"], event="push"),
+            "schedule": run(["README.md"], event="schedule"),
+            "dispatch": run(["README.md"], event="workflow_dispatch"),
+        }
+        for name, got in cases.items():
+            with self.subTest(case=name):
+                self.assertEqual(got.get("mods"), "true", got)
+
 
 if __name__ == "__main__":
     unittest.main()
