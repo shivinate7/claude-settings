@@ -89,7 +89,6 @@ Limits, named:
 - The latency run used a Bash call as input. A real judged input is longer, so the figure
   is a floor.
 - The judge on Sonnet costs more than Haiku. Unmeasured.
-- `lint/rule_mechanisms.json` still says "Haiku prompt hook" in its reasons.
 
 Kind: process
 Home: hooks/reply_judge.py
