@@ -3943,6 +3943,19 @@ sh("wsl: a test path with a drive letter",
 sh("wsl: a glob in a test path is allowed",
    "wsl -e node --test mods/*/x.test.mjs", "allow", cwd=NOGIT)
 
+# Round 2 (coordinator): WSLENV named as text is a false alarm; only an assignment refuses. A
+# dot-led glob segment can expand to `..`, so it refuses too.
+sh("wsl: WSLENV in a file name before a wsl call is a false alarm",
+   "cat WSLENV.md; wsl -e node --test a.test.mjs", "allow", cwd=NOGIT)
+sh("wsl: WSLENV in quoted text before a wsl call is a false alarm",
+   "echo \"see WSLENV\"; wsl -e node --test a.test.mjs", "allow", cwd=NOGIT)
+sh("wsl: a set WSLENV assignment refuses",
+   "set WSLENV=PATH/p; wsl -e node --test a.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a test path whose bracket glob expands to ..",
+   "wsl -e node --test [.][.]/x.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a test path whose dot-led glob expands to ..",
+   "wsl -e node --test .*/x.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+
 
 # =========================================================================== 2d. the silent write
 FAMILY = "write"
