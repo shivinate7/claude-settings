@@ -42,8 +42,14 @@ use Monitor for a wait. An agent that followed that text was refused. An agent t
 
 - Whether Monitor still errors is unmeasured. The weekly table (decision guard-log-read-weekly)
   carries the `waiter` count. The first table after this change is the measurement.
-- Watcher detection matches `gh` followed by `watch`, `--watch` or `-w`, wider than the two
-  commands the ruling names.
+- Watcher detection matches `gh run watch`, and `gh pr checks` with `--watch` or
+  `--watch=...`. `gh` and `gh.exe` both count.
+- `bash -c '...'` and subshell bodies, such as `(sleep 30)` and `$(sleep 30)`, are not parsed.
+  The owner accepted this gap (guard.py, near the `bash -c` note).
+- `sleep 20 20` reads as 20 s, not 40 s, and passes.
+- The loop flag spans the whole command. A pause after any unrelated loop is refused.
+- A loop with no loop word, such as `(1..10).ForEach({ Start-Sleep 1 })`, is not seen.
+- `echo {sleep}` is refused: a bare word after `{` counts as a call.
 - An agent may still burn up to 25 s per call on a single pause.
 - Monitor waits for a condition, such as a port or a file. A long command still runs in the
   background, and the agent waits for its completion notice.
