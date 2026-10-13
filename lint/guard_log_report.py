@@ -6,12 +6,18 @@ A line ends in the hook's session_id as a sixth field; a five-field line, or "-"
 session". --session <id> keeps one session's lines. --by-session adds counts per session."""
 import argparse
 import os
-from collections import namedtuple
 import sys
+from collections import namedtuple
 from datetime import datetime, timedelta
+
+# One home for the placeholder: hooks/guard_core.py. lint/ and hooks/ land side by side, in the
+# repo and under ~/.claude, so the hop holds in both places (lint/report_gate.py does the same).
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+from guard_core import SESSION_LOG_PLACEHOLDER  # noqa: E402
 
 COUNTED = ("deny", "ask", "noted")
 UNKNOWN = "unknown session"
+BY_SESSION_ROWS = 200
 Row = namedtuple("Row", "line when tool decision rule matched session")
 
 
@@ -19,11 +25,12 @@ def parse_line(raw):
     """Return the Row for one guard.log line, or None when it is unreadable.
 
     The one reader of guard.log lines. Both shapes: five tab fields, or six with the session last.
-    `session` is the id, or UNKNOWN for a five-field line, an empty field or "-". Extra tabs stay
-    in the last field. Unreadable: fewer than four fields, or a bad timestamp.
+    `session` is field 6 alone, or UNKNOWN for a five-field line, an empty field or the
+    placeholder. A tab beyond field 6 stays in `matched`, never in `session`. Unreadable: fewer
+    than four fields, or a bad timestamp.
     """
     line = raw.rstrip("\r\n")
-    parts = line.split("\t", 5)
+    parts = line.split("\t")
     try:
         if len(parts) < 4:
             raise ValueError
@@ -31,11 +38,14 @@ def parse_line(raw):
     except ValueError:
         return None
     parts += [""] * (6 - len(parts))
-    session = parts[5] if parts[5] not in ("", "-") else UNKNOWN
-    return Row(line, when, parts[1], parts[2], parts[3], parts[4], session)
+    session = parts[5] if parts[5] not in ("", SESSION_LOG_PLACEHOLDER) else UNKNOWN
+    matched = "\t".join([parts[4]] + parts[6:])
+    return Row(line, when, parts[1], parts[2], parts[3], matched, session)
 
 
 def summarize(lines, days, now, session=None):
+    if session == SESSION_LOG_PLACEHOLDER:
+        session = UNKNOWN  # --session - names the lines whose session is unknown
     end = now.date()
     window = [(end - timedelta(days=i)).isoformat() for i in range(days - 1, -1, -1)]
     out = {"by_rule": {}, "per_day": dict.fromkeys(window, 0), "other": [], "unreadable": 0,
@@ -69,9 +79,12 @@ def render(s, by_session=False):
     out += ["| %s | %d | %d | %d |" % (r, c["deny"], c["ask"], c["noted"]) for r, c in rows]
     if by_session:
         out += ["", "| session | rule | deny | ask | noted |", "|---|---|---|---|---|"]
-        for label, rules in sorted(s["by_session"].items()):
-            out += ["| %s | %s | %d | %d | %d |" % (label, r, c["deny"], c["ask"], c["noted"])
-                    for r, c in sorted(rules.items(), key=lambda kv: (-kv[1]["deny"], kv[0]))]
+        flat = [(label, r, c) for label, rules in s["by_session"].items() for r, c in rules.items()]
+        flat.sort(key=lambda t: (-t[2]["deny"], t[0], t[1]))
+        out += ["| %s | %s | %d | %d | %d |" % (label, r, c["deny"], c["ask"], c["noted"])
+                for label, r, c in flat[:BY_SESSION_ROWS]]
+        if len(flat) > BY_SESSION_ROWS:
+            out.append("... and %d more" % (len(flat) - BY_SESSION_ROWS))
     out += ["", "| day | denies |", "|---|---|"]
     out += ["| %s | %d |" % kv for kv in sorted(s["per_day"].items())]
     out += ["", "```"] + s["other"] + ["```", "", "unreadable: %d" % s["unreadable"]]

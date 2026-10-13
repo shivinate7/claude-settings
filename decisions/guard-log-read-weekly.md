@@ -15,6 +15,9 @@ each audit session, and once a week:
 python lint/guard_log_report.py --days 7
 ```
 
+The session is the last field. A missing field or `-` means unknown session. The reader has
+`--session <id>` and `--by-session`.
+
 The table is the outcome meter for the two owner concerns: prompts the owner did not need,
 and agents refused with no allowed path. A rule is judged by its row here, not by its test
 count.

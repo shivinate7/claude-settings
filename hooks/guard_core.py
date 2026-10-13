@@ -1253,7 +1253,11 @@ def log_path_and_text(where: str, text: str) -> str:
 
 SESSION_LOG_PLACEHOLDER = "-"
 SESSION_LOG_MAX = 64
+# Controls and line separators go before the cut. A lone surrogate cannot be encoded as UTF-8, so
+# one in the id would lose the whole log line at the write. It goes after the cut, so the cut
+# never leaves one at the end.
 _SESSION_LOG_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
+_SESSION_LOG_SURROGATE = re.compile(r"[\ud800-\udfff]")
 _log_session = SESSION_LOG_PLACEHOLDER
 
 
@@ -1267,6 +1271,7 @@ def session_log_field(value) -> str:
         if not isinstance(value, str):
             return SESSION_LOG_PLACEHOLDER
         text = _SESSION_LOG_CONTROL.sub("", value).strip()[:SESSION_LOG_MAX]
+        text = _SESSION_LOG_SURROGATE.sub("", text).strip()
         return text or SESSION_LOG_PLACEHOLDER
     except Exception:
         return SESSION_LOG_PLACEHOLDER

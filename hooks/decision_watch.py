@@ -1134,9 +1134,12 @@ def collect_unread(stamp):
             lines = handle.read().splitlines()
     except Exception:
         return []
-    if LINT_DIR not in sys.path:
-        sys.path.insert(0, LINT_DIR)
-    import guard_log_report  # lint/guard_log_report.py, the one reader of guard.log lines
+    try:
+        if LINT_DIR not in sys.path:
+            sys.path.insert(0, LINT_DIR)
+        import guard_log_report  # lint/guard_log_report.py, the one reader of guard.log lines
+    except Exception:
+        return []  # an unimportable reader names no unread subject, and keeps the other messages
     for line in lines:
         row = guard_log_report.parse_line(line)
         if row is None or row.rule != UNREAD_RULE or row.when < bound:
