@@ -39,7 +39,8 @@ A session is update-ready when all five hold: no running agents, state is waitin
 - The board reads the 200 newest entries. It says how many more exist.
 - After `/clear` or a resume, the mod writes nothing for the old id and reads the id again on each beat. It writes under the new id when that binds. After session end it writes nothing.
 - The git call runs once per turn end and once per idle heartbeat: argv array, no shell, `core.fsmonitor=false`, `--no-optional-locks`, 5 s timeout.
-- These steps each wait at most 100 ms for their reads and writes: session start, turn start, turn end, a permission ask, and the end of a tool call. The work then finishes on its own.
+- These steps each wait at most 100 ms for their git, agent, context, and store work: session start, turn start, turn end, a permission ask, and the end of a tool call. The work then finishes on its own.
+- The 100 ms wait does not cover everything. At session start, `$.session.repo()` and `$.command.register()` are not bounded by it. At session end, the store deletes are not bounded by it.
 - A permission ask with no tool id writes nothing.
 - The pane refreshes the board on the heartbeat while it is open. It stops when the pane closes, or after 10 refreshes with no `/board` call.
 
@@ -90,6 +91,10 @@ Checked: the session id in `claude agents --json` equals the id the mod writes. 
 - The store file name carries the install: a `--plugin-dir` run wrote `session-board_inline-<hash>.json`. Sessions loaded two ways probably do not share one file. Load every session the same way.
 - The running agent count is as of the last turn end or heartbeat. It can lag by 30 s.
 - A denied permission clears when the tool call returns, the same as an approved one. Turn end also clears it.
+- Named hole, the sweep: it deletes day-old records only when `claude agents --json` gives a valid JSON list. A banner line, an object, or no output deletes nothing. A valid empty list `[]` counts as real, so day-old records of sessions with no live row go.
+- Named hole, the clear race: after `/clear` or a resume, a store write already held at the host can land late. The mod removes it again after it lands. The old entry can show for a short moment.
+- Named hole, the idle git read: a quick read from a turn end or a beat puts the idle read back to every 30 s. A slow turn-end read does not change the interval. Only a slow idle read doubles it.
+- Named hole, the config folder: under Git Bash, `HOME` is a path like `/c/Users/x`. `/safe-stop` uses `USERPROFILE` first when it starts with a drive letter. Another setup can pick the wrong folder. Set `CLAUDE_CONFIG_DIR` to be sure.
 - A mod error is not shown in the session. It goes to the debug log (`claude --debug`), one line starting "session-board:".
 
 ## Try in the desktop app

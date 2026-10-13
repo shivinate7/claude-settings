@@ -5,7 +5,7 @@
 import {
   AGENTS_TIMEOUT_MS, GC_MS, GIT_BACKOFF_MAX_MS, GIT_SLOW_MS, GIT_TIMEOUT_MS, GRACE_MS, HEARTBEAT_MS, MAX_KEYS, MAX_PATH, MAX_POLLS, READ_BUDGET_MS,
   bandText, baseName, clean, cleanPath, detailLines, gitArgs, headerText, isSessionId, isUserOrigin, makeTracker,
-  mergeRows, num, parseAgentsJson, parseStatus, readDetail, readEntry, rowText, safeStopMessage, safeStopPlan,
+  agentRows, configDir, mergeRows, num, parseStatus, readDetail, readEntry, rowText, safeStopMessage, safeStopPlan,
 } from './lib.mjs'
 
 const PANE = 'session-board'
@@ -18,6 +18,7 @@ let polls = 0 // board refreshes on the heartbeat since the last /board
 let gitBusy = false // a heartbeat git read is running
 let gen = 0 // counts turn starts: a git read that began in an earlier count is dropped when it lands
 let ended = false // the session ended: nothing is written after that
+const retired = new Set() // ids a /clear or resume left behind: a write that lands late is removed again
 let gitEvery = HEARTBEAT_MS // idle git read interval: doubles after a slow read, back to 30 s on a quick one
 let gitNextAt = 0
 let lastDetail = '' // the detail record as last written, without its stamp
@@ -43,6 +44,7 @@ export function register(on) {
         // running and reads the id again each beat. Until the new id binds the host still
         // answers the old one: write nothing for it.
         staleId = e.sessionId
+        if (isSessionId(e.sessionId)) retired.add(e.sessionId)
         lastDetail = ''
         tracker.reset()
         await setRepo($)
@@ -135,6 +137,7 @@ async function startUp($) {
   tracker.reset()
   staleId = ''
   ended = false
+  retired.clear()
   lastDetail = ''
   await $.command.register({ name: 'board', description: 'Show every session on this machine: state, update-ready, agents', argumentHint: '[text]' })
   await $.command.register({ name: 'safe-stop', description: 'Reach a stopping point and write this session\'s handoff', argumentHint: '[plan]' })
@@ -211,6 +214,8 @@ async function ident($) {
   return sid
 }
 
+const gone = id => ended || retired.has(id)
+
 // The entry always; the detail record at turn end and on a beat, only when its content changed.
 async function flush($, withDetail) {
   if (ended) return // the session ended: a refresh that lands now writes nothing
@@ -220,16 +225,23 @@ async function flush($, withDetail) {
     if (!isSessionId(id)) return note($, 'no usable session id: entry not written')
     if (id === staleId) return // /clear ran and the new id is not bound yet
     staleId = ''
+    retired.delete(id) // the host answers this id as current
     const now = await $.clock.now()
     if (ended) return
     await $.store.set('sess:' + id, tracker.entry(now))
-    if (withDetail && !ended) {
+    if (withDetail && !gone(id)) {
       const detail = tracker.detail(now)
       const key = id + JSON.stringify({ ...detail, at: 0 })
       if (key !== lastDetail) {
         await $.store.set('detail:' + id, detail)
         lastDetail = key
       }
+    }
+    // A write held at the host can land after the session ended or the id was retired by a
+    // /clear or resume. It recreated the records: remove them again.
+    if (gone(id)) {
+      await $.store.delete('sess:' + id)
+      await $.store.delete('detail:' + id)
     }
   } catch (err) { note($, 'store write failed: ' + (err && err.message)) } // the entry goes stale and hides: the safe failure
 }
@@ -246,6 +258,8 @@ async function refreshGit($) {
     const r = await bounded($, $.process.run(gitArgs(), { cwd, timeoutMs: GIT_TIMEOUT_MS }), GIT_TIMEOUT_MS + 1000)
     const at = await $.clock.now()
     slow = at - started >= GIT_SLOW_MS
+    // A quick read, from a turn end or a beat, puts the idle interval back to 30 s.
+    if (!slow) { gitEvery = HEARTBEAT_MS; gitNextAt = at + HEARTBEAT_MS }
     if (mine !== gen) return { slow }
     if (r.exitCode !== 0) throw new Error('git exited ' + r.exitCode)
     tracker.setGit(parseStatus(r.stdout), at)
@@ -314,7 +328,12 @@ async function readAgents($) {
   try {
     const r = await bounded($, $.process.run(['claude', 'agents', '--json'], { timeoutMs: AGENTS_TIMEOUT_MS }), AGENTS_TIMEOUT_MS + 1000)
     if (r.exitCode !== 0) return { rows: [], ok: false, note: 'claude agents failed: shown from the store only' }
-    return { rows: parseAgentsJson(r.stdout), ok: true, note: '' }
+    // Parse once. Anything but a JSON array (a banner line, an object, a string) is not a list:
+    // not ok, so the sweep deletes nothing. A valid [] is a real list with no live session.
+    let list
+    try { list = JSON.parse(String(r.stdout)) } catch { list = null }
+    if (!Array.isArray(list)) return { rows: [], ok: false, note: 'claude agents output not usable: shown from the store only' }
+    return { rows: agentRows(list), ok: true, note: '' }
   } catch {
     return { rows: [], ok: false, note: 'claude agents unavailable: shown from the store only' }
   }
@@ -390,15 +409,19 @@ async function safeStop($, args) {
   const plan = String(args ?? '').trim() === 'plan'
   const id = await ident($)
   if (!isSessionId(id)) return safeStopPlan(null, ['this session id'])
-  const home = (await $.env.get('HOME')) || (await $.env.get('USERPROFILE')) || ''
-  const config = (await $.env.get('CLAUDE_CONFIG_DIR')) || home + '/.claude'
+  const env = { CLAUDE_CONFIG_DIR: await $.env.get('CLAUDE_CONFIG_DIR'), USERPROFILE: await $.env.get('USERPROFILE'), HOME: await $.env.get('HOME') }
+  // A drive-letter USERPROFILE means Windows; the mod has no platform call.
+  const win = /^[A-Za-z]:[\\/]/.test(env.USERPROFILE || '')
+  const config = configDir(env, win ? 'win32' : 'posix')
+  if (!config) return safeStopPlan(null, ['the config folder (set CLAUDE_CONFIG_DIR, HOME, or USERPROFILE)'])
+  const hooks = config + (win ? '\\' : '/') + 'hooks'
   const why = []
   let paths = null
   for (const py of ['python3', 'python']) {
     try {
       // -I: no current-folder or user-site imports. cwd is the config folder, never the session's:
       // a json.py or datetime.py in a repo must not run.
-      const r = await $.process.run([py, '-I', '-B', '-c', HANDOFF_PY, config + '/hooks', id, plan ? 'plan' : 'run'], { cwd: config, timeoutMs: 10_000 })
+      const r = await $.process.run([py, '-I', '-B', '-c', HANDOFF_PY, hooks, id, plan ? 'plan' : 'run'], { cwd: config, timeoutMs: 10_000 })
       const o = r.exitCode === 0 ? JSON.parse(String(r.stdout).trim().split('\n').pop()) : null
       if (o && typeof o.handoff === 'string' && typeof o.prompt === 'string') { paths = o; break }
       why.push(`${py}: ${clean(String(r.stderr).trim().split('\n').pop(), 100) || 'no usable output'}`)
@@ -406,7 +429,7 @@ async function safeStop($, args) {
       why.push(`${py}: ${clean(err && err.message, 100)}`)
     }
   }
-  if (!paths) return safeStopPlan(null, [`python with ${config}/hooks/precompact_handoff.py (${why.join('; ')})`])
+  if (!paths) return safeStopPlan(null, [`python with ${hooks}${win ? '\\' : '/'}precompact_handoff.py (${why.join('; ')})`])
   for (const p of [paths.handoff, paths.prompt]) {
     // A path is shown and sent whole or not at all: never a cut path.
     if (Array.from(p).length > MAX_PATH) return `Safe stop: a path from the handoff hook is over ${MAX_PATH} characters. Nothing was sent.`

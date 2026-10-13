@@ -238,6 +238,11 @@ export const isUpdateReady = (e, now) => readiness(e, now) === true
 export function parseAgentsJson(text) {
   let list
   try { list = JSON.parse(text) } catch { return [] }
+  return agentRows(list)
+}
+
+// Rows from an already parsed `claude agents --json` list. Not an array gives [].
+export function agentRows(list) {
   if (!Array.isArray(list)) return []
   const state = s => (s === 'busy' ? 'working' : s === 'idle' || s === 'waiting' ? 'waiting' : 'unknown')
   return list
@@ -305,6 +310,17 @@ export function detailLines(row, detail, now) {
   const r = detail.receipt
   out.push(r ? `Last turn: ${r.sec} s, ${r.tools} tool calls, ${r.edits} edits, ${r.asks} permission checks${r.aborted ? ', stopped early' : ''}` : 'Last turn: none yet')
   return out
+}
+
+// The Claude config folder: CLAUDE_CONFIG_DIR, else the home folder plus .claude. On win32 the
+// home folder is USERPROFILE before HOME: under Git Bash HOME is an MSYS path (/c/Users/x) that
+// a Windows program cannot use. env holds CLAUDE_CONFIG_DIR, USERPROFILE and HOME, as set.
+export function configDir(env, platform) {
+  const e = env ?? {}
+  if (e.CLAUDE_CONFIG_DIR) return e.CLAUDE_CONFIG_DIR
+  const win = platform === 'win32'
+  const home = win ? e.USERPROFILE || e.HOME : e.HOME || e.USERPROFILE
+  return home ? home + (win ? '\\' : '/') + '.claude' : ''
 }
 
 // /safe-stop. The text goes to the session as a prompt. The handoff hook's own prompt file holds
