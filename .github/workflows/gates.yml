@@ -124,7 +124,7 @@ jobs:
         run: python3 hooks/test_stall_watch.py
 
       - name: Stall watch stop suite
-        run: python hooks/test_stall_watch_stop.py
+        run: python3 hooks/test_stall_watch_stop.py
 
       - name: Simulator boot-record fixture suite
         run: python3 hooks/test_sim_boot_record.py
