@@ -2,12 +2,13 @@
 
 ## The question
 
-How do we run CI once per reviewed change, not once per push?
+How do we run CI once per batch of reviewed changes, not once per push?
 
 ## The ruling
 
-Owner ruling, 2026-10-10. Every PR opens as a draft. CI skips draft PRs. The orchestrator marks a
-PR ready, or folds it into an integration branch, only after review.
+Owner rulings, 2026-10-10 and 2026-10-13. Every PR opens as a draft. CI skips draft PRs. Lane PRs
+stay drafts. Only one integration PR per batch goes ready, and its run is the batch's only CI run
+(CLAUDE.md rule `git-integration-branch-merge`).
 
 - Guard gate `draft-pr` refuses `gh pr create` without `--draft` or `-d`. It reads `sh -c`
   scripts, command substitutions and subshells. The last `--draft`, `-d` or `--draft=X` wins.

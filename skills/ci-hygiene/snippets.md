@@ -187,3 +187,57 @@ if <gate> > gate.log 2>&1; then git commit -m "<subject>"; else tail -n 20 gate.
 ```
 
 In bash, `set -o pipefail` makes a pipe fail when any stage fails.
+
+## 11. Public repos: visibility, fork PRs, least privilege
+
+Docs checked 2026-10-12.
+
+Read the visibility first. The answer is `PUBLIC`, `PRIVATE` or `INTERNAL`:
+
+```sh
+gh repo view --json visibility
+```
+
+Fork PRs. Secrets are not passed to a fork's `pull_request` run, except `GITHUB_TOKEN`. That token is
+read-only there.
+Source: https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows#pull_request
+
+Least privilege. Set `permissions` at the top level, and raise it on one job only when that job needs
+more. An unset key inherits the repo or org default.
+Source: https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions#permissions
+
+```yaml
+on:
+  pull_request:
+permissions:
+  contents: read   # default for every job
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@<full-sha>  # v4.x.x
+        with: {persist-credentials: false}
+```
+
+Pin every third-party action by full SHA. A full-length SHA guards against a backdoor added to the action's repository.
+Source: https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions#using-third-party-actions
+
+`pull_request_target`. This trigger runs the default branch with secrets and write access. Do not
+check out the PR's head in it. Do not write this:
+
+```yaml
+on: pull_request_target
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@<full-sha>
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}   # refused: fork code runs with secrets
+```
+
+Source: https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows#pull_request_target
+and https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions
+
+Billing. Standard GitHub-hosted runners are free for public repos.
+Source: https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions

@@ -8,10 +8,14 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 
 ## Procedure
 
+0. **Read the visibility first.** Run `gh repo view --json visibility`. See `snippets.md`,
+   section 11. Note which steps apply. Steps tagged **(private repos)** save billed minutes only.
+   The **Public repos** section applies to a public repo. An internal repo counts as private.
 1. **Measure first.** Rank the step times of a finished run. Optimize the slowest step only.
    Never guess which step is slow. Measure wall time on the slowest job, not runner minutes
-   alone: a cut off a job that is not the slowest saves money, not waiting. Also read the billed
-   minutes each week, and set a spending alarm in the billing settings. See `snippets.md`.
+   alone: a cut off a job that is not the slowest saves money, not waiting. **(private repos)**
+   Also read the billed minutes each week, and set a spending alarm in the billing settings.
+   See `snippets.md`.
    Time the before and the after back to back, under the same machine load. Note the load
    beside each time: CPU use, and what else ran. A time taken under load does not compare with
    one taken on a quiet machine. (2026-10-12: a guard suite read 3500 s under load, against
@@ -37,14 +41,14 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    a comment. Let a bot keep the pins current. Disable credential persistence on checkout. Run
    an audit tool in CI, and run it locally with the exact CI command and paths.
    If the installed tool's `--version` matches the CI pin, use it. If it does not, install a copy.
-8. **Batch green PRs.** Merge PRs that are green together through one integration branch. One CI
-   run then covers the combined code. "No conflicts" does not prove they work together. Green CI
-   does not prove that no line was lost either: run `lint/check_silent_undo.py` before the merge.
+8. **Batch lanes.** One CI run per batch, by CLAUDE.md rule `git-integration-branch-merge`.
+   "No conflicts" does not prove the lanes work together. A green integration run does not prove
+   that no line was lost either: run `lint/check_silent_undo.py` before the merge.
    GitHub's merge queue needs an organization-owned repo, so a personal repo batches by hand or
    through the merge tool.
    Batch across sessions too. Before a PR runs CI, list the repo's open PRs. When another session's
-   PR will be ready at about the same time, offer one integration branch. A repo may name one
-   session to batch PRs and run each merge, on the owner's word.
+   lane passes its local checks at about the same time, offer one integration branch. A repo may
+   name one session to batch PRs and run each merge, on the owner's word.
 9. **Wait without loops.** Watch a run once, in the background, and keep its output. Never poll
    with a sleep loop. A repeated `gh run view` or `gh pr checks` without `--watch` is a poll. Use
    a one-shot wait: `gh pr checks <n> --watch` or `gh run watch <id>`, run once. (About 1,600
@@ -56,8 +60,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    it runs on a red gate. Gate on the command's own exit code. See `snippets.md`, section 10.
    (Incident 2026-10-12: three records pushed with STE errors.)
 11. **No CI on a draft.** Run the PR workflow on `opened`, `synchronize`, `reopened` and
-    `ready_for_review`, and skip each job while the PR is a draft. Work in a draft. Mark it ready
-    once. A draft cannot merge, so it needs no check yet. Read the protection rules first: see
+    `ready_for_review`. Skip every job while the PR is a draft, the required check included. Work
+    in a draft. Only the integration PR goes ready, once (step 8). A draft cannot merge, so it
+    needs no check yet. Read the protection rules first: see
     "Before you skip a required job". A fan-in job with `if: always()` needs its own draft guard.
     A workflow that also has `on: push` for all branches still runs on a draft branch.
     `gh pr create --draft` then `gh pr ready` fires two runs: keep the draft state in the
@@ -68,7 +73,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     tool refuses an all-skipped head. PRs 357 and 362.)
 12. **Cheap checks first.** Give each expensive job `needs:` the cheap static job. A red static
     check then stops the shards from starting.
-13. **Merge tiny jobs.** Each job bills whole minutes, rounded up, plus its own setup. Put checks
+13. **Merge tiny jobs (private repos).** Each job bills whole minutes, rounded up, plus its own setup. Put checks
     under about a minute into one job. This saves money in private repos only: standard hosted
     runners are free in public repos. Measure billed minutes and wall time before and after.
     Merged jobs can make the wait longer. Per-job rounding is measured, not a documented rule.
@@ -93,6 +98,21 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     A docs-only PR runs only the lint job. Push, nightly and dispatch run everything. An
     unreadable diff or an unmapped path runs everything. A skipped job reads as passing, so put
     the scope job in the required checks (decision ci-wall-time-cuts, cut B).
+
+## Public repos
+
+Fork PRs run code you did not write. Apply these to a public repo. See `snippets.md`, section 11.
+
+- Never expose secrets to a fork's run. A fork's `pull_request` run gets no secrets, and its
+  `GITHUB_TOKEN` is read-only.
+- Avoid `pull_request_target` with a checkout of the PR's head. That trigger runs the default
+  branch with secrets and write access.
+- Pin every third-party action by full SHA. Step 7 applies in full, and matters more here.
+- Give workflows least-privilege `permissions`. Default the token to read-only at the top level.
+  If a job needs more, restate `contents: read` in that job's block with the extra scope. A
+  `permissions` block sets every scope it does not name to `none`.
+- Keep one CI run per batch (step 8). Free minutes do not remove queue time, and each run
+  costs `gh` calls on the shared token. A secondary rate limit refused a merge on 2026-10-12.
 
 ## Before you skip a required job
 
