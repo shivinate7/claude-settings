@@ -15,9 +15,9 @@ claude-settings?
    that window's size.
 2. The session updates its handoff at context checkpoints, while it has full context:
    200k tokens, then every +150k below the compaction limit minus 50k, then a last one at
-   that limit minus 50k. After each compaction, auto or manual, it patches the handoff:
-   it adds what changed since the last write and keeps the rest. The plan file is updated
-   too, when the session works from one and its state changed.
+   that limit minus 50k. After each compaction, auto or manual, it rewrites the handoff
+   whole: what is true now, nothing appended. The plan file is updated too, when the
+   session works from one and its state changed.
 3. After compaction, a short message reorients the session.
 4. It must work in the desktop app with no other login. The owner rejected a design that
    ran a second `claude -p` with its own command-line login.
@@ -53,31 +53,33 @@ One file, `hooks/precompact_handoff.py`, with three modes. No mode calls a model
 
 **Reorient mode** (hook `SessionStart`, matcher `compact`):
 
-Print one short message into context. The session itself does the patch, under the
+Print one short message into context. The session itself does the rewrite, under the
 desktop app's own login. The message tells the session to:
 
 1. Follow `~/.claude/hooks/precompact_handoff_prompt.md` before anything else.
-2. Patch the handoff at `~/.claude/handoffs/<session_id>.md`. The
+2. Rewrite the handoff at `~/.claude/handoffs/<session_id>.md`. The
    message names the exact path.
 3. Use the compaction summary, the digest at its path, and the prior handoff.
 4. Then confirm checkout and branch, and continue the last task.
 
 With no state file, or a failed one, the message says the digest is missing. The session
-then patches from the compaction summary and the prior handoff alone.
+then rewrites it from the compaction summary and the prior handoff alone.
 
-**The prompt file** tells the session how to update and how to patch:
+**The prompt file** tells the session how to rewrite the handoff:
 
 - The handoff path: the one the reorient message names. Never a scratchpad or temp
   folder. The repo's own handoff.md is context, never the update target.
-- At a checkpoint, update every section. After compaction, read the prior handoff, then
-  patch it in place. Never make a dated copy.
+- At a checkpoint and after compaction, read the prior handoff, then rewrite the whole
+  file with what is true now. Never append. Never make a dated copy.
+  Owner, 2026-10-13: patching let sessions append block after block, and rulings with no
+  home sank under them.
 - If the work names a plan file (`~/.claude/plans/*.md` or the repo's `plans/*.md`) and
   the plan's state changed, update that plan in place.
 
 ## What the handoff holds
 
-Where things stand (branch, head, PRs and their CI). The owner's rulings this session, each
-with its tracked home, or marked "NO HOME YET". Work in flight: agents, workflow runs,
+Rulings with NO HOME YET come first. Then where things stand (branch, head, PRs and their
+CI), and the owner's rulings this session with their tracked homes, one line each. Work in flight: agents, workflow runs,
 servers with pid and port. Next steps. The files and commands that matter. A handoff is a
 short-term note. It is never a ruling's only home (see memory-is-never-a-rulings-only-home).
 
@@ -101,7 +103,7 @@ scratchpads. A test now asks the guard whether the handoff path is frozen.
 
 ## Known limits
 
-- The post-compaction patch covers the work since the last checkpoint, up to about 50k
+- The post-compaction rewrite covers the work since the last checkpoint, up to about 50k
   tokens, from the summary and the digest. The digest keeps only the last 60,000
   characters of text, so a long, talk-heavy gap can lose detail.
 - The hook reads the limit from settings.json. Claude Code also caps compaction at the
@@ -110,8 +112,10 @@ scratchpads. A test now asks the guard whether the handoff path is frozen.
 - The reply written after a checkpoint block runs with `stop_hook_active` set, so the
   other Stop gates skip it. When another Stop hook blocked first, the checkpoint fires one
   stop later.
-- Each checkpoint costs one handoff update. The patch costs one read of the digest, about
-  15k tokens.
+- Each checkpoint costs one handoff rewrite. After compaction, the rewrite also costs one
+  read of the digest, about 15k tokens.
+- Nothing checks that a session rewrote the file and did not append. The prompt asks for
+  a rewrite, and the owner reads the result.
 
 ## Measured facts
 
