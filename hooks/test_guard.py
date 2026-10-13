@@ -4940,6 +4940,31 @@ for _name, _command in (
 ):
     sh("lane-by-slug: %s denies" % _name, _command, "deny", "lane-by-slug", cwd=NOGIT,
        config=MERGECFG)
+# ---- lane-by-slug, review round 2. Two commits in one call each take their own heredoc body, so
+# a second commit whose segment text repeats the first is still judged on its own body. A header
+# inside quotes is text, and the commit's own header still takes its body. A glued value is never a
+# body: a letter in a glued value is read as a value, not as a flag.
+for _name, _command in (
+    ("two identical heredoc commits, the second names a lane",
+     VCS + " commit -F - <<EOF\nok\nEOF\n" + VCS + " commit -F - <<EOF\nN20 lands\nEOF"),
+    ("two identical --amend heredoc commits, the second names a lane",
+     VCS + " commit --amend -F - <<EOF\nok\nEOF\n" + VCS + " commit --amend -F - <<EOF\nN20 lands\nEOF"),
+    ("a fake header inside quotes before the commit's own heredoc",
+     'echo "<<EOF" ; ' + VCS + " commit -F - <<EOF\nN20\nEOF"),
+    ("a lane-named heredoc commit, then a clean one",
+     VCS + " commit -F - <<EOF\nN20 lands\nEOF\n" + VCS + " commit -F - <<EOF\nok\nEOF"),
+):
+    sh("lane-by-slug: %s denies" % _name, _command, "deny", "lane-by-slug", cwd=NOGIT,
+       config=MERGECFG)
+for _name, _command in (
+    ("a glued base -Bmain", "gh pr create --draft -Bmain -b ok"),
+    ("a glued label -lbug", "gh pr create --draft -lbug -b ok"),
+    ("a glued base that holds m and then a lane number", "gh pr create --draft -BmN20 -b ok"),
+    ("a glued label that holds b and then a lane number", "gh pr create --draft -lbN20 -b ok"),
+    ("two identical clean heredoc commits",
+     VCS + " commit -F - <<EOF\nok\nEOF\n" + VCS + " commit -F - <<EOF\nok\nEOF"),
+):
+    sh("lane-by-slug: %s is allowed" % _name, _command, "allow", cwd=NOGIT, config=MERGECFG)
 
 
 def cite_unread_folders_case():
