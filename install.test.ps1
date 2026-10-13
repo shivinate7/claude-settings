@@ -61,6 +61,8 @@ try {
 # checks that the landed names are copies, not links. A seam that never reaches the child process
 # then fails the case, instead of passing it without exercising the copy path.
 # (D: copy-mode-overwrites-no-backup)
+# install.ps1 is the Windows installer (kernel32 MoveFileEx). The cases below that run it run only
+# on Windows. Elsewhere each prints SKIP and the file goes on.
 
 # True when $Path is a symlink or junction (a reparse point). A missing path is not a link.
 function Test-ReparsePoint([string]$Path) {
@@ -73,7 +75,9 @@ function Test-ReparsePoint([string]$Path) {
 # HKCU:\Environment. install.ps1 reads the key path from CLAUDE_SETTINGS_USER_ENV_KEY. The key
 # and the variable are removed at the end of the file.
 # No registry off Windows: there the registry cases SKIP and install.ps1 skips the PATH write.
-$IsWin = ($env:OS -eq 'Windows_NT')
+# Windows PowerShell 5.1 (Desktop) or pwsh on Windows. Off Windows, $IsWindows is $false.
+$IsWin  = ($PSVersionTable.PSEdition -eq 'Desktop') -or [bool]$IsWindows
+$PsHost = (Get-Process -Id $PID).Path   # child installs run under this host; no literal `powershell`
 if (-not $env:USERPROFILE) { $env:USERPROFILE = $HOME }   # the pure Join-BinPath cases expand %USERPROFILE%
 $TestEnvSub = 'Software\claude-settings-test-' + [guid]::NewGuid().ToString('N')
 if ($IsWin) {
@@ -82,6 +86,7 @@ if ($IsWin) {
 }
 try {
 
+if ($IsWin) {
 # ---- copy-mode case: skills/ under a real install.ps1 run, twice ------------------------------
 # Mirrors hooks/test_install_src.sh's copymode_case1 (D: copy-mode-overwrites-no-backup). Runs
 # the WHOLE install.ps1 as a subprocess (not just one extracted function) against a fake
@@ -102,14 +107,14 @@ try {
 
     $env:CLAUDE_CONFIG_DIR = $Cfg
     $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
-    powershell -NoProfile -File (Join-Path $Co 'install.ps1') *> $null
+    & $PsHost -NoProfile -File (Join-Path $Co 'install.ps1') *> $null
     if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: copymode1 run 1 exited $LASTEXITCODE"; $Failed++ }
     Check "copymode1: sample-skill is a copy, not a link, after run 1" (-not (Test-ReparsePoint (Join-Path $Cfg 'skills\sample-skill')))
 
     # Change the skill's source content between runs, the way a real `git pull` would.
     Set-Content -Path (Join-Path $SkillDir 'SKILL.md') -Value 'v2' -Encoding utf8
 
-    powershell -NoProfile -File (Join-Path $Co 'install.ps1') *> $null
+    & $PsHost -NoProfile -File (Join-Path $Co 'install.ps1') *> $null
     if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: copymode1 run 2 exited $LASTEXITCODE"; $Failed++ }
 
     Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
@@ -140,14 +145,14 @@ try {
 
     $env:CLAUDE_CONFIG_DIR = $Cfg3
     $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
-    powershell -NoProfile -File (Join-Path $Co3 'install.ps1') *> $null
+    & $PsHost -NoProfile -File (Join-Path $Co3 'install.ps1') *> $null
     if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: settingsrepeat1 run 1 exited $LASTEXITCODE"; $Failed++ }
     Check "settingsrepeat1: settings.json is a copy, not a link, after run 1" (-not (Test-ReparsePoint (Join-Path $Cfg3 'settings.json')))
 
     # Change the source settings.json between runs, the way a real `git pull` would.
     Set-Content -Path (Join-Path $Co3 'settings.json') -Value '{"v":2}' -Encoding utf8
 
-    powershell -NoProfile -File (Join-Path $Co3 'install.ps1') *> $null
+    & $PsHost -NoProfile -File (Join-Path $Co3 'install.ps1') *> $null
     if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: settingsrepeat1 run 2 exited $LASTEXITCODE"; $Failed++ }
 
     Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
@@ -192,7 +197,7 @@ try {
 
     $env:CLAUDE_CONFIG_DIR = $Cfg4
     $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
-    powershell -NoProfile -File (Join-Path $Co4 'install.ps1') *> $null
+    & $PsHost -NoProfile -File (Join-Path $Co4 'install.ps1') *> $null
     if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: firstinstall1 run 1 exited $LASTEXITCODE"; $Failed++ }
 
     $SkillBaks1 = @(Get-ChildItem -Path (Join-Path $Cfg4 'skills') -Filter 'sample-skill.bak.*' -ErrorAction SilentlyContinue)
@@ -213,7 +218,7 @@ try {
     Check "firstinstall1: shipped skill is a copy, not a link, after run 1" (-not (Test-ReparsePoint $CfgSkillDir))
     Check "firstinstall1: shipped agent is a copy, not a link, after run 1" (-not (Test-ReparsePoint $GotAgent))
 
-    powershell -NoProfile -File (Join-Path $Co4 'install.ps1') *> $null
+    & $PsHost -NoProfile -File (Join-Path $Co4 'install.ps1') *> $null
     if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: firstinstall1 run 2 exited $LASTEXITCODE"; $Failed++ }
     Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
 
@@ -232,25 +237,6 @@ $Tmp5 = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-envkey-" + [guid]
 $Co5  = Join-Path $Tmp5 'clone'
 $Cfg5 = Join-Path $Tmp5 'claude'
 New-Item -ItemType Directory -Force -Path $Co5, $Cfg5 | Out-Null
-if (-not $IsWin) {
-    # Off Windows install.ps1 must skip the PATH write and still exit 0 (it never reaches the registry).
-    try {
-        Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $Co5 'install.ps1')
-        Set-Content -Path (Join-Path $Co5 'CLAUDE.md') -Value "# nonwin1 content" -Encoding utf8
-        Set-Content -Path (Join-Path $Co5 'settings.json') -Value '{}' -Encoding utf8
-        Set-Content -Path (Join-Path $Co5 'landed-dirs.txt') -Value "skills" -Encoding utf8
-        $env:CLAUDE_CONFIG_DIR = $Cfg5
-        & (Get-Process -Id $PID).Path -NoProfile -File (Join-Path $Co5 'install.ps1') *> $null
-        $rc5 = $LASTEXITCODE
-        Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
-        Check "nonwin1: subprocess install exits 0 off Windows (no registry)" ($rc5 -eq 0)
-    } finally {
-        Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
-        Remove-Item -Recurse -Force $Tmp5 -ErrorAction SilentlyContinue
-    }
-    Write-Host "SKIP: envkey1 (no registry off Windows)"
-} else {
-    Write-Host "SKIP: nonwin1 (this is Windows)"
 try {
     Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $Co5 'install.ps1')
     Set-Content -Path (Join-Path $Co5 'CLAUDE.md') -Value "# envkey1 content" -Encoding utf8
@@ -266,7 +252,7 @@ try {
     if ($k5) { $k5.Close() }
     if (-not $pre5) { Write-Host "FAIL: envkey1 fixture: var unset, key missing, or Path already set"; $Failed++ }
     $env:CLAUDE_CONFIG_DIR = $Cfg5
-    powershell -NoProfile -File (Join-Path $Co5 'install.ps1') *> $null
+    & $PsHost -NoProfile -File (Join-Path $Co5 'install.ps1') *> $null
     if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: envkey1 install exited $LASTEXITCODE"; $Failed++ }
     Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
     $k5 = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($Sub5)
@@ -279,6 +265,15 @@ try {
     if ($Sub5) { try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($Sub5, $false) } catch { } }
     Remove-Item -Recurse -Force $Tmp5 -ErrorAction SilentlyContinue
 }
+    # The nonwin1 case (install.ps1 exits 0 off Windows) ran the Windows installer off Windows.
+    # It is dropped; off Windows it prints SKIP below.
+    Write-Host "SKIP: nonwin1 (this is Windows)"
+} else {
+    Write-Host "SKIP: copymode1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: settingsrepeat1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: firstinstall1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: envkey1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: nonwin1: install.ps1 runs only on Windows"
 }
 
 # ---- Join-BinPath: pure PATH-string function; never reads or writes the real user PATH ------
