@@ -10,7 +10,7 @@ The model call is `decision_watch.invoke_model`, the one home for it: Haiku at e
 `--safe-mode`, no tools, and an empty config dir and scratch cwd, so the child cannot fire this
 hook again. This file passes its own accepted answer, `{"ok": true|false}`.
 
-Sampling: the judge runs on Stop n of a session when (n - 1) % 5 == 0. A skipped Stop returns
+Sampling: the judge runs on Stop n of a session (counting only Stops that carry a reply) when (n - 1) % 5 == 0. A skipped Stop returns
 at once with no model call and no output. The count is a file per session under the state folder.
 
 Fail open. Any model error, timeout or odd answer prints one line on stderr, exits 0, and
@@ -76,7 +76,12 @@ def count_this_stop(decision_watch, session_id):
                 f.write(str(n))
             os.replace(path + ".tmp", path)
     except Exception:
-        pass  # a write failure never blocks the Stop
+        # A write that fails would freeze the stored count and skip every later Stop. Drop the
+        # file instead, so the next Stop reads a damaged counter and is judged.
+        try:
+            os.remove(path)
+        except Exception:
+            pass  # ponytail: if the remove fails too, the count stays frozen; nothing else to try
     return n
 
 
@@ -86,10 +91,10 @@ def main():
         hook = json.load(sys.stdin)
         if hook.get("stop_hook_active"):
             return 0
-        if (count_this_stop(decision_watch, hook.get("session_id")) - 1) % SAMPLE_EVERY:
-            return 0
         reply = hook.get("last_assistant_message")
         if not isinstance(reply, str) or not reply.strip():
+            return 0
+        if (count_this_stop(decision_watch, hook.get("session_id")) - 1) % SAMPLE_EVERY:
             return 0
         verdict, error = decision_watch.invoke_model(
             build_prompt(reply), timeout=MODEL_TIMEOUT, shape=OK_SHAPE)
