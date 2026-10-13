@@ -23,8 +23,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-import decision_watch  # noqa: E402
-
 OK_SHAPE = {"ok": (True, False)}
 MODEL_TIMEOUT = 20  # measured 6.6, 7.0, 8.0 s per run on this machine; the Stop entry allows 25
 REPLY_MAX = 12000  # one argv element: Windows caps the command line near 32,767 characters
@@ -36,7 +34,7 @@ INSTRUCTIONS = (
     "a Done/Deviations/Input Needed/Next report is never narration. "
     "output-never-paste-passing-output: a passing run gets a verdict, not its pasted output. "
     "Running background work never makes a reply unfinished. "
-    "Block only on a clear breach; when unsure answer {\"ok\": true}. "
+    "Flag only on a clear breach; when unsure answer {\"ok\": true}. "
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
 )
 
@@ -50,6 +48,7 @@ def build_prompt(reply):
 
 def main():
     try:
+        import decision_watch
         hook = json.load(sys.stdin)
         if hook.get("stop_hook_active"):
             return 0
