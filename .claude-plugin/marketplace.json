@@ -19,6 +19,11 @@
       "name": "plain-diff",
       "source": "./mods/plain-diff",
       "description": "plain-diff mod: /plain-diff opens a pane with a plain-English note for each changed file (our own code)"
+    },
+    {
+      "name": "session-board",
+      "source": "./mods/session-board",
+      "description": "session-board mod: /board pane of every session, /safe-stop"
     }
   ]
 }
