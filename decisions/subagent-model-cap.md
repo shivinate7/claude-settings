@@ -24,7 +24,7 @@ Writing prose and records is not building.
 | claude-code-guide | haiku | high |
 | test-author | haiku | xhigh |
 | reviewer | haiku | xhigh |
-| reviewer, rounds 2 and 3 | sonnet, the ceiling; round 3 may run opus on the owner's word for that spawn; set per spawn, which overrides the frontmatter `haiku` | high, set per spawn, which overrides the frontmatter `xhigh` |
+| reviewer, rounds 2 and 3 | sonnet, the ceiling; round 3 may run opus on the owner's word for that spawn; set per spawn, which overrides the frontmatter `haiku` | round 2: high, set per spawn; round 3 on sonnet: xhigh, the frontmatter; round 3 on opus: high, set per spawn |
 | record-writer (`agents/record-writer.md`) | haiku | xhigh |
 | builder | sonnet | high |
 | builder, try 3 after a FAIL at review round 2 | opus, the owner's standing word of 2026-10-12; set per spawn, which overrides `CLAUDE_CODE_SUBAGENT_MODEL` | high |
