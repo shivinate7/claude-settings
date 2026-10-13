@@ -37,7 +37,8 @@ Short and plain are one goal. Never trade one for the other.
 - Do a step yourself before you hand it to me. First search the repo and your tools for a way
   to do it, and prove any way that is unproven. Hand me only a step that needs my decision,
   my login, or an act the safety rules keep for me. Name which one. When the step is mine, give
-  the most direct way: the exact button path, or a command block I can run. Where a screen tool
+  the most direct way: the exact button path, or a runnable `bash` block outside the report (the
+  app adds a Run button to it). Where a screen tool
   can do it, offer to take over the screen.<!-- rule:output-never-hand-off-doable-step -->
 - For each option, say what the user gains and what the user loses if they pick it.<!-- rule:style-option-says-effect -->
 - Give times in US Central, 24-hour clock, with the zone named once, such as 21:40 CDT. Never
@@ -45,5 +46,6 @@ Short and plain are one goal. Never trade one for the other.
 - Give no time estimate for agent work. State a time only from a measured range of the same
   kind, with its sample count, such as "PR CI 8-10 min, 13 runs". With no measure, give
   none.<!-- rule:style-no-unmeasured-estimate -->
-- Answer a status question with the report shape: Done, Deviations, Input Needed, Next. Never
-  use a new format.<!-- rule:style-status-is-report -->
+- When I ask for status, answer with the report shape: Done, Deviations, Input Needed, Next.
+  Never use a new format. If nothing landed, put work in flight under Next. For a turn I did not
+  ask about, the one-line and no-report rules govern.<!-- rule:style-status-is-report -->

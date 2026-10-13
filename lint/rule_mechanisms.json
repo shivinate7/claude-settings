@@ -71,7 +71,7 @@
     "roles-one-role-per-worker": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
+        "reason": "No hook judges it. A prompt hook sees only the event input, never what a worker did, and no check reads a worker's roles."
       }
     },
     "roles-sonnet-is-the-default": {
@@ -135,7 +135,7 @@
     "roles-brief-contents": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
+        "reason": "Judged by the Agent prompt hook (model claude-sonnet-5-5, in settings.json); it moves to a mechanism after the hook makes a real catch."
       }
     },
     "roles-third-try-steps-up": {
@@ -165,7 +165,7 @@
     "parallelism-no-mid-task-talk": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
+        "reason": "Judged by the SendMessage prompt hook (model claude-sonnet-5-5, in settings.json); it moves to a mechanism after the hook makes a real catch."
       }
     },
     "parallelism-argue-max-parallelism": {
@@ -375,7 +375,7 @@
     "tokens-point-brief-at-files": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
+        "reason": "Judged by the Agent prompt hook (model claude-sonnet-5-5, in settings.json); it moves to a mechanism after the hook makes a real catch."
       }
     },
     "tokens-read-report-not-transcript": {
@@ -448,7 +448,7 @@
     "speak-rewrite-superseded-in-place": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
+        "reason": "Judged by the Edit and Write prompt hooks (model claude-sonnet-5-5, in settings.json); it moves to a mechanism after the hook makes a real catch."
       }
     },
     "output-write-in-ste": {
@@ -485,7 +485,7 @@
     "output-bring-decisions-as-question": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Judged by a trial Haiku prompt hook per haiku-prompt-hooks; it moves to a mechanism after the hook makes a real catch."
+        "reason": "Judged by the AskUserQuestion prompt hook (model claude-sonnet-5-5, in settings.json); it moves to a mechanism after the hook makes a real catch."
       }
     },
     "reports-order-of-labels": {
