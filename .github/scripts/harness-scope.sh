@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Decides which gates jobs and suites a run needs. Writes name=<bool> lines to $GITHUB_OUTPUT:
 #   per job: gates_windows gates_windows_merge gates_windows_rest gates_macos shell_macos pointer_windows
-#   per suite: code (any non-docs file changed), guard (guard mutation harness), sweep (janitor
-#   mutation harness). The `gates` lint job always runs, so it has no flag.
+#   per suite: code (any non-docs file changed), mods (a path under mods/: the mod tests, a step of
+#   the `gates` job), guard (guard mutation harness), sweep (janitor mutation harness). The `gates` lint job always runs, so it has no flag.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
 # BASE_SHA, BEFORE_SHA. decisions/docs-only-prs-skip-code-suites.md.
 set -u
 JOBS="gates_windows gates_windows_merge gates_windows_rest gates_macos shell_macos pointer_windows"
-ALL="$JOBS code guard sweep"
+ALL="$JOBS code mods guard sweep"
 range=""
 case "${EVENT:-}" in
   pull_request) [ -n "${BASE_SHA:-}" ] && range="$BASE_SHA...HEAD" ;;
@@ -47,6 +47,8 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       merge/*|bin/merge|bin/merge.cmd|.github/stamp.json) on="$on $M $S code " ;;
       actions/stamp/*.md) ;;
       actions/stamp/*) on="$on $R $X $M code " ;;
+      # Mod tests: nothing else reads mods/.
+      mods/*) on="$on mods " ;;
       install.ps1|install.test.ps1|install-no-gap.test.ps1) on="$on $P code " ;;
       # Linux `gates` job only: the lints and opt-in templates.
       actions/*|githooks/*|testing/*|lint/*|.github/dependabot.yml|.gitignore) on="$on code " ;;
