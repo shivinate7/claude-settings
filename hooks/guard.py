@@ -3326,11 +3326,20 @@ def waiter_hit(segment: str) -> str:
 
 
 def gh_watches(rest) -> bool:
-    """True for `gh run watch` and `gh pr checks` with -w, --watch or --watch=...; no other gh call."""
-    if rest[:2] == ["run", "watch"]:
+    """True for `gh run watch` and `gh pr checks` with --watch or --watch=...; no other gh call.
+
+    The global `-R`/`--repo` flag may sit between the group and the verb. `-w` on `gh pr checks`
+    is `--web`, and `--watch` has no short form."""
+    words, i = [], 0
+    while i < len(rest) and len(words) < 2:
+        t = rest[i]
+        i += 2 if t in ("-R", "--repo") else 1
+        if not (t in ("-R", "--repo") or t.startswith(("--repo=", "-R"))):
+            words.append(t)
+    if words == ["run", "watch"]:
         return True
-    return rest[:2] == ["pr", "checks"] and any(
-        t in ("-w", "--watch") or t.startswith("--watch=") for t in rest[2:])
+    return words == ["pr", "checks"] and any(
+        t == "--watch" or t.startswith("--watch=") for t in rest[i:])
 
 
 def waiter_verdict(segments, background: bool) -> str:
