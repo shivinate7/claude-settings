@@ -457,6 +457,16 @@ MUTATIONS = [
      '                or not isinstance(when, (int, float)) or isinstance(when, bool):',
      '                or False:',
      "test_a_non_numeric_time_ms_is_kept_not_purged"),
+    ("purge: the ref is dropped by branch name, with no check that it holds the entry's commit",
+     "sweep",
+     '            held = guard._git(repo, "rev-parse", "-q", "--verify", ref)\n'
+     '            if held is not None and (held.returncode != 0 or held.stdout.strip() != commit):\n'
+     '                if held.returncode == 0:\n'
+     '                    decision["reason"] += "; ref kept: it holds a younger restore point"\n'
+     '                continue\n'
+     '            dropped = guard._git(repo, "update-ref", "-d", ref, commit)',
+     '            dropped = guard._git(repo, "update-ref", "-d", ref)',
+     "test_an_expired_entry_keeps_the_ref_that_holds_the_younger_commit"),
 
     # ---- --confirm (plan, "the refusals"). See the module docstring: MEASURED to survive. ----
     ("--confirm: reap branches for real with no --confirm on the line",

@@ -2152,7 +2152,9 @@ def purge_tombstones(restore_log_path: str, confirm: bool, now_ms=None):
         repo = entry.get("repo")
         branch = entry.get("branch")
         when = entry.get("time_ms")
+        commit = entry.get("commit")
         if not isinstance(repo, str) or not repo or not isinstance(branch, str) or not branch \
+                or not isinstance(commit, str) or not commit \
                 or not isinstance(when, (int, float)) or isinstance(when, bool):
             decisions.append({"repo": repo, "branch": branch, "action": "keep",
                                "reason": "unreadable-entry"})
@@ -2166,7 +2168,16 @@ def purge_tombstones(restore_log_path: str, confirm: bool, now_ms=None):
                      "reason": "past 90 days (%d days old)" % (age_ms // 86400000)}
         decisions.append(decision)
         if confirm:
-            dropped = guard._git(repo, "update-ref", "-d", TOMBSTONE_REF_PREFIX + branch)
+            # The ref is keyed by branch name, so a later reap of the same name overwrites it.
+            # Drop it only while it still holds THIS entry's commit; the old-value argument
+            # makes git refuse on a mismatch. A mismatch keeps the ref and is not an error.
+            ref = TOMBSTONE_REF_PREFIX + branch
+            held = guard._git(repo, "rev-parse", "-q", "--verify", ref)
+            if held is not None and (held.returncode != 0 or held.stdout.strip() != commit):
+                if held.returncode == 0:
+                    decision["reason"] += "; ref kept: it holds a younger restore point"
+                continue
+            dropped = guard._git(repo, "update-ref", "-d", ref, commit)
             if dropped is None or dropped.returncode != 0:
                 decision["error"] = "drop failed: %s" % (
                     dropped.stderr.strip() if dropped is not None else "git gave no answer"
