@@ -35,6 +35,8 @@ one fixed order, and the first match wins.
                        untouched.
   1d cite-by-id        a `git commit` message or `gh pr create|edit` body that cites a record by
                        its path. Denied. See "three git acts" below.
+  1d lane-by-slug      a `git commit` message or `gh pr create|edit` body or `--title` that names a
+                       lane by a session number (`N20`, `(N16)`). Denied: name it by branch slug.
   2 machine-wide-kill  a kill by name or by pattern, or `kill <pid>` of a live process that is
                        not a descendant of this session's own `claude` process
   2b detached-launch   a command that starts a process and detaches it from the session: a
@@ -792,12 +794,17 @@ CITE_REASON = (
 )
 
 
-def message_sources(args):
+TITLE_FLAGS = {"--title", "-t"}
+
+
+def message_sources(args, titles=False):
     """Return (texts, files, stdin) the message flags of a commit or PR call carry.
 
     `texts` are the inline values, `files` the named files, `stdin` True for `-F -`. Reads
     `-m x`, `--message=x`, `-mx`, a short cluster ending in m (`-am x`), and the long and short
     body and file flags. A flag glued to a value in any other way is a form this does not read.
+    `titles` also reads `--title` and `-t`, which are a gh call's title (a commit's `-t` is a
+    template file, so a commit never passes it).
     """
     texts, files, stdin = [], [], False
     index = 0
@@ -806,15 +813,16 @@ def message_sources(args):
         index += 1
         value = None
         is_file = False
-        if arg in MESSAGE_VALUE_FLAGS or (re.match(r"^-[A-Za-z]+$", arg) and arg.endswith("m")
-                                          and not arg.startswith("--")):
+        if (arg in MESSAGE_VALUE_FLAGS or (titles and arg in TITLE_FLAGS)
+                or (re.match(r"^-[A-Za-z]+$", arg) and arg.endswith("m")
+                    and not arg.startswith("--"))):
             value = args[index] if index < len(args) else ""
             index += 1
         elif arg in MESSAGE_FILE_FLAGS:
             value = args[index] if index < len(args) else ""
             index += 1
             is_file = True
-        elif arg.startswith(("--message=", "--body=")):
+        elif arg.startswith(("--message=", "--body=") + (("--title=",) if titles else ())):
             value = arg.split("=", 1)[1]
         elif arg.startswith(("--file=", "--body-file=")):
             value = arg.split("=", 1)[1]
@@ -840,29 +848,25 @@ UNREAD_REASON = (
 )
 
 
-def cited_record_path(segment: str, raw: str, where: str) -> str:
-    """Return the first record path a commit message or PR body cites, else ''. A message file
-    that cannot be read returns UNREAD_MARK + its name: an unread message is not a clean one.
+def message_texts(segment: str, raw: str, where: str, titles: bool = False):
+    """Return (is_commit, texts, unread) for a `git commit` or `gh pr create|edit` segment, or None
+    when the segment is neither. `unread` is the name of a message file that could not be read, else
+    ''. An unread message is not a clean one.
 
-    Acts: `git commit` and `gh pr create|edit`. A heredoc body belongs to the act only when the
-    segment itself carries the `<<` header, so a heredoc that writes a record file never counts.
+    A heredoc body belongs to the act only when the segment itself carries the `<<` header, so a
+    heredoc that writes a record file never counts.
     """
     call = git_call_of(segment)
     if call is not None:
         if call[0] != "commit":
-            return ""
+            return None
         args = call[1]
     else:
         rest = gh_call_of(segment)
         if rest is None or rest[:1] != ["pr"] or rest[1:2] not in (["create"], ["edit"]):
-            return ""
+            return None
         args = rest[2:]
-    pattern = record_path_pattern()
-    if pattern is None:
-        # An unread folder list is logged, as every unread subject is, and the rule stands down.
-        record("Bash", "noted", "subject-unread", "cite-by-id: record folders unread")
-        return ""
-    texts, files, stdin = message_sources(args)
+    texts, files, stdin = message_sources(args, titles=titles and call is None)
     for name in files:
         if is_env(name):
             continue   # never opened here: the environment-file rule judges it, and refuses
@@ -871,10 +875,30 @@ def cited_record_path(segment: str, raw: str, where: str) -> str:
                       errors="replace") as handle:
                 texts.append(handle.read(MESSAGE_FILE_MAX))
         except Exception:
-            return UNREAD_MARK + name   # unknown, never a pass
+            return call is not None, texts, name   # unknown, never a pass
     if "<<" in segment:
         texts.extend(body for _, body in _split_heredocs(raw)[1])
-    if call is not None:
+    return call is not None, texts, ""
+
+
+def cited_record_path(segment: str, raw: str, where: str) -> str:
+    """Return the first record path a commit message or PR body cites, else ''. A message file
+    that cannot be read returns UNREAD_MARK + its name.
+
+    Acts: `git commit` and `gh pr create|edit`.
+    """
+    read = message_texts(segment, raw, where)
+    if read is None:
+        return ""
+    is_commit, texts, unread = read
+    if unread:
+        return UNREAD_MARK + unread
+    pattern = record_path_pattern()
+    if pattern is None:
+        # An unread folder list is logged, as every unread subject is, and the rule stands down.
+        record("Bash", "noted", "subject-unread", "cite-by-id: record folders unread")
+        return ""
+    if is_commit:
         # Owner ruling 2026-10-12: a commit's trailer `Drops-lines: <path> -- <reason>`, the shape
         # lint/check_silent_undo.py reads, may name its path. Git joins -m values as paragraphs and
         # reads trailers from the last one only, never from a lone subject. Only a token that is one
@@ -889,6 +913,34 @@ def cited_record_path(segment: str, raw: str, where: str) -> str:
         if found:
             return found.group(0)
     return ""
+
+
+# ---- a message that names a lane by its session number (owner ruling 2026-10-13)
+LANE_NUMBER = re.compile(r"\bN\d{1,3}b?\b")
+LANE_QUOTED = re.compile(r"^[ \t]*```.*?^[ \t]*```|`[^`\n]*`", re.MULTILINE | re.DOTALL)
+LANE_REASON = (
+    "Rule (Git): this message names a lane by a session number. That number is handed out in one "
+    "chat and means nothing outside it. "
+    "Remedy: name the lane by its branch slug, like \"lane-number-cite\". A number inside a "
+    "backtick code span or a fenced block is quoted text and stays allowed."
+)
+
+
+def lane_number_named(segment: str, raw: str, where: str) -> str:
+    """Return the first session-number lane name (`N20`) in a commit message, PR body or PR title,
+    else ''. Fenced blocks and backtick spans are quoted text and skipped. Same acts and same text
+    extraction as cite-by-id. An unread message file reads as clean here: cite-by-id refuses it.
+    """
+    read = message_texts(segment, raw, where, titles=True)
+    if read is None or read[2]:
+        return ""
+    for text in read[1]:
+        found = LANE_NUMBER.search(LANE_QUOTED.sub(" ", text))
+        if found:
+            return found.group(0)
+    return ""
+
+
 TEST_BASENAME = re.compile(
     r"^(?:test_.*\.py|.*_test\.(?:py|go)|.*\.test\.[cm]?[jt]sx?|.*\.spec\..+|conftest\.py"
     r"|jest\.setup\..+|(?:.*[-_]selftest|selftest_.*)\.(?!md$).+"
@@ -1404,6 +1456,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             refuse(tool, "deny", "cite-by-id", UNREAD_REASON, matched[len(UNREAD_MARK):])
         if matched:
             refuse(tool, "deny", "cite-by-id", CITE_REASON, matched)
+        matched = lane_number_named(segment, raw, cite_where)
+        if matched:
+            refuse(tool, "deny", "lane-by-slug", LANE_REASON, matched)
 
     # 2. A machine-wide kill. Judged in COMMAND POSITION, from the segment's own tokens, never
     # by the word appearing anywhere in the text. A segment shlex cannot parse fails open:
