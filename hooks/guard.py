@@ -35,8 +35,9 @@ one fixed order, and the first match wins.
                        untouched.
   1d cite-by-id        a `git commit` message or `gh pr create|edit` body that cites a record by
                        its path. Denied. See "three git acts" below.
-  1d lane-by-slug      a `git commit` message or `gh pr create|edit` body or `--title` that names a
-                       lane by a session number (`N20`, `(N16)`). Denied: name it by branch slug.
+  1d lane-by-slug      a `git commit` message, a `gh pr create|edit|merge` body, `--title` or
+                       `--subject` that names a lane by a session number (`N20`, `(N16)`). Denied:
+                       name it by branch slug.
   2 machine-wide-kill  a kill by name or by pattern, or `kill <pid>` of a live process that is
                        not a descendant of this session's own `claude` process
   2b detached-launch   a command that starts a process and detaches it from the session: a
@@ -794,7 +795,7 @@ CITE_REASON = (
 )
 
 
-TITLE_FLAGS = {"--title", "-t"}
+TITLE_FLAGS = {"--title", "-t", "--subject"}
 
 
 def message_sources(args, titles=False):
@@ -803,8 +804,8 @@ def message_sources(args, titles=False):
     `texts` are the inline values, `files` the named files, `stdin` True for `-F -`. Reads
     `-m x`, `--message=x`, `-mx`, a short cluster ending in m (`-am x`), and the long and short
     body and file flags. A flag glued to a value in any other way is a form this does not read.
-    `titles` also reads `--title` and `-t`, which are a gh call's title (a commit's `-t` is a
-    template file, so a commit never passes it).
+    `titles` also reads `--title`, `--subject` and `-t`, which are a gh call's title or squash
+    subject (a commit's `-t` is a template file, so a commit never passes it).
     """
     texts, files, stdin = [], [], False
     index = 0
@@ -822,7 +823,7 @@ def message_sources(args, titles=False):
             value = args[index] if index < len(args) else ""
             index += 1
             is_file = True
-        elif arg.startswith(("--message=", "--body=") + (("--title=",) if titles else ())):
+        elif arg.startswith(("--message=", "--body=") + (("--title=", "--subject=") if titles else ())):
             value = arg.split("=", 1)[1]
         elif arg.startswith(("--file=", "--body-file=")):
             value = arg.split("=", 1)[1]
@@ -850,7 +851,8 @@ UNREAD_REASON = (
 
 def message_texts(segment: str, raw: str, where: str, titles: bool = False):
     """Return (is_commit, texts, unread) for a `git commit` or `gh pr create|edit` segment, or None
-    when the segment is neither. `unread` is the name of a message file that could not be read, else
+    when the segment is neither. `titles` also takes `gh pr merge`, whose squash subject and body
+    become a commit on main. `unread` is the name of a message file that could not be read, else
     ''. An unread message is not a clean one.
 
     A heredoc body belongs to the act only when the segment itself carries the `<<` header, so a
@@ -863,7 +865,8 @@ def message_texts(segment: str, raw: str, where: str, titles: bool = False):
         args = call[1]
     else:
         rest = gh_call_of(segment)
-        if rest is None or rest[:1] != ["pr"] or rest[1:2] not in (["create"], ["edit"]):
+        acts = (["create"], ["edit"]) + ((["merge"],) if titles else ())
+        if rest is None or rest[:1] != ["pr"] or rest[1:2] not in acts:
             return None
         args = rest[2:]
     texts, files, stdin = message_sources(args, titles=titles and call is None)
@@ -927,9 +930,9 @@ LANE_REASON = (
 
 
 def lane_number_named(segment: str, raw: str, where: str) -> str:
-    """Return the first session-number lane name (`N20`) in a commit message, PR body or PR title,
-    else ''. Fenced blocks and backtick spans are quoted text and skipped. Same acts and same text
-    extraction as cite-by-id. An unread message file reads as clean here: cite-by-id refuses it.
+    """Return the first session-number lane name (`N20`) in a commit message, PR body or title, or
+    `gh pr merge` subject or body, else ''. Fenced blocks and backtick spans are quoted text and
+    skipped. Same text extraction as cite-by-id. An unread message file reads as clean here: cite-by-id refuses it.
     """
     read = message_texts(segment, raw, where, titles=True)
     if read is None or read[2]:
