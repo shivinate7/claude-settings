@@ -9,12 +9,21 @@ prompt hook sees only the question, never the chat, so it judges form alone.
 
 ## The ruling
 
+Owner ruling, 2026-10-13: the standard question format is a `Problem:` sentence, then
+the `Goal:` line, then the options. The check reads the two rule lines for that format
+from its home, `output-styles/shiv-stylisms.md` (rules `style-question-states-problem`
+and `style-question-restates-goal`), at run time, and puts them in its model prompt.
+So it raises no false alarm on a question that follows the style file. A missing
+`Problem:` line is not a deny. A `Goal:` line is a plain-words paraphrase of the goal,
+and a paraphrase is no reason to deny. Incident, 2026-10-13 12:09: the check refused a
+correct question because its goal line was not in the owner's exact words.
+
 Owner rulings, 2026-10-08:
-- Each question opens with one line, `You want: <the goal>`, in the owner's terms. The
+- Each question opens with one line, `Goal: <the goal>`, in the owner's terms. The
   owner sees at a glance whether the goal was read right.
 - A command hook, `hooks/question_outcome.py`, runs on PreToolUse for `AskUserQuestion`.
   It reads the owner's last messages from `transcript_path`. It asks a model whether the
-  `You want:` line matches those messages, and whether each option serves that goal. It
+  `Goal:` line matches those messages, and whether each option serves that goal. It
   also asks whether an option that serves the goal better is missing.
 - The model call reuses `invoke_model` from `hooks/decision_watch.py`. The model is Haiku
   at effort `xhigh`.
@@ -41,7 +50,7 @@ Owner rulings, 2026-10-08:
 ## Bounds
 
 - A clarifying question, with no options or one option, passes first.
-- Any other question with no `You want:` line, or an empty one, is denied with no model
+- Any other question with no `Goal:` line, or an empty one, is denied with no model
   call.
 - The hook reads only the owner's own messages from the last 2 MiB of the transcript.
   The owner's words are user records with `origin.kind` "human", plus the owner's answers
@@ -56,3 +65,6 @@ Owner rulings, 2026-10-08:
   hook cannot record or clear a deny, it does not deny, and it says the check did not run.
   So a judge that is wrong cannot loop.
 - The reason sent back to the session is capped and cleaned.
+
+Kind: process
+Home: hooks/question_outcome.py
