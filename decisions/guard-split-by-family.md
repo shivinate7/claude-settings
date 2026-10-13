@@ -19,7 +19,7 @@ Owner, 2026-10-12 and 2026-10-13:
 - Do it in small PRs. Each one is proven by the full suite and the mutation harness in CI.
   The case list and the kill count must not drop.
 - Opus builds the split, on the owner's word.
-- The session id column in guard.log waits until `guard_core.py` holds the log code.
+- The session id column in guard.log is written by `guard_core.py`, which holds the log code.
 - When the split lands, the ci-hygiene skill gets a new step. It says to split the slowest
   suite's subject by family, and gives the measured CI time before and after.
 

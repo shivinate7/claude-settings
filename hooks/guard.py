@@ -194,7 +194,7 @@ except Exception as exc:
         text = " ".join(("guard_core: %s: %s" % (type(exc).__name__, exc)).split())[:120]
         with open(os.path.join(folder, "guard.log"), "a", encoding="utf-8") as handle:
             handle.write("\t".join([time.strftime("%Y-%m-%dT%H:%M:%S"), "", "crash", "guard-crash",
-                                    text]) + "\n")
+                                    text, "-"]) + "\n")  # the one literal "-": guard_core failed to load
     except Exception:
         pass
     if __name__ != "__main__":
@@ -5440,6 +5440,10 @@ def main() -> None:
         sys.exit(0)  # fail open on unreadable input
     if not isinstance(payload, dict):
         sys.exit(0)  # fail open on a payload that is not an object
+    try:
+        guard_core.set_log_session(payload.get("session_id"))  # the last column of every log line
+    except Exception:
+        pass  # a guard_core without the setter still judges: its line has no session cell (unknown session)
     try:
         judge(payload)
     except SystemExit:

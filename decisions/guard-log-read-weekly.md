@@ -2,7 +2,7 @@
 
 ## The question
 
-`hooks/guard.py:record()` appends one line per verdict to `~/.claude/guard.log`. Who reads it,
+`hooks/guard_core.py:record()` appends one line per verdict to `~/.claude/guard.log`. Who reads it,
 and what does it say?
 
 ## The ruling, 2026-10-11
@@ -14,6 +14,9 @@ each audit session, and once a week:
 ```
 python lint/guard_log_report.py --days 7
 ```
+
+The session is the last field. A missing field or `-` means unknown session. The reader has
+`--session <id>` and `--by-session`.
 
 The table is the outcome meter for the two owner concerns: prompts the owner did not need,
 and agents refused with no allowed path. A rule is judged by its row here, not by its test
@@ -63,6 +66,39 @@ What the matched text says:
 - Nothing runs the reader on a schedule. A session runs it by hand.
 - One machine per log. The Mac's log (9,537 lines on 2026-10-11) is a second reading, not in
   this table.
+
+## Holes, named
+
+Review ended at the three-round cap with no blocker open. The guard no longer crashes when
+`guard_core` lacks `set_log_session` (a blocker found in round 1): same verdict and exit code,
+no traceback.
+
+- **Reader edit selects extra CI.** An edit to `lint/guard_log_report.py` selects
+  `gates_windows_merge` and the `guard` suite, as well as `code`. Neither reads guard.log, so
+  the cost is CI time. It ships for the macOS and Windows runs of the `decision_watch` tests,
+  which `gates_macos` and `gates_windows_rest` give. Those two also select on this edit.
+- **Install skew.** A new `hooks/guard_core.py` writes six fields. An old
+  `hooks/decision_watch.py` (main, before this PR) skips every line whose field count is not
+  five, so it drops every unread note. `install.sh` lands both files from one source, so only
+  a partial copy, such as a Windows file copy, can split them.
+- **One-reader test gaps.** `OneReaderTests` flags only a literal `.split("\t")` call in
+  `hooks/*.py` and `lint/*.py` files that name guard.log. A `partition`, `re.split`, `csv`, a
+  split on a variable, or a reader in `merge/`, `janitor/` or `bin/` passes. Risk is low. The
+  test names its one allowed fallback (`gate-hooks-fail-closed`: an unread note must not vanish).
+- **Session name read by `globals()`.** `record` in `hooks/guard_core.py` reads
+  `_log_session` with `globals().get`. The module always defines that name, so the absent
+  branch cannot run in production. A stale `guard_core.py` runs its own old `record`, which
+  writes five fields. Test `session_log_stale_core_case` proves the code path, not the real
+  skew in the install hole above.
+- **Pipe or backtick in a session id.** A `|` splits its cell in the `--by-session` table.
+  Control characters are stripped, so an id cannot add a line. A backtick is not stripped, so
+  it could close the fence in the verbatim `other` rows. The fault is display only: counts use
+  the raw id.
+- **Seven or more fields.** The reader reads `session` as field 6, and `matched` as field 5
+  plus the later fields. The `decision_watch` fallback reads `matched` as field 5 only. The
+  line gets a seventh field only through the `tool` field, which is not folded. Not every
+  caller of `tool` was checked for a tab. `log_cut` folds tabs out of `matched`, and the
+  session cell strips control characters.
 
 ## What reopens it
 
