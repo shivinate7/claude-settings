@@ -282,3 +282,46 @@ def paragraph_blocks(text):
 
 def format_finding(f):
     return "line %s: %s %s" % (f.get("line"), f.get("code"), safe_finding_text(f.get("message")))
+
+
+# ---------------------------------------------------------------- guard.log lines from the gates
+#
+# One home for the STE gate's and md_sweep's guard.log line. The line goes through
+# hooks/guard_core.py `record`, so its columns match every other guard line. The matched field is
+# the file's basename and a count: never a path, never file text. A log failure, a missing
+# guard_core, or a crash here never changes a gate's output or exit code
+# (decisions/gate-hooks-fail-closed.md): every step is inside a try, and a failed import turns
+# logging off.
+GUARD_LOG_RULE_MAX = 40
+
+
+def guard_logger(hook):
+    """Return log(tool, decision, rule, matched_name, label, count) for one hook call.
+
+    The line reads `<tool> <decision> <rule> <name> <label>=<count>`: matched is the basename and
+    the count, composed so a long name is shortened from its head and the count survives. The
+    first call loads guard_core from the hooks/ folder beside lint/ and names the hook's session
+    once. A call that cannot log does nothing.
+    """
+    state = {}
+
+    def log(tool, decision, rule, name, label, count):
+        try:
+            if "core" not in state:
+                state["core"] = None
+                import importlib.util
+                path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks",
+                                    "guard_core.py")
+                spec = importlib.util.spec_from_file_location("guard_core", path)
+                core = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(core)
+                core.set_log_session(hook.get("session_id"))
+                state["core"] = core
+            core = state["core"]
+            if core is not None:
+                core.record(tool, decision, core.log_cut(rule, GUARD_LOG_RULE_MAX),
+                            core.log_path_and_text(os.path.basename(name), "%s=%s" % (label, count)))
+        except Exception:
+            pass
+
+    return log

@@ -100,7 +100,7 @@ from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from _transcript import is_last_human, last_human_epoch, paragraph_blocks, format_finding, landed_work  # noqa: E402
+from _transcript import is_last_human, last_human_epoch, paragraph_blocks, format_finding, landed_work, guard_logger  # noqa: E402
 
 LINTER = os.path.join(HERE, "ste_lint.py")
 
@@ -516,7 +516,7 @@ def main():
     if not by_path:
         return
 
-    lines = []
+    lines, blocked, codes = [], [], set()
     for resolved in lintable:
         findings = by_path.get(resolved)
         if not findings:
@@ -526,6 +526,8 @@ def main():
             findings = [f for f in findings if f.get("line") in scope]
         if not findings:
             continue
+        blocked.append(resolved)
+        codes.update(f.get("code") or "STE" for f in findings)
         lines.append("%s:" % os.path.basename(resolved))
         lines.extend("  " + format_finding(f) for f in findings)
     if not lines:
@@ -536,6 +538,7 @@ def main():
         "in the file on disk after the write.\n%s\n%s Fix the text, then finish the turn."
         % ("\n".join(lines), NOTE)
     )
+    guard_logger(hook)("Stop", "deny", ",".join(sorted(codes)), blocked[0], "files", len(blocked))
     print(json.dumps({"decision": "block", "reason": reason}))
 
 
