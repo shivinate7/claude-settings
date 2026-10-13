@@ -20,14 +20,19 @@ its own CI wake-up step (B5 step 1). The /safe-stop entry point into precompact_
 stable.
 
 1. **Reorient after /clear or a fork.** SessionStart has the sources `clear` and `fork`. Its
-   input carries no previous session id. So a SessionEnd hook with reason `clear` writes a
-   pointer: the old session id and the project directory. The SessionStart `clear` or `fork`
-   hook reads the newest pointer for the same project directory. It then tells the session to
-   read that handoff and to rewrite its own handoff from it. With no pointer, it names the
-   newest handoff for the same project directory. With none, it says so.
+   input carries no previous session id.
+   - On `clear`: a SessionEnd hook with reason `clear` writes a pointer, the old session id and
+     the project directory. SessionStart reads the newest pointer for the same directory and
+     names that handoff.
+   - On `fork`: no pointer is read, because a pointer can name an older cleared session. The
+     hook names the newest handoff for the same directory, which is the parent's.
+   - A session's project directory is recorded each time a handoff hook runs for it (nudge,
+     PreCompact, SessionEnd), so a session that never compacted is still found.
+   - With nothing found, it says so. The session reads the named handoff and rewrites its own
+     handoff from it.
 2. **Re-read check after compaction.** A PostCompact hook sets a flag for the session. A
    PreToolUse hook on Read clears the flag when the path is the session's handoff. A Stop hook
-   blocks once while the flag is set, and names the handoff path. It exits on
+   blocks once per turn while the flag is set and the handoff file exists, and names its path. It exits on
    `stop_hook_active`, so it cannot loop.
 3. **CI wake-up.** A PostToolUse hook on Bash and PowerShell starts an `asyncRewake` watcher
    after `gh pr ready <n>`. Each `gh pr ready` in one command gets its own watch. A push alone
