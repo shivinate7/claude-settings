@@ -31,10 +31,15 @@ Owner, 2026-10-12: "Fix both now, one lane."
   same reason.
 - A skipped run never outranks a run of the same name that ran. It is dropped when any
   other run of that name is not skipped. Then only the newest run per workflow name
-  counts; gh lists runs newest first. An older cancelled run under a newer pass of the
-  same name is superseded. A newest cancelled run stays red. Incident 2026-10-12 17:05Z:
+  counts; gh lists runs newest first. Incident 2026-10-12 17:05Z:
   a draft PR made ready in the same second got two runs. The skipped `opened` run carried
   the higher id. It outranked the green `ready_for_review` run, and #360 was refused.
+- A cancelled run never outranks a run of the same name that ran, completed or in
+  progress, in either list order. Owner, 2026-10-13. A cancelled run with no other run of
+  its name stays red. A newer skipped run does not erase an older cancelled run.
+  Incident 2026-10-13, PR 381: two gates runs started in the same second. Concurrency
+  cancelled one. `judge_runs` kept the first listed run per name, so the cancelled run
+  read red and the wait stopped while the other run was still going.
 - A skipped job beside a passing check still reads as passing. A docs-only PR, with
   `scope` passed and the code suites skipped, stays green (decision
   docs-only-prs-skip-code-suites).
