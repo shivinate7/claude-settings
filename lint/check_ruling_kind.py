@@ -14,7 +14,7 @@ next touch, so the next touch brings its Kind line.
 NAMED LIMIT. The lint cannot know which platforms a ruling needs, so it cannot check that
 every platform has a Plan line. It checks each line that is there.
 
-    python3 lint/check_ruling_kind.py [--base REF] [file ...]   # files given: check those, skip git
+    python3 lint/check_ruling_kind.py [--base REF] [--root DIR] [file ...]   # files given: check those, skip git
 """
 import os
 import re
@@ -155,6 +155,10 @@ base = "origin/main"
 if "--base" in args:
     i = args.index("--base")
     base = args[i + 1]
+    del args[i:i + 2]
+if "--root" in args:  # the checkout to judge, for a caller whose repo is not this one
+    i = args.index("--root")
+    ROOT = os.path.abspath(args[i + 1])
     del args[i:i + 2]
 files = args or changed(base)
 bad = 0

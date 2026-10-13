@@ -1,0 +1,15 @@
+name: Ruling kind check
+description: >
+  Fails a pull request that adds or edits a decisions/*.md record with no valid Kind line
+  (Kind: build with Plan lines, or Kind: process with a Home line). Runs lint/check_ruling_kind.py
+  from this repo against the caller's checkout and the pull request base. Fails closed: when the
+  base cannot be read, the step is red, never green. A run with no pull request base is skipped.
+  The caller needs actions/checkout with fetch-depth 0 so the diff can reach the base.
+runs:
+  using: composite
+  steps:
+    - name: Check each changed record declares its kind
+      shell: bash
+      env:
+        BASE_REF: ${{ github.base_ref }}
+      run: bash "${{ github.action_path }}/check.sh"

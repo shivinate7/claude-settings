@@ -1,7 +1,8 @@
 # Each ruling declares its kind
 
 A decision record that a pull request adds or changes must say what kind each ruling is: a
-build task, or a process change. A lint checks this on every such record.
+build task, or a process change. A lint checks this on every such record. Two routes carry the
+check to the owner's other repos.
 
 ## The question
 
@@ -38,6 +39,16 @@ Home: <path>
 against the pull request base. It has no "not a ruling" exemption. A record with no ruling
 still carries a Kind line, because the lint cannot tell the two apart.
 
+## The two routes
+
+- CI lint. `lint/check_ruling_kind.py` runs in this repo's CI. The opt-in composite action
+  `actions/ruling-kind` runs the same lint on another repo's pull request, against its base.
+  Adopt it with `uses: shivinate7/claude-settings/actions/ruling-kind@<full-sha>` after
+  `actions/checkout` with `fetch-depth: 0`. It is red when the base cannot be read.
+- Write judge. The Edit and Write prompt judges in `settings.json` fire on any `decisions/`
+  path. They refuse a record with no `Kind: build` (with Plan lines) or `Kind: process`
+  (with a Home line). The check runs at write time, in any repo with these settings.
+
 ## Named limits
 
 - The lint cannot know which platforms a ruling needs. It does not check that every platform
@@ -47,6 +58,10 @@ still carries a Kind line, because the lint cannot tell the two apart.
 - Home is checked for existence only. The lint does not check that the home enforces the ruling.
 - A missing base ref reads as unknown. Locally the lint exits 0. In CI it fails.
 - Only pull requests run the check. A push to main and the nightly run skip it, by design.
+- The judge is a model and can miss a case. It sees only Claude's writes, never a human edit.
+  An Edit shows it the changed text, not the whole record, so it cannot always tell. The CI
+  lint is the check that does not miss.
+- The action is not adopted anywhere yet. It has not run on a hosted runner (unmeasured).
 - The lint checks that a plan heading exists. It does not check that the plan lane does the work.
 
 Kind: process
