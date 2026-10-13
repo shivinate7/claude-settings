@@ -6,7 +6,8 @@ guard-split-by-family). Other files reach these names through `guard`.
 import os
 
 from guard_core import (
-    _git_subcommand_index, basename, cap_safe, resolve_command, segment_tokens,
+    _git_subcommand_index, basename, cap_safe, inline_script, resolve_command, segment_tokens,
+    split_segments,
 )
 from guard_pointer import (
     pointer_checkout,
@@ -179,3 +180,43 @@ MERGE_GATE_REASON = (
 
 def merge_gate_reason(verdict: str, detail: str) -> str:
     return MERGE_GATE_REASON % (verdict + (" (" + cap_safe(detail, 160) + ")" if detail else ""))
+
+
+DRAFT_PR_REASON = ("draft-pr: open every PR as a draft. Add --draft (or -d) to gh pr create. "
+                   "Only the batch's integration PR goes ready; CI skips drafts.")
+
+
+# `gh pr create` flags that take a value; the next token is data, never a flag.
+PR_CREATE_VALUE_FLAGS = {"-t", "--title", "-b", "--body", "-F", "--body-file", "-B", "--base",
+                         "-H", "--head", "-l", "--label", "-a", "--assignee", "-m", "--milestone",
+                         "-p", "--project", "-r", "--reviewer", "-R", "--repo", "-T", "--template"}
+GH_TRUE = ("1", "t", "T", "TRUE", "true", "True")
+# Named limits (decision draft-until-reviewed): a `gh api` POST to the pulls endpoint and
+# `hub pull-request` open a PR and are not judged here. A short-flag cluster such as `-dt x` is
+# not read as a draft flag, so it is refused (a rare false alarm).
+
+
+def undrafted_pr_create(segment: str) -> bool:
+    """True for a `gh pr create` segment (or a `sh -c` script holding one) that ends not draft.
+    The last --draft, -d or --draft=X wins."""
+    tokens = segment_tokens(segment) or []
+    script = inline_script(tokens) if tokens else ""
+    if script:
+        return any(undrafted_pr_create(part) for part in split_segments(script) if part.strip())
+    rest = gh_call_of(segment)
+    if rest is None or rest[:2] != ["pr", "create"]:
+        return False
+    args = rest[2:]
+    draft, index = False, 0
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        if arg in PR_CREATE_VALUE_FLAGS:
+            index += 1
+        elif arg in ("-h", "--help"):
+            return False   # help creates nothing
+        elif arg in ("-d", "--draft"):
+            draft = True
+        elif arg.startswith(("--draft=", "-d=")):
+            draft = arg.split("=", 1)[1] in GH_TRUE   # gh's ParseBool set; any other value is false
+    return not draft
