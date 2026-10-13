@@ -15,6 +15,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 
@@ -2565,6 +2566,43 @@ def gl_linter_tree(root, entry):
     return os.path.join(lint_copy, "ste_gate.py")
 
 
+def gl_print_findings(codes):
+    """A linter entry point (one line, for gl_linter_tree) that prints one error finding per code,
+    on its own line. The path is the file the linter was given, so a sweep finds its own findings."""
+    findings = [{"code": code, "severity": "error", "line": n, "col": 1,
+                 "message": "message %d" % n} for n, code in enumerate(codes, 1)]
+    return "print(json.dumps({'findings': [dict(f, path=sys.argv[-1]) for f in %r]}))" % (findings,)
+
+
+def gl_sleepy_tree(root, seconds):
+    """A gate tree whose guard_core.record sleeps first, so a log write takes `seconds`. Returns the
+    copied lint folder."""
+    lint_copy = gl_copy_tree(root)
+    with open(os.path.join(root, "hooks", "guard_core.py"), "a", encoding="utf-8") as handle:
+        handle.write("\n\nimport time as _slow_time\n_slow_record = record\n\n"
+                     "def record(tool, decision, rule, matched):\n"
+                     "    _slow_time.sleep(%r)\n"
+                     "    _slow_record(tool, decision, rule, matched)\n" % (seconds,))
+    return lint_copy
+
+
+def gl_timed(script, hook, env):
+    """Run a hook script. Return (seconds until its first stdout line, rc, all stdout, stderr)."""
+    proc = subprocess.Popen([sys.executable, script], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    start = time.monotonic()
+    proc.stdin.write(json.dumps(hook).encode("utf-8"))
+    proc.stdin.close()
+    first = proc.stdout.readline()
+    seconds = time.monotonic() - start
+    rest = proc.stdout.read()
+    err = proc.stderr.read()
+    proc.stdout.close()
+    proc.stderr.close()
+    proc.wait()
+    return seconds, proc.returncode, (first + rest).decode("utf-8"), err.decode("utf-8", "replace")
+
+
 def gl_guard_core():
     """guard_core, imported the way the gates import it: from hooks/ beside lint/."""
     if HOOKS not in sys.path:
@@ -2992,6 +3030,50 @@ class SteGateLogTests(unittest.TestCase):
         self.assertIsNone(GL_HOSTILE.search(matched), repr(matched))
 
 
+    # (H1) finding codes of two types, an int and a string. The sort that builds the log rule must not
+    # take the answer with it: the gate denies with the same stdout and rc 0 as it does with strings.
+    def test_26_mixed_code_types_keep_the_deny_and_the_exit_code(self):
+        content = {"file_path": self._path(), "content": GL_CLEAN_DOC}
+        mixed = gl_gate(self.cfg, "Write", content, gate=gl_linter_tree(
+            os.path.join(self.tmp.name, "mixed"), gl_print_findings([5, "STE001"])))
+        plain = gl_gate(self.cfg, "Write", content, gate=gl_linter_tree(
+            os.path.join(self.tmp.name, "plain"), gl_print_findings(["5", "STE001"])))
+        self.assertEqual(gl_decision(plain), "deny")  # precondition: the string codes deny
+        self.assertNotIn("Traceback", mixed.stderr)
+        self.assertEqual(mixed.returncode, 0, mixed.stderr)
+        self.assertEqual(mixed.stdout, plain.stdout)
+
+    # (H3) the answer leaves before the log write. The log write sleeps 4 s; the first stdout line
+    # arrives in under 2 s, for a fix and for a deny.
+    def _answer_first(self, name, content):
+        script = os.path.join(gl_sleepy_tree(os.path.join(self.tmp.name, name), 4), "ste_gate.py")
+        hook = {"hook_event_name": "PreToolUse", "tool_name": "Write", "session_id": GL_SESSION,
+                "tool_input": {"file_path": self._path(), "content": content}}
+        seconds, rc, out, err = gl_timed(script, hook, gl_env(self.cfg))
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(rc, 0, err)
+        self.assertLess(seconds, 2.0, "the answer waited for the log write")
+        return out
+
+    def test_27_a_fix_answers_before_the_slow_log_write(self):
+        self.assertIn("updatedInput", self._answer_first("slow-fix", GL_FIXED_DOC))
+
+    def test_28_a_deny_answers_before_the_slow_log_write(self):
+        self.assertIn('"permissionDecision": "deny"', self._answer_first("slow-deny", GL_DENY_DOC))
+
+    # (name hygiene) the bidi isolates U+2066 to U+2069 never reach the log: the cleaned basename
+    # holds none of them.
+    def test_29_bidi_isolates_are_stripped_from_the_basename(self):
+        gl_gate(self.cfg, "Write", {"file_path": self._path("a⁦b⁧c⁨d⁩e.md"),
+                                    "content": GL_FIXED_DOC})
+        rows = self._rows("a name with bidi isolates")
+        self.assertEqual(len(rows), 1)
+        matched = gl_fields(rows[0])[4]
+        for mark in "⁦⁧⁨⁩":
+            self.assertNotIn(mark, matched)
+        self.assertIn(".md", matched)
+
+
 class MdSweepLogTests(unittest.TestCase):
     """md_sweep (Stop) writes one guard.log line per run that blocks. A clean run writes none."""
 
@@ -3012,8 +3094,8 @@ class MdSweepLogTests(unittest.TestCase):
         with open(os.path.join(self.proj, name), "w", encoding="utf-8") as handle:
             handle.write(text)
 
-    def _sweep(self, cfg=None, extra=None, script=None):
-        """Run md_sweep as a Stop hook. The last human message is 5 s old, so each file written
+    def _stop_hook(self):
+        """The Stop hook md_sweep reads. The last human message is 5 s old, so each file written
         here is newer than it and dirty in the work tree."""
         first = human("write the doc")
         first["timestamp"] = (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat(
@@ -3021,9 +3103,12 @@ class MdSweepLogTests(unittest.TestCase):
         records = [first, tool_use_msg("Bash", {"command": "true"}), tool_result_msg(),
                    assistant_text("done")]
         transcript = write_transcript(records, self.tmp.name)
-        hook = {"hook_event_name": "Stop", "transcript_path": transcript, "cwd": self.proj,
+        return {"hook_event_name": "Stop", "transcript_path": transcript, "cwd": self.proj,
                 "stop_hook_active": False, "session_id": GL_SESSION}
-        return run_gate(script or MD_SWEEP, hook, env=gl_env(cfg or self.cfg, extra))
+
+    def _sweep(self, cfg=None, extra=None, script=None):
+        """Run md_sweep as a Stop hook."""
+        return run_gate(script or MD_SWEEP, self._stop_hook(), env=gl_env(cfg or self.cfg, extra))
 
     def _rows(self, what):
         rows = gl_lines(self.cfg)
@@ -3102,6 +3187,32 @@ class MdSweepLogTests(unittest.TestCase):
         self.assertEqual(skewed.returncode, 0, skewed.stderr)
         self.assertEqual(skewed.stdout, real.stdout)
         self.assertIsNone(gl_lines(skew_cfg), "an old _transcript wrote a line")
+
+    # (H1) an unhashable finding code (a list). The sweep must block with the same stdout and exit code
+    # as it does with the same code written as a string.
+    def test_08_unhashable_code_keeps_the_sweep_output_and_exit_code(self):
+        self._md("notes.md", self.ERROR_TEXT)
+        plain_gate = gl_linter_tree(os.path.join(self.tmp.name, "plain"),
+                                    gl_print_findings(["['STE008']"]))
+        listed_gate = gl_linter_tree(os.path.join(self.tmp.name, "listed"),
+                                     gl_print_findings([["STE008"]]))
+        plain = self._sweep(script=os.path.join(os.path.dirname(plain_gate), "md_sweep.py"))
+        listed = self._sweep(script=os.path.join(os.path.dirname(listed_gate), "md_sweep.py"))
+        self.assertEqual(json.loads(plain.stdout).get("decision"), "block")  # precondition
+        self.assertNotIn("Traceback", listed.stderr)
+        self.assertEqual(listed.returncode, plain.returncode)
+        self.assertEqual(listed.stdout, plain.stdout)
+
+    # (H3) the sweep prints its block before the log write. The log write sleeps 4 s; the first stdout
+    # line arrives in under 2 s.
+    def test_09_sweep_answers_before_the_slow_log_write(self):
+        self._md("notes.md", self.ERROR_TEXT)
+        script = os.path.join(gl_sleepy_tree(os.path.join(self.tmp.name, "slow"), 4), "md_sweep.py")
+        seconds, rc, out, err = gl_timed(script, self._stop_hook(), gl_env(self.cfg))
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out).get("decision"), "block")
+        self.assertLess(seconds, 2.0, "the sweep waited for the log write")
 
 
 if __name__ == "__main__":
