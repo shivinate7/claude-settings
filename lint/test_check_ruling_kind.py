@@ -247,6 +247,59 @@ class RulingKindTests(unittest.TestCase):
         self.assertIn("check_ruling_kind: FAIL:", out)
         self.assertIn(OLD, out)
 
+    def test_fence_closer_must_match_the_opener(self):
+        cases = [
+            # a 3-backtick line does not close a 4-backtick fence, so the Kind line stays inside
+            ("````\n```\nKind: build\nPlan: %s (mac)\n````" % L1, False),
+            # a closer has no info string, so ```python does not close a ``` fence
+            ("```\n```python\nKind: build\nPlan: %s (mac)\n```" % L1, False),
+            # a Kind line inside a fence opened with an info string is not counted
+            ("```python\nKind: build\nPlan: %s (mac)\n```" % L1, False),
+            # a 4-backtick fence closed by a 4-backtick line hides nothing after it
+            ("````\n```\n````\n\nKind: build\nPlan: %s (mac)" % L1, True),
+        ]
+        for ruling, passes in cases:
+            with self.subTest(ruling=ruling):
+                self.put(REC, record(ruling))
+                if passes:
+                    self.assert_passes(REC)
+                else:
+                    self.assert_fails(REC, "Kind")
+
+    def test_dot_slash_changed_path_is_checked(self):
+        self.put(REC, record("Owner ruling. Ship it."))
+        self.assert_fails("./" + REC, "Kind")
+
+    def test_plan_with_a_bom_resolves_its_first_heading(self):
+        self.put("plans/bom-plan.md", "﻿# Build plan\n\n## Build lanes\n\nText.\n")
+        self.put(REC, record("Kind: build\nPlan: plans/bom-plan.md#build-plan (mac)"))
+        self.assert_passes(REC)
+
+    def test_heading_with_a_link_slugs_to_its_link_text(self):
+        self.put("plans/link-plan.md", "# Build plan\n\n## See [the rule](x.md)\n\nText.\n")
+        self.put(REC, record("Kind: build\nPlan: plans/link-plan.md#see-the-rule (mac)"))
+        self.assert_passes(REC)
+
+    def test_kind_inside_an_html_comment_is_not_counted(self):
+        cases = [
+            ("<!--\nKind: build\nPlan: %s (mac)\n-->" % L1, False),
+            # a commented-out Kind line does not count, so the real one after it is the only one
+            ("<!--\nKind: none\n-->\n\nKind: build\nPlan: %s (mac)" % L1, True),
+        ]
+        for ruling, passes in cases:
+            with self.subTest(ruling=ruling):
+                self.put(REC, record(ruling))
+                if passes:
+                    self.assert_passes(REC)
+                else:
+                    self.assert_fails(REC, "Kind")
+
+    def test_platform_none_or_empty_fails(self):
+        for label in ("(none)", "(None)", "()"):
+            with self.subTest(label=label):
+                self.put(REC, record("Kind: build\nPlan: %s %s" % (L1, label)))
+                self.assert_fails(REC, "plan")
+
 
 if __name__ == "__main__":
     unittest.main()
