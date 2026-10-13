@@ -1,38 +1,49 @@
 #!/usr/bin/env python3
 """CI wake-up hook. Standard library only. See decisions/handoff-hooks-wave-2.md, part 3.
 
-PostToolUse hook for Bash, registered with `asyncRewake: true`. After `gh pr ready <N>`, or a
-`git push` to a branch with an open ready PR, it waits once on every workflow run of that PR head
-and exits 2 with one line, which wakes the session:
+PostToolUse hook for the Bash and PowerShell tools, registered with `asyncRewake: true`. Only
+`gh pr ready <N>` starts a watch, and each one in a command gets its own, in this one process.
+A push starts none. Per PR it reads the head once, waits on every run of that head, and prints one line:
 
     CI <green|red|cancelled> on <sha7>: <failing job names>
-    CI unknown on <sha7 or branch>: <reason>
+    CI unknown on <sha7 or PR>: <reason>        (also "still running" at the deadline)
 
-Any other command exits 0 with no output and makes no gh call. A branch with no PR starts no
-watch. It never polls and never loops on a red run: one PR read, one run list, one blocking
-`gh run watch` per unfinished run, one read of each run. The settings.json `timeout` caps the wait.
+Then it exits 2 once, which wakes the session. It prints nothing and exits 0 when no watch starts,
+or when another watcher already holds every PR it would watch. Any error exits 2 with an unknown
+line, never 1. It never polls and never loops on a red run.
+
+Seams: CI_WAKE_DEADLINE, the watch budget in seconds (default DEFAULT_DEADLINE, under the hook
+timeout in settings.json). CI_WAKE_LOCK_DIR, the folder of the per-PR lock files.
 The cancelled-twin rule is merge.py's `Host.judge_runs`, loaded through guard_merge.merge_module.
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-from guard_core import basename, resolve_command, segment_tokens, split_segments  # noqa: E402
+import guard_core  # noqa: E402
+from guard_core import basename, split_segments, strip_heredoc_bodies  # noqa: E402
 from guard_merge import gh_call_of, merge_module  # noqa: E402
 
-NO_RUN_PAUSE = 20   # seconds; the one pause when the head has no run yet
-READ_TIMEOUT = 60   # seconds for each gh read; `gh run watch` has none (the hook timeout caps it)
-PR_FIELDS = "number,isDraft,headRefName,headRefOid,state"
+DEFAULT_DEADLINE = 3300   # seconds; the hook timeout in settings.json is 3600
+NO_RUN_PAUSE = 20         # seconds; the one pause when the head has no run yet
+READ_TIMEOUT = 60         # seconds for each gh read
+PR_FIELDS = "number,headRefName,headRefOid,state,url"
 RUN_FIELDS = "databaseId,name,status,conclusion,workflowName,headSha,event"
 GOOD = ("success", "skipped", "neutral")
 REPO_FLAGS = ("-R", "--repo")
+# A word-internal apostrophe (don't) opens no quote. Masked here, so split_segments does not read it as one.
+APOSTROPHE = re.compile(r"(?<=[A-Za-z])'(?=[A-Za-z])")
+HELD = []   # open lock files, kept until the process ends: the OS drops the locks then, kill included
 
 
 class Unknown(Exception):
@@ -40,26 +51,36 @@ class Unknown(Exception):
 
 
 class NoPR(Exception):
-    """The branch or number names no pull request: no watch, not an unknown."""
+    """The number names no pull request: no watch, not an unknown."""
 
 
-def say(line):
-    sys.stderr.write(" ".join(line.split())[:300] + "\n")
-    sys.exit(2)
+def emit(lines):
+    if not lines:
+        return 0
+    try:
+        sys.stderr.buffer.write("".join(" ".join(x.split())[:300] + "\n" for x in lines).encode("utf-8", "replace"))
+        sys.stderr.buffer.flush()
+    except Exception:
+        pass
+    return 2
 
 
 def gh(args, cwd, timeout=READ_TIMEOUT):
     """-> (rc, stdout, stderr). gh is found with shutil.which: a list-form call of a bare "gh"
-    misses a .cmd launcher on Windows."""
+    misses a .cmd launcher on Windows. A timeout kills gh and never waits on its pipes."""
     exe = shutil.which("gh")
     if exe is None:
         raise Unknown("gh is not on PATH")
     try:
-        p = subprocess.run([exe, *args], capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", cwd=cwd, timeout=timeout)
-    except (OSError, subprocess.TimeoutExpired) as e:
+        p = subprocess.Popen([exe, *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, cwd=cwd)
+        out, err = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        raise Unknown("gh %s timed out" % " ".join(args[:2]))
+    except OSError as e:
         raise Unknown("gh %s failed: %s" % (" ".join(args[:2]), type(e).__name__))
-    return p.returncode, p.stdout or "", p.stderr or ""
+    return p.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
 
 
 def gh_json(args, cwd):
@@ -74,17 +95,27 @@ def gh_json(args, cwd):
         raise Unknown("gh %s printed non-JSON" % " ".join(args[:2]))
 
 
-def command_words(segment):
-    """-> (program, args) of a segment's command word, or None."""
-    tokens = segment_tokens(segment)
-    if not tokens:
-        return None
-    i = resolve_command(tokens)
-    return None if i is None else (basename(tokens[i]), tokens[i + 1:])
+def watch_run(run_id, cwd, deadline):
+    """Block on `gh run watch` until the run ends or the deadline passes. Output goes nowhere
+    (no pipes to wait on after a kill). The run's own state is read from `run view`."""
+    exe = shutil.which("gh")
+    if exe is None:
+        raise Unknown("gh is not on PATH")
+    left = deadline - time.monotonic()
+    if left <= 0:
+        return
+    try:
+        p = subprocess.Popen([exe, "run", "watch", str(run_id)], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=cwd)
+        p.wait(timeout=left)
+    except subprocess.TimeoutExpired:
+        p.kill()
+    except OSError as e:
+        raise Unknown("gh run watch failed: " + type(e).__name__)
 
 
 def ready_call(rest):
-    """-> (selector, repo) for `gh pr ready` args, else None."""
+    """-> (selector, repo) for the args of a `gh pr ready` call, else None."""
     if rest[:2] != ["pr", "ready"] or any(a in ("--undo", "-h", "--help") for a in rest):
         return None
     pos, repo, i = [], "", 2
@@ -100,67 +131,47 @@ def ready_call(rest):
     return (pos[0] if pos else ""), repo
 
 
-def triggers(command):
-    """-> the watches this command starts, in order: ("ready", selector, repo) or ("push", args, "").
-    Reads the text only. Quoted text is no command, and a word that is not a segment's command is no call."""
+def triggers(command, powershell):
+    """-> [(selector, repo)], one per `gh pr ready` in the command. Reads the text only. A heredoc
+    body, quoted text and text after `#` is no command (split_segments drops comments and keeps
+    quotes whole); a lone apostrophe in a word opens no quote."""
+    guard_core.POWERSHELL_CALL[0] = powershell
+    text = APOSTROPHE.sub("\x01", strip_heredoc_bodies(command))
     found = []
-    for segment in split_segments(command):
+    for segment in split_segments(text):
         rest = gh_call_of(segment)
-        if rest is not None:
-            call = ready_call(rest)
-            if call:
-                found.append(("ready", *call))
-            continue
-        words = command_words(segment)
-        if words and words[0] in ("git", "git.exe"):
-            args, i = words[1], 0
-            while i < len(args) and args[i].startswith("-"):   # git global options
-                i += 2 if args[i] in ("-C", "-c") else 1
-            if args[i:i + 1] == ["push"]:
-                found.append(("push", args[i + 1:], ""))
+        call = ready_call(rest) if rest is not None else None
+        if call:
+            found.append(call)
     return found
 
 
-def push_branch(args, cwd):
-    """The branch a `git push` targets, or "" when it pushes no branch (delete, tags)."""
-    if any(a in ("-d", "--delete", "--tags", "--mirror") for a in args):
-        return ""
-    pos = [a for a in args if not a.startswith("-")][1:]   # drop the remote
-    ref = (pos[0] if pos else "HEAD").split(":")[-1].lstrip("+")
-    if ref.startswith("refs/heads/"):
-        ref = ref[len("refs/heads/"):]
-    if ref in ("", "HEAD"):   # the current branch
-        try:
-            ref = subprocess.run(["git", "branch", "--show-current"], capture_output=True, text=True,
-                                 cwd=cwd, timeout=READ_TIMEOUT).stdout.strip()
-        except (OSError, subprocess.TimeoutExpired):
-            ref = ""
-        if not ref:
-            raise Unknown("git push target branch not readable")
-    return ref
-
-
-def ready_pr(kind, key, repo, cwd):
-    """-> the open, non-draft PR to watch, or None for a draft, a closed PR or no PR."""
-    extra = ["-R", repo] if repo else []
+def lock_pr(pr, lock_dir):
+    """Take the one lock of this PR for the life of the process. False when another watcher holds it."""
+    key = re.sub(r"[^A-Za-z0-9._-]+", "_", str(pr.get("url") or pr["number"]))
+    os.makedirs(lock_dir, exist_ok=True)
+    fd = os.open(os.path.join(lock_dir, key + ".lock"), os.O_CREAT | os.O_RDWR)
     try:
-        if kind == "ready":
-            prs = [gh_json(["pr", "view", *([key] if key else []), *extra, "--json", PR_FIELDS], cwd)]
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
         else:
-            prs = gh_json(["pr", "list", "--head", key, "--json", PR_FIELDS], cwd)
-        prs = [p for p in prs if p.get("state", "OPEN") == "OPEN" and not p.get("isDraft")]
-    except NoPR:
-        return None
-    return prs[0] if prs else None
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        return False
+    HELD.append(fd)
+    return True
 
 
-def wait_for(sha, cwd):
+def wait_for(sha, cwd, deadline):
     """One run list (two when the head has no run yet, after one pause), one blocking watch per
     run (not a cancelled twin), then one read of each run with its jobs."""
     list_args = ["run", "list", "--commit", sha, "--limit", "100", "--json", RUN_FIELDS]
     runs = gh_json(list_args, cwd)
     if not runs:
-        time.sleep(NO_RUN_PAUSE)
+        time.sleep(max(0, min(NO_RUN_PAUSE, deadline - time.monotonic())))
         runs = gh_json(list_args, cwd)
     if not runs:
         raise Unknown("no run yet")
@@ -168,7 +179,7 @@ def wait_for(sha, cwd):
     for r in runs:
         if r["conclusion"] == "cancelled" and r["name"] in live:
             continue   # a cancelled twin: judge_runs reads the run that ran
-        gh(["run", "watch", str(r["databaseId"])], cwd, timeout=None)   # blocks; at once for a finished run. The view below gives the verdict
+        watch_run(r["databaseId"], cwd, deadline)
     return [gh_json(["run", "view", str(r["databaseId"]), "--json", "databaseId,name,status,conclusion,jobs"], cwd)
             for r in runs]
 
@@ -195,36 +206,57 @@ def verdict(sha, runs):
     return "CI %s on %s: %s" % ("cancelled" if cancelled else "red", sha[:7], ", ".join(dict.fromkeys(names)))
 
 
-def main():
+def watch_pr(selector, repo, cwd, deadline, lock_dir):
+    """-> one output line, or None when no watch starts."""
+    ident = "PR" + selector if selector else "PR"
     try:
-        data = json.load(sys.stdin)
-    except ValueError:
-        return 0
-    if not isinstance(data, dict) or data.get("tool_name") != "Bash":
-        return 0
-    command = (data.get("tool_input") or {}).get("command")
-    if not isinstance(command, str):
-        return 0
-    cwd = data.get("cwd") if os.path.isdir(data.get("cwd") or "") else None
-    ident = "?"
-    try:
-        for kind, key, repo in triggers(command):
-            if kind == "push":
-                key = push_branch(key, cwd)
-                if not key:
-                    continue
-            ident = key or "PR"
-            pr = ready_pr(kind, key, repo, cwd)
-            if pr:
-                sha = pr["headRefOid"]
-                ident = sha[:7]
-                say(verdict(sha, wait_for(sha, cwd)))
+        extra = ["-R", repo] if repo else []
+        pr = gh_json(["pr", "view", *([selector] if selector else []), *extra, "--json", PR_FIELDS], cwd)
+        ident = pr["headRefOid"][:7]
+        if not lock_pr(pr, lock_dir):
+            return None
+        return verdict(pr["headRefOid"], wait_for(pr["headRefOid"], cwd, deadline))
+    except NoPR:
+        return None
     except Unknown as e:
-        say("CI unknown on %s: %s" % (ident, e))
-    except (KeyError, TypeError, AttributeError):
-        say("CI unknown on %s: gh printed unexpected JSON" % ident)
-    return 0
+        return "CI unknown on %s: %s" % (ident, e)
+    except Exception as e:
+        return "CI unknown on %s: %s: %s" % (ident, type(e).__name__, e)
+
+
+def main():
+    data = json.load(sys.stdin)
+    if not isinstance(data, dict) or data.get("tool_name") not in ("Bash", "PowerShell"):
+        return 0
+    command = data["tool_input"]["command"]
+    cwd = data.get("cwd") if isinstance(data.get("cwd"), str) and os.path.isdir(data["cwd"]) else None
+    calls = triggers(command, data["tool_name"] == "PowerShell")
+    if not calls:
+        return 0
+    try:
+        budget = float(os.environ.get("CI_WAKE_DEADLINE") or DEFAULT_DEADLINE)
+    except ValueError:
+        budget = DEFAULT_DEADLINE
+    deadline = time.monotonic() + budget
+    lock_dir = os.environ.get("CI_WAKE_LOCK_DIR") or os.path.join(tempfile.gettempdir(), "ci-wake-locks")
+    merge_module()   # load once here, before the threads
+    lines = [None] * len(calls)
+
+    def work(i, selector, repo):
+        lines[i] = watch_pr(selector, repo, cwd, deadline, lock_dir)
+
+    threads = [threading.Thread(target=work, args=(i, *call), daemon=True) for i, call in enumerate(calls)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    return emit([x for x in lines if x])
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        code = main()
+    except BaseException as e:   # never exit 1: an unread CI is an unknown, not a silent failure
+        code = emit(["CI unknown on ?: %s: %s" % (type(e).__name__, e)])
+    sys.stderr.flush()
+    os._exit(code)   # a daemon thread or a killed gh child must not hold the process open
