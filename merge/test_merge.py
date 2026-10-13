@@ -1260,17 +1260,40 @@ class GhHalf(Env):
         runs = [{"name": "gates", "status": "completed", "conclusion": "success"}, {"name": "gates", "status": "completed", "conclusion": "cancelled"}]
         self.assertEqual(merge.Host.judge_runs(runs), ([], []))
 
-    def test_a_newest_cancelled_run_is_red_even_under_an_older_success(self):
+    def test_a_cancelled_run_beside_a_success_of_its_name_is_superseded(self):
+        # Owner ruling 2026-10-13, option (a): on one head, a run of a name that ran outranks a cancelled run of that name.
         runs = [{"name": "gates", "status": "completed", "conclusion": "cancelled"}, {"name": "gates", "status": "completed", "conclusion": "success"}]
-        red, pending = merge.Host.judge_runs(runs)
-        self.assertEqual(red, ["workflow gates: cancelled"])
-        self.assertEqual(pending, [])
+        self.assertEqual(merge.Host.judge_runs(runs), ([], []))
 
     def test_a_cancelled_run_with_no_newer_run_of_its_name_is_red(self):
         runs = [{"name": "gates", "status": "completed", "conclusion": "success"}, {"name": "ci", "status": "completed", "conclusion": "cancelled"}]
         red, pending = merge.Host.judge_runs(runs)
         self.assertEqual(red, ["workflow ci: cancelled"])
         self.assertEqual(pending, [])
+
+    # Incident 2026-10-13, PR 381: two gates runs started on one head in the same second. GitHub cancelled one (concurrency).
+    # judge_runs must read the live twin, not the cancelled one, whatever the list order.
+    def test_a_cancelled_twin_beside_a_live_run_of_its_name_waits_in_either_order(self):
+        live = {"name": "gates", "status": "in_progress", "conclusion": ""}
+        cancelled = {"name": "gates", "status": "completed", "conclusion": "cancelled"}
+        for order, runs in (("cancelled first", [cancelled, live]), ("live first", [live, cancelled])):
+            with self.subTest(order=order):
+                self.assertEqual(merge.Host.judge_runs(runs), ([], ["workflow gates"]))
+
+    def test_a_cancelled_twin_beside_a_live_run_that_succeeded_is_green_in_either_order(self):
+        # Owner ruling 2026-10-13, option (a): a run that ran outranks a cancelled run of its name, in either order.
+        success ={"name": "gates", "status": "completed", "conclusion": "success"}
+        cancelled = {"name": "gates", "status": "completed", "conclusion": "cancelled"}
+        for order, runs in (("cancelled first", [cancelled, success]), ("live first", [success, cancelled])):
+            with self.subTest(order=order):
+                self.assertEqual(merge.Host.judge_runs(runs), ([], []))
+
+    def test_a_cancelled_twin_beside_a_live_run_that_failed_is_red_on_the_failure_in_either_order(self):
+        failure = {"name": "gates", "status": "completed", "conclusion": "failure"}
+        cancelled = {"name": "gates", "status": "completed", "conclusion": "cancelled"}
+        for order, runs in (("cancelled first", [cancelled, failure]), ("live first", [failure, cancelled])):
+            with self.subTest(order=order):
+                self.assertEqual(merge.Host.judge_runs(runs), (["workflow gates: failure"], []))
 
     def test_a_newer_skipped_run_does_not_outrank_an_older_success_of_the_same_name(self):
         # Incident 2026-10-12, bin/merge 360: a draft PR marked ready in the same second. The skipped `opened` run is

@@ -406,12 +406,15 @@ class Host:
     def judge_runs(runs):
         """-> (red, pending) from a list of workflow runs, newest first. Pending: any run not completed, even an
         older one. Red: judged on the newest run per workflow name, after a skipped run is dropped when another run
-        of that name is not skipped (a skip never outranks a run that ran). Success, skipped and neutral pass, but when
+        of that name is not skipped (a skip never outranks a run that ran), and after a cancelled run is dropped when another run
+        of that name ran, completed or in progress (concurrency cancels one of two same-second runs; a cancelled run alone stays red). Success, skipped and neutral pass, but when
         every run is completed/skipped and none is pending, no job ran on this head: red (GitHub counts a
         skipped job as passing, so required checks miss it)."""
         pending = [f"workflow {r['name']}" for r in runs if r["status"] != "completed"]
         ran = {r["name"] for r in runs if r["conclusion"] != "skipped"}
         runs = [r for r in runs if not (r["conclusion"] == "skipped" and r["name"] in ran)]
+        live = {r["name"] for r in runs if r["conclusion"] not in ("skipped", "cancelled")}
+        runs = [r for r in runs if not (r["conclusion"] == "cancelled" and r["name"] in live)]
         runs = list({r["name"]: r for r in reversed(runs)}.values())[::-1]
         red = [f"workflow {r['name']}: {r['conclusion']}" for r in runs if r["status"] == "completed" and r["conclusion"] not in ("success", "skipped", "neutral")]
         if runs and not pending and all(r["conclusion"] == "skipped" for r in runs):
