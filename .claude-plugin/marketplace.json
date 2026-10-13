@@ -14,6 +14,11 @@
       "name": "desktop-statusline",
       "source": "./mods/desktop-statusline",
       "description": "Desktop Statusline mod (MIT, vendored unmodified)"
+    },
+    {
+      "name": "plain-diff",
+      "source": "./mods/plain-diff",
+      "description": "plain-diff mod: /plain-diff opens a pane with a plain-English note for each changed file (our own code)"
     }
   ]
 }
