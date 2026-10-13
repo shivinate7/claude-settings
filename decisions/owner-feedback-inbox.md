@@ -36,6 +36,8 @@ Owner ruling, 2026-10-13, from an interview in the claude-settings audit session
   items. An item has no kind or home. An open item id is missing from the handoff. The check reads ids,
   so a whole-file handoff rewrite that drops an item goes red. It exits on `stop_hook_active` in
   code, so it cannot loop.
+- **Reminder.** While capture is open, the Stop hook shows the owner one line at each turn end:
+  send `fb done` to close capture. The hook prints it, so it costs no model tokens.
 - **After compaction.** The compact hook lists open item ids and says when capture is still open.
 
 ## Build plan
