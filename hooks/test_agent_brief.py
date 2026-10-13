@@ -15,6 +15,8 @@ the hook prints one JSON object on stdout and exits 0:
   test-author, record-writer and any other type; never for reviewer, Explore, Plan or
   claude-code-guide, which only read.
 - A plugin-namespaced type (`my-plugin:builder`) gets the scope of its bare name.
+- When the payload's cwd holds a .github/stamp.json that names a cite form, one brief line
+  carries that form. The form is read from the file, never written into the hook.
 - Junk or empty stdin, or an internal error: no output on stdout, exit 0, and at most one stderr
   line that starts `agent_brief:`. The hook fails open.
 
@@ -25,8 +27,10 @@ Override the module under test with the env var AGENT_BRIEF_UNDER_TEST.
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.environ.get("AGENT_BRIEF_UNDER_TEST") or os.path.join(HERE, "agent_brief.py")
@@ -401,6 +405,42 @@ BAD_CASES = [
 for _name, _stdin in BAD_CASES:
     add("bad input: %s gives no stdout, exit 0, at most one agent_brief: stderr line" % _name,
         "bad", _stdin)
+
+# CITE FORM: the brief names the repo's record cite form. The hook reads `.github/stamp.json`
+# under the payload's `cwd`, so the form comes from the repo, not from the hook's text. The
+# fixture is the claude-sharables shape: kinds D and F, and the cite form D‹slug›.
+CITE_STAMP = {
+    "kinds": [
+        {"id": "decision", "folder": "decisions", "prefix": "D", "idTemplate": "{prefix}{n}"},
+        {"id": "finding", "folder": "findings", "prefix": "F", "idTemplate": "{prefix}{n}"},
+    ],
+    "cite": {"pattern": "([DF])‹([a-z0-9-]+)›", "prefixGroup": 1, "slugGroup": 2, "template": "{id}"},
+}
+
+
+def cite_form_check():
+    """A repo whose stamp.json names the D‹slug› cite form gets one brief line that carries it."""
+    root = tempfile.mkdtemp(prefix="agent-brief-cite-")
+    try:
+        os.makedirs(os.path.join(root, ".github"))
+        with open(os.path.join(root, ".github", "stamp.json"), "w", encoding="utf-8") as fh:
+            json.dump(CITE_STAMP, fh)
+        body = json.loads(payload("builder"))
+        body["cwd"] = root
+        text, problem = context_for(json.dumps(body))
+        if problem:
+            return problem
+        if not has_line(text, "D‹slug›"):  # the stamp's cite form, spelled as escapes
+            return "no brief line carries the cite form read from the repo's stamp.json"
+        if len(text.split("\n")) >= 20:
+            return "the context is %d lines, want fewer than 20" % len(text.split("\n"))
+        return None
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+add("cite form: a repo stamp.json with a cite form adds a brief line that carries it",
+    "custom", fn=cite_form_check)
 
 
 def main():

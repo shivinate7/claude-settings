@@ -1501,6 +1501,123 @@ test("config.kinds missing, a string, {} or null is still refused", () =>
     });
   }));
 
+// ---------------------------------------------------------------- near-miss cites
+// A prefix letter glued to a KNOWN slug, in a wrapper the repo's cite form does not use, is a
+// near-miss: the stamp never rewrites it, so it survives the claim as dead text. The check reads
+// the same config and record set as the cite check. Each fixture repo holds one numbered record,
+// `one`, so the default-branch pending refusal stays out of these results.
+const NEAR_MISS = {
+  // cite form D‹slug›: the stamp rewrites that form, so it is the correct cite here
+  prefixed: {
+    config: prefixedCiteConfig,
+    record: "decisions/one.md",
+    recordText: "---\nid: D1\nslug: one\nkind: decision\nstatus: open\ndate: 2026-01-01\n---\n\nBody.\n",
+    correct: "D‹one›",
+  },
+  // cite form [[slug]]: D‹slug› is a near-miss here, and the correct form is [[one]]
+  doubleBracket: {
+    config: frontmatterConfig,
+    record: "docs/decisions/one.md",
+    recordText: "---\nid: D-001\nslug: one\ntitle: One\ndate: 2026-01-01\n---\n\nBody.\n",
+    correct: "[[one]]",
+  },
+};
+
+// The problems `check` returns that name the doc, for one doc that holds `docText`.
+function docProblems(fixture, docText) {
+  return withTempDir((root) => {
+    initRepo(root);
+    write(root, fixture.record, fixture.recordText);
+    write(root, "notes/doc.md", docText);
+    commit(root, "a numbered record, and a doc that cites it");
+    return check(root, fixture.config()).filter((p) => p.includes("notes/doc.md"));
+  });
+}
+
+// True when one problem names the wrong text and the right form together.
+const flaggedWith = (problems, wrong, right) => problems.some((p) => p.includes(wrong) && p.includes(right));
+
+test("near-miss: D`one` (backticks) is flagged, and the remedy names D‹one›", () => {
+  const problems = docProblems(NEAR_MISS.prefixed, "Cites D`one`, a gloss.\n");
+  assert.equal(flaggedWith(problems, "D`one`", "D‹one›"), true, problems.join("\n"));
+});
+
+test("near-miss: D'one' (single quotes) is flagged, and the remedy names D‹one›", () => {
+  const problems = docProblems(NEAR_MISS.prefixed, "Cites D'one', a gloss.\n");
+  assert.equal(flaggedWith(problems, "D'one'", "D‹one›"), true, problems.join("\n"));
+});
+
+test("near-miss: D\"one\" (double quotes) is flagged, and the remedy names D‹one›", () => {
+  const problems = docProblems(NEAR_MISS.prefixed, "Cites D\"one\", a gloss.\n");
+  assert.equal(flaggedWith(problems, "D\"one\"", "D‹one›"), true, problems.join("\n"));
+});
+
+test("near-miss: D[one] (brackets) is flagged, and the remedy names D‹one›", () => {
+  const problems = docProblems(NEAR_MISS.prefixed, "Cites D[one], a gloss.\n");
+  assert.equal(flaggedWith(problems, "D[one]", "D‹one›"), true, problems.join("\n"));
+});
+
+test("near-miss: D‹one› is flagged where the cite form is [[slug]], and the remedy names [[one]]", () => {
+  const problems = docProblems(NEAR_MISS.doubleBracket, "Cites D‹one›, a gloss.\n");
+  assert.equal(flaggedWith(problems, "D‹one›", "[[one]]"), true, problems.join("\n"));
+});
+
+test("correct cite: D‹one› passes where the cite form is D‹slug›", () => {
+  assert.deepEqual(docProblems(NEAR_MISS.prefixed, "Cites D‹one›, a gloss.\n"), []);
+});
+
+test("correct cite: [[one]] passes where the cite form is [[slug]]", () => {
+  assert.deepEqual(docProblems(NEAR_MISS.doubleBracket, "Cites [[one]], a gloss.\n"), []);
+});
+
+test("near-miss: a slug in prose without the prefix letter is not flagged", () => {
+  // `one` and one are plain mentions; A`one` has a letter that is no kind's prefix; ID`one`
+  // has a D that is the tail of a word, not a prefix letter of its own.
+  assert.deepEqual(docProblems(NEAR_MISS.prefixed, "Read `one`, the one record, A`one`, and ID`one` here.\n"), []);
+});
+
+test("near-miss: D`not-a-record` (no such record) is not flagged", () => {
+  assert.deepEqual(docProblems(NEAR_MISS.prefixed, "Cites D`not-a-record`, a gloss.\n"), []);
+});
+
+test("near-miss: D`one` inside a ``` fence is exempt", () => {
+  assert.deepEqual(docProblems(NEAR_MISS.prefixed, "```text\nD`one` as an example\n```\n"), []);
+});
+
+test("near-miss: D`one` inside a ~~~ fence is exempt", () => {
+  assert.deepEqual(docProblems(NEAR_MISS.prefixed, "~~~text\nD`one` as an example\n~~~\n"), []);
+});
+
+// Scanner cases (building-scanner-respects-strings). The near-miss must be found even when a
+// comment opener sits inside a string, a lone quote sits in prose, or a backtick sits inside a
+// quoted string on the same line. A scan that pairs backticks, or stops at a comment opener,
+// would hide the near-miss that follows.
+test("scanner: comment openers inside a string do not hide a near-miss on the same line", () => {
+  const problems = docProblems(NEAR_MISS.prefixed, "Use \"//\", \"/*\" and \"#\" as openers, then D`one`, a gloss.\n");
+  assert.equal(flaggedWith(problems, "D`one`", "D‹one›"), true, problems.join("\n"));
+});
+
+test("scanner: a lone quote in text (Don't) does not hide a near-miss", () => {
+  const problems = docProblems(NEAR_MISS.prefixed, "Don't cite D`one` by slug.\n");
+  assert.equal(flaggedWith(problems, "D`one`", "D‹one›"), true, problems.join("\n"));
+});
+
+test("scanner: a backtick inside a quoted string does not hide a near-miss", () => {
+  const problems = docProblems(NEAR_MISS.prefixed, "Write \"a`b\" then D`one`, a gloss.\n");
+  assert.equal(flaggedWith(problems, "D`one`", "D‹one›"), true, problems.join("\n"));
+});
+
+test("scanner: a multi-line template literal inside a fence is exempt", () => {
+  const text = "```js\nconst s = `first line\nD`one` on line two`;\n```\n";
+  assert.deepEqual(docProblems(NEAR_MISS.prefixed, text), []);
+});
+
+test("scanner: a near-miss after a fence that holds a multi-line template literal is flagged", () => {
+  const text = "```js\nconst s = `first line\nD`one` on line two`;\n```\nThen D`one`, a gloss.\n";
+  const problems = docProblems(NEAR_MISS.prefixed, text);
+  assert.equal(flaggedWith(problems, "D`one`", "D‹one›"), true, problems.join("\n"));
+});
+
 // ---------------------------------------------------------------- run
 // LIST_TESTS=1 prints each registered name as `LISTED <JSON>` and exits before any test body runs.
 if (process.env.LIST_TESTS === "1") { for (const { name } of tests) console.log("LISTED " + JSON.stringify(name)); process.exit(0); }
