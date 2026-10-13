@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """The shared merge tool, git half. Plan: plans/shared-merge-tool.md, "The flow".
 
-  merge <pr>              preview: what it would claim and merge. Presses nothing.
+  merge <pr>              preview: what it would claim and merge, and the silent-undo check on the head. Presses
+                          nothing. A draft is previewed too; a dropped line exits 1.
   merge <pr> --confirm [--session NAME]   lock, claim, push, wait, merge, sync the local base, clean up.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Reads no lock state first.
 
@@ -735,10 +736,10 @@ def load_config(root, base, path):
         say(f"merge: {path} on {ref} leaves out {', '.join(filled)}. Using the defaults for those.")
     return cfg
 
-def refuse_bad_pr(info):
+def refuse_bad_pr(info, draft_ok=False):
     if info["state"] != "OPEN":
         raise Stop(f"the pull request is {info['state']}")
-    if info["draft"]:
+    if info["draft"] and not draft_ok:
         raise Stop("the pull request is a draft. Mark it ready after review and run again. Nothing was claimed.")
     if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
         raise Stop("the pull request is CONFLICTING. Merge the base into the branch and run again. Nothing was claimed.")
@@ -775,20 +776,23 @@ def ignore_checks(cfg):
         out[e["name"]] = e["reason"]
     return out
 
-def preview(root, cfg, cfgrel, n, host, lock, info=None):
+def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     info = info or host.pr(n)
-    refuse_bad_pr(info)
+    refuse_bad_pr(info, draft_ok=True)  # a draft is previewed, so its silent undos show before it is marked ready
+    if info["draft"]:
+        say(f"merge: #{n} is a draft. This is a preview only; --confirm needs it ready.")
     base = info["base"]
     resumed = trailer = None
-    if base == cfg["defaultBranch"]:  # ids are claimed only on the default branch
-        tmp, wt = open_worktree(root, info, base)
-        try:
+    tmp, wt = open_worktree(root, info, base)  # the same tree confirm checks
+    try:
+        undo_check(wt, f"origin/{base}", unknown_ok)
+        if base == cfg["defaultBranch"]:  # ids are claimed only on the default branch
             sc = base_stamp_config(wt, tmp, cfgrel, f"origin/{base}")
             if sc:
                 resumed = own_claim(wt, sc, f"origin/{base}")
                 trailer = None if resumed else do_claim(wt, sc, f"origin/{base}")
-        finally:
-            drop_worktree(root, tmp, wt)
+    finally:
+        drop_worktree(root, tmp, wt)
     m = cfg.get("merge", {})
     held = lock.read(base)
     say(f"merge: PREVIEW for #{n} ({info['branch']} at {info['head'][:9]}). Nothing was pressed.",
@@ -929,12 +933,12 @@ def main(argv, host=None, lock=None):
             return 0
         h = host or Host()
         info = h.pr(a.pr)  # the PR's base decides which config; confirm and preview reuse this read
-        refuse_bad_pr(info)  # a draft or closed PR stops before the config notice
+        refuse_bad_pr(info, draft_ok=not a.confirm)  # a closed PR, or a draft under --confirm, stops before the config notice
         cfg = load_config(root, info["base"], a.config)
         ignore = ignore_checks(cfg)
         if not host:
             h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore
-        return (confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info) if a.confirm else preview(root, cfg, a.config, a.pr, h, lock, info)) or 0
+        return (confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info) if a.confirm else preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
     except Stop as e:
         print(f"merge: {e}", file=sys.stderr)
         return 1

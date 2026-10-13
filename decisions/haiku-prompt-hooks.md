@@ -41,10 +41,24 @@ see the receiver's task, so it judges by wording alone. A hook that cries wolf i
 cannot exit on a field in code.
 
 - The loop guard is code. `stop_hook_active` true: exit 0, print nothing, no model call.
+- Sampling. The judge runs on 1 Stop in 5. Only Stops that carry a reply count: Stops 1, 6, 11, and so on.
+  The judge stays `async: true`, gives a next-turn note, and never blocks (PR 394). Owner ruling
+  2026-10-13 14:40 CDT, from the oversight audit, relayed by the merge session. Reason: the judge
+  is advisory. A Haiku call on every turn end costs model calls and latency. A sample still
+  shows the owner the pattern.
+- Counter. One file per session holds the Stops so far, as a plain integer:
+  `state/reply-judge/<sha256 of session id>.count` under the config folder. A damaged, missing or
+  unwritable counter means that Stop is judged. It never refuses and never crashes (decision
+  `gate-hooks-fail-closed`: a crash never refuses). A failed write removes the counter file, so
+  the next Stop is judged.
 - The model call is `decision_watch.invoke_model`, the one home. It runs Haiku at `xhigh`,
   the owner's preferred judge setting, which a prompt hook cannot set. The caller passes the
   accepted answer, `{"ok": true|false}`. `decision_watch` keeps its own ALLOW/FLAG shape.
 - The child runs isolated, as in `decision_watch`, so it cannot fire this hook again.
+- A finding never blocks. Owner ruling 2026-10-13 11:33 CDT: a block came after the owner had
+  read the reply, so the session sent the reply twice. The hook runs `async: true` and passes
+  the finding as a note at the start of the next turn. The session fixes the habit going
+  forward, and that one reply keeps its flaw. The report-shape gate still blocks.
 - It fails open. An error, a timeout or an odd answer prints one stderr line and blocks nothing.
 - Timeout: measured 6.6, 7.0 and 8.0 seconds for three real runs on this machine. The model
   limit is 20 seconds and the `settings.json` entry is 25. Unmeasured: a long reply.
@@ -54,6 +68,22 @@ cannot exit on a field in code.
   Its rules are `output-start-with-point`, `style-cut-narration`
   and `output-never-paste-passing-output`. They stay `unmechanized` in
   `lint/rule_mechanisms.json` until the hook catches a real defect.
+
+Holes, named:
+
+- Old counter files are not removed. Cause: no code purges `state/`. Effect: one file of at most
+  70 bytes stays per session. Fix: none named yet.
+- Lost updates. Cause: heavy parallel calls of one session. Effect: a measured stress of 4 threads
+  by 300 calls ended at 30 of 1200. It errs toward judging. Real Stops of one session come seconds
+  apart. Fix: none named yet.
+- Frozen count after a failed remove. Cause: the remove after a failed write also fails. Effect:
+  the count stays frozen, and the judge skips silently. Unmeasured in practice. Fix: none named yet.
+- Session key copied. Cause: the session key line is copied from
+  `decision_watch._seen_store_path`, with no stated reason. Rule `building-one-home-per-capability`
+  (one home per capability) asks for a stated reason. Effect: the key line lives in two places.
+  Fix: a shared helper that both call.
+- Stop with no reply text. Cause: the counter counts only Stops that carry a reply. Effect: such a
+  Stop neither counts nor judges. Fix: none named yet.
 
 ## Judge model
 
@@ -85,4 +115,6 @@ Limits, named:
 - The latency run used a Bash call as input. A real judged input is longer, so the figure
   is a floor.
 - The judge on Sonnet costs more than Haiku. Unmeasured.
-- `lint/rule_mechanisms.json` still says "Haiku prompt hook" in its reasons.
+
+Kind: process
+Home: hooks/reply_judge.py

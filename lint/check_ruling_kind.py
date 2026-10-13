@@ -14,10 +14,11 @@ next touch, so the next touch brings its Kind line.
 NAMED LIMIT. The lint cannot know which platforms a ruling needs, so it cannot check that
 every platform has a Plan line. It checks each line that is there.
 
-    python3 lint/check_ruling_kind.py [--base REF] [--root DIR] [--rules-file PATH ...] [file ...]
+    python3 lint/check_ruling_kind.py [--base REF] [--root DIR] [--rules-file PATH ...] [--dir FOLDER] [file ...]
         # files given: check those, skip git
         # --rules-file (repeatable): the files whose rule markers a Home may name, instead of the
         # RULE_FILES under --root. A missing file is skipped. None readable: a rule: Home is red.
+        # --dir: the records folder, relative to --root. Default decisions. Only .md files under it are checked.
 """
 import os
 import re
@@ -25,7 +26,7 @@ import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DIR = "decisions/"
+DIR = "decisions/"  # the records folder; --dir replaces it
 RULE_FILES = ("CLAUDE.md", "output-styles/shiv-stylisms.md")
 ANCHOR_RE = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
 HEADING_RE = re.compile(r"^ {0,3}#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
@@ -177,6 +178,24 @@ while "--rules-file" in args:
     i = args.index("--rules-file")
     RULES_FILES.append(args[i + 1])
     del args[i:i + 2]
+if "--dir" in args:  # the records folder, for a repo that keeps its records elsewhere
+    i = args.index("--dir")
+    given = args[i + 1] if i + 1 < len(args) else ""
+    DIR = os.path.normpath(given).replace("\\", "/").rstrip("/") + "/"
+    del args[i:i + 2]
+    # A check that cannot read its folder is red, never green. Compare each name exactly against its
+    # parent's listing: isdir accepts a wrong case on Windows and macOS. A listed name must also be a
+    # folder: a file name passes the listing.
+    here = ROOT
+    for part in DIR.rstrip("/").split("/"):
+        try:
+            ok = part not in ("", ".") and part in os.listdir(here)
+        except OSError:
+            ok = False
+        here = os.path.join(here, part)
+        if not ok or not os.path.isdir(here):
+            print("check_ruling_kind: FAIL: records folder '%s' is not a folder under %s" % (given, ROOT))
+            sys.exit(1)
 files = args or changed(base)
 bad = 0
 for f in files:

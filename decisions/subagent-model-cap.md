@@ -11,7 +11,7 @@ roles the owner named. Opus runs only for Plan, the advisor, the builder's third
 `CLAUDE_CODE_SUBAGENT_MODEL: sonnet` stays as the fallback. The settings-write ask and the
 expiry both stay, because both key on the model variable and never on the force flag.
 
-## The model per role, ruled 2026-10-07, 2026-10-10 and 2026-10-12
+## The model per role, ruled 2026-10-07, 2026-10-10, 2026-10-12 and 2026-10-13
 
 The owner ruled each point in one interview. The reason: Haiku is cheap enough for
 read-only work, tests, review and record-writing, and the owner will measure cost and quality.
@@ -36,6 +36,11 @@ Writing prose and records is not building.
 | fast mode | opt-in per session | n/a |
 | `haiku` alias | not pinned, follows Claude Code | n/a |
 | skills | no `model:` pin | none |
+| skill `ci-hygiene` | no model pin; runs on the caller's model | none |
+| skill `compliance-check` | no model pin; runs on the caller's model | none |
+| skill `design-review` | no model pin; runs on the caller's model | none |
+| skill `fresh-prose` | no model pin; runs on the caller's model | none |
+| skill `impeccable` | no model pin; runs on the caller's model | none |
 | cloud routines | sonnet | default |
 | Claude GitHub Action, if added | haiku | xhigh |
 | `availableModels` | none | n/a |
@@ -44,12 +49,36 @@ Writing prose and records is not building.
 | `opus`, `sonnet`, `fable` aliases | not pinned | n/a |
 | safety-classifier fallback | on, the default | n/a |
 | `/model` picker | built-in list | n/a |
+| prompt-hook judges: AskUserQuestion, Agent, Edit, Write, SendMessage (settings.json) | claude-sonnet-5-5 | model default; a prompt hook has no effort field (decision haiku-prompt-hooks) |
+| reply judge (`hooks/reply_judge.py`, Stop) | haiku, through `decision_watch.invoke_model` | xhigh |
+| question outcome check (`hooks/question_outcome.py`) | haiku, through `decision_watch.invoke_model` | xhigh |
+| decision watch (`hooks/decision_watch.py`) | haiku | xhigh |
+| every other hook and gate | no model; plain code | n/a |
 
-The Explore audit row is prose only. The guard cannot tell an audit Explore from a search
-Explore. The caller spot-checks 3 findings before it acts on an audit.
+The Agent prompt judge checks the Explore audit row (owner ruling, 2026-10-13 12:09 CDT). It
+blocks an Explore whose brief asks it to audit, review, judge, rate or compare meaning, when the
+call does not set model sonnet. A plain search passes on the Haiku default. Incident: the row
+rested on the session's own label, and the judge passed every Explore. The judge is a model, so
+it can misread a borderline brief. The caller still spot-checks 3 findings before it acts on an
+audit.
 
 Haiku means Haiku 5.5. It needs Claude Code v2.1.293 or later. Haiku 4.5 ignores effort.
 A session on an older Claude Code may run Haiku 4.5 for these roles.
+
+Owner ruling, 2026-10-13 13:39 CDT: every skill under `skills/` has one row here. The row text is "no model pin; runs on the caller's model". The reason: a skill has no model pin, and its model is the model of the session that calls it.
+
+A check, `lint/check_skill_model_rows.py`, fails CI when a skill has no row or a row names a skill that does not exist. It runs as two steps in the `gates` job: the check, then its fixture suite.
+
+Holes, named, for the skill rows check:
+
+1. Fence indentation is not limited. A line of 4 spaces, then a fence mark, inside a fence closes it. A row inside that fence then counts. This gives a false green. No fix yet. A cheap fix breaks fences nested in lists.
+2. Rows in a second table or an indented block count. Cause: by the ruling, the check reads rows, not table shape. No fix, by ruling.
+3. The check matches the two phrases anywhere on the row line. It does not limit the match to the second cell. No fix known.
+4. An unclosed fence or comment hides every later row. The output says "no row" and does not name the fence. It fails visibly, never silently. No fix known.
+5. A directory named `SKILL.md` counts as a skill. No fix known.
+6. No test covers a tilde line inside a backtick fence. No test covers an unclosed fence or comment at the end of the file. No test covers a lone backtick before a comment opener. Fix: add a test for each.
+7. The unreadable-folder exit 2 test runs only on POSIX. The symlink case did not run on Windows. No fix known.
+8. The gates steps have no step-level `if` and no `!cancelled()`, by design. The `gates` job is always on. A test pins "no if". No fix, by design.
 
 ## The ceiling
 
@@ -432,3 +461,8 @@ The step-up check has named limits, from review rounds 2 and 3:
 ## Where this lives
 
 This file keeps its slug name. No number is claimed on a branch.
+
+Kind: process
+Home: lint/check_agent_models.py
+Home: lint/check_skill_model_rows.py
+Home: settings.json
