@@ -55,7 +55,8 @@ def build_prompt(reply):
 def count_this_stop(decision_watch, session_id):
     """Return this Stop's number n in its session and store it. Never raises. A counter that is
     missing, corrupt, unreadable or unkeyed reads as none, so this Stop is n = 1 and is judged;
-    a failed write only means the next Stop reads the same damage."""
+    after a good read, a failed write removes the counter file, so the next Stop is judged; if
+    the remove also fails, the count stays frozen (the ponytail limit below)."""
     path = None
     n = 1
     try:
