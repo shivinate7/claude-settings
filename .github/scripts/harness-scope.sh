@@ -47,7 +47,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       merge/*|bin/merge|bin/merge.cmd|.github/stamp.json) on="$on $M $S code " ;;
       actions/stamp/*.md) ;;
       actions/stamp/*) on="$on $R $X $M code " ;;
-      # Mod tests: nothing else reads mods/.
+      # Mod tests: no other CI job reads mods/.
       mods/*) on="$on mods " ;;
       install.ps1|install.test.ps1|install-no-gap.test.ps1) on="$on $P code " ;;
       # Linux `gates` job only: the lints and opt-in templates.
