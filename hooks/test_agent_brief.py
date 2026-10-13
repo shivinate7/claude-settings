@@ -16,7 +16,7 @@ the hook prints one JSON object on stdout and exits 0:
   claude-code-guide, which only read.
 - A plugin-namespaced type (`my-plugin:builder`) gets the scope of its bare name.
 - When the payload's cwd holds a .github/stamp.json whose cite.form is set, one brief line
-  carries that form. A cite.pattern with no cite.form adds no line: no form is derived.
+  carries the form of every kind, in kind order. A cite.pattern with no cite.form adds no line.
 - Junk or empty stdin, or an internal error: no output on stdout, exit 0, and at most one stderr
   line that starts `agent_brief:`. The hook fails open.
 
@@ -408,13 +408,15 @@ for _name, _stdin in BAD_CASES:
 
 # CITE FORM: the brief names the repo's record cite form. The hook reads `.github/stamp.json`
 # under the payload's `cwd`, so the form comes from the repo, not from the hook's text. The
-# fixture is the claude-sharables shape: kinds D and F, and the cite form D‹slug›.
+# fixture has three kinds (D, F, Q). The form is per kind: one brief line gives every kind's form,
+# in kind order, because a single {prefix} filled from kinds[0] would name only D.
 CITE_STAMP = {
     "kinds": [
         {"id": "decision", "folder": "decisions", "prefix": "D", "idTemplate": "{prefix}{n}"},
         {"id": "finding", "folder": "findings", "prefix": "F", "idTemplate": "{prefix}{n}"},
+        {"id": "question", "folder": "questions", "prefix": "Q", "idTemplate": "{prefix}{n}"},
     ],
-    "cite": {"pattern": "([DF])‹([a-z0-9-]+)›", "prefixGroup": 1, "slugGroup": 2, "template": "{id}",
+    "cite": {"pattern": "([DFQ])‹([a-z0-9-]+)›", "prefixGroup": 1, "slugGroup": 2, "template": "{id}",
              "form": "{prefix}‹{slug}›"},  # cite.form is the one source for the brief line
 }
 
@@ -434,12 +436,13 @@ def brief_for_stamp(stamp):
 
 
 def cite_form_check():
-    """A repo whose stamp.json carries cite.form gets one brief line that carries that form."""
+    """A repo whose stamp.json carries cite.form gets one brief line that carries every kind's form."""
     text, problem = brief_for_stamp(CITE_STAMP)
     if problem:
         return problem
-    if not has_line(text, "D‹slug›"):  # the form, spelled as escapes
-        return "no brief line carries the cite form read from the repo's stamp.json"
+    forms = ["%s‹slug›" % letter for letter in ("D", "F", "Q")]  # spelled as escapes
+    if not has_line(text, *forms):
+        return "no one brief line carries the form of each kind (D, F, Q) from the repo's stamp.json"
     if len(text.split("\n")) >= 20:
         return "the context is %d lines, want fewer than 20" % len(text.split("\n"))
     return None

@@ -1521,7 +1521,40 @@ const NEAR_MISS = {
     recordText: "---\nid: D-001\nslug: one\ntitle: One\ndate: 2026-01-01\n---\n\nBody.\n",
     correct: "[[one]]",
   },
+  // cite form D‹slug› with a slug that may hold dots, as the frontmatter-filename pattern allows
+  dotted: {
+    config: dottedCiteConfig,
+    record: "decisions/dotted.md",
+    recordText: "---\nid: D1\nslug: a.b\nkind: decision\nstatus: open\ndate: 2026-01-01\n---\n\nBody.\n",
+    correct: "D‹a.b›",
+  },
+  // a multi-character prefix, DEBT, beside D, F and Q
+  debt: {
+    config: debtCiteConfig,
+    record: "debt/debt-one.md",
+    recordText: "---\nid: DEBT1\nslug: debt-one\nkind: debt\nstatus: open\ndate: 2026-01-01\n---\n\nBody.\n",
+    correct: "DEBT‹debt-one›",
+  },
 };
+
+// Each config is a fresh loadConfig result, so a test may change its cite pattern or kinds.
+function dottedCiteConfig() {
+  const config = prefixedCiteConfig();
+  config.cite.pattern = "\\b([DFQ])\u2039([a-z0-9._-]+)\u203a";
+  return config;
+}
+
+function debtCiteConfig() {
+  const config = prefixedCiteConfig();
+  config.kinds.push({
+    id: "debt", folder: "debt", filePattern: "*.md", prefix: "DEBT", pad: 0, idTemplate: "{prefix}{n}",
+    pendingRegex: "^id:[ \\t]*pending[ \\t]*$", location: "frontmatter", order: "date",
+    numbering: "lowest_free", slugField: "slug", dateField: "date", glossField: "title",
+    requireFieldsOnPending: [], excludeFiles: ["_index.md"],
+  });
+  config.cite.pattern = "\\b(DEBT|[DFQ])\u2039([a-z0-9-]+)\u203a";
+  return config;
+}
 
 // The problems `check` returns that name the doc, for one doc that holds `docText`.
 function docProblems(fixture, docText) {
@@ -1580,12 +1613,70 @@ test("near-miss: D`not-a-record` (no such record) is not flagged", () => {
   assert.deepEqual(docProblems(NEAR_MISS.prefixed, "Cites D`not-a-record`, a gloss.\n"), []);
 });
 
-test("near-miss: D`one` inside a ``` fence is exempt", () => {
-  assert.deepEqual(docProblems(NEAR_MISS.prefixed, "```text\nD`one` as an example\n```\n"), []);
+// Fence shapes, pinned to CommonMark. A fence opens with 3+ backticks or tildes at 0-3 spaces of
+// indent: at the top level, in a list item whose content sits at 0-3 spaces, or after a blockquote
+// marker ("> "). It closes only on the same character, at least as long. A tab or four spaces at
+// the top level is an indented code block, not a fence, so it exempts nothing: a doc that shows
+// the wrong form uses a fence. Each shape pins both paths: the near-miss scan and protectedRanges
+// (the dangling-cite check). Known ceiling: list items whose content sits past column 3 (for
+// example "10." or a 4-space fence under "- ") are not modelled.
+const FENCE_SHAPES = [
+  ["a top-level ``` fence", (line) => "```text\n" + line + "\n```\n", true],
+  ["a top-level ~~~ fence", (line) => "~~~text\n" + line + "\n~~~\n", true],
+  ["a fence indented 3 spaces", (line) => "   ```text\n   " + line + "\n   ```\n", true],
+  ["a fence in a numbered list item", (line) => "1. item\n\n   ```text\n   " + line + "\n   ```\n", true],
+  ["a fence in a blockquote", (line) => "> ```text\n> " + line + "\n> ```\n", true],
+  ["a ~~~ fence that a ``` line does not close", (line) => "~~~text\n```\n" + line + "\n~~~\n", true],
+  ["a tab-indented ``` (an indented code block, not a fence)", (line) => "\t```\n\t" + line + "\n\t```\n", false],
+  ["a 4-space indented ``` (an indented code block, not a fence)", (line) => "    ```\n    " + line + "\n    ```\n", false],
+];
+
+for (const [shape, block, exempt] of FENCE_SHAPES) {
+  test(`fence rules: a near-miss in ${shape} is ${exempt ? "exempt" : "flagged"}`, () => {
+    const problems = docProblems(NEAR_MISS.prefixed, block("D`one`, a gloss."));
+    if (exempt) assert.deepEqual(problems, []);
+    else assert.equal(flaggedWith(problems, "D`one`", "D‹one›"), true, problems.join("\n"));
+  });
+  test(`fence rules: a dangling cite in ${shape} is ${exempt ? "exempt" : "flagged"}`, () => {
+    const problems = docProblems(NEAR_MISS.prefixed, block("D‹nothing›, a gloss."));
+    assert.equal(problems.some((p) => p.includes("[[nothing]]")), !exempt, problems.join("\n"));
+  });
+}
+
+test("fence: a ``D`one` `` span inside a fence is not flagged", () => {
+  assert.deepEqual(docProblems(NEAR_MISS.prefixed, "```text\n``D`one` ``\n```\n"), []);
 });
 
-test("near-miss: D`one` inside a ~~~ fence is exempt", () => {
-  assert.deepEqual(docProblems(NEAR_MISS.prefixed, "~~~text\nD`one` as an example\n~~~\n"), []);
+// Curly quotes are wrappers too: a doc that types the wrong quote mark is still dead text.
+test("near-miss: curly double quotes D“one” are flagged, and the remedy names D‹one›", () => {
+  const problems = docProblems(NEAR_MISS.prefixed, "Cites D“one”, a gloss.\n");
+  assert.equal(flaggedWith(problems, "D“one”", "D‹one›"), true, problems.join("\n"));
+});
+
+test("near-miss: curly single quotes D‘one’ are flagged, and the remedy names D‹one›", () => {
+  const problems = docProblems(NEAR_MISS.prefixed, "Cites D‘one’, a gloss.\n");
+  assert.equal(flaggedWith(problems, "D‘one’", "D‹one›"), true, problems.join("\n"));
+});
+
+// A slug may hold dots (the frontmatter-filename pattern allows them): the near-miss scan must
+// read the whole slug, or it sees "a" and finds no record.
+test("near-miss: D`a.b` (a dotted slug) is flagged, and the remedy names D‹a.b›", () => {
+  const problems = docProblems(NEAR_MISS.dotted, "Cites D`a.b`, a gloss.\n");
+  assert.equal(flaggedWith(problems, "D`a.b`", "D‹a.b›"), true, problems.join("\n"));
+});
+
+test("correct cite: D‹a.b› passes where the slug may hold dots", () => {
+  assert.deepEqual(docProblems(NEAR_MISS.dotted, "Cites D‹a.b›, a gloss.\n"), []);
+});
+
+// A multi-character prefix is a prefix letter too: DEBT is a kind's prefix, so DEBT`slug` is glued.
+test("near-miss: DEBT`debt-one` (a multi-character prefix) is flagged, and the remedy names DEBT‹debt-one›", () => {
+  const problems = docProblems(NEAR_MISS.debt, "Cites DEBT`debt-one`, a gloss.\n");
+  assert.equal(flaggedWith(problems, "DEBT`debt-one`", "DEBT‹debt-one›"), true, problems.join("\n"));
+});
+
+test("correct cite: DEBT‹debt-one› passes under a multi-character prefix", () => {
+  assert.deepEqual(docProblems(NEAR_MISS.debt, "Cites DEBT‹debt-one›, a gloss.\n"), []);
 });
 
 // Scanner cases (building-scanner-respects-strings). The near-miss must be found even when a
