@@ -45,6 +45,10 @@ cannot exit on a field in code.
   the owner's preferred judge setting, which a prompt hook cannot set. The caller passes the
   accepted answer, `{"ok": true|false}`. `decision_watch` keeps its own ALLOW/FLAG shape.
 - The child runs isolated, as in `decision_watch`, so it cannot fire this hook again.
+- A finding never blocks. Owner ruling 2026-10-13 11:33 CDT: a block came after the owner had
+  read the reply, so the session sent the reply twice. The hook runs `async: true` and passes
+  the finding as a note at the start of the next turn. The session fixes the habit going
+  forward, and that one reply keeps its flaw. The report-shape gate still blocks.
 - It fails open. An error, a timeout or an odd answer prints one stderr line and blocks nothing.
 - Timeout: measured 6.6, 7.0 and 8.0 seconds for three real runs on this machine. The model
   limit is 20 seconds and the `settings.json` entry is 25. Unmeasured: a long reply.
