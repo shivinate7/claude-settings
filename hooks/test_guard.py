@@ -8403,6 +8403,53 @@ LOG_CHECKS_EXTRA.append(("session-log: a 1 MB control-character id is sanitized 
                          "100 ms", session_log_control_id_time_case))
 
 
+def session_log_stale_core_case():
+    """session-log: a stale guard_core that lacks BOTH set_log_session and _log_session still
+    judges. The verdict and the exit match a run with both names, and the deny line has five fields:
+    no session cell, so it reads as unknown session. The comments that say the line ends in the
+    placeholder (hooks/guard.py main, hooks/config_watch.py sweep) are wrong for this case.
+    """
+    payload = _session_log_payload(SESSION_LOG_ID)
+    runs = []
+    for label, drop in (("with", ()), ("without", ("set_log_session", "_log_session"))):
+        folder = _session_log_fresh("sessionlog-stalecore-" + label)
+        code = ("import io, sys, importlib.util as u\n"
+                "spec = u.spec_from_file_location('g', %r)\n"
+                "g = u.module_from_spec(spec)\n"
+                "spec.loader.exec_module(g)\n" % GUARD
+                + "".join("del sys.modules['guard_core'].%s\n" % name for name in drop)
+                + "sys.stdin = io.StringIO(%r)\n"
+                  "g.main()\n" % payload)
+        env = dict(os.environ)
+        env["CLAUDE_CONFIG_DIR"] = folder
+        env.pop("CLAUDE_CODE_SESSION_ID", None)
+        run = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                             env=env, timeout=60)
+        runs.append((run, _session_log_rows(folder)))
+    (with_run, _), (without_run, without_rows) = runs
+    if without_run.returncode != with_run.returncode:
+        return False, "exit %d without the two names, %d with them" % (
+            without_run.returncode, with_run.returncode)
+    if "Traceback" in without_run.stderr:
+        return False, "a traceback without the two names: %r" % without_run.stderr.strip()[-160:]
+    if not without_run.stdout.strip():
+        return False, "the deny was not printed without the two names"
+    if without_run.stdout != with_run.stdout:
+        return False, "the verdict changed without the two names"
+    if without_rows is None or len(without_rows) != 1:
+        return False, "expected one line without the two names, found %s" % (
+            "none" if without_rows is None else len(without_rows))
+    fields = without_rows[0].split("\t")
+    if len(fields) != 5 or fields[2:4] != ["deny", "machine-wide-kill"]:
+        return False, "the line without the two names is %r, want five fields, a deny" % (
+            without_rows[0])
+    return True, "same verdict and exit, and the line has five fields (unknown session)"
+
+
+LOG_CHECKS_EXTRA.append(("session-log: a stale guard_core lacking both names still judges, and "
+                         "its line has five fields", session_log_stale_core_case))
+
+
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
 
 # The log checkers tagged "windows". Each one reads a live process's start time (guard.py

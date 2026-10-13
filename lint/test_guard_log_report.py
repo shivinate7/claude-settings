@@ -165,6 +165,7 @@ class MainTests(unittest.TestCase):
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 READER = "lint/guard_log_report.py"
+HOOKS_DIR = os.path.join(REPO_ROOT, "hooks")
 SID = "9f2c4e1a-7b3d-4c8e-9a10-5d6e7f8a9b0c"
 OTHER_SID = "4d1e2f3a-0b9c-4d8e-8f7a-6b5c4d3e2f1a"
 UNKNOWN = "unknown session"
@@ -558,6 +559,117 @@ class ReaderImporterTests(unittest.TestCase):
         self.assertIn("Merges into main this turn", healthy)
         self.assertIn("Config files changed this turn", blocked)
         self.assertIn("Merges into main this turn", blocked)
+
+
+# ------------------------------------ review round 2 hole 1: unread notes survive an unimportable reader
+#
+# collect_unread names the unread subjects of a turn from guard.log. When the reader cannot be
+# imported, those notes must still come back. collect_unread falls back to a local split of the
+# line: the first five fields, extra fields ignored. So a five-field and a six-field line both count.
+
+UNREAD_LINES = [
+    "2026-10-12T10:00:00\tBash\tnoted\tsubject-unread\tgit reset --hard HEAD\t-",  # six fields
+    "2026-10-12T10:01:00\tBash\tnoted\tsubject-unread\tgit checkout -- f.py",      # five fields
+]
+
+
+def _unread_turn(folder, guard_lines):
+    """A transcript with one Edit to a settings file and one merge, and guard.log lines in a config
+    folder. Returns (hook payload, config folder)."""
+    proj = os.path.join(folder, "proj")
+    os.makedirs(os.path.join(proj, ".claude"))
+    target = os.path.join(proj, ".claude", "settings.local.json")
+    records = [
+        {"type": "user", "timestamp": "2026-09-22T10:00:00.000Z",
+         "message": {"role": "user", "content": [
+             {"type": "text", "text": "tune the settings and merge"}]}},
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "name": "Edit", "input": {"file_path": target}}]}},
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "name": "Bash", "input": {"command": "gh pr merge 5 --squash"}}]}},
+    ]
+    transcript = os.path.join(folder, "transcript.jsonl")
+    with open(transcript, "w", encoding="utf-8") as handle:
+        handle.write("".join(json.dumps(rec) + "\n" for rec in records))
+    config = os.path.join(folder, "config")
+    os.makedirs(config)
+    with open(os.path.join(config, "guard.log"), "w", encoding="utf-8") as handle:
+        handle.write("\n".join(guard_lines) + "\n")
+    return {"transcript_path": transcript, "cwd": proj}, config
+
+
+def _report_with_config(dw, hook, config):
+    saved = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = config
+    try:
+        return dw.config_report(hook)
+    finally:
+        if saved is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = saved
+
+
+def _load_decision_watch():
+    spec = importlib.util.spec_from_file_location(
+        "decision_watch_unread", os.path.join(REPO_ROOT, "hooks", "decision_watch.py"))
+    dw = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(dw)
+    return dw
+
+
+class UnreadNotesFailOpenTests(unittest.TestCase):
+    def assertNotesNamed(self, message):
+        self.assertIn("The guard could not read the subject", message, message)
+        self.assertIn("git reset --hard HEAD", message, message)
+        self.assertIn("git checkout -- f.py", message, message)
+        self.assertIn("Config files changed this turn", message, message)
+        self.assertIn("Merges into main this turn", message, message)
+
+    def test_two_unread_notes_come_back_with_the_reader_blocked(self):
+        dw = _load_decision_watch()
+        with tempfile.TemporaryDirectory() as folder:
+            hook, config = _unread_turn(folder, UNREAD_LINES)
+            healthy = _report_with_config(dw, hook, config)
+            had = "guard_log_report" in sys.modules
+            saved = sys.modules.get("guard_log_report")
+            sys.modules["guard_log_report"] = None  # the reader's import raises ImportError
+            try:
+                blocked = _report_with_config(dw, hook, config)
+            finally:
+                if had:
+                    sys.modules["guard_log_report"] = saved
+                else:
+                    sys.modules.pop("guard_log_report", None)
+        self.assertNotesNamed(healthy)  # the fixture is live
+        self.assertNotesNamed(blocked)
+
+    def test_two_unread_notes_come_back_with_a_stale_guard_core(self):
+        # The reader imports SESSION_LOG_PLACEHOLDER from guard_core at load. A guard_core that lacks
+        # the name makes that import fail, with the reader itself present.
+        dw = _load_decision_watch()
+        if HOOKS_DIR not in sys.path:
+            sys.path.insert(0, HOOKS_DIR)
+        import guard_core
+        had_name = hasattr(guard_core, "SESSION_LOG_PLACEHOLDER")
+        saved_name = getattr(guard_core, "SESSION_LOG_PLACEHOLDER", None)
+        had_reader = "guard_log_report" in sys.modules
+        saved_reader = sys.modules.get("guard_log_report")
+        with tempfile.TemporaryDirectory() as folder:
+            hook, config = _unread_turn(folder, UNREAD_LINES)
+            try:
+                if had_name:
+                    delattr(guard_core, "SESSION_LOG_PLACEHOLDER")
+                sys.modules.pop("guard_log_report", None)
+                blocked = _report_with_config(dw, hook, config)
+            finally:
+                if had_name:
+                    guard_core.SESSION_LOG_PLACEHOLDER = saved_name
+                if had_reader:
+                    sys.modules["guard_log_report"] = saved_reader
+                else:
+                    sys.modules.pop("guard_log_report", None)
+        self.assertNotesNamed(blocked)
 
 
 if __name__ == "__main__":
