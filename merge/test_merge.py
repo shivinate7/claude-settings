@@ -1260,11 +1260,10 @@ class GhHalf(Env):
         runs = [{"name": "gates", "status": "completed", "conclusion": "success"}, {"name": "gates", "status": "completed", "conclusion": "cancelled"}]
         self.assertEqual(merge.Host.judge_runs(runs), ([], []))
 
-    def test_a_newest_cancelled_run_is_red_even_under_an_older_success(self):
+    def test_a_cancelled_run_beside_a_success_of_its_name_is_superseded(self):
+        # Owner ruling 2026-10-13, option (a): on one head, a run of a name that ran outranks a cancelled run of that name.
         runs = [{"name": "gates", "status": "completed", "conclusion": "cancelled"}, {"name": "gates", "status": "completed", "conclusion": "success"}]
-        red, pending = merge.Host.judge_runs(runs)
-        self.assertEqual(red, ["workflow gates: cancelled"])
-        self.assertEqual(pending, [])
+        self.assertEqual(merge.Host.judge_runs(runs), ([], []))
 
     def test_a_cancelled_run_with_no_newer_run_of_its_name_is_red(self):
         runs = [{"name": "gates", "status": "completed", "conclusion": "success"}, {"name": "ci", "status": "completed", "conclusion": "cancelled"}]
@@ -1282,9 +1281,8 @@ class GhHalf(Env):
                 self.assertEqual(merge.Host.judge_runs(runs), ([], ["workflow gates"]))
 
     def test_a_cancelled_twin_beside_a_live_run_that_succeeded_is_green_in_either_order(self):
-        # The cancelled-first order has the same input as test_a_newest_cancelled_run_is_red_even_under_an_older_success,
-        # which asserts red. Both cannot hold. Owner ruling needed before the build.
-        success = {"name": "gates", "status": "completed", "conclusion": "success"}
+        # Owner ruling 2026-10-13, option (a): a run that ran outranks a cancelled run of its name, in either order.
+        success ={"name": "gates", "status": "completed", "conclusion": "success"}
         cancelled = {"name": "gates", "status": "completed", "conclusion": "cancelled"}
         for order, runs in (("cancelled first", [cancelled, success]), ("live first", [success, cancelled])):
             with self.subTest(order=order):
