@@ -3006,6 +3006,101 @@ class PurgeRefOwnershipTests(unittest.TestCase):
         self.assertEqual([e["commit"] for e in sweep.read_restore_log(log)], [commit],
                          "a failed drop must keep its log line: never log-without-ref")
 
+    def write_rows(self, log, rows):
+        with open(log, "w", encoding="utf-8") as handle:
+            for row in rows:
+                handle.write(json.dumps(row) + "\n")
+
+    def test_an_expired_entry_keeps_the_ref_while_an_unexpired_entry_names_its_commit(self):
+        """One branch reaped twice at one tip: two log rows name one commit. The 91-day row
+        expires, but the 5-day row still needs the ref, so the purge must keep it."""
+        repo = self.fresh_repo("same-commit")
+        log = self.log_path("same-commit")
+        now = int(time.time() * 1000)
+        commit = self.rev(repo, "HEAD")
+        self.reap(repo, "lane-same", commit, log)
+        self.reap(repo, "lane-same", commit, log)
+        self.age_log(log, [91, 5], now)
+        self.assertEqual(self.ref(repo, "lane-same"), commit,
+                         "fixture: two reaps at one tip must leave the ref on that commit")
+
+        decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertEqual(decisions[1]["action"], "keep")
+        self.assertEqual(self.ref(repo, "lane-same"), commit,
+                         "the expired row dropped the ref while the 5-day row still names "
+                         "its commit")
+
+    def test_an_expired_entry_drops_the_ref_once_no_unexpired_entry_names_its_commit(self):
+        repo = self.fresh_repo("same-gone")
+        log = self.log_path("same-gone")
+        now = int(time.time() * 1000)
+        commit = self.rev(repo, "HEAD")
+        self.reap(repo, "lane-same-gone", commit, log)
+        self.reap(repo, "lane-same-gone", commit, log)
+        self.age_log(log, [91, 92], now)
+
+        decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertEqual([d["action"] for d in decisions], ["purge", "purge"])
+        self.assertNotIn("error", decisions[0])
+        self.assertNotIn("error", decisions[1])
+        self.assertIsNone(self.ref(repo, "lane-same-gone"),
+                          "both rows are expired and name the commit: the ref must be dropped")
+
+    def test_a_missing_repo_path_is_reported_not_read_as_a_gone_ref(self):
+        """git exits 128 for a missing path. Only exit 1 means the ref is gone."""
+        missing = os.path.join(ROOT, "pown-no-such-repo")
+        self.assertFalse(os.path.exists(missing), "fixture: the path must not exist")
+        log = self.log_path("missing-path")
+        now = int(time.time() * 1000)
+        self.write_rows(log, [{"repo": missing, "branch": "lane-missing-path",
+                               "commit": "1" * 40, "time_ms": now - 91 * self.DAY_MS}])
+
+        decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertIn("error", decisions[0],
+                      "a git failure (exit 128) must be reported, not read as a gone ref")
+
+    def test_a_non_repo_directory_is_reported_not_read_as_a_gone_ref(self):
+        """git exits 128 inside a directory that is not a repository."""
+        plain = os.path.join(ROOT, "pown-plain-dir")
+        os.makedirs(plain, exist_ok=True)
+        log = self.log_path("plain-dir")
+        now = int(time.time() * 1000)
+        self.write_rows(log, [{"repo": plain, "branch": "lane-plain-dir",
+                               "commit": "2" * 40, "time_ms": now - 91 * self.DAY_MS}])
+
+        decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertIn("error", decisions[0],
+                      "a git failure (exit 128) must be reported, not read as a gone ref")
+
+    def test_a_failed_ref_read_is_reported_and_keeps_the_ref(self):
+        repo = self.fresh_repo("read-fails")
+        log = self.log_path("read-fails")
+        now = int(time.time() * 1000)
+        commit = self.rev(repo, "HEAD")
+        self.reap(repo, "lane-read", commit, log)
+        self.age_log(log, [91], now)
+        real = sys.modules["guard_core"]._git
+        failed = subprocess.CompletedProcess([], 128, "", "fatal: simulated")
+
+        def failing_read(where, *args):
+            if args[:3] == ("rev-parse", "-q", "--verify"):
+                return failed
+            return real(where, *args)
+
+        sys.modules["guard_core"]._git = failing_read
+        try:
+            decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+        finally:
+            sys.modules["guard_core"]._git = real
+
+        self.assertIn("error", decisions[0], "a git failure (exit 128) must be reported")
+        self.assertEqual(self.ref(repo, "lane-read"), commit,
+                         "a ref that could not be read must be kept")
+
 
 class AgentEndLogConcurrencyTests(unittest.TestCase):
     """janitor/agent_end_reap.py log(): parallel hook runs (one per finished agent) each append
