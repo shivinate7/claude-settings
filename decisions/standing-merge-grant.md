@@ -7,5 +7,6 @@ claude-settings. This is the repo grant that `git-main-only-by-pr` names.
   (`git-wait-for-required-checks`, `git-never-merge-failing-ci`).
 - A diff that touches a rule's behaviour, a gate's verdict, or program logic merges only after a
   fresh reviewer approves it.
-- Batch green PRs into one integration branch (`git-integration-branch-merge`).
+- Batch lanes into one integration PR, the only PR that goes ready and runs CI
+  (`git-integration-branch-merge`).
 - The grant covers this repo only. Other repos need their own grant.
