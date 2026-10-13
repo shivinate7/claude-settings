@@ -31,9 +31,11 @@ the desktop app has none.
   session id and the project dir. Any other reason writes nothing.
 
   SessionStart --reorient with source `clear` or `fork` -- names the handoff of the
-  newest pointer for the same project dir; with no pointer, the newest handoff whose
-  PreCompact state `repo` is that dir; with none, says "no handoff". It also names the
-  new session's own handoff. Spec: decisions/handoff-hooks-wave-2.md.
+  newest pointer for the same project dir (none when that session has no handoff); with no
+  pointer, the newest handoff whose PreCompact state `repo` is that dir; with none, says
+  "no handoff". It also names the new session's own handoff. Every reorient then sweeps
+  unusable pointers and stale .dir and .reread records (sweep()).
+  Spec: decisions/handoff-hooks-wave-2.md.
 
 Never exits 2 and never blocks compaction: every failure is caught, logged to stderr,
 and the hook still exits 0 (case_precompact_error_is_ok_false).
@@ -42,8 +44,12 @@ import datetime
 import json
 import os
 import sys
+import time
 
 DIGEST_CAP = 60_000
+# A .dir or .reread record this old has no live session: Claude Code deletes a transcript after
+# cleanupPeriodDays (default 30), so no session that old can resume. The record sets no value.
+STALE_AGE = 30 * 86400
 NUDGE_FLOOR = 200_000
 NUDGE_STEP = 150_000
 NUDGE_MARGIN = 50_000
@@ -252,9 +258,18 @@ def _newest(paths):
     return max(paths, key=os.path.getmtime) if paths else None
 
 
-def find_pointer(cwd, usable):
-    """The newest pointer file for this dir whose old session has a usable handoff, as
-    (pointer file, handoff path); (None, None) when there is none."""
+def _remove(path):
+    """Delete one file. A failure is logged, naming the file: a silent failure hides it."""
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        sys.stderr.write("precompact_handoff: could not remove %s: %s\n" % (path, e))
+
+
+def pointers():
+    """{pointer file: (old session id, project dir)}; (None, None) for a malformed one."""
     found = {}
     pdir = pointer_dir()
     for name in os.listdir(pdir) if os.path.isdir(pdir) else []:
@@ -264,13 +279,36 @@ def find_pointer(cwd, usable):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 ptr = json.load(f)
+            sid, pcwd = ptr["session_id"], ptr["cwd"]
+            if not (isinstance(sid, str) and sid and isinstance(pcwd, str)):
+                raise ValueError
+        except OSError:
+            continue   # unreadable now, maybe in use: leave it
         except Exception:
-            continue
-        if isinstance(ptr, dict) and same_dir(ptr.get("cwd"), cwd) and usable(
-                ptr.get("session_id")):
-            found[path] = ptr["session_id"]
-    best = _newest(found)
-    return (best, handoff_path(found[best])) if best else (None, None)
+            sid = pcwd = None
+        found[path] = (sid, pcwd)
+    return found
+
+
+def sweep(cwd):
+    """Drop records no session can use: a malformed pointer, a pointer for this dir whose
+    session has no handoff, and a .dir or .reread record older than STALE_AGE. Another dir's
+    pointer stays: that dir can be mid-/clear. Each failed delete is logged."""
+    for path, (sid, pcwd) in pointers().items():
+        if sid is None or (same_dir(pcwd, cwd) and not os.path.isfile(handoff_path(sid))):
+            _remove(path)
+    sdir = os.path.dirname(state_path("x"))
+    now = time.time()
+    for name in os.listdir(sdir) if os.path.isdir(sdir) else []:
+        base, ext = os.path.splitext(name)
+        path = os.path.join(sdir, name)
+        if ext in (".dir", ".reread") and "." not in base and os.path.isfile(path):
+            try:
+                old = now - os.path.getmtime(path) > STALE_AGE
+            except OSError:
+                continue
+            if old:
+                _remove(path)
 
 
 def find_newest_handoff(cwd, usable):
@@ -286,7 +324,8 @@ def find_newest_handoff(cwd, usable):
 
 
 def run_reorient_cleared(payload):
-    """clear: the newest pointer for this dir, which is used up and deleted. fork: no pointer
+    """clear: the newest pointer for this dir, which is used up and deleted. Its session's
+    handoff is named, or none when it has none: never another session's. fork: no pointer
     (it can name an older cleared session), only the newest handoff for the dir. Either way,
     with no pointer the newest handoff for the dir. ponytail: matches by dir only, so two
     sessions clearing in one dir at once can swap pointers (decisions/handoff-hooks-wave-2.md,
@@ -299,13 +338,15 @@ def run_reorient_cleared(payload):
     def usable(sid):
         return bool(sid) and sid != session_id and os.path.isfile(handoff_path(sid))
 
-    ptr, old = find_pointer(cwd, usable) if payload.get("source") == "clear" else (None, None)
+    ptr = None
+    if payload.get("source") == "clear":
+        found = {p: sid for p, (sid, pcwd) in pointers().items() if sid and same_dir(pcwd, cwd)}
+        ptr = _newest(found)
     if ptr:
-        try:
-            os.remove(ptr)
-        except OSError:
-            pass
-    old = old or find_newest_handoff(cwd, usable)
+        _remove(ptr)
+        old = handoff_path(found[ptr]) if usable(found[ptr]) else None
+    else:
+        old = find_newest_handoff(cwd, usable)
     if not old:
         print("This session started after /clear or a fork. There is no handoff for this "
               "project dir. Your handoff is %s. Write it as you work; never append." % mine)
@@ -318,6 +359,16 @@ def run_reorient_cleared(payload):
 
 
 def run_reorient(payload):
+    try:
+        return _run_reorient(payload)
+    finally:
+        try:
+            sweep(payload.get("cwd") or os.getcwd())
+        except Exception as e:
+            sys.stderr.write("precompact_handoff: sweep error: %s\n" % e)
+
+
+def _run_reorient(payload):
     if payload.get("source") in ("clear", "fork"):
         return run_reorient_cleared(payload)
     session_id = payload.get("session_id", "")

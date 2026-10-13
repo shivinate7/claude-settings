@@ -30,14 +30,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-import guard_core  # noqa: E402
-from guard_core import basename, split_segments, strip_heredoc_bodies  # noqa: E402
-from guard_merge import gh_call_of, merge_module  # noqa: E402
+# The sibling modules (guard_core, guard_env, guard_merge) load inside main(), so a failed import
+# ends in an unknown line, never a traceback and exit 1.
 
 DEFAULT_DEADLINE = 3300   # seconds; the hook timeout in settings.json is 3600
 NO_RUN_PAUSE = 20         # seconds; the one pause when the head has no run yet
 READ_TIMEOUT = 60         # seconds for each gh read
-PR_FIELDS = "number,headRefName,headRefOid,state,url"
+PR_FIELDS = "number,isDraft,headRefName,headRefOid,state,url"
 RUN_FIELDS = "databaseId,name,status,conclusion,workflowName,headSha,event"
 GOOD = ("success", "skipped", "neutral")
 REPO_FLAGS = ("-R", "--repo")
@@ -134,11 +133,15 @@ def ready_call(rest):
 def triggers(command, powershell):
     """-> [(selector, repo)], one per `gh pr ready` in the command. Reads the text only. A heredoc
     body, quoted text and text after `#` is no command (split_segments drops comments and keeps
-    quotes whole); a lone apostrophe in a word opens no quote."""
+    quotes whole); a lone apostrophe in a word opens no quote. A lone `&` ends a command too
+    (guard_env's quote-aware split); the `&` of `2>&1` leaves the call whole."""
+    import guard_core
+    from guard_env import _ampersand_split
+    from guard_merge import gh_call_of
     guard_core.POWERSHELL_CALL[0] = powershell
-    text = APOSTROPHE.sub("\x01", strip_heredoc_bodies(command))
+    text = APOSTROPHE.sub("\x01", guard_core.strip_heredoc_bodies(command))
     found = []
-    for segment in split_segments(text):
+    for segment in (p for s in guard_core.split_segments(text) for p in _ampersand_split(s)):
         rest = gh_call_of(segment)
         call = ready_call(rest) if rest is not None else None
         if call:
@@ -167,12 +170,13 @@ def lock_pr(pr, lock_dir):
 
 def wait_for(sha, cwd, deadline):
     """One run list (two when the head has no run yet, after one pause), one blocking watch per
-    run (not a cancelled twin), then one read of each run with its jobs."""
+    run (not a cancelled twin), then one read of each run with its jobs. A skipped run is no run:
+    the runs of a draft head skip, and the run of the ready PR comes after them."""
     list_args = ["run", "list", "--commit", sha, "--limit", "100", "--json", RUN_FIELDS]
-    runs = gh_json(list_args, cwd)
+    runs = [r for r in gh_json(list_args, cwd) if r["conclusion"] != "skipped"]
     if not runs:
         time.sleep(max(0, min(NO_RUN_PAUSE, deadline - time.monotonic())))
-        runs = gh_json(list_args, cwd)
+        runs = [r for r in gh_json(list_args, cwd) if r["conclusion"] != "skipped"]
     if not runs:
         raise Unknown("no run yet")
     live = {r["name"] for r in runs if r["conclusion"] != "cancelled"}
@@ -185,6 +189,7 @@ def wait_for(sha, cwd, deadline):
 
 
 def verdict(sha, runs):
+    from guard_merge import merge_module
     merge = merge_module()
     if merge is None:
         raise Unknown("the merge tool (judge_runs) could not be loaded")
@@ -213,6 +218,8 @@ def watch_pr(selector, repo, cwd, deadline, lock_dir):
         extra = ["-R", repo] if repo else []
         pr = gh_json(["pr", "view", *([selector] if selector else []), *extra, "--json", PR_FIELDS], cwd)
         ident = pr["headRefOid"][:7]
+        if pr.get("isDraft"):
+            return None   # gh pr ready did not take: a draft runs no CI
         if not lock_pr(pr, lock_dir):
             return None
         return verdict(pr["headRefOid"], wait_for(pr["headRefOid"], cwd, deadline))
@@ -229,6 +236,8 @@ def main():
     if not isinstance(data, dict) or data.get("tool_name") not in ("Bash", "PowerShell"):
         return 0
     command = data["tool_input"]["command"]
+    if "ready" not in command.lower():
+        return 0   # no `gh pr ready` can hide here: no import, so a broken install wakes no `ls`
     cwd = data.get("cwd") if isinstance(data.get("cwd"), str) and os.path.isdir(data["cwd"]) else None
     calls = triggers(command, data["tool_name"] == "PowerShell")
     if not calls:
@@ -239,6 +248,7 @@ def main():
         budget = DEFAULT_DEADLINE
     deadline = time.monotonic() + budget
     lock_dir = os.environ.get("CI_WAKE_LOCK_DIR") or os.path.join(tempfile.gettempdir(), "ci-wake-locks")
+    from guard_merge import merge_module
     merge_module()   # load once here, before the threads
     lines = [None] * len(calls)
 
@@ -256,7 +266,8 @@ def main():
 if __name__ == "__main__":
     try:
         code = main()
+        if code:
+            sys.stderr.flush()   # only after a write: a broken stderr must not wake a silent run
     except BaseException as e:   # never exit 1: an unread CI is an unknown, not a silent failure
         code = emit(["CI unknown on ?: %s: %s" % (type(e).__name__, e)])
-    sys.stderr.flush()
     os._exit(code)   # a daemon thread or a killed gh child must not hold the process open

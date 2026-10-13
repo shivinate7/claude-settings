@@ -37,7 +37,7 @@ def names_handoff(file_path, session_id):
 def main():
     try:
         payload = json.loads(sys.stdin.read() or "{}")
-    except ValueError:
+    except Exception:   # bad JSON, or a read that fails
         return 0
     sid = payload.get("session_id") if isinstance(payload, dict) else None
     if not sid or not isinstance(sid, str):
