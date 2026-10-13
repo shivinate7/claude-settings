@@ -119,6 +119,9 @@ jobs:
       - name: Local time line fixture suite
         run: python3 hooks/test_local_time.py
 
+      - name: Feedback inbox fixture suite
+        run: python3 hooks/test_feedback_inbox.py
+
       # Windows is not covered: the stall watch is posix only (see the stall-watch decision).
       - name: Stall watch fixture suite
         run: python3 hooks/test_stall_watch.py
@@ -392,6 +395,10 @@ jobs:
       - name: Local time line fixture suite
         if: ${{ !cancelled() }}
         run: python3 hooks/test_local_time.py
+
+      - name: Feedback inbox fixture suite
+        if: ${{ !cancelled() }}
+        run: python3 hooks/test_feedback_inbox.py
 
       # Windows is not covered: the stall watch is posix only (see the stall-watch decision).
       - name: Stall watch fixture suite
@@ -681,6 +688,10 @@ jobs:
       - name: Local time line fixture suite
         if: ${{ !cancelled() }}
         run: python hooks/test_local_time.py
+
+      - name: Feedback inbox fixture suite
+        if: ${{ !cancelled() }}
+        run: python hooks/test_feedback_inbox.py
 
       - name: Gate wrappers fixture suite
         if: ${{ !cancelled() }}
