@@ -208,6 +208,12 @@ jobs:
       - name: Agent and skill model floor
         run: python3 lint/check_agent_models.py
 
+      - name: Skill model rows check
+        run: python3 lint/check_skill_model_rows.py
+
+      - name: Skill model rows fixture suite
+        run: python3 lint/test_check_skill_model_rows.py
+
       - name: PowerShell syntax check, install.ps1
         if: ${{ needs.scope.outputs.code == 'true' }}
         shell: pwsh
