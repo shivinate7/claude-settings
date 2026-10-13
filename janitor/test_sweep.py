@@ -3114,14 +3114,16 @@ class PurgeRefOwnershipTests(unittest.TestCase):
             "long-name": os.path.realpath(repo),
         }
 
-    def test_an_unexpired_row_protects_the_ref_across_spellings_of_its_repo(self):
-        """The same-commit check must compare repositories by their real path. An expired row
-        and an unexpired row for one commit may spell one directory differently; the unexpired
-        row must still protect the ref."""
-        repo = self.fresh_repo("spell")
+    def check_spellings_keep_ref(self, tag, labels):
+        """An expired row that spells the repo as one of `labels` must not drop the ref that an
+        unexpired row (spelled as the fixture made it) still names. A spelling equal to the
+        fixture's own string is skipped: there is no other spelling to test."""
+        repo = self.fresh_repo(tag)
         now = int(time.time() * 1000)
         commit = self.rev(repo, "HEAD")
-        for label, spelled in sorted(self.spellings_of(repo).items()):
+        spellings = self.spellings_of(repo)
+        for label in labels:
+            spelled = spellings[label]
             if spelled == repo:
                 continue  # this PC gives the same string: no spelling to test
             with self.subTest(spelling=label):
@@ -3140,6 +3142,20 @@ class PurgeRefOwnershipTests(unittest.TestCase):
                 self.assertEqual(self.ref(repo, branch), commit,
                                  "the expired row, spelled %r, dropped the ref that the "
                                  "unexpired row still names" % label)
+
+    def test_an_unexpired_row_protects_the_ref_across_spellings_of_its_repo(self):
+        """The same-commit check must compare repositories by their real path. A trailing
+        separator and the long name name the same directory on every platform, so these cases
+        run on every platform."""
+        self.check_spellings_keep_ref("spell", ["trailing-sep", "long-name"])
+
+    @unittest.skipUnless(sys.platform == "win32",
+                         "case and separator spellings name another path on POSIX: the file "
+                         "system is case-sensitive and '/' is a literal character, so only the "
+                         "Windows path compare folds them")
+    def test_an_unexpired_row_protects_the_ref_across_case_and_separator_spellings(self):
+        self.check_spellings_keep_ref("spell-win",
+                                      ["all-upper", "drive-case", "forward-slash", "mixed-sep"])
 
     def test_a_broken_ref_file_is_an_error_not_a_gone_ref(self):
         """git rev-parse exits 1 for a broken ref file and says so on stderr. Only a clean
