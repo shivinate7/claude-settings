@@ -47,4 +47,4 @@ the gate and the alarm are proved on their scripts, not on a hosted runner. The 
 checks on main. The nightly alarm is proposed in the PR, not enabled.
 
 Kind: process
-Home: actions/test_action_metadata.py
+Home: rule:building-one-home-per-capability

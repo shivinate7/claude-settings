@@ -14,7 +14,10 @@ next touch, so the next touch brings its Kind line.
 NAMED LIMIT. The lint cannot know which platforms a ruling needs, so it cannot check that
 every platform has a Plan line. It checks each line that is there.
 
-    python3 lint/check_ruling_kind.py [--base REF] [--root DIR] [file ...]   # files given: check those, skip git
+    python3 lint/check_ruling_kind.py [--base REF] [--root DIR] [--rules-file PATH ...] [file ...]
+        # files given: check those, skip git
+        # --rules-file (repeatable): the files whose rule markers a Home may name, instead of the
+        # RULE_FILES under --root. A missing file is skipped. None readable: a rule: Home is red.
 """
 import os
 import re
@@ -31,12 +34,16 @@ LINK_RE = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
 PLAN_RE = re.compile(r"^(\S+)#(\S+) \(([^()\s][^()]*)\)$")
 
 
-def read(rel):
+def read_path(path):
     try:
-        with open(os.path.join(ROOT, *rel.split("/")), encoding="utf-8-sig", newline="") as f:
+        with open(path, encoding="utf-8-sig", newline="") as f:
             return f.read().replace("\r\n", "\n")
     except OSError:
         return None
+
+
+def read(rel):
+    return read_path(os.path.join(ROOT, *rel.split("/")))
 
 
 def unfenced(text):
@@ -88,8 +95,12 @@ def slugs(text):
     return out
 
 
+RULES_FILES = []  # --rules-file paths; when set, they replace the RULE_FILES under ROOT
+
+
 def rule_ids():
-    return {i for rel in RULE_FILES for i in ANCHOR_RE.findall(read(rel) or "")}
+    texts = [read_path(p) for p in RULES_FILES] if RULES_FILES else [read(rel) for rel in RULE_FILES]
+    return {i for t in texts for i in ANCHOR_RE.findall(t or "")}
 
 
 def field(lines, name):
@@ -135,6 +146,8 @@ def plan_problem(plan):
 
 def home_problem(home, ids):
     if home.startswith("rule:"):
+        if RULES_FILES and all(read_path(p) is None for p in RULES_FILES):
+            return "Home %s cannot be checked: no --rules-file can be read" % home
         if home[5:] not in ids:
             return "Home %s is not a rule marker in CLAUDE.md" % home
     elif not home or read(home) is None:
@@ -159,6 +172,10 @@ if "--base" in args:
 if "--root" in args:  # the checkout to judge, for a caller whose repo is not this one
     i = args.index("--root")
     ROOT = os.path.abspath(args[i + 1])
+    del args[i:i + 2]
+while "--rules-file" in args:
+    i = args.index("--rules-file")
+    RULES_FILES.append(args[i + 1])
     del args[i:i + 2]
 files = args or changed(base)
 bad = 0

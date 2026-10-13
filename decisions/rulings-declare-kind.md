@@ -32,6 +32,10 @@ Home: <path>
 
 - Use one Plan line for each platform. `<slug>` is the anchor slug of a heading in the plan file.
 - `rule:<id>` is a rule marker in CLAUDE.md. A path must be an existing file.
+- Owner ruling, 2026-10-13. In another repo's pull request, a `Home: rule:<id>` resolves against
+  both that repo's CLAUDE.md and the claude-settings CLAUDE.md. The action reads the second from
+  its own checkout at the pinned sha, with no network read (`--rules-file`, repeatable, on the
+  lint). A missing file is skipped. With none readable, a `rule:` Home is red.
 - `none` is not a kind and not a link.
 - A record has one Kind line. A second ruling in the same record needs its own record.
 
@@ -46,8 +50,9 @@ still carries a Kind line, because the lint cannot tell the two apart.
   Adopt it with `uses: shivinate7/claude-settings/actions/ruling-kind@<full-sha>` after
   `actions/checkout` with `fetch-depth: 0`. It is red when the base cannot be read.
 - Write judge. The Edit and Write prompt judges in `settings.json` fire on any `decisions/`
-  path. They refuse a record with no `Kind: build` (with Plan lines) or `Kind: process`
-  (with a Home line). The check runs at write time, in any repo with these settings.
+  path. They refuse a record whose written text has no `Kind: build` (with Plan lines) or
+  `Kind: process` (with a Home line). The check runs at write time, in any repo with these
+  settings. Only the Write judge sees a whole record.
 
 ## Named limits
 
@@ -58,9 +63,10 @@ still carries a Kind line, because the lint cannot tell the two apart.
 - Home is checked for existence only. The lint does not check that the home enforces the ruling.
 - A missing base ref reads as unknown. Locally the lint exits 0. In CI it fails.
 - Only pull requests run the check. A push to main and the nightly run skip it, by design.
-- The judge is a model and can miss a case. It sees only Claude's writes, never a human edit.
-  An Edit shows it the changed text, not the whole record, so it cannot always tell. The CI
-  lint is the check that does not miss.
+- The judge is a model and can miss a case. It sees only Claude's Edit and Write calls, never a
+  human edit. A Bash write into `decisions/` is not judged. The Edit judge sees only the
+  changed text, so it cannot see a missing Kind line in an old record. Only the Write judge
+  and the lint enforce that. The CI lint is the check that does not miss.
 - The action is not adopted anywhere yet. It has not run on a hosted runner (unmeasured).
 - The lint checks that a plan heading exists. It does not check that the plan lane does the work.
 
