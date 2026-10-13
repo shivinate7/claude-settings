@@ -12,6 +12,7 @@ A mod. It runs the Stop-time decision watch with this session's own model login.
   2. The mod calls the model with that prompt. The call has a 50 s limit. Then `--model-text` or `--model-error` gives the verdict.
 - Every failure reads as UNKNOWN. A failure never reads as ALLOW.
 - A model verdict that the script cannot use reads as "verdict lost". This happens when another judge already recorded the same turn. The script prints this marker whenever it gets a model reply and ends before the model step. A valid ALLOW that the script uses stays ALLOW.
+- A new human message between the two steps also causes it. The baseline moves, so a real FLAG can print "verdict lost". That is loud and correct.
 - The mod sends the Stop JSON to python as ASCII only. It escapes each other character as `\uXXXX`.
 
 ## Log
@@ -47,8 +48,11 @@ The last line is "Stops seen: N". N counts the STOP seen lines now in the log. T
 - The script must be the version that knows `--emit-prompt`, `--model-text`, and `--model-error`.
 - A bad flag combination on the script falls back to the normal `claude -p` call. This is a hole: a wrong flag from a caller runs the old path.
 - A Stop that arrives during a judge is not judged. The next Stop on an unchanged turn judges it.
+- The ruling and the holes: `decision-watch-mod-limits` (limits of the shadow mod).
 
 ## Try in the desktop app
+
+Refresh the installed `~/.claude/hooks/decision_watch.py` first. Replace it with this repo's `hooks/decision_watch.py`. An old copy ignores `--emit-prompt`, so each Stop runs `claude -p`.
 
 1. Install: `/plugin install decision-watch --marketplace shivinate7/claude-settings`, then restart the session.
 2. Finish a turn. Run `/dw`. Check that the last line counts the Stop.
