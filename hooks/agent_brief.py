@@ -37,17 +37,18 @@ GENERAL = ("Scope: do only what your brief names. A builder never edits tests; "
 
 
 def cite_form(cwd):
-    """The repo's cite form from <cwd>/.github/stamp.json: cite.form, with {slug} read as "slug" and
-    {prefix} as the first kind's prefix. None when the file or the field is missing or unreadable."""
+    """The repo's cite form from <cwd>/.github/stamp.json: cite.form, filled per kind ({prefix} is the
+    kind's prefix, {slug} reads as "slug"), joined in kind order with repeats dropped. None when the
+    file or the field is missing or unreadable."""
     try:
         with open(os.path.join(cwd, ".github", "stamp.json"), encoding="utf-8") as fh:
             cfg = json.load(fh)
         form = cfg["cite"]["form"]
         if not isinstance(form, str) or not form:
             return None
-        kinds = [k for k in cfg.get("kinds", []) if isinstance(k, dict)]
-        prefix = kinds[0].get("prefix", "") if kinds else ""
-        return form.replace("{prefix}", prefix if isinstance(prefix, str) else "").replace("{slug}", "slug")
+        prefixes = [k.get("prefix") for k in cfg.get("kinds", []) if isinstance(k, dict)]
+        forms = [form.replace("{prefix}", p).replace("{slug}", "slug") for p in prefixes if isinstance(p, str)]
+        return ", ".join(dict.fromkeys(forms or [form.replace("{prefix}", "").replace("{slug}", "slug")]))
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return None
 

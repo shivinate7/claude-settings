@@ -358,21 +358,39 @@ function finishStamp(root, kind, rec, n) {
 // citation of a record named "slug", so the dangling-cite refusal must not treat it as one. The
 // protected spans are frontmatter, a fenced block, an inline code span, and a markdown link
 // target.
+// One fence rule, for the dangling-cite check (protectedRanges) and the near-miss scan. CommonMark:
+// a fence opens with 3+ backticks or tildes at 0-3 spaces of indent, at the top level, in a list
+// item, or after blockquote markers ("> "). It closes on a line of its own character, at least as
+// long, with nothing else on it. A backtick fence's info string holds no backtick. A tab or four
+// spaces is an indented code block, not a fence. An unclosed fence runs to the end of the text.
+// Ceiling: a list item whose content sits past column 3 (such as "10." or a 4-space fence under
+// "- ") is not modelled.
+const FENCE_LEAD = /^(?: {0,3}>)* {0,3}/;
+function fenceRanges(text) {
+  const spans = [];
+  let open = null;
+  let at = 0;
+  for (const line of text.split("\n")) {
+    const body = line.slice(FENCE_LEAD.exec(line)[0].length);
+    const f = /^(`{3,}|~{3,})(.*)$/.exec(body.replace(/\r$/, ""));
+    if (open === null) {
+      if (f && !(f[1][0] === "`" && f[2].includes("`"))) open = { ch: f[1][0], len: f[1].length, from: at };
+    } else if (f && f[1][0] === open.ch && f[1].length >= open.len && f[2].trim() === "") {
+      spans.push([open.from, at + line.length]);
+      open = null;
+    }
+    at += line.length + 1;
+  }
+  if (open) spans.push([open.from, text.length]);
+  return spans;
+}
+
 const FM_RE = /^---\r?\n[\s\S]*?\r?\n---\r?\n/;
 function protectedRanges(text) {
   const spans = [];
   const fm = FM_RE.exec(text);
   if (fm) spans.push([0, fm[0].length]);
-  let fenceAt = null;
-  let at = 0;
-  for (const line of text.split("\n")) {
-    if (/^\s*```/.test(line)) {
-      if (fenceAt === null) fenceAt = at;
-      else { spans.push([fenceAt, at + line.length]); fenceAt = null; }
-    }
-    at += line.length + 1;
-  }
-  if (fenceAt !== null) spans.push([fenceAt, text.length]);
+  spans.push(...fenceRanges(text));
   for (const m of text.matchAll(/`[^`\n]*`/g)) spans.push([m.index, m.index + m[0].length]);
   for (const m of text.matchAll(/\]\([^)\n]*\)/g)) spans.push([m.index, m.index + m[0].length]);
   return spans;
@@ -426,24 +444,7 @@ function rewriteCites(root, config, byId, files) {
 // D`slug`, is dead text: the rewrite never matches it. Fenced blocks (``` and ~~~) are exempt;
 // an inline span is not, because D`slug` is itself an inline span. The scan is a line walk for
 // fences and one regex for cites, so a comment opener or a lone quote in prose hides nothing.
-const CLOSER = { "`": "`", "'": "'", '"': '"', "[": "]", "[[": "]]", "(": ")", "{": "}", "<": ">", "‹": "›", "«": "»" };
-function fenceRanges(text) {
-  const spans = [];
-  let open = null;
-  let at = 0;
-  for (const line of text.split("\n")) {
-    const f = /^ {0,3}(`{3,}|~{3,})/.exec(line);
-    if (f && open === null) open = { ch: f[1][0], len: f[1].length, from: at };
-    else if (f && open && f[1][0] === open.ch && f[1].length >= open.len && /^ {0,3}[`~]+\s*$/.test(line)) {
-      spans.push([open.from, at + line.length]);
-      open = null;
-    }
-    at += line.length + 1;
-  }
-  if (open) spans.push([open.from, text.length]);
-  return spans;
-}
-
+const CLOSER = { "`": "`", "'": "'", '"': '"', "[": "]", "[[": "]]", "(": ")", "{": "}", "<": ">", "‹": "›", "«": "»", "“": "”", "‘": "’" };
 // The right form for one record: cite.form with {prefix} and {slug} filled in. Without cite.form
 // the remedy can only point at cite.pattern.
 const citeFormFor = (config, prefix, slug) =>
@@ -452,9 +453,9 @@ const citeFormFor = (config, prefix, slug) =>
 function nearMissCites(rel, text, config, pattern, prefixBySlug) {
   const prefixes = [...new Set(prefixBySlug.values())];
   if (!prefixes.length) return [];
-  const letters = prefixes.map(escapeRe).join("");
+  const letters = prefixes.sort((a, b) => b.length - a.length).map(escapeRe).join("|");
   const opens = Object.keys(CLOSER).sort((a, b) => b.length - a.length).map(escapeRe).join("|");
-  const re = new RegExp(`(?<![\\p{L}\\p{N}_])([${letters}])(${opens})([\\p{L}\\p{N}_-]+)`, "gu");
+  const re = new RegExp(`(?<![\\p{L}\\p{N}_])(${letters})(${opens})([\\p{L}\\p{N}_.-]+)`, "gu");
   const fenced = fenceRanges(text);
   const correct = new Set([...text.matchAll(pattern)].map((m) => m.index));
   const out = [];
