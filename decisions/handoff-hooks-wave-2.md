@@ -29,10 +29,14 @@ stable.
    PreToolUse hook on Read clears the flag when the path is the session's handoff. A Stop hook
    blocks once while the flag is set, and names the handoff path. It exits on
    `stop_hook_active`, so it cannot loop.
-3. **CI wake-up.** A PostToolUse hook on Bash starts an `asyncRewake` watcher after `gh pr
-   ready` or a push to a branch with an open ready PR. The watcher waits on that head's runs
-   once. It exits 2 with a one-line verdict, which wakes the session even when it is idle. The
-   hook `timeout` caps the wait. The watcher never loops on a red run.
+3. **CI wake-up.** A PostToolUse hook on Bash and PowerShell starts an `asyncRewake` watcher
+   after `gh pr ready <n>`. Each `gh pr ready` in one command gets its own watch. A push alone
+   starts no watch: in this workflow a PR goes ready after its last push, and a push read can
+   see the old head (review round 1). The watcher reads the PR head once and waits on its
+   runs. It exits 2 with a one-line verdict, which wakes the session even when it is idle.
+   It stops at its own deadline, under the hook `timeout`, and then wakes with "still running".
+   One watcher runs per PR: a second one for the same PR exits at once. Text in quotes, in a
+   heredoc body or after `#` never starts a watch. Any error wakes with an "unknown" line.
 
 ## Build plan
 
