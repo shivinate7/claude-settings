@@ -307,6 +307,10 @@ _GUARD_LOG_NAME_BAD = re.compile("[" + "".join(
 def guard_logger(hook):
     """Return log(tool, decision, rule, path, detail) for one hook call.
 
+    `rule` is a string, or the raw list of finding codes. The list is turned into the sorted
+    unique codes here, inside the try, each one through str(), so an odd code (an int, a list)
+    can never raise out of the gate path.
+
     matched is `<basename> <detail>`, such as `notes.md fixed=2`. The basename is cleaned of
     hostile characters, and the field is at most 80 characters: a long name is shortened from
     its head and the detail survives. The
@@ -329,6 +333,8 @@ def guard_logger(hook):
                 state["core"] = core
             core = state["core"]
             if core is not None:
+                if not isinstance(rule, str):
+                    rule = ",".join(sorted({str(code or "STE") for code in rule})) or "STE-wording"
                 name = _GUARD_LOG_NAME_BAD.sub("", os.path.basename(path)).strip() or "-"
                 matched = (core.log_path(name, GUARD_LOG_MATCHED_MAX - 1 - len(detail)) + " "
                            + detail)

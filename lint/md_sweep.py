@@ -521,7 +521,7 @@ def main():
     if not by_path:
         return
 
-    lines, blocked, codes = [], [], set()
+    lines, blocked, codes = [], [], []
     for resolved in lintable:
         findings = by_path.get(resolved)
         if not findings:
@@ -532,7 +532,7 @@ def main():
         if not findings:
             continue
         blocked.append(resolved)
-        codes.update(f.get("code") or "STE" for f in findings)
+        codes.extend(f.get("code") for f in findings)
         lines.append("%s:" % os.path.basename(resolved))
         lines.extend("  " + format_finding(f) for f in findings)
     if not lines:
@@ -545,7 +545,7 @@ def main():
     )
     print(json.dumps({"decision": "block", "reason": reason}))
     sys.stdout.flush()  # the answer is out before the log write; a stalled disk can still delay exit
-    guard_logger(hook)("Stop", "deny", ",".join(sorted(codes)), blocked[0], "files=%d" % len(blocked))
+    guard_logger(hook)("Stop", "deny", codes, blocked[0], "files=%d" % len(blocked))
 
 
 if __name__ == "__main__":

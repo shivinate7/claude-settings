@@ -486,16 +486,15 @@ def main():
         if scope is not None:
             findings = [f for f in findings if f.get("line") in scope]
         if findings:
-            pending.append((tool, "deny", ",".join(sorted({f.get("code") or "STE" for f in findings})),
-                            path, "denied=%d" % len(findings)))
+            pending.append((tool, "deny", [f.get("code") for f in findings], path,
+                            "denied=%d" % len(findings)))
             answer({"hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "deny",
                 "permissionDecisionReason": deny_reason(path, findings, written, is_ui),
             }})
         elif fixed_ti:
-            pending.append((tool, "fixed", ",".join(sorted(set(fixed_codes))) or "STE-wording",
-                            path, "fixed=%d" % len(fixed_codes)))
+            pending.append((tool, "fixed", fixed_codes, path, "fixed=%d" % len(fixed_codes)))
             answer(rewrite_output(fixed_ti, note))
         else:
             answer()
