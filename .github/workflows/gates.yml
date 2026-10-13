@@ -87,6 +87,10 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 actions/test_action_metadata.py
 
+      - name: Ruling-kind records-dir input
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 actions/test_ruling_kind_records_dir.py
+
       - name: Janitor sweep fixture suite
         if: ${{ needs.scope.outputs.code == 'true' && needs.scope.outputs.sweep == 'true' }}
         run: python3 janitor/test_sweep.py
