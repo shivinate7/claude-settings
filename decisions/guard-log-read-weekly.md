@@ -119,10 +119,15 @@ no traceback.
   empty tables, which read as no events.
 - **Lines lost on Windows.** A plain append from many processes is not atomic on Windows.
   Measured: a line was lost in 1 round of 12, each round with 20 processes calling `record`. A
-  lost line costs one count and never changes a verdict. `lint/test_gates.py` skips the exact-count
-  test on Windows (test_19). Test_19b checks a range of 17 to 20 lines.
+  lost line costs one count and never changes a verdict. `lint/test_gates.py` skips test_19, the
+  exact-count test, on win32. Test_19b checks a range of 17 to 20 lines.
 - **Rewrite, then failed lint.** The fixer rewrites the text, then the lint cannot run. The
   rewrite still lands. The log holds `STE-unchecked` and no `fixed` line.
+- **Closed stdout pipe.** If the reader closes stdout early, the STE gate raises at its flush in
+  `answer()`, before the log call. Measured on Windows: `OSError` Errno 22, 21 stderr lines, exit
+  120, and no log line. On POSIX the error is `BrokenPipeError`, not measured. md_sweep catches the
+  same error in its own try, not measured. It ships because the exit code is unchanged and a
+  closed pipe means that the host has already gone.
 
 ## What reopens it
 
