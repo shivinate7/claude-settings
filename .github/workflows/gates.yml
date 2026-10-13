@@ -160,6 +160,9 @@ jobs:
       - name: Landed-directory check fixture suite
         run: python3 lint/test_check_landed_dirs.py
 
+      - name: Settings matcher fixture suite
+        run: python3 lint/test_settings_matcher.py
+
       - name: Record slug length
         run: python3 lint/check_record_slugs.py
 
