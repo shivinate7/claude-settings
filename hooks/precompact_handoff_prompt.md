@@ -1,8 +1,8 @@
 # Keep the handoff current
 
-A Stop-hook checkpoint asks you to update the handoff while you still have full context:
-update every section of step 4 from what you know. After a compaction, patch it instead,
-in this order. The last checkpoint wrote it with full context, so keep what still holds.
+A Stop-hook checkpoint asks you to update the handoff while you still have full context.
+After a compaction, the reorient message asks again. Each time, rewrite the whole file.
+Never append to it.
 
 ## 1. Read the prior handoff first
 
@@ -25,16 +25,20 @@ Change it only in a PR, never as this update.
 Use the compaction summary above. Read the digest file the reorient message named, when
 it named one. Together they cover the work since the handoff's last write.
 
-## 4. Patch the file in place
+## 4. Rewrite the whole file
 
-Add what changed since the handoff's last write, and correct what is now false. Keep the
-rest. When no handoff exists yet, write it whole. Never make a dated copy.
+Write the file again from the top, with one whole-file write. Never append a block, a
+dated line, or a "CURRENT STATE" section below the old ones. Keep only what is true now,
+in the fewest words. Drop work that landed on main and text that a later fact replaced.
+Git and the transcript keep the history. Never make a dated copy.
 
-The handoff holds these sections:
+The handoff holds these sections, in this order:
 
+- Rulings with NO HOME YET, first. Each one names the work it governs. Give each a home
+  before that work merges.
 - Where things stand: the branch, the head commit, open PRs, and their CI state.
-- The owner's rulings from this session. Give each ruling its tracked home, a file
-  and a section. Write "NO HOME YET" when a ruling has no tracked home.
+- The owner's rulings from this session that have a home: one line each, the ruling and
+  its file and section.
 - Work in flight: agents, workflow runs, and servers. Give each server its pid
   and its port.
 - Next steps.

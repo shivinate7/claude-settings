@@ -12,7 +12,7 @@ the desktop app has none.
   time).
 
   SessionStart --reorient (stdin: session_id) -- reads that state and prints a short
-  message: follow the installed prompt file, patch the session's own handoff at
+  message: follow the installed prompt file, rewrite the session's own handoff at
   ~/.claude/handoffs/<session_id>.md, then use the digest (or, with no usable
   digest, the compaction summary and the prior handoff alone).
 
@@ -22,7 +22,7 @@ the desktop app has none.
   200k, +150k while below limit-50k, then limit-50k; limit = autoCompactWindow in
   <config dir>/settings.json, default 500,000). The bucket lives in
   ~/.claude/state/handoff/<session_id>.nudge.json as {"bucket": N}. A higher bucket
-  than stored prints {"decision": "block", "reason": ...}: update the handoff per the
+  than stored prints {"decision": "block", "reason": ...}: rewrite the handoff per the
   prompt file's step 4. A lower bucket (after compaction) is stored silently. Nothing
   prints when stop_hook_active is true or on any error.
 
@@ -185,13 +185,13 @@ def run_reorient(payload):
     handoff = handoff_path(session_id)
     if not state or not state.get("ok") or not state.get("digest"):
         print("Context was compacted. Follow %s before anything else. Your handoff is "
-              "%s. The digest is missing: use the compaction summary and the prior "
-              "handoff instead. Confirm checkout and branch before any git write. Then "
+              "%s. Rewrite it whole; never append. The digest is missing: use the "
+              "compaction summary and the prior handoff instead. Confirm checkout and branch before any git write. Then "
               "continue the last task." % (prompt, handoff))
         return 0
 
     print("Context was compacted. Follow %s before anything else. Your handoff is %s. "
-          "Use the compaction summary, the digest at %s, and the prior handoff. Confirm "
+          "Rewrite it whole; never append. Use the compaction summary, the digest at %s, and the prior handoff. Confirm "
           "checkout and branch before any git write. Then continue the last task."
           % (prompt, handoff, state.get("digest")))
     return 0
@@ -257,9 +257,10 @@ def run_nudge(payload):
         if bucket > stored:
             ensure_handoff_dir(session_id)
             print(json.dumps({"decision": "block", "reason": (
-                "Context is about %dk tokens. Update your handoff at %s now. Follow step 4 "
-                "of %s: where things stand, the owner's rulings with their homes, work in "
-                "flight, next steps, the files and commands that matter. Then continue."
+                "Context is about %dk tokens. Rewrite your handoff at %s now, the whole "
+                "file; never append. Follow step 4 of %s: rulings with NO HOME YET first, "
+                "where things stand, rulings with their homes, work in flight, next "
+                "steps, the files and commands that matter. Then continue."
                 % (size // 1000, handoff_path(session_id), prompt_path()))}))
     except Exception as e:
         sys.stderr.write("precompact_handoff: nudge error: %s\n" % e)
