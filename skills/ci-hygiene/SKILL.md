@@ -8,10 +8,14 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 
 ## Procedure
 
+0. **Read the visibility first.** Run `gh repo view --json visibility`. See `snippets.md`,
+   section 11. Note which steps apply. Steps tagged **(private repos)** save billed minutes only.
+   The **Public repos** section applies to a public repo.
 1. **Measure first.** Rank the step times of a finished run. Optimize the slowest step only.
    Never guess which step is slow. Measure wall time on the slowest job, not runner minutes
-   alone: a cut off a job that is not the slowest saves money, not waiting. Also read the billed
-   minutes each week, and set a spending alarm in the billing settings. See `snippets.md`.
+   alone: a cut off a job that is not the slowest saves money, not waiting. **(private repos)**
+   Also read the billed minutes each week, and set a spending alarm in the billing settings.
+   See `snippets.md`.
    Time the before and the after back to back, under the same machine load. Note the load
    beside each time: CPU use, and what else ran. A time taken under load does not compare with
    one taken on a quiet machine. (2026-10-12: a guard suite read 3500 s under load, against
@@ -75,7 +79,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     tool refuses an all-skipped head. PRs 357 and 362.)
 12. **Cheap checks first.** Give each expensive job `needs:` the cheap static job. A red static
     check then stops the shards from starting.
-13. **Merge tiny jobs.** Each job bills whole minutes, rounded up, plus its own setup. Put checks
+13. **Merge tiny jobs (private repos).** Each job bills whole minutes, rounded up, plus its own setup. Put checks
     under about a minute into one job. This saves money in private repos only: standard hosted
     runners are free in public repos. Measure billed minutes and wall time before and after.
     Merged jobs can make the wait longer. Per-job rounding is measured, not a documented rule.
@@ -100,6 +104,20 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     A docs-only PR runs only the lint job. Push, nightly and dispatch run everything. An
     unreadable diff or an unmapped path runs everything. A skipped job reads as passing, so put
     the scope job in the required checks (decision ci-wall-time-cuts, cut B).
+
+## Public repos
+
+Fork PRs run code you did not write. Apply these to a public repo. See `snippets.md`, section 11.
+
+- Never expose secrets to a fork's run. A fork's `pull_request` run gets no secrets, and its
+  `GITHUB_TOKEN` is read-only.
+- Avoid `pull_request_target` with a checkout of the PR's head. That trigger runs the default
+  branch with secrets and write access.
+- Pin every third-party action by full SHA. Step 7 applies in full, and matters more here.
+- Give workflows least-privilege `permissions`. Default the token to read-only at the top level.
+  If a job needs more, grant that job only the extra permission.
+- Keep one CI run per batch. Queue time, the macOS runner concurrency cap, and the API rate
+  limit all favor one run. The rate limit was hit on 2026-10-12 from a public repo.
 
 ## Before you skip a required job
 
