@@ -417,8 +417,8 @@ MUTATIONS = [
      "detached: a PowerShell assignment ahead of Start-Process is still read, MEASURED "
      "wrongly missed before _skip_assignments_and_keywords learned $name ="),
     ("shell segments: a quote never closes, so a real call after it is swallowed whole",
-     '            if char == quote:\n                quote = ""',
-     '            if False:\n                quote = ""', "guard", 'kill: a quoted phrase ahead of a real chained kill still denies'),
+     '            if char == quote:\n                quote = ""\n            index += 1',
+     '            if False:\n                quote = ""\n            index += 1', "guard", 'kill: a quoted phrase ahead of a real chained kill still denies'),
     ("shared-tree: a conflict-side flag no longer exempts the checkout",
      'CHECKOUT_CONFLICT_FLAGS = {"--ours", "--theirs", "--merge"}',
      'CHECKOUT_CONFLICT_FLAGS = set()', "guard", 'checkout: --theirs resolves a real, unresolved merge conflict'),
@@ -1483,8 +1483,16 @@ def run_mutant(sources, work: str, entry):
     if skip:
         return label, None, [], required, skip
     _path, suite, variable, stem = TARGETS[target]
-    mutated = sources[target].replace(old, new, 1)
-    copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(label)))
+    if target == "guard":
+        # The whole guard family goes in the mutant's own folder, and the anchor lands in the one
+        # module that holds it. The suite loads the copied guard.py, which finds its siblings.
+        tree = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
+        mutate_shared.guard_tree(tree)
+        mutate_shared.apply_mutant(tree, old, new)
+        copy_path = os.path.join(tree, "guard.py")
+    else:
+        copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(label)))
+        mutated = sources[target].replace(old, new, 1)
     if target in ("ruling", "decision"):
         # ruling_home.py and decision_watch.py read `../lint/_transcript.py` beside itself. A bare copy in `work`
         # would crash on that import and read as red on every case, whatever was mutated
@@ -1494,10 +1502,11 @@ def run_mutant(sources, work: str, entry):
         os.makedirs(os.path.join(tree, "lint"), exist_ok=True)
         shutil.copy(os.path.join(HERE, "..", "lint", "_transcript.py"), os.path.join(tree, "lint"))
         if target == "decision":
-            shutil.copy(os.path.join(HERE, "guard.py"), os.path.join(tree, "hooks"))
+            mutate_shared.guard_tree(os.path.join(tree, "hooks"))
         copy_path = os.path.join(tree, "hooks", os.path.basename(TARGETS[target][0]))
-    with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
-        handle.write(mutated)
+    if target != "guard":
+        with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(mutated)
     config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(label))
     os.makedirs(config_dir, exist_ok=True)
     code, red = mutate_shared.staged_suite(
@@ -1528,7 +1537,17 @@ def main() -> int:
         if target not in TARGETS:
             print("ERROR unknown mutation target %r: %s" % (target, label))
             return 1
-        if old not in sources[target]:
+        if target == "guard":
+            # Across every guard module: exactly one match, or the mutant breaks the wrong spot.
+            try:
+                mutate_shared.find_anchor(HERE, old)
+            except mutate_shared.StaleMutant:
+                print("ERROR stale mutation, anchor text not found: %s" % label)
+                return 1
+            except mutate_shared.AmbiguousMutant as error:
+                print("ERROR ambiguous mutation, %s: %s" % (error, label))
+                return 1
+        elif old not in sources[target]:
             print("ERROR stale mutation, anchor text not found: %s" % label)
             return 1
         if not required:
@@ -1560,8 +1579,7 @@ def main() -> int:
     # which line was mutated: a kill with no bearing on the defect the mutation names, the exact
     # failure this file exists to catch. MEASURED: before this line, all seven `watch` mutants
     # printed the identical nine-case failure list, whatever the mutation.
-    with open(os.path.join(work, "guard.py"), "w", encoding="utf-8", newline="\n") as handle:
-        handle.write(sources["guard"])
+    mutate_shared.guard_tree(work)
 
     try:
         return mutate_shared.run_mutants(

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Checks that landed-dirs.txt, install.sh, install.ps1, and hooks/guard.py's
-CONFIG_FROZEN_DIRS agree on the set of directories that land under ~/.claude.
+"""Checks that landed-dirs.txt, install.sh, install.ps1, and the guard's
+CONFIG_FROZEN_DIRS (in hooks/guard*.py or a hooks/guard_*.py sibling) agree on the set of directories that land under ~/.claude.
 
 Four places used to hardcode this set independently (drift already cost commit 9c1efab, which
 pruned install.sh land_dir() calls the source no longer defined). Now there is one manifest,
 landed-dirs.txt at the repo root. install.sh and both lists in install.ps1 read it at their own
 runtime, so they cannot drift from it by construction; this check instead confirms each site is
-still wired to the manifest and has not quietly reverted to a hardcoded list. hooks/guard.py
+still wired to the manifest and has not quietly reverted to a hardcoded list. hooks/guard*.py
 keeps CONFIG_FROZEN_DIRS as a literal on purpose (see the comment beside it there), so this
 check parses that literal and compares it against the manifest directly, `state` excepted as a
 documented guard-only extra and `skills` excepted as a documented manifest-only partial freeze
@@ -19,6 +19,7 @@ Run it from the repository root:
 
 Exits 0 and prints nothing on agreement. Exits 1 and names the disagreeing site otherwise.
 """
+import glob
 import os
 import re
 import sys
@@ -29,10 +30,11 @@ REPO_ROOT = os.path.dirname(HERE)
 MANIFEST_PATH = os.path.join(REPO_ROOT, "landed-dirs.txt")
 INSTALL_SH_PATH = os.path.join(REPO_ROOT, "install.sh")
 INSTALL_PS1_PATH = os.path.join(REPO_ROOT, "install.ps1")
-GUARD_PY_PATH = os.path.join(REPO_ROOT, "hooks", "guard.py")
+# Every guard module: the frozen-dir literals may live in guard.py or in a guard_*.py sibling.
+GUARD_GLOB = os.path.join(REPO_ROOT, "hooks", "guard*.py")
 
 # guard.py directories that are never landed by either installer, and why. The "why" string
-# must appear verbatim (as a substring) beside the entry in hooks/guard.py, so a comment that
+# must appear verbatim (as a substring) beside the entry in hooks/guard*.py, so a comment that
 # drifts from the reason it excuses is itself a failure, not a silent pass.
 KNOWN_GUARD_ONLY_EXTRAS = {
     "state": "holds the baseline `hooks/config_watch.py` restores a reverted file from",
@@ -41,7 +43,7 @@ KNOWN_GUARD_ONLY_EXTRAS = {
 # landed-dirs.txt names this dir, but CONFIG_FROZEN_DIRS deliberately leaves it out: it is
 # frozen per-entry (CONFIG_FROZEN_SKILLS) instead of whole, so a person's own skills stay
 # writable. The reason string must appear verbatim beside CONFIG_FROZEN_SKILLS in
-# hooks/guard.py, same contract as KNOWN_GUARD_ONLY_EXTRAS above.
+# hooks/guard*.py, same contract as KNOWN_GUARD_ONLY_EXTRAS above.
 KNOWN_MANIFEST_ONLY_PARTIAL_FREEZE = {
     "skills": "is NOT frozen whole",
 }
@@ -74,15 +76,15 @@ def parse_manifest(text):
 def parse_guard_frozen_dirs(text):
     m = re.search(r"CONFIG_FROZEN_DIRS\s*=\s*\((.*?)\n\)", text, re.DOTALL)
     if not m:
-        fail("hooks/guard.py: could not find a CONFIG_FROZEN_DIRS = (...) literal to parse")
+        fail("hooks/guard*.py: could not find a CONFIG_FROZEN_DIRS = (...) literal to parse")
     body = m.group(1)
     entries = re.findall(r'os\.path\.normcase\("([^"]+)"\)', body)
     if not entries:
-        fail("hooks/guard.py: CONFIG_FROZEN_DIRS parsed but held no os.path.normcase(...) entries")
+        fail("hooks/guard*.py: CONFIG_FROZEN_DIRS parsed but held no os.path.normcase(...) entries")
     for extra, reason_fragment in KNOWN_GUARD_ONLY_EXTRAS.items():
         if extra in entries and reason_fragment not in body:
             fail(
-                "hooks/guard.py: CONFIG_FROZEN_DIRS has %r but its comment no longer says %r; "
+                "hooks/guard*.py: CONFIG_FROZEN_DIRS has %r but its comment no longer says %r; "
                 "the exception and its reason must not drift apart" % (extra, reason_fragment)
             )
     return entries
@@ -91,12 +93,12 @@ def parse_guard_frozen_dirs(text):
 def parse_guard_frozen_skills(text):
     m = re.search(r"CONFIG_FROZEN_SKILLS\s*=\s*\((.*?)\n\)", text, re.DOTALL)
     if not m:
-        fail("hooks/guard.py: could not find a CONFIG_FROZEN_SKILLS = (...) literal to parse")
+        fail("hooks/guard*.py: could not find a CONFIG_FROZEN_SKILLS = (...) literal to parse")
     body = m.group(1)
     for skill, reason_fragment in KNOWN_MANIFEST_ONLY_PARTIAL_FREEZE.items():
         if reason_fragment not in body and reason_fragment not in text[: m.start()]:
             fail(
-                "hooks/guard.py: CONFIG_FROZEN_SKILLS has no comment saying %r near it; the "
+                "hooks/guard*.py: CONFIG_FROZEN_SKILLS has no comment saying %r near it; the "
                 "per-skill freeze and its reason must not drift apart" % reason_fragment
             )
     return set(re.findall(r'os\.path\.normcase\("([^"]+)"\)', body))
@@ -160,7 +162,7 @@ def main():
     manifest_dirs = parse_manifest(read(MANIFEST_PATH))
     manifest_set = set(manifest_dirs)
 
-    guard_text = read(GUARD_PY_PATH)
+    guard_text = "\n".join(read(path) for path in sorted(glob.glob(GUARD_GLOB)))
     guard_dirs = parse_guard_frozen_dirs(guard_text)
     guard_set = set(guard_dirs) - set(KNOWN_GUARD_ONLY_EXTRAS)
     manifest_set_for_dirs = manifest_set - set(KNOWN_MANIFEST_ONLY_PARTIAL_FREEZE)
@@ -171,12 +173,12 @@ def main():
         detail = []
         if missing_from_guard:
             detail.append(
-                "landed-dirs.txt has %s that hooks/guard.py's CONFIG_FROZEN_DIRS does not"
+                "landed-dirs.txt has %s that hooks/guard*.py's CONFIG_FROZEN_DIRS does not"
                 % sorted(missing_from_guard)
             )
         if extra_in_guard:
             detail.append(
-                "hooks/guard.py's CONFIG_FROZEN_DIRS has %s that landed-dirs.txt does not "
+                "hooks/guard*.py's CONFIG_FROZEN_DIRS has %s that landed-dirs.txt does not "
                 "(add it there, or list it in KNOWN_GUARD_ONLY_EXTRAS with its reason)"
                 % sorted(extra_in_guard)
             )
@@ -191,12 +193,12 @@ def main():
             detail = []
             if missing:
                 detail.append(
-                    "skills/ ships %s that hooks/guard.py's CONFIG_FROZEN_SKILLS does not"
+                    "skills/ ships %s that hooks/guard*.py's CONFIG_FROZEN_SKILLS does not"
                     % sorted(missing)
                 )
             if extra:
                 detail.append(
-                    "hooks/guard.py's CONFIG_FROZEN_SKILLS has %s that skills/ does not ship"
+                    "hooks/guard*.py's CONFIG_FROZEN_SKILLS has %s that skills/ does not ship"
                     % sorted(extra)
                 )
             fail("; ".join(detail))

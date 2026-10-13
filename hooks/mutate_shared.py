@@ -28,14 +28,66 @@ which recreates the duplication as a configuration option instead of removing it
 real duplication; both add the fragility this module exists to avoid. They stay two local
 functions, each shaped by its own file's `MUTATIONS`.
 """
+import glob
 import hashlib
 import os
+import shutil
 import sys
 from concurrent.futures import ThreadPoolExecutor
+
+# The folder guard_tree copies from. Read at call time, so a test can point it elsewhere.
+HOOKS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # How many red lines a wrong cause prints before it stops. A wrong cause usually carries one or
 # two, and the bound keeps a mutation that breaks half the suite from burying the rest of the run.
 WRONG_CAUSE_LINES_SHOWN = 10
+
+
+class StaleMutant(Exception):
+    """A mutant's anchor text is in no guard module."""
+
+
+class AmbiguousMutant(Exception):
+    """A mutant's anchor text is in the guard modules more than once."""
+
+
+def guard_files(folder: str):
+    """Every guard module in `folder`: guard.py and its guard_*.py siblings, sorted."""
+    return sorted(glob.glob(os.path.join(folder, "guard*.py")))
+
+
+def guard_tree(dest: str) -> None:
+    """Copy every guard module in HOOKS_DIR into `dest`, so a copied guard.py finds its
+    siblings beside it, never the real ones."""
+    os.makedirs(dest, exist_ok=True)
+    for path in guard_files(HOOKS_DIR):
+        shutil.copy(path, dest)
+
+
+def find_anchor(folder: str, old: str):
+    """Return (path, text) of the one guard module in `folder` that holds `old` exactly once.
+    Raise StaleMutant on zero matches, AmbiguousMutant on two or more, across all modules."""
+    hits = []
+    for path in guard_files(folder):
+        # Universal newlines: a checkout may hold CRLF, and an anchor spells a line break "\n".
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+        hits.extend([(path, text)] * text.count(old))
+    if not hits:
+        raise StaleMutant("STALE: anchor text is in no guard module in %s" % folder)
+    if len(hits) > 1:
+        raise AmbiguousMutant("anchor text matches %d times in %s" % (
+            len(hits), ", ".join(sorted({os.path.basename(p) for p, _ in hits}))))
+    return hits[0]
+
+
+def apply_mutant(tree: str, old: str, new: str) -> str:
+    """Replace `old` with `new` in the one guard module in `tree` that holds it. Return its path.
+    Write nothing when the anchor is stale or ambiguous (see find_anchor)."""
+    path, text = find_anchor(tree, old)
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text.replace(old, new, 1))
+    return path
 
 
 def safe_name(label: str) -> str:
