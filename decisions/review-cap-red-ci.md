@@ -2,7 +2,7 @@
 
 ## The question
 
-What does a change do when it still fails CI after review round 3?
+What does a change do when its CI is still red after review round 3?
 
 ## The incident
 
@@ -12,17 +12,21 @@ None on record. The owner gave the ruling directly.
 
 Owner ruling, 2026-10-13 14:50 CDT: "Split, then ask."
 
-- After round 3, a change known to fail CI is not a named hole. Red CI is a failing claim.
+- Rounds 1 and 2 still fix the defect (rule `outcomes-tests-are-claims`).
+- After round 3, red CI is not a named hole. Red CI is a failing claim.
 - Split the change. Ship the part that passes. Open the red part as a new lane, with a fresh
   brief that records what failed.
+- The new lane starts at round 1, try 1.
 - If no split is possible, or the failing test looks stale, bring it to the owner. Follow the
   stale-decision protocol (rule `outcomes-stale-decision-protocol`).
 - Never merge it red. Never weaken a test to reach green.
+- A red batch still drops the lane first (rule `git-integration-branch-merge`). The split
+  happens in that lane's own fix.
 
 ## What protects it
 
-No check enforces the split step. The rule in CLAUDE.md states it. The merge rule that the PR
-merges on green is the only other guard named there.
+GitHub required checks block a red merge: the branch's required-status-checks setting, mapped
+as `git-never-merge-failing-ci`. No check enforces the split step.
 
 Kind: process
 Home: rule:roles-review-cap-three
