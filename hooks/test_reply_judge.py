@@ -223,6 +223,26 @@ def case_model_failure_fails_open():
         check("fail open, %s: claude was called once" % label, len(run.calls) == 1, len(run.calls))
 
 
+# --------------------------------------------------------------------------- case 4b
+# A timeout raises TimeoutExpired, and its message repeats the argv, which holds the prompt and
+# the reply. stderr must carry neither, and must say the call timed out, not failed to start.
+# The reply check uses a sentinel, which survives repr() escaping. The prompt check tests both
+# the raw and the repr-escaped form of the prompt.
+
+TIMEOUT_SENTINEL = "SENTINEL-timeout-5d0e"
+
+
+def case_timeout_leaks_no_reply_text():
+    run = run_hook("Reply body %s, end." % TIMEOUT_SENTINEL, scenario="timeout")
+    prompt = run.prompt()
+    check("timeout: claude was called, so the leak checks mean something", bool(prompt), run.calls)
+    check("timeout: stderr holds no reply text", TIMEOUT_SENTINEL not in run.err, run.err)
+    check("timeout: stderr holds no prompt, raw or repr-escaped",
+          prompt != "" and prompt not in run.err and repr(prompt)[1:-1] not in run.err, run.err)
+    check("timeout: stderr says timed out", "timed out" in run.err, run.err)
+    check("timeout: stderr does not say failed to start", "failed to start" not in run.err, run.err)
+
+
 # --------------------------------------------------------------------------- case 5
 # The prompt holds the reply text and the three rules, and says running background work never
 # makes a reply unfinished (the second false block, 2026-10-13).
@@ -271,6 +291,7 @@ CASES = (
     case_model_is_haiku_at_xhigh,
     case_model_block_emits_block_json,
     case_model_failure_fails_open,
+    case_timeout_leaks_no_reply_text,
     case_prompt_carries_reply_and_rules,
     case_child_cannot_retrigger_hook,
 )
