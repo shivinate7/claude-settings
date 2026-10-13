@@ -3101,6 +3101,96 @@ class PurgeRefOwnershipTests(unittest.TestCase):
         self.assertEqual(self.ref(repo, "lane-read"), commit,
                          "a ref that could not be read must be kept")
 
+    def spellings_of(self, repo):
+        """Other strings that name the same directory on this PC (NTFS is case-insensitive,
+        and tempfile hands back an 8.3 short name whose long form realpath returns)."""
+        drive, tail = os.path.splitdrive(repo)
+        return {
+            "trailing-sep": repo + os.sep,
+            "forward-slash": repo.replace("\\", "/"),
+            "mixed-sep": drive + "\\" + tail[1:].replace("\\", "/"),
+            "drive-case": repo[0].swapcase() + repo[1:],
+            "all-upper": repo.upper(),
+            "long-name": os.path.realpath(repo),
+        }
+
+    def test_an_unexpired_row_protects_the_ref_across_spellings_of_its_repo(self):
+        """The same-commit check must compare repositories by their real path. An expired row
+        and an unexpired row for one commit may spell one directory differently; the unexpired
+        row must still protect the ref."""
+        repo = self.fresh_repo("spell")
+        now = int(time.time() * 1000)
+        commit = self.rev(repo, "HEAD")
+        for label, spelled in sorted(self.spellings_of(repo).items()):
+            if spelled == repo:
+                continue  # this PC gives the same string: no spelling to test
+            with self.subTest(spelling=label):
+                branch = "lane-spell-" + label
+                log = self.log_path("spell-" + label)
+                self.reap(repo, branch, commit, log)
+                self.reap(repo, branch, commit, log)
+                self.age_log(log, [91, 5], now)
+                rows = sweep.read_restore_log(log)
+                rows[0]["repo"] = spelled
+                self.write_rows(log, rows)
+
+                decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+                self.assertNotIn("error", decisions[0])
+                self.assertEqual(self.ref(repo, branch), commit,
+                                 "the expired row, spelled %r, dropped the ref that the "
+                                 "unexpired row still names" % label)
+
+    def test_a_broken_ref_file_is_an_error_not_a_gone_ref(self):
+        """git rev-parse exits 1 for a broken ref file and says so on stderr. Only a clean
+        exit 1 (no stderr) means the ref is gone."""
+        repo = self.fresh_repo("broken-ref")
+        log = self.log_path("broken-ref")
+        now = int(time.time() * 1000)
+        commit = self.rev(repo, "HEAD")
+        self.reap(repo, "lane-broken", commit, log)
+        self.age_log(log, [91], now)
+        ref_file = os.path.join(repo, ".git", "refs", "janitor", "reaped", "lane-broken")
+        self.assertTrue(os.path.isfile(ref_file), "fixture: the ref must be a loose file")
+        write(ref_file, "not a sha\n")
+
+        decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertIn("error", decisions[0],
+                      "a broken ref (exit 1 with stderr) must be an error, not a gone ref")
+        self.assertTrue(os.path.isfile(ref_file), "a broken ref must be kept")
+
+    def test_a_reap_landing_after_the_read_keeps_the_younger_ref(self):
+        """The read says the ref holds the expired commit, but a reap lands before the delete.
+        The old-value argument must refuse the delete and keep the younger restore point."""
+        repo = self.fresh_repo("race")
+        log = self.log_path("race")
+        now = int(time.time() * 1000)
+        old = self.rev(repo, "HEAD")
+        self.reap(repo, "lane-race", old, log)
+        young = self.younger_commit(repo, "a reap that lands after the read")
+        self.reap(repo, "lane-race", young, log)
+        self.age_log(log, [91, 5], now)
+        self.assertEqual(self.ref(repo, "lane-race"), young,
+                         "fixture: the second reap must hold the ref")
+        real = sys.modules["guard_core"]._git
+        stale = subprocess.CompletedProcess([], 0, old + "\n", "")
+
+        def read_says_old(where, *args):
+            if args[:3] == ("rev-parse", "-q", "--verify"):
+                return stale
+            return real(where, *args)
+
+        sys.modules["guard_core"]._git = read_says_old
+        try:
+            decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+        finally:
+            sys.modules["guard_core"]._git = real
+
+        self.assertIn("error", decisions[0], "a refused delete must be reported")
+        self.assertEqual(self.ref(repo, "lane-race"), young,
+                         "the younger restore point must survive a delete that lost the race")
+
 
 class AgentEndLogConcurrencyTests(unittest.TestCase):
     """janitor/agent_end_reap.py log(): parallel hook runs (one per finished agent) each append
