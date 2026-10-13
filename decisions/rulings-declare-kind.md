@@ -14,6 +14,10 @@ A ruling in redesign.md, in another repo, never became a phone build task. The o
 it. The record held it. No build plan named it. The phone build never did it. Nothing failed,
 because nothing linked the ruling to a plan.
 
+Records folders differ by repo. q_max keeps its records in `docs/decisions/`, so a check that
+reads only `decisions/` passes there with nothing checked (found by the oversight session's
+Code-prose lane). Precedent: D-683, a Plan slug that is not a heading in `src/index.css`.
+
 ## The ruling
 
 Owner ruling, 2026-10-12. Each ruling declares its kind. A build ruling links the build plan,
@@ -36,12 +40,19 @@ Home: <path>
   both that repo's CLAUDE.md and the claude-settings CLAUDE.md. The action reads the second from
   its own checkout at the pinned sha, with no network read (`--rules-file`, repeatable, on the
   lint). A missing file is skipped. With none readable, a `rule:` Home is red.
+- Owner ruling, 2026-10-13 14:45. q_max adopts the Kind format.
+- Owner ruling, 2026-10-13 15:22. The checker is built once, here. Each repo sets its own records
+  folder: `--dir <folder>` on the lint, `records-dir` on the action.
 - `none` is not a kind and not a link.
 - A record has one Kind line. A second ruling in the same record needs its own record.
 
 `lint/check_ruling_kind.py` checks every record the pull request adds or changes. It runs in CI
-against the pull request base. It has no "not a ruling" exemption. A record with no ruling
-still carries a Kind line, because the lint cannot tell the two apart.
+against the pull request base. `--dir <folder>` names the records folder, relative to the
+checkout. The default is `decisions`. Only `.md` files under it are checked. A `--dir` or
+`records-dir` that is empty, `.`, missing, wrongly cased, or not a folder makes the lint exit
+non-zero and name the folder (decision gate-hooks-fail-closed: a gate fails closed). The lint
+has no "not a ruling" exemption. A record with no ruling still carries a Kind line, because
+the lint cannot tell the two apart.
 
 ## The two routes
 
@@ -49,6 +60,8 @@ still carries a Kind line, because the lint cannot tell the two apart.
   `actions/ruling-kind` runs the same lint on another repo's pull request, against its base.
   Adopt it with `uses: shivinate7/claude-settings/actions/ruling-kind@<full-sha>` after
   `actions/checkout` with `fetch-depth: 0`. It is red when the base cannot be read.
+  Its input `records-dir` names the records folder, relative to the caller's checkout. The
+  default is `decisions`. q_max sets `records-dir: docs/decisions`.
 - Write judge. The Write prompt judge in `settings.json` fires on any `decisions/` path. It
   refuses a record whose text has no `Kind: build` (with Plan lines) or `Kind: process` (with a
   Home line). The Edit judge sees only the changed text, so its scope is narrower (see the
@@ -75,6 +88,11 @@ still carries a Kind line, because the lint cannot tell the two apart.
   two lists. They match today.
 - The action is not adopted anywhere yet. It has not run on a hosted runner (unmeasured).
 - The lint checks that a plan heading exists. It does not check that the plan lane does the work.
+- The lint refuses a `--dir` of `..` or a leading `/`, as it refuses any unusable folder.
+  `actions/ruling-kind/check.sh` refuses both in `records-dir`. No test covers `..` or a leading
+  `/` in either.
+- `lint/check_record_slugs.py` still reads only `decisions/` and `deferred/`, at the top level. It
+  does not read a records folder such as `docs/decisions/`.
 
 Kind: process
 Home: lint/check_ruling_kind.py

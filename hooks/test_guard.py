@@ -293,6 +293,8 @@ GHBLANK = os.path.join(ROOT, "ghblank")    # green checks, a base that reads as 
 CTXREPO = os.path.join(ROOT, "ctxrepo")      # a checkout on main with one merged branch, `done`
 MSG_BAD = os.path.join(ROOT, "msg_bad.txt")  # a message file that cites a record by path
 MSG_OK = os.path.join(ROOT, "msg_ok.txt")    # a message file that cites a record by id
+MSG_LANE = os.path.join(ROOT, "msg_lane.txt")  # a message file that names a lane by session number
+MSG_FENCE = os.path.join(ROOT, "msg_fence.txt")  # a message file that names a lane only in a fence
 PATHSPEC_LIST = os.path.join(ROOT, "pathspec_list.txt")  # a pathspec file naming f.txt, for --pathspec-from-file
 MERGECFG = os.path.join(ROOT, "mergecfg")  # a config directory whose rules file points at this repo
 GHNONE = os.path.join(ROOT, "ghnone")      # an empty directory, so the tool is missing
@@ -840,6 +842,8 @@ def build_fixtures():
     make_fake_gh(GHMAIN, "main")
     write(MSG_BAD, "title\n\ncites decisions/one-shared-record-stamp.md\n")
     write(MSG_OK, "title\n\ncites D12, short titles for records\n")
+    write(MSG_LANE, "title\n\nLane N20 lands the guard.\n")
+    write(MSG_FENCE, "title\n\n```\nLane N20 lands the guard.\n```\n")
     write(PATHSPEC_LIST, "f.txt\n")
     make_fake_gh(GHPEND, "main", checks=[{"name": "gates", "bucket": "pending", "link": ""}])
     make_fake_gh(GHRED, "main", checks=[{"name": "gates", "bucket": "fail", "link": ""}])
@@ -4928,6 +4932,203 @@ sh("cite-by-id: Drops-lines key with a space before the colon is allowed",
    VCS + ' commit -m "title\n\nbody\n\nDrops-lines : deferred/a.md -- replaced"',
    "allow", cwd=NOGIT, config=MERGECFG)
 
+# ---- lane-by-slug (owner ruling 2026-10-13). A commit message or PR body names a lane by its
+# session number, such as `N20` or `(N16)`. That number is handed out in one chat and means nothing
+# outside it, so a lane is named by its branch slug. The scan reads the same message text as
+# cite-by-id. A number inside a backtick code span or a fenced block is quoted text and stays
+# allowed. `NaN`, `N/A`, `IPv4N1`, `N100000` and `N+1` are no lane number. Only a commit message,
+# a PR body or title, and a `gh pr merge` subject or body are read (a squash subject or body becomes
+# a commit on main). A tag, a note, a log search and a PR list are other acts.
+sh("lane-by-slug: the refusal names a branch slug as the remedy",
+   VCS + ' commit -m "fix flaky test (N16)"', "deny", "lane-by-slug", carries="branch slug",
+   cwd=NOGIT, config=MERGECFG)
+for _name, _command in (
+    ("a body line naming a lane", VCS + ' commit -m "title" -m "Lane N20 lands the guard."'),
+    ("N3b in prose", VCS + ' commit -m "title\n\nsee N3b for the rest"'),
+    ("the long --message=", VCS + ' commit --message="Lane N20 lands"'),
+    ("an attached -m value", VCS + ' commit -m"Lane N20 lands"'),
+    ("a -am cluster", VCS + ' commit -am "fix (N16)"'),
+    ("a single-quoted message", VCS + " commit -m 'Lane N20 lands'"),
+    ("a file named by -F", VCS + " commit -F " + slash(MSG_LANE)),
+    ("a heredoc fed to -F -", VCS + " commit -F - <<'EOF'\ntitle\n\nLane N20 lands\nEOF"),
+    ("a PR body", 'gh pr create --draft --title t --body "lands N16"'),
+    ("a PR body file", "gh pr edit 3 --body-file " + slash(MSG_LANE)),
+    ("a PR body behind a cd", "cd x; gh pr edit 3 -b 'lands N16'"),
+    ("a lone backtick before the number",
+     VCS + " commit -m 'title\n\nthe ` mark, then Lane N16 lands'"),
+    ("a closed span then a bare number", VCS + " commit -m 'title\n\n`x` then N16 lands'"),
+    ("an apostrophe word beside a number", VCS + ' commit -m "title\n\nDon\'t land N20"'),
+    ("a hash opener inside the message", VCS + ' commit -m "title\n\n# note: Lane N16 lands"'),
+    ("a slash-slash opener inside the message", VCS + ' commit -m "title\n\nsee // Lane N16 lands"'),
+    ("a block opener inside the message", VCS + ' commit -m "title\n\n/* Lane N16 lands */"'),
+    ("a number after a closed fence",
+     VCS + " commit -F - <<'EOF'\ntitle\n\n```\nx = 1\n```\nLane N16 lands\nEOF"),
+):
+    sh("lane-by-slug: %s denies" % _name, _command, "deny", "lane-by-slug", cwd=NOGIT,
+       config=MERGECFG)
+sh("lane-by-slug: a PowerShell commit denies too", VCS + ' commit -m "Lane N16 lands"', "deny",
+   "lane-by-slug", tool="PowerShell", cwd=NOGIT, config=MERGECFG)
+sh("lane-by-slug: a PowerShell -F file at a native path denies", VCS + " commit -F " + MSG_LANE,
+   "deny", "lane-by-slug", tool="PowerShell", cwd=NOGIT, config=MERGECFG)
+for _name, _command in (
+    ("a number in a code span", VCS + " commit -m 'title\n\nsee `N16` for the lane'"),
+    ("a number in a fenced block",
+     VCS + " commit -F - <<'EOF'\ntitle\n\n```\nLane N20 lands\n```\nEOF"),
+    ("a table cell in a fenced block",
+     VCS + " commit -F - <<'EOF'\ntitle\n\n```\n| lane | state |\n| N1 | done |\n```\nEOF"),
+    ("a comment opener inside a fence",
+     VCS + " commit -F - <<'EOF'\ntitle\n\n```\n# Lane N16 lands\n```\nEOF"),
+    ("a message file with a fenced number", VCS + " commit -F " + slash(MSG_FENCE)),
+    ("a PR body with a code span", "gh pr create --draft --title t --body 'see `N16` lands'"),
+    ("NaN", VCS + ' commit -m "title\n\nNaN guard for the sum"'),
+    ("N/A", VCS + ' commit -m "title\n\nowner: N/A"'),
+    ("IPv4N1, which has no word boundary", VCS + ' commit -m "title\n\nbind the IPv4N1 address"'),
+    ("N100000", VCS + ' commit -m "title\n\nbatch of N100000 rows"'),
+    ("N+1, a redundancy term", VCS + ' commit -m "title\n\nadd N+1 cooling"'),
+    ("a commit with no number", VCS + ' commit -m "fix guard parsing"'),
+):
+    sh("lane-by-slug: %s is allowed" % _name, _command, "allow", cwd=NOGIT, config=MERGECFG)
+# The same lane-by-slug rule, its title and merge half. A title names a lane on create and edit, and
+# a squash subject or body on merge, so each is read. The merge cases run on a green head, so merge-checks
+# passes and only the lane rule can decide. A create without --draft is refused by draft-pr, so the
+# allowed create carries --draft.
+for _name, _command in (
+    ("a create title naming a lane", 'gh pr create --title "lane N20" --body x'),
+    ("an edit title in the short form", "gh pr edit 5 -t 'fix (N16)'"),
+    ("a create title in the equals form", "gh pr create --title=N7 --body x"),
+    ("a merge subject naming a lane", 'gh pr merge 5 --squash --subject "fix (N16)"'),
+    ("a merge body naming a lane", 'gh pr merge 5 --squash --body "N20 lands"'),
+):
+    sh("lane-by-slug: %s denies" % _name, _command, "deny", "lane-by-slug", cwd=NOGIT,
+       env_path=GREEN_ON, config=MERGECFG)
+sh("lane-by-slug: a create title naming a slug is allowed",
+   'gh pr create --draft --title "slug lands" --body x', "allow", cwd=NOGIT, config=MERGECFG)
+sh("lane-by-slug: a bare squash merge is allowed", "gh pr merge 5 --squash", "allow", cwd=NOGIT,
+   env_path=GREEN_ON, config=MERGECFG)
+sh("lane-by-slug: a merge subject naming a slug is allowed",
+   'gh pr merge 5 --squash --subject "lane-number-cite lands"', "allow", cwd=NOGIT,
+   env_path=GREEN_ON, config=MERGECFG)
+for _name, _command in (
+    ("an echo", 'echo "lane N16 lands"'),
+    ("a grep", "grep -rn 'N16' hooks"),
+    ("a log search", VCS + " log --grep=N16 --oneline"),
+    ("a git note", VCS + ' notes add -m "Lane N16 lands"'),
+    ("a tag message", VCS + ' tag -a lane-v1 -m "Lane N16 cut"'),
+    ("a PR list search", 'gh pr list --search "N16"'),
+):
+    sh("lane-by-slug: %s is no message" % _name, _command, "allow", silent=True, cwd=NOGIT,
+       config=MERGECFG)
+
+
+# ---- lane-by-slug, review round 1. The red cases name the shape they pin. A glued short flag
+# (-tN16, -t=N16, -bN16, -amN20, -am"x") and a long-option prefix (--mess=, --messa=) carry the
+# message, so they are read. A double-backtick span and a ~~~ fence are quoted text, as a single
+# backtick span and a ``` fence already are. A cat heredoc is no commit message, so only the
+# commit's own -F - body counts. An unreadable -F file on gh pr merge fails closed, as on create and
+# edit (decision gate-hooks-fail-closed).
+sh("lane-by-slug: an unreadable -F file on gh pr merge is refused, not read as clean",
+   "gh pr merge 5 --squash -F /nonexistent/msg.md", "deny", "cite-by-id",
+   carries="could not be read", cwd=NOGIT, env_path=GREEN_ON, config=MERGECFG)
+for _name, _command in (
+    ("a glued -tN16 title", "gh pr create --draft -tN16 -b x"),
+    ("a glued -t=N16 title", "gh pr create --draft -t=N16 -b x"),
+    ("a glued -bN16 body", "gh pr create --draft -t x -bN16"),
+    ("a glued -amN20 cluster", VCS + " commit -amN20"),
+    ("a glued -am cluster with a quoted value", VCS + ' commit -am"fix (N16)"'),
+    ("a long --mess= prefix", VCS + ' commit --mess="fix N16"'),
+    ("a long --messa= prefix", VCS + ' commit --messa="fix N16"'),
+):
+    sh("lane-by-slug: %s denies" % _name, _command, "deny", "lane-by-slug", cwd=NOGIT,
+       config=MERGECFG)
+for _name, _command in (
+    ("a double-backtick code span", VCS + " commit -m 'title\n\nsee ``N16`` for the lane'"),
+    ("a ~~~ fence", VCS + " commit -F - <<'EOF'\ntitle\n\n~~~\nLane N16 lands\n~~~\nEOF"),
+    ("a cat heredoc naming N16, then a clean commit heredoc",
+     "cat <<'A' && " + VCS + " commit -F - <<'B'\nN16 notes\nA\ntitle\n\nclean body\nB"),
+    ("a cat heredoc with clean notes, then a clean commit heredoc",
+     "cat <<'A' && " + VCS + " commit -F - <<'B'\nclean notes\nA\ntitle\n\nclean body\nB"),
+    ("a lowercase n16", VCS + ' commit -m "title\n\nsee n16 for the lane"'),
+    ("N16a, the shape stops at a letter", VCS + ' commit -m "title\n\nsee N16a for the lane"'),
+):
+    sh("lane-by-slug: %s is allowed" % _name, _command, "allow", cwd=NOGIT, config=MERGECFG)
+for _name, _command in (
+    ("a number after a closed double-backtick span",
+     VCS + " commit -m 'title\n\n``a`` then N16 lands'"),
+    ("a number after a closed ~~~ fence",
+     VCS + " commit -F - <<'EOF'\ntitle\n\n~~~\nx = 1\n~~~\nLane N16 lands\nEOF"),
+):
+    sh("lane-by-slug: %s denies" % _name, _command, "deny", "lane-by-slug", cwd=NOGIT,
+       config=MERGECFG)
+# ---- lane-by-slug, review round 2. Two commits in one call each take their own heredoc body, so
+# a second commit whose segment text repeats the first is still judged on its own body. A header
+# inside quotes is text, and the commit's own header still takes its body. A glued value is never a
+# body: a letter in a glued value is read as a value, not as a flag.
+for _name, _command in (
+    ("two identical heredoc commits, the second names a lane",
+     VCS + " commit -F - <<EOF\nok\nEOF\n" + VCS + " commit -F - <<EOF\nN20 lands\nEOF"),
+    ("two identical --amend heredoc commits, the second names a lane",
+     VCS + " commit --amend -F - <<EOF\nok\nEOF\n" + VCS + " commit --amend -F - <<EOF\nN20 lands\nEOF"),
+    ("a fake header inside quotes before the commit's own heredoc",
+     'echo "<<EOF" ; ' + VCS + " commit -F - <<EOF\nN20\nEOF"),
+    ("a lane-named heredoc commit, then a clean one",
+     VCS + " commit -F - <<EOF\nN20 lands\nEOF\n" + VCS + " commit -F - <<EOF\nok\nEOF"),
+):
+    sh("lane-by-slug: %s denies" % _name, _command, "deny", "lane-by-slug", cwd=NOGIT,
+       config=MERGECFG)
+for _name, _command in (
+    ("a glued base -Bmain", "gh pr create --draft -Bmain -b ok"),
+    ("a glued label -lbug", "gh pr create --draft -lbug -b ok"),
+    ("a glued base that holds m and then a lane number", "gh pr create --draft -BmN20 -b ok"),
+    ("a glued label that holds b and then a lane number", "gh pr create --draft -lbN20 -b ok"),
+    ("two identical clean heredoc commits",
+     VCS + " commit -F - <<EOF\nok\nEOF\n" + VCS + " commit -F - <<EOF\nok\nEOF"),
+):
+    sh("lane-by-slug: %s is allowed" % _name, _command, "allow", cwd=NOGIT, config=MERGECFG)
+
+
+def cite_unread_folders_case():
+    """A -F message file that cannot be read is refused even when the record folders cannot be read
+    either. The copy has no lint/ folder and no pointer, so the folder list is unread. The inline
+    probe runs first: it must stand down and log the unread folders, so the pin proves that state.
+    Fail closed: decision gate-hooks-fail-closed."""
+    folder = os.path.join(ROOT, "unreadfolders")
+    os.makedirs(os.path.join(folder, "cfg"), exist_ok=True)
+    copy = os.path.join(folder, "hooks", "guard.py")
+    os.makedirs(os.path.dirname(copy), exist_ok=True)
+    for name in os.listdir(os.path.dirname(GUARD)):
+        if name.startswith("guard") and name.endswith(".py"):
+            shutil.copy(os.path.join(os.path.dirname(GUARD), name), os.path.dirname(copy))
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = os.path.join(folder, "cfg")
+    env["PATH"] = GHMAIN + os.pathsep + PY_PATH
+
+    def ask(command):
+        return subprocess.run(
+            [sys.executable, copy],
+            input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command},
+                              "cwd": NOGIT}),
+            capture_output=True, text=True, env=env, timeout=60)
+
+    probe = ask(VCS + ' commit -m "cites decisions/one-shared-record-stamp.md"')
+    if "permissionDecision" in probe.stdout:
+        return False, "the inline probe must stand down, got %r" % probe.stdout[:120]
+    try:
+        with open(os.path.join(folder, "cfg", "guard.log"), encoding="utf-8") as handle:
+            logged = "cite-by-id: record folders unread" in handle.read()
+    except OSError:
+        logged = False
+    if not logged:
+        return False, "the probe must log that the record folders are unread"
+    result = ask(VCS + " commit -F " + slash(ROOT) + "/no-such-message.txt")
+    try:
+        block = json.loads(result.stdout)["hookSpecificOutput"]
+    except (ValueError, KeyError):
+        return False, "an unreadable -F file must deny, got %r" % result.stdout[:120]
+    if block.get("permissionDecision") != "deny" or \
+            "could not be read" not in block.get("permissionDecisionReason", ""):
+        return False, "want a deny that says could not be read, got %r" % result.stdout[:120]
+    return True, "deny: the -F file is unread, and the record folders are unread too"
+
 
 # =========================================================================== 6. frozen paths
 FAMILY = "frozen"
@@ -7880,6 +8081,8 @@ LOG_CHECKS = (
     ("trim: a merge into main is allowed and logs nothing", merge_log_case),
     ("trim: a guard crash fails open and logs a crash line", crash_log_case),
     ("merge-checks: a merge tool that cannot load is unknown, and denies", merge_tool_missing_case),
+    ("cite-by-id: a -F file that cannot be read is denied with the folders unread too",
+     cite_unread_folders_case),
     ("merge-checks: a gh that never answers still denies, well inside the hook's 20s budget",
      merge_hang_timeout_case),
     ("powershell: a backslash path survives tokenizing, a Bash one does not", powershell_backslash_case),
@@ -9155,6 +9358,7 @@ LOG_RULE_FAMILY = (
     ("liveness: session_is_live reads an implied", "branch-worktree"),
     ("worktree-home: orchestrator", "branch-worktree"),
     ("worktree-home: a later path field", "branch-worktree"),
+    ("cite-by-id: a -F file that cannot be read", "cite"),
 )
 for _prefix, _family_name in LOG_RULE_FAMILY:
     _hits = [label for label in LOG_FAMILY if label.startswith(_prefix)]

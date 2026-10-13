@@ -13,8 +13,9 @@ Contract the builder codes against:
         Returns one line, for example "Local time: 2026-10-13 21:40 CDT (UTC-05:00)".
         24-hour clock, America/Chicago, DST-aware. Winter reads CST and UTC-06:00.
 
-    As a script: reads and ignores stdin, prints line() once, exits 0 (also when
-    no tz database is present). With --subagent, prints one JSON object:
+    As a script: prints line() once, exits 0 (also when no tz database is present),
+    whatever stdin holds. As a UserPromptSubmit hook it also captures owner prompts; those cases
+    are in test_feedback_inbox.py. With --subagent, prints one JSON object:
     {"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": line}}.
 
 Set LOCAL_TIME_UNDER_TEST to test another file.
@@ -270,8 +271,10 @@ def case_cli_no_tz_database():
     env = dict(os.environ)
     env["PYTHONTZPATH"] = EMPTY_TZPATH
     try:
+        # stdin=DEVNULL: local_time.py reads stdin as a hook. An inherited open pipe never closes.
         proc = subprocess.run([sys.executable, "-c", CLI_BLOCKED, MODULE_PATH],
-                              capture_output=True, text=True, env=env, timeout=30)
+                              capture_output=True, text=True, env=env, timeout=30,
+                              stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         check("CLI with no tz database: finishes within 30 s", False, "timed out")
         return
