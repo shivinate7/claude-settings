@@ -178,9 +178,9 @@ def run_precompact(payload):
     return 0
 
 
-def _same_dir(a, b):
+def same_dir(a, b):
     """The same folder: equal after normpath, or after realpath (a short 8.3 name and
-    its long name on Windows)."""
+    its long name on Windows). Also used by reread_check for the handoff file."""
     if not a or not b:
         return False
     if os.path.normcase(os.path.normpath(a)) == os.path.normcase(os.path.normpath(b)):
@@ -195,16 +195,55 @@ def pointer_dir():
     return os.path.join(config_dir(), "state", "handoff", "pointers")
 
 
+def reread_flag_path(session_id):
+    """The flag reread_check sets after compaction. Defined here so SessionEnd can drop it."""
+    return os.path.join(config_dir(), "state", "handoff", "%s.reread" % session_id)
+
+
+def record_dir(session_id, cwd):
+    """Record the session's project dir in <sid>.dir, so the fork fallback finds a session
+    that never compacted. Every handoff hook that runs for a session calls this."""
+    if not session_id or not cwd:
+        return
+    path = os.path.join(os.path.dirname(state_path(session_id)), "%s.dir" % session_id)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(cwd)
+
+
+def recorded_dir(session_id):
+    """The project dir of a session: its .dir record, else the PreCompact state's repo."""
+    try:
+        with open(state_path(session_id)[:-len(".json")] + ".dir", "r", encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        pass
+    try:
+        with open(state_path(session_id), "r", encoding="utf-8") as f:
+            return json.load(f).get("repo")
+    except Exception:
+        return None
+
+
 def run_session_end(payload):
-    """SessionEnd: only reason `clear` leaves a pointer to the old session."""
+    """SessionEnd: record the dir for any reason. Only reason `clear` leaves a pointer to
+    the old session, and drops that session's re-read flag."""
     session_id = payload.get("session_id", "")
-    if payload.get("reason") != "clear" or not session_id:
+    if not session_id:
         return 0
+    cwd = payload.get("cwd") or os.getcwd()
+    record_dir(session_id, cwd)
+    if payload.get("reason") != "clear":
+        return 0
+    try:
+        os.remove(reread_flag_path(session_id))
+    except OSError:
+        pass
     os.makedirs(pointer_dir(), exist_ok=True)
     path = os.path.join(pointer_dir(), "%s.json" % session_id)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"session_id": session_id, "cwd": payload.get("cwd") or os.getcwd()}, f)
+        json.dump({"session_id": session_id, "cwd": cwd}, f)
     os.replace(tmp, path)
     return 0
 
@@ -213,52 +252,60 @@ def _newest(paths):
     return max(paths, key=os.path.getmtime) if paths else None
 
 
-def find_old_handoff(cwd, new_sid):
-    """The handoff to read after /clear or a fork: the newest pointer for this dir, else
-    the newest handoff whose PreCompact state names this dir. None when there is none.
-    ponytail: matches by dir only, so two sessions clearing in one dir at once can swap
-    pointers (decisions/handoff-hooks-wave-2.md, named limits)."""
-    def usable(sid):
-        return bool(sid) and sid != new_sid and os.path.isfile(handoff_path(sid))
-
-    pointers = {}  # pointer file -> old session id
+def find_pointer(cwd, usable):
+    """The newest pointer file for this dir whose old session has a usable handoff, as
+    (pointer file, handoff path); (None, None) when there is none."""
+    found = {}
     pdir = pointer_dir()
     for name in os.listdir(pdir) if os.path.isdir(pdir) else []:
         if not name.endswith(".json"):
             continue
+        path = os.path.join(pdir, name)
         try:
-            with open(os.path.join(pdir, name), "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 ptr = json.load(f)
         except Exception:
             continue
-        if isinstance(ptr, dict) and _same_dir(ptr.get("cwd"), cwd) and usable(
+        if isinstance(ptr, dict) and same_dir(ptr.get("cwd"), cwd) and usable(
                 ptr.get("session_id")):
-            pointers[os.path.join(pdir, name)] = ptr["session_id"]
-    best = _newest(pointers)
-    if best:
-        return handoff_path(pointers[best])
+            found[path] = ptr["session_id"]
+    best = _newest(found)
+    return (best, handoff_path(found[best])) if best else (None, None)
 
+
+def find_newest_handoff(cwd, usable):
+    """The newest handoff file of a session recorded in this dir, or None."""
     sdir = os.path.dirname(state_path("x"))
-    found = []
+    sids = set()
     for name in os.listdir(sdir) if os.path.isdir(sdir) else []:
-        if name.count(".") != 1 or not name.endswith(".json"):
-            continue  # skips <sid>.nudge.json and <sid>.digest.md
-        sid = name[:-len(".json")]
-        try:
-            with open(os.path.join(sdir, name), "r", encoding="utf-8") as f:
-                state = json.load(f)
-        except Exception:
-            continue
-        if isinstance(state, dict) and _same_dir(state.get("repo"), cwd) and usable(sid):
-            found.append(handoff_path(sid))
-    return _newest(found)
+        base, ext = os.path.splitext(name)
+        if ext in (".dir", ".json") and "." not in base:
+            sids.add(base)  # skips <sid>.nudge.json and <sid>.digest.md
+    return _newest([handoff_path(s) for s in sids
+                    if usable(s) and same_dir(recorded_dir(s), cwd)])
 
 
 def run_reorient_cleared(payload):
+    """clear: the newest pointer for this dir, which is used up and deleted. fork: no pointer
+    (it can name an older cleared session), only the newest handoff for the dir. Either way,
+    with no pointer the newest handoff for the dir. ponytail: matches by dir only, so two
+    sessions clearing in one dir at once can swap pointers (decisions/handoff-hooks-wave-2.md,
+    named limits)."""
     session_id = payload.get("session_id", "")
+    cwd = payload.get("cwd") or os.getcwd()
     ensure_handoff_dir(session_id)
     mine = handoff_path(session_id)
-    old = find_old_handoff(payload.get("cwd") or os.getcwd(), session_id)
+
+    def usable(sid):
+        return bool(sid) and sid != session_id and os.path.isfile(handoff_path(sid))
+
+    ptr, old = find_pointer(cwd, usable) if payload.get("source") == "clear" else (None, None)
+    if ptr:
+        try:
+            os.remove(ptr)
+        except OSError:
+            pass
+    old = old or find_newest_handoff(cwd, usable)
     if not old:
         print("This session started after /clear or a fork. There is no handoff for this "
               "project dir. Your handoff is %s. Write it as you work; never append." % mine)
@@ -324,6 +371,10 @@ def window_limit():
 
 
 def run_nudge(payload):
+    try:
+        record_dir(payload.get("session_id", ""), payload.get("cwd"))
+    except Exception as e:
+        sys.stderr.write("precompact_handoff: could not record the dir: %s\n" % e)
     if payload.get("stop_hook_active"):
         return 0
     try:
