@@ -68,6 +68,18 @@ Gate: hooks/feedback_gate.py (env FEEDBACK_GATE_UNDER_TEST overrides the path). 
     `fb done`. It rides on a pass and on a block. While capture is closed, there is no systemMessage.
   - Another session's inbox is never read.
 
+Reorient: hooks/precompact_handoff.py `--reorient` (env PRECOMPACT_HANDOFF_UNDER_TEST overrides the
+  path). Each of its two messages ends with an inbox note, or with nothing:
+  - open ids (ruling, task, standing) in the inbox:
+    " Open feedback items: <ids>. Keep each in the handoff."
+  - the open marker <session>.inbox.open exists: " Feedback capture is still open: the owner has not
+    sent `fb done`."
+  - both, items first. Neither: the message is unchanged. An unreadable inbox gives no note, one
+    stderr line, and the message still prints.
+  Stub kinds for the reorient cases: FEEDBACK_INBOX_STUB=empty-inbox-note (inbox_note returns
+  "") and always-capture-line (inbox_note always returns the capture line). Each is a copy of the
+  real file with that one body swapped, written into this run's scratch folder, never the repo.
+
 Readings taken here, where the record says "every owner message between the two":
   the opening prompt is captured; `x fb` and `fbi ...` are captured while open; the gate's jotting
   checks apply to a closed inbox too, because those messages were still captured.
@@ -86,6 +98,8 @@ from datetime import datetime
 HERE = os.path.dirname(os.path.abspath(__file__))
 LT_PATH = os.environ.get("LOCAL_TIME_UNDER_TEST") or os.path.join(HERE, "local_time.py")
 GATE_PATH = os.environ.get("FEEDBACK_GATE_UNDER_TEST") or os.path.join(HERE, "feedback_gate.py")
+PRECOMPACT_PATH = os.environ.get("PRECOMPACT_HANDOFF_UNDER_TEST") or os.path.join(
+    HERE, "precompact_handoff.py")
 ROOT = tempfile.mkdtemp(prefix="feedback_inbox_cases_")
 FAILED = []
 RED_CASES = []
@@ -136,14 +150,42 @@ print("Local time: 2026-10-13 10:04 CDT (UTC-05:00)")
 }
 
 
+# Each replaces the body of inbox_note in a copy of precompact_handoff.py. The real file is read
+# only. A mutant must go red on the reorient cases it names, or the case is not guarding anything.
+PRECOMPACT_MUTANTS = {
+    "empty-inbox-note": '    return ""',
+    "always-capture-line":
+        '    return " Feedback capture is still open: the owner has not sent `fb done`."',
+}
+
+
+def write_precompact_mutant(kind):
+    """Writes the mutant copy into this run's scratch folder and returns its path. HERE goes on
+    sys.path first, so the copy still imports the real local_time and feedback_gate."""
+    with open(os.path.join(HERE, "precompact_handoff.py"), encoding="utf-8") as f:
+        src = f.read()
+    head = "def inbox_note(session_id):\n"
+    if src.count(head) != 1:
+        raise SystemExit("cannot mutate inbox_note: its def line appears %d times"
+                         % src.count(head))
+    path = os.path.join(ROOT, kind, "precompact_handoff.py")
+    write_file(path, "import sys\nsys.path.insert(0, %r)\n" % HERE
+               + src.replace(head, head + PRECOMPACT_MUTANTS[kind] + "\n", 1))
+    return path
+
+
 def install_stub():
     """Points one module at a stub written into this run's scratch folder. No env var: real paths."""
-    global LT_PATH, GATE_PATH
+    global LT_PATH, GATE_PATH, PRECOMPACT_PATH
     kind = os.environ.get("FEEDBACK_INBOX_STUB", "")
     if not kind:
         return
+    if kind in PRECOMPACT_MUTANTS:
+        PRECOMPACT_PATH = write_precompact_mutant(kind)
+        return
     if kind not in STUB_SOURCES:
-        raise SystemExit("FEEDBACK_INBOX_STUB must be one of: %s" % ", ".join(STUB_SOURCES))
+        raise SystemExit("FEEDBACK_INBOX_STUB must be one of: %s"
+                         % ", ".join(list(STUB_SOURCES) + list(PRECOMPACT_MUTANTS)))
     path = os.path.join(ROOT, kind + ".py")
     write_file(path, STUB_SOURCES[kind])
     if kind == "always-pass-gate":
@@ -208,6 +250,36 @@ def capture(cfg, sid, prompt):
 def gate(cfg, sid, stop_active=False):
     return run(GATE_PATH, payload({"hook_event_name": "Stop", "session_id": sid,
                                    "stop_hook_active": stop_active, "cwd": cfg}), cfg)
+
+
+def marker_of(cfg, sid):
+    return os.path.join(cfg, "handoffs", sid + ".inbox.open")
+
+
+def state_of(cfg, sid):
+    return os.path.join(cfg, "state", "handoff", sid + ".json")
+
+
+def state_tag(ok_state):
+    return "ok state" if ok_state else "no state"
+
+
+def reorient(cfg, sid, ok_state=False):
+    """Runs `precompact_handoff.py --reorient` as SessionStart does. ok_state writes the state of a
+    passing PreCompact run, so the message names a digest; otherwise the digest is missing."""
+    if ok_state:
+        digest = os.path.join(cfg, "state", "handoff", sid + ".digest.md")
+        write_file(state_of(cfg, sid), json.dumps({"ok": True, "digest": digest}))
+    return run(PRECOMPACT_PATH, payload({"hook_event_name": "SessionStart", "session_id": sid,
+                                         "source": "compact", "cwd": cfg}), cfg,
+               args=("--reorient",))
+
+
+def ends_with_note(p, note):
+    """Exit 0, one reorient message, and the message ends with `note` ("" when there is none)."""
+    out = p.out.rstrip()  # Windows prints CRLF, so strip all trailing whitespace, not only "\n"
+    return p.code == 0 and out.count("Context was compacted") == 1 and out.endswith(
+        "continue the last task." + note)
 
 
 def inbox_of(cfg, sid):
@@ -682,6 +754,88 @@ def case_gate_reads_only_its_own_session():
                   gate(cfg, "own"))
 
 
+# --------------------------------------------------------------------------- reorient note
+
+NOTE_CAPTURE = " Feedback capture is still open: the owner has not sent `fb done`."
+
+
+def case_reorient_lists_open_items_only():
+    cfg = new_cfg()
+    sid = "reo-items"
+    write_file(inbox_of(cfg, sid), render_block(SCANNER, items=JOTTED_ITEMS))
+    note = " Open feedback items: fb-0958-1, fb-0958-2, fb-0958-5. Keep each in the handoff."
+    for ok_state in (False, True):
+        p = reorient(cfg, sid, ok_state)
+        tag = state_tag(ok_state)
+        check("reorient items (%s): open ids in file order, in the message" % tag,
+              ends_with_note(p, note), p.desc())
+        check("reorient items (%s): question and note ids are not listed" % tag,
+              "fb-0958-3" not in p.out and "fb-0958-4" not in p.out, p.desc())
+        check("reorient items (%s): the fenced fake item is not listed" % tag,
+              "fb-0999-1" not in p.out, p.desc())
+
+
+def case_reorient_capture_open_line():
+    cfg = new_cfg()
+    sid = "reo-marker"
+    write_file(marker_of(cfg, sid), "")
+    for ok_state in (False, True):
+        p = reorient(cfg, sid, ok_state)
+        tag = state_tag(ok_state)
+        check("reorient capture (%s): the capture line ends the message" % tag,
+              ends_with_note(p, NOTE_CAPTURE), p.desc())
+        check("reorient capture (%s): no items line without an inbox" % tag,
+              "Open feedback items" not in p.out, p.desc())
+
+
+def case_reorient_items_and_capture_line_together():
+    cfg = new_cfg()
+    sid = "reo-both"
+    write_file(inbox_of(cfg, sid), render_block("two open items", items=(
+        "- fb-0958-2 [task] -> handoff", "- fb-0958-3 [ruling] -> NO HOME YET")))
+    write_file(marker_of(cfg, sid), "")
+    note = " Open feedback items: fb-0958-2, fb-0958-3. Keep each in the handoff." + NOTE_CAPTURE
+    for ok_state in (False, True):
+        p = reorient(cfg, sid, ok_state)
+        check("reorient both (%s): items line, then the capture line" % state_tag(ok_state),
+              ends_with_note(p, note), p.desc())
+
+
+def case_reorient_nothing_when_no_open_items_and_no_marker():
+    cfg = new_cfg()  # no inbox file at all
+    sid = "reo-absent"
+    for ok_state in (False, True):
+        p = reorient(cfg, sid, ok_state)
+        check("reorient absent (%s): the message is unchanged" % state_tag(ok_state),
+              ends_with_note(p, ""), p.desc())
+    cfg2 = new_cfg()  # an inbox with question and note items only, and no marker
+    write_file(inbox_of(cfg2, sid), render_block("jotted only", items=(
+        "- fb-0958-3 [question] -> answered", "- fb-0958-4 [note] -> noted")))
+    p = reorient(cfg2, sid)
+    check("reorient no open items (no state): the message is unchanged", ends_with_note(p, ""),
+          p.desc())
+
+
+def case_reorient_unreadable_inbox_prints_message_and_one_stderr_line():
+    for label in ("a directory at its path", "bytes that are not UTF-8"):
+        cfg = new_cfg()
+        sid = "reo-unreadable"
+        path = inbox_of(cfg, sid)
+        if label.startswith("a directory"):
+            os.makedirs(path)
+        else:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(b"\xff\xfe- fb-0958-2 [task] -> handoff\n")
+        for ok_state in (False, True):
+            p = reorient(cfg, sid, ok_state)
+            err = [ln for ln in p.err.splitlines() if ln.strip()]
+            name = "reorient unreadable (%s, %s)" % (label, state_tag(ok_state))
+            check("%s: the message prints, with no note" % name, ends_with_note(p, ""), p.desc())
+            check("%s: one stderr line names the failure" % name,
+                  len(err) == 1 and "inbox note failed" in err[0], p.desc())
+
+
 CASES = (
     case_closed_by_default,
     case_opener_captured_with_central_time,
@@ -705,6 +859,11 @@ CASES = (
     case_gate_reminder_follows_capture_state,
     case_gate_unreadable_inbox_blocks_and_names_the_file,
     case_gate_reads_only_its_own_session,
+    case_reorient_lists_open_items_only,
+    case_reorient_capture_open_line,
+    case_reorient_items_and_capture_line_together,
+    case_reorient_nothing_when_no_open_items_and_no_marker,
+    case_reorient_unreadable_inbox_prints_message_and_one_stderr_line,
 )
 
 
