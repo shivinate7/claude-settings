@@ -1,0 +1,25 @@
+#!/usr/bin/env python3
+# claude-p <args...>: run `claude -p <args...>`. If ANTHROPIC_API_KEY is not in this process's env,
+# fetch it by name from the device's own store (Windows user scope, HKCU\Environment) and hand it to the child only.
+# Why: a session that started before the user-scope key was set has no key, and `claude -p` then cannot run headless.
+# It never prints, logs or writes the value, and never puts it on a command line. Exit code is the child's.
+# Windows: bin/claude-p.cmd. ponytail: Windows store only, on other systems the env var is the only source.
+import os, shutil, subprocess, sys
+NAME = "ANTHROPIC_API_KEY"
+def user_key():
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
+            val = winreg.QueryValueEx(k, NAME)[0]
+        return os.path.expandvars(val) if isinstance(val, str) else ""
+    except (ImportError, OSError):
+        return ""
+def main(argv):
+    env = dict(os.environ)
+    if not env.get(NAME):
+        val = user_key()
+        if val: env[NAME] = val
+    exe = shutil.which("claude")
+    if not exe: print("claude-p: claude not found on PATH", file=sys.stderr); return 127
+    return subprocess.run([exe, "-p", *argv], env=env).returncode
+if __name__ == "__main__": sys.exit(main(sys.argv[1:]))
