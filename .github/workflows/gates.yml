@@ -104,6 +104,9 @@ jobs:
       - name: Decision watch fixture suite
         run: python3 hooks/test_decision_watch.py
 
+      - name: Reply judge fixture suite
+        run: python3 hooks/test_reply_judge.py
+
       - name: Question outcome fixture suite
         run: python3 hooks/test_question_outcome.py
 
@@ -112,6 +115,9 @@ jobs:
 
       - name: Agent brief fixture suite
         run: python3 hooks/test_agent_brief.py
+
+      - name: Local time line fixture suite
+        run: python3 hooks/test_local_time.py
 
       # Windows is not covered: the stall watch is posix only (see the stall-watch decision).
       - name: Stall watch fixture suite
@@ -352,6 +358,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 hooks/test_decision_watch.py
 
+      - name: Reply judge fixture suite
+        if: ${{ !cancelled() }}
+        run: python3 hooks/test_reply_judge.py
+
       - name: Question outcome fixture suite
         if: ${{ !cancelled() }}
         run: python3 hooks/test_question_outcome.py
@@ -363,6 +373,10 @@ jobs:
       - name: Agent brief fixture suite
         if: ${{ !cancelled() }}
         run: python3 hooks/test_agent_brief.py
+
+      - name: Local time line fixture suite
+        if: ${{ !cancelled() }}
+        run: python3 hooks/test_local_time.py
 
       # Windows is not covered: the stall watch is posix only (see the stall-watch decision).
       - name: Stall watch fixture suite
@@ -633,6 +647,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: python hooks/test_decision_watch.py
 
+      - name: Reply judge fixture suite
+        if: ${{ !cancelled() }}
+        run: python hooks/test_reply_judge.py
+
       - name: Question outcome fixture suite
         if: ${{ !cancelled() }}
         run: python hooks/test_question_outcome.py
@@ -644,6 +662,10 @@ jobs:
       - name: Agent brief fixture suite
         if: ${{ !cancelled() }}
         run: python hooks/test_agent_brief.py
+
+      - name: Local time line fixture suite
+        if: ${{ !cancelled() }}
+        run: python hooks/test_local_time.py
 
       - name: Gate wrappers fixture suite
         if: ${{ !cancelled() }}

@@ -90,6 +90,15 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/reply_judge.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
+            "timeout": 25
+          }
+        ]
       }
     ],
     "PreCompact": [
@@ -294,6 +303,26 @@
             "type": "command",
             "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/agent_brief.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 20
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/local_time.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\" --subagent; done; exit 0",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/local_time.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
+            "timeout": 10
           }
         ]
       }

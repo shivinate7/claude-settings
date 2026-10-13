@@ -33,14 +33,27 @@ what those rules need. A block returns its reason to the session and the turn go
 see the receiver's task, so it judges by wording alone. A hook that cries wolf is spent, by
 `verification-cry-wolf-guard-is-spent`. Remove one that blocks good input.
 
-## Stop reply judge, pulled
+## Stop reply judge
 
-The `Stop` prompt judge is removed from `settings.json`, by owner ruling 2026-10-12. Incident:
-it ignored its own line "if `stop_hook_active` is true, answer ok". It blocked done replies
-in a loop. A prompt hook cannot exit on a field in code. Rebuild it as a command hook that
-exits on `stop_hook_active` in code and calls the model itself, as `decision_watch` does.
-It stays off until then. Its rules (`output-start-with-point`, `style-cut-narration`,
-`output-never-paste-passing-output`) have no judge meanwhile.
+`hooks/reply_judge.py` is the `Stop` reply judge. It is a command hook, rebuilt by owner ruling
+2026-10-12 after the prompt hook was pulled. Incident: the prompt hook ignored its own line
+"if `stop_hook_active` is true, answer ok". It blocked done replies in a loop. A prompt hook
+cannot exit on a field in code.
+
+- The loop guard is code. `stop_hook_active` true: exit 0, print nothing, no model call.
+- The model call is `decision_watch.invoke_model`, the one home. It runs Haiku at `xhigh`,
+  the owner's preferred judge setting, which a prompt hook cannot set. The caller passes the
+  accepted answer, `{"ok": true|false}`. `decision_watch` keeps its own ALLOW/FLAG shape.
+- The child runs isolated, as in `decision_watch`, so it cannot fire this hook again.
+- It fails open. An error, a timeout or an odd answer prints one stderr line and blocks nothing.
+- Timeout: measured 6.6, 7.0 and 8.0 seconds for three real runs on this machine. The model
+  limit is 20 seconds and the `settings.json` entry is 25. Unmeasured: a long reply.
+- A reply over 12000 characters is cut to its first and last 6000. A breach in the middle is
+  not seen.
+- It is last in the `Stop` array in `settings.json`. That is array position, not run order.
+  Its rules are `output-start-with-point`, `style-cut-narration`
+  and `output-never-paste-passing-output`. They stay `unmechanized` in
+  `lint/rule_mechanisms.json` until the hook catches a real defect.
 
 ## Judge model
 
