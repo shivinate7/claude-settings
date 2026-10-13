@@ -869,7 +869,7 @@ def segment_markdown(lines: Sequence[str], default_mode: str) -> Tuple[List[Para
     suppressed: Dict[int, Optional[List[str]]] = {}
     file_disable: Optional[List[str]] = None
     current: Optional[Paragraph] = None
-    in_fence = False
+    in_fence = None
     in_frontmatter = False
     heading_mode = default_mode
     explicit_mode: Optional[str] = None
@@ -906,11 +906,12 @@ def segment_markdown(lines: Sequence[str], default_mode: str) -> Tuple[List[Para
             suppressed[lineno] = pending_next[1]
             pending_next = None
 
-        if FENCE.match(stripped):
-            in_fence = not in_fence
+        was_fenced = in_fence is not None
+        in_fence = fence_step(in_fence, stripped)
+        if was_fenced != (in_fence is not None):  # an opening or a closing fence line
             flush()
             continue
-        if in_fence:
+        if in_fence is not None:
             continue
 
         marker = re.search(r"<!--\s*ste:\s*(procedural|descriptive|auto)\s*-->", stripped)
@@ -1839,44 +1840,207 @@ class Linter:
 # Automatic fixes
 # --------------------------------------------------------------------------
 
-FIXABLE = [(p, r) for p, r, _ in LATIN if r] + CONTRACTIONS + \
-          [(p, r) for p, r in BLOAT] + \
-          [(p, r) for p, r, _ in NOMINALIZATION_PHRASES if r]
+# A pattern is fixable only when the swap reads as correct English, with the same punctuation,
+# in every sentence. These keep their lint finding, and the writer fixes them by hand. "vs",
+# "cf", "via" and "per se" change meaning or grammar, a deletion leaves a lowercase start, a
+# stray comma or a space, and "we'd", "they'd", "he'd", "she'd" and "it'd" may mean "had".
+_NO_FIX = {r"\bvs\.?(?=\s)", r"\bcf\.", r"\bvia\b", r"\bper\s+se\b", r"\bN\.\s?B\.", r"\bwe'd\b", r"\bthey'd\b",
+           r"\bthe majority of\b"}
+
+# An 's is "is" or "has", and an 'd is "would" or "had". These forms are fixed only when the
+# next word makes the meaning clear. Data, not code: pattern -> words that may follow.
+# Only the FIRST word after the form is read. An adverb (not, never, always, also, just, still,
+# now, only) can sit before "been" or "had", so no adverb is in these tables.
+_S_FOLLOW = (r"a|an|the|very|too|so|here|there|more|"
+             r"less|better|best|worse|no|any|all|each|every|another|my|your|our|their|his|her|its|"
+             r"safe|full|fine|true|ready|clear|open|closed|important|possible|easy|hard|good|bad|"
+             r"correct|wrong|okay|ok|likely|enough|about|in|on|at|for|to|from|\w+ing")
+_THERE_FOLLOW = r"a|an|no|one|nothing|something|another|enough"
+_D_FOLLOW = r"like|love|prefer|rather|need|want|be"
+_CONTEXT_FIX = {
+    r"\bit's\b": _S_FOLLOW, r"\bthat's\b": _S_FOLLOW, r"\bwhat's\b": _S_FOLLOW,
+    r"\bthere's\b": _THERE_FOLLOW, r"\byou'd\b": _D_FOLLOW,
+}
+# Any other 's or 'd form here stays unfixed.
+_NO_FIX |= {r"\bhe's\b", r"\bshe's\b", r"\bhe'd\b", r"\bshe'd\b", r"\bit'd\b"}
+
+# Fixer-only rewrites of a table row. The lint rule keeps the original pattern. A row whose
+# swap would double or drop punctuation has a guard, so it fixes only where the result is right.
+_EG_CLOSE = r"(?=\s*\))"
+_FIX_PATTERN = {
+    # Keep the period when "etc." ends the sentence.
+    r"\betc\.": [(r"\betc\.(?=\s*$|\s+(?-i:[A-Z]))", "and so on."), (r"\betc\.", "and so on")],
+    # "e.g." before a bracket or at the end of the line takes no comma.
+    r"\be\.\s?g\.(?:,)?": [
+        (r"\be\.\s?g\.,?" + _EG_CLOSE, "for example"),
+        (r"\be\.\s?g\.\s*$", "for example."),
+        (r"\be\.\s?g\.,?(?=\s+[\w\"'(\[`])", "for example,")],
+    r"\bi\.\s?e\.(?:,)?": [
+        (r"\bi\.\s?e\.,?" + _EG_CLOSE, "that is"),
+        (r"\bi\.\s?e\.\s*$", "that is."),
+        (r"\bi\.\s?e\.,?(?=\s+[\w\"'(\[`])", "that is,")],
+    # Keep the period when "et al." ends the sentence.
+    r"\bet\s+al\.": [(r"\bet\s+al\.(?=\s*$|\s+(?-i:[A-Z]))", "and others."),
+                     (r"\bet\s+al\.", "and others")],
+    # A comma before it leaves "Stop, to test".
+    r"\bin order to\b": [(r"(?<!,)(?<!, )\bin order to\b", "to")],
+    r"\bmake a decision about\b": [(r"\bmake a decision about\b", "decide about")],
+    # The verb must agree with the subject.
+    r"\bmake(?:s)? use of\b": [(r"\bmakes use of\b", "uses"), (r"\bmake use of\b", "use")],
+    r"\bgive(?:s)? consideration to\b": [(r"\bgives consideration to\b", "considers"),
+                                         (r"\bgive consideration to\b", "consider")],
+    r"\bprovide(?:s)? support for\b": [(r"\bprovides support for\b", "supports"),
+                                       (r"\bprovide support for\b", "support")],
+}
+
+
+def _fixable():
+    rows = []
+    for code, table in (("STE007", [(p, r) for p, r, _ in LATIN]),
+                        ("STE008", CONTRACTIONS), ("STE011", BLOAT),
+                        ("STE003", [(p, r) for p, r, _ in NOMINALIZATION_PHRASES])):
+        for pattern, replacement in table:
+            if not replacement or (pattern in _NO_FIX and pattern not in _CONTEXT_FIX):
+                continue
+            if pattern in _CONTEXT_FIX:
+                pattern = pattern + r"(?=\s+(?:%s)\b)" % _CONTEXT_FIX[pattern]
+            for p2, r2 in _FIX_PATTERN.get(pattern, [(pattern, replacement)]):
+                rows.append((p2, r2, code))
+    return rows
+
+
+FIXABLE = _fixable()
+
+_NUL = "\x00"
+_QUOTED = re.compile(r'(?<!\w)"[^"\n]+"(?!\w)|“[^”\n]*”')
+# Spans the fixer never reads: code, whole links and images (label and URL), URLs, e-mail
+# addresses, HTML tags, placeholders. A quote around one of them masks it all.
+_FIX_MASK = [
+    re.compile(r"`[^`\n]*`"),
+    re.compile(r"!?\[[^\[\]\n]*\]\((?:[^()\n]|\([^()\n]*\))*\)"),  # one level of ( ) in a URL
+    re.compile(r"\[[^\[\]\n]*\]\[[^\[\]\n]*\]"),
+    re.compile(r"<https?://[^<>\s]+>"),
+    re.compile(r"https?://\S+"),
+    re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+\.[\w.]+\b"),  # the lookbehind keeps it linear
+    re.compile(r"<[^<>\s][^<>]*>"),
+    re.compile(r"\{\{[^{}]*\}\}"),
+    re.compile(r"\$\{[^{}]*\}"),
+    _QUOTED,
+]
+_LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
+_FENCE_LINE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+_REF_DEF = re.compile(r"^ {0,3}\[([^\]\n]+)\]:\s")
+# Lines the last apply_fixes call changed: {1-based line: [rule codes]}.
+LAST_FIX_CODES: dict = {}
+
+
+def fence_step(state, line):
+    """Return the fence state after `line`: None outside a fence, else (marker char, length).
+    A fence closes only on the same char, at least as long, with nothing after it."""
+    m = _FENCE_LINE.match(line.rstrip("\r\n"))
+    if state is None:
+        if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+            return (m.group(1)[0], len(m.group(1)))
+        return None
+    if m and m.group(1)[0] == state[0] and len(m.group(1)) >= state[1] and not m.group(2).strip():
+        return None
+    return state
+
+
+def front_matter_lines(text: str) -> int:
+    """Return how many leading lines are YAML or TOML front matter, 0 when there is none."""
+    lines = text.split("\n")
+    if not lines or lines[0].rstrip() not in ("---", "+++"):
+        return 0
+    for n, line in enumerate(lines[1:], 2):
+        if line.rstrip() in (lines[0].rstrip(), "..."):
+            return n
+    return 0
+
+
+_SHORTCUT = re.compile(r"\[([^\[\]\n]+)\](?![(\[:])")
+_QUOTE_PREFIX = re.compile(r"^(?: {0,3}>)+ ?")
+_RAW_OPEN = re.compile(r"^ {0,3}(?:<(pre|script|style|textarea)\b|<!--)", re.I)
+
+
+def _label(text: str) -> str:
+    return " ".join(text.lower().split())
+
+
+def _fix_line(body: str, labels=frozenset()):
+    """Fix one line of prose. Return (fixed line, codes). A shortcut reference label whose
+    definition is in `labels` is never changed: the label and its definition stay in step."""
+    tokens: List[str] = []
+
+    def hide(match):
+        tokens.append(match.group(0))
+        return "%s%d%s" % (_NUL, len(tokens) - 1, _NUL)
+    masked = body
+    if labels:
+        masked = _SHORTCUT.sub(lambda m: hide(m) if _label(m.group(1)) in labels else m.group(0),
+                               masked)
+    for pattern in _FIX_MASK:
+        masked = pattern.sub(hide, masked)
+    codes: List[str] = []
+    for pattern, replacement, code in FIXABLE:
+        def repl(match, replacement=replacement, code=code):
+            codes.append(code)
+            if match.group(0)[:1].isupper():
+                return replacement[:1].upper() + replacement[1:]
+            return replacement
+        masked = re.sub(pattern, repl, masked, flags=re.I)
+    if not codes:
+        return body, codes
+    while _NUL in masked:  # a quote can hold a token: restore until none is left
+        restored = re.sub(r"\x00(\d+)\x00", lambda m: tokens[int(m.group(1))], masked)
+        if restored == masked:
+            break
+        masked = restored
+    return masked, codes
 
 
 def apply_fixes(text: str) -> Tuple[str, int]:
-    """Apply the substitutions that are safe without context."""
-    lines = text.splitlines(keepends=True)
+    """Apply the substitutions that are safe without context, line by line. The line count
+    and every line's own ending never change. Front matter, fenced and indented code, raw
+    HTML blocks (pre, script, style, textarea, comments), inline code, links, images and
+    quoted text stay as they are, and a line with no match is returned byte for byte.
+    Run time is not proven linear for every input: a few mask patterns can scan to the end
+    of a long line from many starts. The gate bounds the input size and the run time."""
+    LAST_FIX_CODES.clear()
+    lines = re.findall(r"[^\n]*\n|[^\n]+", text)
+    labels = {_label(m.group(1)) for ln in lines for m in [_REF_DEF.match(ln)] if m}
     out: List[str] = []
-    in_fence = False
+    fence = None
+    raw_end = None
     total = 0
-    for raw in lines:
-        body = raw.rstrip("\n")
-        newline = raw[len(body):]
-        if FENCE.match(body):
-            in_fence = not in_fence
+    skip_to = front_matter_lines(text)
+    for number, raw in enumerate(lines, 1):
+        body = raw[:-2] if raw.endswith("\r\n") else raw.rstrip("\n")
+        inner = _QUOTE_PREFIX.sub("", body) if body.lstrip(" ").startswith(">") else body
+        was_fenced = fence is not None
+        fence = fence_step(fence, inner)
+        in_raw = raw_end is not None
+        if in_raw:
+            if raw_end.search(body):
+                raw_end = None
+        elif not was_fenced and fence is None:
+            opened = _RAW_OPEN.match(body)
+            if opened:
+                in_raw = True
+                end = re.compile(r"</%s\s*>" % opened.group(1) if opened.group(1) else r"-->",
+                                 re.I)
+                if not end.search(body, opened.end()):
+                    raw_end = end
+        if (number <= skip_to or was_fenced or fence is not None or in_raw
+                or _FENCE_LINE.match(inner) or _REF_DEF.match(body)
+                or (re.match(r"(?: {4}|\t)", body) and not _LIST_ITEM.match(body))):
             out.append(raw)
             continue
-        if in_fence:
-            out.append(raw)
-            continue
-        masker = Masker(body)
-        masked = masker.text
-        for pattern, replacement in FIXABLE:
-            def repl(match, replacement=replacement):
-                nonlocal total
-                total += 1
-                original = match.group(0)
-                if not replacement:
-                    return ""
-                if original[:1].isupper():
-                    return replacement[:1].upper() + replacement[1:]
-                return replacement
-            masked = re.sub(pattern, repl, masked, flags=re.I)
-        fixed = masker.unmask(masked)
-        fixed = re.sub(r"  +", " ", fixed)
-        fixed = re.sub(r"\s+([.,;:])", r"\1", fixed)
-        out.append(fixed.rstrip() + newline if newline else fixed.rstrip())
+        fixed, codes = _fix_line(body, labels)
+        if codes:
+            total += len(codes)
+            LAST_FIX_CODES[number] = codes
+        out.append(fixed + raw[len(body):])
     return "".join(out), total
 
 

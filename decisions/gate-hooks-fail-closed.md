@@ -16,6 +16,10 @@ line names the remedy. For `rm_prompt_answer.py`, exit 2 leaves the normal permi
 `powershell -ExecutionPolicy Bypass -File ./install.ps1`. A missing python says to install Python 3 first. No gate carries `onFailure`: a gate that
 times out or crashes lets the call through (see Holes).
 
+A fixer crash or timeout in the STE gate keeps plain lint, never a refusal. That is this crash
+rule applied to the STE fixer. The STE rewrite ruling is ste-gate-fixes-not-nags, which says the
+gate fixes what it can and denies only what remains.
+
 Advisory hooks stay fail-open, because a session must still start, stop and compact. They
 are SessionStart, Stop, PreCompact, SessionEnd, PostToolUse, and the SubagentStop guard.
 PreToolUse `stall_watch.py` and `sim_boot_record.py` stay advisory too: neither ever

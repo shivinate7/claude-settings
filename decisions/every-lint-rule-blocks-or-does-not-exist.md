@@ -8,6 +8,13 @@ to `error` only. Fifteen rules fired on every run. None of them changed a
 single outcome. A rule nobody can see is not a rule. The owner ruled that a
 rule either blocks or does not exist.
 
+## A finding the gate fixes is not a block
+
+The STE gate rewrites a Markdown finding it can fix, and denies only the
+findings it cannot fix. A fixed finding is not a block. A finding the gate
+cannot fix still blocks, as this entry says. See ste-gate-fixes-not-nags, the
+STE rewrite ruling.
+
 ## The measurement
 
 Every one of the 32 tracked Markdown files in this repository, already
