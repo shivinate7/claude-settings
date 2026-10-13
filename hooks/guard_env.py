@@ -71,7 +71,16 @@ ENV_TEXT_COMMANDS = ("echo", "printf")
 
 
 ENV_PATTERN_FLAGS = ("-e", "--regexp")
-ENV_PATTERN_VALUE_FLAGS = ("-A", "-B", "-C", "-m")  # a count follows, never the pattern
+# A flag's own value stands before the pattern and is never it: a count, a glob, a file filter.
+ENV_PATTERN_VALUE_FLAGS = (
+    "-A", "-B", "-C", "-m", "-g", "-d", "--max-count", "--context", "--after-context",
+    "--before-context", "--include", "--exclude", "--exclude-dir", "--glob", "--max-depth",
+    "--max-filesize", "--type",
+)
+# `sed` and `awk` read a script, and its first plain word is a regex, never a path. `awk -F` and
+# `-v` take a value of their own.
+ENV_SCRIPT_COMMANDS = ("sed", "awk", "gawk", "mawk", "nawk")
+ENV_SCRIPT_VALUE_FLAGS = ("-F", "-v")
 
 # The message or body of a commit or a pull request is text. Its value is blanked before the words
 # are read, so an env name in prose reads no contents. A substitution in the value is cut out
@@ -369,7 +378,7 @@ def _env_parts(piece: str):
     return _ampersand_split(piece)
 
 
-def _pattern_words(words, position: int):
+def _pattern_words(words, position: int, command: str):
     """Return the indexes of the words a search command reads as its PATTERN, never as a path.
 
     With `-e` or `--regexp`, the word after each one is a pattern. Without, the first plain word
@@ -381,9 +390,13 @@ def _pattern_words(words, position: int):
     marked = {i + 1 for i, w in enumerate(words) if w in ENV_PATTERN_FLAGS and i > position}
     if marked:
         return marked
+    value_flags = ENV_PATTERN_VALUE_FLAGS + (
+        ENV_SCRIPT_VALUE_FLAGS if words[position] in ENV_SCRIPT_COMMANDS else ())
     for i in range(position + 1, len(words)):
+        if words[i - 1] == "--" and i - 1 > position:
+            return {i}  # after a bare `--`, the next word is the pattern even when it starts `-`
         if (words[i].startswith("-") or REDIRECT.fullmatch(words[i])
-                or REDIRECT.fullmatch(words[i - 1]) or words[i - 1] in ENV_PATTERN_VALUE_FLAGS):
+                or REDIRECT.fullmatch(words[i - 1]) or words[i - 1] in value_flags):
             continue
         return {i}
     return set()
@@ -402,10 +415,50 @@ def _assignment_end(words, position: int) -> int:
     return end + 1
 
 
+TIMEOUT_FLAG_GLUED = re.compile(r"^(--(kill-after|signal)=\S+|-[ks]\S+)$")
+PY_LAUNCHER_FLAG = re.compile(r"^-(\d(\.\d+)?(-\d+)?|u)$")  # `py -3`, `py -3.12`, `python -u`
+
+
+def _wrapper_name(word: str) -> str:
+    """A wrapper's name without its Windows extension: `verdict.cmd` is `verdict`."""
+    return re.sub(r"\.(cmd|exe|bat|py)$", "", word)
+
+
+def _quoted_words(segment: str):
+    """Split a segment into words the way the shell does: a quoted string with a space is ONE word.
+    The redirects are spaced into words of their own outside the quotes only. A quote with no
+    closing mate is a plain character, so a lone quote in text still leaves the words after it."""
+    chunks, plain, i, n = [], [], 0, len(segment)
+
+    def flush():
+        text = "".join(plain)
+        chunks.append(READ_REDIRECT.sub(" < ", REDIRECT.sub(r" \1 ", text)))
+        plain.clear()
+
+    while i < n:
+        char = segment[i]
+        if char == "\\" and i + 1 < n:
+            plain.append(segment[i:i + 2])
+            i += 2
+            continue
+        if char in "'\"":
+            j = i + 1
+            while j < n and segment[j] != char:
+                j += 2 if char == '"' and segment[j] == "\\" else 1
+            if j < n:
+                flush()
+                chunks.append(re.sub(r"\s", "\0", segment[i:j + 1]))
+                i = j + 1
+                continue
+        plain.append(char)
+        i += 1
+    flush()
+    return [w.replace("\0", " ") for w in "".join(chunks).split()]
+
+
 def _env_words(segment: str):
     """Return (words, command word) of one segment, redirects spaced into words of their own."""
-    words = READ_REDIRECT.sub(" < ", REDIRECT.sub(
-        r" \1 ", _blank_messages(segment))).split()
+    words = _quoted_words(_blank_messages(segment))
     # The command is the first word that is not a `VAR=value` assignment.
     # A `(` glued to the first assignment is a subshell paren, not part of the name.
     if words and words[0][:1] == "(" and ASSIGNMENT.match(words[0][1:]):
@@ -413,22 +466,29 @@ def _env_words(segment: str):
     position = 0
     while position < len(words) and ASSIGNMENT.match(words[position]):
         position = _assignment_end(words, position)
-    # Look through exactly three wrapper shapes, each by its exact form, so a flag value of some
+    # Look through exactly these wrapper shapes, each by its exact form, so a flag value of some
     # other wrapper (`env -u ls cat .env`) can never pose as the command word.
     while position < len(words):
         word = words[position].rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
         after = position + 1
         if word == "timeout":
             while after < len(words) and (words[after] in TIMEOUT_FLAGS_WITH_VALUE
-                                          or words[after] in TIMEOUT_FLAGS_BARE):
+                                          or words[after] in TIMEOUT_FLAGS_BARE
+                                          or TIMEOUT_FLAG_GLUED.match(words[after])):
                 after += 2 if words[after] in TIMEOUT_FLAGS_WITH_VALUE else 1
             if not (after < len(words) and DURATION.match(words[after])):
                 break
             position = after + 1
-        elif word == "verdict":
+        elif word == "do" or _wrapper_name(word) == "verdict":
             position = after
-        elif (word in ("python", "python3") and after < len(words)
-                and words[after].rsplit("/", 1)[-1] == "verdict"):
+        elif word == "time":
+            position = after + (after < len(words) and words[after] == "-p")
+        elif _wrapper_name(word) in ("python", "python3", "py"):
+            while after < len(words) and PY_LAUNCHER_FLAG.match(words[after]):
+                after += 1
+            if not (after < len(words) and _wrapper_name(
+                    words[after].rsplit("/", 1)[-1].rsplit("\\", 1)[-1]) == "verdict"):
+                break
             position = after + 1
         else:
             break
@@ -510,7 +570,15 @@ def _env_flat(cmd: str, text_ok: bool = False):
             # A text command's arguments are data. A redirect onto an environment file is refused
             # below, first.
             text_to_file = command in ENV_TEXT_COMMANDS and text_ok and not piped
-            patterns = _pattern_words(words, position) if command in ENV_PATTERN_COMMANDS else ()
+            patterns = (_pattern_words(words, position, command)
+                        if command in ENV_PATTERN_COMMANDS + ENV_SCRIPT_COMMANDS else ())
+            # An awk `-v name=value` value that holds a glob is a regex, as a pattern is. A plain
+            # env name there stays judged: awk can open it. ACCEPTED LIMIT: a glob value that
+            # could name an env file is cleared.
+            if command in ENV_SCRIPT_COMMANDS[1:]:
+                patterns = set(patterns) | {
+                    i for i, w in enumerate(words)
+                    if i and words[i - 1] == "-v" and ENV_GLOB.search(w)}
             for index, word in enumerate(words):
                 if index in patterns:
                     continue
