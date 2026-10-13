@@ -1654,6 +1654,23 @@ test("fence rules: a near-miss after a closed column-4 nested-list fence is flag
   assert.equal(flaggedWith(problems, "D`one`", "D‹one›"), true, problems.join("\n"));
 });
 
+// Container edges, pinned to GitHub's reading. A ``` line at column 0 that ends a list item or a
+// blockquote fence ends its container too, then opens a new top-level fence that runs to the end of
+// the text, so a dangling cite after it is not reported. A non-blank plain line less indented than
+// the item ends the item and its fence, so a cite after that line is top level and is reported.
+const CONTAINER_EDGES = [
+  ["a list-item fence closed by a ``` line at column 0", "- a\n\n  ```text\n  code\n```\nD‹nothing›, a gloss.\n", false],
+  ["a blockquote fence closed by a ``` line outside the quote", "> ```text\n> code\n```\nD‹nothing›, a gloss.\n", false],
+  ["a list-item fence ended by a less-indented plain line", "- a\n\n  ```text\n  code\nThen text.\nD‹nothing›, a gloss.\n", true],
+];
+
+for (const [shape, text, reported] of CONTAINER_EDGES) {
+  test(`fence container: a dangling cite after ${shape} is ${reported ? "reported" : "not reported"}`, () => {
+    const problems = docProblems(NEAR_MISS.prefixed, text);
+    assert.equal(problems.some((p) => p.includes("[[nothing]]")), reported, problems.join("\n"));
+  });
+}
+
 test("fence: a ``D`one` `` span inside a fence is not flagged", () => {
   assert.deepEqual(docProblems(NEAR_MISS.prefixed, "```text\n``D`one` ``\n```\n"), []);
 });
