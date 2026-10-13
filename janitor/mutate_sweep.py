@@ -89,11 +89,24 @@ AGENT_END_REAP = os.path.join(HERE, "agent_end_reap.py")
 
 SOURCES = {"sweep": SWEEP, "guard": GUARD, "session_end_sweep": SESSION_END_SWEEP,
            "agent_end_reap": AGENT_END_REAP}
+# Each guard sibling module, hooks/guard_<name>.py, is a target keyed `guard_<name>`. Every
+# scaffold carries the whole guard family, so `import guard` finds its siblings there.
+SOURCES.update({
+    os.path.splitext(os.path.basename(path))[0]: path
+    for path in mutate_shared.guard_files(os.path.dirname(GUARD)) if path != GUARD
+})
+
+
+def is_guard_key(name: str) -> bool:
+    """True for "guard" and each "guard_<name>" sibling key."""
+    return name == "guard" or name.startswith("guard_")
+
 
 # Which suite proves a mutation of a given target. Every "sweep"/"guard" mutant is proven against
 # test_sweep.py, exactly as before; "session_end_sweep" mutants are proven against the hook's own
 # suite instead.
 SUITE_FOR_TARGET = {
+    **{name: "test_sweep.py" for name in SOURCES if is_guard_key(name)},
     "sweep": "test_sweep.py",
     "guard": "test_sweep.py",
     "session_end_sweep": "test_session_end_sweep.py",
@@ -1262,7 +1275,7 @@ def mutation_parts(entry):
 
 
 def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_text: str):
-    """Lay out <scaffold>/hooks/guard.py, <scaffold>/janitor/{sweep.py,test_sweep.py,
+    """Lay out <scaffold>/hooks/guard*.py, <scaffold>/janitor/{sweep.py,test_sweep.py,
     session_end_sweep.py,test_session_end_sweep.py} and <scaffold>/settings.json so that running
     either suite from <scaffold>/janitor resolves `import guard`, `import sweep` and
     `import session_end_sweep` to the copies placed here (see the module docstring, "WHY A
@@ -1274,14 +1287,17 @@ def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_te
     os.makedirs(hooks_dir, exist_ok=True)
     os.makedirs(janitor_dir, exist_ok=True)
 
-    guard_text = mutated_text if mutated_target == "guard" else sources["guard"]
     sweep_text = mutated_text if mutated_target == "sweep" else sources["sweep"]
     session_end_text = (
         mutated_text if mutated_target == "session_end_sweep" else sources["session_end_sweep"]
     )
 
-    with open(os.path.join(hooks_dir, "guard.py"), "w", encoding="utf-8", newline="\n") as h:
-        h.write(guard_text)
+    for name in sources:
+        if is_guard_key(name):
+            text = mutated_text if mutated_target == name else sources[name]
+            with open(os.path.join(hooks_dir, name + ".py"), "w", encoding="utf-8",
+                      newline="\n") as h:
+                h.write(text)
     with open(os.path.join(janitor_dir, "sweep.py"), "w", encoding="utf-8", newline="\n") as h:
         h.write(sweep_text)
     with open(os.path.join(janitor_dir, "test_sweep.py"), "w", encoding="utf-8", newline="\n") as h:

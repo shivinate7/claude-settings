@@ -66,6 +66,7 @@ recorded in a decision file or an agent prompt is a different surface, ungoverne
 from __future__ import annotations
 
 import ast
+import glob
 import json
 import os
 import re
@@ -82,7 +83,6 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Paths relative to the repo root, so a fixture test reads the same list under its own root.
 RULE_FILES = ["CLAUDE.md", os.path.join("output-styles", "shiv-stylisms.md")]
 MAP_FILE = os.path.join(ROOT, "lint", "rule_mechanisms.json")
-GUARD_PY = os.path.join(ROOT, "hooks", "guard.py")
 WORKFLOW = os.path.join(ROOT, ".github", "workflows", "gates.yml")
 
 ANCHOR_RE = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
@@ -330,6 +330,13 @@ def read(path: str) -> str:
         return f.read()
 
 
+def guard_text(root: str) -> str:
+    """The text of every guard module under root: hooks/guard.py and its hooks/guard_*.py
+    siblings. A rule refused in any of them is a guard rule. Empty when there is none."""
+    paths = sorted(glob.glob(os.path.join(root, "hooks", "guard*.py")))
+    return "\n".join(read(path) for path in paths)
+
+
 def claude_md_anchors(text: str) -> List[str]:
     return [m.group(1) for m in ANCHOR_RE.finditer(text)]
 
@@ -428,7 +435,7 @@ def check(
             if ref not in guard_names:
                 problems.append(
                     f"row `{slug}` names guard rule `{ref}`, which is not a `refuse`/`record` "
-                    f"rule name in hooks/guard.py any more. Stale row."
+                    f"rule name in hooks/guard*.py any more. Stale row."
                 )
         elif kind == "gate":
             path = os.path.join(ROOT, ref)
@@ -493,10 +500,9 @@ def main() -> None:
         print(f"rule_audit: FAIL\n - lint/rule_mechanisms.json is not valid JSON: {e}")
         sys.exit(1)
 
-    guard_text = read(GUARD_PY) if os.path.exists(GUARD_PY) else ""
     workflow_text = read(WORKFLOW) if os.path.exists(WORKFLOW) else ""
 
-    problems = check(claude_text, rule_map, guard_text, workflow_text)
+    problems = check(claude_text, rule_map, guard_text(ROOT), workflow_text)
     if problems:
         print("rule_audit: FAIL")
         for p in problems:

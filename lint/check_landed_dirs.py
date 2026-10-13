@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Checks that landed-dirs.txt, install.sh, install.ps1, and hooks/guard.py's
-CONFIG_FROZEN_DIRS agree on the set of directories that land under ~/.claude.
+"""Checks that landed-dirs.txt, install.sh, install.ps1, and the guard's
+CONFIG_FROZEN_DIRS (in hooks/guard.py or a hooks/guard_*.py sibling) agree on the set of directories that land under ~/.claude.
 
 Four places used to hardcode this set independently (drift already cost commit 9c1efab, which
 pruned install.sh land_dir() calls the source no longer defined). Now there is one manifest,
@@ -19,6 +19,7 @@ Run it from the repository root:
 
 Exits 0 and prints nothing on agreement. Exits 1 and names the disagreeing site otherwise.
 """
+import glob
 import os
 import re
 import sys
@@ -29,7 +30,8 @@ REPO_ROOT = os.path.dirname(HERE)
 MANIFEST_PATH = os.path.join(REPO_ROOT, "landed-dirs.txt")
 INSTALL_SH_PATH = os.path.join(REPO_ROOT, "install.sh")
 INSTALL_PS1_PATH = os.path.join(REPO_ROOT, "install.ps1")
-GUARD_PY_PATH = os.path.join(REPO_ROOT, "hooks", "guard.py")
+# Every guard module: the frozen-dir literals may live in guard.py or in a guard_*.py sibling.
+GUARD_GLOB = os.path.join(REPO_ROOT, "hooks", "guard*.py")
 
 # guard.py directories that are never landed by either installer, and why. The "why" string
 # must appear verbatim (as a substring) beside the entry in hooks/guard.py, so a comment that
@@ -160,7 +162,7 @@ def main():
     manifest_dirs = parse_manifest(read(MANIFEST_PATH))
     manifest_set = set(manifest_dirs)
 
-    guard_text = read(GUARD_PY_PATH)
+    guard_text = "\n".join(read(path) for path in sorted(glob.glob(GUARD_GLOB)))
     guard_dirs = parse_guard_frozen_dirs(guard_text)
     guard_set = set(guard_dirs) - set(KNOWN_GUARD_ONLY_EXTRAS)
     manifest_set_for_dirs = manifest_set - set(KNOWN_MANIFEST_ONLY_PARTIAL_FREEZE)
