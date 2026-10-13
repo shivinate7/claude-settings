@@ -20,8 +20,7 @@ Writing prose and records is not building.
 | Point | Model | Effort |
 |---|---|---|
 | `CLAUDE_CODE_SUBAGENT_MODEL` | sonnet | n/a |
-| Explore | haiku | xhigh |
-| claude-code-guide | haiku | high |
+| Explore, claude-code-guide | haiku | xhigh |
 | test-author | haiku | xhigh |
 | reviewer | haiku | xhigh |
 | reviewer, rounds 2 and 3 | sonnet, the ceiling; round 3 may run opus on the owner's word for that spawn; set per spawn, which overrides the frontmatter `haiku` | round 2: high, set per spawn; round 3 on sonnet: xhigh, the frontmatter; round 3 on opus: high, set per spawn |
