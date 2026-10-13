@@ -10,7 +10,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 
 0. **Read the visibility first.** Run `gh repo view --json visibility`. See `snippets.md`,
    section 11. Note which steps apply. Steps tagged **(private repos)** save billed minutes only.
-   The **Public repos** section applies to a public repo.
+   The **Public repos** section applies to a public repo. An internal repo counts as private.
 1. **Measure first.** Rank the step times of a finished run. Optimize the slowest step only.
    Never guess which step is slow. Measure wall time on the slowest job, not runner minutes
    alone: a cut off a job that is not the slowest saves money, not waiting. **(private repos)**
@@ -41,15 +41,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    a comment. Let a bot keep the pins current. Disable credential persistence on checkout. Run
    an audit tool in CI, and run it locally with the exact CI command and paths.
    If the installed tool's `--version` matches the CI pin, use it. If it does not, install a copy.
-8. **Batch lanes.** Batch the lane PRs that pass their local checks into one integration branch.
-   A lane joins only after review. Only the integration PR goes ready. Its CI run is the only run
-   for the batch, and it covers the combined code. "No conflicts" does not prove the lanes work
-   together. A green integration run does not prove that no line was lost either: run
-   `lint/check_silent_undo.py` before the merge. Each lane PR stays a draft until the integration
-   PR merges, then closes as replaced. A lone lane is its own integration PR.
-   A red integration run: read the failing job. Find the lane whose files it touches. Drop that
-   lane from the branch. Run CI again, once, and merge the rest. Fix the dropped lane in its own
-   lane. It joins the next batch after its fix. Never fix inside the integration branch.
+8. **Batch lanes.** One CI run per batch, by CLAUDE.md rule `git-integration-branch-merge`.
+   "No conflicts" does not prove the lanes work together. A green integration run does not prove
+   that no line was lost either: run `lint/check_silent_undo.py` before the merge.
    GitHub's merge queue needs an organization-owned repo, so a personal repo batches by hand or
    through the merge tool.
    Batch across sessions too. Before a PR runs CI, list the repo's open PRs. When another session's
@@ -115,9 +109,10 @@ Fork PRs run code you did not write. Apply these to a public repo. See `snippets
   branch with secrets and write access.
 - Pin every third-party action by full SHA. Step 7 applies in full, and matters more here.
 - Give workflows least-privilege `permissions`. Default the token to read-only at the top level.
-  If a job needs more, grant that job only the extra permission.
-- Keep one CI run per batch. Queue time, the macOS runner concurrency cap, and the API rate
-  limit all favor one run. The rate limit was hit on 2026-10-12 from a public repo.
+  If a job needs more, restate `contents: read` in that job's block with the extra scope. A
+  `permissions` block sets every scope it does not name to `none`.
+- Keep one CI run per batch (step 8). Free minutes do not remove queue time, and each run
+  costs `gh` calls on the shared token. A secondary rate limit refused a merge on 2026-10-12.
 
 ## Before you skip a required job
 
