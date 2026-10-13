@@ -1460,6 +1460,37 @@ def case_default_path_still_calls_claude_without_a_flag():
           (result.stdout[:200], result.stderr[-200:]))
 
 
+# --------------------------------------------------------------------------- a verdict lost
+# A reply handed in with --model-text or --model-error that the run never uses (the verdict is
+# already recorded for this turn) must not read as silence. Silence after a reply is an ALLOW.
+
+def case_model_text_after_a_cached_verdict_says_verdict_lost():
+    # Red on e40df46. --model-text ALLOW records the verdict. A second reply on the same turn returns
+    # before the model step, and prints nothing today. That reads as a pass. It must read UNKNOWN.
+    name = "text_lost"
+    with scratch_config(name):
+        hook = _judged_hook(name)
+        first, _ = _main_in_process(hook, ["--model-text", ALLOW_JSON])
+        out, spawns = _main_in_process(hook, ["--model-text", '{"verdict": "FLAG", "why": "late"}'])
+    msg = _system_message(out)
+    check("verdict lost: the first ALLOW prints nothing", first == "", first[:200])
+    check("verdict lost: the second reply reads as UNKNOWN, verdict lost",
+          msg.startswith(dw.UNKNOWN_PREFIX) and "verdict lost" in msg, out[:200])
+    check("verdict lost: no model subprocess", spawns == 0, spawns)
+
+
+def case_model_error_after_a_cached_verdict_is_not_silent():
+    # Red on e40df46. The same early exit with --model-error prints nothing today. It must read UNKNOWN.
+    name = "error_lost"
+    with scratch_config(name):
+        hook = _judged_hook(name)
+        _main_in_process(hook, ["--model-text", ALLOW_JSON])
+        out, spawns = _main_in_process(hook, ["--model-error", "boom"])
+    check("model-error after a cached verdict: not silent, reads as UNKNOWN",
+          _system_message(out).startswith(dw.UNKNOWN_PREFIX), out[:200])
+    check("model-error after a cached verdict: no model subprocess", spawns == 0, spawns)
+
+
 def main():
     case_flag_unapproved()
     case_flag_deleted_protected_file()
@@ -1515,6 +1546,8 @@ def main():
         case_model_error_is_unknown_cut_to_200_and_not_cached,
         case_emit_prompt_runs_with_dash_I_as_the_mod_spawns_it,
         case_default_path_still_calls_claude_without_a_flag,
+        case_model_text_after_a_cached_verdict_says_verdict_lost,
+        case_model_error_after_a_cached_verdict_is_not_silent,
     ):
         run_case(case)
 
