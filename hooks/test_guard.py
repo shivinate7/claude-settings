@@ -7170,9 +7170,11 @@ def _load_guard_module():
     in the bug report does.
     """
     import importlib.util
-    # guard.py imports guard_core by name. A cached core would carry one case's patches into the
-    # next, so drop it: each load gets a core of its own, as each load always got its own module.
-    sys.modules.pop("guard_core", None)
+    # guard.py imports guard_core and the guard_<family> modules by name. A cached one would carry
+    # an earlier load's patches or copy into this one, so drop every guard_* module: each load gets
+    # modules of its own, as each load always got its own module.
+    for name in [n for n in sys.modules if n == "guard_core" or n.startswith("guard_")]:
+        sys.modules.pop(name, None)
     spec = importlib.util.spec_from_file_location("guard_under_test", GUARD)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
