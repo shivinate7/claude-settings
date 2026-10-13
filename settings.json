@@ -90,6 +90,15 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/reply_judge.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
+            "timeout": 25
+          }
+        ]
       }
     ],
     "PreCompact": [
