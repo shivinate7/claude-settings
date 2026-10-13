@@ -36,6 +36,11 @@ Writing prose and records is not building.
 | fast mode | opt-in per session | n/a |
 | `haiku` alias | not pinned, follows Claude Code | n/a |
 | skills | no `model:` pin | none |
+| skill `ci-hygiene` | no model pin; runs on the caller's model | none |
+| skill `compliance-check` | no model pin; runs on the caller's model | none |
+| skill `design-review` | no model pin; runs on the caller's model | none |
+| skill `fresh-prose` | no model pin; runs on the caller's model | none |
+| skill `impeccable` | no model pin; runs on the caller's model | none |
 | cloud routines | sonnet | default |
 | Claude GitHub Action, if added | haiku | xhigh |
 | `availableModels` | none | n/a |
@@ -440,4 +445,5 @@ This file keeps its slug name. No number is claimed on a branch.
 
 Kind: process
 Home: lint/check_agent_models.py
+Home: lint/check_skill_model_rows.py
 Home: settings.json
