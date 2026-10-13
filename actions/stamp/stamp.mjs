@@ -421,6 +421,53 @@ function rewriteCites(root, config, byId, files) {
   return touched;
 }
 
+// ---------------------------------------------------------------- near-miss cites
+// A prefix letter glued to a KNOWN slug in a wrapper the repo's cite form does not use, such as
+// D`slug`, is dead text: the rewrite never matches it. Fenced blocks (``` and ~~~) are exempt;
+// an inline span is not, because D`slug` is itself an inline span. The scan is a line walk for
+// fences and one regex for cites, so a comment opener or a lone quote in prose hides nothing.
+const CLOSER = { "`": "`", "'": "'", '"': '"', "[": "]", "[[": "]]", "(": ")", "{": "}", "<": ">", "‹": "›", "«": "»" };
+function fenceRanges(text) {
+  const spans = [];
+  let open = null;
+  let at = 0;
+  for (const line of text.split("\n")) {
+    const f = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (f && open === null) open = { ch: f[1][0], len: f[1].length, from: at };
+    else if (f && open && f[1][0] === open.ch && f[1].length >= open.len && /^ {0,3}[`~]+\s*$/.test(line)) {
+      spans.push([open.from, at + line.length]);
+      open = null;
+    }
+    at += line.length + 1;
+  }
+  if (open) spans.push([open.from, text.length]);
+  return spans;
+}
+
+// The right form for one record: cite.form with {prefix} and {slug} filled in. Without cite.form
+// the remedy can only point at cite.pattern.
+const citeFormFor = (config, prefix, slug) =>
+  config.cite.form ? config.cite.form.replace(/\{prefix\}/g, prefix).replace(/\{slug\}/g, slug) : "the form that cite.pattern matches";
+
+function nearMissCites(rel, text, config, pattern, prefixBySlug) {
+  const prefixes = [...new Set(prefixBySlug.values())];
+  if (!prefixes.length) return [];
+  const letters = prefixes.map(escapeRe).join("");
+  const opens = Object.keys(CLOSER).sort((a, b) => b.length - a.length).map(escapeRe).join("|");
+  const re = new RegExp(`(?<![\\p{L}\\p{N}_])([${letters}])(${opens})([\\p{L}\\p{N}_-]+)`, "gu");
+  const fenced = fenceRanges(text);
+  const correct = new Set([...text.matchAll(pattern)].map((m) => m.index));
+  const out = [];
+  for (const m of text.matchAll(re)) {
+    const [head, prefix, open, slug] = m;
+    const end = m.index + head.length;
+    if (prefixBySlug.get(slug) !== prefix || !text.startsWith(CLOSER[open], end)) continue;
+    if (correct.has(m.index) || inSpans(fenced, m.index)) continue;
+    out.push(`${rel} cites ${head}${CLOSER[open]}, a near-miss of the cite form that is never rewritten. Write ${citeFormFor(config, prefix, slug)}`);
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- structural validation, shared
 // by stamp() (which refuses to write on top of it) and --check (which adds the branch question,
 // below, to it). One implementation of "is this record file sound" for both, so they cannot
@@ -481,6 +528,7 @@ function validate(root, config) {
         const prefixOk = !config.cite.prefixGroup || m[config.cite.prefixGroup] === prefixBySlug.get(slug);
         if (!bySlug.has(slug) || !prefixOk) problems.push(`${rel} cites [[${slug}]], which no record file defines`);
       }
+      problems.push(...nearMissCites(rel, text, config, pattern, prefixBySlug));
     }
   }
 
