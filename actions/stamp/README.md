@@ -210,6 +210,7 @@ tree. A default applies when a field is not set.
 | `excludeGlobs` | `[]` | Files that neither reads. |
 
 The near-miss check flags a record's prefix letter and known slug in a wrapper that is not the cite form, such as ``D`slug` ``. It skips ``` and ~~~ fences only.
+Both checks use one CommonMark fence rule. A fence has 0-3 columns of indent past the content column of its blockquote or list item, such as column 4 under `10.`. A tab counts to the next multiple of 4. A top-level line with 4 columns of indent, or a tab, is an indented code block, not a fence.
 The dangling-cite check skips frontmatter, fenced blocks, code spans, and link targets. A
 file that teaches the cite syntax in plain text needs an `excludeGlobs` entry. Find each
 entry from a refusal of `--check` on your own tree. Do not guess the list.

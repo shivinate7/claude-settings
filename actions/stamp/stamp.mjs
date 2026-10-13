@@ -359,25 +359,53 @@ function finishStamp(root, kind, rec, n) {
 // protected spans are frontmatter, a fenced block, an inline code span, and a markdown link
 // target.
 // One fence rule, for the dangling-cite check (protectedRanges) and the near-miss scan. CommonMark:
-// a fence opens with 3+ backticks or tildes at 0-3 spaces of indent, at the top level, in a list
-// item, or after blockquote markers ("> "). It closes on a line of its own character, at least as
-// long, with nothing else on it. A backtick fence's info string holds no backtick. A tab or four
-// spaces is an indented code block, not a fence. An unclosed fence runs to the end of the text.
-// Ceiling: a list item whose content sits past column 3 (such as "10." or a 4-space fence under
-// "- ") is not modelled.
-const FENCE_LEAD = /^(?: {0,3}>)* {0,3}/;
+// a fence opens with 3+ backticks or tildes at 0-3 columns past the content column of its
+// container. The container is the top level, a blockquote (after "> "), or a list item, whose
+// content column sits past its marker and 1-4 spaces: column 2 for "- a", column 4 for "10. a" or
+// a nested "  - b". A tab counts to the next multiple of 4. Four or more columns past the container
+// is an indented code block, not a fence, so a top-level "    ```" or tab is never a fence. A fence
+// closes on a line of its own character, at least as long, with nothing else on it, or at a
+// non-blank line less indented than its container. A backtick fence's info string holds no
+// backtick. An unclosed fence runs to the end of the text.
+// Ceiling: a lazy continuation line (unindented text that continues a list item's paragraph) ends
+// the item here, so a fence after it counts from the outer container.
+const LIST_MARKER = /^(?:[-+*]|\d{1,9}[.)])(?=[ \t]|$)/;
+const FENCE = /^(`{3,}|~{3,})(.*)$/;
 function fenceRanges(text) {
   const spans = [];
+  const items = []; // content columns of the open list items, outermost first
   let open = null;
   let at = 0;
   for (const line of text.split("\n")) {
-    const body = line.slice(FENCE_LEAD.exec(line)[0].length);
-    const f = /^(`{3,}|~{3,})(.*)$/.exec(body.replace(/\r$/, ""));
-    if (open === null) {
-      if (f && !(f[1][0] === "`" && f[2].includes("`"))) open = { ch: f[1][0], len: f[1].length, from: at };
-    } else if (f && f[1][0] === open.ch && f[1].length >= open.len && f[2].trim() === "") {
-      spans.push([open.from, at + line.length]);
-      open = null;
+    const raw = line.replace(/\r$/, "");
+    // Inside a top-level fence, a ">" is content, not a blockquote marker.
+    const quote = open && !open.quote ? 0 : /^(?: {0,3}> ?)*/.exec(raw)[0].length;
+    let i = quote;
+    let col = quote;
+    const skipSpace = () => {
+      for (; raw[i] === " " || raw[i] === "\t"; i++) col = raw[i] === "\t" ? col + 4 - (col % 4) : col + 1;
+    };
+    skipSpace();
+    const blank = i === raw.length;
+    if (!blank) while (items.length && col < items.at(-1)) items.pop();
+    if (open && !blank && col < open.base) { spans.push([open.from, at]); open = null; }
+    if (open) {
+      const f = FENCE.exec(raw.slice(i));
+      if (f && quote === open.quote && col - open.base <= 3 && f[1][0] === open.ch && f[1].length >= open.len && f[2].trim() === "") {
+        spans.push([open.from, at + line.length]);
+        open = null;
+      }
+    } else {
+      let base = Math.max(quote, items.at(-1) ?? 0);
+      for (let m; col - base <= 3 && (m = LIST_MARKER.exec(raw.slice(i))); ) {
+        i += m[0].length;
+        col += m[0].length;
+        const mark = col;
+        skipSpace();
+        items.push((base = i === raw.length || col - mark > 4 ? mark + 1 : col));
+      }
+      const f = FENCE.exec(raw.slice(i));
+      if (f && col - base <= 3 && !(f[1][0] === "`" && f[2].includes("`"))) open = { ch: f[1][0], len: f[1].length, from: at, base, quote };
     }
     at += line.length + 1;
   }
