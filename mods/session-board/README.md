@@ -40,7 +40,7 @@ A session is update-ready when all five hold: no running agents, state is waitin
 - After `/clear` or a resume, the mod writes nothing for the old id and reads the id again on each beat. It writes under the new id when that binds. After session end it writes nothing.
 - The git call runs once per turn end and once per idle heartbeat: argv array, no shell, `core.fsmonitor=false`, `--no-optional-locks`, 5 s timeout.
 - These steps each wait at most 100 ms for their git, agent, context, and store work: session start, turn start, turn end, a permission ask, and the end of a tool call. The work then finishes on its own.
-- The 100 ms wait does not cover everything. At session start, `$.session.repo()` and `$.command.register()` are not bounded by it. At session end, the store deletes are not bounded by it.
+- The 100 ms wait does not cover everything. At session start, `$.session.repo()` and `$.command.register()` are not bounded by it. At session end, the store deletes are not bounded by it. On `/clear` or a resume, `$.session.repo()` is not bounded either.
 - A permission ask with no tool id writes nothing.
 - The pane refreshes the board on the heartbeat while it is open. It stops when the pane closes, or after 10 refreshes with no `/board` call.
 
@@ -86,8 +86,7 @@ Checked: the session id in `claude agents --json` equals the id the mod writes. 
 
 ## Limits
 
-- A session that started before the install does not appear until it restarts.
-- A session without the mod shows repo and state only.
+- A session without the mod shows on the board as "no detail", from the agents list. It shows repo and state only. It gets full detail after it loads the mod.
 - The store file name carries the install: a `--plugin-dir` run wrote `session-board_inline-<hash>.json`. Sessions loaded two ways probably do not share one file. Load every session the same way.
 - The running agent count is as of the last turn end or heartbeat. It can lag by 30 s.
 - A denied permission clears when the tool call returns, the same as an approved one. Turn end also clears it.
