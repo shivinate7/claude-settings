@@ -47,12 +47,12 @@ const msgs = [
   { role: 'user', text: 'thanks', toolUses: [] },
   edit('Edit', '/repo/other.js'), // no words in its turn
 ]
-assert.equal(noteFromMessages(msgs, 'src/login.js'), 'I will fix the login check.')
-assert.equal(noteFromMessages(msgs, 'README.md'), 'Then I will tidy the readme.')
-assert.equal(noteFromMessages(msgs, 'other.js'), '')
-assert.equal(noteFromMessages(msgs, 'login.js'), 'I will fix the login check.') // basename of a nested path still ends-with
-assert.equal(noteFromMessages(msgs, 'gin.js'), '') // no partial-name match
-assert.equal(noteFromMessages([], 'a'), '')
+assert.equal(noteFromMessages(msgs, 'C:/repo', 'src/login.js'), 'I will fix the login check.')
+assert.equal(noteFromMessages(msgs, '/repo', 'README.md'), 'Then I will tidy the readme.')
+assert.equal(noteFromMessages(msgs, '/repo', 'other.js'), '')
+assert.equal(noteFromMessages(msgs, 'C:/repo', 'login.js'), '') // a bare name is not the nested file
+assert.equal(noteFromMessages(msgs, '/repo', 'gin.js'), '') // no partial-name match
+assert.equal(noteFromMessages([], '/repo', 'a'), '')
 
 // truncation
 assert.equal(clipChars('abc', 10), 'abc')

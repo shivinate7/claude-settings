@@ -1,13 +1,16 @@
 export type Entry = {
   path: string
+  label: string
+  key: string
   add: number
   del: number
   lines: number
   diff: string
   isCut: boolean
   note: string
-  // turn: Claude's own words. model: one model call. pending: a call is running. none: no note.
-  source: 'turn' | 'model' | 'pending' | 'none'
+  // turn: Claude's own words. model: one model call. pending: a call is running.
+  // none: no note, with a reason. large: change too large. secret: file skipped, no diff kept.
+  source: 'turn' | 'model' | 'pending' | 'none' | 'large' | 'secret'
 }
 export type Report = {
   entries: Entry[]
