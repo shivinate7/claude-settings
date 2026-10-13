@@ -33,6 +33,11 @@ L1 = PLAN + "#phase-1-the-sweep"
 L2 = PLAN + "#phase-2-the-proof"
 REC = "decisions/new-rule.md"
 OLD = "decisions/old-rule.md"
+DOCS = "docs/decisions"  # a repo whose records live here passes --dir DOCS
+NESTED = DOCS + "/x.md"
+IGNORED = "docs/notdecisions/x.md"  # a folder that only contains the word
+SIBLING = "docs/decisionsX/x.md"  # a folder that starts with the word
+CSS = "src/index.css"  # a plan file with no markdown heading
 
 PLAN_TEXT = """# Build plan
 
@@ -98,15 +103,15 @@ class RulingKindTests(unittest.TestCase):
                            encoding="utf-8", errors="replace")
         return r.returncode, r.stdout + r.stderr
 
-    def assert_fails(self, rel, token):
-        rc, out = self.lint(rel)
+    def assert_fails(self, rel, token, *flags):
+        rc, out = self.lint(*flags, rel)
         self.assertEqual(rc, 1, out)
         self.assertIn("check_ruling_kind: FAIL:", out)
         self.assertIn(rel, out)
         self.assertIn(token.lower(), out.lower())
 
-    def assert_passes(self, rel):
-        rc, out = self.lint(rel)
+    def assert_passes(self, rel, *flags):
+        rc, out = self.lint(*flags, rel)
         self.assertEqual(rc, 0, out)
         self.assertNotIn("FAIL", out)
 
@@ -356,6 +361,102 @@ class RulingKindTests(unittest.TestCase):
         rc, out = self.lint("--root", os.path.join(self.tree, "caller-root"), REC)
         self.assertEqual(rc, 0, out)
         self.assertNotIn("FAIL", out)
+
+
+    # --dir: the records folder the lint checks. The default is decisions/. A repo whose records
+    # live in docs/decisions/ passes --dir docs/decisions. The default never checks that folder.
+
+    def css_plan(self):
+        # "#no-such-heading" has no space after the "#", so it is not a heading.
+        self.put(CSS, "body { color: black; }\n#no-such-heading { color: red }\n")
+
+    def test_dir_checks_records_in_the_named_folder(self):
+        self.css_plan()
+        cases = [
+            (record("Owner ruling. Ship it."), "Kind"),  # (a) no Kind line
+            (record("Kind: build\nPlan: src/index.css#no-such-heading (web)"),
+             "not a heading in src/index.css"),  # (b) slug missing from a file that exists
+        ]
+        for text, token in cases:
+            with self.subTest(token=token):
+                self.put(NESTED, text)
+                self.assert_fails(NESTED, token, "--dir", DOCS)
+
+    def test_dir_passes_a_valid_record_in_the_named_folder(self):
+        for kind, ruling in (("build", BUILD_OK), ("process", PROCESS_OK)):
+            with self.subTest(kind=kind):
+                self.put(NESTED, record(ruling))
+                self.assert_passes(NESTED, "--dir", DOCS)
+
+    def test_dir_ignores_folders_that_only_look_like_it(self):
+        # The named folder must exist, so it holds one valid record. The look-alikes hold none.
+        self.put(NESTED, record(BUILD_OK))
+        self.assert_passes(NESTED, "--dir", DOCS)
+        for rel in (IGNORED, SIBLING):
+            with self.subTest(rel=rel):
+                self.put(rel, record("Owner ruling. No kind line."))
+                self.assert_passes(rel, "--dir", DOCS)
+
+    def test_default_leaves_docs_decisions_unchecked(self):
+        # claude-settings keeps its behaviour: without --dir, only decisions/ is checked.
+        self.css_plan()
+        self.put(NESTED, record("Owner ruling. Ship it."))
+        self.assert_passes(NESTED)
+        self.put(NESTED, record("Kind: build\nPlan: src/index.css#no-such-heading (web)"))
+        self.assert_passes(NESTED)
+
+    def test_dir_checks_records_added_in_the_diff(self):
+        # The CI path: no file arguments, the lint reads the diff against --base.
+        self.commit_base()
+        self.put(NESTED, record("Owner ruling. Ship it."))
+        self.put(IGNORED, record("Owner ruling. No kind line."))
+        self.commit_change()
+        rc, out = self.lint("--dir", DOCS, "--base", "main")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("check_ruling_kind: FAIL: %s:" % NESTED, out)
+        self.assertNotIn(IGNORED, out)
+        rc, out = self.lint("--base", "main")  # default folder: the same diff passes
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("FAIL", out)
+
+
+    # --dir must name a folder that exists under the checkout, spelled as it is on disk. A check
+    # that cannot read its own input exits non-zero, and names the folder it was given.
+    # Case: on a case-insensitive disk "Decisions" resolves, so the spelling must be compared too.
+
+    def test_dir_that_names_no_usable_folder_fails(self):
+        self.put(REC, record(BUILD_OK))
+        for value in ("decision", "docs/decisions-old", ".", "", "Decisions"):
+            with self.subTest(dir=value):
+                rc, out = self.lint("--dir", value, REC)
+                self.assertNotEqual(rc, 0, out)
+                self.assertIn("'%s'" % value, out)
+                self.assertNotIn("Traceback", out)
+
+    def test_dir_that_names_no_usable_folder_fails_in_the_diff(self):
+        self.commit_base()
+        self.put(REC, record(BUILD_OK))
+        self.commit_change()
+        rc, out = self.lint("--dir", "decision", "--base", "main")
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("'decision'", out)
+        self.assertNotIn("Traceback", out)
+
+    def test_dir_that_names_a_file_fails(self):
+        # A file is not a records folder. Its name passes the listing check, so the lint must not.
+        self.put("decisions/x.md", record(BUILD_OK))
+        self.put(REC, record(BUILD_OK))
+        for value in ("CLAUDE.md", "decisions/x.md"):
+            with self.subTest(dir=value):
+                rc, out = self.lint("--dir", value, REC)
+                self.assertNotEqual(rc, 0, out)
+                self.assertIn("'%s'" % value, out)
+                self.assertNotIn("Traceback", out)
+
+    def test_default_and_named_records_folder_pass(self):
+        self.put(REC, record(BUILD_OK))
+        self.assert_passes(REC)
+        self.assert_passes(REC, "--dir", "decisions")
 
 
 if __name__ == "__main__":
