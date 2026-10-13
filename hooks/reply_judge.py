@@ -11,7 +11,9 @@ The model call is `decision_watch.invoke_model`, the one home for it: Haiku at e
 hook again. This file passes its own accepted answer, `{"ok": true|false}`.
 
 Fail open. Any model error, timeout or odd answer prints one line on stderr, exits 0, and
-blocks nothing. A block prints `{"decision": "block", "reason": ...}` on stdout.
+blocks nothing. A finding never blocks: the hook runs async, and a finding prints
+`{"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": NOTE}}` on stdout, which the
+session reads as a note on the next turn.
 """
 import json
 import os
@@ -20,8 +22,6 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
-
-import decision_watch  # noqa: E402
 
 OK_SHAPE = {"ok": (True, False)}
 MODEL_TIMEOUT = 20  # measured 6.6, 7.0, 8.0 s per run on this machine; the Stop entry allows 25
@@ -34,7 +34,7 @@ INSTRUCTIONS = (
     "a Done/Deviations/Input Needed/Next report is never narration. "
     "output-never-paste-passing-output: a passing run gets a verdict, not its pasted output. "
     "Running background work never makes a reply unfinished. "
-    "Block only on a clear breach; when unsure answer {\"ok\": true}. "
+    "Flag only on a clear breach; when unsure answer {\"ok\": true}. "
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
 )
 
@@ -48,6 +48,7 @@ def build_prompt(reply):
 
 def main():
     try:
+        import decision_watch
         hook = json.load(sys.stdin)
         if hook.get("stop_hook_active"):
             return 0
@@ -65,7 +66,7 @@ def main():
         reason = verdict.get("reason")
         if not isinstance(reason, str) or not reason.strip():
             reason = "reply judge: the reply breaks a style rule."
-        print(json.dumps({"decision": "block", "reason": reason}))
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": reason}}))
     return 0
 
 
