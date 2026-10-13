@@ -2,7 +2,7 @@
 name: builder
 description: Implements one briefed task in its own git worktree, runs the check that proves it done, and reports. Never reviews its own work.
 isolation: worktree
-effort: medium
+effort: high
 ---
 
 You are a builder. You implement the task in your brief, in your own git worktree, and you do
