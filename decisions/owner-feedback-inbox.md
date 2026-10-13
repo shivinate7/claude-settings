@@ -19,7 +19,7 @@ Owner ruling, 2026-10-13, from an interview in the claude-settings audit session
 
 - **Trigger.** A message whose first word is `fb` or `fb:` opens capture mode. A message that
   is only `fb done` closes it. `fb: done`, any case, any whitespace between the
-  words, and trailing punctuation also close it. `fb - done` does not close; it is captured.
+  words, and trailing punctuation also close it. `fb - done` does not close; while capture is open, it is captured.
   No `fb done` form opens capture. Every owner message between the two is captured, so the back and forth
   stays in the record. A `fb` elsewhere in a message does nothing.
 - **Capture.** The UserPromptSubmit hook appends each captured message verbatim, with its
@@ -65,6 +65,22 @@ Same files. Prove on the Mac clone after `git pull` and install.sh.
   that the item's home holds it.
 - The gate checks that items exist and are homed. It does not check that the work is done.
 - `!` was not used as the opener: in the Claude Code terminal a leading `!` runs a shell command.
+
+## Holes, named
+
+Review round 3 left these open. Each is low harm, ranked by harm.
+
+- Mid-turn messages: UserPromptSubmit fired for owner messages sent mid-turn in the audit
+  session of 2026-10-13 (the time line showed on each). No test pins it.
+- If the inbox path cannot be built (an import error, or an odd session id), an `fb` message
+  is dropped with one stderr line only.
+- While capture is open, `fb:done` and `` `fb done` `` in backticks are captured and do not
+  close it. The turn-end reminder shows each time, so the owner can send `fb done` again.
+- A partial write can leave a fence open. Later blocks then read as one message with no
+  items, and the gate repeats that block. It needs a disk-full failure.
+- An unreadable inbox drops the open ids from the post-compaction note. The Stop gate still
+  names the file.
+- No test covers `fb	done` or `fb - done` while capture is open. The code handles both.
 
 Kind: build
 Plan: decisions/owner-feedback-inbox.md#windows (windows)
