@@ -4737,8 +4737,8 @@ def merge_call_of(segment: str):
     return selector, repo
 
 
-DRAFT_PR_REASON = ("draft-pr: open every PR as a draft. Add --draft (or -d) to gh pr create, and "
-                   "mark the PR ready after review. CI skips drafts.")
+DRAFT_PR_REASON = ("draft-pr: open every PR as a draft. Add --draft (or -d) to gh pr create. "
+                   "Only the batch's integration PR goes ready; CI skips drafts.")
 
 
 # `gh pr create` flags that take a value; the next token is data, never a flag.

@@ -4553,18 +4553,22 @@ add("merge: a call of the merge tool on a green head is allowed", "allow",
 
 # =========================================================================== 5a. draft pull requests
 #
-# `draft-pr`. Every pull request opens as a draft, and CI skips draft pull requests. The orchestrator
-# marks a pull request ready after review, so CI runs once per reviewed change. A `gh pr create`
-# without `--draft` (or `-d`) is refused, and the refusal names `--draft` and the step after it.
+# `draft-pr`. Every pull request opens as a draft, and CI skips draft pull requests. A lane's pull
+# request stays a draft. Only the batch's integration pull request goes ready, so CI runs once per
+# batch (owner ruling 2026-10-13). A `gh pr create` without `--draft` (or `-d`) is refused, and the
+# refusal names `--draft` and the integration pull request. It never names going ready for a lane.
 
-DRAFT_REMEDY = ("--draft", "mark the PR ready after review")
+DRAFT_REMEDY = ("--draft", "integration PR")
+DRAFT_LACKS = ("ready after review",)
 sh("draft-pr: a pull request opened without --draft is refused",
-   "gh pr create --title x --body y", "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY)
+   "gh pr create --title x --body y", "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY,
+   lacks=DRAFT_LACKS)
 sh("draft-pr: short flags -t and -b without -d are refused",
-   "gh pr create -t x -b y", "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY)
+   "gh pr create -t x -b y", "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY,
+   lacks=DRAFT_LACKS)
 sh("draft-pr: a bash -c wrapper without --draft is refused",
    "bash -c 'gh pr create --title x --body y'", "deny", "draft-pr", cwd=NOGIT,
-   carries=DRAFT_REMEDY)
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 sh("draft-pr: --draft is allowed", "gh pr create --draft --title x", "allow", cwd=NOGIT)
 sh("draft-pr: -d is allowed", "gh pr create -d -t x", "allow", cwd=NOGIT)
 sh("draft-pr: marking a pull request ready is allowed", "gh pr ready 12", "allow", cwd=NOGIT)
@@ -4579,16 +4583,16 @@ for _command in (
     "gh pr create --draft --draft=F --title x", "gh pr create -d -d=false --title x",
 ):
     sh("draft-pr: bypass refused, " + _command, _command, "deny", "draft-pr", cwd=NOGIT,
-       carries=DRAFT_REMEDY)
+       carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 for _command in ("gh pr create --draft=true --title x", "gh pr create --title x -d"):
     sh("draft-pr: bypass allowed, " + _command, _command, "allow", cwd=NOGIT)
 # The MCP create tool carries its own `draft` field, so it is judged by that field.
 add("draft-pr: MCP create with no draft field is refused", "deny", rule="draft-pr",
     tool="mcp__github__create_pull_request", cwd=NOGIT, title="x", head="h", base="main",
-    repo="x", owner="y", carries=("draft", "mark the PR ready after review"))
+    repo="x", owner="y", carries=("draft", "integration PR"), lacks=DRAFT_LACKS)
 add("draft-pr: MCP create with draft false is refused", "deny", rule="draft-pr",
     tool="mcp__github__create_pull_request", cwd=NOGIT, title="x", head="h", base="main",
-    repo="x", owner="y", draft=False, carries=("draft", "mark the PR ready after review"))
+    repo="x", owner="y", draft=False, carries=("draft", "integration PR"), lacks=DRAFT_LACKS)
 add("draft-pr: MCP create with draft true is allowed", "allow",
     tool="mcp__github__create_pull_request", cwd=NOGIT, title="x", head="h", base="main",
     repo="x", owner="y", draft=True)

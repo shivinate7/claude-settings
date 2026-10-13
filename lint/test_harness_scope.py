@@ -167,6 +167,43 @@ class Scope(unittest.TestCase):
         for p in ("README.md", "decisions/some-record.md"):
             self.assertFlags(run([p]), want_false=["guard"])
 
+    # Guard family: hooks/guard_<anything>.py is split out of hooks/guard.py. Each sibling must set
+    # exactly the flags guard.py sets, as a new file and as an edit. Today the generic hooks/* rule
+    # gives a new sibling no sweep flag, and an edited one no Windows or shell job.
+    GUARD_SIBLINGS = ["hooks/guard_core.py", "hooks/guard_merge.py", "hooks/guard_rules.py"]
+
+    def true_set(self, got):
+        return {n for n in ALL if got[n] == "true"}
+
+    def test_guard_sibling_new_file_sets_the_same_flags_as_guard_py(self):
+        want = run(["hooks/guard.py"])
+        self.assertFlags(want, want_true=["gates_windows", "gates_windows_rest", "gates_macos", "code", "guard", "sweep"],
+                         want_false=["gates_windows_merge", "pointer_windows"])
+        for p in self.GUARD_SIBLINGS:
+            with self.subTest(path=p):
+                self.assertEqual(run([p]), want)
+
+    def test_guard_sibling_edit_sets_the_same_flags_as_guard_py(self):
+        want = run(["hooks/guard.py"], existing=["hooks/guard.py"])
+        self.assertFlags(want, want_true=["gates_windows", "gates_windows_rest", "gates_macos", "code", "guard", "sweep"],
+                         want_false=["gates_windows_merge", "shell_macos", "pointer_windows"])
+        for p in self.GUARD_SIBLINGS:
+            with self.subTest(path=p):
+                self.assertEqual(run([p], existing=[p]), want)
+
+    # Control: the guard test file keeps today's flags. A family rule must not catch it.
+    def test_guard_test_file_keeps_its_current_flags(self):
+        p = "hooks/guard_test_x.py"
+        self.assertEqual(self.true_set(run([p])),
+                         {"gates_windows", "gates_windows_rest", "gates_macos", "shell_macos", "code", "guard"})
+        self.assertEqual(self.true_set(run([p], existing=[p])), {"gates_windows_rest", "gates_macos", "code", "guard"})
+
+    # Control: the guard selector test keeps today's flags.
+    def test_test_guard_keeps_its_current_flags(self):
+        p = "hooks/test_guard.py"
+        self.assertEqual(self.true_set(run([p])), {"gates_windows", "gates_macos", "shell_macos", "code", "guard"})
+        self.assertEqual(self.true_set(run([p], existing=[p])), {"gates_windows", "gates_macos", "code", "guard"})
+
 
 if __name__ == "__main__":
     unittest.main()
