@@ -179,18 +179,21 @@ def inbox_note(session_id):
         paths = local_time.inbox_paths(session_id)
         if paths is None:
             return ""
-        note = ""
+    except Exception as e:
+        sys.stderr.write("precompact_handoff: inbox note failed: %s\n" % e)
+        return ""
+    note = ""
+    try:  # an unreadable inbox must not hide the "still open" line below
         if os.path.exists(paths[0]):
             with open(paths[0], encoding="utf-8") as f:
                 ids = feedback_gate.open_ids(feedback_gate.parse(f.read()))
             if ids:
                 note += " Open feedback items: %s. Keep each in the handoff." % ", ".join(ids)
-        if os.path.exists(paths[1]):
-            note += " Feedback capture is still open: the owner has not sent `fb done`."
-        return note
     except Exception as e:
         sys.stderr.write("precompact_handoff: inbox note failed: %s\n" % e)
-        return ""
+    if os.path.exists(paths[1]):  # exists() does not raise
+        note += " Feedback capture is still open: the owner has not sent `fb done`."
+    return note
 
 
 def run_reorient(payload):

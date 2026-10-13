@@ -9,7 +9,9 @@ The US rule is coded here, not read from zoneinfo: Windows Python often has no t
 Advisory, fail-open: any error prints one stderr line and exits 0.
 
 This hook is also the owner feedback inbox's capture (decision owner-feedback-inbox). A UserPromptSubmit
-prompt whose first word is `fb` or `fb:` opens capture; a prompt that is only `fb done` closes it.
+prompt whose first word is `fb` or `fb:` opens capture; a prompt that is only `fb done` closes it
+(also `fb:`, any whitespace before `done`, any case, trailing punctuation). With capture closed, no
+`fb ... done` form opens it; with capture open, `fb - done` is captured as a message.
 While open, each prompt is appended verbatim to <config dir>/handoffs/<session_id>.inbox.md in a
 backtick fence longer than any backtick run in the text. Open state is the marker file
 <session_id>.inbox.open beside it. `--subagent` never reads stdin and never captures. The gate that
@@ -65,21 +67,26 @@ def capture(raw, stamp):
         return
     inbox, marker = paths
     is_open = os.path.exists(marker)
-    if re.fullmatch(r"fb done[\W_]*", prompt.strip(), re.I):  # any case, trailing punctuation
-        if is_open:
-            os.remove(marker)
-        return
-    if not is_open and (prompt.split() or [""])[0] not in ("fb", "fb:"):
-        return
-    fence = "`" * max([3] + [len(r) + 1 for r in re.findall(r"`+", prompt)])
+    said = prompt.strip()
+    # JSON can carry a lone surrogate, which UTF-8 cannot encode: save U+FFFD in its place.
+    prompt = re.sub("[\ud800-\udfff]", "�", prompt)
     try:
+        if re.fullmatch(r"fb:?\s+done[\W_]*", said, re.I):  # any case, trailing punctuation
+            if is_open:
+                os.remove(marker)
+            return
+        if not is_open and ((prompt.split() or [""])[0] not in ("fb", "fb:")
+                            or re.fullmatch(r"fb[\W_]+done[\W_]*", said, re.I)):
+            return  # closed: only an opener opens, and never a near-miss of `fb done`
+        fence = "`" * max([3] + [len(r) + 1 for r in re.findall(r"`+", prompt)])
         os.makedirs(os.path.dirname(inbox), exist_ok=True)
         with open(inbox, "ab") as f:  # bytes: "\n" stays "\n" on Windows, and the text stays verbatim
             f.write(("### %s\n%s\n%s\n%s\n" % (stamp, fence, prompt, fence)).encode("utf-8"))
         if not is_open:
             open(marker, "wb").close()
-    except OSError as e:  # stderr never reaches the owner or the session: say it on stdout
-        print("Feedback capture: this message was not saved (%s). Jot it by hand into the handoff." % e)
+    except (OSError, ValueError) as e:  # stderr never reaches the owner or the session: use stdout
+        print("Feedback capture: this message was not saved, or capture state did not change (%s)."
+              " Jot it by hand into the handoff." % e)
 
 
 def main(argv):
