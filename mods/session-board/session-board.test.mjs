@@ -349,7 +349,7 @@ function host(opts) {
     agentListThrow: false, usageThrow: false, hang: false, submitFails: false,
     python: null, context: { window: 1000, percent: 42 }, env: {}, placed: true,
     hooks: [], beats: [], registered: [], opened: [], logs: [], submitted: [], pythonCalls: [], pythonOpts: [], agentCalls: [], writes: [], gitCalls: [], gitHang: false,
-    gitManual: false, gitPending: [], hangStore: false, hangId: false,
+    gitManual: false, gitPending: [], hangStore: false, hangId: false, holdStore: false, held: [], gitDelayMs: 0,
     ...opts,
   }
   h.store = new Map(opts.seed ?? [])
@@ -359,7 +359,12 @@ function host(opts) {
   h.$ = {
     store: {
       get: async k => { const v = h.store.get(k); if (v === THROWS) throw new Error('store read failed'); return clone(v) },
-      set: async (k, v) => { h.writes.push(k); if (h.hangStore) return never(); h.store.set(k, clone(v)) },
+      set: async (k, v) => {
+        h.writes.push(k)
+        if (h.hangStore) return never()
+        if (h.holdStore) await new Promise(go => h.held.push({ go })) // held until the test releases it, then lands
+        h.store.set(k, clone(v))
+      },
       delete: async k => { h.store.delete(k) },
       keys: async () => [...h.store.keys()],
     },
@@ -382,6 +387,7 @@ function host(opts) {
           if (h.gitManual) return new Promise(resolve => h.gitPending.push({ resolve })) // held until the test lands it
           if (h.gitFail === 'throw') throw new Error('git timed out')
           if (h.gitFail === 'exit') return { exitCode: 128, stdout: '', stderr: 'fatal: not a git repository' }
+          h.now += h.gitDelayMs // a slow read moves the clock while it runs
           return { exitCode: 0, stdout: h.git, stderr: '' }
         }
         if (argv[0] === 'claude') { h.agentCalls.push(argv); return { exitCode: h.agentsExit, stdout: typeof h.agents === 'string' ? h.agents : JSON.stringify(h.agents), stderr: '' } }
@@ -1029,6 +1035,73 @@ await test('README: calls the origin check a block-list', () => {
 await test('README: a sentence says a denied permission clears when the call returns', () => {
   const sentences = README.split(/[.\n]/)
   assert.ok(sentences.some(s => /denied/i.test(s) && /clear/i.test(s) && /return/i.test(s)), 'no sentence says a denied permission clears when the call returns')
+})
+
+// ---- review round 4 pins (PR 380)
+
+// A pure helper the builder must export; the name is this test's choice (see the report).
+const need = name => {
+  if (!(name in lib)) throw new Error(`missing export ${name}`)
+  return lib[name]
+}
+const DAY_OLD_SEED = () => [
+  ['sess:' + OTHER, raw({ repo: 'other', at: NOW - 86_400_001 })],
+  ['detail:' + OTHER, { v: 1, at: NOW - 86_400_001, recent: [], files: 0, agents: [], spawns: {}, perm: { ask: 0, deny: 0, wait: 0 }, receipt: null }],
+]
+
+await test('sweep: unusable claude agents output with exit 0 removes nothing', async () => {
+  for (const out of ['Update available\n[]', '', '{"sessions":[]}', '"[]"', '5']) {
+    const h = await start({ agents: out, seed: DAY_OLD_SEED() })
+    await boardText(h)
+    same([h.store.has('sess:' + OTHER), h.store.has('detail:' + OTHER)], [true, true], `records after output ${JSON.stringify(out)}`)
+  }
+})
+
+await test('sweep: a valid empty array is a real list with no live session, so day-old records go', async () => {
+  const h = await start({ agents: [], seed: DAY_OLD_SEED() })
+  await boardText(h)
+  same([h.store.has('sess:' + OTHER), h.store.has('detail:' + OTHER)], [false, false], 'records after []')
+})
+
+await test('clear: a flush that holds the old id and lands after the clear does not recreate the old entry', async () => {
+  const h = await start()
+  await fire(h, 'session.start', {})
+  h.holdStore = true
+  const turn = fire(h, 'turn.start', { text: '', turnId: 't1' }) // its flush holds at the store write
+  await settle()
+  same(h.held.length, 1, 'flushes held at a write')
+  await fire(h, 'session.end', { sessionId: ID, reason: 'clear' })
+  for (const g of h.held) g.go() // the held write lands after the clear
+  await turn
+  await settle()
+  same(h.store.has('sess:' + ID), false, 'old entry after the held flush landed')
+})
+
+await test('git back-off: a quick turn-end read resets the interval to 30 s; the next idle read is due 30 s later', async () => {
+  const h = await start()
+  await fire(h, 'session.start', {})
+  h.gitDelayMs = 6000 // a slow idle read: the interval doubles
+  h.now += 30_000
+  await tickBeat(h)
+  h.gitDelayMs = 0
+  await fire(h, 'turn.complete', { durationMs: 500, isAborted: false, turnId: 't1' }) // a quick read resets it
+  h.now += 30_000
+  const before = h.gitCalls.length
+  await tickBeat(h)
+  same(h.gitCalls.length - before, 1, 'idle git reads due 30 s after the quick turn-end read')
+})
+
+// Config folder for safe-stop: CLAUDE_CONFIG_DIR, else USERPROFILE, else HOME on Windows.
+await test('config folder: on win32, USERPROFILE is used before the MSYS-style HOME', () => {
+  const configDir = need('configDir')
+  const got = configDir({ HOME: '/c/Users/x', USERPROFILE: 'C:\\Users\\x' }, 'win32')
+  assert.match(String(got), /^C:[\\/]Users[\\/]x[\\/]\.claude$/, `configDir on win32 is ${JSON.stringify(got)}`)
+})
+
+await test('config folder: CLAUDE_CONFIG_DIR wins; a posix HOME gives HOME/.claude', () => {
+  const configDir = need('configDir')
+  same(configDir({ CLAUDE_CONFIG_DIR: 'D:\\cfg', HOME: '/c/Users/x', USERPROFILE: 'C:\\Users\\x' }, 'win32'), 'D:\\cfg', 'CLAUDE_CONFIG_DIR')
+  same(configDir({ HOME: '/home/u' }, 'linux'), '/home/u/.claude', 'posix HOME')
 })
 
 const fails = results.filter(r => r.startsWith('FAIL')).length
