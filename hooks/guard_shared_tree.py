@@ -474,6 +474,20 @@ def under_session_scratchpad(where: str, session_id: str) -> bool:
     return False
 
 
+def in_any_session_scratchpad(where: str) -> bool:
+    """True when `where` resolves into the scratchpad of ANY session under the temp folder."""
+    try:
+        real = os.path.realpath(where)
+        temp = os.path.realpath(tempfile.gettempdir())
+    except Exception:
+        return False
+    if not (os.path.normcase(real) + os.sep).startswith(os.path.normcase(temp) + os.sep):
+        return False
+    parts = real.split(os.sep)
+    return any(parts[i + 1] == "scratchpad" and SESSION_ID_RE.match(parts[i])
+               for i in range(len(parts) - 1))
+
+
 TREE_DENY_REASON = (
     "Rule (shared trees): this command throws away work in a checkout that other "
     "sessions and the owner share, and no step puts it back. "

@@ -189,7 +189,7 @@ try:
     from guard_shared_tree import (
         PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
         checkout_conflict_resolve, names_only_files, one_place, session_id_of, shared_tree_match,
-        stash_takes_the_stack, subject_state, under_session_scratchpad,
+        in_any_session_scratchpad, stash_takes_the_stack, subject_state, under_session_scratchpad,
     )
     _loading = "guard_pointer"
     from guard_pointer import (
@@ -1017,8 +1017,14 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
     if rel is None:
         return ""
     if role == AUTHOR_ROLE:
-        if author_path_ok(rel) or under_session_scratchpad(_expanded(target, cwd), session_id):
+        full = _expanded(target, cwd)
+        if author_path_ok(rel) or under_session_scratchpad(full, session_id):
             return ""
+        # `session_id` is the parent's, the same for a subagent (decision
+        # an-agent-outside-its-home-tree-must-stop), and so is the id in the scratchpad path.
+        # Another session's scratchpad is neither this one's nor "outside a repository".
+        if in_any_session_scratchpad(full):
+            return target
         return "" if repo_rel(target, cwd, outside=False) is None else target
     if role == WRITER_ROLE:
         return "" if rel.lower().endswith(".md") else target

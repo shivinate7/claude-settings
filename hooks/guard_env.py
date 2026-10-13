@@ -70,17 +70,22 @@ ENV_EXISTENCE_COMMANDS = ("ls", "test", "[", "[[")
 ENV_TEXT_COMMANDS = ("echo", "printf")
 
 
-ENV_PATTERN_FLAGS = ("-e", "--regexp")
+# How a search or script command reads its flags. A flag that takes the PATTERN or the program (`-e`,
+# `--regexp`, `--expression`, `--source`) marks the word it carries as no path. A flag that names a
+# FILE of patterns or of a program (`-f`, `--file`) marks nothing: that file is read, so it is
+# judged. Once either one is met, every plain word is a file, and none is read as the pattern.
+ENV_PATTERN_LONG = ("--regexp", "--expression", "--source")
+ENV_FILE_LONG = ("--file",)
 # A flag's own value stands before the pattern and is never it: a count, a glob, a file filter.
-ENV_PATTERN_VALUE_FLAGS = (
-    "-A", "-B", "-C", "-m", "-g", "-d", "--max-count", "--context", "--after-context",
-    "--before-context", "--include", "--exclude", "--exclude-dir", "--glob", "--max-depth",
-    "--max-filesize", "--type",
+ENV_VALUE_LONG = (
+    "--max-count", "--context", "--after-context", "--before-context", "--include", "--exclude",
+    "--exclude-dir", "--glob", "--max-depth", "--max-filesize", "--type",
 )
+ENV_VALUE_SHORT = "ABCmgd"
 # `sed` and `awk` read a script, and its first plain word is a regex, never a path. `awk -F` and
 # `-v` take a value of their own.
 ENV_SCRIPT_COMMANDS = ("sed", "awk", "gawk", "mawk", "nawk")
-ENV_SCRIPT_VALUE_FLAGS = ("-F", "-v")
+ENV_SCRIPT_VALUE_SHORT = "Fv"
 
 # The message or body of a commit or a pull request is text. Its value is blanked before the words
 # are read, so an env name in prose reads no contents. A substitution in the value is cut out
@@ -379,27 +384,63 @@ def _env_parts(piece: str):
 
 
 def _pattern_words(words, position: int, command: str):
-    """Return the indexes of the words a search command reads as its PATTERN, never as a path.
+    """Read the flags of a search or script command. Return (the indexes of the words that are a
+    PATTERN or a program, never a path, {index: the file name glued to a flag word}).
 
-    With `-e` or `--regexp`, the word after each one is a pattern. Without, the first plain word
-    is. A flag's own value (`-A 3`) can stand first and is then skipped in the pattern's place,
-    which only ever leaves a real path judged, never hides one.
+    The words after the command go flag by flag. A short cluster is read letter by letter, so `-nf`
+    and `-ex` are seen. `-e` and the long pattern flags take the pattern (the word itself when it
+    is attached, else the next word). `-f` and `--file` take a FILE: attached, it goes in the
+    second result to be judged as a path, and otherwise the next word is left to be judged. Either
+    kind of flag settles where the pattern comes from, so every plain word after it is a file.
+    Else the first plain word is the pattern. A value flag (`-A 3`, `--include x`) skips its value,
+    which stays judged as a path, so an error here only ever judges a word and never hides one.
     """
-    if any(w in ("-f", "--file") or w.startswith("--file=") for w in words[position + 1:]):
-        return set()  # patterns come from a file: its name is a path, and every word is judged
-    marked = {i + 1 for i, w in enumerate(words) if w in ENV_PATTERN_FLAGS and i > position}
-    if marked:
-        return marked
-    value_flags = ENV_PATTERN_VALUE_FLAGS + (
-        ENV_SCRIPT_VALUE_FLAGS if words[position] in ENV_SCRIPT_COMMANDS else ())
-    for i in range(position + 1, len(words)):
-        if words[i - 1] == "--" and i - 1 > position:
-            return {i}  # after a bare `--`, the next word is the pattern even when it starts `-`
-        if (words[i].startswith("-") or REDIRECT.fullmatch(words[i])
-                or REDIRECT.fullmatch(words[i - 1]) or words[i - 1] in value_flags):
+    skip, glued, plain, given, ended = set(), {}, [], False, False
+    value_short = ENV_VALUE_SHORT + (ENV_SCRIPT_VALUE_SHORT if command in ENV_SCRIPT_COMMANDS else "")
+    i = position + 1
+    while i < len(words):
+        word = words[i]
+        if REDIRECT.fullmatch(word):
+            i += 2
             continue
-        return {i}
-    return set()
+        if ended or not word.startswith("-") or word == "-":
+            plain.append(i)
+            i += 1
+            continue
+        if word == "--":
+            ended = True
+            i += 1
+            continue
+        if word.startswith("--"):
+            name, attached, _ = word.partition("=")
+            if name in ENV_PATTERN_LONG:
+                given = True
+                skip.update({i} if attached else {i + 1})
+            elif name in ENV_FILE_LONG:
+                given = True
+            i += 1 if attached or name not in ENV_PATTERN_LONG + ENV_FILE_LONG + ENV_VALUE_LONG else 2
+            continue
+        step = 1
+        for k, letter in enumerate(word[1:], 1):
+            rest = word[k + 1:]
+            if letter == "e":
+                given = True
+                skip.update({i} if rest else {i + 1})
+                step = 1 if rest else 2
+                break
+            if letter == "f":
+                given = True
+                if rest:
+                    glued[i] = rest
+                step = 1 if rest else 2
+                break
+            if letter in value_short:
+                step = 1 if rest else 2
+                break
+        i += step
+    if not given and plain:
+        skip.add(plain[0])
+    return skip, glued
 
 
 def _assignment_end(words, position: int) -> int:
@@ -570,8 +611,9 @@ def _env_flat(cmd: str, text_ok: bool = False):
             # A text command's arguments are data. A redirect onto an environment file is refused
             # below, first.
             text_to_file = command in ENV_TEXT_COMMANDS and text_ok and not piped
-            patterns = (_pattern_words(words, position, command)
-                        if command in ENV_PATTERN_COMMANDS + ENV_SCRIPT_COMMANDS else ())
+            patterns, glued = (_pattern_words(words, position, command)
+                               if command in ENV_PATTERN_COMMANDS + ENV_SCRIPT_COMMANDS
+                               else (set(), {}))
             # An awk `-v name=value` value that holds a glob is a regex, as a pattern is. A plain
             # env name there stays judged: awk can open it. ACCEPTED LIMIT: a glob value that
             # could name an env file is cleared.
@@ -584,7 +626,7 @@ def _env_flat(cmd: str, text_ok: bool = False):
                     continue
                 prefix, assigned, rest = word.partition("=")
                 flag = prefix if assigned and prefix.startswith("-") else ""
-                named = env_reference(rest if assigned else word)
+                named = env_reference(glued[index] if index in glued else rest if assigned else word)
                 if not named:
                     continue
                 previous = words[index - 1] if index else ""
