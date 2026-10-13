@@ -70,6 +70,9 @@ with `/<sha>/`, or set `CLAUDE_SETTINGS_REF=<sha>` as an environment variable.
 * In a cloud session, ask Claude to run `echo $CLAUDE_CODE_SUBAGENT_MODEL`. Expect `sonnet`.
 * On Windows in copy mode, check `~\.claude\claude-settings-install.log` for a dated line from
   the last run.
+  The line reads `settings.json=<mode> agents/lint=<mode>`. A mode is `symlink`, `copy`, or `kept`.
+  `kept` means a replace failed (a file lock, say) and nothing was copied, so the old files stay in
+  place. The run prints why. Run `install.ps1` again after you close the lock.
 
 ## How a change reaches you
 

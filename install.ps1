@@ -199,6 +199,7 @@ $FirstLocalRun = -not (Test-Path $CopyMarker)
 function Write-CopyMarker { [IO.File]::WriteAllText($CopyMarker, '') }
 
 $AgentCopied = $false
+$AgentFailed = $false
 
 # One home for every symlink try. CLAUDE_SETTINGS_FORCE_COPY=1 makes it throw, so copy mode
 # runs on any machine (install-no-gap.test.ps1).
@@ -217,50 +218,76 @@ function Remove-Leftover([string]$Path) {
     else { Remove-Item -LiteralPath $Path -Force }
 }
 
-# No-gap replace: a real file is never removed first, so the gate hooks never see a missing
-# script. A link is made at "$Dest.new", then moved onto $Dest. With no link, the file is
-# copied over $Dest in place. A failed step (a file lock, say) leaves the old file in place;
-# the failure is logged and the run goes on. Returns 'linked', 'copied', or 'failed'.
+# Moves the file or link $From onto $To in one OS call (MoveFileEx, REPLACE_EXISTING). $To is
+# replaced as a name: a link at $To is replaced, never followed, and no moment has no file at
+# $To. Move-Item -Force is not used: PowerShell 5.1 may delete $To before it moves.
+function Move-OverFile([string]$From, [string]$To) {
+    if ($env:OS -ne 'Windows_NT') { Move-Item -LiteralPath $From -Destination $To -Force; return }
+    if (-not ('ClaudeSettingsMove' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+public static class ClaudeSettingsMove {
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    public static extern bool MoveFileEx(string from, string to, int flags);
+}
+'@
+    }
+    if (-not [ClaudeSettingsMove]::MoveFileEx($From, $To, 1)) {
+        throw (New-Object ComponentModel.Win32Exception([Runtime.InteropServices.Marshal]::GetLastWin32Error())).Message
+    }
+}
+
+# No-gap replace. Two routes, and $Dest is never absent on either.
+#  - A real file left by an earlier run of this installer (not the first local run) is
+#    refreshed in place with Copy-Item. It is not relinked: Windows reports a rename over a
+#    name as a Deleted event on that name, and install-no-gap.test.ps1 counts that as a gap.
+#    Named limit: such a file stays a copy until a person deletes it.
+#  - Anything else (a link, a missing name, a person's own file on the first run, which
+#    is already backed up): the new file or link is built at "$Dest.new", then moved onto
+#    $Dest in one call (Move-OverFile). A failed step (a file lock, say) leaves $Dest as it
+#    was. The failure is logged and the run goes on. Returns 'linked', 'copied', or 'failed'.
 function Install-File([string]$Src, [string]$Dest) {
+    $cur = Get-Item -LiteralPath $Dest -Force -ErrorAction SilentlyContinue
+    if ($cur -and -not $cur.PSIsContainer -and -not $cur.LinkType -and -not $FirstLocalRun) {
+        try { Copy-Item -LiteralPath $Src -Destination $Dest -Force; return 'copied' }
+        catch { Log "could not refresh $Dest ($($_.Exception.Message)); the next run tries again"; return 'failed' }
+    }
     $new = "$Dest.new"
     try {
         Remove-Leftover $new
-        try { New-Link $new $Src } catch { $new = $null }
-        if ($new) {
-            Move-Item -LiteralPath $new -Destination $Dest -Force
-            return 'linked'
-        }
-        # No link: copy over $Dest in place. A copy over a real file leaves no moment with
-        # no file. A link at $Dest goes first, since a copy writes through it onto the
-        # file it points at.
-        $cur = Get-Item -LiteralPath $Dest -Force -ErrorAction SilentlyContinue
-        if ($cur -and $cur.LinkType) { Remove-Item -LiteralPath $Dest -Force }
-        Copy-Item -LiteralPath $Src -Destination $Dest -Force
-        return 'copied'
+        try { New-Link $new $Src; $how = 'linked' }
+        catch { $how = 'copied'; Copy-Item -LiteralPath $Src -Destination $new -Force }
+        Move-OverFile $new $Dest
+        return $how
     } catch {
-        try { Remove-Leftover "$Dest.new" } catch { }
-        Log "could not replace $Dest ($($_.Exception.Message)); old file left in place"
+        $err = $_.Exception.Message
+        try { Remove-Leftover $new } catch { Log "could not remove $new ($($_.Exception.Message)); left behind" }
+        Log "could not replace $Dest ($err); $Dest unchanged"
         return 'failed'
     }
 }
 
-# Same for a directory. A real directory from an earlier copy is refreshed in place (the
-# test watches for a rename of the name too). Otherwise: build at "$Dest.new", rename $Dest
-# to $Old, rename the new one to $Dest, then remove $Old (unless $KeepOld: it is a backup).
-# If the second rename fails the first is undone. Returns 'linked', 'copied', or 'failed'.
+# Same for a directory. A real directory from an earlier copy is refreshed in place when no
+# link can be made (the test watches for a rename of the name too). Otherwise: build at
+# "$Dest.new", rename $Dest to $Old, rename the new one to $Dest, then remove $Old (unless
+# $KeepOld: it is a backup). If the second rename fails the first is undone.
+# Named gap: Windows cannot swap a directory in one call, so a real directory replaced by a
+# link (or a link by a copy) is absent for the time between the two renames. Skills are not
+# gate scripts; no hook fails closed on one. Returns 'linked', 'copied', or 'failed'.
 function Install-Dir([string]$Src, [string]$Dest, [string]$Old, [bool]$KeepOld) {
     $new = "$Dest.new"
-    $moved = $false
+    $state = 'unchanged'   # unchanged | refreshing | moved-away | rollback-failed
+    $how = 'copied'
     try {
         Remove-Leftover $new
         if (-not $KeepOld) { Remove-Leftover $Old }
         try { New-Link $new $Src; $how = 'linked' }
         catch {
-            $how = 'copied'
             $cur = Get-Item -LiteralPath $Dest -Force -ErrorAction SilentlyContinue
             if ($cur -and $cur.PSIsContainer -and -not $cur.LinkType -and -not $KeepOld) {
                 # A real directory from an earlier copy: refresh it in place, so the name is
                 # never renamed away. Copy first, then prune what the source no longer has.
+                $state = 'refreshing'
                 Get-ChildItem -LiteralPath $Src -Force | Copy-Item -Destination $Dest -Recurse -Force
                 $want = @{}
                 foreach ($f in @(Get-ChildItem -LiteralPath $Src -Recurse -Force)) { $want[$f.FullName.Substring($Src.Length)] = $true }
@@ -273,16 +300,29 @@ function Install-Dir([string]$Src, [string]$Dest, [string]$Old, [bool]$KeepOld) 
             Copy-Item -LiteralPath $Src -Destination $new -Recurse -Force
         }
         if (Get-Item -LiteralPath $Dest -Force -ErrorAction SilentlyContinue) {
-            [IO.Directory]::Move($Dest, $Old); $moved = $true
+            [IO.Directory]::Move($Dest, $Old); $state = 'moved-away'
         }
         try { [IO.Directory]::Move($new, $Dest) }
-        catch { if ($moved) { [IO.Directory]::Move($Old, $Dest) }; throw }
+        catch {
+            $e = $_
+            if ($state -eq 'moved-away') {
+                try { [IO.Directory]::Move($Old, $Dest); $state = 'unchanged' }
+                catch { $state = 'rollback-failed'; Log "could not restore $Dest from $Old ($($_.Exception.Message))" }
+            }
+            throw $e
+        }
     } catch {
-        try { Remove-Leftover $new } catch { }
-        Log "could not replace $Dest ($($_.Exception.Message)); left as it was"
+        $err = $_.Exception.Message
+        try { Remove-Leftover $new } catch { Log "could not remove $new ($($_.Exception.Message)); left behind" }
+        $left = switch ($state) {
+            'refreshing'      { "$Dest may be partly refreshed; the next run finishes it" }
+            'rollback-failed' { "$Dest is missing; the old copy is at $Old" }
+            default           { "$Dest unchanged" }
+        }
+        Log "could not replace $Dest ($err); $left"
         return 'failed'
     }
-    if ($moved -and -not $KeepOld) {
+    if ($state -eq 'moved-away' -and -not $KeepOld) {
         try { Remove-Leftover $Old } catch { Log "could not remove $Old ($($_.Exception.Message)); left behind" }
     }
     return $how
@@ -312,7 +352,7 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
             $keep = [bool]($cur -and $FirstLocalRun)
             $old  = if ($keep) { $bak } else { "$dest.old" }
             $how  = Install-Dir $src.FullName $dest $old $keep
-            if ($how -eq 'failed') { continue }
+            if ($how -eq 'failed') { $AgentFailed = $true; continue }
             if ($keep) { Log "existing $dest moved to $bak" }
             if ($how -eq 'linked') {
                 Log "linked $dest -> $($src.FullName)"
@@ -354,6 +394,8 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
         } elseif ($how -eq 'copied') {
             $AgentCopied = $true
             Log "copied $dest (symlink not permitted)"
+        } else {
+            $AgentFailed = $true
         }
     }
     foreach ($entry in @(Get-ChildItem -Path $destDir -File -ErrorAction SilentlyContinue)) {
@@ -379,7 +421,7 @@ $TargetJson = Join-Path $ClaudeDir 'settings.json'
 $item = Get-Item $TargetJson -ErrorAction SilentlyContinue
 if ($item -and $item.LinkType -eq 'SymbolicLink' -and $item.Target -eq $SrcJson) {
     Log "$TargetJson already links to $SrcJson"
-    $AgentsMode = if ($AgentCopied) { 'copy' } else { 'symlink' }
+    $AgentsMode = if ($AgentCopied) { 'copy' } elseif ($AgentFailed) { 'kept' } else { 'symlink' }
     $HookMode = 'not needed'
     if ($AgentCopied) { $HookMode = Install-PostMergeHook }
     Write-InstallLog -SettingsMode 'symlink' -AgentsMode $AgentsMode -HookMode $HookMode
@@ -398,7 +440,7 @@ if ($item -and -not $item.LinkType -and $FirstLocalRun) {
 }
 
 $how = Install-File $SrcJson $TargetJson
-$AgentsMode = if ($AgentCopied) { 'copy' } else { 'symlink' }
+$AgentsMode = if ($AgentCopied) { 'copy' } elseif ($AgentFailed) { 'kept' } else { 'symlink' }
 if ($how -eq 'linked') {
     Log "linked $TargetJson -> $SrcJson (git pull in the clone is now the whole update)"
     Write-InstallLog -SettingsMode 'symlink' -AgentsMode $AgentsMode -HookMode 'not needed'
