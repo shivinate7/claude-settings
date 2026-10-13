@@ -329,8 +329,10 @@ Restore a branch with one command:
 
     git branch <name> refs/janitor/reaped/<name>
 
-The tombstone lives 90 days. Until the purge step drops it, `git gc` cannot
-take the commits.
+The tombstone lives 90 days from the reap that wrote its commit. A tombstone
+that no log row names lives until you delete it. Until the purge step drops it,
+`git gc` cannot take the commits. See purge-keeps-younger-restore-ref, which
+restore point the purge keeps.
 
 ## How you run it every day
 

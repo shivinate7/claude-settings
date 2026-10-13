@@ -2148,11 +2148,25 @@ def purge_tombstones(restore_log_path: str, confirm: bool, now_ms=None):
     "reason"}. With confirm, a "purge" decision also drops that repository's tombstone ref."""
     now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
     decisions = []
-    for entry in read_restore_log(restore_log_path):
+    entries = read_restore_log(restore_log_path)
+
+    def row_key(e):
+        # The same repository can be spelled many ways in the log (slashes, case, 8.3 names).
+        repo = e.get("repo")
+        if not isinstance(repo, str) or not repo:
+            return None
+        return (os.path.normcase(os.path.realpath(repo)), e.get("branch"), e.get("commit"))
+
+    unexpired = {row_key(e) for e in entries
+                 if isinstance(e.get("time_ms"), (int, float)) and not isinstance(e.get("time_ms"), bool)
+                 and now_ms - e["time_ms"] < TOMBSTONE_TTL_MS}
+    for entry in entries:
         repo = entry.get("repo")
         branch = entry.get("branch")
         when = entry.get("time_ms")
+        commit = entry.get("commit")
         if not isinstance(repo, str) or not repo or not isinstance(branch, str) or not branch \
+                or not isinstance(commit, str) or not commit \
                 or not isinstance(when, (int, float)) or isinstance(when, bool):
             decisions.append({"repo": repo, "branch": branch, "action": "keep",
                                "reason": "unreadable-entry"})
@@ -2166,7 +2180,28 @@ def purge_tombstones(restore_log_path: str, confirm: bool, now_ms=None):
                      "reason": "past 90 days (%d days old)" % (age_ms // 86400000)}
         decisions.append(decision)
         if confirm:
-            dropped = guard._git(repo, "update-ref", "-d", TOMBSTONE_REF_PREFIX + branch)
+            # The ref is keyed by branch name, so a later reap of the same name overwrites it.
+            # Drop it only while it still holds THIS entry's commit; the old-value argument
+            # makes git refuse on a mismatch. A mismatch keeps the ref and is not an error.
+            ref = TOMBSTONE_REF_PREFIX + branch
+            # One commit can have two log rows (a branch reaped twice at one tip). The ref stays
+            # while any unexpired row for the same repo, branch and commit still needs it.
+            if row_key(entry) in unexpired:
+                decision["reason"] += "; ref kept: an unexpired entry names the same commit"
+                continue
+            held = guard._git(repo, "rev-parse", "-q", "--verify", ref)
+            if held is None or held.returncode not in (0, 1) or (
+                    held.returncode == 1 and held.stderr.strip()):
+                # Exit 1 with empty stderr means the ref is gone. Any other failure, exit 1 with a
+                # message included (a broken ref), is not an answer: keep the ref.
+                decision["error"] = "ref read failed: %s" % (
+                    held.stderr.strip() if held is not None else "git gave no answer")
+                continue
+            if held.returncode == 1 or held.stdout.strip() != commit:
+                if held.returncode == 0:
+                    decision["reason"] += "; ref kept: it holds a younger restore point"
+                continue
+            dropped = guard._git(repo, "update-ref", "-d", ref, commit)
             if dropped is None or dropped.returncode != 0:
                 decision["error"] = "drop failed: %s" % (
                     dropped.stderr.strip() if dropped is not None else "git gave no answer"
