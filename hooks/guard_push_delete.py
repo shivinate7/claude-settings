@@ -8,7 +8,7 @@ import re
 
 import guard_core
 from guard_core import (
-    GIT_OPT_WITH_VALUE, _absolute, _segment_cd_target, _segment_git_c_target,
+    CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_target, _segment_git_c_target,
     _strip_heredoc_bodies_unconditionally, basename, resolve_command, segment_tokens,
     split_segments,
 )
@@ -247,7 +247,6 @@ DELETE_REASON = (
 # shared `COMMAND_WRAPPERS` every rule reads: that set feeds `resolve_command`, which rules 2 and
 # 3 also call, and widening it here would change what THEY skip past too.
 CMD_EXE_DELETE_WORDS = {"rd", "rmdir", "del", "erase"}
-CMD_EXE_NAMES = {"cmd", "cmd.exe"}
 
 
 def cmd_exe_delete_hit(segment: str) -> str:
