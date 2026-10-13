@@ -3292,7 +3292,7 @@ WAITER_COMMANDS = ("sleep", "start-sleep")
 
 
 SLEEP_LIMIT = 25   # owner ruling 2026-10-12: one sleep under 25 s is allowed
-LOOP_WORDS = {"while", "until", "for", "foreach", "do"}
+LOOP_WORDS = {"while", "until", "for", "foreach", "do", "%", "foreach-object"}
 
 
 def sleep_seconds(tokens, index) -> float:
@@ -3325,6 +3325,14 @@ def waiter_hit(segment: str) -> str:
     return ""
 
 
+def gh_watches(rest) -> bool:
+    """True for `gh run watch` and `gh pr checks` with -w, --watch or --watch=...; no other gh call."""
+    if rest[:2] == ["run", "watch"]:
+        return True
+    return rest[:2] == ["pr", "checks"] and any(
+        t in ("-w", "--watch") or t.startswith("--watch=") for t in rest[2:])
+
+
 def waiter_verdict(segments, background: bool) -> str:
     """Return the matched text when a command waits by looping, else ''.
 
@@ -3333,10 +3341,11 @@ def waiter_verdict(segments, background: bool) -> str:
     runs with run_in_background."""
     sleeps, loop, watcher = [], False, ""
     for segment in segments:
-        tokens = segment_tokens(segment)
+        # Braces get their own token, so a compact `while(1){Start-Sleep 1}` reads like a spaced one.
+        tokens = segment_tokens(re.sub(r"([{}])", r" \1 ", segment))
         if not tokens:
             continue
-        loop = loop or tokens[0].lower() in LOOP_WORDS
+        loop = loop or re.match(r"[\w%-]*", tokens[0]).group().lower() in LOOP_WORDS
         index = resolve_command(tokens)
         if index is None:
             continue
@@ -3347,7 +3356,7 @@ def waiter_verdict(segments, background: bool) -> str:
                 sleeps.append((tokens[at], sleep_seconds(tokens, at)))
         if word in WAITER_COMMANDS:
             pass
-        elif word == "gh" and ({"watch", "--watch", "-w"} & set(tokens[index + 1:])):
+        elif word in ("gh", "gh.exe") and gh_watches(tokens[index + 1:]):
             watcher = watcher or "gh " + " ".join(tokens[index + 1:index + 3])
         elif waiter_hit(segment):
             return waiter_hit(segment)
