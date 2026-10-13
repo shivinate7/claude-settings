@@ -1136,7 +1136,7 @@ def collect_unread(stamp):
         return []
     for line in lines:
         fields = line.split("\t")
-        if len(fields) != 5 or fields[3] != UNREAD_RULE:
+        if len(fields) < 5 or fields[3] != UNREAD_RULE:  # a six-field line adds the session last
             continue
         try:
             when = datetime.fromisoformat(fields[0])

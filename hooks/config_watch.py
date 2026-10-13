@@ -633,6 +633,7 @@ def judge_path(path: str, tool: str, tool_input, cwd: str, explained: str, clock
 def sweep(payload, clock=None):
     """Judge every watched path for this payload. Return the messages, in path order."""
     tool = payload.get("tool_name", "") or ""
+    guard.set_log_session(payload.get("session_id"))  # the last column of a revert's log line
     tool_input = payload.get("tool_input", {}) or {}
     if not isinstance(tool_input, dict):
         tool_input = {}
