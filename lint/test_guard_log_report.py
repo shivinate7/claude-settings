@@ -403,6 +403,27 @@ def _is_fallback_split(node):
             and isinstance(sl.upper, ast.Constant) and sl.upper.value == 5)
 
 
+def _int_const(node):
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, int) else None
+
+
+def _named_columns(sl):
+    """The column indexes a subscript names, or None when they cannot be told. A negative index
+    names a column from the end, so it is never inside 0-4 and the caller rejects it."""
+    if _int_const(sl) is not None:
+        return {sl.value}
+    if (isinstance(sl, ast.UnaryOp) and isinstance(sl.op, ast.USub)
+            and _int_const(sl.operand) is not None):
+        return {-sl.operand.value}
+    if isinstance(sl, ast.Slice) and sl.step is None:
+        lower = 0 if sl.lower is None else _int_const(sl.lower)
+        upper = _int_const(sl.upper)
+        if lower is None or upper is None or lower < 0:
+            return None
+        return set(range(lower, upper))
+    return None
+
+
 def split_sites(tree):
     """Return (scope, call node, shape) for each tab split in a parsed module. scope is the nearest
     enclosing function, or "<module>". shape is "fallback5" for `x.split("\\t")[:5]`, else "plain".
@@ -491,7 +512,11 @@ class OneReaderTests(unittest.TestCase):
         self.assertEqual(unlisted, [], "unlisted guard.log splits")
         self.assertEqual(missing, [], "an allowed split is not found")
 
-    def test_the_named_fallback_reads_no_decision_rule_or_session_column(self):
+    def test_the_named_fallback_may_read_its_rule_column_but_never_the_session_column(self):
+        # A safety note is found by its rule: collect_unread must read the rule column (3) to tell an
+        # unread-subject line from any other, so columns 0-4 are allowed, rule included. The session
+        # column (index 5), any later index, and any negative index are not: the note must not
+        # depend on a session cell, which a five-field line does not carry.
         with open(DECISION_WATCH, encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
         func = next(node for node in ast.walk(tree)
@@ -500,11 +525,21 @@ class OneReaderTests(unittest.TestCase):
                  and _is_fallback_split(node.value) for target in node.targets
                  if isinstance(target, ast.Name)}
         self.assertTrue(bound, "collect_unread has no fallback split to check")
-        read = sorted({node.slice.value for node in ast.walk(func)
-                       if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name)
-                       and node.value.id in bound and isinstance(node.slice, ast.Constant)})
-        forbidden = [column for column in read if column in (2, 3, 5)]  # decision, rule, session
-        self.assertEqual(forbidden, [], "the fallback reads columns %s of its split" % forbidden)
+        # The split list may be used only through an index or a slice, never whole (a loop or a
+        # join reads every column, the session one included).
+        subscripted = {id(node.value) for node in ast.walk(func) if isinstance(node, ast.Subscript)}
+        whole = [node.lineno for node in ast.walk(func)
+                 if isinstance(node, ast.Name) and node.id in bound
+                 and isinstance(node.ctx, ast.Load) and id(node) not in subscripted]
+        self.assertEqual(whole, [], "the fallback's split is read whole at lines %s" % whole)
+        forbidden = []
+        for node in ast.walk(func):
+            if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) \
+                    and node.value.id in bound:
+                columns = _named_columns(node.slice)
+                if columns is None or not columns <= set(range(5)):
+                    forbidden.append((node.lineno, ast.unparse(node)))
+        self.assertEqual(forbidden, [], "the fallback reads a column past 4: %s" % forbidden)
 
     def test_a_second_split_in_another_function_is_unlisted(self):
         # In memory only: the decision_watch source plus one more function that splits a guard.log
