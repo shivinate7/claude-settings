@@ -931,6 +931,10 @@ if a[:2] == ["pr", "view"]:
         lag = S.get("lag")
         if lag and lag["n"] > 0 and head != lag["prior"]:  # GitHub still shows the head before the push
             lag["n"] -= 1; save(); head = lag["prior"]
+        vf = S.get("view_fail")  # {"n", "msg", "after"}: once the head is off `after` (the pre-claim head), the next n reads fail with msg
+        if vf and vf["n"] > 0 and head != vf["after"]:
+            vf["n"] -= 1; S["view_failed"] = S.get("view_failed", 0) + 1; save()
+            print(vf["msg"]); sys.exit(1)
         bad = S.get("dirty_after_checks") is not None and S["checks_calls"] >= S["dirty_after_checks"]
         views = S.get("views", 0) + 1; S["views"] = views; save()  # draft_from_view=N: read N and later ones see a draft
         draft = bool(S.get("draft")) or (S.get("draft_from_view") is not None and views >= S["draft_from_view"])
@@ -969,6 +973,9 @@ elif a[0] == "api" and a[1].endswith("/required_status_checks"):
 else:
     print("unhandled " + " ".join(a)); sys.exit(1)
 """
+
+# The text real gh prints for a network failure (the q_max PR 833 incident, 2026-10-13).
+NET_TLS = 'Post "https://api.github.com/graphql": net/http: TLS handshake timeout'
 
 def drop_config(env):
     """Remove .github/stamp.json from main and feat, as in 5 of the owner's 8 repos. Then pull main into env.co."""
@@ -1038,6 +1045,61 @@ class GhHalf(Env):
 
     def reverted(self):
         return "id: pending" in self.show("feat", "docs/decisions/second.md")
+
+    def gh_state(self, key):
+        return json.loads(pathlib.Path(self.state, "state.json").read_text()).get(key)
+
+    def feat_subjects(self):
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return sh(self.co, "git", "log", "origin/feat", "--format=%s")
+
+    def test_a_network_error_on_the_wait_read_is_retried_and_the_merge_goes_on(self):
+        self.set(view_fail={"n": 1, "msg": NET_TLS, "after": self.head()})  # the first read after the claim push fails
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.gh_state("view_failed"), 1)
+        self.assertIn("pr merge 7", self.calls())
+        self.assertNotIn("reverted on", out)
+        self.assertEqual(self.claims("main"), 1)
+        self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
+        self.assertFalse(self.lock_ref())
+
+    def test_three_network_errors_are_retried_and_the_fourth_try_goes_through(self):
+        self.set(view_fail={"n": 3, "msg": NET_TLS, "after": self.head()})  # the boundary of "up to 3 times"
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.gh_state("view_failed"), 3)
+        self.assertNotIn("reverted on", out)
+        self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
+
+    def test_four_network_errors_stop_the_merge_and_keep_the_claim(self):
+        self.set(view_fail={"n": 4, "msg": NET_TLS, "after": self.head()})
+        rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.gh_state("view_failed"), 4, out)  # one try and three retries, then stop: no fifth try
+        self.assertIn("network", out.lower())
+        self.assertIn("TLS handshake timeout", out)
+        self.assertNotIn("reverted on", out)
+        self.assertNotIn("Revert", self.feat_subjects())  # the claim stands on the branch
+        self.assertIn("Claim record numbers", self.feat_subjects())
+        self.assertFalse(self.reverted())
+        self.assertNotIn("pr merge", self.calls())
+        self.assertFalse(self.lock_ref())
+        self.set(view_fail=None)  # the network is back: the next run resumes the claim and merges
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertIn("resumed", out)
+        self.assertEqual(self.claims("main"), 1)
+
+    def test_a_real_refusal_in_the_wait_reverts_the_claim_and_is_not_retried(self):
+        self.set(view_fail={"n": 1, "msg": "GraphQL: Pull request is not mergeable", "after": self.head()})
+        rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.gh_state("view_failed"), 1, out)  # tried once
+        self.assertIn("reverted on feat", out)
+        self.assertNotIn("pr merge", self.calls())
+        self.assertTrue(self.reverted())
+        self.assertFalse(self.lock_ref())
 
     def test_green_run_watches_the_run_and_merges_pinned_to_the_claim_head(self):
         self.set(checks_seq=[[("gates", "pending", "https://github.com/o/r/actions/runs/99/job/1")], [("gates", "pass", "")]])
