@@ -388,8 +388,61 @@ def reads_guard_log(source):
     return names_log and splits_tab
 
 
-def guard_log_readers(folders=("hooks", "lint")):
-    """Return the repo files, outside test files, that read guard.log lines."""
+def _is_tab_split(node):
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "split" and bool(node.args)
+            and isinstance(node.args[0], ast.Constant) and node.args[0].value == "\t")
+
+
+def _is_fallback_split(node):
+    """`x.split("\\t")[:5]`: the first five tab fields, nothing else."""
+    if not (isinstance(node, ast.Subscript) and _is_tab_split(node.value)):
+        return False
+    sl = node.slice
+    return (isinstance(sl, ast.Slice) and sl.lower is None
+            and isinstance(sl.upper, ast.Constant) and sl.upper.value == 5)
+
+
+def split_sites(tree):
+    """Return (scope, call node, shape) for each tab split in a parsed module. scope is the nearest
+    enclosing function, or "<module>". shape is "fallback5" for `x.split("\\t")[:5]`, else "plain".
+    """
+    fallback = {id(node.value) for node in ast.walk(tree) if _is_fallback_split(node)}
+    sites = []
+
+    def visit(node, scope):
+        if _is_tab_split(node):
+            sites.append((scope, node, "fallback5" if id(node) in fallback else "plain"))
+        for child in ast.iter_child_nodes(node):
+            child_scope = child.name if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                else scope
+            visit(child, child_scope)
+
+    visit(tree, "<module>")
+    return sites
+
+
+def guard_log_split_sites(source):
+    """Return (scope, shape) for each tab split in a Python source that names guard.log. Only code
+    counts: a mention in a docstring, a comment or a plain data string does not name the log."""
+    tree = ast.parse(source)
+    docstrings = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            first = node.body[0] if node.body else None
+            if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
+                    and isinstance(first.value.value, str)):
+                docstrings.add(id(first.value))
+    names_log = any(isinstance(node, ast.Constant) and isinstance(node.value, str)
+                    and id(node) not in docstrings and "guard.log" in node.value
+                    for node in ast.walk(tree))
+    if not names_log:
+        return []
+    return [(scope, shape) for scope, _, shape in split_sites(tree)]
+
+
+def guard_log_sites(folders=("hooks", "lint")):
+    """Return (path, scope, shape) for each tab split in a non-test repo file that names guard.log."""
     found = []
     for folder in folders:
         base = os.path.join(REPO_ROOT, folder)
@@ -397,9 +450,19 @@ def guard_log_readers(folders=("hooks", "lint")):
             if not name.endswith(".py") or name.startswith("test_"):
                 continue
             with open(os.path.join(base, name), encoding="utf-8") as handle:
-                if reads_guard_log(handle.read()):
-                    found.append(folder + "/" + name)
+                for scope, shape in guard_log_split_sites(handle.read()):
+                    found.append((folder + "/" + name, scope, shape))
     return found
+
+
+# The only tab splits of guard.log lines allowed in the repo. The reader's own split, and the one
+# fallback the owner named (decision gate-hooks-fail-closed: an unread safety note must not vanish
+# when the reader cannot be imported). Nothing else may split a guard.log line.
+ALLOWED_SPLITS = (
+    ("lint/guard_log_report.py", "parse_line", "plain"),
+    ("hooks/decision_watch.py", "collect_unread", "fallback5"),
+)
+DECISION_WATCH = os.path.join(REPO_ROOT, "hooks", "decision_watch.py")
 
 
 class OneReaderTests(unittest.TestCase):
@@ -421,9 +484,41 @@ class OneReaderTests(unittest.TestCase):
         self.assertTrue(reads_guard_log('LOG = "guard.log"\nNOTE = "Don\'t"\n'
                                         'f = line.split("\\t")\n'))
 
-    def test_only_the_reader_parses_guard_log_lines(self):
-        others = [name for name in guard_log_readers() if name != READER]
-        self.assertEqual(others, [], "files other than the one reader parse guard.log lines")
+    def test_only_the_reader_and_the_named_fallback_split_guard_log_lines(self):
+        found = guard_log_sites()
+        unlisted = [site for site in found if site not in ALLOWED_SPLITS]
+        missing = [site for site in ALLOWED_SPLITS if site not in found]
+        self.assertEqual(unlisted, [], "unlisted guard.log splits")
+        self.assertEqual(missing, [], "an allowed split is not found")
+
+    def test_the_named_fallback_reads_no_decision_rule_or_session_column(self):
+        with open(DECISION_WATCH, encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+        func = next(node for node in ast.walk(tree)
+                    if isinstance(node, ast.FunctionDef) and node.name == "collect_unread")
+        bound = {target.id for node in ast.walk(func) if isinstance(node, ast.Assign)
+                 and _is_fallback_split(node.value) for target in node.targets
+                 if isinstance(target, ast.Name)}
+        self.assertTrue(bound, "collect_unread has no fallback split to check")
+        read = sorted({node.slice.value for node in ast.walk(func)
+                       if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name)
+                       and node.value.id in bound and isinstance(node.slice, ast.Constant)})
+        forbidden = [column for column in read if column in (2, 3, 5)]  # decision, rule, session
+        self.assertEqual(forbidden, [], "the fallback reads columns %s of its split" % forbidden)
+
+    def test_a_second_split_in_another_function_is_unlisted(self):
+        # In memory only: the decision_watch source plus one more function that splits a guard.log
+        # line. Each shape is a mutant the unlisted check must catch.
+        with open(DECISION_WATCH, encoding="utf-8") as handle:
+            source = handle.read()
+        for body, shape in (('return line.split("\\t")[:5]', "fallback5"),
+                            ('return line.split("\\t")', "plain")):
+            mutant = source + "\n\ndef other_reader(line):\n    %s\n" % body
+            sites = [("hooks/decision_watch.py", scope, kind)
+                     for scope, kind in guard_log_split_sites(mutant)]
+            unlisted = [site for site in sites if site not in ALLOWED_SPLITS]
+            self.assertEqual(unlisted, [("hooks/decision_watch.py", "other_reader", shape)],
+                             "a second %s split was not unlisted" % shape)
 
 
 # ------------------------------------------- review round 1 (PR 383): reader nits, red until fixed
