@@ -15,6 +15,7 @@ let sid = '' // this session's id, read again on every write (a /clear changes i
 let staleId = '' // after /clear: the id the host may still answer until the new one binds
 let watching = false // /board ran and its pane is open: the heartbeat also refreshes the board
 let polls = 0 // board refreshes on the heartbeat since the last /board
+let gitBusy = false // a heartbeat git read is running
 let lastDetail = '' // the detail record as last written, without its stamp
 let board = null // { rows, band, note, now, hidden }
 let view = { id: null, detail: null } // id null: all-sessions view
@@ -173,8 +174,15 @@ async function refreshSoon($, withGit) {
   timer.cancel()
 }
 
+// Heartbeat. While the session waits, it reads git again, so an idle session keeps a fresh
+// reading. One read at a time: a beat that finds the last read still running skips it. This
+// runs from a timer, never inside a hook. A failed read makes the counts unknown.
 async function tick($) {
   try {
+    if (tracker.isIdle() && !gitBusy) {
+      gitBusy = true
+      try { await refreshGit($) } finally { gitBusy = false }
+    }
     await refreshAll($, false)
     if (watching) {
       if (++polls > MAX_POLLS) watching = false // no /board call for 10 beats: stop polling

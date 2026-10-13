@@ -24,8 +24,9 @@ One session: agents with status, the last 5 tool calls, files touched, context p
 A session is update-ready when all five hold: no running agents, state is waiting, no permission ask, no unpushed commits, and a clean tree.
 
 - Running servers and background tasks are not part of it. A session with a dev server can read "ready".
-- The git counts come from one reading at turn end. A reading older than 60 s is "unknown". A failed or slow git call is "unknown". A branch with no upstream is "unknown". Unknown is never ready.
-- So a session shows "ready" for 60 s after its turn ends, then "unknown". The heartbeat does not read git again.
+- The git counts come from a reading at turn end. While the session waits, each heartbeat reads git again, one read at a time. An idle session keeps a fresh reading.
+- A reading older than 60 s is "unknown". A failed or slow git call is "unknown". A branch with no upstream is "unknown". Unknown is never ready.
+- The 60 s rule guards against a stuck reader, not against idleness.
 
 ## Where the data comes from
 
@@ -35,7 +36,7 @@ A session is update-ready when all five hold: no running agents, state is waitin
 - A heartbeat refreshes the entry every 30 s. The board hides an entry older than 2 minutes, or stamped more than 30 s ahead of now. The session removes both records at session end. A killed session leaves them. The 2-minute rule hides them. An entry older than one day is deleted at the next session start or `/board`.
 - The board reads the 200 newest entries. It says how many more exist.
 - After `/clear`, the mod writes nothing for the old id and starts again when the new id binds.
-- The git call is one per turn: argv array, no shell, `core.fsmonitor=false`, `--no-optional-locks`, 5 s timeout. Session start and turn end wait at most 100 ms for it. The refresh then finishes on its own.
+- The git call runs once per turn and once per heartbeat while the session waits: argv array, no shell, `core.fsmonitor=false`, `--no-optional-locks`, 5 s timeout. Session start and turn end wait at most 100 ms for it. The refresh then finishes on its own.
 - The pane refreshes the board on the heartbeat while it is open. It stops when the pane closes, or after 10 refreshes with no `/board` call.
 
 ## Privacy

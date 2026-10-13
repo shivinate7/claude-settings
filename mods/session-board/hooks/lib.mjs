@@ -328,6 +328,7 @@ export function makeTracker() {
   const live = () => t.agents.filter(a => LIVE.has(a.status))
   return {
     reset,
+    isIdle: () => !t.inTurn,
     turnStart() { t.inTurn = true; t.pending.clear(); t.turn = { tools: 0, edits: 0, asks: 0 } },
     turnComplete({ durationMs, isAborted }) {
       t.inTurn = false
