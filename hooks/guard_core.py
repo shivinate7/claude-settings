@@ -1364,3 +1364,81 @@ def agent_role(payload) -> str:
         return ""
     role = role.strip().lower()
     return role if role in (BUILDER_ROLE, AUTHOR_ROLE, WRITER_ROLE) else ""
+
+
+# ------------------------------------------------------------------ helpers several families share
+# A null-device target, on either stream, in the three shells this guard reads a command from:
+# POSIX (`/dev/null`), Windows cmd (`NUL`), and PowerShell (`$null`). `2>&1` duplicates one stream
+# onto another file descriptor and is not this: the line still reaches a stream the session reads.
+SILENT_WRITE_REDIRECT = re.compile(
+    r"(?:&>>?|\d?>>?&?)\s*(['\"]?)(?:/dev/null|NUL|\$null)\1(?=$|[\s;&|])"
+    r"|\d?>&-(?=$|[\s;&|])",   # a closed descriptor
+    re.IGNORECASE,
+)
+
+
+def _norm_dir(path: str):
+    """A resolved, case-folded form of `path` for a prefix compare, or None when it cannot be
+    read. `os.path.realpath` needs no existing file, so a removed worktree's path still
+    normalizes: the home record must still compare correctly once the folder is gone."""
+    if not path or not isinstance(path, str):
+        return None
+    try:
+        return os.path.normcase(os.path.realpath(path))
+    except Exception:
+        return None
+
+
+def path_is_inside(path: str, root: str):
+    """True when `path` sits at or under `root`, False when it plainly does not, None when
+    either could not be resolved. Existence of either is never required."""
+    p, r = _norm_dir(path), _norm_dir(root)
+    if p is None or r is None:
+        return None
+    if p == r:
+        return True
+    return (p + os.sep).startswith(r + os.sep)
+
+
+# A shell that runs its `-c` argument as a script. The script is judged by this same rule.
+# MEASURED 2026-09-26 on Windows (PR #144): `sh -c 'cmd &'` was allowed, and the server outlived
+# its call. The `&` sat inside one quoted token, where no per-segment read above can see it.
+INLINE_SCRIPT_SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "sh.exe", "bash.exe"}
+_C_FLAG = re.compile(r"^-[A-Za-z]*c[A-Za-z]*$")
+
+
+def inline_script(tokens) -> str:
+    """Return the script a `sh -c SCRIPT` segment runs, else ''."""
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]) not in INLINE_SCRIPT_SHELLS:
+        return ""
+    has_c = False
+    for tok in tokens[index + 1:]:
+        if tok.startswith("-"):
+            has_c = has_c or bool(_C_FLAG.match(tok))
+            continue
+        return tok if has_c else ""
+    return ""
+
+
+# A redirect operator, spaced into a word of its own before the words are read.
+REDIRECT = re.compile(r"(\d?>>?)")
+
+
+# A search command's pattern is a regex, never a path: a lone dot-star pattern reads no
+# environment file. MEASURED in guard.log 2026-09-16 to 10-02: 65 false `env-file` denies.
+ENV_PATTERN_COMMANDS = ("grep", "egrep", "fgrep", "rg", "ag", "ack")
+
+
+PLAYWRIGHT_PS_SHELLS = ("pwsh", "powershell", "pwsh.exe", "powershell.exe")
+
+
+def _pwsh_script(tokens) -> str:
+    """The script text after `-c` or `-Command` of a pwsh launch, else ''."""
+    for at, tok in enumerate(tokens[:-1]):
+        if re.fullmatch(r"-c(?:ommand)?", tok, re.I):
+            return " ".join(tokens[at + 1:])
+    return ""
+
+
+CMD_EXE_NAMES = {"cmd", "cmd.exe"}

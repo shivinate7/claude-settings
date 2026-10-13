@@ -1,0 +1,377 @@
+"""The guard's stream family: a stream that never ends, a waiter loop and two ported shell traps.
+
+guard.py is the only entry point, and it runs these checks in its fixed order (decision
+guard-split-by-family). Other files reach these names through `guard`.
+"""
+import os
+import re
+
+from guard_core import (
+    DURATION, _absolute, _skip_assignments_and_keywords, basename, resolve_command, segment_tokens,
+    split_segments,
+)
+
+
+# ------------------------------------------------------------------ a stream that never ends
+#
+# CLAUDE.md: "Never pipe a live stream through `tail`." A follow flag turns `tail` or
+# `Get-Content` into a command that never exits on its own, so it outlives the turn and the
+# agent that started it. The COMMAND WORD is checked first, so an unrelated `-f` on another
+# program never matches.
+#
+# The short-flag test reads the WHOLE TOKEN for an `f` or an `F`, the same shape as
+# `clean_deletes_files` and `push_is_forced` above, so `-fn 20` and `-nf` both match a combined
+# flag. `-F` is `tail`'s own retry-on-rotate form of follow, so it counts too.
+LIVE_STREAM_TAIL_TOOL = "tail"
+LIVE_STREAM_GETCONTENT_TOOLS = ("get-content", "gc")
+
+
+def live_stream_hit(segment: str) -> str:
+    """Return the matched text when one segment follows a stream and never ends, else ''."""
+    tokens = segment.split()
+    for index, token in enumerate(tokens):
+        tool = basename(token)
+        if tool == LIVE_STREAM_TAIL_TOOL:
+            for arg in tokens[index + 1:]:
+                if arg == "--follow" or arg.startswith("--follow="):
+                    return token + " " + arg
+                if arg.startswith("-") and not arg.startswith("--") and (
+                        "f" in arg or "F" in arg):
+                    return token + " " + arg
+        elif tool in LIVE_STREAM_GETCONTENT_TOOLS:
+            for arg in tokens[index + 1:]:
+                if arg.lower() == "-wait":
+                    return token + " " + arg
+    return ""
+
+
+LIVE_STREAM_REASON = (
+    "this command follows a stream and never ends on its own, so it outlives the turn "
+    "and the agent that started it. "
+    "Remedy: run the command in the foreground with a timeout, or in the background and "
+    "wait for its completion notice."
+)
+
+
+# A COMMAND THAT NARRATES WHILE IT WAITS, piped into `tail` or `head`. Ported from banchi's
+# `scripts/guard-shell.py` (the heartbeat clause), behaviour only. The merge tool waits minutes for
+# a claim commit's checks and prints a line a minute. A pipe block-buffers that heartbeat and the
+# filter keeps one end of it, so a working wait reads as a hang. The roster is NAMED, one entry per
+# incident, because "does this command narrate for minutes" cannot be resolved from the system, and
+# refusing every `| tail` is the cry-wolf guard (decisions/guard-that-cries-wolf-is-spent.md). `tee`
+# keeps every byte, so it is not refused. Only `--confirm` reaches the wait: a bare `merge <pr>` is a
+# preview that returns in seconds, so piping it is allowed.
+NARRATING_COMMANDS = ("merge", "merge.cmd")
+NARRATING_SCRIPT_TAILS = ("merge/merge.py", "merge/launch.py")
+TRUNCATING_FILTERS = ("tail", "head")
+
+
+def narrating_stage(segment: str) -> str:
+    """The command word when one segment is a long, narrating `--confirm` run, else ''."""
+    tokens = segment_tokens(segment)
+    if not tokens or "--confirm" not in tokens:
+        return ""
+    index = resolve_command(tokens)
+    if index is None:
+        return ""
+    word = basename(tokens[index])
+    if word in NARRATING_COMMANDS:
+        return word
+    for token in tokens[index:]:
+        if token.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
+            return word + " " + basename(token)
+    return ""
+
+
+def narrated_tail_hit(stripped: str) -> str:
+    """Return the matched text when a narrating stage is piped straight into `tail`/`head`."""
+    ends = []
+    segments = split_segments(stripped, ends)
+    for index in range(len(segments) - 1):
+        if ends[index] != "|":
+            continue
+        stage = narrating_stage(segments[index])
+        if not stage:
+            continue
+        tokens = segment_tokens(segments[index + 1])
+        if not tokens:
+            continue
+        at = resolve_command(tokens)
+        if at is not None and basename(tokens[at]) in TRUNCATING_FILTERS:
+            return stage + " | " + basename(tokens[at])
+    return ""
+
+
+NARRATED_TAIL_REASON = (
+    "this command waits for minutes and prints a line as it goes, and a pipe into a filter "
+    "that keeps one end of the stream hides that line until the end, so a working wait looks "
+    "like a hang. "
+    "Remedy: run the command with nothing after it and read its output as it arrives, or "
+    "redirect to a file you read back afterwards, or use tee to keep a full copy."
+)
+
+
+# ------------------------------------------------------------------ a waiter loop
+#
+# Rule 9, approved by the owner: a shell segment whose command word is a sleep-and-poll turns
+# waiting into a loop of turns that each print a word. Placed beside the live-stream rule, because
+# both are about a command that should not be how a session waits.
+#
+# THE COMMAND WORD is read through `resolve_command`, wrappers and leading loop keywords skipped,
+# not the segment's raw first token: `split_segments` cuts a loop's `while COND; do sleep 1;
+# done` into `do sleep 1` as its own segment, and the command inside that block is `sleep`, not
+# `do`. A segment `shlex` cannot parse fails open, this file's standing rule. The Windows
+# `timeout /t` form is the one case where the wait is the SECOND word after the command, so it is
+# read apart: `timeout /t 5` waits, `timeout /help` (no `/t`) does not.
+WAITER_COMMANDS = ("sleep", "start-sleep")
+
+
+SLEEP_LIMIT = 25   # owner ruling 2026-10-12: one sleep under 25 s is allowed
+LOOP_WORDS = {"while", "until", "for", "foreach", "do", "%", "foreach-object"}
+
+
+def sleep_seconds(tokens, index) -> float:
+    """Seconds of one `sleep N` / `Start-Sleep [-Seconds] N`; infinity when unreadable."""
+    scale = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    unit = 1.0
+    for token in tokens[index + 1:]:
+        if token.lower() in ("-milliseconds", "-m"):
+            unit = 0.001
+        if DURATION.match(token):
+            return float(token.rstrip("smhd")) * scale.get(token[-1], 1) * unit
+    return float("inf")
+
+
+def waiter_hit(segment: str) -> str:
+    """Return the matched text for a `timeout /t` wait, else ''. Sleeps and watchers are
+    judged over the whole command by `waiter_verdict`."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return ""
+    index = resolve_command(tokens)
+    if index is None:
+        return ""
+    # `timeout /t` is read at the first word (`timeout 5 /t 5` waits, and the unwrap would hide
+    # it) and at the resolved word (`sudo timeout /t 5`, `verdict timeout /t 5`).
+    for at in (_skip_assignments_and_keywords(tokens), index):
+        if (at < len(tokens) and basename(tokens[at]) == "timeout"
+                and any(t.lower() == "/t" for t in tokens[at + 1:])):
+            return tokens[at] + " /t"
+    return ""
+
+
+def gh_watches(rest) -> bool:
+    """True for `gh run watch` and `gh pr checks` with --watch or --watch=...; no other gh call.
+
+    The global `-R`/`--repo` flag may sit between the group and the verb. `-w` on `gh pr checks`
+    is `--web`, and `--watch` has no short form."""
+    words, i = [], 0
+    while i < len(rest) and len(words) < 2:
+        t = rest[i]
+        i += 2 if t in ("-R", "--repo") else 1
+        if not (t in ("-R", "--repo") or t.startswith(("--repo=", "-R"))):
+            words.append(t)
+    if words == ["run", "watch"]:
+        return True
+    return words == ["pr", "checks"] and any(
+        t == "--watch" or t.startswith("--watch=") for t in rest[i:])
+
+
+def waiter_verdict(segments, background: bool) -> str:
+    """Return the matched text when a command waits by looping, else ''.
+
+    Refused: a loop around a sleep, two or more sleeps, one sleep of SLEEP_LIMIT seconds or
+    more, `timeout /t`, and a foreground watcher. Allowed: one short sleep, and a watcher that
+    runs with run_in_background."""
+    sleeps, loop, watcher = [], False, ""
+    for segment in segments:
+        # Braces get their own token, so a compact `while(1){Start-Sleep 1}` reads like a spaced one.
+        tokens = segment_tokens(re.sub(r"([{}])", r" \1 ", segment))
+        if not tokens:
+            continue
+        loop = loop or re.match(r"[\w%-]*", tokens[0]).group().lower() in LOOP_WORDS
+        index = resolve_command(tokens)
+        if index is None:
+            continue
+        word = basename(tokens[index]).lower()
+        # A PowerShell loop keeps its sleep in a `{ ... }` block inside the same segment.
+        for at in sorted({index, *(i + 1 for i, t in enumerate(tokens[:-1]) if t == "{")}):
+            if basename(tokens[at]).lower() in WAITER_COMMANDS:
+                sleeps.append((tokens[at], sleep_seconds(tokens, at)))
+        if word in WAITER_COMMANDS:
+            pass
+        elif word in ("gh", "gh.exe") and gh_watches(tokens[index + 1:]):
+            watcher = watcher or "gh " + " ".join(tokens[index + 1:index + 3])
+        elif waiter_hit(segment):
+            return waiter_hit(segment)
+    if sleeps and loop:
+        return sleeps[0][0]
+    if len(sleeps) > 1 or any(seconds >= SLEEP_LIMIT for _, seconds in sleeps):
+        return sleeps[0][0]
+    return "" if background else watcher
+
+
+WAITER_REASON = (
+    "a pause between polls turns waiting into a loop of turns that each print a word. "
+    "Remedy: use the Monitor tool to wait once for the condition, or run the long command in the background and wait for its completion notice, "
+    "or run a watcher such as gh run watch <id> --exit-status once, with run_in_background. "
+    "A single pause under 25 seconds is allowed. Avoid "
+    "gh pr checks --watch, which serves a cached status. For a server warm-up, use a "
+    "readiness check such as curl --retry."
+)
+
+
+# ------------------------------------------------------------------ a waiter loop over a pattern
+#
+# Ported from banchi's `scripts/guard-shell.py:800-990` (predicate and wording only, not the
+# file, and no override token: this repo ships none). MEASURED there, twice on 2026-09-12: a
+# session wrote `until ! pgrep -f 'scratchpad/drive.sh'` to wait out its own driver script, and
+# the condition never went false, because `pgrep -f` matches every process whose command line
+# names the pattern, including that very invocation of itself. A second copy of the driver then
+# raced the live one.
+#
+# THE CONDITION IS READ WHOLE, not only in command position: a negation (`while ! pgrep ...`) or
+# a subshell can sit ahead of the poller, the same reason `live_stream_hit` below reads every
+# token of its segment rather than only the first.
+PATTERN_POLLERS = {"pgrep", "pkill", "lsof"}
+
+
+def loop_condition_polls_a_pattern(segment: str) -> str:
+    """Return the matched tool when a `while`/`until` segment's condition polls a pattern."""
+    tokens = segment.split()
+    if not tokens or tokens[0] not in ("while", "until"):
+        return ""
+    for token in tokens[1:]:
+        if basename(token) in PATTERN_POLLERS:
+            return token
+    return ""
+
+
+PATTERN_POLLER_REASON = (
+    "the loop's own condition polls for a process by name or by pattern. That pattern can match "
+    "every process whose command line names it, including this session's own wrapper for the "
+    "same wait, so the condition can stay true long after the work is done. "
+    "Remedy: wait on one pid this session started, such as `kill -0 $PID`, or use a tool that "
+    "waits once, such as gh run watch <id> --exit-status run with run_in_background."
+)
+
+
+# ------------------------------------------------------------------ two ported shell traps
+#
+# Ported from banchi's `scripts/guard-shell.py` (behaviour, not code shape). Each clause below is
+# self-contained so it merges cleanly beside other edits to this file.
+
+# `gh api` with a field flag and no method. `-f`/`-F` give the request a body and gh then sends POST,
+# so a call meant as a GET silently becomes a write (hung past a 120s timeout in Banchi, 2026-09-12).
+# A named method (`-X`, `--method`, in any spelling) is the caller saying what they mean. `graphql`
+# is a POST by design and takes no method.
+GH_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
+GH_METHOD_FLAGS = ("-X", "--method")
+GH_VALUE_FLAGS = ("-H", "--header", "--hostname", "--jq", "-q", "--template", "-t", "--cache",
+                  "--input", "-p", "--preview")
+
+
+def gh_api_post_hit(segment: str) -> str:
+    """Return the matched text when a `gh api` call has a field and no method, else ''."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return ""
+    at = resolve_command(tokens)
+    if at is None or basename(tokens[at]) not in ("gh", "gh.exe"):
+        return ""
+    # gh's own global flags may sit ahead of `api`: `gh --repo o/r api ...`.
+    sub_at = at + 1
+    while sub_at < len(tokens) and tokens[sub_at].startswith("-"):
+        sub_at += 2 if tokens[sub_at] in ("-R", "--repo") else 1
+    if tokens[sub_at:sub_at + 1] != ["api"]:
+        return ""
+    rest = tokens[sub_at + 1:]
+    fielded = False
+    endpoint = ""
+    index = 0
+    while index < len(rest):
+        token = rest[index]
+        index += 1
+        if token in GH_METHOD_FLAGS or token.startswith(("--method=", "-X")):
+            return ""
+        if token in GH_FIELD_FLAGS:
+            fielded = True
+            index += 1
+        elif token.startswith(("--field=", "--raw-field=")) or (
+                token[:2] in ("-f", "-F") and len(token) > 2 and not token.startswith("--")):
+            fielded = True
+        elif token in GH_VALUE_FLAGS:
+            index += 1
+        elif not token.startswith("-") and not endpoint:
+            endpoint = token
+    if not fielded or endpoint.strip("/") == "graphql":
+        return ""
+    return "gh api " + endpoint + " with a field and no method"
+
+
+GH_API_METHOD_REASON = (
+    "a field flag gives the request a body, and gh sends a body with POST, so with no method named "
+    "this is a write and not the read it looks like. "
+    "Remedy: put a read's parameters in the query string of the endpoint, or name the method with "
+    "--method when the body is what you want."
+)
+
+
+# `ln -s` where the link name is a directory that is already there. ln does not fail: it creates the
+# link INSIDE that directory (`images/images`), the original is still in place, and the call exits 0
+# (Banchi 2026-08-29, which ended with a real directory renamed away). A real directory always
+# descends, whatever flags. A symlink to a directory descends unless `-n`/`-h`, so `-sf` over one is
+# the trap and `-sfn` is the answer. Nothing else is refused: a file or a link to a file either
+# fails loudly or, with `-f`, is replaced as asked, and neither loses anything silently. A trailing
+# slash, `-t`, and `-T` each say the destination is, or is not, a directory, so each is allowed.
+# `-sf` over a link to a file is therefore allowed: it replaces the link, which is what `-f` means.
+def ln_descends_hit(segment: str, where: str) -> str:
+    """Return the matched text when `ln -s` would create a link inside an existing directory."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return ""
+    at = resolve_command(tokens)
+    if at is None or basename(tokens[at]) != "ln":
+        return ""
+    symbolic = no_deref = False
+    operands = []
+    index = at + 1
+    while index < len(tokens):
+        token = tokens[index]
+        index += 1
+        if token == "--":
+            operands.extend(tokens[index:])
+            break
+        if token in ("-t", "--target-directory", "--no-target-directory") or token.startswith(
+                "--target-directory="):
+            return ""
+        if token.startswith("--"):
+            symbolic = symbolic or token == "--symbolic"
+            no_deref = no_deref or token == "--no-dereference"
+        elif token.startswith("-") and len(token) > 1:
+            if "T" in token[1:] or "t" in token[1:]:
+                return ""
+            symbolic = symbolic or "s" in token[1:]
+            no_deref = no_deref or "n" in token[1:] or "h" in token[1:]
+        else:
+            operands.append(token)
+    if not symbolic or len(operands) != 2:
+        return ""
+    dest = operands[1]
+    if dest.endswith(("/", "\\")) or "$" in dest or "*" in dest:
+        return ""
+    full = _absolute(os.path.expanduser(dest), where or os.getcwd())
+    if not os.path.isdir(full):
+        return ""
+    if os.path.islink(full) and no_deref:
+        return ""
+    return "ln -s over an existing directory"
+
+
+LN_DESCENDS_REASON = (
+    "the link name is a directory that already exists, so ln does not replace it: it creates the "
+    "link inside it and exits 0, leaving the original where it was. "
+    "Remedy: add -n beside -f to replace a link to a directory, check that the path is free first "
+    "with a test such as [ -e path ], or end the destination with a slash when you mean a link "
+    "inside the directory."
+)
