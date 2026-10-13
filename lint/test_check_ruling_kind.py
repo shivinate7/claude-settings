@@ -1,0 +1,252 @@
+#!/usr/bin/env python3
+"""Cases for lint/check_ruling_kind.py. Standard library only.
+
+    python3 lint/test_check_ruling_kind.py
+
+The format a changed decision record must carry, one line per item:
+
+    Kind: build                      or      Kind: process
+    Plan: <path>#<slug> (<platform>)         Home: rule:<id>   (a CLAUDE.md marker)
+    Plan: <path>#<slug> (<platform>)         Home: <path>      (an existing file)
+
+`<slug>` is the GitHub slug of a heading in the plan file. One link per line, so a writer's
+line wrap cannot split it.
+
+Each case builds a temp tree: a copy of the module, a CLAUDE.md, a plan file, and records.
+It runs the real script from that tree. The diff cases also make a temp git repo and pass
+`--base main`. A passing case must pass before a red one counts. RULING_KIND_UNDER_TEST
+overrides the module path.
+"""
+import os
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+MODULE = os.environ.get("RULING_KIND_UNDER_TEST") or os.path.join(HERE, "check_ruling_kind.py")
+
+PLAN = "plans/build-plan.md"
+L1 = PLAN + "#phase-1-the-sweep"
+L2 = PLAN + "#phase-2-the-proof"
+REC = "decisions/new-rule.md"
+OLD = "decisions/old-rule.md"
+
+PLAN_TEXT = """# Build plan
+
+## Build lanes
+
+### Phase 1: the sweep
+
+Sweep the old branches.
+
+### Phase 2: the proof
+
+Prove the sweep.
+
+### Don't stop: the sweep
+
+A heading with an apostrophe.
+
+```
+### Fake item
+```
+"""
+CLAUDE_TEXT = "# Rules\n\nDemo rule text. <!-- rule:demo-rule -->\n"
+
+BUILD_OK = ("Owner ruling, 2026-10-12. Ship it on both platforms.\n\n"
+            "Kind: build\nPlan: %s (mac)\nPlan: %s (windows)" % (L1, L2))
+PROCESS_OK = "Owner ruling, 2026-10-12. Process only.\n\nKind: process\nHome: rule:demo-rule"
+
+
+def record(ruling, heading="## The ruling"):
+    return ("# Demo rule\n\n## The question\n\nShould this land as a build task?\n\n"
+            + heading + "\n\n" + ruling + "\n")
+
+
+def rm_tree(path):
+    def clear(func, p, _exc):
+        os.chmod(p, stat.S_IWRITE)  # git objects are read-only on Windows
+        func(p)
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=clear)
+    else:
+        shutil.rmtree(path, onerror=clear)
+
+
+class RulingKindTests(unittest.TestCase):
+    def setUp(self):
+        self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_ruling_kind.py")
+        self.tree = tempfile.mkdtemp(prefix="rkl_")
+        self.addCleanup(rm_tree, self.tree)
+        os.makedirs(os.path.join(self.tree, "lint"))
+        shutil.copyfile(MODULE, os.path.join(self.tree, "lint", "check_ruling_kind.py"))
+        self.put("CLAUDE.md", CLAUDE_TEXT)
+        self.put(PLAN, PLAN_TEXT)
+
+    def put(self, rel, text, newline="\n"):
+        path = os.path.join(self.tree, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline=newline) as f:
+            f.write(text)
+
+    def lint(self, *args):
+        cmd = [sys.executable, os.path.join(self.tree, "lint", "check_ruling_kind.py"), *args]
+        r = subprocess.run(cmd, cwd=self.tree, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
+        return r.returncode, r.stdout + r.stderr
+
+    def assert_fails(self, rel, token):
+        rc, out = self.lint(rel)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("check_ruling_kind: FAIL:", out)
+        self.assertIn(rel, out)
+        self.assertIn(token.lower(), out.lower())
+
+    def assert_passes(self, rel):
+        rc, out = self.lint(rel)
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("FAIL", out)
+
+    def git(self, *args):
+        subprocess.run(["git", "-C", self.tree, "-c", "user.name=test",
+                        "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", *args],
+                       check=True, capture_output=True, text=True)
+
+    def commit_base(self):
+        self.git("init", "-q")
+        self.git("symbolic-ref", "HEAD", "refs/heads/main")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "base")
+        self.git("checkout", "-q", "-b", "change")
+
+    def commit_change(self):
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "change")
+
+    # Positive controls first: a red case means nothing if the clean case fails.
+
+    def test_build_with_a_link_per_platform_passes(self):
+        self.put(REC, record(BUILD_OK))
+        self.assert_passes(REC)
+
+    def test_process_with_a_rule_home_passes(self):
+        for ruling in (PROCESS_OK, PROCESS_OK.replace("rule:demo-rule", PLAN)):
+            with self.subTest(ruling=ruling):
+                self.put(REC, record(ruling))
+                self.assert_passes(REC)
+
+    def test_changed_record_without_kind_fails(self):
+        cases = [
+            ("## The ruling", "Owner ruling. Ship it."),
+            ("## Decision", "Owner ruling. Ship it."),  # a heading name is no exemption
+            ("## Verdict: the diff check logs", "Owner ruling. Log only."),
+        ]
+        for heading, ruling in cases:
+            with self.subTest(heading=heading):
+                self.put(REC, record(ruling, heading))
+                self.assert_fails(REC, "Kind")
+
+    def test_build_link_problems_fail(self):
+        cases = [
+            ("Kind: build", "plan"),  # no Plan line
+            ("Kind: build\nPlan:", "plan"),  # empty Plan line
+            ("Kind: build\nPlan: plans/missing.md#phase-1-the-sweep (mac)", "plans/missing.md"),
+            ("Kind: build\nPlan: plans/build-plan.md#phase-9-nothing (mac)", "phase-9-nothing"),
+            ("Kind: build\nPlan: %s" % L1, "phase-1-the-sweep"),  # no platform label
+        ]
+        for ruling, token in cases:
+            with self.subTest(ruling=ruling):
+                self.put(REC, record(ruling))
+                self.assert_fails(REC, token)
+
+    def test_process_home_problems_fail(self):
+        cases = [
+            ("Kind: process", "home"),
+            ("Kind: process\nHome:", "home"),
+            ("Kind: process\nHome: rule:no-such-rule", "no-such-rule"),
+            ("Kind: process\nHome: plans/gone.md", "plans/gone.md"),
+        ]
+        for ruling, token in cases:
+            with self.subTest(ruling=ruling):
+                self.put(REC, record(ruling))
+                self.assert_fails(REC, token)
+
+    def test_none_and_unknown_kind_fail(self):
+        cases = [
+            ("Kind: none", "none"),
+            ("Kind: NONE", "none"),
+            ("Kind: build\nPlan: none", "none"),
+            ("Kind: process\nHome: None", "none"),
+            ("Kind: maybe\nHome: rule:demo-rule", "maybe"),
+        ]
+        for ruling, token in cases:
+            with self.subTest(ruling=ruling):
+                self.put(REC, record(ruling))
+                self.assert_fails(REC, token)
+
+    def test_kind_line_placement_problems_fail(self):
+        cases = [
+            # two Kind lines: a second ruling in one record must be decided, not hidden
+            ("Kind: build\nPlan: %s (mac)\n\nKind: none" % L1, "Kind"),
+            # a Kind line inside a fenced example does not count
+            ("```\nKind: build\nPlan: %s (mac)\n```" % L1, "Kind"),
+            # a Kind word mid-sentence does not count
+            ("Owner ruling. We set Kind: build for this one.\nPlan: %s (mac)" % L1, "Kind"),
+        ]
+        for ruling, token in cases:
+            with self.subTest(ruling=ruling):
+                self.put(REC, record(ruling))
+                self.assert_fails(REC, token)
+
+    def test_heading_inside_a_fence_is_not_an_item(self):
+        self.put(REC, record("Kind: build\nPlan: plans/build-plan.md#fake-item (mac)"))
+        self.assert_fails(REC, "fake-item")
+
+    def test_prose_with_quotes_and_comment_openers_passes(self):
+        ruling = ("Owner ruling, 2026-10-12. Don't ship it yet. Prose names `<!-- open` and "
+                  "plans/build-plan.md#phase-9-gone, but it is not a link.\n\n"
+                  "Kind: build\nPlan: %s (mac)" % L1)
+        self.put(REC, record(ruling))
+        self.assert_passes(REC)
+
+    def test_apostrophe_heading_slugs_as_github_does(self):
+        self.put(REC, record("Kind: build\nPlan: plans/build-plan.md#dont-stop-the-sweep (mac)"))
+        self.assert_passes(REC)
+
+    def test_crlf_record_parses(self):
+        self.put(REC, record(BUILD_OK), newline="\r\n")
+        self.assert_passes(REC)
+
+    def test_plan_file_passed_in_is_ignored(self):
+        # The plan has no Kind line. It passes only because the lint does not check it.
+        self.assert_passes(PLAN)
+
+    def test_diff_unchanged_old_record_is_ignored(self):
+        self.put(OLD, record("Old ruling, no kind line."))
+        self.put("decisions/gone-rule.md", record("Gone ruling, no kind line."))
+        self.commit_base()
+        os.remove(os.path.join(self.tree, "decisions", "gone-rule.md"))
+        self.put(REC, record(BUILD_OK))
+        self.commit_change()
+        rc, out = self.lint("--base", "main")
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("old-rule", out)
+        self.assertNotIn("gone-rule", out)
+        self.assertNotIn("FAIL", out)
+
+    def test_diff_changed_old_record_fails(self):
+        self.put(OLD, record("Old ruling, no kind line."))
+        self.commit_base()
+        self.put(OLD, record("Old ruling, edited, still no kind line."))
+        self.commit_change()
+        rc, out = self.lint("--base", "main")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("check_ruling_kind: FAIL:", out)
+        self.assertIn(OLD, out)
+
+
+if __name__ == "__main__":
+    unittest.main()
