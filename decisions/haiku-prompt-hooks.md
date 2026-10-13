@@ -90,3 +90,6 @@ Limits, named:
   is a floor.
 - The judge on Sonnet costs more than Haiku. Unmeasured.
 - `lint/rule_mechanisms.json` still says "Haiku prompt hook" in its reasons.
+
+Kind: process
+Home: hooks/reply_judge.py
