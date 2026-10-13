@@ -63,7 +63,7 @@ the CLI binary agrees. The owner prefers Haiku at `xhigh`, as `decision_watch` r
 gap stays open until one of these:
 
 - Claude Code adds an effort field to prompt hooks.
-- A mod judge makes its own model call with an effort setting (mods plan, step E).
+- A mod judge whose own model call takes an effort level.
 
 Then the judges move back to Haiku at `xhigh`, and this record changes in place.
 

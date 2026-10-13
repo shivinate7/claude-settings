@@ -21,6 +21,7 @@ Writing prose and records is not building.
 |---|---|---|
 | `CLAUDE_CODE_SUBAGENT_MODEL` | sonnet | n/a |
 | Explore, claude-code-guide | haiku | xhigh |
+| Explore that audits or judges meaning, not a plain search | sonnet, set per spawn, which overrides the frontmatter `haiku` | high |
 | test-author | haiku | xhigh |
 | reviewer | haiku | xhigh |
 | reviewer, rounds 2 and 3 | sonnet, the ceiling; round 3 may run opus on the owner's word for that spawn; set per spawn, which overrides the frontmatter `haiku` | round 2: high, set per spawn; round 3 on sonnet: xhigh, the frontmatter; round 3 on opus: high, set per spawn |
@@ -43,6 +44,9 @@ Writing prose and records is not building.
 | `opus`, `sonnet`, `fable` aliases | not pinned | n/a |
 | safety-classifier fallback | on, the default | n/a |
 | `/model` picker | built-in list | n/a |
+
+The Explore audit row is prose only. The guard cannot tell an audit Explore from a search
+Explore. The caller spot-checks 3 findings before it acts on an audit.
 
 Haiku means Haiku 5.5. It needs Claude Code v2.1.293 or later. Haiku 4.5 ignores effort.
 A session on an older Claude Code may run Haiku 4.5 for these roles.
