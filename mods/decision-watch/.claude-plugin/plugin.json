@@ -1,0 +1,6 @@
+{
+  "name": "decision-watch",
+  "version": "0.0.1",
+  "description": "Shadow mode for the Stop-time decision watch: judges each turn with the session's own model login and logs the verdict. Adds /dw. Never blocks.",
+  "author": { "name": "shivinate7" }
+}
