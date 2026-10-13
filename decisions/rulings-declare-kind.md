@@ -65,8 +65,12 @@ still carries a Kind line, because the lint cannot tell the two apart.
 - Only pull requests run the check. A push to main and the nightly run skip it, by design.
 - The judge is a model and can miss a case. It sees only Claude's Edit and Write calls, never a
   human edit. A Bash write into `decisions/` is not judged. The Edit judge sees only the
-  changed text, so it cannot see a missing Kind line in an old record. Only the Write judge
-  and the lint enforce that. The CI lint is the check that does not miss.
+  changed text. It cannot see a missing Kind line in an old record. Its scope is narrow.
+  It refuses an edit whose new text deletes a `Kind:`, `Plan:` or `Home:` line. It also
+  refuses an edit that adds a ruling section with no `Kind:` line in the same text. Only the
+  Write judge and the lint check a whole record. The lint runs in no other repo yet.
+- `actions/ruling-kind/check.sh` copies the `RULE_FILES` list of the lint. If the two drift,
+  the check fails red.
 - The action is not adopted anywhere yet. It has not run on a hosted runner (unmeasured).
 - The lint checks that a plan heading exists. It does not check that the plan lane does the work.
 
