@@ -50,6 +50,11 @@ use Monitor for a wait. An agent that followed that text was refused. An agent t
 - The loop flag spans the whole command. A pause after any unrelated loop is refused.
 - A loop with no loop word, such as `(1..10).ForEach({ Start-Sleep 1 })`, is not seen.
 - `echo {sleep}` is refused: a bare word after `{` counts as a call.
+- `--watch=false` is refused, because any `--watch=...` counts. Rare, and a false alarm.
+- `gh pr checks 5 -R --watch` is refused. gh reads that `--watch` as the repo, so the command
+  is invalid anyway.
+- No test pins `--repo o/r`, `--repo=o/r`, `-Ro/r` or the `gh run -R watch list` false-alarm
+  guard. Review round 3 probed all four by hand, and they pass.
 - An agent may still burn up to 25 s per call on a single pause.
 - Monitor waits for a condition, such as a port or a file. A long command still runs in the
   background, and the agent waits for its completion notice.
