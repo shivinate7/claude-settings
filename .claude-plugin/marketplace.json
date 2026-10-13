@@ -24,6 +24,11 @@
       "name": "session-board",
       "source": "./mods/session-board",
       "description": "session-board mod: /board pane of every session, /safe-stop"
+    },
+    {
+      "name": "decision-watch",
+      "source": "./mods/decision-watch",
+      "description": "decision-watch mod: shadow-mode Stop-time decision watch on the session's own model login, /dw (our own code)"
     }
   ]
 }
