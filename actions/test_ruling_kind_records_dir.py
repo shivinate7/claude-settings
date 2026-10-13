@@ -137,6 +137,14 @@ class CheckShRecordsDir(unittest.TestCase):
                 self.assertIn("'%s'" % value, out)
                 self.assertNotIn("Traceback", out)
 
+    def test_records_dir_that_names_a_file_fails_and_names_it(self):
+        for value in ("README.md", "decisions/base-ruling.md"):  # both files exist in the fixture
+            with self.subTest(records_dir=value):
+                rc, out = self.check(value)
+                self.assertNotEqual(rc, 0, out)
+                self.assertIn("'%s'" % value, out)
+                self.assertNotIn("Traceback", out)
+
 
 if __name__ == "__main__":
     unittest.main()

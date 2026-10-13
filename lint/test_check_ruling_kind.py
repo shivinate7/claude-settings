@@ -442,6 +442,17 @@ class RulingKindTests(unittest.TestCase):
         self.assertIn("'decision'", out)
         self.assertNotIn("Traceback", out)
 
+    def test_dir_that_names_a_file_fails(self):
+        # A file is not a records folder. Its name passes the listing check, so the lint must not.
+        self.put("decisions/x.md", record(BUILD_OK))
+        self.put(REC, record(BUILD_OK))
+        for value in ("CLAUDE.md", "decisions/x.md"):
+            with self.subTest(dir=value):
+                rc, out = self.lint("--dir", value, REC)
+                self.assertNotEqual(rc, 0, out)
+                self.assertIn("'%s'" % value, out)
+                self.assertNotIn("Traceback", out)
+
     def test_default_and_named_records_folder_pass(self):
         self.put(REC, record(BUILD_OK))
         self.assert_passes(REC)
