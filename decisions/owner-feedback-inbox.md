@@ -18,7 +18,7 @@ depends on the model remembering it. The oversight session raised this on 2026-1
 Owner ruling, 2026-10-13, from an interview in the claude-settings audit session.
 
 - **Trigger.** A message whose first word is `fb` or `fb:` opens capture mode. A message that
-  is only `fb done` closes it. Every owner message between the two is captured, so the back and forth
+  is only `fb done` closes it; trailing punctuation or spaces are allowed. Every owner message between the two is captured, so the back and forth
   stays in the record. A `fb` elsewhere in a message does nothing.
 - **Capture.** The UserPromptSubmit hook appends each captured message verbatim, with its
   Central time, to `~/.claude/handoffs/<session_id>.inbox.md`. The file is outside git.
@@ -36,6 +36,10 @@ Owner ruling, 2026-10-13, from an interview in the claude-settings audit session
   items. An item has no kind or home. An open item id is missing from the handoff. The check reads ids,
   so a whole-file handoff rewrite that drops an item goes red. It exits on `stop_hook_active` in
   code, so it cannot loop.
+- **Closing an item.** An item closes when its inbox line gains `[closed]`, after its work is
+  done or its home holds it for good. The gate stops asking for a closed id in the handoff.
+- **No silent loss.** A malformed item line is a block reason, never a crash. If capture cannot
+  write a message, the hook tells the session, so it jots the message by hand.
 - **Reminder.** While capture is open, the Stop hook shows the owner one line at each turn end:
   send `fb done` to close capture. The hook prints it, so it costs no model tokens.
 - **After compaction.** The compact hook lists open item ids and says when capture is still open.

@@ -22,7 +22,8 @@ UTC-06:00.
   November, at 02:00 local. It does not read zoneinfo, because Python on Windows often has no
   tz database. It does not read the machine zone either.
 - The hook is advisory. On an internal error it prints nothing to stdout, writes one
-  `local_time:` line to stderr, and exits 0. It never reads stdin, so it cannot block.
+  `local_time:` line to stderr, and exits 0. It prints the time line before it reads stdin
+  for feedback capture (decision owner-feedback-inbox). With `--subagent` it never reads stdin.
 
 ## Why
 
