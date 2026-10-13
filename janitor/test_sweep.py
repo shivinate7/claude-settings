@@ -2807,9 +2807,10 @@ class PurgeTests(unittest.TestCase):
 
     def test_confirm_drops_a_tombstone_past_90_days(self):
         run_vcs(self.repo, "update-ref", "refs/janitor/reaped/old-two", "HEAD")
+        held = run_vcs(self.repo, "rev-parse", "refs/janitor/reaped/old-two").stdout.strip()
         now = int(time.time() * 1000)
         self.write_log([{"repo": self.repo, "branch": "old-two",
-                          "commit": "deadbeef", "time_ms": now - 91 * 86400000}])
+                          "commit": held, "time_ms": now - 91 * 86400000}])
         decisions = sweep.purge_tombstones(self.log_path, confirm=True, now_ms=now)
         self.assertTrue(len(decisions) > 0)
         self.assertEqual(decisions[0]["action"], "purge")
@@ -2852,6 +2853,359 @@ class PurgeTests(unittest.TestCase):
             self.assertEqual(decisions[0]["reason"], "unreadable-entry", repr(bad_time))
         still_there = run_vcs(self.repo, "rev-parse", "refs/janitor/reaped/odd-time")
         self.assertEqual(still_there.returncode, 0)
+
+
+class PurgeRefOwnershipTests(unittest.TestCase):
+    """The restore ref is keyed by branch name, so one name reaped twice shares one ref. The
+    purge must drop a ref only while it still holds the expired entry's own commit.
+
+    These cases assert refs and green pins only. Line compaction (removing expired lines from
+    the restore log) is a separate, unplanned change: no case here asserts that a line leaves
+    the log, and none should until that change is planned."""
+
+    DAY_MS = 86400000
+
+    def fresh_repo(self, tag):
+        repo = os.path.join(ROOT, "pown-" + tag)
+        make_repo(repo, {"f.txt": "x\n"})
+        return repo
+
+    def log_path(self, tag):
+        return os.path.join(ROOT, "pown-%s.jsonl" % tag)
+
+    def rev(self, repo, rev):
+        out = run_vcs(repo, "rev-parse", "-q", "--verify", rev)
+        return out.stdout.strip() if out.returncode == 0 else None
+
+    def ref(self, repo, branch):
+        return self.rev(repo, sweep.TOMBSTONE_REF_PREFIX + branch)
+
+    def younger_commit(self, repo, message):
+        made = run_vcs(repo, *IDENT, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", message)
+        self.assertEqual(made.returncode, 0, "fixture: commit-tree failed: %s" % made.stderr.strip())
+        return made.stdout.strip()
+
+    def reap(self, repo, branch, commit, log):
+        made = run_vcs(repo, "branch", branch, commit)
+        self.assertEqual(made.returncode, 0, "fixture: could not create branch %s" % branch)
+        decision = {}
+        sweep.reap_branch(repo, branch, decision, log)
+        self.assertNotIn("error", decision, "fixture: reap of %s failed" % branch)
+
+    def age_log(self, log, ages_days, now):
+        entries = sweep.read_restore_log(log)
+        self.assertEqual(len(entries), len(ages_days), "fixture: restore-log row count")
+        with open(log, "w", encoding="utf-8") as handle:
+            for entry, days in zip(entries, ages_days):
+                entry["time_ms"] = now - days * self.DAY_MS
+                handle.write(json.dumps(entry) + "\n")
+
+    def test_an_expired_entry_keeps_the_ref_that_holds_the_younger_commit(self):
+        repo = self.fresh_repo("twice-ref")
+        log = self.log_path("twice-ref")
+        now = int(time.time() * 1000)
+        old = self.rev(repo, "HEAD")
+        self.reap(repo, "lane-twice", old, log)
+        young = self.younger_commit(repo, "younger reap of the same name")
+        self.reap(repo, "lane-twice", young, log)
+        self.age_log(log, [91, 5], now)
+        self.assertEqual(self.ref(repo, "lane-twice"), young,
+                         "fixture: the second reap of one name must overwrite the ref")
+
+        decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertEqual(decisions[0]["action"], "purge")
+        self.assertEqual(decisions[1]["action"], "keep")
+        self.assertEqual(self.ref(repo, "lane-twice"), young,
+                         "the expired entry dropped the ref that holds the younger restore "
+                         "point: purge drops by branch name, not by commit")
+
+    def test_the_purge_leaves_the_younger_log_line_in_place(self):
+        repo = self.fresh_repo("twice-log")
+        log = self.log_path("twice-log")
+        now = int(time.time() * 1000)
+        self.reap(repo, "lane-twice-log", self.rev(repo, "HEAD"), log)
+        young = self.younger_commit(repo, "younger reap of the same name")
+        self.reap(repo, "lane-twice-log", young, log)
+        self.age_log(log, [91, 5], now)
+
+        sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertIn(young, [e["commit"] for e in sweep.read_restore_log(log)],
+                      "the purge must not drop the younger entry's line")
+
+    def test_a_lone_expired_entry_whose_ref_holds_its_commit_drops_the_ref(self):
+        repo = self.fresh_repo("lone-ref")
+        log = self.log_path("lone-ref")
+        now = int(time.time() * 1000)
+        self.reap(repo, "lane-lone", self.rev(repo, "HEAD"), log)
+        self.age_log(log, [91], now)
+
+        decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertEqual(decisions[0]["action"], "purge")
+        self.assertNotIn("error", decisions[0])
+        self.assertIsNone(self.ref(repo, "lane-lone"), "the ref must be dropped")
+
+    def test_an_expired_entry_whose_ref_was_deleted_by_hand_purges_without_error(self):
+        repo = self.fresh_repo("gone-ref")
+        log = self.log_path("gone-ref")
+        now = int(time.time() * 1000)
+        self.reap(repo, "lane-gone", self.rev(repo, "HEAD"), log)
+        self.age_log(log, [91], now)
+        gone = run_vcs(repo, "update-ref", "-d", sweep.TOMBSTONE_REF_PREFIX + "lane-gone")
+        self.assertEqual(gone.returncode, 0, "fixture: deleting the ref by hand failed")
+        self.assertIsNone(self.ref(repo, "lane-gone"))
+
+        decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertEqual(decisions[0]["action"], "purge")
+        self.assertNotIn("error", decisions[0],
+                         "a ref already gone must not read as a failed drop")
+
+    def test_an_expired_entry_does_not_drop_a_ref_that_holds_another_commit(self):
+        """The ref holds a commit no log line records (a reap whose line was lost). It is not
+        this entry's restore point, so the purge must leave it alone."""
+        repo = self.fresh_repo("moved-ref")
+        log = self.log_path("moved-ref")
+        now = int(time.time() * 1000)
+        self.reap(repo, "lane-moved", self.rev(repo, "HEAD"), log)
+        self.age_log(log, [91], now)
+        other = self.younger_commit(repo, "a reap whose log line was lost")
+        moved = run_vcs(repo, "update-ref", sweep.TOMBSTONE_REF_PREFIX + "lane-moved", other)
+        self.assertEqual(moved.returncode, 0, "fixture: moving the ref failed")
+
+        sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertEqual(self.ref(repo, "lane-moved"), other,
+                         "the expired entry dropped a ref that holds another commit")
+
+    def test_a_failed_ref_delete_keeps_the_ref_and_the_log_line(self):
+        repo = self.fresh_repo("failed-drop")
+        log = self.log_path("failed-drop")
+        now = int(time.time() * 1000)
+        commit = self.rev(repo, "HEAD")
+        self.reap(repo, "lane-failed", commit, log)
+        self.age_log(log, [91], now)
+        real = sys.modules["guard_core"]._git
+        failed = subprocess.CompletedProcess([], 1, "", "simulated failure")
+
+        def failing_delete(where, *args):
+            if args[:2] == ("update-ref", "-d"):
+                return failed
+            return real(where, *args)
+
+        sys.modules["guard_core"]._git = failing_delete
+        try:
+            decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+        finally:
+            sys.modules["guard_core"]._git = real
+
+        self.assertIn("error", decisions[0], "a failed drop must be reported")
+        self.assertEqual(self.ref(repo, "lane-failed"), commit, "a failed drop must keep the ref")
+        self.assertEqual([e["commit"] for e in sweep.read_restore_log(log)], [commit],
+                         "a failed drop must keep its log line: never log-without-ref")
+
+    def write_rows(self, log, rows):
+        with open(log, "w", encoding="utf-8") as handle:
+            for row in rows:
+                handle.write(json.dumps(row) + "\n")
+
+    def test_an_expired_entry_keeps_the_ref_while_an_unexpired_entry_names_its_commit(self):
+        """One branch reaped twice at one tip: two log rows name one commit. The 91-day row
+        expires, but the 5-day row still needs the ref, so the purge must keep it."""
+        repo = self.fresh_repo("same-commit")
+        log = self.log_path("same-commit")
+        now = int(time.time() * 1000)
+        commit = self.rev(repo, "HEAD")
+        self.reap(repo, "lane-same", commit, log)
+        self.reap(repo, "lane-same", commit, log)
+        self.age_log(log, [91, 5], now)
+        self.assertEqual(self.ref(repo, "lane-same"), commit,
+                         "fixture: two reaps at one tip must leave the ref on that commit")
+
+        decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertEqual(decisions[1]["action"], "keep")
+        self.assertEqual(self.ref(repo, "lane-same"), commit,
+                         "the expired row dropped the ref while the 5-day row still names "
+                         "its commit")
+
+    def test_an_expired_entry_drops_the_ref_once_no_unexpired_entry_names_its_commit(self):
+        repo = self.fresh_repo("same-gone")
+        log = self.log_path("same-gone")
+        now = int(time.time() * 1000)
+        commit = self.rev(repo, "HEAD")
+        self.reap(repo, "lane-same-gone", commit, log)
+        self.reap(repo, "lane-same-gone", commit, log)
+        self.age_log(log, [91, 92], now)
+
+        decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertEqual([d["action"] for d in decisions], ["purge", "purge"])
+        self.assertNotIn("error", decisions[0])
+        self.assertNotIn("error", decisions[1])
+        self.assertIsNone(self.ref(repo, "lane-same-gone"),
+                          "both rows are expired and name the commit: the ref must be dropped")
+
+    def test_a_missing_repo_path_is_reported_not_read_as_a_gone_ref(self):
+        """git exits 128 for a missing path. Only exit 1 means the ref is gone."""
+        missing = os.path.join(ROOT, "pown-no-such-repo")
+        self.assertFalse(os.path.exists(missing), "fixture: the path must not exist")
+        log = self.log_path("missing-path")
+        now = int(time.time() * 1000)
+        self.write_rows(log, [{"repo": missing, "branch": "lane-missing-path",
+                               "commit": "1" * 40, "time_ms": now - 91 * self.DAY_MS}])
+
+        decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertIn("error", decisions[0],
+                      "a git failure (exit 128) must be reported, not read as a gone ref")
+
+    def test_a_non_repo_directory_is_reported_not_read_as_a_gone_ref(self):
+        """git exits 128 inside a directory that is not a repository."""
+        plain = os.path.join(ROOT, "pown-plain-dir")
+        os.makedirs(plain, exist_ok=True)
+        log = self.log_path("plain-dir")
+        now = int(time.time() * 1000)
+        self.write_rows(log, [{"repo": plain, "branch": "lane-plain-dir",
+                               "commit": "2" * 40, "time_ms": now - 91 * self.DAY_MS}])
+
+        decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertIn("error", decisions[0],
+                      "a git failure (exit 128) must be reported, not read as a gone ref")
+
+    def test_a_failed_ref_read_is_reported_and_keeps_the_ref(self):
+        repo = self.fresh_repo("read-fails")
+        log = self.log_path("read-fails")
+        now = int(time.time() * 1000)
+        commit = self.rev(repo, "HEAD")
+        self.reap(repo, "lane-read", commit, log)
+        self.age_log(log, [91], now)
+        real = sys.modules["guard_core"]._git
+        failed = subprocess.CompletedProcess([], 128, "", "fatal: simulated")
+
+        def failing_read(where, *args):
+            if args[:3] == ("rev-parse", "-q", "--verify"):
+                return failed
+            return real(where, *args)
+
+        sys.modules["guard_core"]._git = failing_read
+        try:
+            decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+        finally:
+            sys.modules["guard_core"]._git = real
+
+        self.assertIn("error", decisions[0], "a git failure (exit 128) must be reported")
+        self.assertEqual(self.ref(repo, "lane-read"), commit,
+                         "a ref that could not be read must be kept")
+
+    def spellings_of(self, repo):
+        """Other strings that name the same directory on this PC (NTFS is case-insensitive,
+        and tempfile hands back an 8.3 short name whose long form realpath returns)."""
+        drive, tail = os.path.splitdrive(repo)
+        return {
+            "trailing-sep": repo + os.sep,
+            "forward-slash": repo.replace("\\", "/"),
+            "mixed-sep": drive + "\\" + tail[1:].replace("\\", "/"),
+            "drive-case": repo[0].swapcase() + repo[1:],
+            "all-upper": repo.upper(),
+            "long-name": os.path.realpath(repo),
+        }
+
+    def check_spellings_keep_ref(self, tag, labels):
+        """An expired row that spells the repo as one of `labels` must not drop the ref that an
+        unexpired row (spelled as the fixture made it) still names. A spelling equal to the
+        fixture's own string is skipped: there is no other spelling to test."""
+        repo = self.fresh_repo(tag)
+        now = int(time.time() * 1000)
+        commit = self.rev(repo, "HEAD")
+        spellings = self.spellings_of(repo)
+        for label in labels:
+            spelled = spellings[label]
+            if spelled == repo:
+                continue  # this PC gives the same string: no spelling to test
+            with self.subTest(spelling=label):
+                branch = "lane-spell-" + label
+                log = self.log_path("spell-" + label)
+                self.reap(repo, branch, commit, log)
+                self.reap(repo, branch, commit, log)
+                self.age_log(log, [91, 5], now)
+                rows = sweep.read_restore_log(log)
+                rows[0]["repo"] = spelled
+                self.write_rows(log, rows)
+
+                decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+                self.assertNotIn("error", decisions[0])
+                self.assertEqual(self.ref(repo, branch), commit,
+                                 "the expired row, spelled %r, dropped the ref that the "
+                                 "unexpired row still names" % label)
+
+    def test_an_unexpired_row_protects_the_ref_across_spellings_of_its_repo(self):
+        """The same-commit check must compare repositories by their real path. A trailing
+        separator and the long name name the same directory on every platform, so these cases
+        run on every platform."""
+        self.check_spellings_keep_ref("spell", ["trailing-sep", "long-name"])
+
+    @unittest.skipUnless(sys.platform == "win32",
+                         "case and separator spellings name another path on POSIX: the file "
+                         "system is case-sensitive and '/' is a literal character, so only the "
+                         "Windows path compare folds them")
+    def test_an_unexpired_row_protects_the_ref_across_case_and_separator_spellings(self):
+        self.check_spellings_keep_ref("spell-win",
+                                      ["all-upper", "drive-case", "forward-slash", "mixed-sep"])
+
+    def test_a_broken_ref_file_is_an_error_not_a_gone_ref(self):
+        """git rev-parse exits 1 for a broken ref file and says so on stderr. Only a clean
+        exit 1 (no stderr) means the ref is gone."""
+        repo = self.fresh_repo("broken-ref")
+        log = self.log_path("broken-ref")
+        now = int(time.time() * 1000)
+        commit = self.rev(repo, "HEAD")
+        self.reap(repo, "lane-broken", commit, log)
+        self.age_log(log, [91], now)
+        ref_file = os.path.join(repo, ".git", "refs", "janitor", "reaped", "lane-broken")
+        self.assertTrue(os.path.isfile(ref_file), "fixture: the ref must be a loose file")
+        write(ref_file, "not a sha\n")
+
+        decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+
+        self.assertIn("error", decisions[0],
+                      "a broken ref (exit 1 with stderr) must be an error, not a gone ref")
+        self.assertTrue(os.path.isfile(ref_file), "a broken ref must be kept")
+
+    def test_a_reap_landing_after_the_read_keeps_the_younger_ref(self):
+        """The read says the ref holds the expired commit, but a reap lands before the delete.
+        The old-value argument must refuse the delete and keep the younger restore point."""
+        repo = self.fresh_repo("race")
+        log = self.log_path("race")
+        now = int(time.time() * 1000)
+        old = self.rev(repo, "HEAD")
+        self.reap(repo, "lane-race", old, log)
+        young = self.younger_commit(repo, "a reap that lands after the read")
+        self.reap(repo, "lane-race", young, log)
+        self.age_log(log, [91, 5], now)
+        self.assertEqual(self.ref(repo, "lane-race"), young,
+                         "fixture: the second reap must hold the ref")
+        real = sys.modules["guard_core"]._git
+        stale = subprocess.CompletedProcess([], 0, old + "\n", "")
+
+        def read_says_old(where, *args):
+            if args[:3] == ("rev-parse", "-q", "--verify"):
+                return stale
+            return real(where, *args)
+
+        sys.modules["guard_core"]._git = read_says_old
+        try:
+            decisions = sweep.purge_tombstones(log, confirm=True, now_ms=now)
+        finally:
+            sys.modules["guard_core"]._git = real
+
+        self.assertIn("error", decisions[0], "a refused delete must be reported")
+        self.assertEqual(self.ref(repo, "lane-race"), young,
+                         "the younger restore point must survive a delete that lost the race")
 
 
 class AgentEndLogConcurrencyTests(unittest.TestCase):
