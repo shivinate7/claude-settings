@@ -1134,17 +1134,14 @@ def collect_unread(stamp):
             lines = handle.read().splitlines()
     except Exception:
         return []
+    if LINT_DIR not in sys.path:
+        sys.path.insert(0, LINT_DIR)
+    import guard_log_report  # lint/guard_log_report.py, the one reader of guard.log lines
     for line in lines:
-        fields = line.split("\t")
-        if len(fields) < 5 or fields[3] != UNREAD_RULE:  # a six-field line adds the session last
+        row = guard_log_report.parse_line(line)
+        if row is None or row.rule != UNREAD_RULE or row.when < bound:
             continue
-        try:
-            when = datetime.fromisoformat(fields[0])
-        except Exception:
-            continue
-        if when < bound:
-            continue
-        text = fields[4].strip()
+        text = row.matched.strip()
         if text and text not in seen:
             seen.append(text)
     return seen

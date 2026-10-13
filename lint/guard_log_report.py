@@ -6,11 +6,33 @@ A line ends in the hook's session_id as a sixth field; a five-field line, or "-"
 session". --session <id> keeps one session's lines. --by-session adds counts per session."""
 import argparse
 import os
+from collections import namedtuple
 import sys
 from datetime import datetime, timedelta
 
 COUNTED = ("deny", "ask", "noted")
 UNKNOWN = "unknown session"
+Row = namedtuple("Row", "line when tool decision rule matched session")
+
+
+def parse_line(raw):
+    """Return the Row for one guard.log line, or None when it is unreadable.
+
+    The one reader of guard.log lines. Both shapes: five tab fields, or six with the session last.
+    `session` is the id, or UNKNOWN for a five-field line, an empty field or "-". Extra tabs stay
+    in the last field. Unreadable: fewer than four fields, or a bad timestamp.
+    """
+    line = raw.rstrip("\r\n")
+    parts = line.split("\t", 5)
+    try:
+        if len(parts) < 4:
+            raise ValueError
+        when = datetime.fromisoformat(parts[0])
+    except ValueError:
+        return None
+    parts += [""] * (6 - len(parts))
+    session = parts[5] if parts[5] not in ("", "-") else UNKNOWN
+    return Row(line, when, parts[1], parts[2], parts[3], parts[4], session)
 
 
 def summarize(lines, days, now, session=None):
@@ -19,23 +41,18 @@ def summarize(lines, days, now, session=None):
     out = {"by_rule": {}, "per_day": dict.fromkeys(window, 0), "other": [], "unreadable": 0,
            "by_session": {}}
     for raw in lines:
-        line = raw.rstrip("\r\n")
-        parts = line.split("\t", 5)
-        try:
-            if len(parts) < 4:
-                raise ValueError
-            day = datetime.fromisoformat(parts[0]).date().isoformat()
-        except ValueError:
+        row = parse_line(raw)
+        if row is None:
             out["unreadable"] += 1
             continue
+        day = row.when.date().isoformat()
         if day not in out["per_day"]:
             continue
-        decision, rule = parts[2], parts[3]
-        label = parts[5] if len(parts) > 5 and parts[5] not in ("", "-") else UNKNOWN
+        decision, rule, label = row.decision, row.rule, row.session
         if session is not None and label != session:
             continue
         if decision not in COUNTED:
-            out["other"].append(line)
+            out["other"].append(row.line)
             continue
         row = out["by_rule"].setdefault(rule, dict.fromkeys(COUNTED, 0))
         row[decision] += 1
