@@ -1,6 +1,6 @@
 # Opt-in CI templates are composite actions
 
-Owner approved five templates any repo can adopt. They live in one home and one shape:
+Owner approved six templates any repo can adopt. They live in one home and one shape:
 a composite action under `actions/<name>/`, or a plain file where the template is no workflow
 step.
 
@@ -9,6 +9,7 @@ step.
 | All-jobs-passed gate | `actions/all-jobs-passed` |
 | Nightly CI alarm | `actions/ci-alarm` (also holds `issue.sh`, the one open-or-comment helper) |
 | Weekly README link check | `actions/readme-links` (calls `ci-alarm/issue.sh`) |
+| Ruling kind check on a pull request | `actions/ruling-kind` (runs `lint/check_ruling_kind.py` on the caller's checkout) |
 | Main-ref refusal hook | `githooks/main-ref` (`install.sh` copies it) |
 | Skip locally, fail in CI | `testing/skip-locally-fail-in-ci.mjs` |
 
@@ -42,5 +43,8 @@ the gate and the alarm are proved on their scripts, not on a hosted runner. The 
 
 ## Not wired
 
-`gates.yml` runs the five tests. It does not call the templates: the owner chose no required
+`gates.yml` runs the six tests. It does not call the templates: the owner chose no required
 checks on main. The nightly alarm is proposed in the PR, not enabled.
+
+Kind: process
+Home: actions/test_action_metadata.py
