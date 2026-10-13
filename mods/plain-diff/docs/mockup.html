@@ -1,0 +1,1207 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>plain-diff mockup</title>
+<style>
+:root{--bg:#fff;--fg:#1f2328;--dim:#656d76;--add:#dafbe1;--del:#ffebe9;--hunk:#ddf4ff;--line:#d0d7de;--note:#0550ae}
+@media(prefers-color-scheme:dark){:root{--bg:#0d1117;--fg:#e6edf3;--dim:#8b949e;--add:#12261e;--del:#2d1517;--hunk:#102a43;--line:#30363d;--note:#79c0ff}}
+body{margin:0;padding:16px;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif;max-width:960px}
+h1{font-size:16px;margin:0 0 4px}h2{font:600 14px ui-monospace,monospace;margin:20px 0 4px}
+.dim{color:var(--dim);font-weight:400}.note{margin:0 0 6px;border-left:3px solid var(--note);padding-left:10px}
+pre{margin:0;overflow-x:auto;border:1px solid var(--line);font:12px/1.4 ui-monospace,monospace}code{display:block;min-width:max-content}
+.a{background:var(--add);display:block}.d{background:var(--del);display:block}.h{background:var(--hunk);color:var(--dim);display:block}
+summary{cursor:pointer;color:var(--note);margin:4px 0}.banner{color:var(--dim);margin:0 0 12px}
+</style></head><body>
+<h1>8 files changed, +1354 -83</h1>
+<p class="banner">Mockup of the /plain-diff pane for commit 7d342dd (PR 367, STE auto-fix). Notes written by hand. In the real pane, a note comes from Claude's own turn text, or from one small-model call marked "(summarised by a model)", or reads "No note".</p>
+<section><h2>.github/workflows/gates.yml <span class="dim">+4 -0</span></h2><p class="note">The automatic check on GitHub now runs the new text-fixing tests on every code change. Before, nothing ran them there.</p><pre><code><span class="h">@@ -126,6 +126,10 @@ jobs:
+</span><span class="">       - name: Stop-hook gate fixture suite
+</span><span class="">         run: python3 lint/test_gates.py
+</span><span class=""> 
+</span><span class="a">+      - name: STE auto-fix fixture suite
+</span><span class="a">+        if: ${{ needs.scope.outputs.code == 'true' }}
+</span><span class="a">+        run: python3 lint/test_ste_autofix.py
+</span><span class="a">+
+</span><span class="">       - name: Ruling home fixture suite
+</span><span class="">         run: python3 hooks/test_ruling_home.py
+</span><span class=""> 
+</span></code></pre></section>
+<section><h2>decisions/every-lint-rule-blocks-or-does-not-exist.md <span class="dim">+7 -0</span></h2><p class="note">This rule now says a check may fix a mistake by itself instead of only blocking it. The fix counts as the check doing its job.</p><pre><code><span class="h">@@ -8,6 +8,13 @@ to `error` only. Fifteen rules fired on every run. None of them changed a
+</span><span class=""> single outcome. A rule nobody can see is not a rule. The owner ruled that a
+</span><span class=""> rule either blocks or does not exist.
+</span><span class=""> 
+</span><span class="a">+## A finding the gate fixes is not a block
+</span><span class="a">+
+</span><span class="a">+The STE gate rewrites a Markdown finding it can fix, and denies only the
+</span><span class="a">+findings it cannot fix. A fixed finding is not a block. A finding the gate
+</span><span class="a">+cannot fix still blocks, as this entry says. See ste-gate-fixes-not-nags, the
+</span><span class="a">+STE rewrite ruling.
+</span><span class="a">+
+</span><span class=""> ## The measurement
+</span><span class=""> 
+</span><span class=""> Every one of the 32 tracked Markdown files in this repository, already
+</span></code></pre></section>
+<section><h2>decisions/gate-hooks-fail-closed.md <span class="dim">+4 -0</span></h2><p class="note">A short line was added. If the text fixer crashes or runs too long, the gate falls back to plain checking. It never refuses the work because of that.</p><pre><code><span class="h">@@ -16,6 +16,10 @@ line names the remedy. For `rm_prompt_answer.py`, exit 2 leaves the normal permi
+</span><span class=""> `powershell -ExecutionPolicy Bypass -File ./install.ps1`. A missing python says to install Python 3 first. No gate carries `onFailure`: a gate that
+</span><span class=""> times out or crashes lets the call through (see Holes).
+</span><span class=""> 
+</span><span class="a">+A fixer crash or timeout in the STE gate keeps plain lint, never a refusal. That is this crash
+</span><span class="a">+rule applied to the STE fixer. The STE rewrite ruling is ste-gate-fixes-not-nags, which says the
+</span><span class="a">+gate fixes what it can and denies only what remains.
+</span><span class="a">+
+</span><span class=""> Advisory hooks stay fail-open, because a session must still start, stop and compact. They
+</span><span class=""> are SessionStart, Stop, PreCompact, SessionEnd, PostToolUse, and the SubagentStop guard.
+</span><span class=""> PreToolUse `stall_watch.py` and `sim_boot_record.py` stay advisory too: neither ever
+</span></code></pre></section>
+<section><h2>decisions/ste-gate-fixes-not-nags.md <span class="dim">+70 -0</span></h2><p class="note">This new file explains why the writing check now fixes small mistakes for you. It lists what the fixer may change, what it must leave alone, and the known limits.</p><details><summary>Show diff (71 lines)</summary><pre><code><span class="h">@@ -0,0 +1,70 @@
+</span><span class="a">+# The STE gate fixes what it can and denies the rest
+</span><span class="a">+
+</span><span class="a">+## The question
+</span><span class="a">+
+</span><span class="a">+When a write has STE errors, does the STE gate refuse the write, or fix the text first?
+</span><span class="a">+
+</span><span class="a">+## The ruling
+</span><span class="a">+
+</span><span class="a">+The gate fixes first. For a Markdown write, it rewrites the fixable STE errors and returns the
+</span><span class="a">+fixed text through `updatedInput`. It denies only the errors that remain after the rewrite.
+</span><span class="a">+A UI file is never rewritten. A UI file with STE errors is denied, as before. The UI suffixes
+</span><span class="a">+are `.tsx`, `.jsx`, `.html` and `.vue`.
+</span><span class="a">+
+</span><span class="a">+Owner intent: the gate fixes. It does not nag. The owner marks no golden set.
+</span><span class="a">+
+</span><span class="a">+The mechanism:
+</span><span class="a">+
+</span><span class="a">+- The fixer runs in a child process. Its limit is 5 s. Env `STE_FIXER_LIMIT_S` sets the limit.
+</span><span class="a">+- Text over 262144 bytes skips the fixer. Env `STE_FIXER_MAX_BYTES` sets the ceiling.
+</span><span class="a">+- A fixer crash, a timeout, or oversize input falls back to plain lint. Plain lint denies the
+</span><span class="a">+  errors it finds, as before. The hook exits 0 on that path. The fixer adds no refusal of its own.
+</span><span class="a">+- Unsafe or ambiguous patterns stay unfixed. An unfixed error denies the write.
+</span><span class="a">+- A fix never changes the line count.
+</span><span class="a">+- The gate reads stdin as UTF-8 bytes.
+</span><span class="a">+
+</span><span class="a">+Files: `lint/ste_gate.py` (`autofix`, `run_autofix`, `rewrite_output`) and `lint/ste_lint.py`
+</span><span class="a">+(`apply_fixes`).
+</span><span class="a">+
+</span><span class="a">+## Why
+</span><span class="a">+
+</span><span class="a">+A deny sends the writer back for another write. The owner wants the gate to fix, not nag.
+</span><span class="a">+How often a deny led to a retry is unmeasured.
+</span><span class="a">+
+</span><span class="a">+The fixer changes words, not line counts. A word swap is the only kind of change it makes.
+</span><span class="a">+
+</span><span class="a">+## What it costs
+</span><span class="a">+
+</span><span class="a">+A rewrite can change meaning. See Holes. The fixed text lands without the writer editing it.
+</span><span class="a">+
+</span><span class="a">+## What protects it
+</span><span class="a">+
+</span><span class="a">+- `lint/test_ste_autofix.py`. It runs on the Linux job only (see Holes).
+</span><span class="a">+- The crash rule in gate-hooks-fail-closed (a fixer crash keeps plain lint, never a refusal).
+</span><span class="a">+
+</span><span class="a">+## Holes, named
+</span><span class="a">+
+</span><span class="a">+Each hole ships under the three-round review cap.
+</span><span class="a">+
+</span><span class="a">+- The Edit and MultiEdit path tracks only plain fences and front matter. Text inside a
+</span><span class="a">+  blockquote fence, a multi-line pre block, a script block, or an HTML comment is rewritten on
+</span><span class="a">+  an Edit. The same text is denied on a Write.
+</span><span class="a">+- `e.g.` or `i.e.` at a line end becomes "for example." or "that is." with a period. That breaks
+</span><span class="a">+  hard-wrapped prose. Example: a line ending in `e.g.` becomes `for example.`, and a sentence
+</span><span class="a">+  that wraps there ends early.
+</span><span class="a">+- The fixer limit (5 s) plus the lint timeout (15 s) equals the hook timeout (20 s). A very
+</span><span class="a">+  large input with many quote marks can reach 20 s. The hook is then killed, and the gate fails
+</span><span class="a">+  open. The old lint timeout failed open the same way.
+</span><span class="a">+- Some fixes change meaning:
+</span><span class="a">+  - `It's all been fixed` becomes `It is all been fixed`.
+</span><span class="a">+  - `ad hoc` becomes `unplanned`.
+</span><span class="a">+  - `in between` becomes `between`.
+</span><span class="a">+  - `in terms of` becomes `for`.
+</span><span class="a">+  - `it would appear that` becomes `apparently`.
+</span><span class="a">+  - All-capitals `IT'S A TEST` becomes `It is A TEST`.
+</span><span class="a">+  - The heading `Don't Trust` becomes `Do not Trust`.
+</span><span class="a">+- A comment that holds `&gt;` ends its mask early. Example: `&lt;!-- a &gt; b --&gt;`.
+</span><span class="a">+- The lint still reports `e.g.` inside a blockquote fence or a pre block.
+</span><span class="a">+- `lint/test_ste_autofix.py` runs on the Linux job only. The macOS and Windows runner cost is
+</span><span class="a">+  unmeasured.
+</span><span class="a">+- macOS is unverified for the child-process route.
+</span></code></pre></details></section>
+<section><h2>lint/ste_gate.py <span class="dim">+256 -43</span></h2><p class="note">The writing gate now fixes small mistakes in your text by itself, then lets the file go through. Before, it only told you about them and stopped you. Larger problems still block the file.</p><details><summary>Show diff (360 lines)</summary><pre><code><span class="h">@@ -9,6 +9,11 @@ PreToolUse on Write, Edit, MultiEdit for a *.md path, or a UI file (ste_lint.UI_
+</span><span class=""> findings back so the writer fixes them first. For a UI file ste_lint reads only the copy a
+</span><span class=""> user sees, never the code.
+</span><span class=""> 
+</span><span class="a">+AUTO-FIX. For a Markdown file the hook first runs ste_lint.apply_fixes on the changed blocks
+</span><span class="a">+and returns the fixed text through updatedInput (rewrite_output, the one rewrite function).
+</span><span class="a">+It denies only for the errors that remain. A UI file is never fixed. A fixer crash falls
+</span><span class="a">+back to the plain lint: no rewrite, never a refusal.
+</span><span class="a">+
+</span><span class=""> SCOPING TO CHANGED BLOCKS. This hook sees the proposed content before the write lands. It
+</span><span class=""> replays the tool's own edit onto the file currently on disk to get the FULL proposed text,
+</span><span class=""> the same content the write would leave behind, then lints only the BLOCKS that differ from
+</span><span class="h">@@ -25,6 +30,7 @@ changed, it lints the whole proposed text, the strict, no-worse-than-before defa
+</span><span class=""> import difflib
+</span><span class=""> import json
+</span><span class=""> import os
+</span><span class="a">+import re
+</span><span class=""> import subprocess
+</span><span class=""> import sys
+</span><span class=""> import tempfile
+</span><span class="h">@@ -40,6 +46,9 @@ except Exception:
+</span><span class="">     UI_SUFFIXES = set()  # no linter next to this file: main() returns before it lints
+</span><span class=""> 
+</span><span class=""> MD_SUFFIXES = (".md", ".markdown")
+</span><span class="a">+MAX_SHOWN = 5
+</span><span class="a">+ABBREVIATIONS = {"e.g.", "i.e.", "etc.", "al.", "vs.", "cf.", "n.b.", "viz."}
+</span><span class="a">+CLAUSE_WORDS = {"and", "but", "which", "because", "so", "then", "while", "when", "if"}
+</span><span class=""> NOTE = ("Code in backticks or a fence is exempt. Errors only: sentence length, nominalization, "
+</span><span class="">         "Latin abbreviation, contraction, phrasal verb, bloat, double negative, "
+</span><span class="">         "condition order, omitted 'that'.")
+</span><span class="h">@@ -146,6 +155,211 @@ def apply_edit(text, old_string, new_string, replace_all):
+</span><span class="">     return text[:index] + new_string + text[index + len(old_string):]
+</span><span class=""> 
+</span><span class=""> 
+</span><span class="a">+def resolve(tool, ti, old_text):
+</span><span class="a">+    """Return (text, resolved) for a Write, Edit or MultiEdit input. `text` is the new text
+</span><span class="a">+    the tool carries. `resolved` is the full proposed file, or None when the edit cannot be
+</span><span class="a">+    replayed against `old_text` alone."""
+</span><span class="a">+    resolved = None
+</span><span class="a">+    if tool == "Write":
+</span><span class="a">+        text = ti.get("content") or ""
+</span><span class="a">+        resolved = text
+</span><span class="a">+    elif tool == "Edit":
+</span><span class="a">+        text = ti.get("new_string") or ""
+</span><span class="a">+        if old_text is not None:
+</span><span class="a">+            resolved = apply_edit(old_text, ti.get("old_string") or "", text,
+</span><span class="a">+                                   bool(ti.get("replace_all")))
+</span><span class="a">+    else:  # MultiEdit
+</span><span class="a">+        edits = ti.get("edits") or []
+</span><span class="a">+        text = "\n\n".join((e or {}).get("new_string") or "" for e in edits)
+</span><span class="a">+        if old_text is not None:
+</span><span class="a">+            resolved = old_text
+</span><span class="a">+            for e in edits:
+</span><span class="a">+                e = e or {}
+</span><span class="a">+                resolved = apply_edit(resolved, e.get("old_string") or "",
+</span><span class="a">+                                      e.get("new_string") or "", bool(e.get("replace_all")))
+</span><span class="a">+                if resolved is None:
+</span><span class="a">+                    break
+</span><span class="a">+    return text, resolved
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+# ------------------------------------------------------------------ the fixer (Markdown only)
+</span><span class="a">+
+</span><span class="a">+def fix_fragment(context, idx, old_len, fragment):
+</span><span class="a">+    """Return `fragment` fixed by ste_lint.apply_fixes as it reads at `idx` in `context`
+</span><span class="a">+    (where it replaces `old_len` characters), or None when it sits in front matter or a code
+</span><span class="a">+    fence, or its fix reaches past its own text. The fixer reads the real line around the
+</span><span class="a">+    fragment, so an open code span, link or indent is known. The text around the fragment is
+</span><span class="a">+    fixed in a second run, and the fragment's fix must leave it as that run did."""
+</span><span class="a">+    head = context[:idx]
+</span><span class="a">+    line_start = head.rfind("\n") + 1
+</span><span class="a">+    if head.count("\n") &lt; ste_lint.front_matter_lines(context):
+</span><span class="a">+        return None
+</span><span class="a">+    state = None
+</span><span class="a">+    for line in head[:line_start].split("\n"):
+</span><span class="a">+        state = ste_lint.fence_step(state, line)
+</span><span class="a">+    if state is not None:
+</span><span class="a">+        return None
+</span><span class="a">+    prefix = head[line_start:]
+</span><span class="a">+    tail = context[idx + old_len:].split("\n", 1)[0]
+</span><span class="a">+    mark = "\x01"
+</span><span class="a">+    keep, _ = ste_lint.apply_fixes(prefix + mark + tail)
+</span><span class="a">+    fixed, _ = ste_lint.apply_fixes(prefix + fragment + tail)
+</span><span class="a">+    left, right = keep.split(mark)
+</span><span class="a">+    if not (fixed.startswith(left) and fixed.endswith(right)) or len(fixed) &lt; len(left + right):
+</span><span class="a">+        return None
+</span><span class="a">+    return fixed[len(left):len(fixed) - len(right)]
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+def fix_edit(context, old_string, new_string, replace_all):
+</span><span class="a">+    """Fix the `new_string` of one Edit, in the context of the text it lands in. `context` is
+</span><span class="a">+    None when the edit cannot be replayed: the string is then fixed on its own."""
+</span><span class="a">+    if context is None or not old_string or old_string not in context:
+</span><span class="a">+        return fix_fragment("", 0, 0, new_string)
+</span><span class="a">+    spots, at = [], context.find(old_string)
+</span><span class="a">+    while at != -1:
+</span><span class="a">+        spots.append(at)
+</span><span class="a">+        at = context.find(old_string, at + len(old_string))
+</span><span class="a">+    if len(spots) &gt; 1 and not replace_all:
+</span><span class="a">+        return fix_fragment("", 0, 0, new_string)
+</span><span class="a">+    results = {fix_fragment(context, i, len(old_string), new_string) for i in spots}
+</span><span class="a">+    return results.pop() if len(results) == 1 else None
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+def autofix(tool, ti, old_text, scope):
+</span><span class="a">+    """Return (updated tool input, codes fixed), or None when nothing changed. `scope` is the
+</span><span class="a">+    set of changed lines of a Write, or None for all. A Write is fixed as a whole file, so the
+</span><span class="a">+    fences are read right, and only the lines in scope keep their fix. The fix never changes
+</span><span class="a">+    the line count. An Edit chain that the fix would break (a later `old_string` no longer
+</span><span class="a">+    matches) is not rewritten at all."""
+</span><span class="a">+    new_ti, codes = dict(ti), []
+</span><span class="a">+    if tool == "Write":
+</span><span class="a">+        content = ti.get("content") or ""
+</span><span class="a">+        fixed, _ = ste_lint.apply_fixes(content)
+</span><span class="a">+        old_lines, new_lines = content.split("\n"), fixed.split("\n")
+</span><span class="a">+        if len(old_lines) != len(new_lines):
+</span><span class="a">+            raise ValueError("the fixer changed the line count")
+</span><span class="a">+        for n, (a, b) in enumerate(zip(old_lines, new_lines), 1):
+</span><span class="a">+            if a != b and (scope is None or n in scope):
+</span><span class="a">+                old_lines[n - 1] = b
+</span><span class="a">+                codes += ste_lint.LAST_FIX_CODES.get(n, [])
+</span><span class="a">+        new_ti["content"] = "\n".join(old_lines)
+</span><span class="a">+    else:
+</span><span class="a">+        edits = [ti] if tool == "Edit" else [e or {} for e in ti.get("edits") or []]
+</span><span class="a">+        context, fixed_edits = old_text, []
+</span><span class="a">+        for e in edits:
+</span><span class="a">+            new = e.get("new_string") or ""
+</span><span class="a">+            fixed = fix_edit(context, e.get("old_string") or "", new, bool(e.get("replace_all")))
+</span><span class="a">+            if fixed is not None and fixed != new:
+</span><span class="a">+                codes += [c for v in ste_lint.LAST_FIX_CODES.values() for c in v]
+</span><span class="a">+                e = dict(e, new_string=fixed)
+</span><span class="a">+            fixed_edits.append(e)
+</span><span class="a">+            if context is not None:
+</span><span class="a">+                context = apply_edit(context, e.get("old_string") or "", e.get("new_string") or "",
+</span><span class="a">+                                     bool(e.get("replace_all")))
+</span><span class="a">+        if tool == "Edit":
+</span><span class="a">+            new_ti = fixed_edits[0]
+</span><span class="a">+        else:
+</span><span class="a">+            new_ti["edits"] = fixed_edits
+</span><span class="a">+        if (old_text is not None and resolve(tool, ti, old_text)[1] is not None
+</span><span class="a">+                and resolve(tool, new_ti, old_text)[1] is None):
+</span><span class="a">+            return None
+</span><span class="a">+    return (new_ti, codes) if new_ti != ti else None
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+def fixer_limit():
+</span><span class="a">+    """Seconds the fixer may run: env STE_FIXER_LIMIT_S, default 5."""
+</span><span class="a">+    try:
+</span><span class="a">+        return float(os.environ.get("STE_FIXER_LIMIT_S", "5"))
+</span><span class="a">+    except ValueError:
+</span><span class="a">+        return 5.0
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+def max_bytes():
+</span><span class="a">+    """Largest text the fixer reads: env STE_FIXER_MAX_BYTES, default 262144."""
+</span><span class="a">+    try:
+</span><span class="a">+        return int(os.environ.get("STE_FIXER_MAX_BYTES", "262144"))
+</span><span class="a">+    except ValueError:
+</span><span class="a">+        return 262144
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+def run_autofix(tool, ti, old_text, scope):
+</span><span class="a">+    """Run autofix in a child process, bounded by fixer_limit(). The child is killed when it
+</span><span class="a">+    runs over, because a thread cannot stop a regex stuck in C code. Return its result, or
+</span><span class="a">+    raise on a timeout or a crash: the caller then lints the plain text. The size bound,
+</span><span class="a">+    max_bytes(), is checked by the caller. The fixer is not proven linear in line length:
+</span><span class="a">+    the time limit is the bound that holds."""
+</span><span class="a">+    payload = json.dumps({"tool": tool, "ti": ti, "old_text": old_text,
+</span><span class="a">+                          "scope": None if scope is None else sorted(scope)})
+</span><span class="a">+    run = subprocess.run([sys.executable, os.path.abspath(__file__), "--autofix"],
+</span><span class="a">+                         input=payload.encode("ascii"), capture_output=True,
+</span><span class="a">+                         timeout=fixer_limit())
+</span><span class="a">+    if run.returncode != 0:
+</span><span class="a">+        raise RuntimeError("the STE fixer failed")
+</span><span class="a">+    out = json.loads(run.stdout.decode("ascii"))
+</span><span class="a">+    return (out["ti"], out["codes"]) if out else None
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+def autofix_child():
+</span><span class="a">+    """Entry of the child process: read the request on stdin, print the autofix result."""
+</span><span class="a">+    req = json.loads(sys.stdin.buffer.read().decode("ascii"))
+</span><span class="a">+    result = autofix(req["tool"], req["ti"], req["old_text"],
+</span><span class="a">+                     None if req["scope"] is None else set(req["scope"]))
+</span><span class="a">+    print(json.dumps({"ti": result[0], "codes": result[1]} if result else None))
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+def rewrite_output(updated_input, note):
+</span><span class="a">+    """The one PreToolUse rewrite. It carries no permissionDecision: "allow" would approve
+</span><span class="a">+    the call, and "defer" makes Claude Code drop updatedInput. Deny and ask rules still apply
+</span><span class="a">+    to the rewritten input. Later rewrites reuse this function."""
+</span><span class="a">+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": updated_input,
+</span><span class="a">+                                   "additionalContext": note},
+</span><span class="a">+            "systemMessage": note}
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+def sentence_words(text, line):
+</span><span class="a">+    """Return the words of the sentence that starts at `line` of `text`."""
+</span><span class="a">+    block = []
+</span><span class="a">+    for ln in text.split("\n")[line - 1:]:
+</span><span class="a">+        if not ln.strip():
+</span><span class="a">+            break
+</span><span class="a">+        block.append(ln)
+</span><span class="a">+    words = re.sub(r"^\s*(?:[-*+]|\d+[.)])\s+", "", " ".join(block)).split()
+</span><span class="a">+    end = next((i for i, w in enumerate(words) if re.search(r"[.!?]$", w) and w.lower() not in ABBREVIATIONS),
+</span><span class="a">+               len(words))
+</span><span class="a">+    return words[:end + 1]
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+def split_hint(text, line, limit):
+</span><span class="a">+    """Return a short split point for the sentence that starts at `line` of `text`: a clause
+</span><span class="a">+    break before word `limit`, else word `limit`."""
+</span><span class="a">+    words = sentence_words(text, line)
+</span><span class="a">+    cut = next((i for i in range(min(limit, len(words) - 1) - 1, 3, -1)
+</span><span class="a">+                if re.search(r"[,;:]$", words[i]) or words[i + 1].lower() in CLAUSE_WORDS), None)
+</span><span class="a">+    cut = limit - 1 if cut is None else cut
+</span><span class="a">+    return 'Split after word %d, "%s".' % (cut + 1, " ".join(words[max(0, cut - 3):cut + 1]))
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+def deny_reason(path, findings, text, is_ui):
+</span><span class="a">+    """The denial text. `text` is what the writer wrote, not the fixed text: the sentence
+</span><span class="a">+    quoted here is the writer's own, and a finding's line number is the same in both. It lists
+</span><span class="a">+    5 findings at most. A sentence-length finding names the sentence start, its word count, the
+</span><span class="a">+    limit, and one split point."""
+</span><span class="a">+    lines = []
+</span><span class="a">+    for f in findings[:MAX_SHOWN]:
+</span><span class="a">+        line = format_finding(f)
+</span><span class="a">+        m = re.search(r"holds (\d+) words\. The \w+ limit is (\d+)", f.get("message") or "")
+</span><span class="a">+        if f.get("code") == "STE001" and m and not is_ui:
+</span><span class="a">+            line += '\n  Starts: "%s". %s' % (
+</span><span class="a">+                " ".join(sentence_words(text, f.get("line") or 1))[:60], split_hint(text, f.get("line") or 1, int(m.group(2))))
+</span><span class="a">+        lines.append(line)
+</span><span class="a">+    if len(findings) &gt; MAX_SHOWN:
+</span><span class="a">+        lines.append("%d more findings not shown." % (len(findings) - MAX_SHOWN))
+</span><span class="a">+    return ("STE lint on the text for %s:\n%s\n%s Fix the text, then write again. For a "
+</span><span class="a">+            "rule's meaning, run `python3 %s --explain &lt;id&gt;`." % (
+</span><span class="a">+                os.path.basename(path), "\n".join(lines), UI_NOTE if is_ui else NOTE,
+</span><span class="a">+                os.path.join(HERE, "ste_lint.py")))
+</span><span class="a">+
+</span><span class="a">+
+</span><span class=""> def last_reply(hook):
+</span><span class="">     text = hook.get("last_assistant_message")
+</span><span class="">     if text:
+</span><span class="h">@@ -174,7 +388,9 @@ def last_reply(hook):
+</span><span class=""> 
+</span><span class=""> def main():
+</span><span class="">     try:
+</span><span class="d">-        hook = json.load(sys.stdin)
+</span><span class="a">+        # Bytes, decoded as UTF-8: the locale codec (cp1252 on a Windows pipe) would turn
+</span><span class="a">+        # raw UTF-8 into mojibake. Output stays ASCII (json.dumps escapes), so it is exact.
+</span><span class="a">+        hook = json.loads(sys.stdin.buffer.read().decode("utf-8"))
+</span><span class="">     except Exception:
+</span><span class="">         return
+</span><span class="">     if not isinstance(hook, dict):
+</span><span class="h">@@ -198,67 +414,64 @@ def main():
+</span><span class="">         except Exception:
+</span><span class="">             old_text = None  # no file on disk yet: entirely new, lint in full
+</span><span class=""> 
+</span><span class="a">+        if tool not in ("Write", "Edit", "MultiEdit"):
+</span><span class="a">+            return
+</span><span class="">         # `resolved` holds the full proposed content once known. None means the edit could
+</span><span class="">         # not be replayed against disk content alone, so the fallback text below is linted
+</span><span class="">         # in full rather than guessed at.
+</span><span class="d">-        resolved = None
+</span><span class="d">-        if tool == "Write":
+</span><span class="d">-            text = ti.get("content") or ""
+</span><span class="d">-            resolved = text
+</span><span class="d">-        elif tool == "Edit":
+</span><span class="d">-            text = ti.get("new_string") or ""
+</span><span class="d">-            if old_text is not None:
+</span><span class="d">-                resolved = apply_edit(old_text, ti.get("old_string") or "", text,
+</span><span class="d">-                                       bool(ti.get("replace_all")))
+</span><span class="d">-        elif tool == "MultiEdit":
+</span><span class="d">-            edits = ti.get("edits") or []
+</span><span class="d">-            text = "\n\n".join((e or {}).get("new_string") or "" for e in edits)
+</span><span class="d">-            if old_text is not None:
+</span><span class="d">-                resolved = old_text
+</span><span class="d">-                for e in edits:
+</span><span class="d">-                    e = e or {}
+</span><span class="d">-                    applied = apply_edit(resolved, e.get("old_string") or "",
+</span><span class="d">-                                          e.get("new_string") or "", bool(e.get("replace_all")))
+</span><span class="d">-                    if applied is None:
+</span><span class="d">-                        resolved = None
+</span><span class="d">-                        break
+</span><span class="d">-                    resolved = applied
+</span><span class="d">-        else:
+</span><span class="d">-            return
+</span><span class="a">+        text, resolved = resolve(tool, ti, old_text)
+</span><span class="a">+        is_ui = suffix in UI_SUFFIXES
+</span><span class=""> 
+</span><span class="">         if old_text is None or resolved is None:
+</span><span class="">             scope = None  # new file, or an edit this hook could not replay: lint in full
+</span><span class="">             full_text = resolved if resolved is not None else text
+</span><span class="">         else:
+</span><span class="">             full_text = resolved
+</span><span class="d">-            if suffix in UI_SUFFIXES:
+</span><span class="a">+            if is_ui:
+</span><span class="">                 scope = ui_scope_of_change(old_text, full_text, suffix)
+</span><span class="">             else:
+</span><span class="">                 scope = scope_of_change(old_text, full_text)
+</span><span class=""> 
+</span><span class="d">-        findings = lint(linter, full_text, suffix if suffix in UI_SUFFIXES else ".md", path)
+</span><span class="a">+        # Markdown only: fix what a word swap fixes, then lint the fixed text. A fixer crash
+</span><span class="a">+        # keeps today's behaviour (decisions/gate-hooks-fail-closed.md): no rewrite, no refusal.
+</span><span class="a">+        fixed_ti, note, written = None, "", full_text
+</span><span class="a">+        # Over STE_FIXER_MAX_BYTES the fixer is skipped and the plain lint decides.
+</span><span class="a">+        if not is_ui and len(text.encode("utf-8", "replace")) &lt;= max_bytes():
+</span><span class="a">+            try:
+</span><span class="a">+                result = run_autofix(tool, ti, old_text, scope)
+</span><span class="a">+                if result:
+</span><span class="a">+                    fixed_ti, codes = result
+</span><span class="a">+                    text, resolved = resolve(tool, fixed_ti, old_text)
+</span><span class="a">+                    full_text = resolved if resolved is not None else text
+</span><span class="a">+                    counts = ["%s x%d" % (c, codes.count(c)) for c in sorted(set(codes))]
+</span><span class="a">+                    note = "STE lint fixed %s in %s." % (
+</span><span class="a">+                        ", ".join(counts) or "wording", os.path.basename(path))
+</span><span class="a">+            except Exception:
+</span><span class="a">+                fixed_ti, note = None, ""
+</span><span class="a">+
+</span><span class="a">+        findings = lint(linter, full_text, suffix if is_ui else ".md", path)
+</span><span class="">         if findings is None:
+</span><span class="">             # "Report a read that could not run as unknown, never as clear or broken."
+</span><span class="">             # The write goes ahead, and the message says that nobody checked it.
+</span><span class="d">-            print(json.dumps({"systemMessage": (
+</span><span class="d">-                "STE lint could not run on the text for %s. The result is unknown: the "
+</span><span class="d">-                "write was not checked." % os.path.basename(path))}))
+</span><span class="a">+            unknown = ("STE lint could not run on the text for %s. The result is unknown: the "
+</span><span class="a">+                       "write was not checked." % os.path.basename(path))
+</span><span class="a">+            print(json.dumps(rewrite_output(fixed_ti, note + " " + unknown) if fixed_ti
+</span><span class="a">+                             else {"systemMessage": unknown}))
+</span><span class="">             return
+</span><span class="">         if scope is not None:
+</span><span class="">             findings = [f for f in findings if f.get("line") in scope]
+</span><span class="d">-        if not findings:
+</span><span class="d">-            return
+</span><span class="d">-        lines = [format_finding(f) for f in findings]
+</span><span class="d">-        reason = ("STE lint on the text for %s:\n%s\n%s Fix the text, then write again. For a "
+</span><span class="d">-                  "rule's meaning, run `python3 %s --explain &lt;id&gt;`." % (
+</span><span class="d">-            os.path.basename(path), "\n".join(lines), UI_NOTE if suffix in UI_SUFFIXES else NOTE,
+</span><span class="d">-            os.path.join(HERE, "ste_lint.py")))
+</span><span class="d">-        print(json.dumps({"hookSpecificOutput": {
+</span><span class="d">-            "hookEventName": "PreToolUse",
+</span><span class="d">-            "permissionDecision": "deny",
+</span><span class="d">-            "permissionDecisionReason": reason,
+</span><span class="d">-        }}))
+</span><span class="a">+        if findings:
+</span><span class="a">+            print(json.dumps({"hookSpecificOutput": {
+</span><span class="a">+                "hookEventName": "PreToolUse",
+</span><span class="a">+                "permissionDecision": "deny",
+</span><span class="a">+                "permissionDecisionReason": deny_reason(path, findings, written, is_ui),
+</span><span class="a">+            }}))
+</span><span class="a">+        elif fixed_ti:
+</span><span class="a">+            print(json.dumps(rewrite_output(fixed_ti, note)))
+</span><span class=""> 
+</span><span class=""> 
+</span><span class=""> if __name__ == "__main__":
+</span><span class="d">-    main()
+</span><span class="a">+    if "--autofix" in sys.argv[1:]:
+</span><span class="a">+        autofix_child()
+</span><span class="a">+    else:
+</span><span class="a">+        main()
+</span></code></pre></details></section>
+<section><h2>lint/ste_lint.py <span class="dim">+199 -35</span></h2><p class="note">The writing checker can now rewrite the safe mistakes, such as contractions, and show what it changed. Each fix is made only when it cannot change the meaning.</p><details><summary>Show diff (264 lines)</summary><pre><code><span class="h">@@ -869,7 +869,7 @@ def segment_markdown(lines: Sequence[str], default_mode: str) -&gt; Tuple[List[Para
+</span><span class="">     suppressed: Dict[int, Optional[List[str]]] = {}
+</span><span class="">     file_disable: Optional[List[str]] = None
+</span><span class="">     current: Optional[Paragraph] = None
+</span><span class="d">-    in_fence = False
+</span><span class="a">+    in_fence = None
+</span><span class="">     in_frontmatter = False
+</span><span class="">     heading_mode = default_mode
+</span><span class="">     explicit_mode: Optional[str] = None
+</span><span class="h">@@ -906,11 +906,12 @@ def segment_markdown(lines: Sequence[str], default_mode: str) -&gt; Tuple[List[Para
+</span><span class="">             suppressed[lineno] = pending_next[1]
+</span><span class="">             pending_next = None
+</span><span class=""> 
+</span><span class="d">-        if FENCE.match(stripped):
+</span><span class="d">-            in_fence = not in_fence
+</span><span class="a">+        was_fenced = in_fence is not None
+</span><span class="a">+        in_fence = fence_step(in_fence, stripped)
+</span><span class="a">+        if was_fenced != (in_fence is not None):  # an opening or a closing fence line
+</span><span class="">             flush()
+</span><span class="">             continue
+</span><span class="d">-        if in_fence:
+</span><span class="a">+        if in_fence is not None:
+</span><span class="">             continue
+</span><span class=""> 
+</span><span class="">         marker = re.search(r"&lt;!--\s*ste:\s*(procedural|descriptive|auto)\s*--&gt;", stripped)
+</span><span class="h">@@ -1839,44 +1840,207 @@ class Linter:
+</span><span class=""> # Automatic fixes
+</span><span class=""> # --------------------------------------------------------------------------
+</span><span class=""> 
+</span><span class="d">-FIXABLE = [(p, r) for p, r, _ in LATIN if r] + CONTRACTIONS + \
+</span><span class="d">-          [(p, r) for p, r in BLOAT] + \
+</span><span class="d">-          [(p, r) for p, r, _ in NOMINALIZATION_PHRASES if r]
+</span><span class="a">+# A pattern is fixable only when the swap reads as correct English, with the same punctuation,
+</span><span class="a">+# in every sentence. These keep their lint finding, and the writer fixes them by hand. "vs",
+</span><span class="a">+# "cf", "via" and "per se" change meaning or grammar, a deletion leaves a lowercase start, a
+</span><span class="a">+# stray comma or a space, and "we'd", "they'd", "he'd", "she'd" and "it'd" may mean "had".
+</span><span class="a">+_NO_FIX = {r"\bvs\.?(?=\s)", r"\bcf\.", r"\bvia\b", r"\bper\s+se\b", r"\bN\.\s?B\.", r"\bwe'd\b", r"\bthey'd\b",
+</span><span class="a">+           r"\bthe majority of\b"}
+</span><span class="a">+
+</span><span class="a">+# An 's is "is" or "has", and an 'd is "would" or "had". These forms are fixed only when the
+</span><span class="a">+# next word makes the meaning clear. Data, not code: pattern -&gt; words that may follow.
+</span><span class="a">+# Only the FIRST word after the form is read. An adverb (not, never, always, also, just, still,
+</span><span class="a">+# now, only) can sit before "been" or "had", so no adverb is in these tables.
+</span><span class="a">+_S_FOLLOW = (r"a|an|the|very|too|so|here|there|more|"
+</span><span class="a">+             r"less|better|best|worse|no|any|all|each|every|another|my|your|our|their|his|her|its|"
+</span><span class="a">+             r"safe|full|fine|true|ready|clear|open|closed|important|possible|easy|hard|good|bad|"
+</span><span class="a">+             r"correct|wrong|okay|ok|likely|enough|about|in|on|at|for|to|from|\w+ing")
+</span><span class="a">+_THERE_FOLLOW = r"a|an|no|one|nothing|something|another|enough"
+</span><span class="a">+_D_FOLLOW = r"like|love|prefer|rather|need|want|be"
+</span><span class="a">+_CONTEXT_FIX = {
+</span><span class="a">+    r"\bit's\b": _S_FOLLOW, r"\bthat's\b": _S_FOLLOW, r"\bwhat's\b": _S_FOLLOW,
+</span><span class="a">+    r"\bthere's\b": _THERE_FOLLOW, r"\byou'd\b": _D_FOLLOW,
+</span><span class="a">+}
+</span><span class="a">+# Any other 's or 'd form here stays unfixed.
+</span><span class="a">+_NO_FIX |= {r"\bhe's\b", r"\bshe's\b", r"\bhe'd\b", r"\bshe'd\b", r"\bit'd\b"}
+</span><span class="a">+
+</span><span class="a">+# Fixer-only rewrites of a table row. The lint rule keeps the original pattern. A row whose
+</span><span class="a">+# swap would double or drop punctuation has a guard, so it fixes only where the result is right.
+</span><span class="a">+_EG_CLOSE = r"(?=\s*\))"
+</span><span class="a">+_FIX_PATTERN = {
+</span><span class="a">+    # Keep the period when "etc." ends the sentence.
+</span><span class="a">+    r"\betc\.": [(r"\betc\.(?=\s*$|\s+(?-i:[A-Z]))", "and so on."), (r"\betc\.", "and so on")],
+</span><span class="a">+    # "e.g." before a bracket or at the end of the line takes no comma.
+</span><span class="a">+    r"\be\.\s?g\.(?:,)?": [
+</span><span class="a">+        (r"\be\.\s?g\.,?" + _EG_CLOSE, "for example"),
+</span><span class="a">+        (r"\be\.\s?g\.\s*$", "for example."),
+</span><span class="a">+        (r"\be\.\s?g\.,?(?=\s+[\w\"'(\[`])", "for example,")],
+</span><span class="a">+    r"\bi\.\s?e\.(?:,)?": [
+</span><span class="a">+        (r"\bi\.\s?e\.,?" + _EG_CLOSE, "that is"),
+</span><span class="a">+        (r"\bi\.\s?e\.\s*$", "that is."),
+</span><span class="a">+        (r"\bi\.\s?e\.,?(?=\s+[\w\"'(\[`])", "that is,")],
+</span><span class="a">+    # Keep the period when "et al." ends the sentence.
+</span><span class="a">+    r"\bet\s+al\.": [(r"\bet\s+al\.(?=\s*$|\s+(?-i:[A-Z]))", "and others."),
+</span><span class="a">+                     (r"\bet\s+al\.", "and others")],
+</span><span class="a">+    # A comma before it leaves "Stop, to test".
+</span><span class="a">+    r"\bin order to\b": [(r"(?&lt;!,)(?&lt;!, )\bin order to\b", "to")],
+</span><span class="a">+    r"\bmake a decision about\b": [(r"\bmake a decision about\b", "decide about")],
+</span><span class="a">+    # The verb must agree with the subject.
+</span><span class="a">+    r"\bmake(?:s)? use of\b": [(r"\bmakes use of\b", "uses"), (r"\bmake use of\b", "use")],
+</span><span class="a">+    r"\bgive(?:s)? consideration to\b": [(r"\bgives consideration to\b", "considers"),
+</span><span class="a">+                                         (r"\bgive consideration to\b", "consider")],
+</span><span class="a">+    r"\bprovide(?:s)? support for\b": [(r"\bprovides support for\b", "supports"),
+</span><span class="a">+                                       (r"\bprovide support for\b", "support")],
+</span><span class="a">+}
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+def _fixable():
+</span><span class="a">+    rows = []
+</span><span class="a">+    for code, table in (("STE007", [(p, r) for p, r, _ in LATIN]),
+</span><span class="a">+                        ("STE008", CONTRACTIONS), ("STE011", BLOAT),
+</span><span class="a">+                        ("STE003", [(p, r) for p, r, _ in NOMINALIZATION_PHRASES])):
+</span><span class="a">+        for pattern, replacement in table:
+</span><span class="a">+            if not replacement or (pattern in _NO_FIX and pattern not in _CONTEXT_FIX):
+</span><span class="a">+                continue
+</span><span class="a">+            if pattern in _CONTEXT_FIX:
+</span><span class="a">+                pattern = pattern + r"(?=\s+(?:%s)\b)" % _CONTEXT_FIX[pattern]
+</span><span class="a">+            for p2, r2 in _FIX_PATTERN.get(pattern, [(pattern, replacement)]):
+</span><span class="a">+                rows.append((p2, r2, code))
+</span><span class="a">+    return rows
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+FIXABLE = _fixable()
+</span><span class="a">+
+</span><span class="a">+_NUL = "\x00"
+</span><span class="a">+_QUOTED = re.compile(r'(?&lt;!\w)"[^"\n]+"(?!\w)|“[^”\n]*”')
+</span><span class="a">+# Spans the fixer never reads: code, whole links and images (label and URL), URLs, e-mail
+</span><span class="a">+# addresses, HTML tags, placeholders. A quote around one of them masks it all.
+</span><span class="a">+_FIX_MASK = [
+</span><span class="a">+    re.compile(r"`[^`\n]*`"),
+</span><span class="a">+    re.compile(r"!?\[[^\[\]\n]*\]\((?:[^()\n]|\([^()\n]*\))*\)"),  # one level of ( ) in a URL
+</span><span class="a">+    re.compile(r"\[[^\[\]\n]*\]\[[^\[\]\n]*\]"),
+</span><span class="a">+    re.compile(r"&lt;https?://[^&lt;&gt;\s]+&gt;"),
+</span><span class="a">+    re.compile(r"https?://\S+"),
+</span><span class="a">+    re.compile(r"(?&lt;![\w.+-])[\w.+-]+@[\w-]+\.[\w.]+\b"),  # the lookbehind keeps it linear
+</span><span class="a">+    re.compile(r"&lt;[^&lt;&gt;\s][^&lt;&gt;]*&gt;"),
+</span><span class="a">+    re.compile(r"\{\{[^{}]*\}\}"),
+</span><span class="a">+    re.compile(r"\$\{[^{}]*\}"),
+</span><span class="a">+    _QUOTED,
+</span><span class="a">+]
+</span><span class="a">+_LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
+</span><span class="a">+_FENCE_LINE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+</span><span class="a">+_REF_DEF = re.compile(r"^ {0,3}\[([^\]\n]+)\]:\s")
+</span><span class="a">+# Lines the last apply_fixes call changed: {1-based line: [rule codes]}.
+</span><span class="a">+LAST_FIX_CODES: dict = {}
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+def fence_step(state, line):
+</span><span class="a">+    """Return the fence state after `line`: None outside a fence, else (marker char, length).
+</span><span class="a">+    A fence closes only on the same char, at least as long, with nothing after it."""
+</span><span class="a">+    m = _FENCE_LINE.match(line.rstrip("\r\n"))
+</span><span class="a">+    if state is None:
+</span><span class="a">+        if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+</span><span class="a">+            return (m.group(1)[0], len(m.group(1)))
+</span><span class="a">+        return None
+</span><span class="a">+    if m and m.group(1)[0] == state[0] and len(m.group(1)) &gt;= state[1] and not m.group(2).strip():
+</span><span class="a">+        return None
+</span><span class="a">+    return state
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+def front_matter_lines(text: str) -&gt; int:
+</span><span class="a">+    """Return how many leading lines are YAML or TOML front matter, 0 when there is none."""
+</span><span class="a">+    lines = text.split("\n")
+</span><span class="a">+    if not lines or lines[0].rstrip() not in ("---", "+++"):
+</span><span class="a">+        return 0
+</span><span class="a">+    for n, line in enumerate(lines[1:], 2):
+</span><span class="a">+        if line.rstrip() in (lines[0].rstrip(), "..."):
+</span><span class="a">+            return n
+</span><span class="a">+    return 0
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+_SHORTCUT = re.compile(r"\[([^\[\]\n]+)\](?![(\[:])")
+</span><span class="a">+_QUOTE_PREFIX = re.compile(r"^(?: {0,3}&gt;)+ ?")
+</span><span class="a">+_RAW_OPEN = re.compile(r"^ {0,3}(?:&lt;(pre|script|style|textarea)\b|&lt;!--)", re.I)
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+def _label(text: str) -&gt; str:
+</span><span class="a">+    return " ".join(text.lower().split())
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+def _fix_line(body: str, labels=frozenset()):
+</span><span class="a">+    """Fix one line of prose. Return (fixed line, codes). A shortcut reference label whose
+</span><span class="a">+    definition is in `labels` is never changed: the label and its definition stay in step."""
+</span><span class="a">+    tokens: List[str] = []
+</span><span class="a">+
+</span><span class="a">+    def hide(match):
+</span><span class="a">+        tokens.append(match.group(0))
+</span><span class="a">+        return "%s%d%s" % (_NUL, len(tokens) - 1, _NUL)
+</span><span class="a">+    masked = body
+</span><span class="a">+    if labels:
+</span><span class="a">+        masked = _SHORTCUT.sub(lambda m: hide(m) if _label(m.group(1)) in labels else m.group(0),
+</span><span class="a">+                               masked)
+</span><span class="a">+    for pattern in _FIX_MASK:
+</span><span class="a">+        masked = pattern.sub(hide, masked)
+</span><span class="a">+    codes: List[str] = []
+</span><span class="a">+    for pattern, replacement, code in FIXABLE:
+</span><span class="a">+        def repl(match, replacement=replacement, code=code):
+</span><span class="a">+            codes.append(code)
+</span><span class="a">+            if match.group(0)[:1].isupper():
+</span><span class="a">+                return replacement[:1].upper() + replacement[1:]
+</span><span class="a">+            return replacement
+</span><span class="a">+        masked = re.sub(pattern, repl, masked, flags=re.I)
+</span><span class="a">+    if not codes:
+</span><span class="a">+        return body, codes
+</span><span class="a">+    while _NUL in masked:  # a quote can hold a token: restore until none is left
+</span><span class="a">+        restored = re.sub(r"\x00(\d+)\x00", lambda m: tokens[int(m.group(1))], masked)
+</span><span class="a">+        if restored == masked:
+</span><span class="a">+            break
+</span><span class="a">+        masked = restored
+</span><span class="a">+    return masked, codes
+</span><span class=""> 
+</span><span class=""> 
+</span><span class=""> def apply_fixes(text: str) -&gt; Tuple[str, int]:
+</span><span class="d">-    """Apply the substitutions that are safe without context."""
+</span><span class="d">-    lines = text.splitlines(keepends=True)
+</span><span class="a">+    """Apply the substitutions that are safe without context, line by line. The line count
+</span><span class="a">+    and every line's own ending never change. Front matter, fenced and indented code, raw
+</span><span class="a">+    HTML blocks (pre, script, style, textarea, comments), inline code, links, images and
+</span><span class="a">+    quoted text stay as they are, and a line with no match is returned byte for byte.
+</span><span class="a">+    Run time is not proven linear for every input: a few mask patterns can scan to the end
+</span><span class="a">+    of a long line from many starts. The gate bounds the input size and the run time."""
+</span><span class="a">+    LAST_FIX_CODES.clear()
+</span><span class="a">+    lines = re.findall(r"[^\n]*\n|[^\n]+", text)
+</span><span class="a">+    labels = {_label(m.group(1)) for ln in lines for m in [_REF_DEF.match(ln)] if m}
+</span><span class="">     out: List[str] = []
+</span><span class="d">-    in_fence = False
+</span><span class="a">+    fence = None
+</span><span class="a">+    raw_end = None
+</span><span class="">     total = 0
+</span><span class="d">-    for raw in lines:
+</span><span class="d">-        body = raw.rstrip("\n")
+</span><span class="d">-        newline = raw[len(body):]
+</span><span class="d">-        if FENCE.match(body):
+</span><span class="d">-            in_fence = not in_fence
+</span><span class="d">-            out.append(raw)
+</span><span class="d">-            continue
+</span><span class="d">-        if in_fence:
+</span><span class="a">+    skip_to = front_matter_lines(text)
+</span><span class="a">+    for number, raw in enumerate(lines, 1):
+</span><span class="a">+        body = raw[:-2] if raw.endswith("\r\n") else raw.rstrip("\n")
+</span><span class="a">+        inner = _QUOTE_PREFIX.sub("", body) if body.lstrip(" ").startswith("&gt;") else body
+</span><span class="a">+        was_fenced = fence is not None
+</span><span class="a">+        fence = fence_step(fence, inner)
+</span><span class="a">+        in_raw = raw_end is not None
+</span><span class="a">+        if in_raw:
+</span><span class="a">+            if raw_end.search(body):
+</span><span class="a">+                raw_end = None
+</span><span class="a">+        elif not was_fenced and fence is None:
+</span><span class="a">+            opened = _RAW_OPEN.match(body)
+</span><span class="a">+            if opened:
+</span><span class="a">+                in_raw = True
+</span><span class="a">+                end = re.compile(r"&lt;/%s\s*&gt;" % opened.group(1) if opened.group(1) else r"--&gt;",
+</span><span class="a">+                                 re.I)
+</span><span class="a">+                if not end.search(body, opened.end()):
+</span><span class="a">+                    raw_end = end
+</span><span class="a">+        if (number &lt;= skip_to or was_fenced or fence is not None or in_raw
+</span><span class="a">+                or _FENCE_LINE.match(inner) or _REF_DEF.match(body)
+</span><span class="a">+                or (re.match(r"(?: {4}|\t)", body) and not _LIST_ITEM.match(body))):
+</span><span class="">             out.append(raw)
+</span><span class="">             continue
+</span><span class="d">-        masker = Masker(body)
+</span><span class="d">-        masked = masker.text
+</span><span class="d">-        for pattern, replacement in FIXABLE:
+</span><span class="d">-            def repl(match, replacement=replacement):
+</span><span class="d">-                nonlocal total
+</span><span class="d">-                total += 1
+</span><span class="d">-                original = match.group(0)
+</span><span class="d">-                if not replacement:
+</span><span class="d">-                    return ""
+</span><span class="d">-                if original[:1].isupper():
+</span><span class="d">-                    return replacement[:1].upper() + replacement[1:]
+</span><span class="d">-                return replacement
+</span><span class="d">-            masked = re.sub(pattern, repl, masked, flags=re.I)
+</span><span class="d">-        fixed = masker.unmask(masked)
+</span><span class="d">-        fixed = re.sub(r"  +", " ", fixed)
+</span><span class="d">-        fixed = re.sub(r"\s+([.,;:])", r"\1", fixed)
+</span><span class="d">-        out.append(fixed.rstrip() + newline if newline else fixed.rstrip())
+</span><span class="a">+        fixed, codes = _fix_line(body, labels)
+</span><span class="a">+        if codes:
+</span><span class="a">+            total += len(codes)
+</span><span class="a">+            LAST_FIX_CODES[number] = codes
+</span><span class="a">+        out.append(fixed + raw[len(body):])
+</span><span class="">     return "".join(out), total
+</span><span class=""> 
+</span><span class=""> 
+</span></code></pre></details></section>
+<section><h2>lint/test_gates.py <span class="dim">+14 -5</span></h2><p class="note">Some old tests used a mistake that the fixer now repairs by itself. They now use a mistake it leaves alone, so they still prove that bad text is blocked.</p><details><summary>Show diff (54 lines)</summary><pre><code><span class="h">@@ -1674,7 +1674,7 @@ class SteGatePreToolUseTests(unittest.TestCase):
+</span><span class="">         run = self.run_pretooluse("Edit", {
+</span><span class="">             "file_path": target,
+</span><span class="">             "old_string": "This is the clean block that gets edited.\n",
+</span><span class="d">-            "new_string": "This block now isn't clean, right in the edit itself.\n",
+</span><span class="a">+            "new_string": "We'd call this block clean, right in the edit itself.\n",
+</span><span class="">         })
+</span><span class="">         reason = self.assert_denied(run)
+</span><span class="">         self.assertIn("contraction", reason.lower())
+</span><span class="h">@@ -1700,7 +1700,16 @@ class SteGatePreToolUseTests(unittest.TestCase):
+</span><span class=""> 
+</span><span class="">     def test_62_new_file_via_write_denied_on_every_error(self):
+</span><span class="">         target = os.path.join(self.tmp.name, "new.md")  # never created: Write makes it
+</span><span class="d">-        run = self.run_pretooluse("Write", {"file_path": target, "content": self.THREE_ERRORS_ONE_CLEAN})
+</span><span class="a">+        # Three STE008 contractions the fixer leaves alone (ste_lint _NO_FIX: we'd, they'd),
+</span><span class="a">+        # so every one is denied, not rewritten.
+</span><span class="a">+        content = ("We'd keep the first block clean.\n"
+</span><span class="a">+                   "\n"
+</span><span class="a">+                   "They'd keep the second block clean too.\n"
+</span><span class="a">+                   "\n"
+</span><span class="a">+                   "We'd keep the third block clean as well.\n"
+</span><span class="a">+                   "\n"
+</span><span class="a">+                   "This is the clean block.\n")
+</span><span class="a">+        run = self.run_pretooluse("Write", {"file_path": target, "content": content})
+</span><span class="">         reason = self.assert_denied(run)
+</span><span class="">         self.assertEqual(reason.count("STE008"), 3)
+</span><span class=""> 
+</span><span class="h">@@ -1727,7 +1736,7 @@ class SteGatePreToolUseTests(unittest.TestCase):
+</span><span class="">         target = self._write("notes.md", self.THREE_ERRORS_ONE_CLEAN)
+</span><span class="">         proposed = self.THREE_ERRORS_ONE_CLEAN.replace(
+</span><span class="">             "This is the clean block that gets edited.\n",
+</span><span class="d">-            "This block now isn't clean, right in the edit itself.\n",
+</span><span class="a">+            "We'd call this block clean, right in the edit itself.\n",
+</span><span class="">         )
+</span><span class="">         run = self.run_pretooluse("Write", {"file_path": target, "content": proposed})
+</span><span class="">         reason = self.assert_denied(run)
+</span><span class="h">@@ -1743,7 +1752,7 @@ class SteGatePreToolUseTests(unittest.TestCase):
+</span><span class="">         run = self.run_pretooluse("Edit", {
+</span><span class="">             "file_path": target,
+</span><span class="">             "old_string": "text that is not actually in the file",
+</span><span class="d">-            "new_string": "This new text isn't clean, introduced here.",
+</span><span class="a">+            "new_string": "We'd call this new text clean, introduced here.",
+</span><span class="">         })
+</span><span class="">         reason = self.assert_denied(run)
+</span><span class="">         self.assertIn("contraction", reason.lower())
+</span><span class="h">@@ -1769,7 +1778,7 @@ class SteGatePreToolUseTests(unittest.TestCase):
+</span><span class="">             {"old_string": "This is the clean block that gets edited.\n",
+</span><span class="">              "new_string": "This is the clean block that gets edited today.\n"},
+</span><span class="">             {"old_string": "text that is not actually in the file",
+</span><span class="d">-             "new_string": "This new text isn't clean, introduced here."},
+</span><span class="a">+             "new_string": "We'd call this new text clean, introduced here."},
+</span><span class="">         ]})
+</span><span class="">         reason = self.assert_denied(run)
+</span><span class="">         self.assertIn("contraction", reason.lower())
+</span></code></pre></details></section>
+<section><h2>lint/test_ste_autofix.py <span class="dim">+800 -0</span></h2><p class="note">This new file holds about 800 lines of tests for the text fixer. Each test feeds in a sample and checks the fixed result.</p><details><summary>Show diff (801 lines)</summary><pre><code><span class="h">@@ -0,0 +1,800 @@
+</span><span class="a">+#!/usr/bin/env python3
+</span><span class="a">+"""Tests for the STE auto-fix in lint/ste_gate.py (plan section C).
+</span><span class="a">+
+</span><span class="a">+The gate fixes a Markdown write with ste_lint.apply_fixes, returns the fixed text through the
+</span><span class="a">+PreToolUse updatedInput, and denies only the errors that remain. UI files are never fixed.
+</span><span class="a">+
+</span><span class="a">+Written test-first. On the current code the gate has no fixer, so the gate cases are red, and
+</span><span class="a">+apply_fixes has the unsafe patterns named in the golden set. Safety cases that already pass are
+</span><span class="a">+regression guards, not red proof.
+</span><span class="a">+
+</span><span class="a">+    python lint/test_ste_autofix.py -v
+</span><span class="a">+"""
+</span><span class="a">+import glob
+</span><span class="a">+import json
+</span><span class="a">+import os
+</span><span class="a">+import re
+</span><span class="a">+import shutil
+</span><span class="a">+import subprocess
+</span><span class="a">+import sys
+</span><span class="a">+import tempfile
+</span><span class="a">+import time
+</span><span class="a">+import unittest
+</span><span class="a">+from unittest import mock
+</span><span class="a">+
+</span><span class="a">+HERE = os.path.dirname(os.path.abspath(__file__))
+</span><span class="a">+sys.path.insert(0, HERE)
+</span><span class="a">+import ste_lint  # noqa: E402
+</span><span class="a">+from test_gates import STE_GATE, run_gate  # noqa: E402  (the helper only; no TestCase is collected)
+</span><span class="a">+
+</span><span class="a">+# 29 words: STE001 at the descriptive limit of 25.
+</span><span class="a">+LONG = ("The operators on each shift must record every valve position, every pressure reading, "
+</span><span class="a">+        "every alarm, and every handover note in the shared log before they leave the site today.")
+</span><span class="a">+# 24 words with two contractions: clean now, 26 words once the contractions are fixed.
+</span><span class="a">+GROWS_PAST_LIMIT = ("We don't stop the pump until the valve is closed, the gauge reads zero, "
+</span><span class="a">+                    "and it's safe for the crew to enter the room.")
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+def parse(run):
+</span><span class="a">+    assert run.returncode == 0, run.stderr
+</span><span class="a">+    return json.loads(run.stdout) if run.stdout.strip() else {}
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+def hso(run):
+</span><span class="a">+    return parse(run).get("hookSpecificOutput", {})
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+# ------------------------------------------------------------------ 1. golden grammar set
+</span><span class="a">+# (id, before, after). `after` is correct English. Rows whose id ends in `_unsafe_keep` are
+</span><span class="a">+# unsafe patterns: the fixer must leave the text UNCHANGED, and the gate still denies on the
+</span><span class="a">+# lint error (see GateFixTests test_14 to test_16). Other rows hold the correct fixed text.
+</span><span class="a">+# Red today: the rows where apply_fixes output differs from `after`.
+</span><span class="a">+
+</span><span class="a">+GOLDEN = [
+</span><span class="a">+    ("g01_latin_start_cap", "E.g. the pump stops.", "For example, the pump stops."),
+</span><span class="a">+    ("g02_latin_mid", "Use a tool, e.g. a hammer, for this.", "Use a tool, for example, a hammer, for this."),
+</span><span class="a">+    ("g03_latin_end_comma", "Stop the pump, e.g., during a test.", "Stop the pump, for example, during a test."),
+</span><span class="a">+    ("g04_latin_in_parens", "Check the valves (e.g. the inlet valve).", "Check the valves (for example, the inlet valve)."),
+</span><span class="a">+    ("g05_ie_mid", "Check the valves, i.e. the inlets.", "Check the valves, that is, the inlets."),
+</span><span class="a">+    ("g06_etc_sentence_end", "Test the unit at the end, etc.", "Test the unit at the end, and so on."),
+</span><span class="a">+    ("g07_etc_mid", "Pumps, valves, etc. must be checked.", "Pumps, valves, and so on must be checked."),
+</span><span class="a">+    ("g08_vs_unsafe_keep", "The rule applies to pumps vs. valves.", "The rule applies to pumps vs. valves."),
+</span><span class="a">+    ("g09_vs_unsafe_keep", "Compare Option A vs. Option B.", "Compare Option A vs. Option B."),
+</span><span class="a">+    ("g10_cf_unsafe_keep", "See cf. section 4 for details.", "See cf. section 4 for details."),
+</span><span class="a">+    ("g11_via_unsafe_keep", "Send the report via email.", "Send the report via email."),
+</span><span class="a">+    ("g12_et_al_commas", "The team, et al., reviewed the design.", "The team, and others, reviewed the design."),
+</span><span class="a">+    ("g13_ad_hoc", "This is an ad hoc fix.", "This is an unplanned fix."),
+</span><span class="a">+    ("g14_contraction_mid", "We don't stop the pump.", "We do not stop the pump."),
+</span><span class="a">+    ("g15_contraction_start", "Don't stop the pump.", "Do not stop the pump."),
+</span><span class="a">+    ("g16_its_mid", "The pump stops when it's full.", "The pump stops when it is full."),
+</span><span class="a">+    ("g17_lets", "Let's test the valve.", "Let us test the valve."),
+</span><span class="a">+    ("g18_well_end_clause", "Stop the pump, and we'll check it.", "Stop the pump, and we will check it."),
+</span><span class="a">+    ("g19_wont", "The pump won't start.", "The pump will not start."),
+</span><span class="a">+    ("g20_youd", "You'd like the valve closed.", "You would like the valve closed."),
+</span><span class="a">+    ("g21_theyve", "The crews say they've finished.", "The crews say they have finished."),
+</span><span class="a">+    ("g22_thed_unsafe_keep", "They'd finished the work.", "They'd finished the work."),
+</span><span class="a">+    ("g23_in_order_to", "Close the valve in order to stop the flow.", "Close the valve to stop the flow."),
+</span><span class="a">+    ("g24_due_to_start", "Due to the fact that the seal wore, the pump failed.",
+</span><span class="a">+     "Because the seal wore, the pump failed."),
+</span><span class="a">+    ("g25_in_the_event", "In the event that the alarm sounds, leave the room.", "If the alarm sounds, leave the room."),
+</span><span class="a">+    ("g26_noted_delete_unsafe_keep", "It should be noted that the pump runs hot.",
+</span><span class="a">+     "It should be noted that the pump runs hot."),
+</span><span class="a">+    ("g27_note_delete_unsafe_keep", "Check it. Please note that the door is locked.",
+</span><span class="a">+     "Check it. Please note that the door is locked."),
+</span><span class="a">+    ("g28_conclusion_delete_unsafe_keep", "In conclusion, the plan works.", "In conclusion, the plan works."),
+</span><span class="a">+    ("g29_majority_unsafe_keep", "The majority of the valves are open.", "The majority of the valves are open."),
+</span><span class="a">+    ("g30_large_number", "We saw a large number of faults.", "We saw many faults."),
+</span><span class="a">+    ("g31_able_to", "We are able to finish today.", "We can finish today."),
+</span><span class="a">+    ("g32_first_of_all", "First of all, lock the door.", "First, lock the door."),
+</span><span class="a">+    ("g33_make_use_of", "We made use of the new tool.", "We used the new tool."),
+</span><span class="a">+    ("g34_decision_about", "Make a decision about the pump.", "Decide about the pump."),
+</span><span class="a">+    ("g35_take_into_consideration", "The team will take into consideration the cost.",
+</span><span class="a">+     "The team will consider the cost."),
+</span><span class="a">+    ("g36_gives_consideration", "The team gives consideration to the cost.", "The team considers the cost."),
+</span><span class="a">+    ("g37_makes_use_agreement", "It makes use of the pump.", "It uses the pump."),
+</span><span class="a">+    ("g38_provides_support", "This provides support for the goal.", "This supports the goal."),
+</span><span class="a">+    ("g39_provide_support_plural", "We provide support for the goal.", "We support the goal."),
+</span><span class="a">+    ("g40_comparison_of", "Do a comparison of the two bids.", "Compare the two bids."),
+</span><span class="a">+    ("g41_in_terms_of", "The check is good in terms of safety.", "The check is good for safety."),
+</span><span class="a">+    ("g42_list_item", "- Test the pump, e.g. the inlet.", "- Test the pump, for example, the inlet."),
+</span><span class="a">+    ("g43_table_cell", "| 1 | Close it in order to isolate. |", "| 1 | Close it to isolate. |"),
+</span><span class="a">+    ("g44_comma_unsafe_keep", "Stop, in order to test.", "Stop, in order to test."),
+</span><span class="a">+    ("g45_prior_to_start", "Prior to startup, check the oil.", "Before startup, check the oil."),
+</span><span class="a">+]
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+class GoldenGrammarTests(unittest.TestCase):
+</span><span class="a">+    """One method per golden row, so the report names the failing row."""
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+def _golden_case(before, after):
+</span><span class="a">+    def test(self):
+</span><span class="a">+        self.assertEqual(ste_lint.apply_fixes(before)[0], after)
+</span><span class="a">+    return test
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+for _gid, _before, _after in GOLDEN:
+</span><span class="a">+    setattr(GoldenGrammarTests, "test_" + _gid, _golden_case(_before, _after))
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+# ------------------------------------------------------------------ 3a. fixer safety
+</span><span class="a">+
+</span><span class="a">+class FixerSafetyTests(unittest.TestCase):
+</span><span class="a">+    """apply_fixes must never change code, quoted text, or the layout of a Markdown file."""
+</span><span class="a">+
+</span><span class="a">+    def test_s01_code_fence_unchanged(self):
+</span><span class="a">+        text = ("```python\nx = \"don't e.g. it's\"  # don't\n```\n"
+</span><span class="a">+                "```sh\n# don't run e.g. this\n```\n")
+</span><span class="a">+        self.assertEqual(ste_lint.apply_fixes(text)[0], text)
+</span><span class="a">+
+</span><span class="a">+    def test_s02_inline_code_unchanged(self):
+</span><span class="a">+        text = "Run `don't` and `e.g.` here."
+</span><span class="a">+        self.assertEqual(ste_lint.apply_fixes(text)[0], text)
+</span><span class="a">+
+</span><span class="a">+    def test_s03_quoted_text_unchanged(self):
+</span><span class="a">+        text = 'The sign says "don\'t enter" now.'
+</span><span class="a">+        self.assertEqual(ste_lint.apply_fixes(text)[0], text)
+</span><span class="a">+
+</span><span class="a">+    def test_s04_lone_quote_in_text_does_not_stop_the_fix(self):
+</span><span class="a">+        self.assertEqual(ste_lint.apply_fixes('The 5" pipe, don\'t stop.')[0],
+</span><span class="a">+                         'The 5" pipe, do not stop.')
+</span><span class="a">+
+</span><span class="a">+    def test_s05_comment_openers_inside_inline_code_unchanged(self):
+</span><span class="a">+        text = 'Set `a = "/* x */"` and `b = "# y"`; then don\'t stop.'
+</span><span class="a">+        self.assertEqual(ste_lint.apply_fixes(text)[0],
+</span><span class="a">+                         'Set `a = "/* x */"` and `b = "# y"`; then do not stop.')
+</span><span class="a">+
+</span><span class="a">+    def test_s06_multiline_template_literal_in_fence_unchanged(self):
+</span><span class="a">+        text = ("```js\nconst s = `line one don't\nline two e.g. // keep /* keep */`;\n```\n")
+</span><span class="a">+        self.assertEqual(ste_lint.apply_fixes(text)[0], text)
+</span><span class="a">+
+</span><span class="a">+    def test_s07_indented_code_block_unchanged(self):
+</span><span class="a">+        text = "    cp  a.txt  don't.txt\n"
+</span><span class="a">+        self.assertEqual(ste_lint.apply_fixes(text)[0], text)
+</span><span class="a">+
+</span><span class="a">+    def test_s08_nested_list_indent_kept(self):
+</span><span class="a">+        self.assertEqual(ste_lint.apply_fixes("- item\n  - Close the valve in order to stop.\n")[0],
+</span><span class="a">+                         "- item\n  - Close the valve to stop.\n")
+</span><span class="a">+
+</span><span class="a">+    def test_s09_trailing_two_space_hard_break_kept(self):
+</span><span class="a">+        text = "Line one  \nLine two\n"
+</span><span class="a">+        self.assertEqual(ste_lint.apply_fixes(text)[0], text)
+</span><span class="a">+
+</span><span class="a">+    def test_s10_space_before_dotted_name_kept(self):
+</span><span class="a">+        text = "Copy the file .env now.\n"
+</span><span class="a">+        self.assertEqual(ste_lint.apply_fixes(text)[0], text)
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+# ------------------------------------------------------------------ gate cases
+</span><span class="a">+
+</span><span class="a">+class _GateCase(unittest.TestCase):
+</span><span class="a">+    def setUp(self):
+</span><span class="a">+        self.tmp = tempfile.TemporaryDirectory()
+</span><span class="a">+        self.addCleanup(self.tmp.cleanup)
+</span><span class="a">+
+</span><span class="a">+    def _path(self, name):
+</span><span class="a">+        return os.path.join(self.tmp.name, name)
+</span><span class="a">+
+</span><span class="a">+    def _write(self, name, text):
+</span><span class="a">+        with open(self._path(name), "w", encoding="utf-8") as f:
+</span><span class="a">+            f.write(text)
+</span><span class="a">+        return self._path(name)
+</span><span class="a">+
+</span><span class="a">+    def _pre(self, tool, tool_input, gate=STE_GATE):
+</span><span class="a">+        hook = {"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": tool_input}
+</span><span class="a">+        return run_gate(gate, hook)
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+class GateFixTests(_GateCase):
+</span><span class="a">+    """ste_gate.py on a PreToolUse Write or Edit of a Markdown file."""
+</span><span class="a">+
+</span><span class="a">+    # (a) fixable errors only -&gt; rewritten input, no deny
+</span><span class="a">+
+</span><span class="a">+    def test_01_fixable_only_write_is_rewritten_not_denied(self):
+</span><span class="a">+        target = self._path("notes.md")
+</span><span class="a">+        run = self._pre("Write", {"file_path": target,
+</span><span class="a">+                                  "content": "We don't stop the pump, e.g. at night.\n"})
+</span><span class="a">+        out = hso(run)
+</span><span class="a">+        self.assertNotEqual(out.get("permissionDecision"), "deny")
+</span><span class="a">+        self.assertEqual(out.get("updatedInput"),
+</span><span class="a">+                         {"file_path": target, "content": "We do not stop the pump, for example, at night.\n"})
+</span><span class="a">+
+</span><span class="a">+    def test_02_rewrite_grants_no_allow(self):
+</span><span class="a">+        # Docs: "allow" auto-approves, and "defer" makes the hook ignore updatedInput. The docs do
+</span><span class="a">+        # not say "allow" is required with updatedInput, so the rewrite must not add one.
+</span><span class="a">+        target = self._path("notes.md")
+</span><span class="a">+        out = hso(self._pre("Write", {"file_path": target,
+</span><span class="a">+                                      "content": "We don't stop the pump, e.g. at night.\n"}))
+</span><span class="a">+        self.assertIsNotNone(out.get("updatedInput"), "the rewrite is missing")
+</span><span class="a">+        self.assertNotIn(out.get("permissionDecision"), ("allow", "defer"))
+</span><span class="a">+
+</span><span class="a">+    def test_03_fixable_plus_unfixable_denies_with_remaining_only(self):
+</span><span class="a">+        target = self._path("mixed.md")
+</span><span class="a">+        content = "We don't stop the pump, e.g. at night.\n\n" + LONG + "\n"
+</span><span class="a">+        run = self._pre("Write", {"file_path": target, "content": content})
+</span><span class="a">+        out = hso(run)
+</span><span class="a">+        self.assertEqual(out.get("permissionDecision"), "deny")
+</span><span class="a">+        reason = out["permissionDecisionReason"]
+</span><span class="a">+        self.assertIn("STE001", reason)
+</span><span class="a">+        self.assertIn("operators on each shift", reason, "the sentence is not named")
+</span><span class="a">+        self.assertIn("29", reason, "the word count is missing")
+</span><span class="a">+        self.assertIn("25", reason, "the limit is missing")
+</span><span class="a">+        self.assertIn("split", reason.lower(), "no split point is suggested")
+</span><span class="a">+        self.assertNotIn("STE008", reason, "a fixed contraction is still reported")
+</span><span class="a">+        self.assertNotIn("STE007", reason, "a fixed abbreviation is still reported")
+</span><span class="a">+
+</span><span class="a">+    def test_04_denial_shows_at_most_five_findings(self):
+</span><span class="a">+        target = self._path("many.md")
+</span><span class="a">+        content = "\n\n".join([LONG] * 7) + "\n"
+</span><span class="a">+        out = hso(self._pre("Write", {"file_path": target, "content": content}))
+</span><span class="a">+        self.assertEqual(out.get("permissionDecision"), "deny")
+</span><span class="a">+        findings = [ln for ln in out["permissionDecisionReason"].splitlines()
+</span><span class="a">+                    if re.match(r"line \d+: STE001", ln)]
+</span><span class="a">+        self.assertTrue(0 &lt; len(findings) &lt;= 5, "showed %d findings" % len(findings))
+</span><span class="a">+
+</span><span class="a">+    def test_05_clean_text_no_output(self):
+</span><span class="a">+        run = self._pre("Write", {"file_path": self._path("ok.md"),
+</span><span class="a">+                                  "content": "The pump runs at low speed.\n"})
+</span><span class="a">+        self.assertEqual(run.stdout.strip(), "")
+</span><span class="a">+
+</span><span class="a">+    def test_06_write_fixes_only_the_changed_block(self):
+</span><span class="a">+        disk = "We don't stop the pump.\n\nOld block: it's fine.\n"
+</span><span class="a">+        target = self._write("blocks.md", disk)
+</span><span class="a">+        content = disk + "\nNew block: we'll check it, e.g. daily.\n"
+</span><span class="a">+        out = hso(self._pre("Write", {"file_path": target, "content": content}))
+</span><span class="a">+        self.assertEqual(out.get("updatedInput", {}).get("content"),
+</span><span class="a">+                         disk + "\nNew block: we will check it, for example, daily.\n")
+</span><span class="a">+
+</span><span class="a">+    def test_07_edit_fixes_only_new_string(self):
+</span><span class="a">+        disk = "We don't stop the pump.\n\nOld block: it's fine.\n"
+</span><span class="a">+        target = self._write("edit.md", disk)
+</span><span class="a">+        out = hso(self._pre("Edit", {"file_path": target,
+</span><span class="a">+                                     "old_string": "Old block: it's fine.\n",
+</span><span class="a">+                                     "new_string": "New block: we'll check it, e.g. daily.\n"}))
+</span><span class="a">+        self.assertEqual(out.get("updatedInput"), {
+</span><span class="a">+            "file_path": target,
+</span><span class="a">+            "old_string": "Old block: it's fine.\n",
+</span><span class="a">+            "new_string": "New block: we will check it, for example, daily.\n",
+</span><span class="a">+        })
+</span><span class="a">+
+</span><span class="a">+    def test_08_edit_not_on_disk_lints_whole_text_and_fixes_it(self):
+</span><span class="a">+        target = self._write("unreplayable.md", "Clean text.\n")
+</span><span class="a">+        out = hso(self._pre("Edit", {"file_path": target,
+</span><span class="a">+                                     "old_string": "Nowhere on disk.\n",
+</span><span class="a">+                                     "new_string": "We don't stop it, e.g. at night.\n"}))
+</span><span class="a">+        self.assertEqual(out.get("updatedInput"), {
+</span><span class="a">+            "file_path": target,
+</span><span class="a">+            "old_string": "Nowhere on disk.\n",
+</span><span class="a">+            "new_string": "We do not stop it, for example, at night.\n",
+</span><span class="a">+        })
+</span><span class="a">+
+</span><span class="a">+    def test_09_edit_not_on_disk_remaining_error_denied(self):
+</span><span class="a">+        target = self._write("unreplayable2.md", "Clean text.\n")
+</span><span class="a">+        out = hso(self._pre("Edit", {"file_path": target,
+</span><span class="a">+                                     "old_string": "Nowhere on disk.\n",
+</span><span class="a">+                                     "new_string": LONG + "\n"}))
+</span><span class="a">+        self.assertEqual(out.get("permissionDecision"), "deny")
+</span><span class="a">+        self.assertIn("STE001", out["permissionDecisionReason"])
+</span><span class="a">+
+</span><span class="a">+    def test_10_output_names_the_fixed_code_without_a_deny(self):
+</span><span class="a">+        # One line that names what was fixed, and no deny. Today the gate denies, which also
+</span><span class="a">+        # names STE008, so the deny check is what makes this red.
+</span><span class="a">+        run = self._pre("Write", {"file_path": self._path("named.md"),
+</span><span class="a">+                                  "content": "We don't stop the pump.\n"})
+</span><span class="a">+        self.assertNotEqual(hso(run).get("permissionDecision"), "deny")
+</span><span class="a">+        self.assertIn("STE008", run.stdout)
+</span><span class="a">+
+</span><span class="a">+    def _crash_gate(self):
+</span><span class="a">+        # A copy of the gate whose apply_fixes writes a marker and then raises.
+</span><span class="a">+        d = os.path.join(self.tmp.name, "gate")
+</span><span class="a">+        os.makedirs(d)
+</span><span class="a">+        for src in glob.glob(os.path.join(HERE, "*.py")):
+</span><span class="a">+            if not os.path.basename(src).startswith("test_"):
+</span><span class="a">+                shutil.copy(src, d)
+</span><span class="a">+        marker = self._path("fixer-ran.txt")
+</span><span class="a">+        with open(os.path.join(d, "ste_lint.py"), "a", encoding="utf-8") as f:
+</span><span class="a">+            f.write("\n\ndef apply_fixes(text):\n    open(%r, 'w').close()\n"
+</span><span class="a">+                    "    raise RuntimeError('fixer crash')\n" % marker)
+</span><span class="a">+        return os.path.join(d, "ste_gate.py"), marker
+</span><span class="a">+
+</span><span class="a">+    def test_11_fixer_crash_falls_back_to_deny_and_exits_zero(self):
+</span><span class="a">+        # Ruling (decisions/gate-hooks-fail-closed.md): a crash does not refuse. The gate skips
+</span><span class="a">+        # the rewrite, keeps today's behaviour (deny on the lint errors), exits 0, never 2.
+</span><span class="a">+        gate, marker = self._crash_gate()
+</span><span class="a">+        run = run_gate(gate, {"hook_event_name": "PreToolUse", "tool_name": "Write",
+</span><span class="a">+                              "tool_input": {"file_path": self._path("crash.md"),
+</span><span class="a">+                                             "content": "We don't stop the pump.\n"}})
+</span><span class="a">+        self.assertNotEqual(run.returncode, 2)
+</span><span class="a">+        self.assertEqual(run.returncode, 0, run.stderr)
+</span><span class="a">+        self.assertTrue(os.path.exists(marker), "the fixer never ran")
+</span><span class="a">+        out = hso(run)
+</span><span class="a">+        self.assertEqual(out.get("permissionDecision"), "deny")
+</span><span class="a">+        self.assertIn("STE008", out["permissionDecisionReason"])
+</span><span class="a">+        self.assertNotIn("updatedInput", out)
+</span><span class="a">+
+</span><span class="a">+    def test_11b_fixer_crash_on_clean_text_allows(self):
+</span><span class="a">+        gate, marker = self._crash_gate()
+</span><span class="a">+        run = run_gate(gate, {"hook_event_name": "PreToolUse", "tool_name": "Write",
+</span><span class="a">+                              "tool_input": {"file_path": self._path("clean.md"),
+</span><span class="a">+                                             "content": "The pump runs at low speed.\n"}})
+</span><span class="a">+        self.assertNotEqual(run.returncode, 2)
+</span><span class="a">+        self.assertEqual(run.returncode, 0, run.stderr)
+</span><span class="a">+        self.assertTrue(os.path.exists(marker), "the fixer never ran")
+</span><span class="a">+        self.assertEqual(run.stdout.strip(), "")
+</span><span class="a">+
+</span><span class="a">+    def test_12_fence_only_write_no_output(self):
+</span><span class="a">+        run = self._pre("Write", {"file_path": self._path("fence.md"),
+</span><span class="a">+                                  "content": "```sh\nrun don't here\n```\n"})
+</span><span class="a">+        self.assertEqual(run.stdout.strip(), "")
+</span><span class="a">+
+</span><span class="a">+    def test_13_fix_then_lint_catches_growth_past_the_limit(self):
+</span><span class="a">+        # Clean before the fix (24 words). Lint-before-fix would miss this. Fixed it is 26 words.
+</span><span class="a">+        out = hso(self._pre("Write", {"file_path": self._path("grow.md"),
+</span><span class="a">+                                      "content": GROWS_PAST_LIMIT + "\n"}))
+</span><span class="a">+        self.assertEqual(out.get("permissionDecision"), "deny")
+</span><span class="a">+        reason = out["permissionDecisionReason"]
+</span><span class="a">+        self.assertIn("STE001", reason)
+</span><span class="a">+        self.assertNotIn("STE008", reason)
+</span><span class="a">+
+</span><span class="a">+    # Unsafe patterns (ruling 2): the fixer leaves the text unchanged, so the gate must not
+</span><span class="a">+    # rewrite it, and must still deny on the lint error.
+</span><span class="a">+
+</span><span class="a">+    def test_14_unsafe_latin_vs_cf_via_denied_not_rewritten(self):
+</span><span class="a">+        content = "Compare Option A vs. Option B.\n\nSee cf. section 4.\n\nSend it via email.\n"
+</span><span class="a">+        out = hso(self._pre("Write", {"file_path": self._path("latin.md"), "content": content}))
+</span><span class="a">+        self.assertEqual(out.get("permissionDecision"), "deny")
+</span><span class="a">+        self.assertIn("STE007", out["permissionDecisionReason"])
+</span><span class="a">+        self.assertNotIn("updatedInput", out)
+</span><span class="a">+
+</span><span class="a">+    def test_15_unsafe_would_denied_not_rewritten(self):
+</span><span class="a">+        out = hso(self._pre("Write", {"file_path": self._path("would.md"),
+</span><span class="a">+                                      "content": "They'd finished the work.\n"}))
+</span><span class="a">+        self.assertEqual(out.get("permissionDecision"), "deny")
+</span><span class="a">+        self.assertIn("STE008", out["permissionDecisionReason"])
+</span><span class="a">+        self.assertNotIn("updatedInput", out)
+</span><span class="a">+
+</span><span class="a">+    def test_16_unsafe_deletions_and_majority_denied_not_rewritten(self):
+</span><span class="a">+        content = ("In conclusion, the plan works.\n\nThe majority of the valves are open.\n\n"
+</span><span class="a">+                   "We will check it.\n")
+</span><span class="a">+        out = hso(self._pre("Write", {"file_path": self._path("bloat.md"), "content": content}))
+</span><span class="a">+        self.assertEqual(out.get("permissionDecision"), "deny")
+</span><span class="a">+        self.assertIn("STE011", out["permissionDecisionReason"])
+</span><span class="a">+        self.assertNotIn("updatedInput", out)
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+# ------------------------------------------------------------------ UI files: no rewrite
+</span><span class="a">+
+</span><span class="a">+class UiFileTests(_GateCase):
+</span><span class="a">+    """UI files keep today's behaviour: the gate denies, and never rewrites the input."""
+</span><span class="a">+
+</span><span class="a">+    def test_u01_tsx_contraction_not_rewritten(self):
+</span><span class="a">+        # STE008 does not apply to UI copy, so this is clean today.
+</span><span class="a">+        run = self._pre("Write", {"file_path": self._path("Page.tsx"),
+</span><span class="a">+                                  "content": "export const P = () =&gt; &lt;p&gt;Don't&lt;/p&gt;;\n"})
+</span><span class="a">+        self.assertNotIn("updatedInput", hso(run))
+</span><span class="a">+
+</span><span class="a">+    def test_u02_tsx_latin_denied_and_not_rewritten(self):
+</span><span class="a">+        run = self._pre("Write", {"file_path": self._path("Help.tsx"),
+</span><span class="a">+                                  "content": "export const H = () =&gt; &lt;p&gt;Use it, e.g. daily.&lt;/p&gt;;\n"})
+</span><span class="a">+        out = hso(run)
+</span><span class="a">+        self.assertEqual(out.get("permissionDecision"), "deny")
+</span><span class="a">+        self.assertNotIn("updatedInput", out)
+</span><span class="a">+
+</span><span class="a">+
+</span><span class="a">+# ------------------------------------------------------------------ review round 1 (PR 367)
+</span><span class="a">+# Red pins for the reviewer's findings. Each name starts with its finding number.
+</span><span class="a">+# test_r1_guard_* cases pass today: they hold a failure class the fix must not break.
+</span><span class="a">+
+</span><span class="a">+class ReviewRound1FixerTests(unittest.TestCase):
+</span><span class="a">+    """apply_fixes on Markdown text: links, quotes, fences, front matter, English."""
+</span><span class="a">+
+</span><span class="a">+    # F1 links keep their URL
+</span><span class="a">+    def test_r1_f1_link_url_kept(self):
+</span><span class="a">+        inp = "See [the guide](https://a.example/g) and it's done.\n"
+</span><span class="a">+        out = ste_lint.apply_fixes(inp)[0]
+</span><span class="a">+        self.assertIn("https://a.example/g", out)
+</span><span class="a">+        self.assertIn(out, (inp, "See [the guide](https://a.example/g) and it is done.\n"))
+</span><span class="a">+
+</span><span class="a">+    def test_r1_f1_image_url_kept(self):
+</span><span class="a">+        inp = "See ![alt](u) and it's done.\n"
+</span></code></pre><p class="dim">Diff cut at 400 of 801 lines.</p></details></section>
+</body></html>

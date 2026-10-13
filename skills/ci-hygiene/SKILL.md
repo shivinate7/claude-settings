@@ -67,6 +67,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     A workflow that also has `on: push` for all branches still runs on a draft branch.
     `gh pr create --draft` then `gh pr ready` fires two runs: keep the draft state in the
     `concurrency` group (step 4), or the skipped draft run cancels an in-progress ready run.
+    Run `gh pr ready` only after the draft run shows in `gh run list`. A ready sent seconds
+    after the PR opens can give both runs `draft=false`. One then cancels the other, and
+    its cancelled check runs can block the merge, even for an admin (PR 381).
     After `gh pr ready`, a run of only skipped jobs proves nothing. Wait for a run on the head
     that ran, or dispatch one. See `snippets.md`, section 5b. Never mark ready in the same second
     as the create. (Decision merge-needs-a-proven-head: a merge needs a proven head. The merge

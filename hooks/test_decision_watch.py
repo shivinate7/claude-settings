@@ -609,11 +609,11 @@ def case_judge_isolation_copies_credentials():
     write(creds_path, '{"fake": "credential-content"}')
 
     real_config_dir = dw.guard.config_dir
-    dw.guard.config_dir = lambda: fake_home_config
+    sys.modules["guard_core"].config_dir = lambda: fake_home_config
     try:
         judge_cwd, judge_env = dw._judge_isolation()
     finally:
-        dw.guard.config_dir = real_config_dir
+        sys.modules["guard_core"].config_dir = real_config_dir
 
     try:
         copied = os.path.join(judge_env["CLAUDE_CONFIG_DIR"], dw.CREDENTIALS_FILENAME)

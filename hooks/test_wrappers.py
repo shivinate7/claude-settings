@@ -23,6 +23,10 @@ Contract, from decision gate-hooks-fail-closed:
   alias there hung the guard for 30 s (2026-10-12). A stub alias ahead of a real python must be
   skipped, so every wrapper runs the real one. With only the alias on PATH, a gate exits 2 with
   the no-python remedy and an advisory hook exits 0.
+- The guard split (decision guard-split-by-family): a copied guard.py takes split_segments from its
+  own guard_core.py sibling, never the real one. With the sibling missing, a Bash call that guard.py
+  would refuse is allowed, and one fallback line naming guard_core goes to guard.log. Every name other
+  files reach through `guard` still resolves.
 
 Each command string runs through `sh -c` (Git Bash on Windows). The no-python case runs with
 PATH set to one empty folder. The gate commands use only shell builtins, so no python can be found.
@@ -38,6 +42,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+
+from mutate_shared import guard_tree  # run as a script, so hooks/ is on sys.path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SETTINGS = os.environ.get("WRAPPERS_SETTINGS_UNDER_TEST") or os.path.join(HERE, "..", "settings.json")
@@ -283,6 +289,177 @@ def check_alias_only_advisory():
     return (not bad and len(adv) > 0), "advisory checked %d; wrong: %s" % (len(adv), bad)
 
 
+# Guard split (decision guard-split-by-family). guard.py stays the entry point; shared code moves to
+# guard_core.py beside it. The pins below are red on a guard.py that has no sibling yet.
+GUARD_PY = os.path.join(HERE, "guard.py")
+SPLIT_LABEL = "split_segments: a comment starting a word"  # a test_guard.py log check
+# Built from parts, so this file cannot trip the guard it tests (as test_guard.py does).
+DENIED_COMMAND = "rm -" + "rf /"
+SPLIT_MUTANT = (
+    "\n# MUTANT: split_segments answers its input whole, which the real one never does.\n"
+    "def split_segments(cmd, ends=None):\n"
+    "    return [cmd]\n"
+)
+# Every name a file outside guard.py reaches through `guard`, grepped from hooks/, janitor/ and lint/:
+# config_watch, decision_watch, rm_prompt_answer, report_gate,
+# check_agent_models, test_precompact_handoff, janitor/*, the sweep mutants, and test_guard.py.
+# `re` is listed because config_watch calls guard.re.sub. The four test_guard.py names are
+# POWERSHELL_CALL, judge, mask_script and session_is_live.
+GUARD_NAMES = (
+    "CAP_MAX_CHANGE", "CAP_MAX_PATH", "CAP_MAX_VALUE", "PROJECT_FROZEN_FILES", "SHELL_TOOLS",
+    "SUBAGENT_CAP_KEY", "WRITE_TOOLS", "_cap_reading", "_force_utf8_streams", "_resolved",
+    "_shell_write_hit", "cap_change", "cap_change_parts", "cap_safe", "config_dir",
+    "is_settings_file", "log_path_and_text", "re", "record", "strip_heredoc_bodies",
+    "write_content_parts", "CONFIG_FROZEN_DIRS", "is_project_config", "project_config_shell_hit",
+    "split_segments", "ASSIGNMENT", "_rm_target_bad", "segment_tokens", "is_frozen", "git_calls",
+    "HAIKU_ROLES", "primary_checkout", "worktree_live_session", "is_worktree", "_git",
+    "branch_cherry_empty", "branch_is_ancestor", "branch_is_empty", "porcelain", "session_records",
+    "worktree_locked", "PROCESS_START_UNREADABLE", "SESSION_LIVE_TOLERANCE_MS", "_process_start_ms",
+    "_process_start_ms_windows", "_path_identity", "git_common_dir", "resolve_default_base",
+    "worktree_remove_subject", "POWERSHELL_CALL", "judge", "mask_script", "session_is_live",
+)
+
+
+def clean_env(**extra):
+    """The environment with the guard-test switches removed, then `extra` set."""
+    env = dict(os.environ)
+    for key in ("GUARD_UNDER_TEST", "MUTATE_ONLY", "PYTHONPATH"):
+        env.pop(key, None)
+    env.update(extra)
+    return env
+
+
+def split_tree(mutant):
+    """A scratch folder holding guard.py and its guard_* siblings, the way mutate_guard copies them.
+    With `mutant`, the sibling guard_core.py (created if absent) ends in SPLIT_MUTANT, so a load that
+    takes split_segments from that sibling shows it. Without it, the sibling is left as it is."""
+    tree = tempfile.mkdtemp(prefix="guard-split-")
+    guard_tree(tree)
+    if mutant:
+        with open(os.path.join(tree, "guard_core.py"), "a", encoding="utf-8") as handle:
+            handle.write(SPLIT_MUTANT)
+    return tree
+
+
+def drive_test_guard(tree):
+    """Run test_guard.py on the guard copy at `tree`, filtered to the split_segments log check."""
+    cfg = tempfile.mkdtemp(prefix="guard-split-cfg-")
+    try:
+        env = clean_env(GUARD_UNDER_TEST=os.path.join(tree, "guard.py"), MUTATE_ONLY=SPLIT_LABEL,
+                        CLAUDE_CONFIG_DIR=cfg)
+        return subprocess.run([sys.executable, os.path.join(HERE, "test_guard.py")],
+                              capture_output=True, text=True, env=env, timeout=900)
+    finally:
+        shutil.rmtree(cfg, ignore_errors=True)
+
+
+def split_row(run):
+    """The one output row for the split_segments check, or None."""
+    rows = [line for line in run.stdout.splitlines() if SPLIT_LABEL in line]
+    return rows[0] if rows else None
+
+
+def split_mutant_case():
+    """A copied guard.py loads split_segments from its scratch sibling, not from the real hooks/."""
+    tree = split_tree(mutant=True)
+    try:
+        run = drive_test_guard(tree)
+    finally:
+        shutil.rmtree(tree, ignore_errors=True)
+    row = split_row(run)
+    if run.returncode == 1 and row and row.startswith("FAIL"):
+        return True, "the mutant sibling's split_segments reached the check: " + row[:100]
+    return False, "exit %d, row %r: the copy did not take split_segments from its sibling" % (
+        run.returncode, row)
+
+
+def split_control_case():
+    """Control for split_mutant_case: the same copy with its sibling unmutated passes the check."""
+    tree = split_tree(mutant=False)
+    try:
+        run = drive_test_guard(tree)
+    finally:
+        shutil.rmtree(tree, ignore_errors=True)
+    row = split_row(run)
+    if run.returncode == 0 and row and row.startswith("PASS"):
+        return True, "the unmutated copy passes the check"
+    return False, "exit %d, row %r: the unmutated copy does not pass the check" % (
+        run.returncode, row)
+
+
+def missing_sibling_case():
+    """A copied guard.py with no guard_core.py beside it fails open: the call is allowed, and one
+    fallback line naming guard_core goes to guard.log. The payload is a command the guard refuses
+    when it can judge, so a refusal on stdout would show that it did judge it."""
+    scratch = tempfile.mkdtemp(prefix="guard-nosib-")
+    cfg = os.path.join(scratch, "cfg")
+    try:
+        shutil.copy(GUARD_PY, os.path.join(scratch, "guard.py"))
+        payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": DENIED_COMMAND},
+                              "cwd": scratch})
+        run = subprocess.run([sys.executable, os.path.join(scratch, "guard.py")], input=payload,
+                             capture_output=True, text=True, env=clean_env(CLAUDE_CONFIG_DIR=cfg),
+                             timeout=60)
+        log = os.path.join(cfg, "guard.log")
+        lines = []
+        if os.path.exists(log):
+            with open(log, encoding="utf-8") as handle:
+                lines = [line for line in handle.read().splitlines() if line.strip()]
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    problems = []
+    if run.returncode != 0:
+        problems.append("exit %d" % run.returncode)
+    if run.stdout.strip():
+        problems.append("stdout is not empty, so the call was judged and refused")
+    if len(lines) != 1:
+        problems.append("%d guard.log lines, want 1" % len(lines))
+    elif "guard_core" not in lines[0]:
+        problems.append("the log line does not name guard_core: %r" % lines[0][-120:])
+    if problems:
+        return False, "; ".join(problems)
+    return True, "allowed, with one fallback line naming guard_core"
+
+
+def guard_names_case():
+    """Every name in GUARD_NAMES resolves on `guard` in a fresh process, from GUARD_UNDER_TEST or
+    hooks/guard.py. The check reads the attribute, which a module __getattr__ also serves."""
+    path = os.environ.get("GUARD_UNDER_TEST") or GUARD_PY
+    code = ("import sys\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "import guard\n"
+            "print([n for n in sys.argv[2:] if not hasattr(guard, n)])\n")
+    run = subprocess.run([sys.executable, "-c", code, os.path.dirname(path)] + list(GUARD_NAMES),
+                         capture_output=True, text=True, env=clean_env(), timeout=60)
+    if run.returncode != 0:
+        return False, "import guard failed: %s" % run.stderr.strip()[-160:]
+    if run.stdout.strip() != "[]":
+        return False, "names that do not resolve on guard: %s" % run.stdout.strip()
+    return True, "all %d names resolve on guard" % len(GUARD_NAMES)
+
+
+def guard_sentinel_case():
+    """A name no guard module defines must raise AttributeError through `guard`. A catch-all
+    module __getattr__ would answer it and still pass guard_names_case, so this pins the other side."""
+    path = os.environ.get("GUARD_UNDER_TEST") or GUARD_PY
+    code = ("import sys\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "import guard\n"
+            "try:\n"
+            "    getattr(guard, 'no_such_guard_name')\n"
+            "except AttributeError:\n"
+            "    print('raised')\n"
+            "else:\n"
+            "    print('resolved')\n")
+    run = subprocess.run([sys.executable, "-c", code, os.path.dirname(path)],
+                         capture_output=True, text=True, env=clean_env(), timeout=60)
+    if run.returncode != 0:
+        return False, "import guard failed: %s" % run.stderr.strip()[-160:]
+    if run.stdout.strip() != "raised":
+        return False, "the sentinel name resolved on guard: a catch-all __getattr__?"
+    return True, "the sentinel name raises AttributeError"
+
+
 def build_cases():
     settings = load()
     cases = []
@@ -313,6 +490,16 @@ def build_cases():
     cases.append(("no advisory entry carries onFailure", check_advisory_no_onfailure))
     cases.append(("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL equals CLAUDE_CODE_SUBAGENT_MODEL",
                   check_env_subagent_model))
+    cases.append(("guard split: a copied guard loads split_segments from its sibling, not the real one",
+                  split_mutant_case))
+    cases.append(("guard split control: the same copy with its sibling unmutated passes the check",
+                  split_control_case))
+    cases.append(("guard split: a missing guard_core fails open with one fallback line naming it",
+                  missing_sibling_case))
+    cases.append(("guard split: every name other files reach through guard still resolves",
+                  guard_names_case))
+    cases.append(("guard split: a name no guard module defines raises AttributeError through guard",
+                  guard_sentinel_case))
     return cases
 
 
