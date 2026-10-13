@@ -10,6 +10,10 @@ import guard_core
 from guard_core import (
     GIT_CHECKOUT_TAKES_NAME, PATH_EXTENSION, PATH_PREFIX, _absolute, _run_dir, git_calls,
 )
+# Unused here on purpose: the files root that head_root must NOT use, bound so a mutant that
+# swaps it in breaks the rule rather than the import (mutant "the HEAD root falls back through
+# the work tree").
+from guard_core import command_root  # noqa: F401
 
 
 # ------------------------------------------------------------------ the pointer checkout's HEAD
