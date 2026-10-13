@@ -55,21 +55,18 @@ try {
 }
 
 
-# ---- copy-mode case: skills/ under a real install.ps1 run, twice, no symlink rights -----------
-# Mirrors hooks/test_install_src.sh's copymode_case1 (D: copy-mode-overwrites-no-backup). Runs
-# the WHOLE install.ps1 as a subprocess (not just one extracted function) against a fake
-# checkout and a fake CLAUDE_CONFIG_DIR, twice, so the loop at install.ps1's skills branch
-# (lines 169-197) takes the real New-Item -ItemType SymbolicLink -> catch -> Copy-Item path
-# this machine actually hits. A machine WITH symlink rights would take the symlink branch
-# instead and pass by not exercising the bug at all, so that case is skipped there with a
-# reason instead of a false pass.
-$SymlinkCapable = $true
-$ProbeLink = Join-Path ([IO.Path]::GetTempPath()) ("symprobe-" + [guid]::NewGuid().ToString('N'))
-try {
-    New-Item -ItemType SymbolicLink -Path $ProbeLink -Target $Here -ErrorAction Stop | Out-Null
-    Remove-Item $ProbeLink -Force -ErrorAction SilentlyContinue
-} catch {
-    $SymlinkCapable = $false
+# ---- copy-mode cases: CLAUDE_SETTINGS_FORCE_COPY=1 forces copy mode on any runner -------------
+# install.ps1's New-Link throws while that variable is 1, so every skills, agents and settings
+# link try falls back to Copy-Item, on a machine with symlink rights or without. Each case first
+# checks that the landed names are copies, not links. A seam that never reaches the child process
+# then fails the case, instead of passing it without exercising the copy path.
+# (D: copy-mode-overwrites-no-backup)
+
+# True when $Path is a symlink or junction (a reparse point). A missing path is not a link.
+function Test-ReparsePoint([string]$Path) {
+    $i = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if (-not $i) { return $false }
+    return (([int]$i.Attributes) -band [int][IO.FileAttributes]::ReparsePoint) -ne 0
 }
 
 # Every subprocess install below writes its PATH change to this throwaway key, never to the real
@@ -85,148 +82,148 @@ if ($IsWin) {
 }
 try {
 
-if ($SymlinkCapable) {
-    Write-Host "SKIP: copymode1 (this runner holds symlink rights; the copy path cannot be exercised honestly without forcing it, see install.ps1 skills branch)"
-} else {
-    $Tmp2    = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-copymode-" + [guid]::NewGuid().ToString('N'))
-    $Co      = Join-Path $Tmp2 'clone'
-    $Cfg     = Join-Path $Tmp2 'claude'
-    New-Item -ItemType Directory -Force -Path $Co, $Cfg | Out-Null
-    try {
-        Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $Co 'install.ps1')
-        Set-Content -Path (Join-Path $Co 'CLAUDE.md') -Value "# copymode1 content" -Encoding utf8
-        Set-Content -Path (Join-Path $Co 'settings.json') -Value '{}' -Encoding utf8
-        Set-Content -Path (Join-Path $Co 'landed-dirs.txt') -Value "skills" -Encoding utf8
-        $SkillDir = Join-Path $Co 'skills\sample-skill'
-        New-Item -ItemType Directory -Force -Path $SkillDir | Out-Null
-        Set-Content -Path (Join-Path $SkillDir 'SKILL.md') -Value 'v1' -Encoding utf8
+# ---- copy-mode case: skills/ under a real install.ps1 run, twice ------------------------------
+# Mirrors hooks/test_install_src.sh's copymode_case1 (D: copy-mode-overwrites-no-backup). Runs
+# the WHOLE install.ps1 as a subprocess (not just one extracted function) against a fake
+# checkout and a fake CLAUDE_CONFIG_DIR, twice, so the skills branch takes the copy path
+# (New-Link throws, Install-Dir copies).
+$Tmp2 = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-copymode-" + [guid]::NewGuid().ToString('N'))
+$Co   = Join-Path $Tmp2 'clone'
+$Cfg  = Join-Path $Tmp2 'claude'
+New-Item -ItemType Directory -Force -Path $Co, $Cfg | Out-Null
+try {
+    Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $Co 'install.ps1')
+    Set-Content -Path (Join-Path $Co 'CLAUDE.md') -Value "# copymode1 content" -Encoding utf8
+    Set-Content -Path (Join-Path $Co 'settings.json') -Value '{}' -Encoding utf8
+    Set-Content -Path (Join-Path $Co 'landed-dirs.txt') -Value "skills" -Encoding utf8
+    $SkillDir = Join-Path $Co 'skills\sample-skill'
+    New-Item -ItemType Directory -Force -Path $SkillDir | Out-Null
+    Set-Content -Path (Join-Path $SkillDir 'SKILL.md') -Value 'v1' -Encoding utf8
 
-        $env:CLAUDE_CONFIG_DIR = $Cfg
-        powershell -NoProfile -File (Join-Path $Co 'install.ps1') *> $null
-        if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: copymode1 run 1 exited $LASTEXITCODE"; $Failed++ }
+    $env:CLAUDE_CONFIG_DIR = $Cfg
+    $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+    powershell -NoProfile -File (Join-Path $Co 'install.ps1') *> $null
+    if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: copymode1 run 1 exited $LASTEXITCODE"; $Failed++ }
+    Check "copymode1: sample-skill is a copy, not a link, after run 1" (-not (Test-ReparsePoint (Join-Path $Cfg 'skills\sample-skill')))
 
-        # Change the skill's source content between runs, the way a real `git pull` would.
-        Set-Content -Path (Join-Path $SkillDir 'SKILL.md') -Value 'v2' -Encoding utf8
+    # Change the skill's source content between runs, the way a real `git pull` would.
+    Set-Content -Path (Join-Path $SkillDir 'SKILL.md') -Value 'v2' -Encoding utf8
 
-        powershell -NoProfile -File (Join-Path $Co 'install.ps1') *> $null
-        if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: copymode1 run 2 exited $LASTEXITCODE"; $Failed++ }
+    powershell -NoProfile -File (Join-Path $Co 'install.ps1') *> $null
+    if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: copymode1 run 2 exited $LASTEXITCODE"; $Failed++ }
 
-        Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
-        $Baks     = Get-ChildItem -Path $Cfg -Recurse -Filter '*.bak.*' -ErrorAction SilentlyContinue
-        $GotFile  = Join-Path $Cfg 'skills\sample-skill\SKILL.md'
-        $GotValue = if (Test-Path $GotFile) { Get-Content -Raw $GotFile } else { $null }
+    Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+    $Baks     = Get-ChildItem -Path $Cfg -Recurse -Filter '*.bak.*' -ErrorAction SilentlyContinue
+    $GotFile  = Join-Path $Cfg 'skills\sample-skill\SKILL.md'
+    $GotValue = if (Test-Path $GotFile) { Get-Content -Raw $GotFile } else { $null }
 
-        Check "copymode1: run 2 leaves no .bak under the config dir" (-not $Baks)
-        Check "copymode1: sample-skill/SKILL.md lands after run 2" (Test-Path $GotFile)
-        if ($GotValue) { Check "copymode1: sample-skill/SKILL.md holds run 2's content (v2)" ($GotValue.Trim() -eq 'v2') }
-    } finally {
-        Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
-        Remove-Item -Recurse -Force $Tmp2 -ErrorAction SilentlyContinue
-    }
+    Check "copymode1: run 2 leaves no .bak under the config dir" (-not $Baks)
+    Check "copymode1: sample-skill/SKILL.md lands after run 2" (Test-Path $GotFile)
+    if ($GotValue) { Check "copymode1: sample-skill/SKILL.md holds run 2's content (v2)" ($GotValue.Trim() -eq 'v2') }
+} finally {
+    Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force $Tmp2 -ErrorAction SilentlyContinue
 }
 
-# ---- copy-mode case: settings.json repeat run, no symlink rights (D: copy-mode-overwrites-no-backup) --
-# Same shape as copymode1, but for the settings.json branch at the tail of install.ps1, not the
-# skills branch. Skipped for the same honest reason when this runner holds symlink rights.
-if ($SymlinkCapable) {
-    Write-Host "SKIP: settingsrepeat1 (this runner holds symlink rights; the copy path cannot be exercised honestly without forcing it, see install.ps1 settings.json branch)"
-} else {
-    $Tmp3 = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-settingsrepeat-" + [guid]::NewGuid().ToString('N'))
-    $Co3  = Join-Path $Tmp3 'clone'
-    $Cfg3 = Join-Path $Tmp3 'claude'
-    New-Item -ItemType Directory -Force -Path $Co3, $Cfg3 | Out-Null
-    try {
-        Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $Co3 'install.ps1')
-        Set-Content -Path (Join-Path $Co3 'CLAUDE.md') -Value "# settingsrepeat1 content" -Encoding utf8
-        Set-Content -Path (Join-Path $Co3 'settings.json') -Value '{"v":1}' -Encoding utf8
-        Set-Content -Path (Join-Path $Co3 'landed-dirs.txt') -Value "skills" -Encoding utf8
+# ---- copy-mode case: settings.json repeat run (D: copy-mode-overwrites-no-backup) -------------
+# Same shape as copymode1, for the settings.json branch at the tail of install.ps1, not the
+# skills branch.
+$Tmp3 = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-settingsrepeat-" + [guid]::NewGuid().ToString('N'))
+$Co3  = Join-Path $Tmp3 'clone'
+$Cfg3 = Join-Path $Tmp3 'claude'
+New-Item -ItemType Directory -Force -Path $Co3, $Cfg3 | Out-Null
+try {
+    Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $Co3 'install.ps1')
+    Set-Content -Path (Join-Path $Co3 'CLAUDE.md') -Value "# settingsrepeat1 content" -Encoding utf8
+    Set-Content -Path (Join-Path $Co3 'settings.json') -Value '{"v":1}' -Encoding utf8
+    Set-Content -Path (Join-Path $Co3 'landed-dirs.txt') -Value "skills" -Encoding utf8
 
-        $env:CLAUDE_CONFIG_DIR = $Cfg3
-        powershell -NoProfile -File (Join-Path $Co3 'install.ps1') *> $null
-        if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: settingsrepeat1 run 1 exited $LASTEXITCODE"; $Failed++ }
+    $env:CLAUDE_CONFIG_DIR = $Cfg3
+    $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+    powershell -NoProfile -File (Join-Path $Co3 'install.ps1') *> $null
+    if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: settingsrepeat1 run 1 exited $LASTEXITCODE"; $Failed++ }
+    Check "settingsrepeat1: settings.json is a copy, not a link, after run 1" (-not (Test-ReparsePoint (Join-Path $Cfg3 'settings.json')))
 
-        # Change the source settings.json between runs, the way a real `git pull` would.
-        Set-Content -Path (Join-Path $Co3 'settings.json') -Value '{"v":2}' -Encoding utf8
+    # Change the source settings.json between runs, the way a real `git pull` would.
+    Set-Content -Path (Join-Path $Co3 'settings.json') -Value '{"v":2}' -Encoding utf8
 
-        powershell -NoProfile -File (Join-Path $Co3 'install.ps1') *> $null
-        if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: settingsrepeat1 run 2 exited $LASTEXITCODE"; $Failed++ }
+    powershell -NoProfile -File (Join-Path $Co3 'install.ps1') *> $null
+    if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: settingsrepeat1 run 2 exited $LASTEXITCODE"; $Failed++ }
 
-        Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
-        $Baks     = Get-ChildItem -Path $Cfg3 -Filter 'settings.json.bak.*' -ErrorAction SilentlyContinue
-        $GotFile  = Join-Path $Cfg3 'settings.json'
-        $GotValue = if (Test-Path $GotFile) { Get-Content -Raw $GotFile } else { $null }
+    Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+    $Baks     = Get-ChildItem -Path $Cfg3 -Filter 'settings.json.bak.*' -ErrorAction SilentlyContinue
+    $GotFile  = Join-Path $Cfg3 'settings.json'
+    $GotValue = if (Test-Path $GotFile) { Get-Content -Raw $GotFile } else { $null }
 
-        Check "settingsrepeat1: run 2 leaves no settings.json.bak.* under the config dir" (-not $Baks)
-        Check "settingsrepeat1: settings.json lands after run 2" (Test-Path $GotFile)
-        if ($GotValue) { Check "settingsrepeat1: settings.json holds run 2's content" (($GotValue | ConvertFrom-Json).v -eq 2) }
-    } finally {
-        Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
-        Remove-Item -Recurse -Force $Tmp3 -ErrorAction SilentlyContinue
-    }
+    Check "settingsrepeat1: run 2 leaves no settings.json.bak.* under the config dir" (-not $Baks)
+    Check "settingsrepeat1: settings.json lands after run 2" (Test-Path $GotFile)
+    if ($GotValue) { Check "settingsrepeat1: settings.json holds run 2's content" (($GotValue | ConvertFrom-Json).v -eq 2) }
+} finally {
+    Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force $Tmp3 -ErrorAction SilentlyContinue
 }
 
-# ---- copy-mode case: true first install backs up a person's own files once, no symlink rights --
+# ---- copy-mode case: true first install backs up a person's own files once --------------------
 # (D: copy-mode-overwrites-no-backup). Before any run (no .claude-settings-installed marker),
 # plants a person's own skills/<shipped-name>/SKILL.md and agents/<shipped-name>.md under the
 # fake config dir, under names install.ps1 itself ships, then runs install.ps1 twice.
-if ($SymlinkCapable) {
-    Write-Host "SKIP: firstinstall1 (this runner holds symlink rights; the copy path cannot be exercised honestly without forcing it, see install.ps1 skills/agents branches)"
-} else {
-    $Tmp4 = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-firstinstall-" + [guid]::NewGuid().ToString('N'))
-    $Co4  = Join-Path $Tmp4 'clone'
-    $Cfg4 = Join-Path $Tmp4 'claude'
-    New-Item -ItemType Directory -Force -Path $Co4, $Cfg4 | Out-Null
-    try {
-        Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $Co4 'install.ps1')
-        Set-Content -Path (Join-Path $Co4 'CLAUDE.md') -Value "# firstinstall1 content" -Encoding utf8
-        Set-Content -Path (Join-Path $Co4 'settings.json') -Value '{}' -Encoding utf8
-        Set-Content -Path (Join-Path $Co4 'landed-dirs.txt') -Value "skills`nagents" -Encoding utf8
-        $SkillDir4 = Join-Path $Co4 'skills\sample-skill'
-        New-Item -ItemType Directory -Force -Path $SkillDir4 | Out-Null
-        Set-Content -Path (Join-Path $SkillDir4 'SKILL.md') -Value 'shipped skill v1' -Encoding utf8
-        $AgentDirSrc = Join-Path $Co4 'agents'
-        New-Item -ItemType Directory -Force -Path $AgentDirSrc | Out-Null
-        Set-Content -Path (Join-Path $AgentDirSrc 'sample-agent.md') -Value 'shipped agent v1' -Encoding utf8
+$Tmp4 = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-firstinstall-" + [guid]::NewGuid().ToString('N'))
+$Co4  = Join-Path $Tmp4 'clone'
+$Cfg4 = Join-Path $Tmp4 'claude'
+New-Item -ItemType Directory -Force -Path $Co4, $Cfg4 | Out-Null
+try {
+    Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $Co4 'install.ps1')
+    Set-Content -Path (Join-Path $Co4 'CLAUDE.md') -Value "# firstinstall1 content" -Encoding utf8
+    Set-Content -Path (Join-Path $Co4 'settings.json') -Value '{}' -Encoding utf8
+    Set-Content -Path (Join-Path $Co4 'landed-dirs.txt') -Value "skills`nagents" -Encoding utf8
+    $SkillDir4 = Join-Path $Co4 'skills\sample-skill'
+    New-Item -ItemType Directory -Force -Path $SkillDir4 | Out-Null
+    Set-Content -Path (Join-Path $SkillDir4 'SKILL.md') -Value 'shipped skill v1' -Encoding utf8
+    $AgentDirSrc = Join-Path $Co4 'agents'
+    New-Item -ItemType Directory -Force -Path $AgentDirSrc | Out-Null
+    Set-Content -Path (Join-Path $AgentDirSrc 'sample-agent.md') -Value 'shipped agent v1' -Encoding utf8
 
-        # Plant the person's own pre-existing files before any run, no marker present yet.
-        $CfgSkillDir = Join-Path $Cfg4 'skills\sample-skill'
-        $CfgAgentDir = Join-Path $Cfg4 'agents'
-        New-Item -ItemType Directory -Force -Path $CfgSkillDir, $CfgAgentDir | Out-Null
-        Set-Content -Path (Join-Path $CfgSkillDir 'SKILL.md') -Value "person's own skill" -Encoding utf8
-        Set-Content -Path (Join-Path $CfgAgentDir 'sample-agent.md') -Value "person's own agent" -Encoding utf8
+    # Plant the person's own pre-existing files before any run, no marker present yet.
+    $CfgSkillDir = Join-Path $Cfg4 'skills\sample-skill'
+    $CfgAgentDir = Join-Path $Cfg4 'agents'
+    New-Item -ItemType Directory -Force -Path $CfgSkillDir, $CfgAgentDir | Out-Null
+    Set-Content -Path (Join-Path $CfgSkillDir 'SKILL.md') -Value "person's own skill" -Encoding utf8
+    Set-Content -Path (Join-Path $CfgAgentDir 'sample-agent.md') -Value "person's own agent" -Encoding utf8
 
-        $env:CLAUDE_CONFIG_DIR = $Cfg4
-        powershell -NoProfile -File (Join-Path $Co4 'install.ps1') *> $null
-        if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: firstinstall1 run 1 exited $LASTEXITCODE"; $Failed++ }
+    $env:CLAUDE_CONFIG_DIR = $Cfg4
+    $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+    powershell -NoProfile -File (Join-Path $Co4 'install.ps1') *> $null
+    if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: firstinstall1 run 1 exited $LASTEXITCODE"; $Failed++ }
 
-        $SkillBaks1 = @(Get-ChildItem -Path (Join-Path $Cfg4 'skills') -Filter 'sample-skill.bak.*' -ErrorAction SilentlyContinue)
-        $AgentBaks1 = @(Get-ChildItem -Path $CfgAgentDir -Filter 'sample-agent.md.bak.*' -ErrorAction SilentlyContinue)
+    $SkillBaks1 = @(Get-ChildItem -Path (Join-Path $Cfg4 'skills') -Filter 'sample-skill.bak.*' -ErrorAction SilentlyContinue)
+    $AgentBaks1 = @(Get-ChildItem -Path $CfgAgentDir -Filter 'sample-agent.md.bak.*' -ErrorAction SilentlyContinue)
 
-        Check "firstinstall1: exactly one skill backup after run 1" ($SkillBaks1.Count -eq 1)
-        Check "firstinstall1: exactly one agent backup after run 1" ($AgentBaks1.Count -eq 1)
-        if ($SkillBaks1.Count -eq 1) {
-            Check "firstinstall1: skill backup holds the person's content" ((Get-Content -Raw (Join-Path $SkillBaks1[0].FullName 'SKILL.md')).Trim() -eq "person's own skill")
-        }
-        if ($AgentBaks1.Count -eq 1) {
-            Check "firstinstall1: agent backup holds the person's content" ((Get-Content -Raw $AgentBaks1[0].FullName).Trim() -eq "person's own agent")
-        }
-        $GotSkill = Join-Path $CfgSkillDir 'SKILL.md'
-        $GotAgent = Join-Path $CfgAgentDir 'sample-agent.md'
-        Check "firstinstall1: shipped skill content lands after run 1" ((Test-Path $GotSkill) -and (Get-Content -Raw $GotSkill).Trim() -eq 'shipped skill v1')
-        Check "firstinstall1: shipped agent content lands after run 1" ((Test-Path $GotAgent) -and (Get-Content -Raw $GotAgent).Trim() -eq 'shipped agent v1')
-
-        powershell -NoProfile -File (Join-Path $Co4 'install.ps1') *> $null
-        if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: firstinstall1 run 2 exited $LASTEXITCODE"; $Failed++ }
-        Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
-
-        $SkillBaks2 = @(Get-ChildItem -Path (Join-Path $Cfg4 'skills') -Filter 'sample-skill.bak.*' -ErrorAction SilentlyContinue)
-        $AgentBaks2 = @(Get-ChildItem -Path $CfgAgentDir -Filter 'sample-agent.md.bak.*' -ErrorAction SilentlyContinue)
-        Check "firstinstall1: run 2 makes no new skill backup" ($SkillBaks2.Count -eq 1)
-        Check "firstinstall1: run 2 makes no new agent backup" ($AgentBaks2.Count -eq 1)
-    } finally {
-        Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
-        Remove-Item -Recurse -Force $Tmp4 -ErrorAction SilentlyContinue
+    Check "firstinstall1: exactly one skill backup after run 1" ($SkillBaks1.Count -eq 1)
+    Check "firstinstall1: exactly one agent backup after run 1" ($AgentBaks1.Count -eq 1)
+    if ($SkillBaks1.Count -eq 1) {
+        Check "firstinstall1: skill backup holds the person's content" ((Get-Content -Raw (Join-Path $SkillBaks1[0].FullName 'SKILL.md')).Trim() -eq "person's own skill")
     }
+    if ($AgentBaks1.Count -eq 1) {
+        Check "firstinstall1: agent backup holds the person's content" ((Get-Content -Raw $AgentBaks1[0].FullName).Trim() -eq "person's own agent")
+    }
+    $GotSkill = Join-Path $CfgSkillDir 'SKILL.md'
+    $GotAgent = Join-Path $CfgAgentDir 'sample-agent.md'
+    Check "firstinstall1: shipped skill content lands after run 1" ((Test-Path $GotSkill) -and (Get-Content -Raw $GotSkill).Trim() -eq 'shipped skill v1')
+    Check "firstinstall1: shipped agent content lands after run 1" ((Test-Path $GotAgent) -and (Get-Content -Raw $GotAgent).Trim() -eq 'shipped agent v1')
+    Check "firstinstall1: shipped skill is a copy, not a link, after run 1" (-not (Test-ReparsePoint $CfgSkillDir))
+    Check "firstinstall1: shipped agent is a copy, not a link, after run 1" (-not (Test-ReparsePoint $GotAgent))
+
+    powershell -NoProfile -File (Join-Path $Co4 'install.ps1') *> $null
+    if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: firstinstall1 run 2 exited $LASTEXITCODE"; $Failed++ }
+    Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+
+    $SkillBaks2 = @(Get-ChildItem -Path (Join-Path $Cfg4 'skills') -Filter 'sample-skill.bak.*' -ErrorAction SilentlyContinue)
+    $AgentBaks2 = @(Get-ChildItem -Path $CfgAgentDir -Filter 'sample-agent.md.bak.*' -ErrorAction SilentlyContinue)
+    Check "firstinstall1: run 2 makes no new skill backup" ($SkillBaks2.Count -eq 1)
+    Check "firstinstall1: run 2 makes no new agent backup" ($AgentBaks2.Count -eq 1)
+} finally {
+    Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force $Tmp4 -ErrorAction SilentlyContinue
 }
 
 # ---- envkey1: a subprocess install writes the absolute bin to the key named by the env var -----
