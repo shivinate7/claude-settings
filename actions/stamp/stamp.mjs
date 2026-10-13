@@ -358,21 +358,67 @@ function finishStamp(root, kind, rec, n) {
 // citation of a record named "slug", so the dangling-cite refusal must not treat it as one. The
 // protected spans are frontmatter, a fenced block, an inline code span, and a markdown link
 // target.
+// One fence rule, for the dangling-cite check (protectedRanges) and the near-miss scan. CommonMark:
+// a fence opens with 3+ backticks or tildes at 0-3 columns past the content column of its
+// container. The container is the top level, a blockquote (after "> "), or a list item, whose
+// content column sits past its marker and 1-4 spaces: column 2 for "- a", column 4 for "10. a" or
+// a nested "  - b". A tab counts to the next multiple of 4. Four or more columns past the container
+// is an indented code block, not a fence, so a top-level "    ```" or tab is never a fence. A fence
+// closes on a line of its own character, at least as long, with nothing else on it, or at a
+// non-blank line less indented than its container. A backtick fence's info string holds no
+// backtick. An unclosed fence runs to the end of the text.
+// Ceiling: a lazy continuation line (unindented text that continues a list item's paragraph) ends
+// the item here, so a fence after it counts from the outer container.
+const LIST_MARKER = /^(?:[-+*]|\d{1,9}[.)])(?=[ \t]|$)/;
+const FENCE = /^(`{3,}|~{3,})(.*)$/;
+function fenceRanges(text) {
+  const spans = [];
+  const items = []; // content columns of the open list items, outermost first
+  let open = null;
+  let at = 0;
+  for (const line of text.split("\n")) {
+    const raw = line.replace(/\r$/, "");
+    // Inside a top-level fence, a ">" is content, not a blockquote marker.
+    const quote = open && !open.quote ? 0 : /^(?: {0,3}> ?)*/.exec(raw)[0].length;
+    let i = quote;
+    let col = quote;
+    const skipSpace = () => {
+      for (; raw[i] === " " || raw[i] === "\t"; i++) col = raw[i] === "\t" ? col + 4 - (col % 4) : col + 1;
+    };
+    skipSpace();
+    const blank = i === raw.length;
+    if (!blank) while (items.length && col < items.at(-1)) items.pop();
+    if (open && !blank && col < open.base) { spans.push([open.from, at]); open = null; }
+    if (open) {
+      const f = FENCE.exec(raw.slice(i));
+      if (f && quote === open.quote && col - open.base <= 3 && f[1][0] === open.ch && f[1].length >= open.len && f[2].trim() === "") {
+        spans.push([open.from, at + line.length]);
+        open = null;
+      }
+    } else {
+      let base = Math.max(quote, items.at(-1) ?? 0);
+      for (let m; col - base <= 3 && (m = LIST_MARKER.exec(raw.slice(i))); ) {
+        i += m[0].length;
+        col += m[0].length;
+        const mark = col;
+        skipSpace();
+        items.push((base = i === raw.length || col - mark > 4 ? mark + 1 : col));
+      }
+      const f = FENCE.exec(raw.slice(i));
+      if (f && col - base <= 3 && !(f[1][0] === "`" && f[2].includes("`"))) open = { ch: f[1][0], len: f[1].length, from: at, base, quote };
+    }
+    at += line.length + 1;
+  }
+  if (open) spans.push([open.from, text.length]);
+  return spans;
+}
+
 const FM_RE = /^---\r?\n[\s\S]*?\r?\n---\r?\n/;
 function protectedRanges(text) {
   const spans = [];
   const fm = FM_RE.exec(text);
   if (fm) spans.push([0, fm[0].length]);
-  let fenceAt = null;
-  let at = 0;
-  for (const line of text.split("\n")) {
-    if (/^\s*```/.test(line)) {
-      if (fenceAt === null) fenceAt = at;
-      else { spans.push([fenceAt, at + line.length]); fenceAt = null; }
-    }
-    at += line.length + 1;
-  }
-  if (fenceAt !== null) spans.push([fenceAt, text.length]);
+  spans.push(...fenceRanges(text));
   for (const m of text.matchAll(/`[^`\n]*`/g)) spans.push([m.index, m.index + m[0].length]);
   for (const m of text.matchAll(/\]\([^)\n]*\)/g)) spans.push([m.index, m.index + m[0].length]);
   return spans;
@@ -419,6 +465,36 @@ function rewriteCites(root, config, byId, files) {
     if (next !== text) { writeFileSync(abs, withEol(next, eol)); touched += 1; }
   }
   return touched;
+}
+
+// ---------------------------------------------------------------- near-miss cites
+// A prefix letter glued to a KNOWN slug in a wrapper the repo's cite form does not use, such as
+// D`slug`, is dead text: the rewrite never matches it. Fenced blocks (``` and ~~~) are exempt;
+// an inline span is not, because D`slug` is itself an inline span. The scan is a line walk for
+// fences and one regex for cites, so a comment opener or a lone quote in prose hides nothing.
+const CLOSER = { "`": "`", "'": "'", '"': '"', "[": "]", "[[": "]]", "(": ")", "{": "}", "<": ">", "‹": "›", "«": "»", "“": "”", "‘": "’" };
+// The right form for one record: cite.form with {prefix} and {slug} filled in. Without cite.form
+// the remedy can only point at cite.pattern.
+const citeFormFor = (config, prefix, slug) =>
+  config.cite.form ? config.cite.form.replace(/\{prefix\}/g, prefix).replace(/\{slug\}/g, slug) : "the form that cite.pattern matches";
+
+function nearMissCites(rel, text, config, pattern, prefixBySlug) {
+  const prefixes = [...new Set(prefixBySlug.values())];
+  if (!prefixes.length) return [];
+  const letters = prefixes.sort((a, b) => b.length - a.length).map(escapeRe).join("|");
+  const opens = Object.keys(CLOSER).sort((a, b) => b.length - a.length).map(escapeRe).join("|");
+  const re = new RegExp(`(?<![\\p{L}\\p{N}_])(${letters})(${opens})([\\p{L}\\p{N}_.-]+)`, "gu");
+  const fenced = fenceRanges(text);
+  const correct = new Set([...text.matchAll(pattern)].map((m) => m.index));
+  const out = [];
+  for (const m of text.matchAll(re)) {
+    const [head, prefix, open, slug] = m;
+    const end = m.index + head.length;
+    if (prefixBySlug.get(slug) !== prefix || !text.startsWith(CLOSER[open], end)) continue;
+    if (correct.has(m.index) || inSpans(fenced, m.index)) continue;
+    out.push(`${rel} cites ${head}${CLOSER[open]}, a near-miss of the cite form that is never rewritten. Write ${citeFormFor(config, prefix, slug)}`);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- structural validation, shared
@@ -481,6 +557,7 @@ function validate(root, config) {
         const prefixOk = !config.cite.prefixGroup || m[config.cite.prefixGroup] === prefixBySlug.get(slug);
         if (!bySlug.has(slug) || !prefixOk) problems.push(`${rel} cites [[${slug}]], which no record file defines`);
       }
+      problems.push(...nearMissCites(rel, text, config, pattern, prefixBySlug));
     }
   }
 

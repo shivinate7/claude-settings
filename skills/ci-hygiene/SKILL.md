@@ -143,5 +143,6 @@ Record: `decisions/opt-in-ci-templates-composite.md`. Steps 1 and 11 to 14: `dec
   ```
 - `ci-alarm`: in a nightly workflow with `permissions: {actions: read, issues: write}`. One issue opens when main's latest run is red.
 - `readme-links`: in a weekly workflow after checkout, never per PR. Set `open-issue: true` with `issues: write`.
+- `ruling-kind`: in a pull_request job after `actions/checkout` with `fetch-depth: 0`. It fails when a changed `decisions/*.md` record has no valid Kind line, or when the base cannot be read.
 - `githooks/main-ref`: run `sh githooks/main-ref/install.sh` in each clone. It refuses a local move of main to a commit origin lacks.
 - `testing/skip-locally-fail-in-ci.mjs`: wrap an env-dependent probe in `needEnv`. It skips locally and fails when `CI` is set.

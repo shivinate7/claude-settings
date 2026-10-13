@@ -21,6 +21,7 @@
     "pattern": "\\[\\[([a-z0-9][a-z0-9-]*)\\]\\]",
     "slugGroup": 1,
     "template": "{id}, {title}",
+    "form": "[[{slug}]]",
     "scanGlobs": ["**/*.md"],
     "excludeGlobs": ["docs/citation-syntax.md"]
   }

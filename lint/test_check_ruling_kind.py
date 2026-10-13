@@ -301,5 +301,62 @@ class RulingKindTests(unittest.TestCase):
                 self.assert_fails(REC, "plan")
 
 
+    # --rules-file: a Home names a rule that lives in either rules file. Each file is one side:
+    # the caller's CLAUDE.md and the claude-settings CLAUDE.md, passed by check.sh.
+
+    def rules(self, rel, rule_id):
+        """Write a rules file that holds one rule marker. Returns its absolute path."""
+        self.put(rel, "# Rules\n\nRule text. <!-- rule:%s -->\n" % rule_id)
+        return os.path.join(self.tree, rel)
+
+    def rules_flags(self, *paths):
+        return [flag for p in paths for flag in ("--rules-file", p)]
+
+    def test_rule_home_resolves_in_either_rules_file(self):
+        caller = self.rules("caller/CLAUDE.md", "caller-rule")
+        action = self.rules("action/CLAUDE.md", "action-rule")
+        flags = self.rules_flags(caller, action)
+        cases = [("caller-rule", True), ("action-rule", True), ("neither-rule", False)]
+        for rule, passes in cases:
+            with self.subTest(rule=rule):
+                self.put(REC, record("Kind: process\nHome: rule:%s" % rule))
+                rc, out = self.lint(*flags, REC)
+                if passes:
+                    self.assertEqual(rc, 0, out)
+                    self.assertNotIn("FAIL", out)
+                else:
+                    self.assertEqual(rc, 1, out)
+                    self.assertIn("Home rule:neither-rule is not a rule marker", out)
+
+    def test_missing_rules_file_is_skipped_when_another_is_readable(self):
+        action = self.rules("action/CLAUDE.md", "action-rule")
+        missing = os.path.join(self.tree, "caller", "CLAUDE.md")  # never written
+        self.put(REC, record("Kind: process\nHome: rule:action-rule"))
+        rc, out = self.lint(*self.rules_flags(missing, action), REC)
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("FAIL", out)
+
+    def test_no_readable_rules_file_fails_a_rule_home_and_passes_a_path_home(self):
+        flags = self.rules_flags(os.path.join(self.tree, "caller", "CLAUDE.md"),
+                                 os.path.join(self.tree, "action", "CLAUDE.md"))
+        # demo-rule is in the tree's own CLAUDE.md. --rules-file replaces that file, so it must not resolve.
+        self.put(REC, record("Kind: process\nHome: rule:demo-rule"))
+        rc, out = self.lint(*flags, REC)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("FAIL", out)
+        self.assertIn("cannot be checked", out)
+        self.put(REC, record(PROCESS_OK.replace("rule:demo-rule", PLAN)))
+        rc, out = self.lint(*flags, REC)
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("FAIL", out)
+
+    def test_without_rules_file_the_root_claude_md_is_read(self):
+        self.put("caller-root/CLAUDE.md", "# Rules\n\nRule text. <!-- rule:caller-root-rule -->\n")
+        self.put("caller-root/" + REC, record("Kind: process\nHome: rule:caller-root-rule"))
+        rc, out = self.lint("--root", os.path.join(self.tree, "caller-root"), REC)
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("FAIL", out)
+
+
 if __name__ == "__main__":
     unittest.main()

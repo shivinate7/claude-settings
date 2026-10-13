@@ -45,6 +45,7 @@
     "prefixGroup": 1,
     "slugGroup": 2,
     "template": "{id}",
+    "form": "{prefix}‹{slug}›",
     "scanGlobs": ["**/*.md"]
   }
 }
