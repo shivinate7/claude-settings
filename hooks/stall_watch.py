@@ -20,8 +20,10 @@ Watcher: stall_watch.py --watch-pid PID --log LOG [--quiet SECS]
 Stop: stall_watch.py --stop
   Stop hook. Reads the Stop JSON on stdin, scans the session transcript for background shells
   (also a foreground call that its timeout moved to the background, which --hook never sees),
-  and prints one {"systemMessage": ...} line that lists each job with no terminal task notice
-  whose output file has not changed for the quiet age. A job with no output file is listed as
+  and prints one {"systemMessage": ...} line that lists each open job whose output file has not
+  changed for the quiet age. A job closes on a <task-notification> with status completed, failed,
+  killed or stopped (a user message, or a queued_command attachment record), or on the result of
+  a TaskStop call, 'Successfully stopped task: <id>'. A job with no output file is listed as
   unknown. Any error, or stop_hook_active true, prints nothing and exits 0. No posix gate.
   Seams: STALL_WATCH_NOW (epoch seconds), STALL_WATCH_OUTPUT_BASE (replaces the folder of each
   output path, keeps the file name), STALL_WATCH_QUIET (the age in seconds).
@@ -183,7 +185,7 @@ TASK_ID = re.compile(r"<task-id>(.*?)</task-id>", re.S)
 TASK_STATUS = re.compile(r"<status>(.*?)</status>", re.S)
 RESULT_PATH = re.compile(r"Output is being written to: (.*?\.output)", re.S)
 STOPPED = re.compile(r"\s*Successfully stopped task: (\S+)")
-TERMINAL = ("completed", "failed", "killed")
+TERMINAL = ("completed", "failed", "killed", "stopped")
 
 
 def text_of(content):
@@ -229,7 +231,7 @@ def scan_jobs(transcript):
                 done.update(closed_by_notice(text))
                 if isinstance(content, list):  # only the result of a TaskStop call of this session
                     for b in content:
-                        if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("tool_use_id") in stops:
+                        if isinstance(b, dict) and b.get("type") == "tool_result" and isinstance(b.get("tool_use_id"), str) and b["tool_use_id"] in stops:
                             done.update(stopped_ids(b.get("content")))
     return {k: v for k, v in jobs.items() if k not in done}
 
@@ -247,8 +249,7 @@ def closed_by_notice(text):
 def stopped_ids(content):
     """The id a TaskStop result closes: its message starts 'Successfully stopped task: <id>'. The
     result is a JSON string with a message field; the whole id is matched, never a prefix."""
-    if not isinstance(content, str):
-        return []
+    content = text_of(content)
     try:
         body = json.loads(content)
         msg = body["message"] if isinstance(body, dict) else content
