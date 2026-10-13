@@ -176,9 +176,9 @@ _loading = "guard_core"   # the module being loaded, for the fallback line below
 try:
     import guard_core
     from guard_core import (
-        AUTHOR_ROLE, GIT_WORK_TREE_RE, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
+        AUTHOR_ROLE, GIT_WORK_TREE_RE, HEREDOC_HEADER, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
         SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
-        _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
+        _resolved, _run_dir, _segment_git_c_target, agent_role, basename, cap_safe,
         command_root, git_calls, git_common_dir, inline_script, is_worktree, log_path_and_text, norm,
         path_is_inside, primary_checkout, record, refuse, resolve_command, resolve_default_base,
         segment_tokens, split_segments, strip_heredoc_bodies,
@@ -782,8 +782,9 @@ def record_path_pattern():
             return pattern
     return None
 DROPS_LINES_PATH = re.compile(r"(?im)^(drops-lines[ \t]*:[ \t]*)(\S+)(?=[ \t]+--[ \t]+\S)")
-MESSAGE_VALUE_FLAGS = {"-m", "--message", "-b", "--body"}
-MESSAGE_FILE_FLAGS = {"-F", "--file", "--body-file"}
+MESSAGE_VALUE_FLAGS = {"--message", "--body"}
+MESSAGE_FILE_FLAGS = {"--file", "--body-file"}
+TITLE_FLAGS = {"--title", "--subject"}
 MESSAGE_FILE_MAX = 64 * 1024
 
 CITE_REASON = (
@@ -795,44 +796,50 @@ CITE_REASON = (
 )
 
 
-TITLE_FLAGS = {"--title", "-t", "--subject"}
+# A short flag whose value is no message. The walk over a cluster stops at one: `-C HEAD`, `-Rowner`.
+SHORT_STOP = set("CcuSRt")
 
 
 def message_sources(args, titles=False):
     """Return (texts, files, stdin) the message flags of a commit or PR call carry.
 
-    `texts` are the inline values, `files` the named files, `stdin` True for `-F -`. Reads
-    `-m x`, `--message=x`, `-mx`, a short cluster ending in m (`-am x`), and the long and short
-    body and file flags. A flag glued to a value in any other way is a form this does not read.
+    `texts` are the inline values, `files` the named files, `stdin` True for `-F -`. Reads a long
+    flag (`--message x`, `--message=x`) or any unique prefix of one of at least four characters
+    (git takes `--mess=x`), and a short cluster such as `-am x`, `-amx`, `-mx`, `-m=x`, `-bx`,
+    `-Fx`: the walk reads each letter until one takes a value, and what follows it is the value.
     `titles` also reads `--title`, `--subject` and `-t`, which are a gh call's title or squash
     subject (a commit's `-t` is a template file, so a commit never passes it).
     """
     texts, files, stdin = [], [], False
+    names = MESSAGE_VALUE_FLAGS | MESSAGE_FILE_FLAGS | (TITLE_FLAGS if titles else set())
     index = 0
     while index < len(args):
         arg = args[index]
         index += 1
-        value = None
-        is_file = False
-        if (arg in MESSAGE_VALUE_FLAGS or (titles and arg in TITLE_FLAGS)
-                or (re.match(r"^-[A-Za-z]+$", arg) and arg.endswith("m")
-                    and not arg.startswith("--"))):
-            value = args[index] if index < len(args) else ""
-            index += 1
-        elif arg in MESSAGE_FILE_FLAGS:
-            value = args[index] if index < len(args) else ""
-            index += 1
-            is_file = True
-        elif arg.startswith(("--message=", "--body=") + (("--title=", "--subject=") if titles else ())):
-            value = arg.split("=", 1)[1]
-        elif arg.startswith(("--file=", "--body-file=")):
-            value = arg.split("=", 1)[1]
-            is_file = True
-        elif arg.startswith("-m") and not arg.startswith("--") and len(arg) > 2:
-            value = arg[2:]
-        if value is None:
+        name = value = None
+        if arg.startswith("--"):
+            flag, equals, glued = arg.partition("=")
+            hits = [n for n in names if n == flag] or \
+                [n for n in names if len(flag) >= 4 and n.startswith(flag)]
+            if len(hits) != 1:
+                continue
+            name = hits[0]
+            value = glued if equals else None
+        elif re.match(r"^-[A-Za-z]", arg):
+            for pos, letter in enumerate(arg[1:], 1):
+                if letter in "mbF" or (titles and letter == "t"):
+                    name = "--file" if letter == "F" else letter
+                    rest = arg[pos + 1:]
+                    value = (rest[1:] if rest.startswith("=") else rest) if rest else None
+                    break
+                if letter in SHORT_STOP:
+                    break
+        if name is None:
             continue
-        if not is_file:
+        if value is None:
+            value = args[index] if index < len(args) else ""
+            index += 1
+        if name not in MESSAGE_FILE_FLAGS:
             texts.append(value)
         elif value == "-":
             stdin = True
@@ -847,6 +854,40 @@ UNREAD_REASON = (
     "record by its path. "
     "Remedy: pass the message inline, or name a file this directory can read."
 )
+
+
+def own_heredoc_bodies(segment: str, raw: str):
+    """Return the bodies of the heredocs whose headers sit inside this segment, in order. A heredoc
+    of another command on the same line (`cat <<A && git commit -F - <<B`) is not the message.
+
+    Every header on a line takes its body in turn, as the shell reads them. The segment is found in
+    the raw command by its text. A segment that is not there verbatim (its heredoc bodies were
+    dropped, so a header may sit past a newline) falls back to the headers whose delimiter the
+    segment names.
+    """
+    found = []   # (offset of the header in raw, delimiter, body)
+    lines = raw.split("\n")
+    base = 0
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        heads = [(base + m.start(), m.group(2)) for m in HEREDOC_HEADER.finditer(line)]
+        base += len(line) + 1
+        index += 1
+        for offset, delimiter in heads:
+            start = index
+            while index < len(lines) and lines[index].strip() != delimiter:
+                base += len(lines[index]) + 1
+                index += 1
+            found.append((offset, delimiter, "\n".join(lines[start:index])))
+            if index < len(lines):
+                base += len(lines[index]) + 1
+                index += 1
+    at = raw.find(segment)
+    if at >= 0:
+        return [body for offset, _, body in found if at <= offset < at + len(segment)]
+    wanted = {m.group(2) for m in HEREDOC_HEADER.finditer(segment)}
+    return [body for _, delimiter, body in found if delimiter in wanted]
 
 
 def message_texts(segment: str, raw: str, where: str, titles: bool = False):
@@ -880,7 +921,7 @@ def message_texts(segment: str, raw: str, where: str, titles: bool = False):
         except Exception:
             return call is not None, texts, name   # unknown, never a pass
     if "<<" in segment:
-        texts.extend(body for _, body in _split_heredocs(raw)[1])
+        texts.extend(own_heredoc_bodies(segment, raw))
     return call is not None, texts, ""
 
 
@@ -920,7 +961,8 @@ def cited_record_path(segment: str, raw: str, where: str) -> str:
 
 # ---- a message that names a lane by its session number (owner ruling 2026-10-13)
 LANE_NUMBER = re.compile(r"\bN\d{1,3}b?\b")
-LANE_QUOTED = re.compile(r"^[ \t]*```.*?^[ \t]*```|`[^`\n]*`", re.MULTILINE | re.DOTALL)
+LANE_QUOTED = re.compile(
+    r"^[ \t]*(```|~~~).*?^[ \t]*\1|(?<!`)(`+)(?!`)[^\n]*?(?<!`)\2(?!`)", re.MULTILINE | re.DOTALL)
 LANE_REASON = (
     "Rule (Git): this message names a lane by a session number. That number is handed out in one "
     "chat and means nothing outside it. "
@@ -932,11 +974,14 @@ LANE_REASON = (
 def lane_number_named(segment: str, raw: str, where: str) -> str:
     """Return the first session-number lane name (`N20`) in a commit message, PR body or title, or
     `gh pr merge` subject or body, else ''. Fenced blocks and backtick spans are quoted text and
-    skipped. Same text extraction as cite-by-id. An unread message file reads as clean here: cite-by-id refuses it.
+    skipped. Same text extraction as cite-by-id. An unread message file returns UNREAD_MARK + its
+    name: cite-by-id refuses an unread create or edit file first, so this covers merge.
     """
     read = message_texts(segment, raw, where, titles=True)
-    if read is None or read[2]:
+    if read is None:
         return ""
+    if read[2]:
+        return UNREAD_MARK + read[2]
     for text in read[1]:
         found = LANE_NUMBER.search(LANE_QUOTED.sub(" ", text))
         if found:
@@ -1460,6 +1505,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if matched:
             refuse(tool, "deny", "cite-by-id", CITE_REASON, matched)
         matched = lane_number_named(segment, raw, cite_where)
+        if matched.startswith(UNREAD_MARK):   # a gh pr merge file: cite-by-id never reads merge
+            refuse(tool, "deny", "cite-by-id", UNREAD_REASON, matched[len(UNREAD_MARK):])
         if matched:
             refuse(tool, "deny", "lane-by-slug", LANE_REASON, matched)
 
