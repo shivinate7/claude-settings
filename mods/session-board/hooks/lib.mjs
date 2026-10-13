@@ -4,17 +4,28 @@ export const STALE_MS = 120_000
 export const HEARTBEAT_MS = 30_000
 export const ENTRY_MAX_BYTES = 1024
 export const DETAIL_MAX_BYTES = 3072
-export const MAX_KEYS = 100
+export const MAX_KEYS = 200 // entries read per refresh, newest key first
 export const GC_MS = 86_400_000 // an entry this long past its last beat is deleted
+export const SKEW_MS = 30_000 // a stamp further ahead than this is not fresh
+export const READ_MAX_AGE_MS = 60_000 // a git reading older than this is unknown
+export const MAX_POLLS = 10 // board refreshes on the heartbeat with no /board call
+export const GRACE_MS = 100 // most a hook waits for its refresh
+export const READ_BUDGET_MS = 3000 // most one host read may take
+export const MAX_PATH = 4000
 export const MAX_RECENT = 5
 export const MAX_AGENTS = 8
 export const MAX_SPAWN_TYPES = 6
 export const MAX_FILES = 2000
-export const AGENTS_TIMEOUT_MS = 10_000
+export const AGENTS_TIMEOUT_MS = 8000
 export const GIT_TIMEOUT_MS = 5000
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
+const FILE_TOOLS = new Set(['Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Glob', 'Grep'])
 const SPAWN_TOOLS = new Set(['Agent', 'Task'])
 const LIVE = new Set(['pending', 'running', 'waiting'])
+// Runs of /safe-stop that do not come from the person. Not a list of who may run it: the
+// desktop app can arrive as "unclassified", so only these are refused.
+const NON_USER_ORIGINS = new Set(['plugin', 'peer', 'peer-send-message', 'projects-relay', 'channel', 'coordinator', 'observer', 'observer-activity', 'task-notification', 'scheduled-trigger', 'auto-continuation'])
+export const isUserOrigin = origin => !(origin && typeof origin === 'object' && NON_USER_ORIGINS.has(origin.kind))
 
 // Plain text for anything shown. Control, format and bidi characters become spaces. Markup
 // characters become "_". Long runs of combining marks go. The result is short and inert.
@@ -24,6 +35,13 @@ export function clean(v, max = 40) {
   s = s.replace(/\p{M}{3,}/gu, '').replace(/\s+/g, ' ').trim()
   const chars = Array.from(s)
   return chars.length > max ? chars.slice(0, Math.max(0, max - 1)).join('') + '…' : s
+}
+
+// A path or file path shown or sent whole: control and bidi characters go, nothing else changes.
+// Not for names on the board: those go through clean().
+export function cleanPath(v) {
+  const s = typeof v === 'string' ? v : ''
+  return Array.from(s.replace(/\p{C}/gu, '')).slice(0, MAX_PATH).join('')
 }
 
 // A whole number in [lo, hi], else null.
@@ -62,24 +80,58 @@ export function parseStatus(text) {
   return { branch: branch === '(detached)' ? 'detached' : branch, dirty: Math.min(dirty, 9999), unpushed: ahead === null ? null : Math.min(ahead, 9999) }
 }
 
-// What one tool call adds to the recent list: the tool name and a file name, nothing else.
+// Names that say they hold secrets. The same rule as isSecretPath in mods/plain-diff, copied
+// on purpose: each mod stands alone and neither imports the other.
+export function isSecretName(name) {
+  const b = String(name).replace(/\\/g, '/').split('/').pop().toLowerCase()
+  return (
+    (/^\.env(\..*)?$/.test(b) && !/\.(example|sample|template|dist)$/.test(b)) ||
+    /\.(env|pem|key|p12|pfx|jks|keystore|ppk|asc|tfvars)$/.test(b) ||
+    /^\.(envrc|npmrc|netrc|pgpass|pypirc|htpasswd|git-credentials)$/.test(b) ||
+    b === '_netrc' ||
+    /^id_(rsa|dsa|ecdsa|ed25519)$/.test(b) ||
+    /^(application_default_)?credentials(\.(json|ya?ml|toml|ini|xml|csv|txt))?$/.test(b) ||
+    /^secrets?\.(json|ya?ml|md|txt|env|toml)$/.test(b) ||
+    /^service-account.*\.json$/.test(b)
+  )
+}
+
+// What one tool call adds to the recent list: the tool name and, for a file tool only, a file
+// name. An MCP tool, a Bash command and any tool off the list give no name. A Grep or Glob path
+// counts only when its last part has an extension: a folder path never shows.
+// ponytail: a folder named like a file (v1.2) still passes. Upgrade: ask the file system.
 export function toolTarget(tool, input) {
   const i = input && typeof input === 'object' ? input : {}
-  const path = i.file_path ?? i.notebook_path ?? i.path
-  return { t: clean(tool, 24), f: typeof path === 'string' ? clean(baseName(path), 40) : '', edit: EDIT_TOOLS.has(tool), path: typeof path === 'string' ? path : '' }
+  const out = { t: clean(tool, 24), f: '', edit: EDIT_TOOLS.has(tool), path: '' }
+  if (!FILE_TOOLS.has(tool)) return out
+  const path = tool === 'NotebookEdit' ? i.notebook_path : tool === 'Glob' || tool === 'Grep' ? i.path : i.file_path
+  if (typeof path !== 'string' || !path) return out
+  const name = baseName(path)
+  if ((tool === 'Glob' || tool === 'Grep') && !/\.[^.\s]+$/.test(name)) return out
+  out.f = isSecretName(name) ? '(secret file)' : clean(name, 40)
+  if (out.edit) out.path = path
+  return out
 }
 
 export const spawnType = input => clean(input && typeof input === 'object' ? input.subagent_type || 'general-purpose' : 'general-purpose', 24)
 
+// Spawn counts as a plain object, from a Map or an object. A type named like an
+// Object.prototype key (constructor, __proto__) is an own key here, never the inherited one.
+const put = (o, k, n) => Object.defineProperty(o, k, { value: n, enumerable: true, writable: true, configurable: true })
 function capSpawns(spawns) {
   const out = {}
+  const sums = new Map()
+  for (const [k, n] of spawns instanceof Map ? spawns : Object.entries(spawns ?? {})) {
+    const key = clean(k, 24)
+    const count = num(n, 0, 9999) ?? 0
+    if (key && count > 0) sums.set(key, (sums.get(key) ?? 0) + count)
+  }
   let other = 0
-  const list = Object.entries(spawns ?? {}).map(([k, n]) => [clean(k, 24), num(n, 0, 9999) ?? 0]).filter(([k, n]) => k && n > 0).sort((a, b) => b[1] - a[1])
-  list.forEach(([k, n], i) => {
-    if (i < MAX_SPAWN_TYPES) out[k] = (out[k] ?? 0) + n
+  ;[...sums].sort((a, b) => b[1] - a[1]).forEach(([k, n], i) => {
+    if (i < MAX_SPAWN_TYPES) put(out, k, n)
     else other += n
   })
-  if (other) out.other = (out.other ?? 0) + other
+  if (other) put(out, 'other', (Object.prototype.hasOwnProperty.call(out, 'other') ? out.other : 0) + other)
   return out
 }
 
@@ -108,6 +160,8 @@ export function buildEntry(s) {
     ctx: num(s.ctx, 0, 100),
     at: s.now,
   }
+  // When the git counts were read. Absent for an entry that has no reading time.
+  if (num(s.rt, 0, 8.64e15) !== null) e.rt = num(s.rt, 0, 8.64e15)
   const dropSpawn = o => { const k = Object.keys(o.spawns).pop(); if (k) delete o.spawns[k] }
   return fit(e, ENTRY_MAX_BYTES, [...Array(MAX_SPAWN_TYPES + 1).fill(dropSpawn), o => half(o, 'branch'), o => half(o, 'branch'), o => half(o, 'repo'), o => half(o, 'repo'), o => half(o, 'repo')])
 }
@@ -133,10 +187,11 @@ export function readEntry(raw) {
   const at = num(raw.at, 0, 8.64e15)
   if (at === null) return null
   const spawns = capSpawns(raw.spawns && typeof raw.spawns === 'object' ? raw.spawns : {})
-  return {
+  const e = {
     repo: clean(raw.repo, 40),
     branch: clean(raw.branch, 60),
-    state: raw.state === 'working' ? 'working' : 'waiting',
+    // A missing or odd state is unknown, never waiting: waiting would let it count as ready.
+    state: raw.state === 'working' || raw.state === 'waiting' ? raw.state : 'unknown',
     ask: raw.ask === true,
     dirty: num(raw.dirty, 0, 9999),
     unpushed: num(raw.unpushed, 0, 9999),
@@ -145,6 +200,9 @@ export function readEntry(raw) {
     ctx: num(raw.ctx, 0, 100),
     at,
   }
+  const rt = num(raw.rt, 0, 8.64e15)
+  if (rt !== null) e.rt = rt
+  return e
 }
 export function readDetail(raw) {
   if (!raw || typeof raw !== 'object' || raw.v !== 1) return null
@@ -159,30 +217,40 @@ export function readDetail(raw) {
   })
 }
 
-// Hidden after 2 minutes without a heartbeat. An entry stamped in the future is not fresh.
-export const isFresh = (entry, now) => !!entry && entry.at <= now + STALE_MS && now - entry.at <= STALE_MS
+// Hidden after 2 minutes without a heartbeat. A stamp more than 30 s ahead of now is not fresh.
+export const isFresh = (entry, now) => !!entry && entry.at <= now + SKEW_MS && now - entry.at <= STALE_MS
 
-// Update-ready: no running agents, waiting, no unpushed commits, clean tree. Unknown is not ready.
-export const isUpdateReady = e => !!e && e.agents === 0 && e.state === 'waiting' && !e.ask && e.unpushed === 0 && e.dirty === 0
+// Update-ready: no running agents, waiting, no permission ask, no unpushed commits, clean tree.
+// true, false, or 'unknown' when a git count is missing or its reading (e.rt) is older than
+// 60 s or stamped ahead. Only true counts as ready. Without `now`, the reading time is not checked.
+export function readiness(e, now) {
+  if (!e || e.agents !== 0 || e.state !== 'waiting' || e.ask) return false
+  if (e.dirty === null || e.unpushed === null) return 'unknown'
+  if (typeof e.rt === 'number' && typeof now === 'number' && (now - e.rt > READ_MAX_AGE_MS || e.rt - now > SKEW_MS)) return 'unknown'
+  return e.dirty === 0 && e.unpushed === 0
+}
+export const isUpdateReady = (e, now) => readiness(e, now) === true
 
-// `claude agents --json` text to rows. Anything else gives [].
+// `claude agents --json` text to rows. Anything else gives []. A "waiting" row is a session
+// that waits on a permission answer.
 export function parseAgentsJson(text) {
   let list
   try { list = JSON.parse(text) } catch { return [] }
   if (!Array.isArray(list)) return []
+  const state = s => (s === 'busy' ? 'working' : s === 'idle' || s === 'waiting' ? 'waiting' : 'unknown')
   return list
     .filter(r => r && typeof r === 'object' && isId(r.sessionId))
-    .map(r => ({ id: r.sessionId, repo: clean(baseName(r.cwd), 40), state: r.status === 'busy' ? 'working' : r.status === 'idle' ? 'waiting' : 'unknown' }))
+    .map(r => ({ id: r.sessionId, repo: clean(baseName(r.cwd), 40), state: state(r.status), ask: r.status === 'waiting' }))
 }
 
 // Rows for the board: `claude agents` rows seeded first, then fresh store entries merged in by
 // session id. A session without an entry shows as "no detail". entries: Map id -> readEntry().
 export function mergeRows(agentRows, entries, now) {
   const rows = new Map()
-  for (const a of agentRows ?? []) rows.set(a.id, { id: a.id, repo: a.repo, branch: '', state: a.state, ask: false, ready: null, ctx: null, agents: null, detail: false })
+  for (const a of agentRows ?? []) rows.set(a.id, { id: a.id, repo: a.repo, branch: '', state: a.state, ask: !!a.ask, ready: null, ctx: null, agents: null, detail: false })
   for (const [id, e] of entries ?? []) {
     if (!isFresh(e, now) || !isId(id)) continue
-    rows.set(id, { id, repo: e.repo, branch: e.branch, state: e.state, ask: e.ask, ready: isUpdateReady(e), ctx: e.ctx, agents: e.agents, detail: true })
+    rows.set(id, { id, repo: e.repo, branch: e.branch, state: e.state, ask: e.ask, ready: readiness(e, now), ctx: e.ctx, agents: e.agents, detail: true, at: e.at })
   }
   const order = { working: 0, waiting: 1, unknown: 2 }
   return [...rows.values()].sort((a, b) => order[a.state] - order[b.state] || a.repo.localeCompare(b.repo) || a.branch.localeCompare(b.branch) || a.id.localeCompare(b.id))
@@ -200,18 +268,18 @@ export function bandText(rows) {
 
 const pad = (s, n) => { const c = Array.from(s); return c.length > n ? c.slice(0, n - 1).join('') + '…' : s + ' '.repeat(n - c.length) }
 const stateLabel = r => (r.state === 'waiting' && r.ask ? 'permission' : r.state)
-const readyLabel = r => (r.ready === null ? 'no detail' : r.ready ? 'ready' : 'not ready')
+const readyLabel = r => (r.ready === null ? 'no detail' : r.ready === 'unknown' ? 'unknown' : r.ready ? 'ready' : 'not ready')
 function widths(cols) {
   const c = num(cols, 40, 400) ?? 80
   return { repo: 18, branch: Math.max(8, Math.min(24, c - 52)), state: 10, ready: 9 }
 }
 export function headerText(cols) {
   const w = widths(cols)
-  return [pad('repo', w.repo), pad('branch', w.branch), pad('state', w.state), pad('update', w.ready), 'ctx', 'ag'].join(' ')
+  return [pad('repo', w.repo), pad('branch', w.branch), pad('state', w.state), pad('update', w.ready), pad('ctx', 4), 'ag'].join(' ')
 }
 export function rowText(r, cols) {
   const w = widths(cols)
-  return [pad(r.repo, w.repo), pad(r.branch || '-', w.branch), pad(stateLabel(r), w.state), pad(readyLabel(r), w.ready), pad(r.ctx === null ? '-' : `${r.ctx}%`, 3), r.agents === null ? '-' : String(r.agents)].join(' ')
+  return [pad(r.repo, w.repo), pad(r.branch || '-', w.branch), pad(stateLabel(r), w.state), pad(readyLabel(r), w.ready), pad(r.ctx === null ? '-' : `${r.ctx}%`, 4), r.agents === null ? '-' : String(r.agents)].join(' ')
 }
 
 export const ago = (now, at) => {
@@ -227,7 +295,7 @@ export function detailLines(row, detail, now) {
     return out
   }
   const spawns = Object.entries(detail.spawns).map(([k, n]) => `${k} ${n}`).join(', ')
-  out.push(`Context ${row.ctx === null ? '-' : row.ctx + '%'}   Files touched ${detail.files}   Updated ${ago(now, detail.at)}`)
+  out.push(`Context ${row.ctx === null ? '-' : row.ctx + '%'}   Files touched ${detail.files}   Updated ${ago(now, row.at ?? detail.at)}`)
   out.push(`Agents running ${row.agents ?? 0}: ${detail.agents.map(a => `${a.t} ${a.s}`).join(', ') || 'none'}`)
   out.push(`Spawned: ${spawns || 'none'}`)
   out.push(`Permission checks: ${detail.perm.ask} asked, ${detail.perm.deny} denied, ${detail.perm.wait} waiting now`)
@@ -254,7 +322,7 @@ export function safeStopPlan(text, missing) {
 export function makeTracker() {
   let t
   const reset = () => {
-    t = { inTurn: false, pending: new Set(), spawns: {}, recent: [], files: new Set(), ask: 0, deny: 0, turn: { tools: 0, edits: 0, asks: 0 }, receipt: null, git: { branch: '', dirty: null, unpushed: null }, agents: [], ctx: null, repo: '' }
+    t = { inTurn: false, pending: new Set(), spawns: new Map(), recent: [], files: new Set(), ask: 0, deny: 0, turn: { tools: 0, edits: 0, asks: 0 }, receipt: null, git: { branch: '', dirty: null, unpushed: null, rt: null }, agents: [], ctx: null, repo: '' }
   }
   reset()
   const live = () => t.agents.filter(a => LIVE.has(a.status))
@@ -275,16 +343,17 @@ export function makeTracker() {
       t.turn.tools++
       if (verdict === 'deny') { t.deny++; return }
       if (g.edit) { t.turn.edits++; if (g.path && t.files.size < MAX_FILES) t.files.add(g.path) }
-      if (SPAWN_TOOLS.has(tool)) { const k = spawnType(input); t.spawns[k] = (t.spawns[k] ?? 0) + 1 }
+      if (SPAWN_TOOLS.has(tool)) { const k = spawnType(input); t.spawns.set(k, (t.spawns.get(k) ?? 0) + 1) }
       if (verdict === 'ask') { t.ask++; t.turn.asks++; t.pending.add(id) }
     },
     toolCall(id) { return t.pending.delete(id) },
-    setGit(g) { t.git = g },
+    // g: parseStatus() output read at time `at`; null: the read failed, so the counts are unknown.
+    setGit(g, at) { t.git = g ? { ...g, rt: at ?? null } : { branch: t.git.branch, dirty: null, unpushed: null, rt: null } },
     setAgents(list) { t.agents = (list ?? []).map(a => ({ type: a.type, status: a.status })) },
     setCtx(p) { t.ctx = p },
     setRepo(r) { t.repo = r },
     entry(now) {
-      return buildEntry({ repo: t.repo, branch: t.git.branch, working: t.inTurn, ask: t.pending.size > 0, dirty: t.git.dirty, unpushed: t.git.unpushed, agents: live().length, spawns: t.spawns, ctx: t.ctx, now })
+      return buildEntry({ repo: t.repo, branch: t.git.branch, working: t.inTurn, ask: t.pending.size > 0, dirty: t.git.dirty, unpushed: t.git.unpushed, agents: live().length, spawns: t.spawns, ctx: t.ctx, rt: t.git.rt, now })
     },
     detail(now) {
       return buildDetail({ now, recent: t.recent, files: t.files.size, agents: live(), spawns: t.spawns, perm: { ask: t.ask, deny: t.deny, wait: t.pending.size }, receipt: t.receipt })
