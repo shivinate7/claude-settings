@@ -5443,7 +5443,7 @@ def main() -> None:
     try:
         guard_core.set_log_session(payload.get("session_id"))  # the last column of every log line
     except Exception:
-        pass  # a guard_core without the setter still judges: the line ends in the placeholder
+        pass  # a guard_core without the setter still judges: its line has no session cell (unknown session)
     try:
         judge(payload)
     except SystemExit:

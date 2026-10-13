@@ -2,7 +2,7 @@
 
 ## The question
 
-`hooks/guard.py:record()` appends one line per verdict to `~/.claude/guard.log`. Who reads it,
+`hooks/guard_core.py:record()` appends one line per verdict to `~/.claude/guard.log`. Who reads it,
 and what does it say?
 
 ## The ruling, 2026-10-11

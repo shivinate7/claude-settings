@@ -636,7 +636,7 @@ def sweep(payload, clock=None):
     try:
         guard.set_log_session(payload.get("session_id"))  # the last column of a revert's log line
     except Exception:
-        pass  # a guard without the setter still reverts: the line ends in the placeholder
+        pass  # a guard without the setter still reverts: its line has no session cell (unknown session)
     tool_input = payload.get("tool_input", {}) or {}
     if not isinstance(tool_input, dict):
         tool_input = {}

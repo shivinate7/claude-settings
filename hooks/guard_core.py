@@ -1291,14 +1291,17 @@ def record(tool: str, decision: str, rule: str, matched: str) -> None:
     try:
         folder = config_dir()
         os.makedirs(folder, exist_ok=True)
-        line = "\t".join([
+        fields = [
             datetime.now().isoformat(timespec="seconds"),
             tool or "",
             decision,
             rule,
             log_cut(matched, LOG_MAX_MATCHED),
-            _log_session,
-        ])
+        ]
+        session = globals().get("_log_session")  # absent: a five-field line, never a lost one
+        if session is not None:
+            fields.append(session)
+        line = "\t".join(fields)
         with open(os.path.join(folder, "guard.log"), "a", encoding="utf-8") as handle:
             handle.write(line + "\n")
     except Exception:
