@@ -118,8 +118,9 @@ SUITE_FOR_TARGET = {
 # mutant per PROTECTION, not per line: the seven refusals, the keep rule in both directions, the
 # only-copy remote-contains test, the pid-vs-start-time liveness read, the tombstone's write
 # order, the purge's age source, and the --confirm gate. `target` says which file's copy carries
-# the anchor: "sweep" for janitor/sweep.py's own code, "guard" for the hooks/guard.py primitive
-# sweep.py calls and never re-implements (see the module docstring above).
+# the anchor: "sweep" for janitor/sweep.py's own code, "guard" or "guard_<name>" for the guard
+# module that holds the primitive sweep.py calls and never re-implements (see the module docstring
+# above).
 MUTATIONS = [
     # ---- the seven refusals (plan, "the refusals") ----
     ("refusal: the protected prefix never keeps a branch",
@@ -319,7 +320,7 @@ MUTATIONS = [
 
     # ---- the keep rule, both directions (plan, "Phase 2") ----
     ("keep rule: the ancestry test never proves a branch empty",
-     "guard",
+     "guard_core",
      '    answer = _git(where, "merge-base", "--is-ancestor", branch, base)\n'
      '    if answer is None:\n'
      '        return None\n'
@@ -334,7 +335,7 @@ MUTATIONS = [
      '    return False',
      "test_ancestor_reaps"),
     ("keep rule: the git-cherry patch test never proves a branch empty",
-     "guard",
+     "guard_core",
      '    answer = _git(where, "cherry", base, branch)\n'
      '    if answer is None or answer.returncode != 0:\n'
      '        return None\n'
@@ -347,7 +348,7 @@ MUTATIONS = [
 
     # ---- the only-copy rule (plan, "Phase 2") ----
     ("only-copy: stop asking whether a remote carries the branch",
-     "guard",
+     "guard_core",
      '    answer = _git(\n'
      '        where, "for-each-ref", "--contains", branch, "--format=%(refname)", "refs/remotes"\n'
      '    )\n'
@@ -364,7 +365,7 @@ MUTATIONS = [
 
     # ---- the liveness test (plan, "Phase 2") ----
     ("liveness: match the process id alone, ignore the recorded start time",
-     "guard",
+     "guard_core",
      '    if not isinstance(record, dict):\n'
      '        return False\n'
      '    pid = record.get("pid")\n'
