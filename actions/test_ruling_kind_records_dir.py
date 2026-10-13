@@ -6,9 +6,15 @@
 The action checks the records folder named by its records-dir input. The input defaults to
 decisions, so a caller that sets nothing is checked as before. Stdlib only, so action.yml is
 read as text, not parsed as YAML. Shape only: test_action.sh runs the action end to end.
+The CheckShRecordsDir cases run check.sh itself in a fixture repo, with RECORDS_DIR set or unset.
 """
 import os
 import re
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -62,6 +68,74 @@ class RecordsDirInput(unittest.TestCase):
         flag = re.compile(r"--dir\s+\"?\$\{?%s\}?\"?(?=\s|$)" % re.escape(name))
         self.assertTrue(any(flag.search(line) for line in lint_lines),
                         "the lint call in check.sh does not pass --dir \"$%s\"" % name)
+
+
+GIT = ["git", "-c", "user.name=test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false"]
+BASH = shutil.which("bash")
+
+
+def rm_tree(path):
+    def clear(func, p, _exc):
+        os.chmod(p, stat.S_IWRITE)  # git objects are read-only on Windows
+        func(p)
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=clear)
+    else:
+        shutil.rmtree(path, onerror=clear)
+
+
+@unittest.skipUnless(BASH, "needs bash to run check.sh")
+class CheckShRecordsDir(unittest.TestCase):
+    """check.sh names the records folder through RECORDS_DIR. A bad folder is red, never green."""
+
+    def setUp(self):
+        self.tree = tempfile.mkdtemp(prefix="rdir_")
+        self.addCleanup(rm_tree, self.tree)
+        self.put("README.md", "# Home\n")  # the Home of the valid record below
+        self.put("decisions/base-ruling.md", "Old ruling, no kind line. Not in the diff.\n")
+        self.git("init", "-q", "-b", "main")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "base")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")  # the base, with no fetch
+        self.git("switch", "-q", "-c", "topic")
+        self.put("decisions/new-ruling.md", "Kind: process\nHome: README.md\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "topic")
+
+    def put(self, rel, text):
+        path = os.path.join(self.tree, *rel.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+
+    def git(self, *args):
+        subprocess.run(GIT + list(args), cwd=self.tree, check=True, capture_output=True, text=True)
+
+    def check(self, records_dir=None):
+        """Run check.sh. RECORDS_DIR is unset when records_dir is None, else set to it, even if empty."""
+        env = dict(os.environ, BASE_REF="main")
+        env.pop("RECORDS_DIR", None)
+        if records_dir is not None:
+            env["RECORDS_DIR"] = records_dir
+        r = subprocess.run([BASH, CHECK_SH], cwd=self.tree, env=env,
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        return r.returncode, r.stdout + r.stderr
+
+    def test_unset_records_dir_checks_decisions(self):
+        rc, out = self.check()
+        self.assertEqual(rc, 0, out)
+
+    def test_explicit_decisions_passes(self):
+        rc, out = self.check("decisions")
+        self.assertEqual(rc, 0, out)
+
+    def test_unusable_records_dir_fails_and_names_it(self):
+        for value in ("decision", "docs/decisions-old", ".", "", "Decisions"):
+            with self.subTest(records_dir=value):
+                rc, out = self.check(value)
+                self.assertNotEqual(rc, 0, out)
+                self.assertIn("'%s'" % value, out)
+                self.assertNotIn("Traceback", out)
 
 
 if __name__ == "__main__":

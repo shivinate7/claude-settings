@@ -417,5 +417,33 @@ class RulingKindTests(unittest.TestCase):
         self.assertNotIn("FAIL", out)
 
 
+    # --dir must name a folder that exists under the checkout, spelled as it is on disk. A check
+    # that cannot read its own input exits non-zero, and names the folder it was given.
+    # Case: on a case-insensitive disk "Decisions" resolves, so the spelling must be compared too.
+
+    def test_dir_that_names_no_usable_folder_fails(self):
+        self.put(REC, record(BUILD_OK))
+        for value in ("decision", "docs/decisions-old", ".", "", "Decisions"):
+            with self.subTest(dir=value):
+                rc, out = self.lint("--dir", value, REC)
+                self.assertNotEqual(rc, 0, out)
+                self.assertIn("'%s'" % value, out)
+                self.assertNotIn("Traceback", out)
+
+    def test_dir_that_names_no_usable_folder_fails_in_the_diff(self):
+        self.commit_base()
+        self.put(REC, record(BUILD_OK))
+        self.commit_change()
+        rc, out = self.lint("--dir", "decision", "--base", "main")
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("'decision'", out)
+        self.assertNotIn("Traceback", out)
+
+    def test_default_and_named_records_folder_pass(self):
+        self.put(REC, record(BUILD_OK))
+        self.assert_passes(REC)
+        self.assert_passes(REC, "--dir", "decisions")
+
+
 if __name__ == "__main__":
     unittest.main()
