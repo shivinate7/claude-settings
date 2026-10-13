@@ -12,7 +12,10 @@ stdin, scans the session transcript for background shells, and prints ONE JSON l
 - A job is a Bash call that a background run began. Its id is the `backgroundTaskId` in the
   record's structured `toolUseResult`. Text that quotes a result does not make a job.
 - A job is dropped once the transcript holds a `<task-notification>` for its id whose
-  `<status>` is terminal: completed, failed or killed.
+  `<status>` is terminal: completed, failed or killed. The notice is a user message or a
+  queued_command attachment record.
+- A job is also dropped once a TaskStop result says `Successfully stopped task: <id>` for its id.
+  A stop result, or any other text, that names another id closes nothing.
 - A job is stale when its output file has not changed for the quiet age (STALL_WATCH_QUIET,
   default 300 s). A job whose output file is missing is listed as "unknown", never dropped.
 - Any error prints nothing and exits 0.
@@ -117,13 +120,52 @@ def flagged(job_id):
     return [call(cid, "sleep 600", background=True), started(cid, job_id, win_path(job_id), False)]
 
 
-def notice(job_id, status="completed"):
-    """A completion notice as the transcript holds it: a user message whose content is a string."""
-    body = ("<task-notification>\n<task-id>%s</task-id>\n<tool-use-id>toolu_%s</tool-use-id>\n"
+def task_notification(job_id, status):
+    """The text of a completion notice: a <task-notification> block."""
+    return ("<task-notification>\n<task-id>%s</task-id>\n<tool-use-id>toolu_%s</tool-use-id>\n"
             "<output-file>%s</output-file>\n<status>%s</status>\n"
             "<summary>Background command \"sleep 600\" %s</summary>\n</task-notification>"
             % (job_id, job_id, win_path(job_id), status, status))
-    return {"type": "user", "message": {"role": "user", "content": body}}
+
+
+def notice(job_id, status="completed"):
+    """A completion notice as the transcript holds it: a user message whose content is a string."""
+    return {"type": "user", "message": {"role": "user", "content": task_notification(job_id, status)}}
+
+
+def attachment_notice(job_id, status="completed"):
+    """The same notice as a queued_command attachment record. It has no message key."""
+    return {"type": "attachment", "attachment": {
+        "type": "queued_command", "prompt": task_notification(job_id, status)}}
+
+
+def stop_call(call_id, job_id):
+    """A TaskStop tool_use, as the assistant records it."""
+    return {"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": call_id, "name": "TaskStop", "input": {"task_id": job_id}}]}}
+
+
+def stop_result(call_id, job_id, command="sleep 600"):
+    """The result of a TaskStop call: a tool_result whose content is a JSON string, and a
+    toolUseResult with the same fields."""
+    body = {"message": "Successfully stopped task: %s (%s)" % (job_id, command), "task_id": job_id,
+            "task_type": "local_bash", "command": command}
+    return {"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": call_id, "content": json.dumps(body)}]},
+        "toolUseResult": body}
+
+
+def bash_result(call_id, text):
+    """The result of a Bash call that started no job: plain stdout, no task id."""
+    return {"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": call_id, "content": text, "is_error": False}]},
+        "toolUseResult": {"stdout": text, "stderr": "", "interrupted": False}}
+
+
+def assistant_text(text):
+    """A plain text block of an assistant message."""
+    return {"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "text", "text": text}]}}
 
 
 def transcript(items):
@@ -495,6 +537,153 @@ def stop_mode_has_no_posix_gate():
     problems = expect(rc == 0, f"exit {rc}, want 0 with os.name nt: {err.strip()[:200]}")
     msg = system_message(out, problems)
     problems += listed_once(msg, "bnt600")
+    return problems
+
+
+@case
+def attachment_completed_notice_closes_job():
+    """S14a. a completed notice that arrives as a queued_command attachment closes its job, and a
+    stale job with no notice beside it is still listed"""
+    base = new_dir()
+    output_file(base, "batt600", 600)
+    output_file(base, "batt601", 600)
+    recs = moved("batt600") + moved("batt601") + [attachment_notice("batt600")]
+    rc, out, err = run_stop(transcript(recs), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += expect("batt600" not in msg,
+                       f"job batt600 has an attachment completed notice but is listed: {msg!r}")
+    problems += listed_once(msg, "batt601")
+    return problems
+
+
+@case
+def attachment_failed_and_killed_notices_close_jobs():
+    """S14b. failed and killed notices in attachment form close their jobs, and an open job beside
+    them is still listed"""
+    base = new_dir()
+    for job in ("bafail600", "bakill600", "baopen600"):
+        output_file(base, job, 600)
+    recs = (moved("bafail600") + moved("bakill600") + moved("baopen600")
+            + [attachment_notice("bafail600", "failed"), attachment_notice("bakill600", "killed")])
+    rc, out, err = run_stop(transcript(recs), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    for job in ("bafail600", "bakill600"):
+        problems += expect(job not in msg, f"job {job} has a terminal attachment notice but is listed: {msg!r}")
+    problems += listed_once(msg, "baopen600")
+    return problems
+
+
+@case
+def attachment_notice_for_longer_id_does_not_close_shorter_job():
+    """S14c. a notice for bapfx600 does not close the job bapfx60, whose id is a prefix of it. The
+    notice does close bapfx600 itself"""
+    base = new_dir()
+    output_file(base, "bapfx60", 600)
+    output_file(base, "bapfx600", 600)
+    recs = moved("bapfx60") + moved("bapfx600") + [attachment_notice("bapfx600")]
+    rc, out, err = run_stop(transcript(recs), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += expect("bapfx600" not in msg, f"job bapfx600 has its notice but is listed: {msg!r}")
+    problems += listed_once(msg, "bapfx60")
+    return problems
+
+
+@case
+def attachment_record_without_prompt_does_not_stop_the_scan():
+    """S14d. attachment records with no attachment key, a string attachment, no prompt, or a prompt
+    that is null or a list come before a good notice: exit 0, the notice still closes its job, and
+    the stale job before them is still listed"""
+    base = new_dir()
+    output_file(base, "banoprm600", 600)
+    output_file(base, "banoprmk600", 600)
+    bad = [
+        {"type": "attachment"},
+        {"type": "attachment", "attachment": "not an object"},
+        {"type": "attachment", "attachment": {"type": "queued_command"}},
+        {"type": "attachment", "attachment": {"type": "queued_command", "prompt": None}},
+        {"type": "attachment", "attachment": {"type": "queued_command", "prompt": ["a", "list"]}},
+    ]
+    recs = moved("banoprm600") + bad + moved("banoprmk600") + [attachment_notice("banoprmk600")]
+    rc, out, err = run_stop(transcript(recs), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += expect("banoprmk600" not in msg, f"the notice after the bad records did not close its job: {msg!r}")
+    problems += listed_once(msg, "banoprm600")
+    return problems
+
+
+@case
+def stop_result_closes_stopped_job():
+    """S15a. a job followed by a TaskStop result 'Successfully stopped task: ID' is closed. The
+    command text of that result names another job, which stays listed"""
+    base = new_dir()
+    output_file(base, "bstop600", 600)
+    output_file(base, "bstopk600", 600)
+    recs = (moved("bstop600") + moved("bstopk600")
+            + [stop_call("toolu_stop1", "bstop600"),
+               stop_result("toolu_stop1", "bstop600", command='echo "Successfully stopped task: bstopk600"')])
+    rc, out, err = run_stop(transcript(recs), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += expect("bstop600" not in msg, f"job bstop600 has a stop result but is listed: {msg!r}")
+    problems += listed_once(msg, "bstopk600")
+    return problems
+
+
+@case
+def stop_result_for_longer_id_does_not_close_shorter_job():
+    """S15b. a stop result for bpfx600 does not close the job bpfx60, whose id is a prefix of it. The
+    stop closes bpfx600 itself"""
+    base = new_dir()
+    output_file(base, "bpfx60", 600)
+    output_file(base, "bpfx600", 600)
+    recs = (moved("bpfx60") + moved("bpfx600")
+            + [stop_call("toolu_stop2", "bpfx600"), stop_result("toolu_stop2", "bpfx600")])
+    rc, out, err = run_stop(transcript(recs), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += expect("bpfx600" not in msg, f"job bpfx600 has a stop result but is listed: {msg!r}")
+    problems += listed_once(msg, "bpfx60")
+    return problems
+
+
+@case
+def assistant_text_naming_another_id_does_not_close_job():
+    """S15c. an assistant message that quotes 'Successfully stopped task' for another id, and names
+    the stale job, does not close that job. The real stop result still closes its own job"""
+    base = new_dir()
+    output_file(base, "bastxt600", 600)
+    output_file(base, "bastxk600", 600)
+    recs = (moved("bastxt600") + moved("bastxk600")
+            + [assistant_text("Successfully stopped task: batxother (sleep 9). bastxt600 is still running."),
+               stop_call("toolu_stop3", "bastxk600"), stop_result("toolu_stop3", "bastxk600")])
+    rc, out, err = run_stop(transcript(recs), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += expect("bastxk600" not in msg, f"job bastxk600 has a stop result but is listed: {msg!r}")
+    problems += listed_once(msg, "bastxt600")
+    return problems
+
+
+@case
+def other_tool_result_naming_another_id_does_not_close_job():
+    """S15d. a Bash result that quotes 'Successfully stopped task' for another id, and names the
+    stale job, does not close that job. The real stop result still closes its own job"""
+    base = new_dir()
+    output_file(base, "batool600", 600)
+    output_file(base, "batoolk600", 600)
+    recs = (moved("batool600") + moved("batoolk600")
+            + [call("toolu_grep", "cat notes.txt"),
+               bash_result("toolu_grep", "Successfully stopped task: batoolx (sleep 9)\nbatool600 still running"),
+               stop_call("toolu_stop4", "batoolk600"), stop_result("toolu_stop4", "batoolk600")])
+    rc, out, err = run_stop(transcript(recs), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += expect("batoolk600" not in msg, f"job batoolk600 has a stop result but is listed: {msg!r}")
+    problems += listed_once(msg, "batool600")
     return problems
 
 
