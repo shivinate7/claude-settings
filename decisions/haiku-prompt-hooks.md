@@ -50,7 +50,9 @@ cannot exit on a field in code.
   `state/reply-judge/<sha256 of session id>.count` under the config folder. A damaged, missing or
   unwritable counter means that Stop is judged. It never refuses and never crashes (decision
   `gate-hooks-fail-closed`: a crash never refuses). A failed write removes the counter file, so
-  the next Stop is judged.
+  the next Stop is judged. When the write and the remove both fail, that Stop is judged too,
+  treated as the first Stop. A frozen counter therefore means judge every Stop, the same as a
+  damaged counter. Owner ruling 2026-10-13 17:52 CDT approved this fix.
 - The model call is `decision_watch.invoke_model`, the one home. It runs Haiku at `xhigh`,
   the owner's preferred judge setting, which a prompt hook cannot set. The caller passes the
   accepted answer, `{"ok": true|false}`. `decision_watch` keeps its own ALLOW/FLAG shape.
@@ -76,8 +78,6 @@ Holes, named:
 - Lost updates. Cause: heavy parallel calls of one session. Effect: a measured stress of 4 threads
   by 300 calls ended at 30 of 1200. It errs toward judging. Real Stops of one session come seconds
   apart. Fix: none named yet.
-- Frozen count after a failed remove. Cause: the remove after a failed write also fails. Effect:
-  the count stays frozen, and the judge skips silently. Unmeasured in practice. Fix: none named yet.
 - Session key copied. Cause: the session key line is copied from
   `decision_watch._seen_store_path`, with no stated reason. Rule `building-one-home-per-capability`
   (one home per capability) asks for a stated reason. Effect: the key line lives in two places.
