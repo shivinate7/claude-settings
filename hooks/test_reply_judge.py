@@ -88,6 +88,11 @@ def _fake_run(argv, **kwargs):
 with open(os.environ["RJ_LOADED"], "w", encoding="utf-8") as f:
     f.write("loaded")
 subprocess.run = _fake_run
+if os.environ.get("RJ_FAIL_REPLACE"):
+    # Fake write failure, in the hook process only: every os.replace raises, so no counter write lands.
+    def _refused_replace(src, dst, *args, **kwargs):
+        raise OSError("fake write failure: os.replace refused")
+    os.replace = _refused_replace
 '''
 
 
@@ -125,9 +130,12 @@ class Run:
         return argv[argv.index("-p") + 1] if "-p" in argv else ""
 
 
-def run_hook(text, scenario="ok", answer="", stop_active=False, config=None, session=REPLY_SESSION):
+def run_hook(text, scenario="ok", answer="", stop_active=False, config=None, session=REPLY_SESSION,
+             fail_replace=False):
     """One Stop, one new process. With no `config`, the config dir is fresh and empty, so the
-    Stop is the session's first. A shared `config` carries the counter from Stop to Stop."""
+    Stop is the session's first. A shared `config` carries the counter from Stop to Stop.
+    `text` may be ABSENT: the payload then has no last_assistant_message key at all.
+    `fail_replace` makes every os.replace in the hook process raise (a fake write failure)."""
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     os.makedirs(base, exist_ok=True)
@@ -137,6 +145,10 @@ def run_hook(text, scenario="ok", answer="", stop_active=False, config=None, ses
     env = dict(os.environ)
     for name in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"):
         env.pop(name, None)
+    if fail_replace:
+        env["RJ_FAIL_REPLACE"] = "1"
+    else:
+        env.pop("RJ_FAIL_REPLACE", None)
     env.update(
         CLAUDE_CONFIG_DIR=config,
         PYTHONPATH=STUB_DIR,
@@ -152,6 +164,8 @@ def run_hook(text, scenario="ok", answer="", stop_active=False, config=None, ses
         "stop_hook_active": stop_active,
         "last_assistant_message": text,
     }
+    if text is ABSENT:
+        del payload["last_assistant_message"]
     proc = subprocess.run(
         [sys.executable, MODULE_PATH],
         input=json.dumps(payload), capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -378,6 +392,8 @@ SESSION_BETA = "sample-session-beta"
 OK_ANSWER = json.dumps({"ok": True})
 FINDING_ANSWER = json.dumps({"ok": False, "reason": BLOCK_REASON})
 DAMAGE = ("missing", "corrupt", "unreadable")
+ABSENT = object()  # a payload with no last_assistant_message key
+EMPTY_REPLIES = ("", "  \n", None, ABSENT)  # no reply text: empty, whitespace, null, missing
 
 
 def sample_config(label):
@@ -519,6 +535,80 @@ def case_counter_write_failure_never_blocks():
     check("write fails: the Stop is judged once", len(run.calls) == 1, run.calls)
 
 
+# --------------------------------------------------------------------------- cases 14-16
+# Hole 1 (review round 1): a failed counter write froze the stored count at k. Every later Stop
+# read k, returned n = k + 1 and was skipped forever. Pin: the Stop after a failed write is judged.
+# Stop 1 writes a good count. From Stop 2 on, the stub's os.replace refuses every write. Stop 2
+# reads 1, so n = 2 and is skipped, and its write fails. Stops 3 to 9 must each be judged, since
+# every one of them follows a failed write. No Stop is skipped forever.
+
+def case_failed_write_does_not_freeze_the_count():
+    config = sample_config("write-refused")
+    run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 1, good write
+    check("write refused: Stop 1 wrote a counter", bool(counter_files(config)), counter_files(config))
+    codes = []
+    called = {}
+    for n in range(2, 10):
+        run = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA, fail_replace=True)
+        codes.append(run.code)
+        called[n] = len(run.calls)
+    check("write refused: exit 0 on Stops 2 to 9", all(c == 0 for c in codes), codes)
+    check("write refused: Stop 2 is skipped, its read was good", called[2] == 0, called)
+    check("write refused: Stops 3 to 9 are each judged, none skipped forever",
+          all(called[n] == 1 for n in range(3, 10)), called)
+
+
+# Hole 2 (review round 1): a Stop with no reply text was counted before the empty-reply return,
+# so an empty Stop 1 used the session's first sample slot. Pin: an empty Stop writes no counter
+# change and counts for nothing. Stops 1, 6 and 11 are counted among Stops that carry a reply.
+
+def counter_snapshot(config):
+    snap = {}
+    for rel in counter_files(config):
+        with open(os.path.join(config, rel), "rb") as f:
+            snap[rel] = f.read()
+    return snap
+
+
+def empty_stop_is_silent(run):
+    return run.code == 0 and run.calls == [] and run.out.strip() == ""
+
+
+def case_empty_stop_writes_nothing_and_counts_nothing():
+    config = sample_config("empty-first")
+    empty = run_hook(EMPTY_REPLIES[0], answer=FINDING_ANSWER, config=config, session=SESSION_ALPHA)
+    check("empty first Stop: exit 0, no call, nothing printed", empty_stop_is_silent(empty), empty.out)
+    check("empty first Stop: no counter written", counter_files(config) == [], counter_files(config))
+    reply = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)
+    check("empty first Stop: the first reply is the first counted Stop, so it is judged",
+          len(reply.calls) == 1, reply.calls)
+    before = counter_snapshot(config)
+    empty_again = run_hook(EMPTY_REPLIES[2], answer=FINDING_ANSWER, config=config, session=SESSION_ALPHA)
+    check("empty after a counted reply: exit 0, no call, nothing printed",
+          empty_stop_is_silent(empty_again), empty_again.out)
+    check("empty after a counted reply: counter bytes unchanged",
+          counter_snapshot(config) == before, counter_snapshot(config))
+
+
+def case_empty_stops_between_replies_do_not_shift_samples():
+    config = sample_config("empty-between")
+    judged = []
+    bad_empty = []
+    for i in range(1, 12):  # 11 replies, each after one empty Stop of a different kind
+        kind = EMPTY_REPLIES[i % len(EMPTY_REPLIES)]
+        before = counter_snapshot(config)
+        empty = run_hook(kind, answer=FINDING_ANSWER, config=config, session=SESSION_ALPHA)
+        if not empty_stop_is_silent(empty) or counter_snapshot(config) != before:
+            bad_empty.append(i)
+        reply = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)
+        if reply.calls:
+            judged.append(i)
+    check("empty between replies: each empty Stop is silent and changes no counter",
+          bad_empty == [], bad_empty)
+    check("empty between replies: the model is called on reply 1, 6 and 11 only",
+          judged == [1, 6, 11], judged)
+
+
 CASES = (
     case_stop_hook_active_never_calls_model,
     case_model_ok_is_silent,
@@ -536,6 +626,9 @@ CASES = (
     case_counter_is_a_file_that_survives_between_processes,
     case_damaged_counter_fails_open,
     case_counter_write_failure_never_blocks,
+    case_failed_write_does_not_freeze_the_count,
+    case_empty_stop_writes_nothing_and_counts_nothing,
+    case_empty_stops_between_replies_do_not_shift_samples,
 )
 
 
