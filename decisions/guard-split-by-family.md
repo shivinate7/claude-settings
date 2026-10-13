@@ -39,5 +39,13 @@ the full suite took 929 s on the branch and 1123 s on main, on this box.
 ## Holes, named
 
 - PR0 measured a kill count of 310 of 314 on the branch, against 309 on main. The one change
-  is "root-scope: _git drops -C", wrong-cause on main. The cause is a guess: main's copy had
-  no `.git`.
+  is "root-scope: _git drops -C". Measured cause: that mutant is killed only when the harness
+  runs inside a git checkout. CI does. The fragility is older than the split.
+- `janitor/mutate_sweep.py` checks an anchor exactly once only in its scaffold. Its main
+  apply path still uses a first-match replace, so a second copy inside one file passes
+  silently. All 149 anchors match once today.
+- Three tools glob `hooks/guard*.py` on their own: `lint/rule_audit.py`,
+  `lint/check_landed_dirs.py` and `hooks/mutate_shared.py`. The lints run without the hooks
+  folder on their import path, so they cannot share one helper yet.
+- PR2 needs a case that kills a sibling mutant through the in-process load in
+  `hooks/test_guard.py`, because that load puts the real `hooks/` first on `sys.path`.
