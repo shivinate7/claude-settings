@@ -18,7 +18,9 @@ depends on the model remembering it. The oversight session raised this on 2026-1
 Owner ruling, 2026-10-13, from an interview in the claude-settings audit session.
 
 - **Trigger.** A message whose first word is `fb` or `fb:` opens capture mode. A message that
-  is only `fb done` closes it; trailing punctuation or spaces are allowed. Every owner message between the two is captured, so the back and forth
+  is only `fb done` closes it. `fb: done`, any case, any whitespace between the
+  words, and trailing punctuation also close it. `fb - done` does not close; it is captured.
+  No `fb done` form opens capture. Every owner message between the two is captured, so the back and forth
   stays in the record. A `fb` elsewhere in a message does nothing.
 - **Capture.** The UserPromptSubmit hook appends each captured message verbatim, with its
   Central time, to `~/.claude/handoffs/<session_id>.inbox.md`. The file is outside git.
