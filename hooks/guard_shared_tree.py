@@ -469,7 +469,7 @@ def under_session_scratchpad(where: str, session_id: str) -> bool:
         return False
     parts = real.split(os.sep)
     for index in range(len(parts) - 1):
-        if parts[index] == session_id and parts[index + 1] == "scratchpad":
+        if parts[index] == session_id and os.path.normcase(parts[index + 1]) == "scratchpad":
             return True
     return False
 
@@ -484,7 +484,7 @@ def in_any_session_scratchpad(where: str) -> bool:
     if not (os.path.normcase(real) + os.sep).startswith(os.path.normcase(temp) + os.sep):
         return False
     parts = real.split(os.sep)
-    return any(parts[i + 1] == "scratchpad" and SESSION_ID_RE.match(parts[i])
+    return any(os.path.normcase(parts[i + 1]) == "scratchpad" and SESSION_ID_RE.match(parts[i])
                for i in range(len(parts) - 1))
 
 
