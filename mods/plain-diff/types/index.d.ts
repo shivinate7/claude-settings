@@ -18,6 +18,7 @@ export type Report = {
   add: number
   del: number
   hiddenFiles: number
+  truncated: boolean
   error: string
 }
 

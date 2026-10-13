@@ -13,19 +13,43 @@ const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
 // The base to diff against: HEAD, or the empty tree in a repo with no commit yet.
 export const diffBase = hasHead => (hasHead ? 'HEAD' : EMPTY_TREE)
 
-// The path of a file in the header `diff --git a/P b/P'`. P may hold spaces.
+// A path git wrote in C style: "we\tird/x". Unquote it. Octal escapes are UTF-8 bytes.
+export function unquote(p) {
+  if (!(p.length >= 2 && p.startsWith('"') && p.endsWith('"'))) return p
+  const bytes = []
+  const esc = { t: 9, n: 10, r: 13, a: 7, b: 8, f: 12, v: 11, '"': 34, '\\': 92 }
+  const inner = p.slice(1, -1)
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i]
+    if (c !== '\\') bytes.push(...Buffer.from(c))
+    else if (/[0-7]/.test(inner[i + 1])) {
+      const o = inner.slice(i + 1).match(/^[0-7]{1,3}/)[0]
+      bytes.push(parseInt(o, 8) & 255)
+      i += o.length
+    } else bytes.push(esc[inner[++i]] ?? inner.charCodeAt(i))
+  }
+  return Buffer.from(bytes).toString('utf8')
+}
+const noPrefix = (p, pre) => (p.startsWith(pre) ? p.slice(pre.length) : p)
+
+// The paths in the header "diff --git a/P b/P". P may hold spaces or quotes. The prefixes may be
+// absent (diff.noprefix): the argv fixes them, and this stays correct if it ever does not.
 function headerPaths(part) {
   const lines = part.split('\n')
   const head = lines[0]
   const rf = lines.find(l => l.startsWith('rename from '))
   const rt = lines.find(l => l.startsWith('rename to '))
-  if (rf && rt) return [rf.slice(12), rt.slice(10)]
-  // Same path on both sides: "a/P b/P" is 2n+5 characters long.
-  const n = (head.length - 5) / 2
-  if (Number.isInteger(n) && head.startsWith('a/') && head.slice(2, 2 + n) === head.slice(5 + n)) {
-    return [head.slice(2, 2 + n), head.slice(5 + n)]
+  if (rf && rt) return [unquote(rf.slice(12)), unquote(rt.slice(10))]
+  const q = head.match(/^("(?:[^"\\]|\\.)*") ("(?:[^"\\]|\\.)*"|.*)$/)
+  if (q) return [noPrefix(unquote(q[1]), 'a/'), noPrefix(unquote(q[2]), 'b/')]
+  // Same path on both sides: "a/P b/P" is 2n+5 characters long, "P P" is 2n+1.
+  for (const [pre, extra] of [['a/', 5], ['', 1]]) {
+    const n = (head.length - extra) / 2
+    if (Number.isInteger(n) && head.startsWith(pre) && head.slice(pre.length, pre.length + n) === head.slice(extra === 5 ? n + 5 : n + 1)) {
+      return [head.slice(pre.length, pre.length + n), head.slice(pre.length, pre.length + n)]
+    }
   }
-  const m = head.match(/^"?a\/(.*?)"? "?b\/(.*?)"?$/)
+  const m = head.match(/^a\/(.*?) b\/(.*)$/)
   return m ? [m[1], m[2]] : [head, head]
 }
 
@@ -59,11 +83,12 @@ export function parseDiff(text) {
 export function isSecretPath(path) {
   const b = String(path).replace(/\\/g, '/').split('/').pop().toLowerCase()
   return (
-    /^\.env(\..*)?$/.test(b) ||
-    /\.(pem|key|p12|pfx|jks|keystore)$/.test(b) ||
+    (/^\.env(\..*)?$/.test(b) && !/\.(example|sample|template|dist)$/.test(b)) ||
+    /\.(env|pem|key|p12|pfx|jks|keystore|ppk|asc|tfvars)$/.test(b) ||
+    /^\.(envrc|npmrc|netrc|pgpass|pypirc|htpasswd|git-credentials)$/.test(b) ||
+    b === '_netrc' ||
     /^id_(rsa|dsa|ecdsa|ed25519)$/.test(b) ||
-    /^credentials(\..*)?$/.test(b) ||
-    /^\.(npmrc|netrc|pgpass)$/.test(b) ||
+    /^(application_default_)?credentials(\.(json|ya?ml|toml|ini|xml|csv|txt))?$/.test(b) ||
     /^secrets?\.(json|ya?ml|md|txt|env|toml)$/.test(b) ||
     /^service-account.*\.json$/.test(b)
   )
@@ -71,13 +96,21 @@ export function isSecretPath(path) {
 
 // Privacy: key material under an innocent file name. One pass over the raw text, so a
 // comment opener or a quote in a string cannot hide a key.
-// ponytail: known key shapes only. A bare "password = hunter2" is not caught. Add a rule per incident.
+// ponytail: known key shapes and KEY=value lines only (API_KEY, SECRET, PASSWORD, TOKEN with a long
+// value). A secret in another shape is not caught. Add a rule per incident or measured miss.
 const SECRET_BODY = [
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
-  /\bAKIA[0-9A-Z]{16}\b/,
+  /-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----/,
+  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/,
   /\bgh[pousr]_[A-Za-z0-9]{36,}/,
   /\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}/,
+  /\b[sr]k_live_[A-Za-z0-9]{20,}/,
   /\bxox[abprs]-[A-Za-z0-9-]{10,}/,
+  /\bAIza[0-9A-Za-z_-]{35}/,
+  /\bey[A-Za-z0-9_-]{10,}\.ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}/, // JWT
+  /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:[^\s/@]+@/, // URL with user:pass@
+  /\bBearer\s+[A-Za-z0-9._~+/-]{20,}/,
+  // NAME = value, where NAME holds API_KEY, SECRET, PASSWORD, PASSWD or TOKEN and the value is one long word.
+  /[A-Za-z0-9_]*(?:API_?KEY|SECRET|PASSWORD|PASSWD|TOKEN)[A-Za-z0-9_]*["']?\s*[:=]\s*["']?(?!\d+["']?\s*$)[A-Za-z0-9/+_=-]{8,}["']?\s*$/im,
 ]
 export const looksSecret = text => SECRET_BODY.some(re => re.test(String(text)))
 
@@ -116,6 +149,7 @@ export const cacheKey = (path, diff) => `${path}\n${hash(diff)}`
 // Plain text from a note: no code fences, no links, no HTML, no table pipes; 2 sentences, 300 chars.
 export function trimNote(text) {
   const plain = String(text)
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069]/g, '')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/`/g, '')
     .replace(/\*\*|__/g, '')
@@ -153,8 +187,9 @@ export function noteFromMessages(messages, repoRoot, relPath) {
       const r = messages[j]
       if (r.role === 'user' && !(r.toolResults && r.toolResults.length)) break
       if (r.role === 'assistant' && r.text && r.text.trim()) {
-        const note = trimNote(r.text)
-        if (note) found = note
+        // A turn text holding a secret shape gives no note, as a diff holding one gives none.
+        const note = looksSecret(r.text) ? '' : trimNote(r.text)
+        found = note
         break
       }
     }
@@ -196,8 +231,9 @@ export const applyNote = (entries, key, note, source = 'model') =>
   entries.map(e => (e.key === key && e.source === 'pending' ? { ...e, note, source } : e))
 
 // A cap on model calls shared by every run. A key already in flight shares its call.
-// run() resolves call()'s value, or null when the cap refuses. The count resets when none is in flight.
-export function makeLimiter(max) {
+// run() resolves call()'s value, or null when the cap refuses or the call outlasts timeoutMs
+// (a hung call is freed). The count resets when none is in flight.
+export function makeLimiter(max, { timeoutMs } = {}) {
   const inflight = new Map()
   let started = 0
   return {
@@ -206,9 +242,26 @@ export function makeLimiter(max) {
       if (inflight.size === 0) started = 0
       if (started >= max) return Promise.resolve(null)
       started++
-      const p = (async () => call())().finally(() => inflight.delete(key))
+      let timer
+      const racers = [(async () => call())()]
+      if (timeoutMs) racers.push(new Promise(r => (timer = setTimeout(() => r(null), timeoutMs))))
+      const p = Promise.race(racers).finally(() => {
+        clearTimeout(timer)
+        inflight.delete(key)
+      })
       inflight.set(key, p)
       return p
     },
   }
 }
+
+// The argv after git. The prefixes are fixed, so diff.noprefix and diff.mnemonicPrefix cannot change a path.
+export const gitDiffArgs = base => [
+  '-c', 'core.quotepath=off', 'diff', base, '--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/',
+]
+
+// The one-line header. A cut git result is never shown as a complete count.
+export const headerLine = ({ files, add, del, truncated }) =>
+  truncated
+    ? `Diff truncated: some files are not shown. Read so far: ${files} files, +${add} -${del}.`
+    : `${files} files changed, +${add} -${del}`

@@ -18,6 +18,8 @@ import {
   cacheKey,
   cutLines,
   diffBase,
+  gitDiffArgs,
+  headerLine,
   isSecretPath,
   isTooLargeForModel,
   looksSecret,
@@ -32,14 +34,14 @@ import {
 } from './lib.mjs'
 
 const PANE = 'plain-diff'
-const EMPTY = { entries: [], files: 0, add: 0, del: 0, hiddenFiles: 0, error: '' }
+const EMPTY = { entries: [], files: 0, add: 0, del: 0, hiddenFiles: 0, truncated: false, error: '' }
 const report = atom({ plugin: 'plain-diff', key: 'report' }, EMPTY)
 const open = atom({ plugin: 'plain-diff', key: 'open' }, [])
 
 // Notes kept for the session, by file path plus diff hash. Lost on a reload of the mod: fine.
 const cache = new Map()
 // One cap for every run. Overlapping runs share calls for the same file and diff.
-const limiter = makeLimiter(MAX_MODEL_CALLS)
+const limiter = makeLimiter(MAX_MODEL_CALLS, { timeoutMs: 25000 })
 
 export function register(on) {
   on('session.start', async ($, e, next) => {
@@ -68,7 +70,7 @@ export function register(on) {
     if (r.error) return h(Text, { dimColor: true }, r.error)
     if (r.entries.length === 0) return h(Text, { dimColor: true }, 'No changes against HEAD.')
 
-    const rows = [h(Text, { bold: true }, `${r.files} files changed, +${r.add} -${r.del}`)]
+    const rows = [h(Text, { bold: true }, headerLine(r))]
     if (r.hiddenFiles > 0) {
       rows.push(h(Text, { dimColor: true }, `Showing the first ${MAX_FILES} files. ${r.hiddenFiles} more not shown.`))
     }
@@ -115,7 +117,7 @@ async function build($) {
     hasHead = (await $.process.run(['git', 'rev-parse', '--verify', '--quiet', 'HEAD'])).exitCode === 0
     const top = await $.process.run(['git', 'rev-parse', '--show-toplevel'])
     if (top.exitCode === 0) root = top.stdout.trim()
-    out = await $.process.run(['git', '-c', 'core.quotepath=off', 'diff', diffBase(hasHead), '--no-color', '--no-ext-diff'])
+    out = await $.process.run(['git', ...gitDiffArgs(diffBase(hasHead))])
   } catch (err) {
     return failed(`Could not run git: ${String(err && err.message ? err.message : err)}`)
   }
@@ -155,7 +157,7 @@ async function build($) {
       entry.source = 'pending'
       todo.push({ path: f.path, key: entry.key, diff: clean })
     } else if (clean) {
-      entry.note = 'No note: model limit reached'
+      entry.note = 'No note: model limit or timeout'
     }
     return entry
   })
@@ -165,6 +167,7 @@ async function build($) {
     add: all.reduce((n, f) => n + f.add, 0),
     del: all.reduce((n, f) => n + f.del, 0),
     hiddenFiles: Math.max(0, all.length - MAX_FILES),
+    truncated: out.isStdoutTruncated === true,
     error: '',
   }
   return { report: rep, todo }
