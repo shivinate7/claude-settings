@@ -98,21 +98,34 @@ export function isSecretPath(path) {
 // comment opener or a quote in a string cannot hide a key.
 // ponytail: known key shapes and KEY=value lines only (API_KEY, SECRET, PASSWORD, TOKEN with a long
 // value). A secret in another shape is not caught. Add a rule per incident or measured miss.
+// Every rule is linear: no leading wildcard class, every repeat has a cap, and the scan runs
+// per line in chunks of 3000 characters. Do not add a rule without a cap on each repeat.
 const SECRET_BODY = [
-  /-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----/,
+  /-----BEGIN [A-Z ]{0,30}PRIVATE KEY(?: BLOCK)?-----/,
   /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/,
   /\bgh[pousr]_[A-Za-z0-9]{36,}/,
   /\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}/,
   /\b[sr]k_live_[A-Za-z0-9]{20,}/,
   /\bxox[abprs]-[A-Za-z0-9-]{10,}/,
   /\bAIza[0-9A-Za-z_-]{35}/,
-  /\bey[A-Za-z0-9_-]{10,}\.ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}/, // JWT
-  /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:[^\s/@]+@/, // URL with user:pass@
-  /\bBearer\s+[A-Za-z0-9._~+/-]{20,}/,
-  // NAME = value, where NAME holds API_KEY, SECRET, PASSWORD, PASSWD or TOKEN and the value is one long word.
-  /[A-Za-z0-9_]*(?:API_?KEY|SECRET|PASSWORD|PASSWD|TOKEN)[A-Za-z0-9_]*["']?\s*[:=]\s*["']?(?!\d+["']?\s*$)[A-Za-z0-9/+_=-]{8,}["']?\s*$/im,
+  /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{5,}/, // JWT
+  /\b[a-z][a-z0-9+.-]{0,19}:\/\/[^\s/:@]{1,100}:[^\s/@]{1,100}@/, // URL with user:pass@
+  /\bBearer\s{1,5}[A-Za-z0-9._~+/-]{20,}/,
+  // NAME = value, NAME: "value" or NAME, "value": NAME holds API_KEY, SECRET, PASSWORD, PASSWD or TOKEN.
+  // The value is one long word. A trailing ; , ) or a # or // comment is allowed.
+  /(?:API_?KEY|SECRET|PASSWORD|PASSWD|TOKEN)[A-Za-z0-9_]{0,40}["']?\s{0,5}[:=,]\s{0,5}["']?(?!\d+["')]?[,;]?\s*$)[A-Za-z0-9/+_=-]{8,300}["']?\)?[,;]?\s*(?:#.*|\/\/.*)?$/i,
 ]
-export const looksSecret = text => SECRET_BODY.some(re => re.test(String(text)))
+const CHUNK = 3000
+export function looksSecret(text) {
+  for (const line of String(text).split('\n')) {
+    // Chunks overlap by 200 characters, so a secret on a chunk edge is still whole in one chunk.
+    for (let i = 0; i === 0 || i < line.length; i += CHUNK - 200) {
+      const part = line.slice(i, i + CHUNK)
+      if (SECRET_BODY.some(re => re.test(part))) return true
+    }
+  }
+  return false
+}
 
 // Remove C0 control characters except tab, LF, CR. ESC and NUL must not reach the Code element.
 export const sanitizeForCode = text => String(text).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '')
@@ -255,10 +268,13 @@ export function makeLimiter(max, { timeoutMs } = {}) {
   }
 }
 
+// Every git call the mod makes starts with these. A repo's own core.fsmonitor command must not run.
+export const gitArgs = (...rest) => ['-c', 'core.fsmonitor=false', ...rest]
+
 // The argv after git. The prefixes are fixed, so diff.noprefix and diff.mnemonicPrefix cannot change a path.
-export const gitDiffArgs = base => [
-  '-c', 'core.quotepath=off', 'diff', base, '--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/',
-]
+// No textconv and no external diff: a repo's own driver commands must not run.
+export const gitDiffArgs = base =>
+  gitArgs('-c', 'core.quotepath=off', 'diff', base, '--no-color', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/')
 
 // The one-line header. A cut git result is never shown as a complete count.
 export const headerLine = ({ files, add, del, truncated }) =>

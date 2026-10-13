@@ -29,6 +29,9 @@ The mod skips a secret file. A secret file is one with a name such as `.env`, `*
 Known holes, in plain words:
 
 - A secret in a form the mod does not know is not caught.
+- The check can also hide ordinary source. It flagged about 1% of the changes in this repo's history. Those files show "Skipped: secret file" with no note and no diff.
+- Some secret file names are not caught by name. Examples are `terraform.tfstate`, `.kube/config`, `wp-config.php`, and `AuthKey_*.p8`.
+- A quoted path with an emoji or other non-ASCII text may show a wrong label.
 - A `.env` file that git shows as a new file under an innocent name is not caught by name. A rename that git detects is checked by its old name.
 
 ## Check

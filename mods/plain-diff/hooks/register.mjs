@@ -18,6 +18,7 @@ import {
   cacheKey,
   cutLines,
   diffBase,
+  gitArgs,
   gitDiffArgs,
   headerLine,
   isSecretPath,
@@ -114,8 +115,8 @@ async function build($) {
   let root = ''
   let out
   try {
-    hasHead = (await $.process.run(['git', 'rev-parse', '--verify', '--quiet', 'HEAD'])).exitCode === 0
-    const top = await $.process.run(['git', 'rev-parse', '--show-toplevel'])
+    hasHead = (await $.process.run(['git', ...gitArgs('rev-parse', '--verify', '--quiet', 'HEAD')])).exitCode === 0
+    const top = await $.process.run(['git', ...gitArgs('rev-parse', '--show-toplevel')])
     if (top.exitCode === 0) root = top.stdout.trim()
     out = await $.process.run(['git', ...gitDiffArgs(diffBase(hasHead))])
   } catch (err) {
@@ -134,10 +135,11 @@ async function build($) {
   const entries = all.slice(0, MAX_FILES).map(f => {
     const entry = { path: f.path, label: f.label, key: '', add: f.add, del: f.del, lines: 0, diff: '', isCut: false, note: '', source: 'none' }
     // Privacy first: a secret file is not read further. No diff is kept, shown, or sent.
-    if (isSecretPath(f.path) || isSecretPath(f.oldPath) || looksSecret(f.diff)) {
+    // The scan runs on the text the model gets, after control characters are removed.
+    const clean = sanitizeForCode(f.diff)
+    if (isSecretPath(f.path) || isSecretPath(f.oldPath) || looksSecret(clean)) {
       return { ...entry, note: SECRET_NOTE, source: 'secret' }
     }
-    const clean = sanitizeForCode(f.diff)
     const cut = cutLines(clean)
     entry.diff = cut.text
     entry.isCut = cut.isCut
