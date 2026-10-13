@@ -5744,7 +5744,7 @@ def diff_logs_case():
                                   os.path.join(DIFFROOT, label), agent_type, agent_id)
         if out:
             problems.append("%s: expected silent allows, got %r" % (label, out[:60]))
-        hits = [r for r in rows if len(r) == 5 and r[2] == "noted" and r[3] == rule]
+        hits = [r for r in rows if len(r) == 6 and r[2] == "noted" and r[3] == rule]  # six: session last
         if len(hits) != 3:
             problems.append("%s: expected 3 noted/%s lines, found %d" % (label, rule, len(hits)))
     return (not problems), ("; ".join(problems) or "each diff check logged and allowed")
@@ -5987,7 +5987,7 @@ def rw_diff_logs_case():
     problems = []
     if out:
         problems.append("expected silent allows, got %r" % out[:60])
-    hits = [r for r in rows if len(r) == 5 and r[2] == "noted" and r[3] == "writer-diff"]
+    hits = [r for r in rows if len(r) == 6 and r[2] == "noted" and r[3] == "writer-diff"]  # six
     if len(hits) != 3:
         problems.append("expected 3 noted/writer-diff lines, found %d" % len(hits))
     return (not problems), ("; ".join(problems) or "non-.md diff logged at commit, push and stop")
@@ -6032,7 +6032,7 @@ def xctestplan_logs_case():
                               "bld1")
     if out:
         problems.append("skip: expected silent allows, got %r" % out[:60])
-    hits = [r for r in rows if len(r) == 5 and r[2] == "noted" and r[3] == "builder-diff"]
+    hits = [r for r in rows if len(r) == 6 and r[2] == "noted" and r[3] == "builder-diff"]  # six
     if len(hits) != 3:
         problems.append("skip: expected 3 noted/builder-diff lines, found %d" % len(hits))
     out, rows = _diff_log_run(os.path.join(ROOT, "difflog-xctestplan-coverage"),
@@ -6438,7 +6438,8 @@ def cap_deep_path_log_case():
             if line.split("\t")[2:4] == ["ask", "subagent-model-cap"]]
     if len(asks) != 1:
         return False, "expected one ask line, found %d of %d" % (len(asks), len(lines))
-    matched = asks[0][4] if len(asks[0]) == 5 else ""
+    # Six fields: time, tool, decision, rule, matched, session. The matched text is field 4 (index 4).
+    matched = asks[0][4] if len(asks[0]) == 6 else ""
     if OPUS not in matched:
         return False, "the deep path crowded the model out of the log line: %r" % matched
     if "settings.local.json" not in matched:
@@ -7153,8 +7154,10 @@ def log_env_case():
         return False, "no log file was written"
     with open(path, encoding="utf-8") as handle:
         lines = [line for line in handle.read().splitlines() if line.strip()]
-    if len(lines) != 1 or ENV not in lines[0].split("\t")[-1]:
-        return False, "the log line does not carry the path"
+    # The matched text is field 4. The last field is the session id, not the matched text.
+    fields = lines[0].split("\t") if len(lines) == 1 else []
+    if len(fields) != 6 or ENV not in fields[4]:
+        return False, "the log line does not carry the path in its matched field"
     return True, "generic on stdout, named in the log"
 
 
