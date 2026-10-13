@@ -2149,6 +2149,17 @@ def purge_tombstones(restore_log_path: str, confirm: bool, now_ms=None):
     now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
     decisions = []
     entries = read_restore_log(restore_log_path)
+
+    def row_key(e):
+        # The same repository can be spelled many ways in the log (slashes, case, 8.3 names).
+        repo = e.get("repo")
+        if not isinstance(repo, str) or not repo:
+            return None
+        return (os.path.normcase(os.path.realpath(repo)), e.get("branch"), e.get("commit"))
+
+    unexpired = {row_key(e) for e in entries
+                 if isinstance(e.get("time_ms"), (int, float)) and not isinstance(e.get("time_ms"), bool)
+                 and now_ms - e["time_ms"] < TOMBSTONE_TTL_MS}
     for entry in entries:
         repo = entry.get("repo")
         branch = entry.get("branch")
@@ -2175,16 +2186,14 @@ def purge_tombstones(restore_log_path: str, confirm: bool, now_ms=None):
             ref = TOMBSTONE_REF_PREFIX + branch
             # One commit can have two log rows (a branch reaped twice at one tip). The ref stays
             # while any unexpired row for the same repo, branch and commit still needs it.
-            if any(e.get("repo") == repo and e.get("branch") == branch
-                   and e.get("commit") == commit
-                   and isinstance(e.get("time_ms"), (int, float))
-                   and not isinstance(e.get("time_ms"), bool)
-                   and now_ms - e["time_ms"] < TOMBSTONE_TTL_MS for e in entries):
+            if row_key(entry) in unexpired:
                 decision["reason"] += "; ref kept: an unexpired entry names the same commit"
                 continue
             held = guard._git(repo, "rev-parse", "-q", "--verify", ref)
-            if held is None or held.returncode not in (0, 1):
-                # Exit 1 means the ref is gone. Any other failure is not an answer: keep the ref.
+            if held is None or held.returncode not in (0, 1) or (
+                    held.returncode == 1 and held.stderr.strip()):
+                # Exit 1 with empty stderr means the ref is gone. Any other failure, exit 1 with a
+                # message included (a broken ref), is not an answer: keep the ref.
                 decision["error"] = "ref read failed: %s" % (
                     held.stderr.strip() if held is not None else "git gave no answer")
                 continue
