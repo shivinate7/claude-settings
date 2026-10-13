@@ -4,6 +4,7 @@ guard.py is the only entry point (decision guard-split-by-family). Owner ruling 
 agent may run only a fixed list of test commands through WSL. Every other WSL form is refused,
 whatever the role.
 """
+import fnmatch
 import re
 
 from guard_core import basename, resolve_command, segment_tokens, split_segments
@@ -25,10 +26,21 @@ PY_TEST = re.compile(r"^" + _PATH + r"test_[\w*?-]+\.py$")
 # A launcher other than the wsl command: a distro launcher, or the System32 bash.exe (Git bash
 # is not one). shlex eats a backslash, so `C:\Windows\System32ash.exe` reads `C:WindowsSystem32bash.exe`.
 DISTRO_LAUNCHER = re.compile(r"ubuntu[\w.-]*\.exe$")
+# A WSLENV assignment: `WSLENV=` bare or after export/set/env, `$env:WSLENV =`, an env: provider
+# path, or the quoted name an API call takes. WSLENV named as plain text is not one.
+WSLENV_SET = re.compile(
+    r"(?:(?<![\w$:.\-])|\$\{?env:)WSLENV\}?\s*\+?=|(?<!\$)\benv:[\\/]?WSLENV\b|[\"']WSLENV[\"']",
+    re.I)
+
+
+def _climbs(seg: str) -> bool:
+    """True when a path segment is `..`, or a dot-led glob that can expand to it (`.*`, `[.][.]`).
+    A glob led by `*` or `?` never matches a leading dot, so `mods/*/x` stays allowed."""
+    return seg == ".." or (seg[:1] in ".[" and fnmatch.fnmatchcase("..", seg))
 
 
 def _test_path(path: str, pattern) -> bool:
-    return bool(pattern.match(path)) and not path.startswith("/") and ".." not in path.split("/")
+    return bool(pattern.match(path)) and not path.startswith("/") and not any(map(_climbs, path.split("/")))
 
 
 def _launcher(word: str) -> str:
@@ -69,7 +81,7 @@ def _judge(tokens, closed: str, env_set: bool) -> str:
 def wsl_hit(cmd: str) -> str:
     """Return the matched text when any segment of the command runs wsl outside the allow list."""
     ends = []
-    env_set = "wslenv" in cmd.lower()   # set in any statement of the same command
+    env_set = bool(WSLENV_SET.search(cmd))   # set in any statement of the same command
     for segment, closed in zip(split_segments(cmd, ends), ends):
         tokens = segment_tokens(segment)
         if tokens is not None:
