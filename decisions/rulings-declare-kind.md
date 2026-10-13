@@ -44,6 +44,9 @@ still carries a Kind line, because the lint cannot tell the two apart.
   has a Plan line. It checks each line that is there.
 - Old records are not checked or rewritten. Each one gets its Kind line when a later change
   touches it.
+- Home is checked for existence only. The lint does not check that the home enforces the ruling.
+- A missing base ref reads as unknown. Locally the lint exits 0. In CI it fails.
+- Only pull requests run the check. A push to main and the nightly run skip it, by design.
 - The lint checks that a plan heading exists. It does not check that the plan lane does the work.
 
 Kind: process

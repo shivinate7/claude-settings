@@ -43,8 +43,6 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       merge/merge.py) on="$on $M $W $X code guard " ;;
       lint/check_record_slugs.py) on="$on $W $X code guard " ;;
       lint/check_silent_undo.py) on="$on $M code " ;;
-      # check_ruling_kind.py: read by no other suite; its lint and test run in the `gates` job only.
-      lint/check_ruling_kind.py|lint/test_check_ruling_kind.py) on="$on code " ;;
       merge/*|bin/merge|bin/merge.cmd|.github/stamp.json) on="$on $M $S code " ;;
       actions/stamp/*.md) ;;
       actions/stamp/*) on="$on $R $X $M code " ;;

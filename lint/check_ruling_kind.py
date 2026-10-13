@@ -26,27 +26,53 @@ DIR = "decisions/"
 RULE_FILES = ("CLAUDE.md", "output-styles/shiv-stylisms.md")
 ANCHOR_RE = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
 HEADING_RE = re.compile(r"^ {0,3}#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
-FENCE_RE = re.compile(r"^ {0,3}(```|~~~)")
+FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+LINK_RE = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
 PLAN_RE = re.compile(r"^(\S+)#(\S+) \(([^()\s][^()]*)\)$")
 
 
 def read(rel):
     try:
-        with open(os.path.join(ROOT, *rel.split("/")), encoding="utf-8", newline="") as f:
+        with open(os.path.join(ROOT, *rel.split("/")), encoding="utf-8-sig", newline="") as f:
             return f.read().replace("\r\n", "\n")
     except OSError:
         return None
 
 
 def unfenced(text):
-    """Yield the lines outside fenced text."""
-    fence = None
+    """Yield the lines outside fenced text and HTML comments (CommonMark fence rules)."""
+    fence, comment = None, False
     for line in text.split("\n"):
-        m = FENCE_RE.match(line)
-        if m and fence in (None, m.group(1)):
-            fence = None if fence else m.group(1)
-        elif not fence:
-            yield line
+        if comment:
+            end = line.find("-->")
+            if end < 0:
+                continue
+            line, comment = line[end + 3:], False
+        elif fence:
+            m = FENCE_RE.match(line)
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not m.group(2).strip():
+                fence = None
+            continue
+        else:
+            m = FENCE_RE.match(line)
+            if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+                fence = m.group(1)
+                continue
+        # Comment openers inside an inline code span are prose, so scan a masked copy.
+        masked = re.sub(r"`[^`]*`", lambda m: "x" * len(m.group()), line)
+        kept, pos = [], 0
+        while True:
+            a = masked.find("<!--", pos)
+            if a < 0:
+                kept.append(line[pos:])
+                break
+            kept.append(line[pos:a])
+            b = masked.find("-->", a + 4)
+            if b < 0:
+                comment = True
+                break
+            pos = b + 3
+        yield "".join(kept)
 
 
 def slugs(text):
@@ -55,7 +81,7 @@ def slugs(text):
     for line in unfenced(text):
         m = HEADING_RE.match(line)
         if m:
-            s = re.sub(r"[^\w\- ]", "", m.group(1).lower()).replace(" ", "-")
+            s = re.sub(r"[^\w\- ]", "", LINK_RE.sub(lambda k: k.group(1), m.group(1)).lower()).replace(" ", "-")
             n = seen.get(s, 0)
             seen[s] = n + 1
             out.add(s if not n else "%s-%d" % (s, n))
@@ -97,7 +123,9 @@ def plan_problem(plan):
     m = PLAN_RE.match(plan)
     if not m:
         return "Plan line '%s' is not <path>#<slug> (<platform>)" % plan
-    path, slug, _platform = m.groups()
+    path, slug, platform = m.groups()
+    if platform.strip().lower() == "none":
+        return "Plan line '%s' names platform none" % plan
     body = read(path)
     if body is None:
         return "Plan file %s does not exist" % path
@@ -132,8 +160,8 @@ files = args or changed(base)
 bad = 0
 for f in files:
     f = f.strip()
-    if f.startswith(DIR) and f.endswith(".md"):
-        for p in problems(f):
+    if os.path.normpath(f).replace("\\", "/").startswith(DIR) and f.endswith(".md"):
+        for p in problems(os.path.normpath(f).replace("\\", "/")):
             bad = 1
             print("check_ruling_kind: FAIL: %s: %s" % (f, p))
 sys.exit(bad)
