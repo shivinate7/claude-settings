@@ -26,12 +26,14 @@ import precompact_handoff  # noqa: E402  the one home of the handoff path
 
 ITEM = re.compile(r"- (fb-\S+)(?:\s+(.*))?$")
 JOT = re.compile(r"\[(ruling|task|question|note|standing)\]\s+->\s+\S")
+HEADER = re.compile(r"### \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CDT|CST) \(UTC-0[56]:00\)$")
 OPEN_KINDS = ("[ruling]", "[task]", "[standing]")
 REMINDER = "Feedback capture is open. Send `fb done` when the burst is over to close capture."
 
 
 def parse(text):
-    """[{stamp, text, items}] from the inbox. Lines inside a fence are never headers or items."""
+    """[{stamp, text, items}] from the inbox. Lines inside a fence are never headers or items, and a
+    `### ` line that is not the hook's own Central header is plain text."""
     blocks, fence = [], None
     for ln in text.split("\n"):
         ln = ln.rstrip("\r")
@@ -40,7 +42,7 @@ def parse(text):
                 fence = None
             elif blocks[-1]["text"] is None:
                 blocks[-1]["text"] = ln
-        elif ln.startswith("### "):
+        elif HEADER.match(ln):
             blocks.append({"stamp": ln[4:], "text": None, "items": [], "fenced": False})
         elif blocks and not blocks[-1]["fenced"] and re.fullmatch(r"`{3,}", ln):
             fence, blocks[-1]["fenced"] = ln, True
@@ -49,14 +51,23 @@ def parse(text):
     return blocks
 
 
+def item(ln):
+    """(id, rest, jotted, closed) for an item line, or None when the line is malformed."""
+    m = ITEM.match(ln)
+    if m is None:
+        return None
+    rest = m.group(2) or ""
+    return m.group(1), rest, JOT.match(rest) is not None, rest.rstrip().endswith("[closed]")
+
+
 def open_ids(blocks):
-    """Ids of well-formed open items (ruling, task, standing), in file order."""
+    """Ids of well-formed, not closed, open items (ruling, task, standing), in file order."""
     ids = []
     for b in blocks:
         for ln in b["items"]:
-            m = ITEM.match(ln)
-            if JOT.match(m.group(2) or "") and m.group(2).startswith(OPEN_KINDS):
-                ids.append(m.group(1))
+            it = item(ln)
+            if it and it[2] and not it[3] and it[1].startswith(OPEN_KINDS):
+                ids.append(it[0])
     return ids
 
 
@@ -66,13 +77,15 @@ def problems(blocks, handoff):
         if not b["items"]:
             out.append("the message at %s (%s) has no items" % (b["stamp"], (b["text"] or "")[:40]))
         for ln in b["items"]:
-            m = ITEM.match(ln)
-            if not JOT.match(m.group(2) or ""):
+            it = item(ln)
+            if it is None:
+                out.append("the item line `%s` is malformed: it needs `- <id> [kind] -> home`" % ln[2:])
+            elif not it[2]:
                 out.append("%s needs `[kind] -> home`, kind one of ruling, task, question, note, standing"
-                           % m.group(1))
-            elif m.group(2).startswith(OPEN_KINDS) and not re.search(
-                    r"(?<![\w-])%s(?![\w-])" % re.escape(m.group(1)), handoff):
-                out.append("%s is not in the handoff" % m.group(1))
+                           % it[0])
+        for i in open_ids([b]):
+            if not re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(i), handoff):
+                out.append("%s is not in the handoff" % i)
     return out
 
 

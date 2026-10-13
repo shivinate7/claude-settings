@@ -65,18 +65,21 @@ def capture(raw, stamp):
         return
     inbox, marker = paths
     is_open = os.path.exists(marker)
-    if prompt.strip() == "fb done":
+    if re.fullmatch(r"fb done[\W_]*", prompt.strip(), re.I):  # any case, trailing punctuation
         if is_open:
             os.remove(marker)
         return
     if not is_open and (prompt.split() or [""])[0] not in ("fb", "fb:"):
         return
     fence = "`" * max([3] + [len(r) + 1 for r in re.findall(r"`+", prompt)])
-    os.makedirs(os.path.dirname(inbox), exist_ok=True)
-    with open(inbox, "ab") as f:  # bytes: "\n" stays "\n" on Windows, and the text stays verbatim
-        f.write(("### %s\n%s\n%s\n%s\n" % (stamp, fence, prompt, fence)).encode("utf-8"))
-    if not is_open:
-        open(marker, "wb").close()
+    try:
+        os.makedirs(os.path.dirname(inbox), exist_ok=True)
+        with open(inbox, "ab") as f:  # bytes: "\n" stays "\n" on Windows, and the text stays verbatim
+            f.write(("### %s\n%s\n%s\n%s\n" % (stamp, fence, prompt, fence)).encode("utf-8"))
+        if not is_open:
+            open(marker, "wb").close()
+    except OSError as e:  # stderr never reaches the owner or the session: say it on stdout
+        print("Feedback capture: this message was not saved (%s). Jot it by hand into the handoff." % e)
 
 
 def main(argv):
