@@ -10,6 +10,7 @@ Run with:
     python3 lint/test_rule_audit.py -v
 """
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -269,10 +270,61 @@ class RuleAuditTests(unittest.TestCase):
         actual pinned floor and unmechanized count -- no override."""
         claude_text = rule_audit.rule_text()
         rule_map = __import__("json").loads(rule_audit.read(rule_audit.MAP_FILE))
-        guard_text = rule_audit.read(rule_audit.GUARD_PY)
+        guard_text = rule_audit.guard_text(rule_audit.ROOT)
         workflow_text = rule_audit.read(rule_audit.WORKFLOW)
         problems = rule_audit.check(claude_text, rule_map, guard_text, workflow_text)
         self.assertEqual(problems, [])
+
+
+SIBLING_MAP = {
+    "rules": {
+        "shared-trees-no-destructive-git": {"mechanism": {"kind": "guard", "ref": "sibling-rule"}}
+    }
+}
+
+
+class GuardTextTests(unittest.TestCase):
+    """`guard_text(root)` reads every hooks/guard*.py under root. A rule refused in a sibling
+    module (guard_x.py, not guard.py) must resolve, and test files must not count as rule homes."""
+
+    def tree(self, files):
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, True)
+        for rel, body in files.items():
+            path = os.path.join(root, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(body)
+        return root
+
+    def files(self):
+        refuse = 'refuse(tool, "deny", "%s", REASON, matched)\n'
+        return {
+            os.path.join("hooks", "guard.py"): refuse % "main-rule",
+            os.path.join("hooks", "guard_x.py"): refuse % "sibling-rule",
+            os.path.join("hooks", "test_guard.py"): refuse % "test-only-rule",
+        }
+
+    def test_rule_refused_only_in_a_sibling_module_resolves(self):
+        root = self.tree(self.files())
+        guard_text = rule_audit.guard_text(root)
+        problems = rule_audit.check(GOOD_MD, SIBLING_MAP, guard_text, "", 1, 0)
+        self.assertEqual(problems, [])
+
+    def test_guard_py_alone_leaves_that_sibling_rule_stale(self):
+        """Control: the same fixture read the old way (guard.py only) must read red, so the
+        case above proves the reader, not the fixture."""
+        root = self.tree(self.files())
+        guard_text = rule_audit.read(os.path.join(root, "hooks", "guard.py"))
+        problems = rule_audit.check(GOOD_MD, SIBLING_MAP, guard_text, "", 1, 0)
+        self.assertTrue(any("sibling-rule" in p and "Stale row" in p for p in problems), problems)
+
+    def test_guard_text_joins_guard_modules_and_no_test_file(self):
+        root = self.tree(self.files())
+        guard_text = rule_audit.guard_text(root)
+        self.assertIn("main-rule", guard_text)
+        self.assertIn("sibling-rule", guard_text)
+        self.assertNotIn("test-only-rule", guard_text)
 
 
 class CitationTests(unittest.TestCase):
