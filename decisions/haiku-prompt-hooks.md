@@ -41,7 +41,7 @@ alias `haiku` (`unrecognized_model`), so every judge failed open until 2026-10-1
 Measured: `claude-haiku-5-5` runs in the headless CLI 2.1.296. When the model retires, change
 the `model` value in the judge hooks of `settings.json`, the one place.
 `lint/test_settings_matcher.py` pins it. `hooks/decision_watch.py` is a script that calls the
-CLI itself, and it keeps `haiku`. Its `claude -p --model haiku` call works (measured 2026-10-13: it replied "ok"). Only the settings prompt-hook evaluator rejects the alias.
+CLI itself, and it keeps `haiku`. Its `claude -p --model haiku` call works (measured 2026-10-12: it replied "ok"). Only the settings prompt-hook evaluator rejects the alias.
 
 Limits, named:
 
