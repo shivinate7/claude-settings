@@ -17,10 +17,20 @@ Watcher: stall_watch.py --watch-pid PID --log LOG [--quiet SECS]
   300) without new bytes, it prints a STALL report and exits 3, and the job keeps running. When
   the job ends first, it exits 0.
 
+Stop: stall_watch.py --stop
+  Stop hook. Reads the Stop JSON on stdin, scans the session transcript for background shells
+  (also a foreground call that its timeout moved to the background, which --hook never sees),
+  and prints one {"systemMessage": ...} line that lists each job with no terminal task notice
+  whose output file has not changed for the quiet age. A job with no output file is listed as
+  unknown. Any error, or stop_hook_active true, prints nothing and exits 0. No posix gate.
+  Seams: STALL_WATCH_NOW (epoch seconds), STALL_WATCH_OUTPUT_BASE (replaces the folder of each
+  output path, keeps the file name), STALL_WATCH_QUIET (the age in seconds).
+
 See decisions/stall-watch.md.
 """
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -169,9 +179,79 @@ def hook():
     return 0
 
 
+TASK_ID = re.compile(r"<task-id>(.*?)</task-id>", re.S)
+TASK_STATUS = re.compile(r"<status>(.*?)</status>", re.S)
+RESULT_PATH = re.compile(r"Output is being written to: (.*?\.output)", re.S)
+TERMINAL = ("completed", "failed", "killed")
+
+
+def text_of(content):
+    """The text of a message content: a string, or the text and tool_result strings of a list."""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts = [b.get("text") or b.get("content") for b in content if isinstance(b, dict)]
+    return "\n".join(p for p in parts if isinstance(p, str))
+
+
+def scan_jobs(transcript):
+    """Return {job id: output path or None} for every job with no terminal task notice."""
+    jobs, done = {}, set()
+    with open(transcript, "rb") as f:
+        for line in f:
+            if b"backgroundTaskId" not in line and b"task-notification" not in line:
+                continue
+            try:
+                rec = json.loads(line)
+                text = text_of(rec["message"]["content"])
+            except Exception:  # a bad or half-written line is skipped
+                continue
+            tur = rec.get("toolUseResult")
+            if isinstance(tur, dict) and isinstance(tur.get("backgroundTaskId"), str):
+                m = RESULT_PATH.search(text)
+                jobs.setdefault(tur["backgroundTaskId"], m.group(1) if m else None)
+            elif rec.get("type") == "user":
+                for note in text.split("<task-notification>")[1:]:
+                    tid, st = TASK_ID.search(note), TASK_STATUS.search(note)
+                    if tid and st and st.group(1).strip() in TERMINAL:
+                        done.add(tid.group(1).strip())
+    return {k: v for k, v in jobs.items() if k not in done}
+
+
+def stop():
+    try:
+        call = json.load(sys.stdin)
+        if call.get("stop_hook_active") is True:
+            return 0
+        now = float(os.environ.get("STALL_WATCH_NOW") or time.time())
+        quiet = float(os.environ.get("STALL_WATCH_QUIET") or DEFAULT_QUIET)
+        base = os.environ.get("STALL_WATCH_OUTPUT_BASE")
+        rows = []
+        for job, path in scan_jobs(call["transcript_path"]).items():
+            real = path
+            if path and base:
+                real = os.path.join(base, re.split(r"[\\/]", path)[-1])
+            try:
+                idle = now - os.stat(real).st_mtime
+            except (OSError, TypeError):  # TypeError: no path recorded
+                rows.append("%s: unknown, output file not found: %s" % (job, path or "(path not recorded)"))
+                continue
+            if idle >= quiet:
+                rows.append("%s: no output for %ds: %s" % (job, idle, path))
+        if rows:
+            head = "Background shells still running and quiet: stop it or tell the owner."
+            print(json.dumps({"systemMessage": "\n".join([head] + rows)}))
+    except Exception:  # gate-hooks-fail-closed: a failed check prints nothing and does not block
+        pass
+    return 0
+
+
 def main(argv):
     if argv[:1] == ["--hook"]:
         return hook()
+    if argv[:1] == ["--stop"]:
+        return stop()
     opts = {"--quiet": DEFAULT_QUIET, "--watch-pid": None, "--log": None}
     for i in range(0, len(argv) - 1, 2):
         if argv[i] in opts:
