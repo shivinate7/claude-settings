@@ -3558,6 +3558,18 @@ sh("waiter: gh issue list --label watch is allowed", "gh issue list --label watc
    cwd=NOGIT)
 sh("waiter: gh issue create --title watch is allowed", "gh issue create --title watch", "allow",
    cwd=NOGIT)
+
+# Review round 2 on 3f2b435. `-w` is `--web` for `gh pr checks` (open the browser), and
+# `--watch` has no short form, so `-w` there is not a watcher. A repo flag (`-R o/r`) sits
+# between the command group and its verb, so the verb is not the token after `gh`.
+sh("waiter: gh pr checks -w, --web, in the foreground is allowed", "gh pr checks 5 -w", "allow",
+   cwd=NOGIT)
+sh("waiter: gh run -R o/r watch in the foreground is refused", "gh run -R o/r watch 1", "deny",
+   "waiter", cwd=NOGIT)
+sh("waiter: gh pr -R o/r checks --watch in the foreground is refused",
+   "gh pr -R o/r checks 5 --watch", "deny", "waiter", cwd=NOGIT)
+add("waiter: gh run -R o/r watch under run_in_background is allowed", "allow", cwd=NOGIT,
+    command="gh run -R o/r watch 1", run_in_background=True)
 sh("waiter: a readiness check is allowed", "curl --retry 5 http://localhost:3000", "allow",
    cwd=NOGIT)
 sh("waiter: an unrelated log query is allowed", VCS + " log --since=yesterday", "allow", cwd=NOGIT)
