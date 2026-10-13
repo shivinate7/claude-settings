@@ -8,6 +8,10 @@ Run it from the repository root:
 GUARD_TESTS=windows-slice runs only the cases tagged for Windows (see WINDOWS_SHAPE below); unset
 runs every case. Any other value stops the run before a case runs.
 
+GUARD_FAMILY=<name> runs only one family of cases (FAMILIES, at the top of this file). An unknown
+name, or a filter that matches no case, fails the run. GUARD_TIMING=1 prints what each fixture
+block cost.
+
 Each case drives the guard as Claude Code drives it: one JSON object on stdin, and the decision read
 back off stdout. An empty stdout is an allow. Anything else is parsed for permissionDecision.
 
@@ -52,6 +56,97 @@ CASES = []
 # GUARD_TESTS=windows-slice keeps only the cases tagged "windows": the ones that reach Windows-only
 # guard code. Unset or empty keeps every case. Any other value stops the run before a case runs.
 GUARD_TESTS_MODES = ("", "windows-slice")
+
+# GUARD_FAMILY=<name> keeps only the cases of one family, so a change to one rule runs in that
+# family's time. A case takes the family of the nearest FAMILY line above it (one per section),
+# except a case named "rm-var", which is its own family wherever it sits. An unknown name stops the
+# run before any fixture is built, and the message lists these names.
+FAMILIES = {
+    "shared-tree": "stash, reset, restore, checkout and the subject read",
+    "branch-worktree": "branch delete and worktree remove/prune",
+    "pointer": "the pointer HEAD checkout",
+    "kill": "machine-wide kills and detached launches",
+    "stream": "live streams, narrating commands, gh api, ln -s and waiter loops",
+    "write": "the silent write",
+    "push-delete": "push and delete",
+    "env": "environment files",
+    "merge": "merge into main, draft pull requests and the merge gate",
+    "cite": "cite by id",
+    "frozen": "frozen paths",
+    "model-cap": "the subagent model cap",
+    "paths": "path rules, builders and the test-author",
+    "diff": "the diff judged at commit, push and stop",
+    "impeccable": "impeccable is review-only",
+    "rule9": "rule 9, the subagent model floor",
+    "mask-script": "mask_script lexemes",
+    "simulator": "the simulator boot and hold rules",
+    "rm-var": "every case named rm-var, wherever it sits",
+    "misc": "anything outside a tagged section",
+}
+GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
+if GUARD_FAMILY and GUARD_FAMILY not in FAMILIES:
+    sys.exit("GUARD_FAMILY=%r is not a family. Want one of: %s"
+             % (GUARD_FAMILY, ", ".join(sorted(FAMILIES))))
+FAMILY = "misc"  # set at each section header below
+
+
+def _family(name):
+    """The family a case or a log check takes: rm-var by name, else the section's FAMILY."""
+    return "rm-var" if "rm-var" in name else FAMILY
+
+
+LOG_FAMILY = {}  # log check label -> family, filled as each log check is registered
+
+
+class _TaggedLogs(list):
+    """LOG_CHECKS_EXTRA: each (label, check) appended takes the family in force at that line."""
+
+    def append(self, item):
+        LOG_FAMILY[item[0]] = _family(item[0])
+        list.append(self, item)
+
+
+# GUARD_TIMING=1 prints, once at the end, the seconds each fixture block took: the eager blocks at
+# import, and each lazy block the first time a case needs it. Unset, a run prints nothing extra.
+GUARD_TIMING = os.environ.get("GUARD_TIMING") == "1"
+TIMINGS = []
+_TIMED_LAST = [time.perf_counter()]
+
+
+def _mark(label):
+    """GUARD_TIMING only: the seconds since the previous mark, recorded under `label`."""
+    if GUARD_TIMING:
+        now = time.perf_counter()
+        TIMINGS.append((label, now - _TIMED_LAST[0]))
+        _TIMED_LAST[0] = now
+
+
+_TIMED_INNER = []  # one running total per nested _timed call: the seconds its inner builders took
+
+
+def _timed(label, build):
+    """GUARD_TIMING only: run `build`, recording its own seconds under `label`, not the seconds of a
+    builder it runs inside (a push destination builds the branch repos first)."""
+    start = time.perf_counter()
+    _TIMED_INNER.append(0.0)
+    build()
+    took = time.perf_counter() - start
+    inner = _TIMED_INNER.pop()
+    if _TIMED_INNER:
+        _TIMED_INNER[-1] += took
+    if GUARD_TIMING:
+        TIMINGS.append((label, took - inner))
+
+
+def _timing_report():
+    if GUARD_TIMING:
+        totals = {}  # a label can repeat (every diff repo is one `build`): sum them
+        for label, secs in TIMINGS:
+            totals[label] = totals.get(label, 0.0) + secs
+        print("fixture timing, seconds (net of any builder a block runs):")
+        for label, secs in totals.items():
+            print("  %8.2f  %s" % (secs, label))
+        print("  %8.2f  total" % sum(totals.values()))
 
 # A case's input carries a Windows-only shape. Each shape names the guard.py code it reaches,
 # read on 2026-10-10 (line numbers are guard.py's):
@@ -128,6 +223,7 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "tool_input": tool_input,
         # Tagged for GUARD_TESTS=windows-slice. A session case reads a live process's start time,
         # which on Windows is the ctypes arm of _process_start_ms (guard.py L1837-1905).
+        "family": _family(name),
         "windows": bool(windows or session is not None or windows_shaped(
             tool, raw, cwd, env_path, config, *tool_input.values())),
     })
@@ -674,8 +770,55 @@ UNDERTESTS = os.path.join(ROOT, "tests", "clone")   # a repo whose own folder si
 LINKS_MADE = False  # set by build_fixtures; True only where os.symlink works
 
 
+# Lazy fixtures. A block that runs git or builds a repo is a builder, run the first time a case
+# names one of its paths (`materialize_for`, from decide). A path is matched as text, after slash(),
+# in the fields the guard reads: cwd, env_path, config, transcript, raw and the tool_input values.
+# A log check builds its own fixtures in its own code, so `materialize_all` runs before the logs.
+# A builder's paths are every path it creates. Keep the list whole, or a case reads a missing folder.
+LAZY = {}  # slash(path) -> the once() that builds its builder
+
+
+def lazy_fixture(paths, build):
+    """Register `build` (run once, the first time a case names one of `paths`) for every path."""
+    done = []
+
+    def once():
+        if not done:
+            done.append(1)
+            _timed(build.__name__, build)
+    for path in paths:
+        LAZY[slash(path)] = once
+
+
+def materialize(path):
+    once = LAZY.get(slash(path)) if path else None
+    if once:
+        once()
+
+
+def materialize_for(case):
+    """Build every lazy fixture that a case's own fields name, before the case runs."""
+    fields = [case.get(k) for k in ("cwd", "env_path", "config", "transcript", "raw")]
+    fields += list(case.get("tool_input", {}).values())
+    text = slash(" ".join(str(f) for f in fields if f is not None))
+    for key, once in list(LAZY.items()):
+        if key in text:
+            once()
+
+
+def materialize_all():
+    """Build every lazy fixture except the diff repos. A log check builds its own diff repos (see
+    diff_repo), so the run loop need not build all ~170 of them for any log check."""
+    for key, once in list(LAZY.items()):
+        if slash(DIFFROOT) not in key:
+            once()
+
+
 def build_fixtures():
-    for folder in (CFG, LOGDIR, PROJ, CLONE, NOGIT, GITMAIN, os.path.join(UNDERTESTS, ".git")):
+    """The EAGER fixtures: config folders, fake gh files, message files and the link probe. Each git
+    repo is a builder below, and it is built on first use."""
+    global LINKS_MADE, SYMWT_MADE
+    for folder in (CFG, LOGDIR, PROJ, CLONE, NOGIT, os.path.join(UNDERTESTS, ".git")):
         os.makedirs(folder, exist_ok=True)
     write(os.path.join(CFG, "settings.json"), "{}\n")
     write(os.path.join(CFG, "CLAUDE.md"), "rules\n")
@@ -694,10 +837,6 @@ def build_fixtures():
     write(MSG_BAD, "title\n\ncites decisions/one-shared-record-stamp.md\n")
     write(MSG_OK, "title\n\ncites D12, short titles for records\n")
     write(PATHSPEC_LIST, "f.txt\n")
-    os.makedirs(CTXREPO, exist_ok=True)
-    run_vcs(CTXREPO, "init", "-q", "-b", "main", ".")
-    run_vcs(CTXREPO, *IDENT, "commit", "-q", "--allow-empty", "-m", "first")
-    run_vcs(CTXREPO, "branch", "done")
     make_fake_gh(GHPEND, "main", checks=[{"name": "gates", "bucket": "pending", "link": ""}])
     make_fake_gh(GHRED, "main", checks=[{"name": "gates", "bucket": "fail", "link": ""}])
     make_fake_gh(GHRUNPEND, "main",
@@ -733,15 +872,38 @@ def build_fixtures():
     # mutant can flip (GHMAIN and GHNONE both expect "logged" either way), so it is the one fixture
     # whose instant reply could race that mutant's shrunk timeout. See make_fake_gh's docstring.
     make_fake_gh(GHDEV, "dev", delay=1)
-    # Trust this delay only once it is proven, not assumed: run it now, under the guard's own
-    # narrow PATH, and fail fixture setup outright if it does not really delay. See
-    # _verify_fake_gh_delay's docstring for the defect this catches.
-    _verify_fake_gh_delay(GHDEV, delay=1)
     os.makedirs(GHNONE, exist_ok=True)
     found = shutil.which("gh", path=GHNONE_PATH)
     if found:
         sys.exit("fixture check failed: the 'gh missing' PATH %r resolves a real gh at %r"
                  % (GHNONE_PATH, found))
+    # The link probe, read at import: registration reads LINKS_MADE and SYMWT_MADE, and the link
+    # fixtures themselves are built lazily. One link in ROOT asks the same privilege they need.
+    try:
+        os.symlink(ROOT, os.path.join(ROOT, "linkprobe"), target_is_directory=True)
+        LINKS_MADE = SYMWT_MADE = True
+    except Exception:  # no symlink privilege: the link cases skip, as they did before
+        LINKS_MADE = SYMWT_MADE = False
+
+
+def _build_ctxrepo():
+    """CTXREPO: a repo on main with one branch, `done`. GHCWD's fake gh checks it by folder name."""
+    os.makedirs(CTXREPO, exist_ok=True)
+    run_vcs(CTXREPO, "init", "-q", "-b", "main", ".")
+    run_vcs(CTXREPO, *IDENT, "commit", "-q", "--allow-empty", "-m", "first")
+    run_vcs(CTXREPO, "branch", "done")
+
+
+def _build_ghdev():
+    # Trust this delay only once it is proven, not assumed: run it now, under the guard's own
+    # narrow PATH, and fail fixture setup outright if it does not really delay. See
+    # _verify_fake_gh_delay's docstring for the defect this catches.
+    _verify_fake_gh_delay(GHDEV, delay=1)
+
+
+def _build_gitmain():
+    """GITMAIN, its linked worktrees, and DECOYMAIN. The DOTDOTWT and SYMWT checks ride on it."""
+    os.makedirs(GITMAIN, exist_ok=True)
     # A real checkout and a real linked worktree of it. The shared-tree rule asks git which is
     # which, so no fake will do.
     #
@@ -802,6 +964,18 @@ def build_fixtures():
     write(os.path.join(DECOYMAIN, "new.txt"), "untracked\n")
     _require_dirty(DECOYMAIN, "f.txt", "new.txt", "keep.txt")
 
+    # DOTDOTWT, checked on the real tree: a path through .claude/worktrees/ that climbs back out
+    # with ".." must resolve to GITWT itself. SYMWT is a real link to GITWT, when the account may
+    # make one (SYMWT_MADE, from the probe in build_fixtures).
+    if os.path.normcase(os.path.realpath(DOTDOTWT)) != os.path.normcase(os.path.realpath(GITWT)):
+        sys.exit("fixture setup failed: DOTDOTWT does not resolve to GITWT. realpath is %r"
+                 % os.path.realpath(DOTDOTWT))
+    if SYMWT_MADE:
+        os.symlink(GITWT, SYMWT, target_is_directory=True)
+
+
+def _build_subject():
+    """SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH and SUBJSTASHWT: the subject-read repos."""
     # THE SUBJECT READ. Each arm gets both sides, built with real state: a real clean tree, a
     # real uncommitted edit, a real untracked file, a real one-entry stash stack.
     make_repo(SUBJCLEAN, {"f.txt": "base\n", "keep.txt": "base\n"})
@@ -831,12 +1005,16 @@ def build_fixtures():
     run_vcs(SUBJSTASH, "worktree", "add", "-q", SUBJSTASHWT, "-b", "stashlane")
     _require_stash(SUBJSTASHWT, 1)
 
+def _build_privrepo():
+    """PRIVREPO: a dirty repository under a scratchpad named after one session."""
     # A dirty repository under a scratchpad named after one session.
     make_repo(PRIVREPO, {"f.txt": "base\n", "keep.txt": "base\n"})
     write(os.path.join(PRIVREPO, "f.txt"), "uncommitted\n")
     write(os.path.join(PRIVREPO, "new.txt"), "untracked\n")
     _require_dirty(PRIVREPO, "f.txt", "new.txt", "keep.txt")
 
+def _build_pointer():
+    """The pointer checkout (PTRMAIN, PTRWT), its config folders, and the blind git."""
     # THE POINTER CHECKOUT, built with git itself. The rule compares TOP LEVELS read from git, so
     # no fake directory will do, and the worktree that must stay allowed has to be a real one.
     #
@@ -861,6 +1039,8 @@ def build_fixtures():
 
     make_blind_git(GITBLIND)
 
+def _build_conflict():
+    """CONFLICT: a real checkout with one unresolved merge conflict."""
     # A real checkout with a real, unresolved merge conflict, built with git itself rather than
     # mocked. Two branches each change the same file, and merging one into the other leaves
     # MERGE_HEAD set and the file in the conflicted "AA" state, which git will not let a commit
@@ -887,6 +1067,8 @@ def build_fixtures():
     run_vcs(CONFLICT, *ident, "merge", "feature")  # conflicts and leaves MERGE_HEAD set
     _require_conflict(CONFLICT, "docs/DEBTS.md")
 
+def _build_branch():
+    """The branch-delete repos: a bare remote, the base fallbacks and the unmerged branches."""
     # ----------------------------------------------------------------- branch delete fixtures
     #
     # BRANCHREPO pushes to a real bare remote, so `git cherry` and `git for-each-ref --contains`
@@ -1001,6 +1183,9 @@ def build_fixtures():
         sys.exit("fixture setup failed in build_fixtures: BRANCHNOBASE unexpectedly has a "
                   "local main")
 
+def _build_push():
+    """The push destinations: the feat, main, trunk and upstream repos and their remotes."""
+    materialize(BRANCHREMOTE)  # every push destination adds the bare remote _build_branch makes
     # ----------------------------------------------------------------- push destinations
     for where, head, branch in ((PUSHFEAT, "main", "feat"), (PUSHMAIN, "main", "main"),
                                 (PUSHTRUNK, "trunk", "feat"), (PUSHNOHEAD, None, "feat"),
@@ -1032,6 +1217,8 @@ def build_fixtures():
         if run_vcs(where, "config", "--get", "push.default").stdout.strip() != mode:
             sys.exit("fixture setup failed in build_fixtures: push.default in %r" % where)
 
+def _build_worktrees():
+    """The worktree remove and prune repos: locked, live, dead, stale and clean linked trees."""
     # ----------------------------------------------------------------- worktree remove/prune
     #
     # WTMAIN carries real tracked files, the same `keep.txt`/`f.txt` shape SUBJDIRTY uses above,
@@ -1131,6 +1318,8 @@ def build_fixtures():
             % (prune_clean_check.stdout, prune_clean_check.stderr)
         )
 
+def _build_links():
+    """The symlink worktrees: a link to a folder outside, a link to a tracked file, and controls."""
     # ----------------------------------------------------------------- symlink worktrees
     # Every tree below is DETACHED, so none of them takes a branch name. `app/package.json` is
     # tracked, which keeps `app/` a tracked directory and makes the link its own status line.
@@ -1145,16 +1334,12 @@ def build_fixtures():
     # A real untracked node_modules directory needs no link, so its control always runs.
     write(os.path.join(WTCTRLDIR, "app", "node_modules", "index.js"), "module.exports = {};\n")
     _require_status(WTCTRLDIR, ["?? app/node_modules/"])
-    # Case 1 and the link-only controls: the only untracked entry is one symlink. Degrades to
-    # skip, flag LINKS_MADE, where the account holds no symlink privilege (MEASURED: this box
-    # raises OSError: a required privilege is not held by the client).
-    global LINKS_MADE
-    try:
-        os.symlink(LINKOUT, os.path.join(WTLINKDIR, "app", "node_modules"))
-    except OSError:
-        LINKS_MADE = False
+    # Case 1 and the link-only controls: the only untracked entry is one symlink. Without symlink
+    # privilege (MEASURED: this box raises OSError: a required privilege is not held by the client)
+    # LINKS_MADE is False, from the probe, and the link cases skip, as before.
+    if not LINKS_MADE:
         return
-    LINKS_MADE = True
+    os.symlink(LINKOUT, os.path.join(WTLINKDIR, "app", "node_modules"))
     _require_status(WTLINKDIR, ["?? app/node_modules"])
     # Case 2: the link targets a tracked file inside the same tree.
     os.symlink(os.path.join("..", "config.json"), os.path.join(WTLINKFILE, "app", "node_modules"))
@@ -1174,24 +1359,34 @@ def build_fixtures():
 
 
 build_fixtures()
+_mark("build_fixtures: eager config, fake gh writes, GHNONE and the link probe")
+
+# Each builder runs the first time a case names one of its paths (see lazy_fixture). A builder's
+# list is every path it creates, and the config folders that point into a repo are listed with it,
+# so a case that names only PTRCFG still gets PTRMAIN built.
+lazy_fixture([CTXREPO], _build_ctxrepo)
+lazy_fixture([GHDEV], _build_ghdev)
+lazy_fixture([GITMAIN, GITWT, AGENTWT, FARWT, SYMWT, DECOYMAIN], _build_gitmain)
+lazy_fixture([SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT], _build_subject)
+lazy_fixture([PRIVREPO], _build_privrepo)
+lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND], _build_pointer)
+lazy_fixture([CONFLICT], _build_conflict)
+lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
+             _build_branch)
+lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHNOHEAD, PUSHDETACHED, PUSHUP, PUSHUPSELF, PUSHNOUP,
+              PUSHMATCH], _build_push)
+lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
+              WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
+lazy_fixture([LINKMAIN, LINKOUT, WTLINKDIR, WTLINKFILE, WTCTRLFILE, WTCTRLTRACKED, WTCTRLDIR,
+              WTCTRLNESTED], _build_links)
 
 # DOTDOTWT: a path spelled through GITMAIN's .claude/worktrees/ that climbs back out with "..",
 # resolving to GITWT itself (a linked worktree OUTSIDE .claude/worktrees). It must be judged on
-# where it really is, not on the ".claude/worktrees" segment in its spelling.
+# where it really is, not on the ".claude/worktrees" segment in its spelling. Checked in _build_gitmain.
 DOTDOTWT = os.path.join(GITMAIN, ".claude", "worktrees", "..", "..", "..", "lane")
-if os.path.normcase(os.path.realpath(DOTDOTWT)) != os.path.normcase(os.path.realpath(GITWT)):
-    sys.exit("fixture setup failed: DOTDOTWT does not resolve to GITWT. realpath is %r"
-             % os.path.realpath(DOTDOTWT))
-# SYMWT: a symlink inside .claude/worktrees/ pointing at GITWT, same proof with a real link
-# instead of literal "..". Degrades to skip where the account holds no symlink privilege
-# (MEASURED: this box raises OSError: a required privilege is not held by the client).
-try:
-    os.symlink(GITWT, SYMWT, target_is_directory=True)
-    SYMWT_MADE = True
-except Exception:
-    SYMWT_MADE = False
 
 # --------------------------------------------------------------- the ported shell traps
+FAMILY = "shared-tree"
 #
 # TRAPLN holds one real directory, a link to it, a file and a link to it.
 TRAPLN = os.path.join(ROOT, "trapln")
@@ -1206,6 +1401,7 @@ def build_trap_fixtures():
 
 
 build_trap_fixtures()
+_mark("build_trap_fixtures, DOTDOTWT and SYMWT")
 
 CFG_SETTINGS = slash(os.path.join(CFG, "settings.json"))
 CFG_CLAUDEMD = slash(os.path.join(CFG, "CLAUDE.md"))
@@ -1985,6 +2181,7 @@ sh("work-tree: the spaced form is read the same way",
 
 
 # ============================================================ 1. branch delete / worktree remove/prune
+FAMILY = "branch-worktree"
 #
 # The three git forms the machine-wide janitor plan named as a hole in this rule: `git branch
 # -d/-D`, `git worktree remove`, `git worktree prune`. Each is judged on the STATE OF ITS SUBJECT,
@@ -2095,6 +2292,7 @@ if LINKS_MADE:
 
 
 # =========================================================================== 1b. the pointer HEAD
+FAMILY = "pointer"
 #
 # The pointer checkout is the one checkout whose HEAD decides which copy of the rules and the gates
 # every session on this machine runs. Its HEAD stays `main`.
@@ -2230,6 +2428,7 @@ sh("pointer: no global rules file at all fires nothing",
 
 
 # =========================================================================== 2. machine-wide kills
+FAMILY = "kill"
 
 sh("kill: pkill by pattern", "pkill -f node", "deny", "machine-wide-kill", cwd=NOGIT)
 sh("kill: pkill by name reaches every match", "pkill node", "deny", "machine-wide-kill", cwd=NOGIT)
@@ -3377,6 +3576,7 @@ sh("detached: a grep for Start-Job is not a call to it",
 
 
 # =========================================================================== 2c. live streams
+FAMILY = "stream"
 #
 # CLAUDE.md: "Never pipe a live stream through `tail`." A follow flag never ends on its own, so
 # it outlives the turn and the agent that started it.
@@ -3502,6 +3702,7 @@ sh("waiter: a `#` inside a word is not a comment, so the loop after it still den
 
 
 # =========================================================================== 2d. the silent write
+FAMILY = "write"
 #
 # Rule 1c, the owner's ruling. CLAUDE.md: "Never discard a command's output." A discarding
 # redirect denies on any of the six subcommands, whatever git itself would have printed. git's
@@ -3629,6 +3830,7 @@ sh("silent-write pipe, allow (known gap): bash -c wrapper is not parsed",
 
 
 # =========================================================================== 3. push and delete
+FAMILY = "push-delete"
 
 LEASE = " --force-with-lease --force-if-includes"
 SHA = "0123456789abcdef0123456789abcdef01234567"
@@ -3885,6 +4087,7 @@ sh("delete: a grep pattern naming the cmd.exe form calls nothing",
 
 
 # =========================================================================== 4. environment files
+FAMILY = "env"
 #
 # Ported whole from q_max. The rule is about the CONTENTS of the file, so a read is refused as
 # firmly as a write, and a runner that loads the file into its own environment is allowed by name.
@@ -4224,6 +4427,7 @@ sh("env: the accessor search in the other shell",
 
 
 # =========================================================================== 5. merge into main
+FAMILY = "merge"
 #
 # Decision 8 ("Merge into main: allow and report") supersedes Decision 2 ("ask always"). Every
 # merge call is now an ALLOW; the guard log is what carries the base and the tool, checked in
@@ -4392,6 +4596,7 @@ sh("merge-checks: a commit message that names a merge is a message",
 
 
 # =========================================================================== 5d. cite by id
+FAMILY = "cite"
 #
 # `git-cite-by-id`. A commit message or a PR body that cites a record by its path is refused. A code
 # path, the word "decisions", a read of a record and a record's own file stay allowed.
@@ -4501,6 +4706,7 @@ sh("cite-by-id: Drops-lines key with a space before the colon is allowed",
 
 
 # =========================================================================== 6. frozen paths
+FAMILY = "frozen"
 #
 # Ported from q_max, with that repository's own two frozen paths replaced by the global set. The
 # file-tool check is the WALL: an exact resolved path, and no heuristics. The shell check is a
@@ -4751,6 +4957,7 @@ sh("frozen: a leftover token is not a key to the push rule",
 
 
 # =========================================================================== 6b. the model cap
+FAMILY = "model-cap"
 #
 # Rule 8. A project settings file overrides the owner's user settings, so a write there can lift
 # the subagent model cap the user settings hold. The decision is `ask`, never `deny`: the same
@@ -4976,6 +5183,7 @@ add("cap: a payload with no tool name allows", "allow",
 
 
 # =========================================================================== ordinary work
+FAMILY = "paths"
 
 for ordinary in (
     "npm test",
@@ -5152,6 +5360,7 @@ add("builder-test: Edit of .xctestplan that adds codeCoverage is allowed", "allo
 add("test-author: Edit of .xctestplan is allowed", "allow", tool="Edit", file_path=XCTESTPLAN, **A)
 
 # ---- the diff, judged at commit, push and SubagentStop
+FAMILY = "diff"
 BASE_FILES = {
     "src/app.py": "x = 1\n", "src/contest.py": "y = 1\n", "latest_results.md": "ok\n",
     "tests/test_a.py": "def test_a():\n    assert True\n", "pyproject.toml": "[project]\nname = 'x'\n[tool.pytest.ini_options]\nminversion = '7'\n",
@@ -5166,26 +5375,6 @@ DIFFROOT = os.path.join(ROOT, "diffrepos")
 # `MUTATE_ONLY` selects one or two cases. So a repo is built LAZILY, the first time a case runs in
 # it (`materialize`, called from `decide`). MEASURED on Windows CI: building all of them at import
 # cost 1 min 52 s per run of this module.
-LAZY = {}
-
-
-def lazy_fixture(paths, build):
-    """Register `build` (run once) for every path in `paths`."""
-    done = []
-
-    def once():
-        if not done:
-            done.append(1)
-            build()
-    for path in paths:
-        LAZY[path] = once
-
-
-def materialize(path):
-    if path and path in LAZY:
-        LAZY[path]()
-
-
 def diff_repo(name, change, commit=False, cut_from=None, files=None):
     """A real linked worktree, as a builder runs in: a main checkout with a base commit, and a
     worktree on a new branch `work` cut from `cut_from` (default HEAD). `change` edits the
@@ -5485,12 +5674,14 @@ def long_lived_no_log_case():
     return True, "allowed with no builder-diff line"
 
 
-LOG_CHECKS_EXTRA = [
+LOG_CHECKS_EXTRA = _TaggedLogs([
     ("role-diff: every unjudged stop is logged", role_log_case),
     ("builder-diff: the diff check logs for the reviewer and never blocks", diff_logs_case),
     ("builder-diff: main's later tests merged into a long-lived worktree log nothing",
      long_lived_no_log_case),
-]
+])
+for _label, _check in LOG_CHECKS_EXTRA:  # the literal above is not appended: tag it here
+    LOG_FAMILY.setdefault(_label, _family(_label))
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
@@ -5512,6 +5703,7 @@ sh("builder-diff: a builder in a tree git cannot read is allowed and noted", COM
 sh("builder-diff: reads stay allowed in a dirty tree", "cat tests/test_a.py && ls tests",
    "allow", cwd=_dirty, agent_id="bld1", agent_type="builder")
 
+FAMILY = "paths"
 # ---- the test-author, inverted: only tests and test config may change
 AUTHOR_GREEN = [
     ("new-test", _put("tests/test_new.py", "pass\n")),
@@ -5757,6 +5949,7 @@ LOG_CHECKS_EXTRA.append(("xctestplan-diff: a builder's skippedTests line is logg
 
 
 # =========================================================================== failing open
+FAMILY = "paths"
 
 add("open: a payload with no command", "allow", tool="Bash", cwd=NOGIT)
 add("open: a tool the guard does not handle", "allow", tool="Glob", cwd=NOGIT, pattern="**/*.ts")
@@ -5771,6 +5964,7 @@ add("open: a tool_input that is not an object", "allow", raw='{"tool_name":"Bash
 
 
 # --------------------------------------------------------------------------- impeccable is review-only
+FAMILY = "impeccable"
 #
 # Owner ruling, 2026-10-10, decisions/design-skills.md: the impeccable plugin loads only for review
 # (audit, critique). Its build commands and its settings writers are refused. Other skills pass.
@@ -5917,7 +6111,7 @@ LOG_CHECKS_EXTRA.append(("impeccable: settings.json names no impeccable plugin",
 
 def decide(case):
     """Return (decision, reason) for one case."""
-    materialize(case.get("cwd"))
+    materialize_for(case)
     if case["raw"] is not None:
         payload = case["raw"]
     else:
@@ -6253,6 +6447,8 @@ def subject_unread_log_case(command=None, expect_note=True):
     """
     if os.name == "nt":
         return True, "skipped: a stand-in git is not reached through CreateProcess"
+    materialize(GITBLIND)  # lint calls this directly, with no run loop to build what it names
+    materialize(SUBJDIRTY)
     folder = os.path.join(ROOT, "unreadlog")
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, "guard.log")
@@ -6407,6 +6603,7 @@ def branch_base_unread_log_case():
 # `git checkout` and `git switch` are on this list for the pointer rule, and the list is global,
 # so no rule may print either one in a remedy. The pointer rule's remedy is a worktree, and it
 # names `git worktree add` instead, which is a different command and not the refused target.
+FAMILY = "rule9"
 # ---- Rule 9, the subagent model floor. Both directions: Haiku in any spelling is denied, and
 # every other model, or none, is allowed.
 for _tool in ("Agent", "Task"):
@@ -7383,6 +7580,7 @@ def worktree_home_later_field_case():
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
 # literal count drifts the moment a case is added, and a suite that miscounts its own cases is a
 # suite a reader stops trusting.
+FAMILY = "misc"  # this literal mixes several rules, so its log checks are not one family
 LOG_CHECKS = (
     ("log: one line per refusal and none for an allow", log_case),
     ("log: the refused file is named in the log and nowhere else", log_env_case),
@@ -7433,9 +7631,12 @@ LOG_CHECKS = (
     ("worktree-home: a later path field outside the recorded home is refused, not skipped",
      worktree_home_later_field_case),
 )
+for _label, _check in LOG_CHECKS:  # the literal above is not appended: tag it here
+    LOG_FAMILY.setdefault(_label, _family(_label))
 
 
 # =========================================================================== mask_script lexemes
+FAMILY = "mask-script"
 
 # The timing cases guard mask_script. Its earlier regex form could take each backslash after an
 # unclosed quote as one `.` or as half of a `\\.` pair, so the paths grew like Fibonacci. Measured
@@ -7744,6 +7945,7 @@ WINDOWS_CHECKERS = {
 
 
 # --------------------------------------------------------------------------- the simulator boot rules
+FAMILY = "simulator"
 #
 # Owner rulings 2026-10-10. A boot is `xcrun simctl boot`, an `xcodebuild -destination` that names a
 # shut-down simulator, or the simulator MCP control tool's `launch` naming a shut-down device.
@@ -8094,28 +8296,85 @@ def register_simulator_hold_cases():
        env_path=env_for("hold_ps_rc", [], ps_rc=1), config=cfg)
 
 
-# The simulator cases need a POSIX shell for the fake xcrun and ps. Windows has neither to fake.
+# The simulator cases need a POSIX shell for the fake xcrun and ps. Windows has neither to fake, so
+# on Windows the simulator family holds no case, and GUARD_FAMILY=simulator runs none and fails.
+FAMILY = "simulator"
 if os.name != "nt":
     register_simulator_boot_cases()
     register_simulator_hold_cases()
+
+# Log checks in the literal and the appended extras are tagged by section above. These prefixes give
+# each one its rule's family instead, so GUARD_FAMILY=<rule> runs its log checks too. A prefix that
+# matches no label, or more than one, stops the run: a typo must not leave a log check untagged.
+LOG_RULE_FAMILY = (
+    ("log: one line per refusal", "frozen"),
+    ("log: the refused file is named", "frozen"),
+    ("log: a project config edit", "frozen"),
+    ("log: a cap lift is asked", "model-cap"),
+    ("log: a cap lift under a deep path", "model-cap"),
+    ("cap: the printed reason is bounded", "model-cap"),
+    ("trim: a merge into main", "merge"),
+    ("trim: a guard crash fails open", "paths"),
+    ("merge-checks: a merge tool that cannot load", "merge"),
+    ("merge-checks: a gh that never answers", "merge"),
+    ("powershell: a backslash path survives", "paths"),
+    ("trim: a conflict-side checkout", "shared-tree"),
+    ("log: an unreadable subject", "shared-tree"),
+    ("log: a hard reset in an agent-owned", "shared-tree"),
+    ("log: checkout -- in an agent-owned", "shared-tree"),
+    ("log: an unforced worktree remove", "branch-worktree"),
+    ("log: a forced worktree remove", "branch-worktree"),
+    ("log: a quoted or abbreviated force", "branch-worktree"),
+    ("per-file kill: log: a quoted or abbreviated force", "branch-worktree"),
+    ("log: a branch delete with no resolvable base", "branch-worktree"),
+    ("stack: the refusal never names", "shared-tree"),
+    ("playwright: the refusal names the stale", "env"),
+    ("split_segments: a comment starting a word", "paths"),
+    ("liveness: process_start_ms splits", "kill"),
+    ("liveness: windows arm splits", "kill"),
+    ("liveness: session_is_live carries", "branch-worktree"),
+    ("liveness: worktree_live_session answers None on an unreadable", "branch-worktree"),
+    ("liveness: worktree_live_session matches two", "branch-worktree"),
+    ("liveness: worktree_live_session answers None when", "branch-worktree"),
+    ("liveness: session_is_live reads an implied", "branch-worktree"),
+    ("worktree-home: orchestrator", "branch-worktree"),
+    ("worktree-home: a later path field", "branch-worktree"),
+)
+for _prefix, _family_name in LOG_RULE_FAMILY:
+    _hits = [label for label in LOG_FAMILY if label.startswith(_prefix)]
+    if len(_hits) != 1:
+        sys.exit("fixture setup failed: log family prefix %r matches %d log checks, want 1"
+                 % (_prefix, len(_hits)))
+    LOG_FAMILY[_hits[0]] = _family_name
+
+# A case or log check with a family that FAMILIES does not name would hide from GUARD_FAMILY.
+_UNNAMED = sorted({c["family"] for c in CASES} - set(FAMILIES))
+_BAD_LOG = [(label, LOG_FAMILY.get(label)) for label, _ in LOG_CHECKS
+            if LOG_FAMILY.get(label) not in FAMILIES]
+if _UNNAMED or _BAD_LOG:
+    sys.exit("fixture setup failed: families not in FAMILIES: cases %s, log checks %s"
+             % (_UNNAMED, _BAD_LOG))
 
 
 # Deferred: build-disk-guard (decision build-dirs-reaped-at-agent-end, Part 2), until a threshold is measured.
 
 
-def main():
+def run_cases():
     mode = os.environ.get("GUARD_TESTS", "")
     if mode not in GUARD_TESTS_MODES:
         print("GUARD_TESTS=%r: want unset or 'windows-slice'. Nothing ran." % mode)
         return 2
-    cases = [c for c in CASES if not mode or c["windows"]]
-    logs = [(label, check) for label, check in LOG_CHECKS if not mode or check in WINDOWS_CHECKERS]
+    fam = GUARD_FAMILY
+    cases = [c for c in CASES if (not mode or c["windows"]) and (not fam or c["family"] == fam)]
+    logs = [(label, check) for label, check in LOG_CHECKS
+            if (not mode or check in WINDOWS_CHECKERS) and (not fam or LOG_FAMILY.get(label) == fam)]
     total = len(cases) + len(logs)
     if mode and not total:
         print("GUARD_TESTS=windows-slice: no case is tagged. Nothing ran.")
         return 2
     print("guard cases, %d in all" % (len(CASES) + len(LOG_CHECKS)))
-    print("GUARD_TESTS=%s: %d cases selected to run" % (mode or "(unset)", total))
+    print("GUARD_TESTS=%s GUARD_FAMILY=%s: %d cases selected to run"
+          % (mode or "(unset)", fam or "(unset)", total))
     print("fixtures under " + ROOT)
     print()
     failed = 0
@@ -8152,6 +8411,8 @@ def main():
         failed += 0 if ok else 1
         print("%s  %-6s(want %-6s)  [%-11s] %s%s" % (
             "PASS" if ok else "FAIL", got, case["expected"], case["tool"], case["name"], note))
+    if any(not only or only in label for label, _ in logs):
+        materialize_all()  # a log check names its fixtures in its own code, not in a case's fields
     for label, checker in logs:
         if only and only not in label:
             continue
@@ -8168,14 +8429,22 @@ def main():
             os.kill(orphan, signal.SIGTERM)
         except OSError:
             pass
-    if mode and not ran:
-        print("test_guard FAIL: GUARD_TESTS=%s ran 0 cases (MUTATE_ONLY matched none)" % mode)
+    if (mode or fam or only) and not ran:
+        print("test_guard FAIL: ran 0 cases (GUARD_TESTS=%s, GUARD_FAMILY=%s, MUTATE_ONLY=%s "
+              "matched none)" % (mode or "(unset)", fam or "(unset)", only or "(unset)"))
         return 1
     if failed:
         print("test_guard FAIL: %d of %d cases wrong" % (failed, ran))
         return 1
     print("test_guard PASS: %d of %d cases right" % (ran, ran))
     return 0
+
+
+def main():
+    _mark("case registration (module code after the fixtures)")
+    rc = run_cases()
+    _timing_report()
+    return rc
 
 
 if __name__ == "__main__":
