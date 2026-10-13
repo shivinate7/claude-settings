@@ -48,7 +48,10 @@ cannot exit on a field in code.
 - It fails open. An error, a timeout or an odd answer prints one stderr line and blocks nothing.
 - Timeout: measured 6.6, 7.0 and 8.0 seconds for three real runs on this machine. The model
   limit is 20 seconds and the `settings.json` entry is 25. Unmeasured: a long reply.
-- It is the last `Stop` hook. Its rules are `output-start-with-point`, `style-cut-narration`
+- A reply over 12000 characters is cut to its first and last 6000. A breach in the middle is
+  not seen.
+- It is last in the `Stop` array in `settings.json`. That is array position, not run order.
+  Its rules are `output-start-with-point`, `style-cut-narration`
   and `output-never-paste-passing-output`. They stay `unmechanized` in
   `lint/rule_mechanisms.json` until the hook catches a real defect.
 

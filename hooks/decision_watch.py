@@ -775,6 +775,8 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
             input="", capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=timeout, cwd=root, env=env,
         )
+    except subprocess.TimeoutExpired:
+        return None, "model subprocess timed out"  # fixed text: str(exc) holds the argv and prompt
     except Exception as exc:
         return None, scrub("model subprocess failed to start: %s" % exc)
     finally:

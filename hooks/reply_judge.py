@@ -30,7 +30,7 @@ REPLY_MAX = 12000  # one argv element: Windows caps the command line near 32,767
 INSTRUCTIONS = (
     "Judge the final reply below against three rules. "
     "output-start-with-point: the first sentence is the point, not a preamble. "
-    "style-cut-narration: narration means lines like \"I will now...\" or \"Let me...\"; "
+    "style-cut-narration: cut narration and recaps; narration means lines like \"I will now...\" or \"Let me...\"; "
     "a Done/Deviations/Input Needed/Next report is never narration. "
     "output-never-paste-passing-output: a passing run gets a verdict, not its pasted output. "
     "Running background work never makes a reply unfinished. "
