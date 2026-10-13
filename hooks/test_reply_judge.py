@@ -28,6 +28,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 MODULE_PATH = os.environ.get("REPLY_JUDGE_UNDER_TEST") or os.path.join(HERE, "reply_judge.py")
+SETTINGS_PATH = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(REPO_ROOT, "settings.json")
 ROOT = tempfile.mkdtemp(prefix="reply_judge_cases_")
 STUB_DIR = os.path.join(ROOT, "stub")
 FAILED = []
@@ -188,17 +189,49 @@ def case_model_is_haiku_at_xhigh():
 
 
 # --------------------------------------------------------------------------- case 3
-# A model answer of {"ok": false, "reason": R}: stdout is exactly the block decision with R.
+# A model answer of {"ok": false, "reason": R} is a finding. It never blocks. Stdout is one JSON
+# object, the Stop note that Claude Code delivers at the start of the next turn:
+#   {"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": NOTE}}
+# NOTE names the rule id and the fix. The shape is the one Claude Code's async hook validator
+# accepts for a Stop hook (checked in the installed binary, 2026-10-13).
 
-def case_model_block_emits_block_json():
-    run = run_hook(MARK, answer=json.dumps({"ok": False, "reason": BLOCK_REASON}))
-    check("block: exit 0", run.code == 0, run.code)
+def parse_stdout(run):
     try:
         got = json.loads(run.out)
     except ValueError:
-        got = None
-    check("block: stdout is exactly the block decision with the model's reason",
-          got == {"decision": "block", "reason": BLOCK_REASON}, run.out)
+        return None
+    return got if isinstance(got, dict) else None
+
+
+def case_model_finding_emits_note_not_block():
+    run = run_hook(MARK, answer=json.dumps({"ok": False, "reason": BLOCK_REASON}))
+    check("finding: exit 0", run.code == 0, run.code)
+    got = parse_stdout(run)
+    specific = got.get("hookSpecificOutput") if got else None
+    check("finding: stdout is one JSON object holding hookSpecificOutput",
+          isinstance(specific, dict), run.out)
+    check("finding: hookEventName is Stop",
+          isinstance(specific, dict) and specific.get("hookEventName") == "Stop", run.out)
+    note = specific.get("additionalContext") if isinstance(specific, dict) else None
+    check("finding: additionalContext names the rule id",
+          isinstance(note, str) and "output-never-paste-passing-output" in note, run.out)
+    check("finding: additionalContext holds the fix",
+          isinstance(note, str) and "paste the verdict" in note, run.out)
+    check("finding: never a block, no decision key at the top level or in hookSpecificOutput",
+          got is not None and "decision" not in got and "decision" not in (specific or {}), run.out)
+
+
+# A finding with no reason is still a note. The fallback must not turn it into a block.
+
+def case_finding_without_reason_is_still_a_note():
+    run = run_hook(MARK, answer=json.dumps({"ok": False}))
+    got = parse_stdout(run)
+    specific = got.get("hookSpecificOutput") if got else None
+    note = specific.get("additionalContext") if isinstance(specific, dict) else None
+    check("finding without reason: exit 0", run.code == 0, run.code)
+    check("finding without reason: a non-empty note, not a block",
+          isinstance(note, str) and note.strip() != "" and got is not None and "decision" not in got,
+          run.out)
 
 
 # --------------------------------------------------------------------------- case 4
@@ -285,15 +318,47 @@ def case_child_cannot_retrigger_hook():
           not {".claude", "settings.json"} & set(cwd_entries), cwd_entries)
 
 
+# --------------------------------------------------------------------------- case 7
+# settings.json. The reply judge Stop entry is async, so a finding never holds the turn. The
+# report gate Stop entry is not async: it still blocks. Each entry is found by its script path.
+
+def stop_hooks_running(script):
+    with open(SETTINGS_PATH, encoding="utf-8") as f:
+        settings = json.load(f)
+    found = []
+    for entry in (settings.get("hooks") or {}).get("Stop") or []:
+        for hook in entry.get("hooks") or []:
+            if script in str(hook.get("command", "")):
+                found.append(hook)
+    return found
+
+
+def case_settings_reply_judge_is_async_and_report_gate_is_not():
+    try:
+        judge = stop_hooks_running("hooks/reply_judge.py")
+        gate = stop_hooks_running("lint/report_gate.py")
+    except (OSError, ValueError) as exc:
+        check("settings: settings.json reads as JSON", False, "%s: %s" % (type(exc).__name__, exc))
+        return
+    check("settings: exactly one reply_judge Stop hook", len(judge) == 1, judge)
+    check("settings: reply_judge Stop hook has async true",
+          len(judge) == 1 and judge[0].get("async") is True, judge)
+    check("settings: exactly one report_gate Stop hook", len(gate) == 1, gate)
+    check("settings: report_gate Stop hook is not async",
+          len(gate) == 1 and gate[0].get("async") is not True, gate)
+
+
 CASES = (
     case_stop_hook_active_never_calls_model,
     case_model_ok_is_silent,
     case_model_is_haiku_at_xhigh,
-    case_model_block_emits_block_json,
+    case_model_finding_emits_note_not_block,
+    case_finding_without_reason_is_still_a_note,
     case_model_failure_fails_open,
     case_timeout_leaks_no_reply_text,
     case_prompt_carries_reply_and_rules,
     case_child_cannot_retrigger_hook,
+    case_settings_reply_judge_is_async_and_report_gate_is_not,
 )
 
 
