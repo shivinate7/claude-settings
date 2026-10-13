@@ -21,7 +21,25 @@
 //     one module-level limiter shared by all runs; git base = diffBase(rev-parse HEAD succeeds)
 // Decisions pinned here: match is case-sensitive; drive letter and slashes normalised;
 // a trailing slash on repoRoot is ignored; docs/secrets-policy.md is not flagged by name.
+// Review round 2 (PR 375) pins, R2-1 .. R2-8. Seams the builder adds in round 2:
+//   hooks/lib.mjs
+//     gitDiffArgs(base) -> argv after 'git'; must carry '--src-prefix=a/' and '--dst-prefix=b/'
+//     headerLine({ files, add, del, truncated }) -> string; truncated gives 'Diff truncated: some files are not shown'
+//     makeLimiter(max, { timeoutMs }); a call still running after timeoutMs is freed and resolves null
+//     trimNote also strips ESC, BEL and bidi overrides (U+202A..U+202E, U+2066..U+2069)
+//     parseDiff: a no-prefix header 'P P' gives P; a quoted rename name is unquoted (C-style escapes)
+//     isSecretPath: new names flagged; .env.example, .env.sample, .env.template and credentials.ts are not
+//     looksSecret: Stripe, ASIA, JWT, postgres URL, Bearer, AIza, PGP block, key=value assignments
+//     noteFromMessages returns '' for a turn text that holds a secret shape
+//   hooks/register.mjs: reads isStdoutTruncated into report.truncated; passes gitDiffArgs to git
+//   README.md: wording 'at most 5 calls per run, shared by overlapping runs'; names the empty tree
+// Known hole, not pinned: a rename that git shows as a new file (no 'rename from' line).
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { register as registerHooks } from 'node:module'
 import * as lib from './hooks/lib.mjs'
 
@@ -228,6 +246,7 @@ const plugin = await import('./hooks/register.mjs')
 const quick = async () => ({ isAnswered: true, text: 'A plain note.' })
 async function gitRun(argv, st) {
   const ok = stdout => ({ exitCode: 0, stdout, stderr: '' })
+  if (argv.includes('--show-toplevel')) return ok('/repo\n')
   if (argv.includes('rev-parse')) {
     return st.hasHead ? ok('HEAD\n') : { exitCode: 128, stdout: '', stderr: 'fatal: Needed a single revision\n' }
   }
@@ -235,9 +254,35 @@ async function gitRun(argv, st) {
     if (argv.includes('HEAD') && !st.hasHead) {
       return { exitCode: 128, stdout: '', stderr: "fatal: ambiguous argument 'HEAD': unknown revision\n" }
     }
-    return ok(st.diff)
+    return { ...ok(st.diff), isStdoutTruncated: !!st.truncated }
   }
   return ok('')
+}
+// A real git in a temp repo, for the prefix pins.
+function realRun(dir) {
+  return argv => {
+    const r = spawnSync(argv[0], argv.slice(1), { cwd: dir, encoding: 'utf8' })
+    return { exitCode: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '', isStdoutTruncated: false }
+  }
+}
+function gitIn(dir, args) {
+  const r = spawnSync('git', args, { cwd: dir, encoding: 'utf8' })
+  if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`)
+  return r.stdout
+}
+// A repo with committed files, then changed files, then git config keys.
+function repoWith(initial, changed, config) {
+  const dir = mkdtempSync(join(tmpdir(), 'plain-diff-r2-'))
+  gitIn(dir, ['init', '-q'])
+  gitIn(dir, ['config', 'user.name', 'test'])
+  gitIn(dir, ['config', 'user.email', 'test@example.com'])
+  gitIn(dir, ['config', 'commit.gpgsign', 'false'])
+  for (const [p, c] of Object.entries(initial)) writeFileSync(join(dir, p), c)
+  gitIn(dir, ['add', '-A'])
+  gitIn(dir, ['commit', '-q', '-m', 'init'])
+  for (const [p, c] of Object.entries(changed)) writeFileSync(join(dir, p), c)
+  for (const [k, v] of Object.entries(config)) gitIn(dir, ['config', k, v])
+  return dir
 }
 function allText(tree) {
   const got = []
@@ -263,15 +308,21 @@ function codeSources(tree) {
   return got
 }
 function host(init = {}) {
-  const st = { diff: '', hasHead: true, messages: [], model: quick, ...init }
+  const st = { diff: '', hasHead: true, messages: [], model: quick, truncated: false, run: null, ...init }
   const calls = []
+  const argvs = []
   const $ = {
     command: { register: async () => {} },
     ui: {
       open: async () => {},
       resolve: () => ({ Box: 'Box', Button: 'Button', Code: 'Code', Markdown: 'Markdown', Text: 'Text' }),
     },
-    process: { run: async argv => gitRun(argv, st) },
+    process: {
+      run: async argv => {
+        argvs.push(argv)
+        return st.run ? st.run(argv) : gitRun(argv, st)
+      },
+    },
     session: { messages: async () => st.messages },
     model: {
       complete: async req => {
@@ -287,6 +338,7 @@ function host(init = {}) {
   return {
     st,
     calls,
+    argvs,
     run: () => find('command.run')($),
     rows: async () => allText(await pane()),
     codes: async () => codeSources(await pane()),
@@ -413,7 +465,188 @@ await test("F8 register: a model failure shows 'No note: api-error'", async () =
   assert.ok((await t.rows()).includes('No note: api-error'))
 })
 
+// ---------- Review round 2 (PR 375) ----------
+// Failure messages stay ASCII, so the verdict tool can print them on any console.
+const show = s => JSON.stringify(s).replace(/[^\x20-\x7e]/g, c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'))
+const BEARER = 'Bearer ' + 'abcdefghij' + 'klmnopqrst' // Bearer + 20 token chars
+const STRIPE = 'sk' + '_live_' + 'A1b2C3d4E5f6G7h8I9j0K1l2' // sk_live_ + 24
+const ASIA = 'AS' + 'IA' + 'ABCDEFGHIJKLMNOP' // ASIA + 16
+const JWT = 'ey' + 'JhbGciOiJIUzI1NiJ9' + '.' + 'ey' + 'JzdWIiOiIxMjM0In0' + '.' + 'sig_abc123XYZ'
+const PG_URL = 'postgres' + '://' + 'user:pass' + '@' + 'db.example.com:5432/app'
+const AIZA = 'AI' + 'za' + 'Sy' + 'D'.repeat(33) // AIza + 35
+const PGP = '-----BEGIN ' + 'PGP PRIVATE KEY BLOCK-----'
+
+// R2-1 privacy: prefixes. The argv always fixes the prefixes; a no-prefix header still parses.
+await test('R2-1 gitDiffArgs(HEAD) carries --src-prefix=a/ and --dst-prefix=b/', () => {
+  const args = need('gitDiffArgs')('HEAD')
+  assert.ok(args.includes('--src-prefix=a/'), args.join(' '))
+  assert.ok(args.includes('--dst-prefix=b/'), args.join(' '))
+  assert.ok(args.includes('HEAD'), args.join(' '))
+})
+await test('R2-1 register: every git diff call carries the fixed prefixes', async () => {
+  const t = host({ diff: fileDiff('p.txt', 'x') })
+  await t.run()
+  const diffCalls = t.argvs.filter(a => a.includes('diff'))
+  assert.ok(diffCalls.length >= 1, 'no diff call')
+  for (const a of diffCalls) {
+    assert.ok(a.includes('--src-prefix=a/'), a.join(' '))
+    assert.ok(a.includes('--dst-prefix=b/'), a.join(' '))
+  }
+})
+await test("R2-1 parseDiff: a header with no prefixes ('diff --git .env .env') still gives .env", () => {
+  const raw = 'diff --git .env .env\nindex 1..2 100644\n--- .env\n+++ .env\n@@ -1 +1 @@\n-a\n+b\n'
+  const f = lib.parseDiff(raw)[0]
+  assert.equal(f.path, '.env')
+  assert.equal(need('isSecretPath')(f.path), true)
+})
+await test('R2-1 real repo, diff.noprefix: a root .env change is skipped, with no model call for it', async () => {
+  const dir = repoWith({ '.env': 'A=1\n', 'keep.txt': 'x\n' }, { '.env': 'A=2\n', 'keep.txt': 'y\n' }, { 'diff.noprefix': 'true' })
+  try {
+    const t = host({ run: realRun(dir) })
+    await t.run()
+    assert.equal(t.calls.length, 1, JSON.stringify(t.calls.map(c => c.prompt.split('\n')[4])))
+    assert.equal(t.calls[0].prompt.split('\n')[4], 'File: keep.txt')
+    assert.ok(!JSON.stringify(t.calls).includes('A=2'), 'secret text sent')
+    assert.equal(count(await t.rows(), 'Skipped: secret file'), 1)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+await test('R2-1 real repo, diff.mnemonicPrefix: a.txt keeps its path; a root .env change is still skipped', async () => {
+  const dir = repoWith({ 'a.txt': 'one\n', '.env': 'A=1\n' }, { 'a.txt': 'two\n', '.env': 'A=2\n' }, { 'diff.mnemonicPrefix': 'true' })
+  try {
+    const t = host({ run: realRun(dir) })
+    await t.run()
+    assert.equal(t.calls.length, 1, JSON.stringify(t.calls.map(c => c.prompt.split('\n')[4])))
+    assert.equal(t.calls[0].prompt.split('\n')[4], 'File: a.txt')
+    assert.ok(!JSON.stringify(t.calls).includes('A=2'), 'secret text sent')
+    const rows = await t.rows()
+    assert.ok(rows.includes('a.txt'), rows)
+    assert.equal(count(rows, 'Skipped: secret file'), 1)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// R2-2 names: more secret file names; false alarms must stay unflagged; quoted rename names unquoted.
+await test('R2-2 isSecretPath flags more secret file names', () => {
+  const f = need('isSecretPath')
+  for (const p of [
+    '.envrc', 'prod.env', '.git-credentials', '_netrc', '.pypirc', 'terraform.tfvars', '.htpasswd',
+    'application_default_credentials.json', 'key.ppk', 'signing.asc',
+  ]) assert.equal(f(p), true, p)
+})
+await test('R2-2 isSecretPath does not flag names that only look like secrets', () => {
+  const f = need('isSecretPath')
+  for (const p of ['credentials.ts', 'credentials.test.js', '.env.example', '.env.sample', '.env.template', 'environment.md', 'keyboard.ts']) {
+    assert.equal(f(p), false, p)
+  }
+})
+await test('R2-2 a quoted rename source is unquoted before the check', () => {
+  // git writes a tab in a name as the two characters \t inside quotes
+  const raw = 'diff --git "a/we\\tird/.env" "b/new.txt"\nsimilarity index 90%\nrename from "we\\tird/.env"\nrename to new.txt\n@@ -1 +1 @@\n-a\n+b\n'
+  const f = lib.parseDiff(raw)[0]
+  assert.equal(f.oldPath, 'we\tird/.env')
+  assert.equal(f.path, 'new.txt')
+  assert.equal(need('isSecretPath')(f.oldPath), true)
+})
+
+// R2-3 body shapes: flagged; prose and key-like names not flagged.
+await test('R2-3 looksSecret flags more key shapes under an innocent name', () => {
+  const f = need('looksSecret')
+  for (const body of [STRIPE, ASIA, JWT, PG_URL, BEARER, AIZA, PGP, 'API_KEY=abcdef1234567890', 'SECRET_KEY: "abcdefghijkl"', 'password = "longvalue"']) {
+    assert.equal(f(fileDiff('notes.txt', body)), true, body.slice(0, 24))
+  }
+})
+await test('R2-3 looksSecret does not flag prose or key-like names', () => {
+  const f = need('looksSecret')
+  for (const body of ['the API key is rotated every quarter', 'api_key_name = column', '  See password_policy.md for the rules.']) {
+    assert.equal(f(fileDiff('notes.txt', body)), false, body)
+  }
+})
+
+// R2-4 turn text: a note holding a secret shape is not shown.
+await test('R2-4 noteFromMessages: a turn text holding a secret shape gives no note; prose still does', () => {
+  const nf = need('noteFromMessages')
+  assert.equal(nf(editedAt('/repo/src/keys.js', 'I set the key to ' + AWS + ' in the file.'), '/repo', 'src/keys.js'), '')
+  assert.equal(nf(editedAt('/repo/src/x.js', 'I rotated the API key.'), '/repo', 'src/x.js'), 'I rotated the API key.')
+})
+await test('R2-4 register: a secret-shaped turn note is not shown; the row says No note', async () => {
+  const t = host({
+    diff: fileDiff('src/keys.js', 'const k = 1'),
+    messages: editedAt('/repo/src/keys.js', 'I set the key to ' + AWS + ' in the file.'),
+    model: async () => ({ isAnswered: false, reason: 'empty' }),
+  })
+  await t.run()
+  const rows = await t.rows()
+  assert.ok(!rows.includes(AWS), 'secret shown in pane')
+  assert.ok(rows.includes('No note'), rows)
+})
+
+// R2-5 limiter honesty: 5 starts per busy period; a hung call is freed by the limiter's timeout.
+await test('R2-5 makeLimiter(5): 5 starts per busy period; the 6th is refused until the period ends', async () => {
+  const L = need('makeLimiter')(5)
+  const gates = Array.from({ length: 5 }, () => deferred())
+  const ps = gates.map((g, i) => L.run('k' + i, () => g.promise))
+  assert.equal(await L.run('k5', async () => 'X'), null)
+  gates.forEach((g, i) => g.resolve(i))
+  assert.deepEqual(await Promise.all(ps), [0, 1, 2, 3, 4])
+  assert.equal(await L.run('k6', async () => 'Y'), 'Y')
+})
+await test('R2-5 makeLimiter timeoutMs: a hung call is freed, so a later run is admitted and the hung run gives null', async () => {
+  const L = need('makeLimiter')(1, { timeoutMs: 20 })
+  const hung = L.run('a', () => new Promise(() => {}))
+  assert.equal(await L.run('b', async () => 'B'), null) // still busy at once
+  await new Promise(r => setTimeout(r, 60))
+  assert.equal(await L.run('c', async () => 'C'), 'C')
+  assert.equal(await Promise.race([hung, new Promise(r => setTimeout(() => r('still hung'), 100))]), null)
+})
+
+// R2-6 control characters in notes: ESC, BEL, bidi overrides removed from turn and model notes.
+const CTRL = /[\x00-\x08\x0b\x0c\x0e-\x1f‪-‮⁦-⁩]/
+await test('R2-6 trimNote strips ESC, BEL and bidi overrides', () => {
+  const o = lib.trimNote('Fixed\x1b[31m the login\x07 check.‮ Done.')
+  assert.ok(!CTRL.test(o), show(o))
+  assert.ok(o.includes('login') && o.includes('Done'), show(o))
+})
+await test('R2-6 a turn-text note with BEL or a bidi override is cleaned too', () => {
+  const o = need('noteFromMessages')(editedAt('/repo/src/bel.js', 'Turn\x07 note.‮'), '/repo', 'src/bel.js')
+  assert.ok(!CTRL.test(o), show(o))
+  assert.ok(o.includes('Turn'), show(o))
+})
+await test('R2-6 register: a model note with ESC or a bidi override is shown without them', async () => {
+  const t = host({ diff: fileDiff('esc.txt', 'z'), model: async () => ({ isAnswered: true, text: 'Model\x1b[1m note‮ here.' }) })
+  await t.run()
+  const rows = await t.rows()
+  assert.ok(!CTRL.test(rows), show(rows))
+  assert.ok(rows.includes('Model'), show(rows))
+})
+
+// R2-7 truncation: the header says so, and does not present the count as complete.
+await test('R2-7 headerLine: the complete form when not truncated', () => {
+  assert.equal(need('headerLine')({ files: 3, add: 1, del: 1, truncated: false }), '3 files changed, +1 -1')
+})
+await test('R2-7 headerLine: truncated says some files are not shown, and is not the complete form', () => {
+  const h = need('headerLine')({ files: 3, add: 1, del: 1, truncated: true })
+  assert.ok(h.includes('Diff truncated: some files are not shown'), h)
+  assert.notEqual(h, '3 files changed, +1 -1')
+})
+await test('R2-7 register: a truncated git result shows the truncation line in the pane', async () => {
+  const t = host({ diff: fileDiff('t.txt', 'x'), truncated: true })
+  await t.run()
+  assert.ok((await t.rows()).includes('Diff truncated: some files are not shown'))
+})
+
+// R2-8 README: the limit wording is per run, shared by overlapping runs; the unborn-repo base is named.
+await test('R2-8 README: no "at most 5 calls at one time"; says per run, shared by overlapping runs; names the empty tree', () => {
+  const readme = readFileSync(fileURLToPath(new URL('./README.md', import.meta.url)), 'utf8')
+  assert.ok(!/at most 5 calls (run )?at one time/i.test(readme), 'old limit wording')
+  assert.ok(readme.includes('at most 5 calls per run'), 'missing per-run wording')
+  assert.ok(readme.includes('shared by overlapping runs'), 'missing shared wording')
+  assert.ok(/empty tree/i.test(readme), 'unborn-repo base not named')
+})
+
 const r1Failed = r1.filter(r => r.startsWith('FAIL')).length
 console.log(r1.join('\n'))
-console.log(`plain-diff review-1 pins: ${r1.length - r1Failed} pass, ${r1Failed} fail of ${r1.length}`)
+console.log(`plain-diff pins (review 1 and 2): ${r1.length - r1Failed} pass, ${r1Failed} fail of ${r1.length}`)
 if (r1Failed) process.exitCode = 1
