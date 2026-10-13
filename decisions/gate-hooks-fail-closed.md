@@ -7,7 +7,9 @@ When a gate hook cannot run, does the call it guards run?
 ## The ruling
 
 Owner, 2026-10-12: a gate whose script or python is missing refuses the call. A gate that
-times out or crashes does not, because load must never take the whole setup down. The four command gates in
+times out or crashes does not, because load must never take the whole setup down. A logging
+failure never changes a gate's output or exit code: the STE gate and md_sweep log through
+`guard_logger` in `lint/_transcript.py`, which catches any Exception. The four command gates in
 `settings.json` exit 2 when their script or python is missing. They are PreToolUse
 `guard.py`, `ste_gate.py` and `question_outcome.py`, and PermissionRequest
 `rm_prompt_answer.py`. For the three PreToolUse gates, exit 2 refuses the call and one stderr
@@ -85,3 +87,6 @@ where a gate carries it.
 - `bin/claude-janitor` keeps the old loop with no skip. It is a user command, not a hook.
 - The same change adds `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL: sonnet` beside the subagent
   model (changelog 2.1.296), so workflow agents follow the same default.
+
+Kind: process
+Home: hooks/test_wrappers.py

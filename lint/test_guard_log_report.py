@@ -802,5 +802,64 @@ class UnreadNotesFailOpenTests(unittest.TestCase):
         self.assertNotesNamed(blocked)
 
 
+class FixedDecisionTests(unittest.TestCase):
+    """A `fixed` line (an STE gate rewrite) is counted under the noted column. Pinned choice: map
+    fixed to noted, the smaller change. A column of its own would change every old-only table, and
+    GOLDEN_OLD_ONLY would break. The rule column still tells the STE codes apart from guard notes."""
+
+    LINES = [
+        session_line("2026-10-11T09:00:00", "fixed", "STE007,STE008", "notes.md fixed=2", SID),
+        session_line("2026-10-11T10:00:00", "noted", "STE-fallback", "notes.md fallback=crash", SID),
+        session_line("2026-10-11T11:00:00", "fixed", "STE007,STE008", "other.md fixed=2", OTHER_SID),
+    ]
+
+    def test_fixed_counts_under_noted_by_rule(self):
+        s = glr.summarize(self.LINES, 7, NOW)
+        self.assertEqual(s["by_rule"]["STE007,STE008"], {"deny": 0, "ask": 0, "noted": 2})
+        self.assertEqual(s["by_rule"]["STE-fallback"], {"deny": 0, "ask": 0, "noted": 1})
+
+    def test_fixed_is_never_a_verbatim_other_line(self):
+        self.assertEqual(glr.summarize(self.LINES, 7, NOW)["other"], [])
+
+    def test_session_filter_keeps_only_that_sessions_fixed_lines(self):
+        s = glr.summarize(self.LINES, 7, NOW, SID)
+        self.assertEqual(s["by_rule"]["STE007,STE008"], {"deny": 0, "ask": 0, "noted": 1})
+
+    def test_report_and_by_session_show_fixed_in_the_noted_column(self):
+        now = datetime.now().replace(microsecond=0)
+        lines = [
+            session_line(hours_ago(now, 1), "fixed", "STE007,STE008", "notes.md fixed=2", SID),
+            session_line(hours_ago(now, 2), "fixed", "STE007,STE008", "b.md fixed=2", OTHER_SID),
+        ]
+        with tempfile.TemporaryDirectory() as folder:
+            path = write_log(os.path.join(folder, "guard.log"), lines)
+            rc, out = run_main(["--log", path, "--by-session", "--days", "7"])
+            rc_one, one = run_main(["--log", path, "--session", SID, "--days", "7"])
+        self.assertEqual((rc, rc_one), (0, 0))
+        self.assertIn("| STE007,STE008 | 0 | 0 | 2 |", out)
+        self.assertIn("| %s | STE007,STE008 | 0 | 0 | 1 |" % SID, out)
+        self.assertIn("| STE007,STE008 | 0 | 0 | 1 |", one)
+        self.assertNotIn("| STE007,STE008 | 0 | 0 | 2 |", one)
+
+    # STE denies and sweep blocks count in the deny column, as rows of their own: the reader groups
+    # by rule, and an STE line's rule is its STE codes, so a guard row and an STE row never share one.
+    def test_ste_denies_are_own_rows_beside_guard_rows_in_the_deny_column(self):
+        lines = [
+            session_line("2026-10-11T09:00:00", "deny", "shared-tree", "git stash", SID),
+            session_line("2026-10-11T10:00:00", "deny", "STE008", "notes.md denied=1", SID),
+            session_line("2026-10-11T11:00:00", "deny", "STE001,STE008", "b.md denied=2", OTHER_SID),
+            session_line("2026-10-11T12:00:00", "deny", "STE008", "c.md denied=1", SID),
+        ]
+        s = glr.summarize(lines, 7, NOW)
+        self.assertEqual(s["by_rule"]["shared-tree"], {"deny": 1, "ask": 0, "noted": 0})
+        self.assertEqual(s["by_rule"]["STE008"], {"deny": 2, "ask": 0, "noted": 0})
+        self.assertEqual(s["by_rule"]["STE001,STE008"], {"deny": 1, "ask": 0, "noted": 0})
+        self.assertEqual(s["per_day"]["2026-10-11"], 4)
+        out = glr.render(s)
+        self.assertIn("| shared-tree | 1 | 0 | 0 |", out)
+        self.assertIn("| STE008 | 2 | 0 | 0 |", out)
+        self.assertIn("| STE001,STE008 | 1 | 0 | 0 |", out)
+
+
 if __name__ == "__main__":
     unittest.main()

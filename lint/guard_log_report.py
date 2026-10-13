@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Reads ~/.claude/guard.log: one tab-separated line per guard verdict, written by
 hooks/guard_core.py record(). Nobody read it, so a rule that never fires, or fires too often, went unseen.
-Prints per-rule deny/ask/noted counts, denies per day, other verdicts verbatim, bad-line count.
+Prints per-rule deny/ask/noted counts (a `fixed` STE gate rewrite counts as noted), denies per day,
+other verdicts verbatim, bad-line count.
 A line ends in the hook's session_id as a sixth field; a five-field line, or "-", is "unknown
 session". --session <id> keeps one session's lines. --by-session adds counts per session."""
 import argparse
@@ -61,6 +62,8 @@ def summarize(lines, days, now, session=None):
         decision, rule, label = row.decision, row.rule, row.session
         if session is not None and label != session:
             continue
+        if decision == "fixed":
+            decision = "noted"  # an STE gate rewrite: counted as a note, its STE codes are its rule
         if decision not in COUNTED:
             out["other"].append(row.line)
             continue

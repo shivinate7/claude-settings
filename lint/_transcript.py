@@ -282,3 +282,64 @@ def paragraph_blocks(text):
 
 def format_finding(f):
     return "line %s: %s %s" % (f.get("line"), f.get("code"), safe_finding_text(f.get("message")))
+
+
+# ---------------------------------------------------------------- guard.log lines from the gates
+#
+# One home for the STE gate's and md_sweep's guard.log line. The line goes through
+# hooks/guard_core.py `record`, so its columns match every other guard line. The matched field is
+# the file's basename and a count: never a path, never file text. A log failure, a missing
+# guard_core, or a crash here never changes a gate's output or exit code
+# (decisions/gate-hooks-fail-closed.md): every step is inside a try, and a failed import turns
+# logging off.
+GUARD_LOG_RULE_MAX = 40
+GUARD_LOG_MATCHED_MAX = 80
+# Never in a log field: C0 and C1 controls, line and paragraph separators, bidi marks, overrides and
+# isolates, and a lone surrogate (it cannot be encoded, so one would lose the line and leave an
+# empty file behind). guard_core.session_log_field cleans the same way but keeps bidi marks and
+# cuts at 64, so it is not reused. Code points, so no hostile character sits in this source.
+_GUARD_LOG_NAME_BAD = re.compile("[" + "".join(
+    chr(lo) + "-" + chr(hi) for lo, hi in (
+        (0x00, 0x1F), (0x7F, 0x9F), (0x61C, 0x61C), (0x200E, 0x200F), (0x2028, 0x2029),
+        (0x202A, 0x202E), (0x2066, 0x2069), (0xD800, 0xDFFF))) + "]")
+
+
+def guard_logger(hook):
+    """Return log(tool, decision, rule, path, detail) for one hook call.
+
+    `rule` is a string, or the raw list of finding codes. The list is turned into the sorted
+    unique codes here, inside the try, each one through str(), so an odd code (an int, a list)
+    can never raise out of the gate path.
+
+    matched is `<basename> <detail>`, such as `notes.md fixed=2`. The basename is cleaned of
+    hostile characters, and the field is at most 80 characters: a long name is shortened from
+    its head and the detail survives. The
+    first call loads guard_core from the hooks/ folder beside lint/ and names the hook's session
+    once. A call that cannot log does nothing.
+    """
+    state = {}
+
+    def log(tool, decision, rule, path, detail):
+        try:
+            if "core" not in state:
+                state["core"] = None
+                import importlib.util
+                source = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks",
+                                      "guard_core.py")
+                spec = importlib.util.spec_from_file_location("guard_core", source)
+                core = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(core)
+                core.set_log_session(hook.get("session_id"))
+                state["core"] = core
+            core = state["core"]
+            if core is not None:
+                if not isinstance(rule, str):
+                    rule = ",".join(sorted({str(code or "STE") for code in rule})) or "STE-wording"
+                name = _GUARD_LOG_NAME_BAD.sub("", os.path.basename(path)).strip() or "-"
+                matched = (core.log_path(name, GUARD_LOG_MATCHED_MAX - 1 - len(detail)) + " "
+                           + detail)
+                core.record(tool, decision, core.log_cut(rule, GUARD_LOG_RULE_MAX), matched)
+        except Exception:
+            pass
+
+    return log
