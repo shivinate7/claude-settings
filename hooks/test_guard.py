@@ -82,6 +82,7 @@ FAMILIES = {
     "simulator": "the simulator boot and hold rules",
     "rm-var": "every case named rm-var, wherever it sits",
     "session-log": "the session id column of guard.log",
+    "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -3798,6 +3799,124 @@ sh("waiter: a loop under a comment holding an apostrophe, MEASURED wrongly allow
    "# the merge driver's shape\nwhile true; do sleep 5; done", "deny", "waiter")
 sh("waiter: a `#` inside a word is not a comment, so the loop after it still denies",
    "echo fix#3; while true; do sleep 5; done", "deny", "waiter")
+
+
+# =========================================================================== 2c-bis. the WSL launch allow list
+#
+# Owner ruling 2026-10-13 15:20: an agent may run a fixed list of Linux test commands through WSL.
+# Allowed: `wsl -e` or `wsl --exec` with a test runner and test paths, from any role. Refused: every
+# other WSL form. A refusal's reason names WSL_RULE. The allow cases pass on the code before the
+# rule, because the guard allows every WSL form today (no WSL token in hooks/guard*.py). They pin
+# the allowed forms so the rule cannot narrow them. The deny cases are the red proof.
+FAMILY = "wsl"
+#
+WSL_RULE = "wsl-allow-list"
+SUBAGENT_ID = "a64a7f84210a8721d"
+
+sh("wsl: a node test file under mods, main session",
+   "wsl -e node --test mods/plain-diff/plain-diff.test.mjs", "allow", cwd=NOGIT)
+sh("wsl: two node test paths in one call",
+   "wsl -e node --test mods/plain-diff/plain-diff.test.mjs mods/session-board/session-board.test.mjs",
+   "allow", cwd=NOGIT)
+sh("wsl: a node test file at a repo path",
+   "wsl -e node --test testing/skip-locally-fail-in-ci.test.mjs", "allow", cwd=NOGIT)
+sh("wsl: a pwsh test file at the repo root",
+   "wsl -e pwsh -NoProfile -File install.test.ps1", "allow", cwd=NOGIT)
+sh("wsl: a python test file under hooks",
+   "wsl -e python3 hooks/test_guard.py", "allow", cwd=NOGIT)
+sh("wsl: --exec in place of -e",
+   "wsl --exec node --test mods/plain-diff/plain-diff.test.mjs", "allow", cwd=NOGIT)
+sh("wsl: wrapped by verdict, node",
+   "python bin/verdict wsl -e node --test mods/plain-diff/plain-diff.test.mjs", "allow", cwd=NOGIT)
+sh("wsl: wrapped by verdict, python",
+   "python bin/verdict wsl -e python3 hooks/test_guard.py", "allow", cwd=NOGIT)
+
+# The same allowed call from each role: "allowed (any role)".
+sh("wsl: an allowed test call from a builder subagent",
+   "wsl -e node --test mods/plain-diff/plain-diff.test.mjs", "allow", cwd=NOGIT,
+   agent_id=SUBAGENT_ID, agent_type="builder")
+sh("wsl: an allowed test call from a test-author subagent",
+   "wsl -e node --test mods/plain-diff/plain-diff.test.mjs", "allow", cwd=NOGIT,
+   agent_id=SUBAGENT_ID, agent_type="test-author")
+sh("wsl: an allowed test call from a record-writer subagent",
+   "wsl -e node --test mods/plain-diff/plain-diff.test.mjs", "allow", cwd=NOGIT,
+   agent_id=SUBAGENT_ID, agent_type="record-writer")
+sh("wsl: an allowed test call from an Explore subagent",
+   "wsl -e node --test mods/plain-diff/plain-diff.test.mjs", "allow", cwd=NOGIT,
+   agent_id=SUBAGENT_ID, agent_type="Explore")
+sh("wsl: an allowed test call from a reviewer subagent",
+   "wsl -e node --test mods/plain-diff/plain-diff.test.mjs", "allow", cwd=NOGIT,
+   agent_id=SUBAGENT_ID, agent_type="reviewer")
+
+# Quoted and commented text runs nothing, and a comment hides nothing that follows it.
+sh("wsl: a refused form in single quotes runs nothing",
+   "echo 'wsl --shutdown'", "allow", cwd=NOGIT)
+sh("wsl: a refused form inside a multi-line double-quoted string runs nothing",
+   "echo \"first line\nwsl --shutdown\"", "allow", cwd=NOGIT)
+sh("wsl: a comment after an allowed call",
+   "wsl -e node --test mods/plain-diff/plain-diff.test.mjs # ; x", "allow", cwd=NOGIT)
+sh("wsl: grep for the word, a false alarm",
+   "grep -n wsl hooks/guard.py", "allow", cwd=NOGIT)
+
+# The refused forms. Each names WSL_RULE.
+sh("wsl: no -e, so the command goes through a shell",
+   "wsl node --test mods/plain-diff/plain-diff.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: bash through -e", "wsl -e bash -c ls", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: sh through -e with -c", "wsl -e sh -c ls", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: sh through -e with a script", "wsl -e sh x.sh", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: root user with -u",
+   "wsl -u root -e node --test mods/plain-diff/plain-diff.test.mjs", "deny", rule=WSL_RULE,
+   cwd=NOGIT)
+sh("wsl: the system distro flag",
+   "wsl --system -e node --test mods/plain-diff/plain-diff.test.mjs", "deny", rule=WSL_RULE,
+   cwd=NOGIT)
+sh("wsl: a login shell type",
+   "wsl --shell-type login -e node --test mods/plain-diff/plain-diff.test.mjs", "deny",
+   rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: another distro with -d",
+   "wsl -d Other -e node --test mods/plain-diff/plain-diff.test.mjs", "deny", rule=WSL_RULE,
+   cwd=NOGIT)
+sh("wsl: a working directory with --cd",
+   "wsl --cd /x -e node --test mods/plain-diff/plain-diff.test.mjs", "deny", rule=WSL_RULE,
+   cwd=NOGIT)
+sh("wsl: the import management verb",
+   "wsl --import Other C:/wsl/other C:/x.tar", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: the unregister management verb", "wsl --unregister Other", "deny", rule=WSL_RULE,
+   cwd=NOGIT)
+sh("wsl: the mount management verb", "wsl --mount C:/x.vhdx", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: the shutdown management verb", "wsl --shutdown", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: the install management verb", "wsl --install", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: the update management verb", "wsl --update", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a node script that is not a test",
+   "wsl -e node script.js", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a python setup script that is not a test",
+   "wsl -e python3 setup.py", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a pwsh script that is not a test",
+   "wsl -e pwsh -NoProfile -File scripts/x.ps1", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a test file with a non-test file after it",
+   "wsl -e node --test mods/plain-diff/plain-diff.test.mjs script.js", "deny", rule=WSL_RULE,
+   cwd=NOGIT)
+sh("wsl: a pipe after the wsl part",
+   "wsl -e node --test mods/plain-diff/plain-diff.test.mjs | tail -3", "deny", rule=WSL_RULE,
+   cwd=NOGIT)
+sh("wsl: a redirect after the wsl part",
+   "wsl -e node --test mods/plain-diff/plain-diff.test.mjs > out.txt", "deny", rule=WSL_RULE,
+   cwd=NOGIT)
+sh("wsl: a semicolon after the wsl part",
+   "wsl -e node --test mods/plain-diff/plain-diff.test.mjs; echo hi", "deny", rule=WSL_RULE,
+   cwd=NOGIT)
+sh("wsl: a newline after the wsl part starts a second command",
+   "wsl -e node --test mods/plain-diff/plain-diff.test.mjs\necho hi", "deny", rule=WSL_RULE,
+   cwd=NOGIT)
+sh("wsl: a WSLENV prefix on the wsl call",
+   "WSLENV=PATH/u wsl -e node --test mods/plain-diff/plain-diff.test.mjs", "deny",
+   rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a refused form wrapped by verdict",
+   "python bin/verdict wsl -e bash -c ls", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a lone apostrophe in text does not hide a refused verb",
+   "echo don't; wsl --shutdown", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a comment opener in a string does not hide a refused verb",
+   "echo \"# note\"; wsl --shutdown", "deny", rule=WSL_RULE, cwd=NOGIT)
 
 
 # =========================================================================== 2d. the silent write
