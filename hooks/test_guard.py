@@ -292,6 +292,8 @@ GHBLANK = os.path.join(ROOT, "ghblank")    # green checks, a base that reads as 
 CTXREPO = os.path.join(ROOT, "ctxrepo")      # a checkout on main with one merged branch, `done`
 MSG_BAD = os.path.join(ROOT, "msg_bad.txt")  # a message file that cites a record by path
 MSG_OK = os.path.join(ROOT, "msg_ok.txt")    # a message file that cites a record by id
+MSG_LANE = os.path.join(ROOT, "msg_lane.txt")  # a message file that names a lane by session number
+MSG_FENCE = os.path.join(ROOT, "msg_fence.txt")  # a message file that names a lane only in a fence
 PATHSPEC_LIST = os.path.join(ROOT, "pathspec_list.txt")  # a pathspec file naming f.txt, for --pathspec-from-file
 MERGECFG = os.path.join(ROOT, "mergecfg")  # a config directory whose rules file points at this repo
 GHNONE = os.path.join(ROOT, "ghnone")      # an empty directory, so the tool is missing
@@ -839,6 +841,8 @@ def build_fixtures():
     make_fake_gh(GHMAIN, "main")
     write(MSG_BAD, "title\n\ncites decisions/one-shared-record-stamp.md\n")
     write(MSG_OK, "title\n\ncites D12, short titles for records\n")
+    write(MSG_LANE, "title\n\nLane N20 lands the guard.\n")
+    write(MSG_FENCE, "title\n\n```\nLane N20 lands the guard.\n```\n")
     write(PATHSPEC_LIST, "f.txt\n")
     make_fake_gh(GHPEND, "main", checks=[{"name": "gates", "bucket": "pending", "link": ""}])
     make_fake_gh(GHRED, "main", checks=[{"name": "gates", "bucket": "fail", "link": ""}])
@@ -4808,6 +4812,72 @@ sh("cite-by-id: Drops-lines token with a semicolon-joined second path is denied"
 sh("cite-by-id: Drops-lines key with a space before the colon is allowed",
    VCS + ' commit -m "title\n\nbody\n\nDrops-lines : deferred/a.md -- replaced"',
    "allow", cwd=NOGIT, config=MERGECFG)
+
+# ---- lane-by-slug (owner ruling 2026-10-13). A commit message or PR body names a lane by its
+# session number, such as `N20` or `(N16)`. That number is handed out in one chat and means nothing
+# outside it, so a lane is named by its branch slug. The scan reads the same message text as
+# cite-by-id. A number inside a backtick code span or a fenced block is quoted text and stays
+# allowed. `NaN`, `N/A`, `IPv4N1`, `N100000` and `N+1` are no lane number. Only a commit message
+# and a PR body are read. A tag, a note, a log search and a PR list are other acts.
+sh("lane-by-slug: the refusal names a branch slug as the remedy",
+   VCS + ' commit -m "fix flaky test (N16)"', "deny", "lane-by-slug", carries="branch slug",
+   cwd=NOGIT, config=MERGECFG)
+for _name, _command in (
+    ("a body line naming a lane", VCS + ' commit -m "title" -m "Lane N20 lands the guard."'),
+    ("N3b in prose", VCS + ' commit -m "title\n\nsee N3b for the rest"'),
+    ("the long --message=", VCS + ' commit --message="Lane N20 lands"'),
+    ("an attached -m value", VCS + ' commit -m"Lane N20 lands"'),
+    ("a -am cluster", VCS + ' commit -am "fix (N16)"'),
+    ("a single-quoted message", VCS + " commit -m 'Lane N20 lands'"),
+    ("a file named by -F", VCS + " commit -F " + slash(MSG_LANE)),
+    ("a heredoc fed to -F -", VCS + " commit -F - <<'EOF'\ntitle\n\nLane N20 lands\nEOF"),
+    ("a PR body", 'gh pr create --draft --title t --body "lands N16"'),
+    ("a PR body file", "gh pr edit 3 --body-file " + slash(MSG_LANE)),
+    ("a PR body behind a cd", "cd x; gh pr edit 3 -b 'lands N16'"),
+    ("a lone backtick before the number",
+     VCS + " commit -m 'title\n\nthe ` mark, then Lane N16 lands'"),
+    ("a closed span then a bare number", VCS + " commit -m 'title\n\n`x` then N16 lands'"),
+    ("an apostrophe word beside a number", VCS + ' commit -m "title\n\nDon\'t land N20"'),
+    ("a hash opener inside the message", VCS + ' commit -m "title\n\n# note: Lane N16 lands"'),
+    ("a slash-slash opener inside the message", VCS + ' commit -m "title\n\nsee // Lane N16 lands"'),
+    ("a block opener inside the message", VCS + ' commit -m "title\n\n/* Lane N16 lands */"'),
+    ("a number after a closed fence",
+     VCS + " commit -F - <<'EOF'\ntitle\n\n```\nx = 1\n```\nLane N16 lands\nEOF"),
+):
+    sh("lane-by-slug: %s denies" % _name, _command, "deny", "lane-by-slug", cwd=NOGIT,
+       config=MERGECFG)
+sh("lane-by-slug: a PowerShell commit denies too", VCS + ' commit -m "Lane N16 lands"', "deny",
+   "lane-by-slug", tool="PowerShell", cwd=NOGIT, config=MERGECFG)
+sh("lane-by-slug: a PowerShell -F file at a native path denies", VCS + " commit -F " + MSG_LANE,
+   "deny", "lane-by-slug", tool="PowerShell", cwd=NOGIT, config=MERGECFG)
+for _name, _command in (
+    ("a number in a code span", VCS + " commit -m 'title\n\nsee `N16` for the lane'"),
+    ("a number in a fenced block",
+     VCS + " commit -F - <<'EOF'\ntitle\n\n```\nLane N20 lands\n```\nEOF"),
+    ("a table cell in a fenced block",
+     VCS + " commit -F - <<'EOF'\ntitle\n\n```\n| lane | state |\n| N1 | done |\n```\nEOF"),
+    ("a comment opener inside a fence",
+     VCS + " commit -F - <<'EOF'\ntitle\n\n```\n# Lane N16 lands\n```\nEOF"),
+    ("a message file with a fenced number", VCS + " commit -F " + slash(MSG_FENCE)),
+    ("a PR body with a code span", "gh pr create --draft --title t --body 'see `N16` lands'"),
+    ("NaN", VCS + ' commit -m "title\n\nNaN guard for the sum"'),
+    ("N/A", VCS + ' commit -m "title\n\nowner: N/A"'),
+    ("IPv4N1, which has no word boundary", VCS + ' commit -m "title\n\nbind the IPv4N1 address"'),
+    ("N100000", VCS + ' commit -m "title\n\nbatch of N100000 rows"'),
+    ("N+1, a redundancy term", VCS + ' commit -m "title\n\nadd N+1 cooling"'),
+    ("a commit with no number", VCS + ' commit -m "fix guard parsing"'),
+):
+    sh("lane-by-slug: %s is allowed" % _name, _command, "allow", cwd=NOGIT, config=MERGECFG)
+for _name, _command in (
+    ("an echo", 'echo "lane N16 lands"'),
+    ("a grep", "grep -rn 'N16' hooks"),
+    ("a log search", VCS + " log --grep=N16 --oneline"),
+    ("a git note", VCS + ' notes add -m "Lane N16 lands"'),
+    ("a tag message", VCS + ' tag -a lane-v1 -m "Lane N16 cut"'),
+    ("a PR list search", 'gh pr list --search "N16"'),
+):
+    sh("lane-by-slug: %s is no message" % _name, _command, "allow", silent=True, cwd=NOGIT,
+       config=MERGECFG)
 
 
 # =========================================================================== 6. frozen paths
