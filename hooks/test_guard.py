@@ -6968,7 +6968,11 @@ def merge_tool_missing_case():
     os.makedirs(os.path.join(folder, "cfg"), exist_ok=True)
     copy = os.path.join(folder, "hooks", "guard.py")
     os.makedirs(os.path.dirname(copy), exist_ok=True)
-    shutil.copy(GUARD, copy)
+    # The whole guard family beside GUARD (guard.py and its guard_* siblings), so the copy finds
+    # guard_core.py. mutate_shared.guard_tree copies from the real hooks/, not from GUARD's folder.
+    for name in os.listdir(os.path.dirname(GUARD)):
+        if name.startswith("guard") and name.endswith(".py"):
+            shutil.copy(os.path.join(os.path.dirname(GUARD), name), os.path.dirname(copy))
     env = dict(os.environ)
     env["CLAUDE_CONFIG_DIR"] = os.path.join(folder, "cfg")
     env["PATH"] = GHMAIN + os.pathsep + PY_PATH
