@@ -22,14 +22,21 @@ The mechanism:
 - Unsafe or ambiguous patterns stay unfixed. An unfixed error denies the write.
 - A fix never changes the line count.
 - The gate reads stdin as UTF-8 bytes.
+- Each outcome writes one guard.log line through `guard_logger`: `fixed`, `deny`, or `noted`
+  with rule STE-fallback (fixer timeout, crash or oversize) or STE-unchecked (lint could not
+  run). md_sweep writes one Stop `deny` line per blocked run. The line format is in
+  guard-log-read-weekly, the record of what the reader counts. A write with no fix, deny,
+  fallback or unchecked outcome writes no line.
 
 Files: `lint/ste_gate.py` (`autofix`, `run_autofix`, `rewrite_output`) and `lint/ste_lint.py`
-(`apply_fixes`).
+(`apply_fixes`). Logging: `lint/_transcript.py` (`guard_logger`).
 
 ## Why
 
 A deny sends the writer back for another write. The owner wants the gate to fix, not nag.
-How often a deny led to a retry is unmeasured.
+How often a deny led to a retry is still unmeasured. The log counts denies, fixes and fallbacks per
+session, with `--by-session`. It does not pair a deny with the retry that followed. Each line holds
+the time, the session and the basename, so a count can be made by hand.
 
 The fixer changes words, not line counts. A word swap is the only kind of change it makes.
 
@@ -68,3 +75,6 @@ Each hole ships under the three-round review cap.
 - `lint/test_ste_autofix.py` runs on the Linux job only. The macOS and Windows runner cost is
   unmeasured.
 - macOS is unverified for the child-process route.
+
+Kind: process
+Home: lint/ste_gate.py

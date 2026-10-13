@@ -6,11 +6,16 @@ gate as a subprocess, the way Claude Code's Stop hook does. Run with:
 
     python lint/test_gates.py -v
 """
+import glob
 import json
 import os
+import re
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 
@@ -25,6 +30,27 @@ import ste_lint  # noqa: E402
 from _transcript import format_finding, landed_work  # noqa: E402
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
+
+# Isolation. Every spawned gate and sweep inherits this process's environment (env=None, or a copy
+# of os.environ). Point CLAUDE_CONFIG_DIR at a temporary folder for the whole module, so no test
+# appends to the user's guard.log. tearDownModule restores the value it found. A test that sets its
+# own folder (gl_env, the config report) still wins. Also imported by lint/test_ste_autofix.py.
+_ISOLATION = {}
+
+
+def setUpModule():
+    _ISOLATION["dir"] = tempfile.TemporaryDirectory()
+    _ISOLATION["prev"] = os.environ.get("CLAUDE_CONFIG_DIR")  # None means unset
+    os.environ["CLAUDE_CONFIG_DIR"] = _ISOLATION["dir"].name
+
+
+def tearDownModule():
+    prev = _ISOLATION.pop("prev")
+    if prev is None:
+        os.environ.pop("CLAUDE_CONFIG_DIR", None)
+    else:
+        os.environ["CLAUDE_CONFIG_DIR"] = prev
+    _ISOLATION.pop("dir").cleanup()
 
 
 def human(text):
@@ -2390,6 +2416,815 @@ class TurnEndEarlyExitTests(unittest.TestCase):
         path = write_transcript(records, self.tmp.name)
         run = run_config_report({"hook_event_name": "Stop", "transcript_path": path, "cwd": self.repo})
         self.assertIn("Merges into main", json.loads(run.stdout)["systemMessage"])
+
+
+# ---------------------------------------------------------------- guard.log lines from the gates
+#
+# The STE gate and md_sweep append one guard.log line per outcome, through guard_core.record, so
+# the columns match every other guard line. The matched field is the file's basename and a count:
+# never a path, never file text. Decisions: `fixed` (a rewrite landed), `deny` (refused, with the
+# remaining codes), and `noted` with rule STE-fallback (a fixer crash, timeout or oversize). md_sweep
+# writes `deny` with tool `Stop`. Pinned call site: guard_core.set_log_session(the hook's session_id)
+# once, then guard_core.record(...) once per outcome. Ruling: ste-gate-fixes-not-nags (the STE gate
+# fixes what it can and denies the rest).
+
+GL_SESSION = "9f2c4e1a-7b3d-4c8e-9a10-5d6e7f8a9b0c"
+GL_ENV_SESSION = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+GL_RULE_CAP = 40  # pinned: the rule field holds at most this many characters
+GL_LONG = ("The operators on each shift must record every valve position, every pressure reading, "
+           "every alarm, and every handover note in the shared log before they leave the site today.")
+GL_FIXED_DOC = "We don't stop the pump, e.g. at night.\n"  # fixed: STE007 x1, STE008 x1
+GL_DENY_DOC = "It's not been tested.\n"  # denied: STE008 stays
+GL_CLEAN_DOC = "This is a short clean sentence.\n"
+GL_MIXED_DOC = GL_FIXED_DOC + "\n" + GL_LONG + "\n"  # fixed, then STE001 stays: a deny
+GL_UI_DOC = "<button>Save all of the changes you made today</button>\n"  # UI copy: STE020
+GL_SIX_CODE_DOC = (  # six findings after the fix: STE003, STE008, STE009, STE013, STE015, STE017
+    "<!-- ste: procedural -->\n\nWe set up the valve.\n\n"
+    "The team made a determination of the seals.\n\nIt's not been tested.\n\n"
+    "This is not uncommon.\n\nStop the valve if the gauge reads high.\n\n"
+    "We ensure the seals are sound.\n")
+GL_STRIPPED = ("STE_FIXER_LIMIT_S", "STE_FIXER_MAX_BYTES", "CLAUDE_CODE_SESSION_ID",
+               "MD_SWEEP_DISABLE", "MD_SWEEP_EXCLUDE")
+# Characters a guard.log field must never hold: C0 and C1 controls, line and paragraph separators,
+# the bidi overrides and isolates, and a lone surrogate.
+GL_HOSTILE = re.compile("[\x00-\x1f\x7f-\x9f  ‪-‮⁦-⁩\ud800-\udfff]")
+# Appended to a copy of guard_core.py. Each record and set_log_session call is written to MARKER.
+GL_PROBE = '''
+
+_probe_record, _probe_set = record, set_log_session
+
+
+def record(tool, decision, rule, matched):
+    with open(MARKER, "a", encoding="utf-8") as handle:
+        handle.write("record|%s|%s|%s|%s\\n" % (tool, decision, rule, matched))
+    _probe_record(tool, decision, rule, matched)
+
+
+def set_log_session(value):
+    with open(MARKER, "a", encoding="utf-8") as handle:
+        handle.write("session|%r\\n" % (value,))
+    _probe_set(value)
+'''
+
+
+def gl_env(cfg, extra=None):
+    """One gate run's environment. CLAUDE_CONFIG_DIR is the test's own folder, never ~/.claude."""
+    env = dict(os.environ)
+    for key in GL_STRIPPED:
+        env.pop(key, None)
+    env["CLAUDE_CONFIG_DIR"] = cfg
+    env.update(extra or {})
+    return env
+
+
+def gl_text(cfg):
+    """guard.log in cfg as text (universal newlines), or None when there is no file."""
+    path = os.path.join(cfg, "guard.log")
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as handle:
+        return handle.read()
+
+
+def gl_lines(cfg):
+    """The lines of guard.log in cfg, or None when there is no file."""
+    text = gl_text(cfg)
+    if text is None:
+        return None
+    rows = text.split("\n")
+    if rows[-1] == "":
+        rows.pop()
+    return rows
+
+
+def gl_fields(row):
+    """The six tab fields of one guard.log line. Any other count is a failure."""
+    fields = row.split("\t")
+    if len(fields) != 6:
+        raise AssertionError("expected six tab fields, found %d: %r" % (len(fields), row))
+    return fields
+
+
+def gl_out(run):
+    return json.loads(run.stdout) if run.stdout.strip() else {}
+
+
+def gl_decision(run):
+    return gl_out(run).get("hookSpecificOutput", {}).get("permissionDecision")
+
+
+def gl_gate(cfg, tool, tool_input, session=GL_SESSION, extra=None, gate=STE_GATE):
+    """Run the STE gate once on a PreToolUse call. session=None leaves the session_id key out."""
+    hook = {"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": tool_input}
+    if session is not None:
+        hook["session_id"] = session
+    return run_gate(gate, hook, env=gl_env(cfg, extra))
+
+
+def gl_blocked_cfg(tmp):
+    """A CLAUDE_CONFIG_DIR that cannot be created, because its parent is a plain file."""
+    blocker = os.path.join(tmp, "blocker")
+    with open(blocker, "w", encoding="utf-8") as handle:
+        handle.write("not a folder")
+    return os.path.join(blocker, "cfg")
+
+
+def gl_copy_tree(root, old_transcript=False):
+    """Copy lint/*.py (no tests) to <root>/lint and hooks/guard_core.py to <root>/hooks. With
+    old_transcript, the copy's _transcript.py stops before guard_logger: the module of an older
+    install, beside the new scripts. Returns the copied lint folder."""
+    lint_copy = os.path.join(root, "lint")
+    os.makedirs(lint_copy)
+    for src in glob.glob(os.path.join(HERE, "*.py")):
+        if not os.path.basename(src).startswith("test_"):
+            shutil.copy(src, lint_copy)
+    os.makedirs(os.path.join(root, "hooks"))
+    shutil.copy(os.path.join(HOOKS, "guard_core.py"), os.path.join(root, "hooks"))
+    if old_transcript:
+        path = os.path.join(lint_copy, "_transcript.py")
+        with open(path, encoding="utf-8") as handle:
+            old = handle.read().split("\ndef guard_logger(")[0]
+        if "def guard_logger" in old:
+            raise AssertionError("the cut did not remove guard_logger")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(old)
+    return lint_copy
+
+
+def gl_set_linter(lint_copy, entry):
+    """Make the linter in `lint_copy` run `entry` where its main() runs: a fresh copy of lint/ste_lint.py
+    with that entry. Calling it again swaps the entry and leaves the folder, and so every path a gate
+    prints, the same."""
+    with open(os.path.join(HERE, "ste_lint.py"), encoding="utf-8") as handle:
+        text = handle.read()
+    entry_main = 'if __name__ == "__main__":\n    sys.exit(main())'
+    if text.count(entry_main) != 1:
+        raise AssertionError("the linter entry point moved")
+    with open(os.path.join(lint_copy, "ste_lint.py"), "w", encoding="utf-8") as handle:
+        handle.write(text.replace(entry_main, 'if __name__ == "__main__":\n    ' + entry))
+
+
+def gl_linter_tree(root, entry):
+    """A gate tree whose linter, run as a script, does `entry` where its main() runs, so the gate
+    gets no findings from the child: a crash, or silence. Returns the copied ste_gate.py."""
+    lint_copy = gl_copy_tree(root)
+    gl_set_linter(lint_copy, entry)
+    return os.path.join(lint_copy, "ste_gate.py")
+
+
+def gl_print_findings(codes):
+    """A linter entry point (one line, for gl_linter_tree) that prints one error finding per code,
+    on its own line. The path is the file the linter was given, so a sweep finds its own findings."""
+    findings = [{"code": code, "severity": "error", "line": n, "col": 1,
+                 "message": "message %d" % n} for n, code in enumerate(codes, 1)]
+    return "print(json.dumps({'findings': [dict(f, path=sys.argv[-1]) for f in %r]}))" % (findings,)
+
+
+def gl_sleepy_tree(root, seconds):
+    """A gate tree whose guard_core.record sleeps first, so a log write takes `seconds`. Returns the
+    copied lint folder."""
+    lint_copy = gl_copy_tree(root)
+    with open(os.path.join(root, "hooks", "guard_core.py"), "a", encoding="utf-8") as handle:
+        handle.write("\n\nimport time as _slow_time\n_slow_record = record\n\n"
+                     "def record(tool, decision, rule, matched):\n"
+                     "    _slow_time.sleep(%r)\n"
+                     "    _slow_record(tool, decision, rule, matched)\n" % (seconds,))
+    return lint_copy
+
+
+def gl_timed(script, hook, env):
+    """Run a hook script. Return (seconds until its first stdout line, rc, all stdout, stderr)."""
+    proc = subprocess.Popen([sys.executable, script], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    start = time.monotonic()
+    proc.stdin.write(json.dumps(hook).encode("utf-8"))
+    proc.stdin.close()
+    first = proc.stdout.readline()
+    seconds = time.monotonic() - start
+    rest = proc.stdout.read()
+    err = proc.stderr.read()
+    proc.stdout.close()
+    proc.stderr.close()
+    proc.wait()
+    return seconds, proc.returncode, (first + rest).decode("utf-8"), err.decode("utf-8", "replace")
+
+
+def gl_guard_core():
+    """guard_core, imported the way the gates import it: from hooks/ beside lint/."""
+    if HOOKS not in sys.path:
+        sys.path.insert(0, HOOKS)
+    import guard_core
+    return guard_core
+
+
+class SteGateLogTests(unittest.TestCase):
+    """The STE gate's guard.log line, one per outcome. Each test names the pin it holds."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.cfg = os.path.join(self.tmp.name, "cfg")  # CLAUDE_CONFIG_DIR: a test folder
+        os.makedirs(self.cfg)
+        self.docs = os.path.join(self.tmp.name, "privdir-4481")  # the folder of the written file
+        os.makedirs(self.docs)
+
+    def _path(self, name="notes.md"):
+        return os.path.join(self.docs, name)
+
+    def _disk(self, name, text):
+        with open(self._path(name), "w", encoding="utf-8") as handle:
+            handle.write(text)
+        return self._path(name)
+
+    def _rows(self, what):
+        rows = gl_lines(self.cfg)
+        self.assertIsNotNone(rows, "no guard.log line for %s" % what)
+        return rows
+
+    def _gate_copy(self, name, with_guard_core):
+        """A copy of lint/*.py (no tests) under <tmp>/<name>/lint, beside <tmp>/<name>/hooks when
+        `with_guard_core` is true, holding the real guard_core.py. Returns the copied ste_gate.py."""
+        root = os.path.join(self.tmp.name, name)
+        lint_copy = os.path.join(root, "lint")
+        os.makedirs(lint_copy)
+        for src in glob.glob(os.path.join(HERE, "*.py")):
+            if not os.path.basename(src).startswith("test_"):
+                shutil.copy(src, lint_copy)
+        if with_guard_core:
+            os.makedirs(os.path.join(root, "hooks"))
+            shutil.copy(os.path.join(HOOKS, "guard_core.py"), os.path.join(root, "hooks"))
+        return os.path.join(lint_copy, "ste_gate.py")
+
+    def _crash_gate(self):
+        """A gate copy whose fixer raises. The plain lint in the copy is unchanged."""
+        gate = self._gate_copy("crash", True)
+        with open(os.path.join(os.path.dirname(gate), "ste_lint.py"), "a", encoding="utf-8") as handle:
+            handle.write("\n\ndef apply_fixes(text):\n    raise RuntimeError('fixer crash')\n")
+        return gate
+
+    def _assert_fallback(self, reason):
+        """A fallback over a denied write: one noted line for the fallback, one deny for the codes."""
+        rows = self._rows("the %s fallback" % reason)
+        by = {gl_fields(row)[2]: gl_fields(row) for row in rows}
+        self.assertEqual(sorted(by), ["deny", "noted"], rows)
+        self.assertEqual(by["noted"][1:5],
+                         ["Write", "noted", "STE-fallback", "notes.md fallback=%s" % reason])
+        self.assertEqual(by["deny"][1:5], ["Write", "deny", "STE007,STE008", "notes.md denied=2"])
+        self.assertEqual({fields[5] for fields in by.values()}, {GL_SESSION})
+
+    # (1) a fixed write: one `fixed` line. The rule holds the fixed codes and matched the basename.
+    def test_01_fixed_write_appends_one_line_with_codes_and_counts(self):
+        run = gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_FIXED_DOC})
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("updatedInput", gl_out(run).get("hookSpecificOutput", {}))  # precondition
+        rows = self._rows("a fixed write")
+        self.assertEqual(len(rows), 1)
+        when, *rest = gl_fields(rows[0])
+        datetime.fromisoformat(when)
+        self.assertEqual(rest, ["Write", "fixed", "STE007,STE008", "notes.md fixed=2", GL_SESSION])
+
+    # (1) Edit and MultiEdit log their own tool name. The codes and count match the rewrite note.
+    def test_02_fixed_edit_and_multiedit_log_their_tool_name_and_note_codes(self):
+        self._disk("notes.md", "Intro.\n")
+        calls = [
+            ("Edit", {"file_path": self._path(), "old_string": "Intro.\n", "new_string": GL_FIXED_DOC}),
+            ("MultiEdit", {"file_path": self._path(),
+                           "edits": [{"old_string": "Intro.\n", "new_string": GL_FIXED_DOC}]}),
+        ]
+        for count, (tool, tool_input) in enumerate(calls, 1):
+            run = gl_gate(self.cfg, tool, tool_input)
+            pairs = re.findall(r"(STE\d{3}) x(\d+)", gl_out(run).get("systemMessage", ""))
+            self.assertTrue(pairs, "precondition: %s was not fixed" % tool)
+            rows = self._rows("a fixed %s" % tool)
+            self.assertEqual(len(rows), count)
+            want = [tool, "fixed", ",".join(sorted({code for code, _ in pairs})),
+                    "notes.md fixed=%d" % sum(int(n) for _, n in pairs), GL_SESSION]
+            self.assertEqual(gl_fields(rows[-1])[1:], want)
+
+    # (2) a denied write: one `deny` line, the remaining codes, and the count of findings.
+    def test_03_deny_appends_the_remaining_codes_and_the_denied_count(self):
+        run = gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_DENY_DOC})
+        self.assertEqual(gl_decision(run), "deny")  # precondition
+        rows = self._rows("a denied write")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(gl_fields(rows[0])[1:], ["Write", "deny", "STE008", "notes.md denied=1",
+                                                  GL_SESSION])
+
+    # (2) a fix never lands on a deny: the mixed write logs only the code that remains.
+    def test_04_mixed_write_logs_one_deny_with_only_the_remaining_code(self):
+        run = gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_MIXED_DOC})
+        self.assertEqual(gl_decision(run), "deny")  # precondition
+        rows = self._rows("a denied mixed write")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(gl_fields(rows[0])[1:], ["Write", "deny", "STE001", "notes.md denied=1",
+                                                  GL_SESSION])
+
+    # (2) the rule field is capped, and the count still counts every finding, not the five shown.
+    def test_05_six_code_deny_keeps_the_rule_under_the_cap_and_counts_every_finding(self):
+        run = gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_SIX_CODE_DOC})
+        self.assertEqual(gl_decision(run), "deny")  # precondition
+        rows = self._rows("a six-code deny")
+        self.assertEqual(len(rows), 1)
+        _, tool, decision, rule, matched, session = gl_fields(rows[0])
+        self.assertEqual((tool, decision), ("Write", "deny"))
+        self.assertLessEqual(len(rule), GL_RULE_CAP, rule)
+        self.assertTrue(rule.startswith("STE003,STE008,STE009"), rule)
+        self.assertEqual(matched, "notes.md denied=6")
+        self.assertEqual(session, GL_SESSION)
+
+    # (3) a clean write adds no line. The fixed write first proves the line would be seen.
+    def test_06_clean_write_adds_no_line_after_a_fixed_write(self):
+        gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_FIXED_DOC})
+        before = len(self._rows("the fixed write"))
+        clean = gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_CLEAN_DOC})
+        self.assertEqual(clean.stdout.strip(), "")
+        self.assertEqual(len(gl_lines(self.cfg)), before, "a clean write added a guard.log line")
+
+    # (4) a timeout: one noted STE-fallback line, the deny from plain lint, and the same output
+    # as a run whose log cannot be written.
+    def test_07_timeout_fallback_logs_noted_and_keeps_the_output(self):
+        extra = {"STE_FIXER_LIMIT_S": "0.001"}
+        run = gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_FIXED_DOC},
+                      extra=extra)
+        bare = gl_gate(gl_blocked_cfg(self.tmp.name), "Write",
+                       {"file_path": self._path(), "content": GL_FIXED_DOC}, extra=extra)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(gl_decision(run), "deny")  # precondition: plain lint decides
+        self.assertEqual(run.stdout, bare.stdout)
+        self._assert_fallback("timeout")
+
+    # (4) an oversize input: the same pins as the timeout.
+    def test_08_oversize_fallback_logs_noted_and_keeps_the_output(self):
+        extra = {"STE_FIXER_MAX_BYTES": "5"}
+        run = gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_FIXED_DOC},
+                      extra=extra)
+        bare = gl_gate(gl_blocked_cfg(self.tmp.name), "Write",
+                       {"file_path": self._path(), "content": GL_FIXED_DOC}, extra=extra)
+        self.assertEqual(gl_decision(run), "deny")  # precondition: plain lint decides
+        self.assertEqual(run.stdout, bare.stdout)
+        self._assert_fallback("oversize")
+
+    # (4) a fixer crash: one noted STE-fallback line, the deny from plain lint, no traceback.
+    def test_09_crash_fallback_logs_noted_then_the_plain_deny(self):
+        run = gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_FIXED_DOC},
+                      gate=self._crash_gate())
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertNotIn("Traceback", run.stderr)
+        self.assertEqual(gl_decision(run), "deny")  # precondition
+        self._assert_fallback("crash")
+
+    # (4) a fixer crash on clean text: the write is allowed, and the fallback still counts once.
+    def test_09b_crash_on_clean_text_logs_one_noted_line(self):
+        run = gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_CLEAN_DOC},
+                      gate=self._crash_gate())
+        self.assertEqual(run.stdout.strip(), "")  # precondition: the write is allowed
+        rows = self._rows("a fallback on clean text")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(gl_fields(rows[0])[1:],
+                         ["Write", "noted", "STE-fallback", "notes.md fallback=crash", GL_SESSION])
+
+    # (4) a UI file never runs the fixer, so an oversize UI file logs no fallback. Its deny logs.
+    def test_10_ui_file_over_the_byte_limit_logs_no_fallback(self):
+        run = gl_gate(self.cfg, "Write", {"file_path": self._path("page.html"), "content": GL_UI_DOC},
+                      extra={"STE_FIXER_MAX_BYTES": "5"})
+        self.assertEqual(gl_decision(run), "deny")  # precondition: the UI copy was linted
+        rows = self._rows("the UI deny")
+        self.assertEqual([gl_fields(row)[2] for row in rows], ["deny"], "a UI file logged a fallback")
+
+    # (4) a log that cannot be written never changes the output or the exit code.
+    def test_11_unwritable_log_never_changes_output_or_exit_code(self):
+        run = gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_FIXED_DOC})
+        bare = gl_gate(gl_blocked_cfg(self.tmp.name), "Write",
+                       {"file_path": self._path(), "content": GL_FIXED_DOC})
+        self.assertEqual(bare.returncode, 0, bare.stderr)
+        self.assertNotIn("Traceback", bare.stderr)
+        self.assertEqual((run.returncode, run.stdout), (bare.returncode, bare.stdout))
+
+    # (4) a read-only log: nothing is appended, nothing is raised, the output is the fixed text.
+    def test_12_read_only_log_never_changes_output_or_exit_code(self):
+        log = os.path.join(self.cfg, "guard.log")
+        with open(log, "w", encoding="utf-8") as handle:
+            handle.write("")
+        os.chmod(log, stat.S_IREAD)
+        self.addCleanup(os.chmod, log, stat.S_IREAD | stat.S_IWRITE)  # restore before the tmp cleanup
+        run = gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_FIXED_DOC})
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertNotIn("Traceback", run.stderr)
+        self.assertIn("updatedInput", gl_out(run).get("hookSpecificOutput", {}))
+        with open(log, encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), "", "a line was appended to a read-only log")
+
+    # (4) a missing guard_core (the hooks folder is absent) keeps the output and the exit code.
+    def test_13_missing_guard_core_keeps_the_output_and_exit_code(self):
+        bare = gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_FIXED_DOC},
+                       gate=self._gate_copy("nohooks", False))
+        full = gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_FIXED_DOC})
+        self.assertEqual(bare.returncode, 0, bare.stderr)
+        self.assertNotIn("Traceback", bare.stderr)
+        self.assertEqual(bare.stdout, full.stdout)
+
+    # (10) the line holds no file text and no folder: a marker in the body and in an Edit is absent.
+    def test_14_line_holds_no_file_text_and_no_folder(self):
+        marker = "ZQXMARK-7731"
+        self._disk("edit.md", "Intro %s here.\n" % marker)
+        gl_gate(self.cfg, "Write", {"file_path": self._path(),
+                                    "content": "We don't stop the pump, e.g. %s at night.\n" % marker})
+        gl_gate(self.cfg, "Write", {"file_path": self._path("deny.md"),
+                                    "content": "It's not been tested, %s.\n" % marker})
+        gl_gate(self.cfg, "Edit", {"file_path": self._path("edit.md"),
+                                   "old_string": "Intro %s here.\n" % marker,
+                                   "new_string": "We don't stop, e.g. here.\n"})
+        rows = self._rows("the privacy writes")
+        self.assertGreaterEqual(len(rows), 2)
+        text = gl_text(self.cfg)
+        self.assertNotIn(marker, text)
+        self.assertNotIn("privdir-4481", text)
+        self.assertNotIn(self.docs, text)
+
+    # (8) the session column is the hook's session_id, never the environment, and `-` when absent.
+    def test_15_session_column_is_the_hook_id_and_never_the_environment(self):
+        core = gl_guard_core()
+        extra = {"CLAUDE_CODE_SESSION_ID": GL_ENV_SESSION}
+        gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_FIXED_DOC}, extra=extra)
+        gl_gate(self.cfg, "Write", {"file_path": self._path("deny.md"), "content": GL_DENY_DOC},
+                session=None, extra=extra)
+        rows = self._rows("two writes")
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(gl_fields(rows[0])[5], core.session_log_field(GL_SESSION))
+        self.assertEqual(gl_fields(rows[1])[5], "-")
+
+    # (8) a hostile file name (tab, newline, U+2028, non-ASCII) stays on one line; the session holds.
+    def test_16_hostile_file_name_stays_on_one_line_and_keeps_the_session(self):
+        core = gl_guard_core()
+        name = "a\tb\nc d ñé日本.md"
+        gl_gate(self.cfg, "Write", {"file_path": os.path.join(self.docs, name), "content": GL_FIXED_DOC})
+        self._rows("the hostile name")
+        self.assertEqual(len(gl_text(self.cfg).splitlines()), 1, "a file name split the log line")
+        _, _, decision, rule, matched, session = gl_fields(gl_lines(self.cfg)[0])
+        self.assertEqual((decision, rule), ("fixed", "STE007,STE008"))
+        self.assertTrue(matched.endswith(" fixed=2"), matched)
+        self.assertIn("ñé日本.md fixed=2", matched)
+        self.assertLessEqual(len(matched), core.LOG_MAX_MATCHED)
+        self.assertEqual(session, GL_SESSION)
+
+    # (8) a 5000-character name is capped, and the count and the name's tail survive the cap.
+    def test_17_five_thousand_character_name_keeps_the_counts_under_the_cap(self):
+        core = gl_guard_core()
+        gl_gate(self.cfg, "Write", {"file_path": os.path.join(self.docs, "n" * 5000 + ".md"),
+                                    "content": GL_FIXED_DOC})
+        rows = self._rows("the long name")
+        _, _, decision, _, matched, session = gl_fields(rows[0])
+        self.assertEqual(decision, "fixed")
+        self.assertLessEqual(len(matched), core.LOG_MAX_MATCHED)
+        self.assertTrue(matched.endswith(".md fixed=2"), matched)
+        self.assertEqual(session, GL_SESSION)
+
+    # (9) the line ends as guard_core.record ends its lines on this platform (CRLF on Windows).
+    def test_18_line_end_matches_guard_core_record_on_this_platform(self):
+        base = os.path.join(self.tmp.name, "base")
+        os.makedirs(base)
+        subprocess.run([sys.executable, "-c",
+                        "import sys; sys.path.insert(0, %r); import guard_core; "
+                        "guard_core.record('Write', 'deny', 'X', 'm')" % HOOKS],
+                       env=gl_env(base), check=True, capture_output=True, text=True)
+        with open(os.path.join(base, "guard.log"), "rb") as handle:
+            recorded = handle.read()
+        end = recorded[len(recorded.rstrip(b"\r\n")):]
+        if os.name == "nt":
+            self.assertEqual(end, b"\r\n", "guard_core.record no longer writes CRLF on Windows")
+        gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_FIXED_DOC})
+        self._rows("the fixed write")
+        with open(os.path.join(self.cfg, "guard.log"), "rb") as handle:
+            raw = handle.read()
+        self.assertTrue(raw.endswith(end), "line end differs from guard_core.record: %r" % raw[-4:])
+        body = raw[:-len(end)]
+        self.assertNotIn(b"\n", body)
+        self.assertNotIn(b"\r", body)
+
+    def _run_parallel_gates(self):
+        """Start twenty gates at once on one config folder, each under its own session id. Each
+        must exit 0. The caller reads guard.log."""
+        procs = []
+        for i in range(20):
+            hook = {"hook_event_name": "PreToolUse", "tool_name": "Write",
+                    "session_id": "gl-par-%02d" % i,
+                    "tool_input": {"file_path": self._path(), "content": GL_FIXED_DOC}}
+            proc = subprocess.Popen([sys.executable, STE_GATE], stdin=subprocess.PIPE,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    env=gl_env(self.cfg))
+            proc.stdin.write(json.dumps(hook).encode("utf-8"))
+            proc.stdin.close()
+            procs.append(proc)
+        for proc in procs:
+            proc.stdout.read()
+            err = proc.stderr.read()
+            proc.stdout.close()
+            proc.stderr.close()
+            proc.wait()
+            self.assertEqual(proc.returncode, 0, err.decode("utf-8", "replace"))
+
+    # (7) twenty gates at once: twenty whole lines, one per session, none lost or joined. Skipped on
+    # Windows: a plain append from many processes is not atomic there, so the exact count cannot hold.
+    # test_19b is the form that holds on every platform.
+    @unittest.skipIf(sys.platform == "win32",
+                     "Windows append from many processes is not atomic: see decisions/guard-log-read-weekly.md Holes")
+    def test_19_twenty_parallel_gates_leave_twenty_whole_lines(self):
+        self._run_parallel_gates()
+        rows = self._rows("twenty parallel writes")
+        self.assertEqual(len(rows), 20, "a line was lost or joined")
+        self.assertEqual(sorted(gl_fields(row)[5] for row in rows),
+                         sorted("gl-par-%02d" % i for i in range(20)))
+
+    # (7) the Windows-safe form of test 19. What the gate controls holds on every platform: each gate
+    # writes at most one line, no line is corrupted, doubled or joined, no process crashes, and most
+    # lines land (17 to 20).
+    def test_19b_parallel_gates_write_at_most_one_whole_line_each(self):
+        self._run_parallel_gates()
+        rows = gl_lines(self.cfg) or []
+        self.assertGreaterEqual(len(rows), 17, "too many lines lost")
+        self.assertLessEqual(len(rows), 20)
+        sessions = []
+        for row in rows:
+            when, tool, decision, rule, matched, session = gl_fields(row)
+            datetime.fromisoformat(when)
+            self.assertEqual((tool, decision, rule, matched),
+                             ("Write", "fixed", "STE007,STE008", "notes.md fixed=2"), row)
+            sessions.append(session)
+        self.assertEqual(len(sessions), len(set(sessions)), "a session wrote two lines")
+        self.assertLessEqual(set(sessions), {"gl-par-%02d" % i for i in range(20)})
+
+    # (pins the call site) set_log_session gets the raw id once, and record is called once.
+    def test_20_call_site_sets_the_raw_session_then_records_once(self):
+        marker = os.path.join(self.tmp.name, "calls.txt")
+        gate = self._gate_copy("probe", True)
+        probe_core = os.path.join(os.path.dirname(os.path.dirname(gate)), "hooks", "guard_core.py")
+        with open(probe_core, "a", encoding="utf-8") as handle:
+            handle.write(GL_PROBE.replace("MARKER", repr(marker)))
+        run = gl_gate(self.cfg, "Write", {"file_path": self._path(), "content": GL_FIXED_DOC},
+                      gate=gate)
+        self.assertIn("updatedInput", gl_out(run).get("hookSpecificOutput", {}))  # precondition
+        calls = open(marker, encoding="utf-8").read().splitlines() if os.path.exists(marker) else []
+        self.assertEqual([c for c in calls if c.startswith("session|")],
+                         ["session|%r" % GL_SESSION], calls)
+        self.assertEqual([c for c in calls if c.startswith("record|")],
+                         ["record|Write|fixed|STE007,STE008|notes.md fixed=2"], calls)
+
+    # (2) import skew: the new gate beside an old _transcript.py that has no guard_logger. The gate
+    # prints what it prints with logging, exits as it does, and writes no line. No ImportError.
+    def test_21_old_transcript_without_guard_logger_keeps_the_gate_output(self):
+        gate = os.path.join(gl_copy_tree(os.path.join(self.tmp.name, "skew"), old_transcript=True),
+                            "ste_gate.py")
+        skew_cfg = os.path.join(self.tmp.name, "skew-cfg")
+        content = {"file_path": self._path(), "content": GL_FIXED_DOC}
+        skewed = gl_gate(skew_cfg, "Write", content, gate=gate)
+        full = gl_gate(self.cfg, "Write", content)
+        self.assertIn("updatedInput", gl_out(full).get("hookSpecificOutput", {}))  # precondition
+        self.assertNotIn("Traceback", skewed.stderr)
+        self.assertEqual(skewed.returncode, full.returncode, skewed.stderr)
+        self.assertEqual(skewed.returncode, 0)
+        self.assertEqual(skewed.stdout, full.stdout)
+        self.assertIsNone(gl_lines(skew_cfg), "an old _transcript wrote a line")
+
+    # (4) the linter returns nothing (a crash, or silence): findings are None, the write is unknown.
+    # One line names the unchecked write. The output and the exit code do not change.
+    def _unchecked(self, name, entry):
+        gate = gl_linter_tree(os.path.join(self.tmp.name, name), entry)
+        clean = {"file_path": self._path(), "content": GL_CLEAN_DOC}
+        run = gl_gate(self.cfg, "Write", clean, gate=gate)
+        bare = gl_gate(gl_blocked_cfg(self.tmp.name), "Write", clean, gate=gate)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertNotIn("Traceback", run.stderr)
+        self.assertIn("was not checked", run.stdout)  # precondition: the unknown path
+        self.assertEqual((run.returncode, run.stdout), (bare.returncode, bare.stdout))
+        rows = self._rows("an unchecked write")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(gl_fields(rows[0])[1:],
+                         ["Write", "noted", "STE-unchecked", "notes.md unchecked", GL_SESSION])
+
+    def test_22_linter_crash_logs_unchecked_and_keeps_the_output(self):
+        self._unchecked("crashlint", 'raise RuntimeError("linter crash")')
+
+    def test_23_silent_linter_logs_unchecked_and_keeps_the_output(self):
+        self._unchecked("silentlint", "pass")
+
+    # (6) name hygiene: a lone surrogate in the name. The line is still written, and it is one line.
+    def test_24_lone_surrogate_in_the_name_still_writes_one_line(self):
+        run = gl_gate(self.cfg, "Write", {"file_path": self._path("notes\ud800.md"),
+                                          "content": GL_FIXED_DOC})
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertNotIn("Traceback", run.stderr)
+        rows = self._rows("a write named with a lone surrogate")
+        self.assertEqual(len(rows), 1)
+        when, tool, decision, _rule, _matched, session = gl_fields(rows[0])
+        datetime.fromisoformat(when)
+        self.assertEqual((tool, session), ("Write", GL_SESSION))
+        self.assertIn(decision, ("fixed", "noted", "deny"))
+
+    # (6) name hygiene: tab, NUL, controls, U+2028 and U+202E, and a name over 80 characters. The
+    # line is one whole line, the name is cleaned, and the matched field is at most 80 characters.
+    def test_25_control_characters_in_the_name_are_cleaned_and_the_field_is_capped(self):
+        name = "p\tq\x00r\x01s\x1bt‮u v" + "x" * 90 + ".md"
+        run = gl_gate(self.cfg, "Write", {"file_path": self._path(name), "content": GL_FIXED_DOC})
+        self.assertEqual(run.returncode, 0, run.stderr)
+        rows = self._rows("a write named with control characters")
+        self.assertEqual(len(gl_text(self.cfg).splitlines()), 1, "a name split the log line")
+        when, tool, decision, _rule, matched, session = gl_fields(rows[0])
+        datetime.fromisoformat(when)
+        self.assertEqual((tool, session), ("Write", GL_SESSION))
+        self.assertIn(decision, ("fixed", "noted", "deny"))
+        self.assertLessEqual(len(matched), 80, matched)
+        self.assertIsNone(GL_HOSTILE.search(matched), repr(matched))
+
+
+    # (H1) finding codes of two types, an int and a string. The sort that builds the log rule must not
+    # take the answer with it: the gate denies with the same stdout and rc 0 as it does with strings.
+    def test_26_mixed_code_types_keep_the_deny_and_the_exit_code(self):
+        # One gate folder for both runs: the deny text names the gate's own folder, so two folders
+        # would differ there and not in the answer. Only the linter's entry is swapped.
+        lint_copy = gl_copy_tree(os.path.join(self.tmp.name, "codes"))
+        gate = os.path.join(lint_copy, "ste_gate.py")
+        content = {"file_path": self._path(), "content": GL_CLEAN_DOC}
+        gl_set_linter(lint_copy, gl_print_findings(["5", "STE001"]))
+        plain = gl_gate(self.cfg, "Write", content, gate=gate)
+        gl_set_linter(lint_copy, gl_print_findings([5, "STE001"]))
+        mixed = gl_gate(self.cfg, "Write", content, gate=gate)
+        self.assertEqual(plain.returncode, 0, plain.stderr)  # precondition: the string codes
+        self.assertEqual(gl_decision(plain), "deny")
+        self.assertNotIn("Traceback", mixed.stderr)
+        self.assertEqual(mixed.returncode, 0, mixed.stderr)
+        self.assertEqual(gl_decision(mixed), "deny")
+        self.assertEqual(mixed.stdout, plain.stdout)
+
+    # (H3) the answer leaves before the log write. The log write sleeps 4 s; the first stdout line
+    # arrives in under 2 s, for a fix and for a deny.
+    def _answer_first(self, name, content):
+        script = os.path.join(gl_sleepy_tree(os.path.join(self.tmp.name, name), 4), "ste_gate.py")
+        hook = {"hook_event_name": "PreToolUse", "tool_name": "Write", "session_id": GL_SESSION,
+                "tool_input": {"file_path": self._path(), "content": content}}
+        seconds, rc, out, err = gl_timed(script, hook, gl_env(self.cfg))
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(rc, 0, err)
+        self.assertLess(seconds, 2.0, "the answer waited for the log write")
+        return out
+
+    def test_27_a_fix_answers_before_the_slow_log_write(self):
+        self.assertIn("updatedInput", self._answer_first("slow-fix", GL_FIXED_DOC))
+
+    def test_28_a_deny_answers_before_the_slow_log_write(self):
+        self.assertIn('"permissionDecision": "deny"', self._answer_first("slow-deny", GL_DENY_DOC))
+
+    # (name hygiene) the bidi isolates U+2066 to U+2069 never reach the log: the cleaned basename
+    # holds none of them.
+    def test_29_bidi_isolates_are_stripped_from_the_basename(self):
+        gl_gate(self.cfg, "Write", {"file_path": self._path("a⁦b⁧c⁨d⁩e.md"),
+                                    "content": GL_FIXED_DOC})
+        rows = self._rows("a name with bidi isolates")
+        self.assertEqual(len(rows), 1)
+        matched = gl_fields(rows[0])[4]
+        for mark in "⁦⁧⁨⁩":
+            self.assertNotIn(mark, matched)
+        self.assertIn(".md", matched)
+
+
+class MdSweepLogTests(unittest.TestCase):
+    """md_sweep (Stop) writes one guard.log line per run that blocks. A clean run writes none."""
+
+    ERROR_TEXT = "This sentence isn't clean, and that trips the STE008 rule.\n"
+    CLEAN_TEXT = "This is a short clean sentence.\nHere is one more short clean sentence.\n"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.proj = os.path.join(self.tmp.name, "proj")  # the swept folder: a git work tree
+        self.cfg = os.path.join(self.tmp.name, "cfg")  # CLAUDE_CONFIG_DIR, outside the swept folder
+        os.makedirs(self.proj)
+        os.makedirs(self.cfg)
+        subprocess.run(["git", "init", "-q"], cwd=self.proj, check=True, capture_output=True,
+                       text=True)
+
+    def _md(self, name, text):
+        with open(os.path.join(self.proj, name), "w", encoding="utf-8") as handle:
+            handle.write(text)
+
+    def _stop_hook(self):
+        """The Stop hook md_sweep reads. The last human message is 5 s old, so each file written
+        here is newer than it and dirty in the work tree."""
+        first = human("write the doc")
+        first["timestamp"] = (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat(
+            timespec="milliseconds").replace("+00:00", "Z")
+        records = [first, tool_use_msg("Bash", {"command": "true"}), tool_result_msg(),
+                   assistant_text("done")]
+        transcript = write_transcript(records, self.tmp.name)
+        return {"hook_event_name": "Stop", "transcript_path": transcript, "cwd": self.proj,
+                "stop_hook_active": False, "session_id": GL_SESSION}
+
+    def _sweep(self, cfg=None, extra=None, script=None):
+        """Run md_sweep as a Stop hook."""
+        return run_gate(script or MD_SWEEP, self._stop_hook(), env=gl_env(cfg or self.cfg, extra))
+
+    def _rows(self, what):
+        rows = gl_lines(self.cfg)
+        self.assertIsNotNone(rows, "no guard.log line for %s" % what)
+        return rows
+
+    # (5) a blocking run: one Stop line. The rule holds the STE codes; matched holds one basename.
+    def test_01_a_blocking_run_appends_one_stop_line(self):
+        self._md("notes.md", self.ERROR_TEXT)
+        run = self._sweep()
+        self.assertEqual(json.loads(run.stdout).get("decision"), "block")  # precondition
+        rows = self._rows("a blocking Stop")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(gl_fields(rows[0])[1:], ["Stop", "deny", "STE008", "notes.md files=1",
+                                                  GL_SESSION])
+
+    # (5) two files: one line, the file count, and one of the two basenames (the order is not pinned).
+    def test_02_two_files_log_one_line_with_the_count_and_one_basename(self):
+        self._md("a.md", self.ERROR_TEXT)
+        self._md("b.md", self.ERROR_TEXT)
+        run = self._sweep()
+        self.assertEqual(json.loads(run.stdout).get("decision"), "block")  # precondition
+        rows = self._rows("two blocking files")
+        self.assertEqual(len(rows), 1)
+        _, tool, decision, rule, matched, session = gl_fields(rows[0])
+        self.assertEqual((tool, decision, rule, session), ("Stop", "deny", "STE008", GL_SESSION))
+        self.assertRegex(matched, r"^(a\.md|b\.md) files=2$")
+
+    # (5) a clean run adds no line after a blocking run.
+    def test_03_clean_run_after_a_blocking_run_adds_no_line(self):
+        self._md("notes.md", self.ERROR_TEXT)
+        self._sweep()
+        before = len(self._rows("the blocking run"))
+        self._md("notes.md", self.CLEAN_TEXT)
+        run = self._sweep()
+        self.assertEqual(run.stdout.strip(), "")
+        self.assertEqual(len(gl_lines(self.cfg)), before, "a clean run added a guard.log line")
+
+    # (10) the line holds no file text and no folder.
+    def test_04_the_line_holds_no_file_text_and_no_folder(self):
+        marker = "ZQXMARK-7731"
+        self._md("notes.md", "This sentence isn't clean, %s, and that trips STE008.\n" % marker)
+        self._sweep()
+        self._rows("the blocking run")
+        text = gl_text(self.cfg)
+        self.assertIn("notes.md files=1", text)
+        self.assertNotIn(marker, text)
+        self.assertNotIn(self.proj, text)
+
+    # (4) a log that cannot be written never changes md_sweep's output.
+    def test_05_unwritable_log_keeps_the_block_output(self):
+        self._md("notes.md", self.ERROR_TEXT)
+        run = self._sweep()
+        bare = self._sweep(cfg=gl_blocked_cfg(self.tmp.name))
+        self.assertEqual(bare.returncode, 0, bare.stderr)
+        self.assertNotIn("Traceback", bare.stderr)
+        self.assertEqual(run.stdout, bare.stdout)
+
+    # (5) the disabled sweep does nothing, so it writes nothing.
+    def test_06_disabled_sweep_writes_no_line(self):
+        self._md("notes.md", self.ERROR_TEXT)
+        run = self._sweep(extra={"MD_SWEEP_DISABLE": "1"})
+        self.assertEqual(run.stdout.strip(), "")
+        self.assertIsNone(gl_lines(self.cfg))
+
+    # (2) import skew, on the sweep side: the new md_sweep beside an old _transcript.py that has no
+    # guard_logger. The sweep blocks as it does with logging, exits 0, and writes no line.
+    def test_07_old_transcript_without_guard_logger_keeps_the_sweep_output(self):
+        self._md("notes.md", self.ERROR_TEXT)
+        real = self._sweep()
+        self.assertEqual(json.loads(real.stdout).get("decision"), "block")  # precondition
+        lint_copy = gl_copy_tree(os.path.join(self.tmp.name, "skew"), old_transcript=True)
+        skew_cfg = os.path.join(self.tmp.name, "skew-cfg")
+        skewed = self._sweep(cfg=skew_cfg, script=os.path.join(lint_copy, "md_sweep.py"))
+        self.assertNotIn("Traceback", skewed.stderr)
+        self.assertEqual(skewed.returncode, 0, skewed.stderr)
+        self.assertEqual(skewed.stdout, real.stdout)
+        self.assertIsNone(gl_lines(skew_cfg), "an old _transcript wrote a line")
+
+    # (H1) an unhashable finding code (a list). The sweep must block with the same stdout and exit code
+    # as it does with the same code written as a string.
+    def test_08_unhashable_code_keeps_the_sweep_output_and_exit_code(self):
+        self._md("notes.md", self.ERROR_TEXT)
+        lint_copy = gl_copy_tree(os.path.join(self.tmp.name, "codes"))
+        script = os.path.join(lint_copy, "md_sweep.py")  # one folder for both runs
+        gl_set_linter(lint_copy, gl_print_findings(["['STE008']"]))
+        plain = self._sweep(script=script)
+        gl_set_linter(lint_copy, gl_print_findings([["STE008"]]))
+        listed = self._sweep(script=script)
+        self.assertEqual(json.loads(plain.stdout).get("decision"), "block")  # precondition
+        self.assertNotIn("Traceback", listed.stderr)
+        self.assertEqual(listed.returncode, plain.returncode)
+        self.assertEqual(listed.stdout, plain.stdout)
+
+    # (H3) the sweep prints its block before the log write. The log write sleeps 4 s; the first stdout
+    # line arrives in under 2 s.
+    def test_09_sweep_answers_before_the_slow_log_write(self):
+        self._md("notes.md", self.ERROR_TEXT)
+        script = os.path.join(gl_sleepy_tree(os.path.join(self.tmp.name, "slow"), 4), "md_sweep.py")
+        seconds, rc, out, err = gl_timed(script, self._stop_hook(), gl_env(self.cfg))
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out).get("decision"), "block")
+        self.assertLess(seconds, 2.0, "the sweep waited for the log write")
 
 
 if __name__ == "__main__":
