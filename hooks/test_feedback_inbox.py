@@ -21,14 +21,19 @@ Seams the builder codes against.
 Capture: hooks/local_time.py (env LOCAL_TIME_UNDER_TEST overrides the path). A UserPromptSubmit
   hook. Stdin is one JSON object: hook_event_name, session_id, prompt, cwd. Stdout is one
   "Local time: ..." line. Exit 0. A write failure adds one stdout line; see below.
-  - The first word of the prompt is `fb` or `fb:`: capture opens. The opening prompt is captured.
-  - While open, a prompt that is only `fb done` closes capture and is not captured. Surrounding
-    whitespace and trailing punctuation are ignored, and letter case does not matter: `fb done.`,
-    `fb done!` and `FB done` all close. `fb done now` does not close. Plain `fb done` never opens
-    capture.
+  - While closed, a prompt whose first word is `fb` or `fb:` opens capture, and the opening prompt
+    is captured. Near-misses of the close form open nothing: `fb: done`, `fb  done` (two spaces),
+    a tab in place of the space in `fb done`, and `fb - done`. Plain `fb done` opens nothing.
+  - While open, a prompt that is only `fb done` closes capture and is not captured. `fb: done` and
+    `fb  done` (two spaces) close too. Surrounding whitespace and trailing punctuation are ignored,
+    and letter case does not matter: `fb done.`, `fb done!` and `FB done` all close. `fb done now`
+    does not close.
   - While open, every owner prompt is captured verbatim, including `x fb`, `fbi ...` and
-    `fb done now`. Neither closes capture. Only the close forms of `fb done` close it.
-  - While closed, nothing is captured.
+    `fb done now`. Neither closes capture. Only the close forms above close it.
+  - While closed, only the opener is captured; every other prompt is dropped.
+  - While open, a lone surrogate in the text (JSON escape `\\ud800`) is either saved with U+FFFD
+    (the replacement character) in its place, or stdout carries a line that says `not saved`.
+    Never silent. Capture stays open, and the inbox stays strict UTF-8.
   - State is per session_id and survives across runs. Another session's prompts are never captured.
   - `--subagent` (a SubagentStart payload) prints the same hookSpecificOutput JSON and never opens,
     closes or captures.
@@ -508,7 +513,8 @@ def case_fb_done_closes_and_is_not_captured():
 
 def case_fb_done_forms_close_capture():
     for sid, closer in (("done-period", "fb done."), ("done-bang", "fb done!"),
-                        ("done-caps", "FB done")):
+                        ("done-caps", "FB done"), ("done-colon", "fb: done"),
+                        ("done-two-spaces", "fb  done")):
         cfg = new_cfg()
         opened(cfg, sid, "fb: open the burst")
         p = capture(cfg, sid, closer)
@@ -524,6 +530,17 @@ def case_fb_done_forms_close_capture():
           os.path.exists(marker_of(cfg, sid))
           and captured_texts(cfg, sid) == ["fb: open the burst", "fb done now"],
           captured_texts(cfg, sid))
+
+
+def case_near_miss_closers_open_nothing_while_closed():
+    for sid, text in (("near-colon", "fb: done"), ("near-two-spaces", "fb  done"),
+                      ("near-tab", "fb\tdone"), ("near-dash", "fb - done")):
+        cfg = new_cfg()
+        p = capture(cfg, sid, text)
+        check("near miss %r: hook ran" % text, ran_central(p), p.desc())
+        check("near miss %r: does not open capture (no marker, no inbox)" % text,
+              not os.path.exists(marker_of(cfg, sid))
+              and not os.path.exists(inbox_of(cfg, sid)), p.desc())
 
 
 def case_verbatim_scanner_text_is_fenced():
@@ -576,6 +593,40 @@ def case_capture_write_failure_says_not_saved():
     write_file(marker_of(cfg, sid), "")  # capture is already open
     not_saved_check("write failure, capture open",
                     capture(cfg, sid, "a later message in the burst"))
+
+
+# A lone surrogate, as the payload's JSON escape. json.dumps writes the escape: the bytes are ASCII.
+LONE_SURROGATE = "a lone \ud800 surrogate in the middle of the burst"
+SURROGATE_SAVED = "a lone \ufffd surrogate in the middle of the burst"
+
+
+def case_lone_surrogate_is_saved_or_said_not_saved():
+    cfg, sid = new_cfg(), "lone-surrogate"
+    opener = "fb: surrogate burst"
+    if not opened(cfg, sid, opener):
+        return
+    raw = json.dumps({"hook_event_name": "UserPromptSubmit", "session_id": sid,
+                      "prompt": LONE_SURROGATE, "cwd": cfg}).encode("ascii")
+    p = run(LT_PATH, raw, cfg)
+    lines = [ln.strip() for ln in p.out.splitlines() if ln.strip()]
+    check("lone surrogate: exit 0, Local time line first",
+          p.code == 0 and bool(lines) and CENTRAL.fullmatch(lines[0]) is not None, p.desc())
+    inbox = inbox_of(cfg, sid)
+    strict = True
+    if os.path.exists(inbox):
+        try:
+            with open(inbox, "rb") as f:
+                f.read().decode("utf-8")
+        except UnicodeDecodeError:
+            strict = False
+    check("lone surrogate: an inbox that is written is strict UTF-8", strict, ascii(inbox))
+    check("lone surrogate: capture stays open", os.path.exists(marker_of(cfg, sid)), p.desc())
+    texts = captured_texts(cfg, sid) if strict else None
+    saved = texts == [opener, SURROGATE_SAVED]
+    told = any("not saved" in ln.lower() for ln in lines[1:])
+    check("lone surrogate: saved with U+FFFD, or stdout says not saved (never silent)",
+          saved or told, "saved=%s told=%s captured=%s %s"
+          % (saved, told, ascii(texts), p.desc()))
 
 
 def subagent_ok(p):
@@ -954,9 +1005,11 @@ CASES = (
     case_open_survives_across_runs,
     case_fb_done_closes_and_is_not_captured,
     case_fb_done_forms_close_capture,
+    case_near_miss_closers_open_nothing_while_closed,
     case_verbatim_scanner_text_is_fenced,
     case_fail_open_writes_nothing,
     case_capture_write_failure_says_not_saved,
+    case_lone_surrogate_is_saved_or_said_not_saved,
     case_subagent_never_opens_closes_or_captures,
     case_sessions_are_isolated,
     case_gate_no_inbox_and_empty_inbox_pass_silently,

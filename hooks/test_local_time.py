@@ -271,8 +271,10 @@ def case_cli_no_tz_database():
     env = dict(os.environ)
     env["PYTHONTZPATH"] = EMPTY_TZPATH
     try:
+        # stdin=DEVNULL: local_time.py reads stdin as a hook. An inherited open pipe never closes.
         proc = subprocess.run([sys.executable, "-c", CLI_BLOCKED, MODULE_PATH],
-                              capture_output=True, text=True, env=env, timeout=30)
+                              capture_output=True, text=True, env=env, timeout=30,
+                              stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         check("CLI with no tz database: finishes within 30 s", False, "timed out")
         return
