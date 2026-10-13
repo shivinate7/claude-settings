@@ -4817,8 +4817,9 @@ sh("cite-by-id: Drops-lines key with a space before the colon is allowed",
 # session number, such as `N20` or `(N16)`. That number is handed out in one chat and means nothing
 # outside it, so a lane is named by its branch slug. The scan reads the same message text as
 # cite-by-id. A number inside a backtick code span or a fenced block is quoted text and stays
-# allowed. `NaN`, `N/A`, `IPv4N1`, `N100000` and `N+1` are no lane number. Only a commit message
-# and a PR body are read. A tag, a note, a log search and a PR list are other acts.
+# allowed. `NaN`, `N/A`, `IPv4N1`, `N100000` and `N+1` are no lane number. Only a commit message,
+# a PR body or title, and a `gh pr merge` subject or body are read (a squash subject or body becomes
+# a commit on main). A tag, a note, a log search and a PR list are other acts.
 sh("lane-by-slug: the refusal names a branch slug as the remedy",
    VCS + ' commit -m "fix flaky test (N16)"', "deny", "lane-by-slug", carries="branch slug",
    cwd=NOGIT, config=MERGECFG)
@@ -4868,6 +4869,26 @@ for _name, _command in (
     ("a commit with no number", VCS + ' commit -m "fix guard parsing"'),
 ):
     sh("lane-by-slug: %s is allowed" % _name, _command, "allow", cwd=NOGIT, config=MERGECFG)
+# The same lane-by-slug rule, its title and merge half. A title names a lane on create and edit, and
+# a squash subject or body on merge, so each is read. The merge cases run on a green head, so merge-checks
+# passes and only the lane rule can decide. A create without --draft is refused by draft-pr, so the
+# allowed create carries --draft.
+for _name, _command in (
+    ("a create title naming a lane", 'gh pr create --title "lane N20" --body x'),
+    ("an edit title in the short form", "gh pr edit 5 -t 'fix (N16)'"),
+    ("a create title in the equals form", "gh pr create --title=N7 --body x"),
+    ("a merge subject naming a lane", 'gh pr merge 5 --squash --subject "fix (N16)"'),
+    ("a merge body naming a lane", 'gh pr merge 5 --squash --body "N20 lands"'),
+):
+    sh("lane-by-slug: %s denies" % _name, _command, "deny", "lane-by-slug", cwd=NOGIT,
+       env_path=GREEN_ON, config=MERGECFG)
+sh("lane-by-slug: a create title naming a slug is allowed",
+   'gh pr create --draft --title "slug lands" --body x', "allow", cwd=NOGIT, config=MERGECFG)
+sh("lane-by-slug: a bare squash merge is allowed", "gh pr merge 5 --squash", "allow", cwd=NOGIT,
+   env_path=GREEN_ON, config=MERGECFG)
+sh("lane-by-slug: a merge subject naming a slug is allowed",
+   'gh pr merge 5 --squash --subject "lane-number-cite lands"', "allow", cwd=NOGIT,
+   env_path=GREEN_ON, config=MERGECFG)
 for _name, _command in (
     ("an echo", 'echo "lane N16 lands"'),
     ("a grep", "grep -rn 'N16' hooks"),
