@@ -17,10 +17,28 @@ WSL_REASON = (
     "WSLENV prefix, or a pipe, redirect, `;`, `&` or newline after the wsl part."
 )
 
-_PATH = r"[\w./-]*"
-NODE_TEST = re.compile(r"^" + _PATH + r"[\w-]\.test\.mjs$")
-PWSH_TEST = re.compile(r"^" + _PATH + r"[\w-]\.test\.ps1$")
-PY_TEST = re.compile(r"^" + _PATH + r"test_[\w-]+\.py$")
+# A test path is relative, climbs nowhere, and may hold a glob (`mods/*/x.test.mjs`).
+_PATH = r"[\w./*?\[\]-]*"
+NODE_TEST = re.compile(r"^" + _PATH + r"[\w*?-]\.test\.mjs$")
+PWSH_TEST = re.compile(r"^" + _PATH + r"[\w*?-]\.test\.ps1$")
+PY_TEST = re.compile(r"^" + _PATH + r"test_[\w*?-]+\.py$")
+# A launcher other than the wsl command: a distro launcher, or the System32 bash.exe (Git bash
+# is not one). shlex eats a backslash, so `C:\Windows\System32ash.exe` reads `C:WindowsSystem32bash.exe`.
+DISTRO_LAUNCHER = re.compile(r"ubuntu[\w.-]*\.exe$")
+
+
+def _test_path(path: str, pattern) -> bool:
+    return bool(pattern.match(path)) and not path.startswith("/") and ".." not in path.split("/")
+
+
+def _launcher(word: str) -> str:
+    """'wsl' for the wsl command (bare or by any path), 'other' for another WSL launcher, else ''."""
+    low = word.lower()
+    if basename(word) == "wsl" or low.endswith("wsl.exe"):
+        return "wsl"
+    if DISTRO_LAUNCHER.search(low) or (low.endswith("bash.exe") and ("system32" in low or "sysnative" in low)):
+        return "other"
+    return ""
 
 
 def _allowed(args) -> bool:
@@ -29,20 +47,21 @@ def _allowed(args) -> bool:
         return False
     prog, rest = args[1], args[2:]
     if prog == "node":
-        return rest[0] == "--test" and len(rest) > 1 and all(NODE_TEST.match(p) for p in rest[1:])
+        return rest[0] == "--test" and len(rest) > 1 and all(_test_path(p, NODE_TEST) for p in rest[1:])
     if prog == "pwsh":
-        return len(rest) == 3 and rest[:2] == ["-NoProfile", "-File"] and bool(PWSH_TEST.match(rest[2]))
+        return len(rest) == 3 and rest[:2] == ["-NoProfile", "-File"] and _test_path(rest[2], PWSH_TEST)
     if prog == "python3":
-        return len(rest) == 1 and bool(PY_TEST.match(rest[0]))
+        return len(rest) == 1 and _test_path(rest[0], PY_TEST)
     return False
 
 
-def _judge(tokens, closed: str) -> str:
+def _judge(tokens, closed: str, env_set: bool) -> str:
     """Return the matched text when this segment runs wsl outside the allowed list, else ''."""
     at = resolve_command(tokens)
-    if at is None or basename(tokens[at]) not in ("wsl", "wsl.exe"):
+    kind = _launcher(tokens[at]) if at is not None else ""
+    if not kind:
         return ""
-    if closed or any(t.upper().startswith("WSLENV=") for t in tokens[:at]):
+    if kind == "other" or closed or env_set or any(t.upper().startswith("WSLENV=") for t in tokens[:at]):
         return " ".join(tokens[:at + 3])
     return "" if _allowed(tokens[at + 1:]) else " ".join(tokens[at:at + 3])
 
@@ -50,10 +69,11 @@ def _judge(tokens, closed: str) -> str:
 def wsl_hit(cmd: str) -> str:
     """Return the matched text when any segment of the command runs wsl outside the allow list."""
     ends = []
+    env_set = "wslenv" in cmd.lower()   # set in any statement of the same command
     for segment, closed in zip(split_segments(cmd, ends), ends):
         tokens = segment_tokens(segment)
         if tokens is not None:
-            hit = _judge(tokens, closed)
+            hit = _judge(tokens, closed, env_set)
             if hit:
                 return hit
             continue
@@ -63,7 +83,7 @@ def wsl_hit(cmd: str) -> str:
         for i in range(0, len(pieces), 2):
             words = pieces[i].split()
             closed_piece = pieces[i + 1] if i + 1 < len(pieces) else closed
-            hit = _judge(words, closed_piece) if words else ""
+            hit = _judge(words, closed_piece, env_set) if words else ""
             if hit:
                 return hit
     return ""
