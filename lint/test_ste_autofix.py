@@ -739,5 +739,62 @@ class ReviewRound2GateTests(_GateCase):
         self.assertNotIn("for example", reason)
 
 
+# ------------------------------------------------------------------ review round 3 (PR 367)
+# Blocker: ste_gate.py reads the hook JSON with json.load(sys.stdin), which uses the locale
+# codec. A Windows pipe is cp1252 without PYTHONUTF8, so raw UTF-8 bytes turn into mojibake.
+# run_gate sends ASCII-escaped JSON, so the existing tests never see raw bytes. These send
+# raw UTF-8 bytes into a child with the UTF-8 env vars removed and PYTHONUTF8=0.
+
+class ReviewRound3RawStdinTests(_GateCase):
+
+    def _run_raw(self, obj):
+        raw = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        env = dict(os.environ)
+        for key in ("PYTHONUTF8", "PYTHONIOENCODING", "PYTHONLEGACYWINDOWSSTDIO"):
+            env.pop(key, None)
+        env["PYTHONUTF8"] = "0"
+        env["LC_ALL"] = "C"
+        return subprocess.run([sys.executable, STE_GATE], input=raw, capture_output=True,
+                              timeout=15, env=env)
+
+    def test_r3_blocker_raw_utf8_stdin_write_byte_exact(self):
+        content = "We use it e.g. café 日本語 😀 here.\r\nWe don't stop.\r\n"
+        run = self._run_raw({"hook_event_name": "PreToolUse", "tool_name": "Write",
+                             "tool_input": {"file_path": self._path("utf.md"), "content": content}})
+        self.assertEqual(run.returncode, 0, run.stderr.decode("utf-8", "replace"))
+        out = json.loads(run.stdout.decode("utf-8"))  # the printed JSON reads back as UTF-8
+        updated = out.get("hookSpecificOutput", {}).get("updatedInput", {})
+        self.assertEqual(updated.get("content"),
+                         "We use it for example, café 日本語 😀 here.\r\nWe do not stop.\r\n")
+
+    def test_r3_blocker_raw_utf8_stdin_edit_byte_exact(self):
+        target = self._path("utf-edit.md")
+        with open(target, "wb") as f:
+            f.write("Intro café.\r\n".encode("utf-8"))
+        run = self._run_raw({"hook_event_name": "PreToolUse", "tool_name": "Edit",
+                             "tool_input": {"file_path": target, "old_string": "Intro café.\r\n",
+                                            "new_string": "We use it e.g. café 日本語 😀 here.\r\n"}})
+        self.assertEqual(run.returncode, 0, run.stderr.decode("utf-8", "replace"))
+        out = json.loads(run.stdout.decode("utf-8"))
+        updated = out.get("hookSpecificOutput", {}).get("updatedInput", {})
+        self.assertEqual(updated.get("new_string"),
+                         "We use it for example, café 日本語 😀 here.\r\n")
+
+    def test_r3_guard_invalid_utf8_byte_does_not_crash(self):
+        # A lone 0xE9 is not UTF-8. The gate must fall back: exit 0, no traceback, never exit 2.
+        raw = (b'{"hook_event_name": "PreToolUse", "tool_name": "Write", "tool_input": '
+               b'{"file_path": "bad.md", "content": "We don\'t stop \xe9 here.\\n"}}')
+        env = dict(os.environ)
+        for key in ("PYTHONUTF8", "PYTHONIOENCODING", "PYTHONLEGACYWINDOWSSTDIO"):
+            env.pop(key, None)
+        env["PYTHONUTF8"] = "0"
+        env["LC_ALL"] = "C"
+        run = subprocess.run([sys.executable, STE_GATE], input=raw, capture_output=True,
+                             timeout=15, env=env)
+        self.assertNotEqual(run.returncode, 2)
+        self.assertEqual(run.returncode, 0, run.stderr.decode("utf-8", "replace"))
+        self.assertNotIn(b"Traceback", run.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
