@@ -90,9 +90,10 @@ await test('stale: a missing updatedAt is never fresh and never a row', () => {
   same(rowsFor([], [[ID, e]]), [], 'rows')
 })
 
-await test('clock skew: an entry stamped up to 2 min ahead shows; further ahead is hidden', () => {
-  assert.equal(lib.isFresh({ at: NOW + 120_000 }, NOW), true, 'exactly 2 min ahead should show')
-  assert.equal(lib.isFresh({ at: NOW + 120_001 }, NOW), false, 'just over 2 min ahead should be hidden')
+// Re-pinned in review round 1 (decision): a stamp more than 30 s ahead of now is not fresh.
+await test('clock skew: an entry stamped up to 30 s ahead shows; more than 30 s ahead is not fresh', () => {
+  assert.equal(lib.isFresh({ at: NOW + 30_000 }, NOW), true, 'exactly 30 s ahead should show')
+  assert.equal(lib.isFresh({ at: NOW + 30_001 }, NOW), false, 'just over 30 s ahead should not be fresh')
   same(rowsFor([], [fresh(1, { at: NOW + 3_600_000 })]), [], 'an hour ahead gives no row')
 })
 
@@ -343,28 +344,42 @@ let loads = 0
 function host(opts) {
   const h = {
     now: NOW, sid: ID, cwd: '/home/u/secret/repo/sub', repoRoot: '/home/u/secret/repo',
-    git: '# branch.head main\n# branch.ab +0 -0\n', agents: [], agentsExit: 0, liveAgents: [],
+    git: '# branch.head main\n# branch.ab +0 -0\n', gitFail: null, agents: [], agentsExit: 0, liveAgents: [],
+    agentListThrow: false, usageThrow: false, hang: false, submitFails: false,
     python: null, context: { window: 1000, percent: 42 }, env: {}, placed: true,
-    hooks: [], registered: [], opened: [], submitted: [], pythonCalls: [],
+    hooks: [], beats: [], registered: [], opened: [], logs: [], submitted: [], pythonCalls: [], agentCalls: [], writes: [],
     ...opts,
   }
   h.store = new Map(opts.seed ?? [])
   const clone = v => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)))
   const ctor = name => props => ({ name, props })
+  const never = () => new Promise(() => {})
   h.$ = {
     store: {
       get: async k => { const v = h.store.get(k); if (v === THROWS) throw new Error('store read failed'); return clone(v) },
-      set: async (k, v) => { h.store.set(k, clone(v)) },
+      set: async (k, v) => { h.writes.push(k); h.store.set(k, clone(v)) },
       delete: async k => { h.store.delete(k) },
       keys: async () => [...h.store.keys()],
     },
-    clock: { now: async () => h.now, every: () => ({ cancel() {} }), after: () => ({ cancel() {} }) },
-    session: { id: async () => h.sid, cwd: async () => h.cwd, repo: async () => ({ root: h.repoRoot }), usage: async () => ({ context: h.context }) },
-    agent: { list: async () => h.liveAgents },
+    clock: {
+      now: async () => h.now,
+      every: (ms, fn) => { h.beats.push(fn); return { cancel() {} } },
+      after: (ms, fn) => { const t = setTimeout(fn, ms); t.unref?.(); return { cancel() { clearTimeout(t) } } },
+    },
+    session: {
+      id: async () => h.sid, cwd: async () => h.cwd, repo: async () => ({ root: h.repoRoot }),
+      usage: async () => { if (h.hang) return never(); if (h.usageThrow) throw new Error('usage read failed'); return { context: h.context } },
+    },
+    agent: { list: async () => { if (h.hang) return never(); if (h.agentListThrow) throw new Error('agent list failed'); return h.liveAgents } },
     process: {
       run: async argv => {
-        if (argv[0] === 'git') return { exitCode: 0, stdout: h.git, stderr: '' }
-        if (argv[0] === 'claude') return { exitCode: h.agentsExit, stdout: typeof h.agents === 'string' ? h.agents : JSON.stringify(h.agents), stderr: '' }
+        if (h.hang) return never()
+        if (argv[0] === 'git') {
+          if (h.gitFail === 'throw') throw new Error('git timed out')
+          if (h.gitFail === 'exit') return { exitCode: 128, stdout: '', stderr: 'fatal: not a git repository' }
+          return { exitCode: 0, stdout: h.git, stderr: '' }
+        }
+        if (argv[0] === 'claude') { h.agentCalls.push(argv); return { exitCode: h.agentsExit, stdout: typeof h.agents === 'string' ? h.agents : JSON.stringify(h.agents), stderr: '' } }
         h.pythonCalls.push(argv)
         if (!h.python) throw Object.assign(new Error(`spawn ${argv[0]} ENOENT`), { code: 'ENOENT' })
         return h.python(argv)
@@ -375,10 +390,10 @@ function host(opts) {
       open: async o => { h.opened.push(o); return { isPlaced: h.placed } },
       invalidate: () => {},
       resolve: () => ({ Box: ctor('Box'), Text: ctor('Text'), Button: ctor('Button') }),
-      log: () => {},
+      log: (text, o) => { h.logs.push({ text: String(text), opts: o }) },
     },
     env: { get: async k => h.env[k] },
-    prompt: { submit: async o => { h.submitted.push(o.text); return {} } },
+    prompt: { submit: async o => { if (h.submitFails) throw new Error('no session to take the prompt'); h.submitted.push(o.text); return {} } },
   }
   return h
 }
@@ -404,6 +419,29 @@ const boardText = async h => (await fire(h, 'command.run', { command: 'board', a
 const lines = async h => (await boardText(h)).split('\n')
 const pyOk = (handoff = HANDOFF, prompt = PROMPT) => argv => ({ exitCode: 0, stdout: JSON.stringify({ handoff, prompt }) + '\n', stderr: '' })
 const safe = (h, args) => fire(h, 'command.run', { command: 'safe-stop', args })
+const NEW_ID = 'dddddddd-1111-2222-3333-444444444444'
+const settle = () => new Promise(r => setTimeout(r, 5))
+const tickBeat = async h => { h.beats[0](); await settle() } // one heartbeat, then let its async work finish
+// A pane close, as the host raises it (ui.close, origin person). No hook for it means the close is ignored.
+const closePane = async h => {
+  const hook = h.hooks.find(x => x.event === 'ui.close')
+  if (hook) await hook.fn(h.$, { id: PANE, origin: { kind: 'person' } }, async e => e)
+}
+// Resolves 'done' if p settles within ms, else 'late'.
+async function within(ms, p) {
+  let timer
+  const late = new Promise(r => { timer = setTimeout(() => r('late'), ms) })
+  const won = await Promise.race([p.then(() => 'done', e => 'error: ' + e.message), late])
+  clearTimeout(timer)
+  return won
+}
+// The detail record after one tool check, for the target rules.
+const runTarget = (tool, input) => {
+  const t = lib.makeTracker()
+  t.toolCheck({ tool, input, id: 'x1', verdict: 'allow' })
+  const d = t.detail(NOW)
+  return { rec: d.recent[0], text: JSON.stringify(d) }
+}
 
 await test('register: session start writes the repo folder and branch, and no path', async () => {
   const h = await start()
@@ -608,6 +646,209 @@ await test('safe-stop: a handoff path over 300 characters is named whole', async
   const h = await start({ python: pyOk(long), env: { HOME: '/home/u' } })
   const out = await safe(h, 'plan')
   assert.ok(out.text.includes(long), `plan cuts the handoff path: ${out.text.slice(0, 120)}`)
+})
+
+// ---- review round 1 pins (PR 380): permission order, git readiness, hook speed, targets, safe-stop, agents, polling, writes
+
+await test('permission: an approved ask clears when the tool call resolves, not before', async () => {
+  const h = await start()
+  await fire(h, 'session.start', {})
+  await fire(h, 'turn.start', { text: '', turnId: 't1' })
+  const input = { file_path: '/r/a.ts' }
+  const callHook = h.hooks.find(x => x.event === 'tool.call')
+  let during = ''
+  // Real host order: the tool.call hooks wrap the permission check, which runs inside next().
+  await callHook.fn(h.$, { tool: 'Edit', input, tool_use_id: 'e1' }, async () => {
+    await fire(h, 'tool.check', { tool: 'Edit', input, tool_use_id: 'e1' }, 'ask')
+    during = (await lines(h))[2]
+  })
+  assert.ok(during.includes('permission'), `while asking, row reads: ${during}`)
+  const after = (await lines(h))[2]
+  assert.ok(!after.includes('permission') && after.includes('working'), `after the approved call, row reads: ${after}`)
+})
+
+await test('git: a failed readiness read makes the reading unknown, so no update-ready mark', async () => {
+  for (const mode of ['throw', 'exit']) {
+    const h = await start()
+    await fire(h, 'session.start', {})
+    h.gitFail = mode
+    await fire(h, 'turn.complete', { durationMs: 500, isAborted: false, turnId: 't1' })
+    same((await lines(h))[0], '0 working, 1 waiting, update-ready 0 of 1', `band after git ${mode}`)
+  }
+})
+
+await test('git: a reading older than 60 s counts as unknown; one 59 s old still counts', async () => {
+  const h = await start()
+  await fire(h, 'session.start', {})
+  h.now = NOW + 59_000
+  await tickBeat(h)
+  same((await lines(h))[0], '0 working, 1 waiting, update-ready 1 of 1', 'reading 59 s old')
+  h.now = NOW + 61_000
+  await tickBeat(h)
+  same((await lines(h))[0], '0 working, 1 waiting, update-ready 0 of 1', 'reading 61 s old')
+})
+
+await test('hooks: session start returns within 200 ms when git, agents and usage never answer', async () => {
+  const h = await start({ hang: true })
+  same(await within(200, fire(h, 'session.start', {})), 'done', 'session.start return')
+})
+
+await test('hooks: turn complete returns within 200 ms when git, agents and usage never answer', async () => {
+  const h = await start()
+  await fire(h, 'session.start', {})
+  h.hang = true
+  same(await within(200, fire(h, 'turn.complete', { durationMs: 500, isAborted: false, turnId: 't1' })), 'done', 'turn.complete return')
+})
+
+await test('debug: failed git, agent and usage reads each write a debug note', async () => {
+  const h = await start({ gitFail: 'throw', agentListThrow: true, usageThrow: true })
+  await fire(h, 'session.start', {})
+  await settle()
+  const notes = h.logs.filter(l => l.opts && l.opts.to === 'debug' && l.text.startsWith('session-board'))
+  assert.ok(notes.length >= 3, `debug notes: ${notes.length}, want at least 3`)
+  for (const [src, re] of [['git', /git/i], ['agents', /agent/i], ['usage', /usage|context/i]]) {
+    assert.ok(notes.some(n => re.test(n.text)), `no debug note names ${src}`)
+  }
+})
+
+await test('targets: file tools store the file name only', () => {
+  const cases = [['Read', { file_path: '/home/u/work/app.ts' }], ['Edit', { file_path: '/home/u/work/app.ts' }], ['Write', { file_path: '/home/u/work/app.ts' }], ['MultiEdit', { file_path: '/home/u/work/app.ts' }], ['NotebookEdit', { notebook_path: '/home/u/work/app.ts' }]]
+  for (const [tool, input] of cases) {
+    const { rec, text } = runTarget(tool, input)
+    same(rec.f, 'app.ts', `${tool} target`)
+    assert.ok(!text.includes('/home/u'), `${tool} stored a folder: ${text.slice(0, 120)}`)
+  }
+})
+
+await test('targets: an MCP tool stores no target, even when its input has a path', () => {
+  const { rec, text } = runTarget('mcp__compass__hr_read', { path: 'Compass/HR/Terminations-2026' })
+  same(rec.f, '', 'target name')
+  assert.ok(!text.includes('Terminations'), `MCP path reached the detail: ${text.slice(0, 160)}`)
+})
+
+await test('targets: a folder path stores no name (Grep)', () => {
+  const { rec, text } = runTarget('Grep', { path: '/Users/jdoe', pattern: 'TODO' })
+  same(rec.f, '', 'target name')
+  assert.ok(!text.includes('jdoe'), `folder path reached the detail: ${text.slice(0, 160)}`)
+})
+
+await test('targets: a tool outside the file-tool allow-list stores no target', () => {
+  const { rec, text } = runTarget('Lsp', { file_path: '/repo/private/plan.md' })
+  same(rec.f, '', 'target name')
+  assert.ok(!text.includes('plan.md'), `name reached the detail: ${text.slice(0, 160)}`)
+})
+
+// Names follow plain-diff's isSecretPath, with the exceptions below.
+await test('targets: names that look secret are stored as (secret file)', () => {
+  const names = ['.env', '.env.production', 'server.pem', 'api.key', 'id_rsa', 'id_ed25519', 'credentials.json', '.npmrc', '.netrc', 'secrets.yaml', 'cert.p12', 'cert.pfx', '.git-credentials', 'prod.tfvars']
+  for (const n of names) same(runTarget('Read', { file_path: '/repo/' + n }).rec.f, '(secret file)', `name ${n}`)
+})
+
+await test('targets: plain-diff exceptions keep their names (.env.example, .env.sample, .env.template, credentials.ts)', () => {
+  for (const n of ['.env.example', '.env.sample', '.env.template', 'credentials.ts']) same(runTarget('Read', { file_path: '/repo/' + n }).rec.f, n, `name ${n}`)
+})
+
+await test('safe-stop: a run from a plugin or another non-user origin does nothing', async () => {
+  for (const kind of ['plugin', 'peer', 'coordinator', 'scheduled-trigger', 'auto-continuation']) {
+    const h = await start({ python: pyOk(), env: { HOME: '/home/u' } })
+    await fire(h, 'command.run', { command: 'safe-stop', args: '', origin: { kind, name: 'other-plugin' } })
+    same([h.submitted.length, h.pythonCalls.length], [0, 0], `origin ${kind}: prompts sent, python calls`)
+  }
+})
+
+await test('safe-stop: the person\'s own run (composer origin) still sends', async () => {
+  const h = await start({ python: pyOk(), env: { HOME: '/home/u' } })
+  await fire(h, 'command.run', { command: 'safe-stop', args: '', origin: { kind: 'composer' } })
+  same(h.submitted.length, 1, 'composer origin: prompts sent')
+})
+
+await test('safe-stop: a rejected prompt submit says could not send, not sent', async () => {
+  const h = await start({ python: pyOk(), env: { HOME: '/home/u' }, submitFails: true })
+  const out = await safe(h, '')
+  assert.ok(out.text.includes('could not send') && !out.text.includes('Safe stop sent'), `reply: ${out.text}`)
+})
+
+await test('safe-stop: the reply says the prompt is queued until the session is idle', async () => {
+  const h = await start({ python: pyOk(), env: { HOME: '/home/u' } })
+  const out = await safe(h, '')
+  assert.ok(/queued|idle/i.test(out.text), `reply: ${out.text}`)
+})
+
+// Real row shape: pid, sessionId, cwd, status; a waiting row also has waitingFor.
+await test('agents json: status waiting is waiting with a permission ask, not unknown', () => {
+  const rows = []
+  for (let i = 1; i <= 4; i++) rows.push({ pid: i, sessionId: sid(i), cwd: '/x/a', status: 'busy' })
+  for (let i = 5; i <= 10; i++) rows.push({ pid: i, sessionId: sid(i), cwd: '/x/a', status: 'idle' })
+  rows.push({ pid: 11, sessionId: sid(11), cwd: '/x/a', status: 'waiting', waitingFor: 'Bash permission' })
+  const parsed = lib.parseAgentsJson(JSON.stringify(rows))
+  const count = s => parsed.filter(r => r.state === s).length
+  same([count('working'), count('waiting'), count('unknown')], [4, 7, 0], 'states of the 11 rows')
+  same(parsed.filter(r => r.ask).map(r => r.id), [sid(11)], 'the one ask row')
+  const [asked] = rowsFor(parsed, []).filter(r => r.ask)
+  same([asked && asked.state, asked && lib.rowText(asked, 80).includes('permission')], ['waiting', true], 'merged row')
+})
+
+await test('polling: heartbeats stop calling claude agents once the pane closes', async () => {
+  const h = await start()
+  await fire(h, 'session.start', {})
+  await fire(h, 'command.run', { command: 'board', args: '' })
+  await closePane(h)
+  h.agentCalls.length = 0
+  for (let i = 0; i < 5; i++) { h.now += 30_000; await tickBeat(h) }
+  same(h.agentCalls.length, 0, 'claude agents calls after the pane closed')
+})
+
+// Backstop when no close arrives: N = 10 refreshes with no /board call.
+await test('polling: with no close and no /board call, board refreshes stop after 10 beats', async () => {
+  const h = await start()
+  await fire(h, 'session.start', {})
+  await fire(h, 'command.run', { command: 'board', args: '' })
+  h.agentCalls.length = 0
+  for (let i = 0; i < 30; i++) { h.now += 30_000; await tickBeat(h) }
+  assert.ok(h.agentCalls.length >= 1 && h.agentCalls.length <= 10, `claude agents calls over 30 beats: ${h.agentCalls.length}, want 1 to 10`)
+})
+
+await test('timeout: the claude agents call timeout is 8 s, under the 10 s hook budget', () => {
+  same(lib.AGENTS_TIMEOUT_MS, 8000, 'AGENTS_TIMEOUT_MS')
+})
+
+await test('clear: a flush before the new session id binds does not recreate the old entry', async () => {
+  const h = await start()
+  await fire(h, 'session.start', {})
+  await fire(h, 'session.end', { sessionId: ID, reason: 'clear' })
+  h.now += 30_000
+  await tickBeat(h) // the host still answers the old id
+  same(h.store.has('sess:' + ID), false, 'old entry written again before the new id bound')
+  h.sid = NEW_ID
+  h.now += 30_000
+  await tickBeat(h)
+  same(h.store.has('sess:' + NEW_ID), true, 'new entry once the new id binds')
+})
+
+await test('heartbeat: with only the stamp changed, detail is not rewritten; sess at most once a beat', async () => {
+  const h = await start()
+  await fire(h, 'session.start', {})
+  h.writes.length = 0
+  for (let i = 0; i < 4; i++) { h.now += 30_000; await tickBeat(h) }
+  same(h.writes.filter(k => !k.startsWith('sess:')), [], 'writes outside sess: over 4 beats')
+  assert.ok(h.writes.length <= 4, `store writes over 4 beats: ${h.writes.length}, want at most 4`)
+})
+
+await test('read cap: all 200 entries appear in the board', async () => {
+  const seed = Array.from({ length: 200 }, (_, i) => ['sess:' + sid(i + 1), raw({ repo: 'r' + (i + 1) })])
+  const h = await start({ seed })
+  same((await lines(h)).length, 202, 'board lines: band, header, 200 rows')
+})
+
+await test('read cap: above 200, the pane gives the true count not shown and never drops the newest live rows', async () => {
+  const seed = []
+  for (let i = 1; i <= 245; i++) seed.push(['sess:' + sid(i), raw({ repo: 'old-' + i, at: NOW - 60_000 - i })])
+  for (let i = 1; i <= 5; i++) seed.push(['sess:' + sid(900 + i), raw({ repo: 'live-' + i, at: NOW })])
+  const h = await start({ seed })
+  const text = await boardText(h)
+  for (let i = 1; i <= 5; i++) assert.ok(text.includes('live-' + i), `live-${i} is missing from the board`)
+  const texts = paneTexts(await pane(h))
+  assert.ok(texts.includes('+210 more not shown'), `pane says ${JSON.stringify(texts.filter(t => t.includes('more')))}, want +210`)
 })
 
 const fails = results.filter(r => r.startsWith('FAIL')).length
