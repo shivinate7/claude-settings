@@ -1501,6 +1501,242 @@ test("config.kinds missing, a string, {} or null is still refused", () =>
     });
   }));
 
+// ---------------------------------------------------------------- near-miss cites
+// A prefix letter glued to a KNOWN slug, in a wrapper the repo's cite form does not use, is a
+// near-miss: the stamp never rewrites it, so it survives the claim as dead text. The check reads
+// the same config and record set as the cite check. Each fixture repo holds one numbered record,
+// `one`, so the default-branch pending refusal stays out of these results.
+const NEAR_MISS = {
+  // cite form D‹slug›: the stamp rewrites that form, so it is the correct cite here
+  prefixed: {
+    config: prefixedCiteConfig,
+    record: "decisions/one.md",
+    recordText: "---\nid: D1\nslug: one\nkind: decision\nstatus: open\ndate: 2026-01-01\n---\n\nBody.\n",
+    correct: "D‹one›",
+  },
+  // cite form [[slug]]: D‹slug› is a near-miss here, and the correct form is [[one]]
+  doubleBracket: {
+    config: frontmatterConfig,
+    record: "docs/decisions/one.md",
+    recordText: "---\nid: D-001\nslug: one\ntitle: One\ndate: 2026-01-01\n---\n\nBody.\n",
+    correct: "[[one]]",
+  },
+  // cite form D‹slug› with a slug that may hold dots, as the frontmatter-filename pattern allows
+  dotted: {
+    config: dottedCiteConfig,
+    record: "decisions/dotted.md",
+    recordText: "---\nid: D1\nslug: a.b\nkind: decision\nstatus: open\ndate: 2026-01-01\n---\n\nBody.\n",
+    correct: "D‹a.b›",
+  },
+  // a multi-character prefix, DEBT, beside D, F and Q
+  debt: {
+    config: debtCiteConfig,
+    record: "debt/debt-one.md",
+    recordText: "---\nid: DEBT1\nslug: debt-one\nkind: debt\nstatus: open\ndate: 2026-01-01\n---\n\nBody.\n",
+    correct: "DEBT‹debt-one›",
+  },
+};
+
+// Each config is a fresh loadConfig result, so a test may change its cite pattern or kinds.
+function dottedCiteConfig() {
+  const config = prefixedCiteConfig();
+  config.cite.pattern = "\\b([DFQ])\u2039([a-z0-9._-]+)\u203a";
+  return config;
+}
+
+function debtCiteConfig() {
+  const config = prefixedCiteConfig();
+  config.kinds.push({
+    id: "debt", folder: "debt", filePattern: "*.md", prefix: "DEBT", pad: 0, idTemplate: "{prefix}{n}",
+    pendingRegex: "^id:[ \\t]*pending[ \\t]*$", location: "frontmatter", order: "date",
+    numbering: "lowest_free", slugField: "slug", dateField: "date", glossField: "title",
+    requireFieldsOnPending: [], excludeFiles: ["_index.md"],
+  });
+  config.cite.pattern = "\\b(DEBT|[DFQ])\u2039([a-z0-9-]+)\u203a";
+  return config;
+}
+
+// The problems `check` returns that name the doc, for one doc that holds `docText`.
+function docProblems(fixture, docText) {
+  return withTempDir((root) => {
+    initRepo(root);
+    write(root, fixture.record, fixture.recordText);
+    write(root, "notes/doc.md", docText);
+    commit(root, "a numbered record, and a doc that cites it");
+    return check(root, fixture.config()).filter((p) => p.includes("notes/doc.md"));
+  });
+}
+
+// True when one problem names the wrong text and the right form together.
+const flaggedWith = (problems, wrong, right) => problems.some((p) => p.includes(wrong) && p.includes(right));
+
+test("near-miss: D`one` (backticks) is flagged, and the remedy names D‹one›", () => {
+  const problems = docProblems(NEAR_MISS.prefixed, "Cites D`one`, a gloss.\n");
+  assert.equal(flaggedWith(problems, "D`one`", "D‹one›"), true, problems.join("\n"));
+});
+
+test("near-miss: D'one' (single quotes) is flagged, and the remedy names D‹one›", () => {
+  const problems = docProblems(NEAR_MISS.prefixed, "Cites D'one', a gloss.\n");
+  assert.equal(flaggedWith(problems, "D'one'", "D‹one›"), true, problems.join("\n"));
+});
+
+test("near-miss: D\"one\" (double quotes) is flagged, and the remedy names D‹one›", () => {
+  const problems = docProblems(NEAR_MISS.prefixed, "Cites D\"one\", a gloss.\n");
+  assert.equal(flaggedWith(problems, "D\"one\"", "D‹one›"), true, problems.join("\n"));
+});
+
+test("near-miss: D[one] (brackets) is flagged, and the remedy names D‹one›", () => {
+  const problems = docProblems(NEAR_MISS.prefixed, "Cites D[one], a gloss.\n");
+  assert.equal(flaggedWith(problems, "D[one]", "D‹one›"), true, problems.join("\n"));
+});
+
+test("near-miss: D‹one› is flagged where the cite form is [[slug]], and the remedy names [[one]]", () => {
+  const problems = docProblems(NEAR_MISS.doubleBracket, "Cites D‹one›, a gloss.\n");
+  assert.equal(flaggedWith(problems, "D‹one›", "[[one]]"), true, problems.join("\n"));
+});
+
+test("correct cite: D‹one› passes where the cite form is D‹slug›", () => {
+  assert.deepEqual(docProblems(NEAR_MISS.prefixed, "Cites D‹one›, a gloss.\n"), []);
+});
+
+test("correct cite: [[one]] passes where the cite form is [[slug]]", () => {
+  assert.deepEqual(docProblems(NEAR_MISS.doubleBracket, "Cites [[one]], a gloss.\n"), []);
+});
+
+test("near-miss: a slug in prose without the prefix letter is not flagged", () => {
+  // `one` and one are plain mentions; A`one` has a letter that is no kind's prefix; ID`one`
+  // has a D that is the tail of a word, not a prefix letter of its own.
+  assert.deepEqual(docProblems(NEAR_MISS.prefixed, "Read `one`, the one record, A`one`, and ID`one` here.\n"), []);
+});
+
+test("near-miss: D`not-a-record` (no such record) is not flagged", () => {
+  assert.deepEqual(docProblems(NEAR_MISS.prefixed, "Cites D`not-a-record`, a gloss.\n"), []);
+});
+
+// Fence shapes, pinned to CommonMark. A fence opens with 3+ backticks or tildes at 0-3 spaces of
+// indent, counted from the content column of its container: the top level, a list item (at any
+// column, such as "- a" with content at column 2, or "10." with content at column 4), or a
+// blockquote after its "> " marker. It closes only on the same character, at least as long. A tab
+// or four spaces at the top level is an indented code block, not a fence, so it exempts nothing: a
+// doc that shows the wrong form uses a fence. A tab in a list item counts to column 4, so "- a"
+// then a tab leaves 2 spaces of indent: a fence. Each shape pins both paths: the near-miss scan and
+// protectedRanges (the dangling-cite check).
+const FENCE_SHAPES = [
+  ["a top-level ``` fence", (line) => "```text\n" + line + "\n```\n", true],
+  ["a top-level ~~~ fence", (line) => "~~~text\n" + line + "\n~~~\n", true],
+  ["a fence indented 3 spaces", (line) => "   ```text\n   " + line + "\n   ```\n", true],
+  ["a fence in a numbered list item", (line) => "1. item\n\n   ```text\n   " + line + "\n   ```\n", true],
+  ["a fence in a blockquote", (line) => "> ```text\n> " + line + "\n> ```\n", true],
+  ["a ~~~ fence that a ``` line does not close", (line) => "~~~text\n```\n" + line + "\n~~~\n", true],
+  ["a tab-indented ``` (an indented code block, not a fence)", (line) => "\t```\n\t" + line + "\n\t```\n", false],
+  ["a 4-space indented ``` (an indented code block, not a fence)", (line) => "    ```\n    " + line + "\n    ```\n", false],
+  ["a fence at column 4 in a nested list (\"- a\", \"  - b\")", (line) => "- a\n  - b\n\n    ```text\n    " + line + "\n    ```\n", true],
+  ["a fence at column 4 under a \"10.\" item", (line) => "10. item\n\n    ```text\n    " + line + "\n    ```\n", true],
+  ["a tab-indented fence in a list item (\"- a\")", (line) => "- a\n\n\t```text\n\t" + line + "\n\t```\n", true],
+];
+
+for (const [shape, block, exempt] of FENCE_SHAPES) {
+  test(`fence rules: a near-miss in ${shape} is ${exempt ? "exempt" : "flagged"}`, () => {
+    const problems = docProblems(NEAR_MISS.prefixed, block("D`one`, a gloss."));
+    if (exempt) assert.deepEqual(problems, []);
+    else assert.equal(flaggedWith(problems, "D`one`", "D‹one›"), true, problems.join("\n"));
+  });
+  test(`fence rules: a dangling cite in ${shape} is ${exempt ? "exempt" : "flagged"}`, () => {
+    const problems = docProblems(NEAR_MISS.prefixed, block("D‹nothing›, a gloss."));
+    assert.equal(problems.some((p) => p.includes("[[nothing]]")), !exempt, problems.join("\n"));
+  });
+}
+
+// Guard: a closed fence ends at its closer, so the text after it is top level and its near-miss is
+// flagged. A fix that opens an indented fence but never closes it would protect this line too.
+test("fence rules: a near-miss after a closed column-4 nested-list fence is flagged", () => {
+  const problems = docProblems(NEAR_MISS.prefixed, "- a\n  - b\n\n    ```text\n    code\n    ```\n\nThen D`one`, a gloss.\n");
+  assert.equal(flaggedWith(problems, "D`one`", "D‹one›"), true, problems.join("\n"));
+});
+
+// Container edges, pinned to GitHub's reading. A ``` line at column 0 that ends a list item or a
+// blockquote fence ends its container too, then opens a new top-level fence that runs to the end of
+// the text, so a dangling cite after it is not reported. A non-blank plain line less indented than
+// the item ends the item and its fence, so a cite after that line is top level and is reported.
+const CONTAINER_EDGES = [
+  ["a list-item fence closed by a ``` line at column 0", "- a\n\n  ```text\n  code\n```\nD‹nothing›, a gloss.\n", false],
+  ["a blockquote fence closed by a ``` line outside the quote", "> ```text\n> code\n```\nD‹nothing›, a gloss.\n", false],
+  ["a list-item fence ended by a less-indented plain line", "- a\n\n  ```text\n  code\nThen text.\nD‹nothing›, a gloss.\n", true],
+];
+
+for (const [shape, text, reported] of CONTAINER_EDGES) {
+  test(`fence container: a dangling cite after ${shape} is ${reported ? "reported" : "not reported"}`, () => {
+    const problems = docProblems(NEAR_MISS.prefixed, text);
+    assert.equal(problems.some((p) => p.includes("[[nothing]]")), reported, problems.join("\n"));
+  });
+}
+
+test("fence: a ``D`one` `` span inside a fence is not flagged", () => {
+  assert.deepEqual(docProblems(NEAR_MISS.prefixed, "```text\n``D`one` ``\n```\n"), []);
+});
+
+// Curly quotes are wrappers too: a doc that types the wrong quote mark is still dead text.
+test("near-miss: curly double quotes D“one” are flagged, and the remedy names D‹one›", () => {
+  const problems = docProblems(NEAR_MISS.prefixed, "Cites D“one”, a gloss.\n");
+  assert.equal(flaggedWith(problems, "D“one”", "D‹one›"), true, problems.join("\n"));
+});
+
+test("near-miss: curly single quotes D‘one’ are flagged, and the remedy names D‹one›", () => {
+  const problems = docProblems(NEAR_MISS.prefixed, "Cites D‘one’, a gloss.\n");
+  assert.equal(flaggedWith(problems, "D‘one’", "D‹one›"), true, problems.join("\n"));
+});
+
+// A slug may hold dots (the frontmatter-filename pattern allows them): the near-miss scan must
+// read the whole slug, or it sees "a" and finds no record.
+test("near-miss: D`a.b` (a dotted slug) is flagged, and the remedy names D‹a.b›", () => {
+  const problems = docProblems(NEAR_MISS.dotted, "Cites D`a.b`, a gloss.\n");
+  assert.equal(flaggedWith(problems, "D`a.b`", "D‹a.b›"), true, problems.join("\n"));
+});
+
+test("correct cite: D‹a.b› passes where the slug may hold dots", () => {
+  assert.deepEqual(docProblems(NEAR_MISS.dotted, "Cites D‹a.b›, a gloss.\n"), []);
+});
+
+// A multi-character prefix is a prefix letter too: DEBT is a kind's prefix, so DEBT`slug` is glued.
+test("near-miss: DEBT`debt-one` (a multi-character prefix) is flagged, and the remedy names DEBT‹debt-one›", () => {
+  const problems = docProblems(NEAR_MISS.debt, "Cites DEBT`debt-one`, a gloss.\n");
+  assert.equal(flaggedWith(problems, "DEBT`debt-one`", "DEBT‹debt-one›"), true, problems.join("\n"));
+});
+
+test("correct cite: DEBT‹debt-one› passes under a multi-character prefix", () => {
+  assert.deepEqual(docProblems(NEAR_MISS.debt, "Cites DEBT‹debt-one›, a gloss.\n"), []);
+});
+
+// Scanner cases (building-scanner-respects-strings). The near-miss must be found even when a
+// comment opener sits inside a string, a lone quote sits in prose, or a backtick sits inside a
+// quoted string on the same line. A scan that pairs backticks, or stops at a comment opener,
+// would hide the near-miss that follows.
+test("scanner: comment openers inside a string do not hide a near-miss on the same line", () => {
+  const problems = docProblems(NEAR_MISS.prefixed, "Use \"//\", \"/*\" and \"#\" as openers, then D`one`, a gloss.\n");
+  assert.equal(flaggedWith(problems, "D`one`", "D‹one›"), true, problems.join("\n"));
+});
+
+test("scanner: a lone quote in text (Don't) does not hide a near-miss", () => {
+  const problems = docProblems(NEAR_MISS.prefixed, "Don't cite D`one` by slug.\n");
+  assert.equal(flaggedWith(problems, "D`one`", "D‹one›"), true, problems.join("\n"));
+});
+
+test("scanner: a backtick inside a quoted string does not hide a near-miss", () => {
+  const problems = docProblems(NEAR_MISS.prefixed, "Write \"a`b\" then D`one`, a gloss.\n");
+  assert.equal(flaggedWith(problems, "D`one`", "D‹one›"), true, problems.join("\n"));
+});
+
+test("scanner: a multi-line template literal inside a fence is exempt", () => {
+  const text = "```js\nconst s = `first line\nD`one` on line two`;\n```\n";
+  assert.deepEqual(docProblems(NEAR_MISS.prefixed, text), []);
+});
+
+test("scanner: a near-miss after a fence that holds a multi-line template literal is flagged", () => {
+  const text = "```js\nconst s = `first line\nD`one` on line two`;\n```\nThen D`one`, a gloss.\n";
+  const problems = docProblems(NEAR_MISS.prefixed, text);
+  assert.equal(flaggedWith(problems, "D`one`", "D‹one›"), true, problems.join("\n"));
+});
+
 // ---------------------------------------------------------------- run
 // LIST_TESTS=1 prints each registered name as `LISTED <JSON>` and exits before any test body runs.
 if (process.env.LIST_TESTS === "1") { for (const { name } of tests) console.log("LISTED " + JSON.stringify(name)); process.exit(0); }

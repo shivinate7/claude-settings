@@ -15,6 +15,8 @@ the hook prints one JSON object on stdout and exits 0:
   test-author, record-writer and any other type; never for reviewer, Explore, Plan or
   claude-code-guide, which only read.
 - A plugin-namespaced type (`my-plugin:builder`) gets the scope of its bare name.
+- When the payload's cwd holds a .github/stamp.json whose cite.form is set, one brief line
+  carries the form of every kind, in kind order. A cite.pattern with no cite.form adds no line.
 - Junk or empty stdin, or an internal error: no output on stdout, exit 0, and at most one stderr
   line that starts `agent_brief:`. The hook fails open.
 
@@ -25,8 +27,10 @@ Override the module under test with the env var AGENT_BRIEF_UNDER_TEST.
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.environ.get("AGENT_BRIEF_UNDER_TEST") or os.path.join(HERE, "agent_brief.py")
@@ -401,6 +405,65 @@ BAD_CASES = [
 for _name, _stdin in BAD_CASES:
     add("bad input: %s gives no stdout, exit 0, at most one agent_brief: stderr line" % _name,
         "bad", _stdin)
+
+# CITE FORM: the brief names the repo's record cite form. The hook reads `.github/stamp.json`
+# under the payload's `cwd`, so the form comes from the repo, not from the hook's text. The
+# fixture has three kinds (D, F, Q). The form is per kind: one brief line gives every kind's form,
+# in kind order, because a single {prefix} filled from kinds[0] would name only D.
+CITE_STAMP = {
+    "kinds": [
+        {"id": "decision", "folder": "decisions", "prefix": "D", "idTemplate": "{prefix}{n}"},
+        {"id": "finding", "folder": "findings", "prefix": "F", "idTemplate": "{prefix}{n}"},
+        {"id": "question", "folder": "questions", "prefix": "Q", "idTemplate": "{prefix}{n}"},
+    ],
+    "cite": {"pattern": "([DFQ])‹([a-z0-9-]+)›", "prefixGroup": 1, "slugGroup": 2, "template": "{id}",
+             "form": "{prefix}‹{slug}›"},  # cite.form is the one source for the brief line
+}
+
+
+def brief_for_stamp(stamp):
+    """Run the hook in a repo whose .github/stamp.json holds `stamp`. Return (text, problem)."""
+    root = tempfile.mkdtemp(prefix="agent-brief-cite-")
+    try:
+        os.makedirs(os.path.join(root, ".github"))
+        with open(os.path.join(root, ".github", "stamp.json"), "w", encoding="utf-8") as fh:
+            json.dump(stamp, fh)
+        body = json.loads(payload("builder"))
+        body["cwd"] = root
+        return context_for(json.dumps(body))
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def cite_form_check():
+    """A repo whose stamp.json carries cite.form gets one brief line that carries every kind's form."""
+    text, problem = brief_for_stamp(CITE_STAMP)
+    if problem:
+        return problem
+    forms = ["%s‹slug›" % letter for letter in ("D", "F", "Q")]  # spelled as escapes
+    if not has_line(text, *forms):
+        return "no one brief line carries the form of each kind (D, F, Q) from the repo's stamp.json"
+    if len(text.split("\n")) >= 20:
+        return "the context is %d lines, want fewer than 20" % len(text.split("\n"))
+    return None
+
+
+def cite_form_absent_check():
+    """A stamp.json with cite.pattern and no cite.form adds no cite line: no form is derived."""
+    stamp = json.loads(json.dumps(CITE_STAMP))
+    del stamp["cite"]["form"]
+    text, problem = brief_for_stamp(stamp)
+    if problem:
+        return problem
+    if "‹slug›" in text or "Cite a record in this repo" in text:
+        return "a cite line was derived from cite.pattern; want none without cite.form"
+    return None
+
+
+add("cite form: a repo stamp.json with cite.form adds a brief line that carries it",
+    "custom", fn=cite_form_check)
+add("cite form: a repo stamp.json with cite.pattern and no cite.form adds no cite line",
+    "custom", fn=cite_form_absent_check)
 
 
 def main():
