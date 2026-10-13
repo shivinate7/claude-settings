@@ -44,6 +44,11 @@ Writing prose and records is not building.
 | `opus`, `sonnet`, `fable` aliases | not pinned | n/a |
 | safety-classifier fallback | on, the default | n/a |
 | `/model` picker | built-in list | n/a |
+| prompt-hook judges: AskUserQuestion, Agent, Edit, Write, SendMessage (settings.json) | claude-sonnet-5-5 | model default; a prompt hook has no effort field (decision haiku-prompt-hooks) |
+| reply judge (`hooks/reply_judge.py`, Stop) | haiku, through `decision_watch.invoke_model` | xhigh |
+| question outcome check (`hooks/question_outcome.py`) | haiku, through `decision_watch.invoke_model` | xhigh |
+| decision watch (`hooks/decision_watch.py`) | haiku | xhigh |
+| every other hook and gate | no model; plain code | n/a |
 
 The Explore audit row is prose only. The guard cannot tell an audit Explore from a search
 Explore. The caller spot-checks 3 findings before it acts on an audit.
@@ -432,3 +437,6 @@ The step-up check has named limits, from review rounds 2 and 3:
 ## Where this lives
 
 This file keeps its slug name. No number is claimed on a branch.
+
+Kind: process
+Home: lint/check_agent_models.py
