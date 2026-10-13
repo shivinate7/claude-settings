@@ -80,5 +80,41 @@ class DecisionJudgeMatch(unittest.TestCase):
                 self.assertIn(JUDGE_RULE, prompt)
 
 
+# A prompt or agent hook names its model. Since 2026-10-08 the evaluator has rejected the bare
+# alias "haiku" (stderr unrecognized_model, query_source hook_prompt), so each judge failed and
+# let calls through. A full id starts with "claude-".
+JUDGE_TYPES = ("prompt", "agent")
+
+
+def judge_hooks():
+    """Yield (label, hook) for every prompt or agent hook in settings.json, under any event."""
+    with open(SETTINGS, encoding="utf-8") as f:
+        events = json.load(f)["hooks"]
+    for event, entries in events.items():
+        for entry in entries:
+            for hook in entry.get("hooks", []):
+                if hook.get("type") in JUDGE_TYPES:
+                    label = event
+                    if "matcher" in entry:
+                        label += " matcher=" + entry["matcher"]
+                    if "if" in hook:
+                        label += " if=" + hook["if"]
+                    yield label, hook
+
+
+class JudgeModelIds(unittest.TestCase):
+    def test_every_prompt_and_agent_hook_names_a_full_model_id(self):
+        found, bad = 0, []
+        for label, hook in judge_hooks():
+            found += 1
+            model = hook.get("model")
+            if not (isinstance(model, str) and model.startswith("claude-")):
+                bad.append("%s (%s) model=%r" % (label, hook["type"], model))
+        if not found:
+            self.fail("no prompt or agent hook found, so the scan proves nothing")
+        if bad:
+            self.fail("model is not a full id (must start claude-): " + "; ".join(bad))
+
+
 if __name__ == "__main__":
     unittest.main()
