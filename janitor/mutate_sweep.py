@@ -457,6 +457,35 @@ MUTATIONS = [
      '                or not isinstance(when, (int, float)) or isinstance(when, bool):',
      '                or False:',
      "test_a_non_numeric_time_ms_is_kept_not_purged"),
+    ("purge: the ref is dropped by branch name, with no check that it holds the entry's commit",
+     "sweep",
+     '            if held.returncode == 1 or held.stdout.strip() != commit:\n'
+     '                if held.returncode == 0:\n'
+     '                    decision["reason"] += "; ref kept: it holds a younger restore point"\n'
+     '                continue\n'
+     '            dropped = guard._git(repo, "update-ref", "-d", ref, commit)',
+     '            dropped = guard._git(repo, "update-ref", "-d", ref)',
+     "test_an_expired_entry_keeps_the_ref_that_holds_the_younger_commit"),
+    ("purge: an unexpired entry for the same commit no longer keeps the ref",
+     "sweep",
+     '            if row_key(entry) in unexpired:\n',
+     '            if False:\n',
+     "test_an_expired_entry_keeps_the_ref_while_an_unexpired_entry_names_its_commit"),
+    ("purge: the repo key is the raw string, not the normalised real path",
+     "sweep",
+     '        return (os.path.normcase(os.path.realpath(repo)), e.get("branch"), e.get("commit"))\n',
+     '        return (repo, e.get("branch"), e.get("commit"))\n',
+     "test_an_unexpired_row_protects_the_ref_across_spellings_of_its_repo"),
+    ("purge: a git failure reading the ref is read as a gone ref",
+     "sweep",
+     '            if held is None or held.returncode not in (0, 1) or (\n',
+     '            if held is None or (\n',
+     "test_a_failed_ref_read_is_reported_and_keeps_the_ref"),
+    ("purge: exit 1 with a stderr message (a broken ref) is read as a gone ref",
+     "sweep",
+     '                    held.returncode == 1 and held.stderr.strip()):\n',
+     '                    False):\n',
+     "test_a_broken_ref_file_is_an_error_not_a_gone_ref"),
 
     # ---- --confirm (plan, "the refusals"). See the module docstring: MEASURED to survive. ----
     ("--confirm: reap branches for real with no --confirm on the line",
