@@ -1614,12 +1614,13 @@ test("near-miss: D`not-a-record` (no such record) is not flagged", () => {
 });
 
 // Fence shapes, pinned to CommonMark. A fence opens with 3+ backticks or tildes at 0-3 spaces of
-// indent: at the top level, in a list item whose content sits at 0-3 spaces, or after a blockquote
-// marker ("> "). It closes only on the same character, at least as long. A tab or four spaces at
-// the top level is an indented code block, not a fence, so it exempts nothing: a doc that shows
-// the wrong form uses a fence. Each shape pins both paths: the near-miss scan and protectedRanges
-// (the dangling-cite check). Known ceiling: list items whose content sits past column 3 (for
-// example "10." or a 4-space fence under "- ") are not modelled.
+// indent, counted from the content column of its container: the top level, a list item (at any
+// column, such as "- a" with content at column 2, or "10." with content at column 4), or a
+// blockquote after its "> " marker. It closes only on the same character, at least as long. A tab
+// or four spaces at the top level is an indented code block, not a fence, so it exempts nothing: a
+// doc that shows the wrong form uses a fence. A tab in a list item counts to column 4, so "- a"
+// then a tab leaves 2 spaces of indent: a fence. Each shape pins both paths: the near-miss scan and
+// protectedRanges (the dangling-cite check).
 const FENCE_SHAPES = [
   ["a top-level ``` fence", (line) => "```text\n" + line + "\n```\n", true],
   ["a top-level ~~~ fence", (line) => "~~~text\n" + line + "\n~~~\n", true],
@@ -1629,6 +1630,9 @@ const FENCE_SHAPES = [
   ["a ~~~ fence that a ``` line does not close", (line) => "~~~text\n```\n" + line + "\n~~~\n", true],
   ["a tab-indented ``` (an indented code block, not a fence)", (line) => "\t```\n\t" + line + "\n\t```\n", false],
   ["a 4-space indented ``` (an indented code block, not a fence)", (line) => "    ```\n    " + line + "\n    ```\n", false],
+  ["a fence at column 4 in a nested list (\"- a\", \"  - b\")", (line) => "- a\n  - b\n\n    ```text\n    " + line + "\n    ```\n", true],
+  ["a fence at column 4 under a \"10.\" item", (line) => "10. item\n\n    ```text\n    " + line + "\n    ```\n", true],
+  ["a tab-indented fence in a list item (\"- a\")", (line) => "- a\n\n\t```text\n\t" + line + "\n\t```\n", true],
 ];
 
 for (const [shape, block, exempt] of FENCE_SHAPES) {
@@ -1642,6 +1646,13 @@ for (const [shape, block, exempt] of FENCE_SHAPES) {
     assert.equal(problems.some((p) => p.includes("[[nothing]]")), !exempt, problems.join("\n"));
   });
 }
+
+// Guard: a closed fence ends at its closer, so the text after it is top level and its near-miss is
+// flagged. A fix that opens an indented fence but never closes it would protect this line too.
+test("fence rules: a near-miss after a closed column-4 nested-list fence is flagged", () => {
+  const problems = docProblems(NEAR_MISS.prefixed, "- a\n  - b\n\n    ```text\n    code\n    ```\n\nThen D`one`, a gloss.\n");
+  assert.equal(flaggedWith(problems, "D`one`", "D‹one›"), true, problems.join("\n"));
+});
 
 test("fence: a ``D`one` `` span inside a fence is not flagged", () => {
   assert.deepEqual(docProblems(NEAR_MISS.prefixed, "```text\n``D`one` ``\n```\n"), []);
