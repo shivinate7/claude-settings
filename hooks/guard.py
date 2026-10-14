@@ -217,12 +217,13 @@ while True:
     try:
         import guard_core
         from guard_core import (
-            AUTHOR_ROLE, GIT_WORK_TREE_RE, heredoc_heads, is_contraction, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
+            AUTHOR_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
-            _resolved, _run_dir, _segment_cd_target, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
+            _resolved, _run_dir, _git_subcommand_index, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             command_root, git_calls, git_common_dir, inline_script, is_worktree, log_path_and_text, norm,
-            path_is_inside, primary_checkout, record, refuse, resolve_command, resolve_default_base,
-            segment_tokens, split_segments, strip_heredoc_bodies,
+            dir_before_segment, path_is_inside, primary_checkout, record, refuse, resolve_command,
+            resolve_default_base, segment_tokens, shell_abs, split_segments, strip_heredoc_bodies,
+            walk_quotes,
         )
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
@@ -426,22 +427,13 @@ QUIET_FLAG_SUBCOMMANDS = ("push", "merge", "rebase", "pull", "fetch")
 
 
 def unquoted_at(text: str, index: int) -> bool:
-    """True when `index` in `text` sits outside every quote. The walk is split_segments' own: a
-    quote closes at the next like mark, a contraction that never closes is text, and an unquoted
-    backslash (POSIX) escapes the next character. An unterminated quote runs to the end."""
-    quote = ""
-    skip = -1
-    for at in range(index):
-        char = text[at]
-        if at == skip:
-            continue
-        if quote:
-            quote = "" if char == quote else quote
-        elif char == "\\" and not POWERSHELL_CALL[0]:
-            skip = at + 1
-        elif char in ("'", '"') and not (char == "'" and is_contraction(text, at)):
-            quote = char
-    return not quote
+    """True when `index` in `text` sits outside every quote, read off guard_core's quote walk (the
+    one `split_segments` cuts with: an escaped quote, a `$'...'` string and a PowerShell backtick
+    included). An unterminated quote runs to the end."""
+    for at, _, quote in walk_quotes(text):
+        if at >= index:
+            return not quote
+    return True
 
 
 def discards_output(segment: str) -> bool:
@@ -475,7 +467,9 @@ def quiet_write(args) -> bool:
 # and `commit -m "--dry-run"` are real commits. A short cluster ending in one of these letters
 # (`-am`) takes the next token too. A miss here only keeps a deny, never lifts one.
 VALUE_FLAGS = {"-m", "--message", "-F", "--file", "-c", "-C", "--reuse-message", "--reedit-message",
-               "--author", "--date", "--fixup", "--squash", "-t", "--template", "--cleanup"}
+               "--author", "--date", "--fixup", "--squash", "-t", "--template", "--cleanup",
+               "--trailer", "-o", "--push-option", "-u", "-s", "-X", "--onto", "--repo", "-x",
+               "--strategy", "--strategy-option"}
 LISTING = re.compile(r"-[ln]+\d*")   # `tag -l`, `-n5`, `-ln1`
 FETCH_VALUE_FLAGS = {"--depth", "-j", "--jobs", "--upload-pack", "--refmap", "-o", "--server-option",
                      "--deepen", "--shallow-since", "--shallow-exclude"}
@@ -494,7 +488,7 @@ def read_verb(subcommand: str, args) -> bool:
                 subcommand == "tag" and (token == "--list" or LISTING.fullmatch(token))):
             return True
         elif token in VALUE_FLAGS or (token[:1] == "-" and token[1:2] != "-" and len(token) > 2
-                                      and token[-1] in "mFcCt"):
+                                      and token[-1] in "mFcCtouXsx"):
             skip = True
     return False
 
@@ -556,42 +550,55 @@ def silent_write_hit(segment: str, tail: str = ""):
             word, rest = basename(tokens[index]), tokens[index + 1:]
             if (word == "make" and "merge" in rest) or (
                     word in ("gh", "gh.exe") and rest[:2] == ["pr", "merge"]):
-                return word + " " + " ".join(rest), "redirect", "merge"
+                return word + " " + " ".join(rest), "redirect", ("make merge" if word == "make" else "gh pr merge")
     return "", "", ""
 
 
-def _git_dir_target(tokens):
-    """The `--git-dir` a segment's git call names, either spelling, or None."""
+def _git_option_tokens(tokens):
+    """The words of a segment's git call that sit before its subcommand: git's own options."""
     index = resolve_command(tokens)
     if index is None or basename(tokens[index]) not in ("git", "git.exe"):
-        return None
-    for at in range(index + 1, len(tokens)):
-        if tokens[at].startswith("--git-dir="):
-            return tokens[at][len("--git-dir="):]
-        if tokens[at] == "--git-dir":
-            return tokens[at + 1] if at + 1 < len(tokens) else None
+        return []
+    return tokens[index + 1:_git_subcommand_index(tokens, index)]
+
+
+def _git_dir_target(tokens):
+    """The `--git-dir` the git call names before its subcommand, either spelling, or None."""
+    options = _git_option_tokens(tokens)
+    for at, token in enumerate(options):
+        if token.startswith("--git-dir="):
+            return token[len("--git-dir="):]
+        if token == "--git-dir":
+            return options[at + 1] if at + 1 < len(options) else None
     return None
+
+
+def _unexpanded(path) -> bool:
+    """True when a path holds a variable or a substitution: the shell's value is not this hook's."""
+    return any(mark in path for mark in "$%`")
 
 
 def in_throwaway(segments, number: int, cwd: str) -> bool:
     """True when the write in `segments[number]` runs under the temp folder, where a lost trace
-    costs nothing real. Its own `-C`, else its own `--git-dir`, else the last `cd` ahead of it,
-    else the shell's cwd names where it runs; a `--git-dir` names the repository, so its parent
-    folder is judged. An unexpanded `$` in the path reads as not throwaway."""
+    costs nothing real. A `push` never counts: it reaches a remote. The folder is read the way
+    the shell reads it (`dir_before_segment`: cd, pushd, Set-Location, cd -, a subshell's cd),
+    then its own `-C`, then its own `--git-dir`, which names the repository and outranks `-C`. A
+    path that holds a variable, an unknown cwd, a `GIT_DIR` or `--work-tree` all read as not
+    throwaway: this fails closed."""
+    if any(subcommand == "push" for subcommand, _ in git_calls(segments[number])):
+        return False
+    where = dir_before_segment(segments, number, cwd)
     tokens = segment_tokens(segments[number])
-    where = None
     if tokens:
-        where = _segment_git_c_target(tokens)
-        if where is None:
-            git_dir = _git_dir_target(tokens)
-            where = git_dir and os.path.dirname(git_dir.rstrip("/\\")) or git_dir
-    if where is None:
-        for earlier in segments[:number]:
-            earlier_tokens = segment_tokens(earlier)
-            target = earlier_tokens and _segment_cd_target(earlier_tokens)
-            where = target or where
-    where = _absolute(where, cwd) if where else cwd
-    if not where or "$" in where:
+        index = resolve_command(tokens) or 0
+        options = _git_option_tokens(tokens)
+        if any(t.startswith(("GIT_DIR=", "GIT_WORK_TREE=")) for t in tokens[:index]) or any(
+                t.startswith("--work-tree") for t in options):
+            return False
+        for named in (_segment_git_c_target(tokens), _git_dir_target(tokens)):
+            if named is not None:
+                where = None if _unexpanded(named) else shell_abs(named, where)
+    if not where:
         return False
     import tempfile   # lazy: only a silenced write reaches here
     return bool(path_is_inside(where, tempfile.gettempdir()))
@@ -601,13 +608,15 @@ SILENT_WRITE_REDIRECT_REASON = (
     "Rule (Git): step {step} of {total}, the {kind}: a redirect silences this write's own "
     "output (>/dev/null), so neither a refusal nor the line that proves it landed would reach "
     "the session. "
-    "Remedy: run `git {kind} 2>&1 | tail -1`, and read the line it prints before you say it landed."
+    "Remedy: run {program} again with its output kept, ending the line with `2>&1 | tail -1`, "
+    "and read what it prints before you say it landed."
 )
 SILENT_WRITE_QUIET_REASON = (
     "Rule (Git): step {step} of {total}, the {kind}: its quiet flag (-q) drops the one line "
     "that told a real update apart from one that moved nothing, so the session cannot read "
     "which one just ran. "
-    "Remedy: run `git {kind} 2>&1 | tail -1`, and read the line it prints before you say it landed."
+    "Remedy: run {program} again without the quiet flag, ending the line with `2>&1 | tail -1`, "
+    "and read what it prints before you say it landed."
 )
 
 
@@ -1716,7 +1725,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"
                       else SILENT_WRITE_QUIET_REASON)
             refuse(tool, "deny", "silent-write",
-                   reason.format(step=live.index(number) + 1, total=len(live), kind=kind), matched)
+                   reason.format(step=live.index(number) + 1, total=len(live), kind=kind,
+                                 program=kind if " " in kind else "git " + kind), matched)
 
     # 1e. The impeccable skill's build and settings-writer commands (design-skills record).
     for segment in split_segments(stripped):

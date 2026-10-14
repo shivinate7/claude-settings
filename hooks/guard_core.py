@@ -88,6 +88,44 @@ def _split_segments_cached(cmd: str, powershell: bool):
     return tuple(split_segments(cmd, []))
 
 
+# ------------------------------------------------------------------ the quote walk
+#
+# ONE QUOTE WALK. `_split_reading` cuts segments with it and `walk_quotes` hands the same steps to
+# a rule that must know whether a character sits inside quotes. `quote` is "", `'`, `"`, or `$'` (a
+# bash ANSI-C string). A backslash escapes the next character outside quotes and inside `"..."` or
+# `$'...'`, so `\"` neither opens nor closes a quote; inside `'...'` it escapes nothing. In
+# PowerShell the escape is the backtick, inside `"..."` only, and a backslash is a path separator.
+def quote_advance(text: str, index: int, quote: str):
+    """Step the walk over `text[index]`: (width consumed, the quote open after it). An escaped
+    pair is one step of width 2. A contraction is the caller's to skip (`is_contraction`)."""
+    char = text[index]
+    if quote:
+        if (char == "\\" and quote != "'" and not POWERSHELL_CALL[0]) or (
+                char == "`" and quote == '"' and POWERSHELL_CALL[0]):
+            return 2, quote
+        return 1, ("" if char == quote[-1] else quote)
+    if char == "\\" and not POWERSHELL_CALL[0] and text[index + 1:index + 2] in ("'", '"'):
+        return 2, ""
+    if char == "'" and not POWERSHELL_CALL[0] and index and text[index - 1] == "$":
+        return 1, "$'"
+    if char in ("'", '"'):
+        return 1, char
+    return 1, ""
+
+
+def walk_quotes(text: str):
+    """Yield (index, char, quote open before it) over `text`, one step at a time. A contraction
+    that bash never closes is text, as in `_split_reading`'s second reading."""
+    quote, index = "", 0
+    while index < len(text):
+        if not quote and text[index] == "'" and is_contraction(text, index):
+            width, after = 1, ""
+        else:
+            width, after = quote_advance(text, index, quote)
+        yield index, text[index], quote
+        quote, index = after, index + width
+
+
 # ------------------------------------------------------------------ shell segments and command words
 #
 # ONE SHELL SEGMENT of the command. Each segment is judged on its own, so an allowed first half
@@ -141,10 +179,9 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
     while index < length:
         char = cmd[index]
         if quote:
-            current.append(char)
-            if char == quote:
-                quote = ""
-            index += 1
+            width, quote = quote_advance(cmd, index, quote)
+            current.append(cmd[index:index + width])
+            index += width
             continue
         if char == "#" and (index == 0 or cmd[index - 1] in " \t\n;|&("):
             while index < length and cmd[index] != "\n":
@@ -163,10 +200,11 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
                 current.append(char)   # `don't` as text: it must not hide the rest of the command
                 index += 1
                 continue
-        if char in ("'", '"'):
-            quote = char
-            current.append(char)
-            index += 1
+        if char in ("'", '"') or (char == "\\" and cmd[index + 1:index + 2] in ("'", '"')
+                                  and not POWERSHELL_CALL[0]):
+            width, quote = quote_advance(cmd, index, "")
+            current.append(cmd[index:index + width])
+            index += width
             continue
         if char == "&" and cmd[index:index + 2] == "&&":
             segments.append("".join(current))
@@ -634,17 +672,94 @@ def pathspec_from_file_flag(arg: str) -> bool:
 GIT_WORK_TREE_RE = re.compile(r"--work-tree(?:=|\s+)(['\"]?)([^'\";&|\s]+)\1")
 
 
+CD_WORDS = ("cd", "chdir", "pushd", "set-location", "push-location")
+POP_WORDS = ("popd", "pop-location")
+CD_UNKNOWN = object()   # a move whose destination is not tracked (popd)
+
+
+def _segment_cd_move(tokens):
+    """None when the segment moves no directory. Else where it goes: a path, "-" (the directory
+    before the last move), "" (a bare cd: home), or CD_UNKNOWN. `cd`, `chdir`, `pushd` and
+    PowerShell's `Set-Location`, `Push-Location` and `sl` all move; `popd` goes somewhere not
+    tracked."""
+    index = resolve_command(tokens)
+    if index is None:
+        return None
+    word = basename(tokens[index])
+    if word in POP_WORDS:
+        return CD_UNKNOWN
+    if not (word in CD_WORDS or (word == "sl" and POWERSHELL_CALL[0])):
+        return None
+    for token in tokens[index + 1:]:
+        if token == "-":
+            return "-"
+        if token.startswith("-") or token[:1] in "<>" or REDIRECTION.match(token):
+            continue
+        return token
+    return ""
+
+
 def _segment_cd_target(tokens):
     """Return the path a tokenized segment's `cd` would take, or None when it names none, or
-    when the segment's command word is not `cd`."""
+    when the segment's command word is not `cd`. Only `cd`: the push and delete rules and
+    `_run_dir` read this, and `_segment_cd_move` (the silent-write rule) reads the rest."""
+    move = _segment_cd_move(tokens)
     index = resolve_command(tokens)
     if index is None or basename(tokens[index]) != "cd":
         return None
-    for token in tokens[index + 1:]:
-        if token.startswith("-"):
-            continue
-        return token
-    return None
+    return move if isinstance(move, str) and move not in ("", "-") else None
+
+
+def shell_abs(path: str, base):
+    """A path a command names, made absolute against `base` (the directory the shell is in, or
+    None when that is not known). Git Bash's `/tmp` is the Windows temp folder. No variable is
+    expanded: the shell's variables are not this hook's. None when it cannot be made absolute."""
+    if os.name == "nt" and (path == "/tmp" or path.startswith("/tmp/")):
+        import tempfile   # lazy: only a path under /tmp needs it
+        path = tempfile.gettempdir() + path[4:]
+    path = os.path.expanduser(path)
+    if re.match(r"^/[a-zA-Z]/", path):
+        path = path[1].upper() + ":" + path[2:]
+    if not os.path.isabs(path):
+        return os.path.join(base, path) if base else None
+    return path
+
+
+def dir_before_segment(segments, number: int, shell_cwd: str):
+    """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
+
+    Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
+    real shell keeps: `cd`, `pushd`, `Set-Location` move it, a bare `cd` goes home, `cd -` goes
+    back, a `cd` inside `( ... )` ends with the parenthesis, `popd` or a path that holds a variable
+    is not tracked, and a `cd` into a folder that does not exist is not trusted (the shell stays
+    where it was, and a `;` runs the next command there)."""
+    where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
+    prev, stack = None, []
+    for at, segment in enumerate(segments[:number + 1]):
+        marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
+        stack.extend([(where, prev)] * marks.count("("))
+        if at == number:
+            return where
+        tokens = segment_tokens(segment)
+        move = _segment_cd_move(tokens) if tokens else None
+        if tokens is None:
+            where = None
+        elif move is not None:
+            old = where
+            if move is CD_UNKNOWN:
+                where = None
+            elif move == "-":
+                where = prev
+            elif any(mark in move for mark in "$%`"):
+                where = None
+            else:
+                where = shell_abs(move or "~", where)
+                where = where if where and os.path.isdir(where) else None
+            prev = old
+        for _ in range(marks.count(")")):
+            if stack:
+                where, prev = stack.pop()
+    return where
 
 
 def _segment_git_c_target(tokens):
