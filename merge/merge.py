@@ -168,7 +168,7 @@ def undo_check(wt, base_ref, unknown_ok=""):
         raise Stop("the branch silently undoes earlier work:\n  " + "\n  ".join(problems) + f"\nPut it back, or add the trailer `{undo.TRAILER}: <path> -- <reason>` to a commit message.")
 
 def say(*lines):
-    print(*lines, flush=True)
+    print("\n".join(lines), flush=True)  # one line each: the preview is a list of indented lines, never one long line
 
 # ------------------------------------------------------------------ the merge lock
 # A lock is a commit that a ref points at. The commit message holds the expiry. The ref is
