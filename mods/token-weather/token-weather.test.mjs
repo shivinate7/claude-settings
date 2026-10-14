@@ -4,7 +4,7 @@
 // Seam: hooks/token-weather.mjs exports register(on). The test collects the handlers by event name,
 // then drives turn.complete and ui.render with a fake host $.
 // Host contract pinned here: session.usage() returns context.breakdown only when called with
-// { breakdown: 'summary' }, the call desktop-statusline makes. The fixtures' context.percent is
+// { breakdown: 'summary' }, per the host type doc for session.usage. The fixtures' context.percent is
 // model-relative (25), so the band must measure its own percent against the window it uses.
 import assert from 'node:assert/strict'
 

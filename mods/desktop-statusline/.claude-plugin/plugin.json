@@ -15,7 +15,6 @@
     "statusline",
     "desktop",
     "usage-limits",
-    "context",
     "cost"
   ],
   "types": "./types/index.d.ts",
