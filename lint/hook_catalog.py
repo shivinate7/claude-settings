@@ -1,16 +1,27 @@
 #!/usr/bin/env python3
-"""Writes docs/catalog.md, one page that says what each hook, judge, mod and skill does.
+"""Writes docs/catalog.md and docs/records.md. The catalog says what each hook, judge, mod and skill does.
+The records page lists the records of a repo: its rules, decisions, debts, deferred items and plans.
 
 The owner asked for this page on 2026-10-13: plain words, one row each, and the model and
 effort beside it, like the model table in decisions/subagent-model-cap.md. The page is
 generated and never edited by hand. Each description comes from the source it describes, so
 the page cannot drift from it.
 
-    python3 lint/hook_catalog.py            write docs/catalog.md
-    python3 lint/hook_catalog.py --print    write the page to stdout, exit 1 while a problem stands
-    python3 lint/hook_catalog.py --check    exit 0 and print nothing when the page is current
+    python3 lint/hook_catalog.py            write every page the root owns
+    python3 lint/hook_catalog.py --print    write the catalog page to stdout, exit 1 while a problem stands
+    python3 lint/hook_catalog.py --check    exit 0 and print nothing when each page is current
 
-The root is the repo root, or the folder in the environment variable HOOK_CATALOG_ROOT.
+The root is `--root DIR`, else the folder in the environment variable HOOK_CATALOG_ROOT, else the repo
+this script is in. It is never the working folder.
+
+The catalog needs a hooks/, skills/ or mods/ folder. A root with none gets no catalog and is never asked
+for settings.json. The records page is read from CLAUDE.md (the `<!-- rule:<id> -->` markers) and the .md
+files in decisions/, debts/, deferred/ and plans/. A root with no record gets no records page. A record
+that holds overruled text (a line that opens with Superseded, Overruled, Previously, No longer or Old
+ruling, or any "was:") is a problem, and so is an empty one. No page is written while a problem stands.
+The merge tool (merge/merge.py) writes the records page on the pull request head before it merges. So
+`--check` waives a stale or missing records page on a pull request run (GITHUB_BASE_REF set, or GITHUB_REF
+under refs/pull/), and fails on any other run.
 
 Sources, all read from the root:
   settings.json `hooks`   one row per registration (event, matcher, `if`, command or prompt).
@@ -466,6 +477,236 @@ def render():
     return page.rstrip("\n") + "\n", problems
 
 
+# ---- the records page --------------------------------------------------------------------------
+
+RECORDS_PAGE = "docs/records.md"
+RECORD_FOLDERS = ("decisions", "debts", "deferred", "plans")
+SECTIONS = ("Mandates", "Rulings", "Build designs", "Unsorted decisions", "Debts", "Deferred", "Plans")
+RULE_MARK = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+HEADING = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$")
+ITEM = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+")
+KIND = re.compile(r"^Kind:\s*(process|build)\s*$")
+CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)
+OPENS_HISTORY = re.compile(r"(?:superseded|overruled|previously|no longer|old ruling)(?![A-Za-z0-9])", re.I)
+WAS_COLON = re.compile(r"\bwas:", re.I)
+
+RECORDS_INTRO = """# Records index
+
+This page lists every record in this repo: the rules in `CLAUDE.md`, and the files in `decisions/`, `debts/`, `deferred/` and `plans/`. A script writes it. Do not edit it by hand.
+
+The merge tool writes this page again when a pull request merges, so a pull request need not carry a fresh one. To write it by hand, run `python3 lint/hook_catalog.py` from the claude-settings checkout, with `--root` set to this repo. The check on the default branch fails when the page is stale.
+
+Each row has the slug, the first sentence of the record, and a link to it. A record that a ruling overrules is rewritten in place, so no row holds old text.
+
+"""
+
+
+def lines_outside_fences(text):
+    """(line number from 1, line) for each line. A line inside a fenced block, the fences too, has line None.
+    A fence closes on the same character, at least as long, with no text after it (CommonMark)."""
+    fence = None
+    for n, line in enumerate(text.split("\n"), 1):
+        found = FENCE.match(line)
+        if fence:
+            if found and found.group(1)[0] == fence[0] and len(found.group(1)) >= len(fence) and not found.group(2).strip():
+                fence = None
+            yield n, None
+        elif found and not (found.group(1)[0] == "`" and "`" in found.group(2)):
+            fence = found.group(1)
+            yield n, None
+        else:
+            yield n, line
+
+
+def mask_code(text):
+    """text with each inline code span turned into NUL characters, newlines kept, so every index stays valid."""
+    return CODE_SPAN.sub(lambda m: re.sub(r"[^\n]", "\0", m.group(0)), text)
+
+
+def blocks(text):
+    """The blocks outside fences, as [first line number, kind, lines]. Kind: heading, item (a list item and its
+    continuation lines) or para. A blank line, a fence, a heading and a new list item each end the block before them."""
+    out, cur = [], None
+    for n, line in lines_outside_fences(text):
+        if line is None or not line.strip():
+            cur = None
+        elif HEADING.match(line):
+            out.append([n, "heading", [line]])
+            cur = None
+        elif ITEM.match(line):
+            cur = [n, "item", [line]]
+            out.append(cur)
+        elif cur:
+            cur[2].append(line)
+        else:
+            cur = [n, "para", [line]]
+            out.append(cur)
+    return out
+
+
+def raw_of(block):
+    """The lines of a block, joined, without the heading hashes or the list marker."""
+    _n, kind, lines = block
+    first = lines[0]
+    if kind == "heading":
+        first = re.sub(r"[ \t]+#+$", "", HEADING.match(first).group(2) or "")
+    elif kind == "item":
+        first = ITEM.sub("", first, 1)
+    return "\n".join([first] + lines[1:])
+
+
+def sentence(text):
+    """The first sentence of flat text: up to the first '. ', '? ' or '! ', else all of it. A code span never ends it."""
+    found = re.search(r"[.?!](?=\s)", mask_code(text))
+    return text[:found.end()] if found else text
+
+
+def history_problems(rel, text):
+    """One line per place a record keeps overruled text: <path>:<line>. Fences and inline code are never read."""
+    out = []
+    for n, kind, lines in blocks(text):
+        for i, line in enumerate(mask_code("\n".join(lines)).split("\n")):
+            hit = "was:" if WAS_COLON.search(line) else None
+            if not hit and i == 0:  # a marker counts where it opens a heading, a paragraph or a list item
+                found = OPENS_HISTORY.match(raw_of([n, kind, [line]]).lstrip("*_ \t"))
+                hit = found.group(0) if found else None
+            if hit:
+                out.append("%s:%d: overruled text (%s). Rewrite the record in place and delete the old text" % (rel, n + i, hit))
+    return out
+
+
+def mandates(text):
+    """[(rule id, gist)] in file order. A rule's text runs from its paragraph start, or the marker before it, to its marker."""
+    found, seen = [], set()
+    for block in blocks(text):
+        raw = raw_of(block)
+        start = 0
+        for mark in RULE_MARK.finditer(mask_code(raw)):
+            seg = raw[start:mark.start()]
+            if start == 0:
+                seg = re.sub(r"^\s*\*\*[^*\n]+\*\*\s*", "", seg)  # a bold lead label is no part of the rule
+            start = mark.end()
+            if mark.group(1) not in seen:
+                seen.add(mark.group(1))
+                found.append((mark.group(1), sentence(flat(seg))))
+    return found
+
+
+def block_gist(block):
+    """The first sentence of a block. A table is no sentence: "" ."""
+    raw = raw_of(block)
+    if raw.lstrip().startswith("|"):
+        return ""
+    return sentence(flat(re.sub(r"(?m)^[ \t]*>[ \t]?", "", raw)))
+
+
+def decision_gist(text):
+    """The first block under `## Ruling` or `## The ruling`, else under `## The question`, else the first paragraph
+    under the H1, else the H1 text."""
+    found = blocks(text)
+
+    def under(i):
+        return block_gist(found[i + 1]) if i + 1 < len(found) and found[i + 1][1] != "heading" else ""
+
+    def level(i):
+        return HEADING.match(found[i][2][0]).group(1)
+
+    for want in (r"(?:the )?ruling", r"the question"):
+        for i, block in enumerate(found):
+            if block[1] == "heading" and level(i) == "##" and re.fullmatch(want, flat(raw_of(block)), re.I):
+                if under(i):
+                    return under(i)
+                break
+    for i, block in enumerate(found):
+        if block[1] == "heading" and level(i) == "#":
+            return under(i) or flat(raw_of(block))
+    return ""
+
+
+def debt_gist(text):
+    """The first sentence of the **What.** item."""
+    for block in blocks(text):
+        found = re.match(r"\*\*What\.\*\*\s*", raw_of(block))
+        if found:
+            return sentence(flat(raw_of(block)[found.end():]))
+    return ""
+
+
+def first_line_gist(text):
+    """The first line that has text, its leading # dropped."""
+    for line in text.split("\n"):
+        if line.strip():
+            return flat(re.sub(r"^\s*#+\s*", "", line))
+    return ""
+
+
+def decision_section(text):
+    kinds = {m.group(1) for _n, line in lines_outside_fences(text) if line is not None for m in [KIND.match(line)] if m}
+    return {frozenset(["process"]): "Rulings", frozenset(["build"]): "Build designs"}.get(frozenset(kinds), "Unsorted decisions")
+
+
+def collect_records():
+    """({section: [(slug, gist, link text, link)]}, problems). A page is written only when no problem stands."""
+    rows = {name: [] for name in SECTIONS}
+    problems = []
+    if has_file("CLAUDE.md"):
+        text = read("CLAUDE.md")
+        problems += history_problems("CLAUDE.md", text)
+        for rule, gist in mandates(text):
+            if gist:
+                rows["Mandates"].append((rule, gist, "CLAUDE.md", "../CLAUDE.md"))
+            else:
+                problems.append("CLAUDE.md: the rule %s has no text before its marker" % rule)
+    for folder in RECORD_FOLDERS:
+        base = os.path.join(ROOT, folder)
+        try:
+            names = sorted(os.listdir(base)) if os.path.isdir(base) else []
+        except OSError as err:
+            raise Unreadable(folder) from err
+        for name in names:
+            rel = "%s/%s" % (folder, name)
+            if not name.endswith(".md") or name == "README.md" or not has_file(rel):
+                continue
+            text = read(rel)
+            problems += history_problems(rel, text)
+            if folder == "decisions":
+                section, gist = decision_section(text), decision_gist(text)
+            elif folder == "debts":
+                section, gist = "Debts", debt_gist(text)
+            else:
+                section, gist = folder.capitalize(), first_line_gist(text)
+            if gist:
+                rows[section].append((name[:-3], gist, rel, "../" + rel))
+            else:
+                problems.append("%s: %s" % (rel, "no **What.** line to make a gist from" if folder == "debts" else "no text to make a gist from"))
+    return rows, problems
+
+
+def render_records():
+    """(page text, problems). The page is "" for a repo with no records: it gets none."""
+    rows, problems = collect_records()
+    if not any(rows.values()):
+        return "", problems
+    page = RECORDS_INTRO
+    for name in SECTIONS:
+        found = rows[name] if name == "Mandates" else sorted(rows[name])
+        if found:
+            page += "## %s\n\n| Slug | Gist | Link |\n|---|---|---|\n" % name
+            page += "".join("| `%s` | %s | [`%s`](%s) |\n" % (slug, gist.replace("|", "\\|"), text, link) for slug, gist, text, link in found)
+            page += "\n"
+    return page.rstrip("\n") + "\n", problems
+
+
+def pull_request_run():
+    """True on a pull request run in Actions, as the stamp engine reads it (onDefaultBranch)."""
+    return bool(os.environ.get("GITHUB_BASE_REF")) or os.environ.get("GITHUB_REF", "").startswith("refs/pull/")
+
+
+def has_catalog_parts():
+    return any(os.path.isdir(os.path.join(ROOT, part)) for part in ("hooks", "skills", "mods"))
+
+
 def emit(text):
     """Write UTF-8 to stdout, whatever the console codepage."""
     sys.stdout.flush()
@@ -474,31 +715,44 @@ def emit(text):
 
 
 def main(argv):
-    parser = argparse.ArgumentParser(description="Write docs/catalog.md.")
+    global ROOT
+    parser = argparse.ArgumentParser(description="Write docs/catalog.md and docs/records.md.")
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--print", action="store_true", dest="show", help="write the page to stdout, exit 1 on a problem")
-    mode.add_argument("--check", action="store_true", help="exit 1 when the page is stale or a source is empty")
+    mode.add_argument("--print", action="store_true", dest="show", help="write the catalog page to stdout, exit 1 on a problem")
+    mode.add_argument("--check", action="store_true", help="exit 1 when a page is stale or a source is empty or keeps overruled text")
+    parser.add_argument("--root", help="the repo root. The default is the environment variable HOOK_CATALOG_ROOT, else the repo this script is in")
     args = parser.parse_args(argv)
+    ROOT = os.path.abspath(args.root or os.environ.get("HOOK_CATALOG_ROOT") or os.path.dirname(HERE))
     try:
-        page, problems = render()
+        pages, problems = {}, []
+        if has_catalog_parts():
+            pages[PAGE], problems = render()
         if args.show:
-            emit(page)
+            emit(pages.get(PAGE, ""))
             sys.stderr.write("".join("hook_catalog: %s\n" % p for p in problems))
             return 1 if problems else 0
+        records, more = render_records()
+        problems += more
+        if records:
+            pages[RECORDS_PAGE] = records
         if not problems and args.check:
-            if not has_file(PAGE):
-                problems.append("%s is missing: run %s" % (PAGE, REGEN))
-            elif read(PAGE) != page:
-                problems.append("%s is stale: run %s" % (PAGE, REGEN))
+            for rel, page in pages.items():
+                state = "missing" if not has_file(rel) else "stale" if read(rel) != page else ""
+                # The merge tool rewrites the records page on the pull request head, so a pull request run waives it.
+                if state and not (rel == RECORDS_PAGE and pull_request_run()):
+                    problems.append("%s is %s: run %s" % (rel, state, REGEN))
         if problems:
             emit("".join(p + "\n" for p in problems))
             return 1
         if not args.check:
-            target = os.path.join(ROOT, *PAGE.split("/"))
-            os.makedirs(os.path.dirname(target), exist_ok=True)
-            with open(target, "w", encoding="utf-8", newline="\n") as handle:
-                handle.write(page)
-            emit("wrote %s\n" % PAGE)
+            for rel, page in pages.items():
+                if has_file(rel) and read(rel) == page:
+                    continue
+                target = os.path.join(ROOT, *rel.split("/"))
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                with open(target, "w", encoding="utf-8", newline="\n") as handle:
+                    handle.write(page)
+                emit("wrote %s\n" % rel)
         return 0
     except Unreadable as err:
         emit("hook_catalog: cannot read %s\n" % err)

@@ -3,7 +3,7 @@
 
   merge <pr>              preview: what it would claim and merge, and the silent-undo check on the head. Presses
                           nothing. A draft is previewed too; a dropped line exits 1.
-  merge <pr> --confirm [--session NAME]   lock, claim, push, wait, merge, sync the local base, clean up.
+  merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, wait, merge, sync the local base, clean up.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Reads no lock state first.
 
 Git half: the merge lock, the temporary worktree, the claim, the push, the revert, resume, the
@@ -13,6 +13,7 @@ the minute read and `gh pr merge --match-head-commit`.
 import argparse, contextlib, json, os, re, shutil, socket, subprocess, sys, tempfile, threading, time, uuid
 
 STAMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "actions", "stamp", "stamp.mjs")
+RECORDS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint", "hook_catalog.py")  # the records-page generator; the tool brings it, a repo adds nothing
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -679,13 +680,42 @@ def do_claim(wt, cfgrel, base):
         raise Stop("the claim printed more than one Record-claim line. Refusing to guess which is real.\n" + out)
     return claims[0] if claims else None
 
+def identity(wt):
+    return [] if git(wt, "config", "user.email")[1] and git(wt, "config", "user.name")[1] else ["-c", "user.name=merge", "-c", "user.email=merge@localhost"]  # a runner has no identity
+
 def commit_claim(wt, trailer):
+    """One commit for the claim and the rebuilt records page. No trailer: the page alone."""
     git(wt, "add", "-A")
-    who = [] if git(wt, "config", "user.email")[1] and git(wt, "config", "user.name")[1] else ["-c", "user.name=merge", "-c", "user.email=merge@localhost"]  # a runner has no identity
-    c, out = git(wt, *who, "commit", "-q", "-m", "Claim record numbers", "-m", trailer)
+    msg = ["-m", "Claim record numbers", "-m", trailer] if trailer else ["-m", "Rebuild the records page"]
+    c, out = git(wt, *identity(wt), "commit", "-q", *msg)
     if c:
         raise Stop("cannot commit the claim: " + out)
     return git(wt, "rev-parse", "HEAD")[1]
+
+def rebuild_records(wt):
+    """Run the records generator on the worktree: `python3 <RECORDS> --root <wt>`, nothing else. -> True when it changed a file.
+    The tree hash before and after is the proof: `git add -A` first, so the claim's own edits are not the generator's."""
+    def tree():
+        git(wt, "add", "-A")
+        return git(wt, "write-tree")[1]
+    before = tree()
+    c, out = sh([sys.executable, RECORDS, "--root", wt])
+    if c:
+        why = "; ".join(l.strip() for l in out.splitlines() if l.strip()) or "no output"
+        raise Stop(f"the records page cannot be rebuilt, so nothing was pushed: {why}")
+    return tree() != before
+
+def records_stale(wt, base_ref):
+    """True when the page on the head would be stale in the merge result: merge base_ref into the worktree without a commit,
+    run the generator, and see whether it changes a file. The worktree is put back as it was."""
+    c, out = git(wt, *identity(wt), "merge", "--no-commit", "--no-ff", "-q", base_ref)
+    try:
+        if c:  # a conflict: the page cannot be proved fresh
+            raise Stop(f"the head does not merge cleanly with {base_ref}, so the records page cannot be proved fresh: {out}")
+        return rebuild_records(wt)
+    finally:
+        git(wt, "reset", "--hard", "-q", "HEAD")  # also ends a merge in progress
+        git(wt, "clean", "-fdq")
 
 def push_branch(wt, branch):
     """A plain push. Never force: a moved branch refuses it, and nothing reaches origin."""
@@ -882,7 +912,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     if info["draft"]:
         say(f"merge: #{n} is a draft. This is a preview only; --confirm needs it ready.")
     base = info["base"]
-    resumed = trailer = None
+    resumed = trailer = records = None
     tmp, wt = open_worktree(root, info, base)  # the same tree confirm checks
     try:
         undo_check(wt, f"origin/{base}", unknown_ok)
@@ -891,6 +921,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
             if sc:
                 resumed = own_claim(wt, sc, f"origin/{base}")
                 trailer = None if resumed else do_claim(wt, sc, f"origin/{base}")
+            records = "rebuild docs/records.md" if rebuild_records(wt) else "current"  # after the claim, as confirm does
     finally:
         drop_worktree(root, tmp, wt)
     m = cfg.get("merge", {})
@@ -899,6 +930,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         f"  lock:   " + (holder_text(base, held, lock.now()) if held and held[1] > lock.now() else "free"),
         f"  head checks: {host.head_state(n)}",
         "  claim:  " + (f"already claimed ({resumed}); a run resumes at the wait" if resumed else trailer or "nothing to claim"),
+        *([f"  records: {records}"] if records else []),
         *([] if base == cfg["defaultBranch"] else [f"  ids:    stay pending: {base} is not the default branch ({cfg['defaultBranch']}); they are claimed when it merges there."]),
         f"  then:   push HEAD:{info['branch']}, wait for the checks, `gh pr merge --{m.get('method', '?')} --match-head-commit`,",
         f"          move local {base}, run {len(m.get('afterMerge', []))} afterMerge command(s)" + (", delete the branch." if m.get("deleteBranch") else "."))
@@ -922,6 +954,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         undo_check(wt, base_ref, unknown_ok)
         stamp_cfg = base_stamp_config(wt, tmp, cfgrel, base_ref)  # None: no config or no kinds, so no claim and no stamp
         resumed = own_claim(wt, stamp_cfg, base_ref) if base == cfg["defaultBranch"] else None
+        claimed = bool(resumed)  # the pushed commit holds a Record-claim
         if base != cfg["defaultBranch"]:
             if head_claim(wt):  # an old claim would put real ids into a branch that is not the default
                 raise Stop(f"{info['head'][:7]} on {branch} holds a Record-claim, and {base} is not the default branch. Revert that commit and run again.")
@@ -931,7 +964,9 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             say(f"merge: resumed. {branch} already holds the claim {resumed}.")
         else:
             trailer = do_claim(wt, stamp_cfg, base_ref) if stamp_cfg else None
-            if trailer:
+            claimed = bool(trailer)
+            rebuilt = rebuild_records(wt)  # after the claim, whatever the stamp config holds: a stale page heals at the next merge
+            if trailer or rebuilt:
                 # check first, then claim: a claim push cancels the head's own run and would hide a red already there
                 try:
                     ok, why = host.wait_checks(n, info["head"], m["deadlineMinutes"])
@@ -943,7 +978,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                     raise Stop("the head's own checks are not green, so nothing was claimed or pushed: " + why)
                 claim_sha = commit_claim(wt, trailer)
                 push_branch(wt, branch)
-                say(f"merge: {trailer} pushed to {branch} at {claim_sha[:9]}.")
+                say(f"merge: {trailer or 'the records page'} pushed to {branch} at {claim_sha[:9]}.")
             else:
                 say("merge: nothing to claim.")
         sha = claim_sha or info["head"]
@@ -985,11 +1020,18 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 stamp_cfg = base_stamp_config(wt, tmp, cfgrel, base_ref)
             except Stop as e:
                 fail(str(e))
-            if claim_sha and not stamp_cfg:
+            if claimed and not stamp_cfg:
                 fail(f"base lost its config: {cfgrel} on {base_ref} no longer holds stamp kinds, so the claim cannot be proved fresh.")
             c, out = node_stamp(wt, stamp_cfg, "check", base_ref) if stamp_cfg else (0, "")  # each claimed number must still be free on the base tip
             if c or "UNKNOWN:" in out:
                 fail(str(stamp_stop("the base moved and the claim is stale, or the check could not read the base", out)))
+            if base == cfg["defaultBranch"]:  # the base moved with a record and no rebuild: the merge result would hold a stale page
+                try:
+                    stale = records_stale(wt, base_ref)
+                except Stop as e:
+                    fail(str(e))
+                if stale:
+                    fail(f"the records page is stale for the merge result: {base_ref} gained a record after the rebuild (a push that did not use the tool). Nothing was merged. Run again.")
             commit, msg = host.merge(n, m["method"], sha)
             if not commit:
                 fail("the merge was refused:\n" + msg)
