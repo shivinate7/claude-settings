@@ -18,8 +18,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    See `snippets.md`.
    Time the before and the after back to back, under the same machine load. Note the load
    beside each time: CPU use, and what else ran. A time taken under load does not compare with
-   one taken on a quiet machine. (2026-10-12: a guard suite read 3500 s under load, against
-   929 s and 1123 s on a quieter machine.)
+   one taken on a quiet machine.
 2. **Check what exists.** Read the current workflow and the log before you build a speedup. The
    step may already run in parallel, or be cached.
 3. **Gate slow checks on their inputs.** Run a slow check after a change to the files it reads.
@@ -38,9 +37,11 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 6. **After a merge, read every run the push starts.** A deploy or nightly workflow is not a
    required check, so its failure shows on no PR.
 7. **Pin and audit actions.** Pin each third-party action by full commit SHA, with the version as
-   a comment. Let a bot keep the pins current. Disable credential persistence on checkout. Run
-   an audit tool in CI, and run it locally with the exact CI command and paths.
-   If the installed tool's `--version` matches the CI pin, use it. If it does not, install a copy.
+   a comment. Name the bot that keeps each pin current. Here, `.github/dependabot.yml` ignores
+   all version updates for actions. Renovate tracks three custom pins, not actions
+   (`renovate.json`). Disable credential persistence on checkout. Run an
+   audit tool in CI, and run the same command locally: see the zizmor step in
+   `.github/workflows/gates.yml`.
 8. **Batch lanes.** One CI run per batch, by CLAUDE.md rule `git-integration-branch-merge`.
    "No conflicts" does not prove the lanes work together. A green integration run does not prove
    that no line was lost either: run `lint/check_silent_undo.py` before the merge.
@@ -51,14 +52,13 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    name one session to batch PRs and run each merge, on the owner's word.
 9. **Wait without loops.** Watch a run once, in the background, and keep its output. Never poll
    with a sleep loop. A repeated `gh run view` or `gh pr checks` without `--watch` is a poll. Use
-   a one-shot wait: `gh pr checks <n> --watch` or `gh run watch <id>`, run once. (About 1,600
-   such calls in transcripts, mods plan B5. Decision agents-wait-with-monitor: agents wait with
-   the Monitor tool.) See `snippets.md`.
+   a one-shot wait: `gh pr checks <n> --watch` or `gh run watch <id>`, run once. (Decision
+   agents-wait-with-monitor: of 468 measured refusals of `sleep` waits, about 130 were real
+   loops. Agents wait with the Monitor tool.) See `snippets.md`.
 10. **Prove each new gate red once.** Break the gate's target on a scratch copy. Watch the gate
    fail. Restore the target. A gate you did not see go red is not proven.
    A pipe hides a gate's exit code. `lint | tail -1` exits 0 when lint fails, so a commit after
    it runs on a red gate. Gate on the command's own exit code. See `snippets.md`, section 10.
-   (Incident 2026-10-12: three records pushed with STE errors.)
 11. **No CI on a draft.** Run the PR workflow on `opened`, `synchronize`, `reopened` and
     `ready_for_review`. Skip every job while the PR is a draft, the required check included. Work
     in a draft. Only the integration PR goes ready, once (step 8). A draft cannot merge, so it
@@ -73,7 +73,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     After `gh pr ready`, a run of only skipped jobs proves nothing. Wait for a run on the head
     that ran, or dispatch one. See `snippets.md`, section 5b. Never mark ready in the same second
     as the create. (Decision merge-needs-a-proven-head: a merge needs a proven head. The merge
-    tool refuses an all-skipped head. PRs 357 and 362.)
+    tool refuses an all-skipped head. Incidents: PRs 352 and 360.)
 12. **Cheap checks first.** Give each expensive job `needs:` the cheap static job. A red static
     check then stops the shards from starting.
 13. **Merge tiny jobs (private repos).** Each job bills whole minutes, rounded up, plus its own setup. Put checks
@@ -85,22 +85,28 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     `cache: npm`. Measure the step before and after.
 15. **Split the slowest job for wall time.** Use it where minutes are free, as in a
     public repo. Step 13 saves money, not time. Split the slowest serial job into parallel jobs.
-    Measured: the longest Windows job went from about 20 min to 8m59s, with no coverage lost
-    (PR 293's CI run).
+    Decision ci-wall-time-cuts, cut A, made this split. `lint/test_windows_split.py` checks that
+    each suite runs in exactly one job. In PR 293's CI run 37675874835 (2026-10-07), the longest
+    Windows job took 6m24s.
 16. **Pin every suite in a split-job guard.** The guard must pin each suite's `if:`, `shell:` and
     `!cancelled()`, with no env override (`MERGE_TESTS` gap, review of PR 293). A job-level `if:`
-    is allowed only on the job's own scope flag (step 19).
+    names only its own scope flag, or a non-PR event (step 19).
 17. **Slice tests on a slow platform.** On PRs, run a platform-specific test slice. Run the full
-    suite on main and nightly. Measured: the Windows merge job went from 8m59s to 1m13s
-    (PR 293's own CI run).
+    suite on main and nightly. Measured: the Windows merge slice took 1m13s in PR 293's own CI
+    run 37675874835.
 18. **Profile before you refactor test setup.** Compare setup time to test-body time. If
     the saving is under 20%, stop. Measured: setup was 31% of the time, and setup reuse saved
-    about 9% (decision ci-wall-time-cuts, cut D).
-19. **Run one scope job first.** Make it a cheap Linux job. Give every other job `needs: scope`
-    and a job-level `if:` on its own flag. A job with nothing to test then starts no runner.
-    A docs-only PR runs only the lint job. Push, nightly and dispatch run everything. An
-    unreadable diff or an unmapped path runs everything. A skipped job reads as passing, so put
-    the scope job in the required checks (decision ci-wall-time-cuts, cut B).
+    about 9% (decision ci-wall-time-cuts, cut D: merge test setup).
+19. **Run one scope job first.** Make it a cheap Linux job. Give every other job `needs: scope`.
+    Most jobs add a job-level `if:` on their own flag. That `if:` also holds
+    `|| github.event_name != 'pull_request'`, so push, nightly and dispatch runs start them.
+    The `gates` job has no job-level `if:`. Its steps carry the flags.
+    Two jobs may share a flag: this repo's `gates-mutate-guard` and `gates-windows-guard` both
+    read `guard`. A job with nothing to test then starts no runner. A docs-only PR skips the code
+    suites. `gates` still runs its lint steps (decision docs-only-prs-skip-code-suites, the rule
+    for docs-only PRs). An unreadable diff or an unmapped path runs everything. A skipped job
+    reads as passing. Put the scope job in the required checks (decision ci-wall-time-cuts,
+    cut B: the scope job).
 
 ## Public repos
 
@@ -115,7 +121,7 @@ Fork PRs run code you did not write. Apply these to a public repo. See `snippets
   If a job needs more, restate `contents: read` in that job's block with the extra scope. A
   `permissions` block sets every scope it does not name to `none`.
 - Keep one CI run per batch (step 8). Free minutes do not remove queue time, and each run
-  costs `gh` calls on the shared token. A secondary rate limit refused a merge on 2026-10-12.
+  costs `gh` calls on the shared token.
 
 ## Before you skip a required job
 
@@ -133,7 +139,10 @@ CI claims in README or docs go stale too. See the `fresh-prose` skill.
 ## Opt-in templates
 
 Adopt each by `uses: shivinate7/claude-settings/actions/<name>@<full-sha>`, or copy the file.
-Record: `decisions/opt-in-ci-templates-composite.md`. Steps 1 and 11 to 14: `decisions/ci-spend-rules.md`. Steps 15 to 19: decision ci-wall-time-cuts.
+Records:
+- Opt-in templates: decision opt-in-ci-templates-composite (composite actions).
+- Steps 1 and 11 to 14: decision ci-spend-rules (CI spend).
+- Steps 15 to 19: decision ci-wall-time-cuts (CI wall time).
 
 - `all-jobs-passed`: in a job with `needs: [...]` and `if: always()`, pass `toJSON(needs)` as shown. A skipped needed job then fails.
 
