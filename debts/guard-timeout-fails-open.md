@@ -1,6 +1,6 @@
-# A guard timeout or crash lets the call run
+# Question for the owner: should a guard timeout refuse the call?
 
-- **What.** If a PreToolUse hook times out or exits with a code other than 2, Claude Code lets the call run. The guard rows in `settings.json` set no `onFailure`, so a slow or crashed guard fails open.
-- **Where.** The PreToolUse guard rows in `settings.json`.
-- **Decision.** none. Parked for the owner by the arbiter at 04:50 CDT, because it changes the hook config of every session.
-- **Retire.** The owner rules. If yes, the guard rows set `"onFailure": "block"` (Claude Code 2.1.295 or later), and a settings test pins it.
+- **What.** If the PreToolUse guard times out or crashes, Claude Code lets the call run. The owner chose this in `gate-hooks-fail-closed`, so load never takes the setup down. The cost is that a slow or crashed guard judges nothing.
+- **Where.** The PreToolUse guard row in `settings.json`, which sets no `onFailure`.
+- **Decision.** `gate-hooks-fail-closed` (a missing gate refuses; a slow or crashed gate does not).
+- **Retire.** The owner keeps the ruling, and this file is deleted. Or the owner changes it, the guard row sets `"onFailure": "block"`, and a settings test pins it.
