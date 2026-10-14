@@ -16,9 +16,10 @@ Two reads, one verdict. Design: decisions/silent-undo-check-design.md.
               earlier first-parent commit of upstream changed it: the exact blob (whole
               file), a -U0 hunk reversed on all but one line, or lines main only added
               that this change removes, even beside an edit. Reads only the commits
-              upstream gained after the branch was cut (since the merge base, or since
-              the branch's first commit was authored, which a rebase keeps). Catches
-              `git revert`, a stale copy, a rebase that took its own side.
+              upstream gained after the branch was cut: from where the branch's own
+              first-parent line left main, up, that commit included. Catches
+              `git revert`, a stale copy, and a rebase that took its own side (caught
+              when the lost work is the rebase-base commit or later).
 
 Blank lines and whitespace never count. The escape is a trailer in a commit message, one per
 path: `Drops-lines: <path> -- <reason>`. A trailer with no reason excuses nothing. Each use prints
@@ -46,7 +47,7 @@ class Unknown(Exception):
 
 
 def git(cwd, *a, ok=(0,)):
-    r = subprocess.run(["git", "-C", cwd, *a], capture_output=True, text=True, errors="replace")
+    r = subprocess.run(["git", "-C", cwd, *a], capture_output=True, encoding="utf-8", errors="replace")
     if r.returncode not in ok:
         raise Unknown("git %s failed: %s" % (" ".join(a[:3]), r.stderr.strip() or r.returncode))
     return r.returncode, r.stdout
@@ -375,8 +376,8 @@ def resolve_upstream(cwd, upstream):
 
 def check(cwd, upstream, head, default=None):
     """(problem lines, ALLOWED notes); no problems is green. Raises Unknown. Reads only the commits
-    upstream gained after the branch was cut: since the merge base, or since the branch's first
-    commit was authored (a rebase keeps that date, so a rebased branch still reads them)."""
+    upstream gained after the branch was cut: from where the branch's own first-parent line left
+    main, up, the fork commit included. The window starts at the fork point, never at a commit time (one-second resolution)."""
     if git(cwd, "rev-parse", "--is-shallow-repository")[1].strip() != "false":
         raise Unknown("the history is shallow; fetch with depth 0")
     upstream = resolve_upstream(cwd, upstream)
@@ -396,10 +397,12 @@ def check(cwd, upstream, head, default=None):
         old, new = git(cwd, "merge-base", upstream, h)[1].strip(), h
     files = raw_files(cwd, old, new)
     base = git(cwd, "merge-base", upstream, h)[1].strip()
-    cut = min(int(t) for t in git(cwd, "log", "--format=%at", "%s..%s" % (upstream, h))[1].split())
-    n = max(int(git(cwd, "rev-list", "--count", "--first-parent", "%s..%s" % (base, upstream))[1]),
-            int(git(cwd, "rev-list", "--count", "--first-parent", "--since=%d" % (cut - 1), upstream)[1]))
-    earlier = first_parent(cwd, upstream, n) if n else []
+    own = git(cwd, "rev-list", "--first-parent", "%s..%s" % (upstream, h))[1].split()
+    if own:  # the fork point is where the branch's own first-parent line left main, even after it merged main back in
+        rc, fork = git(cwd, "merge-base", upstream, own[-1] + "^", ok=(0, 1))
+        base = fork.strip() if rc == 0 and fork.strip() else base
+    n = int(git(cwd, "rev-list", "--count", "--first-parent", "%s..%s" % (base, upstream))[1]) + 1  # +1: the fork commit
+    earlier = first_parent(cwd, upstream, n)
     items += [(x[0], fmt_rev(*x)) for x in reversals(cwd, old, new, files, earlier)]
     bad, notes = judge(items, ok)
     return bad, notes

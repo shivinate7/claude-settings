@@ -360,7 +360,7 @@ def _run_git(cwd, args, input_text=None):
     try:
         return subprocess.run(
             ["git", "--literal-pathspecs", "-C", cwd] + args,
-            input=input_text, capture_output=True, text=True, timeout=GIT_TIMEOUT,
+            input=input_text, capture_output=True, encoding="utf-8", errors="replace", timeout=GIT_TIMEOUT,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
         raise _GitFailure(str(exc)) from exc

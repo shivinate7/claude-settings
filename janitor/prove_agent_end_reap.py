@@ -45,7 +45,7 @@ def git_bash():
 
 
 def vcs(where, *args):
-    answer = subprocess.run([VCS, "-C", where, *IDENT, *args], capture_output=True, text=True,
+    answer = subprocess.run([VCS, "-C", where, *IDENT, *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
                             timeout=20)
     if answer.returncode != 0:
         sys.exit("proof setup failed: %s %s: %s" % (VCS, " ".join(args), answer.stderr.strip()))

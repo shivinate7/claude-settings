@@ -1362,6 +1362,7 @@ def run_suite(suite_path: str, config_dir: str, only=None):
     env = dict(os.environ)
     env["CLAUDE_CONFIG_DIR"] = config_dir
     result = subprocess.run(
+        # text=True keeps the default decoding: the child inherits env, so both sides share one encoding.
         [sys.executable, suite_path] + (["-k", only] if only else []), capture_output=True, text=True, env=env, timeout=1200,
     )
     red = [line for line in (result.stdout + result.stderr).splitlines() if "FAIL" in line]

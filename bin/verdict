@@ -12,6 +12,7 @@ CHUNK, OVERLAP = 1 << 20, 256  # OVERLAP > longest marker
 EXEC = re.compile(r"Executed (\d+) tests?")
 TAIL = 1 << 20  # read at most the last 1 MiB of this run's output for the excerpt
 def main(argv):
+    for s in (sys.stdout, sys.stderr): s.reconfigure(encoding="utf-8", errors="replace")  # a cp1252 pipe cannot print the excerpt
     if not argv: sys.exit("usage: verdict <cmd...>")
     name = " ".join(argv)
     argv = [shutil.which(argv[0]) or argv[0]] + argv[1:]  # finds .cmd/.bat shims on Windows

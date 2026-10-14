@@ -493,7 +493,7 @@ def _live_remote_heads(path: str):
             try:  # prompts off: an unattended run never waits on a login window
                 listed = subprocess.run(
                     ["git", "-C", path, "ls-remote", "--heads", remote], capture_output=True,
-                    text=True, timeout=10,
+                    text=True, encoding="utf-8", errors="replace", timeout=10,
                     env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"})
             except Exception:
                 listed = None

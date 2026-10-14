@@ -157,7 +157,7 @@ def home_problem(home, ids):
 
 def changed(base):
     r = subprocess.run(["git", "diff", "--name-only", "--diff-filter=d", base + "...HEAD"],
-                       cwd=ROOT, capture_output=True, text=True)
+                       cwd=ROOT, capture_output=True, encoding="utf-8", errors="replace")
     if r.returncode:
         print("check_ruling_kind: UNKNOWN, git diff failed: " + r.stderr.strip())
         sys.exit(1 if os.environ.get("CI") else 0)  # CI exit code is a verdict: unknown is red there

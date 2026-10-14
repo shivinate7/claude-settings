@@ -174,7 +174,7 @@ def _run_git(cwd, args, timeout=20):
     """
     try:
         return subprocess.run(
-            ["git", "-C", cwd] + args, capture_output=True, text=True, timeout=timeout,
+            ["git", "-C", cwd] + args, capture_output=True, encoding="utf-8", errors="replace", timeout=timeout,
         )
     except Exception:
         return None
@@ -428,7 +428,7 @@ def lint_files(paths, exclude):
         cmd += ["--exclude", exclude]
     cmd += paths
     try:
-        run = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        run = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=30)
         data = json.loads(run.stdout or "{}")
     except Exception:
         return {}

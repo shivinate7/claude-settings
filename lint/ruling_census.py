@@ -305,7 +305,7 @@ def reach_test(cwd, text, timeouts):
     try:
         run = subprocess.run(
             ["git", "-C", cwd, "log", "--all", "-S", collapsed, "-1", "--format=%h"],
-            capture_output=True, text=True, timeout=GIT_TIMEOUT_SECONDS,
+            capture_output=True, encoding="utf-8", errors="replace", timeout=GIT_TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired:
         timeouts[0] += 1
@@ -467,7 +467,7 @@ def get_remote(cwd, cache):
     try:
         run = subprocess.run(
             ["git", "-C", cwd, "remote", "get-url", "origin"],
-            capture_output=True, text=True, timeout=GIT_TIMEOUT_SECONDS,
+            capture_output=True, encoding="utf-8", errors="replace", timeout=GIT_TIMEOUT_SECONDS,
         )
         if run.returncode == 0:
             remote = run.stdout.strip() or None
@@ -492,7 +492,7 @@ def cwd_present(cwd, cache):
         try:
             run = subprocess.run(
                 ["git", "-C", cwd, "rev-parse", "--git-dir"],
-                capture_output=True, text=True, timeout=GIT_TIMEOUT_SECONDS,
+                capture_output=True, encoding="utf-8", errors="replace", timeout=GIT_TIMEOUT_SECONDS,
             )
             present = run.returncode == 0
         except (subprocess.TimeoutExpired, OSError):
