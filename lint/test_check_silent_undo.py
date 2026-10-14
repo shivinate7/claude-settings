@@ -1258,6 +1258,22 @@ class BodyReadFails:
         return unittest.mock.patch.object(subprocess, "run", self.run)
 
 
+class SpawnCount:
+    """Counts the `git` processes started while the block is armed. Every spawn, `subprocess.run` too, goes through Popen,
+    so Popen is the one place counted. A count, never a clock."""
+
+    def __init__(self):
+        self.n, self.real = 0, subprocess.Popen
+
+    def popen(self, args, *a, **k):
+        if list(args)[:1] == ["git"]:
+            self.n += 1
+        return self.real(args, *a, **k)
+
+    def armed(self):
+        return unittest.mock.patch.object(subprocess, "Popen", self.popen)
+
+
 class DropsLinesHint(unittest.TestCase):
     """A `Drops-lines:` line that git does not parse as a trailer (it is not in the last paragraph) excuses nothing, and
     the refusal said nothing about it: claude-settings (2026-10-14) and q_max PRs 869 and 874 each lost a full merge run
@@ -1464,6 +1480,30 @@ class DropsLinesHint(unittest.TestCase):
             merge.undo_check(self.r.dir, "origin/main", unknown_ok="the owner accepts an unreadable history")
         self.assertGreater(fault.hits, 0, "the faulted read never ran")
         self.assertIn("app.txt", str(cm.exception))
+
+    # ------------------------------------------------ round 3: the repo's config, and the cost of the read
+
+    def test_a_fixed_grep_pattern_type_in_the_repo_config_does_not_hide_the_hint(self):
+        """grep.patternType=fixed makes `git log --grep` read its pattern as a literal string. A hint that filters
+        commits with a regex through --grep then matches none, and prints nothing."""
+        self.r.sh("config", "grep.patternType", "fixed")
+        self.land_pr()
+        sha = self.revert_with(self.ABOVE)
+        got, text = self.said()
+        self.assertRefusedWithHint(sha, got, text)
+
+    def test_the_hint_costs_a_constant_number_of_git_spawns_at_fifty_candidates(self):
+        """50 commits each hold a misplaced line. Reading them must not cost a git process per commit: at most 2 in all.
+        A count of spawns, not a time. `misplaced` is the hint's read, named in the round 2 review."""
+        r = self.r
+        r.sh("checkout", "-q", "-b", "many")
+        for i in range(50):
+            r.sh("commit", "-q", "--allow-empty", "-m", "Bring Card back %d\n\n%s\n\n%s" % (i, self.WHY, self.CO))
+        fault = SpawnCount()
+        with fault.armed():
+            out = C.misplaced(r.dir, "origin/main..HEAD")
+        self.assertIn(self.HINT, "\n".join(out), out)  # the read ran, and found the candidates
+        self.assertLessEqual(fault.n, 2, "git spawns for 50 candidate commits: %d" % fault.n)
 
 
 if __name__ == "__main__":
