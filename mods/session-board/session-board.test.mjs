@@ -182,6 +182,39 @@ await test('agents json: a row keeps its name, so a SendMessage to a name can fi
   same(row.name, 'worker-a', 'name from claude agents --json')
 })
 
+// ---- receiverState: the state of the one row named like a SendMessage `to`
+
+const namedRows = json => lib.parseAgentsJson(json)
+
+await test('receiver: busy, idle and waiting by name', () => {
+  const rows = namedRows(JSON.stringify([
+    { sessionId: sid(1), cwd: '/x/a', name: 'a', status: 'busy' },
+    { sessionId: sid(2), cwd: '/x/b', name: 'b', status: 'idle' },
+    { sessionId: sid(3), cwd: '/x/c', name: 'c', status: 'waiting' },
+  ]))
+  same([lib.receiverState(rows, 'a'), lib.receiverState(rows, 'b'), lib.receiverState(rows, 'c')], ['busy', 'idle', 'waiting'], 'states')
+})
+
+await test('receiver: no row with the name is unseen', () => {
+  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name: 'a', status: 'busy' }]))
+  same(lib.receiverState(rows, 'zzz'), 'unseen', 'no match')
+  same(lib.receiverState(rows, ''), 'unseen', 'empty name')
+  same(lib.receiverState(null, 'a'), 'unseen', 'no rows')
+})
+
+await test('receiver: two rows with the same name are unseen, busy or not', () => {
+  const rows = namedRows(JSON.stringify([
+    { sessionId: sid(1), cwd: '/x/a', name: 'a', status: 'busy' },
+    { sessionId: sid(2), cwd: '/x/b', name: 'a', status: 'idle' },
+  ]))
+  same(lib.receiverState(rows, 'a'), 'unseen', 'duplicate name')
+})
+
+await test('receiver: an unknown status is unseen, not busy', () => {
+  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name: 'u', status: 'running' }]))
+  same(lib.receiverState(rows, 'u'), 'unseen', 'unknown status')
+})
+
 // ---- update-ready
 
 await test('update-ready: waiting, no agents, nothing unpushed, clean tree is ready', () => {
