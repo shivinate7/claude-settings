@@ -4175,6 +4175,8 @@ for _name, _command, _rule in (
      "machine-wide-kill"),
     ("a contraction and a quote, then pkill on the next line",
      "echo a's b'\npkill foo\necho \"it's\"", "machine-wide-kill"),
+    ("a lone apostrophe, an open paren, then pkill", "echo don't (x; pkill foo",
+     "machine-wide-kill"),
 ):
     sh("guard-command-position: regression, %s, denies" % _name, _command, "deny", rule=_rule,
        cwd=NOGIT)
