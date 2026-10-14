@@ -5,6 +5,7 @@ Spec: decisions/question-outcome-check.md. Rule: style-question-restates-goal.
 
 Per question with two or more options (a clarifying question passes first):
 - No `Goal:` line, or no `Problem:` line: deny, no model call.
+- A `Problem:` line before the `Goal:` line: deny, no model call. Goal goes first.
 - Else one model call (decision_watch.invoke_model, the one model caller) judges whether the
   `Goal:` line matches the owner's last messages, whether each option serves that goal,
   and whether a better option is missing. FLAG denies, and the reason goes to the session.
@@ -46,9 +47,20 @@ PROBLEM_LABEL = "Problem:"
 GOAL_LINE = re.compile(r"^[ \t]*%s[ \t]*\S" % re.escape(GOAL_LABEL), re.MULTILINE)
 PROBLEM_LINE = re.compile(r"^[ \t]*%s[ \t]*\S" % re.escape(PROBLEM_LABEL), re.MULTILINE)
 
+
+
+def _loose_line(label):
+    """The order check's reading of a label line: any non-word prefix (space, NBSP, `>`, `-`, `*`, `_`),
+    any case, closing marks before the colon, and a full-width colon."""
+    word = re.escape(label.rstrip(":"))
+    return re.compile(r"^(?:[^\w\n]|_)*%s[*_]*[:：]" % word, re.MULTILINE | re.IGNORECASE)
+
+
+GOAL_LOOSE, PROBLEM_LOOSE = _loose_line(GOAL_LABEL), _loose_line(PROBLEM_LABEL)
+
 STYLE_FILE = os.path.join(HERE, "..", "output-styles", "shiv-stylisms.md")
 PROBLEM_RULE = "style-question-states-problem"
-STYLE_RULES = (PROBLEM_RULE, RULE)
+STYLE_RULES = (RULE, PROBLEM_RULE)  # Goal rule first, so the prompt shows Goal first
 
 PROMPT = (
     "You check a question an assistant is about to put to its owner. The owner's goal, read "
@@ -58,7 +70,7 @@ PROMPT = (
     "missing. A goal line is a paraphrase of the goal in plain words; a paraphrase is not grounds "
     "to deny or flag. Be conservative: FLAG only a clear miss. Reply with one JSON object only: "
     '{"verdict": "ALLOW"} or {"verdict": "FLAG", "why": "<one line: what misses, and the fix>"}.'
-    % (PROBLEM_LABEL, GOAL_LABEL, GOAL_LABEL)
+    % (GOAL_LABEL, PROBLEM_LABEL, GOAL_LABEL)
 )
 
 
@@ -239,6 +251,13 @@ def main():
               "terms>`, `%s <the problem, in one plain sentence>`). Missing on: %s"
               % (RULE, " and ".join("`%s`" % l for l in labs), GOAL_LABEL, PROBLEM_LABEL,
                  safe_finding_text("; ".join("%s (no %s)" % (t[:80], " or ".join(l)) for t, l in absent))))
+    misordered = [t for t, _ in todo if PROBLEM_LOOSE.search(t).start() < GOAL_LOOSE.search(t).start()]
+    if misordered:
+        if not _mark_denied(state):
+            _did_not_run("the state could not be written, so no deny was sent.")
+        _deny("%s: put the `%s` line first, then the `%s` line. Out of order on: %s"
+              % (RULE, GOAL_LABEL, PROBLEM_LABEL,
+                 safe_finding_text("; ".join(t[:80] for t in misordered))))
     if not todo:
         sys.exit(0)
 
