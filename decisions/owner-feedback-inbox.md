@@ -24,10 +24,13 @@ Owner ruling, 2026-10-13, from an interview in the claude-settings audit session
   it, with or without text after it.
 - **Close.** Capture ends in four ways. (1) A message that starts with `fb done` or `fb: done`
   closes it, any case, any whitespace between the words. The rest of that message is not saved and
-  is not judged. `fb - done` does not close; while capture is open, it is captured. (2) Quiet time:
+  is not judged. A message whose last line is `fb done` (any case, leading spaces, an optional colon,
+  trailing punctuation) saves the lines before it and closes capture, also when the same message opens it
+  (owner, 2026-10-14). That line in a closed code fence or in backticks does not close. The one-line form
+  `fb: X fb done` does not close. `fb - done` does not close; while capture is open, it is captured. (2) Quiet time:
   10 minutes with no captured owner message. The message after the gap is not saved unless it
   opens with `fb`. (3) The judge: while capture is open,
-  each message that does not open with `fb` is saved first. Then a detached child
+  each message that does not open with `fb` and does not close capture is saved first. Then a detached child
   (`hooks/feedback_judge.py`) asks a Sonnet judge (`claude-sonnet-5-5`, through
   `decision_watch.invoke_model`) whether it still belongs to the burst. On `{"feedback": false}`
   the child adds the item `- fb-auto-<time> [note] -> judged not feedback` under that message, so
@@ -90,7 +93,7 @@ Same files. Prove on the Mac clone after `git pull` and install.sh.
 
 ## Holes, named
 
-Debts: in order of harm. `inbox-midturn-prompt-untested` (mid-turn owner messages fire UserPromptSubmit, and no test pins it). `inbox-path-drop-silent` (an `fb` message is dropped with one stderr line). `inbox-done-forms` (backtick and other done forms do not close capture, and no test covers the tab or dash forms). `fb-judge-marker-race` (the judge can close a newer capture). `fb-inbox-append-race` (concurrent appends drop lines). `inbox-partial-write-fence` (a partial write can leave a fence open). `inbox-unreadable-drops-ids` (an unreadable inbox drops open ids from the compaction note).
+Debts: in order of harm. `inbox-midturn-prompt-untested` (mid-turn owner messages fire UserPromptSubmit, and no test pins it). `inbox-path-drop-silent` (an `fb` message is dropped with one stderr line). `inbox-done-forms` (backtick and other done forms do not close capture, and no test covers the tab or dash forms). `fb-judge-marker-race` (the judge can close a newer capture). `fb-inbox-append-race` (concurrent appends drop lines). `inbox-partial-write-fence` (a partial write can leave a fence open). `inbox-unreadable-drops-ids` (an unreadable inbox drops open ids from the compaction note). `fb-done-unclosed-fence` (a last `fb done` line after an unclosed fence still closes). `fb-done-forms-unpinned` (the close forms have no test).
 
 Kind: build
 Plan: decisions/owner-feedback-inbox.md#windows (windows)
