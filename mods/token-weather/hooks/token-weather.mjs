@@ -57,15 +57,18 @@ export function register(on) {
 
 async function takeReading($) {
   try {
-    const { context } = await $.session.usage();
+    const { context } = await $.session.usage({ breakdown: "summary" });
     if (!context || !context.window) {
       return;
     }
     const tokens = context.tokens ?? 0;
-    const percent = Math.round(context.percent ?? (tokens / context.window) * 100);
+    // Measure against the auto-compact window when one is set, as /context does.
+    const { breakdown } = context;
+    const window = breakdown?.isAutoCompactEnabled ? Math.min(context.window, breakdown.rawMaxTokens) : context.window;
+    const percent = Math.round((tokens / window) * 100);
     // The session.start reading is 0 before any response; drop it once real readings arrive.
     readings = readings.filter((r) => r.tokens > 0);
-    readings.push({ tokens, window: context.window, percent });
+    readings.push({ tokens, window, percent });
     if (readings.length > HISTORY) {
       readings = readings.slice(-HISTORY);
     }

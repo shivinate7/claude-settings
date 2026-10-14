@@ -265,9 +265,6 @@ export const register: Register = (on, options) => {
     const limitBar = isStacked
       ? Math.max(40, Math.min(MAX_BAR_PX, Math.floor(availPx - fixedPx - longestPx)))
       : sharedBar
-    const used = snap.contextTokens === null ? '' : `${tokens(snap.contextTokens)} / ${tokens(snap.contextWindow)}`
-    const contextRoomPx = Math.floor(availPx - fixedPx - used.length * CHAR_PX)
-    const contextBar = Math.max(40, Math.min(isStacked ? limitBar : 2 * limitBar, contextRoomPx))
 
     const where =
       `📁 ${snap.dir}` +
@@ -310,7 +307,6 @@ export const register: Register = (on, options) => {
             <Text dimColor>{session}</Text>
           </Box>
         </Box>
-        {meter('Context', snap.contextPercent, used, contextBar)}
         {snap.limits.length > 0 && (
           <Box flexDirection={isStacked ? 'column' : 'row'} columnGap={METER_GAP}>
             {snap.limits.map((l, i) => meter(label(l.kind), l.percent, details[i] ?? '', limitBar))}
