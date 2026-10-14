@@ -41,7 +41,7 @@ session transcripts, not a repo.
 | Tokens | none: session practice | `n/a (session)` |
 | Building | `git ls-files \| grep -i test` against product files | each product module has a test |
 | Building | designs in `docs/` or `plans/` with no record | each design has a record, or is marked abandoned |
-| Speak plainly | `grep -rnE "\bD-?[0-9]+\b\|\b(decision\|record) [a-z0-9]+(-[a-z0-9]+)+" --include=*.md .` (numbered ids such as D12 or D-570, and slugs such as decision agents-wait-with-monitor) | each cited id has a short gloss beside it |
+| Speak plainly | `grep -rnE -e "\bD-?[0-9]+\b" -e "\b[Dd]ecision [a-z0-9]+(-[a-z0-9]+)+" -e "\brecord [a-z0-9]+(-[a-z0-9]+)+" --include=*.md .` finds numbered ids (D12, D-570) and keyword cites (Decision ci-wall-time-cuts). `grep -rnwF -f <(basename -s .md decisions/*.md) --include=*.md .` finds bare slugs. Run both from the records parent | each cited id has a short gloss beside it |
 | Output | `ste_lint` totals on the child's `*.md` | 0 errors |
 | Style | none: `output-styles/shiv-stylisms.md` governs replies, a session act | `n/a (session)` |
 | Reports | none: `report_gate.py` covers it | `parent-covered` |

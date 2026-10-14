@@ -140,8 +140,7 @@ gh run list --commit <merge-sha> --json name,conclusion
 
 Same-repo action: `uses: $/path` (GitHub changelog 2026-07-30) or `uses: ./path`.
 
-This repo's `.github/dependabot.yml` ignores every version update, so Dependabot opens security
-updates only:
+This repo's `.github/dependabot.yml` ignores every version update for `github-actions`:
 
 ```yaml
 version: 2

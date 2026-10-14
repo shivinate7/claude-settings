@@ -37,9 +37,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 6. **After a merge, read every run the push starts.** A deploy or nightly workflow is not a
    required check, so its failure shows on no PR.
 7. **Pin and audit actions.** Pin each third-party action by full commit SHA, with the version as
-   a comment. Name the bot that keeps each pin current. Here, Dependabot opens security updates
-   only for actions (`.github/dependabot.yml` ignores version updates). Renovate tracks three
-   custom pins, not actions (`renovate.json`). Disable credential persistence on checkout. Run an
+   a comment. Name the bot that keeps each pin current. Here, `.github/dependabot.yml` ignores
+   all version updates for actions. Renovate tracks three custom pins, not actions
+   (`renovate.json`). Disable credential persistence on checkout. Run an
    audit tool in CI, and run the same command locally: see the zizmor step in
    `.github/workflows/gates.yml`.
 8. **Batch lanes.** One CI run per batch, by CLAUDE.md rule `git-integration-branch-merge`.
@@ -96,16 +96,17 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     run 37675874835.
 18. **Profile before you refactor test setup.** Compare setup time to test-body time. If
     the saving is under 20%, stop. Measured: setup was 31% of the time, and setup reuse saved
-    about 9% (decision ci-wall-time-cuts, cut D).
-19. **Run one scope job first.** Make it a cheap Linux job. Give every other job `needs: scope`
-    Most jobs add a job-level `if:` on their own flag. The `if:` also holds
+    about 9% (decision ci-wall-time-cuts, cut D: merge test setup).
+19. **Run one scope job first.** Make it a cheap Linux job. Give every other job `needs: scope`.
+    Most jobs add a job-level `if:` on their own flag. That `if:` also holds
     `|| github.event_name != 'pull_request'`, so push, nightly and dispatch runs start them.
     The `gates` job has no job-level `if:`. Its steps carry the flags.
-    Two jobs may share a flag. This repo's `gates-mutate-guard` and `gates-windows-guard` both read
-    `guard`. A job with nothing to test then starts no runner. A docs-only PR runs no code suite,
-    but `gates` still runs its lint steps (decision docs-only-prs-skip-code-suites). An unreadable
-    diff or an unmapped path runs everything. A skipped job reads as passing, so put the scope job
-    in the required checks (decision ci-wall-time-cuts, cut B).
+    Two jobs may share a flag: this repo's `gates-mutate-guard` and `gates-windows-guard` both
+    read `guard`. A job with nothing to test then starts no runner. A docs-only PR skips the code
+    suites. `gates` still runs its lint steps (decision docs-only-prs-skip-code-suites, the rule
+    for docs-only PRs). An unreadable diff or an unmapped path runs everything. A skipped job
+    reads as passing. Put the scope job in the required checks (decision ci-wall-time-cuts,
+    cut B: the scope job).
 
 ## Public repos
 
@@ -138,7 +139,10 @@ CI claims in README or docs go stale too. See the `fresh-prose` skill.
 ## Opt-in templates
 
 Adopt each by `uses: shivinate7/claude-settings/actions/<name>@<full-sha>`, or copy the file.
-Record: decision opt-in-ci-templates-composite. Steps 1 and 11 to 14: decision ci-spend-rules. Steps 15 to 19: decision ci-wall-time-cuts.
+Records:
+- Opt-in templates: decision opt-in-ci-templates-composite (composite actions).
+- Steps 1 and 11 to 14: decision ci-spend-rules (CI spend).
+- Steps 15 to 19: decision ci-wall-time-cuts (CI wall time).
 
 - `all-jobs-passed`: in a job with `needs: [...]` and `if: always()`, pass `toJSON(needs)` as shown. A skipped needed job then fails.
 
