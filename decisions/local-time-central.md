@@ -39,15 +39,13 @@ database, a child with `TZ=Asia/Tokyo`, and the hook run as a script. CI steps i
 
 ## Holes, named
 
-- The rule is the US rule in force since 2007. If the US changes its DST dates, edit
-  `hooks/local_time.py`. The upgrade is zoneinfo with this rule as the fallback.
-- The line states a time. Nothing forces the model to use it. A session that ignores the
-  line still answers in UTC.
-- The time is fixed when the prompt is sent, or when the agent starts. A long run does not
-  see it move.
-- The hook reaches a machine only after `install.sh` copies it to `~/.claude/hooks`. Until
-  then the wrapper exits 0 and no line shows.
-- Unmeasured: the token cost of one line per prompt.
+Debts: `local-time-hard-coded-dst` (the US DST rule is coded in the hook, and the zoneinfo upgrade is not built), `local-time-line-cost-unmeasured` (the token cost of one line per prompt is unmeasured).
+
+## Named limits
+
+- The line states a time. Nothing forces the model to use it. A session that ignores the line still answers in UTC.
+- The time is fixed at prompt send, or at agent start. A long run does not see it move.
+- The hook reaches a machine only after `install.sh` copies it to `~/.claude/hooks`. Until then the wrapper exits 0 and no line shows.
 
 Kind: process
 Home: hooks/local_time.py

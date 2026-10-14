@@ -1,6 +1,6 @@
 # Question for the owner: should a guard timeout refuse the call?
 
-- **What.** If the PreToolUse guard times out or crashes, Claude Code lets the call run. The owner chose this in `gate-hooks-fail-closed`, so load never takes the setup down. The cost is that a slow or crashed guard judges nothing.
+- **What.** If the PreToolUse guard times out or crashes, Claude Code lets the call run. The owner chose this in `gate-hooks-fail-closed`, so load never takes the setup down. The cost is that a slow or crashed guard judges nothing. A stalled guard.log write can also delay exit past the hook timeout, because the gate prints its answer before the write. Incident, 2026-10-12: with `onFailure: block`, a slow guard refused every Bash, PowerShell and Agent call. The Store `python3` alias took over 30 s, and `python` about 0.4 s. Every python wrapper now skips a `command -v` result under `/WindowsApps/`, and the guard took 0.36 s after the skip. `onFailure` is not set, pending the owner's ruling. An odd count of `'` doubles guard time: a 6,001-word command takes about 15 to 32 s, inside the 60 s hook timeout. A longer command can run unjudged.
 - **Where.** The PreToolUse guard row in `settings.json`, which sets no `onFailure`.
 - **Decision.** `gate-hooks-fail-closed` (a missing gate refuses; a slow or crashed gate does not).
 - **Retire.** The owner keeps the ruling, and this file is deleted. Or the owner changes it, the guard row sets `"onFailure": "block"`, and a settings test pins it.

@@ -30,7 +30,7 @@ session transcripts, not a repo.
 | Roles | `git log --oneline -40 origin/main` and `git branch -r` | test commits or `tests/*` branches land before product commits |
 | Roles | `cat .claude/settings.local.json` | no stale model raise; any raise has `_subagentCapUntil` in the future |
 | Parallelism | `git worktree list`; `grep -n worktrees .gitignore` | work runs in worktrees; `.claude/worktrees` is ignored |
-| Shared trees | `git stash list \| wc -l` | 0 entries |
+| Shared trees | `git stash list` | no output (0 entries) |
 | Shared trees | `.claude/launch.json`, dev scripts, `git ls-files '*playwright*.config.*'`, dev server config | each checkout can set its own port and data; each `webServer` has reuse off or absent, or on (any value that can be true, such as `!process.env.CI`) with a wired `globalSetup` that refuses another checkout; port strict (`--strictPort` or `strictPort: true`); no Playwright config: n/a |
 | Git | `gh pr list --state merged --limit 20` and `git log --first-parent --no-merges --oneline -20 origin/main` | main moves only by PR |
 | Git | `gh api repos/{owner}/{repo}/branches/main/protection` | the answer is known. A 404 is a known answer: no protection |
@@ -40,7 +40,7 @@ session transcripts, not a repo.
 | Verification | list the screens, if any, and the sizes and themes they ship in | a check per screen |
 | Verification | `grep -rn "sleep" .github/ scripts/` | no waiter loop |
 | Tokens | none: session practice | `n/a (session)` |
-| Building | `git ls-files \| grep -i test` against product files | each product module has a test |
+| Building | `git ls-files '*test*'` against product files | each product module has a test |
 | Building | designs in `docs/` or `plans/` with no record | each design has a record, or is marked abandoned |
 | Speak plainly | `grep -rnE -e "\bD-?[0-9]+\b" -e "\b[Dd]ecision [a-z0-9]+(-[a-z0-9]+)+" -e "\brecord [a-z0-9]+(-[a-z0-9]+)+" --include=*.md .` finds numbered ids (D12, D-570) and keyword cites (Decision ci-wall-time-cuts). `grep -rnwF -f <(basename -s .md decisions/*.md) --include=*.md .` finds bare slugs. Run both from the records parent | each cited id has a short gloss beside it |
 | Output | `ste_lint` totals on the child's `*.md` | 0 errors |
