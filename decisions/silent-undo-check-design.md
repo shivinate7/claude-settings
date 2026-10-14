@@ -182,16 +182,7 @@ Cost: a pull request run took 0.4 to 5 seconds on this repo. The full-history au
 
 ## Holes, named
 
-- After a rebase, the window starts at the rebase base. Main work lost in a commit older than
-  that base is not read. Debt `rebase-loss-before-base-unread`.
-- The `+1` reads the fork commit only when the fork point is on upstream's first-parent line.
-  When the branch was cut from a PR branch that merged later, the fork point is off the line.
-  Then the `+1` reads the first-parent commit where the PR branch left main, which is main work from before the cut.
-  A scratch probe flagged a deliberate removal of it. Debt `off-line-fork-reads-pre-cut`.
-- An in-place edit of a main-added line that keeps under 0.9 similarity reads as a reversal.
-  Debt `inplace-edit-under-0-9-flagged`.
-- The faster scan splits a changed line at a lone CR or a NUL, so later lines of that commit
-  read as lost. A false alarm only. Debt `undo-scan-cr-nul-false-alarm`.
+Debts: `rebase-loss-before-base-unread` (main work older than a rebase base is not read). `off-line-fork-reads-pre-cut` (a fork point off the first-parent line reads pre-cut main work). `inplace-edit-under-0-9-flagged` (an in-place edit under 0.9 similarity reads as a reversal). `undo-scan-cr-nul-false-alarm` (a lone CR or NUL splits a line, a false alarm).
 
 Kind: process
 Home: lint/check_silent_undo.py

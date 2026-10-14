@@ -97,4 +97,4 @@ Debts: `sb-pane-untested` (pane draw), `sb-prompt-turn-end` (turn end in a promp
 - The cost figure from `$.session.usage()` is shown nowhere. The figure was unreliable.
 
 Kind: process
-Home: mods/session-board
+Home: mods/session-board/hooks/lib.mjs

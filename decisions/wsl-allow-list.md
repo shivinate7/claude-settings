@@ -61,16 +61,7 @@ The WSL section of the guard tests (section 2c-bis) pins each allowed form and e
 
 ## Holes, named
 
-- A bare `bash.exe -c` is not refused. It runs the System32 `bash.exe` when Git bash is not
-  first on PATH. See bare-bash-on-windows-can-resolve-to-the-wsl-stub, the WSL stub record.
-- `debian.exe` and `kali.exe` are not refused.
-- A substitution inside a token is not read (`x=$(...)`, backticks). See guard-command-position,
-  the one command-word resolver.
-- A WSLENV set with no `=` is not refused. Examples: `New-Item Env:`, `Set-Item` after
-  `cd env:`, `read`, `${WSLENV:=x}`, and `printf -v`.
-- False alarms, when the same command also runs wsl: `echo "WSLENV=x"`, `${env:WSLENV}` reads,
-  and `grep "WSLENV"`.
-- No test pins the `env:` path form or the quoted-name form of WSLENV.
+Debts: `wsl-bare-bash-not-refused` (a bare bash.exe -c is not refused). `wsl-distro-exes-not-refused` (debian.exe and kali.exe are not refused). `wsl-substitution-token-unread` (a substitution inside a token is not read). `wsl-wslenv-no-equals-unrefused` (a WSLENV set with no equals sign is not refused). `wsl-wslenv-false-alarms` (WSLENV text in the same command raises false alarms). `wsl-env-path-form-untested` (no test pins the env path or quoted-name forms).
 
 Kind: process
 Home: hooks/guard_wsl.py
