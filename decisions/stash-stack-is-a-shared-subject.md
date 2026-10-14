@@ -110,5 +110,20 @@ instead, which is the only half of the conflict this repository controls.
   `export` are not git subcommands. Git 2.55 lists both in `git stash -h`. Comment
   only. Debt: `stash-export-comment-stale`.
 
+## Build plan
+
+The rule lives in `hooks/guard_shared_tree.py`, and the shared-tree family of
+`hooks/test_guard.py` pins it.
+
+### windows
+
+The gates-windows-guard job runs the guard fixture suite, as the Windows slice on a pull
+request and in full on main.
+
+### macos
+
+The gates-macos job runs the guard fixture suite in full.
+
 Kind: build
-Home: hooks/guard_shared_tree.py
+Plan: decisions/stash-stack-is-a-shared-subject.md#windows (windows)
+Plan: decisions/stash-stack-is-a-shared-subject.md#macos (macos)
