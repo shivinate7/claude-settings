@@ -104,7 +104,7 @@ def named(payload):
 
 def sim_ok(udid):
     """True when bootstatus and a screenshot both exit 0. A timeout or error is a fail."""
-    shot, ok = None, True  # both steps always run: a fail in the first does not skip the second
+    shot, ok = None, True  # a failed bootstatus still runs the screenshot; a bootstatus timeout skips it
     try:
         for argv, wait in ((["bootstatus", udid], 90), (["io", udid, "screenshot", None], 15)):
             if argv[-1] is None:
@@ -126,11 +126,11 @@ def sim_ok(udid):
 
 def retry(udid):
     """Shut down and boot UDID once, then check again."""
-    try:
-        for step, wait in (("shutdown", 30), ("boot", 60)):
+    for step, wait in (("shutdown", 30), ("boot", 60)):  # boot runs even when shutdown failed
+        try:
             subprocess.run(["xcrun", "simctl", step, udid], capture_output=True, timeout=wait)
-    except Exception:
-        return False
+        except Exception:
+            pass
     return sim_ok(udid)
 
 
@@ -167,26 +167,33 @@ def main():
             hits = [(u, rec) for u, (s, rec) in now.items()
                     if s == "Booted" and before.get(u) == "Shutdown" and (
                         u.upper() in names or (rec["name"] in names and by_name_ok(rec, now, payload)))]
-            checked = payload.get("tool_name") != "Bash" or BOOT_ARG_RE.search(str(tool_input.get("command", "")))
-            notes, broken = [], []
-            for u, _ in hits if checked else []:  # the check runs before launchd(): the record holds the retry pid
-                if not sim_ok(u):
-                    (notes if retry(u) else broken).append(u)
-            lines = []
-            for u, rec in hits:
+            if payload.get("tool_name") == "Bash":  # check only the devices a `simctl boot` names
+                booted = {m.strip("'\"").upper() for m in BOOT_ARG_RE.findall(str(tool_input.get("command", "")))}
+                booted |= {m.strip("'\"") for m in BOOT_ARG_RE.findall(str(tool_input.get("command", "")))}
+                to_check = {u for u, rec in hits if u.upper() in booted or rec["name"] in booted}
+            else:
+                to_check = {u for u, _ in hits}
+
+            def record(u, rec):
                 pid, start = launchd(u)
                 if pid is None or start is None:
-                    continue  # unclear: no record, so the sweep keeps the device
-                lines.append(json.dumps({**rec, "at": at, "launchd_pid": pid,
-                                         "launchd_start": start}) + "\n")
-            if lines:
+                    return  # unclear: no record, so the sweep keeps the device
                 with open(os.path.join(state, "sim-boots.jsonl"), "a", encoding="utf-8") as f:
-                    f.writelines(lines)
+                    f.write(json.dumps({**rec, "at": at, "launchd_pid": pid, "launchd_start": start}) + "\n")
+            notes, broken = [], []
+            for u, rec in hits:
+                record(u, rec)  # before the check: a hook killed mid-check still leaves a record
+                if u in to_check and not sim_ok(u):
+                    if retry(u):
+                        notes.append(u)
+                        record(u, rec)  # the newest line holds the retry boot's pid
+                    else:
+                        broken.append(u)
             msg = ("Simulator %s failed the boot check and was booted again. Launch again any app "
                    "this call launched." % ", ".join(notes)) if notes else ""
             if broken:
                 print(json.dumps({"decision": "block", "reason": "Simulator %s is broken: it failed "
-                                  "the boot check twice. Stop using it. It stays booted. %s"
+                                  "the boot check twice. Stop using it. %s"
                                   % (", ".join(broken), msg)}))
             elif notes:
                 print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse",
