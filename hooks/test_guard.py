@@ -94,6 +94,12 @@ if GUARD_FAMILY and GUARD_FAMILY not in FAMILIES:
     sys.exit("GUARD_FAMILY=%r is not a family. Want one of: %s"
              % (GUARD_FAMILY, ", ".join(sorted(FAMILIES))))
 FAMILY = "misc"  # set at each section header below
+# TEMP_DIR is the temp folder the guard reads for the cases added while it is set, or None for the
+# system temp. add() records it, and decide() puts it in TMPDIR, TEMP and TMP for that guard run.
+# The silent-write section sets it to ROOT/tmp, so its throwaway cases sit under it while every
+# other fixture (ROOT/nogit, ROOT/repo) stays outside it. Left None, a case keeps the system temp,
+# which holds ROOT, so a case that sets nothing is judged as it always was.
+TEMP_DIR = None
 
 
 def _family(name):
@@ -228,6 +234,8 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "max_seconds": max_seconds,
         # An allow that must print NOTHING, not even context. Only a case that says so is held to it.
         "silent": silent,
+        # The temp folder this case's guard run reads as its own (see TEMP_DIR above).
+        "temp": TEMP_DIR,
         "tool_input": tool_input,
         # Tagged for GUARD_TESTS=windows-slice. A session case reads a live process's start time,
         # which on Windows is the ctypes arm of _process_start_ms (guard.py L1837-1905).
@@ -828,7 +836,8 @@ def build_fixtures():
     """The EAGER fixtures: config folders, fake gh files, message files and the link probe. Each git
     repo is a builder below, and it is built on first use."""
     global LINKS_MADE, SYMWT_MADE
-    for folder in (CFG, LOGDIR, PROJ, CLONE, NOGIT, os.path.join(UNDERTESTS, ".git")):
+    for folder in (CFG, LOGDIR, PROJ, CLONE, NOGIT, os.path.join(UNDERTESTS, ".git"),
+                   os.path.join(ROOT, "tmp")):   # the temp folder the silent-write cases read
         os.makedirs(folder, exist_ok=True)
     write(os.path.join(CFG, "settings.json"), "{}\n")
     write(os.path.join(CFG, "CLAUDE.md"), "rules\n")
@@ -4480,6 +4489,9 @@ sh("guard-command-position: wsl pinned, env -S in a glued subshell denies",
 
 # =========================================================================== 2d. the silent write
 FAMILY = "write"
+# The throwaway cases below read ROOT/tmp as the system temp. Every other write case keeps its
+# NOGIT, GITMAIN or PROJ cwd outside it, so each stays a real checkout whatever the system temp is.
+TEMP_DIR = os.path.join(ROOT, "tmp")
 #
 # Rule 1c, the owner's ruling. CLAUDE.md: "Never discard a command's output." A discarding
 # redirect denies on any of the six subcommands, whatever git itself would have printed. git's
@@ -4604,6 +4616,167 @@ sh("silent-write pipe, allow: tee prints",
 # KNOWN GAP, pinned ALLOWED on purpose: the owner left bash -c unparsed. Do not flip without the owner.
 sh("silent-write pipe, allow (known gap): bash -c wrapper is not parsed",
    "bash -c '" + VCS + " commit -m x >/dev/null 2>&1'", "allow", cwd=NOGIT)
+
+# Narrowed 2026-10-14 (lane silent-write-narrow). Four changes, each pinned below. (1) A read under a
+# write verb stays allowed when silenced: `--help`, `-h`, `tag -l`, `-ln1`, `--list`, `merge-base`,
+# and `--dry-run` (`push -n` too). A flag inside a quoted value is a value, never a flag. (2) A
+# silenced write whose cwd, `-C` target or `cd` target sits under the temp folder is allowed. A real
+# checkout outside it stays denied, and a quiet flag stays denied in both. (3) `fetch -q src:dst` is
+# a write only when dst is under refs/heads/ or refs/remotes/; a short dst resolves to refs/heads.
+# (4) The refusal names its step by kind and position, the flag it hit, and one loud form to run.
+
+
+def _build_throwaway():
+    """A real repository under the silent-write temp folder, made the way `git init` makes one."""
+    make_repo(THROWAWAY, {"base.txt": "base\n"})
+
+
+THROWAWAY = os.path.join(ROOT, "tmp", "throwaway")   # built on first use, under TEMP_DIR
+TSLASH = slash(THROWAWAY)                            # the same path as a shell command names it
+lazy_fixture([THROWAWAY], _build_throwaway)
+
+# (1) Reads under a write verb. Silenced, each one still moves nothing.
+sh("silent-write read: tag -ln1 silenced lists tags",
+   VCS + " tag -ln1 >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write read: tag -l silenced lists tags",
+   VCS + " tag -l >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write read: tag --list silenced lists tags",
+   VCS + " tag --list >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write read: cherry-pick --help silenced prints usage",
+   VCS + " cherry-pick --help >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write read: merge --help silenced prints usage",
+   VCS + " merge --help >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write read: rebase --help silenced prints usage",
+   VCS + " rebase --help >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write read: commit -h silenced prints usage",
+   VCS + " commit -h >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write read: merge-base silenced reads a base",
+   VCS + " merge-base HEAD HEAD >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write read: push --dry-run silenced moves nothing",
+   VCS + " push --dry-run >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write read: push -n, the dry-run short form, silenced moves nothing",
+   VCS + " push -n >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write read: the remedy's own loud form is allowed",
+   VCS + " push origin zz9 2>&1 | tail -1", "allow", cwd=GITMAIN)
+
+# (1, bypasses) A flag-shaped token that is a value, or a flag that is not the read, stays denied.
+sh("silent-write read bypass: --dry-run as a message value is a real commit",
+   VCS + ' commit -m "--dry-run" >/dev/null', "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write read bypass: -h as a message value is a real commit",
+   VCS + " commit -m -h >/dev/null", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write read bypass: --help inside a message is a real commit",
+   VCS + ' commit -m "fix --help" >/dev/null', "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write read bypass: commit -n is no-verify, not a dry run",
+   VCS + " commit -n -m x >/dev/null", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write read bypass: tag -d deletes a tag, it does not list",
+   VCS + " tag -d v1 >/dev/null", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write read bypass: a silenced tag create is a write",
+   VCS + " tag v1 >/dev/null", "deny", "silent-write", cwd=GITMAIN)
+
+# (2) A silenced write whose folder is a throwaway under the temp folder is allowed.
+sh("silent-write throwaway: a discarded commit in a throwaway repo",
+   VCS + " commit -m x >/dev/null", "allow", cwd=THROWAWAY)
+sh("silent-write throwaway: -C names the throwaway repo, and it is judged there",
+   VCS + " -C " + TSLASH + " commit -m x >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write throwaway: cd into the throwaway repo, and it is judged there",
+   "cd " + TSLASH + " && " + VCS + " commit -m x >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write throwaway: --git-dir names the throwaway repo, and it is judged there",
+   VCS + " --git-dir=" + TSLASH + "/.git commit -m x >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write throwaway: a discarded pipe tail in a throwaway repo",
+   VCS + " commit -m x 2>&1 | cat >/dev/null", "allow", cwd=THROWAWAY)
+sh("silent-write throwaway: a quiet push in a throwaway repo",
+   VCS + " push -q", "allow", cwd=THROWAWAY)
+sh("silent-write throwaway: a quiet merge in a throwaway repo",
+   VCS + " merge -q feature/x", "allow", cwd=THROWAWAY)
+sh("silent-write throwaway: this session's own scratchpad",
+   VCS + " commit -m x >/dev/null", "allow",
+   cwd=os.path.join(ROOT, "tmp", FAKE_SESSION, "scratchpad", "notes"), session=FAKE_SESSION)
+TEMP_DIR = None   # the system temp itself, for this one case
+sh("silent-write throwaway: a folder under the system temp dir counts as a throwaway",
+   VCS + " commit -m x >/dev/null", "allow", cwd=NOGIT)
+TEMP_DIR = os.path.join(ROOT, "tmp")
+
+# (2, kept) A real checkout outside the throwaway folder is still judged, quiet flags too.
+sh("silent-write real: a discarded commit in a real checkout",
+   VCS + " commit -m x >/dev/null", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write real: a quiet push in a real checkout",
+   VCS + " push -q", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write real: a quiet merge in a real checkout",
+   VCS + " merge -q feature/x", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write real: a silenced tag create in a real checkout",
+   VCS + " tag v1 >/dev/null", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write real: a throwaway -C, then a quiet push in the real cwd",
+   VCS + " -C " + TSLASH + " commit -m x >/dev/null && " + VCS + " push -q",
+   "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write real: a real --git-dir is judged where it points, not the throwaway cwd",
+   VCS + " --git-dir=" + slash(GITMAIN) + "/.git commit -m x >/dev/null", "deny", "silent-write",
+   cwd=THROWAWAY)
+sh("silent-write real: a real -C target is judged where it runs, not the throwaway cwd",
+   VCS + " -C " + slash(GITMAIN) + " commit -m x >/dev/null", "deny", "silent-write",
+   cwd=THROWAWAY)
+sh("silent-write real: an if-test of a silenced merge stays denied (unmeasured; keep)",
+   "if " + VCS + " merge feature/x >/dev/null 2>&1; then echo y; fi", "deny", "silent-write",
+   cwd=GITMAIN)
+
+# (3) `fetch -q src:dst` is a write only when dst is under refs/heads/ or refs/remotes/.
+sh("silent-write fetch: a quiet fetch into refs/tmp moves no branch",
+   VCS + " fetch -q origin main:refs/tmp/x", "allow", cwd=GITMAIN)
+sh("silent-write fetch: a forced quiet fetch into refs/tmp moves no branch",
+   VCS + " fetch -q origin +main:refs/tmp/x", "allow", cwd=GITMAIN)
+sh("silent-write fetch: a quiet fetch into refs/heads is a write",
+   VCS + " fetch -q origin main:refs/heads/x", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write fetch: a quiet fetch into refs/remotes is a write",
+   VCS + " fetch -q origin main:refs/remotes/origin/x", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write fetch: a short dst resolves to refs/heads, so it is a write",
+   VCS + " fetch -q origin main:main", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write fetch: one dst under refs/heads makes the whole fetch a write",
+   VCS + " fetch -q origin a:refs/tmp/a b:main", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write fetch: a bare quiet fetch is a read",
+   VCS + " fetch -q origin main", "allow", cwd=GITMAIN)
+
+# (4) The refusal names its step by kind and position, the flag it hit, and one loud form.
+sh("silent-write reason: a quiet push names step 3 of 4, the push, the flag, and the loud form",
+   "echo a && " + VCS + " status && " + VCS + " push -q origin zz9 && echo done",
+   "deny", "silent-write",
+   carries=("step 3 of 4", "the push", "-q", "2>&1 | tail -1"),
+   lacks=("zz9", VCS + " push -q", "echo done"), cwd=GITMAIN)
+sh("silent-write reason: a discarded commit names step 2 of 2, the commit, the redirect, "
+   "and the loud form",
+   VCS + " add zz9 && " + VCS + " commit -m qq7 2>/dev/null", "deny", "silent-write",
+   carries=("step 2 of 2", "the commit", ">/dev/null", "2>&1 | tail -1"),
+   lacks=("qq7", "zz9", VCS + " commit -m"), cwd=GITMAIN)
+sh("silent-write reason: a piped discard counts the pipe's stages as steps",
+   VCS + " commit -m qq7 2>&1 | cat >/dev/null", "deny", "silent-write",
+   carries=("step 1 of 2", "the commit"), lacks=("qq7", "cat >/dev/null"), cwd=GITMAIN)
+
+# Scanner (building-scanner-respects-strings): a quote or a comment opener changes nothing outside
+# its own quotes, and a comment hides nothing from a real write before it.
+sh("silent-write scanner: a comment opener inside a message does not hide a discard",
+   VCS + ' commit -m "x # y" 2>/dev/null', "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write scanner: block and line openers inside a message do not hide a discard",
+   VCS + ' commit -m "see // and /* here" >/dev/null', "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write scanner: a real comment after a discard is still a discard",
+   VCS + " commit -m x >/dev/null # the note", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write scanner: a flag named in a comment after a discard is still a discard",
+   VCS + " commit -m x >/dev/null # --dry-run", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write scanner: a discard named only in a comment is not a discard",
+   VCS + " commit -m x # 2>/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write scanner: a lone quote after a discard does not hide it",
+   VCS + " commit -m x 2>/dev/null; echo don't", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write scanner: a lone quote in a throwaway message",
+   VCS + ' commit -m "it\'s" >/dev/null', "allow", cwd=THROWAWAY)
+sh("silent-write scanner: a multi-line message in a throwaway",
+   VCS + ' commit -m "line one\nline two" >/dev/null', "allow", cwd=THROWAWAY)
+sh("silent-write scanner: a multi-line message, then a real discard",
+   VCS + ' commit -m "line one\nline two" 2>/dev/null', "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write scanner: a quoted git -C in a message does not move the judgement",
+   VCS + ' commit -m "git -C ' + TSLASH + ' x" >/dev/null', "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write scanner: a discard quoted in echo is text",
+   'echo "' + VCS + ' commit -m x >/dev/null"', "allow", cwd=GITMAIN)
+sh("silent-write scanner: a discard named inside a message is text",
+   VCS + ' commit -m "log >/dev/null"', "allow", cwd=GITMAIN)
+
+TEMP_DIR = None   # back to the system temp for the sections below
 
 
 # =========================================================================== 3. push and delete
@@ -7816,6 +7989,9 @@ def decide(case):
             body["agent_type"] = case["agent_type"]
         payload = json.dumps(body)
     env = dict(os.environ)
+    if case.get("temp"):   # the temp folder this case reads as its own (see TEMP_DIR)
+        for name in ("TMPDIR", "TEMP", "TMP"):
+            env[name] = case["temp"]
     # `.get`, not `[...]`: a checker below builds a case dict by hand and names only the keys it
     # needs, so a key added here must not turn into a KeyError in a checker that never asked for
     # it. MEASURED on CI run 35473213091: indexing this key crashed `stack_reason_hygiene_case`,
