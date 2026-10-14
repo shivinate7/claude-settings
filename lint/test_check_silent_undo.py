@@ -940,5 +940,306 @@ class RawBytes(unittest.TestCase):
             b.close()
 
 
+class FailReads:
+    """Every read of `rev:path` fails while the block is armed, as a read fails mid-scan: `git show`
+    exits 128, and cat-file answers `missing` for a blob it holds. Other reads are real. main reads with
+    `git show`; the Blobs reader reads with cat-file, so both are patched. `hits` counts the failed reads."""
+
+    def __init__(self, rev, path):
+        self.want, self.hits = "%s:%s" % (rev, path), 0
+        self.real_run, self.real_popen = subprocess.run, subprocess.Popen
+
+    def run(self, args, *a, **k):
+        if list(args[-2:]) == ["show", self.want]:
+            self.hits += 1
+            return subprocess.CompletedProcess(args, 128, "", "fatal: injected read failure")
+        return self.real_run(args, *a, **k)
+
+    def popen(self, args, *a, **k):
+        proc = self.real_popen(args, *a, **k)
+        return CatFile(self, proc) if list(args[-2:]) == ["cat-file", "--batch"] else proc
+
+    def armed(self):
+        return unittest.mock.patch.multiple(subprocess, run=self.run, Popen=self.popen)
+
+
+class CatFile:
+    """A cat-file process. The reply to a faulted request reads `missing`; its blob is consumed so
+    the protocol stays in step for the next request."""
+
+    def __init__(self, fault, proc):
+        self.fault, self.proc, self.req = fault, proc, None
+        self.stdin, self.stdout = Feed(self), Reply(self)
+
+    def wait(self, *a, **k):
+        return self.proc.wait(*a, **k)
+
+
+class Feed:
+    def __init__(self, owner):
+        self.owner = owner
+
+    def write(self, data):
+        self.owner.req = data.decode("utf-8", "surrogateescape").strip()
+        return self.owner.proc.stdin.write(data)
+
+    def flush(self):
+        return self.owner.proc.stdin.flush()
+
+    def close(self):
+        return self.owner.proc.stdin.close()
+
+
+class Reply:
+    def __init__(self, owner):
+        self.owner = owner
+
+    def readline(self):
+        o = self.owner
+        if o.req == o.fault.want:
+            o.fault.hits += 1
+            head = o.proc.stdout.readline()
+            o.proc.stdout.read(int(head.split()[2]) + 1)
+            return (o.req + " missing\n").encode("utf-8", "surrogateescape")
+        return o.proc.stdout.readline()
+
+    def read(self, n):
+        return self.owner.proc.stdout.read(n)
+
+    def close(self):
+        return self.owner.proc.stdout.close()
+
+
+class SharedLineRead(unittest.TestCase):
+    """q_max PR 869 (claude-settings a7b8d7d, 2026-10-14): the merge tool reported `merge d9b46148a drops
+    2 line(s) that parent 92d4ed8f2 added`, for record D-618 (past-price search reads words first). That
+    file is byte-identical at the merge and at that parent, and the claim commit on top does not touch
+    it. The two lines are main's, and the merge keeps them: no drop. A read that fails is no text. It may
+    end the check as UNKNOWN, but it must never become a drop, and two windows of one merge must agree."""
+
+    DEC = "docs/decisions/fixture-shared-line.md"
+    HEAD_TXT = "---\nid: D-618\n---\n\n```refs\ncode: src/a.ts\n```\n\n"
+    TAIL_TXT = "**Decision.** Search is Design 1.\n\n- A query is OR.\n- Two lists.\n"
+    T0, T1, T2, T3 = "2025-12-01T10:00:00", "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
+
+    def build(self, lane_edits):
+        """The q_max shape. Main adds two lines to the file after the cut. The lane never touches the
+        file, or with lane_edits adds a line at its tail. The lane merges main and keeps the lines.
+        A claim commit that does not touch the file goes on top. -> (repo, merge sha, claim sha)."""
+        r = Repo()
+        r.put("app.txt", BODY)
+        r.put(self.DEC, self.HEAD_TXT + self.TAIL_TXT)
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "base", date=self.T0)
+        r.push()
+        r.sh("checkout", "-q", "-b", "lane")
+        r.put("lane.txt", "lane work\n")
+        if lane_edits:
+            r.put(self.DEC, self.HEAD_TXT + self.TAIL_TXT + "- Lane note.\n")
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "lane work", date=self.T1)
+        r.sh("checkout", "-q", "main")
+        r.put(self.DEC, self.HEAD_TXT + "Kind: build\nPlan: specs/x.md (web)\n\n" + self.TAIL_TXT)
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "main adds kind and plan", date=self.T2)
+        r.push()
+        r.sh("checkout", "-q", "lane")
+        r.sh("merge", "-q", "--no-edit", "origin/main", date=self.T3)
+        merged = r.sh("rev-parse", "HEAD")
+        r.put("claims.txt", "D-779 D-780\n")
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Claim record numbers", date=self.T3)
+        return r, merged, r.sh("rev-parse", "HEAD")
+
+    def outcome(self, r, head):
+        try:
+            return C.check(r.dir, "origin/main", head)
+        except C.Unknown as e:
+            return e
+
+    def assertNoDrop(self, got, merged):
+        if isinstance(got, C.Unknown):
+            return  # a read that cannot run is UNKNOWN, never a drop
+        drops = [x for x in got[0] if "drops" in x and merged[:9] in x]
+        self.assertEqual(drops, [], "a failed read became a drop")
+
+    def assertSameOrUnknown(self, a, b):
+        if isinstance(a, C.Unknown) or isinstance(b, C.Unknown):
+            return
+        self.assertEqual(a[0], b[0], "the preview window and the confirm window disagree")
+
+    def test_the_q_max_shape_with_a_claim_on_top_is_green(self):
+        r, merged, claim = self.build(lane_edits=False)
+        self.assertEqual(self.outcome(r, merged)[0], [])
+        self.assertEqual(self.outcome(r, claim)[0], [])
+
+    def test_a_failed_read_of_the_merge_file_is_never_a_drop(self):
+        r, merged, claim = self.build(lane_edits=False)
+        with FailReads(merged, self.DEC).armed():
+            preview = self.outcome(r, merged)
+        self.assertNoDrop(preview, merged)
+        self.assertSameOrUnknown(preview, self.outcome(r, claim))
+
+    def test_a_lane_that_edits_the_file_and_a_failed_read_is_never_a_drop(self):
+        r, merged, claim = self.build(lane_edits=True)
+        clean = self.outcome(r, merged)
+        self.assertNotIsInstance(clean, C.Unknown)
+        self.assertEqual(clean[0], [], "clean without faults")
+        fault = FailReads(merged, self.DEC)
+        with fault.armed():
+            preview = self.outcome(r, merged)
+        self.assertGreater(fault.hits, 0, "the faulted read never ran")
+        self.assertNoDrop(preview, merged)
+        self.assertSameOrUnknown(preview, self.outcome(r, claim))
+
+
+class Plumb:
+    """Trees and commits made with plumbing, never the worktree. Windows refuses a colon in a path
+    unless core.protectNTFS is off, so the fixture turns it off: the names become real tree entries."""
+
+    def __init__(self, r):
+        self.r, self.n = r, 0
+
+    def run(self, *a, inp=None, env=None):
+        p = subprocess.run(["git", "-C", self.r.dir, "-c", "core.protectNTFS=false", *a], input=inp,
+                           capture_output=True, env=dict(os.environ, **(env or {})))
+        assert p.returncode == 0, (a, p.stderr)
+        return p.stdout.decode("utf-8", "replace").strip()
+
+    def blob(self, text):
+        return self.run("hash-object", "-w", "--stdin", inp="".join(l + "\n" for l in text).encode("utf-8"))
+
+    def tree(self, entries):
+        """entries: (mode, sha, name bytes). -> tree sha, read through a private index file."""
+        self.n += 1
+        idx = os.path.join(self.r.tmp.name, "index-%d" % self.n)
+        rows = b"".join(b"%s %s 0\t%s\n" % (m.encode(), s.encode(), name) for m, s, name in entries)
+        self.run("update-index", "--index-info", inp=rows, env={"GIT_INDEX_FILE": idx})
+        return self.run("write-tree", env={"GIT_INDEX_FILE": idx})
+
+    def commit(self, tree, parents, when):
+        args = ["commit-tree", tree]
+        for p in parents:
+            args += ["-p", p]
+        return self.run(*args, "-m", "fixture", env={"GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when})
+
+
+class ListedReads(unittest.TestCase):
+    """A read that fails on a path the tree lists is UNKNOWN, never empty text. absent() must hold for
+    three shapes: a path that starts with a colon (ls-tree reads it as pathspec magic); a non-UTF-8 name
+    (it must be read byte for byte; a name that misses on every revision is no clean verdict); and a
+    gitlink (not a blob: its text is "", and reading it is no failure)."""
+    T0, T1, T2, T3 = "2025-12-01T10:00:00", "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
+
+    def repo(self):
+        r = Repo()
+        return r, Plumb(r)
+
+    def test_a_failed_read_of_a_colon_path_is_unknown(self):
+        r, p = self.repo()
+        app, name = p.blob(["app"]), b":/X"
+        base = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["1", "2", "3"]), name)]), [], self.T0)
+        lane = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["1 lane", "2", "3"]), name)]), [base], self.T1)
+        main = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["1", "2", "3", "main added"]), name)]), [base], self.T2)
+        merged = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["1 lane", "2", "3", "main added"]), name)]), [lane, main], self.T3)
+        r.sh("update-ref", "refs/remotes/origin/main", main)
+        with FailReads(merged, ":/X").armed():
+            with self.assertRaises(C.Unknown):
+                C.check(r.dir, "origin/main", merged)
+
+    def test_a_drop_in_a_non_utf8_tracked_name_is_never_clean(self):
+        r, p = self.repo()
+        app, name = p.blob(["app"]), b"caf\xe9.txt"
+        base = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z"]), name)]), [], self.T0)
+        lane = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z", "lane line"]), name)]), [base], self.T1)
+        main = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z", "main line"]), name)]), [base], self.T2)
+        merged = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z", "lane line"]), name)]), [lane, main], self.T3)
+        r.sh("update-ref", "refs/remotes/origin/main", main)
+        try:
+            bad, _ = C.check(r.dir, "origin/main", merged)
+        except C.Unknown:
+            return  # a read that cannot run is UNKNOWN: a verdict, not clean
+        self.assertTrue(any("drops" in x and "main line" in x for x in bad), "clean: the merge drops main's line and the check missed it")
+
+    def test_a_gitlink_with_an_absent_commit_is_not_unknown(self):
+        r, p = self.repo()
+        app = p.blob(["app"])
+        pin = lambda sha: ("160000", sha, b"sub")
+        base = p.commit(p.tree([("100644", app, b"app.txt"), pin("1" * 40)]), [], self.T0)
+        lane = p.commit(p.tree([("100644", app, b"app.txt"), pin("3" * 40)]), [base], self.T1)
+        main = p.commit(p.tree([("100644", app, b"app.txt"), pin("2" * 40)]), [base], self.T2)
+        merged = p.commit(p.tree([("100644", app, b"app.txt"), pin("4" * 40)]), [lane, main], self.T3)
+        r.sh("update-ref", "refs/remotes/origin/main", main)
+        got = C.check(r.dir, "origin/main", merged)
+        self.assertEqual(got[0], [], "a gitlink reads as empty text: no drop, no Unknown")
+
+
+class PrintedFindings(unittest.TestCase):
+    """main() prints each finding. A non-UTF-8 name reaches the print as text with surrogates, which a strict
+    stream cannot encode: the print raised, and the finding was lost. Each run, under a strict cp1252 stream
+    and a strict utf-8 stream, must print a readable finding that names the file, with no traceback, and exit
+    with its normal code: 1 for a FAIL, 0 for an UNKNOWN (CI unset) and for --history."""
+
+    ENCODINGS = ("cp1252", "utf-8")
+    T0, T1, T2, T3 = ListedReads.T0, ListedReads.T1, ListedReads.T2, ListedReads.T3
+
+    def drop_repo(self):
+        """The non-UTF-8 drop: main's line is in the file on main, and the merge drops it. -> (repo, merge sha)."""
+        r = Repo()
+        p = Plumb(r)
+        app, name = p.blob(["app"]), b"caf\xe9.txt"
+        base = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z"]), name)]), [], self.T0)
+        lane = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z", "lane line"]), name)]), [base], self.T1)
+        main = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z", "main line"]), name)]), [base], self.T2)
+        merged = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z", "lane line"]), name)]), [lane, main], self.T3)
+        r.sh("update-ref", "refs/remotes/origin/main", main)
+        return r, merged
+
+    def run_main(self, argv, encoding):
+        """main(argv) with stdout a strict stream of `encoding`. -> (rc, what was printed). A raise is a failure."""
+        out = io.TextIOWrapper(io.BytesIO(), encoding=encoding, errors="strict", newline="\n")
+        with unittest.mock.patch.dict(os.environ), contextlib.redirect_stdout(out):
+            os.environ.pop("CI", None)
+            try:
+                rc = C.main(argv)
+            except Exception as e:  # the traceback is the failure
+                self.fail("main raised %s under %s: %s" % (type(e).__name__, encoding, e))
+        out.flush()
+        return rc, out.buffer.getvalue().decode(encoding, "replace")
+
+    def test_a_fail_prints_a_readable_finding_and_exits_1(self):
+        r, merged = self.drop_repo()
+        for enc in self.ENCODINGS:
+            with self.subTest(encoding=enc):
+                rc, text = self.run_main(["--upstream", "origin/main", "--head", merged, "--repo", r.dir], enc)
+                self.assertEqual(rc, 1)
+                self.assertIn("FAIL", text)
+                self.assertIn("caf", text)
+                self.assertIn(".txt", text)
+                self.assertIn("main line", text)
+
+    def test_an_unknown_prints_a_readable_finding_and_exits_0(self):
+        r, merged = self.drop_repo()
+        fault = FailReads(merged, "caf\udce9.txt")  # the read of the name fails: UNKNOWN, the name is not UTF-8
+        for enc in self.ENCODINGS:
+            with self.subTest(encoding=enc), fault.armed():
+                rc, text = self.run_main(["--upstream", "origin/main", "--head", merged, "--repo", r.dir], enc)
+                self.assertEqual(rc, 0)
+                self.assertIn("UNKNOWN", text)
+                self.assertIn("caf", text)
+                self.assertIn(".txt", text)
+        self.assertGreater(fault.hits, 0, "the faulted read never ran")
+
+    def test_history_prints_a_readable_finding_and_exits_0(self):
+        r, merged = self.drop_repo()
+        for enc in self.ENCODINGS:
+            with self.subTest(encoding=enc):
+                rc, text = self.run_main(["--history", merged, "--repo", r.dir], enc)
+                self.assertEqual(rc, 0)
+                self.assertIn("drops", text)
+                self.assertIn("caf", text)
+                self.assertIn(".txt", text)
+
+
 if __name__ == "__main__":
     unittest.main()
