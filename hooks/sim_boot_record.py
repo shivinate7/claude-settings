@@ -184,11 +184,8 @@ def main():
             for u, rec in hits:
                 record(u, rec)  # before the check: a hook killed mid-check still leaves a record
                 if u in to_check and not sim_ok(u):
-                    if retry(u):
-                        notes.append(u)
-                        record(u, rec)  # the newest line holds the retry boot's pid
-                    else:
-                        broken.append(u)
+                    (notes if retry(u) else broken).append(u)
+                    record(u, rec)  # the newest line holds the retry boot's pid
             msg = ("Simulator %s failed the boot check and was booted again. Launch again any app "
                    "this call launched." % ", ".join(notes)) if notes else ""
             if broken:
