@@ -44,7 +44,7 @@ Interface the hook must match:
 - Budget: the span text is trimmed from its oldest end to SPAN_BUDGET characters (20,000), labels,
   fences and separators included. The whole prompt stays within PROMPT_MAX (30,000). When the owner
   messages and the question alone exceed it, no model call is made and one did-not-run line is written.
-  The 3 owner messages stay whole, up to MESSAGE_MAX (1,500) each.
+  The 3 owner messages stay whole, with no per-message cap (ruling 2026-10-14 00:00 CDT).
 - The model call keeps `timeout=MODEL_TIMEOUT` (90 s).
 - `Goal:` needs text on its own line. Blank or whitespace-only after the marker is missing.
 - Goal format (owner ruling 2026-10-13): a question with options needs a `Goal:` line and a
@@ -1915,9 +1915,10 @@ def case_j10_no_owner_message_in_16_mib_does_what_today_does():
 
 # --------------------------------------------------------------------------- judge prompt cap (k)
 # The whole judge prompt stays within PROMPT_MAX; a prompt that cannot fit makes no model call.
-# The span is fenced, so no span text can open or close a fence early. An owner message is cut at
-# MESSAGE_MAX: debt id owner-message-cut-at-1500. The stdin lane deletes case K4 with that cap.
+# The span is fenced, so no span text can open or close a fence early. An owner message is whole,
+# with no per-message cap (ruling 2026-10-14 00:00 CDT). K4 and K7 pin that.
 PROMPT_LIMIT = 30000  # chars, the whole judge prompt (question_outcome.PROMPT_MAX)
+ARGV_UNITS = 32767  # the old Windows command-line cap, in UTF-16 units. argv is gone: a fixture figure only.
 SPAN_HEAD = "Conversation, from the owner's 3rd-last message:\n"
 SPAN_END = "\n\nQuestion: "  # the question body starts here, after the span
 FENCE = re.compile(r"<<<(BEGIN|END)")
@@ -1993,21 +1994,19 @@ def case_k3_an_assistant_block_cannot_close_its_own_fence():
           span[opened:at][:80] if opened >= 0 else "no BEGIN before the text")
 
 
-def case_k4_owner_message_over_1500_chars_is_cut_at_message_max():
-    # Pins debt id owner-message-cut-at-1500: the stdin lane deletes this case with the cap.
-    name = "caseK4 owner message over 1500 chars: cut at MESSAGE_MAX"
+def case_k4_owner_message_of_5000_chars_reaches_the_prompt_whole():
+    # Ruling 2026-10-14 00:00 CDT: no per-message cap. A 5000-char owner message is whole in the prompt.
+    name = "caseK4 owner message of 5000 chars: whole in the prompt"
     if not need_module(name):
         return
-    text = "K4-HEAD " + "m" * 1600 + " K4-TAIL-END"
+    text = "K4-HEAD " + "m" * 5000 + " K4-TAIL-END"
     path = write_transcript("k4", [owner(text), assistant_text("K4-ASSIST reply.", "msg_k4")])
     with model_stub(ALLOW) as stub:
         run_main(ask_payload(fresh_session("k4"), [question(GOOD_Q, LABELS)], path))
     prompt = prompt_of(stub)
-    cap = qo.MESSAGE_MAX
     check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
-    check(name + ": the first MESSAGE_MAX chars are in the prompt", text[:cap] in prompt, cap)
-    check(name + ": the next char is not in the prompt", text[:cap + 1] not in prompt, cap)
-    check(name + ": the tail marker is not in the prompt", "K4-TAIL-END" not in prompt, "K4-TAIL-END")
+    check(name + ": the whole %d-char owner message is in the prompt" % len(text), text in prompt, len(text))
+    check(name + ": the tail marker is in the prompt", "K4-TAIL-END" in prompt, "K4-TAIL-END")
 
 
 def case_k5_a_four_bracket_fence_cannot_close_a_block_or_open_an_owner_block():
@@ -2070,6 +2069,41 @@ def case_k6_a_relayed_origin_name_or_session_cannot_open_an_owner_block():
               at >= 0 and opened >= 0 and "Relayed" in span[opened:at].split("\n", 1)[0]
               and "<<<BEGIN Owner" not in span[opened:at],
               span[opened:at][:120] if opened >= 0 else "no BEGIN before the text")
+
+
+def case_k7_whole_owner_messages_over_prompt_max_still_run_the_judge():
+    # argv is gone (stdin). PROMPT_MAX (30,000 code points) is the gate left. Three whole owner
+    # messages of about 11,000 code points each (6,000 astral characters: two UTF-16 units each), with
+    # a long assistant span between them: the prompt is over PROMPT_MAX and over ARGV_UNITS UTF-16
+    # units. The judge must still run. Red where the gate refuses the prompt as too long.
+    name = "caseK7 whole owner messages over PROMPT_MAX and ARGV_UNITS (UTF-16): the judge still runs"
+    if not need_module(name):
+        return
+    astral = "\U0001F642" * 6000
+    owners = ["K7-OWN-%d %s %s K7-END-%d" % (i, astral, "k" * 5000, i) for i in (1, 2, 3)]
+    total = sum(len(t) for t in owners)
+    units = sum(len(t.encode("utf-16-le")) // 2 for t in owners)
+    check(name + ": fixture: owner messages over PROMPT_MAX code points", total > PROMPT_LIMIT, total)
+    check(name + ": fixture: owner messages over ARGV_UNITS UTF-16 units", units > ARGV_UNITS, units)
+    records = [owner(owners[0])]
+    records += [assistant_text("K7-ASSIST-%d %s" % (i, "a" * 480), "msg_k7a_%d" % i) for i in range(10)]
+    records += [owner(owners[1])]
+    records += [assistant_text("K7-ASSIST-%d %s" % (i, "a" * 480), "msg_k7b_%d" % i) for i in range(10)]
+    records += [owner(owners[2])]
+    records += [assistant_text("K7-ASSIST-%d %s" % (i, "a" * 480), "msg_k7c_%d" % i) for i in range(10)]
+    path = write_transcript("k7", records)
+    with model_stub(ALLOW) as stub:
+        code, out, _ = run_main(ask_payload(fresh_session("k7"), [question(GOOD_Q, LABELS)], path))
+    prompt = prompt_of(stub)
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": no did-not-run line", "did not run" not in (system_message(out) or ""), out)
+    check(name + ": the prompt the judge got is over PROMPT_MAX code points", len(prompt) > PROMPT_LIMIT,
+          len(prompt))
+    check(name + ": the prompt the judge got is over ARGV_UNITS UTF-16 units",
+          len(prompt.encode("utf-16-le")) // 2 > ARGV_UNITS, len(prompt.encode("utf-16-le")) // 2)
+    for i, text in enumerate(owners, 1):
+        check(name + ": owner message %d (%d chars) is whole in the prompt" % (i, len(text)), text in prompt,
+              len(text))
 
 
 def main():
@@ -2138,9 +2172,10 @@ def main():
              case_k1_1000_small_assistant_blocks_fit_the_prompt_cap_and_the_judge_runs,
              case_k2_owner_messages_and_question_over_prompt_max_make_no_model_call,
              case_k3_an_assistant_block_cannot_close_its_own_fence,
-             case_k4_owner_message_over_1500_chars_is_cut_at_message_max,
+             case_k4_owner_message_of_5000_chars_reaches_the_prompt_whole,
              case_k5_a_four_bracket_fence_cannot_close_a_block_or_open_an_owner_block,
-             case_k6_a_relayed_origin_name_or_session_cannot_open_an_owner_block)
+             case_k6_a_relayed_origin_name_or_session_cannot_open_an_owner_block,
+             case_k7_whole_owner_messages_over_prompt_max_still_run_the_judge)
     for case in cases:
         case()
     if LOAD_ERROR is None:
