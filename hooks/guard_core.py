@@ -1671,8 +1671,11 @@ def inline_script(tokens) -> str:
     index = resolve_command(tokens)
     if index is None or basename(tokens[index]) not in INLINE_SCRIPT_SHELLS:
         return ""
-    has_c = False
-    for tok in tokens[index + 1:]:
+    has_c, rest = False, iter(tokens[index + 1:])
+    for tok in rest:
+        if tok in ("-o", "+o", "-O", "+O"):
+            next(rest, None)   # a shell option's name (`bash -o pipefail -c`), never the script
+            continue
         if tok.startswith("-"):
             has_c = has_c or bool(_C_FLAG.match(tok))
             continue
@@ -1716,8 +1719,8 @@ def _env_split_string(tokens) -> str:
 
 
 def nested_script(tokens) -> str:
-    """The script text a segment hands to another interpreter: `sh -c`, `cmd /c`, `pwsh -c`, or
-    PowerShell's `iex`. Else ''. A rule that judges a command reads this text as one more command."""
+    """The script text a segment hands to another interpreter: `sh -c`, `cmd /c`, `pwsh -c`,
+    `env -S`, PowerShell's `iex`, or `eval`. Else ''. A rule that judges a command reads this text as one more command."""
     script = inline_script(tokens) or _env_split_string(tokens)
     at = resolve_command(tokens)
     if script or at is None:
@@ -1726,7 +1729,7 @@ def nested_script(tokens) -> str:
     if word in CMD_EXE_NAMES:
         flag = next((i for i, t in enumerate(rest) if t.lower() in ("/c", "/k")), None)
         return "" if flag is None else " ".join(rest[flag + 1:])
-    if word in ("iex", "invoke-expression"):
+    if word in ("iex", "invoke-expression", "eval"):
         return " ".join(rest)
     return _pwsh_script(tokens) if word in PLAYWRIGHT_PS_SHELLS else ""
 

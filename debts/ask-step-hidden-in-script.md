@@ -1,6 +1,6 @@
-# An ask step hidden in an inline script is not asked
+# An ask step hidden in a substitution or subshell is not asked
 
-- **What.** A settings write of the subagent model cap inside `bash -c "<write>; echo hi"`, `echo $(<write>)`, a subshell `(<write>)` or backticks is allowed with no ask. An unspaced `$(git ...)` is missed too. Found in review round 1 of lane ask-alone, by live probes.
-- **Where.** The step split in `hooks/guard_core.py` (`inline_script`, near line 1473, and the `$(` reader near line 379), and the bash -c gap named in `hooks/guard.py` near line 427.
-- **Decision.** `ask-steps-run-alone`.
-- **Retire.** The guard reads the steps inside an inline script, a command substitution and a subshell. Tests show each shape asks when alone and denies when chained.
+- **What.** The guard does not see a settings write of the subagent model cap in some shapes. In a command substitution (`echo "$(<write>)"`), backticks or an unspaced subshell (`(<write>)`), the write is allowed with no ask, alone or chained. A forced push inside `bash -c` is allowed too: the force-push rule does not read the script. Measured 2026-10-14 by live probes. A chain inside a script that another interpreter runs (`bash -c`, `bash -o pipefail -c`, `cmd /c`, `pwsh -Command`, `iex`, `env -S`, `eval`) now denies. A spaced subshell `( <write> )` asks alone and denies chained.
+- **Where.** `count_steps` and the ask-step rules in `hooks/guard.py` read a nested script through `nested_script` in `hooks/guard_core.py`. They read no substitution, backtick or unspaced subshell body. The force-push rule in `hooks/guard.py` reads no `bash -c` script.
+- **Decision.** `ask-steps-run-alone`, a step that asks the owner runs alone.
+- **Retire.** The guard reads the steps inside a command substitution, backticks and an unspaced subshell, and the force-push rule reads a `bash -c` script. Tests show each shape asks when alone and denies when chained.

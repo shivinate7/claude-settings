@@ -214,7 +214,7 @@ while True:
             AUTHOR_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
-            command_root, git_calls, git_common_dir, inline_script, is_worktree, log_path_and_text, norm,
+            command_root, git_calls, git_common_dir, inline_script, is_worktree, log_path_and_text, nested_script, norm,
             path_is_inside, primary_checkout, record, refuse, resolve_command, resolve_default_base,
             segment_tokens, split_segments, strip_heredoc_bodies,
         )
@@ -1508,9 +1508,12 @@ def background_steps(segment: str) -> int:
     split, and a `&` that joins a redirect (`&>`, `>&`, `<&`) is no separator. A `&` with nothing
     before it (PowerShell's call operator, the tail of `|&`) or nothing after it (a trailing job)
     adds no step. Local to ask-alone: split_segments stays as the other rules read it."""
-    parts, quote, current = [], "", []
+    parts, quote, current, escaped = [], "", [], False
     for index, char in enumerate(segment):
-        if quote:
+        if escaped:
+            escaped = False   # `\"` inside double quotes is text, never the closing mark
+        elif quote:
+            escaped = quote == '"' and char == "\\" and not POWERSHELL_CALL[0]
             quote = "" if char == quote else quote
         elif char in "'\"":
             quote = char
@@ -1525,15 +1528,16 @@ def background_steps(segment: str) -> int:
 
 
 def count_steps(text: str) -> int:
-    """The steps in a command: its segments, a single `&` as a separator, and the steps inside an
-    inline `bash -c` script, which stand in place of the call that holds them."""
+    """The steps in a command: its segments, a single `&` as a separator, and the steps inside a
+    script handed to another interpreter (nested_script: `sh -c`, `cmd /c`, `pwsh -c`, `iex`,
+    `env -S`, `eval`), which stand in place of the call that holds them."""
     steps = 0
     for segment in split_segments(text):
         if not segment.strip():
             continue
         steps += background_steps(segment)
         tokens = segment_tokens(segment)
-        script = inline_script(tokens) if tokens else ""
+        script = nested_script(tokens) if tokens else ""
         if script:
             steps += count_steps(script) - 1
     return steps
