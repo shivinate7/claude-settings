@@ -6,7 +6,9 @@ gate as a subprocess, the way Claude Code's Stop hook does. Run with:
 
     python lint/test_gates.py -v
 """
+import errno
 import glob
+import importlib.util
 import json
 import os
 import re
@@ -18,6 +20,7 @@ import tempfile
 import time
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STE_GATE = os.path.join(HERE, "ste_gate.py")
@@ -2934,7 +2937,7 @@ class SteGateLogTests(unittest.TestCase):
 
     # (7) each gate writes exactly one whole line: no line is corrupted, doubled or joined, no process
     # crashes, and all twenty land.
-    def test_19b_parallel_gates_write_at_most_one_whole_line_each(self):
+    def test_19b_parallel_gates_write_exactly_one_whole_line_each(self):
         self._run_parallel_gates()
         rows = gl_lines(self.cfg) or []
         self.assertEqual(len(rows), 20, "lines lost: kept %d of 20" % len(rows))
@@ -3317,6 +3320,38 @@ class GuardLogAppendRaceTests(unittest.TestCase):
         codes = self._run_writers(APPEND_WRITER_STE, HERE, tags)
         want = ["%s-%05d.md fixed=2" % (tag, i) for tag in tags for i in range(APPEND_N)]
         self._assert_kept_each_once(codes, tags, want)
+
+    def _record_with_lock_error(self, errno_value):
+        """Run guard_core.record() in this process while every lock call raises OSError(errno_value).
+        Return (guard_core module, seconds record() took, the guard.log lines). No process stalls."""
+        spec = importlib.util.spec_from_file_location("guard_core_probe",
+                                                      os.path.join(HOOKS, "guard_core.py"))
+        core = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(core)
+        lock_call = "msvcrt.locking" if os.name == "nt" else "fcntl.flock"
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.cfg}), \
+                mock.patch(lock_call, side_effect=OSError(errno_value, "lock refused")):
+            started = time.monotonic()
+            core.record("Bash", "deny", "lock-probe", "errno-%d" % errno_value)
+            seconds = time.monotonic() - started
+        return core, seconds, gl_lines(self.cfg) or []
+
+    def test_lock_error_that_is_not_contention_returns_at_once(self):
+        # Red today: _log_lock retries any OSError for the full LOG_LOCK_WAIT, then writes. EINVAL
+        # (errno 22) is not "another writer holds the lock", so waiting buys nothing.
+        _core, seconds, rows = self._record_with_lock_error(errno.EINVAL)
+        self.assertLess(seconds, 0.5, "record() waited %.2f s on errno 22" % seconds)
+        self.assertEqual(len(rows), 1, "the line was not kept: %r" % rows)
+        self.assertEqual(rows[0].split("\t")[4], "errno-22", rows[0])
+
+    def test_contention_lock_error_waits_then_writes(self):
+        # Green pin: a lock held by another writer still gets the full wait, then the line lands.
+        contention = errno.EACCES if os.name == "nt" else errno.EAGAIN
+        core, seconds, rows = self._record_with_lock_error(contention)
+        self.assertGreaterEqual(seconds, core.LOG_LOCK_WAIT * 0.9,
+                                "record() did not wait out a contended lock: %.2f s" % seconds)
+        self.assertEqual(len(rows), 1, "the line was not kept: %r" % rows)
+        self.assertEqual(rows[0].split("\t")[4], "errno-%d" % contention, rows[0])
 
 
 if __name__ == "__main__":
