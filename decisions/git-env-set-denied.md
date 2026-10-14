@@ -32,10 +32,10 @@ reopen that path, so deny wins (arbiter ruling, 03:05 CDT).
 - Indirect sets pass: a shell function around the set, `set -a` with `read` or `for`, a name
   built at run time, `iex`, `-EncodedCommand`, or `os.environ` in `python -c`. Debt:
   git-env-set-indirect-forms.
-- A PowerShell block opener glued to its word, such as `%{`, `){`, `try{` or `$sb={`, hides a
-  set inside it. Debt: git-env-glued-block.
-- The env-file rule reads an apostrophe in an unquoted heredoc body as a quote, so a later
-  substitution that reads an env file passes. Debt: git-env-glued-block.
+- A glued block opener followed by a group, such as `%{($env:GIT_DIR='x')}`, hides the set. The
+  spaced form denies. Debt: git-env-glued-block.
+- False alarms on the safe side: `%{} $env:GIT_DIR='x'`, `try{$env:GIT_DIR=$null}catch{}`, and
+  a quoted glued block in the same segment as a here-string.
 - No case pins the PowerShell backtick escape, the shared group-opener pattern, or quote text in
   a heredoc body.
 - False alarms on the safe side: backslash- or part-quoted heredoc delimiters read as unquoted,
