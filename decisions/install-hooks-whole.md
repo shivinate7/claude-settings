@@ -43,6 +43,12 @@ stopped. Arbiter rulings 03:41 and 03:50 CDT.
   allows a call. Debt: install-writes-in-place.
 - The guard's module list `_FAMILY_MODULES` is kept by hand. A new guard module left off it is
   not compared.
+- No test pins the stampers' placeholder text to the lines in the repo's `hooks/guard*.py`. If one
+  file's line drifts, it installs unstamped, the installer exits 0, and the guard denies every
+  call. Debt: install-stamp-line-unpinned.
+- If `Install-Dir` cannot replace a skill folder, the run does not retry it and still exits 0.
+  The log can also say `settings.json=kept` after a retry recovered it. Debt:
+  install-skill-fail-exits-0.
 
 ## Build plan
 
