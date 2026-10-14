@@ -52,6 +52,7 @@ Writing prose and records is not building.
 | prompt-hook judges: AskUserQuestion, Agent, Edit, Write, SendMessage (settings.json) | claude-sonnet-5-5 | model default; a prompt hook has no effort field (decision haiku-prompt-hooks) |
 | reply judge (`hooks/reply_judge.py`, Stop) | haiku, through `decision_watch.invoke_model` | xhigh |
 | question outcome check (`hooks/question_outcome.py`) | haiku, through `decision_watch.invoke_model` | xhigh |
+| SendMessage state judge (`hooks/sendmessage_state.py`, PreToolUse; a model call only when the receiver is busy on the session board) | haiku, through `decision_watch.invoke_model` | xhigh |
 | decision watch (`hooks/decision_watch.py`) | haiku | xhigh |
 | every other hook and gate | no model; plain code | n/a |
 
