@@ -940,5 +940,158 @@ class RawBytes(unittest.TestCase):
             b.close()
 
 
+class FailReads:
+    """Every read of `rev:path` fails while the block is armed, as a read fails mid-scan: `git show`
+    exits 128, and cat-file answers `missing` for a blob it holds. Other reads are real. main reads with
+    `git show`; the Blobs reader reads with cat-file, so both are patched. `hits` counts the failed reads."""
+
+    def __init__(self, rev, path):
+        self.want, self.hits = "%s:%s" % (rev, path), 0
+        self.real_run, self.real_popen = subprocess.run, subprocess.Popen
+
+    def run(self, args, *a, **k):
+        if list(args[-2:]) == ["show", self.want]:
+            self.hits += 1
+            return subprocess.CompletedProcess(args, 128, "", "fatal: injected read failure")
+        return self.real_run(args, *a, **k)
+
+    def popen(self, args, *a, **k):
+        proc = self.real_popen(args, *a, **k)
+        return CatFile(self, proc) if list(args[-2:]) == ["cat-file", "--batch"] else proc
+
+    def armed(self):
+        return unittest.mock.patch.multiple(subprocess, run=self.run, Popen=self.popen)
+
+
+class CatFile:
+    """A cat-file process. The reply to a faulted request reads `missing`; its blob is consumed so
+    the protocol stays in step for the next request."""
+
+    def __init__(self, fault, proc):
+        self.fault, self.proc, self.req = fault, proc, None
+        self.stdin, self.stdout = Feed(self), Reply(self)
+
+    def wait(self, *a, **k):
+        return self.proc.wait(*a, **k)
+
+
+class Feed:
+    def __init__(self, owner):
+        self.owner = owner
+
+    def write(self, data):
+        self.owner.req = data.decode("utf-8").strip()
+        return self.owner.proc.stdin.write(data)
+
+    def flush(self):
+        return self.owner.proc.stdin.flush()
+
+    def close(self):
+        return self.owner.proc.stdin.close()
+
+
+class Reply:
+    def __init__(self, owner):
+        self.owner = owner
+
+    def readline(self):
+        o = self.owner
+        if o.req == o.fault.want:
+            o.fault.hits += 1
+            head = o.proc.stdout.readline()
+            o.proc.stdout.read(int(head.split()[2]) + 1)
+            return (o.req + " missing\n").encode("utf-8")
+        return o.proc.stdout.readline()
+
+    def read(self, n):
+        return self.owner.proc.stdout.read(n)
+
+    def close(self):
+        return self.owner.proc.stdout.close()
+
+
+class SharedLineRead(unittest.TestCase):
+    """q_max PR 869 (claude-settings a7b8d7d, 2026-10-14): the merge tool reported `merge d9b46148a drops
+    2 line(s) that parent 92d4ed8f2 added`, for record D-618 (past-price search reads words first). That
+    file is byte-identical at the merge and at that parent, and the claim commit on top does not touch
+    it. The two lines are main's, and the merge keeps them: no drop. A read that fails is no text. It may
+    end the check as UNKNOWN, but it must never become a drop, and two windows of one merge must agree."""
+
+    DEC = "docs/decisions/fixture-shared-line.md"
+    HEAD_TXT = "---\nid: D-618\n---\n\n```refs\ncode: src/a.ts\n```\n\n"
+    TAIL_TXT = "**Decision.** Search is Design 1.\n\n- A query is OR.\n- Two lists.\n"
+    T0, T1, T2, T3 = "2025-12-01T10:00:00", "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
+
+    def build(self, lane_edits):
+        """The q_max shape. Main adds two lines to the file after the cut. The lane never touches the
+        file, or with lane_edits adds a line at its tail. The lane merges main and keeps the lines.
+        A claim commit that does not touch the file goes on top. -> (repo, merge sha, claim sha)."""
+        r = Repo()
+        r.put("app.txt", BODY)
+        r.put(self.DEC, self.HEAD_TXT + self.TAIL_TXT)
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "base", date=self.T0)
+        r.push()
+        r.sh("checkout", "-q", "-b", "lane")
+        r.put("lane.txt", "lane work\n")
+        if lane_edits:
+            r.put(self.DEC, self.HEAD_TXT + self.TAIL_TXT + "- Lane note.\n")
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "lane work", date=self.T1)
+        r.sh("checkout", "-q", "main")
+        r.put(self.DEC, self.HEAD_TXT + "Kind: build\nPlan: specs/x.md (web)\n\n" + self.TAIL_TXT)
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "main adds kind and plan", date=self.T2)
+        r.push()
+        r.sh("checkout", "-q", "lane")
+        r.sh("merge", "-q", "--no-edit", "origin/main", date=self.T3)
+        merged = r.sh("rev-parse", "HEAD")
+        r.put("claims.txt", "D-779 D-780\n")
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Claim record numbers", date=self.T3)
+        return r, merged, r.sh("rev-parse", "HEAD")
+
+    def outcome(self, r, head):
+        try:
+            return C.check(r.dir, "origin/main", head)
+        except C.Unknown as e:
+            return e
+
+    def assertNoDrop(self, got, merged):
+        if isinstance(got, C.Unknown):
+            return  # a read that cannot run is UNKNOWN, never a drop
+        drops = [x for x in got[0] if "drops" in x and merged[:9] in x]
+        self.assertEqual(drops, [], "a failed read became a drop")
+
+    def assertSameOrUnknown(self, a, b):
+        if isinstance(a, C.Unknown) or isinstance(b, C.Unknown):
+            return
+        self.assertEqual(a[0], b[0], "the preview window and the confirm window disagree")
+
+    def test_the_q_max_shape_with_a_claim_on_top_is_green(self):
+        r, merged, claim = self.build(lane_edits=False)
+        self.assertEqual(self.outcome(r, merged)[0], [])
+        self.assertEqual(self.outcome(r, claim)[0], [])
+
+    def test_a_failed_read_of_the_merge_file_is_never_a_drop(self):
+        r, merged, claim = self.build(lane_edits=False)
+        with FailReads(merged, self.DEC).armed():
+            preview = self.outcome(r, merged)
+        self.assertNoDrop(preview, merged)
+        self.assertSameOrUnknown(preview, self.outcome(r, claim))
+
+    def test_a_lane_that_edits_the_file_and_a_failed_read_is_never_a_drop(self):
+        r, merged, claim = self.build(lane_edits=True)
+        clean = self.outcome(r, merged)
+        self.assertNotIsInstance(clean, C.Unknown)
+        self.assertEqual(clean[0], [], "clean without faults")
+        fault = FailReads(merged, self.DEC)
+        with fault.armed():
+            preview = self.outcome(r, merged)
+        self.assertGreater(fault.hits, 0, "the faulted read never ran")
+        self.assertNoDrop(preview, merged)
+        self.assertSameOrUnknown(preview, self.outcome(r, claim))
+
+
 if __name__ == "__main__":
     unittest.main()
