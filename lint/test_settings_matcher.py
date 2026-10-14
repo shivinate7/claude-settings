@@ -127,6 +127,71 @@ class JudgeModelIds(unittest.TestCase):
             self.fail("model is not a full id (must start claude-): " + "; ".join(bad))
 
 
+# decision-watch runs as the mod (an enabled plugin), not as a Stop row. The reply judge and the
+# AskUserQuestion check keep their own calls. The Stop rows are pinned by script name, not by index.
+DECISION_WATCH_PLUGIN = "decision-watch@claude-settings"
+STOP_SCRIPTS_AFTER_SWAP = sorted([
+    "stall_watch.py", "report_gate.py", "md_sweep.py", "config_watch.py", "ruling_home.py",
+    "precompact_handoff.py", "reply_judge.py", "feedback_gate.py", "reread_check.py",
+])
+
+
+def command_rows(entries):
+    """Every command string under a list of hook entries."""
+    return [h.get("command", "") for e in entries for h in e.get("hooks", []) if h.get("type") == "command"]
+
+
+def script_names(command):
+    """The hooks/ or lint/ script names a command assigns to g, e.g. decision_watch.py."""
+    return re.findall(r'/(\w+\.py)(?=["\s]|$)', command)
+
+
+def decision_watch_stop_rows(settings):
+    """The Stop command rows that run decision_watch.py, quoted path or bare."""
+    return [c for c in command_rows(settings["hooks"]["Stop"]) if "decision_watch.py" in script_names(c)]
+
+
+def stop_settings(command):
+    """A settings dict whose only Stop row runs `command`."""
+    return {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": command}]}]}}
+
+
+class DecisionWatchSwap(unittest.TestCase):
+    def setUp(self):
+        with open(SETTINGS, encoding="utf-8") as f:
+            self.settings = json.load(f)
+
+    def test_decision_watch_plugin_is_enabled(self):
+        self.assertIs(self.settings["enabledPlugins"].get(DECISION_WATCH_PLUGIN), True)
+
+    def test_no_stop_row_runs_decision_watch(self):
+        self.assertEqual(decision_watch_stop_rows(self.settings), [], "a Stop row still runs decision_watch.py")
+
+    # The detector must see both spellings. The unquoted one is the form a row is most likely to take.
+    def test_quoted_decision_watch_stop_row_is_caught(self):
+        rows = decision_watch_stop_rows(stop_settings('python3 "$HOME/.claude/hooks/decision_watch.py"'))
+        self.assertEqual(len(rows), 1, "a quoted decision_watch.py Stop row is not caught")
+
+    def test_unquoted_decision_watch_stop_row_is_caught(self):
+        rows = decision_watch_stop_rows(stop_settings("python3 ~/.claude/hooks/decision_watch.py"))
+        self.assertEqual(len(rows), 1, "an unquoted decision_watch.py Stop row is not caught")
+
+    def test_stop_rows_are_the_others_only(self):
+        names = sorted(n for c in command_rows(self.settings["hooks"]["Stop"]) for n in script_names(c))
+        self.assertEqual(names, STOP_SCRIPTS_AFTER_SWAP)
+
+    def test_reply_judge_stop_row_stays(self):
+        names = [n for c in command_rows(self.settings["hooks"]["Stop"]) for n in script_names(c)]
+        self.assertIn("reply_judge.py", names)
+
+    def test_ask_user_question_rows_stay(self):
+        entries = [e for e in self.settings["hooks"]["PreToolUse"] if e.get("matcher") == "AskUserQuestion"]
+        hooks = [h for e in entries for h in e.get("hooks", [])]
+        self.assertTrue(any(h.get("type") == "prompt" for h in hooks), "AskUserQuestion prompt judge missing")
+        names = [n for c in command_rows(entries) for n in script_names(c)]
+        self.assertIn("question_outcome.py", names)
+
+
 # The SendMessage judge must see the receiver's busy state. A prompt hook sees only its tool
 # input (to, summary, message), so the state has to be read by code: a command or agent hook.
 # `claude agents --json` rows carry name, sessionId, status (busy, idle, waiting), cwd.

@@ -235,9 +235,10 @@ try:
     )
     _loading = "guard_stream"
     from guard_stream import (
-        GH_API_METHOD_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON, NARRATED_TAIL_REASON,
-        PATTERN_POLLER_REASON, WAITER_REASON, gh_api_post_hit, live_stream_hit, ln_descends_hit,
-        loop_condition_polls_a_pattern, narrated_tail_hit, waiter_verdict,
+        BACKGROUND_END_REASON, GH_API_METHOD_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
+        NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, WAITER_REASON, background_end_hit,
+        gh_api_post_hit, live_stream_hit, ln_descends_hit, loop_condition_polls_a_pattern,
+        narrated_tail_hit, waiter_verdict,
     )
     _loading = "guard_rm_var"
     from guard_rm_var import (
@@ -1475,7 +1476,7 @@ def step_up_hit(tool: str, tool_input) -> str:
 
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
                 transcript: str = "", subagent: bool = False,
-                background: bool = False) -> None:
+                background: bool = False, description: str = "") -> None:
     POWERSHELL_CALL[0] = tool == "PowerShell"
     stripped = strip_heredoc_bodies(raw)
     cmd = norm(stripped)
@@ -1659,6 +1660,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = narrated_tail_hit(stripped)
     if matched:
         refuse(tool, "deny", "live-stream", NARRATED_TAIL_REASON, matched)
+    matched = background_end_hit(split_segments(stripped), background, description)
+    if matched:
+        refuse(tool, "deny", "background-end", BACKGROUND_END_REASON, matched)
 
     # 3c. A command that sets the Playwright browser cache location (incident 2026-10-10).
     matched = playwright_command_hit(raw, stripped)
@@ -1968,7 +1972,8 @@ def judge(payload) -> None:
             judge_shell(tool, command, cwd, session_id_of(payload), agent_role(payload),
                         transcript if isinstance(transcript, str) else "",
                         bool(payload.get("agent_id")),
-                        tool_input.get("run_in_background") is True)
+                        tool_input.get("run_in_background") is True,
+                        tool_input.get("description") or "")
             names = [n for seg in split_segments(strip_heredoc_bodies(command))
                      for n in _sim_boot_names(seg)]
             if names:
