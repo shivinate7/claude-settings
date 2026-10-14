@@ -17,9 +17,11 @@
 # source drops must be pruned.
 #
 # Three more cases, each in its own scratch tree. symrun and linkfail need symlink rights. On a
-# runner without them they print SKIP with the reason and do not count:
+# runner without them they print SKIP with the reason and do not count; with CI set, a symrun SKIP
+# is a FAIL, since a CI runner has the rights:
 #   symrun    a real file from an earlier copy, then a run where links can be made: the same reader
-#             loop sees no fault, and hooks\guard.py is a link at the end.
+#             loop sees no fault and sees the mixed-id window between the two swaps, and
+#             hooks\guard.py is a link at the end.
 #   linkfail  dest is a symlink to elsewhere and the copy fails: a file must still exist at dest.
 #   lock1     first local run, skill locked: a .bak or no copy marker after run 1, and no person
 #             file lost after run 2. Needs no symlink rights; copy mode is forced.
@@ -57,7 +59,9 @@ function Check([string]$name, [bool]$ok) {
 # "(placeholder)", an uncommented line as its quoted id, and no line as "(none)". A read is whole
 # when its text, without that line, equals one version's text without its line. Faults, by kind:
 #   missing <name>        the file, or a path listed in Present, is not there.
-#   unreadable <name>     the open or read failed, a sharing violation for one.
+#   unreadable <name>     the open or read failed: a sharing violation, or access denied on a file
+#                         that is being deleted. Any other throw is counted here too, with its type,
+#                         so the reader thread never dies and ends the test process silently.
 #   short read <name>     the read is not one whole version.
 # Mixed-id windows, on the pair of hook files: a window opens at the first pass where both reads
 # are whole and their stamps differ, and closes at the first pass where they match. Its length is
@@ -196,6 +200,7 @@ public class HookReader
                 catch (FileNotFoundException) { Fault("missing " + name); continue; }
                 catch (DirectoryNotFoundException) { Fault("missing " + name); continue; }
                 catch (IOException) { Fault("unreadable " + name); continue; }
+                catch (Exception e) { Fault("unreadable " + name + " " + e.GetType().Name); continue; }
                 string body = StripStamp(got[i]);
                 whole[i] = body == body1[i] || body == body2[i];
                 if (whole[i]) stamp[i] = StampOf(got[i]);
@@ -429,7 +434,9 @@ try {
     # link the placeholder) from the first swap to the second: a window, which must clear.
     $Blocker = Get-SymlinkBlocker
     if ($Blocker) {
-        Write-Host "SKIP: symrun (no symlink rights: $Blocker)"
+        # A CI runner has symlink rights. A skip there would hide the link route, so it fails.
+        if ($env:CI) { Check "symrun: runs on CI, where links can be made (no symlink rights: $Blocker)" $false }
+        else { Write-Host "SKIP: symrun (no symlink rights: $Blocker)" }
     } else {
         $Sym      = New-Scratch 'symrun' @('hooks')
         # Small files: a link needs no long copy, and a fast reader pass lands inside a short gap.
@@ -444,7 +451,6 @@ try {
         Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
         Check "symrun: run 1 (forced copy) exits 0 (exit $rcS1)" ($rcS1 -eq 0)
         Check "symrun: run 1 leaves a real file at hooks\guard.py, the earlier copy" ((Test-Path -LiteralPath $SymGuard) -and (-not (Test-ReparsePoint $SymGuard)))
-        Check "symrun: FORCE_COPY is unset for run 2, so links can be made" (-not $env:CLAUDE_SETTINGS_FORCE_COPY)
 
         $SymReader = New-Object -TypeName HookReader
         $SymReader.Paths = [string[]]@($SymGuard, (Join-Path $Sym.Cfg 'hooks\guard_core.py'))
@@ -470,6 +476,9 @@ try {
         Check "symrun: no hook read is short during run 2 ($($SymReader.Count('short read ')) faults)" ($SymReader.Count('short read ') -eq 0)
         Check "symrun: every mixed-id window clears within $MixedMaxSeconds s ($($SymReader.Windows) windows, longest $SymLongest s)" ($SymReader.MaxWindowSeconds -le $MixedMaxSeconds)
         Check "symrun: no mixed-id window is still open when run 2 ends" (-not $SymReader.WindowOpen)
+        # Between the two swaps guard.py and guard_core.py differ in id, so the reader must have seen
+        # a window. With none, the checks above passed on no evidence.
+        Check "symrun: the reader saw the mixed-id window between the two swaps ($($SymReader.Windows) windows, want 1 or more)" ($SymReader.Windows -ge 1)
         Check "symrun: run 2 leaves hooks\guard.py a link (non-vacuous: the link route ran)" (Test-ReparsePoint $SymGuard)
     }
 
