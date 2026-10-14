@@ -1241,5 +1241,270 @@ class PrintedFindings(unittest.TestCase):
                 self.assertIn(".txt", text)
 
 
+class BodyReadFails:
+    """A `git log` that reads the commit message body (%B or %b) exits 128 while the block is armed. That is the hint's
+    read: allowed() reads trailers only, and the scan reads subjects. Other reads are real. `hits` counts the failures."""
+
+    def __init__(self):
+        self.hits, self.real_run = 0, subprocess.run
+
+    def run(self, args, *a, **k):
+        if "log" in args and any(x.startswith("--format=") and ("%B" in x or "%b" in x) for x in args):
+            self.hits += 1
+            return subprocess.CompletedProcess(args, 128, "", "fatal: injected read failure")
+        return self.real_run(args, *a, **k)
+
+    def armed(self):
+        return unittest.mock.patch.object(subprocess, "run", self.run)
+
+
+class SpawnCount:
+    """Counts the `git` processes started while the block is armed. Every spawn, `subprocess.run` too, goes through Popen,
+    so Popen is the one place counted. A count, never a clock."""
+
+    def __init__(self):
+        self.n, self.real = 0, subprocess.Popen
+
+    def popen(self, args, *a, **k):
+        if list(args)[:1] == ["git"]:
+            self.n += 1
+        return self.real(args, *a, **k)
+
+    def armed(self):
+        return unittest.mock.patch.object(subprocess, "Popen", self.popen)
+
+
+class DropsLinesHint(unittest.TestCase):
+    """A `Drops-lines:` line that git does not parse as a trailer (it is not in the last paragraph) excuses nothing, and
+    the refusal said nothing about it: claude-settings (2026-10-14) and q_max PRs 869 and 874 each lost a full merge run
+    to it. A refusal now names the commit and says where the trailer goes. The hint never excuses a finding, and it shows
+    only beside a finding: a misplaced line with no finding prints nothing (no hint and no note). Where check() puts the
+    hint (problems or notes) is not pinned: each case reads both, and the printed cases read the output."""
+
+    HINT = "not as a trailer"
+    CO = "Co-Authored-By: Someone <someone@example.com>"
+    WHY = "Drops-lines: app.txt -- the owner wants Card back"
+    ABOVE = "Bring Card back\n\n%s\n\n%s" % (WHY, CO)  # the incident: its own paragraph above Co-Authored-By
+    IN_BODY = "Bring Card back\n\nWhy:\n%s\nthe rest of the why\n\n%s" % (WHY, CO)  # a line inside a body paragraph
+    RIGHT = "Bring Card back\n\nWhy.\n\n%s\n%s" % (WHY, CO)  # one last paragraph: git parses it
+    run_main = PrintedFindings.run_main
+
+    def setUp(self):
+        self.r = base_repo()
+
+    def land_pr(self, msg="delete Card"):
+        """PR 1 deletes Card from app.txt, and lands on main with a merge commit. `msg` is the message of its commit."""
+        r = self.r
+        r.sh("checkout", "-q", "-b", "pr1")
+        r.commit(msg, app_txt=BODY)
+        r.sh("checkout", "-q", "main")
+        r.sh("merge", "-q", "--no-ff", "-m", "Merge pull request #1", "pr1")
+        r.push()
+
+    def revert_with(self, msg):
+        """Branch `oops`: revert PR 1 (a finding on app.txt), reword that commit to `msg`, then add a plain commit on top.
+        -> the sha of the reworded commit. HEAD is the plain one, so the hint must name the right commit, not the last."""
+        r = self.r
+        r.sh("checkout", "-q", "-b", "oops")
+        r.sh("revert", "--no-edit", "-m", "1", "main")
+        r.sh("commit", "-q", "--amend", "-m", msg)
+        sha = r.sh("rev-parse", "HEAD")
+        r.commit("tidy other", other_txt="other v2\n")
+        return sha
+
+    def parsed(self, sha):
+        return self.r.sh("log", "-1", "--format=%(trailers:key=Drops-lines,valueonly)", sha).strip()
+
+    def said(self):
+        """-> (problems, every line check() says: problems and notes)."""
+        got = self.r.verdict()
+        return got, "\n".join(got + self.r.notes)
+
+    def assertHintFor(self, sha, text):
+        self.assertTrue(any(sha[:7] in l and self.HINT in l for l in text.splitlines()), text)  # one line: the sha and the hint
+        self.assertIn("last paragraph", text)
+
+    def assertRefusedWithHint(self, sha, got, text):
+        self.assertEqual(self.parsed(sha), "", "fixture: git must not parse the line as a trailer")
+        self.assertTrue(any("app.txt" in p for p in got), got)  # the refusal holds
+        self.assertHintFor(sha, text)
+        self.assertNotIn(self.r.sh("rev-parse", "HEAD")[:7], text)  # the culprit, not the head
+
+    def test_a_line_in_its_own_paragraph_above_co_authored_by_is_refused_with_a_hint(self):
+        self.land_pr()
+        sha = self.revert_with(self.ABOVE)
+        got, text = self.said()
+        self.assertRefusedWithHint(sha, got, text)
+
+    def test_a_line_inside_a_body_paragraph_is_refused_with_a_hint(self):
+        self.land_pr()
+        sha = self.revert_with(self.IN_BODY)
+        got, text = self.said()
+        self.assertRefusedWithHint(sha, got, text)
+
+    def test_a_trailer_that_parses_is_excused_with_no_hint(self):
+        self.land_pr()
+        sha = self.revert_with(self.RIGHT)
+        self.assertEqual(self.parsed(sha), "app.txt -- the owner wants Card back", "fixture: git must parse the trailer")
+        got, text = self.said()
+        self.assertEqual(got, [])
+        self.assertEqual(self.r.notes, ["ALLOWED app.txt: the owner wants Card back"])
+
+    def test_a_bare_trailer_that_parses_keeps_the_finding_and_gets_no_hint(self):
+        """git returns it, so placement is right: the missing reason is the fault, and a placement hint would be wrong."""
+        self.land_pr()
+        sha = self.revert_with("Bring Card back\n\nDrops-lines: app.txt\n%s" % self.CO)
+        self.assertEqual(self.parsed(sha), "app.txt", "fixture: git must parse the bare trailer")
+        got, text = self.said()
+        self.assertTrue(any("app.txt" in p for p in got), got)
+        self.assertNotIn(self.HINT, text)
+
+    def test_a_misplaced_line_with_no_finding_prints_nothing(self):
+        """Chosen: no hint and no note. The line costs nothing when the check is green."""
+        r = self.r
+        r.sh("checkout", "-q", "-b", "quiet")
+        sha = r.commit(self.ABOVE, other_txt="other v2\n")
+        self.assertEqual(self.parsed(sha), "", "fixture: git must not parse the line as a trailer")
+        got, text = self.said()
+        self.assertEqual(got, [])
+        self.assertEqual(r.notes, [])
+
+    def test_a_mid_line_mention_of_the_word_gets_no_hint(self):
+        """Only a line that starts with `Drops-lines:` counts. A message that talks about the word is not a mistake."""
+        self.land_pr()
+        self.revert_with("Explain Drops-lines: the check reads trailers\n\nWe say Drops-lines: app.txt -- x in prose.\n\n%s" % self.CO)
+        got, text = self.said()
+        self.assertTrue(any("app.txt" in p for p in got), got)
+        self.assertNotIn(self.HINT, text)
+
+    def test_a_misplaced_line_on_a_commit_already_on_main_gets_no_hint(self):
+        """The scanned range is upstream..head. A commit main already holds is not the author's to fix."""
+        self.land_pr(self.ABOVE)
+        self.revert_with("Bring Card back")
+        got, text = self.said()
+        self.assertTrue(any("app.txt" in p for p in got), got)
+        self.assertNotIn(self.HINT, text)
+
+    def test_main_prints_the_hint_and_still_exits_1(self):
+        self.land_pr()
+        sha = self.revert_with(self.ABOVE)
+        rc, text = self.run_main(["--upstream", "origin/main", "--head", "HEAD", "--repo", self.r.dir], "utf-8")
+        self.assertEqual(rc, 1)
+        self.assertIn("FAIL", text)
+        self.assertTrue(any(l.startswith("silent-undo:") and sha[:7] in l and self.HINT in l for l in text.splitlines()), text)
+        self.assertIn("last paragraph", text)
+
+    def test_main_prints_no_hint_for_a_trailer_that_parses(self):
+        self.land_pr()
+        self.revert_with(self.RIGHT)
+        rc, text = self.run_main(["--upstream", "origin/main", "--head", "HEAD", "--repo", self.r.dir], "utf-8")
+        self.assertEqual(rc, 0)
+        self.assertIn("ALLOWED app.txt", text)
+        self.assertNotIn(self.HINT, text)
+
+    def test_the_merge_tool_refusal_carries_the_hint(self):
+        import merge
+        self.land_pr()
+        sha = self.revert_with(self.ABOVE)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(merge.Stop) as cm:
+            merge.undo_check(self.r.dir, "origin/main")
+        text = out.getvalue() + "\n" + str(cm.exception)
+        self.assertIn("app.txt", str(cm.exception))  # the refusal holds
+        self.assertTrue(any(sha[:7] in l and self.HINT in l for l in text.splitlines()), text)
+
+    # ------------------------------------------------ round 2: reads of the message that the first cases did not stress
+
+    def test_a_folded_parsed_trailer_does_not_hide_a_misplaced_line(self):
+        """A trailer value folded onto a continuation line is one trailer. It must not pass for a second Drops-lines line."""
+        self.land_pr()
+        sha = self.revert_with("Bring Card back\n\nDrops-lines: app.txt -- wrong place\n\n"
+                               "Drops-lines: other.txt -- reason that\n continues here\n%s" % self.CO)
+        got_trailer = self.parsed(sha)
+        self.assertIn("other.txt", got_trailer, "fixture: git must parse the folded trailer")
+        self.assertIn("continues here", got_trailer, "fixture: git must fold the continuation into it")
+        got, text = self.said()
+        self.assertTrue(any("app.txt" in p for p in got), got)  # the refusal holds
+        self.assertHintFor(sha, text)
+
+    def test_a_parsed_trailer_with_an_empty_value_gets_no_hint(self):
+        """git reads `Drops-lines:` with nothing after it as a trailer, so placement is right: a hint would be a false alarm."""
+        self.land_pr()
+        sha = self.revert_with("Bring Card back\n\nDrops-lines:\n%s" % self.CO)
+        self.assertTrue(self.r.sh("log", "-1", "--format=%(trailers:key=Drops-lines)", sha).startswith("Drops-lines:"),
+                        "fixture: git must parse the empty trailer")
+        got, text = self.said()
+        self.assertTrue(any("app.txt" in p for p in got), got)  # the empty trailer excuses nothing
+        self.assertNotIn(self.HINT, text)
+
+    def test_a_control_byte_in_the_body_does_not_hide_a_misplaced_line(self):
+        """A \\x01 byte before the line. A reader that splits records on that byte loses the commit and says nothing."""
+        self.land_pr()
+        sha = self.revert_with("Bring Card back\n\nWhy:\x01 a stray control byte\n\n%s\n\n%s" % (self.WHY, self.CO))
+        self.assertIn("\x01", self.r.sh("log", "-1", "--format=%B", sha), "fixture: the message must hold the byte")
+        self.assertEqual(self.parsed(sha), "", "fixture: git must not parse the line as a trailer")
+        got, text = self.said()
+        self.assertTrue(any("app.txt" in p for p in got), got)
+        self.assertHintFor(sha, text)
+
+    def misplaced_repo_with_a_failing_hint_read(self):
+        """A finding on app.txt, a misplaced line on the commit, and a message read that fails. The hint is an extra: a
+        failed read of it must not turn the FAIL into an UNKNOWN (exit 0 locally) or into an owner override."""
+        self.land_pr()
+        sha = self.revert_with(self.ABOVE)
+        self.assertEqual(self.parsed(sha), "", "fixture: git must not parse the line as a trailer")
+        return BodyReadFails()
+
+    def test_main_still_exits_1_with_the_finding_when_the_hint_read_fails(self):
+        fault = self.misplaced_repo_with_a_failing_hint_read()
+        with fault.armed():
+            rc, text = self.run_main(["--upstream", "origin/main", "--head", "HEAD", "--repo", self.r.dir], "utf-8")
+        self.assertGreater(fault.hits, 0, "the faulted read never ran")
+        self.assertEqual(rc, 1, text)
+        self.assertIn("FAIL", text)
+        self.assertIn("app.txt", text)
+
+    def test_the_merge_tool_still_refuses_with_the_finding_when_the_hint_read_fails(self):
+        import merge
+        fault = self.misplaced_repo_with_a_failing_hint_read()
+        with fault.armed(), contextlib.redirect_stdout(io.StringIO()), self.assertRaises(merge.Stop) as cm:
+            merge.undo_check(self.r.dir, "origin/main")
+        self.assertGreater(fault.hits, 0, "the faulted read never ran")
+        self.assertIn("app.txt", str(cm.exception))
+
+    def test_the_unknown_override_does_not_excuse_a_finding_when_the_hint_read_fails(self):
+        """--undo-check-unknown-ok is the way out of an unreadable history. It never excuses a finding."""
+        import merge
+        fault = self.misplaced_repo_with_a_failing_hint_read()
+        with fault.armed(), contextlib.redirect_stdout(io.StringIO()), self.assertRaises(merge.Stop) as cm:
+            merge.undo_check(self.r.dir, "origin/main", unknown_ok="the owner accepts an unreadable history")
+        self.assertGreater(fault.hits, 0, "the faulted read never ran")
+        self.assertIn("app.txt", str(cm.exception))
+
+    # ------------------------------------------------ round 3: the repo's config, and the cost of the read
+
+    def test_a_fixed_grep_pattern_type_in_the_repo_config_does_not_hide_the_hint(self):
+        """grep.patternType=fixed makes `git log --grep` read its pattern as a literal string. A hint that filters
+        commits with a regex through --grep then matches none, and prints nothing."""
+        self.r.sh("config", "grep.patternType", "fixed")
+        self.land_pr()
+        sha = self.revert_with(self.ABOVE)
+        got, text = self.said()
+        self.assertRefusedWithHint(sha, got, text)
+
+    def test_the_hint_costs_a_constant_number_of_git_spawns_at_fifty_candidates(self):
+        """50 commits each hold a misplaced line. Reading them must not cost a git process per commit: at most 2 in all.
+        A count of spawns, not a time. `misplaced` is the hint's read, named in the round 2 review."""
+        r = self.r
+        r.sh("checkout", "-q", "-b", "many")
+        for i in range(50):
+            r.sh("commit", "-q", "--allow-empty", "-m", "Bring Card back %d\n\n%s\n\n%s" % (i, self.WHY, self.CO))
+        fault = SpawnCount()
+        with fault.armed():
+            out = C.misplaced(r.dir, "origin/main..HEAD")
+        self.assertIn(self.HINT, "\n".join(out), out)  # the read ran, and found the candidates
+        self.assertLessEqual(fault.n, 2, "git spawns for 50 candidate commits: %d" % fault.n)
+
+
 if __name__ == "__main__":
     unittest.main()
