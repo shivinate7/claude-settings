@@ -1503,11 +1503,47 @@ def ask_step(rule: str, reason: str, matched: str, step: str) -> None:
         PENDING_ASK.append((rule, reason, matched, rule + ", " + step))
 
 
+def background_steps(segment: str) -> int:
+    """The steps in one segment once an unquoted single `&` also separates them. `&&` is already
+    split, and a `&` that joins a redirect (`&>`, `>&`, `<&`) is no separator. A `&` with nothing
+    before it (PowerShell's call operator, the tail of `|&`) or nothing after it (a trailing job)
+    adds no step. Local to ask-alone: split_segments stays as the other rules read it."""
+    parts, quote, current = [], "", []
+    for index, char in enumerate(segment):
+        if quote:
+            quote = "" if char == quote else quote
+        elif char in "'\"":
+            quote = char
+        elif char == "&" and segment[index - 1:index] not in (">", "<") \
+                and segment[index + 1:index + 2] != ">":
+            parts.append("".join(current))
+            current = []
+            continue
+        current.append(char)
+    parts.append("".join(current))
+    return max(1, sum(1 for part in parts if part.strip()))
+
+
+def count_steps(text: str) -> int:
+    """The steps in a command: its segments, a single `&` as a separator, and the steps inside an
+    inline `bash -c` script, which stand in place of the call that holds them."""
+    steps = 0
+    for segment in split_segments(text):
+        if not segment.strip():
+            continue
+        steps += background_steps(segment)
+        tokens = segment_tokens(segment)
+        script = inline_script(tokens) if tokens else ""
+        if script:
+            steps += count_steps(script) - 1
+    return steps
+
+
 def settle_ask(tool: str, stripped: str) -> None:
     if not PENDING_ASK:
         return
     rule, reason, matched, step = PENDING_ASK[0]
-    if sum(1 for segment in split_segments(stripped) if segment.strip()) > 1:
+    if count_steps(stripped) > 1:
         refuse(tool, "deny", "ask-alone", ASK_ALONE_REASON % step, matched)
     refuse(tool, "ask", rule, reason, matched)
 

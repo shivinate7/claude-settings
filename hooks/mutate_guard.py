@@ -199,7 +199,7 @@ MUTATIONS = [
      '            ask_step("shared-tree", WORKTREE_PRUNE_ASK_REASON, matched, "worktree prune")', "guard",
      'worktree prune: a stale record asks, never denies'),
     ("ask-alone: a chained ask step asks instead of denying",
-     '    if sum(1 for segment in split_segments(stripped) if segment.strip()) > 1:',
+     '    if count_steps(stripped) > 1:',
      '    if False:', "guard",
      'ask-alone: the incident, prune then worktree add then grep, denies and names the prune'),
     ("worktree-prune: the call's own -n no longer reads as a pure read",
