@@ -5328,6 +5328,19 @@ for _label, _cmd in (
     sh("git env set: PowerShell printf into a profile, a name split by a directive %s, denies"
        % _label, _cmd, "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
 
+# Round 3 review of 78ba117 (guard-speed): the quick test cannot read a printf directive by a strip
+# over the whole text, in either order with `QUOTE_MARKS`. Each case below is denied on 46c3191 and
+# pins one way a whole-text strip under-matches, so the quick test sends any printf on to the walk.
+sh("git env set: Bash, a percent sign and a space before a set, no printf, denies",
+   "x=5% GIT_DIR=/x " + VCS + " status", "deny", GIT_ENV_RULE, cwd=NOGIT)   # `% G` is no directive
+sh("git env set: Bash printf into a profile, a directive split by adjacent quotes, denies",
+   r"printf 'GIT_%''sDIR=/x\n' >> ~/.bashrc", "deny", GIT_ENV_RULE, cwd=NOGIT)
+# KNOWN LIMIT: printf reads `\n` in this argument as a newline, so the file gets `GIT_` and
+# `DIR=/x` and sets nothing. The walk drops `\n` as a directive and denies: a false deny on the
+# safe side, pinned so the speed change keeps the verdict of 46c3191.
+sh("git env set: Bash printf into a profile, a doubled backslash before n inside a name, denies",
+   r"printf GIT_\\nDIR=/x >> ~/.bashrc", "deny", GIT_ENV_RULE, cwd=NOGIT)
+
 # =========================================================================== 5. merge into main
 FAMILY = "merge"
 #
