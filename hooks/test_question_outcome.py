@@ -43,8 +43,8 @@ Interface the hook must match:
 - Order (owner request 2026-10-13 19:48 CDT): in the question text, the `Goal:` line comes before the
   `Problem:` line. A `Problem:` line first is denied with no model call, and the reason says Goal goes
   first. Only the question text counts for either line, never an option's preview. A variant form
-  of the Problem line (bold, NBSP-led, or lowercase) that comes before a plain `Problem:` line is
-  denied the same way.
+  of the Problem line (bold, NBSP-led, lowercase, quoted, bulleted, italic, or full-width colon) that
+  comes before a plain `Problem:` line is denied the same way.
 - The model prompt names `Goal:` and `Problem:`. It holds the two rule bullets
   (style-question-states-problem, style-question-restates-goal) read at call time from
   output-styles/shiv-stylisms.md, found from the hook's own folder (hooks/../output-styles).
@@ -1531,6 +1531,62 @@ def case_o7_after_any_deny_the_next_ask_passes_even_problem_first():
               len(stub.prompts) - calls)
 
 
+DECORATED_VARIANTS = (
+    ("blockquote > Problem:", "> Problem: the upload retry has no limit."),
+    ("bullet - Problem:", "- Problem: the upload retry has no limit."),
+    ("italic *Problem:*", "*Problem:* the upload retry has no limit."),
+    ("full-width colon (U+FF1A)", "Problem： the upload retry has no limit."),
+)
+
+
+def case_o8_decorated_problem_first_lines_are_denied_with_no_model_call():
+    for label, first_line in DECORATED_VARIANTS:
+        name = "caseO8 %s first, then Goal:, then a plain Problem: line: deny, no model call" % label
+        if not need_module(name):
+            return
+        with model_stub(ALLOW) as stub:
+            code, out, _ = run_main(ask_payload(fresh_session("o8"), [question(variant_order_q(first_line), LABELS)],
+                                                default_transcript()))
+        check(name + ": denied", deny_reason(out) is not None, out)
+        check(name + ": no model call", stub.prompts == [], len(stub.prompts))
+        check(name + ": exit 0", code in (0, None), code)
+
+
+def case_o9_prompt_names_the_goal_line_before_the_problem_line():
+    name = "caseO9 model prompt: the hook's own text names the Goal: line before the Problem: line"
+    if not need_module(name):
+        return
+    with model_stub(ALLOW) as stub:
+        run_main(ask_payload(fresh_session("o9"), [question(GOOD_Q, LABELS)], default_transcript()))
+    prompt = stub.prompts[0] if stub.prompts else ""
+    head = prompt.split("Owner's last messages:")[0]  # the hook's own text and the style rules, not the question
+    goal_at, problem_at = head.find("Goal:"), head.find("Problem:")
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": names Goal: and Problem:", goal_at >= 0 and problem_at >= 0,
+          "goal_at=%d problem_at=%d" % (goal_at, problem_at))
+    check(name + ": Goal: comes before Problem:", 0 <= goal_at < problem_at,
+          "Goal: at %d, Problem: at %d" % (goal_at, problem_at))
+
+
+def case_o10_problems_and_problem_solved_lines_do_not_deny():
+    # Green controls: `Problems:` and `problem solved?` are not Problem: lines. Placed after Goal: (the
+    # ruling's case) and before it (a loose prefix match would deny there).
+    name = "caseO10 control: Problems: and problem solved? lines do not deny"
+    if not need_module(name):
+        return
+    after = ("Goal: a three-try limit on the upload retry.\nProblems: the upload retry has no limit.\n"
+             "problem solved?\nProblem: the upload retry has no limit.\nShould the retry wait between tries?")
+    before = ("Problems: the upload retry has no limit.\nproblem solved?\n"
+              "Goal: a three-try limit on the upload retry.\nProblem: the upload retry has no limit.\n"
+              "Should the retry wait between tries?")
+    for where, text in (("after Goal:", after), ("before Goal:", before)):
+        with model_stub(ALLOW) as stub:
+            code, out, _ = run_main(ask_payload(fresh_session("o10"), [question(text, LABELS)], default_transcript()))
+        check(name + " (" + where + "): not denied", deny_reason(out) is None, out)
+        check(name + " (" + where + "): model called once", len(stub.prompts) == 1, len(stub.prompts))
+        check(name + " (" + where + "): exit 0", code in (0, None), code)
+
+
 def main():
     cases = (case_g1_goal_line_passes_the_presence_check_and_reaches_the_model,
              case_g2_you_want_alone_is_denied_and_the_reason_names_goal,
@@ -1551,6 +1607,9 @@ def main():
              case_o5_goal_only_in_an_option_preview_does_not_satisfy_goal,
              case_o6_problem_first_variant_forms_are_denied_with_no_model_call,
              case_o7_after_any_deny_the_next_ask_passes_even_problem_first,
+             case_o8_decorated_problem_first_lines_are_denied_with_no_model_call,
+             case_o9_prompt_names_the_goal_line_before_the_problem_line,
+             case_o10_problems_and_problem_solved_lines_do_not_deny,
              case_r8_stale_state_whose_remove_fails_is_ignored_and_the_ask_is_judged,
              case_r8b_fresh_state_whose_remove_fails_does_not_deny_and_says_so,
              case_r1_a_state_that_cannot_be_removed_does_not_pass_every_later_ask,
