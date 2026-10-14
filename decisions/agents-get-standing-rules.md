@@ -51,3 +51,4 @@ Debts: `agent-brief-text-copy-drifts` (the hook text copies the rules, and no ch
 - Fail-open: a crashed hook injects nothing.
 
 Kind: process
+Home: hooks/agent_brief.py
