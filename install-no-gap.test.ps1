@@ -6,11 +6,14 @@
 # again. Between the two steps the file is absent. The gate hooks fail closed on a missing
 # script, so every session is refused for as long as the gap lasts (incident 2026-10-13).
 #
-# The main case runs install.ps1 twice against a scratch clone and a scratch CLAUDE_CONFIG_DIR,
-# with copy mode forced. A FileSystemWatcher on the scratch CLAUDE dir records Deleted and Renamed
-# events during run 2. It fails if any name the clone ships is deleted or renamed away. A name
-# the clone no longer ships may be removed. The fixture skill has nested dirs, so the same check
-# covers nested files, and a nested file the source drops must be pruned.
+# The main case runs install.ps1 once, then re-runs it 20 times against a scratch clone and a
+# scratch CLAUDE_CONFIG_DIR, with copy mode forced. Each re-run changes both hook files to the other
+# of two large versions. A reader loop, in this process, opens and reads guard.py and guard_core.py
+# in a tight loop for the whole series. It fails on a missing file, an unreadable file, a read that
+# is not one whole version, or a read pair whose INSTALL_ID values differ. This replaces a watcher
+# count of Deleted and Renamed events: a rename over a name emits a Deleted event, so that count
+# failed a correct atomic replace (a stale proxy, re-pointed per outcomes-tests-are-claims). The
+# fixture skill has nested dirs, and a nested file the source drops must be pruned.
 #
 # Three more cases, each in its own scratch tree. symrun and linkfail need symlink rights. On a
 # runner without them they print SKIP with the reason and do not count:
@@ -122,6 +125,114 @@ public class NoGapRecorder : IDisposable
     {
         watcher.EnableRaisingEvents = false;
         watcher.Dispose();
+    }
+}
+'@
+
+# Reads each hook file in a tight loop on its own thread, until Stop. Every read is opened with
+# read, write and delete sharing, so the installer's writes and renames are never refused by the
+# reader. A pass reads each path in order, then compares the two. A fault is counted by kind:
+#   missing <name>               the file is not there.
+#   unreadable <name>            the open or read failed, a sharing violation for one.
+#   short or mixed <name>        the read is not one whole version (Versions1 or Versions2).
+#   INSTALL_ID mismatch ...      both reads are whole, and their INSTALL_ID values differ.
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Concurrent;
+using System.IO;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
+
+public class HookReader
+{
+    public string[] Paths = new string[0];
+    public string[] Versions1 = new string[0];
+    public string[] Versions2 = new string[0];
+    private readonly ConcurrentDictionary<string, long> faults = new ConcurrentDictionary<string, long>();
+    private static readonly Regex StampRe = new Regex("INSTALL_ID = \"([^\"]*)\"");
+    private long passes;
+    private volatile bool stop;
+    private Thread worker;
+
+    public long Passes { get { return Interlocked.Read(ref passes); } }
+
+    public void Start()
+    {
+        worker = new Thread(Loop);
+        worker.IsBackground = true;
+        worker.Start();
+    }
+
+    public void Stop()
+    {
+        stop = true;
+        if (worker != null) { worker.Join(); worker = null; }
+    }
+
+    public long Count(string prefix)
+    {
+        long total = 0;
+        foreach (var kv in faults) if (kv.Key.StartsWith(prefix, StringComparison.Ordinal)) total += kv.Value;
+        return total;
+    }
+
+    public long Total()
+    {
+        long total = 0;
+        foreach (var kv in faults) total += kv.Value;
+        return total;
+    }
+
+    public string[] Report()
+    {
+        var lines = new System.Collections.Generic.List<string>();
+        foreach (var kv in faults) lines.Add(kv.Key + " x" + kv.Value);
+        return lines.ToArray();
+    }
+
+    private void Fault(string kind)
+    {
+        faults.AddOrUpdate(kind, 1L, (k, v) => v + 1);
+    }
+
+    private static string ReadAll(string path)
+    {
+        using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+        using (MemoryStream ms = new MemoryStream())
+        {
+            fs.CopyTo(ms);
+            return Encoding.UTF8.GetString(ms.ToArray());
+        }
+    }
+
+    private static string StampOf(string text)
+    {
+        Match m = StampRe.Match(text);
+        return m.Success ? m.Groups[1].Value : "(none)";
+    }
+
+    private void Loop()
+    {
+        string[] got = new string[Paths.Length];
+        while (!stop)
+        {
+            for (int i = 0; i < Paths.Length; i++)
+            {
+                string name = Path.GetFileName(Paths[i]);
+                got[i] = null;
+                try { got[i] = ReadAll(Paths[i]); }
+                catch (FileNotFoundException) { Fault("missing " + name); continue; }
+                catch (DirectoryNotFoundException) { Fault("missing " + name); continue; }
+                catch (IOException) { Fault("unreadable " + name); continue; }
+                if (got[i] != Versions1[i] && got[i] != Versions2[i]) Fault("short or mixed " + name);
+            }
+            bool whole0 = got[0] != null && (got[0] == Versions1[0] || got[0] == Versions2[0]);
+            bool whole1 = got[1] != null && (got[1] == Versions1[1] || got[1] == Versions2[1]);
+            if (whole0 && whole1 && StampOf(got[0]) != StampOf(got[1]))
+                Fault("INSTALL_ID mismatch between " + Path.GetFileName(Paths[0]) + " and " + Path.GetFileName(Paths[1]));
+            Interlocked.Increment(ref passes);
+        }
     }
 }
 '@
@@ -238,8 +349,20 @@ Write-Fixture 'landed-dirs.txt' (($Landed -join "`n") + "`n")
 Write-Fixture 'agents\builder.md' '# builder'
 Write-Fixture 'lint\ste_gate.py' '# gate'
 Write-Fixture 'lint\ste_lint.py' '# lint'
-Write-Fixture 'hooks\guard.py' '# guard'
-Write-Fixture 'hooks\guard_core.py' '# guard core'
+# The hook files in two versions, A and B. Each file is one stamp line, a label line, then padding,
+# so a version is large: a copy of it takes long enough for the reader to land inside it. Both files
+# of one version carry that version's INSTALL_ID, as an installed copy does.
+$HookPadLines = 40000
+$HookStampA = '1a2b3c4d-0000-4000-8000-00000000000a'
+$HookStampB = '1a2b3c4d-0000-4000-8000-00000000000b'
+function New-HookText([string]$File, [string]$Stamp, [string]$Label) {
+    $head = 'INSTALL_ID = "' + $Stamp + '"' + "`n" + '# ' + $File + ' ' + $Label + "`n"
+    return $head + (('# padding, so a copy of this file takes a while to write' + "`n") * $HookPadLines)
+}
+$HookA = @((New-HookText 'guard.py' $HookStampA 'version A'), (New-HookText 'guard_core.py' $HookStampA 'version A'))
+$HookB = @((New-HookText 'guard.py' $HookStampB 'version B'), (New-HookText 'guard_core.py' $HookStampB 'version B'))
+Write-Fixture 'hooks\guard.py' $HookA[0]
+Write-Fixture 'hooks\guard_core.py' $HookA[1]
 Write-Fixture 'skills\sample\SKILL.md' '# sample'
 Write-Fixture 'skills\sample\notes.md' '# notes'
 # Nested dirs, as real skills have (skills/impeccable/reference/, scripts/data/). The source drops
@@ -285,33 +408,52 @@ try {
     $Shipped     = @(Get-ShippedNames $Clone $Landed)
     $ShippedSet  = Get-NameSet $Shipped
     $NestedNames = @($Shipped | Where-Object { ($_ -split '\\').Count -ge 4 })
-    $NestedSet   = Get-NameSet $NestedNames
     Check "fixture: nested names are in the shipped set ($($NestedNames.Count))" ($NestedNames.Count -ge 3)
 
-    # ---- run 2: the re-run under watch ---------------------------------------------------------
-    $Rec = New-Object -TypeName NoGapRecorder -ArgumentList $Cfg
-    $pre = Flush-Canary $Rec '__nogap_canary_pre.tmp' $Cfg
-    Check "watcher live before run 2 (canary delivered)" $pre
-
-    $rc2 = Invoke-Install $Clone 'run2.log'
-    Check "setup: run 2 exits 0 (exit $rc2)" ($rc2 -eq 0)
-
-    $post = Flush-Canary $Rec '__nogap_canary_post.tmp' $Cfg
-    Check "watcher delivered run 2 events (post canary)" $post
-    $Errs = @($Rec.Errors.ToArray())
-    Check "watcher raised no error (an overflow would make the result unknown)" ($Errs.Count -eq 0)
-    foreach ($e in $Errs) { Write-Host "  watcher error: $e" }
+    # ---- run 2 to run 21: the re-runs under the reader -----------------------------------------
+    # Each round writes the other version into the clone, then re-runs install.ps1. The reader runs
+    # from before the first round to after the last. Its passes are counted per round, so a round
+    # the reader did not run in shows up.
+    $InstallRounds = 20
+    $Reader = New-Object -TypeName HookReader
+    $Reader.Paths = [string[]]@((Join-Path $Cfg 'hooks\guard.py'), (Join-Path $Cfg 'hooks\guard_core.py'))
+    $Reader.Versions1 = [string[]]$HookA
+    $Reader.Versions2 = [string[]]$HookB
+    $RoundPasses = @()
+    $RoundFaults = @()
+    $RoundsExit0 = 0
+    $RoundsLanded = 0
+    $Reader.Start()
+    try {
+        for ($round = 1; $round -le $InstallRounds; $round++) {
+            $Want = if ($round % 2 -eq 1) { $HookB } else { $HookA }
+            Write-Fixture 'hooks\guard.py' $Want[0]
+            Write-Fixture 'hooks\guard_core.py' $Want[1]
+            $passesBefore = $Reader.Passes
+            $faultsBefore = $Reader.Total()
+            $rcR = Invoke-Install $Clone ("run2-round$round.log")
+            $RoundPasses += ($Reader.Passes - $passesBefore)
+            $RoundFaults += ($Reader.Total() - $faultsBefore)
+            if ($rcR -eq 0) { $RoundsExit0++ }
+            $landed = ([IO.File]::ReadAllText((Join-Path $Cfg 'hooks\guard.py')) -eq $Want[0]) -and ([IO.File]::ReadAllText((Join-Path $Cfg 'hooks\guard_core.py')) -eq $Want[1])
+            if ($landed) { $RoundsLanded++ }
+        }
+    } finally {
+        $Reader.Stop()
+    }
     Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
 
-    $Gone = @($Rec.Gone.ToArray())
-    Write-Host "info: $($Gone.Count) Deleted or Renamed events during run 2"
-    $Hits = @(Get-GapHits $Gone $ShippedSet)
-    foreach ($h in $Hits) { Write-Host "  gap: $h during run 2" }
-    Check "run 2 deletes or renames no shipped name ($($Hits.Count) gap events)" ($Hits.Count -eq 0)
-
-    $NestedHits = @(Get-GapHits $Gone $NestedSet)
-    foreach ($h in $NestedHits) { Write-Host "  nested gap: $h during run 2" }
-    Check "run 2 deletes or renames no nested file under skills ($($NestedHits.Count) gap events)" ($NestedHits.Count -eq 0)
+    $RedRounds = @($RoundFaults | Where-Object { $_ -gt 0 }).Count
+    Write-Host "info: $RedRounds of $InstallRounds re-runs had a reader fault; $($Reader.Passes) reader passes in all"
+    foreach ($line in $Reader.Report()) { Write-Host "  reader fault: $line" }
+    $NoPass = @($RoundPasses | Where-Object { $_ -lt 1 }).Count
+    Check "reader ran during every re-run ($NoPass of $InstallRounds re-runs had no reader pass, want 0)" ($NoPass -eq 0)
+    Check "all $InstallRounds re-runs exit 0 ($RoundsExit0 of $InstallRounds)" ($RoundsExit0 -eq $InstallRounds)
+    Check "every re-run lands its new text in both hook files ($RoundsLanded of $InstallRounds, non-vacuous)" ($RoundsLanded -eq $InstallRounds)
+    Check "no hook file is missing during the re-runs ($($Reader.Count('missing ')) faults)" ($Reader.Count('missing ') -eq 0)
+    Check "no hook file is unreadable during the re-runs ($($Reader.Count('unreadable ')) faults)" ($Reader.Count('unreadable ') -eq 0)
+    Check "no hook read is short or mixed: each read is one whole version ($($Reader.Count('short or mixed ')) faults)" ($Reader.Count('short or mixed ') -eq 0)
+    Check "guard.py and guard_core.py never carry different INSTALL_IDs during the re-runs ($($Reader.Count('INSTALL_ID mismatch')) faults)" ($Reader.Count('INSTALL_ID mismatch') -eq 0)
     Check "run 2 prunes the nested file the source dropped" (-not (Test-Path -LiteralPath (Join-Path $Cfg $DroppedRel)))
 
     $Missing2 = @($Shipped | Where-Object { -not (Test-Path -LiteralPath (Join-Path $Cfg $_)) })
