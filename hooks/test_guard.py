@@ -5838,6 +5838,17 @@ add("test-author: Edit of package.json passes the early warning (the diff judges
 for _path in ("tests/test_a.py", "src/b_test.go", "pytest.ini", "pyproject.toml", "conftest.py",
               "jest.config.js"):
     add("test-author: Edit of %s is allowed" % _path, "allow", tool="Edit", file_path=_path, **A)
+# ---- mutation harnesses are test code: hooks/mutate_*.py holds the mutants the guard suite is judged
+# by, so a test-author edits them. Red on main: the early warning refused them as product code. The
+# builder case stays green and pins the fix to the test-author: agent_brief.py tells a builder to add
+# mutants to hooks/mutate_guard.py when the brief asks, and a builder must keep that.
+for _path in ("hooks/mutate_guard.py", "hooks/mutate_shared.py"):
+    add("test-author: Edit of mutation harness %s is allowed" % _path, "allow", tool="Edit",
+        file_path=_path, **A)
+add("test-author: Edit of hooks/guard_core.py is refused", "deny", rule=TA, tool="Edit",
+    file_path="hooks/guard_core.py", carries=("builder", "Report"), **A)
+add("builder-test: Edit of hooks/mutate_guard.py stays allowed for a builder", "allow", tool="Edit",
+    file_path="hooks/mutate_guard.py", agent_id="bld1", agent_type="builder", cwd=GITMAIN)
 
 # ---- repo self-test files are test paths (Banchi incident, 2026-10-02): `*-selftest.*`,
 # `*_selftest.*`, `selftest_*.*`, in any folder. A .md file does NOT count: a note named like a
@@ -6259,11 +6270,26 @@ def long_lived_no_log_case():
     return True, "allowed with no builder-diff line"
 
 
+_author_mutant = diff_repo("g-author-mutant", _put("hooks/mutate_guard.py", "pass\n"))
+
+
+def author_mutant_no_log_case():
+    """A test-author's edit of a mutation harness is test code: commit and stop log no author-diff line."""
+    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-author-mutant"), _author_mutant,
+                              "test-author", "auth1")
+    rows = [r for r in rows if len(r) > 3 and r[3] == "author-diff"]
+    if out or rows:
+        return False, "a mutation harness was judged: %r %r" % (out[:60], rows)
+    return True, "a mutation harness logs no author-diff line"
+
+
 LOG_CHECKS_EXTRA = _TaggedLogs([
     ("role-diff: every unjudged stop is logged", role_log_case),
     ("builder-diff: the diff check logs for the reviewer and never blocks", diff_logs_case),
     ("builder-diff: main's later tests merged into a long-lived worktree log nothing",
      long_lived_no_log_case),
+    ("author-diff: a test-author's mutation harness edit logs no author-diff line",
+     author_mutant_no_log_case),
 ])
 for _label, _check in LOG_CHECKS_EXTRA:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
