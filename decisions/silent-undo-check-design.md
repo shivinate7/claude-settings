@@ -11,8 +11,8 @@ It reads two things.
   (whole file). A `-U0` hunk reversed on all but one line. Lines main only added that the
   change removes, even in a hunk that also edits a neighbour. The third is the rebase that
   took its own side. Catches `git revert` of a merged PR and a stale copy.
-  Only commits upstream gained after the fork point are read, and the fork commit is one of
-  them. See the next section. The branch check has no time bound and no commit-count floor.
+  Only the fork commit and the commits upstream gained after it are read. See the next
+  section. The branch check has no time bound and no commit-count floor.
 - **Lost line.** A merge commit in the branch loses a line one parent added since the
   merge base. Catches a conflict taken "ours" and a hand edit of a merge.
 
