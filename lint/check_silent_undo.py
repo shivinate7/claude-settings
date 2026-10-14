@@ -63,7 +63,14 @@ def counts(text):
 
 def blob(cwd, rev, path):
     rc, out = git(cwd, "show", "%s:%s" % (rev, path), ok=(0, 128))
-    return out if rc == 0 else ""
+    return out if rc == 0 else absent(cwd, rev, path)
+
+
+def absent(cwd, rev, path):
+    """"" for a path the rev's tree does not list. A failed read of a listed path is Unknown, never empty text."""
+    if git(cwd, "ls-tree", rev, "--", path)[1].strip():
+        raise Unknown("the read of %s:%s failed, though the tree lists it" % (rev[:9], path))
+    return ""
 
 
 def allowed(cwd, rng):
@@ -230,7 +237,7 @@ def branch_only(cwd, p, bases, path, line, refs):
 
 
 class Blobs:
-    """Blob text by `rev:path` through one `git cat-file --batch` process; "" for a missing path."""
+    """Blob text by `rev:path` through one `git cat-file --batch` process; "" for a path the tree lacks."""
 
     def __init__(self, cwd):
         self.cwd = cwd
@@ -247,7 +254,7 @@ class Blobs:
             self.proc.stdin.flush()
             line = self.proc.stdout.readline().rstrip(b"\r\n")
             if line.endswith(b" missing"):  # the reply names the spec, which may hold spaces
-                return ""
+                return absent(self.cwd, rev, path)
             head = line.split()
             if len(head) != 3 or not head[2].isdigit():  # an empty line is EOF: the process died
                 raise Unknown("git cat-file gave no usable header for %s:%s: %r" % (rev[:9], path, line[:80]))
