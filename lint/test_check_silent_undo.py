@@ -5,7 +5,7 @@ Every case builds a throwaway repo with a local `origin` and asks the check for 
 Red cases come from two real incidents: a squash that carried the pre-deletion copy of a file
 (banchi, a revert nobody wrote), and a merge that dropped a parent's added line (q_max).
 """
-import contextlib, io, os, subprocess, sys, tempfile, unittest
+import contextlib, io, os, subprocess, sys, tempfile, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -729,6 +729,129 @@ class MergeTool(unittest.TestCase):
         self.assertIn("app.txt", str(cm.exception))
         r.sh("checkout", "-q", "main")
         merge.undo_check(r.dir, "origin/main")  # a branch at main: green, no raise
+
+
+# ------------------------------------------------------ scan cost and NUL lines
+
+
+def scanner_lines(tag):
+    """20 lines of source-like text: comment openers inside strings, a lone apostrophe, a template
+    literal over three lines, a pipe, an unbalanced paren. A combined pattern must escape all of them."""
+    out = []
+    for i in range(4):
+        out += ['%s%da = "/* opener %d"' % (tag, i, i), '%s%db = "// slash %d" # hash %d' % (tag, i, i, i),
+                "<p>Don't %s%d</p>" % (tag, i), "%s%dc = a | (b %d" % (tag, i, i)]
+    return out + ["%s = `template open" % tag, "%s middle" % tag, "%s close`" % tag, "%s plain 20" % tag]
+
+
+def drop_merge(lines, own=False):
+    """A merge commit that drops `lines` from app.txt. own=False: main added them, so upstream holds
+    them. own=True: the branch added them itself and main did not. -> (repo, merge sha)."""
+    body = BODY + "function Card() {}\n" + "".join(l + "\n" for l in lines)
+    r = base_repo()
+    r.sh("checkout", "-q", "-b", "feat")
+    if own:
+        r.commit("feat adds lines", app_txt=body)
+        r.sh("checkout", "-q", "main")
+        r.commit("main moves", other_txt="other v2\n")
+    else:
+        r.commit("feat", other_txt="other v2\n")
+        r.sh("checkout", "-q", "main")
+        r.commit("main adds lines", app_txt=body)
+    r.push()
+    r.sh("checkout", "-q", "feat")
+    r.sh("merge", "--no-commit", "--no-ff", "main")
+    r.put("app.txt", BODY + "function Card() {}\n")
+    r.sh("add", "-A")
+    r.sh("commit", "-q", "-m", "Merge main, drop the lines")
+    return r, r.sh("rev-parse", "HEAD")
+
+
+def git_calls(fn):
+    """Run fn with the git helper wrapped. -> (fn's result, [argv tuple of each git call])."""
+    calls, real = [], C.git
+
+    def counting(cwd, *a, ok=(0,)):
+        calls.append(a)
+        return real(cwd, *a, ok=ok)
+    with unittest.mock.patch.object(C, "git", counting):
+        return fn(), calls
+
+
+def probes(calls):
+    """The calls that find a line's adding commit: a pickaxe, or an ancestry test."""
+    return [a for a in calls if (a[0] == "log" and any(x.startswith("-G") for x in a)) or (a[0] == "merge-base" and "--is-ancestor" in a)]
+
+
+class CallBound(unittest.TestCase):
+    """branch_only ran one `git log -G` per lost line, up to OWN_LOOKUPS per file. A merge that drops
+    20 lines of one file must cost a fixed number of git calls, not one per line."""
+
+    def lost(self, lines, own=False):
+        r, m = drop_merge(lines, own)
+        found, calls = git_calls(lambda: C.lost_lines(r.dir, m, ("origin/main",)))
+        return r, found, calls
+
+    def test_main_carried_lines_cost_the_same_at_20_as_at_5(self):
+        _, found20, c20 = self.lost(scanner_lines("m"))
+        _, found5, c5 = self.lost(scanner_lines("m")[:5])
+        self.assertEqual([len(x[2]) for x in found20], [20])
+        self.assertEqual([len(x[2]) for x in found5], [5])
+        self.assertLessEqual(len(c20) - len(c5), 3, "git calls: N=5 %d, N=20 %d, probes at N=20 %d" % (len(c5), len(c20), len(probes(c20))))
+
+    def test_main_carried_probes_are_at_most_three_for_twenty_lines(self):
+        _, found20, c20 = self.lost(scanner_lines("m"))
+        self.assertEqual([len(x[2]) for x in found20], [20])
+        self.assertLessEqual(len(probes(c20)), 3, "probes at N=20: %d of %d git calls" % (len(probes(c20)), len(c20)))
+
+    def test_own_lines_cost_the_same_at_20_as_at_5(self):
+        _, found20, c20 = self.lost(scanner_lines("o"), own=True)
+        _, found5, c5 = self.lost(scanner_lines("o")[:5], own=True)
+        self.assertEqual(found20, [])
+        self.assertEqual(found5, [])
+        self.assertLessEqual(len(c20) - len(c5), 3, "git calls: N=5 %d, N=20 %d, probes at N=20 %d" % (len(c5), len(c20), len(probes(c20))))
+        self.assertLessEqual(len(probes(c20)), 3, "probes at N=20: %d of %d git calls" % (len(probes(c20)), len(c20)))
+
+
+class Scanner(unittest.TestCase):
+    """Source-like lines are matched as plain text. Main-carried ones are all flagged; the branch's own are none."""
+
+    def test_all_twenty_main_carried_lines_are_flagged(self):
+        r, _ = drop_merge(scanner_lines("m"))
+        text = "\n".join(r.verdict())
+        for line in scanner_lines("m"):
+            self.assertIn(" ".join(line.split()), text)
+
+    def test_none_of_the_twenty_own_lines_is_flagged(self):
+        r, _ = drop_merge(scanner_lines("o"), own=True)
+        self.assertEqual(r.verdict(), [])
+
+
+class NulLine(unittest.TestCase):
+    """A UTF-16 file puts a NUL byte in every line. git cannot take a NUL in an argument, so branch_only
+    raised ValueError and aborted the whole check. A read that fails counts the line (branch_only docstring)."""
+
+    def test_a_utf16_line_main_added_and_the_merge_dropped_is_a_fail(self):
+        r = base_repo()
+        r.sh("checkout", "-q", "-b", "feat")
+        r.commit("feat", other_txt="other v2\n")
+        r.sh("checkout", "-q", "main")
+        with open(os.path.join(r.dir, "wide.txt"), "wb") as f:
+            f.write("main note\n".encode("utf-16"))
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "main adds a UTF-16 note")
+        r.push()
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "--no-commit", "--no-ff", "main")
+        r.sh("rm", "-q", "-f", "wide.txt")
+        r.sh("commit", "-q", "-m", "Merge main, drop the note")
+        got = r.verdict()
+        self.assertTrue(any("wide.txt" in p for p in got), got)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = C.main(["--repo", r.dir, "--upstream", "origin/main"])
+        self.assertEqual(code, 1, out.getvalue())
+        self.assertIn("FAIL", out.getvalue())
 
 
 if __name__ == "__main__":
