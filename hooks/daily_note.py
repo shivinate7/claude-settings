@@ -11,13 +11,13 @@ through the day before today, at most 7 days. With no stamp, or a stamp that is 
 the window is the day before today. A day with no session start keeps its lines for the next start.
 
 Checks, each over the window. Each failure is one stdout line of at most 240 characters. The line
-names lint/guard_log_report.py, the reader to run for the detail.
+names the reader, lint/guard_log_report.py, by its absolute path beside this hook's folder, so the
+path holds from any working folder.
 - a `crash` line: a guard hook crashed.
 - an `STE-fallback` line whose matched field ends fallback=crash.
 - an `STE-unchecked` line: the lint could not run, so those writes are unknown, not clear.
-- a rule whose denies on one day of the window reach DENY_FLOOR and exceed DENY_FACTOR times the
-  daily mean of the 7 days before that day. The line names the rule.
 - guard.log exists and cannot be read: unknown. A missing guard.log is not a failure.
+There is no volume check: denies grew with use, and a count check fired on 6 of 14 real days.
 A line's day is the date its timestamp is written with: guard.log holds Central wall time.
 
 Seam: CLAUDE_DAILY_NOTE_NOW, an ISO-8601 instant with its UTC offset, in place of the clock.
@@ -26,7 +26,7 @@ Advisory, fail-open: any error prints one stderr line and exits 0.
 import os
 import re
 import sys
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 for sub in (HERE, os.path.join(HERE, "..", "lint")):
@@ -34,9 +34,7 @@ for sub in (HERE, os.path.join(HERE, "..", "lint")):
         sys.path.insert(0, sub)
 
 MAX_WINDOW = 7    # days
-DENY_FLOOR = 25   # denies in one day, below which a rule never fails
-DENY_FACTOR = 3   # ponytail: fixed factor on a 7-day mean; tune from the reader's tables if it cries wolf
-READER = "lint/guard_log_report.py"
+READER = os.path.normpath(os.path.join(HERE, "..", "lint", "guard_log_report.py"))
 
 
 def central_today():
@@ -57,34 +55,23 @@ def read_stamp(path):
 
 def failures(lines, window):
     """One line per failed check over the window, a list of consecutive days."""
-    import guard_log_report as report
+    import guard_log_report as report  # the one reader of guard.log lines
     days = {day.isoformat() for day in window}
     span = str(window[0]) if len(window) == 1 else "%s to %s" % (window[0], window[-1])
-    tail = "Read: python %s --days %d" % (READER, len(window) + 1)
+    tail = "Read: python %s" % READER
     rows = [row for row in map(report.parse_line, lines) if row and row.when.date().isoformat() in days]
     out = []
     crashes = [r for r in rows if r.decision == "crash"]
     if crashes:
-        out.append("%d guard crash line(s) in guard.log, %s: a guard hook crashed. %s" % (len(crashes), span, tail))
+        out.append("%d guard crash line(s), %s: a guard hook crashed. %s" % (len(crashes), span, tail))
     fallbacks = [r for r in rows if r.rule == "STE-fallback" and r.matched.endswith("fallback=crash")]
     if fallbacks:
-        out.append("%d STE-fallback line(s) ended fallback=crash, %s: the STE fixer crashed. %s"
+        out.append("%d STE-fallback line(s) ended fallback=crash, %s. %s"
                    % (len(fallbacks), span, tail))
     unchecked = [r for r in rows if r.rule == "STE-unchecked"]
     if unchecked:
-        out.append("%d STE-unchecked line(s), %s: the lint could not run, so those writes are unknown. %s"
+        out.append("%d STE-unchecked line(s), %s: lint could not run, writes unknown. %s"
                    % (len(unchecked), span, tail))
-
-    def by_rule(end, count):  # the reader's tally: the `count` days up to and including `end`
-        return report.summarize(lines, count, datetime.combine(end, time()))["by_rule"]
-
-    for day in window:
-        base = by_rule(day - timedelta(days=1), 7)
-        for rule, tally in sorted(by_rule(day, 1).items()):
-            deny = tally["deny"]
-            if deny >= DENY_FLOOR and deny > DENY_FACTOR * base.get(rule, {"deny": 0})["deny"] / 7:
-                out.append("Rule %s denied %d times on %s, over its 7-day baseline. %s"
-                           % (rule[:60], deny, day, tail))
     return out
 
 
