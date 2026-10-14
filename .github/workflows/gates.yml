@@ -424,6 +424,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 hooks/test_reply_judge.py
 
+      - name: SendMessage state fixture suite
+        if: ${{ !cancelled() }}
+        run: python3 hooks/test_sendmessage_state.py
+
       - name: Question outcome fixture suite
         if: ${{ !cancelled() }}
         run: python3 hooks/test_question_outcome.py
@@ -724,6 +728,10 @@ jobs:
       - name: Reply judge fixture suite
         if: ${{ !cancelled() }}
         run: python hooks/test_reply_judge.py
+
+      - name: SendMessage state fixture suite
+        if: ${{ !cancelled() }}
+        run: python hooks/test_sendmessage_state.py
 
       - name: Question outcome fixture suite
         if: ${{ !cancelled() }}

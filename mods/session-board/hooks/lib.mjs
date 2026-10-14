@@ -253,7 +253,7 @@ export function agentRows(list) {
 // The `claude agents` state of the one row named `name`: busy, idle or waiting (on a permission
 // answer). 'unseen' when no row, or more than one row, has that name, or its state is unknown.
 export function receiverState(rows, name) {
-  const bare = typeof name === 'string' ? name.replace(/ \[[^\]]*\]$/, '') : '' // ListAgents prints `name [ref]` when names clash
+  const bare = typeof name === 'string' ? clean(name.replace(/ \[[^\]]*\]$/, ''), 40) : '' // ListAgents prints `name [ref]` when names clash; rows hold clean() names
   const hits = (rows ?? []).filter(r => bare && r.name === bare)
   if (hits.length !== 1) return 'unseen'
   const r = hits[0]
