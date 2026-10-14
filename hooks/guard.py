@@ -49,6 +49,9 @@ one fixed order, and the first match wins.
                        `cmd`/`cmd.exe /c start ...` from either shell. Always denied, the same
                        as rule 2, because a detached process leaves no pid this session can
                        name to stop it later.
+  2c wsl-allow-list    a `wsl` call that is not `-e`/`--exec` with node --test on *.test.mjs, pwsh
+                       -NoProfile -File *.test.ps1, or python3 on test_*.py (alone on the line, or
+                       behind `python bin/verdict`). Always denied.
   3 live-stream        a command that follows a stream and never ends on its own
   3 waiter             a shell segment whose command word is a sleep-and-poll
   4 force-push         a forced push. Allowed with a lease plus --force-if-includes, denied
@@ -171,7 +174,7 @@ if sys.path[:1] != [_HERE]:
 # The rule families in import order: each one imports only guard_core and the families before it.
 _FAMILY_MODULES = ("guard_branch_worktree", "guard_shared_tree", "guard_pointer",
                    "guard_push_delete", "guard_merge", "guard_frozen", "guard_env",
-                   "guard_kill", "guard_stream", "guard_rm_var", "guard_mask_script")
+                   "guard_kill", "guard_stream", "guard_rm_var", "guard_mask_script", "guard_wsl")
 _loading = "guard_core"   # the module being loaded, for the fallback line below
 try:
     import guard_core
@@ -237,6 +240,8 @@ try:
     from guard_mask_script import (
         mask_script,
     )
+    _loading = "guard_wsl"
+    from guard_wsl import WSL_REASON, wsl_hit
 except Exception as exc:
     # A recovery path must not depend on the module it recovers (CLAUDE.md
     # verification-recovery-not-gated-on-own-state). guard_core holds `record` and `config_dir`,
@@ -1620,6 +1625,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = detached_launch_hit(stripped)
     if matched:
         refuse(tool, "deny", "detached-launch", DETACHED_LAUNCH_REASON, matched)
+
+    # 2c. WSL: only the fixed list of test commands (owner ruling 2026-10-13).
+    matched = wsl_hit(stripped)
+    if matched:
+        refuse(tool, "deny", "wsl-allow-list", WSL_REASON, matched)
 
     # 3. A live stream that never ends, or a waiter loop (Rule 9). A waiter loop whose own
     # condition polls a pattern gets the more specific reason: the pattern can match the loop's
