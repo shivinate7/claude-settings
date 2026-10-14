@@ -1640,11 +1640,13 @@ CMD_EXE_NAMES = {"cmd", "cmd.exe"}
 
 def _env_split_string(tokens) -> str:
     """The command string `env -S STRING` (or `--split-string`, `-iS STRING`) runs, else ''. Only
-    an `env` the segment runs as a wrapper counts: `echo env -S x` runs echo."""
-    for word, flags in _walk_wrappers(tuple(tokens))[1]:
-        for flag, value in flags if word == "env" else ():
-            if flag in ("-S", "--split-string"):
-                return value
+    an `env` the segment runs as a wrapper counts, at its start or after a `(` or `$(`:
+    `echo env -S x` runs echo."""
+    for start in _command_starts(tokens):
+        for word, flags in _walk_wrappers(tuple(tokens[start:]))[1]:
+            for flag, value in flags if word == "env" else ():
+                if flag in ("-S", "--split-string"):
+                    return value
     return ""
 
 
@@ -1664,14 +1666,18 @@ def nested_script(tokens) -> str:
     return _pwsh_script(tokens) if word in PLAYWRIGHT_PS_SHELLS else ""
 
 
+def _command_starts(tokens):
+    """The token indexes where a command may start: 0, and each unquoted `(` or `$(`."""
+    quoted = getattr(tokens, "quoted", ())
+    return [0] + [i for i, t in enumerate(tokens)
+                  if i and i not in quoted and (t in ("(", "$(") or GLUED_OPEN.match(t))]
+
+
 def command_indexes(tokens):
     """Every index where a command runs in one segment: its own command word, and the one after
     each `(` or `$(` (a subshell or substitution, glued or spaced), such as `echo $(wsl ...)`."""
-    quoted = getattr(tokens, "quoted", ())
-    starts = [0] + [i for i, t in enumerate(tokens)
-                    if i and i not in quoted and (t in ("(", "$(") or GLUED_OPEN.match(t))]
     found = []
-    for start in starts:
+    for start in _command_starts(tokens):
         at = resolve_command(tokens[start:])
         if at is not None and start + at not in found:
             found.append(start + at)
