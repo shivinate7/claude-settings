@@ -39,7 +39,7 @@ is ever reached. On Windows the launcher is `gh.cmd`, and a list-form subprocess
 skips a .cmd stand-in (decision list-form-subprocess-ignores-a-path-shim-on-windows). So the hook
 must find gh with shutil.which. The stub answers the --json forms of `pr view <N|branch>`,
 `pr list --head B`, `run list --commit SHA`, `run view <id>` and `run watch <id>` from a JSON
-fixture. It appends every call to a log. A run marked in_progress_until_watch stays in progress
+fixture. It writes every call to its own file beside the log (one file per call, so parallel calls never share one). A run marked in_progress_until_watch stays in progress
 until `run watch` names it. A run with hang_seconds: `run watch` first connects to the localhost
 port in GH_STUB_READY_PORT, so a case can wait for the watch with one accept() and no polling.
 Then the stub closes fds 0-2 and sleeps, which models a run still pending. Fixture mode "error"
@@ -85,9 +85,46 @@ def flag(args, name):
             return a[len(name) + 1:]
     return None
 
+_SEQ = [0]
+
+def call_files(base):
+    """The finished call files of one log, oldest first. The name starts with the time, zero padded."""
+    folder, name = os.path.split(base)
+    return sorted(os.path.join(folder, n) for n in os.listdir(folder)
+                  if n.startswith(name + ".") and n.endswith(".json"))
+
+def log_call(args):
+    """One call, one file. The line is written under a .part name and renamed once whole, so a
+    reader never sees half of one. A shared append lost lines when two processes wrote at once on
+    Windows (CI run 38484705402 lost 2 of 8 calls)."""
+    base = os.environ["GH_STUB_LOG"]
+    while True:
+        _SEQ[0] += 1
+        stem = "%s.%020d.%d.%d" % (base, time.time_ns(), os.getpid(), _SEQ[0])
+        try:
+            fd = os.open(stem + ".part", os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+            break
+        except FileExistsError:
+            continue
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(json.dumps(args) + "\n")
+    for _ in range(100):
+        try:
+            os.replace(stem + ".part", stem + ".json")
+            return
+        except PermissionError:   # Windows: a scanner may hold the new file for a moment
+            time.sleep(0.02)
+    raise OSError("gh stub: could not finish the call file " + stem)
+
+def read_log(base):
+    out = []
+    for path in call_files(base):
+        with open(path, encoding="utf-8") as f:
+            out.append(json.loads(f.read()))
+    return out
+
 def logged_calls():
-    with open(os.environ["GH_STUB_LOG"], encoding="utf-8") as f:
-        return [json.loads(x) for x in f if x.strip()]
+    return read_log(os.environ["GH_STUB_LOG"])
 
 def view(r, watched, with_jobs):
     hidden = bool(r.get("in_progress_until_watch")) and str(r["databaseId"]) not in watched
@@ -111,8 +148,7 @@ def hang(seconds):
     time.sleep(seconds)
 
 def main(args):
-    with open(os.environ["GH_STUB_LOG"], "a", encoding="utf-8") as f:
-        f.write(json.dumps(args) + "\n")
+    log_call(args)
     with open(os.environ["GH_STUB_FIXTURE"], encoding="utf-8") as f:
         fx = json.load(f)
     if fx.get("mode") == "error":
@@ -177,6 +213,8 @@ def write_stub():
 
 
 write_stub()
+sys.path.insert(0, TMP)
+import gh_stub as GH  # the stand-in's own log reader: one home for the call-file format
 
 
 FLUSH_SRC = r'''
@@ -287,8 +325,7 @@ def read_text(path):
 
 
 def read_calls(log):
-    with open(log, encoding="utf-8") as f:
-        return [json.loads(x) for x in f if x.strip()]
+    return GH.read_log(log)
 
 
 def new_case(scen):
@@ -297,7 +334,6 @@ def new_case(scen):
     log = os.path.join(case, "gh.log")
     with open(fixture_path, "w", encoding="utf-8") as f:
         json.dump(scen, f)
-    open(log, "w").close()
     return case, fixture_path, log
 
 
@@ -549,6 +585,50 @@ def case_lock_folder_unusable_wakes_unknown():
     expect_no_watch("lock folder is a file", res)
 
 
+STRESS_SRC = r'''
+import sys
+sys.path.insert(0, sys.argv[1])   # the folder with gh_stub.py
+import gh_stub
+for i in range(int(sys.argv[3])):
+    gh_stub.log_call([sys.argv[2], str(i)])
+'''
+
+
+def case_stress_log_keeps_every_line():
+    """Two processes write 2000 stand-in calls each into one log at the same time. All 4000 are
+    kept, each once. Red for a shared append: it lost 2 of 8 calls in CI, and 191 of 4000 on a
+    local probe."""
+    folder = tempfile.mkdtemp(prefix="stress-", dir=TMP)
+    base = os.path.join(folder, "gh.log")
+    writer = os.path.join(folder, "stress_writer.py")
+    with open(writer, "w", encoding="utf-8") as f:
+        f.write(STRESS_SRC)
+    env = dict(os.environ, GH_STUB_LOG=base)
+    procs, outs = [], []
+    for tag in ("a", "b"):
+        out = open(os.path.join(folder, "out-%s.txt" % tag), "w", encoding="utf-8")
+        outs.append(out)
+        procs.append(subprocess.Popen([PY, writer, TMP, tag, "2000"], env=env, stdout=out,
+                                      stderr=subprocess.STDOUT))
+    codes = []
+    for p in procs:
+        try:
+            codes.append(p.wait(timeout=TIMEOUT * 4))
+        except subprocess.TimeoutExpired:
+            p.kill()
+            codes.append(None)
+    for out in outs:
+        out.close()
+    calls = read_calls(base)
+    got = sorted(tuple(c) for c in calls)
+    want = sorted((tag, str(i)) for tag in ("a", "b") for i in range(2000))
+    check("stress: both writers exit 0", codes == [0, 0], "codes=%r" % (codes,))
+    check("stress: 4000 lines kept of 4000 written (2 x 2000)", len(calls) == 4000,
+          "kept %d" % len(calls))
+    check("stress: every line present once, none lost or doubled", got == want,
+          "missing %d, extra %d" % (len(set(want) - set(got)), len(got) - len(set(got))))
+
+
 def main():
     hook_exists = os.path.isfile(MODULE)
     check("module under test exists (missing module = red for this reason)", hook_exists, MODULE)
@@ -716,6 +796,8 @@ def main():
     case_background_separator_starts_each_watch()
     case_deadline_not_a_number_uses_default()
     case_lock_folder_unusable_wakes_unknown()
+
+    case_stress_log_keeps_every_line()
 
     print()
     print("%d checks, %d failed" % (COUNT[0], len(FAILS)))
