@@ -17,8 +17,8 @@
 # source drops must be pruned.
 #
 # Three more cases, each in its own scratch tree. symrun and linkfail need symlink rights. On a
-# runner without them they print SKIP with the reason and do not count; with CI set, a symrun SKIP
-# is a FAIL, since a CI runner has the rights:
+# runner without them they print SKIP with the reason and do not count; with CI set, a SKIP of
+# either is a FAIL, since a CI runner has the rights:
 #   symrun    a real file from an earlier copy, then a run where links can be made: the same reader
 #             loop sees no fault and sees the mixed-id window between the two swaps, and
 #             hooks\guard.py is a link at the end.
@@ -484,7 +484,8 @@ try {
 
     # ---- linkfail: dest is a symlink to elsewhere and the copy fails: a file must remain -------
     if ($Blocker) {
-        Write-Host "SKIP: linkfail (no symlink rights: $Blocker)"
+        if ($env:CI) { Check "linkfail: runs on CI, where links can be made (no symlink rights: $Blocker)" $false }
+        else { Write-Host "SKIP: linkfail (no symlink rights: $Blocker)" }
     } else {
         $Lf     = New-Scratch 'linkfail' @('hooks')
         $LfSrc  = Join-Path $Lf.Clone 'hooks\guard.py'
