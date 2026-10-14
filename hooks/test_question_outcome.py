@@ -39,6 +39,9 @@ Interface the hook must match:
   `Problem:` line to pass the presence check. A question with only `You want:` is denied, with a
   reason that names `Goal:`, and no model call. A question with `Goal:` but no `Problem:` is denied,
   with a reason that names `Problem:`, and no model call (owner ruling 2026-10-13 14:13 CDT).
+- Order (owner request 2026-10-13 19:48 CDT): in the question text, the `Goal:` line comes before the
+  `Problem:` line. A `Problem:` line first is denied with no model call, and the reason says Goal goes
+  first. Only the question text counts for either line, never an option's preview.
 - The model prompt names `Goal:` and `Problem:`. It holds the two rule bullets
   (style-question-states-problem, style-question-restates-goal) read at call time from
   output-styles/shiv-stylisms.md, found from the hook's own folder (hooks/../output-styles).
@@ -1389,6 +1392,98 @@ def case_g12_goal_without_problem_is_denied_with_no_model_call():
     check(name + ": exit 0", code in (0, None), code)
 
 
+# --------------------------------------------------------------------------- order: Goal before Problem
+# Owner request 2026-10-13 19:48 CDT: the `Goal:` line comes before the `Problem:` line. The order is
+# judged on the question text only, the way the presence check reads it. An option's preview is not read.
+
+ORDER_BAD_Q = ("Problem: the upload retry has no limit, so it can loop.\n"
+               "Goal: a three-try limit on the upload retry.\nShould the retry wait between tries?")
+GOAL_THEN_PROBLEM_Q = ("Goal: a three-try limit on the upload retry.\n\n"
+                       "Problem: the upload retry has no limit.\nShould the retry wait between tries?")
+GOAL_TEXT_Q = "Goal: a three-try limit on the upload retry.\nShould the retry wait between tries?"
+PROBLEM_TEXT_Q = "Problem: the upload retry has no limit.\nShould the retry wait between tries?"
+PROBLEM_PREVIEW = "Problem: the upload retry has no limit."
+GOAL_PREVIEW = "Goal: a three-try limit on the upload retry."
+GOAL_FIRST_REASON = re.compile(r"\bGoal\b[^\n]*\bfirst\b|\bfirst\b[^\n]*\bGoal\b")
+
+
+def question_with_previews(text, labels, previews):
+    """A question whose options carry a `preview` text each. An empty preview is left out."""
+    q = question(text, labels)
+    for opt, preview in zip(q["options"], previews):
+        if preview:
+            opt["preview"] = preview
+    return q
+
+
+def case_o1_problem_line_before_goal_line_is_denied_with_no_model_call():
+    name = "caseO1 Problem: line before Goal: line: deny, reason says Goal goes first, no model call"
+    if not need_module(name):
+        return
+    with model_stub(ALLOW) as stub:
+        code, out, _ = run_main(ask_payload(fresh_session("o1"), [question(ORDER_BAD_Q, LABELS)],
+                                            default_transcript()))
+    reason = deny_reason(out)
+    check(name + ": denied", reason is not None, out)
+    check(name + ": reason says Goal goes first",
+          reason is not None and GOAL_FIRST_REASON.search(reason) is not None, reason)
+    check(name + ": no model call", stub.prompts == [], len(stub.prompts))
+    check(name + ": exit 0", code in (0, None), code)
+
+
+def case_o2_goal_line_before_problem_line_passes_the_format_check():
+    name = "caseO2 Goal: line before Problem: line, a blank line between: not denied, model called once"
+    if not need_module(name):
+        return
+    with model_stub(ALLOW) as stub:
+        code, out, _ = run_main(ask_payload(fresh_session("o2"), [question(GOAL_THEN_PROBLEM_Q, LABELS)],
+                                            default_transcript()))
+    check(name + ": not denied", deny_reason(out) is None, out)
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": exit 0", code in (0, None), code)
+
+
+def case_o3_after_an_order_deny_the_next_ask_passes_with_no_model_call():
+    name = "caseO3 after an order deny, the next ask passes with no model call"
+    if not need_module(name):
+        return
+    session = fresh_session("o3")
+    with model_stub(ALLOW) as stub:
+        run_main(ask_payload(session, [question(ORDER_BAD_Q, LABELS)], default_transcript()))
+        calls = len(stub.prompts)
+        _, out, _ = run_main(ask_payload(session, [question(BAD_Q, LABELS)], default_transcript()))
+    check(name + ": the next ask is not denied", deny_reason(out) is None, out)
+    check(name + ": the next ask calls no model", len(stub.prompts) == calls, len(stub.prompts) - calls)
+
+
+def case_o4_problem_only_in_an_option_preview_does_not_satisfy_problem():
+    name = "caseO4 Goal: in the question text, Problem: only in an option preview: deny, Problem: missing, no model call"
+    if not need_module(name):
+        return
+    q = question_with_previews(GOAL_TEXT_Q, LABELS, [PROBLEM_PREVIEW, ""])
+    with model_stub(ALLOW) as stub:
+        code, out, _ = run_main(ask_payload(fresh_session("o4"), [q], default_transcript()))
+    reason = deny_reason(out) or ""
+    check(name + ": denied", deny_reason(out) is not None, out)
+    check(name + ": only Problem: is missing", "(no Problem:)" in reason and "(no Goal:)" not in reason, reason)
+    check(name + ": no model call", stub.prompts == [], len(stub.prompts))
+    check(name + ": exit 0", code in (0, None), code)
+
+
+def case_o5_goal_only_in_an_option_preview_does_not_satisfy_goal():
+    name = "caseO5 Problem: in the question text, Goal: only in an option preview: deny, Goal: missing, no model call"
+    if not need_module(name):
+        return
+    q = question_with_previews(PROBLEM_TEXT_Q, LABELS, [GOAL_PREVIEW, ""])
+    with model_stub(ALLOW) as stub:
+        code, out, _ = run_main(ask_payload(fresh_session("o5"), [q], default_transcript()))
+    reason = deny_reason(out) or ""
+    check(name + ": denied", deny_reason(out) is not None, out)
+    check(name + ": only Goal: is missing", "(no Goal:)" in reason and "(no Problem:)" not in reason, reason)
+    check(name + ": no model call", stub.prompts == [], len(stub.prompts))
+    check(name + ": exit 0", code in (0, None), code)
+
+
 def main():
     cases = (case_g1_goal_line_passes_the_presence_check_and_reaches_the_model,
              case_g2_you_want_alone_is_denied_and_the_reason_names_goal,
@@ -1402,6 +1497,11 @@ def main():
              case_g10_missing_goal_anchor_still_judges_and_names_it_on_stderr,
              case_g11_missing_problem_anchor_still_judges_and_names_it_on_stderr,
              case_g12_goal_without_problem_is_denied_with_no_model_call,
+             case_o1_problem_line_before_goal_line_is_denied_with_no_model_call,
+             case_o2_goal_line_before_problem_line_passes_the_format_check,
+             case_o3_after_an_order_deny_the_next_ask_passes_with_no_model_call,
+             case_o4_problem_only_in_an_option_preview_does_not_satisfy_problem,
+             case_o5_goal_only_in_an_option_preview_does_not_satisfy_goal,
              case_r8_stale_state_whose_remove_fails_is_ignored_and_the_ask_is_judged,
              case_r8b_fresh_state_whose_remove_fails_does_not_deny_and_says_so,
              case_r1_a_state_that_cannot_be_removed_does_not_pass_every_later_ask,
