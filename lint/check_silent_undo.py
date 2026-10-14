@@ -93,14 +93,16 @@ def allowed(cwd, rng):
 def misplaced(cwd, rng):
     """Hint lines for commits of the range with a line that starts `Drops-lines:` and that git did not read as a trailer
     (it is not in the last paragraph, so it excuses nothing). A hint never excuses a finding."""
-    fmt = "%H%x00%(trailers:key=" + TRAILER + ",valueonly)%x00%B%x01"
+    key = re.compile(r"^" + TRAILER + r":", re.I | re.M)
     out = []
-    for rec in git(cwd, "log", "--format=" + fmt, rng)[1].split("\x01"):
-        if rec.count("\x00") < 2:
-            continue
-        sha, got, body = rec.strip("\n").split("\x00", 2)
-        if len(re.findall(r"^" + TRAILER + r":", body, re.I | re.M)) > len([l for l in got.splitlines() if l.strip()]):
-            out.append("%s has a %s: line, read not as a trailer: put it in the last paragraph, with Co-Authored-By." % (sha[:9], TRAILER))
+    try:  # the hint is an extra: a failed read of it never changes the verdict
+        for sha in git(cwd, "log", "-i", "--grep=^" + TRAILER + ":", "--format=%H", rng)[1].split():  # one read per commit: no body byte can split a record
+            body = git(cwd, "log", "-1", "--format=%B", sha)[1]
+            got = git(cwd, "log", "-1", "--format=%(trailers:key=" + TRAILER + ",unfold)", sha)[1]  # keys, not values: an empty or folded trailer counts once
+            if len(key.findall(body)) > len(key.findall(got)):
+                out.append("%s has a %s: line, read not as a trailer: put it in the last paragraph, with Co-Authored-By." % (sha[:9], TRAILER))
+    except Unknown:
+        pass  # ponytail: a failed read gives no hint, and no note; the finding and its exit code stand
     return out
 
 
