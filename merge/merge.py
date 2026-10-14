@@ -83,7 +83,12 @@ def git(cwd, *a, input=None):
 
 SETTLE_SECONDS = 30
 NET_RETRIES, NET_PAUSE = 3, 5  # owner ruling 2026-10-13: retry a network error 3 times, a short pause between
-RATE_WAIT_CAP = 60  # seconds: a Retry-After or reset time can say an hour, and one wait must not hang the merge past its own retries
+RATE_WAIT_CAP = 60  # seconds: a real gh call shows no Retry-After header, and a GitHub secondary limit needs about a minute; 3 retries bound the wait at 180 s
+# A rate-limit text (gh prints these on a 403): the wrapped HTTPError line, the GraphQL line, and `gh api`'s last line. Same anchors as the 5xx forms.
+_RATE_WRAPPED = r"(?:^|: )HTTP 403: (?:API rate limit|You have exceeded a secondary rate limit)[^\n]*\(https?://\S+\)\s*$"
+_RATE_GRAPHQL = r"^GraphQL: (?:API rate limit (?:already )?exceeded|You have exceeded a secondary rate limit)"
+_RATE_API_TAIL = r"gh: (?:API rate limit|You have exceeded a secondary rate limit)[^\n]*\(HTTP 403\)\s*\Z"
+RATE_LIMIT = re.compile(f"{_RATE_WRAPPED}|{_RATE_GRAPHQL}|{_RATE_API_TAIL}", re.I | re.M)
 # A network error, anchored on the error line, never on refusal text (a PR title "#502 Bad Gateway fix" is no match):
 # gh's Go transport error `Post "https://...": <cause>`, gh's offline line, gh's own server-error lines at the start of a line
 # (`HTTP 502 (url)`, `HTTP 500: ...`, `gh: HTTP 503`, `gh: Server Error (HTTP 502)`, `GraphQL: Something went wrong ...`),
@@ -95,8 +100,7 @@ RATE_WAIT_CAP = 60  # seconds: a Retry-After or reset time can say an hour, and 
 NET_ERROR = re.compile(r"(?:^|: )(?:(?:Post|Get|Put|Patch|Delete|Head) \x22https?://[^\x22\s]*\x22: |error connecting to )"
                        r"|^(?:gh: )?(?:Server Error \()?HTTP (?:5\d\d|429)\b|^GraphQL: Something went wrong"
                        r"|(?:^|: )HTTP (?:5\d\d|429)(?:: [^\n]*)? \(https?://\S+\)\s*$"
-                       r"|(?:^|: )HTTP 403: (?:API rate limit|You have exceeded a secondary rate limit)[^\n]*\(https?://\S+\)\s*$"
-                       r"|^GraphQL: (?:API rate limit (?:already )?exceeded|You have exceeded a secondary rate limit)"
+                       f"|{_RATE_WRAPPED}|{_RATE_GRAPHQL}"
                        r"|^invalid character '<' looking for beginning of value"
                        r"|^(?:fatal|error): .*(?:Could not resolve (?:host|proxy)|Failed to connect|Connection was reset|connection reset|connection refused|connectex|wsarecv|"
                        r"schannel|unable to access '[^']*': .*\bSSL\b|GnuTLS|timed out|context deadline exceeded|Recv failure|the remote end hung up|early EOF|RPC failed|returned error: 5\d\d|"
@@ -104,31 +108,26 @@ NET_ERROR = re.compile(r"(?:^|: )(?:(?:Post|Get|Put|Patch|Delete|Head) \x22https
                        r"|^ssh: (?:connect to host|Could not resolve hostname)|^kex_exchange_identification\b|^unexpected end of JSON input", re.I | re.M)
 # `gh api` on a 5xx prints the body to stdout with no newline, then its own line to stderr. Measured with gh 2.98.0:
 # `{"message": "Server Error"}gh: Server Error (HTTP 502)` and `<html>...</html>gh: HTTP 502`. That line ends the output.
-GH_API_TAIL = re.compile(r"gh: (?:[^\n]*\()?HTTP (?:5\d\d|429)\)?\s*\Z|gh: (?:API rate limit|You have exceeded a secondary rate limit)[^\n]*\(HTTP 403\)\s*\Z", re.I)
+GH_API_TAIL = re.compile(r"gh: (?:[^\n]*\()?HTTP (?:5\d\d|429)\)?\s*\Z|" + _RATE_API_TAIL, re.I)
 
 def is_net(c, out):
     """A failed call whose output is a network error line. JSON is gh's answer (a check named EOF), not its error line,
     unless gh's own 5xx line ends it."""
     return bool(c and (GH_API_TAIL.search(out) or (NET_ERROR.search(out) and not out.lstrip().startswith(("[", "{")))))
 
-def net_wait(out, now=None):
-    """Seconds to wait before a retry. A `Retry-After: <s>` or `X-Ratelimit-Reset: <epoch s>` header line in `out` sets it (1 s over, never
-    below 1, never above RATE_WAIT_CAP); a reset time needs `now`, the host's clock. No hint: NET_PAUSE."""
-    m = re.search(r"^retry-after:[ 	]*(\d+)[ 	]*$", out, re.I | re.M)
-    if m:
-        return min(int(m[1]) + 1, RATE_WAIT_CAP)
-    m = now and re.search(r"^x-ratelimit-reset:[ 	]*(\d+)[ 	]*$", out, re.I | re.M)
-    return NET_PAUSE if not m else min(max(int(m[1]) - now(), 0) + 1, RATE_WAIT_CAP)
+def net_wait(out):
+    """Seconds to wait before a retry: RATE_WAIT_CAP on a rate-limit text, else NET_PAUSE."""
+    return RATE_WAIT_CAP if RATE_LIMIT.search(out) else NET_PAUSE
 
-def retry_net(call, pause, retries=NET_RETRIES, now=None):
-    """-> (code, output, retries used). Runs `call` again after `pause(net_wait(...))` while it fails with a network error, up to `retries` times."""
+def retry_net(call, pause, retries=NET_RETRIES):
+    """-> (code, output, retries used). Runs `call` again after `pause(net_wait(out))` while it fails with a network error, up to `retries` times."""
     n = 0
     while True:
         c, out = call()
         if n >= retries or not is_net(c, out):
             return c, out, n
         n += 1
-        pause(net_wait(out, now))
+        pause(net_wait(out))
 
 UNDO_MEMO = {}
 
@@ -372,7 +371,7 @@ class Host:
         """-> (code, output). The one home of every Host `gh` call. A network error is retried NET_RETRIES times with
         `self.pause`; after that NetStop. Any other failure returns at once. `self.net_retries` counts the retries
         of the last call. ponytail: no retry inside `shared_deadline` (the guard's hard hook budget has no room for a pause)."""
-        c, out, self.net_retries = retry_net(lambda: sh(["gh", *args], cwd=cwd), self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, self.now)
+        c, out, self.net_retries = retry_net(lambda: sh(["gh", *args], cwd=cwd), self.pause, NET_RETRIES if _READ_DEADLINE is None else 0)
         if is_net(c, out):
             raise NetStop(f"network error from `gh {' '.join(args[:2])}`, still failing after {self.net_retries} retries. Nothing was reverted. Run again.\n{out}")
         return c, out
