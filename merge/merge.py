@@ -85,19 +85,26 @@ SETTLE_SECONDS = 30
 NET_RETRIES, NET_PAUSE = 3, 5  # owner ruling 2026-10-13: retry a network error 3 times, a short pause between
 # A network error, anchored on the error line, never on refusal text (a PR title "#502 Bad Gateway fix" is no match):
 # gh's Go transport error `Post "https://...": <cause>`, gh's offline line, gh's own server-error lines at the start of a line
-# (`HTTP 502 (url)`, `HTTP 500: ...`, `gh: HTTP 503`, `gh: Server Error (HTTP 502)`, `GraphQL: Something went wrong ...`), a truncated reply,
-# git's transport lines. Never free text: a PR title "Fix (HTTP 502 retry)" or a check "build: HTTP 500 guard" is no match.
-# The one home: Host.gh, the fetch and the lock read all ask it.
+# (`HTTP 502 (url)`, `HTTP 500: ...`, `gh: HTTP 503`, `gh: Server Error (HTTP 502)`, `GraphQL: Something went wrong ...`),
+# gh's HTTPError after a command's prefix (`failed to get runs: HTTP 502: 502 Bad Gateway (https://...)`; a title has no
+# trailing url), `--jq` on an HTML gateway page, a truncated reply, git's transport lines (SSL only after curl's
+# `unable to access '<url>': `, so a branch `ssl-fix` is no match). Never free text: a PR title "Fix (HTTP 502 retry)"
+# or a check "build: HTTP 500 guard" is no match. The one home: Host.gh, the fetch and both lock reads ask is_net.
 NET_ERROR = re.compile(r"(?:^|: )(?:(?:Post|Get|Put|Patch|Delete|Head) \x22https?://[^\x22\s]*\x22: |error connecting to )"
                        r"|^(?:gh: )?(?:Server Error \()?HTTP (?:5\d\d|429)\b|^GraphQL: Something went wrong"
+                       r"|HTTP (?:5\d\d|429)(?:: [^\n]*)? \(https?://\S+\)\s*$|^invalid character '<' looking for beginning of value"
                        r"|^(?:fatal|error): .*(?:Could not resolve (?:host|proxy)|Failed to connect|Connection was reset|connection reset|connection refused|connectex|wsarecv|"
-                       r"schannel|\bSSL\b|GnuTLS|timed out|context deadline exceeded|Recv failure|the remote end hung up|early EOF|RPC failed|returned error: 5\d\d|"
+                       r"schannel|unable to access '[^']*': .*\bSSL\b|GnuTLS|timed out|context deadline exceeded|Recv failure|the remote end hung up|early EOF|RPC failed|returned error: 5\d\d|"
                        r"HTTP/2 stream|Empty reply from server|Failed sending data)"
                        r"|^ssh: (?:connect to host|Could not resolve hostname)|^kex_exchange_identification\b|^unexpected end of JSON input", re.I | re.M)
+# `gh api` on a 5xx prints the body to stdout with no newline, then its own line to stderr. Measured with gh 2.98.0:
+# `{"message": "Server Error"}gh: Server Error (HTTP 502)` and `<html>...</html>gh: HTTP 502`. That line ends the output.
+GH_API_TAIL = re.compile(r"gh: (?:[^\n]*\()?HTTP (?:5\d\d|429)\)?\s*\Z", re.I)
 
 def is_net(c, out):
-    """A failed call whose output is a network error line. JSON is gh's answer (a check named EOF), not its error line."""
-    return bool(c and NET_ERROR.search(out) and not out.lstrip().startswith(("[", "{")))
+    """A failed call whose output is a network error line. JSON is gh's answer (a check named EOF), not its error line,
+    unless gh's own 5xx line ends it."""
+    return bool(c and (GH_API_TAIL.search(out) or (NET_ERROR.search(out) and not out.lstrip().startswith(("[", "{")))))
 
 def retry_net(call, pause, retries=NET_RETRIES):
     """-> (code, output, retries used). Runs `call` again after `pause(NET_PAUSE)` while it fails with a network error, up to `retries` times."""
@@ -258,16 +265,18 @@ class GitLock(Lock):
 
 class GhLock(Lock):
     """Real use: the GitHub API. The API refuses a ref that exists, so one run wins."""
-    def __init__(self, now=time.time):
-        self.now = now
+    def __init__(self, now=time.time, pause=time.sleep):
+        self.now, self.pause = now, pause
 
     def api(self, *a):
         c, out = sh(["gh", "api", *a])
         return c, out
 
     def read(self, b):
-        c, sha = self.api(f"repos/{{owner}}/{{repo}}/git/ref/merge-lock/{b}", "--jq", ".object.sha")
+        c, sha, _ = retry_net(lambda: self.api(f"repos/{{owner}}/{{repo}}/git/ref/merge-lock/{b}", "--jq", ".object.sha"), self.pause)
         if c:
+            if is_net(c, sha):  # first: a 5xx reply whose url holds "404" is no proof the lock is gone
+                raise NetStop("cannot read the merge lock: " + sha)
             if "404" in sha or "Not Found" in sha:
                 return None
             raise Stop("cannot read the merge lock: " + sha)
