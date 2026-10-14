@@ -97,7 +97,7 @@ Owner rulings, 2026-10-08:
 
 ## Holes, named
 
-Round 3 review. Each finding stays open at the cap.
+Round 2 and round 3 reviews. Each finding stays open.
 
 - A decorated Goal line earlier in the question, such as `- goal: old`, masks a real
   Problem-first order. The order check reads that line first, so it passes. Presence passes
