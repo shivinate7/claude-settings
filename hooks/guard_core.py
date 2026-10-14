@@ -420,16 +420,17 @@ _SEGMENT_BREAK = re.compile(r"(&&|\|\||[;|\n])")
 
 def _without_message_values(cmd: str) -> str:
     """Blank each message value of a commit or a pull request, so prose naming a shell reads as
-    text. The detectors are guard_env's own (imported late: guard_env imports this file)."""
+    text. The blanking is guard_env's own (imported late: guard_env imports this file)."""
     if "commit" not in cmd and "create" not in cmd:
         return cmd
-    from guard_env import ENV_MESSAGE_ARG, ENV_MESSAGE_COMMAND
-    return "".join(ENV_MESSAGE_ARG.sub(r"\g<flag>", part) if ENV_MESSAGE_COMMAND.match(part) else part
-                   for part in _SEGMENT_BREAK.split(cmd))
+    from guard_env import _blank_messages
+    return "".join(_blank_messages(part) for part in _SEGMENT_BREAK.split(cmd))
 
 
 def _interpreter_header(words: str):
-    return re.compile(r"(?<![\w-])(?:[\w.~-]*/)*(?:" + words + r")(?:\.exe)?(?![\w.-])[^\n]*<<").search
+    # The word stands alone or ends a path or a name (`/usr/bin/bash`, `ts-node`, `node.cmd`);
+    # the lookahead alone keeps `node-notes.md` and `bash-tips.md` text.
+    return re.compile(r"(?<!\w)(?:" + words + r")(?:\.exe|\.cmd)?(?![\w.-])[^\n]*<<").search
 
 
 SHELL_HEREDOC = _interpreter_header("bash|sh|zsh|dash|ksh|pwsh|powershell")
