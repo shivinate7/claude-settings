@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. Also warns when the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, a freshness check could not run, or the SessionEnd sweep is disarmed or unknown.
+# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, a freshness check could not run, or the SessionEnd sweep is disarmed or unknown.
 # Silent outside a git tree or when git is missing. Always exits 0, nothing on stderr.
 
 input=$(cat 2>/dev/null)
@@ -33,6 +33,22 @@ branch=$(cd "$cwd" 2>/dev/null && git rev-parse --abbrev-ref HEAD 2>/dev/null)
 n=$(cd "$cwd" 2>/dev/null && git status --porcelain 2>/dev/null | wc -l | tr -d '[:space:]')
 
 printf 'checkout %s on %s, %s dirty files\n' "$toplevel" "$branch" "$n"
+
+# core.worktree in the SHARED config re-points every checkout of the clone at one tree. Incident
+# (q_max, 2026-10-14): a test's child `git init` inherited GIT_DIR and GIT_WORK_TREE and wrote it.
+# Warns only, never fixes: the value may be someone's live work. `git config` exits 0 when the
+# key is set, 1 when it is absent, and above 1 when the read failed, which is reported as unknown,
+# never as clear. A submodule sets this key on purpose, so it is skipped.
+if [ -z "$(cd "$cwd" 2>/dev/null && git rev-parse --show-superproject-working-tree 2>/dev/null)" ]; then
+  core_worktree=$(cd "$cwd" 2>/dev/null && git config --local --get core.worktree 2>/dev/null)
+  core_worktree_rc=$?
+  if [ "$core_worktree_rc" -eq 0 ]; then
+    printf 'checkout %s: core.worktree is set to %s in the shared git config; every checkout of this clone reads that tree. Unset it with git config --local --unset core.worktree\n' \
+      "$cwd" "$core_worktree"
+  elif [ "$core_worktree_rc" -gt 1 ]; then
+    printf 'checkout %s: cannot read core.worktree from the git config; its state is unknown\n' "$cwd"
+  fi
+fi
 
 # Divergence check: does ~/.claude/CLAUDE.md's pointer target match this checkout's CLAUDE.md?
 # Same parsing as settings.json's refresh hook. Silent on any missing/unreadable piece.

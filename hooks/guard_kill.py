@@ -464,8 +464,57 @@ _PRINTF_DIRECTIVE = re.compile(r"%%|%[-+ #0-9.]*[a-zA-Z]|\\[nrtabfv\\]")
 _REDIRECT_TO_PROFILE = re.compile(r">+\|?\s*[^\s|;&]*" + PLAYWRIGHT_PROFILE.pattern)
 
 
-def _is_playwright_assign(token: str) -> bool:
-    return bool(ASSIGNMENT.match(token)) and token.split("=", 1)[0].upper() == PLAYWRIGHT_VAR
+# A watched set of variable names: (names, fold_case). The Playwright rule folds the name to upper
+# case in every form. The git rule does not in a POSIX shell, because `git_dir=$(...)` is a plain
+# shell variable there; PowerShell's `env:` is case-blind and is read with re.I below.
+PLAYWRIGHT_WATCH = ((PLAYWRIGHT_VAR,), True)
+GIT_ENV_WATCH = (("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"), False)
+_ASSIGN_NAME = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\+?=")
+
+
+def _assigned_var(token: str, watch) -> str:
+    """The watched name a `VAR=value` (or `VAR+=value`) token assigns, else ''."""
+    found = _ASSIGN_NAME.match(token)
+    name = (found.group(1).upper() if watch[1] else found.group(1)) if found else ""
+    return name if name in watch[0] else ""
+
+
+_PS_CMDLETS = ("set-item", "si", "new-item", "ni", "set-content", "sc")
+_PS_UNSET = ("$null", "")
+
+
+def _ps_env_set(tokens, watch) -> str:
+    """Return the matched text when a PowerShell statement sets a watched name in the process
+    environment, else ''. Reads the statement's own tokens, so a name inside quoted text, which
+    is one token, never fires. A statement starts at the first token, or after `{`, `(` or `&`.
+    `$env:X = $null` and an empty value unset the name and pass."""
+    alt = "|".join(map(re.escape, watch[0]))
+    start = _skip_assignments_and_keywords(tokens)
+    for i, tok in enumerate(tokens):
+        if i != start and not (i and (tokens[i - 1] in ("{", "(", "&") or tokens[i - 1].endswith("{"))):
+            continue
+        found = re.fullmatch(r"\$\{?env:(" + alt + r")\}?(?:([-+*/]?=)(.*))?", tok, re.I | re.S)
+        if found:
+            if found.group(2):
+                value = found.group(3) or "".join(tokens[i + 1:i + 2])
+            elif re.fullmatch(r"[-+*/]?=", "".join(tokens[i + 1:i + 2])):
+                value = "".join(tokens[i + 2:i + 3])
+            else:
+                continue
+            if value not in _PS_UNSET:
+                return "$env:" + found.group(1)
+            continue
+        if basename(tok).lower() in _PS_CMDLETS:
+            rest = tokens[i + 1:]
+            named = [m.group(1) for t in rest if (m := re.fullmatch(
+                r"(?:-\w+:)?env:\\?(" + alt + ")", t, re.I))]
+            if named and rest[-1] not in _PS_UNSET:
+                return tok + " env:" + named[0]
+        found = re.search(r"SetEnvironmentVariable\s*\(\s*(" + alt + r")\s*,(.*)",
+                          " ".join(tokens[i:i + 4]), re.I)
+        if found and not re.match(r"\s*(?:\$null\b|,|\)|$)", found.group(2)):
+            return "SetEnvironmentVariable " + found.group(1)
+    return ""
 
 
 
@@ -510,14 +559,14 @@ def _playwright_install_hit(word, rest, who) -> str:
     return "" if allowed and who == "main" else "playwright install"
 
 
-def _playwright_tokens_hit(tokens, depth=0, install=None) -> str:
+def _playwright_tokens_hit(tokens, depth=0, install=None, watch=PLAYWRIGHT_WATCH) -> str:
     tokens = [t for t in ([tokens[0].lstrip("(")] + tokens[1:] if tokens else []) if t]
     if not tokens or depth > 3:
         return ""
     at = resolve_command(tokens)
-    if not install and any(
-            _is_playwright_assign(t) for t in tokens[:len(tokens) if at is None else at]):
-        return PLAYWRIGHT_VAR + " assignment"
+    for t in ([] if install else tokens[:len(tokens) if at is None else at]):
+        if _assigned_var(t, watch):
+            return _assigned_var(t, watch) + " assignment"
     if at is None:
         return ""
     word, rest = basename(tokens[at]).lower(), tokens[at + 1:]
@@ -525,10 +574,10 @@ def _playwright_tokens_hit(tokens, depth=0, install=None) -> str:
         hit = _playwright_install_hit(word, rest, install)
         if hit:
             return hit
-    elif word in ASSIGNING_BUILTINS and any(_is_playwright_assign(t) for t in rest):
-        return word + " " + PLAYWRIGHT_VAR
+    elif word in ASSIGNING_BUILTINS and any(_assigned_var(t, watch) for t in rest):
+        return word + " " + next(_assigned_var(t, watch) for t in rest if _assigned_var(t, watch))
     if word in ("builtin", "exec"):
-        return _playwright_tokens_hit(rest, depth + 1, install)
+        return _playwright_tokens_hit(rest, depth + 1, install, watch)
     npx_script = ""
     if word == "npx":
         # `npx -c 'script'` runs the string in a shell: walk it like `sh -c`.
@@ -541,8 +590,8 @@ def _playwright_tokens_hit(tokens, depth=0, install=None) -> str:
         for token in rest:
             if not ASSIGNMENT.match(token):
                 break
-            if _is_playwright_assign(token) and not install:
-                return word + " " + PLAYWRIGHT_VAR
+            if _assigned_var(token, watch) and not install:
+                return word + " " + _assigned_var(token, watch)
     script = " ".join(rest[1:]) if word in CMD_EXE_NAMES and rest and rest[0].lower() in (
         "/c", "/k") else None
     if script is None:
@@ -550,15 +599,16 @@ def _playwright_tokens_hit(tokens, depth=0, install=None) -> str:
             _pwsh_script(tokens) if word in PLAYWRIGHT_PS_SHELLS else inline_script(tokens)))
     for segment in split_segments(script) if script else ():
         hit = playwright_path_hit(segment, depth + 1, ps_inner=word in PLAYWRIGHT_PS_SHELLS,
-                                  install=install)
+                                  install=install, watch=watch)
         if hit:
             return hit
     return ""
 
 
 def playwright_path_hit(segment: str, depth=0, to_file=False, ps_inner=False,
-                        install=None) -> str:
-    """Return the matched text when a segment sets PLAYWRIGHT_BROWSERS_PATH, else ''.
+                        install=None, watch=PLAYWRIGHT_WATCH) -> str:
+    """Return the matched text when a segment sets a watched name (PLAYWRIGHT_BROWSERS_PATH
+    unless `watch` names others), else ''.
 
     `to_file` says the segment's output goes to a profile (a `tee` further down the pipe). The
     file-write form counts only when the written text starts with the assignment.
@@ -572,7 +622,11 @@ def playwright_path_hit(segment: str, depth=0, to_file=False, ps_inner=False,
     outer_ps = word in PLAYWRIGHT_PS_SHELLS and not _pwsh_script(tokens)
     if (POWERSHELL_CALL[0] or outer_ps or ps_inner) and word not in (
             ENV_PATTERN_COMMANDS + PLAYWRIGHT_PS_READERS):
-        found = PLAYWRIGHT_PS_SET.search(segment)
+        if watch is not PLAYWRIGHT_WATCH:
+            hit = _ps_env_set(tokens, watch)
+            if hit:
+                return hit
+        found = PLAYWRIGHT_PS_SET.search(segment) if watch is PLAYWRIGHT_WATCH else None
         # inside pwsh -c, a `$env:` text counts only as a statement, not inside another command's argument
         if found and not (ps_inner and found.group(0).startswith(("$", "{")) and not re.match(
                 r"\s*" + re.escape(found.group(0)), segment)):
@@ -584,16 +638,17 @@ def playwright_path_hit(segment: str, depth=0, to_file=False, ps_inner=False,
         if basename(tokens[0]) == "printf":   # drop printf directives and escapes, keep the text
             words = [_PRINTF_DIRECTIVE.sub("", t) for t in words]
         written = " ".join(w for w in words if w)
-        if _is_playwright_assign(written.removeprefix("export ").lstrip()):
-            return PLAYWRIGHT_VAR + " written to a file"
-    return _playwright_tokens_hit(tokens, depth)
+        name = _assigned_var(written.removeprefix("export ").lstrip(), watch)
+        if name:
+            return name + " written to a file"
+    return _playwright_tokens_hit(tokens, depth, watch=watch)
 
 
-def playwright_command_hit(raw: str, stripped: str) -> str:
+def playwright_command_hit(raw: str, stripped: str, watch=PLAYWRIGHT_WATCH) -> str:
     """Judge a whole command: each segment, plus a profile-bound heredoc body and `tee` pipe."""
     to_file = bool(re.search(r"\btee\b[^|;&]*" + PLAYWRIGHT_PROFILE.pattern, stripped))
     for segment in split_segments(stripped):
-        matched = playwright_path_hit(segment, to_file=to_file)
+        matched = playwright_path_hit(segment, to_file=to_file, watch=watch)
         if matched:
             return matched
     kept, bodies = _split_heredocs(raw)
@@ -601,10 +656,31 @@ def playwright_command_hit(raw: str, stripped: str) -> str:
     for header, (_, body) in zip(headers, bodies):
         if PLAYWRIGHT_PROFILE.search(header):
             for line in body.split("\n"):
-                matched = playwright_path_hit(line)
+                matched = playwright_path_hit(line, watch=watch)
                 if matched:
                     return matched
     return ""
+
+
+# GIT LOCATION VARIABLES. Incident (q_max, 2026-10-14 02:41-02:47 CDT): an agent set GIT_DIR and
+# GIT_WORK_TREE in PowerShell, then a test's child `git init` inherited them and wrote
+# core.worktree into the shared .git/config. Every checkout then read the wrong tree. One walk
+# with the Playwright rule (same segments, same wrappers, same `sh -c`/`eval`/`pwsh -c` reach),
+# with a different watch list and a quote-safe PowerShell reader. KNOWN LIMITS: those of the
+# Playwright rule, plus `VAR+=x cmd` as an inline prefix and PowerShell `New-Item` forms beyond
+# the cmdlets listed in `_PS_CMDLETS`. `git --git-dir` and `git -C` are options, not sets.
+def git_env_command_hit(raw: str, stripped: str) -> str:
+    """Judge a whole command for a set of GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE."""
+    return playwright_command_hit(raw, stripped, GIT_ENV_WATCH)
+
+
+GIT_ENV_REASON = (
+    "a shell that sets the git location variables points every child git at another tree. "
+    "Measured in q_max on 2026-10-14: a test's child `git init` inherited them and wrote "
+    "core.worktree into the shared config, and every checkout read the wrong tree. "
+    "Remedy: pass the repo path with `git -C <dir>`, or scrub every GIT_* name from the child's "
+    "own environment."
+)
 
 
 def playwright_install_hit(stripped: str, subagent: bool) -> str:
