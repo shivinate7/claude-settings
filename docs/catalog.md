@@ -6,7 +6,7 @@ Run `python3 lint/hook_catalog.py` to write the page again. CI runs `python3 lin
 
 Where each text comes from:
 
-- A hook runs a script. Its text is the first paragraph of the script docstring, or the leading comment block of a shell script.
+- A hook runs a script. Its text is the first paragraph of the script docstring, or the leading comment block of a shell script. A hook whose command is inline shell has no script, so its text is one line in `lint/hook_catalog_inline.json`, under its event and matcher.
 - A judge is a prompt hook that a model answers. Its key is the first sentence of the prompt. Its text is the rest of the prompt, up to the standard clause that blocks only on a clear breach.
 - A mod is an enabled mod from this repo. Its text is the intro of its `README.md`. A mod with no README takes the `description` in its `plugin.json`, then the text of its `SOURCE.md`.
 - A skill is a folder under `skills/`. Its text is the `description` in its `SKILL.md` frontmatter.
@@ -30,8 +30,8 @@ Model and effort come from the model table (decision `subagent-model-cap`, the m
 | `hooks/precompact_handoff.py` | hook | PreCompact | - | - | no model | n/a | Claude Code hook: get the session's handoff ready before compaction. |
 | `hooks/precompact_handoff.py` | hook | SessionStart | compact | - | no model | n/a | Claude Code hook: get the session's handoff ready before compaction. |
 | `hooks/precompact_handoff.py` | hook | SessionStart | clear\|fork | - | no model | n/a | Claude Code hook: get the session's handoff ready before compaction. |
-| `hooks/session_refresh.sh` | hook | SessionStart | startup\|resume | - | no model | n/a | Pulls the claude-settings clone and runs its install.sh, at session start and resume. Finds the clone through the @ pointer in the global CLAUDE.md. Exits at once in cloud sessions. A failed pull or install falls through, and the script always exits 0. |
-| `hooks/session_start.sh` | hook | SessionStart | startup\|resume | - | no model | n/a | Prints "checkout `<toplevel>` on `<branch>`, `<n>` dirty files" at session start and resume. Silent outside a git tree or when git is missing. Always exits 0, nothing on stderr. |
+| `inline: SessionStart matcher=startup\|resume` | hook | SessionStart | startup\|resume | - | no model | n/a | Pulls the claude-settings clone with a fast-forward pull, then runs its install.sh. Does nothing in cloud sessions. A failed pull or install falls through, and the command always exits 0. |
+| `hooks/session_start.sh` | hook | SessionStart | startup\|resume | - | no model | n/a | Prints "checkout `<toplevel>` on `<branch>`, `<n>` dirty files" at session start and resume. Also warns when the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, a freshness check could not run, or the SessionEnd sweep is disarmed or unknown. Silent outside a git tree or when git is missing. Always exits 0, nothing on stderr. |
 | `janitor/session_end_sweep.py` | hook | SessionEnd | - | - | no model | n/a | Claude Code hook: SessionEnd trigger for janitor/sweep.py. |
 | `hooks/precompact_handoff.py` | hook | SessionEnd | clear | - | no model | n/a | Claude Code hook: get the session's handoff ready before compaction. |
 | `janitor/agent_end_reap.py` | hook | SubagentStop | - | - | no model | n/a | Claude Code hook: stop the processes a finished subagent left in its own worktree. |
@@ -49,8 +49,8 @@ Model and effort come from the model table (decision `subagent-model-cap`, the m
 | `hooks/reread_check.py` | hook | PreToolUse | Read | - | no model | n/a | Claude Code hook: after compaction, check the session re-read its handoff. |
 | `hooks/rm_prompt_answer.py` | hook | PermissionRequest | Bash | - | no model | n/a | PermissionRequest hook on Bash: answer allow for a guarded delete of a bound, safe path. |
 | `hooks/agent_brief.py` | hook | SubagentStart | - | - | no model | n/a | SubagentStart hook: give every spawned agent the standing rules, so briefs stop retyping them. |
-| `hooks/local_time.py` | hook | SubagentStart | - | - | no model | n/a | UserPromptSubmit and SubagentStart hook: tell the session the time in US Central (America/Chicago). |
-| `hooks/local_time.py` | hook | UserPromptSubmit | - | - | no model | n/a | UserPromptSubmit and SubagentStart hook: tell the session the time in US Central (America/Chicago). |
+| `hooks/local_time.py` | hook | SubagentStart | - | - | no model | n/a | UserPromptSubmit and SubagentStart hook: tell the session the time in US Central (America/Chicago). On UserPromptSubmit it also captures owner feedback: a prompt that opens with `fb` is saved to the session's inbox file until a prompt of `fb done`. |
+| `hooks/local_time.py` | hook | UserPromptSubmit | - | - | no model | n/a | UserPromptSubmit and SubagentStart hook: tell the session the time in US Central (America/Chicago). On UserPromptSubmit it also captures owner feedback: a prompt that opens with `fb` is saved to the session's inbox file until a prompt of `fb done`. |
 | `hooks/config_watch.py` | hook | PostToolUse | Bash\|PowerShell\|Write\|Edit\|MultiEdit\|NotebookEdit | - | no model | n/a | The PostToolUse and Stop watch on the subagent model cap. |
 | `hooks/ci_wake.py` | hook | PostToolUse | Bash\|PowerShell | - | no model | n/a | CI wake-up hook. Standard library only. See decisions/handoff-hooks-wave-2.md, part 3. |
 | `hooks/sim_boot_record.py` | hook | PostToolUse | Bash\|mcp__Claude_Code_iOS_Simulator__control | - | no model | n/a | Record each simulator a session call booted (decisions/sweep-shuts-down-idle-simulators.md, ruling 1). |

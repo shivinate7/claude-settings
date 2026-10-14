@@ -16,6 +16,9 @@ Sources, all read from the root:
   settings.json `hooks`   one row per registration (event, matcher, `if`, command or prompt).
   a command's script      the first paragraph of a .py docstring, or the leading comment block
                           of a .sh script, after an optional shebang.
+  an inline command       a command that names no script has no docstring. Its text is the
+                          value in lint/hook_catalog_inline.json under its registration label
+                          (event, then " matcher=<m>" and " if=<c>" when set). The one home.
   a prompt hook           the key is its first sentence. The text is the rest of the prompt,
                           up to the clause that blocks only on a clear breach.
   enabled repo mods       `enabledPlugins` keys `<name>@claude-settings` set true. The text is
@@ -43,6 +46,7 @@ from check_skill_model_rows import skill_names  # noqa: E402  one home for "a sk
 ROOT = os.path.abspath(os.environ.get("HOOK_CATALOG_ROOT") or os.path.dirname(HERE))
 PAGE = "docs/catalog.md"
 TABLE = "decisions/subagent-model-cap.md"
+INLINE = "lint/hook_catalog_inline.json"
 REGEN = "python3 lint/hook_catalog.py"
 COLUMNS = ["Key", "Kind", "Event", "Matcher", "If", "Model", "Effort", "What it does"]
 CMD_PATH = re.compile(r"\$\{CLAUDE_CONFIG_DIR:-\$HOME/\.claude\}/([\w./-]+\.(?:py|sh|mjs|js))")
@@ -235,6 +239,19 @@ def registrations(settings):
                 yield event, entry.get("matcher", "-"), hook.get("if", "-"), hook
 
 
+def inline_summaries():
+    """{registration label: one-line summary} for the hooks whose command names no script."""
+    if not has_file(INLINE):
+        return {}  # no inline command needs it: a command that has none reports its own problem
+    try:
+        found = json.loads(read(INLINE))
+    except ValueError as err:
+        raise Unreadable(INLINE) from err
+    if not isinstance(found, dict):
+        raise Unreadable(INLINE)
+    return found
+
+
 def model_table():
     """{script path: (model, effort)} for each model-table row that names a script."""
     found = {}
@@ -260,7 +277,7 @@ Run `%(regen)s` to write the page again. CI runs `%(regen)s --check`. The check 
 
 Where each text comes from:
 
-- A hook runs a script. Its text is the first paragraph of the script docstring, or the leading comment block of a shell script.
+- A hook runs a script. Its text is the first paragraph of the script docstring, or the leading comment block of a shell script. A hook whose command is inline shell has no script, so its text is one line in `lint/hook_catalog_inline.json`, under its event and matcher.
 - A judge is a prompt hook that a model answers. Its key is the first sentence of the prompt. Its text is the rest of the prompt, up to the standard clause that blocks only on a clear breach.
 - A mod is an enabled mod from this repo. Its text is the intro of its `README.md`. A mod with no README takes the `description` in its `plugin.json`, then the text of its `SOURCE.md`.
 - A skill is a folder under `skills/`. Its text is the `description` in its `SKILL.md` frontmatter.
@@ -288,6 +305,8 @@ def render():
     """(page text, problems). A problem is one line that names its offender."""
     settings = load_settings()
     models = model_table()
+    inline = inline_summaries()
+    used = set()
     problems, hook_rows, docs = [], [], {}
 
     def script_row(path, label):
@@ -314,7 +333,14 @@ def render():
         if kind == "command":
             found = CMD_PATH.search(hook.get("command", ""))
             if not found:
-                problems.append("%s: command names no script (inline shell)" % label)
+                text = inline.get(label)
+                if label in used:
+                    problems.append("%s: two inline commands share this label, so %s cannot tell them apart" % (label, INLINE))
+                elif not isinstance(text, str) or not text.strip():
+                    problems.append("%s: inline command has no summary in %s under this label" % (label, INLINE))
+                else:
+                    hook_rows.append([key_cell("inline: " + label), "hook", event, cell(matcher), cell(cond), *NO_MODEL, cell(text)])
+                used.add(label)
                 continue
             path = found.group(1)
             what = script_row(path, label)
@@ -331,6 +357,8 @@ def render():
                               cell(judge_text(prompt, key))])
         else:
             problems.append("%s: hook type %r has no catalog reader" % (label, kind))
+
+    problems += ["%s has an entry that matches no inline command: %s" % (INLINE, k) for k in inline if k not in used]
 
     mod_rows, external = [], []
     for plugin, on in settings.get("enabledPlugins", {}).items():
