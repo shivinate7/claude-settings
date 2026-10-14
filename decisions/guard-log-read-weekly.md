@@ -125,10 +125,10 @@ no traceback.
   It retries only on contention (BlockingIOError, errno 13, EAGAIN, EDEADLK 36), for up to
   `LOG_LOCK_WAIT`, 2 s. After 2 s of contention it writes without the lock. Any other lock error
   writes at once, without the lock and without a wait. So a line can still be lost under a slow
-  holder, or on a lock error. Tests: `lint/test_gates.py`, `GuardLogAppendRaceTests`:
-  `test_19_twenty_parallel_gates_leave_twenty_whole_lines` (every platform),
-  `test_19b_parallel_gates_write_exactly_one_whole_line_each` (exactly 20 lines), and
-  `test_lock_error_that_is_not_contention_returns_at_once`.
+  holder, or on a lock error. Tests in `lint/test_gates.py`: in `SteGateLogTests`,
+  `test_19_twenty_parallel_gates_leave_twenty_whole_lines` (every platform) and
+  `test_19b_parallel_gates_write_exactly_one_whole_line_each` (exactly 20 lines); in
+  `GuardLogAppendRaceTests`, `test_lock_error_that_is_not_contention_returns_at_once`.
 - **Crash path writes without the lock.** When `guard_core` fails to load, `hooks/guard.py`
   lines 253-254 write guard.log with no lock. A line from that path can still be lost to a
   concurrent writer.
