@@ -953,6 +953,8 @@ elif a[:2] == ["pr", "checks"]:
     print(json.dumps([{"name": n, "bucket": b, "link": l} for n, b, l in cur]))
     sys.exit(0 if all(b in ("pass", "skipping") for _, b, _ in cur) else 8)
 elif a[:2] == ["run", "list"]:
+    if S.get("runs_fail"):  # the text of every failing `gh run list`
+        print(S["runs_fail"]); sys.exit(1)
     seq = S.get("runs_seq") or [[]]; cur = seq.pop(0) if len(seq) > 1 else seq[0]; save()
     print(json.dumps([{"name": n, "status": st, "conclusion": c} for n, st, c in cur]))
 elif a[:2] == ["run", "watch"]:
@@ -1356,6 +1358,37 @@ class GhHalf(Env):
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.calls().count("pr merge"), 1)  # a refusal is not retried
         self.assertTrue(self.reverted())
+        self.assertFalse(self.lock_ref())
+
+    def test_a_run_list_http_500_with_green_checks_is_a_network_error_not_not_green(self):
+        # oversight report (q_max #853): every check is green, gh run list answers HTTP 500
+        self.set(runs_fail="HTTP 500: Internal Server Error (https://api.github.com/repos/o/r/actions/runs?head_sha=abc)")
+        before = self.head()
+        rc, out = self.go()
+        self.assertNotIn("not green", out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.calls().count("run list"), 4, out)  # one try and three retries
+        self.assertIn("network", out.lower())
+        self.assertNotIn("pr merge", self.calls())
+        self.assertEqual(self.head(), before)  # nothing claimed or pushed
+        self.assertFalse(self.lock_ref())
+
+    def test_a_merge_lock_read_that_fails_once_with_a_json_error_is_retried_and_the_run_goes_on(self):
+        # Windows credential manager (PR 411, 2026-10-13 20:35): ls-remote of the lock ref fails once, then works
+        real_git = merge.git
+        hits = []
+        def flaky(cwd, *a, input=None):
+            if a[:1] == ("ls-remote",) and a[-1] == "refs/merge-lock/main" and not hits:
+                hits.append(1)
+                return 1, "unexpected end of JSON input"
+            return real_git(cwd, *a, input=input)
+        with unittest.mock.patch.object(merge, "git", flaky):
+            rc, out = self.go()
+        self.assertEqual(hits, [1])  # the first read failed
+        self.assertNotIn("cannot read the merge lock", out)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("pr merge", self.calls())
+        self.assertEqual(self.claims("main"), 1)
         self.assertFalse(self.lock_ref())
 
     def test_green_run_watches_the_run_and_merges_pinned_to_the_claim_head(self):
