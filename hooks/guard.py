@@ -911,8 +911,6 @@ def heredoc_offsets(segments, ends, bodies_kept=True):
             # a body that opens and closes inside one quoted segment (`-m "$(cat <<EOF ... EOF`) is whole
             queue += [d for d in found if not any(line.strip() == d for line in segment.split("\n")[1:])]
             reading = bodies_kept and bool(queue) and end == "\n"
-        if end == "":   # the last segment of one reading: split_segments's second reading counts afresh
-            heads, queue, reading = 0, [], False
     return offsets
 
 
