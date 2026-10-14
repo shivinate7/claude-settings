@@ -201,6 +201,27 @@ class ModVersionTests(unittest.TestCase):
         self.commit_change()
         self.assert_passes()
 
+    def test_folder_move_that_keeps_the_name_and_version_fails(self):
+        # The plugin cache keys by name. The same name at the same version keeps the old installed code.
+        self.base_files()
+        self.commit_base()
+        shutil.rmtree(os.path.join(self.tree, "mods", "alpha"))
+        self.plugin_tree("mods/delta", "alpha", "0.1.0")
+        self.put(MARKET, market_json(["./mods/beta", "./mods/delta"]))
+        self.commit_change()
+        out = self.assert_fails()
+        self.assert_flags(out, "alpha", "0.1.0")
+
+    def test_folder_move_that_keeps_the_name_and_bumps_the_version_passes(self):
+        # Plugins are matched by name, not folder: the same name with a higher version passes.
+        self.base_files()
+        self.commit_base()
+        shutil.rmtree(os.path.join(self.tree, "mods", "alpha"))
+        self.plugin_tree("mods/delta", "alpha", "0.1.1")
+        self.put(MARKET, market_json(["./mods/beta", "./mods/delta"]))
+        self.commit_change()
+        self.assert_passes()
+
     def test_change_outside_plugin_folders_passes(self):
         self.base_files()
         self.commit_base()
