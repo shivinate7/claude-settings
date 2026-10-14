@@ -4086,6 +4086,32 @@ for _name, _command in (
     sh("guard-command-position: wsl pinned, %s allowed" % _name, _command, "allow", cwd=NOGIT)
 
 
+# ---- guard-command-position, review round 1 (lane). Each RED case below is a hole on 707f9dd.
+# A real quote that opens after a letter (`sed -e's/a/b/'`, `cut -d't'`) or closes after one
+# (`x'd'`) is read as a contraction, so the call after it is hidden. A quoted `(wsl` is text, and
+# must allow. A long value flag (`--unset`, `--user`, `--adjustment`, `--max-args`) and the short
+# value flags `-S`, `-P`, `-h` move the verb slot onto the value, as `-u` and `-n` already do.
+# `$( )` outside wsl is a named gap, not covered here.
+for _name, _command in (
+    ("a quote opened after e in a sed flag", "sed -e's/a/b/' f; wsl --shutdown"),
+    ("a quote opened after t in a cut flag", "cut -d't' f; wsl --shutdown"),
+    ("a quote closed after x", "echo x'd'; wsl --shutdown"),
+    ("env with a long unset flag", "env --unset X wsl"),
+    ("sudo with a long user flag", "sudo --user root wsl"),
+    ("nice with a long adjustment flag", "nice --adjustment 5 wsl"),
+    ("xargs with a long max-args flag", "xargs --max-args 1 wsl"),
+    ("env -S with the call in one string", "env -S 'wsl --shutdown'"),
+    ("env -P with a path before the call", "env -P /bin wsl"),
+    ("sudo -h with a host before the call", "sudo -h host wsl"),
+):
+    sh("guard-command-position: wsl %s denies" % _name, _command, "deny", rule=WSL_RULE, cwd=NOGIT)
+for _name, _command in (
+    ("a quoted run with a semicolon after a letter", "echo foo'd; X'"),
+    ("a quoted glued subshell to grep", "grep -r '(wsl' ."),
+):
+    sh("guard-command-position: wsl %s allowed" % _name, _command, "allow", cwd=NOGIT)
+
+
 # =========================================================================== 2d. the silent write
 FAMILY = "write"
 #
@@ -4929,6 +4955,15 @@ for _cmd in (
 ):
     sh("audit-high env regression: a program flag still reads its file, " + _cmd[:24], _cmd,
        "deny", "env-file", cwd=NOGIT)
+
+
+# ---- guard-command-position, review round 1 (lane). Two heredoc headers on one line: the first
+# body ends at its delimiter `A`, and the second body follows that line and ends at `B`.
+# The export is in the second body, which `cat >>` writes into the shell rc file, so the guard
+# must deny. A header read that strips the lines after it hides this write (RED on 707f9dd).
+sh("guard-command-position: playwright, two heredoc headers on one line write the export",
+   "cat >> ~/.zshrc <<A <<'B'\nx\nA\nexport PLAYWRIGHT_BROWSERS_PATH=/x\nB", "deny",
+   "playwright-browsers-path", cwd=NOGIT)
 
 
 # =========================================================================== 5. merge into main
