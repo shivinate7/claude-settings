@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+# ste-changed <base>: lint what the CI ste-lint step lints for the diff <base>...HEAD.
+# It runs actions/ste-lint/run.sh, the one home of the step, with the step's env and defaults
+# read from actions/ste-lint/action.yml. Same output lines, same exit code. <base>: main or origin/main.
+# Excludes: .ste-lint-exclude at the git top level of the repo being linted. EXCLUDE is set to the
+# input default, so an EXCLUDE in the caller's environment is ignored.
+# Windows: bin\ste-changed.cmd. Needs bash (Git for Windows has it) and python3 on PATH.
+import os, re, shutil, subprocess, sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+ACTION = os.path.join(ROOT, "actions", "ste-lint")
+
+
+def out(*a):
+    return subprocess.run(["git", *a], capture_output=True, text=True).stdout.strip()
+
+
+def default(text, name):
+    return re.search(r"^  %s:.*?\n    default: \"([^\"]*)\"" % re.escape(name), text, re.M | re.S).group(1)
+
+
+def find_bash():
+    if os.path.exists("/bin/bash"):
+        return "/bin/bash"
+    git = shutil.which("git")  # a bare "bash" can be WSL's, which cannot run the step
+    if git:
+        gb = os.path.join(os.path.dirname(os.path.dirname(git)), "bin", "bash.exe")
+        if os.path.exists(gb):
+            return gb
+    return shutil.which("bash") or sys.exit("ste-changed: bash not found")
+
+
+def main(argv):
+    if len(argv) != 1:
+        sys.exit("usage: ste-changed <base>")
+    base = re.sub(r"^origin/", "", argv[0])
+    text = open(os.path.join(ACTION, "action.yml")).read()
+    env = dict(os.environ, EVENT_NAME="pull_request", BASE_REF=base, DEFAULT_BRANCH=base,
+               REF_NAME=out("rev-parse", "--abbrev-ref", "HEAD"), SCOPE="changed", FAIL="true",
+               PATHS_GLOB=default(text, "paths"), EXCLUDE=default(text, "exclude"),
+               CHANGED_PATHS_GLOB=default(text, "changed_paths"),
+               DECISIONS_DIR=default(text, "decisions-dir"))
+    run = os.path.join(ACTION, "run.sh").replace("\\", "/")
+    sys.exit(subprocess.run([find_bash(), run], env=env).returncode)
+
+
+main(sys.argv[1:])
