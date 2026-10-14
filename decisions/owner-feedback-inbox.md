@@ -17,11 +17,22 @@ depends on the model remembering it. The oversight session raised this on 2026-1
 
 Owner ruling, 2026-10-13, from an interview in the claude-settings audit session.
 
-- **Trigger.** A message whose first word is `fb` or `fb:` opens capture mode. A message that
-  is only `fb done` closes it. `fb: done`, any case, any whitespace between the
-  words, and trailing punctuation also close it. `fb - done` does not close; while capture is open, it is captured.
-  No `fb done` form opens capture. Every owner message between the two is captured, so the back and forth
-  stays in the record. A `fb` elsewhere in a message does nothing.
+- **Trigger.** A message whose first word is `fb` or `fb:` opens capture mode. Every owner
+  message after it is captured while capture is open, so the back and forth stays in the record. A
+  `fb` elsewhere in a message does nothing. While capture is closed, no `fb ... done` form opens
+  it, with or without text after it.
+- **Close.** Capture ends in four ways. (1) A message that starts with `fb done` or `fb: done`
+  closes it, any case, any whitespace between the words. The rest of that message is not saved and
+  is not judged. `fb - done` does not close; while capture is open, it is captured. (2) Quiet time:
+  10 minutes with no captured owner message. The message after the gap is not saved unless it
+  opens with `fb`. (3) The judge: while capture is open, each message that does not open with `fb`
+  goes to a Sonnet judge (`claude-sonnet-5-5`, through `decision_watch.invoke_model`, owner ruling
+  2026-10-14). `{"feedback": false}` closes capture and the message is not saved. An error, a
+  timeout or an odd answer keeps capture open and saves the message. (4) Nothing else: the
+  turn end does not close it.
+- **Notices.** A message that starts with a tag in `question_outcome.MACHINE_TAGS`
+  (`<task-notification>`, `<system-reminder>`) is agent or system text. It is never captured or
+  judged, it does not close capture, and it does not reset the quiet-time clock.
 - **Capture.** The UserPromptSubmit hook appends each captured message verbatim, with its
   Central time, to `~/.claude/handoffs/<session_id>.inbox.md`. The file is outside git.
   Messages from other sessions are not captured.
@@ -43,7 +54,9 @@ Owner ruling, 2026-10-13, from an interview in the claude-settings audit session
 - **No silent loss.** A malformed item line is a block reason, never a crash. If capture cannot
   write a message, the hook tells the session, so it jots the message by hand.
 - **Reminder.** While capture is open, the Stop hook shows the owner one line at each turn end:
-  send `fb done` to close capture. The hook prints it, so it costs no model tokens.
+  send `fb done` to close capture, or wait 10 minutes. It uses the same open test as the capture
+  hook (`local_time.is_open`), so it never says open after the quiet time. The hook prints it, so
+  it costs no model tokens.
 - **After compaction.** The compact hook lists open item ids and says when capture is still open.
 
 ## Build plan
@@ -61,6 +74,8 @@ Same files. Prove on the Mac clone after `git pull` and install.sh.
 ## Named limits
 
 - The trigger is the owner's to type. A burst sent without `fb` is not captured.
+- The judge is a model call: unmeasured for accuracy and for latency against its 7 s timeout. It
+  fails open, so a slow or wrong judge costs a saved message, never a lost one.
 - Closing is self-attested. A `[closed]` mark waives the handoff check, and nothing checks
   that the item's home holds it.
 - The gate checks that items exist and are homed. It does not check that the work is done.
@@ -74,8 +89,8 @@ Review round 3 left these open. Each is low harm, ranked by harm.
   session of 2026-10-13 (the time line showed on each). No test pins it.
 - If the inbox path cannot be built (an import error, or an odd session id), an `fb` message
   is dropped with one stderr line only.
-- While capture is open, `fb:done` and `` `fb done` `` in backticks are captured and do not
-  close it. The turn-end reminder shows each time, so the owner can send `fb done` again.
+- While capture is open, `fb:done` and `` `fb done` `` in backticks do not close it. The judge
+  or the quiet time ends capture, and the turn-end reminder shows each time.
 - A partial write can leave a fence open. Later blocks then read as one message with no
   items, and the gate repeats that block. It needs a disk-full failure.
 - An unreadable inbox drops the open ids from the post-compaction note. The Stop gate still

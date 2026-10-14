@@ -28,7 +28,8 @@ ITEM = re.compile(r"- (fb-\S+)(?:\s+(.*))?$")
 JOT = re.compile(r"\[(ruling|task|question|note|standing)\]\s+->\s+\S")
 HEADER = re.compile(r"### \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CDT|CST) \(UTC-0[56]:00\)$")
 OPEN_KINDS = ("[ruling]", "[task]", "[standing]")
-REMINDER = "Feedback capture is open. Send `fb done` when the burst is over to close capture."
+REMINDER = ("Feedback capture is open. Send `fb done` when the burst is over to close capture. "
+            "It also ends after 10 minutes with no owner message.")
 
 
 def parse(text):
@@ -96,7 +97,7 @@ def main():
         if hook.get("stop_hook_active") or paths is None:
             return 0
         inbox, marker = paths
-        out = {"systemMessage": REMINDER} if os.path.exists(marker) else {}
+        out = {"systemMessage": REMINDER} if local_time.is_open(marker) else {}
         try:
             with open(inbox, encoding="utf-8") as f:
                 blocks = parse(f.read())
