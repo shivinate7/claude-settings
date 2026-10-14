@@ -56,13 +56,21 @@ Not a longer list of action words. The predicate is the act's DIRECTION.
 
 A `git stash` call reads the stack, puts work onto it, or takes an entry off it.
 `list` and `show` read. `push`, `save` and a bare `git stash` put work on. Every
-other action takes an entry off. An action word the guard does not know falls on
-the stack side. A wrong answer on that side costs another session its work.
+other action takes an entry off. A word that is no known action is a pathspec, and
+it is read as a push. A known action word that is neither a read nor a push falls on
+the stack side. A wrong answer there costs another session its work.
 
 The subject read follows the direction. A call that puts work on is read with
 `git status --porcelain`. A call that takes an entry off is read with `git stash
 list`. An empty subject still passes, because an empty stack holds nothing to
 take and git itself errors there.
+
+Option values are skipped before the action word is read. A value is the next word
+after `-m`. It is also the next word after a short cluster that ends in `m`
+(`-qm <msg>`). `--message` and `--pathspec-from-file` take one too, by any prefix
+git accepts (`--mess <msg>`). A glued value (`-mfoo`, `--message=x`) takes nothing
+more. A word after `--` is a push. `export` and `import` are known action words and
+keep the stack side. Lane stash-pathspec fixed these reads.
 
 ## The conflict this keeps hitting
 
@@ -83,10 +91,21 @@ instead, which is the only half of the conflict this repository controls.
 
 ## Holes, named
 
-- An action word git adds later is refused over a non-empty stack until someone
-  reads it. That is the fail-closed side, and it is the side chosen on purpose.
+- An unknown stash word is judged on the tree side only. A future action that takes a
+  stack entry would pass over a clean tree, even with another session's entry on the
+  stack. Debt: `unknown-stash-word-tree-only`.
 - `git stash create` writes no stack entry and changes no tree, and it falls on
   the stack side. It is refused over a non-empty stack. This is unmeasured
   against real use, and it is a known false refusal.
 - An empty stack still passes every arm. A session that pushes an entry between
   the guard's read and the command's run is not covered.
+- `git stash -a` and `git stash --all` read as a push over an ignored-only tree, and
+  that tree reads as empty. `_tree_subject` in `hooks/guard_shared_tree.py` reads the
+  tree without ignored files, so the push passes. Git stashes the ignored files.
+  Debt: `stash-all-ignored-tree-passes`.
+- `git stash -h` and `git stash --help` are read as a push, so a dirty tree refuses
+  them. Git prints help and changes nothing, so the refusal is a false alarm. The read
+  is in `stash_action`. Debt: `stash-help-flag-refused-as-push`.
+- The comment on the import and export rows in `hooks/test_guard.py` says `import` and
+  `export` are not git subcommands. Git 2.55 lists both in `git stash -h`. Comment
+  only. Debt: `stash-export-comment-stale`.
