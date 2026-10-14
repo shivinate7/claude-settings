@@ -50,6 +50,8 @@ _real_run = subprocess.run
 
 
 def _fake_run(argv, **kwargs):
+    if os.environ.get("SM_READER_TIMEOUT") and os.path.basename(str(argv[0])).lower().startswith("node"):
+        raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
     if not (isinstance(argv, (list, tuple)) and argv
             and os.path.basename(str(argv[0])).lower() in ("claude", "claude.exe", "claude.cmd")):
         return _real_run(argv, **kwargs)
@@ -130,7 +132,7 @@ def detail(r):
         r.code, r.out[:160], r.err[-200:], len(r.model_calls), len(r.agents_calls), r.loaded)
 
 
-def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=False):
+def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=False, reader_timeout=False):
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     cfg = os.path.join(base, "config")
@@ -152,6 +154,8 @@ def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=
         env["SM_MODEL_FAIL"] = "1"
     if agents_fail:
         env["SM_AGENTS_FAIL"] = "1"
+    if reader_timeout:
+        env["SM_READER_TIMEOUT"] = "1"
     proc = subprocess.run([sys.executable, HOOK], input=stdin_text, capture_output=True, text=True,
                           encoding="utf-8", errors="replace", env=env, timeout=120)
     return Run(proc, base)
@@ -294,6 +298,14 @@ def case_malformed_input_fails_open_with_no_deny():
               r.code == 0 and r.out == "" and not r.model_calls, detail(r))
 
 
+def case_reader_timeout_allows_with_one_plain_line():
+    r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")], answer=FLAG, reader_timeout=True)
+    lines = r.err.strip().splitlines()
+    check("reader times out: exit 0, no deny, no model call, one plain failed-open line",
+          r.code == 0 and r.out == "" and not r.model_calls and len(lines) == 1
+          and "failed open" in lines[0] and "TimeoutExpired" not in r.err and "Command" not in r.err, detail(r))
+
+
 def case_model_failures_fail_open_with_no_deny():
     r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")], answer=FLAG, model_fail=True)
     check("busy + model exits non-zero: exit 0, no deny, failed-open line",
@@ -336,6 +348,7 @@ def case_hook_runs():
     case_unseen_receivers_allow_with_no_model_call()
     case_malformed_input_fails_open_with_no_deny()
     case_model_failures_fail_open_with_no_deny()
+    case_reader_timeout_allows_with_one_plain_line()
 
 
 if __name__ == "__main__":

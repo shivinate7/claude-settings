@@ -57,8 +57,12 @@ def receiver_state(name):
     node, reader = shutil.which("node"), find_reader()
     if not node or not reader:
         return "unseen"
-    run = subprocess.run([node, reader, name], capture_output=True, text=True, encoding="utf-8",
-                         errors="replace", timeout=READER_TIMEOUT)
+    try:
+        run = subprocess.run([node, reader, name], capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", timeout=READER_TIMEOUT)
+    except subprocess.TimeoutExpired:  # slow board read: unseen, the wording judge covers it
+        print("sendmessage state judge failed open: the board read timed out", file=sys.stderr)
+        return "unseen"
     word = run.stdout.strip()
     return word if run.returncode == 0 and word in ("busy", "idle", "waiting") else "unseen"
 
