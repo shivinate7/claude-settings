@@ -46,7 +46,7 @@ class Unknown(Exception):
 
 
 def git(cwd, *a, ok=(0,)):
-    r = subprocess.run(["git", "-C", cwd, *a], capture_output=True, text=True, errors="replace")
+    r = subprocess.run(["git", "-C", cwd, *a], capture_output=True, text=True, encoding="utf-8", errors="replace")
     if r.returncode not in ok:
         raise Unknown("git %s failed: %s" % (" ".join(a[:3]), r.stderr.strip() or r.returncode))
     return r.returncode, r.stdout

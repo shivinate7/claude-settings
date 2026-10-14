@@ -9,7 +9,7 @@ own tree and nothing else. Plan: plans/shared-merge-tool.md, "The fresh-code gua
 import os, shutil, stat, subprocess, sys, tempfile
 
 def git(co, *a):
-    r = subprocess.run(["git", "-C", co, *a], capture_output=True, text=True)
+    r = subprocess.run(["git", "-C", co, *a], capture_output=True, text=True, encoding="utf-8", errors="replace")
     return r.returncode, (r.stdout + r.stderr).strip()
 
 def rmtree_retry(path):  # own copy: bin/merge is a standalone shim and can't import this
