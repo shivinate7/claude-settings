@@ -1585,6 +1585,21 @@ sh("stash pathspec: stash -m over real uncommitted work denies like a push",
    VCS + " stash -m lane", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
 sh("stash pathspec: stash . over real uncommitted work denies", VCS + " stash .", "deny",
    "shared-tree", cwd=SUBJDIRTY)
+# Combined short flags and abbreviated long options take a value as the next word too (git's
+# parse-options). Each one is a push, so each deny carries the push remedy.
+sh("stash pathspec: stash -qm over real uncommitted work denies like a push",
+   VCS + " stash -qm list", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash -um over real uncommitted work denies like a push",
+   VCS + " stash -um show", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash -pm over real uncommitted work denies like a push",
+   VCS + " stash -pm show", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash --mess over real uncommitted work denies like a push",
+   VCS + " stash --mess list", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash --m over real uncommitted work denies like a push",
+   VCS + " stash --m list", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash --pathspec-from over real uncommitted work denies like a push",
+   VCS + " stash --pathspec-from list", "deny", "shared-tree", cwd=SUBJDIRTY,
+   carries=PUSH_FRAGMENT)
 # Pins that stay green. The reads stay allowed, and an explicit push still denies here.
 sh("stash pathspec pin: stash list still reads a dirty checkout", VCS + " stash list", "allow",
    cwd=SUBJDIRTY)
