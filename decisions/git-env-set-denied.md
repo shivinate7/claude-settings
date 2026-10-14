@@ -6,8 +6,8 @@ May an agent command set `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE`?
 
 ## The ruling
 
-No. The guard denies a command that sets any of the three, in Bash and in PowerShell (rule
-`git-env-set`). Reading and unsetting stay allowed. A mention inside quoted text stays allowed.
+No. The guard denies a command that sets any of the three in a literal form, in Bash and in
+PowerShell (rule `git-env-set`). Indirect forms are a named hole. Reading and unsetting stay allowed. A mention inside quoted text stays allowed.
 Session start warns when `core.worktree` is set in the shared config of the repo in the cwd.
 
 Incident: on q_max, 2026-10-14 02:41-02:47 CDT, an agent set `$env:GIT_DIR` and
@@ -29,6 +29,9 @@ reopen that path, so deny wins (arbiter ruling, 03:05 CDT).
 
 - The warning runs at session start only, so damage done mid-session shows at the next start.
 - Lower-case names fold to the rule, so `git_dir=x cmd` is denied too.
+- Indirect sets pass: a shell function around the set, `set -a` with `read` or `for`, a name
+  built at run time, `iex`, `-EncodedCommand`, or `os.environ` in `python -c`. Debt:
+  git-env-set-indirect-forms.
 
 ## Build plan
 
