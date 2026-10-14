@@ -54,9 +54,11 @@ Owner rulings, 2026-10-08:
 
 - A clarifying question, with no options or one option, passes first.
 - Any other question with no `Goal:` line, no `Problem:` line, or an empty one, is denied
-  with no model call. The reason names each missing label.
+  with no model call. The reason names each missing label. The presence check needs the
+  plain label: exact case, no bold, no NBSP, at a line start.
 - A `Problem:` line before the `Goal:` line is denied with no model call. The reason says
-  `Goal:` goes first.
+  `Goal:` goes first. The order check reads both labels loosely: bold, any leading space
+  or NBSP, any case.
 - Only the question text counts. A `Problem:` or `Goal:` line in an option (its label,
   preview or description) does not count.
 - The hook reads only the owner's own messages from the last 2 MiB of the transcript.
@@ -67,8 +69,9 @@ Owner rulings, 2026-10-08:
 - A model call that fails or times out lets the question through, and the hook prints
   one line that says so. That line never repeats the prompt. A question is not a
   destructive act, so a lost check costs less than a blocked question.
-- After a deny, the next question in the session passes with no model call, whatever
-  its text. That clears the state. A deny state older than 30 minutes is ignored. If the
+- After any deny, presence or order, the next question in the session passes with no
+  check, whatever its text (owner ruling, 2026-10-13 20:12 CDT, "Keep the free pass"; test
+  O7). That clears the state. A deny state older than 30 minutes is ignored. If the
   hook cannot record or clear a deny, it does not deny, and it says the check did not run.
   So a judge that is wrong cannot loop.
 - The reason sent back to the session is capped and cleaned.
