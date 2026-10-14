@@ -40,14 +40,15 @@ How `check()` finds the window:
    there, the plain merge-base is used.
 2. Window: `n` is the count of upstream first-parent commits not reachable from the fork point,
    plus 1. The read takes the first `n` commits of upstream's first-parent line, from the tip
-   down. The `+1` is the fork commit when the fork point sits on that line.
+   down. The `+1` is the fork commit when the fork point sits on that line. When the fork
+   commit is a PR merge, the read takes the whole PR.
 3. The result is read against upstream's tip. A conflict leaves no result. Then the branch's
    own diff is read off the plain merge-base.
 
 Consequence: a branch cut at main's tip that undoes the tip commit is flagged. That includes a
 deliberate revert of that commit, which needs the trailer. Main work before the fork commit is
-not read. `test_main_work_before_the_cut_is_not_read` puts its protected lines before the fork
-commit. The removal is on the branch, after the cut.
+not read, unless the fork point is off upstream's first-parent line (see Holes, named).
+`test_main_work_before_the_cut_is_not_read` puts its protected lines before the fork commit. The removal is on the branch, after the cut.
 
 ## Required or advisory depends on the lane shape
 
@@ -151,7 +152,8 @@ Cost: a pull request run took 0.4 to 5 seconds on this repo. The full-history au
 
 ## Known limits
 
-- A reversal of main work before the fork commit is not read, by ruling.
+- A reversal of main work before the fork commit is not read, by ruling. The exception is a fork
+  point off upstream's first-parent line (see Holes, named).
 - In the `--history` audit, a reversal older than `--window` (default 60 commits) is not seen.
   `--window 0` reads all history.
 - `git()` decodes its output as UTF-8 with `errors="replace"`. A bad byte reads as U+FFFD. So two
@@ -182,9 +184,8 @@ Cost: a pull request run took 0.4 to 5 seconds on this repo. The full-history au
 - After a rebase, the window starts at the rebase base. Main work lost in a commit older than
   that base is not read. Debt `rebase-loss-before-base-unread`.
 - The `+1` reads the fork commit only when the fork point is on upstream's first-parent line.
-  When the fork point is a PR merge on that line, the `+1` reads the whole PR. When the branch
-  was cut from a PR branch that merged later, the fork point is off the line. Then the `+1`
-  reads the first-parent commit below that PR's merge, which is main work from before the cut.
+  When the branch was cut from a PR branch that merged later, the fork point is off the line.
+  Then the `+1` reads the first-parent commit below that PR's merge, which is main work from before the cut.
   A scratch probe flagged a deliberate removal of it. Debt `off-line-fork-reads-pre-cut`.
 
 Kind: process
