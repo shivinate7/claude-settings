@@ -4112,6 +4112,42 @@ for _name, _command in (
     sh("guard-command-position: wsl %s allowed" % _name, _command, "allow", cwd=NOGIT)
 
 
+# ---- guard-command-position, review round 2 (lane). Each RED case below is a hole on 8b6813a.
+# Item 1 is a regression: main denies these, and 8b6813a allows them. A contraction (`a's b'`) is
+# read as a contraction, so the real quote after it is not seen, and the call after that quote is
+# hidden. `sed -e's;a;b;'` holds a real quote, and the call after it must deny. Item 3: a short flag
+# bundled with a value flag (`-Eu`, `-iu`, `-rn`, `-iS`) moves the verb slot onto the value, as a
+# lone `-u` or `-n` does. Item 4 is a false alarm: `env -S` named as echo text is not a wrapper.
+# The pins keep a contraction followed by a real quote in view of the call after it, straight or
+# curly. `$( )` inside a token is known gap 6, and is not covered here.
+for _sep, _sep_name in ((";", "a semicolon"), (" && ", "and-and"), (" | ", "a pipe")):
+    for _name, _command, _rule in (
+        ("a contraction before pkill", "echo a's b'" + _sep + "pkill foo", "machine-wide-kill"),
+        ("a sed quote before pkill", "sed -e's;a;b;' f" + _sep + "pkill foo", "machine-wide-kill"),
+        ("a contraction before wsl", "echo a's b'" + _sep + "wsl --shutdown", WSL_RULE),
+    ):
+        sh("guard-command-position: regression, %s, %s denies" % (_name, _sep_name), _command,
+           "deny", rule=_rule, cwd=NOGIT)
+for _name, _command in (
+    ("sudo with bundled -Eu", "sudo -Eu root wsl --shutdown"),
+    ("sudo with bundled -iu", "sudo -iu root wsl --shutdown"),
+    ("xargs with bundled -rn", "xargs -rn 1 wsl --shutdown"),
+    ("env with bundled -iu", "env -iu X wsl --shutdown"),
+    ("env with bundled -iS", "env -iS 'wsl --shutdown'"),
+):
+    sh("guard-command-position: wsl %s denies" % _name, _command, "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("guard-command-position: env -S named as echo text allows", "echo env -S 'wsl x'", "allow",
+   cwd=NOGIT)
+for _name, _command in (
+    ("a straight apostrophe before a semicolon", "echo it's; wsl --shutdown"),
+    ("a curly apostrophe before a semicolon", "echo it’s; wsl --shutdown"),
+    ("a straight apostrophe before a real quote", "echo it's 'x'; wsl --shutdown"),
+    ("a curly apostrophe before a real quote", "echo it’s 'x'; wsl --shutdown"),
+):
+    sh("guard-command-position: contraction pin, %s, wsl denies" % _name, _command, "deny",
+       rule=WSL_RULE, cwd=NOGIT)
+
+
 # =========================================================================== 2d. the silent write
 FAMILY = "write"
 #
