@@ -231,58 +231,112 @@ def _resolve_vars(cmd: str) -> str:
 
 # DATA IS NOT A WRITE. Incident 2026-10-14: a reviewer's probe piped a JSON sample that held a cap
 # write into `python hooks/guard.py`, and the owner was asked to approve a call that wrote nothing.
-# A quoted string that holds a space or an operator, and a heredoc body fed to a program that is not a
-# shell, are text for that program: no redirect or `tee` inside them runs. Two cases keep the text
-# in view. A shell reads it (`bash -c "..."`, `echo "..." | sh`, `eval`, `iex`, `pwsh -c`, a heredoc
-# fed to `sh`: any segment of the command that names a shell), and a double-quoted string holds `$(`
-# or a backtick, which the shell runs.
-# RESIDUAL GAP: a program that writes from its own code (`python -c`, a python heredoc) is not seen
-# here; debt cap-write-by-python-unseen.
-_SHELL_RUNNERS = frozenset((
-    "bash", "sh", "zsh", "dash", "ksh", "eval", "pwsh", "powershell", "cmd", "wsl", "su",
-    "iex", "invoke-expression"))
-_SHELL_HEREDOC = re.compile(r"\b(?:bash|sh|zsh|dash|ksh)\b[^\n]*<<")
+# FAIL CLOSED (review round 1, owner's orchestrator call). Quoted text and a heredoc body are data only
+# when EVERY segment of the command starts with a known reader that runs nothing it is handed: `echo`,
+# `printf`, `cat`, `grep`, `git`, `gh`, `jq`, `wc`, a `python script.py` that runs a file. Any other
+# command word keeps all text in view: a shell, an interpreter body (`python3 <<EOF`, `perl`, `node`),
+# `env`, `flock`, `script`, `xargs`, `eval`, `iex`, a scriptblock, a quoted or variable command word, a
+# subshell, or a command not listed. So does a segment with a backtick, a backslash before a quote, or
+# an ANSI-C `$'`: the scanner's quote reading may then differ from the shell's. A word that holds a
+# quote is read in whole: the text of each quote is its own words, so `system("sh", "-c", "tee P")`
+# shows its `tee P`.
+# RESIDUAL GAPS, each a debt: a write made by a program's own code (cap-write-by-python-unseen), and
+# `cat <<EOF | sh`, an eval of a heredoc, a subshell `( ... > P)` and `"$( ... )"` (debts
+# shell-write-miss-pipe-heredoc, -eval-heredoc, -subshell, -dq-substitution). Main missed these too.
+_READERS = frozenset((
+    "echo", "printf", "cat", "grep", "egrep", "fgrep", "rg", "head", "tail", "wc", "jq", "sort",
+    "uniq", "ls", "tr", "cut", "diff", "cmp", "git", "gh", "write-output", "write-host"))
+_PYTHON = frozenset(("python", "python3", "py"))
+_UNSAFE_MARK = re.compile(r"""`|\\["']|\$['"(]""")
+
+
+def _unsafe_segment(segment: str) -> bool:
+    """True when the segment holds, outside single quotes, a backtick, `$(`, `$'`, `$"` or a
+    backslash before a quote. The shell may then read its quotes differently from the scanner.
+    Single-quoted text is skipped whole: a `\"` in a JSON sample there is plain text."""
+    index, quote = 0, ""
+    while index < len(segment):
+        char = segment[index]
+        if quote == "'":
+            quote = "" if char == "'" else quote
+        elif quote == '"' and char == "\\":
+            index += 1   # an escaped character in double quotes
+        elif _UNSAFE_MARK.match(segment, index) and not (quote == '"' and char == "\\"):
+            return True
+        elif char in "'\"":
+            quote = "" if quote == char else (quote or char)
+        index += 1
+    return bool(quote)   # a quote with no mate: fail closed
+_COMMAND_WORD_HOLDS = re.compile(r"""['"$`(){}\[\]!&]""")
+_ASSIGNMENT_WORD = re.compile(r"[A-Za-z_]\w*=[^\s'\"`$]*")
 _DATA_WORD = re.compile(r"[\s<>|;&]")
 
 
-def _text_words(word: str, shell_runs_it: bool):
-    """The words a segment's quoted word stands for: itself when it is no text, one blank when it is
-    data, else the words inside it (a shell runs them: it reads the quote as code)."""
-    if word[:1] not in ("'", '"') or not _DATA_WORD.search(word):
-        return [word]
-    if shell_runs_it or (word[0] == '"' and ("$(" in word or "`" in word)):
-        return REDIRECT.sub(r" \1 ", word).split()
-    return ['""']
-
-
-def _runs_text(words) -> bool:
-    """True when a command word is a shell, so a quoted argument or piped text is code."""
-    for word in words:
-        if word[:1] not in ("'", '"'):
-            name = word.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
-            if name.removesuffix(".exe") in _SHELL_RUNNERS:
-                return True
+def _runs_a_file(args) -> bool:
+    """True for `python [-flags] script ...`: a script file, no `-c`, `-m` or `-` (stdin) code."""
+    for arg in args:
+        if arg in ("-c", "-m", "-") or arg.startswith("-c") or arg.startswith("-m"):
+            return False
+        if not arg.startswith("-"):
+            return True
     return False
+
+
+def _reader_segment(segment: str, words) -> bool:
+    """True when the segment's command word is a known reader that runs none of its text."""
+    if _unsafe_segment(segment):
+        return False
+    index = 0
+    while index < len(words) and _ASSIGNMENT_WORD.fullmatch(words[index]):
+        index += 1
+    if index >= len(words):
+        return True   # assignments only: nothing runs
+    word = words[index]
+    if _COMMAND_WORD_HOLDS.search(word):
+        return False
+    name = word.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower().removesuffix(".exe")
+    if name in _PYTHON:
+        return "<<" not in segment and _runs_a_file(words[index + 1:])
+    if name not in _READERS:
+        return False
+    if name in ("git", "gh") and any(w.lstrip("'\"").startswith("!") for w in words):
+        return False   # an alias that runs a shell
+    return True
+
+
+def _words_of(word: str):
+    """The words a word stands for with its quotes read: each quote's text is its own words."""
+    out = []
+    for piece in re.split(r"""['"]""", word):
+        out.extend(REDIRECT.sub(r" \1 ", piece).split())
+    return out
 
 
 def _shell_write_hit(cmd: str, cwd: str, predicate) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''."""
     cmd = _resolve_vars(cmd)
-    if not _SHELL_HEREDOC.search(cmd):
-        cmd = _drop_heredoc_bodies(cmd)
-    segments = [(seg, _quoted_words(seg)) for seg in split_segments(cmd) if seg.strip()]
-    shell_runs_it = any(_runs_text(words) for _, words in segments)   # `echo "..." | sh` too
-    for segment, words in segments:
-        words = [part for word in words for part in _text_words(word, shell_runs_it)]
+    bare_cmd = _drop_heredoc_bodies(cmd)
+    parsed = [(seg, _quoted_words(seg)) for seg in split_segments(bare_cmd) if seg.strip()]
+    data_only = all(_reader_segment(seg, words) for seg, words in parsed)
+    if not data_only:   # a heredoc body fed to anything else stays in view
+        parsed = [(seg, _quoted_words(seg)) for seg in split_segments(cmd) if seg.strip()]
+    for _segment, raw in parsed:
+        words = []
+        for number, word in enumerate(raw):
+            quoted = "'" in word or '"' in word
+            after_redirect = number > 0 and REDIRECT.fullmatch(raw[number - 1])
+            if data_only and quoted and _DATA_WORD.search(word) and not after_redirect:
+                words.append('""')   # data handed to a reader: no redirect or `tee` in it runs
+            else:
+                words.extend(_words_of(word) if quoted else [word])
         text = " ".join(words)
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
-            bare = word.strip("'\"")
-            if not bare or bare in (">", ">>"):
+            if not word or word in (">", ">>"):
                 continue
-            if predicate(bare, cwd) and writes_to(word, text):
-                return bare
+            if predicate(word, cwd) and writes_to(word, text):
+                return word
     return ""
 
 
