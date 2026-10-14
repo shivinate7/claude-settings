@@ -6650,6 +6650,64 @@ sh("frozen data: a // in a multi-line double-quoted string naming a cat-write al
 sh("frozen data: a multi-line commit message with a # naming a cat-write allows [r1 cov]",
    VCS + ' commit -m "line one\n# cat > ' + CFG_SETTINGS + '"', "allow", cwd=NOGIT)
 
+# ROUND 2 RED (cap-ask-data, try 3, review option A). A command that runs its argument as a shell is
+# code, even when the outer command is git, gh, rg, sort or python. Each shape writes the frozen path,
+# so each DENIES, as main does. Red on 6895ae0: the outer command read as a data reader, so its
+# quoted argument stayed data.
+for _n, _c in (
+    ("a git -c alias that runs the write", "git -c alias.w='!cat > " + CFG_SETTINGS + "' w"),
+    ("a git submodule foreach that runs the write", "git submodule foreach 'cat > " + CFG_SETTINGS + "'"),
+    ("a git rebase -x that runs the write", "git rebase -x 'cat > " + CFG_SETTINGS + "' HEAD"),
+    ("a gh alias that runs the write", "gh alias set --shell w 'cat > " + CFG_SETTINGS + "'"),
+    ("a git difftool extcmd that runs the write", "git difftool --extcmd 'cat > " + CFG_SETTINGS + "'"),
+    ("a git bisect run under sh -c", "git bisect run sh -c 'cat > " + CFG_SETTINGS + "'"),
+    ("an rg --pre that runs the write", "rg --pre 'sh -c \"cat > " + CFG_SETTINGS + "\"' x f"),
+    ("a sort compress-program that runs the write",
+     "sort --compress-program='sh -c \"cat > " + CFG_SETTINGS + "\"' f"),
+    ("python -W, then an os.system tee",
+     "python -W ignore -c \"import os; os.system('tee " + CFG_SETTINGS + " </dev/null')\""),
+    ("python -X dev, then an os.system tee",
+     "python -X dev -c \"import os; os.system('tee " + CFG_SETTINGS + " </dev/null')\""),
+    ("python -Bc, then an os.system tee",
+     "python -Bc \"import os; os.system('tee " + CFG_SETTINGS + " </dev/null')\""),
+    ("a process substitution that runs the write", "cat <(sh -c \"cat > " + CFG_SETTINGS + "\")"),
+):
+    sh("frozen shell: r2, " + _n + ", writes the config settings, denies [r2 red]", _c, "deny",
+       "frozen-path", cwd=NOGIT)
+sh("frozen shell: r2, a PowerShell iex inside Write-Output runs a Set-Content on the config settings, "
+   "denies [r2 red]",
+   "Write-Output (iex \"Set-Content -Path " + CFG_SETTINGS + " -Value x\")", "deny", "frozen-path",
+   tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: r2, a # in a quoted git argument does not hide a write run by sh -c, denies [r2 red]",
+   "git submodule foreach \"echo '# keep' && cat > " + CFG_SETTINGS + "\"", "deny", "frozen-path",
+   cwd=NOGIT)
+
+# ROUND 2 GREEN PINS (cap-ask-data, try 3). Quoted text is data as the value of a named message flag,
+# and as the input of a pure printer whose output runs nowhere. Each names the frozen path and allows.
+sh("frozen data: r2, a gh pr create body naming a cat-write onto the config settings, allows [r2 pin]",
+   "gh pr create --draft --title \"note\" --body \"cat > " + CFG_SETTINGS + " is refused\"", "allow",
+   cwd=NOGIT)
+sh("frozen data: r2, a gh issue create body naming a cat-write onto the config settings, allows [r2 pin]",
+   "gh issue create --title \"note\" --body \"cat > " + CFG_SETTINGS + " is refused\"", "allow",
+   cwd=NOGIT)
+sh("frozen data: r2, an echo naming a cat-write onto the config settings, piped to wc, allows [r2 pin]",
+   "echo \"cat > " + CFG_SETTINGS + "\" | wc -l", "allow", cwd=NOGIT)
+sh("frozen data: r2, an add then a commit naming a cat-write onto the config settings, allows [r2 pin]",
+   VCS + " add x && " + VCS + " commit -m \"note: cat > " + CFG_SETTINGS + " is refused\"", "allow",
+   cwd=NOGIT)
+sh("frozen data: r2, a cd then a commit naming a cat-write onto the config settings, allows [r2 pin]",
+   "cd docs && " + VCS + " commit -m \"note: cat > " + CFG_SETTINGS + " is refused\"", "allow",
+   cwd=NOGIT)
+sh("frozen data: r2, a heredoc to notes.md naming a cat-write onto the config settings, allows [r2 pin]",
+   "cat > notes.md <<'DOC'\ncat > " + CFG_SETTINGS + "\nDOC", "allow", cwd=NOGIT)
+
+# ROUND 2 COVERAGE (green on 6895ae0). A multi-line quoted string or an apostrophe must not hide a real
+# write that follows it, under the new reading of a message flag.
+sh("frozen shell: r2 cov, a multi-line commit message before a real write, denies [r2 cov]",
+   VCS + " commit -m \"line one\n# two\" ; cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: r2 cov, a /* and an apostrophe in a commit message before a real write, denies [r2 cov]",
+   VCS + " commit -m \"don't /* stop\" && cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+
 
 # =========================================================================== 6b. the model cap
 FAMILY = "model-cap"
@@ -6969,6 +7027,46 @@ add("cap: an edit list holding something other than an object allows", "allow", 
 add("cap: a payload with no tool name allows", "allow",
     raw=json.dumps({"tool_input": {"file_path": PROJ_LOCAL, "content": cap_settings()}}))
 
+
+# ROUND 2 RED (cap-ask-data, try 3, review option A). The hidden-shell shapes that write the cap ASK, as
+# main does. Each names the project local settings file and the cap key. Red on 6895ae0: the outer
+# command read as a data reader, so the write inside its argument was never seen.
+_CAP_WRITE = CAP_KEY + "=" + OPUS + " > " + PROJ_LOCAL
+for _n, _c in (
+    ("a git -c alias that runs the write", "git -c alias.w='!echo " + _CAP_WRITE + "' w"),
+    ("a git submodule foreach that runs the write", "git submodule foreach 'echo " + _CAP_WRITE + "'"),
+    ("an rg --pre that runs the write", "rg --pre 'sh -c \"echo " + _CAP_WRITE + "\"' x f"),
+    ("python -W, then an os.system echo",
+     "python -W ignore -c \"import os; os.system('echo " + _CAP_WRITE + "')\""),
+    ("a process substitution that runs the write", "cat <(sh -c \"echo " + _CAP_WRITE + "\")"),
+):
+    sh("cap shell: r2, " + _n + ", writes the cap to a project settings file, asks [r2 red]", _c, "ask",
+       "subagent-model-cap", cwd=NOGIT)
+sh("cap shell: r2, a PowerShell iex inside Write-Output sets the cap in a project settings file, asks "
+   "[r2 red]",
+   "Write-Output (iex \"Set-Content -Path " + PROJ_LOCAL + " -Value " + CAP_KEY + "=" + OPUS + "\")",
+   "ask", "subagent-model-cap", tool="PowerShell", cwd=NOGIT)
+sh("cap shell: r2, a # in a quoted git argument does not hide a cap write run by sh -c, asks [r2 red]",
+   "git submodule foreach \"echo '# keep' && echo " + _CAP_WRITE + "\"", "ask", "subagent-model-cap",
+   cwd=NOGIT)
+
+# ROUND 2 GREEN PINS (cap-ask-data, try 3). The cap key named inside a message flag or a pure printer is
+# data. Each names the cap key and a write, and allows, as the incident shapes did.
+sh("cap data: r2, a git commit message naming the cap key and a cat-write, allows [r2 pin]",
+   VCS + " commit -m \"note: " + CAP_KEY + ", cat > " + PROJ_LOCAL + " is refused\"", "allow", cwd=NOGIT)
+sh("cap data: r2, a gh pr create body naming the cap key and a cat-write, allows [r2 pin]",
+   "gh pr create --draft --title \"cap note\" --body \"" + CAP_KEY + ", cat > " + PROJ_LOCAL + " is refused\"",
+   "allow", cwd=NOGIT)
+sh("cap data: r2, an add then a commit naming the cap key and a cat-write, allows [r2 pin]",
+   VCS + " add x && " + VCS + " commit -m \"" + CAP_KEY + ", cat > " + PROJ_LOCAL + "\"", "allow", cwd=NOGIT)
+sh("cap data: r2, a cd then a commit naming the cap key and a cat-write, allows [r2 pin]",
+   "cd docs && " + VCS + " commit -m \"" + CAP_KEY + ", cat > " + PROJ_LOCAL + "\"", "allow", cwd=NOGIT)
+sh("cap data: r2, a heredoc to notes.md naming the cap key and a cat-write, allows [r2 pin]",
+   "cat > notes.md <<'DOC'\n" + CAP_KEY + ", cat > " + PROJ_LOCAL + "\nDOC", "allow", cwd=NOGIT)
+
+# ROUND 2 COVERAGE. A comment opener or an apostrophe in a message flag must not hide a cap write after it.
+sh("cap shell: r2 cov, a /* and an apostrophe in a commit message before a cap write, asks [r2 cov]",
+   VCS + " commit -m \"don't /* stop\" && echo " + _CAP_WRITE, "ask", "subagent-model-cap", cwd=NOGIT)
 
 # =========================================================================== ordinary work
 FAMILY = "paths"
