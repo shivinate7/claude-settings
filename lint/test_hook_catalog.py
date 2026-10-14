@@ -83,20 +83,26 @@ second script.
   the end of its block. Mandate: the first sentence of the rule's text, which runs from the paragraph
   start (a bold lead label dropped) or the marker before it, to its marker. Decision: the first block
   under the first `## Ruling` or `## The ruling`, else under `## The question`, else the first
-  paragraph under the H1, else the H1 text. A list item is a block; its marker is dropped. Debt: the
-  What. Deferred and plan: the first line, its leading # dropped.
+  paragraph under the H1, else the H1 text. A list item is a block; its marker is dropped. Other
+  text stays as written, so a decision whose paragraph opens with bold text (the real
+  one-shared-record-stamp does) keeps it. Debt: the What. Deferred and plan: the first line, its
+  leading # dropped.
 - No overruled history. A marker is Superseded, Overruled, Previously, "was:", "no longer" or "Old
-  ruling", in any case. It fails only where it opens a block: the text of a heading, a paragraph, or a
-  list item, after an optional list marker and emphasis marks around the marker itself. The failure
-  is one line per offender, `<path>:<line>`, 1-based, forward slashes. CLAUDE.md, decisions/, debts/,
-  deferred/ and plans/ are read; a README.md is not. Fenced blocks and inline code are code, not
-  read. A continuation line of a wrapped paragraph does not open a block.
-  What I chose, and why. Measured on 1ac9851 over those files: this rule fires on 0 lines. The plain
-  rule "the marker appears anywhere in the prose" fires on 30 lines in 21 files, almost all of them
-  behaviour prose ("the guard no longer crashes"), CI runs ("cancels superseded runs"), or a rule
-  quoted by name. That would cry wolf on day one. The cost: kept history that says "(superseded by
-  the floor, kept as evidence)" mid-sentence is not caught. A debt's What describing a gap may say
-  "no longer": it opens with its "**What.**" label, so it never opens with the marker.
+  ruling", in any case. The other five fail only where they open a block: the text of a heading, a
+  paragraph, or a list item, after an optional list marker and emphasis marks around the marker
+  itself. "was:" fails anywhere in prose, since it only ever introduces old text ("the old wording
+  was: ..."). The failure is one line per
+  offender, `<path>:<line>`, 1-based, forward slashes. CLAUDE.md, decisions/, debts/, deferred/ and
+  plans/ are read; a README.md is not. Fenced blocks and inline code are code, not read. HTML
+  comments are not special: their lines are read as prose, so history hidden in a comment fails when
+  it opens a block. A continuation line of a wrapped paragraph does not open a block.
+  What I chose, and why. Measured on 1ac9851 over those files: this rule fires on 0 lines, and "was:"
+  has 0 hits in all of them. The plain rule "the marker appears anywhere in the prose" fires on 30
+  lines in 21 files, almost all of them behaviour prose ("the guard no longer crashes"), CI runs
+  ("cancels superseded runs"), or a rule quoted by name. That would cry wolf on day one. The cost:
+  kept history that says "(superseded by the floor, kept as evidence)" mid-sentence is not caught. A
+  debt's What describing a gap may say "no longer": it opens with its "**What.**" label, so it never
+  opens with the marker.
 - Scanner cases (rule building-scanner-respects-strings), the markdown form. A comment opener, a
   quote or a backtick inside code or a fence must not hide, or invent, a marker, a heading, a Kind
   line or a rule marker. A multi-line fenced block is the multi-line-template-literal case. A lone
@@ -880,6 +886,8 @@ GIST_CASES = [
      'Owner ruling, 2026-10-13 23:41 CDT: "End condition at start."'),
     ("a heading inside a fence is no heading", "# T\n\n```\n## The ruling\n\nFake ruling. No.\n```\n\n## The question\n\nReal question?\n\nKind: process\n",
      "Real question?"),
+    ("a first paragraph that opens with bold text keeps it", "# T\n\n**Changed in part on 2026-09-28** by `other-rule`, the rule stays. Second.\n\nKind: process\n",
+     "**Changed in part on 2026-09-28** by `other-rule`, the rule stays."),
 ]
 
 # The real shape of decisions/rulings-declare-kind.md: a fenced example of both kinds, then one real line.
@@ -1091,6 +1099,8 @@ NOT_HISTORY = [
     ("a fence", "# Old thing", "```\nSuperseded: x\nno longer\nOld ruling: y\n```"),
     ("a tilde fence", "# Old thing", "~~~\nPreviously: x\n~~~"),
     ("a fence of three inside a fence of four", "# Old thing", "````\n```\nPreviously: still inside the outer fence\n```\n````"),
+    ("was: in inline code", "# Old thing", "The marker `was:` opens old text."),
+    ("was: in a fence", "# Old thing", "```\nThe old wording was: x\n```"),
 ]
 
 # Each body ends in a line that must fail, whatever text comes before it.
@@ -1110,6 +1120,7 @@ HISTORY_LINES = [
     "OLD RULING: allow it.",
     "- Superseded: allow it.", "* Overruled by the floor.", "1. Previously allowed.", "  - was: allow it.",
     "**Old ruling:** allow it.", "_Previously_ the guard allowed it.", "- **Superseded.** Allow it.",
+    "The old wording was: allow it.", "Some text; the old rule was: allow it.",
 ]
 
 
@@ -1170,6 +1181,16 @@ class RecordsHistory(Tree):
     def test_c7_crlf_and_a_bom_do_not_move_the_line_number(self):
         text = "﻿" + old_decision("Previously: the guard allowed it.").replace("\n", "\r\n")
         self.assert_history(with_records({"decisions/old.md": text}), "decisions/old.md:7")
+
+    def test_c10_was_colon_fails_on_a_wrapped_line_too(self):
+        text = old_decision("The old rule text goes\nhere, and was: allow it.\nThen more.")
+        self.assert_history(with_records({"decisions/old.md": text}),
+                            "decisions/old.md:%d" % line_of(text, "here, and was: allow it."))
+
+    def test_c11_history_hidden_in_a_comment_fails_when_it_opens_a_block(self):
+        text = old_decision("<!--\n\nSuperseded: hidden old text.\n\n-->")
+        self.assert_history(with_records({"decisions/old.md": text}),
+                            "decisions/old.md:%d" % line_of(text, "Superseded: hidden old text."))
 
     def test_c8_a_debt_what_may_say_no_longer(self):
         cases = [
@@ -1280,7 +1301,9 @@ class RealRecords(unittest.TestCase):
     def test_r12_every_gist_is_filled_in(self):
         problems = []
         for r in self.rows():
-            if not r["gist"].strip() or r["gist"].startswith(("#", "-", "*", "|")):
+            # Markdown noise: a heading, table or quote mark, a list marker, or (a mandate) its bold lead label.
+            noise = re.match(r"(#|\||>|[-*+]\s)", r["gist"]) or (r["section"] == "Mandates" and r["gist"].startswith("**"))
+            if not r["gist"].strip() or noise:
                 problems.append("%s %s: gist %r" % (r["section"], r["slug"], r["gist"]))
         self.assertFalse(problems, "\n".join(problems))
 
