@@ -48,7 +48,7 @@ if HERE not in sys.path:
 CST = timedelta(hours=-6)
 GAP = timedelta(minutes=10)  # quiet time that ends capture
 CLOSE = re.compile(r"fb:?\s+done\b", re.I)  # matched at the start of the stripped prompt
-CLOSE_LINE = re.compile(r"\n[ \t]*fb:?\s+done\W*$", re.I)  # a last line of `fb done`: saves the rest, then closes
+CLOSE_LINE = re.compile(r"\n[ \t]*fb:?\s+done[^\w\s`]*\s*$", re.I)  # a last line of `fb done`: saves the rest, then closes
 NEAR_MISS = re.compile(r"fb[\W_]+done\b", re.I)  # while closed: never opens
 MESSAGE_MAX = 4000  # the most of a message the judge child gets on its command line
 
