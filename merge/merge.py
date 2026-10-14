@@ -86,8 +86,8 @@ NET_RETRIES, NET_PAUSE = 3, 5  # owner ruling 2026-10-13: retry a network error 
 # A network error, anchored on the error line, never on refusal text (a PR title "#502 Bad Gateway fix" is no match):
 # gh's Go transport error `Post "https://...": <cause>`, gh's offline line, gh's HTTP 50x line, git's transport lines.
 NET_ERROR = re.compile(r"(?:^|: )(?:(?:Post|Get|Put|Patch|Delete|Head) \x22https?://[^\x22\s]*\x22: |error connecting to |HTTP 50[234]: )"
-                       r"|^(?:fatal|error): .*(?:Could not resolve|Failed to connect|Connection was reset|connection reset|connection refused|connectex|wsarecv|"
-                       r"schannel|SSL|timed out|context deadline exceeded|Recv failure|the remote end hung up|early EOF|RPC failed|returned error: 50[234])"
+                       r"|^(?:fatal|error): .*(?:Could not resolve (?:host|proxy)|Failed to connect|Connection was reset|connection reset|connection refused|connectex|wsarecv|"
+                       r"schannel|\bSSL\b|timed out|context deadline exceeded|Recv failure|the remote end hung up|early EOF|RPC failed|returned error: 50[234])"
                        r"|^ssh: (?:connect to host|Could not resolve hostname)", re.I | re.M)
 
 def undo_check(wt, base_ref, unknown_ok=""):
