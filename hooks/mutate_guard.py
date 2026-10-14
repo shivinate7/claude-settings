@@ -456,7 +456,7 @@ MUTATIONS = [
      r'READ_REDIRECT = re.compile(r"(?<![<])<(?![<(])")',
      r'READ_REDIRECT = re.compile(r"(?<![<])<x(?![<(])")', "guard", 'env: a substitution is judged, echo $(<'),
     ("env-file: a trailing paren hides the name",
-     '.strip("()")', '', "guard",
+     'word).strip("()")', 'word)', "guard",
      'env: a substitution is judged, (cat'),
     ("env-file: the backtick branch of the scan finds no substitution",
      '            done.extend(inner)', '            done.extend([])', "guard",
