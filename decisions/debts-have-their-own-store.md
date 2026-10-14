@@ -18,7 +18,7 @@ The protected outcome: a known gap stays findable in one list, after its decisio
 
 ## Grandfathering
 
-The existing "Holes, named" sections in `decisions/` (34 sections on origin/main) have no debt files. A migration lane, slug `debts-migrate`, files them. Until that lane lands, those holes stay where they are, in their decisions.
+The existing "Holes, named" sections in `decisions/` (34 sections on origin/main, counted by heading; each names at least one open hole) have no debt files. A migration lane, slug `debts-migrate`, files them. Until that lane lands, those holes stay where they are, in their decisions.
 
 ## What protects it
 
