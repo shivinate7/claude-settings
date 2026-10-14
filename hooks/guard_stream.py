@@ -1,4 +1,5 @@
-"""The guard's stream family: a stream that never ends, a waiter loop and two ported shell traps.
+"""The guard's stream family: a stream that never ends, a waiter loop, a background server with no end
+note, a waiter loop over a pattern and two ported shell traps.
 
 guard.py is the only entry point, and it runs these checks in its fixed order (decision
 guard-split-by-family). Other files reach these names through `guard`.
@@ -7,8 +8,8 @@ import os
 import re
 
 from guard_core import (
-    DURATION, _absolute, _skip_assignments_and_keywords, basename, resolve_command, segment_tokens,
-    split_segments,
+    DURATION, PLAYWRIGHT_PS_SHELLS, _absolute, _pwsh_script, _skip_assignments_and_keywords, basename,
+    inline_script, resolve_command, segment_tokens, split_segments,
 )
 
 
@@ -173,8 +174,20 @@ def gh_watches(rest) -> bool:
             words.append(t)
     if words == ["run", "watch"]:
         return True
-    return words == ["pr", "checks"] and any(
-        t == "--watch" or t.startswith("--watch=") for t in rest[i:])
+    return words == ["pr", "checks"] and watch_flag(rest[i:])
+
+
+def watch_flag(args) -> bool:
+    """True for `--watch` or `--watch=<v>`; not when the value is `false` or `0`, in either spelling
+    (`--watch=false`, `--watch 0`), as test runners take it."""
+    for i, a in enumerate(args):
+        if a == "--watch":
+            if args[i + 1:i + 2] and args[i + 1].lower() in ("false", "0"):
+                continue
+            return True
+        if a.startswith("--watch=") and a[8:].lower() not in ("false", "0"):
+            return True
+    return False
 
 
 def waiter_verdict(segments, background: bool) -> str:
@@ -218,6 +231,143 @@ WAITER_REASON = (
     "A single pause under 25 seconds is allowed. Avoid "
     "gh pr checks --watch, which serves a cached status. For a server warm-up, use a "
     "readiness check such as curl --retry."
+)
+
+
+# ------------------------------------------------------------------ a background end condition
+#
+# Owner ruling 2026-10-13 23:41 CDT, "End condition at start". A server or watcher that runs in the
+# background has no end of its own (incident: a file server on port 3202 ran 27 h unnoticed). The
+# call must say when it ends: an `until: <condition>` note in the tool's `description`. The note
+# belongs to the call, not the command text. stall_watch.py --stop shows the note per quiet job, and
+# reads it through `until_note` below, the one parser.
+#
+# The roster is NAMED: "does this command ever end" cannot be resolved from the system, and a rule
+# for every background call would refuse the builds and test runs that end by themselves. A foreground
+# server that the harness timeout later moves to the background is NOT covered: its call never
+# carried run_in_background (named hole).
+UNTIL_NOTE = re.compile(r"\buntil:[ \t]*(\S[^\r\n]*)", re.I)
+SCRIPT_RUNNERS = ("npm", "pnpm", "yarn", "bun", "npx", "pnpx", "bunx")
+SCRIPT_MANAGERS = ("npm", "pnpm", "yarn", "bun")
+RUNNER_VERBS = ("run", "run-script", "exec", "dlx", "x")
+# A runner flag that takes its value as the next token, so the value is not the script name.
+RUNNER_VALUE_FLAGS = ("--prefix", "-w", "--workspace", "-C", "--dir", "--filter", "-F", "--cwd",
+                      "-p", "--package")
+SERVER_SCRIPTS = ("dev", "serve", "start", "watch", "preview")
+SERVER_PROGRAMS = ("serve", "http-server", "live-server", "nodemon", "uvicorn", "http.server")
+# A program that serves when its first positional word is one of these verbs.
+SERVER_VERBS = {"next": ("dev", "start"), "deno": ("serve",), "jupyter": ("lab", "notebook"),
+                "webpack": ("serve",), "astro": ("dev",), "rails": ("s", "server"),
+                "streamlit": ("run",)}
+SHELL_EXTENSION = re.compile(r"\.(exe|cmd|bat|ps1)$")
+# Named holes (decision background-needs-end-note): `node <file>` is not in the roster, the note
+# is checked for presence only, and some wrappers and forms are not read (debt
+# server-wrappers-unread).
+
+
+def until_note(description) -> str:
+    """The end condition after `until:` in a tool description, to the end of its line, else ''."""
+    found = UNTIL_NOTE.search(description) if isinstance(description, str) else None
+    return found.group(1).strip() if found else ""
+
+
+def program_name(token: str) -> str:
+    """A command word or package name without its path, `@version` or `.exe`/`.cmd` suffix."""
+    return SHELL_EXTENSION.sub("", basename(token)).split("@", 1)[0]
+
+
+def server_script(name: str) -> bool:
+    """True for a script name with a part, split on `:` and `-`, that serves or watches."""
+    return any(part in SERVER_SCRIPTS for part in re.split(r"[:-]", name))
+
+
+def server_program(word: str, args) -> bool:
+    """True for a program (with its args) that serves or watches and never ends by itself.
+    The `--watch` flag is read by the caller, on the whole command tail."""
+    if word in SERVER_PROGRAMS:
+        return True
+    if re.fullmatch(r"python[\d.]*|py", word):
+        for i, a in enumerate(args):  # options (`-u`, `-3`) may come before -m
+            if a == "-m":  # the module is read as the program: `-m flask run`, `-m http.server`
+                return i + 1 < len(args) and server_program(args[i + 1], args[i + 2:])
+            if not a.startswith("-"):
+                return False
+        return False
+    if word == "vite":
+        return "build" not in args
+    positional = [a for a in args if not a.startswith("-")]
+    if word == "deno" and positional[:1] == ["task"]:
+        return len(positional) > 1 and server_script(positional[1])
+    if word in SERVER_VERBS:
+        return positional[:1] != [] and positional[0] in SERVER_VERBS[word]
+    if word == "flask":  # `flask --app hello run` puts an option value before the verb
+        return "run" in positional
+    if word == "tsc":
+        return "-w" in args
+    return False
+
+
+def _inner_scripts(tokens, at: int):
+    """The script text a wrapper at `tokens[at]` runs: `sh -c`, `pwsh -Command`, `cmd /c`, else ''."""
+    script = inline_script(tokens)
+    if script:
+        return script
+    word = basename(tokens[at])
+    if word in PLAYWRIGHT_PS_SHELLS:
+        return _pwsh_script(tokens)
+    if word in ("cmd", "cmd.exe") and at + 1 < len(tokens) and tokens[at + 1].lower() in ("/c", "/k"):
+        return " ".join(tokens[at + 2:])
+    return ""
+
+
+def _tokens_hit(tokens) -> str:
+    tokens = [t for t in ([tokens[0].lstrip("(")] + tokens[1:-1] + [tokens[-1].rstrip(")")]
+                          if len(tokens) > 1 else [tokens[0].strip("()")]) if t]  # a subshell `(...)`
+    at = resolve_command(tokens) if tokens else None
+    if at is None:
+        return ""
+    if tokens[at] == "&":  # PowerShell's call operator
+        return _tokens_hit(tokens[at + 1:]) if at + 1 < len(tokens) else ""
+    script = _inner_scripts(tokens, at)
+    if script:
+        return next((hit for hit in map(server_hit, split_segments(script)) if hit), "")
+    word, args = program_name(tokens[at]), tokens[at + 1:]
+    tail, runner, script = args, word, word in SCRIPT_MANAGERS
+    if word in SCRIPT_RUNNERS:
+        # The flag skip below drops `--watch` and `--hot`, so both are read on `tail`, the whole args.
+        while args and (args[0].startswith("-") or args[0] in RUNNER_VERBS):
+            script = script and args[0] not in ("exec", "dlx", "x")  # a package binary, not a script
+            args = args[2:] if args[0] in RUNNER_VALUE_FLAGS else args[1:]
+        if not args:
+            return ""
+        name, rest = program_name(args[0]), args[1:]
+        if script and server_script(name):
+            return word + " " + name
+        word, args = name, rest
+    if word != "gh" and (watch_flag(tail) or runner == "bun" and "--hot" in tail):
+        return word  # `gh ... --watch` ends when the run ends, so it is out of the roster
+    return word if server_program(word, args) else ""
+
+
+def server_hit(segment: str) -> str:
+    """The matched text when one segment starts a server or watcher, else ''. Wrappers (`cmd /c`,
+    `bash -c`, `pwsh -Command`, `&`, a subshell) are read through by guard_core's own resolvers."""
+    tokens = segment_tokens(segment)
+    return _tokens_hit(tokens) if tokens else ""
+
+
+def background_end_hit(segments, background: bool, description) -> str:
+    """The matched text when a background call starts a server or watcher with no until note."""
+    if not background or until_note(description):
+        return ""
+    return next((hit for hit in map(server_hit, segments) if hit), "")
+
+
+BACKGROUND_END_REASON = (
+    "this command starts a server or watcher that never ends on its own, and nothing says when it "
+    "should stop, so it can run unnoticed for a day. "
+    "Remedy: put an end condition in this tool call's description, as `until: <condition>`, such "
+    "as `until: round 1 bids are served`. The Stop check shows that note beside the job."
 )
 
 

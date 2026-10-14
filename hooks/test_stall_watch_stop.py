@@ -22,6 +22,10 @@ stdin, scans the session transcript for background shells, and prints ONE JSON l
   listed.
 - A job is stale when its output file has not changed for the quiet age (STALL_WATCH_QUIET,
   default 300 s). A job whose output file is missing is listed as "unknown", never dropped.
+- A listed job shows its note: the text after `until:` in the description of the Bash call that
+  started it, to the end of that line. The note sits on the job's own line, and the message asks
+  whether it is met. A job whose call holds no `until:` text is still listed, with no note.
+- When guard_stream cannot be imported, --stop still lists each stale job, with no note.
 - Any error prints nothing and exits 0.
 
 Seams: STALL_WATCH_NOW (epoch seconds, the clock), STALL_WATCH_OUTPUT_BASE (a folder that
@@ -85,9 +89,12 @@ def win_path(job_id):
     return WIN_DIR + "\\" + job_id + ".output"
 
 
-def call(call_id, command, background=False):
-    """A Bash tool_use. A call moved by its timeout has no run_in_background key."""
-    inp = {"command": command, "description": "test"}
+def call(call_id, command, background=False, desc="test"):
+    """A Bash tool_use. A call moved by its timeout has no run_in_background key. desc is the call's
+    description; None leaves the key out, as a call in an older transcript has none."""
+    inp = {"command": command}
+    if desc is not None:
+        inp["description"] = desc
     if background:
         inp["run_in_background"] = True
     return {"type": "assistant", "message": {"role": "assistant", "content": [
@@ -113,16 +120,17 @@ def started(call_id, job_id, path, timed_out):
         "toolUseResult": tur}
 
 
-def moved(job_id, path=None):
+def moved(job_id, path=None, desc="test"):
     """A Bash call that its timeout moved to the background, and its result."""
     cid = "toolu_" + job_id
-    return [call(cid, "sleep 600"), started(cid, job_id, path or win_path(job_id), True)]
+    return [call(cid, "sleep 600", desc=desc), started(cid, job_id, path or win_path(job_id), True)]
 
 
-def flagged(job_id):
+def flagged(job_id, desc="test"):
     """A Bash call started with run_in_background, and its result."""
     cid = "toolu_" + job_id
-    return [call(cid, "sleep 600", background=True), started(cid, job_id, win_path(job_id), False)]
+    return [call(cid, "sleep 600", background=True, desc=desc),
+            started(cid, job_id, win_path(job_id), False)]
 
 
 def task_notification(job_id, status, summary=None):
@@ -197,11 +205,16 @@ def output_file(base, job_id, idle):
     return path
 
 
-def run_stop(transcript_path, base=None, stop_hook_active=False, quiet=None, stdin=None, nt=False):
-    """Run the Stop mode the way the Stop hook does. Return (rc, stdout, stderr)."""
-    if not os.path.isfile(MODULE):
-        raise Fail(f"{MODULE} is missing")
+def run_stop(transcript_path, base=None, stop_hook_active=False, quiet=None, stdin=None, nt=False,
+             module=None):
+    """Run the Stop mode the way the Stop hook does. Return (rc, stdout, stderr). module, when
+    given, is the script run in place of MODULE."""
+    mod = module or MODULE
+    if not os.path.isfile(mod):
+        raise Fail(f"{mod} is missing")
     env = {k: v for k, v in os.environ.items() if not k.startswith("STALL_WATCH_")}
+    if module is not None:
+        env.pop("PYTHONPATH", None)  # a copy must not import its siblings from another checkout
     env["STALL_WATCH_NOW"] = str(NOW)
     if base is not None:
         env["STALL_WATCH_OUTPUT_BASE"] = base
@@ -211,7 +224,7 @@ def run_stop(transcript_path, base=None, stop_hook_active=False, quiet=None, std
         payload = {"session_id": "test-stall-watch-stop", "hook_event_name": "Stop", "cwd": SCRATCH,
                    "transcript_path": transcript_path, "stop_hook_active": stop_hook_active}
         stdin = json.dumps(payload).encode("utf-8")
-    argv = [PY, "-c", NT_DRIVER, MODULE] if nt else [PY, MODULE, "--stop"]
+    argv = [PY, "-c", NT_DRIVER, mod] if nt else [PY, mod, "--stop"]
     proc = subprocess.run(argv, input=stdin, capture_output=True, env=env, timeout=20)
     return proc.returncode, proc.stdout.decode("utf-8", "replace"), proc.stderr.decode("utf-8", "replace")
 
@@ -813,6 +826,79 @@ def malformed_tool_use_id_does_not_drop_the_alarm():
     problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
     msg = system_message(out, problems)
     problems += listed_once(msg, "bmal600")
+    return problems
+
+
+def line_of(msg, job_id):
+    """The line of the message that names the job, or '' when none does."""
+    return next((line for line in msg.splitlines() if job_id in line), "")
+
+
+@case
+def until_note_is_printed_beside_its_quiet_job():
+    """N1. a quiet job whose call's description holds `until: <condition>` shows that condition on
+    the job's own line, and the message asks whether it is met"""
+    base = new_dir()
+    output_file(base, "bnote600", 600)
+    recs = flagged("bnote600", desc="Serve q_max files on 3202. until: round 1 bids are served")
+    rc, out, err = run_stop(transcript(recs), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, "bnote600")
+    problems += expect("round 1 bids are served" in line_of(msg, "bnote600"),
+                       f"the note is not on the job's own line: {msg!r}")
+    problems += expect(re.search(r"\bmet\b", msg.lower()) is not None,
+                       f"the message does not ask whether the condition is met: {msg!r}")
+    return problems
+
+
+@case
+def each_quiet_job_shows_its_own_note():
+    """N2. three quiet jobs: a flagged call and a call its timeout moved, each with its own note, and
+    a call with no description. Each note sits on its own job's line only, and the job with no note
+    is still listed"""
+    base = new_dir()
+    for job in ("bnoteA", "bnoteB", "bnoteC"):
+        output_file(base, job, 600)
+    recs = (flagged("bnoteA", desc="until: round 1 bids are served")
+            + moved("bnoteB", desc="until: round 2 bids are served")
+            + flagged("bnoteC", desc=None))
+    rc, out, err = run_stop(transcript(recs), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    for job in ("bnoteA", "bnoteB", "bnoteC"):
+        problems += listed_once(msg, job)
+    a, b, c = line_of(msg, "bnoteA"), line_of(msg, "bnoteB"), line_of(msg, "bnoteC")
+    problems += expect("round 1 bids are served" in a and "round 2" not in a,
+                       f"job A's line does not hold only its own note: {a!r}")
+    problems += expect("round 2 bids are served" in b and "round 1" not in b,
+                       f"job B's line does not hold only its own note: {b!r}")
+    problems += expect("round" not in c, f"job C has no note, but its line names one: {c!r}")
+    return problems
+
+
+@case
+def stop_lists_quiet_job_without_notes_when_guard_stream_is_missing():
+    """N3. guard_stream cannot be imported (a scratch copy of stall_watch.py with no guard_stream
+    beside it): --stop exits 0 and lists the quiet job once, with no note. A control runs the real
+    module on the same transcript and shows the note, so the missing note is not a broken fixture"""
+    base = new_dir()
+    output_file(base, "bnoimp600", 600)
+    recs = flagged("bnoimp600", desc="Serve q_max files on 3202. until: round 1 bids are served")
+    path = transcript(recs)
+    lone = new_dir()
+    shutil.copy(MODULE, os.path.join(lone, "stall_watch.py"))
+    rc, out, err = run_stop(path, base, module=os.path.join(lone, "stall_watch.py"))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, "bnoimp600")
+    problems += expect("600s" in msg, f"age 600s is not in the listing: {msg!r}")
+    problems += expect("round 1 bids" not in msg and "| until:" not in msg,
+                       f"a note is printed with guard_stream missing: {msg!r}")
+    rc, out, err = run_stop(path, base)
+    control = system_message(out, [])
+    problems += expect(rc == 0 and "round 1 bids are served" in control,
+                       f"control: the real module does not print the note: rc {rc}, {out[:200]!r}")
     return problems
 
 
