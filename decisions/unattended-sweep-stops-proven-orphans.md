@@ -120,6 +120,10 @@ included, needs both of these to remove a worktree:
   younger tree is kept, and the reason is `recently-active`. A time that
   cannot be read keeps the tree, and the reason is `unreadable-subject`.
 
+Two other routes remove a tree under `.claude/worktrees/agent-*` without both: the agent
+rule, and the repo's own `reap:worktrees` script. Both are in
+`agent-end-reap-stops-what-a-finished-agent-left`.
+
 The old conditions stay. The worktree must be clean and fully pushed. No live
 session and no process may be inside. The lock must be gone, or its host
 process must be gone.
@@ -168,3 +172,6 @@ pre-check's own enumeration. `janitor/test_sweep.py`'s
 `ListenerDecisionTests`, `UnreadableListenerReadTests`,
 `WorktreeProcessPreCheckTests`, `DeadRootedServerTests`, and `LooseProcessTests` prove them, against
 real fixture processes.
+
+Kind: process
+Home: janitor/test_sweep.py
