@@ -8616,12 +8616,12 @@ def merge_log_case():
 
 def merge_hang_timeout_case():
     """A `gh` that never answers must still end in a deny, and that deny must not depend on the
-    hook's 20s budget being outlived first.
+    hook's 60s budget being outlived first.
 
     The "denies as unknown" half holds on every OS: THAT is the subject (git-wait-for-required-
     checks), and this is pinned everywhere.
 
-    The wall-time half -- the read must finish well inside the 20s hook budget, bounded here at
+    The wall-time half -- the read must finish well inside the 60s hook budget, bounded here at
     ~15s -- is asserted on POSIX only. MEASURED on Windows: GHHANG is a `.cmd` fake, and
     subprocess.run's kill on timeout only reaches the cmd.exe it directly spawned, never the
     ping it wraps for the wait -- Windows hands that ping an inherited duplicate of the real
@@ -8652,7 +8652,7 @@ def merge_hang_timeout_case():
     note = ("denied as unknown in %.1fs; the wall-time bound is skipped on Windows, a `.cmd` "
             "fake gh cannot be killed on time here (see this case's docstring)" % elapsed
             if os.name == "nt" else
-            "denied as unknown in %.1fs, inside the 20s hook budget" % elapsed)
+            "denied as unknown in %.1fs, inside the 60s hook budget" % elapsed)
     return True, note
 
 
@@ -9289,7 +9289,7 @@ LOG_CHECKS = (
     ("merge-checks: a merge tool that cannot load is unknown, and denies", merge_tool_missing_case),
     ("cite-by-id: a -F file that cannot be read is denied with the folders unread too",
      cite_unread_folders_case),
-    ("merge-checks: a gh that never answers still denies, well inside the hook's 20s budget",
+    ("merge-checks: a gh that never answers still denies, well inside the hook's 60s budget",
      merge_hang_timeout_case),
     ("powershell: a backslash path survives tokenizing, a Bash one does not", powershell_backslash_case),
     ("trim: a conflict-side checkout is allowed and logs nothing", conflict_resolve_log_case),
