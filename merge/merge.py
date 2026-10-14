@@ -84,11 +84,27 @@ def git(cwd, *a, input=None):
 SETTLE_SECONDS = 30
 NET_RETRIES, NET_PAUSE = 3, 5  # owner ruling 2026-10-13: retry a network error 3 times, a short pause between
 # A network error, anchored on the error line, never on refusal text (a PR title "#502 Bad Gateway fix" is no match):
-# gh's Go transport error `Post "https://...": <cause>`, gh's offline line, gh's HTTP 50x line, git's transport lines.
-NET_ERROR = re.compile(r"(?:^|: )(?:(?:Post|Get|Put|Patch|Delete|Head) \x22https?://[^\x22\s]*\x22: |error connecting to |HTTP 50[234]: )"
+# gh's Go transport error `Post "https://...": <cause>`, gh's offline line, gh's server-error lines (any HTTP 5xx, HTTP 429, the
+# GraphQL "Something went wrong"), a truncated reply, git's transport lines. The one home: Host.gh, the fetch and the lock read all ask it.
+NET_ERROR = re.compile(r"(?:^|: |\()(?:(?:Post|Get|Put|Patch|Delete|Head) \x22https?://[^\x22\s]*\x22: |error connecting to |HTTP (?:5\d\d|429)\b|Something went wrong)"
                        r"|^(?:fatal|error): .*(?:Could not resolve (?:host|proxy)|Failed to connect|Connection was reset|connection reset|connection refused|connectex|wsarecv|"
-                       r"schannel|\bSSL\b|timed out|context deadline exceeded|Recv failure|the remote end hung up|early EOF|RPC failed|returned error: 50[234])"
-                       r"|^ssh: (?:connect to host|Could not resolve hostname)", re.I | re.M)
+                       r"schannel|\bSSL\b|GnuTLS|timed out|context deadline exceeded|Recv failure|the remote end hung up|early EOF|RPC failed|returned error: 5\d\d|"
+                       r"HTTP/2 stream|Empty reply from server|Failed sending data)"
+                       r"|^ssh: (?:connect to host|Could not resolve hostname)|^kex_exchange_identification\b|^unexpected end of JSON input", re.I | re.M)
+
+def is_net(c, out):
+    """A failed call whose output is a network error line. JSON is gh's answer (a check named EOF), not its error line."""
+    return bool(c and NET_ERROR.search(out) and not out.lstrip().startswith(("[", "{")))
+
+def retry_net(call, pause, retries=NET_RETRIES):
+    """-> (code, output, retries used). Runs `call` again after `pause(NET_PAUSE)` while it fails with a network error, up to `retries` times."""
+    n = 0
+    while True:
+        c, out = call()
+        if n >= retries or not is_net(c, out):
+            return c, out, n
+        n += 1
+        pause(NET_PAUSE)
 
 def undo_check(wt, base_ref, unknown_ok=""):
     """The shared silent-undo lint (lint/check_silent_undo.py), run on the branch before anything is pushed.
@@ -194,12 +210,12 @@ class Lock:
 
 class GitLock(Lock):
     """Any git remote. Tests use a local bare origin. The create-only push is the one arbiter."""
-    def __init__(self, root, now=time.time):
-        self.root, self.now = root, now
+    def __init__(self, root, now=time.time, pause=time.sleep):
+        self.root, self.now, self.pause = root, now, pause
 
     def read(self, b):
         ref = f"refs/merge-lock/{b}"
-        c, out = git(self.root, "ls-remote", "origin", ref)
+        c, out, _ = retry_net(lambda: git(self.root, "ls-remote", "origin", ref), self.pause)
         if c:
             raise Stop("cannot read the merge lock: " + out)
         if not out:
@@ -299,15 +315,10 @@ class Host:
         """-> (code, output). The one home of every Host `gh` call. A network error is retried NET_RETRIES times with
         `self.pause`; after that NetStop. Any other failure returns at once. `self.net_retries` counts the retries
         of the last call. ponytail: no retry inside `shared_deadline` (the guard's hard hook budget has no room for a pause)."""
-        self.net_retries = 0
-        while True:
-            c, out = sh(["gh", *args], cwd=cwd)
-            if not (c and NET_ERROR.search(out) and not out.lstrip().startswith(("[", "{"))):  # JSON is gh's answer (a check named EOF), not its error line
-                return c, out
-            if self.net_retries >= (NET_RETRIES if _READ_DEADLINE is None else 0):
-                raise NetStop(f"network error from `gh {' '.join(args[:2])}`, still failing after {self.net_retries} retries. Nothing was reverted. Run again.\n{out}")
-            self.net_retries += 1
-            self.pause(NET_PAUSE)
+        c, out, self.net_retries = retry_net(lambda: sh(["gh", *args], cwd=cwd), self.pause, NET_RETRIES if _READ_DEADLINE is None else 0)
+        if is_net(c, out):
+            raise NetStop(f"network error from `gh {' '.join(args[:2])}`, still failing after {self.net_retries} retries. Nothing was reverted. Run again.\n{out}")
+        return c, out
 
     def _repo_args(self):
         return ["-R", self.repo] if self.repo else []
@@ -539,15 +550,17 @@ class Host:
             if state == "MERGED" and not oid:
                 raise ValueError("MERGED with no merge commit")
         except (NetStop, ValueError, KeyError, TypeError) as e:
-            raise NetStop(f"the merge of #{n} may have landed, and its state cannot be read. Nothing was reverted. Run again.\n{out}\n{e if isinstance(e, NetStop) else view}")
+            raise NetStop(f"the merge of #{n} may have landed, and its state cannot be read. Nothing was reverted. Check the pull request #{n} on GitHub. "
+                          f"If it is merged, do the after-merge steps by hand (move the local {self.base}, run merge.afterMerge, cut the branch). If it is open, run again.\n{out}\n{e if isinstance(e, NetStop) else view}")
         if state == "MERGED":
             if head == sha:
                 return oid, ""
             raise Stop(f"#{n} is merged at {str(head)[:9]}, not at the proven head {sha[:9]}: not this run's merge. Nothing was reverted.\n{out}")
         if lost:
             raise NetStop(f"network error on `gh pr merge` of #{n}, and the pull request is not merged. Nothing was reverted. Run again.\n{out}")
-        if not c:
-            return None, "gh pr merge passed, but the pull request shows no merge commit: " + view
+        if not c:  # exit 0 and still OPEN: not a refusal (a queued merge, or a lagging read). The claim stays.
+            raise NetStop(f"`gh pr merge` of #{n} exited 0, but the pull request still reads OPEN. Nothing was reverted. Check the pull request #{n} on GitHub: "
+                          f"if it merged, do the after-merge steps by hand; if it is open, run again.\n{view}")
         return None, out
 
 # ------------------------------------------------------------------ git steps
@@ -907,9 +920,9 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 ok, why = False, str(e)
             if not ok:
                 fail(why)
-            c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
-            if c and NET_ERROR.search(out):  # a network error is not a refusal: the claim stays
-                raise NetStop(f"network error on the fetch of origin {base}. The claim stays on {branch}. Run again to resume.\n{out}")
+            c, out, _ = retry_net(lambda: git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}"), getattr(host, "pause", time.sleep))
+            if is_net(c, out):  # a network error is not a refusal: the claim stays
+                raise NetStop(f"network error on the fetch of origin {base}, still failing after {NET_RETRIES} retries. The claim stays on {branch}. Run again to resume.\n{out}")
             if c:  # never check against a stale base tip
                 fail(f"cannot fetch origin {base}, so the claim cannot be proved fresh:\n" + out)
             try:  # main may have moved during the wait: read the branch against the tip fetched just now
