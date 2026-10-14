@@ -14,6 +14,8 @@ its exit code, stdout and stderr. Two fakes sit under it:
 - `claude agents --json`. The reader is a node child of the hook, so it meets a `claude` launcher
   on PATH: claude.cmd on Windows, a sh script elsewhere. The launcher runs fake_claude.py, which
   prints the canned rows and records the call.
+- The reader stub (STUB_READER). A case that sets `reader_mode` points the hook's pointer checkout at
+  a temp clone whose receiver-state.mjs is that stub. Real node runs it, and no claude board read starts.
 Every claude call is recorded, so "no model call" is read from the record, not assumed.
 CLAUDE_CONFIG_DIR is a fresh temp folder: no real pointer file or token is read.
 
@@ -31,6 +33,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -43,6 +46,10 @@ PEER, OTHER = "peer", "other"
 SID_A, SID_B = "ses00001", "ses00002"
 ALLOW = '{"ok": true}'
 FLAG = '{"ok": false, "reason": "parallelism-no-mid-task-talk: send only what changes the work."}'
+READER_SECONDS = 3  # the hook's READER_TIMEOUT in the timed cases, set by TIMED_HOOK
+WALL_LIMIT = READER_SECONDS + 10  # a margin over the set timeout, not a tight absolute bound
+HOLD_MS = 30000  # the held child outlives WALL_LIMIT, so a held pipe fails the bound
+HARNESS_CAP = HOLD_MS // 1000 + 30  # this run's own cap, so a hang ends as a FAIL line
 
 STUB_SITE = r'''
 import json, os, subprocess
@@ -50,8 +57,6 @@ _real_run = subprocess.run
 
 
 def _fake_run(argv, **kwargs):
-    if os.environ.get("SM_READER_TIMEOUT") and os.path.basename(str(argv[0])).lower().startswith("node"):
-        raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
     if not (isinstance(argv, (list, tuple)) and argv
             and os.path.basename(str(argv[0])).lower() in ("claude", "claude.exe", "claude.cmd")):
         return _real_run(argv, **kwargs)
@@ -81,6 +86,48 @@ else:
 '''
 
 
+# The reader stub: real node runs it in place of hooks/mods/session-board/hooks/receiver-state.mjs.
+# idle or waiting prints that word. hang sleeps with no child. hold starts a child that keeps this
+# process's stdout open, then sleeps; the hook's kill of this process leaves that pipe held.
+STUB_READER = r'''
+import { spawn } from "node:child_process";
+import { appendFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+const dir = process.env.SM_READER_DIR;
+const mode = process.env.SM_READER_MODE;
+const holdMs = Number(process.env.SM_READER_HOLD_MS || "30000");
+appendFileSync(join(dir, "reader.jsonl"), JSON.stringify({ argv: process.argv.slice(2) }) + "\n");
+if (mode === "idle" || mode === "waiting") {
+    process.stdout.write(mode + "\n");
+} else {
+    if (mode === "hold") {
+        // The child must keep the inherited stdout open for the whole hold. Measured on Windows: a
+        // cmd.exe child does; a node child with inherited stdio does not, and the pipe closes at the kill.
+        const secs = Math.ceil(holdMs / 1000);
+        const stdio = ["ignore", "inherit", "inherit"];
+        const child = process.platform === "win32"
+            ? spawn("cmd.exe", ["/d", "/c", "ping -n " + (secs + 1) + " 127.0.0.1 > nul"], { stdio, windowsHide: true })
+            : spawn("sh", ["-c", "sleep " + secs], { stdio });
+        child.on("spawn", () => writeFileSync(join(dir, "held.flag"), "1"));
+        child.on("error", () => {});
+    }
+    setTimeout(() => {}, holdMs + 5000);  // exits by itself if nothing kills it
+}
+'''
+
+# Runs the hook with READER_TIMEOUT set to a short test value. The product reads that module global
+# at call time, so a fix that changes how the reader is run still meets this seam.
+TIMED_HOOK = r'''
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("sendmessage_state_timed", %r)
+hook = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(hook)
+hook.READER_TIMEOUT = %r
+sys.exit(hook.main())
+'''
+
+
 def check(name, ok, detail=""):
     if ok:
         print("ok   " + name)
@@ -103,17 +150,23 @@ def write_launchers():
         f.write('@"%s" "%s" %%*\r\n' % (sys.executable, fake))
 
 
+def argv_lines(path):
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as f:
+        return [json.loads(line)["argv"] for line in f if line.strip()]
+
+
 class Run:
-    def __init__(self, proc, base):
+    def __init__(self, proc, base, elapsed):
         self.code = proc.returncode
         self.out = proc.stdout or ""
         self.err = proc.stderr or ""
+        self.elapsed = elapsed
         self.loaded = os.path.exists(os.path.join(base, "loaded"))
-        self.calls = []
-        record = os.path.join(base, "calls.jsonl")
-        if os.path.exists(record):
-            with open(record, encoding="utf-8") as f:
-                self.calls = [json.loads(line)["argv"] for line in f if line.strip()]
+        self.held = os.path.exists(os.path.join(base, "held.flag"))
+        self.calls = argv_lines(os.path.join(base, "calls.jsonl"))
+        self.reader_calls = argv_lines(os.path.join(base, "reader.jsonl"))
         self.model_calls = [a for a in self.calls if "-p" in a]
         self.agents_calls = [a for a in self.calls if a[:2] == ["agents", "--json"]]
 
@@ -128,11 +181,25 @@ class Run:
 
 
 def detail(r):
-    return "code=%s out=%r err=%r model=%d agents=%d loaded=%s" % (
-        r.code, r.out[:160], r.err[-200:], len(r.model_calls), len(r.agents_calls), r.loaded)
+    return "code=%s out=%r err=%r model=%d agents=%d reader=%d loaded=%s wall=%.1fs" % (
+        r.code, r.out[:160], r.err[-200:], len(r.model_calls), len(r.agents_calls),
+        len(r.reader_calls), r.loaded, r.elapsed)
 
 
-def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=False, reader_timeout=False):
+def point_reader_at_stub(cfg, base):
+    """Point the hook's pointer checkout (guard_pointer.pointer_checkout) at a temp clone whose
+    receiver-state.mjs is STUB_READER. find_reader then returns the stub, and node runs it."""
+    clone = os.path.join(base, "clone")
+    reader = os.path.join(clone, "mods", "session-board", "hooks", "receiver-state.mjs")
+    os.makedirs(os.path.dirname(reader))
+    with open(reader, "w", encoding="utf-8") as f:
+        f.write(STUB_READER)
+    with open(os.path.join(cfg, "CLAUDE.md"), "w", encoding="utf-8") as f:
+        f.write("@%s/CLAUDE.md\n" % clone.replace("\\", "/"))
+
+
+def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=False,
+             reader_mode=None, reader_seconds=None, cap=120):
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     cfg = os.path.join(base, "config")
@@ -154,11 +221,18 @@ def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=
         env["SM_MODEL_FAIL"] = "1"
     if agents_fail:
         env["SM_AGENTS_FAIL"] = "1"
-    if reader_timeout:
-        env["SM_READER_TIMEOUT"] = "1"
-    proc = subprocess.run([sys.executable, HOOK], input=stdin_text, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", env=env, timeout=120)
-    return Run(proc, base)
+    script = HOOK
+    if reader_mode:
+        point_reader_at_stub(cfg, base)
+        env.update({"SM_READER_DIR": base, "SM_READER_MODE": reader_mode, "SM_READER_HOLD_MS": str(HOLD_MS)})
+    if reader_seconds is not None:
+        script = os.path.join(base, "hook_timed.py")
+        with open(script, "w", encoding="utf-8") as f:
+            f.write(TIMED_HOOK % (HOOK, reader_seconds))
+    started = time.monotonic()
+    proc = subprocess.run([sys.executable, script], input=stdin_text, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", env=env, timeout=cap)
+    return Run(proc, base, time.monotonic() - started)
 
 
 def hook_input(to=PEER, message="Status: the step is done, no change for you."):
@@ -241,10 +315,14 @@ def case_find_reader():
 # ---- the hook, run as a child with the harness's stdin shape
 
 def case_idle_and_waiting_allow_with_no_model_call():
+    # The stub reader answers the word, so no claude board read runs. Its record shows it was asked
+    # about PEER. Allow and unseen look the same here; the no-model check is what a mutant that sends
+    # idle to the model turns red.
     for status in ("idle", "waiting"):
-        r = run_hook(hook_input(), rows=[row(SID_A, PEER, status)])
+        r = run_hook(hook_input(), reader_mode=status)
         check("%s receiver: allow, no model call, no output" % status,
-              r.code == 0 and r.out == "" and not r.model_calls and r.reached_board(), detail(r))
+              r.code == 0 and r.out == "" and r.err == "" and not r.model_calls and not r.agents_calls
+              and r.loaded and r.reader_calls == [[PEER]], detail(r))
 
 
 def case_busy_blocks_when_the_model_flags():
@@ -299,11 +377,33 @@ def case_malformed_input_fails_open_with_no_deny():
 
 
 def case_reader_timeout_allows_with_one_plain_line():
-    r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")], answer=FLAG, reader_timeout=True)
+    # A reader that hangs with no child, under the short timeout: a real kill, not a fake. The board
+    # would say busy and the model would flag, so a timeout that reached the model shows as a deny.
+    r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")], answer=FLAG,
+                 reader_mode="hang", reader_seconds=READER_SECONDS)
     lines = r.err.strip().splitlines()
-    check("reader times out: exit 0, no deny, no model call, one plain failed-open line",
-          r.code == 0 and r.out == "" and not r.model_calls and len(lines) == 1
-          and "failed open" in lines[0] and "TimeoutExpired" not in r.err and "Command" not in r.err, detail(r))
+    check("reader times out: exit 0, no deny, no model call, one plain board-timeout line",
+          r.code == 0 and r.out == "" and not r.model_calls and r.loaded and len(lines) == 1
+          and "board read timed out" in lines[0] and "TimeoutExpired" not in r.err and "Command" not in r.err,
+          detail(r))
+
+
+def case_reader_that_holds_the_pipe_returns_in_bound():
+    # The reader's child keeps stdout open after the kill. On Windows, subprocess.run then waits on
+    # that pipe with no bound, so the hook returns late. POSIX waits on the reader alone, so this case
+    # is expected to pass there. The limit is a margin over the set timeout, not a tight bound.
+    try:
+        r = run_hook(hook_input(), reader_mode="hold", reader_seconds=READER_SECONDS, cap=HARNESS_CAP)
+    except subprocess.TimeoutExpired:
+        check("reader holds the pipe: hook returns before the harness cap", False,
+              "still running after %d s" % HARNESS_CAP)
+        return
+    check("reader holds the pipe: its child started, so the pipe is really held",
+          r.held and len(r.reader_calls) == 1, detail(r))
+    check("reader holds the pipe: hook returns within %d s for a %d s reader timeout" % (WALL_LIMIT, READER_SECONDS),
+          r.elapsed <= WALL_LIMIT, detail(r))
+    check("reader holds the pipe: exit 0, no deny, no model call, board-timeout line",
+          r.code == 0 and r.out == "" and not r.model_calls and "board read timed out" in r.err, detail(r))
 
 
 def case_model_failures_fail_open_with_no_deny():
@@ -349,6 +449,7 @@ def case_hook_runs():
     case_malformed_input_fails_open_with_no_deny()
     case_model_failures_fail_open_with_no_deny()
     case_reader_timeout_allows_with_one_plain_line()
+    case_reader_that_holds_the_pipe_returns_in_bound()
 
 
 if __name__ == "__main__":
