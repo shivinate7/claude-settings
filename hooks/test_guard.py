@@ -9500,37 +9500,7 @@ LOG_CHECKS_EXTRA.append(("rm-var: 2000 unclosed $( spans are judged in under 2 s
                          rm_var_slow_case))
 
 
-# Time bound (decision rm-on-a-variable-needs-a-guard, ruling item 1): 4000 assignments and 4000
-# targets, with a bare pwd that taints every name, are judged in under 2 s and denied. Taken out of
-# CASES after add(), as the 2000-span case above is, so the main loop does not judge it twice.
-RM_VAR_WIDE_CMD = (
-    "".join("D%d=/tmp/a%d; " % (n, n) for n in range(4000))
-    + "P=$(pwd); rm -rf "
-    + " ".join('"$D%d"/*' % n for n in range(4000))
-)
-_wide_at = len(CASES)
-add("rm-var: 4000 assignments and 4000 targets with pwd are judged in under 2 s", "deny",
-    cwd=NOGIT, command=RM_VAR_WIDE_CMD)
-RM_VAR_WIDE_CASE = CASES[_wide_at]
-del CASES[_wide_at:]
-
-
-def rm_var_wide_case():
-    start = time.monotonic()
-    got, reason = decide(RM_VAR_WIDE_CASE)
-    took = time.monotonic() - start
-    if took >= 2.0:
-        return False, "judged in %.2f s, not under 2 s" % took
-    if got != "deny":
-        return False, "judged %s in %.2f s, not deny" % (got, took)
-    return True, "judged in %.2f s, under 2 s" % took
-
-
-WIDE_LABEL = "rm-var: 4000 assignments and 4000 targets with pwd are judged in under 2 s"
-LOG_CHECKS_EXTRA.append((WIDE_LABEL, rm_var_wide_case))
-
-
-# In-process timing (ruling item 3). guard.judge runs in this process and only its CPU time is read,
+# In-process timing. guard.judge runs in this process and only its CPU time is read,
 # so the reading is the guard's own work. A hook subprocess's CPU time is not this process's, so no
 # subprocess is timed here. judge answers by printing one JSON block and exiting, so stdout is
 # captured and SystemExit is caught. The guard's log goes under CLAUDE_CONFIG_DIR, pointed at the
@@ -9563,40 +9533,118 @@ def judge_in_process(command, cwd):
     return block["permissionDecision"], block["permissionDecisionReason"], took
 
 
-# Ruling item 3: 4000 names, each bound to /tmp/a and then deleted through a glob under that name,
-# are judged in under 1 s of CPU, and the verdict is the rm-var refusal. Each flagged delete re-reads
-# the rest of the command for later bindings, so the work grows as the square of the segments.
-# The name must differ per segment: a repeated name has more than 64 values and is refused before
-# that re-read, so it never reaches the slow path. A `$D/x` target is not in the flagged shape.
-RM_VAR_LINEAR_CMD = "".join("D%d=/tmp/a; rm -rf $D%d/*; " % (n, n) for n in range(4000))
+# Ratio bounds for the timing cases. The speed bound exists because the guard must finish inside its
+# hook timeout (60 s, settings.json; decision gate-hooks-fail-closed). The limits and the one
+# wall-clock case left live in debts/guard-timing-case-flaky.md. An absolute bound flaked on busy
+# runners, so each big case is judged in this process next to a small case of the same shape, one
+# eighth of its size. Linear work takes about the scaled baseline, a ratio of 1. The quadratic
+# slowdown takes about 8. The big case passes when its ratio stays under RM_VAR_K = 3, the geometric
+# mean of 1 and 8, rounded up, which leaves a margin of about 2.7 on each side.
+#
+# Windows CPU time moves in 15.625 ms ticks, so a baseline of a few ticks reads off by 25% or more.
+# So each side is tick_safe_mean: the mean of runs that together span RM_VAR_FLOOR seconds of CPU.
+RM_VAR_K = 3
+RM_VAR_REPEATS = 3
+RM_VAR_FLOOR = 0.4       # CPU seconds one batch must span (25 ticks)
+RM_VAR_BATCH_CAP = 100   # runs in one batch for a judge call; a clock that never moves ends as a FAIL
+
+
+def tick_safe_mean(run_once, cap):
+    """Return (ok, mean CPU per run, text). run_once() returns (ok, CPU seconds, text) for one run.
+
+    Runs repeat until RM_VAR_FLOOR CPU seconds have passed, then the mean is returned. Too little CPU
+    in `cap` runs is a named FAIL, so a clock that never moves never divides by zero.
+    """
+    total, runs = 0.0, 0
+    while total < RM_VAR_FLOOR and runs < cap:
+        ok, took, text = run_once()
+        if not ok:
+            return False, 0.0, text
+        total += took
+        runs += 1
+    if total < RM_VAR_FLOOR:
+        return False, 0.0, ("baseline spans %.3f s CPU in %d runs, under the %.2f s floor"
+                            % (total, runs, RM_VAR_FLOOR))
+    return True, total / runs, ""
+
+
+def rm_var_batch(cmd, must):
+    """Return tick_safe_mean of judging cmd. Every run must be a deny whose reason holds `must`.
+
+    The reason is the rule name, so an empty `must` checks the deny alone.
+    """
+    def run_once():
+        got, reason, took = judge_in_process(cmd, NOGIT)
+        if got != "deny" or must not in reason:
+            return False, 0.0, "judged %s, not the rm-var refusal" % got
+        return True, took, ""
+    return tick_safe_mean(run_once, RM_VAR_BATCH_CAP)
+
+
+def rm_var_ratio(make, small_n, big_n, must="rm-var-unguarded"):
+    """Return (ok, text) for make(big_n) against make(small_n) scaled by big_n / small_n."""
+    small, big = [], []
+    for _ in range(RM_VAR_REPEATS):
+        ok, mean, text = rm_var_batch(make(small_n), must)
+        if not ok:
+            return False, "small n=%d: %s" % (small_n, text)
+        small.append(mean)
+        got, reason, took = judge_in_process(make(big_n), NOGIT)
+        if got != "deny" or must not in reason:
+            return False, "big n=%d judged %s, not the rm-var refusal" % (big_n, got)
+        big.append(took)
+    size = big_n / small_n
+    base = sum(small) / len(small)   # each batch mean is positive: it spans RM_VAR_FLOOR
+    ratio = min(big) / (size * base)
+    return ratio < RM_VAR_K, ("CPU ratio %.2f to the %dx-scaled baseline, bound %d (big %.2f s, "
+                              "small mean %.3f s)" % (ratio, size, RM_VAR_K, min(big), base))
+
+
+# Timing case: 4000 names, each bound to /tmp/a and then deleted through a glob under that name,
+# are the rm-var refusal, and their CPU grows linearly. Each flagged delete re-reads the rest of the
+# command for later bindings, so a re-read per delete grows as the square of the segments. The name
+# must differ per segment: a repeated name has more than 64 values and is refused before that
+# re-read, so it never reaches the slow path. A `$D/x` target is not in the flagged shape.
+def rm_var_linear_cmd(n):
+    return "".join("D%d=/tmp/a; rm -rf $D%d/*; " % (k, k) for k in range(n))
 
 
 def rm_var_linear_case():
-    got, reason, took = judge_in_process(RM_VAR_LINEAR_CMD, NOGIT)
-    if took >= 1.0:
-        return False, "judged in %.2f s CPU, not under 1 s" % took
-    if got != "deny" or "rm-var-unguarded" not in reason:
-        return False, "judged %s in %.2f s CPU, not the rm-var refusal" % (got, took)
-    return True, "judged in %.2f s CPU, under 1 s" % took
+    return rm_var_ratio(rm_var_linear_cmd, 500, 4000)
 
 
-LOG_CHECKS_EXTRA.append(("rm-var: 4000 bindings and 4000 flagged deletes are judged in under 1 s CPU",
+LOG_CHECKS_EXTRA.append(("rm-var: 4000 bindings and 4000 flagged deletes scale linearly in CPU",
                          rm_var_linear_case))
 
 
-# The 64000-binding limit, moved from the wall clock of the whole hook to the CPU time of judge.
-# The bound is unchanged: under 2 s. The verdict is refused, and only the time is the point.
+# The 64000-binding limit: one delete after 64000 bindings, judged in CPU time of judge, whose
+# split is cached once for a command of many repeated segments. The verdict is refused, and only the
+# growth of the time is the point.
+def rm_var_64000_cmd(n):
+    return "A=x;" * n + " rm -rf $A/"
+
+
 def rm_var_64000_case():
-    got, reason, took = judge_in_process("A=x;" * 64000 + " rm -rf $A/", NOGIT)
-    if took >= 2.0:
-        return False, "judged in %.2f s CPU, not under 2 s" % took
-    if got != "deny" or "rm-var-unguarded" not in reason:
-        return False, "judged %s in %.2f s CPU, not the rm-var refusal" % (got, took)
-    return True, "judged in %.2f s CPU, under 2 s" % took
+    return rm_var_ratio(rm_var_64000_cmd, 8000, 64000)
 
 
-LOG_CHECKS_EXTRA.append(("rm-var: 64000 bindings before a delete are judged in under 2 s CPU",
+LOG_CHECKS_EXTRA.append(("rm-var: 64000 bindings before a delete scale linearly in CPU",
                          rm_var_64000_case))
+
+
+# 4000 assignments and 4000 targets, with a bare pwd that taints every name, are denied. Judged in
+# CPU, not the wall clock of a hook subprocess, which carries startup cost and runner load.
+def rm_var_wide_cmd(n):
+    return ("".join("D%d=/tmp/a%d; " % (k, k) for k in range(n))
+            + "P=$(pwd); rm -rf " + " ".join('"$D%d"/*' % k for k in range(n)))
+
+
+def rm_var_wide_case():
+    return rm_var_ratio(rm_var_wide_cmd, 500, 4000, must="")
+
+
+LOG_CHECKS_EXTRA.append(("rm-var: 4000 assignments and 4000 targets with pwd scale linearly in CPU",
+                         rm_var_wide_case))
 
 
 # gcp-quote-fix, round 2 speed. A run of apostrophes must be judged in well under the budget.
@@ -10354,29 +10402,46 @@ def session_log_astral_cut_case():
 
 
 def session_log_control_id_time_case():
-    """session-log: the sanitizer takes a 1 MB id of control characters in under 100 ms (the best
-    of three runs), and cuts a 1 MB id of mixed text to 64 characters. The sanitizer is timed
-    in-process: a subprocess run would time Python's own start-up.
+    """session-log: sanitizing a 1 MB id of control characters scales linearly in CPU. It is timed
+    against a 128 KB id in this process, each side a tick_safe_mean, and the ratio to the scaled
+    baseline must stay under RM_VAR_K. A quadratic sanitizer gives about 8. The guard_core under test
+    is loaded from the GUARD directory, so a mutated copy is the one timed. A 64 KB mixed id must
+    still cut to 64 characters (a quadratic sanitizer takes minutes on a 1 MB mixed id, so the cut
+    is checked at 64 KB).
     """
-    if HERE not in sys.path:
-        sys.path.insert(0, HERE)
-    import guard_core  # noqa: F401  (imported for its sys.modules entry)
-    core = sys.modules["guard_core"]
-    control = "\x01" * (1 << 20)
-    best = None
-    for _ in range(3):
-        start = time.perf_counter()
-        got = core.session_log_field(control)
-        elapsed = time.perf_counter() - start
-        best = elapsed if best is None else min(best, elapsed)
-    if got != SESSION_LOG_PLACEHOLDER:
-        return False, "the control-only id gave %r, want the placeholder" % got[:20]
-    if best >= 0.1:
-        return False, "the 1 MB control-character id took %.0f ms, want under 100 ms" % (best * 1000)
-    mixed = core.session_log_field("\x01a" * (1 << 19))
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "guard_core", os.path.join(os.path.dirname(GUARD), "guard_core.py"))
+    core = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(core)
+
+    def timed(size):
+        control = "\x01" * size
+
+        def run_once():
+            start = time.process_time()
+            got = core.session_log_field(control)
+            took = time.process_time() - start
+            if got != SESSION_LOG_PLACEHOLDER:
+                return False, 0.0, "the control-only id gave %r, want the placeholder" % got[:20]
+            return True, took, ""
+        return tick_safe_mean(run_once, SESSION_LOG_BATCH_CAP)
+
+    ok, small, text = timed(1 << 17)
+    if not ok:
+        return False, "128 KB baseline: " + text
+    ok, big, text = timed(1 << 20)
+    if not ok:
+        return False, "1 MB id: " + text
+    ratio = big / (8 * small)
+    mixed = core.session_log_field("\x01a" * (1 << 15))
     if mixed != "a" * 64:
-        return False, "the 1 MB mixed id gave %d characters, want 64 a's" % len(mixed)
-    return True, "1 MB of control characters in %.0f ms, best of three" % (best * 1000)
+        return False, "the 64 KB mixed id gave %d characters, want 64 a's" % len(mixed)
+    return ratio < RM_VAR_K, ("CPU ratio %.2f to the 8x-scaled baseline, bound %d (1 MB %.4f s, "
+                              "128 KB mean %.5f s)" % (ratio, RM_VAR_K, big, small))
+
+
+SESSION_LOG_BATCH_CAP = 10000   # runs in one batch of the sanitizer timing; a stuck clock ends as a FAIL
 
 
 LOG_CHECKS_EXTRA.append(("session-log: a guard_core without set_log_session still judges and "
@@ -10385,8 +10450,8 @@ LOG_CHECKS_EXTRA.append(("session-log: a lone surrogate in session_id drops or r
                          "and keeps the line", session_log_lone_surrogate_case))
 LOG_CHECKS_EXTRA.append(("session-log: a 64-character cut keeps an astral character whole",
                          session_log_astral_cut_case))
-LOG_CHECKS_EXTRA.append(("session-log: a 1 MB control-character id is sanitized in under "
-                         "100 ms", session_log_control_id_time_case))
+LOG_CHECKS_EXTRA.append(("session-log: sanitizing a 1 MB control-character id scales linearly in CPU",
+                         session_log_control_id_time_case))
 
 
 def session_log_stale_core_case():
