@@ -62,6 +62,17 @@ background job runs unattended for a day with no stated reason.
   `Start-Process`, `cmd /d /c`, `exec`, `x=$(...)`, `yarn workspace <w> dev`, and python options
   with values before `-m` (`-X utf8`). Debt `server-wrappers-unread`: a server behind these
   forms is not refused.
+- Round 3 limits. A script name with a part dev, start, serve, watch or preview is refused,
+  though it ends (`build:dev`, `test-watch-ci`). A flask or jupyter command whose option value or
+  sub-verb is run, lab or notebook is refused. The remedy for both is an `until:` note. Debt
+  `bg-end-false-alarms`.
+- Round 3 limits. Watch flags other than `--watch` and `tsc -w` are not read (`jest --watchAll`,
+  `mocha -w`, `vitest -w`). Servers outside the roster pass (`ng serve`, `nx serve`,
+  `manage.py runserver`, `gunicorn`, `docker compose up`), and so does any interpreter run on a
+  file. `bundle exec`, `setsid`, `Invoke-Expression`, `iex`, `Start-Job`, and runner flags with an
+  unlisted value are not read. Debt `bg-end-roster-gaps`.
+- A server detached inside a foreground call (`nohup x &`) has no `run_in_background`, so this
+  rule skips it. The detached-launch rule refuses that shape. Debt `bg-end-roster-gaps`.
 
 Kind: process
 Home: hooks/guard_stream.py
