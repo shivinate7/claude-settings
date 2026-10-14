@@ -26,8 +26,7 @@ Measured by the oversight session's audit:
 
 ## Holes, named
 
-- The env-file holes are in env-file-wrappers (the env-file rule and its wrappers).
-- On SubagentStop, a missing module still fails open. One log line records it.
+Debts: `env-grep-long-abbrev-unpinned`, `env-file-rule-false-alarms`, `env-flat-crash-allows` and `env-node-env-file-prints` (the env-file holes, in env-file-wrappers), `guard-audit-subagent-stop-open` (SubagentStop fails open on a missing guard module).
 
 Kind: process
 Home: hooks/guard_env.py

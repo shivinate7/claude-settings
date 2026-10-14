@@ -46,5 +46,9 @@ the gate and the alarm are proved on their scripts, not on a hosted runner. The 
 `gates.yml` runs the six tests. It does not call the templates: the owner chose no required
 checks on main. The nightly alarm is proposed in the PR, not enabled.
 
+## Holes, named
+
+Debts: `ste-exclude-star-crosses-dir` (an STE-lint exclude star can skip files in deeper folders).
+
 Kind: process
 Home: rule:building-one-home-per-capability
