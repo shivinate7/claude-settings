@@ -47,9 +47,18 @@ PROBLEM_LABEL = "Problem:"
 GOAL_LINE = re.compile(r"^[ \t]*%s[ \t]*\S" % re.escape(GOAL_LABEL), re.MULTILINE)
 PROBLEM_LINE = re.compile(r"^[ \t]*%s[ \t]*\S" % re.escape(PROBLEM_LABEL), re.MULTILINE)
 
+
+
+def _loose_line(label):
+    """The order check's reading of a label line: any leading space (NBSP too), bold marks, any case."""
+    return re.compile(r"^\s*(?:\*\*|__)?%s" % re.escape(label), re.MULTILINE | re.IGNORECASE)
+
+
+GOAL_LOOSE, PROBLEM_LOOSE = _loose_line(GOAL_LABEL), _loose_line(PROBLEM_LABEL)
+
 STYLE_FILE = os.path.join(HERE, "..", "output-styles", "shiv-stylisms.md")
 PROBLEM_RULE = "style-question-states-problem"
-STYLE_RULES = (PROBLEM_RULE, RULE)
+STYLE_RULES = (RULE, PROBLEM_RULE)  # Goal rule first, so the prompt shows Goal first
 
 PROMPT = (
     "You check a question an assistant is about to put to its owner. The owner's goal, read "
@@ -240,7 +249,7 @@ def main():
               "terms>`, `%s <the problem, in one plain sentence>`). Missing on: %s"
               % (RULE, " and ".join("`%s`" % l for l in labs), GOAL_LABEL, PROBLEM_LABEL,
                  safe_finding_text("; ".join("%s (no %s)" % (t[:80], " or ".join(l)) for t, l in absent))))
-    misordered = [t for t, _ in todo if PROBLEM_LINE.search(t).start() < GOAL_LINE.search(t).start()]
+    misordered = [t for t, _ in todo if PROBLEM_LOOSE.search(t).start() < GOAL_LOOSE.search(t).start()]
     if misordered:
         if not _mark_denied(state):
             _did_not_run("the state could not be written, so no deny was sent.")
