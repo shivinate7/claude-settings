@@ -126,10 +126,12 @@ class RecordSlugsTests(unittest.TestCase):
 
     def test_dir_replaces_the_default_folders(self):
         # --dir points the check at one folder. decisions/ is no longer read, as with check_ruling_kind.
+        self.put(DOCS + "/" + OK)  # the named folder must exist, or --dir fails closed
         self.put("decisions/" + LONG)
         self.assert_passes("--dir", DOCS, "decisions/" + LONG)
 
     def test_dir_ignores_folders_that_only_look_like_it(self):
+        self.put(DOCS + "/" + OK)  # the named folder must exist, or --dir fails closed
         for rel in (LOOKALIKE_SIBLING, LOOKALIKE_WORD):
             with self.subTest(rel=rel):
                 self.put(rel + "/" + LONG)
