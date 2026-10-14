@@ -50,8 +50,9 @@ def norm(path: str) -> str:
 
 # A subshell or substitution paren glued to the command word (`(git`, `$(git`): the word is git.
 GLUED_OPEN = re.compile(r"^(?:\$?\()+(?=.)")
-# An apostrophe inside a word (`don't`, `it's`) is text, never an opening quote.
-CONTRACTION = re.compile(r"(?<=[A-Za-z])'(?:t|s|re|ll|ve|d|m)\b")
+# An apostrophe inside a word (`don't`, `it's`) is text, never an opening quote. The suffix must
+# end the word: `-e's/a/b/'` and `x'd'` are quoted arguments, so `/` and `'` after it fail.
+CONTRACTION = re.compile(r"(?<=[A-Za-z])'(?:t|s|re|ll|ve|d|m)(?=[\s.,;:!?)]|$)")
 
 
 def basename(token: str) -> str:
@@ -175,10 +176,18 @@ POWERSHELL_ASSIGNMENT = re.compile(r"^\$[A-Za-z_][A-Za-z0-9_]*$")
 COMMAND_WRAPPERS = {"sudo", "env", "command", "nohup", "nice", "time", "doas", "xargs",
                     "timeout", "verdict", "python", "python3", "exec", "builtin", "!", "&"}
 # The flags of a wrapper that take the NEXT word as their value: `nice -n 5 git` runs git, not `5`.
+# Long flags are listed too: `sudo --user root git ...` runs git. A `--flag=value` is one token and
+# needs no entry.
 WRAPPER_VALUE_FLAGS = {
-    "nice": {"-n"}, "env": {"-u", "-C", "-S"}, "time": {"-f", "-o"}, "exec": {"-a"},
-    "doas": {"-u", "-C"}, "xargs": {"-n", "-P", "-I", "-L", "-s", "-d", "-E", "-a"},
-    "sudo": {"-u", "-g", "-p", "-C", "-D", "-R", "-T", "-r", "-t", "-U"},
+    "nice": {"-n", "--adjustment"},
+    "env": {"-u", "--unset", "-C", "--chdir", "-S", "--split-string", "-P"},
+    "time": {"-f", "--format", "-o", "--output"}, "exec": {"-a"},
+    "doas": {"-u", "-C"},
+    "xargs": {"-n", "--max-args", "-P", "--max-procs", "-I", "-L", "--max-lines", "-s",
+              "--max-chars", "-d", "--delimiter", "-E", "-a", "--arg-file"},
+    "sudo": {"-u", "--user", "-g", "--group", "-h", "--host", "-p", "--prompt", "-C",
+             "--close-from", "-D", "--chdir", "-R", "--chroot", "-T", "--command-timeout",
+             "-r", "--role", "-t", "--type", "-U", "--other-user"},
 }
 # `timeout` and `python` unwrap only in their wrapper shape: `timeout [flags] DURATION cmd` (Windows
 # `timeout /t 5` is the waiter, not a wrapper) and `python bin/verdict cmd` (the repo's runner).
@@ -207,7 +216,32 @@ def segment_tokens(segment: str):
     if POWERSHELL_CALL[0]:
         segment = segment.replace("\\", "\\\\")
     found = _segment_tokens(segment)
-    return None if found is None else list(found)
+    if found is None:
+        return None
+    tokens = _Tokens(found)
+    if any(t[:1] == "(" or t[:2] == "$(" for t in tokens):
+        tokens.quoted = _quoted_opens(segment, len(tokens))
+    return tokens
+
+
+class _Tokens(list):
+    """A segment's tokens, plus `quoted`: the indexes of tokens whose opening `(` or `$(` sat inside
+    quotes, which makes it text, never a subshell. `command_indexes` reads it."""
+    quoted = frozenset()
+
+
+@functools.lru_cache(maxsize=4096)
+def _quoted_opens(segment: str, count: int):
+    """Indexes of the tokens that start inside quotes. Reads the segment again with quotes kept
+    (non-POSIX shlex): a token that starts with `'`, or with `"` not followed by `$(`, is quoted
+    text. When the two readings do not line up, claim nothing: a paren then counts as a subshell."""
+    try:
+        raw = shlex.split(segment, posix=False)
+    except ValueError:
+        return frozenset()
+    if len(raw) != count:
+        return frozenset()
+    return frozenset(i for i, t in enumerate(raw) if t[:1] == "'" or (t[:1] == '"' and t[1:3] != "$("))
 
 
 @functools.lru_cache(maxsize=16384)   # holds every distinct segment of a 4000-rm command
@@ -338,7 +372,8 @@ def heredoc_heads(text: str, quote: str = ""):
 
 
 def _split_heredocs(cmd: str):
-    """Return (kept lines, [(quote, body)]): every header line kept, every body set apart.
+    """Return (kept lines, [(quote, body, header)]): every header line kept, every body set apart,
+    each body with the text of the header line that opened it (two headers share one line).
     The one walk `_drop_heredoc_bodies` and the environment layer both need. A header is read as
     heredoc_heads reads it, so one in quoted text, a comment or a here-string strips nothing."""
     lines = cmd.split("\n")
@@ -348,13 +383,14 @@ def _split_heredocs(cmd: str):
     stack = ""
     while index < len(lines):
         kept.append(lines[index])
-        heads, stack = heredoc_heads(lines[index], stack)
+        header_line = lines[index]
+        heads, stack = heredoc_heads(header_line, stack)
         index += 1
         for quote, delimiter in heads:
             start = index
             while index < len(lines) and lines[index].strip() != delimiter:
                 index += 1
-            bodies.append((quote, "\n".join(lines[start:index])))
+            bodies.append((quote, "\n".join(lines[start:index]), header_line))
             if index < len(lines):
                 index += 1  # drop the closing delimiter line too
     return kept, bodies
@@ -1504,10 +1540,26 @@ def _pwsh_script(tokens) -> str:
 CMD_EXE_NAMES = {"cmd", "cmd.exe"}
 
 
+def _env_split_string(tokens) -> str:
+    """The command string `env -S STRING` (or `--split-string`, `-SSTRING`) runs, else ''."""
+    at = next((i for i, t in enumerate(tokens) if basename(t) == "env"), None)
+    index = len(tokens) if at is None else at + 1
+    while index < len(tokens) and tokens[index].startswith("-"):
+        flag = tokens[index]
+        if flag in ("-S", "--split-string"):
+            return tokens[index + 1] if index + 1 < len(tokens) else ""
+        if flag.startswith("--split-string="):
+            return flag.split("=", 1)[1]
+        if flag.startswith("-S"):
+            return flag[2:]
+        index += 2 if flag in WRAPPER_VALUE_FLAGS["env"] else 1
+    return ""
+
+
 def nested_script(tokens) -> str:
     """The script text a segment hands to another interpreter: `sh -c`, `cmd /c`, `pwsh -c`, or
     PowerShell's `iex`. Else ''. A rule that judges a command reads this text as one more command."""
-    script = inline_script(tokens)
+    script = inline_script(tokens) or _env_split_string(tokens)
     at = resolve_command(tokens)
     if script or at is None:
         return script
@@ -1523,7 +1575,9 @@ def nested_script(tokens) -> str:
 def command_indexes(tokens):
     """Every index where a command runs in one segment: its own command word, and the one after
     each `(` or `$(` (a subshell or substitution, glued or spaced), such as `echo $(wsl ...)`."""
-    starts = [0] + [i for i, t in enumerate(tokens) if i and (t in ("(", "$(") or GLUED_OPEN.match(t))]
+    quoted = getattr(tokens, "quoted", ())
+    starts = [0] + [i for i, t in enumerate(tokens)
+                    if i and i not in quoted and (t in ("(", "$(") or GLUED_OPEN.match(t))]
     found = []
     for start in starts:
         at = resolve_command(tokens[start:])
