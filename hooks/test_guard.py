@@ -38,6 +38,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -66,7 +67,7 @@ FAMILIES = {
     "branch-worktree": "branch delete and worktree remove/prune",
     "pointer": "the pointer HEAD checkout",
     "kill": "machine-wide kills and detached launches",
-    "stream": "live streams, narrating commands, gh api, ln -s and waiter loops",
+    "stream": "live streams, narrating commands, gh api, ln -s, waiter loops and background end conditions",
     "write": "the silent write",
     "push-delete": "push and delete",
     "env": "environment files",
@@ -84,6 +85,7 @@ FAMILIES = {
     "rm-var": "every case named rm-var, wherever it sits",
     "session-log": "the session id column of guard.log",
     "fail-closed": "a missing sibling module refuses the call, and never allows it",
+    "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "misc": "anything outside a tagged section",
 }
@@ -3920,6 +3922,206 @@ sh("waiter: a loop under a comment holding an apostrophe, MEASURED wrongly allow
    "# the merge driver's shape\nwhile true; do sleep 5; done", "deny", "waiter")
 sh("waiter: a `#` inside a word is not a comment, so the loop after it still denies",
    "echo fix#3; while true; do sleep 5; done", "deny", "waiter")
+
+
+# =========================================================================== background end condition
+#
+# Owner ruling 2026-10-13 23:41 CDT, "End condition at start". A background server or watcher needs
+# an `until: <condition>` note in the Bash call's `description`. A refusal without one names the note
+# in its remedy. stall_watch.py --stop shows the note beside each quiet shell (its cases are in
+# test_stall_watch_stop.py). Incident: a file server on port 3202 ran 27 h unnoticed.
+# A one-off build or test is not a long-runner, so it passes with no note. `gh run watch` is not a
+# long-runner either: it ends by itself.
+# Rule name: background-end. The deny cases are the red proof on the code before the rule. The allow
+# cases pass on that code too. They pin that the rule refuses no finished job, and that a note does
+# not unlock a rule that already refuses (`tail -f`, live-stream).
+
+add("background-end: a python http.server under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="python3 -m http.server 3202", run_in_background=True)
+add("background-end: npm run dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm run dev", run_in_background=True)
+add("background-end: npx vite under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npx vite --port 5173", run_in_background=True)
+add("background-end: next dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npx next dev -p 3000", run_in_background=True)
+add("background-end: serve under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npx serve -s dist -l 3000", run_in_background=True)
+add("background-end: tsc --watch under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npx tsc --watch", run_in_background=True)
+add("background-end: an empty until in the description is no note, so refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="python3 -m http.server 3202", run_in_background=True,
+    description="Serve q_max files. until:   ")
+add("background-end: a description with no until is no note, so refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm run dev", run_in_background=True, description="dev server for the q_max page")
+add("background-end: an until written in the command text is no note, so refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm run dev  # until: round 1 bids are served", run_in_background=True)
+add("background-end: a server after a quoted # is still refused, the # does not hide it",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command='echo "# q_max"; npm run dev', run_in_background=True)
+add("background-end: a server after a lone apostrophe in quotes is still refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command='echo "it\'s up"; python3 -m http.server 3202', run_in_background=True)
+add("background-end: a note does not unlock tail -f, the live-stream rule still refuses it",
+    "deny", "live-stream", cwd=NOGIT, carries=("live-stream",),
+    command="tail -f server.out", run_in_background=True,
+    description="until: round 1 bids are served")
+
+add("background-end: a server with an until note in its description is allowed", "allow",
+    cwd=NOGIT, command="python3 -m http.server 3202", run_in_background=True,
+    description="Serve q_max files on 3202. until: round 1 bids are served")
+add("background-end: a dev server with an until note is allowed", "allow", cwd=NOGIT,
+    command="npm run dev", run_in_background=True, description="until: round 1 bids are served")
+add("background-end: a build under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="npm run build", run_in_background=True)
+add("background-end: the guard suite under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="python3 hooks/test_guard.py", run_in_background=True)
+add("background-end: gh run watch under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="gh run watch 7", run_in_background=True)
+add("background-end: a server named in quoted text is data, allowed", "allow", cwd=NOGIT,
+    command='echo "python3 -m http.server 3202"', run_in_background=True)
+add("background-end: a server named in a heredoc body is data, allowed", "allow", cwd=NOGIT,
+    command="cat > notes.txt <<'EOF'\nDon't run npm run dev here\nEOF", run_in_background=True)
+add("background-end: a server named in a multi-line quoted string is data, allowed", "allow",
+    cwd=NOGIT, command='echo "first line\nnpm run dev later"', run_in_background=True)
+add("background-end: a server named in a comment line is not run, allowed", "allow", cwd=NOGIT,
+    command="# start npm run dev later\necho ready", run_in_background=True)
+
+# Shapes the rule misses on 4d477a4, so each deny below is red there. Each starts a server or
+# watcher that never ends on its own, and each has no note: a flag before the script name, a
+# Windows executable name, a wrapper that runs the command, or a script name that serves or watches.
+add("background-end: npm --prefix web run dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm --prefix web run dev", run_in_background=True)
+add("background-end: npm -w web run dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm -w web run dev", run_in_background=True)
+add("background-end: pnpm -C web dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="pnpm -C web dev", run_in_background=True)
+add("background-end: pnpm --filter web dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="pnpm --filter web dev", run_in_background=True)
+add("background-end: npm.cmd run dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm.cmd run dev", run_in_background=True)
+add("background-end: python.exe -m http.server under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="python.exe -m http.server", run_in_background=True)
+add("background-end: python -u -m http.server under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="python -u -m http.server", run_in_background=True)
+add("background-end: py -3 -m http.server under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="py -3 -m http.server", run_in_background=True)
+add("background-end: cmd /c npm run dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="cmd /c npm run dev", run_in_background=True)
+add("background-end: bash -c around npm run dev under run_in_background is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command='bash -c "npm run dev"', run_in_background=True)
+add("background-end: a '# ready' comment opener in a bash -c string does not hide npm run dev",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command='bash -c "echo \'# ready\'; npm run dev"', run_in_background=True)
+add("background-end: a PowerShell call operator before npm run dev is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"), tool="PowerShell",
+    command="& npm run dev", run_in_background=True)
+add("background-end: npm run dev under PowerShell run_in_background is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"), tool="PowerShell",
+    command="npm run dev", run_in_background=True)
+add("background-end: npm run dev in a subshell under run_in_background is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="(npm run dev)", run_in_background=True)
+add("background-end: npx vite@5 under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npx vite@5", run_in_background=True)
+add("background-end: npm run build:watch under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm run build:watch", run_in_background=True)
+add("background-end: npm run dev:frontend under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm run dev:frontend", run_in_background=True)
+add("background-end: npx vite build --watch under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npx vite build --watch", run_in_background=True)
+
+# Pins: these end by themselves or are a named hole, and must stay allowed with no note.
+add("background-end: vite build under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="vite build", run_in_background=True)
+add("background-end: next build under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="next build", run_in_background=True)
+add("background-end: node script.js under run_in_background is allowed, a one-off and a named hole",
+    "allow", cwd=NOGIT, command="node script.js", run_in_background=True)
+add("background-end: a server named inside a bash -c string is data, allowed", "allow",
+    cwd=NOGIT, command='bash -c "echo \'npm run dev\'"', run_in_background=True)
+
+
+# The deny cases are the red proof on the code before this change: each starts a server or watcher the
+# roster does not name yet. The `--watch=false` and `--watch false` allow cases are red there too, since
+# the guard reads `--watch` in any position. `npm run build-docs` is a pin, allowed before and after.
+DEVSERVER_DENY = ("background-end", "until:")
+
+add("background-end: bun --watch server.ts under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="bun --watch server.ts", run_in_background=True)
+add("background-end: bun run --watch server.ts under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="bun run --watch server.ts", run_in_background=True)
+add("background-end: bun --hot server.ts under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="bun --hot server.ts", run_in_background=True)
+add("background-end: deno task dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="deno task dev", run_in_background=True)
+add("background-end: deno serve main.ts under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="deno serve main.ts", run_in_background=True)
+add("background-end: flask run under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="flask run", run_in_background=True)
+add("background-end: uvicorn app:app --reload under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="uvicorn app:app --reload", run_in_background=True)
+add("background-end: jupyter lab under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="jupyter lab", run_in_background=True)
+add("background-end: webpack serve under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="webpack serve", run_in_background=True)
+add("background-end: astro dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="astro dev", run_in_background=True)
+add("background-end: rails s under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="rails s", run_in_background=True)
+add("background-end: streamlit run app.py under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="streamlit run app.py", run_in_background=True)
+add("background-end: npm run dev-server under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="npm run dev-server", run_in_background=True)
+add("background-end: npm run start-api under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="npm run start-api", run_in_background=True)
+
+add("background-end: jest --watch=false under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="jest --watch=false", run_in_background=True)
+add("background-end: vitest --watch=false under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="vitest --watch=false", run_in_background=True)
+add("background-end: vitest --watch false under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="vitest --watch false", run_in_background=True)
+add("background-end: npm test -- --watch=false under run_in_background needs no note, allowed",
+    "allow", cwd=NOGIT, command="npm test -- --watch=false", run_in_background=True)
+add("background-end: npm run build-docs under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="npm run build-docs", run_in_background=True)
 
 
 # =========================================================================== 2c-bis. the WSL launch allow list
@@ -9566,6 +9768,238 @@ for _label, _check in (
 ):
     FAILCLOSED_CHECKS.append(_check)
     LOG_CHECKS_EXTRA.append((_label, _check))
+
+
+# --------------------------------------------------------------------------- reload-stamp
+#
+# Owner ruling 2026-10-14 (install-atomic, arbiter 03:41). The installer writes each hook file to a
+# temp name and renames it into place, and stamps every installed hook file with one install-id
+# constant. The guard compares the stamps of the modules it loads. On an import or load failure, or
+# a stamp mismatch, it waits briefly and reloads. After the wait it refuses the call as guard-crash,
+# and never allows it. Each case runs two ways. The damage is fixed during the wait, and the call is
+# allowed. Or the damage stays, and the call is refused.
+#
+# The contract the cases hold the guard to: each hook file holds a module-level line
+# INSTALL_ID = "<id>", and the cases put that line at the top of every copy, as an install does.
+#
+# Timing. The damage is fixed RELOAD_DELAY_S after the guard starts. The fix is one rename, so the
+# guard reads the old damaged file or the whole new one, never half of one. A guard that does not
+# wait finishes on its first load, well inside that delay, and so is caught refusing or allowing
+# before the fix lands.
+FAMILY = "reload-stamp"
+RELOAD_DELAY_S = 1.0
+INSTALL_ID = "3f1a9c2e-5b7d-4e8f-9a0b-1c2d3e4f5a6b"
+STALE_INSTALL_ID = "0d9e8f7a-6b5c-4d3e-8f2a-1b0c9d8e7f6a"
+RELOAD_CORE = "guard_core.py"
+RELOAD_MISSING = "guard_pointer.py"
+RELOAD_CONTROL = []   # the intact copy's (decision, exit), read once, for the refusal's exit code
+
+
+def _stamp_line(install_id):
+    return 'INSTALL_ID = "%s"\n' % install_id
+
+
+def _put_whole(path, text):
+    """Writes a file the way the installer does: a temp name, then one rename over the old name."""
+    temp = path + ".put-tmp"
+    with open(temp, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+    os.replace(temp, path)
+
+
+def _reload_copy_stamped(name, first_line_for):
+    """A scratch folder with a copy of guard.py and every guard_* sibling. first_line_for(entry) is
+    the line put at the top of that file, or None for a file with no INSTALL_ID line. Returns
+    (folder, good): good maps each file name to the text an install leaves."""
+    source = os.path.dirname(GUARD)
+    folder = os.path.join(ROOT, "reload", name)
+    shutil.rmtree(folder, ignore_errors=True)
+    os.makedirs(folder)
+    sources = [("guard.py", GUARD)] + [
+        (entry, os.path.join(source, entry)) for entry in sorted(os.listdir(source))
+        if entry.startswith("guard_") and entry.endswith(".py")]
+    good = {}
+    for entry, src in sources:
+        with open(src, encoding="utf-8") as handle:
+            good[entry] = (first_line_for(entry) or "") + handle.read()
+        _put_whole(os.path.join(folder, entry), good[entry])
+    return folder, good
+
+
+def _reload_copy(name, install_id):
+    """A scratch folder with a copy of guard.py and every guard_* sibling, each stamped with
+    install_id. Returns (folder, good): good maps each file name to the text an install leaves."""
+    return _reload_copy_stamped(name, lambda entry: _stamp_line(install_id))
+
+
+def _truncated(text):
+    """The first part of text that does not compile: a write cut short, not an empty file."""
+    cut = len(text) // 2
+    while cut < len(text):
+        try:
+            compile(text[:cut], RELOAD_CORE, "exec")
+        except SyntaxError:
+            return text[:cut]
+        cut += 7
+    raise RuntimeError("no cut of %s fails to compile" % RELOAD_CORE)
+
+
+def _damage_truncated(folder, good):
+    _put_whole(os.path.join(folder, RELOAD_CORE), _truncated(good[RELOAD_CORE]))
+    return [RELOAD_CORE]
+
+
+def _damage_missing(folder, good):
+    os.remove(os.path.join(folder, RELOAD_MISSING))
+    return [RELOAD_MISSING]
+
+
+def _damage_stamp(folder, good):
+    stale = good[RELOAD_CORE].replace(_stamp_line(INSTALL_ID), _stamp_line(STALE_INSTALL_ID), 1)
+    _put_whole(os.path.join(folder, RELOAD_CORE), stale)
+    return [RELOAD_CORE]
+
+
+def _fix_with(folder, good, names):
+    """The fix: each named file put back whole, the way the installer puts it."""
+    def fix():
+        for entry in names:
+            _put_whole(os.path.join(folder, entry), good[entry])
+    return fix
+
+
+def _reload_run(folder, name, fix=None, command=None):
+    """One Bash call through the copy's guard.py. fix, when given, runs once, RELOAD_DELAY_S after the
+    guard starts. Returns (run, fixed): fixed is True when fix ran, which is before the guard ended
+    only if the guard waited."""
+    cfg = os.path.join(ROOT, "reload-cfg", name)
+    os.makedirs(cfg, exist_ok=True)
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env["CLAUDE_CONFIG_DIR"] = cfg
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command or FAILCLOSED_CALL},
+                          "cwd": NOGIT})
+    fixed = threading.Event()
+
+    def land():
+        fix()
+        fixed.set()
+    timer = threading.Timer(RELOAD_DELAY_S, land) if fix else None
+    if timer:
+        timer.daemon = True
+        timer.start()
+    try:
+        run = subprocess.run([sys.executable, os.path.join(folder, "guard.py")], input=payload,
+                             capture_output=True, text=True, env=env, timeout=120)
+    finally:
+        if timer:
+            timer.cancel()
+            timer.join()
+    return run, fixed.is_set()
+
+
+def _reload_control():
+    """(decision, exit) of an intact copy's deny. A refusal from a damaged copy must match it."""
+    if not RELOAD_CONTROL:
+        folder, _good = _reload_copy("control", INSTALL_ID)
+        run, _fixed = _reload_run(folder, "control", command=FAILCLOSED_CONTROL)
+        RELOAD_CONTROL.append((_decision(run)[0], run.returncode))
+    return RELOAD_CONTROL[0]
+
+
+def reload_fixed_case(name, damage):
+    """The damage is fixed during the wait. The guard waits, reloads the whole file, and allows."""
+    def check():
+        folder, good = _reload_copy(name, INSTALL_ID)
+        names = damage(folder, good)
+        run, fixed = _reload_run(folder, name, _fix_with(folder, good, names))
+        decision, reason = _decision(run)
+        if not fixed:
+            return False, ("the guard finished with %r before the fix landed, so it never waited "
+                           "to reload: %r" % (decision, reason[:90]))
+        if decision != "allow" or run.returncode != 0:
+            return False, ("the damage was fixed during the wait, but the call is %r, exit %d, "
+                           "want allow: %r" % (decision, run.returncode, reason[:90]))
+        return True, "waited, reloaded the whole file, and allowed the call, exit 0"
+    return check
+
+
+def reload_stuck_case(name, damage):
+    """The damage stays. The guard waits, then refuses as guard-crash with the intact copy's exit
+    code. It never allows the call."""
+    def check():
+        folder, good = _reload_copy(name, INSTALL_ID)
+        damage(folder, good)
+        run, _fixed = _reload_run(folder, name)
+        decision, reason = _decision(run)
+        control_decision, control_exit = _reload_control()
+        problems = []
+        if control_decision != "deny":
+            problems.append("the intact copy did not deny the control call: %r" % control_decision)
+        if decision != "deny":
+            problems.append("the call is %r with the damage never fixed, want deny" % decision)
+        if "guard-crash" not in reason:
+            problems.append("the reason is not guard-crash: %r" % reason[:90])
+        if run.returncode != control_exit:
+            problems.append("exit %d, the intact copy's deny exits %d" % (run.returncode, control_exit))
+        if problems:
+            return False, "; ".join(problems)
+        return True, "refused as guard-crash with exit %d, and never allowed" % run.returncode
+    return check
+
+
+RELOAD_CHECKS = (
+    ("reload-stamp: a truncated guard_core.py fixed during the wait is reloaded, and the call allowed",
+     reload_fixed_case("truncated-fixed", _damage_truncated)),
+    ("reload-stamp: a truncated guard_core.py never fixed is refused as guard-crash, never allowed",
+     reload_stuck_case("truncated-stuck", _damage_truncated)),
+    ("reload-stamp: a guard_pointer.py missing during the wait, then restored, is reloaded and allowed",
+     reload_fixed_case("missing-fixed", _damage_missing)),
+    ("reload-stamp: a guard_pointer.py never restored is refused as guard-crash, never allowed",
+     reload_stuck_case("missing-stuck", _damage_missing)),
+    ("reload-stamp: a stamp mismatch fixed during the wait is reloaded, and the call allowed",
+     reload_fixed_case("stamp-fixed", _damage_stamp)),
+    ("reload-stamp: a stamp mismatch never fixed is refused as guard-crash, never allowed",
+     reload_stuck_case("stamp-stuck", _damage_stamp)),
+)
+for _label, _check in RELOAD_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+# guard.py stamped and guard_core.py with no INSTALL_ID line at all is a mixed set, not a match: the
+# guard must wait and reload it like any other mismatch, and refuse it when it never clears. The
+# repo's own set, every file on the commented placeholder, is a match, and is allowed at once.
+def _damage_core_unstamped(folder, good):
+    """guard_core.py loses its INSTALL_ID line and keeps the rest. guard.py keeps its id."""
+    _put_whole(os.path.join(folder, RELOAD_CORE), good[RELOAD_CORE].split("\n", 1)[1])
+    return [RELOAD_CORE]
+
+
+def reload_placeholder_case():
+    """Every file carries the commented placeholder, as the repo does. The guard must match, and
+    allow the call with no wait."""
+    def check():
+        folder, _good = _reload_copy_stamped("placeholder-set", lambda entry: '# INSTALL_ID = "uninstalled"\n')
+        run, _fixed = _reload_run(folder, "placeholder-set")
+        decision, reason = _decision(run)
+        if decision != "allow" or run.returncode != 0:
+            return False, "an all-placeholder set is %r, exit %d, want allow: %r" % (
+                decision, run.returncode, reason[:90])
+        return True, "an all-placeholder set matches, and the call is allowed, exit 0"
+    return check
+
+
+RELOAD_STAMP_CHECKS = (
+    ("reload-stamp: guard.py stamped and guard_core.py with no INSTALL_ID line, fixed during the wait: reloaded and allowed",
+     reload_fixed_case("nostamp-fixed", _damage_core_unstamped)),
+    ("reload-stamp: guard.py stamped and guard_core.py with no INSTALL_ID line, never fixed: refused as guard-crash, never allowed",
+     reload_stuck_case("nostamp-stuck", _damage_core_unstamped)),
+    ("reload-stamp: an all-placeholder set (the repo run) matches, and the call is allowed",
+     reload_placeholder_case()),
+)
+for _label, _check in RELOAD_STAMP_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+FAMILY = "fail-closed"  # the family the cases below had before this section
 
 
 # --------------------------------------------------------------------------- session-log

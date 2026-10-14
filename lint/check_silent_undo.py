@@ -47,7 +47,8 @@ class Unknown(Exception):
 
 
 def git(cwd, *a, ok=(0,)):
-    r = subprocess.run(["git", "-C", cwd, *a], capture_output=True, encoding="utf-8", errors="replace")
+    # literal pathspecs: a path that starts with `:` is a name, never magic. surrogateescape keeps a non-UTF-8 name exact.
+    r = subprocess.run(["git", "-C", cwd, *a], capture_output=True, encoding="utf-8", errors="surrogateescape", env=dict(os.environ, GIT_LITERAL_PATHSPECS="1"))
     if r.returncode not in ok:
         raise Unknown("git %s failed: %s" % (" ".join(a[:3]), r.stderr.strip() or r.returncode))
     return r.returncode, r.stdout
@@ -63,7 +64,18 @@ def counts(text):
 
 def blob(cwd, rev, path):
     rc, out = git(cwd, "show", "%s:%s" % (rev, path), ok=(0, 128))
-    return out if rc == 0 else ""
+    return out if rc == 0 else absent(cwd, rev, path)
+
+
+def absent(cwd, rev, path):
+    """"" for a path the rev's tree does not list. A failed read of a listed path is Unknown, never empty text."""
+    try:
+        path.encode("utf-8")  # a non-UTF-8 name cannot be passed as an argument: the tree cannot be asked
+    except UnicodeEncodeError:
+        raise Unknown("the read of %s:%s failed, and the name is not UTF-8" % (rev[:9], path.encode("utf-8", "replace").decode()))
+    if git(cwd, "ls-tree", rev, "--", path)[1].strip():
+        raise Unknown("the read of %s:%s failed, though the tree lists it" % (rev[:9], path))
+    return ""
 
 
 def allowed(cwd, rng):
@@ -76,6 +88,21 @@ def allowed(cwd, rng):
         if m:
             res[m.group(1)] = m.group(2)
     return res
+
+
+def misplaced(cwd, rng):
+    """Hint lines for commits of the range with a line that starts `Drops-lines:` and that git did not read as a trailer
+    (it is not in the last paragraph, so it excuses nothing). A hint never excuses a finding."""
+    key = re.compile(r"^" + TRAILER + r":", re.I | re.M | re.ASCII)  # git matches the key in ASCII case only: no U+017F for `s`
+    try:  # the hint is an extra: a failed read of it never changes the verdict
+        # One read and no --grep, which grep.patternType in the repo config would change. git refuses a NUL in a message, so
+        # NUL splits each commit into sha, parsed trailers (keys, not values: an empty or folded trailer counts once), body.
+        f = git(cwd, "log", "-z", "--format=%H%x00%(trailers:key=" + TRAILER + ",unfold)%x00%B", rng)[1].split("\0")
+    except Unknown:
+        return []  # ponytail: a failed read gives no hint at all, and no note; the finding and its exit code stand
+    return ["%s has a %s: line, read not as a trailer: put it in the last paragraph, with Co-Authored-By." % (sha[:9], TRAILER)
+            for sha, got, body in zip(f[0::3], f[1::3], f[2::3])  # a record short of 3 fields (the closing NUL) drops out
+            if len(key.findall(body)) > len(key.findall(got))]
 
 
 def judge(items, ok):
@@ -176,26 +203,98 @@ def rewritten(line, hs, base=(), modified=False):
     return False
 
 
-OWN_LOOKUPS = 25  # per file: `git log -G` calls spent finding who added a lost line
+OWN_LOOKUPS = 25  # per file: lost lines checked for a branch-only adder in one `git log -p` read; the rest count as lost
 
 
-def ere(line):
-    """An ERE for a normalized line, whitespace-flexible."""
-    return "[[:space:]]*" + "[[:space:]]+".join(re.sub(r"([.\[\]{}()*+?^$|\\])", r"\\\1", w) for w in line.split())
+def changed(patch):
+    """The normalized added and removed lines of a patch. Headers are skipped by state, never by prefix:
+    a line is content only after the first `@@` of its file section, so `++i;` and `-- note` count."""
+    res, in_hunk = [], False
+    for l in patch.split("\n"):  # not splitlines: a form feed inside a line is no line break
+        if l.startswith("diff --git "):
+            in_hunk = False
+        elif l.startswith("@@"):
+            in_hunk = True
+        elif in_hunk and l[:1] in ("+", "-"):
+            res.append(norm(l[1:]))
+    return res
+
+
+def branch_only_lines(cwd, p, bases, path, lines, refs):
+    """The subset of `lines` that only the branch added: for each, the commit that first added it on
+    the way to parent p is reachable from none of refs (upstream and the default branch). A read that
+    fails, or finds no adding commit, leaves the line out, so it counts. Unknown is never clear.
+    One `git log -m -p` per file, read once: a commit is marked by a changed line (added or removed,
+    as `-G` read it) that holds the line, whitespace-collapsed. `-m` lets a line that entered through
+    a merge's own resolution show up. The oldest marked commit is the real adder: a line from main
+    always has main's own commit in the range, older than any merge that carried it."""
+    try:
+        _, out = git(cwd, "log", "-m", "-p", "-U0", "--no-color", "--no-ext-diff", "--format=%x00%H", p, "--not", *bases, "--", path)
+    except Unknown:
+        return set()
+    commits = []  # (sha, the changed lines of that diff, newline-joined)
+    for chunk in out.split("\0")[1:]:  # NUL: a text diff never holds one
+        sha, _, body = chunk.partition("\n")
+        commits.append((sha.strip(), "\n".join(changed(body))))
+    held, res = {}, set()
+    for line in lines:
+        sha = next((c for c, text in reversed(commits) if line in text), None)
+        if sha is None:
+            continue
+        try:
+            if sha not in held:
+                held[sha] = all(git(cwd, "merge-base", "--is-ancestor", sha, r, ok=(0, 1))[0] == 1 for r in refs)
+        except Unknown:
+            held[sha] = False
+        if held[sha]:
+            res.add(line)
+    return res
 
 
 def branch_only(cwd, p, bases, path, line, refs):
-    """True only when the commit that first added `line` on the way to parent p is reachable from none
-    of refs (upstream and the default branch): the branch alone introduced it. A read that fails, or
-    finds no adding commit, is False, so the line counts. Unknown is never clear. `-m` lets a line that
-    entered through a merge's own resolution show up. The oldest entry is the real adder: a line
-    from main always has main's own commit in the range, older than any merge that carried it."""
-    try:
-        _, out = git(cwd, "log", "-m", "-G" + ere(line), "--format=%H", p, "--not", *bases, "--", path)
-        shas = out.split()
-        return bool(shas) and all(git(cwd, "merge-base", "--is-ancestor", shas[-1], r, ok=(0, 1))[0] == 1 for r in refs)
-    except Unknown:
-        return False
+    """True only when the commit that first added `line` on the way to parent p is held by none of refs."""
+    return line in branch_only_lines(cwd, p, bases, path, [line], refs)
+
+
+class Blobs:
+    """Blob text by `rev:path` through one `git cat-file --batch` process; "" for a path the tree lacks."""
+
+    def __init__(self, cwd):
+        self.cwd = cwd
+        try:
+            self.proc = subprocess.Popen(["git", "-C", cwd, "cat-file", "--batch"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        except OSError as e:
+            raise Unknown("git cat-file failed: %s" % e)
+
+    def get(self, rev, path):
+        if "\n" in path or "\r" in path:  # cat-file reads a line and strips a trailing CR
+            return blob(self.cwd, rev, path)
+        try:
+            self.proc.stdin.write(("%s:%s\n" % (rev, path)).encode("utf-8", "surrogateescape"))
+            self.proc.stdin.flush()
+            line = self.proc.stdout.readline().rstrip(b"\r\n")
+            if line.endswith(b" missing"):  # the reply names the spec, which may hold spaces
+                return absent(self.cwd, rev, path)
+            head = line.split()
+            if len(head) > 1 and head[1] == b"submodule":  # a gitlink is no blob: its text is "" (`git show` cannot read it and exits 128)
+                return ""
+            if len(head) != 3 or not head[2].isdigit():  # an empty line is EOF: the process died
+                raise Unknown("git cat-file gave no usable header for %s:%s: %r" % (rev[:9], path, line[:80]))
+            size = int(head[2])
+            data = self.proc.stdout.read(size + 1)  # the reply ends with a newline
+        except OSError as e:
+            raise Unknown("git cat-file failed on %s:%s: %s" % (rev[:9], path, e))
+        if len(data) != size + 1:
+            raise Unknown("git cat-file ended early on %s:%s" % (rev[:9], path))
+        return data[:-1].decode("utf-8", "replace") if head[1] == b"blob" else ""
+
+    def close(self):
+        try:
+            self.proc.stdin.close()
+        except OSError:  # a dead process: the failure was already raised, never mask it here
+            pass
+        self.proc.stdout.close()
+        self.proc.wait()
 
 
 def lost_lines(cwd, m, refs=()):
@@ -212,39 +311,47 @@ def lost_lines(cwd, m, refs=()):
     rc, out = git(cwd, "merge-base", "--all", *parents, ok=(0, 1))
     bases = out.split() if rc == 0 else []
     found = []
-    for p in parents:
-        pool = pool_of(cwd, p, m)
-        paths = set()
-        for b in bases:
-            paths |= set(raw_files(cwd, b, p))
-        for path in sorted(paths):
-            text_m = blob(cwd, m, path)
-            flat = " ".join(text_m.split())  # a re-wrapped line still reads as a run of this
-            in_p, in_m = counts(blob(cwd, p, path)), counts(text_m)
-            in_b = [counts(blob(cwd, b, path)) for b in bases]
-            lost, hs = [], None
-            for l, n in in_p.items():
-                if any(l in c for c in in_b):
-                    continue
-                missing = n - in_m.get(l, 0)
-                if missing <= 0 or l in flat:
-                    continue
-                moved = min(missing, pool[l])
-                pool[l] -= moved
-                if missing > moved:
-                    hs = hunks(cwd, p, m, path) if hs is None else hs
-                    mod = any(l in hn and ho for b in bases for ho, hn in hunks(cwd, b, p, path))
-                    if not rewritten(l, hs, in_b, mod):
-                        lost.append(l)
-            if refs and lost:
-                budget = [OWN_LOOKUPS]
+    blobs = Blobs(cwd)
+    try:
+        for p in parents:
+            found += lost_in_parent(cwd, m, p, bases, refs, blobs)
+    finally:
+        blobs.close()
+    return found
 
-                def counts_as_lost(l):
-                    budget[0] -= 1
-                    return budget[0] < 0 or not branch_only(cwd, p, bases, path, l, refs)
-                lost = [l for l in lost if counts_as_lost(l)]
-            if lost:
-                found.append((path, p, lost))
+
+def lost_in_parent(cwd, m, p, bases, refs, blobs):
+    """lost_lines for one parent p of merge m; blobs reads every file text."""
+    found = []
+    pool = pool_of(cwd, p, m)
+    paths = set()
+    for b in bases:
+        paths |= set(raw_files(cwd, b, p))
+    paths &= set(raw_files(cwd, p, m))  # a path whose blob is the same in p and m loses nothing
+    for path in sorted(paths):
+        text_m = blobs.get(m, path)
+        flat = " ".join(text_m.split())  # a re-wrapped line still reads as a run of this
+        in_p, in_m = counts(blobs.get(p, path)), counts(text_m)
+        in_b = [counts(blobs.get(b, path)) for b in bases]
+        lost, hs = [], None
+        for l, n in in_p.items():
+            if any(l in c for c in in_b):
+                continue
+            missing = n - in_m.get(l, 0)
+            if missing <= 0 or l in flat:
+                continue
+            moved = min(missing, pool[l])
+            pool[l] -= moved
+            if missing > moved:
+                hs = hunks(cwd, p, m, path) if hs is None else hs
+                mod = any(l in hn and ho for b in bases for ho, hn in hunks(cwd, b, p, path))
+                if not rewritten(l, hs, in_b, mod):
+                    lost.append(l)
+        if refs and lost:
+            own = branch_only_lines(cwd, p, bases, path, lost[:OWN_LOOKUPS], refs)  # the rest count as lost, unread
+            lost = [l for l in lost if l not in own]
+        if lost:
+            found.append((path, p, lost))
     return found
 
 
@@ -329,13 +436,18 @@ def undone(o, n, mine):
     return False
 
 
+progress = None  # a caller may set a callable(done, total): called before each file of reversals
+
+
 def reversals(cwd, old, new, files, earlier):
     """[(path, how, earlier commit)] where old->new undoes a change an earlier commit made.
     A change with no non-blank difference is no undo, and neither is a removal whose lines
     old->new adds to another file (a move)."""
     found = []
     elsewhere = None
-    for path, (a, b) in sorted(files.items()):
+    for i, (path, (a, b)) in enumerate(sorted(files.items())):
+        if progress:
+            progress(i + 1, len(files))
         touched = [e for e in earlier if path in e.files]
         mine = hunks(cwd, old, new, path) if touched else []
         for e in touched if mine else []:
@@ -405,7 +517,7 @@ def check(cwd, upstream, head, default=None):
     earlier = first_parent(cwd, upstream, n)
     items += [(x[0], fmt_rev(*x)) for x in reversals(cwd, old, new, files, earlier)]
     bad, notes = judge(items, ok)
-    return bad, notes
+    return bad, notes + (misplaced(cwd, "%s..%s" % (upstream, h)) if bad else [])
 
 
 def history(cwd, rev, window):
@@ -429,6 +541,13 @@ def history(cwd, rev, window):
     return len(line), out
 
 
+def say(line):
+    """The one home for printed output. A non-UTF-8 name holds surrogates, which a strict stream cannot encode:
+    write them as backslash escapes, so the finding prints and the exit code holds."""
+    enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+    print(line.encode(enc, "backslashreplace").decode(enc))
+
+
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--upstream", default="origin/main")
@@ -441,19 +560,19 @@ def main(argv):
     try:
         if a.history:
             n, hits = history(a.repo, a.history, a.window)
-            print("\n".join(hits))
-            print("silent-undo: %d commit(s) read, %d hit(s)." % (n, len(hits)))
+            say("\n".join(hits))
+            say("silent-undo: %d commit(s) read, %d hit(s)." % (n, len(hits)))
             return 0
         problems, notes = check(a.repo, a.upstream, a.head)
     except Unknown as e:
-        print("silent-undo: UNKNOWN: %s" % e)
+        say("silent-undo: UNKNOWN: %s" % e)
         return 1 if (a.strict or os.environ.get("CI")) else 0
     for n in notes:
-        print("silent-undo: " + n)
+        say("silent-undo: " + n)
     for p in problems:
-        print("silent-undo: FAIL: " + p)
+        say("silent-undo: FAIL: " + p)
     if problems:
-        print("silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER)
+        say("silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER)
     return 1 if problems else 0
 
 

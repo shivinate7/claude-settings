@@ -1,23 +1,27 @@
 # decision-watch
 
-A mod. It runs the Stop-time decision watch with this session's own model login. It runs in shadow mode only. It never blocks a turn and never shows a message in the session.
+A mod. It runs the Stop-time decision watch with this session's own model login. It replaces the Stop hook row. It never blocks a turn. A FLAG or UNKNOWN verdict shows in the session as a toast. An ALLOW verdict shows nothing. Each config notice shows as its own toast, marked `Decision watch notice:`.
 
 ## What it does
 
 - On every Stop, the mod writes one "STOP seen" line to the log. It waits at most 0.5 s for that write. Then it returns at once.
 - It then judges the turn in the background. It skips the judge when `stop_hook_active` is set.
-- One shadow judge runs at a time. A Stop that arrives during a judge logs "SKIP busy" and does not judge.
+- One judge runs at a time. A Stop that arrives during a judge logs "SKIP busy" and does not judge.
 - The judging uses `hooks/decision_watch.py` in your Claude config folder, in two steps.
   1. `--emit-prompt` runs the cheap path. It prints a prompt only when a model call is due.
-  2. The mod calls the model with that prompt. The call has a 50 s limit. Then `--model-text` or `--model-error` gives the verdict.
+  2. The mod calls the model with that prompt. The mod enforces a 50 s limit itself (a timer races the call). A call that passes it reads as a model error. Then `--model-text` or `--model-error` gives the verdict.
+- Each python run (30 s) and each python finder (5 s) also has a mod timer: the host limit plus 1 s. A run that passes it reads UNKNOWN. A toast has a 5 s timer. A hung python, model or toast call frees the one-judge slot. The `$.env.get` reads have no timer.
 - Every failure reads as UNKNOWN. A failure never reads as ALLOW.
+- Phase 1 prints a `key` for the evidence it judged. The mod gives it back to phase 2 as `--key` after the reply. Evidence that moved between the two steps reads UNKNOWN. A phase 1 with no key reads UNKNOWN.
+- Under the split flags, the script prints `verdict` and `notices` as separate JSON fields. The mod does not parse joined text.
+- The verdict toast holds the script's own FLAG or UNKNOWN message, or the mod's own UNKNOWN text. Each notice (config files, merges into main, unread subjects) gets its own toast. Each notice is logged on its own `NOTICE` line or lines before the END line, which holds the verdict only. A verdict that is neither FLAG nor UNKNOWN is logged as `NOT SHOWN`. A failed toast is logged as `TOAST FAILED`, with the text it failed to show.
 - A model verdict that the script cannot use reads as "verdict lost". This happens when another judge already recorded the same turn. The script prints this marker whenever it gets a model reply and ends before the model step. A valid ALLOW that the script uses stays ALLOW.
 - A new human message between the two steps also causes it. The baseline moves, so a real FLAG can print "verdict lost". That is loud and correct.
 - The mod sends the Stop JSON to python as ASCII only. It escapes each other character as `\uXXXX`.
 
 ## Log
 
-- The log is `shadow.log` in the state folder `decision-watch-shadow`, inside the config folder.
+- The log is `shadow.log` (the file name is kept) in the state folder `decision-watch-shadow`, inside the config folder.
 - Each judged Stop has a START line and an END line. The END line holds the timings and the verdict line. The log never holds the prompt.
 - The log keeps the newest 500 lines. A line is cut at 2000 characters.
 - Writes go one at a time. The host writes the folder if it is missing.
@@ -27,12 +31,12 @@ A mod. It runs the Stop-time decision watch with this session's own model login.
 ## Where things live
 
 - The script path is `CLAUDE_CONFIG_DIR/hooks/decision_watch.py`. With no `CLAUDE_CONFIG_DIR`, the mod uses `USERPROFILE` or `HOME`, then `.claude`.
-- The shadow judge and `/dw` each have their own state folder: `decision-watch-shadow` and `decision-watch-dw`. Neither is the real config folder. The real Stop hook keeps its own "already judged" cache and the mod never touches it. A shadow verdict does not mute `/dw`.
+- The background judge and `/dw` each have their own state folder: `decision-watch-shadow` and `decision-watch-dw`. Each holds its own "already judged" cache. A background verdict does not mute `/dw`.
 - The mod picks the first `python3` or `python` on PATH that is not the Windows Store stub.
 
 ## /dw
 
-The command runs the same judgment on the latest turn. It shows the timings and the result. It never shows the prompt. Before the first Stop, it finds the transcript from the session id.
+The command runs the same judgment on the latest turn. It shows the timings, the result and each notice. It never shows the prompt. Before the first Stop, it finds the transcript from the session id.
 
 The last line is "Stops seen: N". N counts the STOP seen lines now in the log. The log keeps 500 lines, so N is at most 500.
 
@@ -41,14 +45,15 @@ The last line is "Stops seen: N". N counts the STOP seen lines now in the log. T
 ## Unknown
 
 - Whether the desktop app and the terminal both give the model call the same login.
-- Whether `$.model.complete` stops at `timeoutMs`. The mod also sets one judge at a time, so a hung call holds the slot.
+- Whether `$.model.complete` stops at `timeoutMs`. The request field is not in the host's type, so the mod does not rely on it. Its own timer enforces the 50 s limit. The host call may keep running after the timer.
+- Whether `$.process.run` kills the child at `timeoutMs`. The mod's timer frees the slot, but it does not kill the child. A hung python may keep running.
 
 ## Limits
 
 - The script must be the version that knows `--emit-prompt`, `--model-text`, and `--model-error`.
 - A bad flag combination on the script falls back to the normal `claude -p` call. This is a hole: a wrong flag from a caller runs the old path.
-- A Stop that arrives during a judge is not judged. The next Stop on an unchanged turn judges it.
-- The ruling and the holes: `decision-watch-mod-limits` (limits of the shadow mod).
+- A Stop that arrives during a judge is skipped. The script scopes a turn by the file time after the last human message. So a Stop for a new turn that lands during a judge is never judged. Hole in `decision-watch-mod-limits`.
+- The ruling and the holes: `decision-watch-mod-limits` (limits of the mod).
 
 ## Try in the desktop app
 

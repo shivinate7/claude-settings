@@ -715,3 +715,7 @@ def checkout_conflict_resolve(segment: str, root: str) -> str:
         if conflict_in_progress(root) is True:
             return ("git checkout " + " ".join(args)).strip()
     return ""
+
+# The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
+# ids across the modules it loads. In the repo it stays a comment, which counts as a match.
+# INSTALL_ID = "uninstalled"

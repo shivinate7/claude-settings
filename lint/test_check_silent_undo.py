@@ -5,7 +5,7 @@ Every case builds a throwaway repo with a local `origin` and asks the check for 
 Red cases come from two real incidents: a squash that carried the pre-deletion copy of a file
 (banchi, a revert nobody wrote), and a merge that dropped a parent's added line (q_max).
 """
-import contextlib, io, os, subprocess, sys, tempfile, unittest
+import contextlib, io, os, subprocess, sys, tempfile, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -729,6 +729,781 @@ class MergeTool(unittest.TestCase):
         self.assertIn("app.txt", str(cm.exception))
         r.sh("checkout", "-q", "main")
         merge.undo_check(r.dir, "origin/main")  # a branch at main: green, no raise
+
+
+# ------------------------------------------------------ scan cost and NUL lines
+
+
+def scanner_lines(tag):
+    """20 lines of source-like text: comment openers inside strings, a lone apostrophe, a template
+    literal over three lines, a pipe, an unbalanced paren. A combined pattern must escape all of them."""
+    out = []
+    for i in range(4):
+        out += ['%s%da = "/* opener %d"' % (tag, i, i), '%s%db = "// slash %d" # hash %d' % (tag, i, i, i),
+                "<p>Don't %s%d</p>" % (tag, i), "%s%dc = a | (b %d" % (tag, i, i)]
+    return out + ["%s = `template open" % tag, "%s middle" % tag, "%s close`" % tag, "%s plain 20" % tag]
+
+
+def drop_merge(lines, own=False):
+    """A merge commit that drops `lines` from app.txt. own=False: main added them, so upstream holds
+    them. own=True: the branch added them itself and main did not. -> (repo, merge sha)."""
+    body = BODY + "function Card() {}\n" + "".join(l + "\n" for l in lines)
+    r = base_repo()
+    r.sh("checkout", "-q", "-b", "feat")
+    if own:
+        r.commit("feat adds lines", app_txt=body)
+        r.sh("checkout", "-q", "main")
+        r.commit("main moves", other_txt="other v2\n")
+    else:
+        r.commit("feat", other_txt="other v2\n")
+        r.sh("checkout", "-q", "main")
+        r.commit("main adds lines", app_txt=body)
+    r.push()
+    r.sh("checkout", "-q", "feat")
+    r.sh("merge", "--no-commit", "--no-ff", "main")
+    r.put("app.txt", BODY + "function Card() {}\n")
+    r.sh("add", "-A")
+    r.sh("commit", "-q", "-m", "Merge main, drop the lines")
+    return r, r.sh("rev-parse", "HEAD")
+
+
+def git_calls(fn):
+    """Run fn with the git helper wrapped. -> (fn's result, [argv tuple of each git call])."""
+    calls, real = [], C.git
+
+    def counting(cwd, *a, ok=(0,)):
+        calls.append(a)
+        return real(cwd, *a, ok=ok)
+    with unittest.mock.patch.object(C, "git", counting):
+        return fn(), calls
+
+
+def probes(calls):
+    """The calls that find a line's adding commit: a pickaxe, or an ancestry test."""
+    return [a for a in calls if (a[0] == "log" and any(x.startswith("-G") for x in a)) or (a[0] == "merge-base" and "--is-ancestor" in a)]
+
+
+class CallBound(unittest.TestCase):
+    """branch_only ran one `git log -G` per lost line, up to OWN_LOOKUPS per file. A merge that drops
+    20 lines of one file must cost a fixed number of git calls, not one per line."""
+
+    def lost(self, lines, own=False):
+        r, m = drop_merge(lines, own)
+        found, calls = git_calls(lambda: C.lost_lines(r.dir, m, ("origin/main",)))
+        return r, found, calls
+
+    def test_main_carried_lines_cost_the_same_at_20_as_at_5(self):
+        _, found20, c20 = self.lost(scanner_lines("m"))
+        _, found5, c5 = self.lost(scanner_lines("m")[:5])
+        self.assertEqual([len(x[2]) for x in found20], [20])
+        self.assertEqual([len(x[2]) for x in found5], [5])
+        self.assertLessEqual(len(c20) - len(c5), 3, "git calls: N=5 %d, N=20 %d, probes at N=20 %d" % (len(c5), len(c20), len(probes(c20))))
+
+    def test_main_carried_probes_are_at_most_three_for_twenty_lines(self):
+        _, found20, c20 = self.lost(scanner_lines("m"))
+        self.assertEqual([len(x[2]) for x in found20], [20])
+        self.assertLessEqual(len(probes(c20)), 3, "probes at N=20: %d of %d git calls" % (len(probes(c20)), len(c20)))
+
+    def test_own_lines_cost_the_same_at_20_as_at_5(self):
+        _, found20, c20 = self.lost(scanner_lines("o"), own=True)
+        _, found5, c5 = self.lost(scanner_lines("o")[:5], own=True)
+        self.assertEqual(found20, [])
+        self.assertEqual(found5, [])
+        self.assertLessEqual(len(c20) - len(c5), 3, "git calls: N=5 %d, N=20 %d, probes at N=20 %d" % (len(c5), len(c20), len(probes(c20))))
+        self.assertLessEqual(len(probes(c20)), 3, "probes at N=20: %d of %d git calls" % (len(probes(c20)), len(c20)))
+
+
+class Scanner(unittest.TestCase):
+    """Source-like lines are matched as plain text. Main-carried ones are all flagged; the branch's own are none."""
+
+    def test_all_twenty_main_carried_lines_are_flagged(self):
+        r, _ = drop_merge(scanner_lines("m"))
+        text = "\n".join(r.verdict())
+        for line in scanner_lines("m"):
+            self.assertIn(" ".join(line.split()), text)
+
+    def test_none_of_the_twenty_own_lines_is_flagged(self):
+        r, _ = drop_merge(scanner_lines("o"), own=True)
+        self.assertEqual(r.verdict(), [])
+
+
+class NulLine(unittest.TestCase):
+    """A UTF-16 file puts a NUL byte in every line. git cannot take a NUL in an argument, so branch_only
+    raised ValueError and aborted the whole check. A read that fails counts the line (branch_only docstring)."""
+
+    def test_a_utf16_line_main_added_and_the_merge_dropped_is_a_fail(self):
+        r = base_repo()
+        r.sh("checkout", "-q", "-b", "feat")
+        r.commit("feat", other_txt="other v2\n")
+        r.sh("checkout", "-q", "main")
+        with open(os.path.join(r.dir, "wide.txt"), "wb") as f:
+            f.write("main note\n".encode("utf-16"))
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "main adds a UTF-16 note")
+        r.push()
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "--no-commit", "--no-ff", "main")
+        r.sh("rm", "-q", "-f", "wide.txt")
+        r.sh("commit", "-q", "-m", "Merge main, drop the note")
+        got = r.verdict()
+        self.assertTrue(any("wide.txt" in p for p in got), got)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = C.main(["--repo", r.dir, "--upstream", "origin/main"])
+        self.assertEqual(code, 1, out.getvalue())
+        self.assertIn("FAIL", out.getvalue())
+
+
+class OwnContentLines(unittest.TestCase):
+    """A line whose content starts `++` or `--` shows in a diff as `+++` or `---`. branch_only_lines drops
+    those by prefix, so the branch's own line never finds its adding commit and counts as lost (false FAIL).
+    The old per-line `git log -G` read them as content."""
+
+    def test_branch_own_plus_plus_and_dash_dash_lines_dropped_by_the_merge_are_green(self):
+        r = base_repo()
+        r.sh("checkout", "-q", "-b", "feat")
+        r.commit("feat adds a ++ line and a -- note", app_txt=BODY + "function Card() {}\n++i;\n-- note\n")
+        r.commit("feat rewords the note", app_txt=BODY + "function Card() {}\n++i;\n-- note v2\n")
+        r.sh("checkout", "-q", "main")
+        r.commit("main moves", other_txt="other v2\n")
+        r.push()
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "--no-commit", "--no-ff", "main")
+        r.put("app.txt", BODY + "function Card() {}\n")
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge main, drop my lines")
+        self.assertEqual(r.verdict(), [])
+
+
+class BlobReads(unittest.TestCase):
+    """Blobs reads `rev:path` through one cat-file process. The header must read the path as one field
+    (a path may hold a space), a missing path reads as "" (lost_in_parent reads a deleted file this way),
+    and an EOF header means the history cannot be read: Unknown, never an empty blob."""
+
+    def test_a_missing_path_with_a_space_reads_as_empty(self):
+        r = base_repo()
+        b = C.Blobs(r.dir)
+        try:
+            self.assertEqual(b.get("HEAD", "lint/no such.py"), "")
+        finally:
+            b.close()
+
+    def test_an_existing_path_with_a_space_reads_its_text(self):
+        r = base_repo()
+        r.put("lint/with space.txt", "spaced text\n")
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "spaced path")
+        b = C.Blobs(r.dir)
+        try:
+            self.assertEqual(b.get("HEAD", "lint/with space.txt").split(), ["spaced", "text"])
+        finally:
+            b.close()
+
+    def test_an_eof_header_is_unknown_not_an_empty_blob(self):
+        class Dead:
+            def __init__(self, *a, **k):
+                self.stdin, self.stdout = io.BytesIO(), io.BytesIO(b"")
+
+            def wait(self, *a, **k):
+                return 0
+        r = base_repo()
+        with unittest.mock.patch.object(C.subprocess, "Popen", Dead):
+            b = C.Blobs(r.dir)
+        with self.assertRaises(C.Unknown):
+            b.get("HEAD", "app.txt")
+
+
+class RawBytes(unittest.TestCase):
+    """Control bytes and carriage returns are data. A changed line that holds \\x01 is still one line:
+    the log parse splits on \\x01, so the line and its adding commit must survive it. A path that ends in
+    \\r must not be read as the path without the \\r: the cat-file line protocol drops that CR."""
+
+    def test_a_branch_line_with_a_control_byte_keeps_its_text_and_its_adder(self):
+        r = base_repo()
+        r.sh("checkout", "-q", "-b", "feat")
+        adder = r.commit("feat adds a control byte", app_txt=BODY + "function Card() {}\nctl\x01char\n")
+        base = r.sh("merge-base", "origin/main", "feat")
+        got, calls = git_calls(lambda: C.branch_only_lines(r.dir, adder, [base], "app.txt", ["ctl\x01char"], ["origin/main"]))
+        self.assertEqual(got, {"ctl\x01char"})
+        self.assertEqual([a[2] for a in calls if a[0] == "merge-base" and "--is-ancestor" in a], [adder])
+
+    def test_a_path_ending_in_cr_is_never_read_as_another_path(self):
+        r = base_repo()
+        b = C.Blobs(r.dir)
+        try:
+            try:
+                got = b.get("HEAD", "app.txt\r")
+            except C.Unknown:
+                return  # a refusal is a verdict
+            self.assertEqual(got, "", "app.txt\\r read as another path: %r" % got[:40])
+        finally:
+            b.close()
+
+
+class FailReads:
+    """Every read of `rev:path` fails while the block is armed, as a read fails mid-scan: `git show`
+    exits 128, and cat-file answers `missing` for a blob it holds. Other reads are real. main reads with
+    `git show`; the Blobs reader reads with cat-file, so both are patched. `hits` counts the failed reads."""
+
+    def __init__(self, rev, path):
+        self.want, self.hits = "%s:%s" % (rev, path), 0
+        self.real_run, self.real_popen = subprocess.run, subprocess.Popen
+
+    def run(self, args, *a, **k):
+        if list(args[-2:]) == ["show", self.want]:
+            self.hits += 1
+            return subprocess.CompletedProcess(args, 128, "", "fatal: injected read failure")
+        return self.real_run(args, *a, **k)
+
+    def popen(self, args, *a, **k):
+        proc = self.real_popen(args, *a, **k)
+        return CatFile(self, proc) if list(args[-2:]) == ["cat-file", "--batch"] else proc
+
+    def armed(self):
+        return unittest.mock.patch.multiple(subprocess, run=self.run, Popen=self.popen)
+
+
+class CatFile:
+    """A cat-file process. The reply to a faulted request reads `missing`; its blob is consumed so
+    the protocol stays in step for the next request."""
+
+    def __init__(self, fault, proc):
+        self.fault, self.proc, self.req = fault, proc, None
+        self.stdin, self.stdout = Feed(self), Reply(self)
+
+    def wait(self, *a, **k):
+        return self.proc.wait(*a, **k)
+
+
+class Feed:
+    def __init__(self, owner):
+        self.owner = owner
+
+    def write(self, data):
+        self.owner.req = data.decode("utf-8", "surrogateescape").strip()
+        return self.owner.proc.stdin.write(data)
+
+    def flush(self):
+        return self.owner.proc.stdin.flush()
+
+    def close(self):
+        return self.owner.proc.stdin.close()
+
+
+class Reply:
+    def __init__(self, owner):
+        self.owner = owner
+
+    def readline(self):
+        o = self.owner
+        if o.req == o.fault.want:
+            o.fault.hits += 1
+            head = o.proc.stdout.readline()
+            o.proc.stdout.read(int(head.split()[2]) + 1)
+            return (o.req + " missing\n").encode("utf-8", "surrogateescape")
+        return o.proc.stdout.readline()
+
+    def read(self, n):
+        return self.owner.proc.stdout.read(n)
+
+    def close(self):
+        return self.owner.proc.stdout.close()
+
+
+class SharedLineRead(unittest.TestCase):
+    """q_max PR 869 (claude-settings a7b8d7d, 2026-10-14): the merge tool reported `merge d9b46148a drops
+    2 line(s) that parent 92d4ed8f2 added`, for record D-618 (past-price search reads words first). That
+    file is byte-identical at the merge and at that parent, and the claim commit on top does not touch
+    it. The two lines are main's, and the merge keeps them: no drop. A read that fails is no text. It may
+    end the check as UNKNOWN, but it must never become a drop, and two windows of one merge must agree."""
+
+    DEC = "docs/decisions/fixture-shared-line.md"
+    HEAD_TXT = "---\nid: D-618\n---\n\n```refs\ncode: src/a.ts\n```\n\n"
+    TAIL_TXT = "**Decision.** Search is Design 1.\n\n- A query is OR.\n- Two lists.\n"
+    T0, T1, T2, T3 = "2025-12-01T10:00:00", "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
+
+    def build(self, lane_edits):
+        """The q_max shape. Main adds two lines to the file after the cut. The lane never touches the
+        file, or with lane_edits adds a line at its tail. The lane merges main and keeps the lines.
+        A claim commit that does not touch the file goes on top. -> (repo, merge sha, claim sha)."""
+        r = Repo()
+        r.put("app.txt", BODY)
+        r.put(self.DEC, self.HEAD_TXT + self.TAIL_TXT)
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "base", date=self.T0)
+        r.push()
+        r.sh("checkout", "-q", "-b", "lane")
+        r.put("lane.txt", "lane work\n")
+        if lane_edits:
+            r.put(self.DEC, self.HEAD_TXT + self.TAIL_TXT + "- Lane note.\n")
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "lane work", date=self.T1)
+        r.sh("checkout", "-q", "main")
+        r.put(self.DEC, self.HEAD_TXT + "Kind: build\nPlan: specs/x.md (web)\n\n" + self.TAIL_TXT)
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "main adds kind and plan", date=self.T2)
+        r.push()
+        r.sh("checkout", "-q", "lane")
+        r.sh("merge", "-q", "--no-edit", "origin/main", date=self.T3)
+        merged = r.sh("rev-parse", "HEAD")
+        r.put("claims.txt", "D-779 D-780\n")
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Claim record numbers", date=self.T3)
+        return r, merged, r.sh("rev-parse", "HEAD")
+
+    def outcome(self, r, head):
+        try:
+            return C.check(r.dir, "origin/main", head)
+        except C.Unknown as e:
+            return e
+
+    def assertNoDrop(self, got, merged):
+        if isinstance(got, C.Unknown):
+            return  # a read that cannot run is UNKNOWN, never a drop
+        drops = [x for x in got[0] if "drops" in x and merged[:9] in x]
+        self.assertEqual(drops, [], "a failed read became a drop")
+
+    def assertSameOrUnknown(self, a, b):
+        if isinstance(a, C.Unknown) or isinstance(b, C.Unknown):
+            return
+        self.assertEqual(a[0], b[0], "the preview window and the confirm window disagree")
+
+    def test_the_q_max_shape_with_a_claim_on_top_is_green(self):
+        r, merged, claim = self.build(lane_edits=False)
+        self.assertEqual(self.outcome(r, merged)[0], [])
+        self.assertEqual(self.outcome(r, claim)[0], [])
+
+    def test_a_failed_read_of_the_merge_file_is_never_a_drop(self):
+        r, merged, claim = self.build(lane_edits=False)
+        with FailReads(merged, self.DEC).armed():
+            preview = self.outcome(r, merged)
+        self.assertNoDrop(preview, merged)
+        self.assertSameOrUnknown(preview, self.outcome(r, claim))
+
+    def test_a_lane_that_edits_the_file_and_a_failed_read_is_never_a_drop(self):
+        r, merged, claim = self.build(lane_edits=True)
+        clean = self.outcome(r, merged)
+        self.assertNotIsInstance(clean, C.Unknown)
+        self.assertEqual(clean[0], [], "clean without faults")
+        fault = FailReads(merged, self.DEC)
+        with fault.armed():
+            preview = self.outcome(r, merged)
+        self.assertGreater(fault.hits, 0, "the faulted read never ran")
+        self.assertNoDrop(preview, merged)
+        self.assertSameOrUnknown(preview, self.outcome(r, claim))
+
+
+class Plumb:
+    """Trees and commits made with plumbing, never the worktree. Windows refuses a colon in a path
+    unless core.protectNTFS is off, so the fixture turns it off: the names become real tree entries."""
+
+    def __init__(self, r):
+        self.r, self.n = r, 0
+
+    def run(self, *a, inp=None, env=None):
+        p = subprocess.run(["git", "-C", self.r.dir, "-c", "core.protectNTFS=false", *a], input=inp,
+                           capture_output=True, env=dict(os.environ, **(env or {})))
+        assert p.returncode == 0, (a, p.stderr)
+        return p.stdout.decode("utf-8", "replace").strip()
+
+    def blob(self, text):
+        return self.run("hash-object", "-w", "--stdin", inp="".join(l + "\n" for l in text).encode("utf-8"))
+
+    def tree(self, entries):
+        """entries: (mode, sha, name bytes). -> tree sha, read through a private index file."""
+        self.n += 1
+        idx = os.path.join(self.r.tmp.name, "index-%d" % self.n)
+        rows = b"".join(b"%s %s 0\t%s\n" % (m.encode(), s.encode(), name) for m, s, name in entries)
+        self.run("update-index", "--index-info", inp=rows, env={"GIT_INDEX_FILE": idx})
+        return self.run("write-tree", env={"GIT_INDEX_FILE": idx})
+
+    def commit(self, tree, parents, when):
+        args = ["commit-tree", tree]
+        for p in parents:
+            args += ["-p", p]
+        return self.run(*args, "-m", "fixture", env={"GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when})
+
+
+class ListedReads(unittest.TestCase):
+    """A read that fails on a path the tree lists is UNKNOWN, never empty text. absent() must hold for
+    three shapes: a path that starts with a colon (ls-tree reads it as pathspec magic); a non-UTF-8 name
+    (it must be read byte for byte; a name that misses on every revision is no clean verdict); and a
+    gitlink (not a blob: its text is "", and reading it is no failure)."""
+    T0, T1, T2, T3 = "2025-12-01T10:00:00", "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
+
+    def repo(self):
+        r = Repo()
+        return r, Plumb(r)
+
+    def test_a_failed_read_of_a_colon_path_is_unknown(self):
+        r, p = self.repo()
+        app, name = p.blob(["app"]), b":/X"
+        base = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["1", "2", "3"]), name)]), [], self.T0)
+        lane = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["1 lane", "2", "3"]), name)]), [base], self.T1)
+        main = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["1", "2", "3", "main added"]), name)]), [base], self.T2)
+        merged = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["1 lane", "2", "3", "main added"]), name)]), [lane, main], self.T3)
+        r.sh("update-ref", "refs/remotes/origin/main", main)
+        with FailReads(merged, ":/X").armed():
+            with self.assertRaises(C.Unknown):
+                C.check(r.dir, "origin/main", merged)
+
+    def test_a_drop_in_a_non_utf8_tracked_name_is_never_clean(self):
+        r, p = self.repo()
+        app, name = p.blob(["app"]), b"caf\xe9.txt"
+        base = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z"]), name)]), [], self.T0)
+        lane = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z", "lane line"]), name)]), [base], self.T1)
+        main = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z", "main line"]), name)]), [base], self.T2)
+        merged = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z", "lane line"]), name)]), [lane, main], self.T3)
+        r.sh("update-ref", "refs/remotes/origin/main", main)
+        try:
+            bad, _ = C.check(r.dir, "origin/main", merged)
+        except C.Unknown:
+            return  # a read that cannot run is UNKNOWN: a verdict, not clean
+        self.assertTrue(any("drops" in x and "main line" in x for x in bad), "clean: the merge drops main's line and the check missed it")
+
+    def test_a_gitlink_with_an_absent_commit_is_not_unknown(self):
+        r, p = self.repo()
+        app = p.blob(["app"])
+        pin = lambda sha: ("160000", sha, b"sub")
+        base = p.commit(p.tree([("100644", app, b"app.txt"), pin("1" * 40)]), [], self.T0)
+        lane = p.commit(p.tree([("100644", app, b"app.txt"), pin("3" * 40)]), [base], self.T1)
+        main = p.commit(p.tree([("100644", app, b"app.txt"), pin("2" * 40)]), [base], self.T2)
+        merged = p.commit(p.tree([("100644", app, b"app.txt"), pin("4" * 40)]), [lane, main], self.T3)
+        r.sh("update-ref", "refs/remotes/origin/main", main)
+        got = C.check(r.dir, "origin/main", merged)
+        self.assertEqual(got[0], [], "a gitlink reads as empty text: no drop, no Unknown")
+
+
+class PrintedFindings(unittest.TestCase):
+    """main() prints each finding. A non-UTF-8 name reaches the print as text with surrogates, which a strict
+    stream cannot encode: the print raised, and the finding was lost. Each run, under a strict cp1252 stream
+    and a strict utf-8 stream, must print a readable finding that names the file, with no traceback, and exit
+    with its normal code: 1 for a FAIL, 0 for an UNKNOWN (CI unset) and for --history."""
+
+    ENCODINGS = ("cp1252", "utf-8")
+    T0, T1, T2, T3 = ListedReads.T0, ListedReads.T1, ListedReads.T2, ListedReads.T3
+
+    def drop_repo(self):
+        """The non-UTF-8 drop: main's line is in the file on main, and the merge drops it. -> (repo, merge sha)."""
+        r = Repo()
+        p = Plumb(r)
+        app, name = p.blob(["app"]), b"caf\xe9.txt"
+        base = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z"]), name)]), [], self.T0)
+        lane = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z", "lane line"]), name)]), [base], self.T1)
+        main = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z", "main line"]), name)]), [base], self.T2)
+        merged = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z", "lane line"]), name)]), [lane, main], self.T3)
+        r.sh("update-ref", "refs/remotes/origin/main", main)
+        return r, merged
+
+    def run_main(self, argv, encoding):
+        """main(argv) with stdout a strict stream of `encoding`. -> (rc, what was printed). A raise is a failure."""
+        out = io.TextIOWrapper(io.BytesIO(), encoding=encoding, errors="strict", newline="\n")
+        with unittest.mock.patch.dict(os.environ), contextlib.redirect_stdout(out):
+            os.environ.pop("CI", None)
+            try:
+                rc = C.main(argv)
+            except Exception as e:  # the traceback is the failure
+                self.fail("main raised %s under %s: %s" % (type(e).__name__, encoding, e))
+        out.flush()
+        return rc, out.buffer.getvalue().decode(encoding, "replace")
+
+    def test_a_fail_prints_a_readable_finding_and_exits_1(self):
+        r, merged = self.drop_repo()
+        for enc in self.ENCODINGS:
+            with self.subTest(encoding=enc):
+                rc, text = self.run_main(["--upstream", "origin/main", "--head", merged, "--repo", r.dir], enc)
+                self.assertEqual(rc, 1)
+                self.assertIn("FAIL", text)
+                self.assertIn("caf", text)
+                self.assertIn(".txt", text)
+                self.assertIn("main line", text)
+
+    def test_an_unknown_prints_a_readable_finding_and_exits_0(self):
+        r, merged = self.drop_repo()
+        fault = FailReads(merged, "caf\udce9.txt")  # the read of the name fails: UNKNOWN, the name is not UTF-8
+        for enc in self.ENCODINGS:
+            with self.subTest(encoding=enc), fault.armed():
+                rc, text = self.run_main(["--upstream", "origin/main", "--head", merged, "--repo", r.dir], enc)
+                self.assertEqual(rc, 0)
+                self.assertIn("UNKNOWN", text)
+                self.assertIn("caf", text)
+                self.assertIn(".txt", text)
+        self.assertGreater(fault.hits, 0, "the faulted read never ran")
+
+    def test_history_prints_a_readable_finding_and_exits_0(self):
+        r, merged = self.drop_repo()
+        for enc in self.ENCODINGS:
+            with self.subTest(encoding=enc):
+                rc, text = self.run_main(["--history", merged, "--repo", r.dir], enc)
+                self.assertEqual(rc, 0)
+                self.assertIn("drops", text)
+                self.assertIn("caf", text)
+                self.assertIn(".txt", text)
+
+
+class BodyReadFails:
+    """A `git log` that reads the commit message body (%B or %b) exits 128 while the block is armed. That is the hint's
+    read: allowed() reads trailers only, and the scan reads subjects. Other reads are real. `hits` counts the failures."""
+
+    def __init__(self):
+        self.hits, self.real_run = 0, subprocess.run
+
+    def run(self, args, *a, **k):
+        if "log" in args and any(x.startswith("--format=") and ("%B" in x or "%b" in x) for x in args):
+            self.hits += 1
+            return subprocess.CompletedProcess(args, 128, "", "fatal: injected read failure")
+        return self.real_run(args, *a, **k)
+
+    def armed(self):
+        return unittest.mock.patch.object(subprocess, "run", self.run)
+
+
+class SpawnCount:
+    """Counts the `git` processes started while the block is armed. Every spawn, `subprocess.run` too, goes through Popen,
+    so Popen is the one place counted. A count, never a clock."""
+
+    def __init__(self):
+        self.n, self.real = 0, subprocess.Popen
+
+    def popen(self, args, *a, **k):
+        if list(args)[:1] == ["git"]:
+            self.n += 1
+        return self.real(args, *a, **k)
+
+    def armed(self):
+        return unittest.mock.patch.object(subprocess, "Popen", self.popen)
+
+
+class DropsLinesHint(unittest.TestCase):
+    """A `Drops-lines:` line that git does not parse as a trailer (it is not in the last paragraph) excuses nothing, and
+    the refusal said nothing about it: claude-settings (2026-10-14) and q_max PRs 869 and 874 each lost a full merge run
+    to it. A refusal now names the commit and says where the trailer goes. The hint never excuses a finding, and it shows
+    only beside a finding: a misplaced line with no finding prints nothing (no hint and no note). Where check() puts the
+    hint (problems or notes) is not pinned: each case reads both, and the printed cases read the output."""
+
+    HINT = "not as a trailer"
+    CO = "Co-Authored-By: Someone <someone@example.com>"
+    WHY = "Drops-lines: app.txt -- the owner wants Card back"
+    ABOVE = "Bring Card back\n\n%s\n\n%s" % (WHY, CO)  # the incident: its own paragraph above Co-Authored-By
+    IN_BODY = "Bring Card back\n\nWhy:\n%s\nthe rest of the why\n\n%s" % (WHY, CO)  # a line inside a body paragraph
+    RIGHT = "Bring Card back\n\nWhy.\n\n%s\n%s" % (WHY, CO)  # one last paragraph: git parses it
+    run_main = PrintedFindings.run_main
+
+    def setUp(self):
+        self.r = base_repo()
+
+    def land_pr(self, msg="delete Card"):
+        """PR 1 deletes Card from app.txt, and lands on main with a merge commit. `msg` is the message of its commit."""
+        r = self.r
+        r.sh("checkout", "-q", "-b", "pr1")
+        r.commit(msg, app_txt=BODY)
+        r.sh("checkout", "-q", "main")
+        r.sh("merge", "-q", "--no-ff", "-m", "Merge pull request #1", "pr1")
+        r.push()
+
+    def revert_with(self, msg):
+        """Branch `oops`: revert PR 1 (a finding on app.txt), reword that commit to `msg`, then add a plain commit on top.
+        -> the sha of the reworded commit. HEAD is the plain one, so the hint must name the right commit, not the last."""
+        r = self.r
+        r.sh("checkout", "-q", "-b", "oops")
+        r.sh("revert", "--no-edit", "-m", "1", "main")
+        r.sh("commit", "-q", "--amend", "-m", msg)
+        sha = r.sh("rev-parse", "HEAD")
+        r.commit("tidy other", other_txt="other v2\n")
+        return sha
+
+    def parsed(self, sha):
+        return self.r.sh("log", "-1", "--format=%(trailers:key=Drops-lines,valueonly)", sha).strip()
+
+    def said(self):
+        """-> (problems, every line check() says: problems and notes)."""
+        got = self.r.verdict()
+        return got, "\n".join(got + self.r.notes)
+
+    def assertHintFor(self, sha, text):
+        self.assertTrue(any(sha[:7] in l and self.HINT in l for l in text.splitlines()), text)  # one line: the sha and the hint
+        self.assertIn("last paragraph", text)
+
+    def assertRefusedWithHint(self, sha, got, text):
+        self.assertEqual(self.parsed(sha), "", "fixture: git must not parse the line as a trailer")
+        self.assertTrue(any("app.txt" in p for p in got), got)  # the refusal holds
+        self.assertHintFor(sha, text)
+        self.assertNotIn(self.r.sh("rev-parse", "HEAD")[:7], text)  # the culprit, not the head
+
+    def test_a_line_in_its_own_paragraph_above_co_authored_by_is_refused_with_a_hint(self):
+        self.land_pr()
+        sha = self.revert_with(self.ABOVE)
+        got, text = self.said()
+        self.assertRefusedWithHint(sha, got, text)
+
+    def test_a_line_inside_a_body_paragraph_is_refused_with_a_hint(self):
+        self.land_pr()
+        sha = self.revert_with(self.IN_BODY)
+        got, text = self.said()
+        self.assertRefusedWithHint(sha, got, text)
+
+    def test_a_trailer_that_parses_is_excused_with_no_hint(self):
+        self.land_pr()
+        sha = self.revert_with(self.RIGHT)
+        self.assertEqual(self.parsed(sha), "app.txt -- the owner wants Card back", "fixture: git must parse the trailer")
+        got, text = self.said()
+        self.assertEqual(got, [])
+        self.assertEqual(self.r.notes, ["ALLOWED app.txt: the owner wants Card back"])
+
+    def test_a_bare_trailer_that_parses_keeps_the_finding_and_gets_no_hint(self):
+        """git returns it, so placement is right: the missing reason is the fault, and a placement hint would be wrong."""
+        self.land_pr()
+        sha = self.revert_with("Bring Card back\n\nDrops-lines: app.txt\n%s" % self.CO)
+        self.assertEqual(self.parsed(sha), "app.txt", "fixture: git must parse the bare trailer")
+        got, text = self.said()
+        self.assertTrue(any("app.txt" in p for p in got), got)
+        self.assertNotIn(self.HINT, text)
+
+    def test_a_misplaced_line_with_no_finding_prints_nothing(self):
+        """Chosen: no hint and no note. The line costs nothing when the check is green."""
+        r = self.r
+        r.sh("checkout", "-q", "-b", "quiet")
+        sha = r.commit(self.ABOVE, other_txt="other v2\n")
+        self.assertEqual(self.parsed(sha), "", "fixture: git must not parse the line as a trailer")
+        got, text = self.said()
+        self.assertEqual(got, [])
+        self.assertEqual(r.notes, [])
+
+    def test_a_mid_line_mention_of_the_word_gets_no_hint(self):
+        """Only a line that starts with `Drops-lines:` counts. A message that talks about the word is not a mistake."""
+        self.land_pr()
+        self.revert_with("Explain Drops-lines: the check reads trailers\n\nWe say Drops-lines: app.txt -- x in prose.\n\n%s" % self.CO)
+        got, text = self.said()
+        self.assertTrue(any("app.txt" in p for p in got), got)
+        self.assertNotIn(self.HINT, text)
+
+    def test_a_misplaced_line_on_a_commit_already_on_main_gets_no_hint(self):
+        """The scanned range is upstream..head. A commit main already holds is not the author's to fix."""
+        self.land_pr(self.ABOVE)
+        self.revert_with("Bring Card back")
+        got, text = self.said()
+        self.assertTrue(any("app.txt" in p for p in got), got)
+        self.assertNotIn(self.HINT, text)
+
+    def test_main_prints_the_hint_and_still_exits_1(self):
+        self.land_pr()
+        sha = self.revert_with(self.ABOVE)
+        rc, text = self.run_main(["--upstream", "origin/main", "--head", "HEAD", "--repo", self.r.dir], "utf-8")
+        self.assertEqual(rc, 1)
+        self.assertIn("FAIL", text)
+        self.assertTrue(any(l.startswith("silent-undo:") and sha[:7] in l and self.HINT in l for l in text.splitlines()), text)
+        self.assertIn("last paragraph", text)
+
+    def test_main_prints_no_hint_for_a_trailer_that_parses(self):
+        self.land_pr()
+        self.revert_with(self.RIGHT)
+        rc, text = self.run_main(["--upstream", "origin/main", "--head", "HEAD", "--repo", self.r.dir], "utf-8")
+        self.assertEqual(rc, 0)
+        self.assertIn("ALLOWED app.txt", text)
+        self.assertNotIn(self.HINT, text)
+
+    def test_the_merge_tool_refusal_carries_the_hint(self):
+        import merge
+        self.land_pr()
+        sha = self.revert_with(self.ABOVE)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(merge.Stop) as cm:
+            merge.undo_check(self.r.dir, "origin/main")
+        text = out.getvalue() + "\n" + str(cm.exception)
+        self.assertIn("app.txt", str(cm.exception))  # the refusal holds
+        self.assertTrue(any(sha[:7] in l and self.HINT in l for l in text.splitlines()), text)
+
+    # ------------------------------------------------ round 2: reads of the message that the first cases did not stress
+
+    def test_a_folded_parsed_trailer_does_not_hide_a_misplaced_line(self):
+        """A trailer value folded onto a continuation line is one trailer. It must not pass for a second Drops-lines line."""
+        self.land_pr()
+        sha = self.revert_with("Bring Card back\n\nDrops-lines: app.txt -- wrong place\n\n"
+                               "Drops-lines: other.txt -- reason that\n continues here\n%s" % self.CO)
+        got_trailer = self.parsed(sha)
+        self.assertIn("other.txt", got_trailer, "fixture: git must parse the folded trailer")
+        self.assertIn("continues here", got_trailer, "fixture: git must fold the continuation into it")
+        got, text = self.said()
+        self.assertTrue(any("app.txt" in p for p in got), got)  # the refusal holds
+        self.assertHintFor(sha, text)
+
+    def test_a_parsed_trailer_with_an_empty_value_gets_no_hint(self):
+        """git reads `Drops-lines:` with nothing after it as a trailer, so placement is right: a hint would be a false alarm."""
+        self.land_pr()
+        sha = self.revert_with("Bring Card back\n\nDrops-lines:\n%s" % self.CO)
+        self.assertTrue(self.r.sh("log", "-1", "--format=%(trailers:key=Drops-lines)", sha).startswith("Drops-lines:"),
+                        "fixture: git must parse the empty trailer")
+        got, text = self.said()
+        self.assertTrue(any("app.txt" in p for p in got), got)  # the empty trailer excuses nothing
+        self.assertNotIn(self.HINT, text)
+
+    def test_a_control_byte_in_the_body_does_not_hide_a_misplaced_line(self):
+        """A \\x01 byte before the line. A reader that splits records on that byte loses the commit and says nothing."""
+        self.land_pr()
+        sha = self.revert_with("Bring Card back\n\nWhy:\x01 a stray control byte\n\n%s\n\n%s" % (self.WHY, self.CO))
+        self.assertIn("\x01", self.r.sh("log", "-1", "--format=%B", sha), "fixture: the message must hold the byte")
+        self.assertEqual(self.parsed(sha), "", "fixture: git must not parse the line as a trailer")
+        got, text = self.said()
+        self.assertTrue(any("app.txt" in p for p in got), got)
+        self.assertHintFor(sha, text)
+
+    def misplaced_repo_with_a_failing_hint_read(self):
+        """A finding on app.txt, a misplaced line on the commit, and a message read that fails. The hint is an extra: a
+        failed read of it must not turn the FAIL into an UNKNOWN (exit 0 locally) or into an owner override."""
+        self.land_pr()
+        sha = self.revert_with(self.ABOVE)
+        self.assertEqual(self.parsed(sha), "", "fixture: git must not parse the line as a trailer")
+        return BodyReadFails()
+
+    def test_main_still_exits_1_with_the_finding_when_the_hint_read_fails(self):
+        fault = self.misplaced_repo_with_a_failing_hint_read()
+        with fault.armed():
+            rc, text = self.run_main(["--upstream", "origin/main", "--head", "HEAD", "--repo", self.r.dir], "utf-8")
+        self.assertGreater(fault.hits, 0, "the faulted read never ran")
+        self.assertEqual(rc, 1, text)
+        self.assertIn("FAIL", text)
+        self.assertIn("app.txt", text)
+
+    def test_the_merge_tool_still_refuses_with_the_finding_when_the_hint_read_fails(self):
+        import merge
+        fault = self.misplaced_repo_with_a_failing_hint_read()
+        with fault.armed(), contextlib.redirect_stdout(io.StringIO()), self.assertRaises(merge.Stop) as cm:
+            merge.undo_check(self.r.dir, "origin/main")
+        self.assertGreater(fault.hits, 0, "the faulted read never ran")
+        self.assertIn("app.txt", str(cm.exception))
+
+    def test_the_unknown_override_does_not_excuse_a_finding_when_the_hint_read_fails(self):
+        """--undo-check-unknown-ok is the way out of an unreadable history. It never excuses a finding."""
+        import merge
+        fault = self.misplaced_repo_with_a_failing_hint_read()
+        with fault.armed(), contextlib.redirect_stdout(io.StringIO()), self.assertRaises(merge.Stop) as cm:
+            merge.undo_check(self.r.dir, "origin/main", unknown_ok="the owner accepts an unreadable history")
+        self.assertGreater(fault.hits, 0, "the faulted read never ran")
+        self.assertIn("app.txt", str(cm.exception))
+
+    # ------------------------------------------------ round 3: the repo's config, and the cost of the read
+
+    def test_a_fixed_grep_pattern_type_in_the_repo_config_does_not_hide_the_hint(self):
+        """grep.patternType=fixed makes `git log --grep` read its pattern as a literal string. A hint that filters
+        commits with a regex through --grep then matches none, and prints nothing."""
+        self.r.sh("config", "grep.patternType", "fixed")
+        self.land_pr()
+        sha = self.revert_with(self.ABOVE)
+        got, text = self.said()
+        self.assertRefusedWithHint(sha, got, text)
+
+    def test_the_hint_costs_a_constant_number_of_git_spawns_at_fifty_candidates(self):
+        """50 commits each hold a misplaced line. Reading them must not cost a git process per commit: at most 2 in all.
+        A count of spawns, not a time. `misplaced` is the hint's read, named in the round 2 review."""
+        r = self.r
+        r.sh("checkout", "-q", "-b", "many")
+        for i in range(50):
+            r.sh("commit", "-q", "--allow-empty", "-m", "Bring Card back %d\n\n%s\n\n%s" % (i, self.WHY, self.CO))
+        fault = SpawnCount()
+        with fault.armed():
+            out = C.misplaced(r.dir, "origin/main..HEAD")
+        self.assertIn(self.HINT, "\n".join(out), out)  # the read ran, and found the candidates
+        self.assertLessEqual(fault.n, 2, "git spawns for 50 candidate commits: %d" % fault.n)
 
 
 if __name__ == "__main__":

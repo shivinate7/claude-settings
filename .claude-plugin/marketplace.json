@@ -28,7 +28,7 @@
     {
       "name": "decision-watch",
       "source": "./mods/decision-watch",
-      "description": "decision-watch mod: shadow-mode Stop-time decision watch on the session's own model login, /dw (our own code)"
+      "description": "decision-watch mod: Stop-time decision watch on the session's own model login, shows a FLAG or UNKNOWN, /dw (our own code)"
     }
   ]
 }

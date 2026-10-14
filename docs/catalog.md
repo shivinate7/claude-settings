@@ -17,7 +17,6 @@ Model and effort come from the model table (decision `subagent-model-cap`, the m
 
 | Key | Kind | Event | Matcher | If | Model | Effort | What it does |
 |---|---|---|---|---|---|---|---|
-| `hooks/decision_watch.py` | hook | Stop | - | - | haiku | xhigh | Claude Code hook: decision/gate/settings watch (Stop). Replaces the `type: agent` guardrail. |
 | `hooks/stall_watch.py` | hook | Stop | - | - | no model | n/a | At Stop, lists each open background job whose output file did not change for the quiet age. |
 | `lint/report_gate.py` | hook | Stop | - | - | no model | n/a | Claude Code hook: report-shape gate. |
 | `lint/md_sweep.py` | hook | Stop | - | - | no model | n/a | Claude Code hook: markdown sweep (Stop). |
@@ -65,6 +64,7 @@ Model and effort come from the model table (decision `subagent-model-cap`, the m
 | `mods/desktop-statusline` | mod | - | - | - | not listed | not listed | Status band above the prompt in the Claude Desktop app's Code tab: folder, git branch and state, session age, prompt count and cost, a context meter, 5-hour and weekly plan usage limit meters with reset countdowns, last-turn model, duration and cache hit rate, idle time against the prompt-cache TTL, compactions, and running agents. Toasts at 80% and 95% of a usage limit. Draws only on the desktop surface, so a CLI statusLine is left alone. Source: Repo: https://github.com/centminmod/claude-plugins Path: plugins/desktop-statusline Commit: 5239dd5c241ca5537f4737c25321399734d0c0bc Licence: MIT (LICENSE is the plugin-folder file) Vendored on 2026-10-12. Copied unmodified; markdown docs and unused screenshots omitted. |
 | `mods/plain-diff` | mod | - | - | - | not listed | not listed | A mod. It adds one command, `/plain-diff`. It draws nothing else. The command opens a pane. The pane lists each changed file. Each file has a short note in plain English above its diff. The note says what changed and why it matters. |
 | `mods/session-board` | mod | - | - | - | not listed | not listed | A mod. It adds two commands. `/board` shows the local sessions and agents and what each one is doing. `/safe-stop` checks that a session has no running work before you stop it. It draws nothing else. It calls no model. |
+| `mods/decision-watch` | mod | - | - | - | not listed | not listed | A mod. It runs the Stop-time decision watch with this session's own model login. It replaces the Stop hook row. It never blocks a turn. A FLAG or UNKNOWN verdict shows in the session as a toast. An ALLOW verdict shows nothing. Each config notice shows as its own toast, marked `Decision watch notice:`. |
 
 ## Skills
 
