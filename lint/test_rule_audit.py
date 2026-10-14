@@ -374,6 +374,13 @@ class CitationTests(unittest.TestCase):
         self.assertIn("registers no test", self.problem(NODE_TEST + '// test("it works", () => {});\n',
                                                         "it works", "t.mjs"))
 
+    def test_mjs_non_ascii_name_is_listed_not_a_decode_crash(self):
+        # Windows: node writes UTF-8, subprocess text=True decoded it as cp1252. The reader thread
+        # died on byte 0x9D (the last byte of U+201D), stdout came back None, and citation_problem
+        # raised AttributeError. A non-ASCII name must resolve to itself, with no crash and no mojibake.
+        name = "café “quoted”"
+        self.assertIsNone(self.problem(NODE_TEST + 'test("' + name + '", () => {});\n', name, "t.mjs"))
+
     def test_skipped_method_is_red(self):
         src = ("import unittest\nclass T(unittest.TestCase):\n"
                "    @unittest.skip('later')\n    def test_a(self): pass\n")

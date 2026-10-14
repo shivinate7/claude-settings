@@ -309,7 +309,7 @@ def chat_text_after(records, idx, limit=6000):
 def _run_git(cwd, args, timeout=GIT_TIMEOUT):
     try:
         return subprocess.run(
-            ["git", "-C", cwd] + args, capture_output=True, text=True, timeout=timeout,
+            ["git", "-C", cwd] + args, capture_output=True, encoding="utf-8", errors="replace", timeout=timeout,
         )
     except Exception:
         return None

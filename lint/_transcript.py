@@ -182,7 +182,7 @@ def last_human_epoch(path):
 def _git(cwd, *args):
     import subprocess  # lazy, same reason
     try:
-        run = subprocess.run(["git", "-C", cwd] + list(args), capture_output=True, text=True,
+        run = subprocess.run(["git", "-C", cwd] + list(args), capture_output=True, encoding="utf-8", errors="replace",
                              timeout=10)
     except Exception:
         return None

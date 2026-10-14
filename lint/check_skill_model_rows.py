@@ -61,11 +61,12 @@ def live_lines(text):
         comment = opens_comment(s, comment)
 
 
-def skill_names():
-    """Folders directly under skills/ that hold a file named exactly SKILL.md."""
+def skill_names(skills=SKILLS):
+    """Folders directly under skills/ that hold a file named exactly SKILL.md.
+    `skills` is the folder to list. lint/hook_catalog.py passes its own root's skills/."""
     names = []
-    for name in os.listdir(SKILLS):
-        folder = os.path.join(SKILLS, name)
+    for name in os.listdir(skills):
+        folder = os.path.join(skills, name)
         if name.startswith(".") or name == "__pycache__" or not os.path.isdir(folder):
             continue
         if "SKILL.md" in os.listdir(folder):  # listdir gives the real case on every platform

@@ -74,7 +74,7 @@ def lint(linter, text, suffix=".md", config_from=None):
             run = subprocess.run(
                 [sys.executable, linter, "--no-color", "--format", "json", "--fail-on", "never"]
                 + (["--config-from", config_from] if config_from else []) + [path],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True, encoding="utf-8", errors="replace", timeout=15,
             )
             data = json.loads(run.stdout)
         except Exception:
