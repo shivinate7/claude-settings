@@ -926,7 +926,7 @@ def log(): open(os.path.join(d, "calls.log"), "a").write(" ".join(a) + "\n")
 def git(*c): return subprocess.run(["git", *c], capture_output=True, text=True, cwd=S.get("other") if c[0] != "ls-remote" else None).stdout.strip()
 log()
 if a[:2] == ["pr", "view"]:
-    if "headRefOid" in a[-1]:
+    if "headRefOid" in a[-1] and "mergeCommit" not in a[-1]:  # the wait's head read; a state read may ask for headRefOid too
         head = git("ls-remote", "origin", "refs/heads/feat").split("\t")[0]
         lag = S.get("lag")
         if lag and lag["n"] > 0 and head != lag["prior"]:  # GitHub still shows the head before the push
@@ -941,8 +941,11 @@ if a[:2] == ["pr", "view"]:
         print(json.dumps({"headRefOid": head, "headRefName": "feat", "baseRefName": S.get("base", "main"), "state": "OPEN",
                           "mergeable": "CONFLICTING" if bad else "MERGEABLE", "mergeStateStatus": "DIRTY" if bad else "CLEAN",
                           "isDraft": draft}))  # set draft=True in a test; false by default
-    else:
-        print(json.dumps({"state": "MERGED" if S.get("oid") else "OPEN", "mergeCommit": {"oid": S["oid"]} if S.get("oid") else None}))
+    else:  # the state read. state_read_fail: its plain-text failure. state_head: the head GitHub reports (default: the branch head)
+        if S.get("state_read_fail"):
+            print(S["state_read_fail"]); sys.exit(1)
+        print(json.dumps({"state": "MERGED" if S.get("oid") else "OPEN", "mergeCommit": {"oid": S["oid"]} if S.get("oid") else None,
+                          "headRefOid": S.get("state_head") or git("ls-remote", "origin", "refs/heads/feat").split("\t")[0]}))
 elif a[:2] == ["pr", "checks"] and S.get("checks_broken") and S["checks_calls"] >= S.get("broken_from", 0):
     print("HTTP 500: server error"); sys.exit(1)
 elif a[:2] == ["pr", "checks"]:
@@ -982,6 +985,11 @@ else:
 
 # The text real gh prints for a network failure (the q_max PR 833 incident, 2026-10-13).
 NET_TLS = 'Post "https://api.github.com/graphql": net/http: TLS handshake timeout'
+# Network texts NET_ERROR must match (review round 2): a Windows socket, a deadline, a refused connect; git's name lookup.
+NET_WSARECV = 'Post "https://api.github.com/graphql": read tcp 10.0.0.5:51322->140.82.112.6:443: wsarecv: An existing connection was forcibly closed by the remote host'
+NET_DEADLINE = 'Post "https://api.github.com/graphql": context deadline exceeded'
+NET_REFUSED = 'Post "https://api.github.com/graphql": dial tcp 140.82.112.6:443: connect: connection refused'
+NET_HOST = "fatal: unable to access 'https://github.com/shivinate7/claude-settings/': Could not resolve host: github.com"
 
 def drop_config(env):
     """Remove .github/stamp.json from main and feat, as in 5 of the owner's 8 repos. Then pull main into env.co."""
@@ -1172,22 +1180,83 @@ class GhHalf(Env):
         self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
         self.assertFalse(self.lock_ref())
 
-    def test_a_git_fetch_network_error_after_the_claim_push_stops_without_a_revert(self):
+    def go_with_fetch_after_push(self, msg):
+        """The fetch of main after the claim push fails with `msg`. -> (rc, out)."""
         real_git, real_push = merge.git, merge.push_branch
         pushed = []
         def push(wt, branch):
             pushed.append(branch)
             return real_push(wt, branch)
-        def git_net(cwd, *a, input=None):  # the fetch of main after the claim push loses its network
+        def git_fails(cwd, *a, input=None):
             if pushed and a[:2] == ("fetch", "-q") and a[-1] == "+refs/heads/main:refs/remotes/origin/main":
-                return 1, NET_TLS
+                return 1, msg
             return real_git(cwd, *a, input=input)
-        with unittest.mock.patch.object(merge, "push_branch", push), unittest.mock.patch.object(merge, "git", git_net):
-            rc, out = self.go()
+        with unittest.mock.patch.object(merge, "push_branch", push), unittest.mock.patch.object(merge, "git", git_fails):
+            return self.go()
+
+    def test_a_git_fetch_network_error_after_the_claim_push_stops_without_a_revert(self):
+        rc, out = self.go_with_fetch_after_push(NET_TLS)  # the fetch of main loses its network
         self.assertEqual(rc, 1, out)
         self.assertNotIn("reverted on", out)
         self.assertNotIn("pr merge", self.calls())
         self.assertIn("network", out.lower())
+        self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
+        self.assertFalse(self.lock_ref())
+
+    def test_a_git_fetch_could_not_resolve_host_after_the_claim_push_stops_without_a_revert(self):
+        rc, out = self.go_with_fetch_after_push(NET_HOST)
+        self.assertNotIn("reverted on", out)
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn("pr merge", self.calls())
+        self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
+        self.assertFalse(self.lock_ref())
+
+    def lost_reply_reads_merged(self, msg):
+        """The merge lands, its reply is `msg`, and the retries are lost too. The PR reads MERGED at the proven head: carry on."""
+        self.set(merge_replies=[[msg, True], [msg, False]])
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("reverted on", out)
+        self.assertIn("state,mergeCommit", self.calls())  # the PR state is read
+        self.assertEqual(self.claims("main"), 1)
+        self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
+        self.assertFalse(self.lock_ref())
+
+    def test_a_lost_merge_reply_with_a_wsarecv_error_reads_merged_and_carries_on(self):
+        self.lost_reply_reads_merged(NET_WSARECV)
+
+    def test_a_lost_merge_reply_with_a_deadline_error_reads_merged_and_carries_on(self):
+        self.lost_reply_reads_merged(NET_DEADLINE)
+
+    def test_a_lost_merge_reply_with_a_refused_connection_reads_merged_and_carries_on(self):
+        self.lost_reply_reads_merged(NET_REFUSED)
+
+    def test_a_network_error_then_a_real_not_mergeable_reply_reverts_the_claim(self):
+        self.set(merge_replies=[[NET_TLS, False], ["GraphQL: Pull Request is not mergeable", False]])  # the retry gets a real refusal
+        rc, out = self.go()
+        self.assertIn("reverted on feat", out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.calls().count("pr merge"), 2)  # the refusal is not retried
+        self.assertTrue(self.reverted())
+        self.assertFalse(self.lock_ref())
+
+    def test_already_merged_at_another_head_is_not_this_runs_merge_and_stops_without_a_revert(self):
+        before = self.head()  # the branch head before the claim push: not the proven sha
+        self.set(merge_replies=[["Pull request #7 is already merged", True]], state_head=before)
+        rc, out = self.go()
+        self.assertNotIn("reverted on", out)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("state,mergeCommit", self.calls())
+        self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
+        self.assertFalse(self.lock_ref())
+
+    def test_already_merged_then_a_plain_state_read_failure_reverts_nothing(self):
+        self.set(merge_replies=[["Pull request #7 is already merged", False]],
+                 state_read_fail="GraphQL: Could not resolve to a PullRequest with the number of 7.")
+        rc, out = self.go()
+        self.assertNotIn("reverted on", out)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("state,mergeCommit", self.calls())
         self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
         self.assertFalse(self.lock_ref())
 
