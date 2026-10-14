@@ -47,7 +47,8 @@ class Unknown(Exception):
 
 
 def git(cwd, *a, ok=(0,)):
-    r = subprocess.run(["git", "-C", cwd, *a], capture_output=True, encoding="utf-8", errors="replace")
+    # literal pathspecs: a path that starts with `:` is a name, never magic. surrogateescape keeps a non-UTF-8 name exact.
+    r = subprocess.run(["git", "-C", cwd, *a], capture_output=True, encoding="utf-8", errors="surrogateescape", env=dict(os.environ, GIT_LITERAL_PATHSPECS="1"))
     if r.returncode not in ok:
         raise Unknown("git %s failed: %s" % (" ".join(a[:3]), r.stderr.strip() or r.returncode))
     return r.returncode, r.stdout
@@ -68,6 +69,10 @@ def blob(cwd, rev, path):
 
 def absent(cwd, rev, path):
     """"" for a path the rev's tree does not list. A failed read of a listed path is Unknown, never empty text."""
+    try:
+        path.encode("utf-8")  # a non-UTF-8 name cannot be passed as an argument: the tree cannot be asked
+    except UnicodeEncodeError:
+        raise Unknown("the read of %s:%s failed, and the name is not UTF-8" % (rev[:9], path.encode("utf-8", "replace").decode()))
     if git(cwd, "ls-tree", rev, "--", path)[1].strip():
         raise Unknown("the read of %s:%s failed, though the tree lists it" % (rev[:9], path))
     return ""
@@ -250,12 +255,14 @@ class Blobs:
         if "\n" in path or "\r" in path:  # cat-file reads a line and strips a trailing CR
             return blob(self.cwd, rev, path)
         try:
-            self.proc.stdin.write(("%s:%s\n" % (rev, path)).encode("utf-8"))
+            self.proc.stdin.write(("%s:%s\n" % (rev, path)).encode("utf-8", "surrogateescape"))
             self.proc.stdin.flush()
             line = self.proc.stdout.readline().rstrip(b"\r\n")
             if line.endswith(b" missing"):  # the reply names the spec, which may hold spaces
                 return absent(self.cwd, rev, path)
             head = line.split()
+            if len(head) > 1 and head[1] == b"submodule":  # a gitlink is no blob: its text is "", as `git show` reads it
+                return ""
             if len(head) != 3 or not head[2].isdigit():  # an empty line is EOF: the process died
                 raise Unknown("git cat-file gave no usable header for %s:%s: %r" % (rev[:9], path, line[:80]))
             size = int(head[2])
