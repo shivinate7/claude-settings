@@ -443,7 +443,7 @@ def _split_heredocs(cmd: str, contractions_are_text: bool = False):
     The one walk `_drop_heredoc_bodies` and the environment layer both need. A header is read as
     heredoc_heads reads it, so one in quoted text, a comment or a here-string strips nothing."""
     lines = cmd.split("\n")
-    last = len(lines) if contractions_are_text else max(
+    last = -1 if contractions_are_text else max(
         (i for i, line in enumerate(lines) if "'" in line), default=-1)
     kept = []
     bodies = []
