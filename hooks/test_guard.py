@@ -5504,6 +5504,15 @@ for _name, _command in (
     sh("guard-command-position: lane pinned, %s allowed" % _name, _command, "allow", cwd=NOGIT,
        config=MERGECFG)
 
+# heredoc_offsets reads the stripped text of a plain command, which keeps no bodies, so it must not
+# skip the line after a header. Without its bodies_kept flag, a commit that is the third of three
+# plain heredocs is counted one header short, and reads the second body, not its own. Pinned: the
+# lane is named in the third body, so the lane rule must deny. The first and second positions do
+# not expose this, so they add nothing here.
+sh("guard-command-position: lane in the third of three plain heredoc bodies denies",
+   "cat <<'A'\nfirst body\nA\ncat <<'B'\nsecond body\nB\n" + VCS + " commit -F - <<'C'\nLane N20 lands\nC",
+   "deny", "lane-by-slug", cwd=NOGIT, config=MERGECFG)
+
 # =========================================================================== 6. frozen paths
 FAMILY = "frozen"
 #
