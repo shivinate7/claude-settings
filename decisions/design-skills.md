@@ -40,6 +40,9 @@ skips each PR.
   `.ste-lint-exclude` file holds the path. The local write hook `lint/ste_gate.py` has no
   exclude list, so it is unchanged. Nobody edits the copy by hand, so the hook never meets it.
 
+Kind: process
+Home: skills/impeccable/SOURCE.txt
+
 Dated by: the three pins and the guard rule.
 A change to any of them means that this record is read again.
 
