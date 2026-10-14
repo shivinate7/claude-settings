@@ -673,8 +673,12 @@ MUTATIONS = [
      'def under_session_scratchpad(where: str, session_id: str) -> bool:',
      'def under_session_scratchpad(where: str, session_id: str) -> bool:\n    return False', "guard", "scratchpad: a discard in this session's own scratchpad is private"),
     ("scratchpad: every path reads as this session's scratchpad",
-     '    parts = real.split(os.sep)',
-     '    return True\n    parts = real.split(os.sep)', "guard", "scratchpad: another session's scratchpad is not this session's"),
+     '    parts = real.split(os.sep)\n    for index in range(len(parts) - 1):',
+     '    return True\n    parts = real.split(os.sep)\n    for index in range(len(parts) - 1):', "guard", "scratchpad: another session's scratchpad is not this session's"),
+    ("scratchpad: no path reads as any session's scratchpad",
+     '    return any(os.path.normcase(parts[i + 1]) == "scratchpad"',
+     '    return False and any(os.path.normcase(parts[i + 1]) == "scratchpad"', "guard",
+     "audit-high paths: test-author Edit of another session's scratchpad outside a repo is refused"),
     ("shared-tree: restore collapses back to a name match, --staged or not",
      '    staged = "--staged" in args or "-S" in args\n'
      '    worktree = "--worktree" in args or "-W" in args\n'
@@ -1304,7 +1308,7 @@ MUTATIONS = [
     ("test-author: the scope is never enforced in the diff",
      '            bad = not all(author_path_ok(n) for n in names)', '            bad = False', "guard", "builder-diff: the diff check logs for the reviewer and never blocks"),
     ("test-author: the write tool lets any path through",
-     '        return "" if author_path_ok(rel) else target', '        return ""', "guard",
+     '        return "" if repo_rel(target, cwd, outside=False) is None else target', '        return ""', "guard",
      "test-author: Edit of product code is refused"),
     ("test-author: test config is not its own",
      '    return is_test_rel(rel) or is_test_config_rel(rel) or basename(rel) in AUTHOR_BASENAMES',

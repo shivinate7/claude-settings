@@ -9,16 +9,17 @@ prompt hook sees only the question, never the chat, so it judges form alone.
 
 ## The ruling
 
-Owner ruling, 2026-10-13: the standard question format is a `Problem:` sentence, then
-the `Goal:` line, then the options. The check reads the two rule lines for that format
-from its home, `output-styles/shiv-stylisms.md` (rules `style-question-states-problem`
-and `style-question-restates-goal`), at run time, and puts them in its model prompt.
+Owner ruling, 2026-10-13 19:48 CDT: the standard question format is a `Goal:` line first,
+then a `Problem:` sentence, then the options. The check reads the two rule lines for that
+format from its home, `output-styles/shiv-stylisms.md` (rules `style-question-restates-goal`
+and `style-question-states-problem`), at run time, and puts them in its model prompt.
 So it raises no false alarm on a question that follows the style file. A question with
 no `Problem:` line is denied by the presence check, with no model call, and the reason
-names `Problem:` (owner ruling, 2026-10-13 14:12 CDT, "Block it too"). A `Goal:` line is
-a plain-words paraphrase of the goal, and a paraphrase is no reason to deny. Incident,
-2026-10-13 12:09: the check refused a correct question because its goal line was not in
-the owner's exact words.
+names `Problem:` (owner ruling, 2026-10-13 14:12 CDT, "Block it too"). A question whose
+`Problem:` line comes before its `Goal:` line is denied the same way, and the reason says
+`Goal:` goes first. A `Goal:` line is a plain-words paraphrase of the goal, and a
+paraphrase is no reason to deny. Incident, 2026-10-13 12:09: the check refused a correct
+question because its goal line was not in the owner's exact words.
 
 Owner rulings, 2026-10-08:
 - Each question opens with one line, `Goal: <the goal>`, in the owner's terms. The
@@ -53,7 +54,12 @@ Owner rulings, 2026-10-08:
 
 - A clarifying question, with no options or one option, passes first.
 - Any other question with no `Goal:` line, no `Problem:` line, or an empty one, is denied
-  with no model call. The reason names each missing label.
+  with no model call. The reason names each missing label. The presence check needs the
+  plain label: exact case, ASCII colon, no bold, no NBSP, at a line start.
+- A `Problem:` line before the `Goal:` line is denied with no model call. The reason says
+  `Goal:` goes first. The order check reads both labels loosely: any one-line non-word
+  prefix (space, NBSP, `>`, `-`, `#`, `*`, `_`), `*` or `_` before the colon, any case, and
+  a full-width colon (`：`).
 - Only the question text counts. A `Problem:` or `Goal:` line in an option (its label,
   preview or description) does not count.
 - The hook reads only the owner's own messages from the last 2 MiB of the transcript.
@@ -64,8 +70,9 @@ Owner rulings, 2026-10-08:
 - A model call that fails or times out lets the question through, and the hook prints
   one line that says so. That line never repeats the prompt. A question is not a
   destructive act, so a lost check costs less than a blocked question.
-- After a deny, the next question in the session passes with no model call, whatever
-  its text. That clears the state. A deny state older than 30 minutes is ignored. If the
+- After any deny, presence or order, the next question in the session passes with no
+  check, whatever its text (owner ruling, 2026-10-13 20:12 CDT, "Keep the free pass"; test
+  O7). That clears the state. A deny state older than 30 minutes is ignored. If the
   hook cannot record or clear a deny, it does not deny, and it says the check did not run.
   So a judge that is wrong cannot loop.
 - The reason sent back to the session is capped and cleaned.
@@ -76,6 +83,19 @@ Owner rulings, 2026-10-08:
   the first 2 characters off that text. A style file with no such line above an anchor
   would lose 2 characters from that rule. Not reachable today: both rule bullets start
   with "- ".
+
+## Holes, named
+
+Round 3 review. Each finding stays open at the cap.
+
+- A decorated Goal line earlier in the question, such as `- goal: old`, masks a real
+  Problem-first order. The order check reads that line first, so it passes. Presence passes
+  too, on the later plain `Goal:` line.
+- `1. Problem:` (digit prefix) and `Problem :` (space before the colon) do not count as
+  Problem lines. Each passes presence only with a second plain `Problem:` line, and then
+  passes the order check even before `Goal:`.
+- A punctuation-led preface line before `Goal:`, such as `- problem: note`, is denied. That
+  is correct: the question breaks Goal first. The free pass lets the retry through.
 
 Kind: process
 Home: hooks/question_outcome.py
