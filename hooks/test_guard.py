@@ -10405,8 +10405,9 @@ def session_log_control_id_time_case():
     """session-log: sanitizing a 1 MB id of control characters scales linearly in CPU. It is timed
     against a 128 KB id in this process, each side a tick_safe_mean, and the ratio to the scaled
     baseline must stay under RM_VAR_K. A quadratic sanitizer gives about 8. The guard_core under test
-    is loaded from the GUARD directory, so a mutated copy is the one timed. A 1 MB mixed id must
-    still cut to 64 characters.
+    is loaded from the GUARD directory, so a mutated copy is the one timed. A 64 KB mixed id must
+    still cut to 64 characters (a quadratic sanitizer takes minutes on a 1 MB mixed id, so the cut
+    is checked at 64 KB).
     """
     import importlib.util
     spec = importlib.util.spec_from_file_location(
@@ -10433,9 +10434,9 @@ def session_log_control_id_time_case():
     if not ok:
         return False, "1 MB id: " + text
     ratio = big / (8 * small)
-    mixed = core.session_log_field("\x01a" * (1 << 19))
+    mixed = core.session_log_field("\x01a" * (1 << 15))
     if mixed != "a" * 64:
-        return False, "the 1 MB mixed id gave %d characters, want 64 a's" % len(mixed)
+        return False, "the 64 KB mixed id gave %d characters, want 64 a's" % len(mixed)
     return ratio < RM_VAR_K, ("CPU ratio %.2f to the 8x-scaled baseline, bound %d (1 MB %.4f s, "
                               "128 KB mean %.5f s)" % (ratio, RM_VAR_K, big, small))
 
