@@ -33,13 +33,14 @@ Owner rulings, 2026-10-08:
   4. Can the owner answer from the box alone, with every id, code or name explained in words?
   5. Does the question point at anything the box does not show, such as an earlier message or
      "item 4"?
-  6. Does each option say what the owner gains and what the owner loses (rule
-     `style-option-says-effect`), each as a change for the owner and not for a record?
+  6. Does each option say what the owner gains and what the owner loses, as a change for
+     the owner and not for a record (rule `style-option-says-effect`)?
 - Owner ruling, 2026-10-14: a question must be plain, in every repo. The model judge asks all
   six, in this one hook, with no separate pre-check. A FLAG on any ask denies, and the judge's
   reason goes to the session. Incidents, 2026-10-14: three questions passed and the owner could
   not use them. Two named ids, a branch, a sha and a key with no words, and one pointed at
-  messages the box does not hold. The third offered a false choice and left out the better option.
+  messages the box does not hold. The third offered a false choice.
+  It left out the better option.
 - The model call reuses `invoke_model` from `hooks/decision_watch.py`. The model is Haiku
   at effort `xhigh`.
 - `invoke_model` starts a second `claude` program. That program does not share the app's
