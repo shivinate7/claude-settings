@@ -11,6 +11,8 @@ Why not rule_audit.py: it reads step names only. This needs job boundaries and `
 Line-based parse, stdlib only, like rule_audit. Only single-line `run: <cmd>` steps count.
 GATES_YML overrides the path (used for red proofs on a scratch copy).
 
+CiCoverage (last class) also proves every test_*.py, test_*.sh and *.test.ps1 file has a run step.
+
 Run with:  python3 lint/test_windows_split.py -v
 """
 import json
@@ -628,6 +630,170 @@ class ModTestStepChecker(unittest.TestCase):
         self.assertEqual(unpinned_problems(mod_doc(extra="      - uses: $/actions/local-thing\n")), [])  # local: no @
         self.assertTrue(unpinned_problems(mod_doc(extra=UNPINNED_STEP)))  # setup-node@v4 is not a full SHA
         self.assertTrue(unpinned_problems(mod_doc(extra="        uses: some/tool@main\n")))
+
+
+# ---- every test file runs in a CI step. A test file that no run step names never fails a pull
+# request, so its red stays invisible: lint/test_check_agent_models.py ran in no step. Failure
+# classes: (a) product, a test file has no run line in gates.yml; (b) test, this parser misreads a
+# run line (a comment, a quote, a block scalar); (c) stale, a test file was renamed or removed and
+# its run line was not. Scope: test_*.py, test_*.sh and *.test.ps1 outside hidden folders.
+# mutate_*.py is not a suite (mutate_shared.py is plumbing), and mods/*/*.test.mjs runs in the
+# gates "Mod tests" glob step, so neither is listed here.
+REPO = os.path.normpath(os.path.join(HERE, ".."))
+TEST_FILE = re.compile(r"^(?:test_.*\.(?:py|sh)|.*\.test\.ps1)$")
+
+
+def strip_comment(text):
+    """`text` up to a `#` that opens a shell comment: at the start, or after a space, outside quotes."""
+    quote = ""
+    for i, ch in enumerate(text):
+        if quote:
+            quote = "" if ch == quote else quote
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "#" and (i == 0 or text[i - 1] in " \t"):
+            return text[:i]
+    return text
+
+
+# A block scalar head: `|` or `>`, then an optional indent digit and chomping sign, then an optional comment.
+BLOCK_HEAD = re.compile(r"^[|>][0-9+-]*(?:[ \t]+#.*)?$")
+RUN_KEY = re.compile(r"^(\s*)(- )?run:[ \t]*(.*)$")
+
+
+def run_commands(text):
+    """Each shell command a workflow runs: a one-line `run:` value, and each line of a block scalar
+    under `run:`. A block holds the lines indented deeper than its key, so a sibling key (`env:`) ends
+    it. A comment line, or a trailing comment, is not a command."""
+    commands, block = [], None  # block: the column of the open run key
+    for line in text.splitlines():
+        body = line.strip()
+        column = len(line) - len(line.lstrip(" "))
+        if block is not None and body and column <= block:
+            block = None
+        if block is not None:
+            commands.append(strip_comment(body))
+            continue
+        found = RUN_KEY.match(line)
+        if not found:
+            continue
+        key_column = len(found.group(1)) + (2 if found.group(2) else 0)  # `- run:` keys sit after the dash
+        value = found.group(3).strip()
+        if BLOCK_HEAD.match(value):
+            block = key_column
+        else:
+            commands.append(strip_comment(value))
+    return commands
+
+
+# A run step may name a path with a `./` or `$VAR/` (or `${VAR}/`) prefix. The prefix is dropped first.
+# A folder in front of the path (`hooks/lint/test_x.py`) still names another file.
+PATH_PREFIX = re.compile(r"(?<![\w.$/-])(?:\./|\$\{?\w+\}?/)")
+
+
+def names_path(commands, path):
+    """True when a command names `path` as a whole word, after a path prefix is dropped.
+    `test_x_stop.py` does not name `test_x.py`, and `hooks/lint/test_x.py` does not name `lint/test_x.py`."""
+    pattern = re.compile(r"(?<![\w./-])" + re.escape(path) + r"(?![\w./-])")
+    return any(pattern.search(PATH_PREFIX.sub("", command)) for command in commands)
+
+
+def find_test_files(root):
+    """Repo-relative posix paths of the test files, skipping hidden folders such as .git and .claude.
+    A folder the scan cannot read raises. It must fail the test, never read as holding no tests."""
+    def unreadable(error):
+        raise error
+    found = []
+    for folder, dirs, names in os.walk(root, onerror=unreadable):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        found += [os.path.relpath(os.path.join(folder, n), root).replace(os.sep, "/")
+                  for n in names if TEST_FILE.match(n)]
+    return sorted(found)
+
+
+class CiCoverage(unittest.TestCase):
+    def test_every_test_file_runs_in_a_ci_step(self):
+        with open(GATES, encoding="utf-8") as handle:
+            commands = run_commands(handle.read())
+        missing = [p for p in find_test_files(REPO) if not names_path(commands, p)]
+        self.assertEqual(missing, [], "no run step in gates.yml names: " + ", ".join(missing))
+
+    def test_a_comment_line_is_not_a_run(self):
+        text = "      - run: echo\n      # run: python3 lint/test_x.py\n"
+        self.assertFalse(names_path(run_commands(text), "lint/test_x.py"))
+
+    def test_a_trailing_comment_is_not_a_run(self):
+        text = "      - run: echo  # python3 lint/test_x.py\n"
+        self.assertFalse(names_path(run_commands(text), "lint/test_x.py"))
+
+    def test_a_hash_inside_quotes_is_not_a_comment(self):
+        text = '      - run: echo "a # b" && python3 lint/test_x.py\n'
+        self.assertTrue(names_path(run_commands(text), "lint/test_x.py"))
+
+    def test_a_lone_quote_does_not_hide_a_run(self):
+        text = "      - run: echo don't && python3 lint/test_x.py\n"
+        self.assertTrue(names_path(run_commands(text), "lint/test_x.py"))
+
+    def test_a_block_scalar_line_is_a_run(self):
+        text = "      - run: |\n          echo start\n          python3 lint/test_x.py\n"
+        self.assertTrue(names_path(run_commands(text), "lint/test_x.py"))
+
+    def test_a_comment_line_inside_a_block_is_not_a_run(self):
+        text = "      - run: |\n          echo start\n          # python3 lint/test_x.py\n"
+        self.assertFalse(names_path(run_commands(text), "lint/test_x.py"))
+
+    def test_a_block_ends_at_the_next_step(self):
+        text = ("      - run: |\n          echo\n"
+                "      - name: lint/test_x.py\n"
+                "      - run: python3 lint/test_y.py\n")
+        commands = run_commands(text)
+        self.assertFalse(names_path(commands, "lint/test_x.py"))
+        self.assertTrue(names_path(commands, "lint/test_y.py"))
+
+    def test_a_lone_quote_in_a_name_is_not_a_run(self):
+        text = "      - name: Don't skip lint/test_x.py\n"
+        self.assertFalse(names_path(run_commands(text), "lint/test_x.py"))
+
+    def test_a_longer_or_deeper_name_does_not_cover_a_shorter_one(self):
+        text = "      - run: python3 lint/test_x_stop.py\n      - run: python3 mylint/test_x.py\n"
+        self.assertFalse(names_path(run_commands(text), "lint/test_x.py"))
+
+    def test_a_chomping_block_indicator_is_a_block(self):
+        for head in ("|-", ">-", "|+"):
+            with self.subTest(head=head):
+                text = "      - run: %s\n          echo start\n          python3 lint/test_x.py\n" % head
+                self.assertTrue(names_path(run_commands(text), "lint/test_x.py"))
+
+    def test_a_block_indicator_with_a_trailing_comment_is_a_block(self):
+        for head in ("| # c", ">- # c"):
+            with self.subTest(head=head):
+                text = "      - run: %s\n          echo start\n          python3 lint/test_x.py\n" % head
+                self.assertTrue(names_path(run_commands(text), "lint/test_x.py"))
+
+    def test_a_dot_slash_path_is_a_run(self):
+        text = "      - run: python3 ./lint/test_x.py\n"
+        self.assertTrue(names_path(run_commands(text), "lint/test_x.py"))
+
+    def test_a_workspace_variable_path_is_a_run(self):
+        for path in ("$GITHUB_WORKSPACE/lint/test_x.py", "${GITHUB_WORKSPACE}/lint/test_x.py"):
+            with self.subTest(path=path):
+                text = "      - run: python3 %s\n" % path
+                self.assertTrue(names_path(run_commands(text), "lint/test_x.py"))
+
+    def test_a_sibling_key_ends_a_run_block(self):
+        text = ("      - run: |\n          echo start\n"
+                "        env:\n          MERGE_TESTS: lint/test_x.py\n")
+        self.assertFalse(names_path(run_commands(text), "lint/test_x.py"))
+
+    def test_a_path_under_another_folder_is_not_a_run(self):
+        for path in ("hooks/lint/test_x.py", "$GITHUB_WORKSPACE/hooks/lint/test_x.py"):
+            with self.subTest(path=path):
+                text = "      - run: python3 %s\n" % path
+                self.assertFalse(names_path(run_commands(text), "lint/test_x.py"))
+
+    def test_an_unreadable_folder_fails_the_scan(self):
+        with self.assertRaises(OSError):
+            find_test_files(os.path.join(HERE, "no-such-folder-for-the-scan"))
 
 
 if __name__ == "__main__":
