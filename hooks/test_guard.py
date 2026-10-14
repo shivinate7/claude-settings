@@ -1566,6 +1566,32 @@ sh("subject: setting aside real uncommitted work still denies", VCS + " stash pu
    "deny", "shared-tree", cwd=SUBJDIRTY)
 sh("subject: a bare stash over a clean tree takes nothing", VCS + " stash", "allow",
    cwd=SUBJCLEAN)
+# THE PATHSPEC AND OPTION-VALUE FORMS OF A PUSH (owner's Mac test, 2026-10-13; decision
+# stash-push-is-clone-wide). Git may omit `push` before `--`, before a pathspec after `--`, and
+# before an option, so `stash -- <path>`, `stash -q -- <path>` and `stash -m <msg>` are pushes.
+# The guard takes the first word that is not an option as the action. There `f.txt` or `lane` is
+# an unknown action, which falls on the stack side, and an empty stack allows it. These rows run
+# in SUBJDIRTY, a real checkout with real uncommitted work, so each push form must deny with the
+# push remedy. `stash .` is not a push: git refuses a pathspec outside `--`, so it takes nothing.
+# It stays a deny anyway, because the guard must not rely on git's refusal.
+PUSH_FRAGMENT = "puts work onto the stash stack"  # only PUSH_DENY_REASON says this
+sh("stash pathspec: stash -- over real uncommitted work denies like a push",
+   VCS + " stash -- f.txt", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash -- . over real uncommitted work denies like a push",
+   VCS + " stash -- .", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash -q -- over real uncommitted work denies like a push",
+   VCS + " stash -q -- f.txt", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash -m over real uncommitted work denies like a push",
+   VCS + " stash -m lane", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash . over real uncommitted work denies", VCS + " stash .", "deny",
+   "shared-tree", cwd=SUBJDIRTY)
+# Pins that stay green. The reads stay allowed, and an explicit push still denies here.
+sh("stash pathspec pin: stash list still reads a dirty checkout", VCS + " stash list", "allow",
+   cwd=SUBJDIRTY)
+sh("stash pathspec pin: stash show still reads a dirty checkout", VCS + " stash show", "allow",
+   cwd=SUBJDIRTY)
+sh("stash pathspec pin: an explicit stash push -- still denies over real uncommitted work",
+   VCS + " stash push -- f.txt", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
 # THE STACK IS ITS OWN SUBJECT. Every action that takes an entry off the stack is read with `git
 # stash list`, never with the tree. SUBJDIRTY is dirty and its stack is empty. SUBJSTASH is clean
 # and its stack holds one entry. The two cases cross, which is what proves the right read is made.
