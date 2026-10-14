@@ -504,6 +504,15 @@ jobs:
         if: ${{ !cancelled() }}
         run: bash actions/stamp/test_action.sh
 
+      # Installer spine (install.py + test_install.py). Each file is checked on its own, so the step is a
+      # no-op until the file lands. The `[ -f ]` guard is the whole gate; a present file that fails is red.
+      - name: Installer spine, install.py and test_install.py
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        shell: bash
+        run: |
+          if [ -f install.py ]; then python -m py_compile install.py; else echo "install.py absent, skipped"; fi
+          if [ -f test_install.py ]; then python test_install.py; else echo "test_install.py absent, skipped"; fi
+
   # The Windows suites run in four jobs (gates-windows, gates-windows-guard, gates-windows-merge, gates-windows-rest). Six python suites in the gates job need a real Windows box to prove: no other
   # job in this workflow can show whether they pass there. This job runs those
   # suites on Windows and reports the environment first. It is blocking: run
@@ -809,12 +818,3 @@ jobs:
         if: ${{ !cancelled() }}
         shell: bash
         run: bash actions/stamp/test_action.sh
-
-      # Installer spine (install.py + test_install.py). Each file is checked on its own, so the step is a
-      # no-op until the file lands. The `[ -f ]` guard is the whole gate; a present file that fails is red.
-      - name: Installer spine, install.py and test_install.py
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
-        shell: bash
-        run: |
-          if [ -f install.py ]; then python -m py_compile install.py; else echo "install.py absent, skipped"; fi
-          if [ -f test_install.py ]; then python test_install.py; else echo "test_install.py absent, skipped"; fi
