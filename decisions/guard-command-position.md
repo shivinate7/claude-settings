@@ -28,6 +28,7 @@ The guard tests, families wsl, kill, env, impeccable and shared-tree.
 - A substitution inside a token is not read: `$(`, backticks and `x=$(...)`. Debt: guard-substitution-in-token.
 - Only the WSL rule reads the script of `env -S 'cmd'`. The impeccable-review-only, draft-pr, detached-launch and rm-var-unguarded rules do not see inside it. Debt: env-split-string-wsl-only.
 - The wrapper and value-flag lists are closed. An unlisted wrapper, such as `stdbuf` or `chrt`, or an unlisted value flag hides the command word. Debt: guard-wrapper-lists-closed.
+- The segment split ignores backslash escapes, so `echo '; pkill foo; echo 'x'` hides `pkill`. Debt: guard-split-ignores-backslash.
 
 Kind: process
 Home: hooks/guard_core.py
