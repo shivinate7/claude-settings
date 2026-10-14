@@ -66,7 +66,7 @@ FAMILIES = {
     "branch-worktree": "branch delete and worktree remove/prune",
     "pointer": "the pointer HEAD checkout",
     "kill": "machine-wide kills and detached launches",
-    "stream": "live streams, narrating commands, gh api, ln -s and waiter loops",
+    "stream": "live streams, narrating commands, gh api, ln -s, waiter loops and background end conditions",
     "write": "the silent write",
     "push-delete": "push and delete",
     "env": "environment files",
@@ -1566,6 +1566,58 @@ sh("subject: setting aside real uncommitted work still denies", VCS + " stash pu
    "deny", "shared-tree", cwd=SUBJDIRTY)
 sh("subject: a bare stash over a clean tree takes nothing", VCS + " stash", "allow",
    cwd=SUBJCLEAN)
+# THE PATHSPEC AND OPTION-VALUE FORMS OF A PUSH (owner's Mac test, 2026-10-13; decision
+# stash-push-is-clone-wide). Git may omit `push` before `--`, before a pathspec after `--`, and
+# before an option, so `stash -- <path>`, `stash -q -- <path>` and `stash -m <msg>` are pushes.
+# A word that is no known action reads as a push, so a pathspec such as `f.txt` pushes too.
+# These rows run in SUBJDIRTY, a real checkout with real uncommitted work, so each push form must
+# deny with the push remedy. `stash .` is not a push: git refuses a pathspec outside `--`, so it
+# takes nothing. It stays a deny anyway, because the guard must not rely on git's refusal.
+PUSH_FRAGMENT = "puts work onto the stash stack"  # only PUSH_DENY_REASON says this
+sh("stash pathspec: stash -- over real uncommitted work denies like a push",
+   VCS + " stash -- f.txt", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash -- . over real uncommitted work denies like a push",
+   VCS + " stash -- .", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash -q -- over real uncommitted work denies like a push",
+   VCS + " stash -q -- f.txt", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash -m over real uncommitted work denies like a push",
+   VCS + " stash -m lane", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash . over real uncommitted work denies", VCS + " stash .", "deny",
+   "shared-tree", cwd=SUBJDIRTY)
+# Combined short flags and abbreviated long options take a value as the next word too (git's
+# parse-options). Each one is a push, so each deny carries the push remedy.
+sh("stash pathspec: stash -qm over real uncommitted work denies like a push",
+   VCS + " stash -qm list", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash -um over real uncommitted work denies like a push",
+   VCS + " stash -um show", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash -pm over real uncommitted work denies like a push",
+   VCS + " stash -pm show", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash --mess over real uncommitted work denies like a push",
+   VCS + " stash --mess list", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash --m over real uncommitted work denies like a push",
+   VCS + " stash --m list", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash --pathspec-from over real uncommitted work denies like a push",
+   VCS + " stash --pathspec-from list", "deny", "shared-tree", cwd=SUBJDIRTY,
+   carries=PUSH_FRAGMENT)
+# `import` and `export` are not git subcommands, but main reads them as stack actions, and they keep
+# that side. Over a real entry in a clean checkout they deny with the stack remedy. Over an empty
+# stack in a dirty checkout they take nothing, the same verdict as main.
+STACK_FRAGMENT = "takes a stash entry"  # only STACK_DENY_REASON says this
+sh("stash import: over a real stack entry in a clean checkout denies, as on main",
+   VCS + " stash import abc123", "deny", "shared-tree", cwd=SUBJSTASH, carries=STACK_FRAGMENT)
+sh("stash export: over a real stack entry in a clean checkout denies, as on main",
+   VCS + " stash export", "deny", "shared-tree", cwd=SUBJSTASH, carries=STACK_FRAGMENT)
+sh("stash import: over an empty stack in a dirty checkout takes nothing, as on main",
+   VCS + " stash import abc123", "allow", cwd=SUBJDIRTY)
+sh("stash export: over an empty stack in a dirty checkout takes nothing, as on main",
+   VCS + " stash export", "allow", cwd=SUBJDIRTY)
+# Pins that stay green. The reads stay allowed, and an explicit push still denies here.
+sh("stash pathspec pin: stash list still reads a dirty checkout", VCS + " stash list", "allow",
+   cwd=SUBJDIRTY)
+sh("stash pathspec pin: stash show still reads a dirty checkout", VCS + " stash show", "allow",
+   cwd=SUBJDIRTY)
+sh("stash pathspec pin: an explicit stash push -- still denies over real uncommitted work",
+   VCS + " stash push -- f.txt", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
 # THE STACK IS ITS OWN SUBJECT. Every action that takes an entry off the stack is read with `git
 # stash list`, never with the tree. SUBJDIRTY is dirty and its stack is empty. SUBJSTASH is clean
 # and its stack holds one entry. The two cases cross, which is what proves the right read is made.
@@ -3806,6 +3858,206 @@ sh("waiter: a `#` inside a word is not a comment, so the loop after it still den
    "echo fix#3; while true; do sleep 5; done", "deny", "waiter")
 
 
+# =========================================================================== background end condition
+#
+# Owner ruling 2026-10-13 23:41 CDT, "End condition at start". A background server or watcher needs
+# an `until: <condition>` note in the Bash call's `description`. A refusal without one names the note
+# in its remedy. stall_watch.py --stop shows the note beside each quiet shell (its cases are in
+# test_stall_watch_stop.py). Incident: a file server on port 3202 ran 27 h unnoticed.
+# A one-off build or test is not a long-runner, so it passes with no note. `gh run watch` is not a
+# long-runner either: it ends by itself.
+# Rule name: background-end. The deny cases are the red proof on the code before the rule. The allow
+# cases pass on that code too. They pin that the rule refuses no finished job, and that a note does
+# not unlock a rule that already refuses (`tail -f`, live-stream).
+
+add("background-end: a python http.server under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="python3 -m http.server 3202", run_in_background=True)
+add("background-end: npm run dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm run dev", run_in_background=True)
+add("background-end: npx vite under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npx vite --port 5173", run_in_background=True)
+add("background-end: next dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npx next dev -p 3000", run_in_background=True)
+add("background-end: serve under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npx serve -s dist -l 3000", run_in_background=True)
+add("background-end: tsc --watch under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npx tsc --watch", run_in_background=True)
+add("background-end: an empty until in the description is no note, so refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="python3 -m http.server 3202", run_in_background=True,
+    description="Serve q_max files. until:   ")
+add("background-end: a description with no until is no note, so refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm run dev", run_in_background=True, description="dev server for the q_max page")
+add("background-end: an until written in the command text is no note, so refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm run dev  # until: round 1 bids are served", run_in_background=True)
+add("background-end: a server after a quoted # is still refused, the # does not hide it",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command='echo "# q_max"; npm run dev', run_in_background=True)
+add("background-end: a server after a lone apostrophe in quotes is still refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command='echo "it\'s up"; python3 -m http.server 3202', run_in_background=True)
+add("background-end: a note does not unlock tail -f, the live-stream rule still refuses it",
+    "deny", "live-stream", cwd=NOGIT, carries=("live-stream",),
+    command="tail -f server.out", run_in_background=True,
+    description="until: round 1 bids are served")
+
+add("background-end: a server with an until note in its description is allowed", "allow",
+    cwd=NOGIT, command="python3 -m http.server 3202", run_in_background=True,
+    description="Serve q_max files on 3202. until: round 1 bids are served")
+add("background-end: a dev server with an until note is allowed", "allow", cwd=NOGIT,
+    command="npm run dev", run_in_background=True, description="until: round 1 bids are served")
+add("background-end: a build under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="npm run build", run_in_background=True)
+add("background-end: the guard suite under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="python3 hooks/test_guard.py", run_in_background=True)
+add("background-end: gh run watch under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="gh run watch 7", run_in_background=True)
+add("background-end: a server named in quoted text is data, allowed", "allow", cwd=NOGIT,
+    command='echo "python3 -m http.server 3202"', run_in_background=True)
+add("background-end: a server named in a heredoc body is data, allowed", "allow", cwd=NOGIT,
+    command="cat > notes.txt <<'EOF'\nDon't run npm run dev here\nEOF", run_in_background=True)
+add("background-end: a server named in a multi-line quoted string is data, allowed", "allow",
+    cwd=NOGIT, command='echo "first line\nnpm run dev later"', run_in_background=True)
+add("background-end: a server named in a comment line is not run, allowed", "allow", cwd=NOGIT,
+    command="# start npm run dev later\necho ready", run_in_background=True)
+
+# Shapes the rule misses on 4d477a4, so each deny below is red there. Each starts a server or
+# watcher that never ends on its own, and each has no note: a flag before the script name, a
+# Windows executable name, a wrapper that runs the command, or a script name that serves or watches.
+add("background-end: npm --prefix web run dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm --prefix web run dev", run_in_background=True)
+add("background-end: npm -w web run dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm -w web run dev", run_in_background=True)
+add("background-end: pnpm -C web dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="pnpm -C web dev", run_in_background=True)
+add("background-end: pnpm --filter web dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="pnpm --filter web dev", run_in_background=True)
+add("background-end: npm.cmd run dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm.cmd run dev", run_in_background=True)
+add("background-end: python.exe -m http.server under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="python.exe -m http.server", run_in_background=True)
+add("background-end: python -u -m http.server under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="python -u -m http.server", run_in_background=True)
+add("background-end: py -3 -m http.server under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="py -3 -m http.server", run_in_background=True)
+add("background-end: cmd /c npm run dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="cmd /c npm run dev", run_in_background=True)
+add("background-end: bash -c around npm run dev under run_in_background is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command='bash -c "npm run dev"', run_in_background=True)
+add("background-end: a '# ready' comment opener in a bash -c string does not hide npm run dev",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command='bash -c "echo \'# ready\'; npm run dev"', run_in_background=True)
+add("background-end: a PowerShell call operator before npm run dev is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"), tool="PowerShell",
+    command="& npm run dev", run_in_background=True)
+add("background-end: npm run dev under PowerShell run_in_background is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"), tool="PowerShell",
+    command="npm run dev", run_in_background=True)
+add("background-end: npm run dev in a subshell under run_in_background is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="(npm run dev)", run_in_background=True)
+add("background-end: npx vite@5 under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npx vite@5", run_in_background=True)
+add("background-end: npm run build:watch under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm run build:watch", run_in_background=True)
+add("background-end: npm run dev:frontend under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm run dev:frontend", run_in_background=True)
+add("background-end: npx vite build --watch under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npx vite build --watch", run_in_background=True)
+
+# Pins: these end by themselves or are a named hole, and must stay allowed with no note.
+add("background-end: vite build under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="vite build", run_in_background=True)
+add("background-end: next build under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="next build", run_in_background=True)
+add("background-end: node script.js under run_in_background is allowed, a one-off and a named hole",
+    "allow", cwd=NOGIT, command="node script.js", run_in_background=True)
+add("background-end: a server named inside a bash -c string is data, allowed", "allow",
+    cwd=NOGIT, command='bash -c "echo \'npm run dev\'"', run_in_background=True)
+
+
+# The deny cases are the red proof on the code before this change: each starts a server or watcher the
+# roster does not name yet. The `--watch=false` and `--watch false` allow cases are red there too, since
+# the guard reads `--watch` in any position. `npm run build-docs` is a pin, allowed before and after.
+DEVSERVER_DENY = ("background-end", "until:")
+
+add("background-end: bun --watch server.ts under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="bun --watch server.ts", run_in_background=True)
+add("background-end: bun run --watch server.ts under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="bun run --watch server.ts", run_in_background=True)
+add("background-end: bun --hot server.ts under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="bun --hot server.ts", run_in_background=True)
+add("background-end: deno task dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="deno task dev", run_in_background=True)
+add("background-end: deno serve main.ts under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="deno serve main.ts", run_in_background=True)
+add("background-end: flask run under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="flask run", run_in_background=True)
+add("background-end: uvicorn app:app --reload under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="uvicorn app:app --reload", run_in_background=True)
+add("background-end: jupyter lab under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="jupyter lab", run_in_background=True)
+add("background-end: webpack serve under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="webpack serve", run_in_background=True)
+add("background-end: astro dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="astro dev", run_in_background=True)
+add("background-end: rails s under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="rails s", run_in_background=True)
+add("background-end: streamlit run app.py under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="streamlit run app.py", run_in_background=True)
+add("background-end: npm run dev-server under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="npm run dev-server", run_in_background=True)
+add("background-end: npm run start-api under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="npm run start-api", run_in_background=True)
+
+add("background-end: jest --watch=false under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="jest --watch=false", run_in_background=True)
+add("background-end: vitest --watch=false under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="vitest --watch=false", run_in_background=True)
+add("background-end: vitest --watch false under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="vitest --watch false", run_in_background=True)
+add("background-end: npm test -- --watch=false under run_in_background needs no note, allowed",
+    "allow", cwd=NOGIT, command="npm test -- --watch=false", run_in_background=True)
+add("background-end: npm run build-docs under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="npm run build-docs", run_in_background=True)
+
+
 # =========================================================================== 2c-bis. the WSL launch allow list
 #
 # Owner ruling 2026-10-13 15:20: an agent may run a fixed list of Linux test commands through WSL.
@@ -5838,6 +6090,27 @@ add("test-author: Edit of package.json passes the early warning (the diff judges
 for _path in ("tests/test_a.py", "src/b_test.go", "pytest.ini", "pyproject.toml", "conftest.py",
               "jest.config.js"):
     add("test-author: Edit of %s is allowed" % _path, "allow", tool="Edit", file_path=_path, **A)
+# ---- mutation harnesses are test code: hooks/mutate_*.py holds the mutants the guard suite is judged
+# by, so a test-author edits them. Red on main: the early warning refused them as product code. The
+# builder case stays green and pins the fix to the test-author: agent_brief.py tells a builder to add
+# mutants to hooks/mutate_guard.py when the brief asks, and a builder must keep that.
+for _path in ("hooks/mutate_guard.py", "hooks/mutate_shared.py"):
+    add("test-author: Edit of mutation harness %s is allowed" % _path, "allow", tool="Edit",
+        file_path=_path, **A)
+add("test-author: Edit of hooks/guard_core.py is refused", "deny", rule=TA, tool="Edit",
+    file_path="hooks/guard_core.py", carries=("builder", "Report"), **A)
+add("builder-test: Edit of hooks/mutate_guard.py stays allowed for a builder", "allow", tool="Edit",
+    file_path="hooks/mutate_guard.py", agent_id="bld1", agent_type="builder", cwd=GITMAIN)
+# The harness set is a list of exact names, not a shape: a near miss stays product code, a name with
+# a colon is not a harness, and a name that differs only in case is the same file on Windows.
+add("test-author: Edit of hooks/mutate_x.py is refused", "deny", rule=TA, tool="Edit",
+    file_path="hooks/mutate_x.py", carries=("builder", "Report"), **A)
+add("test-author: Edit of hooks/mutate_:guard_core.py is refused", "deny", rule=TA, tool="Edit",
+    file_path="hooks/mutate_:guard_core.py", carries=("builder", "Report"), **A)
+add("test-author: Edit of janitor/mutate_sweep.py is allowed", "allow", tool="Edit",
+    file_path="janitor/mutate_sweep.py", **A)
+add("test-author: Edit of HOOKS/mutate_guard.py is allowed (case folds)", "allow", tool="Edit",
+    file_path="HOOKS/mutate_guard.py", **A)
 
 # ---- repo self-test files are test paths (Banchi incident, 2026-10-02): `*-selftest.*`,
 # `*_selftest.*`, `selftest_*.*`, in any folder. A .md file does NOT count: a note named like a
@@ -6259,11 +6532,26 @@ def long_lived_no_log_case():
     return True, "allowed with no builder-diff line"
 
 
+_author_mutant = diff_repo("g-author-mutant", _put("hooks/mutate_guard.py", "pass\n"))
+
+
+def author_mutant_no_log_case():
+    """A test-author's edit of a mutation harness is test code: commit and stop log no author-diff line."""
+    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-author-mutant"), _author_mutant,
+                              "test-author", "auth1")
+    rows = [r for r in rows if len(r) > 3 and r[3] == "author-diff"]
+    if out or rows:
+        return False, "a mutation harness was judged: %r %r" % (out[:60], rows)
+    return True, "a mutation harness logs no author-diff line"
+
+
 LOG_CHECKS_EXTRA = _TaggedLogs([
     ("role-diff: every unjudged stop is logged", role_log_case),
     ("builder-diff: the diff check logs for the reviewer and never blocks", diff_logs_case),
     ("builder-diff: main's later tests merged into a long-lived worktree log nothing",
      long_lived_no_log_case),
+    ("author-diff: a test-author's mutation harness edit logs no author-diff line",
+     author_mutant_no_log_case),
 ])
 for _label, _check in LOG_CHECKS_EXTRA:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))

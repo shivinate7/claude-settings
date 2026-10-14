@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """The global PreToolUse guard.
 
+Modes:
+- PreToolUse: Before each matched tool call, runs the owner's global rules in a fixed
+  order and denies or asks on the first match. Bad input allows the call.
+- SubagentStop: When a builder, test-author or record-writer stops, judges its whole diff
+  against its role, for example a builder that changed a test path. Logs an offence for
+  the reviewer and never blocks the stop.
+
 Claude Code runs this script before each matched tool call. The script reads one
 JSON object on stdin and answers on stdout.
 
@@ -228,9 +235,10 @@ try:
     )
     _loading = "guard_stream"
     from guard_stream import (
-        GH_API_METHOD_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON, NARRATED_TAIL_REASON,
-        PATTERN_POLLER_REASON, WAITER_REASON, gh_api_post_hit, live_stream_hit, ln_descends_hit,
-        loop_condition_polls_a_pattern, narrated_tail_hit, waiter_verdict,
+        BACKGROUND_END_REASON, GH_API_METHOD_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
+        NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, WAITER_REASON, background_end_hit,
+        gh_api_post_hit, live_stream_hit, ln_descends_hit, loop_condition_polls_a_pattern,
+        narrated_tail_hit, waiter_verdict,
     )
     _loading = "guard_rm_var"
     from guard_rm_var import (
@@ -1081,6 +1089,9 @@ XCODE_TEST_DIR = re.compile(r"^[A-Z]\w*Tests$")
 TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support"}
 # Dependency lists only a test-author owns. A builder may add a dev dependency.
 AUTHOR_BASENAMES = {"requirements-dev.txt"}
+# The three mutation harnesses are test code for a test-author, named one by one so a later product
+# mutate_*.py stays a builder's. A builder keeps editing them: they are not test paths. Case folds as in `is_test_rel`.
+AUTHOR_HARNESS = {"hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py"}
 TEST_CONFIG = re.compile(
     r"^(?:pytest\.ini|tox\.ini|setup\.cfg|pyproject\.toml|package\.json"
     r"|(?:jest|vitest|playwright|karma)\.conf(?:ig)?\.\w+|vitest\.workspace\.\w+|\.mocharc(?:\.\w+)?|[^/]+\.xctestplan)$")
@@ -1145,7 +1156,8 @@ def is_test_config_rel(rel: str) -> bool:
 def author_path_ok(rel: str) -> bool:
     """A test-author may change a test path, test config, or a dev dependency list. `package.json`
     and `pyproject.toml` pass here and are read by content in `role_offences`."""
-    return is_test_rel(rel) or is_test_config_rel(rel) or basename(rel) in AUTHOR_BASENAMES
+    return (is_test_rel(rel) or is_test_config_rel(rel) or basename(rel) in AUTHOR_BASENAMES
+            or norm(rel).lstrip("/").lower() in AUTHOR_HARNESS)
 
 
 def repo_rel(path: str, cwd: str, outside: bool = True):
@@ -1464,7 +1476,7 @@ def step_up_hit(tool: str, tool_input) -> str:
 
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
                 transcript: str = "", subagent: bool = False,
-                background: bool = False) -> None:
+                background: bool = False, description: str = "") -> None:
     POWERSHELL_CALL[0] = tool == "PowerShell"
     stripped = strip_heredoc_bodies(raw)
     cmd = norm(stripped)
@@ -1648,6 +1660,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = narrated_tail_hit(stripped)
     if matched:
         refuse(tool, "deny", "live-stream", NARRATED_TAIL_REASON, matched)
+    matched = background_end_hit(split_segments(stripped), background, description)
+    if matched:
+        refuse(tool, "deny", "background-end", BACKGROUND_END_REASON, matched)
 
     # 3c. A command that sets the Playwright browser cache location (incident 2026-10-10).
     matched = playwright_command_hit(raw, stripped)
@@ -1957,7 +1972,8 @@ def judge(payload) -> None:
             judge_shell(tool, command, cwd, session_id_of(payload), agent_role(payload),
                         transcript if isinstance(transcript, str) else "",
                         bool(payload.get("agent_id")),
-                        tool_input.get("run_in_background") is True)
+                        tool_input.get("run_in_background") is True,
+                        tool_input.get("description") or "")
             names = [n for seg in split_segments(strip_heredoc_bodies(command))
                      for n in _sim_boot_names(seg)]
             if names:

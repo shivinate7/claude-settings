@@ -10,7 +10,7 @@ Git half: the merge lock, the temporary worktree, the claim, the push, the rever
 local base branch, afterMerge and the branch delete. GitHub half (`Host`): required checks, the wait,
 the minute read and `gh pr merge --match-head-commit`.
 """
-import argparse, contextlib, json, os, re, shutil, socket, subprocess, sys, tempfile, time, uuid
+import argparse, contextlib, json, os, re, shutil, socket, subprocess, sys, tempfile, threading, time, uuid
 
 STAMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "actions", "stamp", "stamp.mjs")
 
@@ -84,11 +84,37 @@ def git(cwd, *a, input=None):
 SETTLE_SECONDS = 30
 NET_RETRIES, NET_PAUSE = 3, 5  # owner ruling 2026-10-13: retry a network error 3 times, a short pause between
 # A network error, anchored on the error line, never on refusal text (a PR title "#502 Bad Gateway fix" is no match):
-# gh's Go transport error `Post "https://...": <cause>`, gh's offline line, gh's HTTP 50x line, git's transport lines.
-NET_ERROR = re.compile(r"(?:^|: )(?:(?:Post|Get|Put|Patch|Delete|Head) \x22https?://[^\x22\s]*\x22: |error connecting to |HTTP 50[234]: )"
+# gh's Go transport error `Post "https://...": <cause>`, gh's offline line, gh's own server-error lines at the start of a line
+# (`HTTP 502 (url)`, `HTTP 500: ...`, `gh: HTTP 503`, `gh: Server Error (HTTP 502)`, `GraphQL: Something went wrong ...`),
+# gh's HTTPError after a command's prefix (`failed to get runs: HTTP 502: 502 Bad Gateway (https://...)`; a title has no
+# trailing url), `--jq` on an HTML gateway page, a truncated reply, git's transport lines (SSL only after curl's
+# `unable to access '<url>': `, so a branch `ssl-fix` is no match). Never free text: a PR title "Fix (HTTP 502 retry)"
+# or a check "build: HTTP 500 guard" is no match. The one home: Host.gh, the fetch and both lock reads ask is_net.
+NET_ERROR = re.compile(r"(?:^|: )(?:(?:Post|Get|Put|Patch|Delete|Head) \x22https?://[^\x22\s]*\x22: |error connecting to )"
+                       r"|^(?:gh: )?(?:Server Error \()?HTTP (?:5\d\d|429)\b|^GraphQL: Something went wrong"
+                       r"|(?:^|: )HTTP (?:5\d\d|429)(?:: [^\n]*)? \(https?://\S+\)\s*$|^invalid character '<' looking for beginning of value"
                        r"|^(?:fatal|error): .*(?:Could not resolve (?:host|proxy)|Failed to connect|Connection was reset|connection reset|connection refused|connectex|wsarecv|"
-                       r"schannel|\bSSL\b|timed out|context deadline exceeded|Recv failure|the remote end hung up|early EOF|RPC failed|returned error: 50[234])"
-                       r"|^ssh: (?:connect to host|Could not resolve hostname)", re.I | re.M)
+                       r"schannel|unable to access '[^']*': .*\bSSL\b|GnuTLS|timed out|context deadline exceeded|Recv failure|the remote end hung up|early EOF|RPC failed|returned error: 5\d\d|"
+                       r"HTTP/2 stream|Empty reply from server|Failed sending data)"
+                       r"|^ssh: (?:connect to host|Could not resolve hostname)|^kex_exchange_identification\b|^unexpected end of JSON input", re.I | re.M)
+# `gh api` on a 5xx prints the body to stdout with no newline, then its own line to stderr. Measured with gh 2.98.0:
+# `{"message": "Server Error"}gh: Server Error (HTTP 502)` and `<html>...</html>gh: HTTP 502`. That line ends the output.
+GH_API_TAIL = re.compile(r"gh: (?:[^\n]*\()?HTTP (?:5\d\d|429)\)?\s*\Z", re.I)
+
+def is_net(c, out):
+    """A failed call whose output is a network error line. JSON is gh's answer (a check named EOF), not its error line,
+    unless gh's own 5xx line ends it."""
+    return bool(c and (GH_API_TAIL.search(out) or (NET_ERROR.search(out) and not out.lstrip().startswith(("[", "{")))))
+
+def retry_net(call, pause, retries=NET_RETRIES):
+    """-> (code, output, retries used). Runs `call` again after `pause(NET_PAUSE)` while it fails with a network error, up to `retries` times."""
+    n = 0
+    while True:
+        c, out = call()
+        if n >= retries or not is_net(c, out):
+            return c, out, n
+        n += 1
+        pause(NET_PAUSE)
 
 UNDO_MEMO = {}
 
@@ -103,14 +129,32 @@ def undo_check(wt, base_ref, unknown_ok=""):
     # and the default refs it reads, so the second call reuses the first when all of them are unchanged.
     try:
         key = (wt, *(git(wt, "rev-parse", "--verify", "-q", r + "^{commit}")[1].strip() for r in ("HEAD", base_ref, "origin/HEAD", "origin/main", "main")))
-        if not (key[1] and key[2]) or key not in UNDO_MEMO:  # a head or base that does not resolve is never reused
-            UNDO_MEMO[key] = undo.check(wt, base_ref, "HEAD")
+        if not (key[1] and key[2]) or key not in UNDO_MEMO:  # a head or base that does not resolve is never reused; a hit skips the scan and its beat
+            c, n = git(wt, "rev-list", "--count", f"{base_ref}..HEAD")
+            say(f"merge: scanning for silent undos ({n.strip() if not c else '?'} commits) ...")  # the scan can run for minutes
+            t0, done, at = time.time(), threading.Event(), [0, 0]  # at: the scan's file counter, set by its progress hook
+            undo.progress = lambda i, total: at.__setitem__(slice(None), [i, total])
+
+            def beat():  # a line every 60 s, with the count, so a reader sees the scan move
+                while not done.wait(60):
+                    where = f"file {at[0]}/{at[1]}" if at[1] else "reading the history"
+                    say(f"merge: silent-undo scan: {where}, {(time.time() - t0) / 60:.0f} min")
+
+            beater = threading.Thread(target=beat, daemon=True)
+            beater.start()
+            try:
+                UNDO_MEMO[key] = undo.check(wt, base_ref, "HEAD")
+            finally:  # the beat stops, and is joined, before any line below: no beat prints after "scan done"
+                done.set()
+                beater.join()
+                undo.progress = None  # the hook is the scan's alone
+            say(f"merge: silent-undo scan done ({time.time() - t0:.0f} s)")
         res = UNDO_MEMO[key]
     except subprocess.TimeoutExpired as e:  # a read that timed out is unknown, and is not remembered
         res = undo.Unknown(f"a git read timed out after {e.timeout:.0f}s")
     except undo.Unknown as e:
         res = UNDO_MEMO[key] = e
-    if isinstance(res, undo.Unknown):
+    if isinstance(res, Exception):  # an Unknown; the scanner is never asked for its class here
         e = res
         if unknown_ok.strip():
             say(f"merge: silent-undo check UNKNOWN ({e}). Owner override, reason: {unknown_ok.strip()}")
@@ -207,14 +251,14 @@ class Lock:
 
 class GitLock(Lock):
     """Any git remote. Tests use a local bare origin. The create-only push is the one arbiter."""
-    def __init__(self, root, now=time.time):
-        self.root, self.now = root, now
+    def __init__(self, root, now=time.time, pause=time.sleep):
+        self.root, self.now, self.pause = root, now, pause
 
     def read(self, b):
         ref = f"refs/merge-lock/{b}"
-        c, out = git(self.root, "ls-remote", "origin", ref)
+        c, out, _ = retry_net(lambda: git(self.root, "ls-remote", "origin", ref), self.pause)
         if c:
-            raise Stop("cannot read the merge lock: " + out)
+            raise (NetStop if is_net(c, out) else Stop)("cannot read the merge lock: " + out)
         if not out:
             return None
         if git(self.root, "fetch", "-q", "origin", ref)[0]:
@@ -252,16 +296,18 @@ class GitLock(Lock):
 
 class GhLock(Lock):
     """Real use: the GitHub API. The API refuses a ref that exists, so one run wins."""
-    def __init__(self, now=time.time):
-        self.now = now
+    def __init__(self, now=time.time, pause=time.sleep):
+        self.now, self.pause = now, pause
 
     def api(self, *a):
         c, out = sh(["gh", "api", *a])
         return c, out
 
     def read(self, b):
-        c, sha = self.api(f"repos/{{owner}}/{{repo}}/git/ref/merge-lock/{b}", "--jq", ".object.sha")
+        c, sha, _ = retry_net(lambda: self.api(f"repos/{{owner}}/{{repo}}/git/ref/merge-lock/{b}", "--jq", ".object.sha"), self.pause)
         if c:
+            if is_net(c, sha):  # first: a 5xx reply whose url holds "404" is no proof the lock is gone
+                raise NetStop("cannot read the merge lock: " + sha)
             if "404" in sha or "Not Found" in sha:
                 return None
             raise Stop("cannot read the merge lock: " + sha)
@@ -312,15 +358,10 @@ class Host:
         """-> (code, output). The one home of every Host `gh` call. A network error is retried NET_RETRIES times with
         `self.pause`; after that NetStop. Any other failure returns at once. `self.net_retries` counts the retries
         of the last call. ponytail: no retry inside `shared_deadline` (the guard's hard hook budget has no room for a pause)."""
-        self.net_retries = 0
-        while True:
-            c, out = sh(["gh", *args], cwd=cwd)
-            if not (c and NET_ERROR.search(out) and not out.lstrip().startswith(("[", "{"))):  # JSON is gh's answer (a check named EOF), not its error line
-                return c, out
-            if self.net_retries >= (NET_RETRIES if _READ_DEADLINE is None else 0):
-                raise NetStop(f"network error from `gh {' '.join(args[:2])}`, still failing after {self.net_retries} retries. Nothing was reverted. Run again.\n{out}")
-            self.net_retries += 1
-            self.pause(NET_PAUSE)
+        c, out, self.net_retries = retry_net(lambda: sh(["gh", *args], cwd=cwd), self.pause, NET_RETRIES if _READ_DEADLINE is None else 0)
+        if is_net(c, out):
+            raise NetStop(f"network error from `gh {' '.join(args[:2])}`, still failing after {self.net_retries} retries. Nothing was reverted. Run again.\n{out}")
+        return c, out
 
     def _repo_args(self):
         return ["-R", self.repo] if self.repo else []
@@ -377,10 +418,14 @@ class Host:
         that still reads as `prior` is GitHub lagging the push: keep waiting. Any red check, required or
         not, ends the wait, and any pending check, required or not, is waited on. No sleep: a pending check blocks in `gh run watch <id> --exit-status` for at
         most a minute, then the loop reads again."""
+        listed = self.required if isinstance(self.required, list) else None  # protection mode needs a gh read to know the names
+        say("merge: checking " + (", ".join(listed) if listed else "the required checks") + " ...")  # before the first gh read, which can block
         names = self.required_names()
         base = self.base  # the base read under the lock: the last pr() before the wait
         end = self.now() + deadline_minutes * 60
         settled = False
+        if not listed:
+            say("merge: required: " + ", ".join(names))
         said, said_at = None, self.now()  # the text last printed, and when (the wait's start before any line)
 
         def progress(what):
@@ -541,6 +586,7 @@ class Host:
         MERGED at head `sha` is this run's merge. MERGED at another head is not: Stop, no revert. An unreadable state,
         or OPEN after a reply lost to the network, is a NetStop (no revert). Only a proven refusal returns None (revert)."""
         lost = False
+        say(f"merge: merging #{n} ...")  # gh pr merge can block
         try:
             c, out = self.gh(["pr", "merge", str(n), f"--{method}", "--match-head-commit", sha])
         except NetStop as e:
@@ -552,15 +598,19 @@ class Host:
             if state == "MERGED" and not oid:
                 raise ValueError("MERGED with no merge commit")
         except (NetStop, ValueError, KeyError, TypeError) as e:
-            raise NetStop(f"the merge of #{n} may have landed, and its state cannot be read. Nothing was reverted. Run again.\n{out}\n{e if isinstance(e, NetStop) else view}")
+            raise NetStop(f"the merge of #{n} may have landed, and its state cannot be read. Nothing was reverted. Check the pull request #{n} on GitHub. "
+                          f"If it is merged, do the after-merge steps by hand (move the local {self.base}, run merge.afterMerge, cut the branch). If it is open, run again.\n{out}\n{e if isinstance(e, NetStop) else view}")
         if state == "MERGED":
             if head == sha:
                 return oid, ""
             raise Stop(f"#{n} is merged at {str(head)[:9]}, not at the proven head {sha[:9]}: not this run's merge. Nothing was reverted.\n{out}")
         if lost:
             raise NetStop(f"network error on `gh pr merge` of #{n}, and the pull request is not merged. Nothing was reverted. Run again.\n{out}")
-        if not c:
-            return None, "gh pr merge passed, but the pull request shows no merge commit: " + view
+        if not c:  # exit 0 and still OPEN: not a refusal (a queued merge, or a lagging read). The claim stays.
+            raise NetStop(f"`gh pr merge` of #{n} exited 0, but the pull request still reads OPEN. Nothing was reverted. Check the pull request #{n} on GitHub: "
+                          f"if it merged, do the after-merge steps by hand; if it is open, run again.\n{view}")
+        # A refusal reply with the PR still OPEN is proven, even when the first try lost its reply and a retry got the refusal
+        # (gh retried it): gh answered and the merge did not happen. The caller reverts the claim. Owner ruling: only a proven refusal reverts.
         return None, out
 
 # ------------------------------------------------------------------ git steps
@@ -920,9 +970,9 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 ok, why = False, str(e)
             if not ok:
                 fail(why)
-            c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
-            if c and NET_ERROR.search(out):  # a network error is not a refusal: the claim stays
-                raise NetStop(f"network error on the fetch of origin {base}. The claim stays on {branch}. Run again to resume.\n{out}")
+            c, out, _ = retry_net(lambda: git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}"), getattr(host, "pause", time.sleep))
+            if is_net(c, out):  # a network error is not a refusal: the claim stays
+                raise NetStop(f"network error on the fetch of origin {base}, still failing after {NET_RETRIES} retries. The claim stays on {branch}. Run again to resume.\n{out}")
             if c:  # never check against a stale base tip
                 fail(f"cannot fetch origin {base}, so the claim cannot be proved fresh:\n" + out)
             try:  # main may have moved during the wait: read the branch against the tip fetched just now

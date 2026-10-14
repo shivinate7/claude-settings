@@ -82,7 +82,9 @@ an UNKNOWN read is never cached and always reported again.
 THE CONFIG REPORT. The same Stop run also prints the old `hooks/config_report.py` message,
 folded in below ("the config report"): the project config files, merges into main and
 unreadable subjects of this turn. It is a separate section with its own message, joined to the
-judgment's with a space, and it never calls the model.
+judgment's with a space, and it never calls the model. Under a split flag (below) the output
+also carries `verdict` (the judgment's text alone) and `notices` (one line per kind of
+notice), so a caller can show each notice apart from the verdict.
 
 WHAT THIS FILE DOES NOT DO. It does not adopt PR #88's `hooks/run_hook.sh` launcher; that PR
 is an open draft on another branch, and this file matches the inline python-fallback shape
@@ -118,30 +120,26 @@ else:
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 from _transcript import last_human_epoch, head_moved_since  # noqa: E402
 
-# THE TIME BUDGET. settings.json's Stop entry for this hook carries `"timeout": 170`.
-# Every git call below uses GIT_TIMEOUT (10s). At most MAX_DIFFED_FILES protected files
-# are diffed; the rest are still named in the evidence, but with no git call, so the
-# count of protected files can grow unbounded with no matching growth in wall time.
-# Worst case, computed here rather than assumed: one `git status`
-# (GIT_TIMEOUT) + one `git log` (GIT_TIMEOUT) + MAX_DIFFED_FILES `git diff` calls
-# (MAX_DIFFED_FILES * GIT_TIMEOUT) + one model call (MODEL_TIMEOUT) = 10 + 10 + 80 + 120
-# = 220 seconds. The settings.json Stop entry for this hook must carry a timeout of at least
-# 230 seconds (10 seconds of margin). Changing any of these numbers means re-deriving this
-# sum and the settings.json timeout together. A model timeout is an error from
+# THE TIME BUDGET. The mod (mods/decision-watch/hooks/register.mjs) runs this script, and it
+# caps each python run itself (PY_MS there), so no Stop row timeout bounds it now. In split
+# mode (--emit-prompt, --model-text, --model-error) the script calls no model: the mod makes
+# the model call under its own MODEL_MS. Inside one run, every git call uses GIT_TIMEOUT (10s)
+# and at most MAX_DIFFED_FILES protected files are diffed; the rest are still named in the
+# evidence, with no git call, so the count of protected files can grow with no matching growth
+# in wall time. Worst case for the git part, computed here: one `git status` + one `git log`
+# + MAX_DIFFED_FILES `git diff` calls = 10 + 10 + 80 = 100 seconds, so the mod's cap can stop
+# a run first. A direct run with no split flag also makes one model call (MODEL_TIMEOUT, 120s).
+# Changing these numbers means re-checking the mod's timers. A model timeout is an error from
 # invoke_model, which the caller reports as UNKNOWN, never ALLOW.
 MODEL = "haiku"
 MODEL_TIMEOUT = 120
 GIT_TIMEOUT = 10
 MAX_DIFFED_FILES = 8
 
-# `invoke_model` puts the whole prompt in one argv element. Windows caps a process's
-# command line around 32,767 characters total; a run touching several protected files, or
-# one large legitimate rewrite of a decision file (exactly the case this hook exists to
-# judge), can build a prompt past that on its own, and `subprocess.run` would then fail to
-# start there -- UNKNOWN, per this hook's own fail-closed contract, but silently so, on the
-# one platform this repo runs Windows parity CI for. Capped well under the limit, with the
-# cut named in the prompt itself so the judge (and anyone reading its "why") knows evidence
-# was dropped rather than concluding nothing else changed.
+# The prompt goes to `claude -p` on stdin, so the Windows command-line cap (about 32,767
+# characters) no longer bounds it. The clip now bounds cost and latency only; the right size
+# is unmeasured. The cut is named in the prompt itself so the judge (and anyone reading its
+# "why") knows evidence was dropped rather than concluding nothing else changed.
 PROMPT_MAX_LEN = 20000
 
 PEER_MESSAGE_TOOLS = ("SendMessage", "Task")
@@ -764,7 +762,7 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
     try:
         run = subprocess.run(
             [
-                "claude", "-p", prompt,
+                "claude", "-p",  # prompt goes on stdin: a Windows command line caps at 32,767 chars
                 "--model", model,
                 "--effort", "xhigh",
                 "--output-format", "json",
@@ -772,11 +770,11 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
                 "--safe-mode",
                 "--permission-mode", "plan",
             ],
-            input="", capture_output=True, text=True, encoding="utf-8", errors="replace",
+            input=prompt.encode("utf-8", "replace"), capture_output=True,  # bytes: text mode turns LF into CRLF on Windows
             timeout=timeout, cwd=root, env=env,
         )
     except subprocess.TimeoutExpired:
-        return None, "model subprocess timed out"  # fixed text: str(exc) holds the argv and prompt
+        return None, "model subprocess timed out"  # fixed text: never put str(exc) in the report
     except Exception as exc:
         return None, scrub("model subprocess failed to start: %s" % exc)
     finally:
@@ -784,10 +782,13 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
             shutil.rmtree(root, ignore_errors=True)
         except Exception:
             pass
+    # Bytes from the pipe; a str passes through, which a stubbed `subprocess.run` may return.
+    text_of = lambda raw: raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw or ""
+    stdout, stderr = text_of(run.stdout), text_of(run.stderr)
     if run.returncode != 0:
-        return None, "model exited %s: %s" % (run.returncode, scrub(run.stderr or "")[:200])
+        return None, "model exited %s: %s" % (run.returncode, scrub(stderr)[:200])
     try:
-        envelope = json.loads(run.stdout)
+        envelope = json.loads(stdout)
     except Exception:
         return None, "model output was not JSON"
     text = envelope.get("result") if isinstance(envelope, dict) else None
@@ -814,11 +815,15 @@ def parse_verdict(text, shape=VERDICT_SHAPE):
 
 # ------------------------------------------------------------------ orchestration
 
-def run(hook, model_call=invoke_model):
+def run(hook, model_call=invoke_model, expect_key=None):
     """Return a systemMessage string, or '' when there is nothing to report.
 
     `model_call` is swapped in tests, so a case can assert it was never called (the common,
     nothing-protected-touched path) or stub its answer without a real subprocess.
+
+    `expect_key` is the key phase 1 printed (the mod's `--key`). A live key that differs means
+    the evidence moved between the two phases, so the reply is not used and the answer is UNKNOWN
+    (HOLE 1 of decision decision-watch-mod-limits).
     """
     path = hook.get("transcript_path")
     if not path or not isinstance(path, str) or not os.path.exists(path):
@@ -889,6 +894,8 @@ def run(hook, model_call=invoke_model):
     # cap" above.
     session_id = hook.get("session_id") or ""
     key = incident_key(protected, evidence, content_digest(cwd, protected))
+    if expect_key is not None and key != expect_key:
+        return MOVED_MESSAGE
     if key in _load_seen(session_id):
         return ""
 
@@ -904,7 +911,10 @@ def run(hook, model_call=invoke_model):
             "length this prompt is passed with.]" % cut
         )
 
-    verdict, error = model_call(prompt)
+    try:
+        verdict, error = model_call(prompt)
+    except NeedsModel as need:
+        raise NeedsModel(need.args[0], key)
     if error is not None:
         return UNKNOWN_PREFIX + "the model judgment could not be completed (%s)." % error
     # An ALLOW is cached like a FLAG: one model call per change, not one per Stop. The key
@@ -1138,7 +1148,15 @@ def collect_unread(stamp):
     if bound is None:
         return []
     try:
-        path = os.path.join(guard.config_dir(), "guard.log")
+        # The mod runs this script with CLAUDE_CONFIG_DIR set to its own state folder, and hands
+        # the real config folder in DW_REAL_CONFIG_DIR. guard.log lives in the real one.
+        real = os.environ.get("DW_REAL_CONFIG_DIR")
+        if not real:
+            real = guard.config_dir()
+            if os.path.basename(real).startswith("decision-watch-"):
+                print("decision_watch: DW_REAL_CONFIG_DIR is not set under the mod, so unread-subject "
+                      "notices read guard.log from the mod state folder " + real, file=sys.stderr)
+        path = os.path.join(real, "guard.log")
     except Exception:
         return []
     if not os.path.exists(path):
@@ -1178,16 +1196,25 @@ def collect_unread(stamp):
 
 def config_report(hook):
     """Return the config-report systemMessage for this turn, or '' for nothing to say."""
+    return _report_text(config_notices(hook))
+
+
+def _report_text(parts):
+    return " ".join(parts) + TAIL if parts else ""
+
+
+def config_notices(hook):
+    """Return this turn's config notices, one string per kind, without TAIL. [] for none."""
     if hook.get("stop_hook_active"):
-        return ""  # a rewrite of an earlier reply: stay quiet, as `main` does for `run`
+        return []  # a rewrite of an earlier reply: stay quiet, as `main` does for `run`
     path = hook.get("transcript_path")
     if not path or not isinstance(path, str) or not os.path.exists(path):
-        return ""
+        return []
     try:
         reader = _shared_transcript()
         human, after = reader.read_turn(path)
         if not after:
-            return ""
+            return []
         cwd = hook.get("cwd") or ""
         if not isinstance(cwd, str):
             cwd = ""
@@ -1204,9 +1231,9 @@ def config_report(hook):
                 pass
         unread = collect_unread(last_human_stamp([human] if human else []))
     except Exception:
-        return ""
+        return []
     if not hits and not merges and not unread:
-        return ""
+        return []
     parts = []
     if hits:
         parts.append(CONFIG_MESSAGE % ", ".join(hits))
@@ -1214,14 +1241,18 @@ def config_report(hook):
         parts.append(MERGE_MESSAGE % ", ".join(merges))
     if unread:
         parts.append(UNREAD_MESSAGE % ", ".join(unread))
-    return " ".join(parts) + TAIL
+    return parts
 
 
 LOST_MESSAGE = UNKNOWN_PREFIX + "verdict lost: the model reply was not used (the watch ended before the model step)."
 
 
+MOVED_MESSAGE = UNKNOWN_PREFIX + "the evidence changed between the two phases, so the model reply was not used."
+
+
 class NeedsModel(Exception):
-    """`--emit-prompt`: the cheap path ended at the model call. `args[0]` is the prompt."""
+    """`--emit-prompt`: the cheap path ended at the model call. `args[0]` is the prompt, `args[1]`
+    the evidence key phase 2 gets back as `--key`."""
 
 
 def _model_call_from_argv(argv):
@@ -1230,7 +1261,9 @@ def _model_call_from_argv(argv):
       --emit-prompt       prints {"needs_model": true, "prompt", "model"} and exits, only when
                           a model call is due; otherwise the normal output (usually nothing).
       --model-text TEXT   the model's reply text; parsed by parse_verdict, then normal output.
-      --model-error TEXT  the call failed; prints the UNKNOWN message, never a pass."""
+      --model-error TEXT  the call failed; prints the UNKNOWN message, never a pass.
+    Phase 2 may end with `--key K`, the "key" phase 1 printed; `main` strips it (`_split_key`).
+    Under any of these flags, printed output also carries `verdict` and `notices` (see `main`)."""
     if argv[:1] == ["--emit-prompt"] and len(argv) == 1:
         def emit(prompt):
             raise NeedsModel(prompt)
@@ -1240,6 +1273,13 @@ def _model_call_from_argv(argv):
     if argv[:1] == ["--model-error"] and len(argv) == 2:
         return lambda prompt: (None, argv[1][:200])
     return invoke_model
+
+
+def _split_key(args):
+    """Return (args without a trailing `--key K`, K or None). Only a reply flag takes a key."""
+    if len(args) == 4 and args[0] in ("--model-text", "--model-error") and args[2] == "--key":
+        return args[:2], args[3]
+    return args, None
 
 
 def main():
@@ -1256,29 +1296,36 @@ def main():
         sys.exit(0)  # this Stop firing is already a rewrite; do not re-judge it
 
     try:
-        model_call = _model_call_from_argv(sys.argv[1:])
+        argv, expect_key = _split_key(sys.argv[1:])
+        model_call = _model_call_from_argv(argv)
         used = []
 
         def tracked(prompt):
             used.append(True)
             return model_call(prompt)
 
-        message = run(hook, tracked)
+        message = run(hook, tracked, expect_key)
         handed_reply = sys.argv[1:2] in (["--model-text"], ["--model-error"]) and model_call is not invoke_model
         if handed_reply and not message and not used:
             # A reply was handed in, but the run ended before the model step (the turn's verdict
             # is already recorded). Silence here would read as an ALLOW. Say it was lost.
             message = LOST_MESSAGE
     except NeedsModel as need:
-        print(json.dumps({"needs_model": True, "prompt": need.args[0], "model": MODEL}))
+        print(json.dumps({"needs_model": True, "prompt": need.args[0], "model": MODEL, "key": need.args[1]}))
         sys.exit(0)
     except Exception as exc:
         print(json.dumps({"systemMessage": UNKNOWN_PREFIX + "the watch itself raised (%s)." % exc}))
         sys.exit(0)
 
-    message = " ".join(m for m in (message, config_report(hook)) if m)
-    if message:
-        print(json.dumps({"systemMessage": message}))
+    notices = config_notices(hook)
+    joined = " ".join(m for m in (message, _report_text(notices)) if m)
+    if joined:
+        out = {"systemMessage": joined}
+        if model_call is not invoke_model:
+            # A split caller (a mod) shows the verdict and each notice apart (decision
+            # decision-watch-mod-limits). The default output keeps the one Stop-hook field only.
+            out.update(verdict=message, notices=[n + TAIL for n in notices])
+        print(json.dumps(out))
     sys.exit(0)
 
 

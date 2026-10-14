@@ -697,12 +697,22 @@ def _invoke_model_argv_body():
     check("invoke_model_argv: verdict is ALLOW", verdict == {"verdict": "ALLOW"}, verdict)
 
     argv = captured.get("argv") or []
-    # --effort xhigh is pinned by case_invoke_model_haiku_xhigh_120s; position is free here.
+    kwargs = captured.get("kwargs") or {}
+    # The prompt travels on stdin, never in argv: Windows refuses a command line past 32,767
+    # chars (WinError 206), so a prompt in argv cannot reach `claude` at its real size.
+    pairs = list(zip(argv, argv[1:]))
+    check("invoke_model_argv: --model haiku in argv", ("--model", "haiku") in pairs, argv)
+    check("invoke_model_argv: --effort xhigh in argv", ("--effort", "xhigh") in pairs, argv)
+    check("invoke_model_argv: prompt is not in argv",
+          not any("JUDGE THIS PROMPT" in arg for arg in argv), argv)
+    check("invoke_model_argv: prompt arrives on stdin",
+          kwargs.get("input") == b"JUDGE THIS PROMPT", kwargs.get("input"))
+    # --effort xhigh is checked above; its position is free, so it is dropped before the compare.
     if "--effort" in argv:
         i = argv.index("--effort")
         argv = argv[:i] + argv[i + 2:]
     expected = [
-        "claude", "-p", "JUDGE THIS PROMPT",
+        "claude", "-p",
         "--model", "haiku",
         "--output-format", "json",
         "--tools", "",
@@ -712,7 +722,6 @@ def _invoke_model_argv_body():
     print("invoke_model argv: %r" % argv)
     check("invoke_model_argv: matches the expected restricted command line", argv == expected, argv)
 
-    kwargs = captured.get("kwargs") or {}
     judge_cwd = kwargs.get("cwd")
     check("invoke_model_argv: cwd is set", bool(judge_cwd), judge_cwd)
     check("invoke_model_argv: cwd is not this repository", judge_cwd != HERE and judge_cwd != os.path.dirname(HERE), judge_cwd)
@@ -746,6 +755,80 @@ def _invoke_model_argv_body():
         set(env) <= set(dw.JUDGE_ENV_ALLOWLIST) | {"CLAUDE_CONFIG_DIR"},
         sorted(env),
     )
+
+
+# Prompts reach the child on stdin. The child is a real process. A bare `claude` cannot be
+# started from a script on Windows, so the shim in each case runs this interpreter on a fake.
+# The fake reads stdin as raw bytes with no newline folding. It returns the bytes hex-encoded,
+# so a case compares what the child received with what was sent.
+FAKE_CLAUDE_SRC = '''\
+import json, sys
+raw = sys.stdin.buffer.read()
+text = raw.decode("utf-8")
+verdict = {"verdict": "ALLOW", "stdin_len": len(text), "stdin_tail": text[-40:],
+           "stdin_hex": raw.hex()}
+print(json.dumps({"result": json.dumps(verdict)}))
+'''
+LONG_PROMPT_LEN = 60000
+LONG_PROMPT_END = "<<end-of-prompt>>"
+
+
+def _invoke_through_fake_claude(prompt, name):
+    """invoke_model with `claude` replaced by the fake, in a scratch config. Returns the
+    verdict, the error, and the argv the child was started with."""
+    fake = os.path.join(ROOT, "fake-claude", "fake_claude.py")
+    write(fake, FAKE_CLAUDE_SRC)
+    captured = {}
+    real_run = dw.subprocess.run
+
+    def shim(argv, **kwargs):
+        captured["argv"] = list(argv)
+        child = [sys.executable, fake] + list(argv[1:]) if argv and argv[0] == "claude" else argv
+        return real_run(child, **kwargs)
+
+    dw.subprocess.run = shim
+    try:
+        with scratch_config(name):
+            verdict, error = dw.invoke_model(prompt)
+    finally:
+        dw.subprocess.run = real_run
+    return verdict, error, captured.get("argv") or []
+
+
+# The filler has no newline. A Windows text-mode write turns each "\n" into "\r\n", which would
+# add 1 char per line and make this case measure line endings. The byte-exact case below owns
+# line endings, so this case measures length, the command line, and the tail.
+def case_invoke_model_long_prompt_reaches_child_whole():
+    filler = "evidence row " * LONG_PROMPT_LEN
+    prompt = filler[:LONG_PROMPT_LEN - len(LONG_PROMPT_END)] + LONG_PROMPT_END
+    verdict, error, argv = _invoke_through_fake_claude(prompt, "longprompt")
+
+    cmd_len = sum(len(arg) + 1 for arg in argv)
+    check("long prompt: invoke_model returns no error", error is None, error)
+    check("long prompt: the command line stays under the 32,767-char Windows cap",
+          cmd_len < 32767, cmd_len)
+    check("long prompt: the child reads all 60,000 chars on stdin",
+          (verdict or {}).get("stdin_len") == LONG_PROMPT_LEN, (verdict or {}).get("stdin_len"))
+    check("long prompt: the child reads the prompt's last 40 chars",
+          (verdict or {}).get("stdin_tail") == prompt[-40:], (verdict or {}).get("stdin_tail"))
+
+
+# A prompt with LF, CRLF and non-ASCII characters reaches the child byte for byte, as UTF-8.
+# The text-mode write (`input=prompt`, `text=True`) on Windows turns each "\n" into "\r\n", so
+# "a\nb\r\nc" arrives as b"a\r\nb\r\r\nc". The non-ASCII check is separate: it passes on its own,
+# so a red byte check points at line endings, not at encoding.
+BYTE_PROMPT = "a\nb\r\nc — é"
+
+
+def case_invoke_model_prompt_bytes_reach_child_exact():
+    verdict, error, _ = _invoke_through_fake_claude(BYTE_PROMPT, "promptbytes")
+    received = bytes.fromhex((verdict or {}).get("stdin_hex", ""))
+
+    check("prompt bytes: invoke_model returns no error", error is None, error)
+    check("prompt bytes: the em dash and e-acute arrive as UTF-8",
+          "—".encode("utf-8") in received and "é".encode("utf-8") in received, received)
+    check("prompt bytes: the child receives the prompt byte-for-byte as UTF-8",
+          received == BYTE_PROMPT.encode("utf-8"), received)
 
 
 # --------------------------------------------------------------------------- case 10
@@ -839,18 +922,6 @@ def case_main_stop_hook_active_stays_quiet():
     # KNOWN-BAD PAIR: the same payload without the flag must not be silent.
     paired = _run_main({"transcript_path": "/does/not/matter", "cwd": "."})
     check("main_stop_hook_active: known-bad pair prints UNKNOWN", _says_unknown(paired), paired.stdout)
-
-
-def case_settings_timeout_covers_worst_case():
-    with open(os.path.join(HERE, "..", "settings.json")) as f:
-        settings = json.load(f)
-    entries = [h for grp in settings["hooks"]["Stop"] for h in grp["hooks"]
-               if "hooks/decision_watch.py" in h.get("command", "")]
-    check("settings_timeout: one Stop entry runs decision_watch.py", len(entries) == 1, len(entries))
-    budget = 2 * dw.GIT_TIMEOUT + dw.MAX_DIFFED_FILES * dw.GIT_TIMEOUT + dw.MODEL_TIMEOUT
-    timeout = entries[0].get("timeout", 0) if entries else 0
-    check("settings_timeout: Stop timeout >= worst-case budget", timeout >= budget,
-          "timeout=%s budget=%s" % (timeout, budget))
 
 
 # --------------------------------------------------------------------------- case 12
@@ -1323,7 +1394,7 @@ def case_bad_flag_runs_the_default_model_call():
 
 
 def case_emit_prompt_prints_needs_model_and_calls_no_model():
-    # Red on main. --emit-prompt on a due model call prints {needs_model, prompt, model} and
+    # Red on main. --emit-prompt on a due model call prints {needs_model, prompt, model, key} and
     # spawns no model. It writes no cache, so a second run still asks.
     name = "emit_needs"
     with scratch_config(name):
@@ -1339,8 +1410,8 @@ def case_emit_prompt_prints_needs_model_and_calls_no_model():
         dw.run(hook, model_call=spy)
     got = _json_or_none(out1)
     check("emit-prompt: no model subprocess", spawns1 == 0, spawns1)
-    check("emit-prompt: prints exactly needs_model, prompt, model",
-          isinstance(got, dict) and set(got) == {"needs_model", "prompt", "model"}, out1[:200])
+    check("emit-prompt: prints exactly needs_model, prompt, model, key",
+          isinstance(got, dict) and set(got) == {"needs_model", "prompt", "model", "key"}, out1[:200])
     check("emit-prompt: needs_model is true", isinstance(got, dict) and got.get("needs_model") is True, out1[:200])
     check("emit-prompt: model is MODEL", isinstance(got, dict) and got.get("model") == dw.MODEL, out1[:200])
     check("emit-prompt: prompt names the protected file",
@@ -1447,6 +1518,49 @@ def case_emit_prompt_runs_with_dash_I_as_the_mod_spawns_it():
           (result.stdout[:200], result.stderr[-200:]))
 
 
+def case_phase_one_prints_a_key_for_the_evidence_it_judged():
+    # Red on main. HOLE 1 (decision decision-watch-mod-limits): phase 1 prints a non-empty
+    # "key" with the needs_model JSON, so phase 2 can be given back the evidence it judged.
+    name = "key_printed"
+    with scratch_config(name):
+        out, spawns = _main_in_process(_judged_hook(name), ["--emit-prompt"])
+    got = _json_or_none(out)
+    key = got.get("key") if isinstance(got, dict) else None
+    check("key: phase 1 prints needs_model with a non-empty key",
+          isinstance(key, str) and key != "", out[:200])
+    check("key: phase 1 calls no model", spawns == 0, spawns)
+
+
+def case_phase_two_with_a_moved_key_reads_unknown_never_allow():
+    # Red on main. The evidence moves between the two phases: the protected file is edited after
+    # phase 1 printed its key. Phase 2 gets that key back, so it reads UNKNOWN and never a silent
+    # ALLOW on evidence that is no longer the evidence judged. On main there is no --key: the argv
+    # falls back to the claude call (HOLE 7 path) and the ALLOW is silent.
+    name = "key_moved"
+    with scratch_config(name):
+        hook = _judged_hook(name)
+        first, _ = _main_in_process(hook, ["--emit-prompt"])
+        key = (_json_or_none(first) or {}).get("key") or "missing"
+        write(os.path.join(hook["cwd"], "CLAUDE.md"), "# Rules\n\nAlways Z.\n")
+        out, spawns = _main_in_process(hook, ["--model-text", ALLOW_JSON, "--key", key])
+    check("key moved: never a silent ALLOW", out != "", out[:200])
+    check("key moved: reads as UNKNOWN", _system_message(out).startswith(dw.UNKNOWN_PREFIX), out[:200])
+    check("key moved: no model subprocess", spawns == 0, spawns)
+
+
+def case_phase_two_with_the_same_key_stays_silent_on_allow():
+    # Guard. An unchanged turn keeps its ALLOW silent: a rule that makes every keyed reply loud
+    # would teach the reader to skip the watch. Red on main only through the missing --key.
+    name = "key_same"
+    with scratch_config(name):
+        hook = _judged_hook(name)
+        first, _ = _main_in_process(hook, ["--emit-prompt"])
+        key = (_json_or_none(first) or {}).get("key") or "missing"
+        out, spawns = _main_in_process(hook, ["--model-text", ALLOW_JSON, "--key", key])
+    check("key same: ALLOW stays silent", out == "", out[:200])
+    check("key same: no model subprocess", spawns == 0, spawns)
+
+
 def case_default_path_still_calls_claude_without_a_flag():
     # Pin, green on main. With no flag the watch calls the model itself. With no claude on PATH
     # that call fails, and the answer is UNKNOWN, never needs_model.
@@ -1491,6 +1605,90 @@ def case_model_error_after_a_cached_verdict_is_not_silent():
     check("model-error after a cached verdict: no model subprocess", spawns == 0, spawns)
 
 
+def case_split_output_carries_the_config_notice_apart_from_the_verdict():
+    # Red on c3326be, which prints only the joined systemMessage. Under a split flag (the mod's
+    # --emit-prompt), the script also prints `verdict` (the judgment's text alone) and `notices`
+    # (one string per kind of notice). A settings edit with no protected change is one notice and
+    # no verdict: `verdict` stays empty and does not carry the notice text.
+    name = "split_config_notice"
+    repo = make_repo(name)
+    write(os.path.join(repo, "src", "app.py"), "print('hello')\n")
+    commit_all(repo)
+    target = os.path.join(repo, ".claude", "settings.local.json")
+    edit = {"type": "tool_use", "name": "Edit", "input": {"file_path": target}}
+    records = [
+        human_record("tune the project settings", T0),
+        assistant_record(tool_use=edit),
+        assistant_record(text="done"),
+    ]
+    hook = {"transcript_path": write_transcript(repo, records), "cwd": repo, "session_id": "sess-" + name}
+    with scratch_config(name) as cfg:
+        result = _run_script(hook, ["--emit-prompt"], cfg)
+    got = _json_or_none(result.stdout.strip())
+    got = got if isinstance(got, dict) else {}
+    notices = got.get("notices")
+    first = notices[0] if isinstance(notices, list) and notices and isinstance(notices[0], str) else ""
+    check("split notices: exit 0", result.returncode == 0, result.returncode)
+    check("split notices: one notice for the config edit",
+          isinstance(notices, list) and len(notices) == 1, result.stdout[:300])
+    check("split notices: the notice names the config file",
+          "Config files changed this turn" in first and "settings.local.json" in first, first[:200])
+    check("split notices: systemMessage still carries the joined text",
+          "Config files changed" in str(got.get("systemMessage", "")), result.stdout[:300])
+    check("split verdict: a separate field, empty when there is no judgment",
+          got.get("verdict") == "", result.stdout[:300])
+    check("split verdict: the notice text is not in the verdict",
+          "Config files changed" not in str(got.get("verdict", "")), result.stdout[:300])
+
+
+# --------------------------------------------------------------------------- dw-unread-dir (c)
+# Under the mod env, python gets CLAUDE_CONFIG_DIR = the mod's state folder and no DW_REAL_CONFIG_DIR. The unread
+# reader then falls back to the state folder, where guard.log is not, so the real folder's unread subject is lost.
+# The fallback must print a line that names DW_REAL_CONFIG_DIR, on stdout or stderr. Red on 2bba35a: it is silent.
+# Guessed contract point: only the name DW_REAL_CONFIG_DIR is pinned, not the wording.
+def case_unread_fallback_is_named_when_dw_real_config_dir_is_unset():
+    name = "unread_fallback"
+    repo = make_repo(name)
+    write(os.path.join(repo, "src", "app.py"), "print('hello')\n")
+    commit_all(repo)
+    now = datetime.now(timezone.utc)
+    records = [
+        human_record("check the record folders", (now - timedelta(seconds=60)).strftime("%Y-%m-%dT%H:%M:%S.000Z")),
+        assistant_record(text="done"),
+    ]
+    hook = {"transcript_path": write_transcript(repo, records), "cwd": repo, "session_id": "sess-" + name}
+    # The real config folder holds one unread-subject line from this turn. The mod's state folder holds none.
+    real = os.path.join(ROOT, name + "-real")
+    os.makedirs(real, exist_ok=True)
+    stamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    write(os.path.join(real, "guard.log"), "\t".join([stamp, "Bash", "noted", "subject-unread", "UNREAD-SUBJECT-BETA-4", "sess-" + name]) + "\n")
+    state = os.path.join(ROOT, name + "-state", "decision-watch-shadow")
+    os.makedirs(state, exist_ok=True)
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=state)
+    for key in list(env):
+        if key.upper() == "DW_REAL_CONFIG_DIR":
+            del env[key]
+    def emit(run_env):
+        return subprocess.run(
+            [sys.executable, "-I", MODULE_PATH, "--emit-prompt"],
+            input=json.dumps(hook), capture_output=True, text=True, timeout=60, env=run_env,
+        )
+
+    result = emit(env)
+    seen = result.stdout + result.stderr
+    check("unread fallback: exit 0", result.returncode == 0, result.stderr[:300])
+    check("unread fallback: a line names DW_REAL_CONFIG_DIR, so the fallback is not silent",
+          "DW_REAL_CONFIG_DIR" in seen, seen[:300])
+    # Control, green on 2bba35a: with the real folder named, the same fixture shows the subject. So a red above is
+    # the fallback, not a fixture that never produces the notice.
+    control = emit(dict(env, DW_REAL_CONFIG_DIR=real))
+    got = _json_or_none(control.stdout.strip())
+    notices = got.get("notices") if isinstance(got, dict) else None
+    shown = isinstance(notices, list) and any("UNREAD-SUBJECT-BETA-4" in n for n in notices if isinstance(n, str))
+    check("unread fallback control: with DW_REAL_CONFIG_DIR set, the unread subject shows",
+          shown, (control.stdout + control.stderr)[:300])
+
+
 def main():
     case_flag_unapproved()
     case_flag_deleted_protected_file()
@@ -1527,9 +1725,10 @@ def main():
     case_main_prints_the_config_report()
     case_main_missing_transcript()
     case_main_stop_hook_active_stays_quiet()
-    case_settings_timeout_covers_worst_case()
 
     for case in (
+        case_invoke_model_long_prompt_reaches_child_whole,
+        case_invoke_model_prompt_bytes_reach_child_exact,
         case_invoke_model_signature_and_return_shape_pinned,
         case_parse_verdict_default_shape,
         case_parse_verdict_honours_a_custom_shape,
@@ -1548,6 +1747,11 @@ def main():
         case_default_path_still_calls_claude_without_a_flag,
         case_model_text_after_a_cached_verdict_says_verdict_lost,
         case_model_error_after_a_cached_verdict_is_not_silent,
+        case_phase_one_prints_a_key_for_the_evidence_it_judged,
+        case_phase_two_with_a_moved_key_reads_unknown_never_allow,
+        case_phase_two_with_the_same_key_stays_silent_on_allow,
+        case_split_output_carries_the_config_notice_apart_from_the_verdict,
+        case_unread_fallback_is_named_when_dw_real_config_dir_is_unset,
     ):
         run_case(case)
 

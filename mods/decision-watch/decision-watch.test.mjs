@@ -9,12 +9,20 @@
 // hooks/test_decision_watch.py pins the python side. This file pins what the mod does with it.
 // Guessed contract points: /dw registers in a session.start handler; a judgment ends with a shadow-log
 // write holding END; each Stop writes a "STOP seen" line; /dw's last output line is "Stops seen: N";
-// the host's fs.read refuses a file over 4 MiB; the child state folder differs from the real config folder.
+// the host's fs.read refuses a file over 4 MiB; the child state folder differs from the real config folder;
+// a config notice is its own toast and contains the word "notice" (any case), and the verdict toast holds the
+// verdict text exactly; a judge slot held by a python call that never returns frees within 60 s.
 // Amended in review round 2 (were pins of e40df46): the two-phase model-call fields (timeoutMs is pinned
 // on its own) and the stop_hook_active case (a STOP seen write is allowed).
+// Guessed contract point, HOLE 12 cases only: the real child's env is the host env merged with the env register.mjs
+// passes (the host may replace it instead). Those cases run the real hooks/decision_watch.py, not the fake.
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { mock } from 'node:test'
 
 const REGISTER = fileURLToPath(new URL('./hooks/register.mjs', import.meta.url))
 const REAL_CFG = '/cfg/real'
@@ -27,20 +35,36 @@ const SENTINEL = 'PROMPT-SENTINEL-ALPHA-7'
 const PROMPT = 'Judge this turn. ' + SENTINEL
 const ALLOW_REPLY = '{"verdict": "ALLOW"}'
 const FLAG_REPLY = '{"verdict": "FLAG", "why": "reversed silently"}'
-const UNKNOWN = 'Decision watch: UNKNOWN, '
-const FLAG = 'Decision watch: FLAG, the judge model reported: "reversed silently".'
+// The message texts are read from the script, so the fake python prints what the Stop hook prints today.
+const SCRIPT_SRC = fileURLToPath(new URL('../../hooks/decision_watch.py', import.meta.url))
+const MODEL_CAP = fileURLToPath(new URL('../../decisions/subagent-model-cap.md', import.meta.url))
+const scriptSource = readFileSync(SCRIPT_SRC, 'utf8')
+const pyConst = name => {
+  const m = scriptSource.match(new RegExp('^' + name + ' = "(.*)"$', 'm'))
+  if (!m) throw new Error(name + ' is not a plain string in hooks/decision_watch.py')
+  return m[1]
+}
+const UNKNOWN = pyConst('UNKNOWN_PREFIX')
+const FLAG_PREFIX = pyConst('FLAG_PREFIX')
+const FLAG = FLAG_PREFIX + 'the judge model reported: "reversed silently"'
 const LOST = UNKNOWN + 'verdict lost: the model reply was not used (the watch ended before the model step).'
 const FOUR_MIB = 4 * 1024 * 1024
 
 const norm = p => String(p).replace(/\\/g, '/')
 const clone = v => JSON.parse(JSON.stringify(v))
 const same = (got, want, why) => assert.deepEqual(got, want, `${why}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`)
-const settle = (ms = 20) => new Promise(r => setTimeout(r, ms))
+// The real timers, read before any case fakes setTimeout. A case on fake timers still reads its guards from these,
+// so a regression fails that case and does not hang the run.
+const realSetTimeout = globalThis.setTimeout
+const realClearTimeout = globalThis.clearTimeout
+const settle = (ms = 20) => new Promise(r => realSetTimeout(r, ms))
 const within = (p, ms, why) => {
   let t
-  const late = new Promise((_, rej) => { t = setTimeout(() => rej(new Error(`timed out after ${ms} ms: ${why}`)), ms) })
-  return Promise.race([p, late]).finally(() => clearTimeout(t))
+  const late = new Promise((_, rej) => { t = realSetTimeout(() => rej(new Error(`timed out after ${ms} ms: ${why}`)), ms) })
+  return Promise.race([p, late]).finally(() => realClearTimeout(t))
 }
+// Drains the microtasks of a fake-host judge. setImmediate is not faked (only setTimeout is).
+const flush = () => new Promise(r => setImmediate(r))
 
 const results = []
 const unhandled = []
@@ -197,17 +221,25 @@ function replyOut(h, key, text) {
   return UNKNOWN_REPLY
 }
 
+// The evidence key: phase 1 prints it, and phase 2 is given it back with --key. A key the live
+// evidence no longer gives reads UNKNOWN (HOLE 1 of decision decision-watch-mod-limits).
+const keyOf = h => 'key:' + h.evidence
+const keyArg = argv => (argv.indexOf('--key') >= 0 ? argv[argv.indexOf('--key') + 1] : undefined)
+const moved = (h, argv) => keyArg(argv) !== undefined && keyArg(argv) !== keyOf(h)
+const MOVED = UNKNOWN + 'the evidence changed between the two phases, so the reply was not used.'
+
 function defaultPython(h, argv, o) {
   const stdin = JSON.parse(o.stdin || '{}')
   const key = `${o.env && o.env.CLAUDE_CONFIG_DIR}|${stdin.session_id}`
   if (argv.includes('--emit-prompt')) {
     if (h.seen.has(key)) return { exitCode: 0, stdout: '', stderr: '' } // the "already judged" cache
-    return out({ needs_model: true, prompt: PROMPT, model: 'haiku' })
+    return out({ needs_model: true, prompt: PROMPT, model: 'haiku', key: keyOf(h) })
   }
   const i = argv.indexOf('--model-text')
   const j = argv.indexOf('--model-error')
-  if (i >= 0) return replyOut(h, key, argv[i + 1])
+  if (i >= 0) return moved(h, argv) ? out({ systemMessage: MOVED }) : replyOut(h, key, argv[i + 1])
   if (j >= 0) {
+    if (moved(h, argv)) return out({ systemMessage: MOVED })
     if (h.seen.has(key)) return out({ systemMessage: LOST })
     return out({ systemMessage: UNKNOWN + 'the model judgment could not be completed (' + argv[j + 1] + ').' })
   }
@@ -222,7 +254,8 @@ function host(opts = {}) {
     finder: null, finderThrow: false, py1: undefined, py2: undefined,
     model: () => ({ isAnswered: true, text: ALLOW_REPLY, usage: {} }),
     sessionThrow: false,
-    hooks: [], procs: [], modelReqs: [], writes: [], files: new Map(), registered: [], uiLogs: [],
+    hooks: [], procs: [], modelReqs: [], writes: [], files: new Map(), registered: [], uiLogs: [], toasts: [],
+    evidence: 'E1', // the live evidence the fake python keys on; a test moves it to model a change
     seen: new Set(), waiters: [],
     ...opts,
   }
@@ -268,7 +301,11 @@ function host(opts = {}) {
       cwd: async () => h.cwd,
     },
     command: { register: async s => { h.registered.push(s.name) } },
-    ui: { log: text => { h.uiLogs.push(String(text)) } },
+    ui: {
+      log: text => { h.uiLogs.push(String(text)) },
+      // The in-session surface: desktop-statusline shows its own notices this way.
+      toast: (text, opts) => { h.toasts.push(String(text)); void opts },
+    },
   }
   return h
 }
@@ -319,12 +356,20 @@ async function primed(h) {
 
 await test('stop: returns next(e) at once while the model call hangs, and the Stop event is untouched', async () => {
   const h = await load(host({ model: () => new Promise(() => {}) }))
-  const e = stopEvent()
-  const before = clone(e)
-  const NEXT = { decision: 'pass' }
-  const got = await within(fire(h, 'classic.Stop', e, NEXT), 1000, 'Stop waited for the judge')
-  assert.equal(got, NEXT, 'Stop returns the object next() returned')
-  same(e, before, 'Stop event')
+  // The mod's model deadline is a timer. Fake it, so the hung call cannot hold the run open for 50 s.
+  mock.timers.enable({ apis: ['setTimeout'] })
+  try {
+    const e = stopEvent()
+    const before = clone(e)
+    const NEXT = { decision: 'pass' }
+    const got = await within(fire(h, 'classic.Stop', e, NEXT), 1000, 'Stop waited for the judge')
+    assert.equal(got, NEXT, 'Stop returns the object next() returned')
+    same(e, before, 'Stop event')
+  } finally {
+    // Drain the background judge first: a deadline made after the reset would be a real 50 s timer.
+    await flush()
+    mock.timers.reset()
+  }
 })
 
 await test('stop: a FLAG never changes the Stop result', async () => {
@@ -363,9 +408,15 @@ await test('stop: stop_hook_active skips the judge: no process call, no model ca
 // Item 7. The STOP seen line is written before Stop returns, so a viewer can tell the mod ran.
 await test('stop: a STOP seen line is written before Stop returns next(e)', async () => {
   const h = await load(host({ model: () => new Promise(() => {}) }))
-  const NEXT = { decision: 'pass' }
-  assert.equal(await within(fire(h, 'classic.Stop', stopEvent(), NEXT), 1500, 'Stop'), NEXT)
-  assert.ok(h.writes.some(w => /STOP seen/.test(w.data)), 'no STOP seen line was written before Stop returned')
+  mock.timers.enable({ apis: ['setTimeout'] }) // the model deadline is a timer: fake it, as in the case above
+  try {
+    const NEXT = { decision: 'pass' }
+    assert.equal(await within(fire(h, 'classic.Stop', stopEvent(), NEXT), 1500, 'Stop'), NEXT)
+    assert.ok(h.writes.some(w => /STOP seen/.test(w.data)), 'no STOP seen line was written before Stop returned')
+  } finally {
+    await flush() // as in the case above: the background judge's deadline must be made while the mock is on
+    mock.timers.reset()
+  }
 })
 
 // Item 7 guard: a write that never returns cannot hold Stop. Green on e40df46, which writes nothing before Stop returns.
@@ -394,15 +445,7 @@ await test('two-phase: phase 1 emits the prompt; the model call takes it with ma
   same(JSON.parse(py[1].opts.stdin).transcript_path, TRANSCRIPT, 'phase 2 stdin is the same Stop JSON')
 })
 
-// Item 5 (part): the model call gets a timeout, a number above 0 and at most 60000.
-await test('model call: carries timeoutMs, a number above 0 and at most 60000', async () => {
-  const h = await load(host())
-  await fire(h, 'classic.Stop', stopEvent(), {})
-  await judged(h)
-  const t = h.modelReqs[0] && h.modelReqs[0].timeoutMs
-  assert.equal(typeof t, 'number', `timeoutMs is ${JSON.stringify(t)}`)
-  assert.ok(t > 0 && t <= 60000, `timeoutMs is ${t}`)
-})
+// The model call's limit is enforced by the mod's own deadline (see the busy cases below), not by a request field.
 
 await test('model error: phase 2 gets --model-error with the message, and no --model-text', async () => {
   const h = await load(host({ model: () => { throw new Error('model down') } }))
@@ -420,6 +463,163 @@ await test('model error: the shadow log reads UNKNOWN, never ALLOW', async () =>
   const endData = await judged(h)
   assert.match(endData, /UNKNOWN/, 'log holds no UNKNOWN')
   assert.doesNotMatch(endData, /ALLOW/, 'log holds ALLOW for a failed judgment')
+})
+
+// ---- HOLE 1 (decision decision-watch-mod-limits): phase 2 is given the phase-1 key.
+
+// Red on main: main passes no key, so the moved evidence is judged afresh and reads a silent ALLOW.
+await test('HOLE 1: evidence moved between the phases reads UNKNOWN, never a silent ALLOW', async () => {
+  let h
+  h = await load(host({
+    model: () => {
+      h.evidence = 'E2' // the protected file changed while the model call was in flight
+      return { isAnswered: true, text: ALLOW_REPLY, usage: {} }
+    },
+  }))
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  const endData = await judged(h)
+  assert.doesNotMatch(endData, /ALLOW/, 'ALLOW for a verdict on evidence that moved')
+  assert.match(endData, /UNKNOWN/, 'the log holds no UNKNOWN')
+})
+
+await test('HOLE 1: phase 2 is given the key phase 1 printed, as --key after the reply', async () => {
+  const h = await load(host())
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await judged(h)
+  const p2 = pyCalls(h)[1].argv
+  assert.ok(p2.includes('--key'), `phase 2 has no --key: ${JSON.stringify(p2)}`)
+  same(p2[p2.indexOf('--key') + 1], 'key:E1', 'phase 2 key, from phase 1')
+})
+
+// A phase 1 with no key (an old decision_watch.py) cannot be tied to the evidence, so it reads UNKNOWN.
+await test('HOLE 1: no key from phase 1 reads UNKNOWN, never ALLOW', async () => {
+  const h = await load(host({ py1: () => out({ needs_model: true, prompt: PROMPT, model: 'haiku' }) }))
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  const endData = await judged(h)
+  assert.doesNotMatch(endData, /ALLOW/, 'ALLOW for a verdict that cannot be tied to the evidence')
+  assert.match(endData, /UNKNOWN/, 'the log holds no UNKNOWN')
+})
+
+// ---- what shows in the session: the Stop hook's own systemMessage text, through $.ui.toast.
+// desktop-statusline shows its notices with $.ui.toast(text, { timeoutMs }), so that is the surface.
+
+await test('shown: a FLAG shows the Stop hook text exactly, once', async () => {
+  const h = await load(host({ model: () => ({ isAnswered: true, text: FLAG_REPLY, usage: {} }) }))
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await judged(h)
+  await settle(60)
+  same(h.toasts, [FLAG], 'toasts')
+})
+
+await test('shown: the FLAG wording is the one hooks/decision_watch.py prints today', () => {
+  assert.ok(scriptSource.includes('FLAG_PREFIX + \'the judge model reported: "%s"\''), 'the script no longer prints this FLAG wording')
+})
+
+await test('shown: an UNKNOWN from the judge shows its exact text, once', async () => {
+  const h = await load(host({ model: () => { throw new Error('model down') } }))
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await judged(h)
+  await settle(60)
+  same(h.toasts, [UNKNOWN + 'the model judgment could not be completed (model call: model down).'], 'toasts')
+})
+
+await test('shown: a message from the cheap path shows its exact text, with no prefix added', async () => {
+  const CHEAP = UNKNOWN + 'the transcript could not be read (no such file).'
+  const h = await load(host({ py1: () => out({ systemMessage: CHEAP }) }))
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await judged(h)
+  await settle(60)
+  same(h.toasts, [CHEAP], 'toasts')
+})
+
+// Guard: an ALLOW stays silent in the session. A toast on every Stop would teach the reader to skip it.
+await test('shown: an ALLOW shows nothing', async () => {
+  const h = await load(host())
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await judged(h)
+  await settle(60)
+  same(h.toasts, [], 'toasts')
+})
+
+// ---- the config notice. decision_watch.py joins config_report() text onto its message, after the verdict, with
+// " ".join at main, so a notice rides on every verdict, ALLOW included, and on a cheap-path message too.
+// Arbiter ruling, 2026-10-14 00:09 CDT: each config notice is its own toast line, apart from the verdict, and is
+// marked as a notice. An ALLOW verdict itself stays silent. The notice's marker is the word "notice" (any case).
+const CONFIG_LINE = pyConst('CONFIG_MESSAGE').replace('%s', '.claude/settings.json')
+const CONFIG_NOTICE = CONFIG_LINE + pyConst('TAIL')
+// What decision_watch.py prints under a split flag (the mod's own call): systemMessage is the joined text,
+// verdict is the judgment alone ("" for none), and notices holds one string per kind, each ending in TAIL.
+// The joined text is verdict and notices joined with a space, as main() joins them.
+const splitOut = (verdict, notices) => out({
+  systemMessage: [verdict, ...notices].filter(Boolean).join(' '),
+  verdict,
+  notices,
+})
+
+// The notice toast names the notice, is marked as one, and is not a verdict.
+const noticeToast = t => {
+  assert.ok(t.includes(CONFIG_LINE), `not the config notice: ${JSON.stringify(t.slice(0, 160))}`)
+  assert.match(t, /notice/i, `the config notice toast is not marked as a notice: ${JSON.stringify(t.slice(0, 160))}`)
+  assert.doesNotMatch(t, /^Decision watch: (FLAG|UNKNOWN|ALLOW)/, 'the config notice toast reads as a verdict')
+}
+
+// Case 1: an ALLOW turn that carries a notice: one toast, the notice, and no verdict toast. Two paths reach it.
+const ALLOW_NOTICE_ROWS = [
+  ['phase 2 ALLOW with a config notice', { py2: splitOut('', [CONFIG_NOTICE]) }],
+  ['cheap path, no model due, with a config notice', { py1: splitOut('', [CONFIG_NOTICE]) }],
+]
+for (const [label, opts] of ALLOW_NOTICE_ROWS) {
+  await test(`config notice: an ALLOW turn shows the notice as its own toast (${label})`, async () => {
+    const h = await load(host(opts))
+    await fire(h, 'classic.Stop', stopEvent(), {})
+    await judged(h)
+    await settle(60)
+    same(h.toasts.length, 1, 'toast count')
+    noticeToast(h.toasts[0])
+  })
+}
+
+// Case 2: a FLAG that carries a notice: two toasts, the FLAG text exactly and the notice, kept apart.
+await test('config notice: a FLAG with a config notice shows two toasts, the FLAG and the notice', async () => {
+  const h = await load(host({ py2: splitOut(FLAG, [CONFIG_NOTICE]) }))
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await judged(h)
+  await settle(60)
+  same(h.toasts.length, 2, 'toast count')
+  assert.ok(h.toasts.includes(FLAG), `no toast holds the FLAG text exactly: ${JSON.stringify(h.toasts.map(t => t.slice(0, 80)))}`)
+  noticeToast(h.toasts.find(t => t !== FLAG))
+})
+
+// Same ruling for an UNKNOWN verdict: the UNKNOWN text exactly, and the notice as its own toast.
+await test('config notice: an UNKNOWN with a config notice shows two toasts, the UNKNOWN and the notice', async () => {
+  const TEXT = UNKNOWN + 'the model judgment could not be completed (model call: model down).'
+  const h = await load(host({ py2: splitOut(TEXT, [CONFIG_NOTICE]) }))
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await judged(h)
+  await settle(60)
+  same(h.toasts.length, 2, 'toast count')
+  assert.ok(h.toasts.includes(TEXT), `no toast holds the UNKNOWN text exactly: ${JSON.stringify(h.toasts.map(t => t.slice(0, 80)))}`)
+  noticeToast(h.toasts.find(t => t !== TEXT))
+})
+
+// A toast that throws is logged, never silent. The verdict line is written before the toast, so the log keeps it.
+await test('toast failure: a FLAG whose toast throws is logged, and a log line names the toast failure', async () => {
+  const h = await load(host({ model: () => ({ isAnswered: true, text: FLAG_REPLY, usage: {} }) }))
+  h.$.ui.toast = async () => { throw new Error('toast host down') }
+  const logged = waitLog(h, /toast/i)
+  logged.catch(() => {})
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await judged(h)
+  assert.match(await logged, /toast/i, 'no log line names the toast failure')
+})
+
+// ---- the model table (decision subagent-model-cap): a mod that calls a model has a row
+
+await test('model table: a row names mods/decision-watch, and that row names haiku', () => {
+  const rows = readFileSync(MODEL_CAP, 'utf8').split('\n').filter(l => l.startsWith('|'))
+  const row = rows.find(l => l.includes('mods/decision-watch'))
+  assert.ok(row, 'no model-table row names mods/decision-watch')
+  assert.match(row, /\bhaiku\b/, 'the mods/decision-watch row does not name haiku')
 })
 
 // ---- the ping bug: $.model.complete returns { isAnswered, text, usage }
@@ -593,6 +793,68 @@ await test('busy guard: a failed judge frees the slot, so the next Stop judges a
   assert.ok(!/SKIP busy/.test(allLog(h)), 'the slot was never freed')
 })
 
+// HOLE 5 (decision decision-watch-mod-limits): the one-judge slot has no watchdog. A model call that never
+// resolves must free the slot at the mod's own limit, log UNKNOWN, and let the next Stop judge. The limit is a
+// timer, so the case runs on fake timers and ticks past MODEL_CEILING_MS. The mod's limit is 50 s, so any
+// limit up to 60 s passes this case.
+const MODEL_CEILING_MS = 60000
+const logNow = h => String(h.files.get(logPath(h)) ?? '')
+
+await test('busy: a model call that never resolves frees the slot at the mod limit, logs UNKNOWN, and the next Stop judges', async () => {
+  const h = await load(host({ model: () => new Promise(() => {}) }))
+  mock.timers.enable({ apis: ['setTimeout'] })
+  try {
+    await fire(h, 'classic.Stop', stopEvent(), {})
+    await flush()
+    assert.match(logNow(h), /START /, 'the first judge did not start')
+    mock.timers.tick(MODEL_CEILING_MS)
+    await flush()
+    assert.match(logNow(h), /UNKNOWN/, 'no UNKNOWN after the limit: the slot is held by the hung model call')
+    h.model = () => ({ isAnswered: true, text: ALLOW_REPLY, usage: {} })
+    await fire(h, 'classic.Stop', stopEvent(), {})
+    await flush()
+    assert.doesNotMatch(logNow(h), /SKIP busy/, 'the next Stop was skipped as busy')
+    same((logNow(h).match(/START /g) || []).length, 2, 'judges started')
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+// The python side of the same hole: a python call that never returns (the finder, or either phase) holds the slot.
+// The slot must free within 60 s (a ceiling this file guesses, as MODEL_CEILING_MS is). Steps of 5 s, each with a
+// flush, so a deadline that starts after a microtask still fires inside the run.
+const HUNG = () => new Promise(() => {})
+const HUNG_ROWS = [
+  ['pickPython: the finder never resolves', { finder: HUNG() }],
+  ['phase 1: the python call never resolves', { py1: HUNG }],
+  ['phase 2: the python call never resolves after an ALLOW reply', { py2: HUNG }],
+]
+for (const [label, opts] of HUNG_ROWS) {
+  await test(`busy: a hung python call frees the slot within 60 s, and the next Stop judges (${label})`, async () => {
+    const h = await load(host(opts))
+    mock.timers.enable({ apis: ['setTimeout'] })
+    try {
+      await fire(h, 'classic.Stop', stopEvent(), {})
+      await flush()
+      assert.match(logNow(h), /START /, 'the first judge did not start')
+      for (let i = 0; i < MODEL_CEILING_MS / 5000; i++) {
+        mock.timers.tick(5000)
+        await flush()
+      }
+      assert.match(logNow(h), /UNKNOWN/, 'no UNKNOWN after 60 s: the slot is held by the hung python call')
+      h.finder = null
+      h.py1 = undefined
+      h.py2 = undefined
+      await fire(h, 'classic.Stop', stopEvent(), {})
+      await flush()
+      assert.doesNotMatch(logNow(h), /SKIP busy/, 'the next Stop was skipped as busy')
+      same((logNow(h).match(/START /g) || []).length, 2, 'judges started')
+    } finally {
+      mock.timers.reset()
+    }
+  })
+}
+
 // ---- item 6: the log stays bounded.
 
 const logLine = i => `2020-01-01T00:00:00.000Z old line ${i}`
@@ -704,6 +966,208 @@ await test('log: holds the verdict line and timings, never the prompt text', asy
   assert.ok(!allLog(h).includes(SENTINEL), 'the prompt text reached the log')
   assert.match(endData, /\d+ ms/, 'timings missing')
   assert.match(endData, /FLAG/, 'verdict line missing')
+})
+
+// ---- HOLE 12 (decision decision-watch-mod-limits): unread-subject notices under the mod. register.mjs runs python
+// with CLAUDE_CONFIG_DIR set to the mod's state folder, so collect_unread reads guard.log there, not in the real
+// config folder. These cases run the real decision_watch.py with the env register.mjs passes.
+
+const REPO_PY = fileURLToPath(new URL('../../hooks/decision_watch.py', import.meta.url))
+const SUBJECT = 'UNREAD-SUBJECT-ALPHA-3'
+const pad = n => String(n).padStart(2, '0')
+// A naive local stamp, the form guard_core writes into guard.log.
+const localStamp = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+
+// The first python on PATH that runs. The Store stub prints a message and exits non-zero. null when none runs.
+function pythonCmd() {
+  for (const c of ['python', 'python3']) {
+    const r = spawnSync(c, ['--version'], { encoding: 'utf8' })
+    if (r.status === 0 && !/WindowsApps/i.test(`${r.stdout}${r.stderr}`)) return c
+  }
+  return null
+}
+const PY_CMD = pythonCmd()
+
+// A real child, started as register.mjs starts it: the mod's argv, with the script path set to this repo's script.
+function realRun(argv, o) {
+  const rest = argv.slice(1).map(a => (/hooks[\\/]decision_watch\.py$/.test(a) ? REPO_PY : a))
+  const r = spawnSync(argv[0], rest, { input: o.stdin, env: { ...process.env, ...o.env }, encoding: 'utf8', timeout: o.timeoutMs || 30000 })
+  return { exitCode: r.status ?? -1, stdout: r.stdout || '', stderr: r.stderr || (r.error ? String(r.error) : '') }
+}
+
+// A real transcript (one human turn, one reply after it), a clean git repo as cwd, and a guard.log in the real config
+// folder holding one unread-subject line from this turn.
+function unreadFixture() {
+  const root = mkdtempSync(join(tmpdir(), 'dw-unread-'))
+  const cfg = join(root, 'real-config')
+  const repo = join(root, 'repo')
+  mkdirSync(cfg)
+  mkdirSync(repo)
+  spawnSync('git', ['init', '-q'], { cwd: repo })
+  spawnSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'base'], { cwd: repo })
+  const transcript = join(root, 'session.jsonl')
+  const records = [
+    { type: 'user', timestamp: new Date(Date.now() - 60000).toISOString(), message: { role: 'user', content: 'check the record folders' } },
+    { type: 'assistant', timestamp: new Date().toISOString(), message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } },
+  ]
+  writeFileSync(transcript, records.map(r => JSON.stringify(r)).join('\n') + '\n')
+  // guard.log fields: when, tool, decision, rule, matched, session
+  writeFileSync(join(cfg, 'guard.log'), [localStamp(new Date()), 'Bash', 'noted', 'subject-unread', SUBJECT, SID].join('\t') + '\n')
+  return { cfg, repo, transcript }
+}
+
+// The Stop judge through register.mjs, with the python call run for real. h.runs records each child.
+async function realStop(fx) {
+  const h = await load(host({
+    env: { CLAUDE_CONFIG_DIR: fx.cfg },
+    cwd: fx.repo,
+    finder: { exitCode: 0, stdout: PY_CMD + '\n', stderr: '' },
+  }))
+  const fake = h.$.process.run
+  h.runs = []
+  h.$.process.run = async (argv, o = {}) => {
+    if (argv[0] !== PY_CMD || argv[1] !== '-I') return fake(argv, o)
+    const r = realRun(argv, o)
+    h.runs.push(r)
+    return r
+  }
+  return h
+}
+
+await test('HOLE 12: under the mod env, a real python run shows the unread subject from the real config folder', async () => {
+  assert.ok(PY_CMD, 'no python on PATH, so the real-python case cannot run')
+  const fx = unreadFixture()
+  const h = await realStop(fx)
+  await fire(h, 'classic.Stop', stopEvent({ transcript_path: fx.transcript, cwd: fx.repo }), {})
+  await within(h.endLogged, 30000, 'the shadow log END line')
+  await settle(60)
+  assert.ok(h.runs.length > 0 && h.runs.every(r => r.exitCode === 0), `python did not run clean: ${JSON.stringify(h.runs.map(r => r.stderr.slice(0, 300)))}`)
+  const notices = h.toasts.filter(t => /notice/i.test(t))
+  same(notices.length, 1, 'notice toasts')
+  assert.ok(notices[0].includes(SUBJECT), `the notice does not name the unread subject: ${JSON.stringify(notices[0].slice(0, 200))}`)
+})
+
+// The control: the same fixture, read with the real folder as CLAUDE_CONFIG_DIR. It must pass on the old code too,
+// so a red above comes from the state folder and not from the fixture.
+await test('HOLE 12 control: the same log, read under the real folder, gives one notice', async () => {
+  assert.ok(PY_CMD, 'no python on PATH, so the real-python case cannot run')
+  const fx = unreadFixture()
+  const r = realRun([PY_CMD, '-I', fx.cfg + '/hooks/decision_watch.py', '--emit-prompt'], {
+    stdin: JSON.stringify(stopEvent({ transcript_path: fx.transcript, cwd: fx.repo })),
+    env: { CLAUDE_CONFIG_DIR: fx.cfg },
+  })
+  same(r.exitCode, 0, `python exit code, stderr ${JSON.stringify(r.stderr.slice(0, 200))}`)
+  const out = JSON.parse(r.stdout)
+  same(out.notices.length, 1, 'notices under the real folder')
+  assert.ok(out.notices[0].includes(SUBJECT), `the notice does not name the unread subject: ${JSON.stringify(out.notices[0])}`)
+})
+
+// HOLE 13 (same decision): the END line is cut at MAX_LINE (2000 characters), so a notice past the cut leaves the log
+// (its toast still shows). The normal flow cannot reach 3000 characters, so a 3000-character verdict stands in for a
+// long trace. The check reads every log write, not only END, so a fix may shorten or split lines.
+await test('HOLE 13: the END log keeps every notice when the line runs 3000 characters', async () => {
+  const LONG = 'v'.repeat(3000)
+  const MERGE = pyConst('MERGE_MESSAGE').replace('%s', 'PR #9') + pyConst('TAIL')
+  const h = await load(host({ py1: splitOut(LONG, [CONFIG_NOTICE, MERGE]) }))
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await judged(h)
+  await settle(60)
+  const logged = allLog(h)
+  for (const n of [CONFIG_NOTICE, MERGE]) {
+    assert.ok(logged.includes('NOTICE: ' + n), `the log lost a notice: ${JSON.stringify(n.slice(0, 80))}`)
+  }
+})
+
+// ---- dw-unread-dir, review round 1 (lane dw-unread-dir). Guessed contract points, as the HOLE cases above: a config
+// notice is written as its own NOTICE line, `<stamp> NOTICE <sid> | NOTICE: <text>`; the mod does not cap a notice, so
+// a long one reaches the log whole; a newline in a notice must not start a log record.
+
+// The real END record of this session. judged() is not used: its /\bEND\b/ match also fires on a forged END.
+const endWritten = h => waitLog(h, new RegExp(` END ${SID} \\|`))
+// The log lines that begin a record: an optional timestamp, then the word. Notice text never starts one.
+const recordsStarting = (text, word) => text.split('\n').filter(Boolean).filter(l => new RegExp(`^(\\S+ )?${word}\\b`).test(l))
+
+// (a) A notice longer than MAX_LINE (2000 characters). The filler has no spaces, so a split must cut inside it.
+const LONG_HEAD = 'LONG-HEAD-ALPHA-5'
+const LONG_TAIL = 'LONG-TAIL-OMEGA-9'
+const LONG_NOTICE = CONFIG_LINE + ' ' + LONG_HEAD + 'x'.repeat(2400) + LONG_TAIL
+
+await test('dw-unread-dir (a): a notice longer than MAX_LINE reaches the log whole, each piece a NOTICE line', async () => {
+  const h = await load(host({ py1: splitOut('', [LONG_NOTICE]) }))
+  const ended = endWritten(h)
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await ended
+  // The final file, not allLog: each log write rewrites the whole file, so the writes repeat each other.
+  const pieces = logNow(h).split('\n').filter(l => /\bNOTICE\b/.test(l))
+  assert.ok(pieces.length > 0, 'no NOTICE line in the log')
+  const text = pieces.map(l => {
+    const m = l.match(/ NOTICE \S+ \| NOTICE: (.*)$/)
+    assert.ok(m, `a NOTICE line is not in the marked form: ${JSON.stringify(l.slice(0, 120))}`)
+    return m[1]
+  }).join('')
+  assert.ok(text.includes(LONG_NOTICE), `the log holds ${text.length} of ${LONG_NOTICE.length} notice characters; the tail is ${text.includes(LONG_TAIL) ? 'there' : 'missing'}`)
+})
+
+// (b) A newline in a notice starts a log line. That text must write no extra END record and no extra Stop.
+const FORGED_END = CONFIG_NOTICE + '\nEND forged | ALLOW (silent)'
+const FORGED_STOP = CONFIG_NOTICE + '\nSTOP seen forged'
+
+await test('dw-unread-dir (b): a notice with a newline and "END ... | ALLOW" writes no extra END record', async () => {
+  const h = await load(host({ py1: splitOut('', [FORGED_END]) }))
+  const ended = endWritten(h)
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await ended
+  same(recordsStarting(logNow(h), 'END').length, 1, 'END records in the log')
+})
+
+await test('dw-unread-dir (b): a notice with a newline and "STOP seen" does not change the Stops seen count', async () => {
+  const h = await load(host({ py1: splitOut('', [FORGED_STOP]) }))
+  const ended = endWritten(h)
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await ended
+  const r = await dwRun(h)
+  const text = String(r && r.text !== undefined ? r.text : r).trim()
+  same(text.split('\n').pop(), 'Stops seen: 1', '/dw last line')
+})
+
+// ---- dw-unread-dir, review round 2. A long notice is split into pieces (register.mjs, the split loop in shadow()).
+// The pieces, read back in order from the final log, must join to the notice exactly.
+
+// The payloads of the NOTICE lines in the final log, in order. A split round-trips only if these join to the notice.
+const noticePieces = h => logNow(h).split('\n').filter(l => /\bNOTICE\b/.test(l)).map(l => {
+  const m = l.match(/ NOTICE \S+ \| NOTICE: (.*)$/)
+  assert.ok(m, `a NOTICE line is not in the marked form: ${JSON.stringify(l.slice(0, 120))}`)
+  return m[1]
+})
+// A lone surrogate is half of a character. Written to a file it reads back as U+FFFD, so no piece may hold one.
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+
+// (1) The split falls between the two halves of a surrogate pair: 1920 characters, then an emoji, then TAIL.
+const EMOJI_NOTICE = 'x'.repeat(1920) + '😀' + 'TAIL'
+
+await test('dw-unread-dir round 2 (1): a split long notice cuts no surrogate pair, and the pieces join back to the notice', async () => {
+  const h = await load(host({ py1: splitOut('', [EMOJI_NOTICE]) }))
+  const ended = endWritten(h)
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await ended
+  const pieces = noticePieces(h)
+  assert.ok(pieces.length > 0, 'no NOTICE line in the log')
+  for (const p of pieces) assert.doesNotMatch(p, LONE_SURROGATE, `a piece holds half a surrogate pair, ends ${JSON.stringify(p.slice(-6))}`)
+  same(pieces.join(''), EMOJI_NOTICE, 'the joined pieces')
+})
+
+// (2) The split falls on a space. The space starts the second piece, and log() folds whitespace on every line,
+// so the space must survive the fold for the pieces to join back to the notice.
+const SPACE_NOTICE = 'x'.repeat(1921) + ' next ' + 'y'.repeat(50)
+
+await test('dw-unread-dir round 2 (2): a space at a piece boundary survives the whitespace fold, so the pieces join back', async () => {
+  const h = await load(host({ py1: splitOut('', [SPACE_NOTICE]) }))
+  const ended = endWritten(h)
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await ended
+  const pieces = noticePieces(h)
+  assert.ok(pieces.length > 0, 'no NOTICE line in the log')
+  same(pieces.join(''), SPACE_NOTICE, 'the joined pieces')
 })
 
 // ---- the background judge never leaks an unhandled rejection

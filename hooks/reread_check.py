@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """Claude Code hook: after compaction, check the session re-read its handoff.
 
+Modes:
+- --post-compact: After compaction, sets the session's flag that its handoff is not read.
+- --pre-read: Before a Read, clears the session's flag that its handoff is not read, when the
+  file is that handoff. Never denies the read.
+- --stop: At Stop, while the session's flag that its handoff is not read is set and the
+  handoff exists, blocks once per turn and names the handoff path.
+
 Spec: decisions/handoff-hooks-wave-2.md, ruling item 2. One flag file per session,
 <config dir>/state/handoff/<session_id>.reread. Three modes, JSON on stdin:
 
