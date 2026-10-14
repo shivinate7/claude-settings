@@ -947,7 +947,7 @@ if a[:2] == ["pr", "view"]:
         print(json.dumps({"state": "MERGED" if S.get("oid") else "OPEN", "mergeCommit": {"oid": S["oid"]} if S.get("oid") else None,
                           "headRefOid": S.get("state_head") or git("ls-remote", "origin", "refs/heads/feat").split("\t")[0]}))
 elif a[:2] == ["pr", "checks"] and S.get("checks_broken") and S["checks_calls"] >= S.get("broken_from", 0):
-    print("HTTP 500: server error"); sys.exit(1)
+    print("HTTP 404: Not Found"); sys.exit(1)  # a 4xx is a refusal, not a network error: the wait's read reverts (a 5xx is a network stop, see GhHalf)
 elif a[:2] == ["pr", "checks"]:
     seq = S["checks_seq"]; cur = seq.pop(0) if len(seq) > 1 else seq[0]; S["checks_calls"] += 1; save()
     print(json.dumps([{"name": n, "bucket": b, "link": l} for n, b, l in cur]))
