@@ -417,8 +417,8 @@ MUTATIONS = [
      "detached: a PowerShell assignment ahead of Start-Process is still read, MEASURED "
      "wrongly missed before _skip_assignments_and_keywords learned $name ="),
     ("shell segments: a quote never closes, so a real call after it is swallowed whole",
-     '            if char == quote:\n                quote = ""\n            index += 1',
-     '            if False:\n                quote = ""\n            index += 1', "guard", 'kill: a quoted phrase ahead of a real chained kill still denies'),
+     '        return 1, ("" if char == quote[-1] else quote)',
+     '        return 1, quote', "guard", 'kill: a quoted phrase ahead of a real chained kill still denies'),
     ("shared-tree: a conflict-side flag no longer exempts the checkout",
      'CHECKOUT_CONFLICT_FLAGS = {"--ours", "--theirs", "--merge"}',
      'CHECKOUT_CONFLICT_FLAGS = set()', "guard", 'checkout: --theirs resolves a real, unresolved merge conflict'),

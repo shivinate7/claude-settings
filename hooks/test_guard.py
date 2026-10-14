@@ -4874,6 +4874,81 @@ sh("silent-write scanner: a backtick inside a message does not hide a real disca
    VCS + ' commit -m "`x`" >/dev/null', "deny", "silent-write", carries="a redirect silences",
    cwd=GITMAIN)
 
+# Review round 2 (lane silent-write-narrow). Each DENY below is a bypass 3a953bc lets through, and
+# each ALLOW is a false alarm it raises. Each one is red until the builder closes it. The LIMIT cases
+# at the end pin what the guard does not see today, labelled as limits, so the gap stays on record.
+
+# (a) The quote walk, a doubled backslash outside quotes. Two backslashes are one escaped backslash,
+# and the quote after them opens. The walk must not read the pair as an escaped quote.
+sh("silent-write quote walk: a doubled backslash before a single quote is one escape, so the quote opens and the redirect after it is real",
+   VCS + r" commit -m \\'a b' >/dev/null", "deny", "silent-write", carries="a redirect silences",
+   cwd=GITMAIN)
+sh("silent-write quote walk: a doubled backslash before a double quote is one escape, so the quote opens and the redirect after it is real",
+   VCS + r' commit -m \\"a b" >/dev/null', "deny", "silent-write", carries="a redirect silences",
+   cwd=GITMAIN)
+# Scanner cases for the same walk (building-scanner-respects-strings): a comment opener inside the
+# quote, a message that spans lines, and a lone quote in text after the discard.
+sh("silent-write scanner: a comment opener inside a doubled-backslash message does not hide the redirect",
+   VCS + r' commit -m \\"x # y" >/dev/null', "deny", "silent-write", carries="a redirect silences",
+   cwd=GITMAIN)
+sh("silent-write scanner: a doubled backslash before a quote in a multi-line message, then a real discard",
+   VCS + " commit -m \\\\'line one\nline two' >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", cwd=GITMAIN)
+# HOLD: green on 3a953bc, pinned so the walk keeps a lone quote in text from hiding a discard.
+sh("silent-write scanner: a lone quote after a doubled backslash does not hide a discard",
+   VCS + r" commit -m \\x >/dev/null; echo don't", "deny", "silent-write",
+   carries="a redirect silences", cwd=GITMAIN)
+
+# (b) The throwaway cwd, for the orchestrator's own writes. Only a local git write can be a throwaway.
+# A pull request merge and a make target are never throwaway, however silent and however temp the cwd.
+sh("silent-write throwaway bypass: gh pr merge silenced from a temp cwd is still a merge",
+   "gh pr merge 5 -R o/r >/dev/null", "deny", "silent-write", carries="gh pr merge",
+   env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG, cwd=THROWAWAY)
+sh("silent-write throwaway bypass: gh pr merge silenced after a cd into the temp folder is still a merge",
+   "cd " + TSLASH + " && gh pr merge 5 -R o/r >/dev/null", "deny", "silent-write",
+   carries="gh pr merge", env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG, cwd=GITMAIN)
+sh("silent-write throwaway bypass: make merge silenced from a temp cwd is still a merge",
+   "make merge >/dev/null", "deny", "silent-write", carries="make merge", cwd=THROWAWAY)
+
+# (c) A cd on the left of a pipe runs in a subshell. The shell that runs the commit never left
+# the real checkout, so the real checkout judges it.
+sh("silent-write throwaway bypass: a cd on the left of a pipe runs in a subshell, so the real cwd takes the commit",
+   "cd " + TSLASH + " | cat; " + VCS + " commit -m x >/dev/null",
+   "deny", "silent-write", carries="a redirect silences", cwd=GITMAIN)
+
+# (d) VALUE_FLAGS, round 2. A value flag takes the next token whatever it is, so -h or -n in that
+# slot is a value, never help or dry-run. The write is real, so the discard denies.
+sh("silent-write read bypass: commit -- ends the options, so -h after it is a pathspec, not help",
+   VCS + " commit -s -- -h >/dev/null", "deny", "silent-write", carries="a redirect silences",
+   cwd=GITMAIN)
+sh("silent-write read bypass: rebase --exec takes -h as its command, so the rebase is real",
+   VCS + " rebase --exec -h >/dev/null", "deny", "silent-write", carries="a redirect silences",
+   cwd=GITMAIN)
+sh("silent-write read bypass: commit --pathspec-from-file takes -h as its file, so the commit is real",
+   VCS + " commit --pathspec-from-file -h >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", cwd=GITMAIN)
+sh("silent-write read bypass: push --receive-pack takes -n as its program, so the push is real",
+   VCS + " push --receive-pack -n origin feat >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", cwd=GITMAIN)
+
+# (e) False alarms. A flag that takes no value, or a value glued to its flag, leaves the next token
+# a flag. The dry run is then a dry run, and the silenced command moves nothing.
+sh("silent-write false alarm: push -u takes no value, so --dry-run after it is a dry run",
+   VCS + " push -u --dry-run origin main >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write false alarm: commit -s takes no value, so --dry-run after it is a dry run",
+   VCS + " commit -s --dry-run >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write false alarm: commit -mfoo glues its value, so --dry-run after it is a dry run",
+   VCS + " commit -mfoo --dry-run >/dev/null", "allow", cwd=GITMAIN)
+
+# (f) LIMITS, pinned at today's behaviour. Each is a gap the guard does not close. The name says so.
+# Do not flip one without the owner.
+sh("silent-write limit (pinned allowed): a quote inside $( ) in a message ends the walk early, so a real commit's redirect reads as text",
+   VCS + r''' commit -m "$(printf '"')" >/dev/null''', "allow", cwd=GITMAIN)
+# Windows only: a Git Bash /tmp path names the temp folder (the round 1 case (d)), so the pin needs it.
+if os.name == "nt":
+    sh("silent-write limit (pinned allowed): a --git-dir under the temp folder is judged as a throwaway, though the cwd is a real checkout",
+       VCS + " --git-dir=/tmp/x/.git merge foo >/dev/null", "allow", cwd=GITMAIN)
+
 TEMP_DIR = None   # back to the system temp for the sections below
 
 
