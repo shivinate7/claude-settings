@@ -16,7 +16,7 @@ failure never changes a gate's output or exit code: the STE gate and md_sweep lo
 line names the remedy. For `rm_prompt_answer.py`, exit 2 leaves the normal permission prompt
 (see Holes). A missing script names `sh install.sh`, or on Windows
 `powershell -ExecutionPolicy Bypass -File ./install.ps1`. A missing python says to install Python 3 first. No gate carries `onFailure`: a gate that
-times out or crashes lets the call through (see Holes).
+times out or crashes lets the call through (see Holes). Owner, 2026-10-14: the PreToolUse `guard.py` hook timeout is 60 s. A command is judged when the guard finishes inside 60 s. Above that it runs unjudged (debt guard-timeout-fails-open). The command length that crosses 60 s is unmeasured.
 
 A fixer crash or timeout in the STE gate keeps plain lint, never a refusal. That is this crash
 rule applied to the STE fixer. The STE rewrite ruling is ste-gate-fixes-not-nags, which says the
@@ -55,38 +55,11 @@ where a gate carries it.
 
 ## Holes, named
 
-- Incident 2026-10-12: with `"onFailure": "block"` on the gates, the guard hook ran past its
-  20 s timeout under load. The cause, measured: the wrapper tries `python3` first, and on this
-  box that is the Windows Store alias. Through it the guard took over 30 s; through `python`
-  it took about 0.4 s. Every Bash, PowerShell and Agent call
-  in every session on the machine was refused. The key was removed the same day. So a guard
-  that times out lets the call through, with no line in guard.log. Every python wrapper now skips a
-  `command -v` result under `/WindowsApps/`. Through the fix the guard took 0.36 s on this box.
-  `onFailure` stays off until the owner rules again.
+Debts: `guard-timeout-fails-open` (a guard that times out lets the call through), `gate-remedy-needs-bash` (the remedy names `sh install.sh`, which Bash cannot run while the guard is missing), `install-sh-no-python-warning` (a Mac without python3 gets no warning), `prompt-hooks-fail-open` (a failed prompt hook lets the call through), `gate-own-errors-fail-open` (a gate's own internal errors exit 0), `gate-exit-7-unprobed` (exit 7 under onFailure block is not probed), `alias-skip-misses-case-forms` (mixed-case and backslash alias paths are not skipped), `install-ps1-counts-store-alias` (install.ps1 passes with only the Store python), `janitor-loop-no-alias-skip` (bin/claude-janitor keeps the old loop with no skip).
 
-- The remedy names `sh install.sh`, but a missing guard refuses Bash too. The owner runs the
-  installer in a terminal of their own.
-- A Mac without `python3` gets no warning from `install.sh`; every gated call is then
-  refused with the no-python remedy.
-- Prompt hooks (Agent, AskUserQuestion, Edit and Write under `decisions/`, SendMessage) can
-  deny, but the docs give them no `onFailure`. A failed prompt hook lets the call through.
-- On PermissionRequest, the hooks reference says exit 2 leaves the permission flow unchanged
-  and discards stderr. So a missing `rm_prompt_answer.py` shows the normal prompt, with no
-  remedy line. This is safe: the gate can only allow, so a prompt is the closed state.
-  `test_wrappers.py` pins exit 2 for it all the same.
-- Errors a gate catches itself fail open. `question_outcome.py` exits 0 when it cannot read
-  its input, its state or its model. `guard.py` logs an internal error, then exits 0.
-  `ste_gate.py` returns on bad input. `rm_prompt_answer.py` returns on any exception, which
-  leaves the prompt.
-- With `onFailure: block`, a timeout refused the call (measured in the incident above). Exit 7
-  was not probed.
-- The alias skip matches `/WindowsApps/` in the POSIX path Git Bash prints. A mixed-case or
-  backslash form is not skipped. Git Bash prints the canonical form, so this is theoretical.
-- A machine whose only python is the Store python gets the no-python remedy on every gated
-  call, and `install.ps1` still passes: it counts the alias as python 3.
-- `bin/claude-janitor` keeps the old loop with no skip. It is a user command, not a hook.
-- The same change adds `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL: sonnet` beside the subagent
-  model (changelog 2.1.296), so workflow agents follow the same default.
+## Named limits
+
+- On PermissionRequest, exit 2 leaves the permission flow unchanged and discards stderr. A missing `rm_prompt_answer.py` shows the normal prompt, with no remedy line. This is safe: the gate can only allow, so a prompt is the closed state. `test_wrappers.py` pins exit 2.
 
 Kind: process
 Home: hooks/test_wrappers.py

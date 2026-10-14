@@ -32,27 +32,11 @@ stopped. Arbiter rulings 03:41 and 03:50 CDT.
 
 ## Holes, named
 
-- A file that the installer cannot replace keeps its old stamp. The guard then denies every call
-  until an install succeeds. The installer prints each such file and exits non-zero. The remedy
-  is to run the installer from a terminal, which the guard does not gate.
-- Some writes are still in place: the `CLAUDE.md` pointer, `settings.json` in `install.sh`, the
-  skills folder, the install log and the marker. A reader can see one of these half written.
-  Debt: install-writes-in-place.
-- Hooks other than the guard, such as `stall_watch.py`, `ci_wake.py` and `sendmessage_state.py`,
-  import guard modules with no reload. During an install they can load mixed code. None of them
-  allows a call. Debt: install-writes-in-place.
-- The guard's module list `_FAMILY_MODULES` is kept by hand. A new guard module left off it is
-  not compared.
-- No test pins the stampers' placeholder text to the lines in the repo's `hooks/guard*.py`. If one
-  file's line drifts, it installs unstamped, the installer exits 0, and the guard denies every
-  call. Debt: install-stamp-line-unpinned.
-- If `Install-Dir` cannot replace a skill folder, the run does not retry it and still exits 0.
-  The log can also say `settings.json=kept` after a retry recovered it. Debt:
-  install-skill-fail-exits-0.
-- The symrun case proves the gap with a reader loop. Its window check is unmeasured on the link
-  route, which only CI runs. Debt: symrun-link-gap-unmeasured.
-- The test reader can die with no output on a fault outside its try. Debt:
-  install-reader-can-die-silent.
+Debts: `install-writes-in-place` (some writes are still in place, and hooks other than the guard import guard modules with no reload), `install-stamp-line-unpinned` (no test pins the stampers' placeholder text), `install-skill-fail-exits-0` (a failed skill copy still exits 0), `symrun-link-gap-unmeasured` (the symrun window check is unmeasured on the link route), `install-reader-can-die-silent` (the test reader can die with no output), `install-family-list-by-hand` (the guard's module list is kept by hand).
+
+## Named limits
+
+- A file that the installer cannot replace keeps its old stamp. The guard then denies every call until an install succeeds. The installer prints each such file and exits non-zero. The remedy is to run the installer from a terminal, which the guard does not gate.
 
 ## Build plan
 

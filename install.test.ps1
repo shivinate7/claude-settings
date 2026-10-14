@@ -266,12 +266,129 @@ try {
     if ($Sub5) { try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($Sub5, $false) } catch { } }
     Remove-Item -Recurse -Force $Tmp5 -ErrorAction SilentlyContinue
 }
+# ---- refusewt1 / keepwt1: a linked worktree stops install.ps1; the main clone still installs ----
+# Incident 2026-10-14: install.ps1 ran from a linked worktree, and ~\.claude pointed at that temp
+# checkout. From a linked worktree install.ps1 must exit non-zero, print a line that names the main
+# clone, and write nothing: the config dir and the fake USERPROFILE stay as they were. Red on
+# origin/main: it installs from the worktree and rewrites the pointer there. keepwt1 guards the other
+# side: the main clone of a repo that has a linked worktree still installs. Plain folder copies with
+# no .git are already covered by the copymode, settingsrepeat, firstinstall and envkey cases above.
+# Each child run gets its own fake USERPROFILE, CLAUDE_CONFIG_DIR and throwaway PATH key.
+
+# Get-TreeSnapshot DIR: one line per entry under DIR (relative path and size); '<absent>' if DIR is missing.
+function Get-TreeSnapshot([string]$Dir) {
+    if (-not (Test-Path -LiteralPath $Dir)) { return '<absent>' }
+    $root = (Resolve-Path -LiteralPath $Dir).Path
+    return ((Get-ChildItem -LiteralPath $Dir -Recurse -Force | ForEach-Object { $_.FullName.Substring($root.Length) + '|' + $_.Length }) -join "`n")
+}
+
+# New-WtFixture ROOT: a git repo at ROOT\main with one detached linked worktree at ROOT\wt. Both hold
+# an install.ps1 copy (untracked, so the worktree gets it by copy, not by commit). Returns @{ Main; Wt },
+# or $null when git cannot make the worktree.
+function New-WtFixture([string]$Root) {
+    $main = Join-Path $Root 'main'
+    $wt   = Join-Path $Root 'wt'
+    New-Item -ItemType Directory -Force -Path $main | Out-Null
+    Set-Content -Path (Join-Path $main 'CLAUDE.md') -Value '# wt fixture content' -Encoding utf8
+    Set-Content -Path (Join-Path $main 'settings.json') -Value '{}' -Encoding utf8
+    Set-Content -Path (Join-Path $main 'landed-dirs.txt') -Value 'skills' -Encoding utf8
+    $sk = Join-Path $main 'skills\sample-skill'
+    New-Item -ItemType Directory -Force -Path $sk | Out-Null
+    Set-Content -Path (Join-Path $sk 'SKILL.md') -Value 'v1' -Encoding utf8
+    git -C $main init -q | Out-Null
+    git -C $main add -A | Out-Null
+    git -C $main -c user.email=t@example.com -c user.name=t commit -q -m init | Out-Null
+    git -C $main worktree add -q --detach $wt | Out-Null
+    if ($LASTEXITCODE -ne 0) { return $null }
+    Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $main 'install.ps1')
+    Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $wt 'install.ps1')
+    return @{ Main = $main; Wt = $wt }
+}
+
+# Invoke-InstallProc INSTALL_PS1 CFG FAKE_HOME LOGDIR: runs install.ps1 in a child host. The three
+# variables are set for the child only and restored after. Returns @{ Exit; Text } (stdout, then stderr).
+# Start-Process keeps stderr out of the PowerShell error stream, so Stop does not turn a line into an error.
+function Invoke-InstallProc([string]$InstallPs1, [string]$Cfg, [string]$FakeHome, [string]$LogDir) {
+    $names = @('CLAUDE_CONFIG_DIR', 'USERPROFILE', 'CLAUDE_SETTINGS_USER_ENV_KEY')
+    $saved = @{}
+    foreach ($n in $names) { $saved[$n] = [Environment]::GetEnvironmentVariable($n) }
+    try {
+        [Environment]::SetEnvironmentVariable('CLAUDE_CONFIG_DIR', $Cfg)
+        [Environment]::SetEnvironmentVariable('USERPROFILE', $FakeHome)
+        [Environment]::SetEnvironmentVariable('CLAUDE_SETTINGS_USER_ENV_KEY', "HKCU:\$TestEnvSub\" + (Split-Path -Leaf $FakeHome))
+        $outFile = Join-Path $LogDir 'stdout.txt'
+        $errFile = Join-Path $LogDir 'stderr.txt'
+        $p = Start-Process -FilePath $PsHost -ArgumentList @('-NoProfile', '-File', ('"' + $InstallPs1 + '"')) -Wait -PassThru -NoNewWindow -RedirectStandardOutput $outFile -RedirectStandardError $errFile
+        $text = (@(Get-Content -LiteralPath $outFile -ErrorAction SilentlyContinue) + @(Get-Content -LiteralPath $errFile -ErrorAction SilentlyContinue)) -join "`n"
+        return @{ Exit = $p.ExitCode; Text = $text }
+    } finally {
+        foreach ($n in $names) { [Environment]::SetEnvironmentVariable($n, $saved[$n]) }
+    }
+}
+
+$RwRoot = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-refusewt-" + [guid]::NewGuid().ToString('N'))
+$RwHome = Join-Path $RwRoot 'home'
+$RwCfg  = Join-Path $RwRoot 'claude'
+$RwLogs = Join-Path $RwRoot 'logs'
+New-Item -ItemType Directory -Force -Path $RwHome, $RwCfg, $RwLogs | Out-Null
+try {
+    $rwFix = New-WtFixture (Join-Path $RwRoot 'repo')
+    if (-not $rwFix) {
+        Write-Host "FAIL: refusewt1 fixture: git worktree add failed"; $Failed++
+    } else {
+        # Seed the config dir with a pointer to the main clone, as an earlier install would have.
+        $RwPtr = Join-Path $RwCfg 'CLAUDE.md'
+        [IO.File]::WriteAllText($RwPtr, ('@' + ($rwFix.Main -replace '\\', '/').TrimEnd('/') + '/CLAUDE.md'), [Text.UTF8Encoding]::new($false))
+        $ptrBefore  = [IO.File]::ReadAllText($RwPtr)
+        $snapBefore = Get-TreeSnapshot $RwCfg
+        $rwRes = Invoke-InstallProc (Join-Path $rwFix.Wt 'install.ps1') $RwCfg $RwHome $RwLogs
+        $named = @($rwRes.Text -split "`n" | Where-Object { $_ -match '(?i)main clone' }).Count
+        Check "refusewt1: install.ps1 run from a linked worktree exits non-zero" ($rwRes.Exit -ne 0)
+        Check "refusewt1: it prints a line that names the main clone" ($named -ge 1)
+        $wrote = @()
+        if ([IO.File]::ReadAllText($RwPtr) -ne $ptrBefore) { $wrote += 'pointer rewritten' }
+        if ((Get-TreeSnapshot $RwCfg) -ne $snapBefore) { $wrote += 'config dir changed' }
+        # A bare child PowerShell creates AppData\Roaming under its USERPROFILE on start, so that folder is
+        # the host's, not the installer's. Any other entry in the fake home is a write.
+        $stray = @(Get-ChildItem -LiteralPath $RwHome -Force | Where-Object { $_.Name -ne 'AppData' })
+        if ($stray.Count) { $wrote += 'fake USERPROFILE written' }
+        Check "refusewt1: writes nothing (pointer kept, config dir and fake USERPROFILE unchanged)" ($wrote.Count -eq 0)
+        if ($wrote.Count) { Write-Host "  refusewt1 wrote: $($wrote -join '; ')" }
+    }
+} finally {
+    Remove-Item -Recurse -Force $RwRoot -ErrorAction SilentlyContinue
+}
+
+$KwRoot = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-keepwt-" + [guid]::NewGuid().ToString('N'))
+$KwHome = Join-Path $KwRoot 'home'
+$KwCfg  = Join-Path $KwRoot 'claude'
+$KwLogs = Join-Path $KwRoot 'logs'
+New-Item -ItemType Directory -Force -Path $KwHome, $KwLogs | Out-Null
+try {
+    $kwFix = New-WtFixture (Join-Path $KwRoot 'repo')
+    if (-not $kwFix) {
+        Write-Host "FAIL: keepwt1 fixture: git worktree add failed"; $Failed++
+    } else {
+        $kwRes  = Invoke-InstallProc (Join-Path $kwFix.Main 'install.ps1') $KwCfg $KwHome $KwLogs
+        $kwPtr  = Join-Path $KwCfg 'CLAUDE.md'
+        $kwWant = '@' + ($kwFix.Main -replace '\\', '/').TrimEnd('/') + '/CLAUDE.md'
+        $kwGot  = if (Test-Path -LiteralPath $kwPtr) { [IO.File]::ReadAllText($kwPtr).TrimStart([char]0xFEFF).Trim() } else { '' }
+        Check "keepwt1: main clone of a repo with a linked worktree exits 0" ($kwRes.Exit -eq 0)
+        Check "keepwt1: that run points the config CLAUDE.md at the main clone" ($kwGot -eq $kwWant)
+        if ($kwRes.Exit -ne 0) { Write-Host "  keepwt1 output: $($kwRes.Text)" }
+    }
+} finally {
+    Remove-Item -Recurse -Force $KwRoot -ErrorAction SilentlyContinue
+}
+
     Write-Host "SKIP: nonwin1 (this is Windows)"
 } else {
     Write-Host "SKIP: copymode1: install.ps1 runs only on Windows"
     Write-Host "SKIP: settingsrepeat1: install.ps1 runs only on Windows"
     Write-Host "SKIP: firstinstall1: install.ps1 runs only on Windows"
     Write-Host "SKIP: envkey1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: refusewt1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: keepwt1: install.ps1 runs only on Windows"
 }
 
 # ---- nonwin1: install.ps1 exits 0 off Windows (no registry). Runs off Windows only. ------------

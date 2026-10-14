@@ -29,14 +29,9 @@ list item or blockquote. A tab counts to the next multiple of 4. A top-level fen
 
 ## Holes, named
 
-Review round 3 left these open. Each is low harm and is no regression against main.
+Debts: `stamp-quote-fence-closes-early` (`>code` closes a fence early). `stamp-list-fence-not-seen` (a fence in a list item at 4 or more columns). `stamp-list-marker-column` (some list markers set a content column). `stamp-blank-line-quote-fence` (a blank line does not end a quoted fence). `stamp-html-comment-hides-file` (a fence in an HTML comment hides the file). `stamp-scan-frontmatter-links` (the near-miss scan reads frontmatter and links).
 
-- A quoted fence line `>code`, with no space after `>`, closes the fence early. That line can give a false alarm.
-- A blockquote fence inside a list item at 4 or more columns is not seen as a fence.
-- Some list markers that CommonMark does not open still set a content column, such as `* * *` or `2.` after a paragraph line.
-- A blank line with no `>` inside a quoted fence does not end the quote.
-- A fence inside an HTML comment hides the rest of the file. Main has the same hole.
-- The near-miss scan does not skip frontmatter or link targets.
+Each is low harm. None is a regression against main.
 
 Kind: process
 Home: actions/stamp/stamp.mjs

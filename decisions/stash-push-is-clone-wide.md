@@ -108,31 +108,17 @@ each judgment consults, and the tree the deny now covers, changes for PUT.
 
 ## Holes, named
 
-- `git stash create` writes no ref by itself. It returns a commit with no ref
-  pointing at it, unless piped into `git stash store`. It is not `push` or `save`,
-  and it falls outside `STASH_TREE_ACTIONS`, so `stash_takes_the_stack` reads it as a
-  TAKE. It denies over a non-empty stack. This is unmeasured against real use of
-  `create` piped into `store`. It is the same known false-refusal shape the earlier
-  decision (stash-stack-is-a-shared-subject) already named for `create`.
-- The harness's own worktree reminder still tells a worker to push a tagged entry.
-  This guard change makes that path deny outright rather than ask. The reminder text
-  is not in this repository and is not changed here.
-- The discard rule judges each git call in its own checkout. Other rules that read the run
-  folder still take the first `-C` in the command, so their verdict or citation can name the
-  wrong checkout. No discard depends on that read.
-- A shared checkout reached by `cd`, then `git -C . restore <file>`, gets ask, not deny: the
-  run folder is read against the shell's cwd, not the `cd`. Main gives the same. Safe, since
-  an ask reaches the owner; the cost is one prompt.
+Debts: `stash-create-false-refusal` (create piped into store is denied over a stack). `stash-reminder-text-outside-repo` (the harness reminder tells a worker to push a tagged entry). `guard-first-c-reads-wrong-tree` (other rules read the first -C target). `guard-shell-wrap-discard-unread` (a discard inside sh -c, eval or substitution). `stash-allow-any-linked-worktree` (any linked worktree passes the allow). `stash-read-to-run-race` (a change after the read is missed).
+
+## Named limits
+
+- A shared checkout reached by `cd`, then `git -C . restore <file>`, gets ask, not deny. An ask reaches the owner. The cost is one prompt.
 - The gate fails closed on shape. These keep the ask even when every segment is in the lane.
-  A `cd`, `pushd`, `popd`, `Set-Location`, `sl`, `chdir`, `Push-Location` or
-  `env -C`/`--chdir`. Two distinct `-C` targets, or one lane spelled two ways. A bare git call
-  beside a `-C` call. Any `--work-tree`, `--git-dir`, `core.worktree`, `GIT_WORK_TREE`,
-  `GIT_DIR` or `GIT_COMMON_DIR` token. `restore --source`, `-p` or `-f`. A glob or `$(…)`
-  pathspec. A segment the tokenizer cannot read. The remedy names the `-C` form.
-- Any linked worktree passes the allow, not only the caller's own.
-- Unread, as on main: a discard inside `sh -c`, `eval`, or a `$(…)` substitution, such as
-  `echo $(cd <shared>; git restore f.txt)`. Review 2026-10-12, three rounds, eight shapes
-  closed; these stay open under the owner's round cap.
-- An empty tree still passes a push in every tree. A session that dirties the tree
-  between the guard's read and the command's run is not covered. This is the same gap
-  the earlier decision named for the TAKE arm.
+- Each of these keeps the ask: `cd`, `pushd`, `popd`, `Set-Location`, `sl`, `chdir`, `Push-Location`, `env -C` and `--chdir`.
+- Also: two distinct `-C` targets, one lane spelled two ways, and a bare git call beside a `-C` call.
+- Also: any `--work-tree`, `--git-dir`, `core.worktree`, `GIT_WORK_TREE`, `GIT_DIR` or `GIT_COMMON_DIR` token.
+- Also: `restore --source`, `-p` or `-f`, a glob or `$(…)` pathspec, and a segment the tokenizer cannot read. The remedy names the `-C` form.
+- Setting `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE` is denied, not asked. See `git-env-set-denied` (the record that denies setting git env vars).
+
+Kind: process
+Home: hooks/guard_shared_tree.py

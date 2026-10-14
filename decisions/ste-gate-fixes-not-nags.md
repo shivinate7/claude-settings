@@ -51,30 +51,7 @@ A rewrite can change meaning. See Holes. The fixed text lands without the writer
 
 ## Holes, named
 
-Each hole ships under the three-round review cap.
-
-- The Edit and MultiEdit path tracks only plain fences and front matter. Text inside a
-  blockquote fence, a multi-line pre block, a script block, or an HTML comment is rewritten on
-  an Edit. The same text is denied on a Write.
-- `e.g.` or `i.e.` at a line end becomes "for example." or "that is." with a period. That breaks
-  hard-wrapped prose. Example: a line ending in `e.g.` becomes `for example.`, and a sentence
-  that wraps there ends early.
-- The fixer limit (5 s) plus the lint timeout (15 s) equals the hook timeout (20 s). A very
-  large input with many quote marks can reach 20 s. The hook is then killed, and the gate fails
-  open. The old lint timeout failed open the same way.
-- Some fixes change meaning:
-  - `It's all been fixed` becomes `It is all been fixed`.
-  - `ad hoc` becomes `unplanned`.
-  - `in between` becomes `between`.
-  - `in terms of` becomes `for`.
-  - `it would appear that` becomes `apparently`.
-  - All-capitals `IT'S A TEST` becomes `It is A TEST`.
-  - The heading `Don't Trust` becomes `Do not Trust`.
-- A comment that holds `>` ends its mask early. Example: `<!-- a > b -->`.
-- The lint still reports `e.g.` inside a blockquote fence or a pre block.
-- `lint/test_ste_autofix.py` runs on the Linux job only. The macOS and Windows runner cost is
-  unmeasured.
-- macOS is unverified for the child-process route.
+Debts: `ste-edit-fence-blind` (Edit rewrites text inside fences that Write denies). `ste-eg-line-end-rewrite` (`e.g.` at a line end becomes a full stop). `ste-hook-timeout-fails-open` (the hook timeout can kill the gate). `ste-fix-changes-meaning` (some autofixes change the meaning). `ste-comment-gt-mask-early` (a > inside a comment ends the mask). `ste-eg-in-fence-reported` (`e.g.` inside a fence is still reported). `ste-autofix-tests-linux-only` (the autofix tests run on Linux only). `ste-macos-child-route-unverified` (the macOS child-process route is unverified).
 
 Kind: process
 Home: lint/ste_gate.py
