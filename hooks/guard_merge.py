@@ -220,3 +220,6 @@ def undrafted_pr_create(segment: str) -> bool:
         elif arg.startswith(("--draft=", "-d=")):
             draft = arg.split("=", 1)[1] in GH_TRUE   # gh's ParseBool set; any other value is false
     return not draft
+
+# Stamped by the installer at copy time; guard.py compares it across the modules it loads.
+INSTALL_ID = "uninstalled"

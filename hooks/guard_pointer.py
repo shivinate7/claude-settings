@@ -240,3 +240,6 @@ def pointer_head_hit(segment: str, root: str) -> str:
         if in_pointer_checkout(root):
             return ("git " + subcommand + " " + target).strip()
     return ""
+
+# Stamped by the installer at copy time; guard.py compares it across the modules it loads.
+INSTALL_ID = "uninstalled"

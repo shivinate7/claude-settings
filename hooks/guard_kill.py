@@ -632,3 +632,6 @@ PLAYWRIGHT_PATH_REASON = (
     "stale `__dirlock`. If the install still hangs, run it under Node 22 with `npx -y node@22 "
     "node_modules/playwright/cli.js install`, which unpacks in under a second."
 )
+
+# Stamped by the installer at copy time; guard.py compares it across the modules it loads.
+INSTALL_ID = "uninstalled"

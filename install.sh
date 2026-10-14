@@ -201,6 +201,19 @@ fi
 printf '%s\n' "$POINTER" > "$TARGET_MD"
 log "wrote $TARGET_MD -> $POINTER"
 
+# put_file SRC DEST: build the file at "DEST.cs-new" in DEST's folder, then rename it over DEST, so
+# DEST is never absent or half-written (a gate hook reads it at any moment). A .py that carries an
+# INSTALL_ID line gets this run's id, the same stamp install.ps1 and its post-merge hook write, so
+# hooks/guard.py can tell a half-installed set from a whole one.
+INSTALL_ID_VALUE="$(date +%Y%m%d%H%M%S)$$"
+put_file() {
+  t="$2.cs-new"
+  case "$1" in
+    *.py) sed "s/^INSTALL_ID = \".*\"/INSTALL_ID = \"$INSTALL_ID_VALUE\"/" "$1" > "$t" ;;
+    *) cp "$1" "$t" ;;
+  esac && mv -f "$t" "$2" || { rm -f "$t"; return 1; }
+}
+
 # ---- ~/.claude/agents and ~/.claude/lint --------------------------------------------------------
 # agents/: one file per role (builder, reviewer). lint/: the STE linter and its hook gate.
 # Local: per-file symlink. Cloud: copy.
@@ -232,7 +245,7 @@ land_dir() {
     [ -f "$f" ] || continue
     DEST="$DEST_DIR/$(basename "$f")"
     if [ "$CLOUD" = 1 ]; then
-      cp "$f" "$DEST"
+      put_file "$f" "$DEST"
     else
       if [ -L "$DEST" ] && [ "$(readlink "$DEST")" = "$f" ]; then LANDED="$LANDED $(basename "$f")"; continue; fi
       # A real file at DEST (not a symlink): on the first local install ever, it is a

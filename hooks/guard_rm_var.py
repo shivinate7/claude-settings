@@ -286,3 +286,6 @@ def rm_var_reason(hits) -> str:
         "intended when the variable is empty. Retry with every expansion written ${NAME:?}, "
         "which stops the command when the variable is empty. Retry with: " + "; ".join(hits)
     )
+
+# Stamped by the installer at copy time; guard.py compares it across the modules it loads.
+INSTALL_ID = "uninstalled"

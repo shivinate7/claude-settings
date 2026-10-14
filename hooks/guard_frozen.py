@@ -253,3 +253,6 @@ def frozen_shell_hit(cmd: str, cwd: str) -> str:
 def project_config_shell_hit(cmd: str, cwd: str) -> str:
     """Return the project config path a shell command writes to, else ''."""
     return _shell_write_hit(cmd, cwd, is_project_config)
+
+# Stamped by the installer at copy time; guard.py compares it across the modules it loads.
+INSTALL_ID = "uninstalled"

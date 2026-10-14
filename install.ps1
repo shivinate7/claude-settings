@@ -99,9 +99,27 @@ if git rev-parse -q --verify ORIG_HEAD >/dev/null 2>&1 \
   echo "`$(date) post-merge: install.ps1 changed, re-running install.ps1" >> "`$log"
   exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File "`$repo/install.ps1"
 fi
+# put SRC DEST: build the file at "DEST.cs-new" in DEST's folder, then rename it over DEST, so DEST
+# is never absent or half-written (a gate hook reads it at any moment). A .py that carries an
+# INSTALL_ID line gets this run's id, the same stamp install.ps1 writes. A rename a reader blocks
+# is retried for about 2.5 s; if it still fails, DEST stays as it was.
+id="`$(date +%Y%m%d%H%M%S)`$`$"
+put() {
+  t="`$2.cs-new"
+  case "`$1" in
+    *.py) sed "s/^INSTALL_ID = \".*\"/INSTALL_ID = \"`$id\"/" "`$1" > "`$t" ;;
+    *) cp "`$1" "`$t" ;;
+  esac || { rm -f "`$t"; return 1; }
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do
+    mv -f "`$t" "`$2" 2>/dev/null && return 0
+    sleep 0.1
+  done
+  rm -f "`$t"
+  return 1
+}
 dest="`$cfg/settings.json"
 if [ -f "`$repo/settings.json" ] && [ ! -L "`$dest" ]; then
-  cp "`$repo/settings.json" "`$dest" && echo "claude-settings: refreshed `$dest"
+  put "`$repo/settings.json" "`$dest" && echo "claude-settings: refreshed `$dest"
 fi
 # landed-dirs.txt at the repo root names the directories, the same file install.ps1 itself
 # reads below and install.sh reads on Linux/macOS. One name per line, `#` comments allowed.
@@ -127,7 +145,7 @@ while IFS= read -r sub || [ -n "`$sub" ]; do
   for f in "`$repo/`$sub"/*; do
     [ -f "`$f" ] || continue
     d="`$cfg/`$sub/`$(basename "`$f")"
-    [ -L "`$d" ] || { cp "`$f" "`$d" && echo "claude-settings: refreshed `$d"; }
+    [ -L "`$d" ] || { put "`$f" "`$d" && echo "claude-settings: refreshed `$d"; }
   done
 done < "`$repo/landed-dirs.txt"
 exit 0
@@ -232,33 +250,39 @@ public static class ClaudeSettingsMove {
 }
 '@
     }
-    if (-not [ClaudeSettingsMove]::MoveFileEx($From, $To, 1)) {
-        throw (New-Object ComponentModel.Win32Exception([Runtime.InteropServices.Marshal]::GetLastWin32Error())).Message
+    # A reader that has $To open (a Python import, say) blocks the rename for a moment: retry
+    # for about 2.5 s, then give up and leave $To as it was.
+    for ($try = 1; ; $try++) {
+        if ([ClaudeSettingsMove]::MoveFileEx($From, $To, 1)) { return }
+        $code = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        if ($try -ge 25 -or ($code -ne 5 -and $code -ne 32)) { throw (New-Object ComponentModel.Win32Exception($code)).Message }
+        Start-Sleep -Milliseconds 100
     }
 }
 
-# No-gap replace. Two routes, and $Dest is never absent on either.
-#  - A real file left by an earlier run of this installer (not the first local run) is
-#    refreshed in place with Copy-Item, and no link is tried ('refreshed'). It is not relinked: Windows reports a rename over a
-#    name as a Deleted event on that name, and install-no-gap.test.ps1 counts that as a gap.
-#    Named limit: such a file stays a copy until a person deletes it.
-#  - Anything else (a link, a missing name, a person's own file on the first run, which
-#    is already backed up): the new file or link is built at "$Dest.cs-new", then moved onto
-#    $Dest in one call (Move-OverFile). A failed step (a file lock, say) leaves $Dest as it
-#    was. The failure is logged and the run goes on.
-# Returns 'linked', 'copied', 'refreshed', or 'failed'. The temp names end in .cs-new and
-# .cs-old, so they do not match a name a person gives a file.
+# One id per run. A hook .py that carries a line `INSTALL_ID = "..."` gets it at copy time, so
+# hooks/guard.py can tell a half-installed set from a whole one. The repo copy holds a placeholder.
+# The embedded post-merge hook and install.sh stamp the same line the same way.
+$InstallId = Get-Date -Format yyyyMMddHHmmssfff
+function Set-InstallId([string]$Path) {
+    $text = [IO.File]::ReadAllText($Path)
+    $new  = [regex]::Replace($text, '(?m)^INSTALL_ID = "[^"]*"', "INSTALL_ID = `"$InstallId`"")
+    if ($new -ne $text) { [IO.File]::WriteAllText($Path, $new, (New-Object Text.UTF8Encoding $false)) }
+}
+
+# No-gap replace, one route for every file: build the new file or link at "$Dest.cs-new" in the
+# same folder, stamp it (Set-InstallId), then move it onto $Dest in one call (Move-OverFile).
+# $Dest is never absent and never half-written, so a gate hook that reads it mid-run sees the
+# old file or the new one. A failed step (a file lock that outlasts the retries, say) leaves
+# $Dest as it was. The failure is logged and the run goes on.
+# Returns 'linked', 'copied', or 'failed'. The temp name ends in .cs-new, so it does not match a
+# name a person gives a file.
 function Install-File([string]$Src, [string]$Dest) {
-    $cur = Get-Item -LiteralPath $Dest -Force -ErrorAction SilentlyContinue
-    if ($cur -and -not $cur.PSIsContainer -and -not $cur.LinkType -and -not $FirstLocalRun) {
-        try { Copy-Item -LiteralPath $Src -Destination $Dest -Force; return 'refreshed' }
-        catch { Log "could not refresh $Dest ($($_.Exception.Message)); the next run tries again"; return 'failed' }
-    }
     $new = "$Dest.cs-new"
     try {
         Remove-Leftover $new
         try { New-Link $new $Src; $how = 'linked' }
-        catch { $how = 'copied'; Copy-Item -LiteralPath $Src -Destination $new -Force }
+        catch { $how = 'copied'; Copy-Item -LiteralPath $Src -Destination $new -Force; if ($Dest -like '*.py') { Set-InstallId $new } }
         Move-OverFile $new $Dest
         return $how
     } catch {
@@ -384,7 +408,7 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
         # installer's own earlier copy, from a no-symlink-rights machine where the symlink
         # attempt below fell back to Copy-Item: replace it, no backup
         # (D: copy-mode-overwrites-no-backup). Matches the skills branch above, so both
-        # branches agree. Install-File swaps by rename, so the file is never absent.
+        # branches agree. Install-File swaps by rename, so the file is never absent or half-written.
         if ($cur -and $FirstLocalRun) {
             $bak = "$dest.bak.$(Get-Date -Format yyyyMMddHHmmss)"
             Copy-Item $dest $bak
@@ -396,9 +420,6 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
         } elseif ($how -eq 'copied') {
             $AgentCopied = $true
             Log "copied $dest (symlink not permitted)"
-        } elseif ($how -eq 'refreshed') {
-            $AgentCopied = $true
-            Log "refreshed $dest in place (an earlier copy; it stays a copy)"
         } else {
             $AgentFailed = $true
         }
@@ -460,7 +481,6 @@ if ($how -eq 'linked') {
     Write-InstallLog -SettingsMode 'symlink' -AgentsMode $AgentsMode -HookMode 'not needed'
 } else {
     if ($how -eq 'copied') { Log "symlink not permitted (enable Windows Developer Mode, or run as admin); copied instead." }
-    if ($how -eq 'refreshed') { Log "refreshed $TargetJson in place (an earlier copy; it stays a copy)" }
     $HookMode = Install-PostMergeHook
     Write-InstallLog -SettingsMode $(if ($how -eq 'failed') { 'kept' } else { 'copy' }) -AgentsMode $AgentsMode -HookMode $HookMode
 }

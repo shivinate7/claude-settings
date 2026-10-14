@@ -1505,3 +1505,6 @@ def _pwsh_script(tokens) -> str:
 
 
 CMD_EXE_NAMES = {"cmd", "cmd.exe"}
+
+# Stamped by the installer at copy time; guard.py compares it across the modules it loads.
+INSTALL_ID = "uninstalled"

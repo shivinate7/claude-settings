@@ -99,3 +99,6 @@ def wsl_hit(cmd: str) -> str:
             if hit:
                 return hit
     return ""
+
+# Stamped by the installer at copy time; guard.py compares it across the modules it loads.
+INSTALL_ID = "uninstalled"

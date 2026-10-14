@@ -525,3 +525,6 @@ LN_DESCENDS_REASON = (
     "with a test such as [ -e path ], or end the destination with a slash when you mean a link "
     "inside the directory."
 )
+
+# Stamped by the installer at copy time; guard.py compares it across the modules it loads.
+INSTALL_ID = "uninstalled"

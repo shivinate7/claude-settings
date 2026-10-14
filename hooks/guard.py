@@ -165,6 +165,7 @@ grant, so the tokens are gone. An "ask" decision puts the answer in the owner's
 hands, which is what the tokens were reaching for.
 """
 
+import importlib
 import json
 import os
 import re
@@ -182,105 +183,138 @@ if sys.path[:1] != [_HERE]:
 _FAMILY_MODULES = ("guard_branch_worktree", "guard_shared_tree", "guard_pointer",
                    "guard_push_delete", "guard_merge", "guard_frozen", "guard_env",
                    "guard_kill", "guard_stream", "guard_rm_var", "guard_mask_script", "guard_wsl")
+# Each hook .py the installer copies carries `INSTALL_ID`, one value per install run, stamped at copy
+# time. The repo copy holds this placeholder, and a placeholder counts as
+# matching. A load that fails, or loads modules with different ids, means an install landed between
+# two of our reads: wait, clear the modules, and load again. The wait is bounded; after it the
+# fallback below fails closed, never open. This is the one home of the stamp check.
+INSTALL_ID = "uninstalled"
+_PLACEHOLDER = "uninstalled"
+_LOAD_WAIT_SECONDS = 5.0
+_LOAD_STEP_SECONDS = 0.25
+
+
+def _install_ids_differ():
+    ids = {getattr(sys.modules.get(name), "INSTALL_ID", _PLACEHOLDER)
+           for name in ("guard_core",) + _FAMILY_MODULES}
+    ids.add(INSTALL_ID)
+    ids.discard(_PLACEHOLDER)
+    return len(ids) > 1
+
+
+_load_deadline = time.monotonic() + _LOAD_WAIT_SECONDS
 _loading = "guard_core"   # the module being loaded, for the fallback line below
-try:
-    import guard_core
-    from guard_core import (
-        AUTHOR_ROLE, GIT_WORK_TREE_RE, HEREDOC_HEADER, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
-        SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
-        _resolved, _run_dir, _segment_git_c_target, agent_role, basename, cap_safe,
-        command_root, git_calls, git_common_dir, inline_script, is_worktree, log_path_and_text, norm,
-        path_is_inside, primary_checkout, record, refuse, resolve_command, resolve_default_base,
-        segment_tokens, split_segments, strip_heredoc_bodies,
-    )
-    _loading = "guard_branch_worktree"
-    from guard_branch_worktree import (
-        BRANCH_DELETE_DENY_REASON, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
-        worktree_remove_forced,
-    )
-    _loading = "guard_shared_tree"
-    from guard_shared_tree import (
-        PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
-        checkout_conflict_resolve, names_only_files, one_place, session_id_of, shared_tree_match,
-        in_any_session_scratchpad, stash_takes_the_stack, subject_state, under_session_scratchpad,
-    )
-    _loading = "guard_pointer"
-    from guard_pointer import (
-        POINTER_HEAD_REASON, head_root, pointer_head_hit,
-    )
-    _loading = "guard_push_delete"
-    from guard_push_delete import (
-        DELETE_REASON, DESTRUCTIVE_DELETE, PUSH_ASK_REASON, PUSH_REASON, cmd_exe_delete_hit,
-        push_target, push_text, push_verdict,
-    )
-    _loading = "guard_merge"
-    from guard_merge import (
-        DRAFT_PR_REASON, MERGE_TOOLS, gh_call_of, git_call_of, merge_call_of, merge_gate,
-        merge_gate_reason, settings_roots, undrafted_pr_create,
-    )
-    _loading = "guard_frozen"
-    from guard_frozen import (
-        FROZEN_REASON, _shell_write_hit, frozen_shell_hit, is_frozen, is_project_config,
-        project_config_shell_hit,
-    )
-    _loading = "guard_env"
-    from guard_env import (
-        ENV_ADVICE, ENV_TOOL_REASON, _substitutions, env_heredoc_refusal, env_refusal, is_env,
-    )
-    _loading = "guard_kill"
-    from guard_kill import (
-        DETACHED_LAUNCH_REASON, KILL_PID_REASON, KILL_REASON, PLAYWRIGHT_INSTALL_REASON,
-        PLAYWRIGHT_PATH_REASON, detached_launch_hit, foreign_pid_kill, kill_fed_by_name,
-        kill_fed_by_pipe, kill_hit, playwright_command_hit, playwright_install_hit,
-    )
-    _loading = "guard_stream"
-    from guard_stream import (
-        BACKGROUND_END_REASON, GH_API_METHOD_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
-        NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, WAITER_REASON, background_end_hit,
-        gh_api_post_hit, live_stream_hit, ln_descends_hit, loop_condition_polls_a_pattern,
-        narrated_tail_hit, waiter_verdict,
-    )
-    _loading = "guard_rm_var"
-    from guard_rm_var import (
-        rm_var_hits, rm_var_reason,
-    )
-    _loading = "guard_mask_script"
-    from guard_mask_script import (
-        mask_script,
-    )
-    _loading = "guard_wsl"
-    from guard_wsl import WSL_REASON, wsl_hit
-except Exception as exc:
-    # A recovery path must not depend on the module it recovers (CLAUDE.md
-    # verification-recovery-not-gated-on-own-state). guard_core holds `record` and `config_dir`,
-    # so this writer repeats their few lines: one guard.log line that names the module.
+while True:
     try:
-        folder = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-        os.makedirs(folder, exist_ok=True)
-        text = " ".join(("%s: %s: %s" % (_loading, type(exc).__name__, exc)).split())[:120]
-        with open(os.path.join(folder, "guard.log"), "a", encoding="utf-8") as handle:
-            handle.write("\t".join([time.strftime("%Y-%m-%dT%H:%M:%S"), "", "crash", "guard-crash",
-                                    text, "-"]) + "\n")  # the one literal "-": guard_core failed to load
-    except Exception:
-        pass
-    if __name__ != "__main__":
-        raise  # a hook that imports guard fails on its own terms, never by a silent allow
-    # Fail closed (decision gate-hooks-fail-closed): a guard with a missing part judges nothing, so
-    # it refuses the call. The reason tells the reader to reinstall and names no file. `refuse`
-    # lives in the module that failed, so the deny is printed here. A SubagentStop has no tool
-    # call to refuse, and a block there could trap the agent: it passes, as the log line records.
-    try:
-        stopping = json.load(sys.stdin).get("hook_event_name") == "SubagentStop"
-    except Exception:
-        stopping = False
-    if not stopping:
-        print(json.dumps({"hookSpecificOutput": {
-            "hookEventName": "PreToolUse", "permissionDecision": "deny",
-            "permissionDecisionReason": (
-                "guard-crash: the gate is missing a part and cannot judge this call, so it refuses "
-                "every call. Remedy: from the claude-settings checkout run install.sh "
-                "(Windows: install.ps1), then retry.")}}))
-    sys.exit(0)
+        import guard_core
+        from guard_core import (
+            AUTHOR_ROLE, GIT_WORK_TREE_RE, HEREDOC_HEADER, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
+            SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
+            _resolved, _run_dir, _segment_git_c_target, agent_role, basename, cap_safe,
+            command_root, git_calls, git_common_dir, inline_script, is_worktree, log_path_and_text, norm,
+            path_is_inside, primary_checkout, record, refuse, resolve_command, resolve_default_base,
+            segment_tokens, split_segments, strip_heredoc_bodies,
+        )
+        _loading = "guard_branch_worktree"
+        from guard_branch_worktree import (
+            BRANCH_DELETE_DENY_REASON, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
+            worktree_remove_forced,
+        )
+        _loading = "guard_shared_tree"
+        from guard_shared_tree import (
+            PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
+            checkout_conflict_resolve, names_only_files, one_place, session_id_of, shared_tree_match,
+            in_any_session_scratchpad, stash_takes_the_stack, subject_state, under_session_scratchpad,
+        )
+        _loading = "guard_pointer"
+        from guard_pointer import (
+            POINTER_HEAD_REASON, head_root, pointer_head_hit,
+        )
+        _loading = "guard_push_delete"
+        from guard_push_delete import (
+            DELETE_REASON, DESTRUCTIVE_DELETE, PUSH_ASK_REASON, PUSH_REASON, cmd_exe_delete_hit,
+            push_target, push_text, push_verdict,
+        )
+        _loading = "guard_merge"
+        from guard_merge import (
+            DRAFT_PR_REASON, MERGE_TOOLS, gh_call_of, git_call_of, merge_call_of, merge_gate,
+            merge_gate_reason, settings_roots, undrafted_pr_create,
+        )
+        _loading = "guard_frozen"
+        from guard_frozen import (
+            FROZEN_REASON, _shell_write_hit, frozen_shell_hit, is_frozen, is_project_config,
+            project_config_shell_hit,
+        )
+        _loading = "guard_env"
+        from guard_env import (
+            ENV_ADVICE, ENV_TOOL_REASON, _substitutions, env_heredoc_refusal, env_refusal, is_env,
+        )
+        _loading = "guard_kill"
+        from guard_kill import (
+            DETACHED_LAUNCH_REASON, KILL_PID_REASON, KILL_REASON, PLAYWRIGHT_INSTALL_REASON,
+            PLAYWRIGHT_PATH_REASON, detached_launch_hit, foreign_pid_kill, kill_fed_by_name,
+            kill_fed_by_pipe, kill_hit, playwright_command_hit, playwright_install_hit,
+        )
+        _loading = "guard_stream"
+        from guard_stream import (
+            BACKGROUND_END_REASON, GH_API_METHOD_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
+            NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, WAITER_REASON, background_end_hit,
+            gh_api_post_hit, live_stream_hit, ln_descends_hit, loop_condition_polls_a_pattern,
+            narrated_tail_hit, waiter_verdict,
+        )
+        _loading = "guard_rm_var"
+        from guard_rm_var import (
+            rm_var_hits, rm_var_reason,
+        )
+        _loading = "guard_mask_script"
+        from guard_mask_script import (
+            mask_script,
+        )
+        _loading = "guard_wsl"
+        from guard_wsl import WSL_REASON, wsl_hit
+
+        _loading = "install-id"
+        if _install_ids_differ():
+            raise ImportError("the loaded modules carry different INSTALL_ID values")
+        break
+    except Exception as exc:
+        if time.monotonic() < _load_deadline:
+            time.sleep(_LOAD_STEP_SECONDS)
+            for _name in ("guard_core",) + _FAMILY_MODULES:
+                sys.modules.pop(_name, None)
+            importlib.invalidate_caches()
+            _loading = "guard_core"
+            continue
+        # A recovery path must not depend on the module it recovers (CLAUDE.md
+        # verification-recovery-not-gated-on-own-state). guard_core holds `record` and `config_dir`,
+        # so this writer repeats their few lines: one guard.log line that names the module.
+        try:
+            folder = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+            os.makedirs(folder, exist_ok=True)
+            text = " ".join(("%s: %s: %s" % (_loading, type(exc).__name__, exc)).split())[:120]
+            with open(os.path.join(folder, "guard.log"), "a", encoding="utf-8") as handle:
+                handle.write("\t".join([time.strftime("%Y-%m-%dT%H:%M:%S"), "", "crash", "guard-crash",
+                                        text, "-"]) + "\n")  # the one literal "-": guard_core failed to load
+        except Exception:
+            pass
+        if __name__ != "__main__":
+            raise  # a hook that imports guard fails on its own terms, never by a silent allow
+        # Fail closed (decision gate-hooks-fail-closed): a guard with a missing part judges nothing, so
+        # it refuses the call. The reason tells the reader to reinstall and names no file. `refuse`
+        # lives in the module that failed, so the deny is printed here. A SubagentStop has no tool
+        # call to refuse, and a block there could trap the agent: it passes, as the log line records.
+        try:
+            stopping = json.load(sys.stdin).get("hook_event_name") == "SubagentStop"
+        except Exception:
+            stopping = False
+        if not stopping:
+            print(json.dumps({"hookSpecificOutput": {
+                "hookEventName": "PreToolUse", "permissionDecision": "deny",
+                "permissionDecisionReason": (
+                    "guard-crash: the gate is missing a part and cannot judge this call, so it refuses "
+                    "every call. Remedy: from the claude-settings checkout run install.sh "
+                    "(Windows: install.ps1), then retry.")}}))
+        sys.exit(0)
 
 
 # `_git`, `config_dir` and the session reads are never bound here: a test or the janitor patches
