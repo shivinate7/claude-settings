@@ -62,8 +62,12 @@ Owner rulings, 2026-10-08:
   a full-width colon (`：`).
 - Only the question text counts. A `Problem:` or `Goal:` line in an option (its label,
   preview or description) does not count.
-- The hook reads only the owner's own messages from the last 2 MiB of the transcript.
-  The owner's words are user records with `origin.kind` "human", plus the owner's answers
+- Owner ruling, 2026-10-13: the judge reads the conversation text (owner messages, assistant
+  text, relayed cross-session messages, each labeled) from the owner's 3rd-last message up to
+  the question, searching back up to 16 MiB; never tool calls, tool results, task notices or
+  reminders. Oldest span text is cut to a budget; the owner messages stay whole. Fewer than
+  3 owner messages: the span starts at the oldest found. None: the check did not run.
+  The goal is read from owner records only. The owner's words are user records with `origin.kind` "human", plus the owner's answers
   in `AskUserQuestion` tool results. Task notifications, hook feedback, peer messages and
   other tool results are not the owner's. Incident, 2026-10-09: the first live check read
   only typed messages, judged a question against an older topic, and denied it.
