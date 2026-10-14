@@ -61,10 +61,8 @@ so a reader sees the skip count without reading every line above it.
 
 ## Holes, named
 
-No Windows machine here can grant `SeCreateSymbolicLinkPrivilege` to this
-account. The probe and the early-return guard are proven only on the
-negative branch, where the privilege is absent. The positive branch needs
-a different runner. A reviewer with Developer Mode on, or a Linux or
-macOS runner, can prove it. There, the probe sets `SYMLINK_CAPABLE=1`.
-prune1, prune3, and prune5 then run and pass, exactly as before this
-change.
+Debts: `prune-symlink-positive-unproven` (the probe and the early-return guard are proven only on the negative branch).
+
+Kind: build
+Plan: decisions/prune-cases-skip-without-symlink-privilege.md#the-fix (windows)
+Home: hooks/test_install_src.sh

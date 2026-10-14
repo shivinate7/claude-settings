@@ -45,16 +45,7 @@ Which branches reach the log is set by `a-branch-is-redundant-by-patch-not-by-an
 
 ## Holes, named
 
-Each hole ships under the three-round review cap. "Fix: not named" means that no fix is recorded yet.
-
-- **Case folds.** Cause: branch names compare with exact case, but NTFS ref names fold case. Effect: an expired `Foo` row and an unexpired `foo` row at one commit drop the shared ref. Main dropped it too. The real log has 0 case collisions. Fix: lower-case the branch in the key.
-- **Bad row key.** Cause: a log row with a list or dict `branch` or `commit` and a live `time_ms` raises TypeError. `realpath` has no try block. Effect: `--purge` stops, preview included, until that row is 90 days old. Main kept such a row as unreadable. Nothing in the repo writes such a row. Fix: guard the key build.
-- **Git trace output.** Cause: with `GIT_TRACE=1` or `GIT_TRACE2=1` set, git writes to stderr on a missing ref. Effect: the missing ref reads as an error while the variable is set. The ref and its row stay. Checked on git 2.55.0.windows.3 only. Fix: not named.
-- **Snapshot race.** Cause: the set of unexpired rows is read once, at purge start. Effect: a reap that logs the same commit later is not seen. The old-value pin on `update-ref -d` still protects a changed ref value. Read from code, not run. Fix: not named.
-- **Realpath cost.** Cause: `realpath` runs once per unexpired row, in preview too. Effect: a dry run on a copy of the real log took 1.35 s, against 0.015 s before. A first call to an unreachable network host took 1.15 s. Fix: build the key lazily, or cache it per repo string.
-- **Missing mutant.** Cause: the harness has no mutant that drops only the commit argument of `update-ref -d`. Effect: the harness alone does not catch it. A hand run of that change was killed by `test_a_reap_landing_after_the_read_keeps_the_younger_ref`. Unverified: the row "the ref is dropped by branch name" in `janitor/mutate_sweep.py` may drop that argument, with a different named killer. Fix: add one mutant row.
-- **Confirm total.** Cause: the "purge: N" total in the confirm report counts rows whose ref was kept. Effect: the total counts more than the refs dropped. Fix: not named.
-- **Orphan ref kept.** Cause: the purge keeps a ref when no log entry names its commit. Effect: such a ref is kept forever. The old code dropped it at 90 days. Fix: not named.
+Debts: `purge-key-case-folds` (branch names compare with exact case), `purge-bad-row-key-raises` (a list or dict key stops the purge), `purge-git-trace-missing-ref` (a missing ref reads as an error while git tracing is on), `purge-snapshot-race` (unexpired rows are read once, at purge start), `purge-realpath-per-row` (realpath runs once per unexpired row), `purge-update-ref-mutant-missing` (no mutant drops only the commit argument of `update-ref -d`), `purge-confirm-total-wrong` (the confirm total counts kept refs), `purge-orphan-ref-kept` (a ref no log entry names is kept forever).
 
 ## Unverified
 

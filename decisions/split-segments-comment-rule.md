@@ -174,24 +174,12 @@ not a defect. `cd -` returns the shell to its PREVIOUS directory. This
 guard has no way to know that directory. Reading no target, and falling
 through to the shell's own cwd, is the fail-open answer, not a wrong one.
 
+A future spelling this reader accepts, but real git or the outer shell rejects, is the same class of defect. It belongs here the same way, MEASURED against the real binary first.
+
 ## Holes, named
 
-- `_run_dir`'s token reader still cannot see everything a real shell can.
-  `split_segments` does not model `$'...'` ANSI-C quoting. It does not model
-  `$(...)` or backtick command substitution. It also cannot see a `cd`
-  whose target only exists after variable expansion: `cd "$DIR"` resolves
-  to the literal string `$DIR`, not the directory it would expand to at
-  runtime. A `cd` hidden inside one of those forms is invisible to this
-  reader, the same way it was invisible to the old regex. The direction is
-  fail-open: the hidden `cd` is skipped, not misread as a literal path.
-  This is unmeasured against banchi's own gaps in the same areas.
-  `shell_parse.py`'s own docstring does not claim to close them either.
-- The two bypasses above were MEASURED, in review, against real fixtures.
-  They are not hypotheticals like the gaps just named. Both are fixed. Both
-  are pinned end to end as of this update. A future spelling this reader
-  accepts, but real git or the outer shell rejects, is the same class of
-  defect. It belongs here the same way, MEASURED against the real binary
-  first.
-- The comment rule itself stays unmeasured against every quoting shape a
-  real shell accepts, as recorded above before this update. This fix
-  changes nothing about that pre-existing gap.
+Debts: `split-reader-misses-cd-forms` (the token reader misses some cd forms). `split-comment-shapes-unmeasured` (the comment rule is unmeasured on quoting shapes).
+
+Kind: build
+Plan: decisions/split-segments-comment-rule.md#the-predicate (all)
+Home: hooks/guard.py

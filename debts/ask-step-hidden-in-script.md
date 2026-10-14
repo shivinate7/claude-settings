@@ -1,0 +1,6 @@
+# An ask step hidden in a substitution or subshell is not asked
+
+- **What.** The guard does not see a settings write of the subagent model cap in some shapes. In a command substitution (`echo "$(<write>)"`), backticks or an unspaced subshell (`(<write>)`), the write is allowed with no ask, alone or chained. A forced push inside `bash -c` is allowed too: the force-push rule does not read the script. Measured 2026-10-14 by live probes. A chain inside a script that another interpreter runs (`bash -c`, `bash -o pipefail -c`, `cmd /c`, `pwsh -Command`, `iex`, `env -S`, `eval`) now denies. A spaced subshell `( <write> )` asks alone and denies chained. A flag cluster that ends in `o`, as in `bash -euo pipefail -c`, is not read, so a chain in that script asks and does not deny.
+- **Where.** `count_steps` and the ask-step rules in `hooks/guard.py` read a nested script through `nested_script` in `hooks/guard_core.py`. They read no substitution, backtick or unspaced subshell body. The force-push rule in `hooks/guard.py` reads no `bash -c` script.
+- **Decision.** `ask-steps-run-alone`, a step that asks the owner runs alone.
+- **Retire.** The guard reads the steps inside a command substitution, backticks and an unspaced subshell, and the force-push rule reads a `bash -c` script. Tests show each shape asks when alone and denies when chained.

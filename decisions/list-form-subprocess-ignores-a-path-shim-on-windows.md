@@ -65,8 +65,7 @@ still needs it.
 
 ## Holes, named
 
-- `janitor/test_install_schtasks.py` was not wired into any CI job before this change. Its
-  skip has never run on Windows CI. It is proven only on this machine, by hand.
-- This entry does not audit every blind-command fixture in the repository for the same gap.
-  `janitor/test_sweep.py`'s own `make_blind_git` may carry the identical assumption. That
-  audit is not part of this change.
+Debts: `schtasks-test-not-in-ci` (`janitor/test_install_schtasks.py` is not in any CI job, so its skip never runs on Windows CI), `blind-git-fixtures-unaudited` (other blind-command fixtures are not audited for the same gap).
+
+Kind: process
+Home: hooks/test_guard.py

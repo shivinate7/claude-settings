@@ -91,24 +91,7 @@ instead, which is the only half of the conflict this repository controls.
 
 ## Holes, named
 
-- An unknown stash word is judged on the tree side only. A future action that takes a
-  stack entry would pass over a clean tree, even with another session's entry on the
-  stack. Debt: `unknown-stash-word-tree-only`.
-- `git stash create` writes no stack entry and changes no tree, and it falls on
-  the stack side. It is refused over a non-empty stack. This is unmeasured
-  against real use, and it is a known false refusal.
-- An empty stack still passes every arm. A session that pushes an entry between
-  the guard's read and the command's run is not covered.
-- `git stash -a` and `git stash --all` read as a push over an ignored-only tree, and
-  that tree reads as empty. `_tree_subject` in `hooks/guard_shared_tree.py` reads the
-  tree without ignored files, so the push passes. Git stashes the ignored files.
-  Debt: `stash-all-ignored-tree-passes`.
-- `git stash -h` and `git stash --help` are read as a push, so a dirty tree refuses
-  them. Git prints help and changes nothing, so the refusal is a false alarm. The read
-  is in `stash_action`. Debt: `stash-help-flag-refused-as-push`.
-- The comment on the import and export rows in `hooks/test_guard.py` says `import` and
-  `export` are not git subcommands. Git 2.55 lists both in `git stash -h`. Comment
-  only. Debt: `stash-export-comment-stale`.
+Debts: `unknown-stash-word-tree-only` (an unknown stash word is judged on the tree side only). `stash-create-false-refusal` (create is denied over a non-empty stack). `stash-read-to-run-race` (a stack entry pushed after the read is missed). `stash-all-ignored-tree-passes` (stash -a passes a tree with ignored files). `stash-help-flag-refused-as-push` (stash -h and --help are refused as a push). `stash-export-comment-stale` (a test comment is stale).
 
 ## Build plan
 
