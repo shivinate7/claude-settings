@@ -28,6 +28,9 @@ def added():
 
 
 args = sys.argv[1:]
+if args.count("--dir") > 1:  # a second --dir would stay in args and be read as file names
+    print("check_record_slugs: FAIL: --dir given more than once")
+    sys.exit(1)
 if "--dir" in args:  # the records folder, for a repo that keeps its records elsewhere
     i = args.index("--dir")
     given = args[i + 1] if i + 1 < len(args) else ""
@@ -47,8 +50,8 @@ if "--dir" in args:  # the records folder, for a repo that keeps its records els
             print("check_record_slugs: FAIL: records folder '%s' is not a folder under %s" % (given, ROOT))
             sys.exit(1)
 files = args or added()
-bad = [f for f in files if f.startswith(DIRS) and f.endswith(".md")
-       and len(os.path.basename(f)[:-3]) > MAX]
+bad = [f for f in files if f.replace("\\", "/").startswith(DIRS) and f.endswith(".md")
+       and len(os.path.basename(f.replace("\\", "/"))[:-3]) > MAX]
 for f in bad:
     print("check_record_slugs: FAIL: slug over %d characters: %s" % (MAX, f))
 sys.exit(1 if bad else 0)

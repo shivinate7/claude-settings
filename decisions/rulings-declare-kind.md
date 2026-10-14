@@ -93,6 +93,8 @@ the lint cannot tell the two apart.
   `/` in either.
 - `lint/check_record_slugs.py` reads `decisions/`, `deferred/` and `debts/` by default, and takes
   `--dir` for one other records folder, as this lint does. No workflow step passes `--dir` yet.
+  The guard reads the same `DIRS`, so a message that cites a `debts/` record by path is refused
+  by cite-by-id (`git-cite-by-id`). That is intended.
 
 Kind: process
 Home: lint/check_ruling_kind.py
