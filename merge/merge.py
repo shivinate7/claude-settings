@@ -356,12 +356,18 @@ class GhLock(Lock):
         self.until = self.now() + ttl
         return sha
 
+    @staticmethod
+    def gone(out):
+        """The ref is not there: a delete that finds this has nothing left to do (a retry after a lost reply lands here)."""
+        return "404" in out or "Not Found" in out or "does not exist" in out
+
     def delete(self, b, token):
-        return self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/refs/merge-lock/{b}")
+        c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/refs/merge-lock/{b}")
+        return (0, out) if c and self.gone(out) and not is_net(c, out) else (c, out)
 
     def unlock(self, b):
         c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/refs/merge-lock/{b}")
-        if c and "404" not in out and "Not Found" not in out and "does not exist" not in out:
+        if c and not self.gone(out):
             raise Stop("unlock failed: " + out)
 
 # ------------------------------------------------------------------ the GitHub half (the seam)
