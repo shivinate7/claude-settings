@@ -20,6 +20,9 @@
   runs finish.
 - Step names do not change: `lint/rule_audit.py` reads them.
 
+Kind: process
+Home: .github/workflows/gates.yml
+
 ## Accepted risk
 
 A bug in an OS-independent suite that only shows on macOS or Windows is no longer
