@@ -162,6 +162,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 
 # The shared code lives in guard_core.py, and the rule families in guard_<family>.py, beside this
@@ -1995,6 +1996,34 @@ def write_targets(tool_input: dict) -> list:
             if isinstance((v := tool_input.get(k)), str) and v]
 
 
+DEADLINE_REASON = "guard-deadline: command too long for the guard to judge; split it"
+
+
+def _deadline_s() -> float:
+    try:
+        return float(os.environ.get("GUARD_DEADLINE_S") or 15)   # under the 20 s hook timeout
+    except ValueError:
+        return 15.0
+
+
+def _deadline_hit(payload) -> None:
+    """The judge missed its deadline. A hook killed at its own timeout fails open, so the guard
+    denies first, from a timer thread: it fires whichever call is slow (a second quote reading, a
+    per-word path read), and no check between segments can be skipped. A SubagentStop has no call
+    to refuse and a block there could trap the agent, so it passes, as the guard-crash path does."""
+    try:
+        record(str(payload.get("tool_name", "")), "deny", "guard-deadline", "")
+    except Exception:
+        pass
+    if payload.get("hook_event_name") != "SubagentStop":
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse", "permissionDecision": "deny",
+            "permissionDecisionReason": DEADLINE_REASON}}), flush=True)
+        print(DEADLINE_REASON, file=sys.stderr, flush=True)
+        os._exit(2)
+    os._exit(0)
+
+
 def main() -> None:
     _force_utf8_streams()
     try:
@@ -2007,15 +2036,21 @@ def main() -> None:
         guard_core.set_log_session(payload.get("session_id"))  # the last column of every log line
     except Exception:
         pass  # a guard_core without the setter still judges: its line has no session cell (unknown session)
+    watchdog = threading.Timer(_deadline_s(), _deadline_hit, (payload,))
+    watchdog.daemon = True
+    watchdog.start()
     try:
         judge(payload)
     except SystemExit:
+        watchdog.cancel()
         raise
     except Exception as exc:
         # Fail open, but never silently: a crash that hides a rule must show in the log.
         record(str(payload.get("tool_name", "")), "crash", "guard-crash",
                cap_safe(type(exc).__name__ + ": " + str(exc), 200))
+        watchdog.cancel()
         sys.exit(0)  # fail open on a guard defect
+    watchdog.cancel()
     sys.exit(0)
 
 
