@@ -210,8 +210,14 @@ async function shadow($, stop) {
   let notices = [];
   try {
     const out = await judge($, stop, "shadow");
-    // Each notice gets its own log line, before END, so the END cut at MAX_LINE never drops one.
-    for (const n of out.notices) await log($, `NOTICE ${stop.session_id} | NOTICE: ${n}`);
+    // Each notice goes on its own log lines, before END, so the END cut at MAX_LINE never drops one.
+    // A notice longer than one line is split over several lines with the same prefix: no text is lost.
+    const prefix = `NOTICE ${stop.session_id} | NOTICE: `;
+    const room = Math.max(MAX_LINE - TIME_LEN - 1 - prefix.length, 100);
+    for (const n of out.notices) {
+      const text = n.replace(/\s+/g, " ");
+      for (let i = 0; i === 0 || i < text.length; i += room) await log($, prefix + text.slice(i, i + room));
+    }
     line = `END ${stop.session_id} | ${out.trace.join(" | ")} | ${out.result}`;
     shown = out.shown;
     notices = out.notices;
@@ -239,6 +245,7 @@ async function toast($, stop, text) {
 
 const MAX_LOG_LINES = 500;
 const MAX_LINE = 2000;
+const TIME_LEN = 24; // length of an ISO timestamp, the start of each log line
 const LOG_WAIT_MS = 2000;
 const STOP_WAIT_MS = 500;
 const MODEL_MS = 50000;
@@ -283,7 +290,8 @@ function log($, line) {
       } catch {
         old = [];
       }
-      const next = `${new Date().toISOString()} ${line}`.slice(0, MAX_LINE);
+      // Whitespace is folded, as guard_core.log_cut does, so no text can forge a second log line.
+      const next = `${new Date().toISOString()} ${line.replace(/\s+/g, " ")}`.slice(0, MAX_LINE);
       await $.fs.write(file, [...old.slice(-(MAX_LOG_LINES - 1)), next].join("\n") + "\n");
     } catch {
       // the log never fails the Stop

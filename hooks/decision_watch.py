@@ -1150,7 +1150,13 @@ def collect_unread(stamp):
     try:
         # The mod runs this script with CLAUDE_CONFIG_DIR set to its own state folder, and hands
         # the real config folder in DW_REAL_CONFIG_DIR. guard.log lives in the real one.
-        path = os.path.join(os.environ.get("DW_REAL_CONFIG_DIR") or guard.config_dir(), "guard.log")
+        real = os.environ.get("DW_REAL_CONFIG_DIR")
+        if not real:
+            real = guard.config_dir()
+            if os.path.basename(real).startswith("decision-watch-"):
+                print("decision_watch: DW_REAL_CONFIG_DIR is not set under the mod, so unread-subject "
+                      "notices read guard.log from the mod state folder " + real, file=sys.stderr)
+        path = os.path.join(real, "guard.log")
     except Exception:
         return []
     if not os.path.exists(path):
