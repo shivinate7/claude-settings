@@ -250,9 +250,16 @@ def owner_messages(path):
 FENCE_TOKEN = re.compile(r"<{3,}(?=BEGIN|END)")  # any run of 3+ "<" before BEGIN or END
 
 
+def _defang(s, one_line=False):
+    """`s` with each fence token defanged. A label (one_line) also loses its line breaks and each
+    run of 3+ ">", so a label set by a relay sender cannot end its BEGIN line and forge a block."""
+    s = FENCE_TOKEN.sub("<<", s)
+    return re.sub(r">{3,}", ">>", " ".join(s.split())) if one_line else s
+
+
 def _block(label, text):
-    """One fenced block. A fence token inside the text is defanged, so the text cannot close its own fence."""
-    return "<<<BEGIN %s>>>\n%s\n<<<END>>>" % (label, FENCE_TOKEN.sub("<<", text))
+    """One fenced block. Fence tokens in the label and the text are defanged, so neither can close its own fence."""
+    return "<<<BEGIN %s>>>\n%s\n<<<END>>>" % (_defang(label, one_line=True), _defang(text))
 
 
 def span_text(entries, budget=SPAN_BUDGET):

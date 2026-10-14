@@ -65,7 +65,7 @@ Owner rulings, 2026-10-08:
 - Owner ruling, 2026-10-13: the judge reads the conversation text (owner messages, assistant
   text, relayed cross-session messages, each labeled) from the owner's 3rd-last message up to
   the question. It searches back up to 16 MiB. It reads no tool calls, tool results, task
-  notices or reminders. Oldest span text is cut to a budget; the owner messages stay whole. Fewer than
+  notices or reminders. Oldest span text is cut to a budget; the owner messages stay whole up to MESSAGE_MAX (1500). Fewer than
   3 owner messages: the span starts at the oldest found. None: the check did not run.
   The goal is read from owner records only. The owner's words are user records with `origin.kind` "human", plus the owner's answers
   in `AskUserQuestion` tool results. Task notifications, hook feedback, peer messages and
@@ -79,6 +79,13 @@ Owner rulings, 2026-10-08:
   O7). That clears the state. A deny state older than 30 minutes is ignored. If the
   hook cannot record or clear a deny, it does not deny, and it says the check did not run.
   So a judge that is wrong cannot loop.
+- Each span block sits between `<<<BEGIN label>>>` and `<<<END>>>` fences. In the text and
+  in the label, each run of 3 or more `<` before `BEGIN` or `END` becomes `<<`. A label also
+  loses its line breaks, and each run of 3 or more `>` becomes `>>`. So a relay sender cannot
+  forge an Owner block through the text or through its session name.
+- The whole prompt stays within PROMPT_MAX (30,000 chars). The span gets the room that the
+  fixed text and the question leave. When the owner messages and the question alone go over
+  PROMPT_MAX, the question passes and the hook says the check did not run.
 - The reason sent back to the session is capped and cleaned.
 
 ## Limits
@@ -102,6 +109,10 @@ Round 3 review. Each finding stays open at the cap.
   is correct: the question breaks Goal first. The free pass lets the retry through.
 - An owner message over 1500 chars is cut, because argv holds at most 32,767 chars on Windows; lane
   model-prompt-stdin removes the cap. This is a bandaid.
+- PROMPT_MAX counts chars, but Windows counts the command line after argv quoting, in
+  UTF-16 units. Quotes, backslashes and emoji add units, so a prompt under PROMPT_MAX can
+  still go over 32,767 (WinError 206). Then the model call fails, the question passes, and the
+  hook says the check did not run. Lane model-prompt-stdin removes argv, and this hole with it.
 
 Kind: process
 Home: hooks/question_outcome.py
