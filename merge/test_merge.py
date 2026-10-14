@@ -2656,7 +2656,7 @@ class GhReleaseReports(unittest.TestCase):
             return 1, "unhandled"
         patcher = unittest.mock.patch.object(merge.GhLock, "api", api)
         patcher.start(); self.addCleanup(patcher.stop)
-        return merge.GhLock(now=lambda: 1000.0), calls
+        return merge.GhLock(now=lambda: 1000.0, pause=lambda s: None), calls  # a retry pause is a no-op: a test never sleeps
 
     def test_delete_failure_is_reported(self):
         lock, _ = self.lock_with("tok", delete=(1, "HTTP 500 boom"))
@@ -2686,6 +2686,11 @@ class NetErrorLines(unittest.TestCase):
 
     def test_a_json_body_with_gh_error_line_after_it_is_a_network_error(self):
         self.assertTrue(merge.is_net(1, '{"message":"Server Error"}gh: Server Error (HTTP 502)'))
+
+    def test_the_jq_html_body_parse_error_line_is_a_network_error(self):
+        # `gh api --jq` on a 5xx HTML gateway page prints only this parse error. A title that quotes it is refusal text.
+        self.assertTrue(merge.is_net(1, "invalid character '<' looking for beginning of value"))
+        self.assertFalse(merge.is_net(1, 'GraphQL: Pull Request is not mergeable: #7 "invalid character \'<\' looking for beginning of value"'))
 
     def test_a_json_check_list_is_never_a_network_error(self):
         # gh's JSON answer names checks: a check named "build: HTTP 500 guard" is a red check, not a network error
