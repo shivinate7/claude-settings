@@ -8,7 +8,8 @@
   `lint/check_record_slugs.py` is the only lint with this shape. `harness-scope.sh`
   fails safe by running the harness. The other lints exit 1 on a failed read.
 - OS-independent suites and pure lints run on ubuntu only: rule audit
-  (suite and lint), record slugs, landed dirs, agent models, STE lints, zizmor.
+  (suite and lint), record slugs, mod version bumps (a changed plugin folder must raise its
+  plugin.json version, else `claude plugin update` keeps the old copy), landed dirs, agent models, STE lints, zizmor.
 - The ruling census suite stays on every OS: it tests macOS `/var` symlinks and
   Windows backslash and `normcase` paths.
 - Suites that touch paths, processes, shells, launchd, schtasks, symlinks or encoding
