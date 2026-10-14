@@ -1242,6 +1242,48 @@ def case_same_message_close_keeps_the_old_controls():
           and captured_texts(cfg, sid) == [SAME_MSG_NOTE, quoted], captured_texts(cfg, sid))
 
 
+def case_close_words_count_only_as_a_last_line():
+    """`fb done` closes only as the last line of a message. Inside a fence, in inline backticks, or
+    on the same line as other text, it does not close (decision owner-feedback-inbox, the backtick
+    hole; orchestrator pin: `fb: X fb done` does not close)."""
+    for sid, text in (("fence-block", "fb: X\n```\nfb done\n```"),
+                      ("fence-inline", "fb: X\n`fb done`"),
+                      ("one-line", "fb: X fb done")):
+        cfg = new_cfg()
+        p = capture(cfg, sid, text, now=at(0))
+        check("no close, opener %r: hook ran" % sid, ran_central(p), p.desc())
+        check("no close, opener %r: capture stays open, whole message saved verbatim" % sid,
+              os.path.exists(marker_of(cfg, sid)) and captured_texts(cfg, sid) == [text],
+              captured_texts(cfg, sid))
+    for sid, text in (("open-fence-block", "X\n```\nfb done\n```"),
+                      ("open-fence-inline", "X\n`fb done`"),
+                      ("open-one-line", "X fb done")):
+        cfg = new_cfg()
+        capture(cfg, sid, "fb: open the burst", now=at(0))
+        p = capture(cfg, sid, text, now=at(1))
+        check("no close, open %r: hook ran" % sid, ran_central(p), p.desc())
+        check("no close, open %r: capture stays open, message saved verbatim" % sid,
+              os.path.exists(marker_of(cfg, sid))
+              and captured_texts(cfg, sid) == ["fb: open the burst", text],
+              captured_texts(cfg, sid))
+
+
+def case_open_last_line_fb_done_starts_no_judge():
+    """With capture open, a message `X` plus a last line `fb done` saves X, closes capture, and
+    starts no judge child. Guards the `and not closing` clause in local_time.py capture()."""
+    cfg, sid = new_cfg(), "open-close-no-judge"
+    capture(cfg, sid, "fb: open the burst", now=at(0))
+    before = calls_so_far(cfg)
+    p = capture(cfg, sid, "X\nfb done", now=at(1))
+    check("open close: hook ran", ran_central(p), p.desc())
+    texts = captured_texts(cfg, sid)
+    check("open close: X is saved as the note, and capture closes",
+          not os.path.exists(marker_of(cfg, sid)) and len(texts) == 2
+          and texts[0] == "fb: open the burst" and texts[1].split("\n")[0] == "X", texts)
+    check("open close: the closing message starts no judge child (no judge call)",
+          no_judge_call(cfg, before, p), p.desc())
+
+
 def case_notices_are_never_captured():
     for label, notice in (("task-notification", NOTICE_TASK), ("system-reminder", NOTICE_REMINDER)):
         cfg, sid = new_cfg(), "notice-" + label
@@ -1438,6 +1480,8 @@ CASES = (
     case_fb_done_prefix_opens_nothing_while_closed,
     case_fb_done_line_at_the_end_closes_in_the_same_message,
     case_same_message_close_keeps_the_old_controls,
+    case_close_words_count_only_as_a_last_line,
+    case_open_last_line_fb_done_starts_no_judge,
     case_notices_are_never_captured,
     case_quiet_gap_closes_capture,
     case_quiet_gap_ignores_notices,
