@@ -15,10 +15,17 @@ The root is the repo root, or the folder in the environment variable HOOK_CATALO
 Sources, all read from the root:
   settings.json `hooks`   one row per registration (event, matcher, `if`, command or prompt).
   a command's script      the first paragraph of a .py docstring, or the leading comment block
-                          of a .sh script, after an optional shebang.
+                          of a .sh script, after an optional shebang. A script that settings.json
+                          runs in more than one way has a "Modes:" paragraph: one "- <key>: <text>"
+                          line per mode, keyed by the flag the command passes after "$g", or by the
+                          event when it passes none. The row takes the line for its flag, else for
+                          its event. With no "Modes:" paragraph the row takes the first paragraph.
+                          A "Modes:" paragraph with no line for a registration is a problem.
   an inline command       a command that names no script has no docstring. Its text is the
-                          value in lint/hook_catalog_inline.json under its registration label
-                          (event, then " matcher=<m>" and " if=<c>" when set). The one home.
+                          value in lint/hook_catalog_inline.json under its key: the registration
+                          label (event, then " matcher=<m>" and " if=<c>" when set), then " #" and
+                          the first 8 hex digits of the SHA-256 of the command text. A changed
+                          command fails the check until its summary is reviewed and re-keyed.
   a prompt hook           the key is its first sentence. The text is the rest of the prompt,
                           up to the clause that blocks only on a clear breach.
   enabled repo mods       `enabledPlugins` keys `<name>@claude-settings` set true. The text is
@@ -34,6 +41,7 @@ run while a problem stands.
 """
 import argparse
 import ast
+import hashlib
 import json
 import os
 import re
@@ -50,6 +58,8 @@ INLINE = "lint/hook_catalog_inline.json"
 REGEN = "python3 lint/hook_catalog.py"
 COLUMNS = ["Key", "Kind", "Event", "Matcher", "If", "Model", "Effort", "What it does"]
 CMD_PATH = re.compile(r"\$\{CLAUDE_CONFIG_DIR:-\$HOME/\.claude\}/([\w./-]+\.(?:py|sh|mjs|js))")
+CMD_FLAG = re.compile(r'"\$g"[ \t]+(--[\w-]+)')
+MODE_LINE = re.compile(r"-\s+(\S+?):\s+(.*)$")
 TABLE_PATH = re.compile(r"`([\w./-]+\.(?:py|sh|mjs|js))`")
 BLOCK_CLAUSE = "Block only on a clear breach"
 NO_MODEL = ("no model", "n/a")
@@ -104,8 +114,23 @@ def split_cells(line):
 
 
 def py_doc(text):
-    """The first paragraph of the module docstring. Parsed with ast, never scanned."""
-    return flat((ast.get_docstring(ast.parse(text)) or "").strip().split("\n\n")[0])
+    """(first paragraph, modes) of the module docstring. Parsed with ast, never scanned.
+    modes is None with no "Modes:" paragraph, else {flag or event: text}."""
+    paras = (ast.get_docstring(ast.parse(text)) or "").strip().split("\n\n")
+    for para in paras:
+        lines = para.strip().split("\n")
+        if lines[0].strip() != "Modes:":
+            continue
+        modes, key = {}, None
+        for line in lines[1:]:
+            found = MODE_LINE.match(line.strip())
+            if found:
+                key = found.group(1)
+                modes[key] = found.group(2)
+            elif key:
+                modes[key] += " " + line.strip()
+        return flat(paras[0]), {k: flat(v) for k, v in modes.items()}
+    return flat(paras[0]), None
 
 
 def sh_doc(text):
@@ -240,7 +265,7 @@ def registrations(settings):
 
 
 def inline_summaries():
-    """{registration label: one-line summary} for the hooks whose command names no script."""
+    """{inline_key: one-line summary} for the hooks whose command names no script."""
     if not has_file(INLINE):
         return {}  # no inline command needs it: a command that has none reports its own problem
     try:
@@ -277,7 +302,7 @@ Run `%(regen)s` to write the page again. CI runs `%(regen)s --check`. The check 
 
 Where each text comes from:
 
-- A hook runs a script. Its text is the first paragraph of the script docstring, or the leading comment block of a shell script. A hook whose command is inline shell has no script, so its text is one line in `lint/hook_catalog_inline.json`, under its event and matcher.
+- A hook runs a script. Its text is the first paragraph of the script docstring, or the leading comment block of a shell script. A script with more than one mode has a `Modes:` paragraph in its docstring. Each row takes the line for its flag or its event. A hook whose command is inline shell has no script, so its text is one line in `lint/hook_catalog_inline.json`. The key is the event and matcher, then a short hash of the command. A changed command fails the check until a person reviews its summary.
 - A judge is a prompt hook that a model answers. Its key is the first sentence of the prompt. Its text is the rest of the prompt, up to the standard clause that blocks only on a clear breach.
 - A mod is an enabled mod from this repo. Its text is the intro of its `README.md`. A mod with no README takes the `description` in its `plugin.json`, then the text of its `SOURCE.md`.
 - A skill is a folder under `skills/`. Its text is the `description` in its `SKILL.md` frontmatter.
@@ -301,6 +326,11 @@ def label_of(event, matcher, cond):
     return event + ("" if matcher == "-" else " matcher=" + matcher) + ("" if cond == "-" else " if=" + cond)
 
 
+def inline_key(label, command):
+    """The sidecar key of an inline command: its label, then " #" and a short hash of its text."""
+    return "%s #%s" % (label, hashlib.sha256(command.encode("utf-8")).hexdigest()[:8])
+
+
 def render():
     """(page text, problems). A problem is one line that names its offender."""
     settings = load_settings()
@@ -309,23 +339,38 @@ def render():
     used = set()
     problems, hook_rows, docs = [], [], {}
 
-    def script_row(path, label):
+    def script_doc(path, label):
+        """(first paragraph, modes) of a script, or ("", None) after a problem. Read once per path."""
         if path not in docs:
             text = read(path)
             ext = path.rsplit(".", 1)[1]
+            docs[path] = ("", None)
             try:
-                docs[path] = py_doc(text) if ext == "py" else sh_doc(text) if ext == "sh" else None
+                found = py_doc(text) if ext == "py" else (sh_doc(text), None) if ext == "sh" else None
             except SyntaxError as err:
                 problems.append("%s: cannot parse %s (%s)" % (label, path, err.msg))
-                docs[path] = ""
+                return docs[path]
+            if found is None:
+                problems.append("%s: %s is a .%s file, and only .py and .sh have a docstring reader" % (label, path, ext))
+            elif not found[0]:
+                problems.append("%s: %s has no docstring (a .py docstring, or a .sh comment block after the shebang)" % (label, path))
             else:
-                if docs[path] is None:
-                    problems.append("%s: %s is a .%s file, and only .py and .sh have a docstring reader" % (label, path, ext))
-                elif not docs[path]:
-                    problems.append("%s: %s has no docstring (a .py docstring, or a .sh comment block after the shebang)" % (label, path))
-                elif ext == "py" and path not in models and calls_invoke_model(text):
+                docs[path] = found
+                if ext == "py" and path not in models and calls_invoke_model(text):
                     problems.append("%s: %s calls invoke_model but has no model-table row" % (label, path))
         return docs[path]
+
+    def script_row(path, label, event, command):
+        """The text of a script row: its mode line when the docstring has modes, else the first paragraph."""
+        first, modes = script_doc(path, label)
+        if not first or modes is None:
+            return first
+        flag = CMD_FLAG.search(command)
+        mode = flag.group(1) if flag else event
+        if mode not in modes:
+            problems.append("%s: %s has a Modes: paragraph with no line for %s" % (label, path, mode))
+            return ""
+        return modes[mode]
 
     for event, matcher, cond, hook in registrations(settings):
         label = label_of(event, matcher, cond)
@@ -333,17 +378,17 @@ def render():
         if kind == "command":
             found = CMD_PATH.search(hook.get("command", ""))
             if not found:
-                text = inline.get(label)
-                if label in used:
-                    problems.append("%s: two inline commands share this label, so %s cannot tell them apart" % (label, INLINE))
-                elif not isinstance(text, str) or not text.strip():
-                    problems.append("%s: inline command has no summary in %s under this label" % (label, INLINE))
+                key = inline_key(label, hook.get("command", ""))
+                text = inline.get(key)
+                if not isinstance(text, str) or not text.strip():
+                    problems.append("%s: inline command has no summary in %s under the key %r. Review the "
+                                    "summary against the command, then key it so" % (label, INLINE, key))
                 else:
                     hook_rows.append([key_cell("inline: " + label), "hook", event, cell(matcher), cell(cond), *NO_MODEL, cell(text)])
-                used.add(label)
+                used.add(key)
                 continue
             path = found.group(1)
-            what = script_row(path, label)
+            what = script_row(path, label, event, hook.get("command", ""))
             if what:
                 model, effort = models.get(path, NO_MODEL)
                 hook_rows.append([key_cell(path), "hook", event, cell(matcher), cell(cond), model, effort, cell(what)])

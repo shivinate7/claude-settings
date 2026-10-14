@@ -6,7 +6,7 @@ Run `python3 lint/hook_catalog.py` to write the page again. CI runs `python3 lin
 
 Where each text comes from:
 
-- A hook runs a script. Its text is the first paragraph of the script docstring, or the leading comment block of a shell script. A hook whose command is inline shell has no script, so its text is one line in `lint/hook_catalog_inline.json`, under its event and matcher.
+- A hook runs a script. Its text is the first paragraph of the script docstring, or the leading comment block of a shell script. A script with more than one mode has a `Modes:` paragraph in its docstring. Each row takes the line for its flag or its event. A hook whose command is inline shell has no script, so its text is one line in `lint/hook_catalog_inline.json`. The key is the event and matcher, then a short hash of the command. A changed command fails the check until a person reviews its summary.
 - A judge is a prompt hook that a model answers. Its key is the first sentence of the prompt. Its text is the rest of the prompt, up to the standard clause that blocks only on a clear breach.
 - A mod is an enabled mod from this repo. Its text is the intro of its `README.md`. A mod with no README takes the `description` in its `plugin.json`, then the text of its `SOURCE.md`.
 - A skill is a folder under `skills/`. Its text is the `description` in its `SKILL.md` frontmatter.
@@ -18,26 +18,26 @@ Model and effort come from the model table (decision `subagent-model-cap`, the m
 | Key | Kind | Event | Matcher | If | Model | Effort | What it does |
 |---|---|---|---|---|---|---|---|
 | `hooks/decision_watch.py` | hook | Stop | - | - | haiku | xhigh | Claude Code hook: decision/gate/settings watch (Stop). Replaces the `type: agent` guardrail. |
-| `hooks/stall_watch.py` | hook | Stop | - | - | no model | n/a | Stall watch for background Bash commands. Standard library only. |
+| `hooks/stall_watch.py` | hook | Stop | - | - | no model | n/a | At Stop, lists each open background job whose output file did not change for the quiet age. |
 | `lint/report_gate.py` | hook | Stop | - | - | no model | n/a | Claude Code hook: report-shape gate. |
 | `lint/md_sweep.py` | hook | Stop | - | - | no model | n/a | Claude Code hook: markdown sweep (Stop). |
 | `hooks/config_watch.py` | hook | Stop | - | - | no model | n/a | The PostToolUse and Stop watch on the subagent model cap. |
 | `hooks/ruling_home.py` | hook | Stop | - | - | no model | n/a | Claude Code hook: ruling-home check (Stop). |
-| `hooks/precompact_handoff.py` | hook | Stop | - | - | no model | n/a | Claude Code hook: get the session's handoff ready before compaction. |
+| `hooks/precompact_handoff.py` | hook | Stop | - | - | no model | n/a | At Stop, blocks once each time the context size passes a new checkpoint, and tells the session to rewrite its handoff. Silent on stop_hook_active or an error. |
 | `hooks/reply_judge.py` | hook | Stop | - | - | haiku | xhigh | Claude Code hook: reply judge (Stop). Judges the final reply against three style rules. |
 | `hooks/feedback_gate.py` | hook | Stop | - | - | no model | n/a | Claude Code hook: feedback inbox gate (Stop). Decision owner-feedback-inbox. |
-| `hooks/reread_check.py` | hook | Stop | - | - | no model | n/a | Claude Code hook: after compaction, check the session re-read its handoff. |
-| `hooks/precompact_handoff.py` | hook | PreCompact | - | - | no model | n/a | Claude Code hook: get the session's handoff ready before compaction. |
-| `hooks/precompact_handoff.py` | hook | SessionStart | compact | - | no model | n/a | Claude Code hook: get the session's handoff ready before compaction. |
-| `hooks/precompact_handoff.py` | hook | SessionStart | clear\|fork | - | no model | n/a | Claude Code hook: get the session's handoff ready before compaction. |
+| `hooks/reread_check.py` | hook | Stop | - | - | no model | n/a | At Stop, while the session's flag that its handoff is not read is set and the handoff exists, blocks once per turn and names the handoff path. |
+| `hooks/precompact_handoff.py` | hook | PreCompact | - | - | no model | n/a | Before compaction, builds a digest of the session's user and assistant text and records the outcome in the session's handoff state. Never blocks compaction. |
+| `hooks/precompact_handoff.py` | hook | SessionStart | compact | - | no model | n/a | At SessionStart after compact, clear or fork, tells the session to rewrite its handoff from the digest. After clear or fork, it also names the handoff of the prior session for the same project. |
+| `hooks/precompact_handoff.py` | hook | SessionStart | clear\|fork | - | no model | n/a | At SessionStart after compact, clear or fork, tells the session to rewrite its handoff from the digest. After clear or fork, it also names the handoff of the prior session for the same project. |
 | `inline: SessionStart matcher=startup\|resume` | hook | SessionStart | startup\|resume | - | no model | n/a | Pulls the claude-settings clone with a fast-forward pull, then runs its install.sh. Does nothing in cloud sessions. A failed pull or install falls through, and the command always exits 0. |
 | `hooks/session_start.sh` | hook | SessionStart | startup\|resume | - | no model | n/a | Prints "checkout `<toplevel>` on `<branch>`, `<n>` dirty files" at session start and resume. Also warns when the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, a freshness check could not run, or the SessionEnd sweep is disarmed or unknown. Silent outside a git tree or when git is missing. Always exits 0, nothing on stderr. |
 | `janitor/session_end_sweep.py` | hook | SessionEnd | - | - | no model | n/a | Claude Code hook: SessionEnd trigger for janitor/sweep.py. |
-| `hooks/precompact_handoff.py` | hook | SessionEnd | clear | - | no model | n/a | Claude Code hook: get the session's handoff ready before compaction. |
+| `hooks/precompact_handoff.py` | hook | SessionEnd | clear | - | no model | n/a | At SessionEnd with reason clear, writes a pointer file that holds the old session id and the project folder, so the next session can find the old handoff. |
 | `janitor/agent_end_reap.py` | hook | SubagentStop | - | - | no model | n/a | Claude Code hook: stop the processes a finished subagent left in its own worktree. |
-| `hooks/guard.py` | hook | SubagentStop | - | - | no model | n/a | The global PreToolUse guard. |
-| `hooks/guard.py` | hook | PreToolUse | Bash\|PowerShell\|Edit\|Write\|MultiEdit\|NotebookEdit\|Agent\|Task\|Workflow\|Skill\|mcp__ccd_session__start_session\|mcp__Claude_Code_iOS_Simulator__control | - | no model | n/a | The global PreToolUse guard. |
-| `hooks/stall_watch.py` | hook | PreToolUse | Bash | - | no model | n/a | Stall watch for background Bash commands. Standard library only. |
+| `hooks/guard.py` | hook | SubagentStop | - | - | no model | n/a | When a builder, test-author or record-writer stops, judges its whole diff against its role, for example a builder that changed a test path. Logs an offence for the reviewer and never blocks the stop. |
+| `hooks/guard.py` | hook | PreToolUse | Bash\|PowerShell\|Edit\|Write\|MultiEdit\|NotebookEdit\|Agent\|Task\|Workflow\|Skill\|mcp__ccd_session__start_session\|mcp__Claude_Code_iOS_Simulator__control | - | no model | n/a | Before each matched tool call, runs the owner's global rules in a fixed order and denies or asks on the first match. Bad input allows the call. |
+| `hooks/stall_watch.py` | hook | PreToolUse | Bash | - | no model | n/a | Before a background Bash command, wraps it so a watcher reports a stall after 300 seconds with no new output. The job keeps running. |
 | `lint/ste_gate.py` | hook | PreToolUse | Write\|Edit\|MultiEdit | - | no model | n/a | Claude Code hook: Simplified Technical English gate. |
 | `Judge this AskUserQuestion call: $ARGUMENTS` | judge | PreToolUse | AskUserQuestion | - | claude-sonnet-5-5 | n/a | Answer {"ok": true} at once for a clarifying question. Judge only a choice between real alternatives that have consequences. Rules: style-option-says-effect (each option says what the user gains and loses), style-question-states-problem (the question states the problem and why it needs the user's word), output-bring-decisions-as-question (a decision is a question with options and a recommendation). |
 | `hooks/question_outcome.py` | hook | PreToolUse | AskUserQuestion | - | haiku | xhigh | PreToolUse hook for AskUserQuestion: each question passes an outcome check first. |
@@ -45,16 +45,16 @@ Model and effort come from the model table (decision `subagent-model-cap`, the m
 | `Judge this edit to a file: $ARGUMENTS` | judge | PreToolUse | Edit | Edit(**/decisions/**) | claude-sonnet-5-5 | n/a | Rule: speak-rewrite-superseded-in-place (superseded text is rewritten in place; no story, no old quote, and no superseded ruling kept beside the new one). A record may state a current fact with its history in one clause; that is not a breach. Rule: rulings-declare-kind (refuse only an edit whose new text deletes a `Kind:`, `Plan:` or `Home:` line, or adds a ruling section with no `Kind:` line in the same text; you see only the changed text, so never refuse for a Kind line you cannot see). |
 | `Judge this edit to a file: $ARGUMENTS` | judge | PreToolUse | Write | Write(**/decisions/**) | claude-sonnet-5-5 | n/a | Rule: speak-rewrite-superseded-in-place (superseded text is rewritten in place; no story, no old quote, and no superseded ruling kept beside the new one). A record may state a current fact with its history in one clause; that is not a breach. Rule: rulings-declare-kind (refuse a decision record that has no `Kind: build` with `Plan: <path>#<slug> (<platform>)` lines, or `Kind: process` with a `Home:` line). |
 | `Judge this SendMessage call: $ARGUMENTS` | judge | PreToolUse | SendMessage | - | claude-sonnet-5-5 | n/a | Answer {"ok": true} at once for a resume, a status message, or an orchestrator instruction. Rule: parallelism-no-mid-task-talk (a lane messages a peer only when the branch must hear something that changes its work). You cannot see the receiver's task, so judge by wording only. |
-| `hooks/sim_boot_record.py` | hook | PreToolUse | Bash\|mcp__Claude_Code_iOS_Simulator__control | - | no model | n/a | Record each simulator a session call booted (decisions/sweep-shuts-down-idle-simulators.md, ruling 1). |
-| `hooks/reread_check.py` | hook | PreToolUse | Read | - | no model | n/a | Claude Code hook: after compaction, check the session re-read its handoff. |
+| `hooks/sim_boot_record.py` | hook | PreToolUse | Bash\|mcp__Claude_Code_iOS_Simulator__control | - | no model | n/a | Before a Bash or simulator call, saves the state of each simulator. |
+| `hooks/reread_check.py` | hook | PreToolUse | Read | - | no model | n/a | Before a Read, clears the session's flag that its handoff is not read, when the file is that handoff. Never denies the read. |
 | `hooks/rm_prompt_answer.py` | hook | PermissionRequest | Bash | - | no model | n/a | PermissionRequest hook on Bash: answer allow for a guarded delete of a bound, safe path. |
 | `hooks/agent_brief.py` | hook | SubagentStart | - | - | no model | n/a | SubagentStart hook: give every spawned agent the standing rules, so briefs stop retyping them. |
-| `hooks/local_time.py` | hook | SubagentStart | - | - | no model | n/a | UserPromptSubmit and SubagentStart hook: tell the session the time in US Central (America/Chicago). On UserPromptSubmit it also captures owner feedback: a prompt that opens with `fb` is saved to the session's inbox file until a prompt of `fb done`. |
-| `hooks/local_time.py` | hook | UserPromptSubmit | - | - | no model | n/a | UserPromptSubmit and SubagentStart hook: tell the session the time in US Central (America/Chicago). On UserPromptSubmit it also captures owner feedback: a prompt that opens with `fb` is saved to the session's inbox file until a prompt of `fb done`. |
+| `hooks/local_time.py` | hook | SubagentStart | - | - | no model | n/a | At SubagentStart, gives the subagent the time in US Central as context. |
+| `hooks/local_time.py` | hook | UserPromptSubmit | - | - | no model | n/a | Tells the session the time in US Central. A prompt that opens with `fb` starts owner feedback capture to the session's inbox file, until `fb done`. |
 | `hooks/config_watch.py` | hook | PostToolUse | Bash\|PowerShell\|Write\|Edit\|MultiEdit\|NotebookEdit | - | no model | n/a | The PostToolUse and Stop watch on the subagent model cap. |
 | `hooks/ci_wake.py` | hook | PostToolUse | Bash\|PowerShell | - | no model | n/a | CI wake-up hook. Standard library only. See decisions/handoff-hooks-wave-2.md, part 3. |
-| `hooks/sim_boot_record.py` | hook | PostToolUse | Bash\|mcp__Claude_Code_iOS_Simulator__control | - | no model | n/a | Record each simulator a session call booted (decisions/sweep-shuts-down-idle-simulators.md, ruling 1). |
-| `hooks/reread_check.py` | hook | PostCompact | - | - | no model | n/a | Claude Code hook: after compaction, check the session re-read its handoff. |
+| `hooks/sim_boot_record.py` | hook | PostToolUse | Bash\|mcp__Claude_Code_iOS_Simulator__control | - | no model | n/a | After a Bash or simulator call, appends each simulator that the call took from Shutdown to Booted to the boot record. Never blocks. |
+| `hooks/reread_check.py` | hook | PostCompact | - | - | no model | n/a | After compaction, sets the session's flag that its handoff is not read. |
 
 ## Mods
 
