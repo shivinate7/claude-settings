@@ -89,19 +89,7 @@ named, checked case is the act.
 
 ## Holes, named
 
-- The fix colocates `guard.py` for `watch` mutants only. It does not audit whether some
-  other mutant, of either target, could crash for a different, still-unseen reason. Such
-  a crash could still read as a false `KILLED` the same way. The required-name field
-  narrows this risk, because a crash's output rarely happens to contain the exact case
-  name a mutation claims to break. A future crash of this shape is more likely to show
-  as `WRONG CAUSE` now. It is not proof against every crash shape.
-- One mutation, "watch: an absent file reads the same as an empty one," needed a new
-  fixture case in `hooks/test_config_watch.py` before it had anything to die on. That
-  case now exists: `a file goes from empty to absent before a lift, so the revert
-  removes it, not empties it`. Building it is a second instance of the same lesson. The
-  first fixture tried for it did not distinguish the mutation either. `load_baseline`
-  recomputes a fresh digest by hand for a stored `None` content, rather than trusting
-  the one that was saved. That makes `digest(None)` unreachable from that angle. The
-  case that actually kills it starts from a REAL empty file, not an absent one, then
-  deletes it. A required name is only as good as the case behind it. A case is only as
-  good as its own trace through the code, never a guess from the mutation's label.
+Debts: `mutant-crash-audit-missing` (mutants other than the watch target are not audited for hidden crashes). The required-name field narrows this risk, but it is not proof against every crash shape.
+
+Kind: process
+Home: hooks/mutate_guard.py

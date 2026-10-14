@@ -58,20 +58,11 @@ cite-by-id rule, for the message, body, file and title flags.
 
 ## Holes, named
 
-- Tag messages are out of scope. A tag is another act.
-- Old history is not checked. Only new acts are judged. The 32 titles already on q_max main
-  stay.
-- cite-by-id does not read a `gh pr merge` subject. This rule does.
-- Lowercase `n20` passes. Four-digit numbers pass.
-- A tilde fence (`~~~`) is not blanked. A session number inside one is denied.
-- Any `N` plus one to three digits, as a whole word, is denied. A part code such as `N12` is
-  refused. This is a false positive, named here and not fixed.
-- Thin scanner tests for heredoc_heads: no test pins a `#` inside a string, a lone apostrophe in a comment, or multi-line quoted text before a header. The code handles them.
-- No mutant covers heredoc_heads or the gh flag value roles.
-- guard_core._split_heredocs reads a quoted or commented `<<X`, or a here-string `<<<word`, as a real heredoc, and strips later lines, so no rule sees them. Example: `cat <<<word`, then a newline, then a commit naming N20, is allowed. This is shared guard code; lane guard-command-position.
-- An unquoted `<<word` in an interpreter-fed heredoc body, such as `x = 1 << y`, or a `case` `)` inside `$(`, shifts the header count.
-- A piped body (`echo ... | gh pr create -F -`) is not read.
-- In gh, `-m` is a milestone or merge flag, never a message. `gh pr create -m N20` is allowed.
+Debts: `cite-by-id-skips-merge-subject` (cite-by-id does not read a `gh pr merge` subject), `lane-slug-lowercase-n-passes` (lowercase `n20` and four-digit numbers pass), `lane-slug-tilde-fence-refused` (a tilde fence does not blank a session number), `lane-slug-part-code-refused` (a part code such as `N12` is refused), `lane-slug-heredoc-untested` (the heredoc header reader has thin tests and no mutant), `guard-split-heredocs-here-string` (a here-string is read as a heredoc), `lane-slug-header-count-shift` (an interpreter body or a `case` shifts the header count), `lane-slug-piped-body-unread` (a piped commit body is not read). `lane-slug-tag-messages-unchecked` (tag messages are out of scope, and a tag is another act). `lane-slug-gh-m-flag-passes` (a session number after gh -m passes the rule).
+
+## Named limits
+
+- Old history is not checked. Only new acts are judged, so the 32 titles on q_max main stay.
 
 ## What reopens it
 

@@ -93,27 +93,7 @@ Same files. Prove on the Mac clone after `git pull` and install.sh.
 
 ## Holes, named
 
-These stay open. Each is low harm, ranked by harm.
-
-- Mid-turn messages: UserPromptSubmit fired for owner messages sent mid-turn in the audit
-  session of 2026-10-13 (the time line showed on each). No test pins it.
-- If the inbox path cannot be built (an import error, or an odd session id), an `fb` message
-  is dropped with one stderr line only.
-- While capture is open, `fb:done` with no space does not close it. The judge or the quiet time
-  ends capture, and the turn-end reminder shows each time.
-- A last `fb done` line after an unclosed code fence closes capture. Debt fb-done-unclosed-fence
-  (an unclosed fence still closes). Also, `fb` and `done` on two last lines close, and no test
-  pins the colon, case, punctuation or CRLF forms. Debt fb-done-forms-unpinned (close forms untested).
-- The judge child checks the marker, then writes the note item and removes the marker. A message
-  captured in that gap can lose its new marker, so capture closes early. Debt
-  fb-judge-marker-race (the judge can close a newer capture).
-- Two processes that append to the inbox at the same instant can lose a line on Windows. Debt
-  fb-inbox-append-race (concurrent appends drop lines).
-- A partial write can leave a fence open. Later blocks then read as one message with no
-  items, and the gate repeats that block. It needs a disk-full failure.
-- An unreadable inbox drops the open ids from the post-compaction note. The Stop gate still
-  names the file.
-- No test covers `fb	done` or `fb - done` while capture is open. The code handles both.
+Debts: in order of harm. `inbox-midturn-prompt-untested` (mid-turn owner messages fire UserPromptSubmit, and no test pins it). `inbox-path-drop-silent` (an `fb` message is dropped with one stderr line). `inbox-done-forms` (backtick and other done forms do not close capture, and no test covers the tab or dash forms). `fb-judge-marker-race` (the judge can close a newer capture). `fb-inbox-append-race` (concurrent appends drop lines). `inbox-partial-write-fence` (a partial write can leave a fence open). `inbox-unreadable-drops-ids` (an unreadable inbox drops open ids from the compaction note). `fb-done-unclosed-fence` (a last `fb done` line after an unclosed fence still closes). `fb-done-forms-unpinned` (the close forms have no test).
 
 Kind: build
 Plan: decisions/owner-feedback-inbox.md#windows (windows)

@@ -56,14 +56,11 @@ and `grep -e foo .env`. File-reading flags, as in `grep -f .env x`, `rg -f .env 
 
 ## Holes, named
 
-- `grep --regex=` style abbreviations of `--regexp`, `--expression` and `--source` are a hole.
-  No case pins them.
-- `ag -f` and `ack -f` now refuse. In those tools `-f` is a boolean, so this is a false alarm.
-- `grep -r --exclude=.env` and `rg -t py .env` are false alarms.
-- A runtime crash in `_env_flat` allows the call.
-- An `awk -v` value holding a glob is cleared.
-- `node --env-file=.env -e 'console.log(process.env)'` prints the file through the runner. The
-  runner allow-list is the limit. Main allowed it before the 2026-10-12 change.
+Debts: `env-grep-long-abbrev-unpinned` (grep --regex= style abbreviations are not pinned), `env-file-rule-false-alarms` (ag -f, ack -f, grep --exclude and rg -t are false refusals), `env-flat-crash-allows` (a crash in `_env_flat` allows the call), `env-node-env-file-prints` (node --env-file with -e prints the file through the runner).
+
+## Named limits
+
+- An `awk -v` value holding a glob is cleared as a search pattern. `hooks/test_guard.py` pins it as an allow.
 
 ## Incident
 

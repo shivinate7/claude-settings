@@ -43,13 +43,8 @@ line, the general line, and exit 0 on junk input. CI steps in `gates`, `gates-ma
 
 ## Holes, named
 
-- The hook's text is a copy of the rules in CLAUDE.md and `agents/*.md`. When a rule changes,
-  change both. The test pins the text, not the source.
-- No matcher: every agent type gets the context.
-- The type match is case-sensitive. `Builder` or `explore` gets the general writer set.
-- Plan and claude-code-guide get the general scope line, which names only reviewer and
-  Explore as never-edit. Their reader line set is right; only the scope text is general.
-- Fail-open: a crashed hook injects nothing. Claude never sees stderr from a hook that exits
-  0, so the `agent_brief:` line shows only with debug logging.
-- Review rounds 1 to 3 found the reader lines, the scope bodies, the builder's mutant carve-out
-  and the plugin prefix. All four are fixed; these holes are what remains.
+Debts: `agent-brief-text-copy-drifts` (the hook text copies the rules, and no check reads the copy), `agent-type-match-case-sensitive` (Builder or explore gets the general writer set), `agent-plan-scope-line-general` (Plan and claude-code-guide get the general scope), `agent-brief-crash-silent` (a crashed hook leaves no visible trace). `agent-brief-no-matcher` (every agent type gets the context, because the hook has no matcher).
+
+Kind: build
+Plan: decisions/agents-get-standing-rules.md#the-ruling (all)
+Home: hooks/agent_brief.py

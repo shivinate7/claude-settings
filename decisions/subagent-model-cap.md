@@ -73,24 +73,14 @@ Owner ruling, 2026-10-13 13:39 CDT: every skill under `skills/` has one row here
 
 A check, `lint/check_skill_model_rows.py`, fails CI when a skill has no row or a row names a skill that does not exist. It runs as two steps in the `gates` job: the check, then its fixture suite.
 
-Holes, named, for the skill rows check:
+## Holes, named
 
-1. Fence indentation is not limited. A line of 4 spaces, then a fence mark, inside a fence closes it. A row inside that fence then counts. This gives a false green. No fix yet. A cheap fix breaks fences nested in lists.
-2. Rows in a second table or an indented block count. Cause: by the ruling, the check reads rows, not table shape. No fix, by ruling.
-3. The check matches the two phrases anywhere on the row line. It does not limit the match to the second cell. No fix known.
-4. An unclosed fence or comment hides every later row. The output says "no row" and does not name the fence. It fails visibly, never silently. No fix known.
-5. A directory named `SKILL.md` counts as a skill. No fix known.
-6. No test covers a tilde line inside a backtick fence. No test covers an unclosed fence or comment at the end of the file. No test covers a lone backtick before a comment opener. Fix: add a test for each.
-7. The unreadable-folder exit 2 test runs only on POSIX. The symlink case did not run on Windows. No fix known.
-8. The gates steps have no step-level `if` and no `!cancelled()`, by design. The `gates` job is always on. A test pins "no if". No fix, by design.
+Debts: `skill-rows-fence-indent` (a 4-space indented fence mark closes a fence). `skill-rows-phrase-any-cell` (the two phrases match any cell). `skill-rows-unclosed-fence-silent` (an unclosed fence hides rows without a name). `skill-rows-dir-named-skill-md` (a directory named SKILL.md counts as a skill). `skill-rows-test-gaps` (three shapes have no test). `skill-rows-posix-only-test` (the exit 2 test is POSIX only). `sendmessage-judge-blind-recvs` (the busy-state layer does not see some receivers). `sendmessage-judge-dup-names` (a name shared by two sessions is read as unseen). `sendmessage-wording-judge-always` (the wording judge runs on every send). `subagent-workflow-model-unasked` (a write that sets the workflow subagent model is not asked).
 
-Holes, named, for the SendMessage state judge (round 2 ruling, orchestrator):
+## Named limits
 
-1. The busy-state layer does not see an agent id, a `uds:` address, `main`, or `*` as a receiver. It reads them as unseen and allows. Debt: `sendmessage-judge-blind-recvs`.
-2. The layer does not see a receiver whose name two sessions share. It reads the name as unseen and allows. Debt: `sendmessage-judge-dup-names`.
-3. The wording judge, the SendMessage prompt hook in `settings.json`, still runs on every send. The state judge cuts no model call there. Debt: `sendmessage-wording-judge-always`.
-4. A `to` that ends in `[ref]` and matches no row is matched by its bare name. The ref is dropped, never compared to a row. The board sees only local `claude agents` rows, so the ref may name an off-board receiver that shares the bare name with a local row. The judge then reads the local row's state: it allows a busy receiver, or sends an idle one to the model. Debt: `sendmessage-judge-dup-names`.
-5. The match key is the cleaned name, so two names that clean alike read as one row: names over 300 chars that share the first 299, `<>&"` against `_`, or 3 or more combining marks. One row then reads the other row's state, and two rows read unseen. Real names are under 50 chars. Debt: `sendmessage-judge-dup-names`.
+- Rows in a second table or an indented block count. The check reads rows, not table shape. This is by ruling.
+- The gates steps have no step-level `if` and no `!cancelled()`. This is by design. A test pins "no if".
 
 ## The ceiling
 
