@@ -1605,10 +1605,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             refuse(tool, "deny", "silent-write", reason, matched)
 
     # 1e. The impeccable skill's build and settings-writer commands (design-skills record).
-    for segment in split_segments(stripped):
-        matched = impeccable_shell_hit(segment)
-        if matched:
-            refuse(tool, "deny", "impeccable-review-only", IMPECCABLE_REASON, matched)
+    matched = impeccable_command_hit(raw)
+    if matched:
+        refuse(tool, "deny", "impeccable-review-only", IMPECCABLE_REASON, matched)
 
     # 1d. A commit message or PR body that cites a record by its path.
     cite_where = command_root(stripped, cwd)
@@ -1827,6 +1826,36 @@ def impeccable_shell_hit(segment: str) -> str:
     if rest[:1] == ["detect"] or rest[:2] == ["hooks", "status"]:
         return ""
     return segment.strip()[:100]
+
+
+# A PowerShell here-string: `@'` ... `'@` is text, `@"` ... `"@` runs its `$(...)`.
+_HERE_STRING = re.compile(r"@(['\"])[ \t]*\r?\n(.*?)\r?\n\1@", re.S)
+
+
+def impeccable_command_hit(raw: str) -> str:
+    """Judge a whole command for impeccable. A body is text, not a run (design-skills record):
+    only a body a shell reads is judged as shell lines, and an unquoted heredoc body or an
+    expandable here-string is judged by the `$(...)` and backticks it runs.
+    KNOWN LIMIT: a Python, Node, Perl or Ruby body that runs impeccable is not read."""
+    texts = []
+    if POWERSHELL_CALL[0] and "@" in raw:
+        def cut(found):
+            if found.group(1) == '"':
+                texts.extend(t for t, _ in _substitutions(found.group(2), powershell=True,
+                                                          heredoc=True)[0][:-1])
+            return "x"
+        raw = _HERE_STRING.sub(cut, raw)
+    texts.append(strip_heredoc_bodies(raw, shells_only=True))
+    if "<<" in raw:
+        for quote, body, _ in _split_heredocs(raw)[1]:
+            if not quote:
+                texts.extend(t for t, _ in _substitutions(body, heredoc=True)[0][:-1])
+    for text in texts:
+        for segment in split_segments(text):
+            matched = impeccable_shell_hit(segment)
+            if matched:
+                return matched
+    return ""
 
 
 # ------------------------------------------------------------------ simulator boots
