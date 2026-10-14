@@ -66,7 +66,7 @@ FAMILIES = {
     "branch-worktree": "branch delete and worktree remove/prune",
     "pointer": "the pointer HEAD checkout",
     "kill": "machine-wide kills and detached launches",
-    "stream": "live streams, narrating commands, gh api, ln -s and waiter loops",
+    "stream": "live streams, narrating commands, gh api, ln -s, waiter loops and background end conditions",
     "write": "the silent write",
     "push-delete": "push and delete",
     "env": "environment files",
@@ -3804,6 +3804,78 @@ sh("waiter: a loop under a comment holding an apostrophe, MEASURED wrongly allow
    "# the merge driver's shape\nwhile true; do sleep 5; done", "deny", "waiter")
 sh("waiter: a `#` inside a word is not a comment, so the loop after it still denies",
    "echo fix#3; while true; do sleep 5; done", "deny", "waiter")
+
+
+# =========================================================================== background end condition
+#
+# Owner ruling 2026-10-13 23:41 CDT, "End condition at start". A background server or watcher needs
+# an `until: <condition>` note in the Bash call's `description`. A refusal without one names the note
+# in its remedy. stall_watch.py --stop shows the note beside each quiet shell (its cases are in
+# test_stall_watch_stop.py). Incident: a file server on port 3202 ran 27 h unnoticed.
+# A one-off build or test is not a long-runner, so it passes with no note. `gh run watch` is not a
+# long-runner either: it ends by itself.
+# Rule name: background-end. The deny cases are the red proof on the code before the rule. The allow
+# cases pass on that code too. They pin that the rule refuses no finished job, and that a note does
+# not unlock a rule that already refuses (`tail -f`, live-stream).
+
+add("background-end: a python http.server under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="python3 -m http.server 3202", run_in_background=True)
+add("background-end: npm run dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm run dev", run_in_background=True)
+add("background-end: npx vite under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npx vite --port 5173", run_in_background=True)
+add("background-end: next dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npx next dev -p 3000", run_in_background=True)
+add("background-end: serve under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npx serve -s dist -l 3000", run_in_background=True)
+add("background-end: tsc --watch under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npx tsc --watch", run_in_background=True)
+add("background-end: an empty until in the description is no note, so refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="python3 -m http.server 3202", run_in_background=True,
+    description="Serve q_max files. until:   ")
+add("background-end: a description with no until is no note, so refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm run dev", run_in_background=True, description="dev server for the q_max page")
+add("background-end: an until written in the command text is no note, so refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm run dev  # until: round 1 bids are served", run_in_background=True)
+add("background-end: a server after a quoted # is still refused, the # does not hide it",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command='echo "# q_max"; npm run dev', run_in_background=True)
+add("background-end: a server after a lone apostrophe in quotes is still refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command='echo "it\'s up"; python3 -m http.server 3202', run_in_background=True)
+add("background-end: a note does not unlock tail -f, the live-stream rule still refuses it",
+    "deny", "live-stream", cwd=NOGIT, carries=("live-stream",),
+    command="tail -f server.out", run_in_background=True,
+    description="until: round 1 bids are served")
+
+add("background-end: a server with an until note in its description is allowed", "allow",
+    cwd=NOGIT, command="python3 -m http.server 3202", run_in_background=True,
+    description="Serve q_max files on 3202. until: round 1 bids are served")
+add("background-end: a dev server with an until note is allowed", "allow", cwd=NOGIT,
+    command="npm run dev", run_in_background=True, description="until: round 1 bids are served")
+add("background-end: a build under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="npm run build", run_in_background=True)
+add("background-end: the guard suite under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="python3 hooks/test_guard.py", run_in_background=True)
+add("background-end: gh run watch under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="gh run watch 7", run_in_background=True)
+add("background-end: a server named in quoted text is data, allowed", "allow", cwd=NOGIT,
+    command='echo "python3 -m http.server 3202"', run_in_background=True)
+add("background-end: a server named in a heredoc body is data, allowed", "allow", cwd=NOGIT,
+    command="cat > notes.txt <<'EOF'\nDon't run npm run dev here\nEOF", run_in_background=True)
+add("background-end: a server named in a multi-line quoted string is data, allowed", "allow",
+    cwd=NOGIT, command='echo "first line\nnpm run dev later"', run_in_background=True)
+add("background-end: a server named in a comment line is not run, allowed", "allow", cwd=NOGIT,
+    command="# start npm run dev later\necho ready", run_in_background=True)
 
 
 # =========================================================================== 2c-bis. the WSL launch allow list
