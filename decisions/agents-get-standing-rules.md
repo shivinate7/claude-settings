@@ -43,12 +43,8 @@ line, the general line, and exit 0 on junk input. CI steps in `gates`, `gates-ma
 
 ## Holes, named
 
-Debts: `agent-brief-text-copy-drifts` (the hook text copies the rules, and no check reads the copy), `agent-type-match-case-sensitive` (Builder or explore gets the general writer set), `agent-plan-scope-line-general` (Plan and claude-code-guide get the general scope), `agent-brief-crash-silent` (a crashed hook leaves no visible trace).
+Debts: `agent-brief-text-copy-drifts` (the hook text copies the rules, and no check reads the copy), `agent-type-match-case-sensitive` (Builder or explore gets the general writer set), `agent-plan-scope-line-general` (Plan and claude-code-guide get the general scope), `agent-brief-crash-silent` (a crashed hook leaves no visible trace). `agent-brief-no-matcher` (every agent type gets the context, because the hook has no matcher).
 
-## Named limits
-
-- No matcher: every agent type gets the context.
-- Fail-open: a crashed hook injects nothing.
-
-Kind: process
+Kind: build
+Plan: decisions/agents-get-standing-rules.md#the-ruling (all)
 Home: hooks/agent_brief.py

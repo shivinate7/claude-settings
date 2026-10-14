@@ -102,7 +102,7 @@ Owner rulings, 2026-10-08:
 
 ## Holes, named
 
-Debts: `question-goal-line-masks-order` (a decorated Goal line masks a late Problem line), `question-problem-line-forms` (`1. Problem:` and `Problem :` do not count), `question-text-not-defanged` (question text and option labels reach the judge with no fence, and `<<< END>>>` forms pass), `judge-cut-mark-reserve-over` (the cut-mark reserve can push the prompt past PROMPT_MAX), `model-clip-unmeasured` (PROMPT_MAX fits the model context, unmeasured for token-dense text).
+Debts: `question-goal-line-masks-order` (a decorated Goal line masks a late Problem line), `question-problem-line-forms` (`1. Problem:` and `Problem :` do not count), `question-text-not-defanged` (question text and option labels reach the judge with no fence, and `<<< END>>>` forms pass), `judge-cut-mark-reserve-over` (the cut-mark reserve can push the prompt past PROMPT_MAX), `model-clip-unmeasured` (PROMPT_MAX fits the model context, unmeasured for token-dense text). `question-preface-punctuation` (a punctuation-led preface line before Goal is denied, and the free pass then lets the retry through).
 
 Kind: process
 Home: hooks/question_outcome.py

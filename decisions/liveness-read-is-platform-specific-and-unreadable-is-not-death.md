@@ -144,5 +144,6 @@ logs `noted`/`subject-unread`, the same path any other unreadable subject
 takes. No test there needed a change. Only the janitor's automated SWEEP
 did. It must decide alone, with nobody to log a note for.
 
-Kind: process
+Kind: build
+Plan: decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md#the-fix (all)
 Home: hooks/guard.py

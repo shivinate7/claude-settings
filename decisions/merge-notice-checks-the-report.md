@@ -96,5 +96,6 @@ This entry adds no new CLAUDE.md rule anchor. It implements the existing
 in `hooks/decision_watch.py`. The fixtures above are its mechanism. Run them
 with `python3 lint/test_gates.py`.
 
-Kind: process
+Kind: build
+Plan: decisions/merge-notice-checks-the-report.md#the-fix (all)
 Home: hooks/decision_watch.py

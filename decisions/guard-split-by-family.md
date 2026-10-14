@@ -40,5 +40,6 @@ the full suite took 929 s on the branch and 1123 s on main, on this box.
 
 Debts: `guard-split-mutant-needs-git` (the root-scope mutant is killed only inside a git checkout), `sweep-anchor-first-match` (the sweep's apply path replaces the first anchor match only), `guard-glob-three-tools` (three tools glob the guard modules on their own), `guard-split-sibling-mutant-case` (PR2 needs a case that kills a sibling mutant).
 
-Kind: process
+Kind: build
+Plan: decisions/guard-split-by-family.md#the-ruling (all)
 Home: hooks/guard.py

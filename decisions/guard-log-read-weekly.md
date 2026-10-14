@@ -28,7 +28,7 @@ A `noted` line with rule `STE-unchecked` means that the lint could not run. Its 
 `<basename> unchecked`. A Stop `deny` line names one blocked sweep run, with matched field
 `<first basename> files=N`. A write with no fix, deny, fallback or unchecked outcome writes no
 line. The reader counts `fixed` under noted. Its denies per day now include the STE denies and the
-sweep blocks, and its by-rule table shows the STE rows as their own rows. The guard does not crash when `guard_core` lacks `set_log_session`: it gives the same verdict and exit code, with no traceback.
+sweep blocks, and its by-rule table shows the STE rows as their own rows.
 
 The table is the outcome meter for the two owner concerns: prompts the owner did not need,
 and agents refused with no allowed path. A rule is judged by its row here, not by its test

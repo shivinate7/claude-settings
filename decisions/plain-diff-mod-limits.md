@@ -57,7 +57,7 @@ Three review rounds. Blockers found and fixed:
 
 ## Holes, named
 
-Debts: `plain-diff-keyvalue-misses` (the KEY=value rule misses some values and names), `plain-diff-secret-file-names` (some secret file names are not caught), `plain-diff-quoted-path-label` (a quoted emoji path shows a wrong label), `plain-diff-long-line-anchor` (the end anchor can match at a chunk end), `plain-diff-limiter-slot-early` (the limiter frees a slot before a hung host call ends), `plain-diff-desktop-untested` (the pane and turn-text match are untested in the app), `plain-diff-4mib-unconfirmed` (the 4 MiB output limit is not confirmed in code), `plain-diff-trimnote-regex` (the trimNote regex was not re-checked).
+Debts: `plain-diff-keyvalue-misses` (the KEY=value rule misses some values and names), `plain-diff-secret-file-names` (some secret file names are not caught), `plain-diff-quoted-path-label` (a quoted emoji path shows a wrong label), `plain-diff-long-line-anchor` (the end anchor can match at a chunk end), `plain-diff-limiter-slot-early` (the limiter frees a slot before a hung host call ends), `plain-diff-desktop-untested` (the pane and turn-text match are untested in the app), `plain-diff-4mib-unconfirmed` (the 4 MiB output limit is not confirmed in code), `plain-diff-trimnote-regex` (the trimNote regex was not re-checked). `plain-diff-env-innocent-name` (a .env body under an innocent name, or a line such as ENCRYPTION_KEY=, passes the filter).
 
 ## Named limits
 
@@ -67,5 +67,6 @@ Debts: `plain-diff-keyvalue-misses` (the KEY=value rule misses some values and n
 - Untracked files are not shown. The diff base is `HEAD`, or the empty tree when no commit exists. `git diff` lists tracked files only.
 - The notes cache lives in memory only. A reload of the mod clears it, so a model note is requested again.
 
-Kind: process
+Kind: build
+Plan: decisions/plain-diff-mod-limits.md#the-ruling (all)
 Home: mods/plain-diff/hooks/register.mjs

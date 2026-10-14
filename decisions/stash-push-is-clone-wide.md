@@ -118,7 +118,7 @@ Debts: `stash-create-false-refusal` (create piped into store is denied over a st
 - Also: two distinct `-C` targets, one lane spelled two ways, and a bare git call beside a `-C` call.
 - Also: any `--work-tree`, `--git-dir`, `core.worktree`, `GIT_WORK_TREE`, `GIT_DIR` or `GIT_COMMON_DIR` token.
 - Also: `restore --source`, `-p` or `-f`, a glob or `$(…)` pathspec, and a segment the tokenizer cannot read. The remedy names the `-C` form.
-- A command that sets `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE` is denied, not asked (rule `git-env-set`). A child git inherits the set. A child `git init` once wrote `core.worktree` into the shared config. An approved ask would reopen that path (arbiter ruling, 2026-10-14 03:05 CDT).
+- Setting `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE` is denied, not asked. See `git-env-set-denied` (the record that denies setting git env vars).
 
 Kind: process
 Home: hooks/guard_shared_tree.py

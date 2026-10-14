@@ -28,12 +28,7 @@ named override, 2026-10-14 10:47 CDT).
 
 ## Holes, named
 
-Debts: `git-env-set-indirect-forms` (indirect sets pass the guard), `git-env-glued-block` (a glued block opener hides the set), `git-env-set-false-alarms` (safe forms are denied), `git-env-set-untested-forms` (some escape, group and heredoc forms have no case).
-
-## Named limits
-
-- The warning runs at session start only, so damage done mid-session shows at the next start.
-- Lower-case names fold to the rule, so `git_dir=x cmd` is denied too.
+Debts: `git-env-set-indirect-forms` (indirect sets pass the guard), `git-env-glued-block` (a glued block opener hides the set), `git-env-set-false-alarms` (safe forms are denied), `git-env-set-untested-forms` (some escape, group and heredoc forms have no case). `git-env-warn-session-start` (the warning runs at session start only). `git-env-lower-case-fold` (lower-case names fold to the rule, so `git_dir=x cmd` is denied too).
 
 ## Build plan
 

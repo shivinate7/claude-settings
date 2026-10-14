@@ -96,5 +96,6 @@ Debts: `sb-pane-untested` (pane draw), `sb-prompt-turn-end` (turn end in a promp
 - Running servers and background tasks are not part of update-ready. The five conditions are the owner's definition.
 - The cost figure from `$.session.usage()` is shown nowhere. The figure was unreliable.
 
-Kind: process
+Kind: build
+Plan: decisions/session-board-mod-limits.md#the-ruling (all)
 Home: mods/session-board/hooks/lib.mjs

@@ -58,11 +58,10 @@ cite-by-id rule, for the message, body, file and title flags.
 
 ## Holes, named
 
-Debts: `cite-by-id-skips-merge-subject` (cite-by-id does not read a `gh pr merge` subject), `lane-slug-lowercase-n-passes` (lowercase `n20` and four-digit numbers pass), `lane-slug-tilde-fence-refused` (a tilde fence does not blank a session number), `lane-slug-part-code-refused` (a part code such as `N12` is refused), `lane-slug-heredoc-untested` (the heredoc header reader has thin tests and no mutant), `guard-split-heredocs-here-string` (a here-string is read as a heredoc), `lane-slug-header-count-shift` (an interpreter body or a `case` shifts the header count), `lane-slug-piped-body-unread` (a piped commit body is not read).
+Debts: `cite-by-id-skips-merge-subject` (cite-by-id does not read a `gh pr merge` subject), `lane-slug-lowercase-n-passes` (lowercase `n20` and four-digit numbers pass), `lane-slug-tilde-fence-refused` (a tilde fence does not blank a session number), `lane-slug-part-code-refused` (a part code such as `N12` is refused), `lane-slug-heredoc-untested` (the heredoc header reader has thin tests and no mutant), `guard-split-heredocs-here-string` (a here-string is read as a heredoc), `lane-slug-header-count-shift` (an interpreter body or a `case` shifts the header count), `lane-slug-piped-body-unread` (a piped commit body is not read). `lane-slug-tag-messages-unchecked` (tag messages are out of scope, and a tag is another act).
 
 ## Named limits
 
-- Tag messages are out of scope. A tag is another act.
 - Old history is not checked. Only new acts are judged, so the 32 titles on q_max main stay.
 - In gh, `-m` is a milestone or merge flag, never a message. `gh pr create -m N20` is allowed.
 

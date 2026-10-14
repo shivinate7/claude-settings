@@ -18,7 +18,7 @@ Yes. The mod judges each Stop in the background, logs the verdict, and never blo
 
 The old `claude -p` path stays the default of the script. `invoke_model(prompt, model, timeout, shape)` keeps its signature and its return shape. `hooks/reply_judge.py` and `hooks/question_outcome.py` call it.
 
-Enabling: the owner ruled 22:00 CDT ("Fix, then swap"). HOLE 1 is closed: phase 1 prints a `key`. The mod gives it back to phase 2 as `--key` after the reply. A key the live evidence no longer gives reads UNKNOWN, and so does a phase 1 with no key. `enabledPlugins` has `decision-watch@claude-settings`, and the Stop row that ran `hooks/decision_watch.py` is removed. The mod still never enforces.
+Enabling: the owner ruled 22:00 CDT ("Fix, then swap"). HOLE 1 is closed. `enabledPlugins` has `decision-watch@claude-settings`, and the Stop row that ran `hooks/decision_watch.py` is removed. The mod still never enforces.
 
 ## Why
 

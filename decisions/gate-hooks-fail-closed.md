@@ -36,8 +36,6 @@ crash or a timeout let the call through, with no line in guard.log. The guard's 
 vanished exactly when the guard was broken. Found 2026-10-12 while reading the Claude Code
 changelog: `onFailure` landed in 2.1.295.
 
-Python wrappers skip a `command -v` result under `/WindowsApps/`. The Store `python3` alias is slow: over 30 s through it, about 0.4 s through `python`, and 0.36 s after the skip. With `onFailure: block`, a slow guard refused every Bash, PowerShell and Agent call. Without `onFailure`, a guard that times out lets the call through, with no line in guard.log. `onFailure` is not set, pending the owner's ruling. The same change sets `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL: sonnet` beside the subagent model (changelog 2.1.296), so workflow agents follow the same default.
-
 ## What it costs
 
 A machine with `settings.json` but no hooks refuses calls until the hooks are installed.

@@ -174,13 +174,12 @@ not a defect. `cd -` returns the shell to its PREVIOUS directory. This
 guard has no way to know that directory. Reading no target, and falling
 through to the shell's own cwd, is the fail-open answer, not a wrong one.
 
+A future spelling this reader accepts, but real git or the outer shell rejects, is the same class of defect. It belongs here the same way, MEASURED against the real binary first.
+
 ## Holes, named
 
 Debts: `split-reader-misses-cd-forms` (the token reader misses some cd forms). `split-comment-shapes-unmeasured` (the comment rule is unmeasured on quoting shapes).
 
-## Named limits
-
-- A spelling this reader accepts, but git or the outer shell rejects, is a defect of this class. It is measured against the real binary first.
-
-Kind: process
+Kind: build
+Plan: decisions/split-segments-comment-rule.md#the-predicate (all)
 Home: hooks/guard.py

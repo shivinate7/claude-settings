@@ -15,8 +15,6 @@ One resolver finds the command word for every rule. It lives in `hooks/guard_cor
 - `heredoc_heads` is the one quote-aware reader of heredoc headers.
 - `split_segments` reads quotes as bash does, so each unquoted `'` opens a quote. Only when that reading ends inside an open quote does a second pass read each contraction-shaped `'` (`don't`) as text. The guard judges the segments of both readings. Both passes are linear. So `echo a's b'; pkill foo` and `echo don't (x; pkill foo` show their second command.
 
-An odd count of `'` doubles guard time: a 6,001-word command takes about 15 to 32 s here. That fits inside the 60 s guard hook timeout (`gate-hooks-fail-closed`). A longer command can run unjudged (debt `guard-timeout-fails-open`).
-
 ## Why
 
 The wsl-allow-list record (WSL runs only a fixed list of test commands) named these wrappers as holes. Each one moved the command word off the slot the rules read, so a refused command passed.

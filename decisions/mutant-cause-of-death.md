@@ -72,7 +72,6 @@ Two changes, both in `hooks/mutate_guard.py`:
 - The mutant work directory now carries a copy of the real, unmutated `guard.py`
   alongside every `watch` mutant. `import guard` then resolves to it, instead of
   crashing.
-- A fixture case in `hooks/test_config_watch.py`, `a file goes from empty to absent before a lift, so the revert removes it, not empties it`, starts from a real empty file and deletes it. An absent-file start does not distinguish the mutation, because `load_baseline` recomputes a fresh digest for a stored `None` content.
 
 The required-name field caught nothing by itself here. It cannot see a crash it was
 never told to expect. A manual read of the identical nine-line output found this, run
@@ -87,8 +86,6 @@ the same error the guards it tests are built to avoid. Verify a test harness the
 `predicate-is-the-act.md` asks a gate to be verified. Name the specific case the change
 must produce. Confirm that case, never a shape near it. An exit code is a shape. A
 named, checked case is the act.
-
-A required name is only as good as the case behind it. A case is only as good as its own trace through the code, never a guess from the mutation's label.
 
 ## Holes, named
 

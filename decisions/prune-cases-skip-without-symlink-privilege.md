@@ -63,5 +63,6 @@ so a reader sees the skip count without reading every line above it.
 
 Debts: `prune-symlink-positive-unproven` (the probe and the early-return guard are proven only on the negative branch).
 
-Kind: process
+Kind: build
+Plan: decisions/prune-cases-skip-without-symlink-privilege.md#the-fix (windows)
 Home: hooks/test_install_src.sh
