@@ -6975,6 +6975,47 @@ chained_ask("ask-alone: a for loop holding W and another step denies",
 chained_ask("ask-alone: W piped to Out-Null in the PowerShell tool denies",
             CAP_PLAIN + " | Out-Null", tool="PowerShell", cwd=PROJ, carries=CAP_STEP)
 
+# (g) A CHAIN HIDDEN IN ANOTHER INTERPRETER'S SCRIPT (review round 2). Each wrapper runs its argument
+# as a script, so an echo and an ask step inside it are a chain and deny. Today count_steps reads only
+# `sh -c` and `bash -c`, so the chained forms answer ask. `bash -o pipefail -c` hides its script behind
+# a flag, and `eval` is no wrapper at all. The lone forms, with no echo, must still ask: the wrapper's
+# own step is counted once, never twice.
+NESTED_FORMS = (
+    ("pwsh -Command", 'pwsh -Command "%s"', "; "),
+    ("powershell -c", 'powershell -c "%s"', "; "),
+    ("cmd /c with single &", 'cmd /c "%s"', " & "),
+    ("cmd /c with double &&", 'cmd /c "%s"', " && "),
+    ("iex", 'iex "%s"', "; "),
+    ("env -S", "env -S '%s'", "; "),
+    ("bash -o pipefail -c", 'bash -o pipefail -c "%s"', "; "),
+    ("eval", 'eval "%s"', "; "),
+)
+for _label, _form, _sep in NESTED_FORMS:
+    chained_ask("ask-alone: an ask step after echo inside %s denies" % _label,
+                _form % ("echo hi" + _sep + CAP_PLAIN), cwd=PROJ, carries=CAP_STEP)
+    sh("ask-alone: an ask step alone inside %s still asks" % _label, _form % CAP_PLAIN,
+       "ask", "subagent-model-cap", cwd=PROJ)
+
+# (h) AN EMPTY OR COMMENT-ONLY SCRIPT ADDS NO STEP. One ask step with an empty `bash -c` script is one
+# step, so it asks. A script that holds no step must never lower the count below the ask step's own.
+sh("ask-alone: an ask step then an empty bash -c script is one step, so it asks",
+   CAP_PLAIN + '; bash -c " "', "ask", "subagent-model-cap", cwd=PROJ)
+sh("ask-alone: an ask step then a bash -c script of one comment is one step, so it asks",
+   CAP_PLAIN + '; bash -c "# x"', "ask", "subagent-model-cap", cwd=PROJ)
+
+# (i) A SINGLE `&` INSIDE QUOTES IS NO CHAIN. An ampersand in a quoted cap value, in a quoted URL beside
+# the cap write, or beside an escaped double quote is part of one word: each cap write stays one step
+# and asks. The escaped-quote case is red today, because background_steps closes its quote at the \"
+# and then counts the `&` after it.
+sh("ask-alone: a single & inside a quoted cap value is one step, so it asks",
+   'echo "' + CAP_KEY + '=' + OPUS + ' a & b" > settings.local.json', "ask", "subagent-model-cap",
+   cwd=PROJ)
+sh("ask-alone: a single & inside a quoted URL beside the cap write is one step, so it asks",
+   "echo " + CAP_KEY + "=" + OPUS + " 'https://x.test/?a=1&b=2' > settings.local.json",
+   "ask", "subagent-model-cap", cwd=PROJ)
+sh("ask-alone: an escaped double quote around a single & is one step, so it asks",
+   'echo "' + CAP_KEY + '=v \\" & \\"" > settings.local.json', "ask", "subagent-model-cap", cwd=PROJ)
+
 
 # =========================================================================== ordinary work
 FAMILY = "paths"
