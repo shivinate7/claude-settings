@@ -43,13 +43,18 @@ Capture: hooks/local_time.py (env LOCAL_TIME_UNDER_TEST overrides the path). A U
     LOCAL_TIME_NOW (env, an ISO-8601 instant with an offset, such as 2026-10-14T18:00:00+00:00)
     replaces the hook's clock when set: it drives the Local time line, the header stamp and the
     gap. Tests set it. Nothing sleeps.
-  - Judge: while open, each owner prompt that is not a close form and not a notice goes through
-    decision_watch.invoke_model with model claude-sonnet-5-5 (the Sonnet row in
-    decisions/subagent-model-cap.md) and shape {"feedback": (True, False)}. {"feedback": false}
-    closes capture, and the prompt is not saved. {"feedback": true} saves it. A timeout, a non-zero
-    exit or an answer outside the shape keeps capture open and saves the prompt. The judge's timeout
-    is below the UserPromptSubmit hook timeout in settings.json (10 s). The opener, the close forms
-    and notices make no judge call.
+  - Judge: every owner prompt is saved first. While open, each owner prompt that is not a close
+    form and not a notice is judged by the detached child hooks/feedback_judge.py, which the hook
+    starts and does not wait for. The child calls decision_watch.invoke_model with model
+    claude-sonnet-5-5 (the Sonnet row in decisions/subagent-model-cap.md) and shape
+    {"feedback": (True, False)}. {"feedback": false} appends a note item,
+    `- fb-auto-<time> [note] -> judged not feedback`, under that message and closes capture, but
+    only while that message is still the last captured one. {"feedback": true}, a timeout, a
+    non-zero exit and an answer outside the shape change nothing. The opener, the close forms and
+    notices make no judge call.
+  - Seam: FEEDBACK_JUDGE_INLINE=1 makes the hook run the child in the foreground and wait for it to
+    exit. Tests set it. Without it the child runs detached, and the hook returns first. The child
+    inherits the hook's environment (PYTHONPATH and FB_JUDGE_* for the stub).
   - While open, a lone surrogate in the text (JSON escape `\\ud800`) is either saved with U+FFFD
     (the replacement character) in its place, or stdout carries a line that says `not saved`.
     Never silent. Capture stays open, and the inbox stays strict UTF-8.
@@ -131,6 +136,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -165,6 +171,9 @@ SCANNER = (
 BLOCK_HEADER = "2026-10-13 10:04 CDT (UTC-05:00)"
 JUDGE_MODEL = "claude-sonnet-5-5"  # the Sonnet id in the model table of decisions/subagent-model-cap.md
 CLOCK_START = datetime(2026, 10, 14, 18, 0, tzinfo=timezone.utc)  # 13:00 CDT, far from a DST edge
+JUDGE_PATH = os.path.join(HERE, "feedback_judge.py")  # the detached judge child
+SLOW = "2"  # seconds the stub judge takes, in the cases that read the child's outcome
+NOTE_ITEM = re.compile(r"- fb-auto-\S+ \[note\] -> judged not feedback")
 
 JOTTED_ITEMS = (
     "- fb-0958-1 [ruling] -> handoff: NO HOME YET",
@@ -237,15 +246,19 @@ def install_stub():
         LT_PATH = path
 
 
-# Judge seam. Every child run of local_time.py loads this sitecustomize first (PYTHONPATH). It
-# wraps subprocess.run and answers only calls whose program is `claude`. The real invoke_model runs
-# on top of it, so its argv (--model) and its parse are exercised. Each call is recorded in the
-# case's judge-calls.jsonl. FB_JUDGE_ANSWER picks the answer: still (default), not, timeout,
-# exit1 or bad-shape. A loaded file says the stub ran; every no-call check needs it.
+# Judge seam. Every run of local_time.py and of feedback_judge.py loads this sitecustomize first
+# (PYTHONPATH, inherited by the detached child). It wraps subprocess.run and answers only calls
+# whose program is `claude`. The real invoke_model runs on top of it, so its argv (--model) and its
+# parse are exercised. After FB_JUDGE_DELAY seconds (default 0) it records the call, with the
+# script that made it, in the case's judge-calls.jsonl, and then answers. FB_JUDGE_ANSWER picks
+# the answer: still (default), not, timeout, exit1 or bad-shape. A loaded file says the stub ran.
+# A zero-call check counts only with a live call elsewhere in the same case.
 JUDGE_STUB_SOURCE = r'''
 import json
 import os
 import subprocess
+import sys
+import time
 
 _real_run = subprocess.run
 
@@ -262,7 +275,9 @@ def _fake_run(argv, **kwargs):
     stdin = kwargs.get("input")
     if isinstance(stdin, bytes):
         stdin = stdin.decode("utf-8", "replace")
-    record = {"argv": list(argv), "prompt": stdin, "timeout": kwargs.get("timeout")}
+    time.sleep(float(os.environ.get("FB_JUDGE_DELAY") or 0))  # a real judge answers late
+    record = {"argv": list(argv), "prompt": stdin, "timeout": kwargs.get("timeout"),
+              "script": os.path.basename(sys.argv[0])}
     with open(os.environ["FB_JUDGE_RECORD"], "a", encoding="utf-8") as f:
         f.write(json.dumps(record) + "\n")
     answer = os.environ.get("FB_JUDGE_ANSWER", "still")
@@ -315,13 +330,15 @@ def new_cfg():
     return cfg
 
 
-JUDGE_ENV = ("FB_JUDGE_ANSWER", "FB_JUDGE_RECORD", "FB_JUDGE_LOADED", "LOCAL_TIME_NOW")
+JUDGE_ENV = ("FB_JUDGE_ANSWER", "FB_JUDGE_DELAY", "FB_JUDGE_RECORD", "FB_JUDGE_LOADED",
+             "LOCAL_TIME_NOW", "FEEDBACK_JUDGE_INLINE")
 
 
-def run(path, raw, cfg, args=(), judge="still", now=None):
-    """Runs one hook script the way the harness does. Returns a Proc. For local_time.py the child
-    also loads the judge stub; `judge` picks its answer, and `now` (an ISO-8601 instant) is the
-    hook's clock through LOCAL_TIME_NOW."""
+def run(path, raw, cfg, args=(), judge="still", now=None, inline=True, delay="0"):
+    """Runs one hook script, or the judge child, the way the harness does. Returns a Proc. The hook
+    and the child load the judge stub. `judge` picks its answer, `delay` is its latency in seconds,
+    `now` (an ISO-8601 instant) is the hook's clock through LOCAL_TIME_NOW, and `inline` sets
+    FEEDBACK_JUDGE_INLINE=1, so the hook waits for the child."""
     home = os.path.join(os.path.dirname(cfg), "home")
     os.makedirs(home, exist_ok=True)
     env = dict(os.environ)
@@ -329,11 +346,14 @@ def run(path, raw, cfg, args=(), judge="still", now=None):
         env.pop(name, None)
     env.update(CLAUDE_CONFIG_DIR=cfg, HOME=home, USERPROFILE=home)
     loaded = None
-    if path == LT_PATH:
+    if path in (LT_PATH, JUDGE_PATH):
         loaded = os.path.join(os.path.dirname(cfg), "loaded-%s" % uuid.uuid4().hex)
         inherited = [os.environ["PYTHONPATH"]] if os.environ.get("PYTHONPATH") else []
         env["PYTHONPATH"] = os.pathsep.join([JUDGE_STUB_DIR] + inherited)
-        env.update(FB_JUDGE_ANSWER=judge, FB_JUDGE_RECORD=judge_log(cfg), FB_JUDGE_LOADED=loaded)
+        env.update(FB_JUDGE_ANSWER=judge, FB_JUDGE_DELAY=delay, FB_JUDGE_RECORD=judge_log(cfg),
+                   FB_JUDGE_LOADED=loaded)
+        if inline:
+            env["FEEDBACK_JUDGE_INLINE"] = "1"
         if now:
             env["LOCAL_TIME_NOW"] = now
     try:
@@ -351,9 +371,10 @@ def payload(obj):
     return json.dumps(obj, ensure_ascii=False).encode("utf-8")
 
 
-def capture(cfg, sid, prompt, now=None, judge="still"):
+def capture(cfg, sid, prompt, now=None, judge="still", inline=True, delay="0"):
     return run(LT_PATH, payload({"hook_event_name": "UserPromptSubmit", "session_id": sid,
-                                 "prompt": prompt, "cwd": cfg}), cfg, judge=judge, now=now)
+                                 "prompt": prompt, "cwd": cfg}), cfg, judge=judge, now=now,
+               inline=inline, delay=delay)
 
 
 def judge_log(cfg):
@@ -373,15 +394,17 @@ def model_of(call):
     return argv[argv.index("--model") + 1] if "--model" in argv[:-1] else None
 
 
-def hook_timeout_seconds():
-    """The timeout of local_time.py's UserPromptSubmit hook in settings.json, or None."""
-    with open(os.path.join(REPO, "settings.json"), encoding="utf-8") as f:
-        settings = json.load(f)
-    for entry in settings.get("hooks", {}).get("UserPromptSubmit", []):
-        for hook in entry.get("hooks", []):
-            if "local_time.py" in hook.get("command", ""):
-                return hook.get("timeout")
+def block_items(cfg, sid, text):
+    """The item lines under the block whose verbatim text is `text`, or None when there is no such block."""
+    for block in read_blocks(read_or_empty(inbox_of(cfg, sid))):
+        if block["text"] == text:
+            return block["items"]
     return None
+
+
+def judged_notes(items):
+    """The `judged not feedback` note items in a list of item lines."""
+    return [item for item in (items or []) if NOTE_ITEM.fullmatch(item)]
 
 
 def sonnet_ids():
@@ -1183,10 +1206,11 @@ def case_notices_are_never_captured():
               captured_texts(cfg, sid) == ["fb: open the burst"]
               and os.path.exists(marker_of(cfg, sid)) and no_judge_call(cfg, before, p),
               captured_texts(cfg, sid))
-        capture(cfg, sid, "owner reply after the notice")
-        check("notice %s: the next owner prompt is still captured" % label,
-              captured_texts(cfg, sid) == ["fb: open the burst", "owner reply after the notice"],
-              captured_texts(cfg, sid))
+        before = calls_so_far(cfg)
+        capture(cfg, sid, "owner reply after the notice", delay=SLOW)
+        check("notice %s: the next owner prompt is saved, and judged once by the child" % label,
+              captured_texts(cfg, sid) == ["fb: open the burst", "owner reply after the notice"]
+              and calls_so_far(cfg) == before + 1, captured_texts(cfg, sid))
     cfg, sid = new_cfg(), "notice-quoted"
     opened(cfg, sid, "fb: open the burst")
     quoted = "the log shows a <task-notification> tag I did not expect; look into it"
@@ -1200,11 +1224,13 @@ def case_quiet_gap_closes_capture():
     first = capture(cfg, sid, "fb: quiet burst", now=at(0))
     check("clock seam: LOCAL_TIME_NOW 18:00 UTC sets the Local time line to 13:00 CDT",
           first.out.strip() == "Local time: 2026-10-14 13:00 CDT (UTC-05:00)", first.desc())
-    capture(cfg, sid, "second point, 8 minutes in", now=at(8))
-    capture(cfg, sid, "third point, 16 minutes in", now=at(16))
+    capture(cfg, sid, "second point, 8 minutes in", now=at(8), delay=SLOW)
+    capture(cfg, sid, "third point, 16 minutes in", now=at(16), delay=SLOW)
     burst = ["fb: quiet burst", "second point, 8 minutes in", "third point, 16 minutes in"]
     check("quiet: prompts 8 and 16 minutes in are captured (the gap runs from the last capture)",
           captured_texts(cfg, sid) == burst, captured_texts(cfg, sid))
+    check("quiet: prompts 8 and 16 minutes in are each judged once, by the child",
+          calls_so_far(cfg) == 2, judge_calls(cfg))
     before = calls_so_far(cfg)
     p = capture(cfg, sid, "plain prompt after an 11 minute gap", now=at(27))
     check("quiet: the prompt after an 11 minute gap is not saved, capture closes, no judge call",
@@ -1218,17 +1244,21 @@ def case_quiet_gap_closes_capture():
 
 def case_quiet_gap_ignores_notices():
     cfg, sid = new_cfg(), "quiet-notice"
-    capture(cfg, sid, "fb: burst with a notice in it", now=at(0))
-    capture(cfg, sid, NOTICE_TASK, now=at(8))
-    check("quiet and notice: a notice 8 minutes in is not captured and does not close capture",
-          captured_texts(cfg, sid) == ["fb: burst with a notice in it"]
-          and os.path.exists(marker_of(cfg, sid)), captured_texts(cfg, sid))
+    opener, point = "fb: burst with a notice in it", "owner point at 2 minutes"
+    capture(cfg, sid, opener, now=at(0))
+    capture(cfg, sid, point, now=at(2), delay=SLOW)  # the last captured owner message, judged live
+    check("quiet and notice: the owner point at 2 minutes is saved and judged once, by the child",
+          captured_texts(cfg, sid) == [opener, point] and calls_so_far(cfg) == 1, judge_calls(cfg))
     before = calls_so_far(cfg)
-    p = capture(cfg, sid, "owner prompt 12 minutes after the last owner message", now=at(12))
-    check("quiet and notice: 12 minutes after the last owner message closes capture, no judge call",
+    p = capture(cfg, sid, NOTICE_TASK, now=at(8))
+    check("quiet and notice: a notice 8 minutes in is not saved, not judged, and does not close capture",
+          captured_texts(cfg, sid) == [opener, point]
+          and os.path.exists(marker_of(cfg, sid)) and no_judge_call(cfg, before, p), p.desc())
+    before = calls_so_far(cfg)
+    p = capture(cfg, sid, "owner prompt 11 minutes after the last owner message", now=at(13))
+    check("quiet and notice: 11 minutes after the owner point at 2 closes capture; not saved, no judge call",
           ran_central(p) and not os.path.exists(marker_of(cfg, sid))
-          and captured_texts(cfg, sid) == ["fb: burst with a notice in it"]
-          and no_judge_call(cfg, before, p), p.desc())
+          and captured_texts(cfg, sid) == [opener, point] and no_judge_call(cfg, before, p), p.desc())
 
 
 def case_judge_runs_once_per_open_prompt_with_the_sonnet_id():
@@ -1241,42 +1271,51 @@ def case_judge_runs_once_per_open_prompt_with_the_sonnet_id():
     check("judge: the opener makes no judge call", calls_so_far(cfg) == before, judge_calls(cfg))
     text = "second point, plain"
     before = calls_so_far(cfg)
-    p = capture(cfg, sid, text)
+    p = capture(cfg, sid, text, delay=SLOW)
     calls = judge_calls(cfg)[before:]
     check("judge: an open plain prompt makes exactly one judge call",
           len(calls) == 1 and bool(p.loaded), p.desc())
     if calls:
-        limit, timeout = hook_timeout_seconds(), calls[0].get("timeout")
+        timeout = calls[0].get("timeout")
         check("judge: the call uses the Sonnet id from decisions/subagent-model-cap.md",
               model_of(calls[0]) == JUDGE_MODEL and JUDGE_MODEL in sonnet_ids(), calls[0].get("argv"))
+        check("judge: the call is made by feedback_judge.py, the detached child, not by the hook",
+              calls[0].get("script") == "feedback_judge.py", calls[0].get("script"))
         check("judge: the prompt text reaches the judge",
               text in (calls[0].get("prompt") or ""), calls[0].get("prompt"))
-        check("judge: its timeout is set, and below the UserPromptSubmit hook timeout in settings.json",
-              isinstance(timeout, (int, float)) and limit is not None and 0 < timeout < limit,
-              "judge timeout=%r hook timeout=%r" % (timeout, limit))
-    check("judge: the judged prompt is captured",
+        check("judge: its timeout is a positive number (the hook does not wait for it)",
+              isinstance(timeout, (int, float)) and timeout > 0, "judge timeout=%r" % (timeout,))
+    check("judge: the judged prompt is saved",
           captured_texts(cfg, sid) == ["fb: judged burst", text], captured_texts(cfg, sid))
 
 
-def case_judge_not_feedback_closes_and_drops_the_prompt():
+def case_judge_not_feedback_keeps_the_prompt_and_closes():
     cfg, sid = new_cfg(), "judge-not"
     kept = ["fb: burst the judge will close", "second point, still feedback"]
     opened(cfg, sid, kept[0])
-    capture(cfg, sid, kept[1])
+    capture(cfg, sid, kept[1], delay=SLOW)
+    text = "ok, run the tests now"
     before = calls_so_far(cfg)
-    p = capture(cfg, sid, "ok, run the tests now", judge="not")
-    check("judge not feedback: hook ran, and the judge was called once",
+    p = capture(cfg, sid, text, judge="not", delay=SLOW)
+    check("judge not feedback: hook ran, and the child judged the prompt once",
           ran_central(p) and calls_so_far(cfg) == before + 1, p.desc())
-    check("judge not feedback: capture closes, and the prompt is not saved",
-          not os.path.exists(marker_of(cfg, sid)) and captured_texts(cfg, sid) == kept,
+    check("judge not feedback: the prompt is saved, and capture closes (marker gone)",
+          captured_texts(cfg, sid) == kept + [text] and not os.path.exists(marker_of(cfg, sid)),
           captured_texts(cfg, sid))
+    check("judge not feedback: one note item under that message says judged not feedback, none elsewhere",
+          len(judged_notes(block_items(cfg, sid, text))) == 1
+          and not judged_notes(block_items(cfg, sid, kept[1])), block_items(cfg, sid, text))
+    g = gate(cfg, sid)
+    check("judge not feedback: the gate does not block on that message, and no capture reminder shows",
+          g.code == 0 and text not in (block_reason(g) or "") and reminder_of(gate_json(g)) is None,
+          g.desc())
     before = calls_so_far(cfg)
     p = capture(cfg, sid, "a later plain prompt")
     check("judge not feedback: the next plain prompt is not saved and makes no judge call",
-          no_judge_call(cfg, before, p) and captured_texts(cfg, sid) == kept, p.desc())
+          no_judge_call(cfg, before, p) and captured_texts(cfg, sid) == kept + [text], p.desc())
     capture(cfg, sid, "fb: a new burst")
     check("judge not feedback: an opener reopens capture",
-          captured_texts(cfg, sid) == kept + ["fb: a new burst"]
+          captured_texts(cfg, sid) == kept + [text, "fb: a new burst"]
           and os.path.exists(marker_of(cfg, sid)), captured_texts(cfg, sid))
 
 
@@ -1287,12 +1326,57 @@ def case_judge_failure_keeps_capture_open_and_saves():
     for answer in ("timeout", "exit1", "bad-shape"):
         text = "message while the judge answers %s" % answer
         before = calls_so_far(cfg)
-        p = capture(cfg, sid, text, judge=answer)
+        p = capture(cfg, sid, text, judge=answer, delay=SLOW)
         saved.append(text)
         check("judge %s: hook ran" % answer, ran_central(p), p.desc())
         check("judge %s: judged once, and the prompt is saved with capture still open" % answer,
               calls_so_far(cfg) == before + 1 and os.path.exists(marker_of(cfg, sid))
               and captured_texts(cfg, sid) == saved, captured_texts(cfg, sid))
+        check("judge %s: no note item under the message" % answer,
+              block_items(cfg, sid, text) == [] and not judged_notes(block_items(cfg, sid, text)),
+              block_items(cfg, sid, text))
+
+
+def case_judge_child_closes_only_the_last_captured_message():
+    """The child closes capture only while the message it judged is still the last captured one.
+    The child runs in the foreground here, the way the inline seam runs it."""
+    cfg, sid = new_cfg(), "judge-last"
+    first, second = "first owner point", "second owner point, the last captured"
+    # The state is written directly. Setup captures would start detached children, and their late
+    # calls would race the counts. The blocks use the hook's format; the marker holds 18:04 UTC.
+    write_file(inbox_of(cfg, sid),
+               render_block("fb: burst for the last-message rule",
+                            header="2026-10-14 13:00 CDT (UTC-05:00)")
+               + render_block(first, header="2026-10-14 13:02 CDT (UTC-05:00)")
+               + render_block(second, header="2026-10-14 13:04 CDT (UTC-05:00)"))
+    write_file(marker_of(cfg, sid), at(4))
+    before = calls_so_far(cfg)
+    p = run(JUDGE_PATH, b"", cfg, args=(sid, at(2), first), judge="not")
+    check("last message: the child for an older message ran and made one judge call",
+          p.code == 0 and calls_so_far(cfg) == before + 1, p.desc())
+    check("last message: the older message gets no note, and capture stays open at the newer time",
+          block_items(cfg, sid, first) == [] and os.path.exists(marker_of(cfg, sid))
+          and read_or_empty(marker_of(cfg, sid)).strip() == at(4), read_or_empty(marker_of(cfg, sid)))
+    p = run(JUDGE_PATH, b"", cfg, args=(sid, at(4), second), judge="not")
+    check("last message: the child for the last captured message adds its note and closes capture",
+          p.code == 0 and len(judged_notes(block_items(cfg, sid, second))) == 1
+          and not os.path.exists(marker_of(cfg, sid)), p.desc())
+
+
+def case_judge_child_is_detached_hook_returns_first():
+    """Without the seam the judge child is detached: the hook returns before a slow judge answers."""
+    cfg, sid = new_cfg(), "detached"
+    opener = "fb: burst while the judge is slow"
+    text = "a not-feedback prompt the slow judge will answer"
+    opened(cfg, sid, opener)
+    started = time.monotonic()
+    p = capture(cfg, sid, text, judge="not", inline=False, delay="5")
+    elapsed = time.monotonic() - started
+    check("detached: the hook returns in under 3 s while the judge sleeps 5 s",
+          ran_central(p) and elapsed < 3.0, "elapsed=%.2f s %s" % (elapsed, p.desc()))
+    check("detached: the prompt is saved, and no note or close has happened yet",
+          captured_texts(cfg, sid) == [opener, text] and os.path.exists(marker_of(cfg, sid))
+          and not judged_notes(block_items(cfg, sid, text)), captured_texts(cfg, sid))
 
 
 CASES = (
@@ -1309,8 +1393,9 @@ CASES = (
     case_quiet_gap_closes_capture,
     case_quiet_gap_ignores_notices,
     case_judge_runs_once_per_open_prompt_with_the_sonnet_id,
-    case_judge_not_feedback_closes_and_drops_the_prompt,
+    case_judge_not_feedback_keeps_the_prompt_and_closes,
     case_judge_failure_keeps_capture_open_and_saves,
+    case_judge_child_closes_only_the_last_captured_message,
     case_verbatim_scanner_text_is_fenced,
     case_fail_open_writes_nothing,
     case_capture_write_failure_says_not_saved,
@@ -1339,6 +1424,7 @@ CASES = (
     case_reorient_malformed_line_keeps_the_note,
     case_reorient_nothing_when_no_open_items_and_no_marker,
     case_reorient_unreadable_inbox_prints_message_and_one_stderr_line,
+    case_judge_child_is_detached_hook_returns_first,  # last: it leaves a 5 s child running
 )
 
 
