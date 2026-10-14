@@ -4211,6 +4211,304 @@ class RunLogTests(unittest.TestCase):
         self.assertIn(_norm_path(self.busy), roots, "no run-log line for the first repository")
 
 
+@contextlib.contextmanager
+def _process_table(rows):
+    """Inject the machine's process table: ROWS maps pid to cwd. The real table is never read."""
+    if sys.platform == "darwin":
+        with _Stub("_all_cwds_macos", lambda: list(rows.items())):
+            yield
+    else:
+        with _Stub("list_all_pids", lambda: list(rows)), _Stub("process_cwd", rows.get):
+            yield
+
+
+@contextlib.contextmanager
+def _git_reads_fail(match):
+    """Every `git` call that MATCH(argv, cwd) accepts answers exit 128. The rest run for real."""
+    real = subprocess.run
+
+    def run(args, *a, **k):
+        if isinstance(args, (list, tuple)) and args and str(args[0]) == "git" \
+                and match([str(x) for x in args], k.get("cwd")):
+            return subprocess.CompletedProcess(args, 128, "", "fatal: injected read failure\n")
+        return real(args, *a, **k)
+
+    with mock.patch("subprocess.run", run):
+        yield
+
+
+def _aimed_at(path, argv, cwd):
+    """True when the git call runs inside PATH (`-C PATH`, or cwd PATH)."""
+    target = argv[argv.index("-C") + 1] if "-C" in argv and argv.index("-C") + 1 < len(argv) else cwd
+    return bool(target) and _norm_path(target) == _norm_path(path)
+
+
+class AgentWorktreeReapTests(unittest.TestCase):
+    """Owner ruling 2026-10-14: the end-of-session sweep (`sweep.py --confirm`, no --attended, as
+    session_end_sweep.py runs it) removes a finished agent's worktree. It removes one only when ALL
+    hold: its path is `<repo>/.claude/worktrees/agent-*`; it is clean (no uncommitted, no untracked
+    file); no process has a cwd inside it; its last change is 4 hours old or more; its HEAD commit
+    is reachable from a remote-tracking ref. A repo whose package.json defines `reap:worktrees`
+    gets that script run with `--remove` instead. A read that fails keeps the tree.
+
+    Incident: q_max reached 798 registered worktrees. Its remover read 181 as "never pushed",
+    because a lane pushes `HEAD:<lane>` from a local branch of another name.
+
+    Seams. Clock: `time.time` runs HOURS ahead, so no file is touched and nothing sleeps.
+    Process table: `sweep.list_all_pids` and `sweep.process_cwd` (darwin: `_all_cwds_macos`).
+    npm: a stub `npm` first on PATH logs argv and cwd. It is a real executable, so the sweep
+    may reach it by any call form. Failed git read: `subprocess.run` answers 128 for one tree.
+    Every keep case also holds a control tree (`agent-ctl`) that must be removed in the same run,
+    so a sweep that does nothing, or stops early, cannot pass a keep case."""
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="rp-", dir=ROOT)  # short: Windows path length
+        self.repo = os.path.join(self.base, "r")
+        make_repo(self.repo, {"f.txt": "base\n"})
+        give_remote(self.repo)
+        self.restore_log = os.path.join(self.base, "restore.log")
+        self.run_log = os.path.join(self.base, "runs.jsonl")
+        self.npm_log = os.path.join(self.base, "npm.jsonl")
+        self.shim = os.path.join(self.base, "shim")
+        os.makedirs(self.shim)
+        stub = os.path.join(self.shim, "npm_stub.py")
+        write(stub, "import json, os, sys\n"
+                    "with open(os.environ['NPM_STUB_LOG'], 'a', encoding='utf-8') as h:\n"
+                    "    h.write(json.dumps({'argv': sys.argv[1:], 'cwd': os.getcwd()}) + '\\n')\n")
+        write(os.path.join(self.shim, "npm"), '#!/bin/sh\nexec "%s" "%s" "$@"\n' % (sys.executable, stub))
+        os.chmod(os.path.join(self.shim, "npm"), 0o755)
+        write(os.path.join(self.shim, "npm.cmd"), '@"%s" "%s" %%*\r\n' % (sys.executable, stub))
+
+    # ---- fixtures
+
+    def commit(self, path, name):
+        write(os.path.join(path, name), "work\n")
+        run_vcs(path, "add", "-A")
+        done = run_vcs(path, *IDENT, "commit", "-q", "-m", name)
+        require(done.returncode == 0, "commit in %r failed: %s" % (path, done.stderr.strip()))
+
+    def agent(self, name, state="pushed", path=None):
+        """A linked worktree on local branch `wt-<name>`, by default at
+        `<repo>/.claude/worktrees/agent-<name>`. STATE: "pushed" is one commit pushed with
+        `push origin HEAD:lane-<name>`, so the local branch has no upstream (the incident shape);
+        "merged" is main's own tip, which origin/main holds; "local" is one commit never pushed;
+        "ahead" is pushed, then one more local commit."""
+        path = path or os.path.join(self.repo, ".claude", "worktrees", "agent-" + name)
+        made = run_vcs(self.repo, "worktree", "add", "-q", path, "-b", "wt-" + name)
+        require(made.returncode == 0, "worktree add %r failed: %s" % (path, made.stderr.strip()))
+        if state != "merged":
+            self.commit(path, name + ".txt")
+        if state in ("pushed", "ahead"):
+            lane = "lane-" + name
+            pushed = run_vcs(path, "push", "-q", "origin", "HEAD:" + lane)
+            require(pushed.returncode == 0, "push of %s failed: %s" % (lane, pushed.stderr.strip()))
+            require(run_vcs(self.repo, "rev-parse", "-q", "--verify",
+                            "refs/remotes/origin/" + lane).returncode == 0,
+                    "no remote-tracking ref for %s after the push" % lane)
+            require(lane in run_vcs(self.repo, "ls-remote", "--heads", "origin").stdout,
+                    "the remote does not list %s" % lane)
+            require(run_vcs(path, "rev-parse", "--abbrev-ref", "wt-%s@{upstream}" % name).returncode != 0,
+                    "wt-%s has an upstream; the fixture must not" % name)
+        if state == "ahead":
+            self.commit(path, name + "-2.txt")
+        require(self.listed(path), "%r is not a registered worktree" % path)
+        return path
+
+    # ---- the run
+
+    def run_sweep(self, hours, rows=None, fail=None):
+        """One `sweep.py --confirm` run, HOURS in the future, over the injected process table.
+        Returns the report text (stdout and stderr)."""
+        out = io.StringIO()
+        env = {"PATH": self.shim + os.pathsep + os.environ.get("PATH", ""),
+               "NPM_STUB_LOG": self.npm_log, "JANITOR_RUN_LOG": self.run_log}
+        real, report = time.time, sweep.print_sweep_report
+
+        def tee(*args, **kwargs):  # the report's `out=sys.stdout` default is bound at import
+            kwargs["out"] = out
+            return report(*args[:2], **kwargs)
+
+        with mock.patch.dict(os.environ, env), _machine_quiet(), \
+                mock.patch("time.time", lambda: real() + hours * 3600), \
+                mock.patch.object(sweep, "print_sweep_report", tee), \
+                _process_table(rows or {}), contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out), \
+                (_git_reads_fail(fail) if fail else contextlib.nullcontext()):
+            sweep.main([self.repo, "--confirm", "--restore-log", self.restore_log])
+        return out.getvalue()
+
+    # ---- reads
+
+    def listed(self, path):
+        return any(_norm_path(e["path"]) == _norm_path(path)
+                   for e in sweep.parse_worktree_list(self.repo) or [])
+
+    def npm_calls(self):
+        if not os.path.isfile(self.npm_log):
+            return []
+        return _read_run_log(self.npm_log)
+
+    def lines_about(self, out, name):
+        return "\n".join(line for line in out.splitlines() if name in line) or "(no report line)"
+
+    # ---- verdicts. The report line is the message, so a red run shows the sweep's own reason.
+
+    def assertKept(self, path, out):
+        name = os.path.basename(path)
+        branch = "wt-" + name.replace("agent-", "")
+        why = self.lines_about(out, name)
+        self.assertTrue(os.path.isdir(path), "%s was removed. Report: %s" % (name, why))
+        self.assertTrue(self.listed(path), "%s was unregistered. Report: %s" % (name, why))
+        self.assertIn(branch, sweep.list_local_branches(self.repo) or [], "%s lost its branch" % name)
+
+    def assertRemoved(self, path, out):
+        name = os.path.basename(path)
+        branch = "wt-" + name.replace("agent-", "")
+        why = self.lines_about(out, name)
+        self.assertFalse(os.path.isdir(path), "%s was kept. Report: %s" % (name, why))
+        self.assertFalse(self.listed(path), "%s is still registered. Report: %s" % (name, why))
+        self.assertNotIn(branch, sweep.list_local_branches(self.repo) or [],
+                         "%s's local branch is still there. Report: %s" % (name, why))
+
+    # ---- (a) the incident shape
+
+    def test_a_removes_a_clean_pushed_tree_idle_5h_with_its_local_branch(self):
+        tree = self.agent("a")
+        sha = run_vcs(tree, "rev-parse", "HEAD").stdout.strip()
+        out = self.run_sweep(5)
+        self.assertRemoved(tree, out)
+        self.assertIn("lane-a", run_vcs(self.repo, "ls-remote", "--heads", "origin").stdout,
+                      "the sweep touched the remote")
+        self.assertEqual(run_vcs(self.repo, "cat-file", "-e", sha + "^{commit}").returncode, 0,
+                         "the lane's commit is gone from the repository")
+        self.assertEqual(self.npm_calls(), [], "a repo with no `reap:worktrees` script ran npm")
+
+    # ---- (b) the 4 hour floor
+
+    def floor(self, state):
+        tree = self.agent("b", state)
+        for hours in (3, 3.9):
+            out = self.run_sweep(hours)
+            self.assertKept(tree, out)
+        out = self.run_sweep(5)  # the same tree, 1.1 hours later: removable, so the keeps were the floor
+        self.assertRemoved(tree, out)
+
+    def test_b_keeps_a_pushed_tree_idle_under_4h(self):
+        self.floor("pushed")
+
+    def test_b_keeps_a_tree_at_origin_main_idle_under_4h(self):
+        """Old rule: merged and idle 1 hour is enough. That is the red run for the 4 hour floor."""
+        self.floor("merged")
+
+    # ---- (c) HEAD on no remote-tracking ref
+
+    def test_c_keeps_a_tree_whose_head_is_on_no_remote_ref(self):
+        local, ahead = self.agent("c1", "local"), self.agent("c2", "ahead")
+        ctl = self.agent("ctl")
+        out = self.run_sweep(5)
+        self.assertKept(local, out)
+        self.assertKept(ahead, out)  # its branch was pushed once; HEAD is one commit past that push
+        self.assertRemoved(ctl, out)
+
+    # ---- (d) uncommitted or untracked
+
+    def test_d_keeps_a_dirty_tree_and_a_tree_with_an_untracked_file(self):
+        dirty, untracked = self.agent("d1"), self.agent("d2")
+        ctl = self.agent("ctl")
+        write(os.path.join(dirty, "f.txt"), "edited, not committed\n")
+        write(os.path.join(untracked, "scratch.txt"), "new, not added\n")
+        out = self.run_sweep(5)
+        self.assertKept(dirty, out)
+        self.assertKept(untracked, out)
+        self.assertRemoved(ctl, out)
+
+    # ---- (e) a process inside
+
+    def test_e_keeps_a_tree_with_a_process_cwd_inside_it(self):
+        busy, ctl = self.agent("e"), self.agent("ctl")
+        inside = os.path.join(busy, "sub")
+        os.makedirs(inside)  # an empty folder: git sees no change
+        out = self.run_sweep(5, rows={424242: inside})
+        self.assertKept(busy, out)
+        self.assertRemoved(ctl, out)
+
+    # ---- (f) outside the agent folder, and the main checkout
+
+    def test_f_keeps_a_tree_outside_agent_folders_and_the_main_checkout(self):
+        """Both trees are clean, at origin/main, and idle 5 hours: only the path keeps them."""
+        outside = self.agent("f1", "merged", path=os.path.join(self.base, "agent-f1"))
+        renamed = self.agent("f2", "merged",
+                             path=os.path.join(self.repo, ".claude", "worktrees", "lane-f2"))
+        ctl = self.agent("ctl")
+        out = self.run_sweep(5)
+        self.assertTrue(os.path.isdir(outside), "a tree outside .claude/worktrees was removed. "
+                        + self.lines_about(out, "agent-f1"))
+        self.assertTrue(os.path.isdir(renamed), "a tree not named agent-* was removed. "
+                        + self.lines_about(out, "lane-f2"))
+        self.assertTrue(self.listed(outside) and self.listed(renamed))
+        self.assertTrue(os.path.isdir(os.path.join(self.repo, ".git")), "the main checkout was removed")
+        self.assertTrue(self.listed(self.repo))
+        self.assertRemoved(ctl, out)
+
+    # ---- (g) the repo's own remover
+
+    def test_g_runs_the_repos_remover_with_remove_and_removes_nothing_itself(self):
+        write(os.path.join(self.repo, "package.json"),
+              json.dumps({"name": "x", "scripts": {"reap:worktrees": "node reap.mjs"}}))
+        run_vcs(self.repo, "add", "-A")
+        self.assertEqual(run_vcs(self.repo, *IDENT, "commit", "-q", "-m", "reaper").returncode, 0)
+        require(run_vcs(self.repo, "push", "-q", "origin", "main").returncode == 0, "push of main failed")
+        tree = self.agent("g")  # the built-in rule would remove it at 5 hours
+        out = self.run_sweep(5)
+        calls = self.npm_calls()
+        self.assertEqual(len(calls), 1, "npm calls: %r\n%s" % (calls, out))
+        argv = calls[0]["argv"]
+        self.assertIn("reap:worktrees", argv)
+        self.assertIn("--remove", argv)
+        self.assertLess(argv.index("reap:worktrees"), argv.index("--remove"), argv)
+        self.assertEqual(_norm_path(calls[0]["cwd"]), _norm_path(self.repo))
+        self.assertKept(tree, out)
+
+    # ---- (h) a failed read
+
+    def kept_and_logged(self, tree, ctl, out, name):
+        self.assertKept(tree, out)
+        self.assertRemoved(ctl, out)
+        try:
+            with open(self.run_log, encoding="utf-8") as handle:
+                out += "\n" + handle.read()
+        except OSError:
+            pass
+        logged = [line for line in out.splitlines() if name in line
+                  and any(word in line.lower() for word in ("unreadable", "unknown", "fail"))]
+        self.assertTrue(logged, "the failed read is not logged (report or run log):\n" + out)
+
+    def test_h_keeps_a_tree_when_any_git_read_in_it_fails_and_logs_it(self):
+        tree, ctl = self.agent("h1", "merged"), self.agent("ctl")
+        out = self.run_sweep(5, fail=lambda argv, cwd: _aimed_at(tree, argv, cwd))
+        self.kept_and_logged(tree, ctl, out, "agent-h1")
+
+    def test_h_keeps_a_tree_when_the_remote_reach_read_fails_and_logs_it(self):
+        """The read that matters here is `git branch -r --contains` (or `for-each-ref
+        --contains`): is HEAD on a remote-tracking ref? Old rule: it never makes that read for a
+        tree, so it removes this merged tree after 1 hour."""
+        tree, ctl = self.agent("h2", "merged"), self.agent("ctl")
+        sha = run_vcs(tree, "rev-parse", "HEAD").stdout.strip()
+        fired = []
+
+        def match(argv, cwd):
+            hit = "--contains" in argv and (_aimed_at(tree, argv, cwd) or sha in argv
+                                            or "wt-h2" in argv or "refs/heads/wt-h2" in argv)
+            if hit:
+                fired.append(argv)
+            return hit
+
+        out = self.run_sweep(5, fail=match)
+        self.assertTrue(fired, "no `--contains` read was made for the tree. Report: "
+                        + self.lines_about(out, "agent-h2"))
+        self.kept_and_logged(tree, ctl, out, "agent-h2")
+
+
 class MergedCountsAsSafeTests(unittest.TestCase):
     """Owner ruling 2026-10-08: a HEAD merged into the default branch, by ancestry or by patch,
     is not kept for "unpushed". The other checks still apply, and a truly unpushed commit is
