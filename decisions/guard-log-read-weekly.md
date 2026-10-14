@@ -122,11 +122,16 @@ no traceback.
   calling `record`. A lost line can drop an owner note: `collect_unread` in
   `hooks/decision_watch.py` names unread subjects from `noted` and `subject-unread` lines.
   Now `record()` in `hooks/guard_core.py` locks each write: msvcrt on Windows, fcntl on POSIX.
-  If the lock wait passes 2 s (`LOG_LOCK_WAIT`), or the lock call raises, it writes without the
-  lock. So a line can still be lost under a slow holder. Tests: `lint/test_gates.py`,
-  `GuardLogAppendRaceTests`, `test_19_twenty_parallel_gates_leave_twenty_whole_lines` (runs on
-  every platform), and `test_19b_parallel_gates_write_at_most_one_whole_line_each` (exactly 20
-  lines).
+  It retries only on contention (BlockingIOError, errno 13, EAGAIN, EDEADLK 36), for up to
+  `LOG_LOCK_WAIT`, 2 s. After 2 s of contention it writes without the lock. Any other lock error
+  writes at once, without the lock and without a wait. So a line can still be lost under a slow
+  holder, or on a lock error. Tests: `lint/test_gates.py`, `GuardLogAppendRaceTests`:
+  `test_19_twenty_parallel_gates_leave_twenty_whole_lines` (every platform),
+  `test_19b_parallel_gates_write_exactly_one_whole_line_each` (exactly 20 lines), and
+  `test_lock_error_that_is_not_contention_returns_at_once`.
+- **Crash path writes without the lock.** When `guard_core` fails to load, `hooks/guard.py`
+  lines 253-254 write guard.log with no lock. A line from that path can still be lost to a
+  concurrent writer.
 - **Rewrite, then failed lint.** The fixer rewrites the text, then the lint cannot run. The
   rewrite still lands. The log holds `STE-unchecked` and no `fixed` line.
 - **Closed stdout pipe.** If the reader closes stdout early, the STE gate raises at its flush in
