@@ -161,7 +161,8 @@ Cost: a pull request run took 0.4 to 5 seconds on this repo. The full-history au
 - A reversal that also rewrites a line is a new edit, not a reversal.
 - A line that a resolver half-rewrote passes. The merge is then a judgement call.
 - A binary file is not read.
-- An edit in place of a main-added line is a new edit, not a reversal.
+- An edit in place of a main-added line is a new edit, not a reversal, when the new line keeps
+  0.9 similarity or more.
 - A merge of three or more parents is UNKNOWN. So are git older than 2.38, a shallow clone,
   and any history the check cannot read. Aliases and exotic merges count as unknown, not as clean.
   CI is red on unknown. `merge.py` refuses unless the owner passes `--undo-check-unknown-ok`.
@@ -185,8 +186,10 @@ Cost: a pull request run took 0.4 to 5 seconds on this repo. The full-history au
   that base is not read. Debt `rebase-loss-before-base-unread`.
 - The `+1` reads the fork commit only when the fork point is on upstream's first-parent line.
   When the branch was cut from a PR branch that merged later, the fork point is off the line.
-  Then the `+1` reads the first-parent commit below that PR's merge, which is main work from before the cut.
+  Then the `+1` reads the first-parent commit where the PR branch left main, which is main work from before the cut.
   A scratch probe flagged a deliberate removal of it. Debt `off-line-fork-reads-pre-cut`.
+- An in-place edit of a main-added line that keeps under 0.9 similarity reads as a reversal.
+  Debt `inplace-edit-under-0-9-flagged`.
 
 Kind: process
 Home: lint/check_silent_undo.py
