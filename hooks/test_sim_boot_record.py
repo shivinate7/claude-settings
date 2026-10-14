@@ -12,7 +12,18 @@ PostToolUse run records the shut-down -> booted changes against that snapshot. A
 with no snapshot records nothing, so a device booted before the call is never recorded.
 
 The contract pinned here (hooks/sim_boot_record.py must match it):
-  - the event is read from `hook_event_name`; the hook never blocks: stdout is empty, exit 0.
+  - the event is read from `hook_event_name`. Exit is 0 in every case. Stdout is empty unless the
+    ruling 5 boot check failed (see below).
+  - ruling 5, boot check: after a Bash `simctl boot` or an MCP `launch`, each device that went
+    shut-down -> booted is checked: `xcrun simctl bootstatus <UDID>` exits 0 AND `xcrun simctl io
+    <UDID> screenshot <file>` exits 0. A fail runs `simctl shutdown <UDID>` then `simctl boot
+    <UDID>` once, then checks again. A healthy boot writes nothing to stdout. A retry that passes
+    writes {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": ...}}
+    (booted again, launch the app again). A retry that fails writes {"decision": "block",
+    "reason": ...} (names the UDID, broken, stop using it) and runs no second shutdown. The record
+    line is written in both cases, and carries the launchd_sim pid read AFTER the retry. An
+    `xcodebuild -destination` boot is not checked. The hung-bootstatus timeout (90 s) is not
+    pinned: it needs an environment seam, and the suite must not wait.
   - a record line is {"udid", "name", "deviceTypeIdentifier", "runtime", "at", "launchd_pid",
     "launchd_start"}. `at` is ISO-8601 UTC. launchd_pid and launchd_start are the pid and the start
     time of the device's launchd_sim, as `ps` prints them, read when the device is booted.
@@ -70,22 +81,27 @@ def devices_json(rows):
     return json.dumps({"devices": grouped})
 
 
-def fake_ps_script(rows, log):
+def fake_ps_script(rows, log, flag=None, rows_after=None):
     """A POSIX `ps` for ROWS, (pid, ppid, uid, command), all strings. Each call appends its
-    LC_ALL to LOG, so a case can see the locale the hook ran the read under."""
-    table = "".join("%s %s %s %s\n" % row for row in rows)
-    starts = [(pid, cmd) for pid, _, _, cmd in rows if "launchd_sim" in cmd]
-    pid_lines = "".join("%s %s\n" % (pid, LSTART) for pid, _ in starts)
-    start_lines = "".join(LSTART + "\n" for _ in starts)
-    for text in (table, pid_lines, start_lines):
-        assert "'" not in text, "the printf body is single-quoted"
-    return ("#!/bin/sh\n"
-            "echo \"${LC_ALL-unset}\" >> '" + log + "'\n"
-            "case \"$*\" in\n"
-            "  *lstart*) case \"$*\" in *pid=*) printf '%s' '" + pid_lines + "' ;;"
-            " *) printf '%s' '" + start_lines + "' ;; esac ;;\n"
-            "  *) printf '%s' '" + table + "' ;;\n"
-            "esac\n")
+    LC_ALL to LOG, so a case can see the locale the hook ran the read under. When the file FLAG
+    exists (the fake `xcrun` makes it on `simctl boot`), the table is ROWS_AFTER instead."""
+    def block(rows):
+        table = "".join("%s %s %s %s\n" % row for row in rows)
+        starts = [(pid, cmd) for pid, _, _, cmd in rows if "launchd_sim" in cmd]
+        pid_lines = "".join("%s %s\n" % (pid, LSTART) for pid, _ in starts)
+        start_lines = "".join(LSTART + "\n" for _ in starts)
+        for text in (table, pid_lines, start_lines):
+            assert "'" not in text, "the printf body is single-quoted"
+        return ("case \"$*\" in\n"
+                "  *lstart*) case \"$*\" in *pid=*) printf '%s' '" + pid_lines + "' ;;"
+                " *) printf '%s' '" + start_lines + "' ;; esac ;;\n"
+                "  *) printf '%s' '" + table + "' ;;\n"
+                "esac\n")
+    head = "#!/bin/sh\necho \"${LC_ALL-unset}\" >> '" + log + "'\n"
+    if flag and rows_after is not None:
+        return (head + "if [ -e '" + flag + "' ]; then\n" + block(rows_after) + "else\n"
+                + block(rows) + "fi\n")
+    return head + block(rows)
 
 
 @unittest.skipIf(not POSIX, "the fake xcrun is a POSIX shell script")
@@ -104,18 +120,25 @@ class SimBootRecordTests(unittest.TestCase):
         self.reads = os.path.join(self.root, "simctl-reads.log")
         self.records = os.path.join(self.state, "sim-boots.jsonl")
         self.ps_log = os.path.join(self.root, "ps-locale.log")
+        self.calls = os.path.join(self.root, "boot-check-calls.log")  # one "name UDID" per call
+        self.plans = os.path.join(self.root, "plans")                 # <name>: one exit code per call
+        self.booted_flag = os.path.join(self.root, "fake-boot-ran")
+        os.makedirs(self.plans)
         # A default `ps` with a launchd_sim row for each UDID, so a boot's record can name one.
         self.write_ps([(str(LAUNCHD_PIDS[u]), "1", "0", LAUNCHD_CMD + " " + u)
                        for u in (U1, U2, U3)])
 
     # ------------------------------------------------------------------ helpers
 
-    def write_ps(self, rows):
-        """Make the fake `ps` answer the process table ROWS, (pid, ppid, uid, command)."""
+    def write_ps(self, rows, rows_after=None):
+        """Make the fake `ps` answer the process table ROWS, (pid, ppid, uid, command). With
+        ROWS_AFTER, it answers that table once the fake `simctl boot` has run."""
         path = os.path.join(self.bin, "ps")
+        init = [("1", "0", "0", "/sbin/launchd")]
         with open(path, "w", encoding="utf-8") as handle:
-            handle.write(fake_ps_script([("1", "0", "0", "/sbin/launchd")] + list(rows),
-                                        self.ps_log))
+            handle.write(fake_ps_script(
+                init + list(rows), self.ps_log, self.booted_flag,
+                None if rows_after is None else init + list(rows_after)))
         os.chmod(path, 0o755)
 
     def simctl_reads(self):
@@ -137,9 +160,45 @@ class SimBootRecordTests(unittest.TestCase):
             text = devices_json(rows)
             assert "'" not in text, "the printf body is single-quoted"
             body = "printf '%s' '" + text + "'\n"
+        # `simctl list` answers BODY. bootstatus, io screenshot, shutdown and boot log "name UDID"
+        # and exit with line N of plans/<name> for their Nth call (0 when the plan has no line N).
+        # Shell builtins only: the hook's PATH holds no grep or sed. A boot also makes the flag file the fake `ps` reads.
+        script = (
+            "#!/bin/sh\n"
+            "case \"$*\" in\n"
+            "  \"simctl list devices\"*) echo read >> '" + self.reads + "'\n" + body + "  ;;\n"
+            "  \"simctl bootstatus \"*|\"simctl io \"*|\"simctl shutdown \"*|\"simctl boot \"*)\n"
+            "    case \"$2\" in io) name=$4; udid=$3 ;; *) name=$2; udid=$3 ;; esac\n"
+            "    echo \"$name $udid\" >> '" + self.calls + "'\n"
+            "    n=0; while read -r l _; do [ \"$l\" = \"$name\" ] && n=$((n+1)); done < '" + self.calls + "'\n"
+            "    [ \"$name\" = boot ] && : > '" + self.booted_flag + "'\n"
+            "    i=0; rc=0; [ -f '" + self.plans + "'/\"$name\" ] && while read -r v; do"
+            " i=$((i+1)); [ $i -eq $n ] && rc=$v; done < '" + self.plans + "'/\"$name\"\n"
+            "    exit \"${rc:-0}\" ;;\n"
+            "esac\n")
         with open(self.fake, "w", encoding="utf-8") as handle:
-            handle.write("#!/bin/sh\necho read >> '" + self.reads + "'\n" + body)
+            handle.write(script)
         os.chmod(self.fake, 0o755)
+
+    def plan(self, name, *rcs):
+        """Script the exit codes of the fake xcrun's NAME calls (bootstatus, screenshot, shutdown,
+        boot), one per call in order. A call past the list exits 0."""
+        with open(os.path.join(self.plans, name), "w", encoding="utf-8") as handle:
+            handle.write("".join("%d\n" % rc for rc in rcs))
+
+    def check_calls(self):
+        """The "name UDID" lines the fake xcrun logged for the check and the retry, in order."""
+        if not os.path.exists(self.calls):
+            return []
+        with open(self.calls, encoding="utf-8") as handle:
+            return handle.read().splitlines()
+
+    def post_raw(self, rows, tool=None, tool_input=None):
+        """Like post, but returns the result and asserts only exit 0."""
+        self.set_devices(rows)
+        result = self.run_hook("PostToolUse", tool=tool, tool_input=tool_input)
+        self.assertEqual(result.returncode, 0, "PostToolUse failed: %s" % result.stderr[:300])
+        return result
 
     def run_hook(self, event, tool=None, tool_input=None, path=None):
         payload = {"hook_event_name": event, "session_id": "sim-boot-record-cases",
@@ -436,6 +495,120 @@ class SimBootRecordTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "")
         self.assertEqual(self.read_records(), [])
+
+
+    # ------------------------------------------------------------------ ruling 5, boot check
+
+    OFF = [(U1, "Idle Pro", "Shutdown", TYPE_PRO)]
+    ON = [(U1, "Idle Pro", "Booted", TYPE_PRO)]
+
+    def ps_with_retry_pid(self):
+        """The launchd_sim pid of U1 is 2001 until the fake boot runs, 3001 after it."""
+        row = lambda pid: [(pid, "1", "0", LAUNCHD_CMD + " " + U1)]
+        self.write_ps(row("2001"), rows_after=row("3001"))
+
+    def boot_and_check(self, tool=None, tool_input=None):
+        self.pre(self.OFF, tool=tool, tool_input=tool_input)
+        return self.post_raw(self.ON, tool=tool, tool_input=tool_input)
+
+    def test_a_healthy_boot_runs_the_check_and_writes_nothing(self):
+        result = self.boot_and_check()
+        self.assertEqual(result.stdout, "", "a healthy boot wrote to stdout")
+        self.assertEqual(self.check_calls(), ["bootstatus " + U1, "screenshot " + U1],
+                         "the check did not run bootstatus then io screenshot, or ran more")
+        self.assertEqual([r["udid"] for r in self.read_records()], [U1])
+
+    def test_a_healthy_mcp_launch_runs_the_check_and_writes_nothing(self):
+        ti = {"action": "launch", "device": U1}
+        result = self.boot_and_check(tool=MCP, tool_input=ti)
+        self.assertEqual(result.stdout, "", "a healthy MCP launch wrote to stdout")
+        self.assertEqual(self.check_calls(), ["bootstatus " + U1, "screenshot " + U1],
+                         "an MCP launch was not checked")
+
+    def test_a_failed_check_is_retried_once_and_a_pass_tells_the_session(self):
+        cases = {"bootstatus fails": ("bootstatus", [1]), "screenshot fails": ("screenshot", [1])}
+        for label, (name, rcs) in cases.items():
+            with self.subTest(label):
+                self.tearDown_state()
+                self.ps_with_retry_pid()
+                self.plan(name, *rcs)
+                result = self.boot_and_check()
+                names = [c.split()[0] for c in self.check_calls()]
+                self.assertEqual([n for n in names if n in ("shutdown", "boot")],
+                                 ["shutdown", "boot"], "no single shutdown then boot after a fail")
+                self.assertLess(names.index("shutdown"), names.index("boot"))
+                self.assertEqual(names[-1], "screenshot", "no second check after the retry")
+                self.assertIn("bootstatus", names[names.index("boot"):],
+                              "the check did not run again after the boot")
+                self.assertIn(U1, [c.split()[1] for c in self.check_calls() if c.startswith("shutdown")])
+                out = json.loads(result.stdout)
+                self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "PostToolUse")
+                note = out["hookSpecificOutput"]["additionalContext"].lower()
+                self.assertIn("again", note, "the note does not say the device was booted again")
+                self.assertNotIn("decision", out)
+                records = self.read_records()
+                self.assertEqual([r["udid"] for r in records], [U1])
+                self.assertEqual(str(records[0]["launchd_pid"]), "3001",
+                                 "the record holds the pid from before the retry")
+
+    def test_a_failed_check_after_the_retry_blocks_and_names_the_device(self):
+        cases = {"bootstatus": ("bootstatus", [1, 1]), "screenshot": ("screenshot", [1, 1]),
+                 "bootstatus then screenshot": None}
+        for label, spec in cases.items():
+            with self.subTest(label):
+                self.tearDown_state()
+                self.ps_with_retry_pid()
+                if spec:
+                    self.plan(*spec[:1], *spec[1])
+                else:
+                    self.plan("bootstatus", 1)
+                    self.plan("screenshot", 0, 1)
+                result = self.boot_and_check()
+                out = json.loads(result.stdout)
+                self.assertEqual(out["decision"], "block")
+                reason = out["reason"]
+                self.assertIn(U1, reason, "the reason does not name the UDID")
+                self.assertIn("broken", reason.lower())
+                self.assertIn("stop", reason.lower(), "the reason does not say to stop using it")
+                names = [c.split()[0] for c in self.check_calls()]
+                self.assertEqual(names.count("shutdown"), 1, "more or fewer than one shutdown")
+                self.assertEqual(names.count("boot"), 1, "more or fewer than one boot")
+                self.assertNotEqual(names[-1], "shutdown", "the hook shut the device after the fail")
+                self.assertEqual([r["udid"] for r in self.read_records()], [U1],
+                                 "a broken device left no record line")
+
+    def test_an_mcp_launch_that_fails_the_check_is_retried(self):
+        ti = {"action": "launch", "device": U1}
+        self.ps_with_retry_pid()
+        self.plan("bootstatus", 1)
+        result = self.boot_and_check(tool=MCP, tool_input=ti)
+        self.assertIn("additionalContext", json.loads(result.stdout)["hookSpecificOutput"])
+        self.assertEqual(self.check_calls().count("shutdown " + U1), 1)
+
+    def test_an_xcodebuild_destination_boot_is_not_checked(self):
+        ti = {"command": "xcodebuild test -scheme App -destination id=" + U1}
+        self.plan("bootstatus", 1, 1)
+        self.plan("screenshot", 1, 1)
+        result = self.boot_and_check(tool_input=ti)
+        self.assertEqual(result.stdout, "", "an xcodebuild boot was checked and blocked")
+        self.assertEqual(self.check_calls(), [], "an xcodebuild boot ran the check")
+        self.assertEqual([r["udid"] for r in self.read_records()], [U1])
+
+    def test_a_device_booted_before_the_call_is_not_checked(self):
+        self.plan("bootstatus", 1, 1)
+        self.pre(self.ON)
+        result = self.post_raw(self.ON)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(self.check_calls(), [], "an owner-booted device was checked")
+
+    def tearDown_state(self):
+        """Reset the fake's logs, plans, flag and records between sub-cases of one test."""
+        for path in (self.calls, self.booted_flag, self.records):
+            if os.path.exists(path):
+                os.remove(path)
+        for name in os.listdir(self.plans):
+            os.remove(os.path.join(self.plans, name))
+        shutil.rmtree(self.state, ignore_errors=True)
 
 
 if __name__ == "__main__":
