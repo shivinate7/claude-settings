@@ -72,15 +72,39 @@ STASH_READ_ACTIONS = {"list", "show"}
 STASH_TREE_ACTIONS = {"push", "save"}
 
 
+# Every action word git's `stash` knows. Any other plain word is a pathspec, which git reads as
+# a push (`git stash <pathspec>` is its own shorthand for `git stash push -- <pathspec>`).
+STASH_ACTIONS = {"list", "show", "drop", "pop", "apply", "clear", "branch", "push", "save",
+                 "create", "store"}
+# `git stash push` options that take a value. The value is a word, never an action.
+STASH_VALUE_OPTIONS = {"-m", "--message", "--pathspec-from-file", "-U", "--unified",
+                       "--inter-hunk-context"}
+
+
 def stash_action(args) -> str:
     """Return the stash call's own action word, or 'push' when the call names none.
 
-    A bare `git stash` and `git stash -u` both push, the same as `git stash push`. `stash`
-    takes no flag of its own before the action word, so the first plain word is the action.
+    A bare `git stash`, `git stash -u`, `git stash -- <path>`, `git stash -m <msg>` and
+    `git stash <path>` all push, the same as `git stash push`. Options are skipped. An option in
+    STASH_VALUE_OPTIONS consumes the next word as its value (`--message=x` carries its own). The
+    first word left is the action when git knows it. After `--` the call is a push, because a
+    pathspec follows. A plain word that is no known action is a pathspec, so it is a push too.
+
+    No word is left unknown, so none lands on the stack side. What lands there is a KNOWN word
+    that is not a read and not a push: pop, apply, drop, clear, branch, create, store.
     """
-    for arg in args:
-        if not arg.startswith("-"):
-            return arg
+    args = list(args)
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--":
+            return "push"
+        if arg in STASH_VALUE_OPTIONS:
+            i += 2
+        elif arg.startswith("-"):
+            i += 1
+        else:
+            return arg if arg in STASH_ACTIONS else "push"
     return "push"
 
 
@@ -93,8 +117,9 @@ def stash_takes_the_stack(args) -> bool:
     `branch` consume the entry they use, `drop` and `clear` destroy entries outright, and
     `apply` reads another session's work into this tree without that session's word.
 
-    An action word this guard does not know falls on the stack side. That is the side where a
-    wrong answer costs another session its work.
+    A word that is no known action is a pathspec, which stash_action reads as a push. Only a
+    known action word that is neither a read nor a push falls on the stack side, the side where
+    a wrong answer costs another session its work.
     """
     action = stash_action(args)
     return action not in STASH_READ_ACTIONS and action not in STASH_TREE_ACTIONS
