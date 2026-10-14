@@ -30,7 +30,9 @@ The guard tests, families wsl, kill, env, impeccable and shared-tree.
 - The wrapper and value-flag lists are closed. An unlisted wrapper, such as `stdbuf` or `chrt`, or an unlisted value flag hides the command word. Debt: guard-wrapper-lists-closed.
 - The segment split ignores backslash escapes, so `echo '; pkill foo; echo 'x'` hides `pkill`. Debt: guard-split-ignores-backslash.
 - The second reading can show a `cd` that bash never runs, as in `git restore f.txt` then `echo don't; cd <lane>`. The run-folder walk then judges the restore in the lane. Debt: guard-cd-walk-extra-reading.
-- A command of about 6,000 words with an odd count of `'` takes about 18 s, near the 20 s hook timeout. Most of the cost is the per-word path read. Debt: guard-long-command-near-timeout.
+- An odd count of `'` doubles guard time. A 6,001-word command takes 31.8 s, past the 20 s hook timeout, and a timed-out hook lets the call run. Debt: guard-long-command-near-timeout.
+- Commit-message rules read heredoc headers one way only. A lone `'` line before a heredoc commit then hides a path-citing body. Main denies it. Debt: guard-heredoc-one-reading.
+- A leading redirect, `)#`, and a heredoc header that ends in an open quote hide a kill, as on main. Debt: guard-redirect-paren-heredoc.
 
 Kind: process
 Home: hooks/guard_core.py
