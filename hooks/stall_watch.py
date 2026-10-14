@@ -44,7 +44,11 @@ import time
 import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from guard_stream import until_note  # the one parser of the `until:` note
+try:
+    from guard_stream import until_note  # the one parser of the `until:` note
+except ImportError:  # the Stop check is a recovery control: it runs without notes, never dies
+    def until_note(description) -> str:
+        return ""
 
 DEFAULT_QUIET = 300
 STALL_EXIT = 3

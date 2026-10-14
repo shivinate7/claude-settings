@@ -18,6 +18,11 @@ Owner ruling, 2026-10-13 23:41 CDT: "End condition at start."
   note in its `description`: `until: <condition>`.
 - The guard rule `background-end` in `hooks/guard_stream.py` refuses the call when the note is
   missing, or when its condition is empty.
+- The roster is named. A script runner (npm, pnpm, yarn, bun) counts when the script name, or a
+  `:` part of it, is dev, serve, start, watch or preview (`build:watch` counts, `build` does not).
+  `--watch` counts on any tool except `gh`, whose watchers end with the run. The guard reads
+  through `cmd /c`, `bash -c`, `pwsh -Command`, `&`, a subshell, `.cmd` and `.exe` names, and
+  `npx pkg@version`.
 - One-off builds, test runs and `gh run watch` pass without the note.
 - The Stop check shows each quiet job's note beside it. The agent judges whether the job should
   still run.
@@ -37,6 +42,10 @@ background job runs unattended for a day with no stated reason.
 
 - A foreground server that the harness moves to background at its 120 s timeout is not checked.
   Debt `timeout-moved-server-unchecked`: a foreground server moved to background at 120 s.
+- `node <file>` is not in the roster. The guard cannot tell a server script from a one-off script.
+  Debt `node-file-server-unchecked`: a background `node server.js` is not refused.
+- The note is checked for presence only. `until: n/a` passes. Debt `until-note-unjudged`: no check
+  reads whether the note names a real condition.
 
 Kind: process
 Home: hooks/guard_stream.py

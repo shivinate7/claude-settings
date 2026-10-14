@@ -1,4 +1,5 @@
-"""The guard's stream family: a stream that never ends, a waiter loop and two ported shell traps.
+"""The guard's stream family: a stream that never ends, a waiter loop, a background server with no end
+note, a waiter loop over a pattern and two ported shell traps.
 
 guard.py is the only entry point, and it runs these checks in its fixed order (decision
 guard-split-by-family). Other files reach these names through `guard`.
@@ -7,8 +8,8 @@ import os
 import re
 
 from guard_core import (
-    DURATION, _absolute, _skip_assignments_and_keywords, basename, resolve_command, segment_tokens,
-    split_segments,
+    DURATION, PLAYWRIGHT_PS_SHELLS, _absolute, _pwsh_script, _skip_assignments_and_keywords, basename,
+    inline_script, resolve_command, segment_tokens, split_segments,
 )
 
 
@@ -235,9 +236,16 @@ WAITER_REASON = (
 # carried run_in_background (named hole).
 UNTIL_NOTE = re.compile(r"\buntil:[ \t]*(\S[^\r\n]*)", re.I)
 SCRIPT_RUNNERS = ("npm", "pnpm", "yarn", "bun", "npx", "pnpx", "bunx")
+SCRIPT_MANAGERS = ("npm", "pnpm", "yarn", "bun")
 RUNNER_VERBS = ("run", "run-script", "exec", "dlx", "x")
+# A runner flag that takes its value as the next token, so the value is not the script name.
+RUNNER_VALUE_FLAGS = ("--prefix", "-w", "--workspace", "-C", "--dir", "--filter", "-F", "--cwd",
+                      "-p", "--package")
 SERVER_SCRIPTS = ("dev", "serve", "start", "watch", "preview")
 SERVER_PROGRAMS = ("serve", "http-server", "live-server", "nodemon")
+SHELL_EXTENSION = re.compile(r"\.(exe|cmd|bat|ps1)$")
+# Named holes (decision background-needs-end-note): `node <file>` is not in the roster, and the
+# note is checked for presence only.
 
 
 def until_note(description) -> str:
@@ -246,38 +254,75 @@ def until_note(description) -> str:
     return found.group(1).strip() if found else ""
 
 
+def program_name(token: str) -> str:
+    """A command word or package name without its path, `@version` or `.exe`/`.cmd` suffix."""
+    return SHELL_EXTENSION.sub("", basename(token)).split("@", 1)[0]
+
+
 def server_program(word: str, args) -> bool:
     """True for a program (with its args) that serves or watches and never ends by itself."""
+    if word != "gh" and any(a == "--watch" or a.startswith("--watch=") for a in args):
+        return True  # `gh ... --watch` ends when the run ends, so it is out of the roster
     if word in SERVER_PROGRAMS:
         return True
     if re.fullmatch(r"python[\d.]*|py", word):
-        return args[:2] == ["-m", "http.server"]
+        for i, a in enumerate(args):  # options (`-u`, `-3`) may come before -m
+            if a == "-m":
+                return args[i + 1:i + 2] == ["http.server"]
+            if not a.startswith("-"):
+                return False
+        return False
     if word == "vite":
         return "build" not in args
     if word == "next":
         return any(a in ("dev", "start") for a in args)
     if word == "tsc":
-        return any(a in ("-w", "--watch") or a.startswith("--watch=") for a in args)
+        return "-w" in args
     return False
 
 
-def server_hit(segment: str) -> str:
-    """The matched text when one segment starts a server or watcher, else ''."""
-    tokens = segment_tokens(segment)
+def _inner_scripts(tokens, at: int):
+    """The script text a wrapper at `tokens[at]` runs: `sh -c`, `pwsh -Command`, `cmd /c`, else ''."""
+    script = inline_script(tokens)
+    if script:
+        return script
+    word = basename(tokens[at])
+    if word in PLAYWRIGHT_PS_SHELLS:
+        return _pwsh_script(tokens)
+    if word in ("cmd", "cmd.exe") and at + 1 < len(tokens) and tokens[at + 1].lower() in ("/c", "/k"):
+        return " ".join(tokens[at + 2:])
+    return ""
+
+
+def _tokens_hit(tokens) -> str:
+    tokens = [t for t in ([tokens[0].lstrip("(")] + tokens[1:-1] + [tokens[-1].rstrip(")")]
+                          if len(tokens) > 1 else [tokens[0].strip("()")]) if t]  # a subshell `(...)`
     at = resolve_command(tokens) if tokens else None
     if at is None:
         return ""
-    word, args = basename(tokens[at]), tokens[at + 1:]
+    if tokens[at] == "&":  # PowerShell's call operator
+        return _tokens_hit(tokens[at + 1:]) if at + 1 < len(tokens) else ""
+    script = _inner_scripts(tokens, at)
+    if script:
+        return next((hit for hit in map(server_hit, split_segments(script)) if hit), "")
+    word, args = program_name(tokens[at]), tokens[at + 1:]
     if word in SCRIPT_RUNNERS:
         while args and (args[0].startswith("-") or args[0] in RUNNER_VERBS):
-            args = args[1:]
+            args = args[2:] if args[0] in RUNNER_VALUE_FLAGS else args[1:]
         if not args:
             return ""
-        name, rest = basename(args[0]), args[1:]
-        if word in ("npm", "pnpm", "yarn", "bun") and name in SERVER_SCRIPTS:
+        name, rest = program_name(args[0]), args[1:]
+        if word in SCRIPT_MANAGERS and any(part in SERVER_SCRIPTS for part in name.split(":")):
             return word + " " + name
         word, args = name, rest
     return word if server_program(word, args) else ""
+
+
+def server_hit(segment: str) -> str:
+    """The matched text when one segment starts a server or watcher, else ''. Wrappers (`cmd /c`,
+    `bash -c`, `pwsh -Command`, `&`, a subshell) are read through by guard_core's own resolvers."""
+    tokens = segment_tokens(segment)
+    return _tokens_hit(tokens) if tokens else ""
 
 
 def background_end_hit(segments, background: bool, description) -> str:
