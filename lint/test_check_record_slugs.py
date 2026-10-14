@@ -193,5 +193,20 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertNotIn("Traceback", out)
 
 
+    def test_backslash_path_is_checked_like_a_slash_path(self):
+        # A Windows-style path names the same record, so its folder must still be read.
+        self.assert_passes("decisions\\" + OK)
+        rc, out = self.lint("decisions\\" + LONG)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), ["decisions\\" + LONG])
+
+    def test_dir_given_twice_fails(self):
+        self.put("decisions/" + OK)
+        rc, out = self.lint("--dir", "decisions", "--dir", "bogus", "decisions/" + OK)
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("given more than once", out)
+        self.assertNotIn("Traceback", out)
+
+
 if __name__ == "__main__":
     unittest.main()
