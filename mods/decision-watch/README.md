@@ -1,6 +1,6 @@
 # decision-watch
 
-A mod. It runs the Stop-time decision watch with this session's own model login. It replaces the Stop hook row. It never blocks a turn. A FLAG or UNKNOWN shows in the session as a toast, with the text the Stop hook showed. An ALLOW shows nothing. Any other text, such as a config notice on an ALLOW turn, goes to the log only.
+A mod. It runs the Stop-time decision watch with this session's own model login. It replaces the Stop hook row. It never blocks a turn. A FLAG or UNKNOWN verdict shows in the session as a toast. An ALLOW verdict shows nothing. Each config notice shows as its own toast, marked `Decision watch notice:`.
 
 ## What it does
 
@@ -9,10 +9,12 @@ A mod. It runs the Stop-time decision watch with this session's own model login.
 - One judge runs at a time. A Stop that arrives during a judge logs "SKIP busy" and does not judge.
 - The judging uses `hooks/decision_watch.py` in your Claude config folder, in two steps.
   1. `--emit-prompt` runs the cheap path. It prints a prompt only when a model call is due.
-  2. The mod calls the model with that prompt. The mod enforces a 50 s limit itself (a timer races the call). A call that passes it reads as a model error, and the one-judge slot frees. Then `--model-text` or `--model-error` gives the verdict.
+  2. The mod calls the model with that prompt. The mod enforces a 50 s limit itself (a timer races the call). A call that passes it reads as a model error. Then `--model-text` or `--model-error` gives the verdict.
+- Each python run and each python finder also has a mod timer: the host limit plus 1 s. A run that passes it reads UNKNOWN. A toast has a 5 s timer. So a hung call frees the one-judge slot.
 - Every failure reads as UNKNOWN. A failure never reads as ALLOW.
 - Phase 1 prints a `key` for the evidence it judged. The mod gives it back to phase 2 as `--key` after the reply. Evidence that moved between the two steps reads UNKNOWN. A phase 1 with no key reads UNKNOWN.
-- The toast holds the script's own FLAG or UNKNOWN message, or the mod's own UNKNOWN text. The log holds the same verdict. A message that is neither (an ALLOW turn's config notice) is logged as `NOT SHOWN`. A failed toast is logged as `TOAST FAILED`, with the text it failed to show.
+- Under the split flags, the script prints `verdict` and `notices` as separate JSON fields. The mod does not parse joined text.
+- The verdict toast holds the script's own FLAG or UNKNOWN message, or the mod's own UNKNOWN text. Each notice (config files, merges into main, unread subjects) gets its own toast. The END log line holds the verdict and each notice. A verdict that is neither FLAG nor UNKNOWN is logged as `NOT SHOWN`. A failed toast is logged as `TOAST FAILED`, with the text it failed to show.
 - A model verdict that the script cannot use reads as "verdict lost". This happens when another judge already recorded the same turn. The script prints this marker whenever it gets a model reply and ends before the model step. A valid ALLOW that the script uses stays ALLOW.
 - A new human message between the two steps also causes it. The baseline moves, so a real FLAG can print "verdict lost". That is loud and correct.
 - The mod sends the Stop JSON to python as ASCII only. It escapes each other character as `\uXXXX`.
@@ -29,12 +31,12 @@ A mod. It runs the Stop-time decision watch with this session's own model login.
 ## Where things live
 
 - The script path is `CLAUDE_CONFIG_DIR/hooks/decision_watch.py`. With no `CLAUDE_CONFIG_DIR`, the mod uses `USERPROFILE` or `HOME`, then `.claude`.
-- The background judge and `/dw` each have their own state folder: `decision-watch-shadow` and `decision-watch-dw`. Neither is the real config folder. The real Stop hook keeps its own "already judged" cache and the mod never touches it. A background verdict does not mute `/dw`.
+- The background judge and `/dw` each have their own state folder: `decision-watch-shadow` and `decision-watch-dw`. Each holds its own "already judged" cache. A background verdict does not mute `/dw`.
 - The mod picks the first `python3` or `python` on PATH that is not the Windows Store stub.
 
 ## /dw
 
-The command runs the same judgment on the latest turn. It shows the timings and the result. It never shows the prompt. Before the first Stop, it finds the transcript from the session id.
+The command runs the same judgment on the latest turn. It shows the timings, the result and each notice. It never shows the prompt. Before the first Stop, it finds the transcript from the session id.
 
 The last line is "Stops seen: N". N counts the STOP seen lines now in the log. The log keeps 500 lines, so N is at most 500.
 
@@ -44,6 +46,7 @@ The last line is "Stops seen: N". N counts the STOP seen lines now in the log. T
 
 - Whether the desktop app and the terminal both give the model call the same login.
 - Whether `$.model.complete` stops at `timeoutMs`. The request field is not in the host's type, so the mod does not rely on it. Its own timer enforces the 50 s limit. The host call may keep running after the timer.
+- Whether `$.process.run` kills the child at `timeoutMs`. The mod's timer frees the slot, but it does not kill the child. A hung python may keep running.
 
 ## Limits
 

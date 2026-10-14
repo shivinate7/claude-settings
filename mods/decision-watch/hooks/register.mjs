@@ -1,7 +1,7 @@
 // decision-watch: runs the Stop-time decision watch (hooks/decision_watch.py) with the session's
-// own model login, and writes the verdict to a log. A FLAG or UNKNOWN shows in the session with
-// $.ui.toast, the text the Stop hook showed. An ALLOW, and any other text such as a config notice,
-// goes to the log only. It never blocks and never changes the Stop result.
+// own model login, and writes the verdict to a log. A FLAG or UNKNOWN verdict shows in the session
+// with $.ui.toast. An ALLOW verdict shows nothing. Each config notice shows as its own toast, marked
+// as a notice. It never blocks and never changes the Stop result.
 //
 // classic.Stop  returns next(e) at once. The judging runs in the background and is skipped when
 //               stop_hook_active is set.
@@ -11,8 +11,8 @@
 // then --model-text or --model-error finishes the verdict. This mod makes the model call between.
 // Phase 1 prints a "key" for the evidence it judged. Phase 2 gets it back as --key after the reply,
 // so evidence that moved between the phases reads UNKNOWN, never a silent ALLOW. No key reads UNKNOWN.
-// The mod runs the script with its own state folder, so it never mutes the real hook's
-// "already judged" cache. The log holds the verdict line and timings, never the prompt.
+// The script prints `verdict` and `notices` apart, so the mod never parses joined text.
+// The log holds the verdict line, the notices and timings, never the prompt.
 //
 // The host reads on(...) and $.noun.method(...) from source, so they are spelled literally.
 
@@ -21,6 +21,9 @@ let busy = false; // true while a background judge runs
 
 // The prefix of every UNKNOWN this mod makes itself; python's own UNKNOWN text comes through as printed.
 const UNKNOWN = "Decision watch: UNKNOWN, ";
+// The mark on a config notice toast. It never matches a FLAG or UNKNOWN verdict.
+const NOTICE = "Decision watch notice: ";
+const NOTHING = "nothing to say (no protected change, no model call)";
 const msg = (err) => String((err && err.message) || err).slice(0, 300);
 // $.model.complete returns {isAnswered, text, usage}. Accept a plain string too.
 const textOf = (r) => (typeof r === "string" ? r : String((r && r.text) ?? ""));
@@ -40,7 +43,7 @@ export function register(on) {
       const stop = lastStop ?? (await deriveStop($));
       lines.push(`stop input: session ${stop.session_id}`);
       const out = await judge($, stop, "dw");
-      lines.push(...out.trace, `RESULT: ${out.result}`);
+      lines.push(...out.trace, `RESULT: ${out.result}`, ...out.notices.map((n) => `NOTICE: ${n}`));
     } catch (err) {
       lines.push(`RESULT: UNKNOWN (mod error): ${msg(err)}`);
     }
@@ -102,7 +105,7 @@ async function deriveStop($) {
 async function pickPython($) {
   for (const argv of [["where.exe", "python3", "python"], ["which", "-a", "python3", "python"]]) {
     try {
-      const r = await $.process.run(argv, { timeoutMs: 5000 });
+      const r = await deadline($.process.run(argv, { timeoutMs: FIND_MS }), FIND_MS + 1000);
       const hit = r.stdout.split(/\r?\n/).map((s) => s.trim()).find((s) => s && !/WindowsApps/i.test(s));
       if (r.exitCode === 0 && hit) return hit;
     } catch {
@@ -115,19 +118,20 @@ async function pickPython($) {
 // ASCII-only JSON: python -I may read stdin in a legacy code page, so escape every non-ASCII character.
 const asciiJson = (v) => JSON.stringify(v).replace(/[\u0080-￿]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
 
-// The background judge and /dw each get their own state folder, so neither mutes the other's cache.
-// Neither is the real config folder, so the real hook's cache is never touched.
+// The background judge and /dw each get their own state folder, so neither mutes the other's
+// "already judged" cache.
 const stateDir = (cfg, who) => `${cfg}/decision-watch-${who}`;
 
 async function dwRun($, stop, extra, who) {
   const cfg = await configDir($);
   const py = await pickPython($);
   const t0 = Date.now();
-  const r = await $.process.run([py, "-I", `${cfg}/hooks/decision_watch.py`, ...extra], {
+  // The mod's own timer frees the slot if the host does not stop the child. It does not kill the child.
+  const r = await deadline($.process.run([py, "-I", `${cfg}/hooks/decision_watch.py`, ...extra], {
     stdin: asciiJson(stop),
     env: { CLAUDE_CONFIG_DIR: stateDir(cfg, who) },
-    timeoutMs: 60000,
-  });
+    timeoutMs: PY_MS,
+  }), PY_MS + 1000);
   return { ...r, ms: Date.now() - t0 };
 }
 
@@ -139,7 +143,7 @@ async function judge($, stop, who) {
   trace.push(`phase 1 (python, cheap path): exit ${p1.exitCode}, ${p1.ms} ms`);
   if (p1.exitCode !== 0) return unknown(trace, `decision_watch exited ${p1.exitCode}: ${p1.stderr.slice(0, 200)}`);
   const raw = p1.stdout.trim();
-  if (raw === "") return { trace, result: "nothing to say (no protected change, no model call)" };
+  if (raw === "") return { trace, result: NOTHING, shown: "", notices: [] };
   let out;
   try {
     out = JSON.parse(raw);
@@ -147,8 +151,9 @@ async function judge($, stop, who) {
     return unknown(trace, `phase 1 output was not JSON: ${raw.slice(0, 200)}`);
   }
   if (!out.needs_model) {
-    const shown = typeof out.systemMessage === "string" ? out.systemMessage : "";
-    return { trace, result: `message from the cheap path: ${shown || raw.slice(0, 300)}`, shown };
+    const { verdict, notices } = partsOf(out);
+    const result = verdict ? `message from the cheap path: ${verdict}` : notices.length ? NOTHING : `message from the cheap path: ${raw.slice(0, 300)}`;
+    return { trace, result, shown: verdict, notices };
   }
   if (typeof out.key !== "string" || out.key === "") {
     return unknown(trace, "phase 1 printed no key, so the reply cannot be tied to the evidence judged (an old decision_watch.py?)");
@@ -174,43 +179,59 @@ async function judge($, stop, who) {
   const p2 = await dwRun($, stop, [...args, "--key", out.key], who);
   trace.push(`phase 2 (python, verdict): exit ${p2.exitCode}, ${p2.ms} ms`);
   if (p2.exitCode !== 0) return unknown(trace, `decision_watch exited ${p2.exitCode} in phase 2: ${p2.stderr.slice(0, 200)}`);
-  let msgOut = "";
+  let parts = { verdict: "", notices: [] };
   try {
-    msgOut = p2.stdout.trim() === "" ? "" : JSON.parse(p2.stdout).systemMessage ?? "";
+    if (p2.stdout.trim() !== "") parts = partsOf(JSON.parse(p2.stdout));
   } catch {
     return unknown(trace, `phase 2 output was not JSON: ${p2.stdout.slice(0, 200)}`);
   }
-  if (msgOut === "" && modelFailed) return unknown(trace, "the model call failed and the script printed nothing");
-  return { trace, result: msgOut === "" ? "ALLOW (silent)" : msgOut, shown: msgOut };
+  if (parts.verdict === "" && modelFailed) return unknown(trace, "the model call failed and the script printed no verdict", parts.notices);
+  return { trace, result: parts.verdict === "" ? "ALLOW (silent)" : parts.verdict, shown: parts.verdict, notices: parts.notices };
+}
+
+// The script prints `verdict` and `notices` under a split flag. Output with no `notices` array
+// (a script that prints systemMessage only) is all verdict.
+function partsOf(o) {
+  if (Array.isArray(o.notices)) {
+    return { verdict: typeof o.verdict === "string" ? o.verdict : "", notices: o.notices.filter((n) => typeof n === "string" && n) };
+  }
+  return { verdict: typeof o.systemMessage === "string" ? o.systemMessage : "", notices: [] };
 }
 
 // A failure the mod itself sees is UNKNOWN, and it shows like the script's own UNKNOWN.
-function unknown(trace, why) {
-  return { trace, result: `UNKNOWN: ${why}`, shown: UNKNOWN + why };
+function unknown(trace, why, notices = []) {
+  return { trace, result: `UNKNOWN: ${why}`, shown: UNKNOWN + why, notices };
 }
 
 async function shadow($, stop) {
   await log($, `START ${stop.session_id}`);
   let line;
   let shown = "";
+  let notices = [];
   try {
     const out = await judge($, stop, "shadow");
-    line = `END ${stop.session_id} | ${out.trace.join(" | ")} | ${out.result}`;
+    line = `END ${stop.session_id} | ${out.trace.join(" | ")} | ${out.result}${out.notices.map((n) => ` | NOTICE: ${n}`).join("")}`;
     shown = out.shown;
+    notices = out.notices;
   } catch (err) {
     line = `END ${stop.session_id} | MOD ERROR, reads as UNKNOWN: ${msg(err)}`;
     shown = UNKNOWN + `the mod raised (${msg(err)})`;
   }
   await log($, line);
-  // Only a FLAG or UNKNOWN toasts. Other text (an ALLOW turn's config notice) stays in the log.
+  // A FLAG or UNKNOWN verdict toasts. An ALLOW verdict is silent. Each notice toasts on its own line.
   if (/^Decision watch: (FLAG|UNKNOWN)/.test(shown)) {
-    try {
-      await $.ui.toast(shown);
-    } catch (err) {
-      await log($, `TOAST FAILED ${stop.session_id} | ${msg(err)} | text: ${shown}`);
-    }
+    await toast($, stop, shown);
   } else if (shown) {
     await log($, `NOT SHOWN ${stop.session_id} | not a FLAG or UNKNOWN | text: ${shown}`);
+  }
+  for (const n of notices) await toast($, stop, NOTICE + n);
+}
+
+async function toast($, stop, text) {
+  try {
+    await deadline(Promise.resolve($.ui.toast(text)), TOAST_MS);
+  } catch (err) {
+    await log($, `TOAST FAILED ${stop.session_id} | ${msg(err)} | text: ${text}`);
   }
 }
 
@@ -219,6 +240,9 @@ const MAX_LINE = 2000;
 const LOG_WAIT_MS = 2000;
 const STOP_WAIT_MS = 500;
 const MODEL_MS = 50000;
+const PY_MS = 60000; // each python run; the mod's timer adds 1 s
+const FIND_MS = 5000; // each python finder; the mod's timer adds 1 s
+const TOAST_MS = 5000;
 
 // Like within, but a late promise rejects, so the caller can fail the step and free its slot.
 async function deadline(work, ms) {

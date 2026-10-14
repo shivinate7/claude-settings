@@ -82,7 +82,9 @@ an UNKNOWN read is never cached and always reported again.
 THE CONFIG REPORT. The same Stop run also prints the old `hooks/config_report.py` message,
 folded in below ("the config report"): the project config files, merges into main and
 unreadable subjects of this turn. It is a separate section with its own message, joined to the
-judgment's with a space, and it never calls the model.
+judgment's with a space, and it never calls the model. Under a split flag (below) the output
+also carries `verdict` (the judgment's text alone) and `notices` (one line per kind of
+notice), so a caller can show each notice apart from the verdict.
 
 WHAT THIS FILE DOES NOT DO. It does not adopt PR #88's `hooks/run_hook.sh` launcher; that PR
 is an open draft on another branch, and this file matches the inline python-fallback shape
@@ -1187,16 +1189,25 @@ def collect_unread(stamp):
 
 def config_report(hook):
     """Return the config-report systemMessage for this turn, or '' for nothing to say."""
+    return _report_text(config_notices(hook))
+
+
+def _report_text(parts):
+    return " ".join(parts) + TAIL if parts else ""
+
+
+def config_notices(hook):
+    """Return this turn's config notices, one string per kind, without TAIL. [] for none."""
     if hook.get("stop_hook_active"):
-        return ""  # a rewrite of an earlier reply: stay quiet, as `main` does for `run`
+        return []  # a rewrite of an earlier reply: stay quiet, as `main` does for `run`
     path = hook.get("transcript_path")
     if not path or not isinstance(path, str) or not os.path.exists(path):
-        return ""
+        return []
     try:
         reader = _shared_transcript()
         human, after = reader.read_turn(path)
         if not after:
-            return ""
+            return []
         cwd = hook.get("cwd") or ""
         if not isinstance(cwd, str):
             cwd = ""
@@ -1213,9 +1224,9 @@ def config_report(hook):
                 pass
         unread = collect_unread(last_human_stamp([human] if human else []))
     except Exception:
-        return ""
+        return []
     if not hits and not merges and not unread:
-        return ""
+        return []
     parts = []
     if hits:
         parts.append(CONFIG_MESSAGE % ", ".join(hits))
@@ -1223,7 +1234,7 @@ def config_report(hook):
         parts.append(MERGE_MESSAGE % ", ".join(merges))
     if unread:
         parts.append(UNREAD_MESSAGE % ", ".join(unread))
-    return " ".join(parts) + TAIL
+    return parts
 
 
 LOST_MESSAGE = UNKNOWN_PREFIX + "verdict lost: the model reply was not used (the watch ended before the model step)."
@@ -1244,7 +1255,8 @@ def _model_call_from_argv(argv):
                           a model call is due; otherwise the normal output (usually nothing).
       --model-text TEXT   the model's reply text; parsed by parse_verdict, then normal output.
       --model-error TEXT  the call failed; prints the UNKNOWN message, never a pass.
-    Phase 2 may end with `--key K`, the "key" phase 1 printed; `main` strips it (`_split_key`)."""
+    Phase 2 may end with `--key K`, the "key" phase 1 printed; `main` strips it (`_split_key`).
+    Under any of these flags, printed output also carries `verdict` and `notices` (see `main`)."""
     if argv[:1] == ["--emit-prompt"] and len(argv) == 1:
         def emit(prompt):
             raise NeedsModel(prompt)
@@ -1298,9 +1310,15 @@ def main():
         print(json.dumps({"systemMessage": UNKNOWN_PREFIX + "the watch itself raised (%s)." % exc}))
         sys.exit(0)
 
-    message = " ".join(m for m in (message, config_report(hook)) if m)
-    if message:
-        print(json.dumps({"systemMessage": message}))
+    notices = config_notices(hook)
+    joined = " ".join(m for m in (message, _report_text(notices)) if m)
+    if joined:
+        out = {"systemMessage": joined}
+        if model_call is not invoke_model:
+            # A split caller (a mod) shows the verdict and each notice apart. The default output
+            # keeps the one Stop-hook field only.
+            out.update(verdict=message, notices=[n + TAIL for n in notices])
+        print(json.dumps(out))
     sys.exit(0)
 
 
