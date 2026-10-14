@@ -6947,6 +6947,34 @@ deny_beats("ask-alone: a stash push before a hard reset in a worktree denies as 
 deny_beats("ask-alone: a kill before a cap write still denies as a kill",
            "pkill -f node && " + CHAIN_CAP_WRITE, "machine-wide-kill", cwd=PROJ)
 
+# (f) A SINGLE `&` IS A CHAIN, AND A STEP HIDDEN IN AN INLINE SCRIPT, A COMMAND SUBSTITUTION, A LOOP
+# OR A PIPE TO Out-Null STILL COUNTS (orchestrator call, review round 1; the hidden shapes are the
+# open items of the debt `ask-step-hidden-in-script`). W is the cap write with no quote in it, so it
+# nests inside `bash -c "..."`, `$( )` and a loop: `echo <key>=<value> > settings.local.json`. A
+# redirect that holds a `&` (`&>`, `>&`) is one step, never a chain, so W with either still asks.
+CAP_PLAIN = "echo " + CAP_KEY + "=" + OPUS + " > settings.local.json"
+CAP_STEP = (("subagent-model-cap", "settings.local.json"),)
+
+sh("ask-alone: W alone still asks", CAP_PLAIN, "ask", "subagent-model-cap", cwd=PROJ)
+sh("ask-alone: W with an &> redirect is one step, so it asks", CAP_PLAIN + " &> log", "ask",
+   "subagent-model-cap", cwd=PROJ)
+sh("ask-alone: W with a >& redirect is one step, so it asks", CAP_PLAIN + " >& log", "ask",
+   "subagent-model-cap", cwd=PROJ)
+chained_ask("ask-alone: W sent to the background, then echo $! to a file, denies",
+            CAP_PLAIN + " & echo $! > pid.txt", cwd=PROJ, carries=CAP_STEP)
+chained_ask("ask-alone: W sent to the background, then P=$!, denies",
+            CAP_PLAIN + " & P=$!", cwd=PROJ, carries=CAP_STEP)
+chained_ask("ask-alone: W after echo inside bash -c with double quotes denies",
+            'bash -c "echo hi; ' + CAP_PLAIN + '"', cwd=PROJ, carries=CAP_STEP)
+chained_ask("ask-alone: W after echo inside bash -c with single quotes denies",
+            "bash -c 'echo hi; " + CAP_PLAIN + "'", cwd=PROJ, carries=CAP_STEP)
+chained_ask("ask-alone: W inside a command substitution, after another step, denies",
+            "echo hi; echo $( " + CAP_PLAIN + " )", cwd=PROJ, carries=CAP_STEP)
+chained_ask("ask-alone: a for loop holding W and another step denies",
+            "for f in a b; do " + CAP_PLAIN + "; echo $f; done", cwd=PROJ, carries=CAP_STEP)
+chained_ask("ask-alone: W piped to Out-Null in the PowerShell tool denies",
+            CAP_PLAIN + " | Out-Null", tool="PowerShell", cwd=PROJ, carries=CAP_STEP)
+
 
 # =========================================================================== ordinary work
 FAMILY = "paths"
