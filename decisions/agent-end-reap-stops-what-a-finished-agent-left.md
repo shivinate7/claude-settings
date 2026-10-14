@@ -167,11 +167,15 @@ off for that repo.
 Why: q_max held 798 registered worktrees. A lane pushes `HEAD:<lane>` from a local branch
 of another name, so a branch-upstream read called 181 of them never pushed. The remote
 keeps every commit of a removed tree. The test-author makes its red-proof checkout under
-`<repo>/.claude/worktrees/`, so this rule covers it.
+`<repo>/.claude/worktrees/` and names it `agent-<something>`, so this rule covers it. A
+checkout with another name under that folder is not covered.
+
+Limits: `git worktree remove` deletes the git-ignored files in a removed tree, a copied
+`.env` included, as the older rules already do. This rule keeps that behaviour.
 
 The mechanism: `janitor/sweep.py`'s `_is_agent_worktree`, `_agent_rule_keep`, `repo_reaper`
 and `run_repo_reaper`. `janitor/test_sweep.py`'s `AgentWorktreeReapTests` proves it.
-`janitor/mutate_sweep.py` carries 10 mutants for it.
+`janitor/mutate_sweep.py` carries 12 mutants for it.
 
 ## Proof
 

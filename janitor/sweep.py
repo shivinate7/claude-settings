@@ -601,14 +601,17 @@ def _is_agent_worktree(where: str, path: str) -> bool:
     return parent == norm(os.path.join(where, ".claude", "worktrees")) and name.startswith("agent-")
 
 
-def _agent_rule_keep(path: str, idle):
+def _agent_rule_keep(kept: dict, idle):
     """The agent rule (owner ruling 2026-10-14). It ADDS removals to the older unattended
     rulings and never narrows them. The caller runs it for a tree under `.claude/worktrees/agent-*`
-    that those rulings keep, after the clean, lock, session and live-ls-remote reads passed.
-    Returns a keep decision, or None when the tree may go: idle 4 hours, and HEAD on a
-    remote-tracking ref (`git branch -r --contains`). A read that fails keeps the tree."""
-    if idle is None:
-        return {"path": path, "action": "keep", "reason": "unreadable-subject"}
+    that those rulings keep (KEPT is their decision), after the clean, lock, session and
+    live-ls-remote reads passed. Returns a keep decision, or None when the tree may go: idle 4
+    hours, and HEAD on a remote-tracking ref (`git branch -r --contains`). A keep that came from
+    a failed read (`unreadable-subject`, an unreadable idle time included) stays, and so does a
+    failed read here."""
+    path = kept["path"]
+    if kept["reason"] == "unreadable-subject":
+        return kept
     if idle < AGENT_IDLE_SECONDS:
         return {"path": path, "action": "keep",
                 "reason": "recently-active: git activity %d minutes ago" % (idle // 60)}
@@ -667,7 +670,7 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
     if not attended:
         kept = _strict_keep(where, path, idle)
         if kept and agent_rule and _is_agent_worktree(where, path):
-            kept = _agent_rule_keep(path, idle)
+            kept = _agent_rule_keep(kept, idle)
         if kept:
             return kept
     # The pre-removal process check (brief point 4). ANY process at all, not only a listener --
@@ -2469,7 +2472,10 @@ MODES = ("full", "tier1", "branches")
 
 
 REAPER_SCRIPT = "reap:worktrees"
-REAPER_TIMEOUT_SECONDS = 120
+# The SessionEnd hook is killed at 55 s (settings.json). The whole sweep has to fit, so the repo's
+# own script gets 40 s, which leaves the rest of the sweep 15 s. After a timeout the older rules
+# alone judge the trees.
+REAPER_TIMEOUT_SECONDS = 40
 
 
 def repo_reaper(root: str):

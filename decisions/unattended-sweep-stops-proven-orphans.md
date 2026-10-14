@@ -93,9 +93,7 @@ touched.
 ## An unattended run may remove a worktree
 
 Owner ruling, 2026-10-01: every `--confirm` run, the daily job and SessionEnd
-included, needs both of these to remove a worktree. The one other way is the agent rule
-of `agent-end-reap-stops-what-a-finished-agent-left`, for a tree under
-`.claude/worktrees/agent-*`:
+included, needs both of these to remove a worktree:
 
 - Merged, or pushed and idle 24 hours. Merged means HEAD holds no commit that
   the default branch lacks. The test is the redundancy test of
@@ -121,6 +119,10 @@ of `agent-end-reap-stops-what-a-finished-agent-left`, for a tree under
   The sweep reads it before any `git status`, which can rewrite the index. A
   younger tree is kept, and the reason is `recently-active`. A time that
   cannot be read keeps the tree, and the reason is `unreadable-subject`.
+
+Two other routes remove a tree under `.claude/worktrees/agent-*` without both: the agent
+rule, and the repo's own `reap:worktrees` script. Both are in
+`agent-end-reap-stops-what-a-finished-agent-left`.
 
 The old conditions stay. The worktree must be clean and fully pushed. No live
 session and no process may be inside. The lock must be gone, or its host
@@ -170,3 +172,6 @@ pre-check's own enumeration. `janitor/test_sweep.py`'s
 `ListenerDecisionTests`, `UnreadableListenerReadTests`,
 `WorktreeProcessPreCheckTests`, `DeadRootedServerTests`, and `LooseProcessTests` prove them, against
 real fixture processes.
+
+Kind: process
+Home: janitor/test_sweep.py
