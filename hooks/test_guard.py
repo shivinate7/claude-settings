@@ -84,6 +84,7 @@ FAMILIES = {
     "session-log": "the session id column of guard.log",
     "fail-closed": "a missing sibling module refuses the call, and never allows it",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
+    "time-budget": "guard.py's own deadline: refused past it, judged as usual under it",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -9518,6 +9519,135 @@ LOG_CHECKS_EXTRA.append(("session-log: a stale guard_core lacking both names sti
                          "its line has five fields", session_log_stale_core_case))
 
 
+# --------------------------------------------------------------------------- the time budget
+#
+# Ruling (arbiter, 2026-10-14 04:50): guard.py keeps its own deadline, about 15 s. A judgement that
+# passes it is refused with exit 2 and DEADLINE_TEXT on stderr. The hook budget is 20 s, and a hook
+# that times out lets its call run unjudged, so the verdict must land inside that budget.
+#
+# GUARD_DEADLINE_S is the test-only knob that lowers the deadline. Unset, the guard uses 15 s. These
+# checkers run the guard themselves: decide() reads every nonzero exit as an error, and a deadline
+# refusal is the one that exits 2.
+FAMILY = "time-budget"
+DEADLINE_DEFAULT_S = 15
+DEADLINE_MARGIN_S = 3      # interpreter start-up and the refusal's own write, on a slow runner
+DEADLINE_TEXT = "command too long for the guard to judge; split it"
+TB_DIR = os.path.join(ROOT, "timebudget")        # a folder that is not a git tree: the payload's cwd
+TB_CFG = os.path.join(ROOT, "timebudget-cfg")    # the config folder these runs read
+
+
+def long_odd_quote(words):
+    """One `echo` of `words` words and one lone apostrophe: an odd count of quote characters."""
+    return "echo " + " ".join(["word"] * words) + " don't"
+
+
+def guard_timed(command, deadline_s=None):
+    """Judge one Bash command in a fresh guard process, the way the hook runs it.
+
+    Returns (rc, stdout, stderr, seconds). rc is None when no verdict came within 120 s.
+    """
+    os.makedirs(TB_DIR, exist_ok=True)
+    os.makedirs(TB_CFG, exist_ok=True)
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = TB_CFG
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    # A deadline the caller's environment carries must not stand in for the default 15 s.
+    env.pop("GUARD_DEADLINE_S", None)
+    if deadline_s is not None:
+        env["GUARD_DEADLINE_S"] = str(deadline_s)
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": TB_DIR})
+    started = time.monotonic()
+    try:
+        result = subprocess.run([sys.executable, GUARD], input=payload, capture_output=True,
+                                text=True, env=env, timeout=120, cwd=TB_DIR)
+    except subprocess.TimeoutExpired:
+        return None, "", "", time.monotonic() - started
+    return result.returncode, result.stdout, result.stderr, time.monotonic() - started
+
+
+def deadline_refusal_problems(rc, err, took, bound):
+    """What is wrong with a deadline refusal: exit 2, the message on stderr, inside the bound."""
+    problems = []
+    if rc is None:
+        problems.append("no verdict within 120 s")
+    else:
+        if rc != 2:
+            problems.append("expected exit 2, got %d" % rc)
+        if DEADLINE_TEXT not in err:
+            problems.append("stderr lacks the deadline message: %r" % err[:120])
+    if took > bound:
+        problems.append("the verdict took %.1f s, over the %d s bound" % (took, bound))
+    return problems
+
+
+def deadline_refusal_case():
+    """(a) A command past the default deadline is refused at exit 2, inside deadline plus margin.
+
+    The command is 16,000 words with one apostrophe. Measured here, 12,002 words took 32.6 s on a
+    quiet run and 16,000 took 76.6 s under CPU load, so the shape stays past the 15 s deadline on a
+    runner several times faster than this one. The bound is the deadline plus DEADLINE_MARGIN_S,
+    which is the only allowance for a slow runner.
+    """
+    bound = DEADLINE_DEFAULT_S + DEADLINE_MARGIN_S
+    rc, _out, err, took = guard_timed(long_odd_quote(16000))
+    problems = deadline_refusal_problems(rc, err, took, bound)
+    if problems:
+        return False, "; ".join(problems) + " (wall %.1f s)" % took
+    return True, "refused at exit 2 in %.1f s, inside the %d s bound" % (took, bound)
+
+
+def deadline_lowered_exceed_case():
+    """(b) With GUARD_DEADLINE_S=3, a judgement that takes about 15 s is refused at that deadline.
+
+    The 6,001-word shape takes about 15 s for guard.py alone on a quiet run here, five times the
+    lowered deadline, and 29 s under CPU load.
+    """
+    bound = 3 + DEADLINE_MARGIN_S
+    rc, _out, err, took = guard_timed(long_odd_quote(6001), deadline_s=3)
+    problems = deadline_refusal_problems(rc, err, took, bound)
+    if problems:
+        return False, "; ".join(problems) + " (wall %.1f s)" % took
+    return True, "refused at exit 2 in %.1f s under GUARD_DEADLINE_S=3, inside the %d s bound" % (
+        took, bound)
+
+
+def deadline_lowered_under_case():
+    """(b) With GUARD_DEADLINE_S=3, a normal command under the deadline is judged as usual.
+
+    `ls -la` is allowed with no output. `echo don't; wsl --shutdown` is refused by its own rule,
+    and its reason carries neither the deadline message nor any timeout text.
+    """
+    problems = []
+    rc, out, err, _took = guard_timed("ls -la", deadline_s=3)
+    if rc != 0 or out.strip() or err.strip():
+        problems.append("ls -la: want a silent allow, got exit %s, stdout %r, stderr %r"
+                        % (rc, out[:120], err[:120]))
+    rc, out, err, _took = guard_timed("echo don't; wsl --shutdown", deadline_s=3)
+    try:
+        block = json.loads(out)["hookSpecificOutput"]
+        decision, reason = block["permissionDecision"], block["permissionDecisionReason"]
+    except (ValueError, KeyError, TypeError):
+        decision, reason = None, ""
+    if rc != 0 or decision != "deny":
+        problems.append("wsl: want a deny at exit 0, got exit %s, decision %r" % (rc, decision))
+    elif WSL_RULE not in reason:
+        problems.append("wsl: the reason does not name %s: %r" % (WSL_RULE, reason[:90]))
+    if DEADLINE_TEXT in out or DEADLINE_TEXT in err:
+        problems.append("wsl: the usual deny carries the deadline message")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "ls -la allowed silently; the wsl deny keeps its own reason, under GUARD_DEADLINE_S=3"
+
+
+LOG_CHECKS_EXTRA.append(("time-budget: a 16,000-word odd-quote command is refused at exit 2 inside "
+                         "the 15 s deadline plus margin", deadline_refusal_case))
+LOG_CHECKS_EXTRA.append(("time-budget: GUARD_DEADLINE_S=3 refuses a 6,001-word odd-quote command at "
+                         "exit 2 inside its bound", deadline_lowered_exceed_case))
+LOG_CHECKS_EXTRA.append(("time-budget: under GUARD_DEADLINE_S=3, ls -la is allowed and a wsl deny "
+                         "keeps its own reason", deadline_lowered_under_case))
+
+
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
 
 # The log checkers tagged "windows". Each one reads a live process's start time (guard.py
@@ -9535,6 +9665,9 @@ WINDOWS_CHECKERS = {
 # audit-high: the fail-closed checks read no Windows-only code, but the Windows slice runs on
 # every pull request, and a missing sibling is the Windows incident. They run in that slice too.
 WINDOWS_CHECKERS.update(FAILCLOSED_CHECKS)
+# time-budget: the two fast checkers run in the Windows slice too, since the deadline is a guard
+# behaviour a Windows run must not skip. The slow refusal stays in the full suite.
+WINDOWS_CHECKERS.update((deadline_lowered_exceed_case, deadline_lowered_under_case))
 
 
 # --------------------------------------------------------------------------- the simulator boot rules
