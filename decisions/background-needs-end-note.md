@@ -18,11 +18,21 @@ Owner ruling, 2026-10-13 23:41 CDT: "End condition at start."
   note in its `description`: `until: <condition>`.
 - The guard rule `background-end` in `hooks/guard_stream.py` refuses the call when the note is
   missing, or when its condition is empty.
-- The roster is named. A script runner (npm, pnpm, yarn, bun) counts when the script name, or a
-  `:` part of it, is dev, serve, start, watch or preview (`build:watch` counts, `build` does not).
-  `--watch` counts on any tool except `gh`, whose watchers end with the run. The guard reads
-  through `cmd /c`, `bash -c`, `pwsh -Command`, `&`, a subshell, `.cmd` and `.exe` names, and
-  `npx pkg@version`.
+- The roster is named. As built:
+  - Script runners npm, pnpm, yarn and bun: the script name counts when a part of it, split on
+    `:` and `-`, is dev, serve, start, watch or preview. `build:watch`, `dev-server` and
+    `start-api` count; `build` and `build-docs` do not. A binary run through `exec`, `dlx` or `x`
+    is not a script name. `deno task <script>` uses the same name rule.
+  - `--watch` or `--watch=<v>` counts on any tool except `gh`, whose watchers end with the run.
+    `--watch=false`, `--watch=0`, `--watch false` and `--watch 0` do not count. `bun --hot`
+    counts.
+  - Programs (`SERVER_PROGRAMS`): serve, http-server, live-server, nodemon.
+  - Programs by verb (`SERVER_VERBS`, first positional word): next dev or start, deno serve,
+    jupyter lab or notebook, webpack serve, astro dev, rails s or server, streamlit run.
+  - `flask run` (also `flask --app <name> run`), `uvicorn` with `--reload`, `vite` without
+    `build`, `tsc -w`, and `python -m http.server`.
+  - The guard reads through `cmd /c`, `bash -c`, `pwsh -Command`, `&`, a subshell, `.cmd` and
+    `.exe` names, and `npx pkg@version`.
 - One-off builds, test runs and `gh run watch` pass without the note.
 - The Stop check shows each quiet job's note beside it. The agent judges whether the job should
   still run.
@@ -46,6 +56,10 @@ background job runs unattended for a day with no stated reason.
   Debt `node-file-server-unchecked`: a background `node server.js` is not refused.
 - The note is checked for presence only. `until: n/a` passes. Debt `until-note-unjudged`: no check
   reads whether the note names a real condition.
+- Some wrappers and forms are not read: `uv run`, `poetry run`, `cross-env`, `concurrently`,
+  `Start-Process`, `cmd /d /c`, `exec`, `x=$(...)`, `yarn workspace <w> dev`, and python options
+  with values before `-m` (`-X utf8`). Debt `server-wrappers-unread`: a server behind these
+  forms is not refused.
 
 Kind: process
 Home: hooks/guard_stream.py
