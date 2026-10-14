@@ -4718,6 +4718,20 @@ sh("trim: env: an unquoted heredoc with no substitution still reaches the frozen
    "cat <<EOF > " + CFG_HOOK + "\nhello\nEOF", "deny", "frozen-path", cwd=NOGIT)
 sh("trim: env: an unquoted heredoc with a substitution that reads the file denies",
    "cat <<EOF\n$(cat " + ENV + ")\nEOF", "deny", "env-file", cwd=NOGIT)
+# git-env-glued, round 1: a quote mark in an unquoted heredoc body is text, so a later substitution
+# still runs and still reads the file (RED on 46c3191: the body was read as a quote, which hid it).
+# A quoted delimiter runs no substitution, so the same body is text and stays allowed. The lone
+# double quote is GREEN on 46c3191 (a substitution runs inside double quotes): a pin, not a red case.
+for _label, _body in (
+    ("an apostrophe line, then a $( ) read", "don't\n$(cat " + ENV + ")"),
+    ("an apostrophe line, then a backtick read", "don't\n`cat " + ENV + "`"),
+    ("an apostrophe on the same line as the $( ) read", "don't $(cat " + ENV + ")"),
+    ("a lone double quote, then a $( ) read", 'say "hi\n$(cat ' + ENV + ")"),
+):
+    sh("trim: env: an unquoted heredoc body with %s denies" % _label,
+       "cat <<EOF\n" + _body + "\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("trim: env: a quoted heredoc body with an apostrophe runs no substitution, allowed",
+   "cat <<'EOF'\ndon't\n$(cat " + ENV + ")\nEOF", "allow", cwd=NOGIT)
 sh("trim: env: the same assignment ahead of a non-runner still denies",
    "ADMINS='Shivam Semwal' cat --env-file=" + ENV, "deny", "env-file", cwd=NOGIT)
 add("env: Edit of the example file", "allow", tool="Edit", cwd=NOGIT,
@@ -5277,6 +5291,110 @@ sh("git env set: Bash unquoted heredoc runs a substitution with a set, denies",
    "cat <<EOF\n$(GIT_DIR=x " + VCS + " init)\nEOF", "deny", GIT_ENV_RULE, cwd=NOGIT)
 sh("git env set: Bash quoted heredoc runs no substitution, allowed",
    "cat <<'EOF'\n$(GIT_DIR=x " + VCS + " init)\nEOF", "allow", cwd=NOGIT)
+
+# git-env-glued, round 1. A PowerShell block opener glued to its word hides the set inside it from
+# the guard (RED on 46c3191). The spaced forms deny in the round 2 block above. One template per
+# opener: `@@` takes the set for the deny case and a body that sets nothing for the allow case, so
+# each form has both directions. A glued opener the guard must read, and one it must leave alone.
+_GLUED_OPENERS = (
+    ("pipeline %{", "1..2|%{@@}"),
+    ("if ($t){", "if ($t){@@}"),
+    ("if($t){", "if($t){@@}"),
+    ("foreach($i in 1..2){", "foreach($i in 1..2){@@}"),
+    ("try{", "try{@@}catch{}"),
+    ("do{", "do{@@}while(0)"),
+    ("else{", "if (0) {1} else{@@}"),
+    ("ForEach-Object{", "1..2 | ForEach-Object{@@}"),
+    ("$sb={", "$sb={@@}; & $sb"),
+)
+for _label, _template in _GLUED_OPENERS:
+    sh("git env set: PowerShell, a set in a glued %s block, denies" % _label,
+       _template.replace("@@", "$env:GIT_DIR='x'"), "deny", GIT_ENV_RULE, tool="PowerShell",
+       cwd=NOGIT)
+    sh("git env set: PowerShell, a glued %s block that sets nothing, allowed" % _label,
+       _template.replace("@@", "$_"), "allow", tool="PowerShell", cwd=NOGIT)
+# Control, green today: the spaced spelling of the three openers the round 2 block does not cover.
+for _cmd in (
+    "if (0) {1} else {$env:GIT_DIR='x'}",
+    "do {$env:GIT_DIR='x'} while (0)",
+    "$sb = {$env:GIT_DIR='x'}; & $sb",
+):
+    sh("git env set: PowerShell, a set in a spaced block, %s, denies" % _cmd[:30], _cmd, "deny",
+       GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+# The other two names, a cmdlet set and a lower-case name inside a glued block.
+for _cmd in (
+    "1..2|%{$env:GIT_WORK_TREE='x'}",
+    "1..2|%{$env:GIT_INDEX_FILE='x'}",
+    "1..2|%{Set-Item env:GIT_DIR x}",
+    "if($t){$env:git_dir='x'}",
+):
+    sh("git env set: PowerShell, a glued block with %s, denies" % _cmd.split("{")[1][:26], _cmd,
+       "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+# Allow: a glued block that only reads the name, unsets it, sets another, or holds it as text.
+for _cmd in (
+    "1..2|%{$env:GIT_DIR}",
+    "1..2|%{$env:GIT_DIR=$null}",
+    "1..2|%{$env:GIT_TRACE='1'}",
+    "if($t){Remove-Item env:GIT_DIR}",
+    "Write-Host 'if($t){$env:GIT_DIR=1}'",
+    "Write-Host '1..2|%{$env:GIT_DIR=1}'",
+    'Write-Host "# 1..2|%{$env:GIT_DIR=1}"',
+    'Write-Host "first line\n1..2|%{$env:GIT_DIR=1}\nlast line"',
+    "@'\n1..2|%{$env:GIT_DIR=1}\n'@",
+):
+    sh("git env set: PowerShell, a glued block that does not set, allowed, %s" % _cmd[:36].replace(
+        "\n", " "), _cmd, "allow", tool="PowerShell", cwd=NOGIT)
+# Scanner cases (building-scanner-respects-strings): a comment opener, a lone apostrophe, a
+# newline inside a string and a here-string ahead of a glued set must not hide it.
+for _label, _head in (
+    ("a hash opener in quotes", 'Write-Host "# note"; '),
+    ("a double slash in quotes", 'Write-Host "// note"; '),
+    ("a slash-star in quotes", 'Write-Host "/* note"; '),
+    ("a lone apostrophe in double quotes", 'Write-Host "Don\'t"; '),
+    ("a newline inside a quoted string", 'Write-Host "first line\nsecond line"\n'),
+    ("a multi-line here-string", "@'\nnote about a block {x}\n'@\n"),
+):
+    sh("git env set: PowerShell, %s does not hide a glued set, denies" % _label,
+       _head + "1..2|%{$env:GIT_DIR='x'}", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+# Bash `pwsh -c` reads the same glued blocks, and the same scanner cases hold before it.
+for _label, _head in (
+    ("no text ahead", ""),
+    ("a hash opener in quotes", 'echo "# note"; '),
+    ("a lone apostrophe in double quotes", 'echo "Don\'t"; '),
+    ("a lone apostrophe in unquoted text", "echo don't; "),
+    ("a newline inside a quoted string", 'echo "first line\nsecond line"\n'),
+):
+    sh("git env set: Bash, pwsh -c with a glued if block, %s, denies" % _label,
+       _head + """pwsh -c 'if(1){$env:GIT_DIR="x"}'""", "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh("git env set: Bash, pwsh -c with a glued pipeline block, denies",
+   """pwsh -c '1..2|%{$env:GIT_DIR="x"}'""", "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh("git env set: Bash, pwsh -c with a glued if block that sets nothing, allowed",
+   "pwsh -c 'if(1){$_}'", "allow", cwd=NOGIT)
+sh("git env set: Bash, a quoted pwsh -c line that only names a glued set, allowed",
+   """echo 'pwsh -c "if(1){$env:GIT_DIR=1}"'""", "allow", cwd=NOGIT)
+
+# Pins for behaviour the glued-block lane must keep (all GREEN on 46c3191, no case held them). The
+# backtick pins are PowerShell: the outer shell takes the escape before pwsh runs the script, and in
+# Bash a backtick opens a substitution. The heredoc pins are Bash: an apostrophe in an unquoted body
+# is text, so the later substitution still runs, and a quoted delimiter runs none.
+sh("git env set: PowerShell, pwsh -c with a backtick-escaped $env inside an if block, denies",
+   "pwsh -c \"if (1) {`$env:GIT_DIR='x'}\"", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a backtick-escaped quote keeps the rest of the string text, allowed",
+   'Write-Host "a `" b $env:GIT_DIR=1"', "allow", tool="PowerShell", cwd=NOGIT)
+sh("git env set: Bash unquoted heredoc body with an apostrophe, then a set substitution, denies",
+   "cat <<EOF\ndon't\n$(export GIT_DIR=x)\nEOF", "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh("git env set: Bash quoted heredoc body with an apostrophe, then a set substitution, allowed",
+   "cat <<'EOF'\ndon't\n$(export GIT_DIR=x)\nEOF", "allow", cwd=NOGIT)
+# The shared group-opener pattern (`&{`, `.{`, `$(`, `@(`), glued: pinned, so a new opener rule
+# cannot drop one of them.
+for _cmd in (
+    "&{$env:GIT_DIR='x'}",
+    ".{$env:GIT_DIR='x'}",
+    "$($env:GIT_DIR='x')",
+    "@($env:GIT_DIR='x')",
+):
+    sh("git env set: PowerShell, a glued group opener, %s, denies" % _cmd[:12], _cmd, "deny",
+       GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
 
 # =========================================================================== 5. merge into main
 FAMILY = "merge"
