@@ -1,0 +1,3 @@
+{
+  "SessionStart matcher=startup|resume": "Pulls the claude-settings clone with a fast-forward pull, then runs its install.sh. Does nothing in cloud sessions. A failed pull or install falls through, and the command always exits 0."
+}
