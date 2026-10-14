@@ -1127,7 +1127,7 @@ class Plumb:
 class ListedReads(unittest.TestCase):
     """A read that fails on a path the tree lists is UNKNOWN, never empty text. absent() must hold for
     three shapes: a path that starts with a colon (ls-tree reads it as pathspec magic); a non-UTF-8 name
-    (git() decodes names with errors=replace, so the name that is read is not the tree's name); and a
+    (it must be read byte for byte; a name that misses on every revision is no clean verdict); and a
     gitlink (not a blob: its text is "", and reading it is no failure)."""
     T0, T1, T2, T3 = "2025-12-01T10:00:00", "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
 
@@ -1147,7 +1147,7 @@ class ListedReads(unittest.TestCase):
             with self.assertRaises(C.Unknown):
                 C.check(r.dir, "origin/main", merged)
 
-    def test_a_non_utf8_tracked_name_whose_read_fails_is_unknown(self):
+    def test_a_drop_in_a_non_utf8_tracked_name_is_never_clean(self):
         r, p = self.repo()
         app, name = p.blob(["app"]), b"caf\xe9.txt"
         base = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z"]), name)]), [], self.T0)
@@ -1155,8 +1155,11 @@ class ListedReads(unittest.TestCase):
         main = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z", "main line"]), name)]), [base], self.T2)
         merged = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z", "lane line"]), name)]), [lane, main], self.T3)
         r.sh("update-ref", "refs/remotes/origin/main", main)
-        with self.assertRaises(C.Unknown):  # the merge drops main's line; the file cannot be read, so clean is a miss
-            C.check(r.dir, "origin/main", merged)
+        try:
+            bad, _ = C.check(r.dir, "origin/main", merged)
+        except C.Unknown:
+            return  # a read that cannot run is UNKNOWN: a verdict, not clean
+        self.assertTrue(any("drops" in x and "main line" in x for x in bad), "clean: the merge drops main's line and the check missed it")
 
     def test_a_gitlink_with_an_absent_commit_is_not_unknown(self):
         r, p = self.repo()
