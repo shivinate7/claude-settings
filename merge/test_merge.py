@@ -2185,6 +2185,80 @@ class ClaimStderr(unittest.TestCase):
             trailer = merge.do_claim("/wt", ".github/stamp.json", "origin/main")
         self.assertIsNone(trailer)
 
+class UndoMemo(Env):
+    """confirm() reads the silent-undo check twice: before the claim, and after the wait. When the head sha,
+    origin/<base> and the default ref are the same at both reads, the second read reuses the first scan.
+    One scan is one call of check_silent_undo.check. Cause: q_max #855 ran two scans of about 35 min each."""
+
+    def counted(self, fn):
+        sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+        import check_silent_undo as undo
+        real_check, real_undo = undo.check, merge.undo_check
+        scans, undos = [], []
+
+        def spy_check(*a, **k):
+            scans.append(a[1])
+            return real_check(*a, **k)
+
+        def spy_undo(wt, base_ref, unknown_ok=""):
+            undos.append(base_ref)
+            return real_undo(wt, base_ref, unknown_ok)
+        with unittest.mock.patch.object(undo, "check", spy_check), unittest.mock.patch.object(merge, "undo_check", spy_undo):
+            res = fn()
+        return res, len(scans), len(undos)
+
+    def no_claim(self):
+        """feat deletes its only pending record, so the run claims nothing and the head does not move."""
+        sh(self.other, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(self.other, "git", "rm", "-q", "docs/decisions/second.md")
+        sh(self.other, "git", "commit", "-qm", "no pending record left"); sh(self.other, "git", "push", "-q", "origin", "feat")
+
+    def move_main_in_the_wait(self, real_wait, fetch_co=False):
+        def wait_while_main_moves(n, sha, d, prior=None):
+            sh(self.other, "git", "fetch", "-q", "origin")
+            sh(self.other, "git", "checkout", "-q", "-B", "main", "origin/main")
+            put(os.path.join(self.other, "moved.txt"), "main moved in the wait\n")
+            sh(self.other, "git", "add", "-A"); sh(self.other, "git", "commit", "-qm", "main moves in the wait")
+            sh(self.other, "git", "push", "-q", "origin", "main")
+            if fetch_co:
+                sh(self.co, "git", "fetch", "-q", "origin")
+            return real_wait(n, sha, d, prior)
+        return wait_while_main_moves
+
+    def test_unchanged_head_base_and_default_scan_once(self):
+        self.no_claim()
+        (rc, out), scans, undos = self.counted(lambda: self.run_merge("7", "--confirm"))
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(undos, 2, out)
+        self.assertEqual(scans, 1, "scans %d, undo reads %d\n%s" % (scans, undos, out))
+
+    def test_origin_base_moving_during_the_wait_scans_again(self):
+        self.no_claim()
+        self.host.wait_checks = self.move_main_in_the_wait(self.host.wait_checks)
+        (rc, out), scans, undos = self.counted(lambda: self.run_merge("7", "--confirm"))
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(undos, 2, out)
+        self.assertEqual(scans, 2, "scans %d, undo reads %d\n%s" % (scans, undos, out))
+
+    def test_default_ref_moving_during_the_wait_scans_again(self):
+        self.no_claim()
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/integ")
+        self.host.base = "integ"
+        self.host.wait_checks = self.move_main_in_the_wait(self.host.wait_checks, fetch_co=True)
+        (rc, out), scans, undos = self.counted(lambda: self.run_merge("7", "--confirm"))
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(undos, 2, out)
+        self.assertEqual(scans, 2, "scans %d, undo reads %d\n%s" % (scans, undos, out))
+
+    def test_head_moving_for_the_claim_scans_again(self):
+        (rc, out), scans, undos = self.counted(lambda: self.run_merge("7", "--confirm"))
+        self.assertEqual(rc, 0, out)
+        self.assertIn("pushed to feat", out)
+        self.assertEqual(undos, 2, out)
+        self.assertEqual(scans, 2, "scans %d, undo reads %d\n%s" % (scans, undos, out))
+
+
 class UnknownOverride(Env):
     """Unknown has a way out that does not depend on the check: an owner flag with a reason, logged."""
     def unreadable(self):
