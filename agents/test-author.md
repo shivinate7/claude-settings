@@ -18,6 +18,8 @@ Run the tests you write, and show each one fails for the right reason before the
 passes after it. Before you stop for any reason, commit your work to your own branch. If the
 stop waits on a person, also push the branch.
 
+Make a red-proof checkout under `<repo>/.claude/worktrees/`, so the session-end sweep covers it.
+
 Code that scans source text gets cases for comment openers inside strings, a multi-line template literal, and a lone quote in text, per building-scanner-respects-strings.
 
 Never build the feature. Never review your own work. You cannot spawn agents. If the task is
