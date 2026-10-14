@@ -56,6 +56,14 @@ GLUED_OPEN = re.compile(r"^(?:\$?\()+(?=.)")
 CONTRACTION = re.compile(r"(?<=[A-Za-z])'(?:t|s|re|ll|ve|d|m)(?=[\s.,;:!?)]|$)")
 
 
+def is_contraction(text: str, index: int) -> bool:
+    """True when the `'` at `index` is a contraction, not a quote. The shape alone is not enough:
+    `echo a's b'; pkill foo` and `sed -e's;a;b;' f; pkill foo` quote real text. So the rest of
+    `text` must hold an even count of `'` (every `'`: the readers honor no escape), which keeps it
+    balanced. Else it is a quote, the way the shell and main read it: that fails toward deny."""
+    return bool(CONTRACTION.match(text, index)) and text.count("'", index + 1) % 2 == 0
+
+
 def basename(token: str) -> str:
     return GLUED_OPEN.sub("", token).rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
 
@@ -121,7 +129,7 @@ def split_segments(cmd: str, ends=None):
         if char == "\\" and cmd[index + 1:index + 2] == "\n" and not POWERSHELL_CALL[0]:
             index += 2   # a POSIX backslash-newline is a continuation; in PowerShell it ends a path
             continue
-        if char == "'" and CONTRACTION.match(cmd, index):
+        if char == "'" and is_contraction(cmd, index):
             current.append(char)   # `don't` is text: it must not hide the rest of the command
             index += 1
             continue
@@ -286,29 +294,63 @@ def resolve_command(tokens):
     any assignment it takes ahead of the program name, so the index returned is the program that
     actually runs, never the keyword or the wrapper carrying it there.
     """
-    return _resolve_command(tuple(tokens))
+    return _walk_wrappers(tuple(tokens))[0]
+
+
+def _wrapper_flags(word: str, tokens, index: int):
+    """Read a wrapper's flags from `index`, getopt-style. Return (the index after them,
+    [(flag, value)]). A short-flag cluster is read letter by letter: the first letter that takes a
+    value (WRAPPER_VALUE_FLAGS) takes the rest of the cluster, or the next word when it is the last
+    letter. So `sudo -Eu root cmd`, `xargs -rn 1 pkill` and `env -iS 'cmd'` each skip the value."""
+    takes = WRAPPER_VALUE_FLAGS.get(word, ())
+    end = len(tokens)
+    found = []
+    while index < end and tokens[index].startswith("-"):
+        token = tokens[index]
+        index += 1
+        if token.startswith("--"):
+            flag, glued, value = token.partition("=")
+            if not glued and flag in takes:
+                value = tokens[index] if index < end else ""
+                index += 1
+            found.append((flag, value))
+            continue
+        for at in range(1, len(token)):
+            flag = "-" + token[at]
+            if flag not in takes:
+                found.append((flag, ""))
+                continue
+            value = token[at + 1:]
+            if not value:
+                value = tokens[index] if index < end else ""
+                index += 1
+            found.append((flag, value))
+            break
+    return index, found
 
 
 @functools.lru_cache(maxsize=4096)   # every rule asks again for each segment of a long command
-def _resolve_command(tokens):
+def _walk_wrappers(tokens):
+    """Return (the command word's index or None, ((wrapper, its flags), ...)): the one walk
+    `resolve_command` and `_env_split_string` both read."""
     end = len(tokens)
     index = _skip_assignments_and_keywords(tokens)
+    chain = []
     while index < end and basename(tokens[index]) in COMMAND_WRAPPERS:
         word, start = basename(tokens[index]), index
-        index += 1
-        while index < end and tokens[index].startswith("-"):
-            index += 2 if tokens[index] in WRAPPER_VALUE_FLAGS.get(word, ()) else 1
+        index, flags = _wrapper_flags(word, tokens, index + 1)
+        chain.append((word, tuple(flags)))
         if word == "timeout" and not (index < end and DURATION.match(tokens[index])):
-            return start
+            return start, tuple(chain)
         if word == "timeout":
             index += 1
         if word in ("python", "python3"):
             if not (index < end and basename(tokens[index]) == "verdict"):
-                return start
+                return start, tuple(chain)
             index += 1
         while index < end and ASSIGNMENT.match(tokens[index]):
             index += 1
-    return index if index < end else None
+    return (index if index < end else None), tuple(chain)
 
 
 # ------------------------------------------------------------------ heredoc bodies
@@ -355,7 +397,7 @@ def heredoc_heads(text: str, quote: str = ""):
             while index < len(text) and text[index] != "\n":
                 index += 1
             continue
-        elif char == "'" and CONTRACTION.match(text, index):
+        elif char == "'" and is_contraction(text, index):
             pass
         elif char in "'\"":
             quote += char
@@ -1597,18 +1639,12 @@ CMD_EXE_NAMES = {"cmd", "cmd.exe"}
 
 
 def _env_split_string(tokens) -> str:
-    """The command string `env -S STRING` (or `--split-string`, `-SSTRING`) runs, else ''."""
-    at = next((i for i, t in enumerate(tokens) if basename(t) == "env"), None)
-    index = len(tokens) if at is None else at + 1
-    while index < len(tokens) and tokens[index].startswith("-"):
-        flag = tokens[index]
-        if flag in ("-S", "--split-string"):
-            return tokens[index + 1] if index + 1 < len(tokens) else ""
-        if flag.startswith("--split-string="):
-            return flag.split("=", 1)[1]
-        if flag.startswith("-S"):
-            return flag[2:]
-        index += 2 if flag in WRAPPER_VALUE_FLAGS["env"] else 1
+    """The command string `env -S STRING` (or `--split-string`, `-iS STRING`) runs, else ''. Only
+    an `env` the segment runs as a wrapper counts: `echo env -S x` runs echo."""
+    for word, flags in _walk_wrappers(tuple(tokens))[1]:
+        for flag, value in flags if word == "env" else ():
+            if flag in ("-S", "--split-string"):
+                return value
     return ""
 
 
