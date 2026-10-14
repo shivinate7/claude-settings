@@ -980,7 +980,7 @@ class Feed:
         self.owner = owner
 
     def write(self, data):
-        self.owner.req = data.decode("utf-8").strip()
+        self.owner.req = data.decode("utf-8", "surrogateescape").strip()
         return self.owner.proc.stdin.write(data)
 
     def flush(self):
@@ -1000,7 +1000,7 @@ class Reply:
             o.fault.hits += 1
             head = o.proc.stdout.readline()
             o.proc.stdout.read(int(head.split()[2]) + 1)
-            return (o.req + " missing\n").encode("utf-8")
+            return (o.req + " missing\n").encode("utf-8", "surrogateescape")
         return o.proc.stdout.readline()
 
     def read(self, n):
@@ -1172,6 +1172,73 @@ class ListedReads(unittest.TestCase):
         r.sh("update-ref", "refs/remotes/origin/main", main)
         got = C.check(r.dir, "origin/main", merged)
         self.assertEqual(got[0], [], "a gitlink reads as empty text: no drop, no Unknown")
+
+
+class PrintedFindings(unittest.TestCase):
+    """main() prints each finding. A non-UTF-8 name reaches the print as text with surrogates, which a strict
+    stream cannot encode: the print raised, and the finding was lost. Each run, under a strict cp1252 stream
+    and a strict utf-8 stream, must print a readable finding that names the file, with no traceback, and exit
+    with its normal code: 1 for a FAIL, 0 for an UNKNOWN (CI unset) and for --history."""
+
+    ENCODINGS = ("cp1252", "utf-8")
+    T0, T1, T2, T3 = ListedReads.T0, ListedReads.T1, ListedReads.T2, ListedReads.T3
+
+    def drop_repo(self):
+        """The non-UTF-8 drop: main's line is in the file on main, and the merge drops it. -> (repo, merge sha)."""
+        r = Repo()
+        p = Plumb(r)
+        app, name = p.blob(["app"]), b"caf\xe9.txt"
+        base = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z"]), name)]), [], self.T0)
+        lane = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z", "lane line"]), name)]), [base], self.T1)
+        main = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z", "main line"]), name)]), [base], self.T2)
+        merged = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z", "lane line"]), name)]), [lane, main], self.T3)
+        r.sh("update-ref", "refs/remotes/origin/main", main)
+        return r, merged
+
+    def run_main(self, argv, encoding):
+        """main(argv) with stdout a strict stream of `encoding`. -> (rc, what was printed). A raise is a failure."""
+        out = io.TextIOWrapper(io.BytesIO(), encoding=encoding, errors="strict", newline="\n")
+        with unittest.mock.patch.dict(os.environ), contextlib.redirect_stdout(out):
+            os.environ.pop("CI", None)
+            try:
+                rc = C.main(argv)
+            except Exception as e:  # the traceback is the failure
+                self.fail("main raised %s under %s: %s" % (type(e).__name__, encoding, e))
+        out.flush()
+        return rc, out.buffer.getvalue().decode(encoding, "replace")
+
+    def test_a_fail_prints_a_readable_finding_and_exits_1(self):
+        r, merged = self.drop_repo()
+        for enc in self.ENCODINGS:
+            with self.subTest(encoding=enc):
+                rc, text = self.run_main(["--upstream", "origin/main", "--head", merged, "--repo", r.dir], enc)
+                self.assertEqual(rc, 1)
+                self.assertIn("FAIL", text)
+                self.assertIn("caf", text)
+                self.assertIn(".txt", text)
+                self.assertIn("main line", text)
+
+    def test_an_unknown_prints_a_readable_finding_and_exits_0(self):
+        r, merged = self.drop_repo()
+        fault = FailReads(merged, "caf\udce9.txt")  # the read of the name fails: UNKNOWN, the name is not UTF-8
+        for enc in self.ENCODINGS:
+            with self.subTest(encoding=enc), fault.armed():
+                rc, text = self.run_main(["--upstream", "origin/main", "--head", merged, "--repo", r.dir], enc)
+                self.assertEqual(rc, 0)
+                self.assertIn("UNKNOWN", text)
+                self.assertIn("caf", text)
+                self.assertIn(".txt", text)
+        self.assertGreater(fault.hits, 0, "the faulted read never ran")
+
+    def test_history_prints_a_readable_finding_and_exits_0(self):
+        r, merged = self.drop_repo()
+        for enc in self.ENCODINGS:
+            with self.subTest(encoding=enc):
+                rc, text = self.run_main(["--history", merged, "--repo", r.dir], enc)
+                self.assertEqual(rc, 0)
+                self.assertIn("drops", text)
+                self.assertIn("caf", text)
+                self.assertIn(".txt", text)
 
 
 if __name__ == "__main__":
