@@ -53,9 +53,9 @@ SEARCH_BYTES = 16 * 1024 * 1024  # how far back from the end the owner's 3rd-las
 # Chars of non-owner span text (assistant and relay) in the prompt. The owner messages are not
 # counted here: they stay whole.
 SPAN_BUDGET = 20000
-# The whole prompt, fixed text and question included. The prompt goes to the model on stdin, so
-# no command-line cap applies. This bound is for cost and latency, not for the context window.
-# Unmeasured beyond one sample: 17 s for a 150,000-char prompt (Haiku, xhigh, MODEL_TIMEOUT 90).
+# The whole prompt, fixed text and question included, sent on stdin (no command-line cap). It fits
+# well inside the model's context and limits cost and latency. Its fit to MODEL_TIMEOUT is
+# unmeasured: debt model-clip-unmeasured.
 PROMPT_MAX = 150000
 CUT_MARK = "[older text cut to fit the budget]"
 MACHINE_TAGS = ("<system-reminder>", "<task-notification>")
@@ -296,8 +296,9 @@ def fit_span(entries, room):
         extra = 0 if i in marked else len(CUT_MARK) + 1
         entries[i][2] = t[min(len(t) - 1, owner_size() - (room - reserve) + extra):]
         marked.add(i)
+    used = owner_size()  # before the rebuild below, which writes each mark into the text
     entries = [(e[0], e[1], text(i)) for i, e in enumerate(entries)]
-    return span_text(entries, min(SPAN_BUDGET, room - owner_size()))
+    return span_text(entries, min(SPAN_BUDGET, room - used))
 
 
 def span_text(entries, budget=SPAN_BUDGET):
