@@ -52,27 +52,12 @@ now carries a passing `scope` entry beside the skipped one.
 
 ## Holes, named
 
-Three review rounds, 2026-10-12. Round 1 found two defects: the all-skipped red fired
-while a check was pending, and the dedup hid an older run still in progress. Round 2
-closed both. Round 3 found the rest, named here under the owner's three-round cap.
+Debts: `merge-head-race-remains` (the push-to-ready race stays), `merge-head-any-check-licenses` (any passing check licenses a skipped required job), `merge-head-neutral-split` (`neutral` reads red in `classify` and green in `judge_runs`), `merge-head-wait-no-remedy` (some red and waiting states give no remedy), `merge-head-preview-wrong` (the preview disagrees with the wait), `merge-head-shared-name-slot` (two workflow files with one name share a dedup slot), `merge-head-empty-reads-green` (the wait reads green with no checks and no runs).
 
-- The race itself stays. Mark a PR ready only after its push run exists, or dispatch the
-  workflow by hand. The tool refuses now; it does not dispatch.
-- Any passing check licenses a skipped required job, not only `scope`. The tool does not
-  check which check passed.
-- An older failure under a newer pass of the same name is superseded, like a cancelled one.
-- `neutral` reads red in `classify` and green in `judge_runs`. Pre-existing split.
-- A passing check beside runs that all skipped reads red, with no remedy. Rare: it needs a
-  newest run that skipped under a check that passed.
-- A required name with no entry beside skipped runs holds the wait to the deadline, with no
-  remedy.
-- The preview (`head_state`) prints a literal `<branch>`; the wait and the read name the
-  real branch.
-- The preview reads checks only. With checks `gates pass` and every run skipped, it says
-  green while the wait and the read refuse with "skipped, no job ran".
-- Two workflow files with one `name` share one dedup slot; a job-level failure still reaches
-  `classify`.
-- Pre-existing: with no required names, zero checks and zero runs, the wait reads green
-  after its 30 s settle, while the read says pending.
-- "Newest" follows gh's order among the runs that ran, not a timestamp. A skipped run never
-  outranks a run that ran, whatever its position.
+## Named limits
+
+- An older failure under a newer pass of the same name is superseded, as a cancelled run is.
+- "Newest" follows gh's order among the runs that ran, not a timestamp. A skipped run never outranks a run that ran.
+
+Kind: process
+Home: merge/merge.py
