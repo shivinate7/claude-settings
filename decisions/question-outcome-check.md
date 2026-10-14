@@ -55,10 +55,11 @@ Owner rulings, 2026-10-08:
 - A clarifying question, with no options or one option, passes first.
 - Any other question with no `Goal:` line, no `Problem:` line, or an empty one, is denied
   with no model call. The reason names each missing label. The presence check needs the
-  plain label: exact case, no bold, no NBSP, at a line start.
+  plain label: exact case, ASCII colon, no bold, no NBSP, at a line start.
 - A `Problem:` line before the `Goal:` line is denied with no model call. The reason says
-  `Goal:` goes first. The order check reads both labels loosely: bold, any leading space
-  or NBSP, any case.
+  `Goal:` goes first. The order check reads both labels loosely: any one-line non-word
+  prefix (space, NBSP, `>`, `-`, `#`, `*`, `_`), `*` or `_` before the colon, any case, and
+  a full-width colon (`：`).
 - Only the question text counts. A `Problem:` or `Goal:` line in an option (its label,
   preview or description) does not count.
 - The hook reads only the owner's own messages from the last 2 MiB of the transcript.
@@ -82,6 +83,19 @@ Owner rulings, 2026-10-08:
   the first 2 characters off that text. A style file with no such line above an anchor
   would lose 2 characters from that rule. Not reachable today: both rule bullets start
   with "- ".
+
+## Holes, named
+
+Round 3 review. Each finding stays open at the cap.
+
+- A decorated Goal line earlier in the question, such as `- goal: old`, masks a real
+  Problem-first order. The order check reads that line first, so it passes. Presence passes
+  too, on the later plain `Goal:` line.
+- `1. Problem:` (digit prefix) and `Problem :` (space before the colon) do not count as
+  Problem lines. Each passes presence only with a second plain `Problem:` line, and then
+  passes the order check even before `Goal:`.
+- A punctuation-led preface line before `Goal:`, such as `- problem: note`, is denied. That
+  is correct: the question breaks Goal first. The free pass lets the retry through.
 
 Kind: process
 Home: hooks/question_outcome.py
