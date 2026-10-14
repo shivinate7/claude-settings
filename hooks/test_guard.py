@@ -70,6 +70,7 @@ FAMILIES = {
     "write": "the silent write",
     "push-delete": "push and delete",
     "env": "environment files",
+    "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "merge": "merge into main, draft pull requests and the merge gate",
     "cite": "cite by id",
     "frozen": "frozen paths",
@@ -4858,6 +4859,111 @@ for _cmd in (
     sh("audit-high env regression: a program flag still reads its file, " + _cmd[:24], _cmd,
        "deny", "env-file", cwd=NOGIT)
 
+
+# =========================================================================== git env set
+# A command that SETS GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE retargets every git call after it.
+# Incident (q_max, 2026-10-14 02:41-02:47 CDT): an agent set $env:GIT_DIR and $env:GIT_WORK_TREE,
+# then ran a test whose child `git init` inherited both, and git wrote core.worktree into the
+# shared .git/config. Reading a variable, unsetting it, and text that only names it stay allowed.
+FAMILY = "git-env"
+GIT_ENV_RULE = "git-env-set"
+_GIT_ENV_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
+
+# Bash forms that set one of the three. The tail is a harmless test run, so the setter decides.
+for _name in _GIT_ENV_VARS:
+    for _label, _cmd in (
+        ("export", "export %s=/x; python -m pytest" % _name),
+        ("export with +=", "export %s+=/x; python -m pytest" % _name),
+        ("a prefix assignment", "%s=/x python -m pytest" % _name),
+        ("env", "env %s=/x python -m pytest" % _name),
+        ("declare -x", "declare -x %s=/x; python -m pytest" % _name),
+    ):
+        sh("git env set: Bash %s by %s, denies" % (_name, _label), _cmd, "deny", GIT_ENV_RULE,
+           cwd=NOGIT)
+sh("git env set: the incident shape in Bash, two variables exported before a test run, denies",
+   "export GIT_DIR=/c/x/.git GIT_WORK_TREE=/c/scratch; python -m pytest", "deny", GIT_ENV_RULE,
+   cwd=NOGIT)
+sh("git env set: the incident shape in Bash, two prefixes on a test run, denies",
+   "GIT_DIR=/c/x/.git GIT_WORK_TREE=/c/scratch python -m pytest", "deny", GIT_ENV_RULE, cwd=NOGIT)
+
+# PowerShell forms that set one of the three, the env drive in every spelling, and a New-Item.
+for _cmd in (
+    r'$env:GIT_DIR = "C:\x\.git"; python -m pytest',
+    r'$env:GIT_WORK_TREE = "C:\scratch"; python -m pytest',
+    r'$env:GIT_INDEX_FILE = "C:\x\index"; python -m pytest',
+    r'$env:GIT_DIR += ";C:\x\.git"; python -m pytest',
+    r'$env:git_dir = "C:\x\.git"; python -m pytest',
+    r'${env:GIT_WORK_TREE} = "C:\scratch"; python -m pytest',
+    r'[Environment]::SetEnvironmentVariable("GIT_DIR", "C:\x\.git", "Process"); python -m pytest',
+    r'Set-Item env:GIT_INDEX_FILE "C:\x\index"; python -m pytest',
+    r'ni env:GIT_DIR -Value C:\x\.git; python -m pytest',
+):
+    sh("git env set: PowerShell %s, denies" % _cmd.split(";")[0][:40], _cmd, "deny", GIT_ENV_RULE,
+       tool="PowerShell", cwd=NOGIT)
+sh("git env set: the incident shape in PowerShell, two variables set before a test run, denies",
+   r'$env:GIT_DIR = "C:\x\.git"; $env:GIT_WORK_TREE = "C:\scratch"; python -m pytest',
+   "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+
+# Scanner cases: a comment opener, a lone quote, and a newline inside a string must not hide the
+# setter that follows them (building-scanner-respects-strings).
+sh('git env set: a hash opener inside quotes does not hide a Bash setter, denies',
+   'echo "# note"; export GIT_DIR=/x; python -m pytest', "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh('git env set: a double slash inside quotes does not hide a Bash setter, denies',
+   'echo "// note"; export GIT_WORK_TREE=/x; python -m pytest', "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh('git env set: a slash-star inside quotes does not hide a Bash setter, denies',
+   'echo "/* note"; export GIT_INDEX_FILE=/x; python -m pytest', "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh("git env set: a lone apostrophe inside double quotes does not hide a Bash setter, denies",
+   "echo \"Don't\"; export GIT_DIR=/x; python -m pytest", "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh("git env set: a lone apostrophe in unquoted text does not hide a Bash setter, denies",
+   "echo don't; export GIT_DIR=/x; python -m pytest", "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh("git env set: a newline inside a quoted string does not hide a setter on the next line, denies",
+   "echo \"first line\nsecond line\"\nexport GIT_DIR=/x\npython -m pytest", "deny", GIT_ENV_RULE,
+   cwd=NOGIT)
+sh("git env set: a commit message ending in a newline does not hide a setter after it, denies",
+   VCS + ' commit -m "note\nline"\nexport GIT_WORK_TREE=/x; python -m pytest', "deny",
+   GIT_ENV_RULE, cwd=NOGIT)
+sh("git env set: a PowerShell here-string does not hide a setter on the next line, denies",
+   "@'\nnote about the variable\n'@\n$env:GIT_DIR = \"C:\\x\\.git\"", "deny", GIT_ENV_RULE,
+   tool="PowerShell", cwd=NOGIT)
+
+# Allow: the same spellings when they only name the variable, print it, or read it.
+sh('git env set: a hash opener in quotes that only names the variable, allowed',
+   'echo "# export GIT_DIR=/x"', "allow", cwd=NOGIT)
+sh("git env set: a quoted apostrophe that only names the variable, allowed",
+   "echo \"Don't mention GIT_DIR\"", "allow", cwd=NOGIT)
+sh("git env set: a quoted echo of a setter line prints it and sets nothing, allowed",
+   'echo "export GIT_DIR=/x"', "allow", cwd=NOGIT)
+sh("git env set: a commit message that only names the variables, allowed",
+   VCS + ' commit -m "doc\nexport GIT_DIR=/x and GIT_WORK_TREE in the message"', "allow",
+   cwd=NOGIT)
+sh("git env set: a PowerShell here-string that only names the variable, allowed",
+   "@'\nexport GIT_DIR=/x\n'@", "allow", tool="PowerShell", cwd=NOGIT)
+
+# Allow: reads and unsets, a git variable outside the list, and names that only start the same.
+for _cmd in (
+    "echo $GIT_DIR",
+    'echo "$GIT_WORK_TREE"',
+    "unset GIT_DIR; python -m pytest",
+    "unset GIT_WORK_TREE GIT_INDEX_FILE; python -m pytest",
+    "env -u GIT_DIR python -m pytest",
+    "GIT_TRACE=1 " + VCS + " rev-parse --git-dir",
+    "GIT_DIRX=1 python -m pytest",
+    "MYGIT_DIR=1 python -m pytest",
+    "export FOO=bar; python -m pytest",
+):
+    sh("git env set: Bash allowed, %s" % _cmd[:40], _cmd, "allow", cwd=NOGIT)
+for _cmd in (
+    r"$env:GIT_DIR",
+    r"Write-Output $env:GIT_WORK_TREE",
+    r"Remove-Item env:GIT_DIR",
+    r"Remove-Item Env:GIT_INDEX_FILE",
+    r'$env:GIT_DIRX = "1"; python -m pytest',
+    r'$env:MYGIT_DIR = "1"; python -m pytest',
+    r'$env:GIT_TRACE = "1"; python -m pytest',
+    r"Select-String '$env:GIT_DIR = ' f.ps1",
+):
+    sh("git env set: PowerShell allowed, %s" % _cmd[:40], _cmd, "allow", tool="PowerShell",
+       cwd=NOGIT)
 
 # =========================================================================== 5. merge into main
 FAMILY = "merge"
