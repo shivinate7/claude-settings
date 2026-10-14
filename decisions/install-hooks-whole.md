@@ -23,10 +23,25 @@ stopped. Arbiter rulings 03:41 and 03:50 CDT.
 
 ## What protects it
 
-- `install-no-gap.test.ps1`: a reader loop over 20 install runs fails on a missing path, a short
-  read or a mixed `INSTALL_ID`. On main's in-place copy it went red in every test run.
+- `install-no-gap.test.ps1`: a reader loop over 20 install runs fails on a missing path or a
+  short read. It also fails when a mixed `INSTALL_ID` outlasts the guard's wait. On main's
+  in-place copy it went red in every test run.
 - `hooks/test_guard.py`, family `reload-stamp`: a truncated module, a missing module and a
   mismatched stamp, each fixed during the wait (allow) and never fixed (deny).
+
+## Holes, named
+
+- A file that the installer cannot replace keeps its old stamp. The guard then denies every call
+  until an install succeeds. The installer prints each such file and exits non-zero. The remedy
+  is to run the installer from a terminal, which the guard does not gate.
+- Some writes are still in place: the `CLAUDE.md` pointer, `settings.json` in `install.sh`, the
+  skills folder, the install log and the marker. A reader can see one of these half written.
+  Debt: install-writes-in-place.
+- Hooks other than the guard, such as `stall_watch.py`, `ci_wake.py` and `sendmessage_state.py`,
+  import guard modules with no reload. During an install they can load mixed code. None of them
+  allows a call. Debt: install-writes-in-place.
+- The guard's module list `_FAMILY_MODULES` is kept by hand. A new guard module left off it is
+  not compared.
 
 ## Build plan
 
