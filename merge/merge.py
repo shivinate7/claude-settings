@@ -52,8 +52,8 @@ def resolve_program(name, env=None):
                 return candidate
     return shutil.which(name, path=path) or name
 
-# Set only inside `shared_deadline`, below. A fixed per-call SH_TIMEOUT cannot give a slow but
-# real `gh` headroom and still keep several calls inside a hook's own budget (incident
+# Set only inside `shared_deadline`, below. A fixed per-call SH_TIMEOUT would let a hung `gh`
+# hold the read for each call in turn; one shared deadline bounds the whole read (incident
 # 2026-10-03: 3s/call read real `gh` at 3.0-3.9s as a hang). `Host.head_read` makes three calls
 # for one read, so it shares a single deadline across them instead: each call gets whatever of
 # that one budget the earlier calls left.
@@ -545,8 +545,8 @@ class Host:
         No check and no run reads as pending, not green: right after a push GitHub has not created
         them yet (wait_checks settles for the same reason). `nothing_is_green` is for a repo with no workflows.
         Its three `gh` calls share one deadline (SH_TIMEOUT, the guard's one budget for this whole
-        read) instead of each getting it afresh: a lone per-call constant cannot give real gh
-        latency headroom and still fit three calls in the guard's hook budget."""
+        read) instead of each getting it afresh, so a hung gh holds the whole read for one deadline,
+        not three."""
         try:
             with shared_deadline(SH_TIMEOUT):
                 info = self.pr(n)
