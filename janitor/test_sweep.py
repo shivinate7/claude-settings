@@ -4397,7 +4397,7 @@ class AgentWorktreeReapTests(unittest.TestCase):
         self.floor("pushed")
 
     def test_b_keeps_a_tree_at_origin_main_idle_under_4h(self):
-        """Old rule: merged and idle 1 hour is enough. That is the red run for the 4 hour floor."""
+        """A tree that adds nothing to origin/main is no exception to the 4 hour floor."""
         self.floor("merged")
 
     # ---- (c) HEAD on no remote-tracking ref
@@ -4490,8 +4490,8 @@ class AgentWorktreeReapTests(unittest.TestCase):
 
     def test_h_keeps_a_tree_when_the_remote_reach_read_fails_and_logs_it(self):
         """The read that matters here is `git branch -r --contains` (or `for-each-ref
-        --contains`): is HEAD on a remote-tracking ref? Old rule: it never makes that read for a
-        tree, so it removes this merged tree after 1 hour."""
+        --contains`): is HEAD on a remote-tracking ref? The tree is merged, so the path, the
+        idle time and the clean tree would all allow its removal. Only this read can keep it."""
         tree, ctl = self.agent("h2", "merged"), self.agent("ctl")
         sha = run_vcs(tree, "rev-parse", "HEAD").stdout.strip()
         fired = []
