@@ -1569,11 +1569,10 @@ sh("subject: a bare stash over a clean tree takes nothing", VCS + " stash", "all
 # THE PATHSPEC AND OPTION-VALUE FORMS OF A PUSH (owner's Mac test, 2026-10-13; decision
 # stash-push-is-clone-wide). Git may omit `push` before `--`, before a pathspec after `--`, and
 # before an option, so `stash -- <path>`, `stash -q -- <path>` and `stash -m <msg>` are pushes.
-# The guard takes the first word that is not an option as the action. There `f.txt` or `lane` is
-# an unknown action, which falls on the stack side, and an empty stack allows it. These rows run
-# in SUBJDIRTY, a real checkout with real uncommitted work, so each push form must deny with the
-# push remedy. `stash .` is not a push: git refuses a pathspec outside `--`, so it takes nothing.
-# It stays a deny anyway, because the guard must not rely on git's refusal.
+# A word that is no known action reads as a push, so a pathspec such as `f.txt` pushes too.
+# These rows run in SUBJDIRTY, a real checkout with real uncommitted work, so each push form must
+# deny with the push remedy. `stash .` is not a push: git refuses a pathspec outside `--`, so it
+# takes nothing. It stays a deny anyway, because the guard must not rely on git's refusal.
 PUSH_FRAGMENT = "puts work onto the stash stack"  # only PUSH_DENY_REASON says this
 sh("stash pathspec: stash -- over real uncommitted work denies like a push",
    VCS + " stash -- f.txt", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
@@ -1600,6 +1599,18 @@ sh("stash pathspec: stash --m over real uncommitted work denies like a push",
 sh("stash pathspec: stash --pathspec-from over real uncommitted work denies like a push",
    VCS + " stash --pathspec-from list", "deny", "shared-tree", cwd=SUBJDIRTY,
    carries=PUSH_FRAGMENT)
+# `import` and `export` are not git subcommands, but main reads them as stack actions, and they keep
+# that side. Over a real entry in a clean checkout they deny with the stack remedy. Over an empty
+# stack in a dirty checkout they take nothing, the same verdict as main.
+STACK_FRAGMENT = "takes a stash entry"  # only STACK_DENY_REASON says this
+sh("stash import: over a real stack entry in a clean checkout denies, as on main",
+   VCS + " stash import abc123", "deny", "shared-tree", cwd=SUBJSTASH, carries=STACK_FRAGMENT)
+sh("stash export: over a real stack entry in a clean checkout denies, as on main",
+   VCS + " stash export", "deny", "shared-tree", cwd=SUBJSTASH, carries=STACK_FRAGMENT)
+sh("stash import: over an empty stack in a dirty checkout takes nothing, as on main",
+   VCS + " stash import abc123", "allow", cwd=SUBJDIRTY)
+sh("stash export: over an empty stack in a dirty checkout takes nothing, as on main",
+   VCS + " stash export", "allow", cwd=SUBJDIRTY)
 # Pins that stay green. The reads stay allowed, and an explicit push still denies here.
 sh("stash pathspec pin: stash list still reads a dirty checkout", VCS + " stash list", "allow",
    cwd=SUBJDIRTY)
