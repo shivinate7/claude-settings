@@ -181,7 +181,7 @@ try:
     from guard_core import (
         AUTHOR_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
         SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
-        _resolved, _run_dir, _segment_git_c_target, agent_role, basename, cap_safe,
+        _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
         command_root, git_calls, git_common_dir, inline_script, is_worktree, log_path_and_text, norm,
         path_is_inside, primary_checkout, record, refuse, resolve_command, resolve_default_base,
         segment_tokens, split_segments, strip_heredoc_bodies,
@@ -896,8 +896,8 @@ def heredoc_offsets(segments, ends, bodies_kept=True):
     """Return, for each segment, the count of heredoc headers ahead of it (own_heredoc_bodies's
     `before`). A line inside a body is no header: `x = 1 << y` in `python3 - <<'EOF'` would shift the
     count and make the commit after it read the wrong body. A body runs from the line after its
-    header, to a segment that is its delimiter. `bodies_kept` is false when the segments come from a
-    command whose bodies were stripped: no body is in them to skip."""
+    header, to a segment that is its delimiter. A segment that ends '' closes one reading of split_segments, so the count restarts for the next.
+    `bodies_kept` is false when the segments come from a command whose bodies were stripped: no body is in them to skip."""
     offsets, heads, queue, reading = [], 0, [], False
     for segment, end in zip(segments, ends):
         offsets.append(heads)
@@ -905,12 +905,14 @@ def heredoc_offsets(segments, ends, bodies_kept=True):
             if segment.strip() == queue[0]:
                 queue.pop(0)
                 reading = bool(queue)
-            continue
-        found = [delimiter for _, delimiter in heredoc_heads(segment)[0]]
-        heads += len(found)
-        # a body that opens and closes inside one quoted segment (`-m "$(cat <<EOF ... EOF`) is whole
-        queue += [d for d in found if not any(line.strip() == d for line in segment.split("\n")[1:])]
-        reading = bodies_kept and bool(queue) and end == "\n"
+        else:
+            found = [delimiter for _, delimiter in heredoc_heads(segment)[0]]
+            heads += len(found)
+            # a body that opens and closes inside one quoted segment (`-m "$(cat <<EOF ... EOF`) is whole
+            queue += [d for d in found if not any(line.strip() == d for line in segment.split("\n")[1:])]
+            reading = bodies_kept and bool(queue) and end == "\n"
+        if end == "":   # the last segment of one reading: split_segments's second reading counts afresh
+            heads, queue, reading = 0, [], False
     return offsets
 
 
@@ -918,28 +920,21 @@ def own_heredoc_bodies(segment: str, raw: str, before: int):
     """Return the bodies of the heredocs whose headers sit inside this segment, in order. A heredoc
     of another command (`cat <<A && git commit -F - <<B`) is not the message.
 
-    `before` is the count of headers in the segments ahead of this one. Raw is walked once, as the
-    shell reads it: each header outside quotes and comments takes the next body in turn, and a body
-    line is never read for headers. This segment takes the bodies `before` onward, one per header
-    it holds, so two commits with the same text each take their own body.
+    `before` is the count of headers in the segments ahead of this one. Raw is walked as the
+    shell reads it (_split_heredocs): each header outside quotes and comments takes the next body
+    in turn, and a body line is never read for headers. This segment takes the bodies `before`
+    onward, one per header it holds, so two commits with the same text each take their own body.
+    Raw is walked twice, bash's reading and the contraction reading, as split_segments does, and
+    the bodies of both are judged: a lone `'` can hide a header from one reading, never both.
     """
     count = len(heredoc_heads(segment)[0])
     if not count:
         return []
-    found = []
-    lines = raw.split("\n")
-    quote = ""
-    index = 0
-    while index < len(lines):
-        heads, quote = heredoc_heads(lines[index], quote)
-        index += 1
-        for _, delimiter in heads:
-            start = index
-            while index < len(lines) and lines[index].strip() != delimiter:
-                index += 1
-            found.append("\n".join(lines[start:index]))
-            index += 1   # past the closing delimiter line
-    return found[before:before + count]
+    texts = []
+    for contractions_are_text in (False, True):   # bash's reading, then the contraction reading
+        found = [body for _, body, _ in _split_heredocs(raw, contractions_are_text)[1]]
+        texts.extend(found[before:before + count])
+    return list(dict.fromkeys(texts))   # the readings often agree: judge each body once
 
 
 def message_texts(segment: str, raw: str, where: str, before: int, titles: bool = False):

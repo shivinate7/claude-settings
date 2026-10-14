@@ -433,13 +433,18 @@ def heredoc_heads(text: str, quote: str = "", closes_after: bool = False):
     return heads, quote
 
 
-def _split_heredocs(cmd: str):
+def _split_heredocs(cmd: str, contractions_are_text: bool = False):
     """Return (kept lines, [(quote, body, header)]): every header line kept, every body set apart,
     each body with the text of the header line that opened it (two headers share one line).
+    The walk is bash's own reading, where a later `'` closes a contraction's mark. With
+    `contractions_are_text` it is the second reading of split_segments: every contraction-shaped
+    `'` is text, so `echo don't` then a `<<'B'` line shows its header. A caller that judges what
+    bash runs walks both.
     The one walk `_drop_heredoc_bodies` and the environment layer both need. A header is read as
     heredoc_heads reads it, so one in quoted text, a comment or a here-string strips nothing."""
     lines = cmd.split("\n")
-    last = max((i for i, line in enumerate(lines) if "'" in line), default=-1)
+    last = len(lines) if contractions_are_text else max(
+        (i for i, line in enumerate(lines) if "'" in line), default=-1)
     kept = []
     bodies = []
     index = 0
