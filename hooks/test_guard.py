@@ -6577,7 +6577,8 @@ sh("frozen: a leftover token is not a key to the push rule",
 # THE SHELL RUNNERS KEEP QUOTED TEXT IN VIEW. Quoted text with a space or an operator is data, unless a
 # shell reads it: text piped into `sh`, or an `iex`. The first two pins deny those shapes. They pass on
 # main, which reads every quoted word as code, and they guard a future regression of the data reading.
-# The commit message and the heredoc body are the two allow shapes that reading made data.
+# The commit message is the allow shape that reading made data. A heredoc body fed to an interpreter
+# is code, not data: it stays in view, so a shell write it names denies (review round 1, F5).
 sh("frozen shell: an echo of a quoted cat-write onto the config settings, piped to sh, denies "
    "[regression pin: passes on main and d7fb2f1]",
    'echo "cat > ' + CFG_SETTINGS + '" | sh', "deny", "frozen-path", cwd=NOGIT)
@@ -6588,9 +6589,66 @@ sh("frozen shell: an iex of a Set-Content onto the config settings denies "
 sh("frozen data: a quoted commit message naming a cat-write onto the config settings allows "
    "[new allow: red on main, passes on d7fb2f1]",
    VCS + ' commit -m "note: cat > ' + CFG_SETTINGS + ' is refused"', "allow", cwd=NOGIT)
-sh("frozen data: a heredoc body naming a cat-write onto the config settings, fed to python, allows "
-   "[new allow: red on main, passes on d7fb2f1]",
-   "python hooks/guard.py <<'DOC'\ncat > " + CFG_SETTINGS + "\nDOC", "allow", cwd=NOGIT)
+sh("frozen shell: a heredoc body naming a cat-write onto the config settings, fed to python, denies "
+   "[review round 1, the orchestrator's F5 call: flipped from allow, an interpreter body stays in view]",
+   "python hooks/guard.py <<'DOC'\ncat > " + CFG_SETTINGS + "\nDOC", "deny", "frozen-path", cwd=NOGIT)
+
+# ROUND 1 RED (cap-ask-data review). The narrowing reads a quoted word as data, and a word that starts
+# plain as code. Each shape below is a real write. Each DENIES, as main does, and each is red on 9eeb1fc.
+# The F5 pins are the orchestrator's call, not a parity claim with main.
+for _n, _c in (
+    ("a quoted sh name", '"sh" -c "cat > ' + CFG_SETTINGS + '"'),
+    ("a shell named by a variable", '$SHELL -c "cat > ' + CFG_SETTINGS + '"'),
+    ("a quoted path to bash.exe with a space",
+     '"/c/Program Files/Git/bin/bash.exe" -c "cat > ' + CFG_SETTINGS + '"'),
+    ("env -S splitting a shell command", 'env -S \'sh -c "cat > ' + CFG_SETTINGS + '"\''),
+    ("flock running a shell command", 'flock /tmp/l -c "cat > ' + CFG_SETTINGS + '"'),
+    ("script running a shell command", 'script -qc "cat > ' + CFG_SETTINGS + '" /dev/null'),
+):
+    sh("frozen shell: F1, " + _n + ", writes the config settings, denies [r1 red]", _c, "deny",
+       "frozen-path", cwd=NOGIT)
+sh("frozen shell: F1, a PowerShell scriptblock built from a string, denies [r1 red]",
+   '[scriptblock]::Create("Set-Content -Path ' + CFG_SETTINGS + ' -Value 1").Invoke()',
+   "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+for _n, _c in (
+    ("bash -c with an ANSI-C quoted command", "bash -c $'cat > " + CFG_SETTINGS + "'"),
+    ("bash -c with a quote that closes mid-word", "bash -c x'; cat > " + CFG_SETTINGS + "'"),
+    ("an ANSI-C escaped quote before a write", "echo $'\\'' ; cat > " + CFG_SETTINGS + " ; echo 'x'"),
+):
+    sh("frozen shell: F2, " + _n + ", denies [r1 red]", _c, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: F3, a PowerShell backtick before a quote, denies [r1 red]",
+   'Write-Output x`"; Set-Content -Path ' + CFG_SETTINGS + ' -Value 1; "b"',
+   "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: F5, a perl heredoc whose body runs a shell write, denies "
+   "[r1 red, orchestrator call]",
+   "perl <<'EOF'\nsystem(\"sh\", \"-c\", \"cat > " + CFG_SETTINGS + "\")\nEOF",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: F5, a python3 heredoc whose body runs an os.system tee, denies "
+   "[r1 red, orchestrator call]",
+   "python3 <<'EOF'\nimport os\nos.system(\"tee " + CFG_SETTINGS + " < /dev/null\")\nEOF",
+   "deny", "frozen-path", cwd=NOGIT)
+
+# COVERAGE (review round 1, green on 9eeb1fc). A comment opener, a multi-line quoted string or a lone
+# apostrophe must neither hide a real write after it, nor turn quoted text that names a write into one.
+sh("frozen shell: a # in double quotes does not hide a real write after it, denies [r1 cov]",
+   'echo "# keep" && cat > ' + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: a /* in double quotes does not hide a real write after it, denies [r1 cov]",
+   'echo "/* keep" ; cat > ' + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: a // in single quotes does not hide a real write after it, denies [r1 cov]",
+   "echo '// keep' ; cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: a # in a multi-line quoted string does not hide a real write after it, denies "
+   "[r1 cov]",
+   "printf 'one\n# two' ; cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: a lone apostrophe in text does not hide a real write after it, denies [r1 cov]",
+   "echo don't ; cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: a lone apostrophe, a line break, then a real write, denies [r1 cov]",
+   "echo don't\ncat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen data: a /* in double quotes naming a cat-write, piped to python, allows [r1 cov]",
+   'echo "/* cat > ' + CFG_SETTINGS + '" | python hooks/guard.py', "allow", cwd=NOGIT)
+sh("frozen data: a // in a multi-line double-quoted string naming a cat-write allows [r1 cov]",
+   'printf "%s\n// cat > ' + CFG_SETTINGS + '" x > notes.txt', "allow", cwd=NOGIT)
+sh("frozen data: a multi-line commit message with a # naming a cat-write allows [r1 cov]",
+   VCS + ' commit -m "line one\n# cat > ' + CFG_SETTINGS + '"', "allow", cwd=NOGIT)
 
 
 # =========================================================================== 6b. the model cap
@@ -6856,6 +6914,47 @@ sh("cap data: a JSON tool-call sample holding the cap write, piped to python, al
 sh("cap data: a JSON payload naming a sed -i on a settings file with the cap key, piped to python, allows",
    "printf '%s' '" + json.dumps({"tool_input": {"command": "sed -i s/x/y/ " + PROJ_SETTINGS + " "
    + CAP_KEY}}) + "' | python hooks/guard.py", "allow", cwd=NOGIT)
+
+# ROUND 1 RED (cap-ask-data review, F4). A quoted project settings path with a space asks, as main does.
+# Rule 8 reads the whole command for the cap key, so each write names it on its line. Only the value
+# is pinned: main names the path fragment after the space, and this guard names the whole path.
+CAP_SPACED = slash(os.path.join(ROOT, "my proj", ".claude", "settings.json"))
+sh("cap: a tee onto a quoted project settings path with a space asks [r1 red]",
+   "printf '%s' '" + cap_settings(compact=True) + "' | tee \"" + CAP_SPACED + "\"",
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+sh("cap: a cp onto a quoted project settings path with a space asks [r1 red]",
+   "printf '%s' '" + cap_settings(compact=True) + "' > /tmp/cap.json && cp /tmp/cap.json \""
+   + CAP_SPACED + "\"",
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+sh("cap: a PowerShell Set-Content onto a quoted project settings path with a space asks [r1 red]",
+   "Set-Content -Path \"" + CAP_SPACED + "\" -Value '" + cap_settings(compact=True) + "'",
+   "ask", "subagent-model-cap", tool="PowerShell", cwd=NOGIT, carries=(OPUS,))
+sh("cap: a PowerShell Out-File onto a quoted project settings path with a space asks [r1 red]",
+   "'" + cap_settings(compact=True) + "' | Out-File -FilePath \"" + CAP_SPACED + "\"",
+   "ask", "subagent-model-cap", tool="PowerShell", cwd=NOGIT, carries=(OPUS,))
+
+# COVERAGE (review round 1, green on 9eeb1fc). On the cap side too: a comment opener, a multi-line quoted
+# string or a lone apostrophe must neither hide a redirect that writes the cap, nor turn quoted text that
+# names a write into one.
+sh("cap: a /* in double quotes does not hide a redirect that writes the cap [r1 cov]",
+   "echo \"/* keep\" && printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+sh("cap: a // in single quotes does not hide a redirect that writes the cap [r1 cov]",
+   "echo '// keep' ; printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+sh("cap: a /* in a multi-line quoted string does not hide a redirect that writes the cap [r1 cov]",
+   "printf '%s\n/* keep' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+sh("cap: a lone apostrophe in text does not hide a redirect that writes the cap [r1 cov]",
+   "echo don't ; printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+sh("cap data: a /* in double quotes naming a cat-write, piped to python, allows [r1 cov]",
+   'echo "/* cat > ' + PROJ_LOCAL + ' ' + CAP_KEY + '" | python hooks/guard.py', "allow", cwd=NOGIT)
+sh("cap data: a // in single quotes naming a tee onto a settings file, piped to jq, allows [r1 cov]",
+   "echo '// tee " + PROJ_SETTINGS + " " + CAP_KEY + "' | jq .", "allow", cwd=NOGIT)
+sh("cap data: a // in a multi-line quoted string naming a cat-write, piped to python, allows [r1 cov]",
+   "printf 'a note\n// cat > " + PROJ_LOCAL + " " + CAP_KEY + "' | python hooks/guard.py",
+   "allow", cwd=NOGIT)
 
 # FAILING OPEN, this rule's own shapes. A content field of the wrong type, an edit list of the
 # wrong type, and a payload with no tool name at all: each allows the call.
