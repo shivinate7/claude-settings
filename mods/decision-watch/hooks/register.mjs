@@ -1,7 +1,7 @@
 // decision-watch: runs the Stop-time decision watch (hooks/decision_watch.py) with the session's
 // own model login, and writes the verdict to a log. A FLAG or UNKNOWN verdict shows in the session
 // with $.ui.toast. An ALLOW verdict shows nothing. Each config notice shows as its own toast, marked
-// as a notice. It never blocks and never changes the Stop result.
+// as a notice (decision decision-watch-mod-limits). It never blocks and never changes the Stop result.
 //
 // classic.Stop  returns next(e) at once. The judging runs in the background and is skipped when
 //               stop_hook_active is set.
@@ -240,7 +240,7 @@ const MAX_LINE = 2000;
 const LOG_WAIT_MS = 2000;
 const STOP_WAIT_MS = 500;
 const MODEL_MS = 50000;
-const PY_MS = 60000; // each python run; the mod's timer adds 1 s
+const PY_MS = 30000; // each python run (unmeasured; split mode calls no model); the mod's timer adds 1 s
 const FIND_MS = 5000; // each python finder; the mod's timer adds 1 s
 const TOAST_MS = 5000;
 

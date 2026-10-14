@@ -1315,8 +1315,8 @@ def main():
     if joined:
         out = {"systemMessage": joined}
         if model_call is not invoke_model:
-            # A split caller (a mod) shows the verdict and each notice apart. The default output
-            # keeps the one Stop-hook field only.
+            # A split caller (a mod) shows the verdict and each notice apart (decision
+            # decision-watch-mod-limits). The default output keeps the one Stop-hook field only.
             out.update(verdict=message, notices=[n + TAIL for n in notices])
         print(json.dumps(out))
     sys.exit(0)

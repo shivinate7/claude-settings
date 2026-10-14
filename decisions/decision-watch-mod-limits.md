@@ -6,7 +6,7 @@ Can the Stop-time decision watch run as a mod, with the app's own login and no C
 
 ## The ruling
 
-Yes. The mod judges each Stop in the background, logs the verdict, and never blocks a turn. A FLAG or UNKNOWN verdict shows in the session with `$.ui.toast`. An ALLOW verdict shows nothing (owner ruling: ALLOW stays silent; it covers verdicts only). Each config notice (config files, merges into main, unread subjects) shows as its own toast, marked as a notice, never a verdict (arbiter ruling, 2026-10-14 00:09 CDT). Under the split flags, the script prints `verdict` and `notices` as separate JSON fields, so the mod parses no joined text.
+Yes. The mod judges each Stop in the background, logs the verdict, and never blocks a turn. A FLAG or UNKNOWN verdict shows in the session with `$.ui.toast`. An ALLOW verdict shows nothing (owner ruling: ALLOW stays silent). That ruling covers verdicts only, and each config notice (config files, merges into main, unread subjects) shows as its own toast, marked as a notice, never a verdict (arbiter ruling, 2026-10-14 00:09 CDT). Under the split flags, the script prints `verdict` and `notices` as separate JSON fields, so the mod parses no joined text.
 
 `hooks/decision_watch.py` stays the one judge. It gains:
 
@@ -48,7 +48,7 @@ On 2026-10-13 at 12:09 CDT, a spike ran a mod's `$.model.complete` in the deskto
 - HOLE 2. A new human message between the phases moves the baseline. A real FLAG then prints `verdict lost`. The output is loud and correct, but the README named one cause only. Fix: the README now names this cause.
 - HOLE 3. `/dw` prints `nothing to say (no protected change, no model call)` on a cache hit too. A second `/dw` after a FLAG reads like a clean turn. No fix is named.
 - HOLE 4. The log is the only output for an ALLOW, and the toast shows a FLAG or UNKNOWN too. A lost log write is silent: an empty catch and a 2 s cap, so START may have no END. Any read error resets the log to one line. Whether `$.fs.write` is atomic is unverified. No fix is named.
-- HOLE 5. Each step that holds the slot has a mod timer: each python finder 6 s (two per run), each python run 61 s, the model call 50 s, each toast 5 s (a verdict and up to three notices), each log write 2 s (up to six). The sum is about 228 s, computed, not measured. A timer frees the slot but does not stop the host call or kill the child. The `$.env.get` reads have no timer. No fix is named.
+- HOLE 5. Each step that holds the slot has a mod timer: each python finder 6 s (two per run), each python run 31 s (a 30 s host limit, unmeasured against a real run), the model call 50 s, each toast 5 s (a verdict and up to three notices), each log write 2 s (up to six). The sum is about 168 s, computed, not measured. A timer frees the slot but does not stop the host call or kill the child. The `$.env.get` reads have no timer. No fix is named.
 - HOLE 6. The log keeps the FLAG `why` up to 2000 characters. That text is model words about a diff, and it may quote a secret. The log also keeps the first 200 characters of non-JSON phase-1 output, which is fixed prompt text only. No fix is named.
 - HOLE 7. A bad flag combination on `decision_watch.py` makes the script use `invoke_model` instead. That can start a 120 s `claude -p` call. Fix: none. The fallback is pinned on purpose.
 - HOLE 8. `Stops seen` counts only lines still in the 500-line log, so N is at most 500. A second `/dw` on the same turn says `nothing to say`, because `/dw` keeps its own cache. No fix is named.

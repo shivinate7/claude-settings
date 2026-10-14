@@ -10,7 +10,7 @@ A mod. It runs the Stop-time decision watch with this session's own model login.
 - The judging uses `hooks/decision_watch.py` in your Claude config folder, in two steps.
   1. `--emit-prompt` runs the cheap path. It prints a prompt only when a model call is due.
   2. The mod calls the model with that prompt. The mod enforces a 50 s limit itself (a timer races the call). A call that passes it reads as a model error. Then `--model-text` or `--model-error` gives the verdict.
-- Each python run and each python finder also has a mod timer: the host limit plus 1 s. A run that passes it reads UNKNOWN. A toast has a 5 s timer. So a hung call frees the one-judge slot.
+- Each python run (30 s) and each python finder (5 s) also has a mod timer: the host limit plus 1 s. A run that passes it reads UNKNOWN. A toast has a 5 s timer. A hung python, model or toast call frees the one-judge slot. The `$.env.get` reads have no timer.
 - Every failure reads as UNKNOWN. A failure never reads as ALLOW.
 - Phase 1 prints a `key` for the evidence it judged. The mod gives it back to phase 2 as `--key` after the reply. Evidence that moved between the two steps reads UNKNOWN. A phase 1 with no key reads UNKNOWN.
 - Under the split flags, the script prints `verdict` and `notices` as separate JSON fields. The mod does not parse joined text.
