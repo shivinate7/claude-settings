@@ -764,7 +764,7 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
     try:
         run = subprocess.run(
             [
-                "claude", "-p", prompt,
+                "claude", "-p",  # prompt goes on stdin: a Windows command line caps at 32,767 chars
                 "--model", model,
                 "--effort", "xhigh",
                 "--output-format", "json",
@@ -772,7 +772,7 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
                 "--safe-mode",
                 "--permission-mode", "plan",
             ],
-            input="", capture_output=True, text=True, encoding="utf-8", errors="replace",
+            input=prompt, capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=timeout, cwd=root, env=env,
         )
     except subprocess.TimeoutExpired:
