@@ -4684,8 +4684,8 @@ sh("silent-write throwaway: --git-dir names the throwaway repo, and it is judged
    VCS + " --git-dir=" + TSLASH + "/.git commit -m x >/dev/null", "allow", cwd=GITMAIN)
 sh("silent-write throwaway: a discarded pipe tail in a throwaway repo",
    VCS + " commit -m x 2>&1 | cat >/dev/null", "allow", cwd=THROWAWAY)
-sh("silent-write throwaway: a quiet push in a throwaway repo",
-   VCS + " push -q", "allow", cwd=THROWAWAY)
+sh("silent-write throwaway: a quiet push in a throwaway repo is still a write, a push is never a throwaway",
+   VCS + " push -q", "deny", "silent-write", carries="moved nothing", cwd=THROWAWAY)
 sh("silent-write throwaway: a quiet merge in a throwaway repo",
    VCS + " merge -q feature/x", "allow", cwd=THROWAWAY)
 sh("silent-write throwaway: this session's own scratchpad",
@@ -4781,6 +4781,98 @@ sh("silent-write scanner: a discard named before a space inside a message is tex
 sh("silent-write scanner: a discard named before a space inside an echo string is text, with a lone "
    "quote and a comment opener in the same string",
    'echo "log >/dev/null now, it\'s # here"', "allow", cwd=GITMAIN)
+
+# Review round 1 (lane silent-write-narrow). Each DENY below is a bypass the narrowed rule lets
+# through on 87d039b, and each ALLOW is a false alarm it raises. Each one is red until the builder
+# closes it. Cases that already pass on 87d039b are marked "hold" and pin behaviour that must stay.
+
+# (a) The quote walk, `unquoted_at`. A `\"` inside double quotes, a `$'...'` string, and a
+# PowerShell backtick escape each end a quote early or late, so a real redirect reads as text.
+sh("silent-write quote walk: an escaped quote inside a message does not close it, so the redirect after it is real",
+   VCS + r' commit -m "a \" b" >/dev/null', "deny", "silent-write", carries="a redirect silences",
+   cwd=GITMAIN)
+sh("silent-write quote walk: a $'...' string with an escaped quote closes before the redirect",
+   VCS + r" commit -m $'a\'b' >/dev/null", "deny", "silent-write", carries="a redirect silences",
+   cwd=GITMAIN)
+sh("silent-write quote walk: a PowerShell backtick escape closes nothing, so the redirect after it is real",
+   VCS + r' commit -m "x`"" >$null', "deny", "silent-write", tool="PowerShell",
+   carries="a redirect silences", cwd=GITMAIN)
+
+# (b) The throwaway cwd. Each shell below ends in a real checkout, while the guard reads a temp
+# folder that the shell has already left. The walker does not parse the move: pushd, Set-Location,
+# a bare cd, cd -, a subshell cd. Or a `-C` that a `--git-dir` overrides, or an env var that the
+# hook expands but the shell reassigns first.
+sh("silent-write throwaway bypass: pushd moves the shell out of the temp folder into a real checkout",
+   "pushd " + slash(GITMAIN) + " && " + VCS + " commit -m x >/dev/null",
+   "deny", "silent-write", carries="a redirect silences", cwd=THROWAWAY)
+sh("silent-write throwaway bypass: Set-Location moves a PowerShell shell out of the temp folder",
+   "Set-Location " + slash(GITMAIN) + "; " + VCS + " commit -m x >$null",
+   "deny", "silent-write", tool="PowerShell", carries="a redirect silences", cwd=THROWAWAY)
+sh("silent-write throwaway bypass: a bare cd leaves the temp folder for the home folder",
+   "cd " + TSLASH + " && cd && " + VCS + " commit -m x >/dev/null",
+   "deny", "silent-write", carries="a redirect silences", cwd=GITMAIN)
+sh("silent-write throwaway bypass: cd - returns the shell to a real checkout",
+   "cd " + TSLASH + " && cd - && " + VCS + " commit -m x >/dev/null",
+   "deny", "silent-write", carries="a redirect silences", cwd=GITMAIN)
+sh("silent-write throwaway bypass: a cd inside a subshell does not carry out of it",
+   "(cd " + TSLASH + " && true); " + VCS + " commit -m x >/dev/null",
+   "deny", "silent-write", carries="a redirect silences", cwd=GITMAIN)
+sh("silent-write throwaway bypass: a --git-dir after -C names the real repository",
+   VCS + " -C " + TSLASH + " --git-dir=" + slash(GITMAIN) + "/.git commit -m x >/dev/null",
+   "deny", "silent-write", carries="a redirect silences", cwd=GITMAIN)
+sh("silent-write throwaway bypass: an env var reassigned to . names the real cwd, not the temp folder",
+   "TEMP=. && " + VCS + ' -C "$TEMP" commit -m x >/dev/null',
+   "deny", "silent-write", carries="a redirect silences", cwd=GITMAIN)
+sh("silent-write throwaway hold: an env var that expands into the temp folder, then .. out of it, "
+   "is judged where it lands",
+   VCS + ' -C "$TEMP/../' + os.path.basename(GITMAIN) + '" commit -m x >/dev/null',
+   "deny", "silent-write", carries="a redirect silences", cwd=GITMAIN)
+sh("silent-write throwaway push: a discarded push from a temp clone to a real remote is a write",
+   VCS + " push " + slash(GITMAIN) + " feat >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", cwd=THROWAWAY)
+
+# (c) VALUE_FLAGS gaps. A value flag takes the next token as its value, so a dry-run word there is
+# text, and the write is real.
+sh("silent-write read bypass: push -o takes -n as its push option value, so the push is real",
+   VCS + " push -o -n origin feat >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", cwd=GITMAIN)
+sh("silent-write read bypass: push --push-option takes -n as its value, so the push is real",
+   VCS + " push --push-option -n origin feat >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", cwd=GITMAIN)
+sh("silent-write read bypass: commit --trailer takes -h as its value, so the commit is real",
+   VCS + " commit --trailer -h -m x >/dev/null", "deny", "silent-write",
+   carries="a redirect silences", cwd=GITMAIN)
+
+# (d) A Git Bash /tmp path names the temp folder, so a silenced write there is a throwaway. Windows
+# only: on POSIX, /tmp is a real folder, and the fixture temp folder is not /tmp.
+if os.name == "nt":
+    sh("silent-write false alarm: git -C /tmp under the Windows temp folder is a throwaway",
+       VCS + " -C /tmp/throwaway commit -m x >/dev/null", "allow", cwd=GITMAIN)
+
+# (e) The remedy names the program that refused and the loud form. It never reduces to the bare verb,
+# which a re-run would turn into a different write, and it never names the forbidden target.
+sh("silent-write remedy: a silenced push to main gives the loud form, not the bare verb, nor the target",
+   VCS + " push origin main:main >/dev/null", "deny", "silent-write",
+   carries="2>&1 | tail -1", lacks=(VCS + " push 2>&1", "main:main"), cwd=GITMAIN)
+sh("silent-write remedy: a silenced make merge names make merge, not the git merge it rewrites to",
+   "make merge PR=5 2>/dev/null", "deny", "silent-write", carries="make merge",
+   lacks=VCS + " merge 2>&1", cwd=NOGIT)
+sh("silent-write remedy: a silenced gh pr merge names gh pr merge, not the git merge it rewrites to",
+   "gh pr merge 5 --merge >/dev/null", "deny", "silent-write", carries="gh pr merge",
+   lacks=VCS + " merge 2>&1", cwd=NOGIT)
+
+# (f) Hold: a single command is step 1 of 1. Green on 87d039b, pinned so the step count cannot drift.
+sh("silent-write step: a single silenced commit says step 1 of 1",
+   VCS + " commit -m x 2>/dev/null", "deny", "silent-write", carries="step 1 of 1",
+   lacks="step 1 of 2", cwd=GITMAIN)
+
+# (g) Scanner cases for the quote walk: a multi-line message that names a discard as text, then a
+# backtick inside a quoted message.
+sh("silent-write scanner: a multi-line message that names a discard as text, then a real discard after it",
+   VCS + ' commit -m "line one\n>/dev/null here" 2>/dev/null', "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write scanner: a backtick inside a message does not hide a real discard after it",
+   VCS + ' commit -m "`x`" >/dev/null', "deny", "silent-write", carries="a redirect silences",
+   cwd=GITMAIN)
 
 TEMP_DIR = None   # back to the system temp for the sections below
 

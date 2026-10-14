@@ -850,6 +850,20 @@ MUTATIONS = [
      'QUIET_FLAG_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick", '
      '"pull", "fetch")', "guard",
      "silent-write: commit's own quiet flag is a carve-out, MEASURED 2026-09-19"),
+    # Review round 1 (lane silent-write-narrow). The two allow paths the narrowed rule added, each
+    # made to allow everything. Each required case is a DENY that the mutant must lose.
+    #   "silent-write: the throwaway test always passes, so a real checkout is never judged"
+    #     -> "silent-write real: a discarded commit in a real checkout"
+    #   "silent-write: the quote walk is quote-blind, so a redirect named in a message counts"
+    #     -> "silent-write scanner: a discard named inside a message is text"
+    ("silent-write: the throwaway test always passes, so a real checkout is never judged",
+     'def in_throwaway(segments, number: int, cwd: str) -> bool:',
+     'def in_throwaway(segments, number: int, cwd: str) -> bool:\n    return True', "guard",
+     "silent-write real: a discarded commit in a real checkout"),
+    ("silent-write: the quote walk is quote-blind, so a redirect named in a message counts",
+     'def unquoted_at(text: str, index: int) -> bool:',
+     'def unquoted_at(text: str, index: int) -> bool:\n    return True', "guard",
+     "silent-write scanner: a discard named inside a message is text"),
 
     # ---- the PostToolUse watch. These break `hooks/config_watch.py` and must be killed by
     # `hooks/test_config_watch.py`, which writes the cap for real and reads the file back.
