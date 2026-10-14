@@ -669,6 +669,12 @@
         "kind": "unmechanized",
         "reason": "Round counts live in briefs and reviewer reports. No check reads how many rounds a PR had."
       }
+    },
+    "roles-holes-are-debts": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "A prose rule. No check reads the debt store yet; one would have to find each known gap in the repo and check that it has a debt entry."
+      }
     }
   }
 }
