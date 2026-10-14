@@ -576,8 +576,11 @@ class SimBootRecordTests(unittest.TestCase):
                 self.assertEqual(names.count("shutdown"), 1, "more or fewer than one shutdown")
                 self.assertEqual(names.count("boot"), 1, "more or fewer than one boot")
                 self.assertNotEqual(names[-1], "shutdown", "the hook shut the device after the fail")
-                self.assertEqual([r["udid"] for r in self.read_records()], [U1],
-                                 "a broken device left no record line")
+                records = self.read_records()
+                self.assertEqual([r["udid"] for r in records], [U1, U1],
+                                 "a broken device needs a record line before and after the retry")
+                self.assertEqual([str(r["launchd_pid"]) for r in records], ["2001", "3001"],
+                                 "want the old pid first and the retry boot's pid newest")
 
     def test_an_mcp_launch_that_fails_the_check_is_retried(self):
         ti = {"action": "launch", "device": U1}
