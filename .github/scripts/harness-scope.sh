@@ -29,7 +29,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       landed-dirs.txt) on="$on $W $R $X $S code guard " ;;
       hooks/test_guard.py|hooks/mutate_guard.py) on="$on $W $X code guard " ;;
       # install.sh and session_start.sh: the checkout-detection suite and test_guard read them.
-      install.sh|hooks/test_install_src.sh) on="$on $W $X $S code guard " ;;
+      install.sh|install.py|test_install.py|hooks/test_install_src.sh) on="$on $W $X $S code guard " ;;
       hooks/session_start.sh) on="$on $W $R $X $S code guard " ;;
       hooks/test_mutate_shared.py) on="$on code guard " ;;
       # Hook modules and suites that run on the rest and macOS jobs.
@@ -49,7 +49,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       actions/stamp/*) on="$on $R $X $M code " ;;
       # Mod tests: no other CI job reads mods/.
       mods/*) on="$on mods " ;;
-      install.ps1|install.test.ps1|install-no-gap.test.ps1) on="$on $P code " ;;
+      install.ps1|install.py|test_install.py|install.test.ps1|install-no-gap.test.ps1) on="$on $P code " ;;
       # Linux `gates` job only: the lints and opt-in templates.
       actions/*|githooks/*|testing/*|lint/*|.github/dependabot.yml|.gitignore) on="$on code " ;;
       # Docs: nothing runs on them but the lints in `gates`. (hooks/*.md, the precompact prompt, matches hooks/* above.)

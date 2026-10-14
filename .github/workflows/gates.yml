@@ -290,6 +290,15 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: sh merge/test_install_from_main.sh
 
+      # Installer spine (install.py + test_install.py). Each file is checked on its own, so the step is a
+      # no-op until the file lands. The `[ -f ]` guard is the whole gate; a present file that fails is red.
+      - name: Installer spine, install.py and test_install.py
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        shell: bash
+        run: |
+          if [ -f install.py ]; then python -m py_compile install.py; else echo "install.py absent, skipped"; fi
+          if [ -f test_install.py ]; then python test_install.py; else echo "test_install.py absent, skipped"; fi
+
       # Last step, so a red mod test skips none of the steps above, and a red step above does not hide
       # a mod test (!cancelled() runs it anyway). One glob reaches only root-level mods/<name>/*.test.mjs
       # files: a test in mods/<name>/tests/ or named *.test.js does not run. A new mods/<name>/ joins
@@ -591,6 +600,15 @@ jobs:
         shell: bash
         run: sh hooks/test_install_src.sh
 
+      # Installer spine (install.py + test_install.py). Each file is checked on its own, so the step is a
+      # no-op until the file lands. The `[ -f ]` guard is the whole gate; a present file that fails is red.
+      - name: Installer spine, install.py and test_install.py
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        shell: bash
+        run: |
+          if [ -f install.py ]; then python -m py_compile install.py; else echo "install.py absent, skipped"; fi
+          if [ -f test_install.py ]; then python test_install.py; else echo "test_install.py absent, skipped"; fi
+
   # The mutation harness for the guard, moved off `gates` by cut F (decisions/ci-wall-time-cuts.md) so it runs in parallel.
   gates-mutate-guard:
     runs-on: ubuntu-latest
@@ -791,3 +809,12 @@ jobs:
         if: ${{ !cancelled() }}
         shell: bash
         run: bash actions/stamp/test_action.sh
+
+      # Installer spine (install.py + test_install.py). Each file is checked on its own, so the step is a
+      # no-op until the file lands. The `[ -f ]` guard is the whole gate; a present file that fails is red.
+      - name: Installer spine, install.py and test_install.py
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        shell: bash
+        run: |
+          if [ -f install.py ]; then python -m py_compile install.py; else echo "install.py absent, skipped"; fi
+          if [ -f test_install.py ]; then python test_install.py; else echo "test_install.py absent, skipped"; fi
