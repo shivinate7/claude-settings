@@ -793,7 +793,7 @@ class BaseAware(Env):
         self.put_locks(self.BASE)  # live on integ, none on main
         rc, out = self.run_merge("7")
         self.assertEqual(rc, 0, out)
-        self.assertIn(f"lock:   the merge lock on {self.BASE} is held", out)  # say() joins its lines with spaces
+        self.assertIn(f"lock:   the merge lock on {self.BASE} is held", out)  # say() prints each line on its own line
 
     def test_B_a_head_that_holds_an_old_claim_stops_before_the_wait_on_another_base(self):
         o = self.other
@@ -3601,6 +3601,38 @@ class RecordsRebuild(RecordsEnv):
         self.assertTrue(getattr(self.host, "merged", False), out)
         self.assertEqual(self.show("main", "docs/records.md"), page("gap-one").strip())
 
+    def test_the_preview_on_a_non_default_base_says_nothing_about_the_page(self):
+        # Pin, green on 6fb3ac0. The records line sits inside the default-branch block of preview(), so a pull request
+        # into another base prints no page line, and confirm does not rebuild there either.
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/integ")
+        self.host.base = "integ"
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        before = self.refs()
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        for line in [l for l in out.splitlines() if l.startswith("  records:")]:
+            self.assertNotIn("rebuild", line)
+        self.assertEqual(self.refs(), before)
+
+    def test_the_preview_and_confirm_agree_on_a_resumed_head_that_needs_the_page(self):
+        # Red on 6fb3ac0. The preview says the page needs a rebuild. Confirm skips the rebuild on a resumed head,
+        # so the stale page is refused at the end. Both must agree: rebuild when the page lands, not otherwise.
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        put_lf(os.path.join(o, "docs/decisions/second.md"), record("D-002", "second"))
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", "Claim record numbers", "-m", "Record-claim: D-002")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("already claimed (D-002)", out)  # precondition: the head is a resumed claim
+        line = [l for l in out.splitlines() if l.startswith("  records:")]
+        self.assertEqual(len(line), 1, out)
+        rc, out = self.run_merge("7", "--confirm")
+        on_main = "docs/records.md" in self.tree_names("origin/main")
+        self.assertEqual("rebuild" in line[0], on_main, f"{line[0]}\n{out}")
+
 class RecordsRebuildReal(RecordsEnv):
     """The same seam with the real generator, lint/hook_catalog.py, as merge.RECORDS defaults to it."""
     def test_the_default_generator_is_the_one_in_this_checkout(self):
@@ -3626,6 +3658,49 @@ class RecordsRebuildReal(RecordsEnv):
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.rev("origin/main^2"), before)
         self.assertNotIn("docs/records.md", self.tree_names("origin/main"))
+
+    def generated(self, ref):
+        """The page the real generator writes for the tree at ref, made in a scratch worktree that is removed again."""
+        self.rev(ref)  # fetches origin first
+        wt = os.path.join(self.t, "gen")
+        sh(self.co, "git", "worktree", "add", "-q", "--detach", wt, ref)
+        try:
+            sh(wt, sys.executable, merge.RECORDS, "--root", wt)
+            with open(os.path.join(wt, "docs", "records.md"), encoding="utf-8") as f:
+                return f.read().strip()
+        finally:
+            sh(self.co, "git", "worktree", "remove", "--force", wt)
+
+    def test_a_conflict_only_on_the_page_is_rebuilt_on_the_merged_tree(self):
+        # Red on 6fb3ac0. records_stale() reads any conflict as "cannot be proved fresh" and reverts the claim. Here only
+        # the generated page conflicts (add/add on both sides), so the tool rebuilds it on the merged tree and goes on.
+        self.kinds_off()
+        self.on("main", {"debts/main-gap.md": DEBT_TEXT.replace("Gap one", "Main gap"), "docs/records.md": "records\n- main-gap\n"},
+                "a debt and a hand-written page on main")
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        page = self.show("main", "docs/records.md")
+        self.assertIn("gap-one", page)
+        self.assertIn("main-gap", page)
+        self.assertEqual(page, self.generated("origin/main"))
+
+    def test_a_conflict_on_another_file_still_refuses_and_reverts(self):
+        # Pin, green on 6fb3ac0. A conflict outside the generated page must still stop the merge. This blocks a blanket
+        # -X ours or -X theirs that would silence every conflict.
+        self.kinds_off()
+        self.on("main", {"notes.txt": "main side\n"}, "a note on main")
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT, "notes.txt": "head side\n"}, "a debt and a note")
+        before = self.head()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("does not merge cleanly", out)
+        self.assertIn("reverted", out)
+        self.assertFalse(getattr(self.host, "merged", False), out)
+        self.assertEqual(sh(self.co, "git", "diff", "--stat", before, "origin/feat"), "")
+        self.assertFalse(self.lock_ref())
+        self.assertEqual(self.worktrees(), 1)
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--child":

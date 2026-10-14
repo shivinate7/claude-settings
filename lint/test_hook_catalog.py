@@ -1050,6 +1050,23 @@ class RecordsPage(Tree):
         self.assertEqual(code, 2, out + err)
         self.assertIn("decisions/bad.md", out + err)
 
+    def test_a15_a_short_first_ruling_block_gives_the_question_sentence(self):
+        # Red on 6fb3ac0 for the three short-block rows. Kind: process throughout. A ruling's first block of under 4 words
+        # ("Yes.", "Owner, 2026-10-11:") gives the first sentence of "## The question". A 4-word block stays (green pin).
+        cases = [
+            ("a bare yes", "Does the gate run first? It does.", "Yes.", "Does the gate run first?"),
+            ("a 3-word block", "Is the page rebuilt at merge? Yes.", "Yes, it is.", "Is the page rebuilt at merge?"),
+            ("a dated owner line, then a short block", "Is the page rebuilt at merge? Yes.",
+             "Owner, 2026-10-11:\n\nYes.\n\nThe page is rebuilt at merge.", "Is the page rebuilt at merge?"),
+            ("a 4-word block stays", "What runs first? The gate.", "The gate runs first.", "The gate runs first."),
+        ]
+        extra = {"decisions/r%d.md" % i: "# T\n\n## The question\n\n%s\n\n## The ruling\n\n%s\n\nKind: process\n" % (q, r)
+                 for i, (_name, q, r, _gist) in enumerate(cases)}
+        got = {r["slug"]: r["gist"] for r in self.rows(extra) if r["section"] == "Rulings"}
+        for i, (name, _q, _r, gist) in enumerate(cases):
+            with self.subTest(name):
+                self.assertEqual(got.get("r%d" % i), gist)
+
 
 class RecordsStale(Tree):
     def published(self, extra=None):
@@ -1302,6 +1319,17 @@ class RecordsHistory(Tree):
         gists = {r["slug"]: r["gist"] for r in records_rows(self.records_text(root)) if r["section"] == "Mandates"}
         self.assertEqual(gists["speak-rewrite-superseded-in-place"], "Rewrite superseded text in place.")
         self.assertEqual(gists["roles-remove-override-file"], "Remove the file when the raise is no longer needed.")
+
+    def test_c12_words_that_only_look_like_a_marker_do_not_fail(self):
+        # Red on 6fb3ac0 for each prose line below: none is overruled text. The control line must still fail the check,
+        # so a detector gone silent cannot pass this case.
+        for line in ["The flag was: on.", "No longer used: the old flag.", "Previously-run tests stay green."]:
+            with self.subTest(line):
+                root = self.tree(with_records({"decisions/old.md": old_decision(line)}))
+                self.publish(root)
+                self.assertEqual(generator(root, "--check"), (0, "", ""))
+                self.assertIn("old", listed(records_rows(self.records_text(root)))["Unsorted decisions"])
+        self.assert_history(with_records({"decisions/old.md": old_decision("Old ruling: allow it.")}), "decisions/old.md:7")
 
 
 class OtherRepos(Tree):
