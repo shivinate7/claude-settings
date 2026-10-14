@@ -860,6 +860,187 @@ public static class FileIdentity
     } finally {
         Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
     }
+    # ---- prose1: only the exact placeholder line is stamped; a prose comment is copied unchanged -----
+    # A comment that starts INSTALL_ID = " but says something else is not the placeholder. Each stamper
+    # (install.ps1's copy path, the post-merge hook, install.sh's put_file) must leave it as it is, so the
+    # installed copy is the source. The installed copy must also still parse as Python. Only the exact
+    # line # INSTALL_ID = "uninstalled" is stamped.
+    $ProseLine = '# INSTALL_ID = "<id>", and the cases put that line at the top of every copy, as an install does.'
+    $ProseText = $ProseLine + "`n" + 'X = 1' + "`n"
+    $PlaceText = $HookPlaceholder + "`n" + 'Y = 2' + "`n"
+    function Test-AstParse([string]$Path) {
+        $py = $null
+        foreach ($c in @('python', 'python3', 'py')) { if (Get-Command $c -ErrorAction SilentlyContinue) { $py = $c; break } }
+        if (-not $py) { return $null }
+        & $py -c "import ast, sys; ast.parse(open(sys.argv[1], encoding='utf-8').read())" "$Path"
+        return ($LASTEXITCODE -eq 0)
+    }
+    function Test-ProseFolder([string]$Label, [string]$Hooks) {
+        # Names differ from $ProseText by more than case: PowerShell variables are case-insensitive.
+        $proseFile = Join-Path $Hooks 'guard_prose.py'
+        $stampFile = Join-Path $Hooks 'guard_stamp.py'
+        $gotProse = ''; $gotStamp = ''
+        if (Test-Path -LiteralPath $proseFile) { $gotProse = [IO.File]::ReadAllText($proseFile) }
+        if (Test-Path -LiteralPath $stampFile) { $gotStamp = [IO.File]::ReadAllText($stampFile) }
+        Check ($Label + ': the prose comment is copied unchanged') ($gotProse -ceq $ProseText)
+        Check ($Label + ': the prose file still parses as Python') ((Test-Path -LiteralPath $proseFile) -and ((Test-AstParse $proseFile) -eq $true))
+        Check ($Label + ': the exact placeholder line is stamped with a real id') ([regex]::IsMatch($gotStamp, '(?m)^INSTALL_ID = "[^"]+"') -and -not $gotStamp.Contains('uninstalled'))
+        Check ($Label + ': the stamped placeholder file still parses as Python') ((Test-Path -LiteralPath $stampFile) -and ((Test-AstParse $stampFile) -eq $true))
+    }
+
+    # Route 1: install.ps1, copy mode (Set-InstallId).
+    $P1 = New-Scratch 'prose-install' @('hooks')
+    Write-FixtureFile (Join-Path $P1.Clone 'hooks\guard_prose.py') $ProseText
+    Write-FixtureFile (Join-Path $P1.Clone 'hooks\guard_stamp.py') $PlaceText
+    $env:CLAUDE_CONFIG_DIR = $P1.Cfg
+    $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+    try {
+        $rcP1 = Invoke-Install $P1.Clone 'prose1-install.log'
+        Check "prose1: install route: install.ps1 exits 0 (exit $rcP1)" ($rcP1 -eq 0)
+        Test-ProseFolder 'prose1: install route' (Join-Path $P1.Cfg 'hooks')
+    } finally {
+        Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+    }
+
+    # Route 2: the post-merge hook install.ps1 writes into .git\hooks (put), run by git's sh.
+    $P2 = New-Scratch 'prose-hook' @('hooks')
+    Write-FixtureFile (Join-Path $P2.Clone 'hooks\guard_prose.py') $ProseText
+    Write-FixtureFile (Join-Path $P2.Clone 'hooks\guard_stamp.py') $PlaceText
+    $Sh2 = Get-GitSh
+    if (-not (Get-Command git -ErrorAction SilentlyContinue) -or -not $Sh2) {
+        Check "prose1: hook route: git and a Git Bash sh are both found, so the post-merge hook can run" $false
+    } else {
+        $env:CLAUDE_CONFIG_DIR = $P2.Cfg
+        $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+        try {
+            & git -C $P2.Clone init -q
+            & git -C $P2.Clone symbolic-ref HEAD refs/heads/main
+            & git -C $P2.Clone -c core.autocrlf=false add -A
+            & git -C $P2.Clone -c core.autocrlf=false -c user.name=prose-test -c user.email=prose-test@example.invalid commit -q -m fixture
+            $rcP2a = Invoke-Install $P2.Clone 'prose1-hook-run1.log'
+            Check "prose1: hook route: install run 1 exits 0 (exit $rcP2a)" ($rcP2a -eq 0)
+            Check "prose1: hook route: install run 1 writes the post-merge hook" (Test-Path -LiteralPath (Join-Path $P2.Clone '.git\hooks\post-merge'))
+            $env:CLAUDE_CONFIG_DIR = $P2.Cfg.Replace('\', '/')
+            $hookLog2 = Join-Path $Tmp 'prose1-hook-run2.log'
+            $pP2 = Start-Process -FilePath $Sh2 -ArgumentList '.git/hooks/post-merge' -WorkingDirectory $P2.Clone -Wait -PassThru -NoNewWindow -RedirectStandardOutput $hookLog2 -RedirectStandardError ($hookLog2 + '.err')
+            Check "prose1: hook route: the post-merge hook exits 0 (exit $($pP2.ExitCode))" ($pP2.ExitCode -eq 0)
+            Test-ProseFolder 'prose1: hook route' (Join-Path $P2.Cfg 'hooks')
+        } finally {
+            Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+        }
+    }
+
+    # Route 3: install.sh's put_file, extracted from install.sh and run by sh on the two files.
+    $P3 = New-Scratch 'prose-sh' @('hooks')
+    $Sh3 = Get-GitSh
+    $ShText = [IO.File]::ReadAllText((Join-Path $Repo 'install.sh'))
+    $ShStart = $ShText.IndexOf('put_file() {')
+    $ShEnd = if ($ShStart -ge 0) { $ShText.IndexOf("`n}", $ShStart) + 2 } else { -1 }
+    $PutFn = if ($ShStart -ge 0 -and $ShEnd -gt $ShStart) { $ShText.Substring($ShStart, $ShEnd - $ShStart) } else { '' }
+    Check "prose1: install.sh route: put_file is found in install.sh" ($PutFn -ne '')
+    $PutDriver = @(
+        'INSTALL_ID_VALUE=TESTID',
+        'INSTALL_FAILED=0',
+        'log() { :; }',
+        $PutFn,
+        'put_file src/guard_prose.py out/guard_prose.py || exit 1',
+        'put_file src/guard_stamp.py out/guard_stamp.py || exit 1'
+    ) -join "`n"
+    [IO.File]::WriteAllText((Join-Path $P3.Root 'put.sh'), $PutDriver + "`n", (New-Object Text.UTF8Encoding $false))
+    New-Item -ItemType Directory -Force -Path (Join-Path $P3.Root 'src'), (Join-Path $P3.Root 'out') | Out-Null
+    Write-FixtureFile (Join-Path $P3.Root 'src\guard_prose.py') $ProseText
+    Write-FixtureFile (Join-Path $P3.Root 'src\guard_stamp.py') $PlaceText
+    if ($Sh3 -and $PutFn -ne '') {
+        $pP3 = Start-Process -FilePath $Sh3 -ArgumentList 'put.sh' -WorkingDirectory $P3.Root -Wait -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $Tmp 'prose1-sh.log') -RedirectStandardError (Join-Path $Tmp 'prose1-sh.log.err')
+        Check "prose1: install.sh route: put_file exits 0 on both files (exit $($pP3.ExitCode))" ($pP3.ExitCode -eq 0)
+        Test-ProseFolder 'prose1: install.sh route' (Join-Path $P3.Root 'out')
+    } else {
+        Check "prose1: install.sh route: sh is found to run put_file" $false
+    }
+
+    # ---- first1: a first install over an unstamped set (the repo's placeholder set) ----------------
+    # No install marker, and the installed copy is the placeholder set from main: the first run. After it,
+    # every guard*.py carries one real id. A reader loop runs through the install. Each mixed-id window
+    # must clear within the guard's wait (5 s), and none may be open when the install ends.
+    $F1 = New-Scratch 'first-install' @('hooks')
+    $F1Hooks = Join-Path $F1.Cfg 'hooks'
+    $F1Names = @('guard.py', 'guard_core.py', 'guard_pointer.py')
+    $F1Old = @{}; $F1New = @{}
+    foreach ($n in $F1Names) {
+        # The installed copy is unstamped, as main's copies are: no INSTALL_ID line at all.
+        $F1Old[$n] = Remove-StampLine (New-HookText $n 'first install, unstamped installed copy')
+        $F1New[$n] = New-HookText $n 'first install, source with the placeholder'
+        Write-FixtureFile (Join-Path $F1Hooks $n) $F1Old[$n]
+        Write-FixtureFile (Join-Path $F1.Clone ('hooks\' + $n)) $F1New[$n]
+    }
+    $Reader1 = New-Object -TypeName HookReader
+    $Reader1.Paths = [string[]]@((Join-Path $F1Hooks 'guard.py'), (Join-Path $F1Hooks 'guard_core.py'))
+    $Reader1.Versions1 = [string[]]@($F1Old['guard.py'], $F1Old['guard_core.py'])
+    $Reader1.Versions2 = [string[]]@($F1New['guard.py'], $F1New['guard_core.py'])
+    $env:CLAUDE_CONFIG_DIR = $F1.Cfg
+    $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+    $Reader1.Start()
+    try {
+        $rcF1 = Invoke-Install $F1.Clone 'first1-install.log'
+    } finally {
+        $Reader1.Stop()
+        Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+    }
+    Check "first1: the first install exits 0 (exit $rcF1)" ($rcF1 -eq 0)
+    $F1Ids = @()
+    foreach ($n in $F1Names) {
+        $mm = [regex]::Match([IO.File]::ReadAllText((Join-Path $F1Hooks $n)), '(?m)^INSTALL_ID = "([^"]*)"')
+        if ($mm.Success) { $F1Ids += $mm.Groups[1].Value } else { $F1Ids += '(none)' }
+    }
+    $F1Distinct = @($F1Ids | Select-Object -Unique)
+    Check "first1: every guard*.py carries one and the same uncommented real INSTALL_ID ($($F1Ids -join ', '))" (($F1Distinct.Count -eq 1) -and ($F1Distinct[0] -notin @('(none)', 'uninstalled', '')))
+    Check "first1: the reader ran through the install ($($Reader1.Passes) passes, want at least 10)" ($Reader1.Passes -ge 10)
+    $F1Gone = $Reader1.Count('missing ') + $Reader1.Count('unreadable ')
+    Check "first1: no hook file is missing or unreadable during the install ($F1Gone faults)" ($F1Gone -eq 0)
+    Check "first1: no hook read is short ($($Reader1.Count('short read ')) faults)" ($Reader1.Count('short read ') -eq 0)
+    $LongestF1 = [math]::Round($Reader1.MaxWindowSeconds, 3)
+    Check "first1: every mixed-id window clears within 5 s ($($Reader1.Windows) windows, longest $LongestF1 s)" ($Reader1.MaxWindowSeconds -le 5)
+    Check "first1: no mixed-id window is still open when the install ends" (-not $Reader1.WindowOpen)
+
+    # ---- retry1: a file that Resolve-Failures recovers on retry leaves no failure behind -----------
+    # A first install: no install marker, and person files already sit at two names. A reader holds
+    # guard_pointer.py open with no delete sharing for 5 s. Move-OverFile gives up after about 2.5 s, and
+    # Resolve-Failures retries after 2 s, when the lock is gone. Such a run must exit 0, print the retry,
+    # write no 'failed' to the install log, and write the install marker.
+    $T1 = New-Scratch 'retry-install' @('hooks')
+    $T1Hooks = Join-Path $T1.Cfg 'hooks'
+    Write-FixtureFile (Join-Path $T1.Clone 'hooks\guard.py') '# guard v1'
+    Write-FixtureFile (Join-Path $T1.Clone 'hooks\guard_pointer.py') '# pointer v2'
+    Write-FixtureFile (Join-Path $T1Hooks 'guard.py') "# person's guard"
+    Write-FixtureFile (Join-Path $T1Hooks 'guard_pointer.py') "# person's pointer"
+    $T1Marker = Join-Path $T1.Cfg '.claude-settings-installed'
+    $T1InstallLog = Join-Path $T1.Cfg 'claude-settings-install.log'
+    $T1Out = Join-Path $Tmp 'retry1-install.log'
+    $T1Held = [IO.FileStream]::new((Join-Path $T1Hooks 'guard_pointer.py'), [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $env:CLAUDE_CONFIG_DIR = $T1.Cfg
+    $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+    try {
+        $pT1 = Start-Process -FilePath 'powershell.exe' -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $T1.Clone 'install.ps1') + '"') -PassThru -NoNewWindow -RedirectStandardOutput $T1Out -RedirectStandardError ($T1Out + '.err')
+        # Reading Handle now keeps the exit code reachable after the process ends.
+        $null = $pT1.Handle
+        Start-Sleep -Milliseconds 5000
+        $T1Held.Dispose()
+        $pT1.WaitForExit()
+        $pT1.Refresh()
+        $rcT1 = $pT1.ExitCode
+    } finally {
+        $T1Held.Dispose()
+        Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+    }
+    $T1Printed = if (Test-Path -LiteralPath $T1Out) { [IO.File]::ReadAllText($T1Out) } else { '' }
+    $T1Text = if (Test-Path -LiteralPath $T1InstallLog) { [IO.File]::ReadAllText($T1InstallLog) } else { '' }
+    Check "retry1: the first install exits 0 (exit $rcT1)" ($rcT1 -eq 0)
+    Check "retry1: the run printed a retry (non-vacuous: the failed replace happened)" ($T1Printed -match 'retrying in')
+    Check "retry1: guard_pointer.py holds the new text after the retry" ([IO.File]::ReadAllText((Join-Path $T1Hooks 'guard_pointer.py')) -eq '# pointer v2')
+    Check "retry1: the install log was written" (Test-Path -LiteralPath $T1InstallLog)
+    Write-Host "  install log (retry1): $($T1Text.Trim())"
+    Check "retry1: the install log has no 'failed' for a file the retry recovered" ($T1Text -notmatch '(?i)failed')
+    Check "retry1: the install marker is written on the first install" (Test-Path -LiteralPath $T1Marker)
 } finally {
     if ($Rec) { $Rec.Dispose() }
     Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY, Env:\CLAUDE_SETTINGS_USER_ENV_KEY -ErrorAction SilentlyContinue
