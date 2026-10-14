@@ -31,7 +31,8 @@ The guard tests, families wsl, kill, env, impeccable and shared-tree.
 - The segment split ignores backslash escapes, so `echo '; pkill foo; echo 'x'` hides `pkill`. Debt: guard-split-ignores-backslash.
 - The second reading can show a `cd` that bash never runs, as in `git restore f.txt` then `echo don't; cd <lane>`. The run-folder walk then judges the restore in the lane. Debt: guard-cd-walk-extra-reading.
 - An odd count of `'` doubles guard time, so a 6,001-word command can pass the 20 s hook timeout and run unjudged. `gate-hooks-fail-closed` accepts that; the owner decides on a guard deadline. Debt: guard-long-command-near-timeout.
-- Commit-message rules read heredoc headers one way only. A lone `'` line before a heredoc commit then hides a path-citing body. Main denies it. Debt: guard-heredoc-one-reading.
+- Commit-message rules read heredoc bodies by both readings (lane gcp-heredoc-two-read). With an unclosed lone `'` line, a later body can be read for the wrong command. The cost is an over-deny: bash stops at the open quote, and a fuzz of 300k cases found no bypass.
+- A lone quote pair, then two interpreter heredoc bodies that name a lane or record, can deny a clean commit.
 - A leading redirect, `)#`, and a heredoc header that ends in an open quote hide a kill, as on main. Debt: guard-redirect-paren-heredoc.
 
 Kind: process
