@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Fails when a plugin folder changed against origin/main and its plugin.json version did not rise.
+"""Fails when a changed plugin's plugin.json version did not rise against origin/main.
 
 `claude plugin update` keeps the installed copy when the version is the same, so a changed mod with
 no bump never reaches an install (incident 2026-10-14, PR 430). Plugin folders: every folder under
 mods/ with a plugin.json, and every folder .claude-plugin/marketplace.json lists as a "./" source.
 The diff is origin/main...HEAD (the merge base), so a main that moved ahead does not flag a plugin
-this branch never touched. A folder with no plugin.json at the merge base is new and passes. A folder
-deleted whole is not gated. A version is MAJOR.MINOR.PATCH, numbers only: a prerelease is refused.
-An unreadable diff, plugin.json or marketplace.json exits 1, also outside CI.
+this branch never touched. Plugins are matched by plugin.json "name", not by folder: the install
+cache keys by name, so a folder move that keeps name and version fails. A name with no match at the
+merge base is new and passes if its version is valid. A folder deleted whole is not gated. A version
+is MAJOR.MINOR.PATCH, numbers only: a prerelease is refused. A leading BOM is ignored. An unreadable
+diff, plugin.json or marketplace.json exits 1, also outside CI.
 
     python3 lint/check_mod_versions.py        # no arguments
 """
@@ -38,16 +40,22 @@ def blob(rev, path):
     return git("show", "%s:%s" % (rev, path))
 
 
-def version(text, folder, where):
-    """(text, (major, minor, patch)) from plugin.json text, or exit 1 naming the folder."""
+def read(text):
+    """(name, version text, (major, minor, patch)) from plugin.json text, or None when unreadable."""
     try:
-        v = json.loads(text).get("version")
+        d = json.loads(text.lstrip("﻿"))
+        n, v = d.get("name"), d.get("version")
     except (ValueError, AttributeError):
-        v = None
-    if not isinstance(v, str) or not re.fullmatch(r"\d+\.\d+\.\d+", v):
-        print(FAIL + "%s has no readable MAJOR.MINOR.PATCH version in %s plugin.json" % (folder, where))
-        sys.exit(1)
-    return v, tuple(map(int, v.split(".")))
+        return None
+    if not isinstance(n, str) or not isinstance(v, str) or not re.fullmatch(r"\d+\.\d+\.\d+", v):
+        return None
+    return n, v, tuple(map(int, v.split(".")))
+
+
+def sources(text):
+    """The "./" folders a marketplace.json lists. Raises on an unreadable file."""
+    got = [p.get("source") for p in json.loads(text.lstrip("﻿"))["plugins"]]
+    return {s[2:].rstrip("/") for s in got if isinstance(s, str) and s.startswith("./")}
 
 
 if len(sys.argv) > 1:
@@ -57,30 +65,53 @@ if len(sys.argv) > 1:
 base = git("merge-base", "origin/main", "HEAD").strip()
 changed = [p for p in git("diff", "--name-only", "--no-renames", "-z", "origin/main...HEAD").split("\0") if p]
 
+
+def hit(folder):
+    return any(p.startswith(folder + "/") for p in changed)
+
+
 try:
     with open(os.path.join(ROOT, *MARKET.split("/")), encoding="utf-8") as f:
-        sources = [p.get("source") for p in json.load(f)["plugins"]]
+        listed = sources(f.read())
+    old_market = blob(base, MARKET)
+    old_listed = sources(old_market) if old_market else set()
 except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
     print(FAIL + "%s is unreadable: %s" % (MARKET, e))
     sys.exit(1)
-listed = {s[2:].rstrip("/") for s in sources if isinstance(s, str) and s.startswith("./")}
+
+# Plugins at the merge base, by name. An unreadable base plugin.json fails only when its folder changed.
+bad = False
+old_by_name = {}
+mods = [e for e in git("ls-tree", "--name-only", base, "mods/").split("\n") if e]
+for folder in sorted(set(mods) | old_listed):
+    text = blob(base, folder + "/" + PLUGIN)
+    if text is None:
+        continue
+    got = read(text)
+    if got:
+        old_by_name[got[0]] = (folder, got[1], got[2])
+    elif hit(folder):
+        print(FAIL + "%s has no readable name and MAJOR.MINOR.PATCH version in base plugin.json" % folder)
+        bad = True
 
 touched = {"/".join(p.split("/")[:2]) for p in changed if p.startswith("mods/") and p.count("/") >= 2}
-bad = False
 for folder in sorted(touched | listed):
-    if not any(p.startswith(folder + "/") for p in changed):
-        continue
-    if not git("ls-tree", "--name-only", "HEAD", "--", folder).strip():
-        continue  # the folder is gone: nothing ships from it
-    old, new = blob(base, folder + "/" + PLUGIN), blob("HEAD", folder + "/" + PLUGIN)
-    if old is None and (new is not None or folder not in listed):
-        continue  # a new plugin, or a mods/ folder that is not a plugin
-    if new is None:
-        print(FAIL + "%s has no plugin.json at HEAD" % folder)
+    if not hit(folder) or not git("ls-tree", "--name-only", "HEAD", "--", folder).strip():
+        continue  # unchanged, or the folder is gone: nothing ships from it
+    text = blob("HEAD", folder + "/" + PLUGIN)
+    if text is None:
+        if folder in listed or blob(base, folder + "/" + PLUGIN) is not None:
+            print(FAIL + "%s has no plugin.json at HEAD" % folder)
+            bad = True
+        continue  # else a mods/ folder that is not a plugin
+    got = read(text)
+    if not got:
+        print(FAIL + "%s has no readable name and MAJOR.MINOR.PATCH version in HEAD plugin.json" % folder)
         bad = True
         continue
-    (ov, oldn), (nv, newn) = version(old, folder, "base"), version(new, folder, "HEAD")
-    if newn <= oldn:
-        print(FAIL + "%s %s -> %s" % (folder, ov, nv))
+    old = old_by_name.get(got[0])
+    if old and got[2] <= old[2]:
+        moved = "" if old[0] == folder else " (was %s)" % old[0]
+        print(FAIL + "%s %s -> %s%s" % (folder, old[1], got[1], moved))
         bad = True
 sys.exit(1 if bad else 0)
