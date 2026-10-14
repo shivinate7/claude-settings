@@ -4542,6 +4542,21 @@ class AgentWorktreeReapTests(unittest.TestCase):
                         + self.lines_about(out, "agent-h3"))
         self.kept_and_logged(tree, ctl, out, "agent-h3")
 
+    def test_h_keeps_a_tree_when_the_live_remote_read_fails_and_logs_it(self):
+        """The agent rule needs the live `git ls-remote` read too, so a stale remote-tracking ref
+        alone never removes a tree. ls-remote is cached for the whole run, so a failure keeps
+        every tree: the same tree goes in a second run that the remote answers."""
+        tree = self.agent("h4")
+        out = self.run_sweep(5, fail=lambda argv, cwd: "ls-remote" in argv)
+        self.assertTrue([call for call in self.git_calls if "ls-remote" in call],
+                        "no `git ls-remote` ran. Report: " + self.lines_about(out, "agent-h4"))
+        self.assertKept(tree, out)
+        logged = [line for line in out.splitlines() if "agent-h4" in line
+                  and any(word in line.lower() for word in ("unreadable", "unknown", "fail"))]
+        self.assertTrue(logged, "the failed read is not logged: " + out)
+        out = self.run_sweep(5)
+        self.assertRemoved(tree, out)
+
     def test_h_keeps_a_tree_when_the_remote_reach_read_fails_and_logs_it(self):
         """The read that matters here is `git branch -r --contains` (or `for-each-ref
         --contains`): is HEAD on a remote-tracking ref? The tree is pushed and not merged, so
