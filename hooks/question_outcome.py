@@ -18,7 +18,8 @@ Per question with two or more options (a clarifying question passes first):
   No owner message at all: the check did not run (the path below). Over SPAN_BUDGET chars
   (labels, fences and separators count) the oldest assistant and relay text is cut. The owner
   messages stay whole. The whole prompt stays within PROMPT_MAX; above it the oldest span text
-  goes first, and owner messages are trimmed only as a last resort, oldest first.
+  goes first, and owner messages are cut only as a last resort, oldest first; each cut block leads
+  with CUT_MARK and none goes blank.
 - After a deny, the next AskUserQuestion in the session passes with no model call and clears
   the state, so no deny can loop. When the state cannot be written, nothing is denied.
 - A failed model call, unreadable transcript, or malformed input lets the question through,
@@ -53,8 +54,8 @@ SEARCH_BYTES = 16 * 1024 * 1024  # how far back from the end the owner's 3rd-las
 # counted here: they stay whole.
 SPAN_BUDGET = 20000
 # The whole prompt, fixed text and question included. The prompt goes to the model on stdin, so
-# no command-line cap applies; this is a context-sized bound (150,000 chars is well inside the
-# model's context window). Unmeasured against MODEL_TIMEOUT.
+# no command-line cap applies. This bound is for cost and latency, not for the context window.
+# Unmeasured beyond one sample: 17 s for a 150,000-char prompt (Haiku, xhigh, MODEL_TIMEOUT 90).
 PROMPT_MAX = 150000
 CUT_MARK = "[older text cut to fit the budget]"
 MACHINE_TAGS = ("<system-reminder>", "<task-notification>")
@@ -271,22 +272,32 @@ SEP = 2  # "\n\n" between blocks
 def fit_span(entries, room):
     """span_text within `room` chars in all, or as near as the owner messages allow. Non-owner text
     is bounded by SPAN_BUDGET and by what the owner messages leave, oldest cut first. Only when the
-    owner messages alone exceed `room` are they trimmed, oldest message first, from its start."""
-    entries = list(entries)
+    owner messages alone exceed `room` are they cut, oldest message first, from its start. A cut
+    owner message leads with CUT_MARK and keeps at least 1 char of its end, so none goes blank.
+    Room for the span's own CUT_MARK is kept back whenever non-owner text exists, so text dropped
+    for lack of room still shows the mark."""
+    entries = [list(e) for e in entries]
+    marked = set()  # indexes of owner messages cut from their start
+
+    def text(i):
+        return CUT_MARK + "\n" + entries[i][2] if i in marked else entries[i][2]
 
     def owner_size():
-        return sum(len(_block(l, t)) + SEP for k, l, t in entries if k == "owner")
+        return sum(len(_block(e[1], text(i))) + SEP for i, e in enumerate(entries) if e[0] == "owner")
 
-    while owner_size() > room:
-        i = next((i for i, e in enumerate(entries) if e[0] == "owner" and e[2]), None)
+    reserve = len(CUT_MARK) + SEP if any(e[0] != "owner" and e[2] for e in entries) else 0
+    while owner_size() > room - reserve:
+        # An owner message can give up chars only if its first cut gains more than the mark costs.
+        i = next((i for i, e in enumerate(entries) if e[0] == "owner"
+                  and len(e[2]) - 1 > (0 if i in marked else len(CUT_MARK) + 1)), None)
         if i is None:
             break
-        k, l, t = entries[i]
-        entries[i] = (k, l, t[owner_size() - room:])
-    budget = min(SPAN_BUDGET, room - owner_size())
-    if budget <= len(CUT_MARK) + SEP:  # no room for even the cut mark: owner messages alone
-        entries = [e for e in entries if e[0] == "owner"]
-    return span_text(entries, budget)
+        t = entries[i][2]
+        extra = 0 if i in marked else len(CUT_MARK) + 1
+        entries[i][2] = t[min(len(t) - 1, owner_size() - (room - reserve) + extra):]
+        marked.add(i)
+    entries = [(e[0], e[1], text(i)) for i, e in enumerate(entries)]
+    return span_text(entries, min(SPAN_BUDGET, room - owner_size()))
 
 
 def span_text(entries, budget=SPAN_BUDGET):
