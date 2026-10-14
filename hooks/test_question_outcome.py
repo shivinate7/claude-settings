@@ -21,7 +21,8 @@ Interface the hook must match:
 - Check did not run: stdout is one `{"systemMessage": "... did not run ..."}` line, exit 0.
 - Retry rule (ruling, batch review): after ANY deny in a session, the NEXT AskUserQuestion in
   that session passes with no model call, whatever its text or options, and clears the state.
-  A third ask after that pass is judged again.
+  A third ask after that pass is judged again. Owner ruling 2026-10-13 20:12 CDT, "Keep the free
+  pass": the pass holds for a Problem-first ask too.
 - Deny-state age: the state file's mtime is its age. A deny state older than 30 minutes is
   not honored: the next ask is judged. A younger one still passes the next ask.
 - A deny-state that cannot be removed does not pass every later ask: a later ask is judged, or
@@ -41,7 +42,9 @@ Interface the hook must match:
   with a reason that names `Problem:`, and no model call (owner ruling 2026-10-13 14:13 CDT).
 - Order (owner request 2026-10-13 19:48 CDT): in the question text, the `Goal:` line comes before the
   `Problem:` line. A `Problem:` line first is denied with no model call, and the reason says Goal goes
-  first. Only the question text counts for either line, never an option's preview.
+  first. Only the question text counts for either line, never an option's preview. A variant form
+  of the Problem line (bold, NBSP-led, or lowercase) that comes before a plain `Problem:` line is
+  denied the same way.
 - The model prompt names `Goal:` and `Problem:`. It holds the two rule bullets
   (style-question-states-problem, style-question-restates-goal) read at call time from
   output-styles/shiv-stylisms.md, found from the hook's own folder (hooks/../output-styles).
@@ -1444,16 +1447,16 @@ def case_o2_goal_line_before_problem_line_passes_the_format_check():
 
 
 def case_o3_after_an_order_deny_the_next_ask_passes_with_no_model_call():
-    name = "caseO3 after an order deny, the next ask passes with no model call"
+    name = "caseO3 after an order deny, the retry (GOOD_Q) passes with no model call"
     if not need_module(name):
         return
     session = fresh_session("o3")
     with model_stub(ALLOW) as stub:
         run_main(ask_payload(session, [question(ORDER_BAD_Q, LABELS)], default_transcript()))
         calls = len(stub.prompts)
-        _, out, _ = run_main(ask_payload(session, [question(BAD_Q, LABELS)], default_transcript()))
-    check(name + ": the next ask is not denied", deny_reason(out) is None, out)
-    check(name + ": the next ask calls no model", len(stub.prompts) == calls, len(stub.prompts) - calls)
+        _, out, _ = run_main(ask_payload(session, [question(GOOD_Q, LABELS)], default_transcript()))
+    check(name + ": the retry is not denied", deny_reason(out) is None, out)
+    check(name + ": the retry calls no model", len(stub.prompts) == calls, len(stub.prompts) - calls)
 
 
 def case_o4_problem_only_in_an_option_preview_does_not_satisfy_problem():
@@ -1484,6 +1487,50 @@ def case_o5_goal_only_in_an_option_preview_does_not_satisfy_goal():
     check(name + ": exit 0", code in (0, None), code)
 
 
+ORDER_VARIANTS = (
+    ("bold Problem:", "**Problem:** the upload retry has no limit."),
+    ("NBSP-led Problem:", " Problem: the upload retry has no limit."),
+    ("lowercase problem:", "problem: the upload retry has no limit."),
+)
+
+
+def variant_order_q(first_line):
+    """A Problem-first question: `first_line`, then a Goal: line, then a plain Problem: line."""
+    return (first_line + "\nGoal: a three-try limit on the upload retry.\n"
+            "Problem: the upload retry has no limit.\nShould the retry wait between tries?")
+
+
+def case_o6_problem_first_variant_forms_are_denied_with_no_model_call():
+    for label, first_line in ORDER_VARIANTS:
+        name = "caseO6 %s first, then Goal:, then a plain Problem: line: deny, no model call" % label
+        if not need_module(name):
+            return
+        with model_stub(ALLOW) as stub:
+            code, out, _ = run_main(ask_payload(fresh_session("o6"), [question(variant_order_q(first_line), LABELS)],
+                                                default_transcript()))
+        check(name + ": denied", deny_reason(out) is not None, out)
+        check(name + ": no model call", stub.prompts == [], len(stub.prompts))
+        check(name + ": exit 0", code in (0, None), code)
+
+
+def case_o7_after_any_deny_the_next_ask_passes_even_problem_first():
+    # Owner ruling 2026-10-13 20:12 CDT, "Keep the free pass". Green on the builder's branch: pinned.
+    name = "caseO7 after any deny, the next ask passes even when Problem-first (owner 20:12 CDT)"
+    if not need_module(name):
+        return
+    for deny_label, first_text in (("presence deny", BAD_Q), ("order deny", ORDER_BAD_Q)):
+        label = name + " [after a %s]" % deny_label
+        session = fresh_session("o7")
+        with model_stub(ALLOW) as stub:
+            _, first_out, _ = run_main(ask_payload(session, [question(first_text, LABELS)], default_transcript()))
+            check(label + ": the first ask is denied", deny_reason(first_out) is not None, first_out)
+            calls = len(stub.prompts)
+            _, out, _ = run_main(ask_payload(session, [question(ORDER_BAD_Q, LABELS)], default_transcript()))
+        check(label + ": the Problem-first ask is not denied", deny_reason(out) is None, out)
+        check(label + ": the Problem-first ask calls no model", len(stub.prompts) == calls,
+              len(stub.prompts) - calls)
+
+
 def main():
     cases = (case_g1_goal_line_passes_the_presence_check_and_reaches_the_model,
              case_g2_you_want_alone_is_denied_and_the_reason_names_goal,
@@ -1502,6 +1549,8 @@ def main():
              case_o3_after_an_order_deny_the_next_ask_passes_with_no_model_call,
              case_o4_problem_only_in_an_option_preview_does_not_satisfy_problem,
              case_o5_goal_only_in_an_option_preview_does_not_satisfy_goal,
+             case_o6_problem_first_variant_forms_are_denied_with_no_model_call,
+             case_o7_after_any_deny_the_next_ask_passes_even_problem_first,
              case_r8_stale_state_whose_remove_fails_is_ignored_and_the_ask_is_judged,
              case_r8b_fresh_state_whose_remove_fails_does_not_deny_and_says_so,
              case_r1_a_state_that_cannot_be_removed_does_not_pass_every_later_ask,
