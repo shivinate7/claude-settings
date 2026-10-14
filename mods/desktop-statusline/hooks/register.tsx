@@ -103,8 +103,7 @@ const refresh = async ($: EngineInterface) => {
   if (!(await isOnDesktop($))) return
 
   const [usage, cwd, now, agents, prompts] = await Promise.all([
-    // A local estimate (no API calls), asked for only its compaction window.
-    $.session.usage({ breakdown: 'summary' }),
+    $.session.usage(),
     $.session.cwd(),
     $.clock.now(),
     $.agent.list(),
@@ -124,11 +123,6 @@ const refresh = async ($: EngineInterface) => {
     percent: r.percentUsed,
     resetsAt: r.resetsAt ?? null,
   }))
-  // Measure against the auto-compact window when one smaller than the model's is set (the
-  // autoCompactWindow setting, /autocompact, CLAUDE_CODE_AUTO_COMPACT_WINDOW), as /context does.
-  const { tokens: contextTokens, window: modelWindow, breakdown } = usage.context
-  const contextWindow = breakdown?.isAutoCompactEnabled ? Math.min(modelWindow, breakdown.rawMaxTokens) : modelWindow
-
   const snap: Snapshot = {
     at: now,
     startedAt: usage.startedAt,
@@ -139,9 +133,6 @@ const refresh = async ($: EngineInterface) => {
     ahead: Number(ab?.[1] ?? 0),
     behind: Number(ab?.[2] ?? 0),
     changed: lines.filter(l => l && !l.startsWith('#')).length,
-    contextPercent: contextTokens === undefined ? null : Math.round((contextTokens / contextWindow) * 100),
-    contextTokens: contextTokens ?? null,
-    contextWindow,
     costUsd: usage.cost?.usd ?? null,
     limits,
     agents: agents
@@ -265,9 +256,6 @@ export const register: Register = (on, options) => {
     const limitBar = isStacked
       ? Math.max(40, Math.min(MAX_BAR_PX, Math.floor(availPx - fixedPx - longestPx)))
       : sharedBar
-    const used = snap.contextTokens === null ? '' : `${tokens(snap.contextTokens)} / ${tokens(snap.contextWindow)}`
-    const contextRoomPx = Math.floor(availPx - fixedPx - used.length * CHAR_PX)
-    const contextBar = Math.max(40, Math.min(isStacked ? limitBar : 2 * limitBar, contextRoomPx))
 
     const where =
       `📁 ${snap.dir}` +
@@ -310,7 +298,6 @@ export const register: Register = (on, options) => {
             <Text dimColor>{session}</Text>
           </Box>
         </Box>
-        {meter('Context', snap.contextPercent, used, contextBar)}
         {snap.limits.length > 0 && (
           <Box flexDirection={isStacked ? 'column' : 'row'} columnGap={METER_GAP}>
             {snap.limits.map((l, i) => meter(label(l.kind), l.percent, details[i] ?? '', limitBar))}
