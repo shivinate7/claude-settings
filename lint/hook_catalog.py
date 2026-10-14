@@ -488,8 +488,11 @@ HEADING = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$")
 ITEM = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+")
 KIND = re.compile(r"^Kind:\s*(process|build)\s*$")
 CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)
-OPENS_HISTORY = re.compile(r"(?:superseded|overruled|previously|no longer|old ruling)(?![A-Za-z0-9])", re.I)
+# A marker opens overruled text. "No longer" is a marker only as a fixed phrase: "No longer used: x" is plain prose.
+# A hyphen after a marker joins it to another word ("Previously-run tests"), so it is no marker.
+OPENS_HISTORY = re.compile(r"(?:superseded|overruled|previously|old ruling|no longer (?:in force|applies|valid|holds))(?![A-Za-z0-9-])", re.I)
 WAS_COLON = re.compile(r"\bwas:", re.I)
+OLD_WORD = re.compile(r"\bold\b", re.I)
 
 RECORDS_INTRO = """# Records index
 
@@ -566,11 +569,17 @@ def history_problems(rel, text):
     """One line per place a record keeps overruled text: <path>:<line>. Fences and inline code are never read."""
     out = []
     for n, kind, lines in blocks(text):
-        for i, line in enumerate(mask_code("\n".join(lines)).split("\n")):
-            hit = "was:" if WAS_COLON.search(line) else None
-            if not hit and i == 0:  # a marker counts where it opens a heading, a paragraph or a list item
-                found = OPENS_HISTORY.match(raw_of([n, kind, [line]]).lstrip("*_ \t"))
+        masked = mask_code("\n".join(lines)).split("\n")
+        for i, line in enumerate(masked):
+            hit = None
+            body = raw_of([n, kind, [line]]).lstrip("*_ \t") if i == 0 else ""
+            if i == 0:  # a marker counts where it opens a heading, a paragraph or a list item
+                found = OPENS_HISTORY.match(body)
                 hit = found.group(0) if found else None
+            if not hit:  # "was:" introduces old text when it opens a block, or when the word "old" comes before it in the block
+                found = WAS_COLON.search(line)
+                if found and (body[:4].lower() == "was:" or OLD_WORD.search("\n".join(masked[:i] + [line[:found.start()]]))):
+                    hit = "was:"
             if hit:
                 out.append("%s:%d: overruled text (%s). Rewrite the record in place and delete the old text" % (rel, n + i, hit))
     return out
@@ -612,12 +621,23 @@ def decision_gist(text):
     def level(i):
         return HEADING.match(found[i][2][0]).group(1)
 
-    for want in (r"(?:the )?ruling", r"the question"):
+    def section(want):
         for i, block in enumerate(found):
             if block[1] == "heading" and level(i) == "##" and re.fullmatch(want, flat(raw_of(block)), re.I):
-                if under(i):
-                    return under(i)
-                break
+                return i
+        return None
+
+    ruling = section(r"(?:the )?ruling")
+    if ruling is not None and under(ruling):
+        first = flat(raw_of(found[ruling + 1]))
+        question = section(r"the question")
+        # A ruling of under 4 words ("Yes.", "Owner, 2026-10-11:") says nothing alone: the question's first sentence does.
+        if len(first.split()) < 4 and question is not None and under(question):
+            return under(question)
+        return under(ruling)
+    question = section(r"the question")
+    if question is not None and under(question):
+        return under(question)
     for i, block in enumerate(found):
         if block[1] == "heading" and level(i) == "#":
             return under(i) or flat(raw_of(block))

@@ -128,7 +128,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `silent-undo-check-design` | `lint/check_silent_undo.py` is the one home. | [`decisions/silent-undo-check-design.md`](../decisions/silent-undo-check-design.md) |
 | `stall-watch` | A background command can stop making progress. | [`decisions/stall-watch.md`](../decisions/stall-watch.md) |
 | `stall-watch-stop-check` | A background shell can stay open after a turn ends. | [`decisions/stall-watch-stop-check.md`](../decisions/stall-watch-stop-check.md) |
-| `stamp-cite-near-miss` | Owner ruling, 2026-10-13. | [`decisions/stamp-cite-near-miss.md`](../decisions/stamp-cite-near-miss.md) |
+| `stamp-cite-near-miss` | Where does the check for a wrongly wrapped cite live, and how does an agent learn the right form? | [`decisions/stamp-cite-near-miss.md`](../decisions/stamp-cite-near-miss.md) |
 | `ste-gate-fixes-not-nags` | The gate fixes first. | [`decisions/ste-gate-fixes-not-nags.md`](../decisions/ste-gate-fixes-not-nags.md) |
 | `subagent-model-cap` | CLAUDE.md says: "Once ready, turn each rule below into a hook or check." This entry records how the worker-model rule is mechanized after `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is dropped. | [`decisions/subagent-model-cap.md`](../decisions/subagent-model-cap.md) |
 | `wsl-allow-list` | Owner ruling, 2026-10-13 15:20: "fixed test list is fine; surf the web for a consensus first". | [`decisions/wsl-allow-list.md`](../decisions/wsl-allow-list.md) |
@@ -185,10 +185,10 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `liveness-read-is-platform-specific-and-unreadable-is-not-death` | `hooks/guard.py`'s liveness oracle (`_process_start_ms`, `session_is_live`, `worktree_live_session`) folded two different facts into one answer. | [`decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md`](../decisions/liveness-read-is-platform-specific-and-unreadable-is-not-death.md) |
 | `main-branch-protection` | main branch protection | [`decisions/main-branch-protection.md`](../decisions/main-branch-protection.md) |
 | `memory-is-never-a-rulings-only-home` | The owner's rulings must reach a tracked file. | [`decisions/memory-is-never-a-rulings-only-home.md`](../decisions/memory-is-never-a-rulings-only-home.md) |
-| `merge-config-defaults` | Owner, 2026-10-10: | [`decisions/merge-config-defaults.md`](../decisions/merge-config-defaults.md) |
+| `merge-config-defaults` | Must a repo have `.github/stamp.json` before the merge tool works in it? | [`decisions/merge-config-defaults.md`](../decisions/merge-config-defaults.md) |
 | `merge-needs-a-proven-head` | Owner, 2026-10-12: "Fix both now, one lane." | [`decisions/merge-needs-a-proven-head.md`](../decisions/merge-needs-a-proven-head.md) |
 | `merge-notice-checks-the-report` | CLAUDE.md: "A guard that goes red when nothing is wrong is spent, because the reader learns to scroll past it." And: trust a guard only once it goes red on the defect it guards. | [`decisions/merge-notice-checks-the-report.md`](../decisions/merge-notice-checks-the-report.md) |
-| `merge-reinstalls-from-main` | Owner, 2026-10-11: | [`decisions/merge-reinstalls-from-main.md`](../decisions/merge-reinstalls-from-main.md) |
+| `merge-reinstalls-from-main` | `install.sh` links the shipped skills, hooks and tools into `~/.claude`. | [`decisions/merge-reinstalls-from-main.md`](../decisions/merge-reinstalls-from-main.md) |
 | `mutant-cause-of-death` | CLAUDE.md says: "Trust a guard only once it goes red on the defect it guards." This entry is that sentence applied to the guard's own test harness. | [`decisions/mutant-cause-of-death.md`](../decisions/mutant-cause-of-death.md) |
 | `mutation-harnesses-run-when-their-code-changes` | `.github/scripts/harness-scope.sh` reads `git diff --name-only` against the merge base and sets one output per harness. | [`decisions/mutation-harnesses-run-when-their-code-changes.md`](../decisions/mutation-harnesses-run-when-their-code-changes.md) |
 | `one-entry-per-question` | On 2026-09-29 the owner ruled that a decision entry answers one question, and a changed ruling rewrites that entry. | [`decisions/one-entry-per-question.md`](../decisions/one-entry-per-question.md) |
@@ -203,7 +203,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `recovery-must-not-gate-on-its-own-state` | CLAUDE.md's Verification paragraph now states this rule. | [`decisions/recovery-must-not-gate-on-its-own-state.md`](../decisions/recovery-must-not-gate-on-its-own-state.md) |
 | `repeal-the-no-prefix-report-rule` | CLAUDE.md's Reports paragraph said: | [`decisions/repeal-the-no-prefix-report-rule.md`](../decisions/repeal-the-no-prefix-report-rule.md) |
 | `retired-numbers-list` | A record may be deleted when its number is named in the kind's `RETIRED` file, in the same tree. | [`decisions/retired-numbers-list.md`](../decisions/retired-numbers-list.md) |
-| `reuse-needs-checkout-proof` | Owner, 2026-10-11: | [`decisions/reuse-needs-checkout-proof.md`](../decisions/reuse-needs-checkout-proof.md) |
+| `reuse-needs-checkout-proof` | Lanes run in separate worktrees of one clone. | [`decisions/reuse-needs-checkout-proof.md`](../decisions/reuse-needs-checkout-proof.md) |
 | `rm-on-a-variable-needs-a-guard` | Owner, 2026-10-11 ("Ship guard now, hook later"): | [`decisions/rm-on-a-variable-needs-a-guard.md`](../decisions/rm-on-a-variable-needs-a-guard.md) |
 | `schtasks-xml-requires-utf16` | schtasks /create /xml requires UTF-16, not UTF-8 | [`decisions/schtasks-xml-requires-utf16.md`](../decisions/schtasks-xml-requires-utf16.md) |
 | `semicolon-and-gendered-pronoun-rules-leave-the-gate` | The owner ruled in chat on 2026-09-23. | [`decisions/semicolon-and-gendered-pronoun-rules-leave-the-gate.md`](../decisions/semicolon-and-gendered-pronoun-rules-leave-the-gate.md) |
@@ -247,6 +247,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `install-writes-in-place` | The `CLAUDE.md` pointer, `settings.json` in `install.sh`, the skills folder, the install log and the marker are written in place. | [`debts/install-writes-in-place.md`](../debts/install-writes-in-place.md) |
 | `judge-cut-mark-reserve-over` | `fit_span` keeps 37 chars for the cut mark even when no owner message can be cut. | [`debts/judge-cut-mark-reserve-over.md`](../debts/judge-cut-mark-reserve-over.md) |
 | `lock-expiry-read-no-retry` | The merge lock reads its commit message once, with no retry. | [`debts/lock-expiry-read-no-retry.md`](../debts/lock-expiry-read-no-retry.md) |
+| `merge-by-button-stale-page` | The merge tool rebuilds the records page before it merges. | [`debts/merge-by-button-stale-page.md`](../debts/merge-by-button-stale-page.md) |
 | `merge-say-surrogate-crash` | The merge tool prints ALLOWED notes and an excused UNKNOWN to stdout with a plain print. | [`debts/merge-say-surrogate-crash.md`](../debts/merge-say-surrogate-crash.md) |
 | `model-clip-unmeasured` | The prompt now goes to `claude -p` on stdin, so no argv cap bounds it. | [`debts/model-clip-unmeasured.md`](../debts/model-clip-unmeasured.md) |
 | `net-error-colon-http-refusal` | `NET_ERROR` matches `: HTTP 5xx (url)` at a line end. | [`debts/net-error-colon-http-refusal.md`](../debts/net-error-colon-http-refusal.md) |

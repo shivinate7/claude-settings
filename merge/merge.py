@@ -13,6 +13,7 @@ the minute read and `gh pr merge --match-head-commit`.
 import argparse, contextlib, json, os, re, shutil, socket, subprocess, sys, tempfile, threading, time, uuid
 
 STAMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "actions", "stamp", "stamp.mjs")
+RECORDS_PAGE = "docs/records.md"  # the page lint/hook_catalog.py writes; named here to tell a conflict on the page from any other
 RECORDS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint", "hook_catalog.py")  # the records-page generator; the tool brings it, a repo adds nothing
 
 class Stop(Exception):
@@ -705,17 +706,28 @@ def rebuild_records(wt):
         raise Stop(f"the records page cannot be rebuilt, so nothing was pushed: {why}")
     return tree() != before
 
-def records_stale(wt, base_ref):
-    """True when the page on the head would be stale in the merge result: merge base_ref into the worktree without a commit,
-    run the generator, and see whether it changes a file. The worktree is put back as it was."""
+def records_proof(wt, base_ref):
+    """Merge base_ref into the worktree without a commit, run the generator, and say what the page needs.
+    -> "fresh": the page on the head holds in the merge result. "stale": it would change. "healed": only the page
+    conflicted, so the merge is committed with the page rebuilt on the merged tree, and HEAD is that commit.
+    A conflict on any other file stops. Fresh and stale put the worktree back as it was."""
     c, out = git(wt, *identity(wt), "merge", "--no-commit", "--no-ff", "-q", base_ref)
+    healed = False
     try:
-        if c:  # a conflict: the page cannot be proved fresh
-            raise Stop(f"the head does not merge cleanly with {base_ref}, so the records page cannot be proved fresh: {out}")
-        return rebuild_records(wt)
+        if c:
+            if git(wt, "diff", "--name-only", "--diff-filter=U")[1].split() != [RECORDS_PAGE]:
+                raise Stop(f"the head does not merge cleanly with {base_ref}, so the records page cannot be proved fresh: {out}")
+            rebuild_records(wt)  # the page is derived: rebuilt on the merged tree, it replaces both sides
+            c, out = git(wt, *identity(wt), "commit", "-q", "-m", f"Merge {base_ref} and rebuild the records page")
+            if c:
+                raise Stop("cannot commit the merge of the base: " + out)
+            healed = True
+            return "healed"
+        return "stale" if rebuild_records(wt) else "fresh"
     finally:
-        git(wt, "reset", "--hard", "-q", "HEAD")  # also ends a merge in progress
-        git(wt, "clean", "-fdq")
+        if not healed:
+            git(wt, "reset", "--hard", "-q", "HEAD")  # also ends a merge in progress
+            git(wt, "clean", "-fdq")
 
 def push_branch(wt, branch):
     """A plain push. Never force: a moved branch refuses it, and nothing reaches origin."""
@@ -954,18 +966,19 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         undo_check(wt, base_ref, unknown_ok)
         stamp_cfg = base_stamp_config(wt, tmp, cfgrel, base_ref)  # None: no config or no kinds, so no claim and no stamp
         resumed = own_claim(wt, stamp_cfg, base_ref) if base == cfg["defaultBranch"] else None
-        claimed = bool(resumed)  # the pushed commit holds a Record-claim
+        claimed, trailer = bool(resumed), None  # claimed: the pushed commit holds a Record-claim
         if base != cfg["defaultBranch"]:
             if head_claim(wt):  # an old claim would put real ids into a branch that is not the default
                 raise Stop(f"{info['head'][:7]} on {branch} holds a Record-claim, and {base} is not the default branch. Revert that commit and run again.")
             say(f"merge: {base} is not the default branch. Ids stay pending; nothing to claim.")
-        elif resumed:
-            claim_sha = info["head"]
-            say(f"merge: resumed. {branch} already holds the claim {resumed}.")
         else:
-            trailer = do_claim(wt, stamp_cfg, base_ref) if stamp_cfg else None
-            claimed = bool(trailer)
-            rebuilt = rebuild_records(wt)  # after the claim, whatever the stamp config holds: a stale page heals at the next merge
+            if resumed:
+                claim_sha = info["head"]
+                say(f"merge: resumed. {branch} already holds the claim {resumed}.")
+            else:
+                trailer = do_claim(wt, stamp_cfg, base_ref) if stamp_cfg else None
+                claimed = bool(trailer)
+            rebuilt = rebuild_records(wt)  # after the claim, whatever the stamp config holds: a stale page heals at the next merge, on a resumed head too
             if trailer or rebuilt:
                 # check first, then claim: a claim push cancels the head's own run and would hide a red already there
                 try:
@@ -979,7 +992,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 claim_sha = commit_claim(wt, trailer)
                 push_branch(wt, branch)
                 say(f"merge: {trailer or 'the records page'} pushed to {branch} at {claim_sha[:9]}.")
-            else:
+            elif not resumed:
                 say("merge: nothing to claim.")
         sha = claim_sha or info["head"]
 
@@ -1027,11 +1040,27 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 fail(str(stamp_stop("the base moved and the claim is stale, or the check could not read the base", out)))
             if base == cfg["defaultBranch"]:  # the base moved with a record and no rebuild: the merge result would hold a stale page
                 try:
-                    stale = records_stale(wt, base_ref)
+                    proof = records_proof(wt, base_ref)
                 except Stop as e:
                     fail(str(e))
-                if stale:
+                if proof == "stale":
                     fail(f"the records page is stale for the merge result: {base_ref} gained a record after the rebuild (a push that did not use the tool). Nothing was merged. Run again.")
+                if proof == "healed":  # the page conflicted with the base: the merge commit carries a rebuilt page, so it is pushed and its checks wait
+                    merged = git(wt, "rev-parse", "HEAD")[1]
+                    try:
+                        push_branch(wt, branch)
+                    except Stop as e:
+                        fail(str(e))
+                    say(f"merge: {base_ref} merged into {branch} with the records page rebuilt, pushed at {merged[:9]}.")
+                    try:
+                        ok, why = host.wait_checks(n, merged, m["deadlineMinutes"], sha)
+                    except NetStop:
+                        raise
+                    except Stop as e:
+                        ok, why = False, str(e)
+                    if not ok:  # a revert of a merge commit would undo the base's own work in the branch, so the commit stays
+                        raise Stop(f"the checks on the merge commit {merged[:9]} are not green. It stays on {branch}. Fix the cause and run again.\n{why}")
+                    sha = merged
             commit, msg = host.merge(n, m["method"], sha)
             if not commit:
                 fail("the merge was refused:\n" + msg)
