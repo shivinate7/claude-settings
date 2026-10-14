@@ -24,6 +24,7 @@ MODULE = os.environ.get("RECORD_SLUGS_UNDER_TEST") or os.path.join(HERE, "check_
 
 OK = "a" * 32 + ".md"  # a slug of 32 characters passes
 LONG = "a" * 33 + ".md"  # a slug of 33 characters fails
+VERY_LONG = "a" * 44 + ".md"  # a slug of 44 characters fails, for the ./ path case
 DOCS = "docs/decisions"  # a repo whose records live here passes --dir DOCS
 LOOKALIKE_SIBLING = "docs/decisionsX"  # a folder that starts with the word
 LOOKALIKE_WORD = "docs/notdecisions"  # a folder that only contains the word
@@ -206,6 +207,38 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertNotEqual(rc, 0, out)
         self.assertIn("given more than once", out)
         self.assertNotIn("Traceback", out)
+
+
+    def test_unknown_or_malformed_option_fails(self):
+        # An option the check does not know must fail closed. Read as a file name, it would
+        # pass, and the check would exit 0 having read nothing.
+        self.put("decisions/" + OK)
+        cases = [
+            ["--dir=nope", "decisions/" + OK],
+            ["--dir=", "decisions/" + OK],
+            ["--dir=" + DOCS, DOCS + "/" + LONG],
+            ["-dir=decisions", "decisions/" + OK],
+            ["--dr", "decisions", "decisions/" + OK],
+        ]
+        for args in cases:
+            with self.subTest(args=args):
+                rc, out = self.lint(*args)
+                self.assertNotEqual(rc, 0, out)
+                self.assertNotIn("Traceback", out)
+
+    def test_dot_slash_record_path_is_judged(self):
+        self.assert_passes("./decisions/" + OK)
+        rc, out = self.lint("./decisions/" + VERY_LONG)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), ["./decisions/" + VERY_LONG])
+
+    def test_default_diff_reads_debts(self):
+        self.commit_base()
+        self.put("debts/" + LONG)
+        self.commit_change()
+        rc, out = self.lint()  # no file arguments: the diff against origin/main
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), ["debts/" + LONG])
 
 
 if __name__ == "__main__":
