@@ -4186,6 +4186,18 @@ for _name, _command in (
 ):
     sh("guard-command-position: regression, %s, allowed" % _name, _command, "allow", cwd=NOGIT)
 
+# ---- guard-command-position, round 2 bypass (lane gcp-quote-fix). Each case below is RED on
+# 39160ee and denies on 103a976. The apostrophe in `don't` opens a single quote that closes inside
+# the double-quoted run, so the line break after it is a real separator and `pkill foo` runs in
+# bash. The two variants swap the closing text (`" '`, `" x'`) and must deny the same way.
+for _name, _command in (
+    ("a lone apostrophe in a double-quoted run", "echo don't \" don't \npkill foo\n \""),
+    ("a lone apostrophe closing a double-quoted run", "echo don't \" '\npkill foo\n \""),
+    ("an apostrophe after x closing a double-quoted run", "echo don't \" x'\npkill foo\n \""),
+):
+    sh("guard-command-position: round 2 bypass, %s, then pkill on the next line, denies" % _name,
+       _command, "deny", rule="machine-wide-kill", cwd=NOGIT)
+
 # ---- guard-command-position, try 3 (lane). `env -S` is read after a `$(` too. The RED case is
 # text `env -S` before the real wrapper: it hides the call after `$(`. It is RED on 1633efa and
 # GREEN on 335c4a9. The two cases after it are PINS: each denies on 1633efa and 335c4a9, and a
@@ -8895,6 +8907,60 @@ def rm_var_64000_case():
 
 LOG_CHECKS_EXTRA.append(("rm-var: 64000 bindings before a delete are judged in under 2 s CPU",
                          rm_var_64000_case))
+
+
+# gcp-quote-fix, round 2 speed. A run of apostrophes must be judged in well under the budget.
+# The bound is the CPU time of judge, 1 s, generous on purpose: no wall-clock bound, which flakes
+# on macOS runners. The judge runs in a child process, so a slow judge stops at a 30 s kill guard
+# and fails the case, instead of hanging the suite. The kill guard only stops a hang; it is not the
+# bound.
+APOSTROPHE_CHILD = r'''
+import contextlib, importlib.util, io, json, os, sys, time
+hooks = sys.argv[1]
+sys.path.insert(0, hooks)
+spec = importlib.util.spec_from_file_location("guard_under_test", os.path.join(hooks, "guard.py"))
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+payload = json.load(sys.stdin)
+printed = io.StringIO()
+started = time.process_time()
+try:
+    with contextlib.redirect_stdout(printed):
+        mod.judge(payload)
+except SystemExit:
+    pass
+print(json.dumps({"cpu": time.process_time() - started, "out": printed.getvalue()}))
+'''
+
+
+def _apostrophe_speed_case(command):
+    def check():
+        materialize(NOGIT)
+        payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": NOGIT}
+        try:
+            done = subprocess.run(
+                [sys.executable, "-c", APOSTROPHE_CHILD, os.path.dirname(GUARD)],
+                input=json.dumps(payload), capture_output=True, text=True, timeout=30,
+                env=dict(os.environ, CLAUDE_CONFIG_DIR=CFG),
+            )
+        except subprocess.TimeoutExpired:
+            return False, "not judged within 30 s, killed; the bound is 1 s of CPU"
+        reply = json.loads(done.stdout.strip())
+        took = reply["cpu"]
+        if took >= 1.0:
+            return False, "judged in %.2f s CPU, not under 1 s" % took
+        got = "allow" if not reply["out"].strip() else \
+            json.loads(reply["out"])["hookSpecificOutput"]["permissionDecision"]
+        return True, "judged %s in %.2f s CPU, under 1 s" % (got, took)
+    return check
+
+
+for _name, _command in (
+    ("a run of lone apostrophes", "echo " + "don't " * 60),
+    ("a run of contraction pairs", "a's b'; " * 50),
+):
+    LOG_CHECKS_EXTRA.append(("guard-command-position: speed, %s, judged in under 1 s CPU" % _name,
+                             _apostrophe_speed_case(_command)))
 
 
 # Ruling item 4: _split_segments_cached is keyed on the command alone, but split_segments reads
