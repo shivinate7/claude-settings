@@ -253,7 +253,7 @@ Where each text comes from:
 - A mod is an enabled mod from this repo. Its text is the intro of its `README.md`, or of its `SOURCE.md` when it has no README.
 - A skill is a folder under `skills/`. Its text is the `description` in its `SKILL.md` frontmatter.
 
-Model and effort come from the model table (decision `subagent-model-cap`, the model per role). A hook with no row in that table calls no model, so its row says "no model". A judge takes the `model` field of its prompt hook, and a prompt hook has no effort field. A skill has no model pin. The model table has no row for a mod, so a mod row says "not listed". A mod may still call a model.
+Model and effort come from the model table (decision `subagent-model-cap`, the model per role). A hook with no row in that table calls no model, so its row says "no model". A judge takes the `model` field of its prompt hook, and a prompt hook has no effort field. A skill has no model pin, so its row says "no model" and effort "none". The model table has no row for a mod, so a mod row says "not listed". A mod may still call a model.
 
 """
 
@@ -341,7 +341,7 @@ def render():
         if not text:
             problems.append("skills/%s: SKILL.md has no description in its frontmatter" % name)
             continue
-        skill_rows.append([key_cell("skills/" + name), "skill", "-", "-", "-", "no model", "n/a", cell(text)])
+        skill_rows.append([key_cell("skills/" + name), "skill", "-", "-", "-", "no model", "none", cell(text)])
 
     page = INTRO % {"regen": REGEN}
     page += table("Hooks and judges", hook_rows) + table("Mods", mod_rows) + table("Skills", skill_rows)
