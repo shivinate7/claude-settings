@@ -15,3 +15,7 @@ Home: lint/hook_catalog.py
 ## Why
 
 The records grew past 300 files. A reader had to search the folders to find the ruling for a question. A hand-kept index goes stale at the first merge that forgets it, so the tool owns it.
+
+## Holes, named
+
+Review round 3 left these open. Debts: `records-heal-keeps-markers` (a heal can commit conflict markers), `records-gen-runs-catalog` (the merge runs the whole catalog generator), `merge-catalog-import-traceback` (a broken catalog module gives a traceback), `records-heal-wait-untested` (the heal-wait stop paths have no test), `old-before-was-flags-history` (the history rule flags a plain description). Lane records-heal-scope takes the first four.
