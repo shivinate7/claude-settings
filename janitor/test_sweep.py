@@ -4579,6 +4579,29 @@ class AgentWorktreeReapTests(unittest.TestCase):
                         + self.lines_about(out, "agent-h2"))
         self.kept_and_logged(tree, ctl, out, "agent-h2")
 
+    def test_h_keeps_a_tree_when_the_merged_read_fails_and_logs_it(self):
+        """Only the merged read (`git merge-base --is-ancestor HEAD <default branch>`) fails. The
+        older rulings keep the tree as unreadable, and the agent rule must not turn that keep
+        into a removal: it is clean, pushed, an agent tree, and idle 5 hours, so it goes in a
+        second run that can read."""
+        tree = self.agent("h5")
+        sha = run_vcs(tree, "rev-parse", "HEAD").stdout.strip()
+        fired = []
+
+        def match(argv, cwd):
+            hit = "merge-base" in argv and (_aimed_at(tree, argv, cwd) or sha in argv or "wt-h5" in argv)
+            if hit:
+                fired.append(argv)
+            return hit
+
+        out = self.run_sweep(5, fail=match)
+        self.assertTrue(fired, "no `merge-base` read was made for the tree. Report: "
+                        + self.lines_about(out, "agent-h5"))
+        self.assertKept(tree, out)
+        self.assertLogged(out, "agent-h5")
+        out = self.run_sweep(5)
+        self.assertRemoved(tree, out)
+
     # ---- (j) the agent rule's own two reads: idle time, and the remote-tracking ref
 
     def test_j_keeps_a_tree_whose_idle_time_cannot_be_read(self):
