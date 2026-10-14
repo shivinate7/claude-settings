@@ -28,6 +28,15 @@ Owner rulings, 2026-10-08:
   It reads the owner's last messages from `transcript_path`. It asks a model whether the
   `Goal:` line matches those messages, and whether each option serves that goal. It
   also asks whether an option that serves the goal better is missing.
+- Owner ruling, 2026-10-14: a question must be plain, in every repo, and the model judge
+  asks all of it, in this one hook, with no separate pre-check. Besides the asks above, the
+  judge asks three more. Can the owner answer from the box alone, with every id, code or
+  name explained in words? Does the question point at anything the box does not show, such
+  as an earlier message or "item 4"? Does each option's `Lose` name what changes for the
+  owner, not for a record? A FLAG on any ask denies, and the judge's reason goes to the
+  session. Incidents, 2026-10-14: three questions passed and the owner could not use them.
+  Two named ids, a branch, a sha and a key with no words, and one pointed at messages the box
+  does not hold. The third offered a false choice and left out the better option.
 - The model call reuses `invoke_model` from `hooks/decision_watch.py`. The model is Haiku
   at effort `xhigh`.
 - `invoke_model` starts a second `claude` program. That program does not share the app's
