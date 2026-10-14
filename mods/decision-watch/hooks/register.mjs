@@ -306,7 +306,7 @@ async function stopsSeen($) {
   try {
     const file = await logFile($);
     if (!(await $.fs.exists(file))) return 0;
-    return String(await $.fs.read(file)).split("\n").filter((l) => l.includes("STOP seen")).length;
+    return String(await $.fs.read(file)).split("\n").filter((l) => /^\S+ STOP seen /.test(l)).length;
   } catch {
     return "unknown";
   }
