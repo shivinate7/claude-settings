@@ -5313,6 +5313,40 @@ for _label, _template in _GLUED_OPENERS:
        cwd=NOGIT)
     sh("git env set: PowerShell, a glued %s block that sets nothing, allowed" % _label,
        _template.replace("@@", "$_"), "allow", tool="PowerShell", cwd=NOGIT)
+# Round 1 review of faa1e35: a glued opener, a space, then the set. 46c3191 denies every one of
+# these, and faa1e35 allows them (a regression, RED on faa1e35): its split leaves an empty token
+# after the brace, so the set no longer follows `{`. The same nine openers, a space before the set.
+for _label, _template in _GLUED_OPENERS:
+    sh("git env set: PowerShell, a set after a space in a glued %s block, denies" % _label,
+       _template.replace("@@", " $env:GIT_DIR='x' "), "deny", GIT_ENV_RULE, tool="PowerShell",
+       cwd=NOGIT)
+sh("git env set: PowerShell, spaces around the pipe and the equals sign in a glued %{ block, denies",
+   "1..2 | %{ $env:GIT_DIR = 'x' }", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+for _cmd in (
+    """pwsh -c '1..2|%{ $env:GIT_DIR="x" }'""",
+    """pwsh -c 'if(1){ $env:GIT_DIR="x" }'""",
+):
+    sh("git env set: Bash, pwsh -c with a space before the set in a glued block, %s, denies"
+       % _cmd[8:20], _cmd, "deny", GIT_ENV_RULE, cwd=NOGIT)
+# Pins, GREEN on 46c3191 and on faa1e35. A double-quoted here-string (`@"..."@`) expands its
+# `$( )`, so a set inside it runs and denies. A single-quoted one (`@'...'@`) is text: the same set
+# in it allows, and so does a double-quoted one that holds no set.
+for _label, _text in (
+    ("a bare here-string", '''@"\n$($env:GIT_DIR='x')\n"@'''),
+    ("after a command word", '''Write-Host @"\nline one\n$($env:GIT_DIR='x')\n"@'''),
+    ("with an apostrophe line ahead of the set", '''@"\ndon't\n$($env:GIT_DIR='x')\n"@'''),
+):
+    sh("git env set: PowerShell, a set in a $( ) of a double-quoted here-string, %s, denies"
+       % _label, _text, "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a double-quoted here-string that holds no set, allowed",
+   '@"\nplain text, no set\n"@', "allow", tool="PowerShell", cwd=NOGIT)
+for _label, _text in (
+    ("a $( ) set", "@'\n$($env:GIT_DIR='x')\n'@"),
+    ("a glued pipeline block", "@'\n1..2|%{$env:GIT_DIR='x'}\n'@"),
+    ("a glued if block with a space before the set", "@'\nif($t){ $env:GIT_DIR='x' }\n'@"),
+):
+    sh("git env set: PowerShell, a single-quoted here-string that holds %s as text, allowed"
+       % _label, _text, "allow", tool="PowerShell", cwd=NOGIT)
 # Control, green today: the spaced spelling of the three openers the round 2 block does not cover.
 for _cmd in (
     "if (0) {1} else {$env:GIT_DIR='x'}",
