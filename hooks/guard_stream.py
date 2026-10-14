@@ -525,3 +525,7 @@ LN_DESCENDS_REASON = (
     "with a test such as [ -e path ], or end the destination with a slash when you mean a link "
     "inside the directory."
 )
+
+# The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
+# ids across the modules it loads. In the repo it stays a comment, which counts as a match.
+# INSTALL_ID = "uninstalled"

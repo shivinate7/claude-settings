@@ -660,3 +660,7 @@ def _env_flat(cmd: str, text_ok: bool = False):
 def is_env(path: str) -> bool:
     name = norm(path).rsplit("/", 1)[-1]
     return name.startswith(".env") and name != ENV_ALLOWED
+
+# The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
+# ids across the modules it loads. In the repo it stays a comment, which counts as a match.
+# INSTALL_ID = "uninstalled"
