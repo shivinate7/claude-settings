@@ -10,6 +10,7 @@ import subprocess
 import sys
 
 from guard_core import (
+    QUOTE_MARKS,
     ASSIGNMENT, CMD_EXE_NAMES, ENV_PATTERN_COMMANDS, PLAYWRIGHT_PS_SHELLS,
     POWERSHELL_CALL, SILENT_WRITE_REDIRECT, _pwsh_script, _skip_assignments_and_keywords,
     _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, inline_script,
@@ -726,10 +727,17 @@ def playwright_command_hit(raw: str, stripped: str, watch=PLAYWRIGHT_WATCH) -> s
 # with a different watch list and a quote-safe PowerShell reader. KNOWN LIMITS: those of the
 # Playwright rule, plus `VAR+=x cmd` as an inline prefix and PowerShell `New-Item` forms beyond
 # the cmdlets listed in `_PS_CMDLETS`. `git --git-dir` and `git -C` are options, not sets.
+# The quick test in git_env_command_hit reads the text as shlex does (`QUOTE_MARKS`), then looks
+# for the same names under the same case fold.
+_GIT_ENV_NAMES = re.compile("|".join(map(re.escape, GIT_ENV_WATCH[0])), re.I)
+
+
 def git_env_command_hit(raw: str, stripped: str) -> str:
     """Judge a whole command for a set of GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE. Each command
     substitution (`$(...)`, backticks, in double quotes too) is judged as a command of its own,
     through the one reader in guard_env; one nested past its depth bound is refused."""
+    if not _GIT_ENV_NAMES.search(QUOTE_MARKS.sub("", raw)):
+        return ""   # every hit below needs a watched name as text, once quotes and escapes fall away
     found, too_deep = _substitutions(stripped, powershell=POWERSHELL_CALL[0])
     texts = [text for text, _in_message in found]
     if too_deep:   # the env-file rule refuses a nesting this deep; judge the text as it stands

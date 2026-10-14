@@ -7,7 +7,7 @@ whatever the role.
 import fnmatch
 import re
 
-from guard_core import basename, command_indexes, nested_script, segment_tokens, split_segments
+from guard_core import QUOTE_MARKS, basename, command_indexes, nested_script, segment_tokens, split_segments
 
 WSL_REASON = (
     "WSL runs only a fixed list of Linux test commands. Allowed forms, each with -e or --exec, "
@@ -31,6 +31,10 @@ DISTRO_LAUNCHER = re.compile(r"ubuntu[\w.-]*\.exe$")
 WSLENV_SET = re.compile(
     r"(?:(?<![\w$:.\-])|\$\{?env:)WSLENV\}?\s*\+?=|(?<!\$)\benv:[\\/]?WSLENV\b|[\"']WSLENV[\"']",
     re.I)
+
+
+# The names `_launcher` reads, as text: `wsl`, `wsl.exe`, `ubuntu*.exe`, the System32 `bash.exe`.
+_LAUNCHER_TEXT = re.compile(r"wsl|ubuntu|bash\.exe", re.I)
 
 
 def _climbs(seg: str) -> bool:
@@ -95,6 +99,8 @@ def _judge(tokens, closed: str, env_set: bool) -> str:
 def wsl_hit(cmd: str, env_set: bool = False) -> str:
     """Return the matched text when any segment of the command runs wsl outside the allow list.
     `env_set` is true when an outer statement set WSLENV or piped the call onward."""
+    if not _LAUNCHER_TEXT.search(QUOTE_MARKS.sub("", cmd)):
+        return ""   # no launcher name in the text, so no token is one (see _launcher)
     ends = []
     env_set = env_set or bool(WSLENV_SET.search(cmd))   # set in any statement of the same command
     for segment, closed in zip(split_segments(cmd, ends), ends):
