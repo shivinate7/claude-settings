@@ -87,7 +87,7 @@ Holes, named, for the SendMessage state judge (round 2 ruling, orchestrator):
 1. The busy-state layer does not see an agent id, a `uds:` address, `main`, or `*` as a receiver. It reads them as unseen and allows. Debt: `sendmessage-judge-blind-recvs`.
 2. The layer does not see a receiver whose name two sessions share. It reads the name as unseen and allows. Debt: `sendmessage-judge-dup-names`.
 3. The wording judge, the SendMessage prompt hook in `settings.json`, still runs on every send. The state judge cuts no model call there. Debt: `sendmessage-wording-judge-always`.
-
+4. A `to` that ends in `[ref]` and matches no row is matched by its bare name. The ref is dropped, never compared to a row. The board sees only local `claude agents` rows, so the ref may name an off-board receiver that shares the bare name with a local row. The judge then reads the local row's state: it allows a busy receiver, or sends an idle one to the model. Debt: `sendmessage-judge-dup-names`.
 
 ## The ceiling
 
