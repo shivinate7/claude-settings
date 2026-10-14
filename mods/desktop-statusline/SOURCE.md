@@ -10,4 +10,4 @@ Copied from the commit above; markdown docs and unused screenshots omitted.
 
 Local changes (owner ruling 2026-10-14: token-weather is the one context bar):
 
-- hooks/register.tsx: removed the Context meter and its `used`, `contextRoomPx`, `contextBar` values. The rest of the status line stays.
+- hooks/register.tsx: removed the Context meter and its `used`, `contextRoomPx`, `contextBar` values. Also removed the unread `contextPercent`, `contextTokens` and `contextWindow` snapshot fields (and their types) and the `breakdown: 'summary'` option on `session.usage()`. The rest of the status line stays.
