@@ -109,3 +109,6 @@ instead, which is the only half of the conflict this repository controls.
 - The comment on the import and export rows in `hooks/test_guard.py` says `import` and
   `export` are not git subcommands. Git 2.55 lists both in `git stash -h`. Comment
   only. Debt: `stash-export-comment-stale`.
+
+Kind: build
+Home: hooks/guard_shared_tree.py
