@@ -92,7 +92,7 @@ NET_RETRIES, NET_PAUSE = 3, 5  # owner ruling 2026-10-13: retry a network error 
 # or a check "build: HTTP 500 guard" is no match. The one home: Host.gh, the fetch and both lock reads ask is_net.
 NET_ERROR = re.compile(r"(?:^|: )(?:(?:Post|Get|Put|Patch|Delete|Head) \x22https?://[^\x22\s]*\x22: |error connecting to )"
                        r"|^(?:gh: )?(?:Server Error \()?HTTP (?:5\d\d|429)\b|^GraphQL: Something went wrong"
-                       r"|HTTP (?:5\d\d|429)(?:: [^\n]*)? \(https?://\S+\)\s*$|^invalid character '<' looking for beginning of value"
+                       r"|(?:^|: )HTTP (?:5\d\d|429)(?::[^\n]*)? \(https?://\S+\)\s*$|^invalid character '<' looking for beginning of value"
                        r"|^(?:fatal|error): .*(?:Could not resolve (?:host|proxy)|Failed to connect|Connection was reset|connection reset|connection refused|connectex|wsarecv|"
                        r"schannel|unable to access '[^']*': .*\bSSL\b|GnuTLS|timed out|context deadline exceeded|Recv failure|the remote end hung up|early EOF|RPC failed|returned error: 5\d\d|"
                        r"HTTP/2 stream|Empty reply from server|Failed sending data)"
