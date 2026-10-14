@@ -9,7 +9,9 @@
 // hooks/test_decision_watch.py pins the python side. This file pins what the mod does with it.
 // Guessed contract points: /dw registers in a session.start handler; a judgment ends with a shadow-log
 // write holding END; each Stop writes a "STOP seen" line; /dw's last output line is "Stops seen: N";
-// the host's fs.read refuses a file over 4 MiB; the child state folder differs from the real config folder.
+// the host's fs.read refuses a file over 4 MiB; the child state folder differs from the real config folder;
+// a config notice is its own toast and contains the word "notice" (any case), and the verdict toast holds the
+// verdict text exactly; a judge slot held by a python call that never returns frees within 60 s.
 // Amended in review round 2 (were pins of e40df46): the two-phase model-call fields (timeoutMs is pinned
 // on its own) and the stop_hook_active case (a STOP seen write is allowed).
 import assert from 'node:assert/strict'
@@ -46,12 +48,18 @@ const FOUR_MIB = 4 * 1024 * 1024
 const norm = p => String(p).replace(/\\/g, '/')
 const clone = v => JSON.parse(JSON.stringify(v))
 const same = (got, want, why) => assert.deepEqual(got, want, `${why}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`)
-const settle = (ms = 20) => new Promise(r => setTimeout(r, ms))
+// The real timers, read before any case fakes setTimeout. A case on fake timers still reads its guards from these,
+// so a regression fails that case and does not hang the run.
+const realSetTimeout = globalThis.setTimeout
+const realClearTimeout = globalThis.clearTimeout
+const settle = (ms = 20) => new Promise(r => realSetTimeout(r, ms))
 const within = (p, ms, why) => {
   let t
-  const late = new Promise((_, rej) => { t = setTimeout(() => rej(new Error(`timed out after ${ms} ms: ${why}`)), ms) })
-  return Promise.race([p, late]).finally(() => clearTimeout(t))
+  const late = new Promise((_, rej) => { t = realSetTimeout(() => rej(new Error(`timed out after ${ms} ms: ${why}`)), ms) })
+  return Promise.race([p, late]).finally(() => realClearTimeout(t))
 }
+// Drains the microtasks of a fake-host judge. setImmediate is not faked (only setTimeout is).
+const flush = () => new Promise(r => setImmediate(r))
 
 const results = []
 const unhandled = []
@@ -343,12 +351,20 @@ async function primed(h) {
 
 await test('stop: returns next(e) at once while the model call hangs, and the Stop event is untouched', async () => {
   const h = await load(host({ model: () => new Promise(() => {}) }))
-  const e = stopEvent()
-  const before = clone(e)
-  const NEXT = { decision: 'pass' }
-  const got = await within(fire(h, 'classic.Stop', e, NEXT), 1000, 'Stop waited for the judge')
-  assert.equal(got, NEXT, 'Stop returns the object next() returned')
-  same(e, before, 'Stop event')
+  // The mod's model deadline is a timer. Fake it, so the hung call cannot hold the run open for 50 s.
+  mock.timers.enable({ apis: ['setTimeout'] })
+  try {
+    const e = stopEvent()
+    const before = clone(e)
+    const NEXT = { decision: 'pass' }
+    const got = await within(fire(h, 'classic.Stop', e, NEXT), 1000, 'Stop waited for the judge')
+    assert.equal(got, NEXT, 'Stop returns the object next() returned')
+    same(e, before, 'Stop event')
+  } finally {
+    // Drain the background judge first: a deadline made after the reset would be a real 50 s timer.
+    await flush()
+    mock.timers.reset()
+  }
 })
 
 await test('stop: a FLAG never changes the Stop result', async () => {
@@ -387,9 +403,15 @@ await test('stop: stop_hook_active skips the judge: no process call, no model ca
 // Item 7. The STOP seen line is written before Stop returns, so a viewer can tell the mod ran.
 await test('stop: a STOP seen line is written before Stop returns next(e)', async () => {
   const h = await load(host({ model: () => new Promise(() => {}) }))
-  const NEXT = { decision: 'pass' }
-  assert.equal(await within(fire(h, 'classic.Stop', stopEvent(), NEXT), 1500, 'Stop'), NEXT)
-  assert.ok(h.writes.some(w => /STOP seen/.test(w.data)), 'no STOP seen line was written before Stop returned')
+  mock.timers.enable({ apis: ['setTimeout'] }) // the model deadline is a timer: fake it, as in the case above
+  try {
+    const NEXT = { decision: 'pass' }
+    assert.equal(await within(fire(h, 'classic.Stop', stopEvent(), NEXT), 1500, 'Stop'), NEXT)
+    assert.ok(h.writes.some(w => /STOP seen/.test(w.data)), 'no STOP seen line was written before Stop returned')
+  } finally {
+    await flush() // as in the case above: the background judge's deadline must be made while the mock is on
+    mock.timers.reset()
+  }
 })
 
 // Item 7 guard: a write that never returns cannot hold Stop. Green on e40df46, which writes nothing before Stop returns.
@@ -514,35 +536,57 @@ await test('shown: an ALLOW shows nothing', async () => {
   same(h.toasts, [], 'toasts')
 })
 
-// ---- the config notice. decision_watch.py adds config_report() text to its message on every verdict, ALLOW
-// included. The notice is for the report, so an ALLOW that carries it must not toast. FLAG and UNKNOWN still do.
-const CONFIG_NOTICE = pyConst('CONFIG_MESSAGE').replace('%s', '.claude/settings.json') + pyConst('TAIL')
+// ---- the config notice. decision_watch.py joins config_report() text onto its message, after the verdict, with
+// " ".join at main, so a notice rides on every verdict, ALLOW included, and on a cheap-path message too.
+// Arbiter ruling, 2026-10-14 00:09 CDT: each config notice is its own toast line, apart from the verdict, and is
+// marked as a notice. An ALLOW verdict itself stays silent. The notice's marker is the word "notice" (any case).
+const CONFIG_LINE = pyConst('CONFIG_MESSAGE').replace('%s', '.claude/settings.json')
+const CONFIG_NOTICE = CONFIG_LINE + pyConst('TAIL')
 
-await test('config notice: an ALLOW that carries a config notice shows nothing', async () => {
-  const h = await load(host({ py2: out({ systemMessage: CONFIG_NOTICE }) }))
-  await fire(h, 'classic.Stop', stopEvent(), {})
-  await judged(h)
-  await settle(60)
-  same(h.toasts, [], 'toasts')
-})
+// The notice toast names the notice, is marked as one, and is not a verdict.
+const noticeToast = t => {
+  assert.ok(t.includes(CONFIG_LINE), `not the config notice: ${JSON.stringify(t.slice(0, 160))}`)
+  assert.match(t, /notice/i, `the config notice toast is not marked as a notice: ${JSON.stringify(t.slice(0, 160))}`)
+  assert.doesNotMatch(t, /^Decision watch: (FLAG|UNKNOWN|ALLOW)/, 'the config notice toast reads as a verdict')
+}
 
-await test('config notice: a FLAG that carries a config notice still shows the FLAG', async () => {
+// Case 1: an ALLOW turn that carries a notice: one toast, the notice, and no verdict toast. Two paths reach it.
+const ALLOW_NOTICE_ROWS = [
+  ['phase 2 ALLOW with a config notice', { py2: out({ systemMessage: CONFIG_NOTICE }) }],
+  ['cheap path, no model due, with a config notice', { py1: out({ systemMessage: CONFIG_NOTICE }) }],
+]
+for (const [label, opts] of ALLOW_NOTICE_ROWS) {
+  await test(`config notice: an ALLOW turn shows the notice as its own toast (${label})`, async () => {
+    const h = await load(host(opts))
+    await fire(h, 'classic.Stop', stopEvent(), {})
+    await judged(h)
+    await settle(60)
+    same(h.toasts.length, 1, 'toast count')
+    noticeToast(h.toasts[0])
+  })
+}
+
+// Case 2: a FLAG that carries a notice: two toasts, the FLAG text exactly and the notice, kept apart.
+await test('config notice: a FLAG with a config notice shows two toasts, the FLAG and the notice', async () => {
   const h = await load(host({ py2: out({ systemMessage: FLAG + ' ' + CONFIG_NOTICE }) }))
   await fire(h, 'classic.Stop', stopEvent(), {})
   await judged(h)
   await settle(60)
-  same(h.toasts.length, 1, 'toast count')
-  assert.ok(h.toasts[0].startsWith(FLAG), `toast text: ${JSON.stringify(h.toasts[0].slice(0, 160))}`)
+  same(h.toasts.length, 2, 'toast count')
+  assert.ok(h.toasts.includes(FLAG), `no toast holds the FLAG text exactly: ${JSON.stringify(h.toasts.map(t => t.slice(0, 80)))}`)
+  noticeToast(h.toasts.find(t => t !== FLAG))
 })
 
-await test('config notice: an UNKNOWN that carries a config notice still shows the UNKNOWN', async () => {
+// Same ruling for an UNKNOWN verdict: the UNKNOWN text exactly, and the notice as its own toast.
+await test('config notice: an UNKNOWN with a config notice shows two toasts, the UNKNOWN and the notice', async () => {
   const TEXT = UNKNOWN + 'the model judgment could not be completed (model call: model down).'
   const h = await load(host({ py2: out({ systemMessage: TEXT + ' ' + CONFIG_NOTICE }) }))
   await fire(h, 'classic.Stop', stopEvent(), {})
   await judged(h)
   await settle(60)
-  same(h.toasts.length, 1, 'toast count')
-  assert.ok(h.toasts[0].startsWith(UNKNOWN), `toast text: ${JSON.stringify(h.toasts[0].slice(0, 160))}`)
+  same(h.toasts.length, 2, 'toast count')
+  assert.ok(h.toasts.includes(TEXT), `no toast holds the UNKNOWN text exactly: ${JSON.stringify(h.toasts.map(t => t.slice(0, 80)))}`)
+  noticeToast(h.toasts.find(t => t !== TEXT))
 })
 
 // A toast that throws is logged, never silent. The verdict line is written before the toast, so the log keeps it.
@@ -741,7 +785,6 @@ await test('busy guard: a failed judge frees the slot, so the next Stop judges a
 // timer, so the case runs on fake timers and ticks past MODEL_CEILING_MS. The mod's limit is 50 s, so any
 // limit up to 60 s passes this case.
 const MODEL_CEILING_MS = 60000
-const flush = () => new Promise(r => setImmediate(r)) // real setImmediate: not one of the faked timers
 const logNow = h => String(h.files.get(logPath(h)) ?? '')
 
 await test('busy: a model call that never resolves frees the slot at the mod limit, logs UNKNOWN, and the next Stop judges', async () => {
@@ -763,6 +806,41 @@ await test('busy: a model call that never resolves frees the slot at the mod lim
     mock.timers.reset()
   }
 })
+
+// The python side of the same hole: a python call that never returns (the finder, or either phase) holds the slot.
+// The slot must free within 60 s (a ceiling this file guesses, as MODEL_CEILING_MS is). Steps of 5 s, each with a
+// flush, so a deadline that starts after a microtask still fires inside the run.
+const HUNG = () => new Promise(() => {})
+const HUNG_ROWS = [
+  ['pickPython: the finder never resolves', { finder: HUNG() }],
+  ['phase 1: the python call never resolves', { py1: HUNG }],
+  ['phase 2: the python call never resolves after an ALLOW reply', { py2: HUNG }],
+]
+for (const [label, opts] of HUNG_ROWS) {
+  await test(`busy: a hung python call frees the slot within 60 s, and the next Stop judges (${label})`, async () => {
+    const h = await load(host(opts))
+    mock.timers.enable({ apis: ['setTimeout'] })
+    try {
+      await fire(h, 'classic.Stop', stopEvent(), {})
+      await flush()
+      assert.match(logNow(h), /START /, 'the first judge did not start')
+      for (let i = 0; i < MODEL_CEILING_MS / 5000; i++) {
+        mock.timers.tick(5000)
+        await flush()
+      }
+      assert.match(logNow(h), /UNKNOWN/, 'no UNKNOWN after 60 s: the slot is held by the hung python call')
+      h.finder = null
+      h.py1 = undefined
+      h.py2 = undefined
+      await fire(h, 'classic.Stop', stopEvent(), {})
+      await flush()
+      assert.doesNotMatch(logNow(h), /SKIP busy/, 'the next Stop was skipped as busy')
+      same((logNow(h).match(/START /g) || []).length, 2, 'judges started')
+    } finally {
+      mock.timers.reset()
+    }
+  })
+}
 
 // ---- item 6: the log stays bounded.
 
