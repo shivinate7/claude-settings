@@ -12,8 +12,9 @@ Run each from the child's root. `$P` is the parent clone. A probe that cannot ru
 | `check_agent_models.py` | `python3 $P/lint/check_agent_models.py .claude/agents/*.md` | a Haiku model in agent frontmatter |
 | `check_silent_undo.py` | `python3 $P/lint/check_silent_undo.py --repo . --history` | lost lines and reversals on main |
 
-`check_record_slugs.py` matches only paths that start with `decisions/` or `deferred/`. For a
-child that keeps records in `docs/decisions/`, run it from `docs/`.
+`check_record_slugs.py` matches only paths that start with `decisions/`, `deferred/` or `debts/`.
+For a child that keeps records in `docs/decisions/`, run it from `docs/`, as the row does, with
+file arguments. Its `--dir` and its git diff read this repo's tree, so neither can target a child.
 
 These lints read the parent tree only, and cannot target a child: `rule_audit.py`,
 `check_landed_dirs.py`, `check_unknown_reads_contract.py`. `md_sweep.py`, `ste_gate.py` and
