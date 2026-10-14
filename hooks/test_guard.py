@@ -28,6 +28,7 @@ The cases come from two working guards and their own test suites:
 Two literals are assembled from parts, so that this file cannot trip the guard it tests.
 """
 
+import ast
 import contextlib
 import io
 import json
@@ -112,6 +113,22 @@ class _TaggedLogs(list):
     def append(self, item):
         LOG_FAMILY[item[0]] = _family(item[0])
         list.append(self, item)
+
+
+# A case this platform does not run is a SKIP row with its reason: never a PASS, never a silent drop.
+# skip_case records it here, and the rows join LOG_CHECKS with the other log checks, further down.
+SKIP_ROWS = []
+NO_PS = "Windows has no ps, so ownership reads unknown and this case does not run here"
+NO_STAND_IN = "a POSIX stand-in git does not reach CreateProcess, so this case does not run here"
+NO_ORPHAN = "needs a PPID-1 orphan from ps, which this host does not give"
+NO_SIMULATOR = "the simulator fakes are POSIX shell scripts, and Windows has no xcrun or ps to fake"
+
+
+def skip_case(label, reason):
+    """Register a case that cannot run on this platform. It prints as SKIP with its reason, and
+    run_cases counts it. The family is the one in force at this line, as for a log check."""
+    LOG_FAMILY[label] = _family(label)
+    SKIP_ROWS.append((label, lambda: (SKIP, reason)))
 
 
 # GUARD_TIMING=1 prints, once at the end, the seconds each fixture block took: the eager blocks at
@@ -1719,6 +1736,9 @@ if os.name != "nt":
        VCS + " reset --hard HEAD", "allow", cwd=SUBJDIRTY, env_path=GITBLIND)
     sh("subject: the same blind git on a stack subject allows", VCS + " stash drop", "allow",
        cwd=SUBJSTASH, env_path=GITBLIND)
+else:
+    skip_case("subject: a git that cannot answer the status read allows, rather than guess", NO_STAND_IN)
+    skip_case("subject: the same blind git on a stack subject allows", NO_STAND_IN)
 # A DIRECTORY THAT IS NO GIT TREE IS NOT AN UNREADABLE SUBJECT. git answers there, and the answer
 # is "no tree", so the rule keeps its fail-closed deny. Every NOGIT case above rests on this.
 sh("subject: a directory that is no git tree still denies", VCS + " reset --hard HEAD", "deny",
@@ -2589,24 +2609,36 @@ sh("kill: listing signals kills nothing", "kill -l 1", "allow", cwd=NOGIT)
 if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
     sh("kill: a pid this session did not start", "kill %d" % FOREIGN, "deny", "machine-wide-kill",
        cwd=NOGIT, carries="did not start")
+else:
+    skip_case("kill: a pid this session did not start", NO_PS)
 if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
     sh("kill: a foreign pid behind a signal flag", "kill -9 %d" % FOREIGN, "deny",
        "machine-wide-kill", cwd=NOGIT)
+else:
+    skip_case("kill: a foreign pid behind a signal flag", NO_PS)
 if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
     sh("kill: a foreign pid behind a named signal", "kill -s TERM %d" % FOREIGN, "deny",
        "machine-wide-kill", cwd=NOGIT)
+else:
+    skip_case("kill: a foreign pid behind a named signal", NO_PS)
 if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
     sh("kill: a foreign pid after the end-of-flags mark", "kill -- %d" % FOREIGN, "deny",
        "machine-wide-kill", cwd=NOGIT)
+else:
+    skip_case("kill: a foreign pid after the end-of-flags mark", NO_PS)
 if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
     sh("kill: one foreign pid in a list of pids", "kill %d %d" % (OWNED.pid, FOREIGN), "deny",
        "machine-wide-kill", cwd=NOGIT)
+else:
+    skip_case("kill: one foreign pid in a list of pids", NO_PS)
 sh("kill: init", "kill 1", "deny", "machine-wide-kill", cwd=NOGIT)
 sh("kill: every process", "kill -9 -- -1", "deny", "machine-wide-kill", cwd=NOGIT)
 sh("kill: the shell's own process group", "kill 0", "deny", "machine-wide-kill", cwd=NOGIT)
 if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
     sh("kill: the session's own claude process", "kill %d" % os.getpid(), "deny",
        "machine-wide-kill", cwd=NOGIT)
+else:
+    skip_case("kill: the session's own claude process", NO_PS)
 sh("kill: init with the root unknown", "kill 1", "deny", "machine-wide-kill", cwd=NOGIT,
    no_root=True)
 sh("kill: every process with the root unknown", "kill -9 -- -1", "deny", "machine-wide-kill",
@@ -2696,6 +2728,11 @@ if ORPHAN_CASES:
     sh("kill: a pid in this session's agent worktree whose parent is alive, not init",
        "kill %d" % LIVE_PID, "deny", "machine-wide-kill", cwd=NOGIT, session=SUB_SESSION,
        config=SUBCFG, transcript=SUB_TRANSCRIPT, carries="did not start")
+else:
+    skip_case("kill: a PPID-1 pid whose cwd is in this session's agent worktree", NO_ORPHAN)
+    skip_case("kill: a PPID-1 pid in another session's agent worktree", NO_ORPHAN)
+    skip_case("kill: a PPID-1 pid in a worktree not named agent-<id>", NO_ORPHAN)
+    skip_case("kill: a pid in this session's agent worktree whose parent is alive, not init", NO_ORPHAN)
 
 sh("kill: a pid list made by pgrep", "kill $(pgrep -f node)", "deny", "machine-wide-kill",
    cwd=NOGIT)
@@ -9800,20 +9837,60 @@ for _label, _check in (
     LOG_CHECKS_EXTRA.append((_label, _check))
 
 
+def _guard_family_constant(path):
+    """The module list the guard loads, ("guard_core",) + _FAMILY_MODULES, read from `path` with the
+    language's own parser. Matching text would read a comment or a string as a module name."""
+    with open(path, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), filename=path)
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "_FAMILY_MODULES" for t in node.targets):
+            return ("guard_core",) + tuple(ast.literal_eval(node.value))
+    raise ValueError("no _FAMILY_MODULES assignment in %s" % path)
+
+
 def _list_names_every_sibling():
-    """FAILCLOSED_MODULES must name every guard_* module beside guard.py. A module the list omits is
-    never refused when it goes missing, so the list is checked against the folder, not trusted."""
-    source = os.path.dirname(GUARD)
-    siblings = sorted(e[:-3] for e in os.listdir(source) if e.startswith("guard_") and e.endswith(".py"))
-    if tuple(siblings) != FAILCLOSED_MODULES:
-        lacks = sorted(set(siblings) - set(FAILCLOSED_MODULES))
-        return False, "the list lacks %s: the folder holds %d guard_* modules, the list %d" % (
-            lacks, len(siblings), len(FAILCLOSED_MODULES))
-    return True, "the list names the %d guard_* modules beside guard.py" % len(siblings)
+    """FAILCLOSED_MODULES must match the module list the guard itself loads, read from GUARD. A module
+    the guard loads that the list omits, or a name the list holds that the guard never loads, goes red."""
+    expected = _guard_family_constant(GUARD)
+    if sorted(FAILCLOSED_MODULES) != sorted(expected):
+        lacks = sorted(set(expected) - set(FAILCLOSED_MODULES))
+        extra = sorted(set(FAILCLOSED_MODULES) - set(expected))
+        return False, "the list lacks %s and holds extra %s against the guard's own constant" % (
+            lacks, extra)
+    return True, "the list matches the guard's own %d-module constant" % len(expected)
 
 
-LOG_CHECKS_EXTRA.append(("audit-high fail-closed list: FAILCLOSED_MODULES names every guard_* sibling",
+LOG_CHECKS_EXTRA.append(("audit-high fail-closed list: FAILCLOSED_MODULES matches the guard's own constant",
                          _list_names_every_sibling))
+
+
+def _constant_drop_goes_red():
+    """Drop guard_wsl from a copy of the guard's own module constant, the one the guard loads. The list
+    check must go red on that copy. The copy is a scratch folder under ROOT, and GUARD is swapped only
+    for the call, then restored."""
+    global GUARD
+    folder = _guard_copy("constant-drop", None)
+    path = os.path.join(folder, "guard.py")
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read()
+    needle = '"guard_mask_script", "guard_wsl")'
+    if text.count(needle) != 1:
+        return False, "the guard's constant no longer reads %s once, so the drop cannot be made" % needle
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text.replace(needle, '"guard_mask_script")'))
+    saved, GUARD = GUARD, path
+    try:
+        ok, note = _list_names_every_sibling()
+    finally:
+        GUARD = saved
+    if ok:
+        return False, "the list check stays green with guard_wsl dropped from the guard's constant"
+    return True, "red on the copy with guard_wsl dropped: %s" % note
+
+
+LOG_CHECKS_EXTRA.append(("audit-high fail-closed list: a guard constant without guard_wsl turns the list red",
+                         _constant_drop_goes_red))
 
 
 def _fake_sibling_is_picked_up():
@@ -10476,7 +10553,7 @@ LOG_CHECKS_EXTRA.append(("session-log: a stale guard_core lacking both names sti
                          "its line has five fields", session_log_stale_core_case))
 
 
-LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
+LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA) + tuple(SKIP_ROWS)
 
 # The log checkers tagged "windows". Each one reads a live process's start time (guard.py
 # L1837-1905, the ctypes arm on Windows) or a PowerShell tokenizing rule (L307-320).
@@ -10853,6 +10930,8 @@ FAMILY = "simulator"
 if os.name != "nt":
     register_simulator_boot_cases()
     register_simulator_hold_cases()
+else:
+    skip_case("simulator: the boot and hold rules, every case of the family", NO_SIMULATOR)
 
 # Log checks in the literal and the appended extras are tagged by section above. These prefixes give
 # each one its rule's family instead, so GUARD_FAMILY=<rule> runs its log checks too. A prefix that
