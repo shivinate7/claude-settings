@@ -102,7 +102,7 @@ Owner rulings, 2026-10-08:
 
 ## Holes, named
 
-Round 2 and round 3 reviews. Each finding stays open.
+Rounds 2 and 3 of the question-outcome review and round 3 of judge-cap-off. Each stays open.
 
 - A decorated Goal line earlier in the question, such as `- goal: old`, masks a real
   Problem-first order. The order check reads that line first, so it passes. Presence passes
@@ -118,6 +118,12 @@ Round 2 and round 3 reviews. Each finding stays open.
 - The defang matches the exact fence tokens only, so `<<<end>>>` and `<<< END>>>` pass
   unchanged. Whether the judge reads them as fences is unmeasured. Debt:
   `question-text-not-defanged`.
+- The cut-mark reserve stays when no owner message can be cut, so the prompt can go up to 36
+  chars over PROMPT_MAX. The hook then says the check did not run. Practically unreachable.
+  Debt: `judge-cut-mark-reserve-over`.
+- That PROMPT_MAX fits the model's context is unmeasured for token-dense text. Over the
+  context, the model call fails and the hook says the check did not run. Debt:
+  `model-clip-unmeasured`.
 
 Kind: process
 Home: hooks/question_outcome.py
