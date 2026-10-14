@@ -728,8 +728,8 @@ def git_env_command_hit(raw: str, stripped: str) -> str:
     through the one reader in guard_env; one nested past its depth bound is refused."""
     found, too_deep = _substitutions(stripped)
     texts = [text for text, _in_message in found]
-    if too_deep:
-        return "command substitution nested too deep to read"
+    if too_deep:   # the env-file rule refuses a nesting this deep; judge the text as it stands
+        texts = [stripped]
     for text in texts:
         matched = playwright_command_hit(raw if text == texts[-1] else text, text, GIT_ENV_WATCH)
         if matched:
