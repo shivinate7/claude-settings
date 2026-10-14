@@ -117,6 +117,24 @@ class Red(unittest.TestCase):
         got = r.verdict()
         self.assertTrue(any("app.txt" in p and "whole file restored" in p for p in got), got)
 
+    def test_stale_merge_whose_first_commit_postdates_the_pr_is_read(self):
+        """The banchi shape with the clock pinned. The branch's first commit lands an hour after the
+        PR merged, so the window (since the first commit's date) excludes the PR and the restore goes
+        unread. Fixed dates, so the verdict does not depend on how fast git runs on the host."""
+        r = self.r
+        r.sh("checkout", "-q", "-b", "stale")
+        r.sh("checkout", "-q", "main")
+        r.sh("checkout", "-q", "-b", "pr1")
+        r.commit("delete Card", date="2026-01-01T10:00:00", app_txt=BODY)
+        r.sh("checkout", "-q", "main")
+        r.sh("merge", "-q", "--no-ff", "-m", "Merge pull request #1", "pr1", date="2026-01-01T10:01:00")
+        r.push()
+        r.sh("checkout", "-q", "stale")
+        r.commit("wording", date="2026-01-01T11:00:00", other_txt="other v2\n")
+        r.sh("merge", "-q", "-s", "ours", "--no-edit", "main", date="2026-01-01T11:01:00")
+        got = r.verdict()
+        self.assertTrue(any("app.txt" in p and "whole file restored" in p for p in got), got)
+
     def test_stale_branch_hunk_level(self):
         """Main added a comment after the PR; the branch restores Card but keeps the comment."""
         self.merged_pr()
