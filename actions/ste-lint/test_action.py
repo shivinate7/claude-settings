@@ -7,7 +7,7 @@ import os, re, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 CMD = os.path.join(ROOT, "bin", "ste-changed")
-GATES = os.path.join(ROOT, ".github", "workflows", "gates.yml")
+EXCLUDE_FILE = os.path.join(ROOT, ".ste-lint-exclude")
 # Stdlib only: the step's `run: |` block is the lines after "      run: |", indented 8 spaces.
 text = open(os.path.join(HERE, "action.yml")).read()
 block = text.split("      run: |\n", 1)[1]
@@ -20,7 +20,7 @@ BASH = "/bin/bash" if os.path.exists("/bin/bash") else (
 LONG = " ".join(["word"] * 40) + " end."
 BASE_FILES = {"a.md": "# T\n\nShort line.\n"}
 STEP_ENV = ("EVENT_NAME", "BASE_REF", "DEFAULT_BRANCH", "REF_NAME", "SCOPE", "FAIL", "PATHS_GLOB",
-            "EXCLUDE", "CHANGED_PATHS_GLOB", "DECISIONS_DIR")
+            "EXCLUDE", "CHANGED_PATHS_GLOB", "DECISIONS_DIR", "STE_EXCLUDE_FILE")
 FINDING = re.compile(r"^\S.*:\d+: [A-Z]+\d+ ")
 
 
@@ -41,10 +41,10 @@ def default_change(work):
     git(work, "commit", "-qam", "long")
 
 
-def ci_exclude():
-    """The exclude the gates job passes to this action, read from that job's `with:` block."""
-    block = re.split(r"uses:.*actions/ste-lint", open(GATES).read(), maxsplit=1)[1].split("- name:", 1)[0]
-    return re.search(r"^\s*exclude:[ \t]*(\S+)", block, re.M).group(1)
+def exclude_patterns():
+    """The repo's exclude home, .ste-lint-exclude: one git pathspec per line, '#' starts a comment. Read, never copied."""
+    lines = (l.strip() for l in open(EXCLUDE_FILE, encoding="utf-8"))
+    return [l for l in lines if l and not l.startswith("#")]
 
 
 def changed_paths_default():
@@ -98,13 +98,14 @@ def run_command(work):
 
 
 def run_pair(change, base=BASE_FILES):
-    """One diff, two runs: the step with CI's exclude and changed_paths, then bin/ste-changed."""
+    """One diff, two runs: the step, reading the repo's .ste-lint-exclude and action.yml's changed_paths,
+    then bin/ste-changed with no config of its own."""
     with tempfile.TemporaryDirectory() as d:
         work = make_repo(d, base, change)
         env = dict(os.environ, EVENT_NAME="pull_request", BASE_REF="main", DEFAULT_BRANCH="main",
                    REF_NAME="topic", SCOPE="changed", FAIL="true", PATHS_GLOB="**/*.md",
-                   EXCLUDE=ci_exclude(), CHANGED_PATHS_GLOB=changed_paths_default(), DECISIONS_DIR="",
-                   GITHUB_STEP_SUMMARY=os.path.join(d, "sum"))
+                   EXCLUDE="", CHANGED_PATHS_GLOB=changed_paths_default(), DECISIONS_DIR="",
+                   STE_EXCLUDE_FILE=EXCLUDE_FILE, GITHUB_STEP_SUMMARY=os.path.join(d, "sum"))
         return run_step(d, work, env), run_command(work)
 
 
@@ -238,9 +239,9 @@ check("unchanged: the command lints only that file, exit 0, reports nothing",
       c_rc == 0 and c["files"] == s["files"] and c["findings"] == [] and c["head"] == s["head"], c_out)
 
 
-# Files the step skips, pinned to the step's own skips: the gates job's exclude (its path read from
-# the CI config, so the case follows a change to it), a non-Markdown file, and a deleted Markdown file.
-EXCLUDED = ci_exclude().replace("**", "probe.md")
+# Files the step skips, pinned to the step's own skips: the first pattern of .ste-lint-exclude (read from
+# that file, so the case follows a change to it), a non-Markdown file, and a deleted Markdown file.
+EXCLUDED = exclude_patterns()[0].replace("**", "probe.md")
 
 
 def skipped_change(work):
