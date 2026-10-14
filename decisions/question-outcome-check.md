@@ -113,6 +113,12 @@ Round 2 and round 3 reviews. Each finding stays open.
   UTF-16 units. Quotes, backslashes and emoji add units, so a prompt under PROMPT_MAX can
   still go over 32,767 (WinError 206). Then the model call fails, the question passes, and the
   hook says the check did not run. Lane model-prompt-stdin removes argv, and this hole with it.
+- Question text and option labels reach the judge prompt with no fence and no defang
+  (`hooks/question_outcome.py` near line 385). An asker can forge an Owner block there. Low
+  risk: the asker already writes the Goal line. Debt: `question-text-not-defanged`.
+- The defang matches the exact fence tokens only, so `<<<end>>>` and `<<< END>>>` pass
+  unchanged. Whether the judge reads them as fences is unmeasured. Debt:
+  `question-text-not-defanged`.
 
 Kind: process
 Home: hooks/question_outcome.py
