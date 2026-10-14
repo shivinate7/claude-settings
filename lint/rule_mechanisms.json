@@ -673,7 +673,7 @@
     "roles-holes-are-debts": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Prose only for now: a check would have to read each named hole in a decision record and find its debt file. The daily-note lane adds that check."
+        "reason": "A prose rule. No check reads the debt store yet; one would have to read each named hole in a decision record and find its debt file."
       }
     }
   }
