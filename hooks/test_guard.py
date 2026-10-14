@@ -75,6 +75,7 @@ FAMILIES = {
     "cite": "cite by id",
     "frozen": "frozen paths",
     "model-cap": "the subagent model cap",
+    "ask-alone": "an ask step chained with other steps denies; a lone ask step still asks",
     "paths": "path rules, builders and the test-author",
     "diff": "the diff judged at commit, push and stop",
     "impeccable": "impeccable is review-only",
@@ -242,6 +243,25 @@ def sh(name, command, expected, rule=None, tool="Bash", cwd=None, env_path=None,
     add(name, expected, rule=rule, tool=tool, cwd=cwd, env_path=env_path, session=session,
         agent_id=agent_id, agent_type=agent_type, no_root=no_root, silent=silent,
         carries=carries, lacks=lacks, config=config, transcript=transcript, command=command)
+
+
+# ASK ALONE (incident 2026-10-14 10:51 CDT: an optional `git worktree prune`, chained with two more
+# steps, sent the whole command to the owner as one permission prompt). A command that holds a step
+# the guard would ASK on, chained with other steps by `&&`, `||`, `;`, `|` or a newline, is DENIED to
+# the agent, and the remedy says to run that step alone or drop it. A lone ask step still asks, and a
+# deny anywhere in the command still wins. CHAIN_ASK is the rule id the deny prints (the lane slug;
+# the cases below pin it, so one edit re-points them all). ALONE is the one word the remedy must
+# carry. Each ask rule's own id is NOT in REASON_MAY_NAME for this rule, so a reason that names an
+# ask step must still avoid every FORBIDDEN_IN_A_REASON fragment.
+CHAIN_ASK = "ask-alone"
+ALONE = "alone"
+
+
+def chained_ask(name, command, **kw):
+    """One case: `command` holds an ask step chained with other steps, so it denies, never asks."""
+    more = kw.pop("carries", ())
+    carries = (ALONE,) + ((more,) if isinstance(more, str) else tuple(more))
+    sh(name, command, "deny", CHAIN_ASK, carries=carries, **kw)
 
 
 # --------------------------------------------------------------------------- the fixtures
@@ -1788,8 +1808,9 @@ sh("worktree: the same reset inside a worktree asks", VCS + " reset --hard", "as
    "shared-tree", cwd=GITWT)
 sh("worktree: -C naming the worktree asks, from the shared checkout",
    VCS + " -C " + slash(GITWT) + " reset --hard", "ask", "shared-tree", cwd=GITMAIN)
-sh("worktree: a cd into the worktree asks, from the shared checkout",
-   "cd " + slash(GITWT) + " && " + VCS + " reset --hard", "ask", "shared-tree", cwd=GITMAIN)
+# Chained with the cd, the ask step denies (ask-alone). The reset alone, by -C, is the line above.
+chained_ask("worktree: a cd into the worktree, then the reset, denies as a chained ask step, from the shared checkout",
+            "cd " + slash(GITWT) + " && " + VCS + " reset --hard", cwd=GITMAIN)
 
 # THE PER-FILE CARVE-OUT (owner ruling 2026-10-11, "Allow per-file"; decisions/stash-push-is-
 # clone-wide.md). In a linked worktree, a checkout or restore that names only FILES writes the
@@ -1809,10 +1830,12 @@ sh("per-file allow: restore of one modified file", VCS + " restore f.txt", "allo
 sh("per-file allow: restore --staged --worktree of one modified file",
    VCS + " restore --staged --worktree f.txt", "allow", cwd=GITWT)
 # one_place (guard.py): a cd anywhere in the command keeps the ask, because a cd can hide the shared
-# checkout behind the lane. The ask reason must name the form that does run with no ask.
-sh("per-file ask: the incident form, a cd into the worktree, one file, then python, names the -C form",
-   "cd " + slash(GITWT) + " && " + VCS + " checkout fixtures/media-players.json && python3 x.py",
-   "ask", "shared-tree", cwd=GITMAIN, carries="git -C <lane> restore <file>")
+# checkout behind the lane. Chained with the cd and the python, that ask step now denies (ask-alone).
+# The old pin that the ask reason names the -C form is dropped: a deny that says "run it alone" sends
+# the agent to the lone step, whose own ask still names that form (decision wanted, see the report).
+chained_ask("per-file ask: the incident form, a cd into the worktree, one file, then python, denies as a chained ask step",
+            "cd " + slash(GITWT) + " && " + VCS + " checkout fixtures/media-players.json && python3 x.py",
+            cwd=GITMAIN)
 
 # ASK, in a linked worktree (GITWT). Each names a whole tree, a folder, a glob, or a reset.
 sh("per-file ask: checkout . in a worktree still asks", VCS + " checkout .", "ask",
@@ -1993,8 +2016,8 @@ sh("per-file deny: -C lane status, then -C shared restore f.txt, from a plain fo
    "deny", "shared-tree", cwd=NOGIT)
 # Limit: _run_dir reads the first -C against the shell cwd, so a shared checkout reached by `cd`
 # gets an ask here, not a deny. Main gives the same.
-sh("per-file ask: cd into the shared checkout, then git -C . restore f.txt, from a worktree",
-   "cd " + slash(GITMAIN) + " && " + VCS + " -C . restore f.txt", "ask", "shared-tree", cwd=GITWT)
+chained_ask("per-file ask: cd into the shared checkout, then git -C . restore f.txt, from a worktree, denies as a chained ask step",
+            "cd " + slash(GITMAIN) + " && " + VCS + " -C . restore f.txt", cwd=GITWT)
 sh("per-file deny: -C parent then a relative -C repo, from a plain folder",
    VCS + " -C " + slash(ROOT) + " -C repo restore f.txt", "deny", "shared-tree", cwd=NOGIT)
 # IDENTICAL SEGMENTS. decisions/stash-push-is-clone-wide.md: each git call is judged in its own
@@ -2019,9 +2042,9 @@ sh("per-file deny: cd lane; git -C . restore f.txt; cd shared; the same -C . res
    + VCS + " -C . restore f.txt", "deny", "shared-tree", cwd=NOGIT)
 # CONTROL, green on the base. Both calls stay in the lane, so the repeat is an allow and the fix
 # must not turn a lane-only repeat into a deny.
-sh("per-file ask: cd lane && restore f.txt && cd lane && the same restore f.txt asks, a cd keeps the ask",
-   "cd " + slash(GITWT) + " && " + VCS + " restore f.txt && cd " + slash(GITWT) + " && "
-   + VCS + " restore f.txt && echo done", "ask", "shared-tree", cwd=NOGIT)
+chained_ask("per-file ask: cd lane && restore f.txt && cd lane && the same restore f.txt, a cd keeps the ask, chained it denies",
+            "cd " + slash(GITWT) + " && " + VCS + " restore f.txt && cd " + slash(GITWT) + " && "
+            + VCS + " restore f.txt && echo done", cwd=NOGIT)
 
 # HEREDOC BODY WITH A LONE QUOTE, THEN A CD. segment_roots (guard.py ~1228) loses sync when a
 # heredoc body holds a lone quote, and drops every later `cd`. The shell stays in the lane (cwd),
@@ -2040,22 +2063,25 @@ sh("per-file deny: python heredoc, a lone double quote in the body, then cd shar
 # segments, every later segment is judged as the shared checkout, so a later discard of a dirty
 # file is denied. Both arms start in the lane, but the restore runs after `cd` into the shared
 # checkout. RED on 6c20c07: the walk's last cd is the lane, so the restore is judged there.
-# Limit: as above, a cd keeps the ask in a worktree, so the two cases below ask, not deny.
-sh("per-file ask: two heredocs with lone apostrophes, then cd shared and restore f.txt, cd lane last",
-   "cd " + slash(GITMAIN) + " && node <<'EOF'\nit's\nEOF\ncat <<EOF2\nwe're\nEOF2\n"
-   + VCS + " restore f.txt\ncd " + slash(GITWT), "ask", "shared-tree", cwd=GITWT)
-sh("per-file ask: the node lone-apostrophe case with && cd lane appended after the shared restore",
-   "node <<'EOF'\n// don't\nEOF\ncd " + slash(GITMAIN) + " && " + VCS + " restore f.txt && cd "
-   + slash(GITWT), "ask", "shared-tree", cwd=GITWT)
-# CONTROL. No heredoc, so the walk stays in sync, but the cd still keeps the ask.
-sh("per-file ask: cd lane && restore f.txt with no heredoc asks, a cd keeps the ask",
-   "cd " + slash(GITWT) + " && " + VCS + " restore f.txt", "ask", "shared-tree", cwd=NOGIT)
+# Limit: as above, a cd keeps the ask in a worktree, so the two cases below hold an ask step, not a
+# deny step. Each is chained, so each denies as a chained ask step (ask-alone).
+chained_ask("per-file ask: two heredocs with lone apostrophes, then cd shared and restore f.txt, cd lane last, denies as a chained ask step",
+            "cd " + slash(GITMAIN) + " && node <<'EOF'\nit's\nEOF\ncat <<EOF2\nwe're\nEOF2\n"
+            + VCS + " restore f.txt\ncd " + slash(GITWT), cwd=GITWT)
+chained_ask("per-file ask: the node lone-apostrophe case with && cd lane appended after the shared restore, denies as a chained ask step",
+            "node <<'EOF'\n// don't\nEOF\ncd " + slash(GITMAIN) + " && " + VCS + " restore f.txt && cd "
+            + slash(GITWT), cwd=GITWT)
+# CONTROL. No heredoc, so the walk stays in sync, but the cd still keeps the ask step. Chained, it
+# denies. The case name keeps the first words that hooks/mutate_guard.py names for this case.
+chained_ask("per-file ask: cd lane && restore f.txt with no heredoc asks when alone, denies when chained",
+            "cd " + slash(GITWT) + " && " + VCS + " restore f.txt", cwd=NOGIT)
 # TWO -C TARGETS (one_place, `len(targets) <= 1`). No cd, both calls are per-file forms in a linked
 # worktree, but they name two different trees (lane, and FARWT, a second linked worktree). One
-# verdict cannot cover two trees, so it asks. FARWT holds b.txt dirty (the fixtures have no g.txt).
-sh("per-file ask: two -C targets, lane then a second linked worktree, both per-file restores",
-   VCS + " -C " + slash(GITWT) + " restore f.txt && " + VCS + " -C " + slash(FARWT)
-   + " restore b.txt", "ask", "shared-tree", cwd=GITWT)
+# verdict cannot cover two trees, so the step is an ask step, and chained it denies. FARWT holds
+# b.txt dirty (the fixtures have no g.txt).
+chained_ask("per-file ask: two -C targets, lane then a second linked worktree, both per-file restores, denies as a chained ask step",
+            VCS + " -C " + slash(GITWT) + " restore f.txt && " + VCS + " -C " + slash(FARWT)
+            + " restore b.txt", cwd=GITWT)
 # CONTROL. One -C target, repeated, no cd: the per-file allow stands.
 sh("per-file allow: one -C target repeated, lane restore f.txt then lane restore b.txt",
    VCS + " -C " + slash(GITWT) + " restore f.txt && " + VCS + " -C " + slash(GITWT)
@@ -2081,21 +2107,27 @@ for _label, _lead in (("a prefix assignment", ""), ("env", "env "), ("export", N
             _cmd = "export " + _vars + "; " + VCS + " restore f.txt"
         else:
             _cmd = _lead + _vars + " " + VCS + " restore f.txt"
-        sh("per-file ask: GIT_WORK_TREE naming the shared checkout by %s%s, from a worktree"
-           % (_label, " with GIT_DIR" if _gitdir else ""), _cmd, "ask", "shared-tree", cwd=GITWT)
+        # The `export` forms hold two steps joined by `;`, so they deny as a chained ask step
+        # (ask-alone). The prefix and `env` forms are one step, so they still ask.
+        if _lead is None:
+            chained_ask("per-file ask: GIT_WORK_TREE naming the shared checkout by %s%s, from a worktree, denies as a chained ask step"
+                        % (_label, " with GIT_DIR" if _gitdir else ""), _cmd, cwd=GITWT)
+        else:
+            sh("per-file ask: GIT_WORK_TREE naming the shared checkout by %s%s, from a worktree"
+               % (_label, " with GIT_DIR" if _gitdir else ""), _cmd, "ask", "shared-tree", cwd=GITWT)
 # 3. A segment with no -C must not borrow another segment's -C. From the shared checkout, the bare
-# restore runs in the shared checkout whichever side the lane's -C status stands on. main asks.
-sh("per-file ask: -C lane status, then a bare restore f.txt, from the shared checkout",
-   VCS + " -C " + slash(GITWT) + " status && " + VCS + " restore f.txt", "ask", "shared-tree",
-   cwd=GITMAIN)
-sh("per-file ask: a bare restore f.txt, then -C lane status, from the shared checkout",
-   VCS + " restore f.txt && " + VCS + " -C " + slash(GITWT) + " status", "ask", "shared-tree",
-   cwd=GITMAIN)
-# 4. A PowerShell cd into the shared checkout. main asks; the branch must not allow.
+# restore runs in the shared checkout whichever side the lane's -C status stands on. main asks the
+# step; chained with the status, it denies as a chained ask step (ask-alone).
+chained_ask("per-file ask: -C lane status, then a bare restore f.txt, from the shared checkout, denies as a chained ask step",
+            VCS + " -C " + slash(GITWT) + " status && " + VCS + " restore f.txt", cwd=GITMAIN)
+chained_ask("per-file ask: a bare restore f.txt, then -C lane status, from the shared checkout, denies as a chained ask step",
+            VCS + " restore f.txt && " + VCS + " -C " + slash(GITWT) + " status", cwd=GITMAIN)
+# 4. A PowerShell cd into the shared checkout. main asks the step; the branch must not allow. The cd
+# is its own step, so the pair denies as a chained ask step (ask-alone).
 for _cd in ("Set-Location", "sl", "chdir", "Push-Location"):
-    sh("per-file ask: PowerShell %s into the shared checkout, then restore f.txt, from a worktree"
-       % _cd, _cd + " " + slash(GITMAIN) + "; " + VCS + " restore f.txt", "ask", "shared-tree",
-       tool="PowerShell", cwd=GITWT)
+    chained_ask("per-file ask: PowerShell %s into the shared checkout, then restore f.txt, from a worktree, denies as a chained ask step"
+                % _cd, _cd + " " + slash(GITMAIN) + "; " + VCS + " restore f.txt",
+                tool="PowerShell", cwd=GITWT)
 # 5. env's own chdir flags. main does not read them and asks, so ask is pinned.
 sh("per-file ask: env -C into the shared checkout, then restore f.txt, from a worktree",
    "env -C " + slash(GITMAIN) + " " + VCS + " restore f.txt", "ask", "shared-tree", cwd=GITWT)
@@ -2117,8 +2149,14 @@ for _label, _cmd in (
     ("env -vC", "env -vC " + _SH + " " + VCS + " restore f.txt"),
     ("env --ch= abbreviation", "env --ch=" + _SH + " " + VCS + " restore f.txt"),
 ):
-    sh("per-file ask: late probe, %s names the shared checkout, from a worktree" % _label, _cmd,
-       "ask", "shared-tree", cwd=GITWT)
+    # A `;` in the literal joins two steps: that form denies as a chained ask step (ask-alone). The
+    # forms with no `;` are one step, and they still ask.
+    if ";" in _cmd:
+        chained_ask("per-file ask: late probe, %s names the shared checkout, from a worktree, denies as a chained ask step"
+                    % _label, _cmd, cwd=GITWT)
+    else:
+        sh("per-file ask: late probe, %s names the shared checkout, from a worktree" % _label, _cmd,
+           "ask", "shared-tree", cwd=GITWT)
 for _label, _cmd in (
     ("$env: assignment", '$env:GIT_WORK_TREE = "' + _SH + '"; ' + VCS + " restore f.txt"),
     ("lower-case $env: assignment", '$env:git_work_tree = "' + _SH + '"; ' + VCS
@@ -2127,8 +2165,8 @@ for _label, _cmd in (
     ("SetEnvironmentVariable", '[Environment]::SetEnvironmentVariable("GIT_WORK_TREE","' + _SH
      + '"); ' + VCS + " restore f.txt"),
 ):
-    sh("per-file ask: late probe, PowerShell %s names the shared checkout, from a worktree" % _label,
-       _cmd, "ask", "shared-tree", tool="PowerShell", cwd=GITWT)
+    chained_ask("per-file ask: late probe, PowerShell %s names the shared checkout, from a worktree, denies as a chained ask step"
+                % _label, _cmd, tool="PowerShell", cwd=GITWT)
 sh("per-file allow: late probe control, a plain restore f.txt in the lane",
    VCS + " restore f.txt", "allow", cwd=GITWT)
 sh("per-file allow: late probe control, a harmless GIT_TRACE prefix in the lane",
@@ -4476,8 +4514,8 @@ sh("push: lease with git -C naming a feature checkout allows from the main check
 sh("push: a git -C on another call is not the push's directory",
    VCS + " -C " + slash(PUSHMAIN) + " status && " + VCS + " push " + LE.strip(), "allow",
    cwd=PUSHFEAT)
-sh("push: lease after cd into the default branch's checkout asks",
-   "cd " + slash(PUSHMAIN) + " && " + VCS + " push " + LE.strip(), "ask", "force-push", cwd=PUSHFEAT)
+chained_ask("push: lease after cd into the default branch's checkout, a chained ask step, denies",
+            "cd " + slash(PUSHMAIN) + " && " + VCS + " push " + LE.strip(), cwd=PUSHFEAT)
 sh("push: lease after cd into a feature checkout allows from the main checkout",
    "cd " + slash(PUSHFEAT) + " && " + VCS + " push " + LE.strip(), "allow", cwd=PUSHMAIN)
 sh("push: lease with git -C naming a directory that is not there asks",
@@ -5966,9 +6004,10 @@ add("cap: the clone's own settings file is asked, not denied", "ask", "subagent-
 sh("cap: a heredoc writing a project settings file asks",
    "cat <<'JSON' > " + PROJ_LOCAL + "\n" + cap_settings() + "\nJSON",
    "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
-sh("cap: a tee onto a project settings file asks",
-   "printf '%s' '" + cap_settings(compact=True) + "' | tee " + PROJ_SETTINGS,
-   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+# The pipe joins two steps, so a tee onto the file is a chained ask step and denies (ask-alone). The
+# pipe IS the write here, so "run it alone" means a form with no pipe, such as the redirect below.
+chained_ask("cap: a tee onto a project settings file, piped from printf, denies as a chained ask step",
+            "printf '%s' '" + cap_settings(compact=True) + "' | tee " + PROJ_SETTINGS, cwd=NOGIT)
 sh("cap: a sed -i on a project settings file asks, and names the value it arrives at",
    "sed -i 's/\"" + CAP_KEY + "\": \"sonnet\"/\"" + CAP_KEY + "\": \"" + OPUS + "\"/' "
    + PROJ_SETTINGS,
@@ -6016,6 +6055,150 @@ add("cap: an edit list holding something other than an object allows", "allow", 
     cwd=NOGIT, file_path=PROJ_LOCAL, edits=[7])
 add("cap: a payload with no tool name allows", "allow",
     raw=json.dumps({"tool_input": {"file_path": PROJ_LOCAL, "content": cap_settings()}}))
+
+
+# =========================================================================== 6c. ask alone
+FAMILY = "ask-alone"
+#
+# A step the guard would ASK on, chained with other steps (`&&`, `||`, `;`, `|`, newline), denies to
+# the agent, and the remedy says to run that step alone or drop it (CHAIN_ASK and ALONE, near sh()).
+# A lone ask step still asks. A deny anywhere in the command still wins. The ask steps, one case
+# each below, are the four shell routes that print an "ask" (guard.py, judge_shell):
+#   rule 1  `git worktree prune`, with a stale record to drop        (WORKTREE_PRUNE_ASK_REASON)
+#   rule 1  a discard in a linked worktree: reset --hard, restore .  (TREE_ASK_REASON)
+#   rule 4  a forced push that may reach the default branch          (PUSH_ASK_REASON)
+#   rule 8  a shell write of a settings file that names the cap key  (CAP_ASK_REASON)
+# The fifth route, rule 8 on a Write/Edit/MultiEdit call, holds one tool call and no chain, so it has
+# no chained form. The re-pointed cases above (named "denies as a chained ask step") cover the
+# cd, export, PowerShell, pipe and `-C` shapes of the same rules.
+#
+# RED TODAY, by design: every case that expects a deny from a lone ask step, and every case where
+# an ask step stands ahead of a later deny (the ask exits first). GREEN TODAY, by design: the lone
+# asks, the allows, and the deny-before-ask order. Those pin what the build must not change.
+
+PRUNE = VCS + " worktree prune"
+
+
+def chained_prune(name, command, **kw):
+    """A chained prune: a deny that names the prune step and says to run it alone."""
+    chained_ask(name, command, cwd=WTPRUNE, carries=("worktree prune",), **kw)
+
+
+# (a) THE INCIDENT, then every chain operator, a step before the prune, the PowerShell tool, a
+# subagent, and two ask steps in one command.
+chained_prune("ask-alone: the incident, prune then worktree add then grep, denies and names the prune",
+              PRUNE + " && " + VCS + ' worktree add -b x "$TEMP/wt-x" origin/y && grep -c x README.md')
+for _label, _tail in (("&&", " && echo x"), ("||", " || echo x"), (";", "; echo x"),
+                      ("a pipe", " | cat"), ("a newline", "\necho x")):
+    chained_prune("ask-alone: a prune joined to another step by %s denies" % _label, PRUNE + _tail)
+chained_prune("ask-alone: a step before the prune denies", "echo x && " + PRUNE)
+chained_prune("ask-alone: a line before the prune denies", "echo x\n" + PRUNE)
+chained_prune("ask-alone: two prunes in one command deny", PRUNE + " && " + PRUNE)
+chained_prune("ask-alone: a prune chained in the PowerShell tool denies", PRUNE + "; Write-Output x",
+              tool="PowerShell")
+chained_prune("ask-alone: a subagent's chained prune denies the same way", PRUNE + " && echo x",
+              agent_id="agent-ask-alone")
+
+# STRINGS AND COMMENTS (building-scanner-respects-strings). The count of steps comes from the shell's
+# own quoting: a comment opener inside a string hides no step, a newline inside a string adds none,
+# a lone quote in a comment or a heredoc body swallows none, and a separator inside a string,
+# a comment or a heredoc body is no chain.
+chained_prune("ask-alone: a # inside a quoted argument does not hide the && after it",
+              PRUNE + ' --expire "a # b" && echo x')
+chained_prune("ask-alone: a /* inside a quoted argument does not hide the && after it",
+              PRUNE + " --expire '/* x' && echo x")
+chained_prune("ask-alone: a // inside a quoted argument before the prune does not hide it",
+              "echo 'http://x' && " + PRUNE)
+chained_prune("ask-alone: a newline inside a quoted argument adds no step, the && after it does",
+              PRUNE + ' --expire "a\nb" && echo x')
+chained_prune("ask-alone: a heredoc with a lone apostrophe in its body, after the prune, denies",
+              PRUNE + "\ncat <<'EOF'\ndon't\nEOF")
+
+# (b) A LONE ASK STEP STILL ASKS, whatever its text holds: a trailing newline, a comment line, a
+# trailing comment with && and a lone quote, a flag, a quoted flag value full of separators and
+# comment openers, a multi-line quoted flag value, and heredoc bodies with separators or a lone quote.
+sh("ask-alone: a prune alone still asks", PRUNE, "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a prune alone in the PowerShell tool still asks", PRUNE, "ask", "shared-tree",
+   tool="PowerShell", cwd=WTPRUNE)
+sh("ask-alone: a prune with a trailing newline is alone, so it asks", PRUNE + "\n", "ask",
+   "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a prune under a comment line is alone, so it asks",
+   "# drop the stale record\n" + PRUNE, "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a prune with a trailing comment holding && and a lone quote is alone, so it asks",
+   PRUNE + " # it's && echo x", "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a prune with a flag is alone, so it asks", PRUNE + " --expire 2.days", "ask",
+   "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a quoted flag value holding every separator and comment opener is no chain",
+   PRUNE + ' --expire "a && b; c || d | e # f // g /* h"', "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a quoted flag value holding a newline is no chain",
+   PRUNE + ' --expire "1.day\n2.days"', "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a heredoc body holding && and ; is no chain",
+   PRUNE + " <<'EOF'\na && b; c\nEOF", "ask", "shared-tree", cwd=WTPRUNE)
+sh("ask-alone: a heredoc body holding a lone apostrophe is no chain",
+   PRUNE + " <<'EOF'\ndon't && stop\nEOF", "ask", "shared-tree", cwd=WTPRUNE)
+
+# (c) THE OTHER ASK STEPS, each alone (still asks) and chained with an echo (denies). The reason
+# names the step by its own text or by the rule that asked for it, and says to run it alone.
+sh("ask-alone: a hard reset alone in a worktree still asks", VCS + " reset --hard", "ask",
+   "shared-tree", cwd=GITWT)
+sh("ask-alone: a whole-tree restore alone in a worktree still asks, and names the -C form",
+   VCS + " restore .", "ask", "shared-tree", cwd=GITWT, carries="git -C <lane> restore <file>")
+chained_ask("ask-alone: a hard reset in a worktree chained with an echo denies",
+            VCS + " reset --hard && echo done", cwd=GITWT,
+            carries=(("reset --hard", "shared-tree"),))
+sh("ask-alone: a forced push to the default branch alone still asks",
+   VCS + " push --force origin HEAD:main", "ask", "force-push", cwd=PUSHFEAT)
+chained_ask("ask-alone: a forced push to the default branch chained with an echo denies",
+            VCS + " push --force origin HEAD:main && echo done", cwd=PUSHFEAT,
+            carries=(("push --force", "force-push"),))
+CHAIN_CAP_WRITE = "printf '%s' '" + cap_settings(compact=True) + "' > settings.local.json"
+sh("ask-alone: a cap write alone to a settings file still asks", CHAIN_CAP_WRITE, "ask",
+   "subagent-model-cap", cwd=PROJ)
+chained_ask("ask-alone: a cap write to a settings file chained after an echo denies",
+            "echo done && " + CHAIN_CAP_WRITE, cwd=PROJ,
+            carries=((CAP_KEY, "settings.local.json", "subagent-model-cap"),))
+
+# (d) NO ASK STEP, NO DENY. A chain that holds no ask step keeps its old answer, so the new deny
+# cannot turn an ordinary chain, a read, or a noted discard into a refusal.
+sh("ask-alone: a dry-run prune chained with an echo allows", PRUNE + " -n && echo x", "allow",
+   cwd=WTPRUNE)
+sh("ask-alone: a prune with nothing to prune, chained with an echo, allows", PRUNE + " && echo x",
+   "allow", cwd=WTMAIN)
+sh("ask-alone: a discard in an agent's own worktree is noted, not asked, so a chain allows",
+   VCS + " reset --hard && echo done", "allow", cwd=AGENTWT)
+sh("ask-alone: a lease push off the default branch, chained with an echo, allows",
+   VCS + " push --force-with-lease --force-if-includes && echo x", "allow", cwd=PUSHFEAT)
+sh("ask-alone: a settings write that names neither cap variable, chained, allows",
+   "echo x && printf '%s' '" + json.dumps({"env": {"TZ": "UTC"}}) + "' > settings.local.json",
+   "allow", cwd=PROJ)
+sh("ask-alone: a chain of git reads in a worktree allows",
+   VCS + " status && " + VCS + " diff --stat", "allow", cwd=GITWT)
+
+# (e) A DENY ANYWHERE STILL WINS, in either order. Today the ask exits first, so the deny that
+# stands after it in the guard's own rule order (kill, env file, a stash push) never prints. The
+# printed reason is the deny rule's own, and never the ask-alone reason.
+
+
+def deny_beats(name, command, rule, **kw):
+    sh(name, command, "deny", rule, lacks=(CHAIN_ASK,), **kw)
+
+
+deny_beats("ask-alone: a kill after the prune still denies as a kill",
+           PRUNE + " && pkill -f node", "machine-wide-kill", cwd=WTPRUNE)
+deny_beats("ask-alone: a kill before the prune still denies as a kill",
+           "pkill -f node && " + PRUNE, "machine-wide-kill", cwd=WTPRUNE)
+deny_beats("ask-alone: an env file read before the prune still denies as an env file",
+           "cat " + ENV + " && " + PRUNE, "env-file", cwd=WTPRUNE)
+deny_beats("ask-alone: an env file read after a forced push ask still denies as an env file",
+           VCS + " push --force origin HEAD:main && cat " + ENV, "env-file", cwd=PUSHFEAT)
+deny_beats("ask-alone: a stash push after a hard reset in a worktree denies as a stash push",
+           VCS + " reset --hard && " + VCS + " stash push -u -m lane", "shared-tree", cwd=GITWT,
+           carries="stash stack")
+deny_beats("ask-alone: a stash push before a hard reset in a worktree denies as a stash push",
+           VCS + " stash push -u -m lane && " + VCS + " reset --hard", "shared-tree", cwd=GITWT,
+           carries="stash stack")
+deny_beats("ask-alone: a kill before a cap write still denies as a kill",
+           "pkill -f node && " + CHAIN_CAP_WRITE, "machine-wide-kill", cwd=PROJ)
 
 
 # =========================================================================== ordinary work
