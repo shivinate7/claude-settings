@@ -1030,8 +1030,8 @@ PLAIN_403 = "failed to get runs: HTTP 403: Resource not accessible by integratio
 PLAIN_403_BRANCH = "HTTP 403: Must have admin rights to Repository. (https://api.github.com/repos/o/r/branches/main/protection/required_status_checks)"
 PLAIN_403_API = ('{"message":"Resource not accessible by integration","documentation_url":"https://docs.github.com/rest","status":"403"}'
                  "gh: Resource not accessible by integration (HTTP 403)")
-# Owner's pick, no ruling yet: the longest one wait on a Retry-After or a reset time. One wait must not hang the merge.
-RATE_WAIT_CAP = 60
+# The GraphQL form on `gh pr checks`, `gh pr view` and `gh pr merge`: no HTTP status in the line.
+RATE_GQL_ALREADY = "GraphQL: API rate limit already exceeded for user ID 309471439."
 
 def drop_config(env):
     """Remove .github/stamp.json from main and feat, as in 5 of the owner's 8 repos. Then pull main into env.co."""
@@ -1481,6 +1481,10 @@ class GhHalf(Env):
 
     def test_a_pr_checks_rate_limit_403_is_a_network_error_retried_then_stopped(self):
         self.checks_read_fails(RATE_GQL_403)
+        self.assertEqual(self.paused, [merge.NET_PAUSE] * 3)
+
+    def test_a_pr_checks_graphql_rate_limit_already_exceeded_is_a_network_error_retried_then_stopped(self):
+        self.checks_read_fails(RATE_GQL_ALREADY)  # owner's word: it retries like the 403
         self.assertEqual(self.paused, [merge.NET_PAUSE] * 3)
 
     def test_a_retry_after_on_a_pr_checks_429_is_the_wait_before_the_retry(self):
@@ -2953,6 +2957,10 @@ class RateLimitLines(unittest.TestCase):
             with self.subTest(out=out[:70]):
                 self.assertTrue(merge.is_net(1, out))
 
+    def test_a_graphql_rate_limit_already_exceeded_is_a_network_error(self):
+        self.assertTrue(merge.is_net(1, RATE_GQL_ALREADY))
+        self.assertTrue(merge.is_net(1, "Retry-After: 17\n" + RATE_GQL_ALREADY))
+
     def test_a_403_that_is_not_a_rate_limit_is_not_a_network_error(self):
         for out in (PLAIN_403, PLAIN_403_BRANCH, PLAIN_403_API):  # the same shapes as the rate-limit texts
             with self.subTest(out=out[:70]):
@@ -2962,6 +2970,7 @@ class RateLimitLines(unittest.TestCase):
         for out in ('GraphQL: Pull Request is not mergeable: #7 "Handle API rate limit exceeded"',
                     'GraphQL: Pull Request is not mergeable: #7 "Back off on a secondary rate limit"',
                     'GraphQL: Pull Request is not mergeable: #7 "Fix: HTTP 403: API rate limit exceeded"',
+                    'GraphQL: Pull Request is not mergeable: #7 "Fix: GraphQL: API rate limit already exceeded"',
                     '[{"name":"API rate limit exceeded guard","bucket":"fail","link":""}]'):
             with self.subTest(out=out[:70]):
                 self.assertFalse(merge.is_net(1, out))
@@ -2969,7 +2978,7 @@ class RateLimitLines(unittest.TestCase):
 class RateLimitWait(unittest.TestCase):
     """retry_net and Host.gh on a rate-limited call (lane merge-rate-limit): how many tries, and how long each wait is. The pause is a
     recorder, so nothing sleeps. A hint is a header line `Retry-After: <seconds>` or `X-Ratelimit-Reset: <epoch seconds>`, as `gh api -i` prints it.
-    A wait honors it to 1 s over, is never more than RATE_WAIT_CAP, and is never negative (time.sleep raises on one)."""
+    A wait honors it to 1 s over, is never more than merge.RATE_WAIT_CAP, and is never negative (time.sleep raises on one)."""
     NOW = 1000.0
 
     def setUp(self):
@@ -3004,6 +3013,13 @@ class RateLimitWait(unittest.TestCase):
         self.assertEqual(self.retry((1, RATE_403), (1, RATE_SECONDARY_403), (0, "[]")), (0, "[]", 2))
         self.assertEqual(self.pauses, [merge.NET_PAUSE] * 2)  # no hint in either text, so no wait but the normal one
 
+    def test_the_wait_cap_is_60_seconds(self):  # orchestrator's call, 2026-10-14: the one value, so the other cases read the constant
+        self.assertEqual(merge.RATE_WAIT_CAP, 60)
+
+    def test_a_graphql_rate_limit_already_exceeded_is_retried_with_the_normal_pause(self):
+        self.assertEqual(self.retry((1, RATE_GQL_ALREADY), (0, "[]")), (0, "[]", 1))
+        self.assertEqual(self.pauses, [merge.NET_PAUSE])
+
     def test_a_rate_limit_403_that_never_clears_is_tried_four_times(self):
         self.assertEqual(self.retry((1, RATE_403)), (1, RATE_403, 3))
         self.assertEqual(self.calls, 4)  # one try and three retries
@@ -3029,11 +3045,11 @@ class RateLimitWait(unittest.TestCase):
                     self.assert_waits(17)
 
     def test_a_retry_after_over_the_cap_waits_the_cap(self):
-        for seconds in (RATE_WAIT_CAP + 1, 3600):
+        for seconds in (merge.RATE_WAIT_CAP + 1, 3600):
             with self.subTest(seconds=seconds):
                 self.pauses.clear()
                 self.retry((1, f"Retry-After: {seconds}\n" + R429), (0, "[]"))
-                self.assertEqual(self.pauses, [RATE_WAIT_CAP])
+                self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
 
     # Host.gh: the reset time, read against the host's own clock; and the stop
     def test_a_reset_time_is_the_wait_on_a_429_and_on_a_rate_limit_403(self):
@@ -3047,13 +3063,13 @@ class RateLimitWait(unittest.TestCase):
     def test_a_reset_time_far_ahead_waits_the_cap(self):
         self.replies((1, f"X-RateLimit-Reset: {int(self.NOW) + 3600}\n" + R429), (0, "[]"))
         self.host().gh(["run", "list"])
-        self.assertEqual(self.pauses, [RATE_WAIT_CAP])
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
 
     def test_a_reset_time_already_past_never_waits_a_negative_time(self):
         self.replies((1, f"X-Ratelimit-Reset: {int(self.NOW) - 100}\n" + R429), (0, "[]"))
         self.host().gh(["run", "list"])
         self.assertEqual(len(self.pauses), 1, self.pauses)
-        self.assertTrue(0 <= self.pauses[0] <= RATE_WAIT_CAP, self.pauses)
+        self.assertTrue(0 <= self.pauses[0] <= merge.RATE_WAIT_CAP, self.pauses)
 
     def test_a_rate_limit_with_no_hint_waits_the_normal_pause_whatever_its_timestamp_says(self):
         self.replies((1, RATE_403), (0, "[]"))  # "timestamp 2026-10-14 12:26:42 UTC" is the request's time, not a reset
