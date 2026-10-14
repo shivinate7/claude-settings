@@ -4508,9 +4508,7 @@ class AgentWorktreeReapTests(unittest.TestCase):
 
     # ---- (h) a failed read
 
-    def kept_and_logged(self, tree, ctl, out, name):
-        self.assertKept(tree, out)
-        self.assertRemoved(ctl, out)
+    def assertLogged(self, out, name):
         try:
             with open(self.run_log, encoding="utf-8") as handle:
                 out += "\n" + handle.read()
@@ -4519,6 +4517,11 @@ class AgentWorktreeReapTests(unittest.TestCase):
         logged = [line for line in out.splitlines() if name in line
                   and any(word in line.lower() for word in ("unreadable", "unknown", "fail"))]
         self.assertTrue(logged, "the failed read is not logged (report or run log):\n" + out)
+
+    def kept_and_logged(self, tree, ctl, out, name):
+        self.assertKept(tree, out)
+        self.assertRemoved(ctl, out)
+        self.assertLogged(out, name)
 
     def test_h_keeps_a_tree_when_any_git_read_in_it_fails_and_logs_it(self):
         tree, ctl = self.agent("h1"), self.agent("ctl")
@@ -4551,9 +4554,7 @@ class AgentWorktreeReapTests(unittest.TestCase):
         self.assertTrue([call for call in self.git_calls if "ls-remote" in call],
                         "no `git ls-remote` ran. Report: " + self.lines_about(out, "agent-h4"))
         self.assertKept(tree, out)
-        logged = [line for line in out.splitlines() if "agent-h4" in line
-                  and any(word in line.lower() for word in ("unreadable", "unknown", "fail"))]
-        self.assertTrue(logged, "the failed read is not logged: " + out)
+        self.assertLogged(out, "agent-h4")
         out = self.run_sweep(5)
         self.assertRemoved(tree, out)
 
@@ -4577,6 +4578,47 @@ class AgentWorktreeReapTests(unittest.TestCase):
         self.assertTrue(fired, "no `--contains` read was made for the tree. Report: "
                         + self.lines_about(out, "agent-h2"))
         self.kept_and_logged(tree, ctl, out, "agent-h2")
+
+    # ---- (j) the agent rule's own two reads: idle time, and the remote-tracking ref
+
+    def test_j_keeps_a_tree_whose_idle_time_cannot_be_read(self):
+        """Only the idle read fails. The tree is clean, pushed, and not merged, so the older
+        rulings keep it before 24 hours and the agent rule alone decides. An idle time the rule
+        cannot read is no idle time: the same tree goes in a second run that can read it."""
+        tree = self.agent("j1")
+        fired = []
+
+        def match(argv, cwd):
+            hit = "--absolute-git-dir" in argv and _aimed_at(tree, argv, cwd)
+            if hit:
+                fired.append(argv)
+            return hit
+
+        out = self.run_sweep(5, fail=match)
+        self.assertTrue(fired, "no idle read (`rev-parse --absolute-git-dir`) ran in the tree. "
+                        "Report: " + self.lines_about(out, "agent-j1"))
+        self.assertKept(tree, out)
+        self.assertLogged(out, "agent-j1")
+        out = self.run_sweep(5)
+        self.assertRemoved(tree, out)
+
+    def test_j_keeps_a_tree_the_remote_lists_when_no_tracking_ref_holds_its_head(self):
+        """The live ls-remote lists the head, so a rule that read only that would remove the
+        tree. `git branch -r --contains HEAD` is empty, because the tracking ref is gone. The
+        tree stays until a fetch brings the ref back."""
+        tree = self.agent("j2")
+        sha = run_vcs(tree, "rev-parse", "HEAD").stdout.strip()
+        require(run_vcs(self.repo, "update-ref", "-d", "refs/remotes/origin/lane-j2").returncode == 0,
+                "could not delete the tracking ref")
+        require(sha in run_vcs(self.repo, "ls-remote", "--heads", "origin").stdout,
+                "the remote does not list the head")
+        require(not run_vcs(tree, "branch", "-r", "--contains", "HEAD").stdout.strip(),
+                "a remote-tracking ref still holds HEAD")
+        out = self.run_sweep(5)
+        self.assertKept(tree, out)
+        require(run_vcs(self.repo, "fetch", "-q", "origin").returncode == 0, "fetch failed")
+        out = self.run_sweep(5)
+        self.assertRemoved(tree, out)
 
 
 class MergedCountsAsSafeTests(unittest.TestCase):
