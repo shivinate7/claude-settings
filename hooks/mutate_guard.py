@@ -673,8 +673,12 @@ MUTATIONS = [
      'def under_session_scratchpad(where: str, session_id: str) -> bool:',
      'def under_session_scratchpad(where: str, session_id: str) -> bool:\n    return False', "guard", "scratchpad: a discard in this session's own scratchpad is private"),
     ("scratchpad: every path reads as this session's scratchpad",
-     '    parts = real.split(os.sep)',
-     '    return True\n    parts = real.split(os.sep)', "guard", "scratchpad: another session's scratchpad is not this session's"),
+     '    parts = real.split(os.sep)\n    for index in range(len(parts) - 1):',
+     '    return True\n    parts = real.split(os.sep)\n    for index in range(len(parts) - 1):', "guard", "scratchpad: another session's scratchpad is not this session's"),
+    ("scratchpad: no path reads as any session's scratchpad",
+     '    return any(os.path.normcase(parts[i + 1]) == "scratchpad"',
+     '    return False and any(os.path.normcase(parts[i + 1]) == "scratchpad"', "guard",
+     "audit-high paths: test-author Edit of another session's scratchpad outside a repo is refused"),
     ("shared-tree: restore collapses back to a name match, --staged or not",
      '    staged = "--staged" in args or "-S" in args\n'
      '    worktree = "--worktree" in args or "-W" in args\n'
