@@ -2792,6 +2792,47 @@ class SilentWait(Env):
         self.assertIn("waiting on gate", out)
         self.assertIn("workflow gate", out)
 
+_real_threading = threading  # the real module. merge's `threading` name is swapped in the scan cases, this name is not
+
+class TickEvent:
+    """Stands in for threading.Event in merge.undo_check. wait() returns only when a test releases a tick,
+    so the heartbeat thread runs when the test says so. set() ends it, as a real Event does."""
+    def __init__(self):
+        self.flag, self.ticks = _real_threading.Event(), _real_threading.Semaphore(0)
+
+    def wait(self, timeout=None):
+        self.ticks.acquire()
+        return self.flag.is_set()
+
+    def set(self):
+        self.flag.set()
+        self.ticks.release()
+
+    def is_set(self):
+        return self.flag.is_set()
+
+    def tick(self):
+        self.ticks.release()
+
+class QuickEvent(_real_threading.Event):
+    """A real Event whose wait() ignores its timeout and waits 20 ms: the heartbeat's 60 s pass, made tiny."""
+    def wait(self, timeout=None):
+        return super().wait(0.02)
+
+class FakeThreading:
+    """merge's `threading` name for one undo_check call. Event is the test's stand-in. Thread is the real class,
+    and every thread it makes is kept, so the test can join it. Any other name is the real module's."""
+    def __init__(self, event_cls):
+        self.Event, self.threads = event_cls, []
+
+    def Thread(self, *a, **k):
+        t = _real_threading.Thread(*a, **k)
+        self.threads.append(t)
+        return t
+
+    def __getattr__(self, name):
+        return getattr(_real_threading, name)
+
 class ScanProgress(Env):
     """The silent-undo scan (lint/check_silent_undo.py) can run for 14 minutes on a long branch. merge.undo_check
     printed nothing until it ended. It must print a start line with the size of the scan, and an end line.
@@ -2818,6 +2859,113 @@ class ScanProgress(Env):
     def test_the_scan_says_when_it_ends(self):
         _, after = self.run_undo()
         self.assertRegex(after, r"(?m)^merge: silent-undo scan done", f"printed after the scan: {after!r}")
+
+    def stub(self, check=None):
+        """A stand-in for lint/check_silent_undo: no finding, no progress hook, and a real Unknown class, so an
+        error that is not Unknown reaches merge's finally, not a TypeError in its except clause."""
+        s = unittest.mock.MagicMock()
+        s.progress, s.Unknown = None, type("Unknown", (Exception,), {})
+        s.check.side_effect = check if check is not None else (lambda *a, **k: ([], []))
+        return s
+
+    def run_undo_scan(self, stub, event_cls=None, on_line=None):
+        """Run merge.undo_check on the test checkout with `stub` as the scanner. event_cls swaps in merge's
+        threading.Event. on_line(line, from_main_thread) sees each line merge prints, after it prints. -> the printed text."""
+        out, real_say = io.StringIO(), merge.say
+
+        def say(*lines):
+            real_say(*lines)
+            for line in lines:
+                if on_line:
+                    on_line(line, _real_threading.current_thread() is _real_threading.main_thread())
+
+        fake = FakeThreading(event_cls or _real_threading.Event)
+        with unittest.mock.patch.dict(sys.modules, {"check_silent_undo": stub}), unittest.mock.patch.object(merge, "threading", fake), \
+                unittest.mock.patch.object(merge, "say", say), contextlib.redirect_stdout(out):
+            try:
+                merge.undo_check(self.co, "origin/main")
+            finally:
+                for t in fake.threads:
+                    t.join(1)
+        return out.getvalue()
+
+    def test_no_heartbeat_prints_after_the_scan_is_done(self):
+        """The race: a beat is due as the scan ends. The done line prints first. Then a tick lets the beat's wait
+        return, and the beat prints, before done.set() runs. The done line's hook holds merge until that beat has printed."""
+        made, beat_printed = [], _real_threading.Event()
+
+        def make_event():
+            made.append(TickEvent())
+            return made[-1]
+
+        def on_line(line, from_main):
+            if from_main and line.startswith("merge: silent-undo scan done"):
+                made[0].tick()
+                beat_printed.wait(0.5)
+            elif not from_main:
+                beat_printed.set()
+
+        out = self.run_undo_scan(self.stub(), event_cls=make_event, on_line=on_line)
+        lines = out.splitlines()
+        done = [i for i, line in enumerate(lines) if line.startswith("merge: silent-undo scan done")]
+        self.assertTrue(done, f"no done line printed: {out!r}")
+        self.assertEqual(done[-1], len(lines) - 1, f"printed after the scan was done: {lines[done[-1] + 1:]}")
+
+    def test_a_scan_that_outlasts_the_interval_prints_a_beat_before_it_ends(self):
+        """A 20 ms beat (QuickEvent) and a scan that holds until a beat prints, for up to 1 s."""
+        beat_printed, during = _real_threading.Event(), []
+
+        def on_line(line, from_main):
+            if not from_main and line.startswith("merge: silent-undo scan:"):
+                beat_printed.set()
+
+        def check(*a, **k):
+            during.append(beat_printed.wait(1))
+            return [], []
+
+        out = self.run_undo_scan(self.stub(check), event_cls=QuickEvent, on_line=on_line)
+        self.assertEqual(during, [True], f"no beat printed during the scan: {out!r}")
+
+    def test_the_progress_hook_is_cleared_after_a_scan(self):
+        stub = self.stub()
+        self.run_undo_scan(stub)
+        self.assertIsNone(stub.progress, "the progress hook stayed set after the scan")
+
+    def test_the_progress_hook_is_cleared_when_the_scan_raises(self):
+        stub = self.stub(RuntimeError("scan broke"))
+        with self.assertRaises(RuntimeError):
+            self.run_undo_scan(stub)
+        self.assertIsNone(stub.progress, "the progress hook stayed set after the scan raised")
+
+class WaitStepLines(unittest.TestCase):
+    """Each long step prints its name before its first gh call can block: the check read and the merge call.
+    A probe stands in for `gh`. It snapshots stdout at the first call, then raises. No shim, no git repo."""
+    class Probe(Exception):
+        pass
+
+    def first_call_text(self, host, step):
+        """-> the stdout printed before the first gh call that `step` makes."""
+        out, seen = io.StringIO(), []
+
+        def gh(args, cwd=None):
+            seen.append(out.getvalue())
+            raise self.Probe(args)
+
+        host.gh = gh
+        with contextlib.redirect_stdout(out), self.assertRaises(self.Probe):
+            step(host)
+        self.assertTrue(seen, "no gh call was made")
+        return seen[0]
+
+    def test_the_check_step_is_named_before_its_first_gh_read(self):
+        host = merge.Host(required="protection", base="main", minute=60, now=lambda: 0.0, pause=lambda s: None)
+        before = self.first_call_text(host, lambda h: h.wait_checks(7, "sha", 15))
+        self.assertRegex(before, r"(?m)^merge: checking", f"printed before the first gh read: {before!r}")
+
+    def test_the_merge_step_is_named_before_the_merge_call(self):
+        host = merge.Host(required=["gates"], base="main", minute=60, now=lambda: 0.0, pause=lambda s: None)
+        before = self.first_call_text(host, lambda h: h.merge(7, "merge", "sha"))
+        self.assertRegex(before, r"(?m)^merge: merging #7", f"printed before the merge call: {before!r}")
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--child":
