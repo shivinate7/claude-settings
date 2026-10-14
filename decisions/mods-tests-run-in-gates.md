@@ -41,13 +41,7 @@ The step is last. A red mod test therefore does not skip the other steps: zizmor
 
 ## Holes, named
 
-1. Cause: `mods/plain-diff/check.mjs` is a self-check script, and the glob skips it. Effect: a red `check.mjs` passes CI. Fix: rename it to `*.test.mjs`, or decide that it is out of scope.
-2. Cause: the glob reaches only root-level `mods/<name>/*.test.mjs`. Effect: a test in `mods/<name>/tests/`, or named `*.test.js`, never runs, with no signal. Fix: widen the glob.
-3. Cause: `mods/session-board/session-board.test.mjs` has two real-timer margins, about lines 709-718 and 928-940. Each is `within(200)` against a 100 ms grace. Effect: both margins are unproven on a slow runner. Fix: none named.
-4. Cause: the runner's Node version is unknown. The tests need `register` from `node:module`, which needs Node 20.6 or later. Effect: an older Node cannot run them. Fix: read the version in the step, or set it.
-5. Cause: no test pins that the step is last. Effect: a step added after it is skipped when a mod test fails. The job stays red, so the verdict is right. Fix: none named.
-6. Cause: Claude Code's worktree isolation refused the builder's `wsl` command. The refusal text said the command "cannot be shown not to run git". The claude-settings guard was not the source: it had no WSL rule before commit eee2f72 (lane wsl-test-list). Decision `wsl-allow-list` (WSL command allow list) now sets that rule. The builder ran the mod tests on Windows only. The mod tests ran on Linux only through the owner's own terminal. That run was WSL: plain-diff 72 of 72, session-board 119 of 119, Node v22.23.1. Effect: those runs are not CI runs. The first CI run on Linux is the real proof. Fix: re-point a red Linux test, never skip it.
-7. Cause, minor: `lint/test_harness_scope.py` lines 215-217 hold the stale comment "ALL stays as it is". `STEP_FLAGS` (line 24) lacks `mods`. The pipe regex in `mods_step_problems` ignores quotes and comments. `.github/scripts/harness-scope.sh` line 5 is about 140 characters long. Effect: the comment misleads a reader, and the regex can misread a pipe inside a quote or comment. Fix: correct the comment, add `mods` to `STEP_FLAGS`, make the regex skip quotes and comments, and wrap line 5.
+Debts: `mods-check-mjs-skipped` (a red `check.mjs` passes CI), `mods-tests-glob-too-narrow` (nested and `*.test.js` tests never run), `mods-session-board-timer-margins` (two real-timer margins are unproven on a slow runner), `mods-node-version-unpinned` (the runner's Node version is unknown), `mods-step-order-unpinned` (no test pins that this step is last), `mods-linux-proof-pending` (the first CI run on Linux is the real proof), `mods-harness-scope-lint-defects` (four minor defects in the harness scope lint).
 
 ## Unverified
 

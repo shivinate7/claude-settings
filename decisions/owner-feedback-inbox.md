@@ -68,19 +68,7 @@ Same files. Prove on the Mac clone after `git pull` and install.sh.
 
 ## Holes, named
 
-Review round 3 left these open. Each is low harm, ranked by harm.
-
-- Mid-turn messages: UserPromptSubmit fired for owner messages sent mid-turn in the audit
-  session of 2026-10-13 (the time line showed on each). No test pins it.
-- If the inbox path cannot be built (an import error, or an odd session id), an `fb` message
-  is dropped with one stderr line only.
-- While capture is open, `fb:done` and `` `fb done` `` in backticks are captured and do not
-  close it. The turn-end reminder shows each time, so the owner can send `fb done` again.
-- A partial write can leave a fence open. Later blocks then read as one message with no
-  items, and the gate repeats that block. It needs a disk-full failure.
-- An unreadable inbox drops the open ids from the post-compaction note. The Stop gate still
-  names the file.
-- No test covers `fb	done` or `fb - done` while capture is open. The code handles both.
+Debts, in order of harm: `inbox-midturn-prompt-untested` (mid-turn owner messages fire UserPromptSubmit, and no test pins it), `inbox-path-drop-silent` (an `fb` message is dropped with one stderr line), `inbox-done-forms` (backtick and other done forms do not close capture), `inbox-partial-write-fence` (a partial write can leave a fence open), `inbox-unreadable-drops-ids` (an unreadable inbox drops open ids from the compaction note).
 
 Kind: build
 Plan: decisions/owner-feedback-inbox.md#windows (windows)

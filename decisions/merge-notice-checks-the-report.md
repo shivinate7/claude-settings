@@ -83,19 +83,11 @@ landed.
 
 ## Holes, named
 
-This notice now depends on the reply's own shape. A turn that merges and
-writes no report at all gets an empty block from `report_gate.block_text`.
-`already_named` then keeps every label unfiled, so the notice still fires.
-That is the safe side of the hole.
+Debts: `merge-notice-unrelated-number` (a digit in the reply can suppress a real merge notice).
 
-The unsafe side is the opposite case. A reply's blockquote could hold the
-digits of a merged PR's number for an unrelated reason. A commit SHA
-fragment, a port number, another PR's number written nearby, any of these
-can supply the digits. `already_named` narrows this by requiring the number
-to follow `#` or `PR`/`pr`, never a bare digit run alone. A coincidental
-string like `PR 75` elsewhere in the block would still suppress a real,
-unnamed merge of PR 75. Nothing here checks that the mention refers to the
-merge this hook is naming, and not some other PR sharing its number.
+## Named limits
+
+- A turn that merges and writes no report still fires the notice. An empty block from `report_gate.block_text` keeps every label unfiled, so this is the safe side.
 
 ## The mechanism
 
@@ -103,3 +95,6 @@ This entry adds no new CLAUDE.md rule anchor. It implements the existing
 `verification-cry-wolf-guard-is-spent` rule, for one guard: the merge notice
 in `hooks/decision_watch.py`. The fixtures above are its mechanism. Run them
 with `python3 lint/test_gates.py`.
+
+Kind: process
+Home: hooks/decision_watch.py

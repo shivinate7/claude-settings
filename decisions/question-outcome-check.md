@@ -102,28 +102,7 @@ Owner rulings, 2026-10-08:
 
 ## Holes, named
 
-Rounds 2 and 3 of the question-outcome review and round 3 of judge-cap-off. Each stays open.
-
-- A decorated Goal line earlier in the question, such as `- goal: old`, masks a real
-  Problem-first order. The order check reads that line first, so it passes. Presence passes
-  too, on the later plain `Goal:` line.
-- `1. Problem:` (digit prefix) and `Problem :` (space before the colon) do not count as
-  Problem lines. Each passes presence only with a second plain `Problem:` line, and then
-  passes the order check even before `Goal:`.
-- A punctuation-led preface line before `Goal:`, such as `- problem: note`, is denied. That
-  is correct: the question breaks Goal first. The free pass lets the retry through.
-- Question text and option labels reach the judge prompt with no fence and no defang
-  (`hooks/question_outcome.py` near line 385). An asker can forge an Owner block there. Low
-  risk: the asker already writes the Goal line. Debt: `question-text-not-defanged`.
-- The defang matches the exact fence tokens only, so `<<<end>>>` and `<<< END>>>` pass
-  unchanged. Whether the judge reads them as fences is unmeasured. Debt:
-  `question-text-not-defanged`.
-- The cut-mark reserve stays when no owner message can be cut, so the prompt can go up to 36
-  chars over PROMPT_MAX. The hook then says the check did not run. Practically unreachable.
-  Debt: `judge-cut-mark-reserve-over`.
-- That PROMPT_MAX fits the model's context is unmeasured for token-dense text. Over the
-  context, the model call fails and the hook says the check did not run. Debt:
-  `model-clip-unmeasured`.
+Debts: `question-goal-line-masks-order` (a decorated Goal line masks a late Problem line), `question-problem-line-forms` (`1. Problem:` and `Problem :` do not count), `question-text-not-defanged` (question text and option labels reach the judge with no fence, and `<<< END>>>` forms pass), `judge-cut-mark-reserve-over` (the cut-mark reserve can push the prompt past PROMPT_MAX), `model-clip-unmeasured` (PROMPT_MAX fits the model context, unmeasured for token-dense text).
 
 Kind: process
 Home: hooks/question_outcome.py
