@@ -757,26 +757,27 @@ def _invoke_model_argv_body():
     )
 
 
-# A 60,000-char prompt reaches the child whole, on stdin. The child is a real process. A bare
-# `claude` cannot be started from a script on Windows, so the shim in the case runs this
-# interpreter on a fake that reads stdin and echoes its length and last 40 chars as the verdict.
-# Windows text-mode stdin writes each "\n" as "\r\n", so the fake folds CRLF back to LF: the
-# check then measures the prompt's content, not the pipe's line endings.
+# Prompts reach the child on stdin. The child is a real process. A bare `claude` cannot be
+# started from a script on Windows, so the shim in each case runs this interpreter on a fake.
+# The fake reads stdin as raw bytes with no newline folding. It returns the bytes hex-encoded,
+# so a case compares what the child received with what was sent.
 FAKE_CLAUDE_SRC = '''\
 import json, sys
-text = sys.stdin.buffer.read().decode("utf-8").replace("\\r\\n", "\\n")
-verdict = {"verdict": "ALLOW", "stdin_len": len(text), "stdin_tail": text[-40:]}
+raw = sys.stdin.buffer.read()
+text = raw.decode("utf-8")
+verdict = {"verdict": "ALLOW", "stdin_len": len(text), "stdin_tail": text[-40:],
+           "stdin_hex": raw.hex()}
 print(json.dumps({"result": json.dumps(verdict)}))
 '''
 LONG_PROMPT_LEN = 60000
 LONG_PROMPT_END = "<<end-of-prompt>>"
 
 
-def case_invoke_model_long_prompt_reaches_child_whole():
+def _invoke_through_fake_claude(prompt, name):
+    """invoke_model with `claude` replaced by the fake, in a scratch config. Returns the
+    verdict, the error, and the argv the child was started with."""
     fake = os.path.join(ROOT, "fake-claude", "fake_claude.py")
     write(fake, FAKE_CLAUDE_SRC)
-    filler = "evidence row\n" * LONG_PROMPT_LEN
-    prompt = filler[:LONG_PROMPT_LEN - len(LONG_PROMPT_END)] + LONG_PROMPT_END
     captured = {}
     real_run = dw.subprocess.run
 
@@ -787,19 +788,47 @@ def case_invoke_model_long_prompt_reaches_child_whole():
 
     dw.subprocess.run = shim
     try:
-        with scratch_config("longprompt"):
+        with scratch_config(name):
             verdict, error = dw.invoke_model(prompt)
     finally:
         dw.subprocess.run = real_run
+    return verdict, error, captured.get("argv") or []
 
-    cmd_len = sum(len(arg) + 1 for arg in captured.get("argv") or [])
+
+# The filler has no newline. A Windows text-mode write turns each "\n" into "\r\n", which would
+# add 1 char per line and make this case measure line endings. The byte-exact case below owns
+# line endings, so this case measures length, the command line, and the tail.
+def case_invoke_model_long_prompt_reaches_child_whole():
+    filler = "evidence row " * LONG_PROMPT_LEN
+    prompt = filler[:LONG_PROMPT_LEN - len(LONG_PROMPT_END)] + LONG_PROMPT_END
+    verdict, error, argv = _invoke_through_fake_claude(prompt, "longprompt")
+
+    cmd_len = sum(len(arg) + 1 for arg in argv)
     check("long prompt: invoke_model returns no error", error is None, error)
     check("long prompt: the command line stays under the 32,767-char Windows cap",
           cmd_len < 32767, cmd_len)
     check("long prompt: the child reads all 60,000 chars on stdin",
-          (verdict or {}).get("stdin_len") == LONG_PROMPT_LEN, verdict)
+          (verdict or {}).get("stdin_len") == LONG_PROMPT_LEN, (verdict or {}).get("stdin_len"))
     check("long prompt: the child reads the prompt's last 40 chars",
-          (verdict or {}).get("stdin_tail") == prompt[-40:], verdict)
+          (verdict or {}).get("stdin_tail") == prompt[-40:], (verdict or {}).get("stdin_tail"))
+
+
+# A prompt with LF, CRLF and non-ASCII characters reaches the child byte for byte, as UTF-8.
+# The text-mode write (`input=prompt`, `text=True`) on Windows turns each "\n" into "\r\n", so
+# "a\nb\r\nc" arrives as b"a\r\nb\r\r\nc". The non-ASCII check is separate: it passes on its own,
+# so a red byte check points at line endings, not at encoding.
+BYTE_PROMPT = "a\nb\r\nc — é"
+
+
+def case_invoke_model_prompt_bytes_reach_child_exact():
+    verdict, error, _ = _invoke_through_fake_claude(BYTE_PROMPT, "promptbytes")
+    received = bytes.fromhex((verdict or {}).get("stdin_hex", ""))
+
+    check("prompt bytes: invoke_model returns no error", error is None, error)
+    check("prompt bytes: the em dash and e-acute arrive as UTF-8",
+          "—".encode("utf-8") in received and "é".encode("utf-8") in received, received)
+    check("prompt bytes: the child receives the prompt byte-for-byte as UTF-8",
+          received == BYTE_PROMPT.encode("utf-8"), received)
 
 
 # --------------------------------------------------------------------------- case 10
@@ -1585,6 +1614,7 @@ def main():
 
     for case in (
         case_invoke_model_long_prompt_reaches_child_whole,
+        case_invoke_model_prompt_bytes_reach_child_exact,
         case_invoke_model_signature_and_return_shape_pinned,
         case_parse_verdict_default_shape,
         case_parse_verdict_honours_a_custom_shape,
