@@ -37,8 +37,8 @@ Code: `merge/merge.py`.
 
 `merge/test_merge.py`, class `GhHalf`. The network cases run from
 `test_a_network_error_on_the_wait_read_is_retried_and_the_merge_goes_on` to
-`test_a_git_fetch_network_error_after_the_claim_push_stops_without_a_revert`. The network text
-list is at line 988. This record states no pass result. The gate run holds it.
+`test_a_git_fetch_network_error_after_the_claim_push_stops_without_a_revert`. This record
+states no pass result. The gate run holds it.
 
 ## Holes, named
 
@@ -54,14 +54,22 @@ Review round 3, final, 2026-10-13. Holes 1, 2 and 4 go to fix lane `merge-net-ho
 4. The `git fetch` pattern misses some network texts. Each one reverts the claim: HTTP/2
    INTERNAL_ERROR, Empty reply from server, GnuTLS recv error, Failed sending data to the peer,
    ssh kex_exchange_identification.
-5. No retry runs inside `shared_deadline`, which wraps the guard's head read. The retry count is 0
-   there (`merge/merge.py` line 307). A network error there reads as unknown.
+5. No retry runs inside `shared_deadline`, which wraps the guard's head read. `Host.gh` sets the
+   retry count to 0 there. A network error there reads as unknown.
 
 ## Build plan
 
+Code in `merge/merge.py`. Cases in `merge/test_merge.py`, class `GhHalf`.
+
 ### windows
 
-Code in `merge/merge.py`, cases in `merge/test_merge.py` (class `GhHalf`), built on this machine.
+Built on this machine. `bin/merge.cmd` is the Windows launcher.
+
+### macos
+
+The README names `bin/merge` as the macOS and Linux launcher (`~/.claude/bin`). Proof on the
+Mac clone is not measured. Linux is not named in this plan and is also unmeasured.
 
 Kind: build
 Plan: decisions/merge-net-retry.md#windows (windows)
+Plan: decisions/merge-net-retry.md#macos (macos)
