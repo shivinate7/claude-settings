@@ -27,6 +27,8 @@ Stop: stall_watch.py --stop
   unknown. Any error, or stop_hook_active true, prints nothing and exits 0. No posix gate.
   Seams: STALL_WATCH_NOW (epoch seconds), STALL_WATCH_OUTPUT_BASE (replaces the folder of each
   output path, keeps the file name), STALL_WATCH_QUIET (the age in seconds).
+  A listed job shows the `until:` note from the description of the call that started it (Bash or
+  PowerShell), read by guard_stream.until_note. The guard refuses a background server with no note.
 
 See decisions/stall-watch.md.
 """
@@ -40,6 +42,9 @@ import sys
 import tempfile
 import time
 import uuid
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from guard_stream import until_note  # the one parser of the `until:` note
 
 DEFAULT_QUIET = 300
 STALL_EXIT = 3
@@ -199,12 +204,13 @@ def text_of(content):
 
 
 def scan_jobs(transcript):
-    """Return {job id: output path or None} for every job with no terminal task notice and no
-    TaskStop result."""
-    jobs, done, stops = {}, set(), set()
+    """Return {job id: (output path or None, until note or '')} for every job with no terminal task
+    notice and no TaskStop result. The note comes from the description of the call that started the
+    job, matched by tool_use_id."""
+    jobs, done, stops, notes, job_call = {}, set(), set(), {}, {}
     with open(transcript, "rb") as f:
         for line in f:
-            if not any(k in line for k in (b"backgroundTaskId", b"task-notification", b"TaskStop", b"Successfully stopped")):
+            if not any(k in line for k in (b"backgroundTaskId", b"task-notification", b"TaskStop", b"Successfully stopped", b"until:")):
                 continue
             try:
                 rec = json.loads(line)
@@ -223,7 +229,14 @@ def scan_jobs(transcript):
             if isinstance(tur, dict) and isinstance(tur.get("backgroundTaskId"), str):
                 m = RESULT_PATH.search(text)
                 jobs.setdefault(tur["backgroundTaskId"], m.group(1) if m else None)
+                if isinstance(content, list):
+                    job_call.setdefault(tur["backgroundTaskId"], next(
+                        (b.get("tool_use_id") for b in content if isinstance(b, dict)
+                         and b.get("type") == "tool_result"), None))
             elif kind == "assistant" and isinstance(content, list):
+                for b in content:  # a Bash or PowerShell call: its description may hold the note
+                    if isinstance(b, dict) and b.get("type") == "tool_use" and isinstance(b.get("input"), dict):
+                        notes[b.get("id")] = until_note(b["input"].get("description"))
                 stops.update(b["id"] for b in content if isinstance(b, dict)
                              and b.get("type") == "tool_use" and b.get("name") == "TaskStop"
                              and isinstance(b.get("id"), str))
@@ -233,7 +246,7 @@ def scan_jobs(transcript):
                     for b in content:
                         if isinstance(b, dict) and b.get("type") == "tool_result" and isinstance(b.get("tool_use_id"), str) and b["tool_use_id"] in stops:
                             done.update(stopped_ids(b.get("content")))
-    return {k: v for k, v in jobs.items() if k not in done}
+    return {k: (v, notes.get(job_call.get(k)) or "") for k, v in jobs.items() if k not in done}
 
 
 def closed_by_notice(text):
@@ -268,19 +281,22 @@ def stop():
         quiet = float(os.environ.get("STALL_WATCH_QUIET") or DEFAULT_QUIET)
         base = os.environ.get("STALL_WATCH_OUTPUT_BASE")
         rows = []
-        for job, path in scan_jobs(call["transcript_path"]).items():
+        for job, (path, note) in scan_jobs(call["transcript_path"]).items():
+            until = " | until: " + note if note else ""
             real = path
             if path and base:
                 real = os.path.join(base, re.split(r"[\\/]", path)[-1])
             try:
                 idle = now - os.stat(real).st_mtime
             except (OSError, TypeError):  # TypeError: no path recorded
-                rows.append("%s: unknown, output file not found: %s" % (job, path or "(path not recorded)"))
+                rows.append("%s: unknown, output file not found: %s%s" % (job, path or "(path not recorded)", until))
                 continue
             if idle >= quiet:
-                rows.append("%s: no output for %ds: %s" % (job, idle, path))
+                rows.append("%s: no output for %ds: %s%s" % (job, idle, path, until))
         if rows:
             head = "Background shells still running and quiet: stop it or tell the owner."
+            if "| until: " in "".join(rows):
+                head += " Say whether each until condition is met."
             print(json.dumps({"systemMessage": "\n".join([head] + rows)}))
     except Exception:  # gate-hooks-fail-closed: a failed check prints nothing and does not block
         pass

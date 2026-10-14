@@ -221,6 +221,80 @@ WAITER_REASON = (
 )
 
 
+# ------------------------------------------------------------------ a background end condition
+#
+# Owner ruling 2026-10-13 23:41 CDT, "End condition at start". A server or watcher that runs in the
+# background has no end of its own (incident: a file server on port 3202 ran 27 h unnoticed). The
+# call must say when it ends: an `until: <condition>` note in the tool's `description`. The note
+# belongs to the call, not the command text. stall_watch.py --stop shows the note per quiet job, and
+# reads it through `until_note` below, the one parser.
+#
+# The roster is NAMED: "does this command ever end" cannot be resolved from the system, and a rule
+# for every background call would refuse the builds and test runs that end by themselves. A foreground
+# server that the harness timeout later moves to the background is NOT covered: its call never
+# carried run_in_background (named hole).
+UNTIL_NOTE = re.compile(r"\buntil:[ \t]*(\S[^\r\n]*)", re.I)
+SCRIPT_RUNNERS = ("npm", "pnpm", "yarn", "bun", "npx", "pnpx", "bunx")
+RUNNER_VERBS = ("run", "run-script", "exec", "dlx", "x")
+SERVER_SCRIPTS = ("dev", "serve", "start", "watch", "preview")
+SERVER_PROGRAMS = ("serve", "http-server", "live-server", "nodemon")
+
+
+def until_note(description) -> str:
+    """The end condition after `until:` in a tool description, to the end of its line, else ''."""
+    found = UNTIL_NOTE.search(description) if isinstance(description, str) else None
+    return found.group(1).strip() if found else ""
+
+
+def server_program(word: str, args) -> bool:
+    """True for a program (with its args) that serves or watches and never ends by itself."""
+    if word in SERVER_PROGRAMS:
+        return True
+    if re.fullmatch(r"python[\d.]*|py", word):
+        return args[:2] == ["-m", "http.server"]
+    if word == "vite":
+        return "build" not in args
+    if word == "next":
+        return any(a in ("dev", "start") for a in args)
+    if word == "tsc":
+        return any(a in ("-w", "--watch") or a.startswith("--watch=") for a in args)
+    return False
+
+
+def server_hit(segment: str) -> str:
+    """The matched text when one segment starts a server or watcher, else ''."""
+    tokens = segment_tokens(segment)
+    at = resolve_command(tokens) if tokens else None
+    if at is None:
+        return ""
+    word, args = basename(tokens[at]), tokens[at + 1:]
+    if word in SCRIPT_RUNNERS:
+        while args and (args[0].startswith("-") or args[0] in RUNNER_VERBS):
+            args = args[1:]
+        if not args:
+            return ""
+        name, rest = basename(args[0]), args[1:]
+        if word in ("npm", "pnpm", "yarn", "bun") and name in SERVER_SCRIPTS:
+            return word + " " + name
+        word, args = name, rest
+    return word if server_program(word, args) else ""
+
+
+def background_end_hit(segments, background: bool, description) -> str:
+    """The matched text when a background call starts a server or watcher with no until note."""
+    if not background or until_note(description):
+        return ""
+    return next((hit for hit in map(server_hit, segments) if hit), "")
+
+
+BACKGROUND_END_REASON = (
+    "this command starts a server or watcher that never ends on its own, and nothing says when it "
+    "should stop, so it can run unnoticed for a day. "
+    "Remedy: put an end condition in this tool call's description, as `until: <condition>`, such "
+    "as `until: round 1 bids are served`. The Stop check shows that note beside the job."
+)
+
+
 # ------------------------------------------------------------------ a waiter loop over a pattern
 #
 # Ported from banchi's `scripts/guard-shell.py:800-990` (predicate and wording only, not the
