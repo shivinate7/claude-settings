@@ -9018,9 +9018,10 @@ def _put_whole(path, text):
     os.replace(temp, path)
 
 
-def _reload_copy(name, install_id):
-    """A scratch folder with a copy of guard.py and every guard_* sibling, each stamped with
-    install_id. Returns (folder, good): good maps each file name to the text an install leaves."""
+def _reload_copy_stamped(name, first_line_for):
+    """A scratch folder with a copy of guard.py and every guard_* sibling. first_line_for(entry) is
+    the line put at the top of that file, or None for a file with no INSTALL_ID line. Returns
+    (folder, good): good maps each file name to the text an install leaves."""
     source = os.path.dirname(GUARD)
     folder = os.path.join(ROOT, "reload", name)
     shutil.rmtree(folder, ignore_errors=True)
@@ -9031,9 +9032,15 @@ def _reload_copy(name, install_id):
     good = {}
     for entry, src in sources:
         with open(src, encoding="utf-8") as handle:
-            good[entry] = _stamp_line(install_id) + handle.read()
+            good[entry] = (first_line_for(entry) or "") + handle.read()
         _put_whole(os.path.join(folder, entry), good[entry])
     return folder, good
+
+
+def _reload_copy(name, install_id):
+    """A scratch folder with a copy of guard.py and every guard_* sibling, each stamped with
+    install_id. Returns (folder, good): good maps each file name to the text an install leaves."""
+    return _reload_copy_stamped(name, lambda entry: _stamp_line(install_id))
 
 
 def _truncated(text):
@@ -9169,6 +9176,39 @@ RELOAD_CHECKS = (
      reload_stuck_case("stamp-stuck", _damage_stamp)),
 )
 for _label, _check in RELOAD_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+# guard.py stamped and guard_core.py with no INSTALL_ID line at all is a mixed set, not a match: the
+# guard must wait and reload it like any other mismatch, and refuse it when it never clears. The
+# repo's own set, every file on the commented placeholder, is a match, and is allowed at once.
+def _damage_core_unstamped(folder, good):
+    """guard_core.py loses its INSTALL_ID line and keeps the rest. guard.py keeps its id."""
+    _put_whole(os.path.join(folder, RELOAD_CORE), good[RELOAD_CORE].split("\n", 1)[1])
+    return [RELOAD_CORE]
+
+
+def reload_placeholder_case():
+    """Every file carries the commented placeholder, as the repo does. The guard must match, and
+    allow the call with no wait."""
+    def check():
+        folder, _good = _reload_copy_stamped("placeholder-set", lambda entry: '# INSTALL_ID = "uninstalled"\n')
+        run, _fixed = _reload_run(folder, "placeholder-set")
+        decision, reason = _decision(run)
+        if decision != "allow" or run.returncode != 0:
+            return False, "an all-placeholder set is %r, exit %d, want allow: %r" % (
+                decision, run.returncode, reason[:90])
+        return True, "an all-placeholder set matches, and the call is allowed, exit 0"
+    return check
+
+
+RELOAD_STAMP_CHECKS = (
+    ("reload-stamp: guard.py stamped and guard_core.py with no INSTALL_ID line, fixed during the wait: reloaded and allowed",
+     reload_fixed_case("nostamp-fixed", _damage_core_unstamped)),
+    ("reload-stamp: guard.py stamped and guard_core.py with no INSTALL_ID line, never fixed: refused as guard-crash, never allowed",
+     reload_stuck_case("nostamp-stuck", _damage_core_unstamped)),
+    ("reload-stamp: an all-placeholder set (the repo run) matches, and the call is allowed",
+     reload_placeholder_case()),
+)
+for _label, _check in RELOAD_STAMP_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
 FAMILY = "fail-closed"  # the family the cases below had before this section
 

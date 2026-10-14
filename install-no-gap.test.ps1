@@ -802,6 +802,64 @@ public static class FileIdentity
             Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
         }
     }
+    # ---- stamp1: after an install, every installed guard*.py carries one real INSTALL_ID -----------
+    # The repo's hook files carry a commented placeholder. An install must replace it, in every
+    # guard*.py, with one uncommented id for the whole run. A placeholder left behind, a missing line,
+    # or two different ids fails.
+    $S1 = New-Scratch 'stamp-install' @('hooks')
+    $S1Hooks = Join-Path $S1.Cfg 'hooks'
+    $S1Names = @('guard.py', 'guard_core.py', 'guard_pointer.py')
+    foreach ($n in $S1Names) {
+        Write-FixtureFile (Join-Path $S1.Clone ('hooks\' + $n)) ($HookPlaceholder + "`n# " + $n + " body`n")
+    }
+    $env:CLAUDE_CONFIG_DIR = $S1.Cfg
+    $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+    try {
+        $rcS1 = Invoke-Install $S1.Clone 'stamp1-run1.log'
+        Check "stamp1: install exits 0 (exit $rcS1)" ($rcS1 -eq 0)
+        $StampIds = @()
+        foreach ($n in $S1Names) {
+            $text = [IO.File]::ReadAllText((Join-Path $S1Hooks $n))
+            $m = [regex]::Match($text, '(?m)^INSTALL_ID = "([^"]*)"')
+            if ($m.Success) { $StampIds += $m.Groups[1].Value } else { $StampIds += '(none)' }
+        }
+        $Distinct = @($StampIds | Select-Object -Unique)
+        Write-Host "info: INSTALL_ID after install: $($StampIds -join ', ')"
+        Check "stamp1: every installed guard*.py carries an uncommented INSTALL_ID line" (-not ($StampIds -contains '(none)'))
+        Check "stamp1: one and the same INSTALL_ID in every guard*.py ($($Distinct.Count) distinct)" ($Distinct.Count -eq 1)
+        Check "stamp1: that INSTALL_ID is a real id, not the placeholder" (($Distinct.Count -eq 1) -and ($Distinct[0] -notin @('uninstalled', '(none)', '')))
+    } finally {
+        Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+    }
+
+    # ---- replace1: a replace that fails for good makes install.ps1 exit non-zero and name the file --
+    # A reader holds guard_pointer.py open with no delete sharing, so the rename over it is refused on
+    # every retry. The install must print the file it could not replace, leave that file as it was,
+    # and exit non-zero.
+    $R1 = New-Scratch 'replace-fail' @('hooks')
+    $R1Hooks = Join-Path $R1.Cfg 'hooks'
+    Write-FixtureFile (Join-Path $R1.Clone 'hooks\guard.py') '# guard v1'
+    Write-FixtureFile (Join-Path $R1.Clone 'hooks\guard_pointer.py') '# pointer v1'
+    $env:CLAUDE_CONFIG_DIR = $R1.Cfg
+    $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+    try {
+        $rcR1 = Invoke-Install $R1.Clone 'replace1-run1.log'
+        Check "replace1: run 1 (forced copy) exits 0 (exit $rcR1)" ($rcR1 -eq 0)
+        Write-FixtureFile (Join-Path $R1.Clone 'hooks\guard.py') '# guard v2'
+        Write-FixtureFile (Join-Path $R1.Clone 'hooks\guard_pointer.py') '# pointer v2'
+        $Held = [IO.FileStream]::new((Join-Path $R1Hooks 'guard_pointer.py'), [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        try {
+            $rcR2 = Invoke-Install $R1.Clone 'replace1-run2.log'
+        } finally {
+            $Held.Dispose()
+        }
+        $R1Log = [IO.File]::ReadAllText((Join-Path $Tmp 'replace1-run2.log'))
+        Check "replace1: run 2 exits non-zero when one replace fails for good (exit $rcR2)" ($rcR2 -ne 0)
+        Check "replace1: run 2 prints the file it could not replace" ($R1Log -match 'could not (replace|refresh) .*guard_pointer\.py')
+        Check "replace1: the file it could not replace is unchanged (still pointer v1)" ([IO.File]::ReadAllText((Join-Path $R1Hooks 'guard_pointer.py')) -eq '# pointer v1')
+    } finally {
+        Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+    }
 } finally {
     if ($Rec) { $Rec.Dispose() }
     Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY, Env:\CLAUDE_SETTINGS_USER_ENV_KEY -ErrorAction SilentlyContinue
