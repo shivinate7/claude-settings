@@ -22,7 +22,7 @@ Contract the builder codes against. Every case is red until hooks/daily_note.py 
   2. An STE-fallback line whose matched field ends fallback=crash, from the previous day.
   3. An STE-unchecked line from the previous day. A read that could not run is unknown.
   4. guard.log exists but cannot be read. The line says unknown.
-  No volume check. A day of high but steady denies prints nothing.
+  No volume check. A day of high but steady denies, or a ramp of growing volume, prints nothing.
 - Each line: plain text, at most 240 characters, names what failed, and names the reader
   command by its ABSOLUTE path, built from the hook's own folder: <hook folder>/../lint/
   guard_log_report.py. Nothing else goes to stdout. stderr stays empty.
@@ -236,6 +236,13 @@ class CheckTests(NoteCase):
     def test_a_day_of_high_but_steady_denies_prints_nothing(self):
         self.write_log(steady("env-file", 500, HISTORY) + steady("waiter", 300, HISTORY))
         self.assert_silent(self.run_note(MORNING))
+
+    def test_a_volume_ramp_like_the_real_log_prints_nothing(self):
+        # About 20 denies a day for a week, then 300, then 2800 on one day, all of one rule.
+        week = ["2026-10-%02d" % day for day in range(6, 13)]
+        self.write_log(steady("env-file", 20, week) + steady("env-file", 300, ["2026-10-13"])
+                       + steady("env-file", 2800, ["2026-10-14"]))
+        self.assert_silent(self.run_note("2026-10-15T09:00:00-05:00"))
 
     def test_steady_rules_and_a_new_small_rule_do_not_fail(self):
         self.write_log(healthy_log() + steady("cite-by-id", 3, [YESTERDAY]))
