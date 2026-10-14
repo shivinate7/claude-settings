@@ -6,7 +6,9 @@ gate as a subprocess, the way Claude Code's Stop hook does. Run with:
 
     python lint/test_gates.py -v
 """
+import errno
 import glob
+import importlib.util
 import json
 import os
 import re
@@ -18,6 +20,7 @@ import tempfile
 import time
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STE_GATE = os.path.join(HERE, "ste_gate.py")
@@ -2923,11 +2926,8 @@ class SteGateLogTests(unittest.TestCase):
             proc.wait()
             self.assertEqual(proc.returncode, 0, err.decode("utf-8", "replace"))
 
-    # (7) twenty gates at once: twenty whole lines, one per session, none lost or joined. Skipped on
-    # Windows: a plain append from many processes is not atomic there, so the exact count cannot hold.
-    # test_19b is the form that holds on every platform.
-    @unittest.skipIf(sys.platform == "win32",
-                     "Windows append from many processes is not atomic: see decisions/guard-log-read-weekly.md Holes")
+    # (7) twenty gates at once: twenty whole lines, one per session, none lost or joined. Runs on every
+    # platform: guard_core.record takes a lock around its append, so Windows keeps every line too.
     def test_19_twenty_parallel_gates_leave_twenty_whole_lines(self):
         self._run_parallel_gates()
         rows = self._rows("twenty parallel writes")
@@ -2935,14 +2935,12 @@ class SteGateLogTests(unittest.TestCase):
         self.assertEqual(sorted(gl_fields(row)[5] for row in rows),
                          sorted("gl-par-%02d" % i for i in range(20)))
 
-    # (7) the Windows-safe form of test 19. What the gate controls holds on every platform: each gate
-    # writes at most one line, no line is corrupted, doubled or joined, no process crashes, and most
-    # lines land (17 to 20).
-    def test_19b_parallel_gates_write_at_most_one_whole_line_each(self):
+    # (7) each gate writes exactly one whole line: no line is corrupted, doubled or joined, no process
+    # crashes, and all twenty land.
+    def test_19b_parallel_gates_write_exactly_one_whole_line_each(self):
         self._run_parallel_gates()
         rows = gl_lines(self.cfg) or []
-        self.assertGreaterEqual(len(rows), 17, "too many lines lost")
-        self.assertLessEqual(len(rows), 20)
+        self.assertEqual(len(rows), 20, "lines lost: kept %d of 20" % len(rows))
         sessions = []
         for row in rows:
             when, tool, decision, rule, matched, session = gl_fields(row)
@@ -3225,6 +3223,136 @@ class MdSweepLogTests(unittest.TestCase):
         self.assertEqual(rc, 0, err)
         self.assertEqual(json.loads(out).get("decision"), "block")
         self.assertLess(seconds, 2.0, "the sweep waited for the log write")
+
+
+# ---------------------------------------------------------------- two writers, one guard.log
+#
+# Guards: two processes appending to one guard.log at the same time keep every line, each exactly
+# once. Each writes APPEND_N lines, so 2 x APPEND_N must land. record() takes a lock around each
+# write, so a Windows append cannot overwrite another writer's line. (Before the lock, a two-process
+# probe on a Windows PC kept about 3810 of 4000 lines, measured 2026-10-13.) Linux does not lose these
+# lines, so a green on Linux proves nothing about the Windows path.
+# Two writers are cased: guard_core.record, and the STE gate's logger (lint/_transcript.guard_logger),
+# which reaches record through the same locked append. The one-writer case is the control: it must stay green.
+APPEND_N = 2000
+APPEND_WRITER_RECORD = r'''
+import sys
+sys.path.insert(0, sys.argv[1])  # the hooks/ folder
+import guard_core
+tag, n, session = sys.argv[2], int(sys.argv[3]), sys.argv[4]
+guard_core.set_log_session(session)
+for i in range(n):
+    guard_core.record("Bash", "deny", "append-race", "{}-{:05d}".format(tag, i))
+'''
+APPEND_WRITER_STE = r'''
+import sys
+sys.path.insert(0, sys.argv[1])  # the lint/ folder: the STE gate's own logger
+from _transcript import guard_logger
+tag, n, session = sys.argv[2], int(sys.argv[3]), sys.argv[4]
+log = guard_logger({"session_id": session})
+for i in range(n):
+    log("Write", "fixed", "STE007,STE008", "{}-{:05d}.md".format(tag, i), "fixed=2")
+'''
+
+
+class GuardLogAppendRaceTests(unittest.TestCase):
+    """Concurrent appends to one guard.log: every line written is kept, once, whole."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cfg = os.path.join(self.tmp.name, "cfg")
+        os.makedirs(self.cfg)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _run_writers(self, source, lib, tags):
+        """Start one writer process per tag at the same time. Each writes APPEND_N lines to self.cfg."""
+        writer = os.path.join(self.tmp.name, "writer.py")
+        with open(writer, "w", encoding="utf-8") as handle:
+            handle.write(source)
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg)
+        procs, outs = [], []
+        for tag in tags:
+            out = open(os.path.join(self.tmp.name, "out-%s.txt" % tag), "w", encoding="utf-8")
+            outs.append(out)
+            procs.append(subprocess.Popen([sys.executable, writer, lib, tag, str(APPEND_N), GL_SESSION],
+                                          env=env, stdout=out, stderr=subprocess.STDOUT))
+        codes = []
+        for proc in procs:
+            try:
+                codes.append(proc.wait(timeout=120))
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                codes.append(None)
+        for out in outs:
+            out.close()
+        self.writer_text = ""
+        for tag in tags:
+            with open(os.path.join(self.tmp.name, "out-%s.txt" % tag), encoding="utf-8") as handle:
+                self.writer_text += handle.read()[:300]
+        return codes
+
+    def _assert_kept_each_once(self, codes, tags, want):
+        """`want` is the matched field of every line that must land, in any order."""
+        self.assertEqual(codes, [0] * len(tags), "a writer failed: " + self.writer_text)
+        rows = gl_lines(self.cfg) or []
+        self.assertEqual(len(rows), len(want), "kept %d of %d written" % (len(rows), len(want)))
+        got = sorted(gl_fields(row)[4] for row in rows)  # six fields each, or this names the row
+        self.assertEqual(len(set(got)), len(got), "a line was doubled")
+        self.assertTrue(got == sorted(want), "missing %d line(s)" % len(set(want) - set(got)))
+
+    def test_one_record_writer_keeps_every_line(self):
+        # Control: one writer, no overlap. Green on main, so a red elsewhere is the race.
+        codes = self._run_writers(APPEND_WRITER_RECORD, HOOKS, ("a",))
+        want = ["a-%05d" % i for i in range(APPEND_N)]
+        self._assert_kept_each_once(codes, ("a",), want)
+
+    def test_two_record_writers_keep_every_line(self):
+        # guard_core.record: the one append that every guard, gate and sweep line goes through.
+        tags = ("a", "b")
+        codes = self._run_writers(APPEND_WRITER_RECORD, HOOKS, tags)
+        want = ["%s-%05d" % (tag, i) for tag in tags for i in range(APPEND_N)]
+        self._assert_kept_each_once(codes, tags, want)
+
+    def test_two_ste_gate_loggers_keep_every_line(self):
+        # The STE gate's real path: lint/_transcript.guard_logger, then core.record.
+        tags = ("a", "b")
+        codes = self._run_writers(APPEND_WRITER_STE, HERE, tags)
+        want = ["%s-%05d.md fixed=2" % (tag, i) for tag in tags for i in range(APPEND_N)]
+        self._assert_kept_each_once(codes, tags, want)
+
+    def _record_with_lock_error(self, errno_value):
+        """Run guard_core.record() in this process while every lock call raises OSError(errno_value).
+        Return (guard_core module, seconds record() took, the guard.log lines). No process stalls."""
+        spec = importlib.util.spec_from_file_location("guard_core_probe",
+                                                      os.path.join(HOOKS, "guard_core.py"))
+        core = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(core)
+        lock_call = "msvcrt.locking" if os.name == "nt" else "fcntl.flock"
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.cfg}), \
+                mock.patch(lock_call, side_effect=OSError(errno_value, "lock refused")):
+            started = time.monotonic()
+            core.record("Bash", "deny", "lock-probe", "errno-%d" % errno_value)
+            seconds = time.monotonic() - started
+        return core, seconds, gl_lines(self.cfg) or []
+
+    def test_lock_error_that_is_not_contention_returns_at_once(self):
+        # Guards: a lock error that is not contention (EINVAL, errno 22, here) returns at once and keeps
+        # the line. Waiting out LOG_LOCK_WAIT buys nothing when no other writer holds the lock.
+        _core, seconds, rows = self._record_with_lock_error(errno.EINVAL)
+        self.assertLess(seconds, 0.5, "record() waited %.2f s on errno 22" % seconds)
+        self.assertEqual(len(rows), 1, "the line was not kept: %r" % rows)
+        self.assertEqual(rows[0].split("\t")[4], "errno-22", rows[0])
+
+    def test_contention_lock_error_waits_then_writes(self):
+        # Green pin: a lock held by another writer still gets the full wait, then the line lands.
+        contention = errno.EACCES if os.name == "nt" else errno.EAGAIN
+        core, seconds, rows = self._record_with_lock_error(contention)
+        self.assertGreaterEqual(seconds, core.LOG_LOCK_WAIT * 0.9,
+                                "record() did not wait out a contended lock: %.2f s" % seconds)
+        self.assertEqual(len(rows), 1, "the line was not kept: %r" % rows)
+        self.assertEqual(rows[0].split("\t")[4], "errno-%d" % contention, rows[0])
 
 
 if __name__ == "__main__":
