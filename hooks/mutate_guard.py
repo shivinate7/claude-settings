@@ -976,10 +976,10 @@ MUTATIONS = [
     ("root-scope: _git drops -C, so it reads whichever tree the guard process happens to stand "
      "in, not the tree it was asked about",
      '        return subprocess.run(\n'
-     '            ["git", "-C", where, *args], capture_output=True, text=True, timeout=10\n'
+     '            ["git", "-C", where, *args], capture_output=True, encoding="utf-8", errors="replace", timeout=10\n'
      '        )',
      '        return subprocess.run(\n'
-     '            ["git", *args], capture_output=True, text=True, timeout=10\n'
+     '            ["git", *args], capture_output=True, encoding="utf-8", errors="replace", timeout=10\n'
      '        )',
      "guard", 'pointer: checkout of a branch in another checkout is allowed'),
 
