@@ -63,6 +63,20 @@ second script.
   a missing or stale page, or a problem, is exit 1 and names the page or the offender. `--print`
   stays the catalog page only (R7). F18, F19, F26 and F27 now publish with a no-argument run, so
   they stay green on 1ac9851 and on the build.
+- Merge-time rebuild, owner ruling 2026-10-14 13:18 CDT. The shared merge tool (merge/merge.py,
+  cases in merge/test_merge.py, class RecordsRebuild) rewrites the records page on the pull request
+  head before it merges, the way it claims record numbers. So a pull request need not carry a fresh
+  page. `--check` is mode-aware, as the stamp engine's check is (onDefaultBranch): on a pull request
+  run (GITHUB_BASE_REF set, or GITHUB_REF under refs/pull/) a stale or missing docs/records.md is no
+  failure and prints nothing. On any other run (a push to the default branch, a laptop) it fails and
+  names the page. A problem (a history marker, an empty record, an unreadable file) and the catalog
+  page stay red everywhere. Why keep the check: after a merge made without the tool, or a failed
+  rebuild, main would hold a stale index and no signal. The push check on main is that signal, and the
+  next merge heals it. Why lenient on a pull request: each pull request that touches a record would
+  have to carry a regenerated page, and two of them conflict on it. R10-R13 read the committed page, so
+  they are skipped on a pull request run. The fixture cases drop the runner's variables (B6-B10 set them).
+- A root with no records at all (no record folder, no rule marker) writes no page: exit 0, nothing
+  written, `--check` silent. The merge tool runs the generator on every repo it merges (D5).
 - `--root DIR` is the repo root, the same as the environment variable HOOK_CATALOG_ROOT (both work).
   It never comes from the working folder.
 - Catalog parts: a hooks/, skills/ or mods/ folder. A root with none writes and checks only
@@ -239,13 +253,28 @@ def model_matches(cell, want):
     return cell == want or re.match(re.escape(want) + r"[ ,(]", cell) is not None
 
 
-def generator(root, *args, cwd=None, flag_root=False):
+PR_ENV = ("GITHUB_BASE_REF", "GITHUB_REF", "GITHUB_EVENT_NAME")  # what Actions sets on a pull request run
+
+
+def pull_request_run():
+    """True when this test run is itself a pull request run in Actions (the stamp engine's test: onDefaultBranch)."""
+    return bool(os.environ.get("GITHUB_BASE_REF")) or os.environ.get("GITHUB_REF", "").startswith("refs/pull/")
+
+
+def generator(root, *args, cwd=None, flag_root=False, env=None):
     """Run lint/hook_catalog.py on root (None: the real repo). Returns (code, stdout, stderr).
-    The root goes in the environment variable, or as --root DIR with flag_root. cwd: the working folder, root by default."""
+    The root goes in the environment variable, or as --root DIR with flag_root. cwd: the working folder, root by default.
+    env: variables to add. A fixture run (root given) drops the runner's pull request variables first, so a fixture
+    behaves the same on a laptop and in a pull request run; the real repo (root None) keeps them."""
     if not os.path.exists(GEN):
         raise AssertionError("lint/hook_catalog.py does not exist yet: the builder writes it")
-    env = dict(os.environ)
-    env.pop("HOOK_CATALOG_ROOT", None)
+    child = dict(os.environ)
+    child.pop("HOOK_CATALOG_ROOT", None)
+    if root is not None:
+        for name in PR_ENV:
+            child.pop(name, None)
+    child.update(env or {})
+    env = child
     argv = [sys.executable, GEN, *args]
     if root is not None:
         if flag_root:
@@ -1086,6 +1115,62 @@ class RecordsStale(Tree):
         self.publish(root)
         self.assertEqual(self.records_text(root), before)
 
+    # Merge-time rebuild (owner ruling 2026-10-14 13:18 CDT): the merge rewrites the page, so a pull request
+    # run does not fail on a stale one. The stamp engine reads a pull request run from GITHUB_BASE_REF or a
+    # GITHUB_REF under refs/pull/, and each alone counts.
+    PULL_REQUEST_RUNS = ({"GITHUB_BASE_REF": "main"}, {"GITHUB_REF": "refs/pull/12/merge"},
+                         {"GITHUB_BASE_REF": "main", "GITHUB_REF": "refs/pull/12/merge"})
+
+    def test_b6_on_a_pull_request_a_stale_page_is_not_red(self):
+        for pr_env in self.PULL_REQUEST_RUNS:
+            with self.subTest(pr_env):
+                root = self.published()
+                put(root, "debts/new-gap.md", DEBT.replace("Gap one", "New gap"))
+                self.assertEqual(generator(root, "--check", env=pr_env), (0, "", ""))
+
+    def test_b7_on_a_pull_request_a_missing_records_page_is_not_red(self):
+        for pr_env in self.PULL_REQUEST_RUNS:
+            with self.subTest(pr_env):
+                root = self.published()
+                self.records_text(root)  # a failure, not an error, while the page is not written
+                os.remove(os.path.join(root, "docs", "records.md"))
+                self.assertEqual(generator(root, "--check", env=pr_env), (0, "", ""))
+
+    def test_b8_on_a_push_to_the_default_branch_a_stale_page_is_red(self):
+        # The signal that a merge made without the tool, or a failed rebuild, left main with a stale index.
+        root = self.published()
+        put(root, "debts/new-gap.md", DEBT.replace("Gap one", "New gap"))
+        for push_env in ({"GITHUB_REF": "refs/heads/main"}, {"GITHUB_REF": "refs/heads/main", "GITHUB_EVENT_NAME": "push"}):
+            with self.subTest(push_env):
+                code, out, err = generator(root, "--check", env=push_env)
+                self.assertEqual(code, 1, out + err)
+                self.assertIn("docs/records.md", out + err)
+        self.records_text(root)
+        os.remove(os.path.join(root, "docs", "records.md"))
+        code, out, err = generator(root, "--check", env={"GITHUB_REF": "refs/heads/main"})
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("docs/records.md", out + err)
+
+    def test_b9_a_problem_is_red_on_a_pull_request_too(self):
+        # Only a stale page is waived. A history marker, an empty record or an unreadable file fails everywhere:
+        # the merge refuses to write over a problem, so waiting for it would stop the merge late.
+        root = self.published()
+        put(root, "decisions/old.md", old_decision("Superseded: x."))
+        put(root, "debts/empty.md", "\n")
+        code, out, err = generator(root, "--check", env={"GITHUB_BASE_REF": "main"})
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("decisions/old.md:7", out + err)
+        self.assertIn("debts/empty.md", out + err)
+
+    def test_b10_the_catalog_page_stays_strict_on_a_pull_request(self):
+        # Regression pin, green on 1ac9851: the ruling covers the records page only.
+        root = self.published()
+        put(root, "hooks/ok.py", '"""Does another thing now."""\nprint("ok")\n')
+        code, out, err = generator(root, "--check", env={"GITHUB_BASE_REF": "main"})
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("docs/catalog.md", out + err)
+        self.assertNotIn("docs/records.md", out + err)
+
 
 NOT_HISTORY = [
     ("mid-sentence no longer", "# Old thing", "The guard no longer crashes when the key is missing."),
@@ -1265,8 +1350,22 @@ class OtherRepos(Tree):
         self.assertIn("settings.json", out + err)
 
 
+    def test_d5_a_repo_with_no_records_gets_no_page(self):
+        # The merge tool runs the generator on every repo it merges, so a repo with no records must stay as it is.
+        for name, spec in (("nothing", {"README.md": "# A repo\n"}), ("only a folder readme", {"debts/README.md": "# Debts\n"})):
+            with self.subTest(name):
+                root, elsewhere = self.tree(spec), self.tree({})
+                before = sorted(os.listdir(root))
+                code, out, err = self.write(root, elsewhere)
+                self.assertEqual(code, 0, out + err)
+                self.assertEqual(sorted(os.listdir(root)), before, "a page was written for a repo with no records")
+                self.assertEqual(self.write(root, elsewhere, "--check"), (0, "", ""))
+
+
+@unittest.skipIf(pull_request_run(), "the merge rebuilds the records page, so a pull request need not carry a fresh one")
 class RealRecords(unittest.TestCase):
-    """The committed page against the real records. Red until the builder writes docs/records.md."""
+    """The committed page against the real records. Red until the builder writes docs/records.md. Skipped on a pull
+    request run (owner ruling 2026-10-14 13:18 CDT: the merge rebuilds the page); run on a laptop and on a push to main."""
 
     def rows(self):
         if not os.path.exists(RECORDS_PAGE):
