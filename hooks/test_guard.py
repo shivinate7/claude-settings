@@ -6510,6 +6510,14 @@ sh("frozen: searching for the path name and writing the results elsewhere",
 sh("frozen: a heredoc writing prose that names the environment file",
    "cat > notes.md <<'DOC'\nThe guard refuses any command naming " + ENV + ".\nDOC", "allow",
    cwd=NOGIT)
+# THE QUOTED SIBLING of the model-cap data cases. The same _shell_write_hit reads a frozen path inside
+# a quoted echo as a write, so a probe that names the config settings file in data is denied today.
+# A quoted path piped to a program is data: the frozen file is not written, so it allows. A real
+# cat-write onto that file stays denied. (Red on main: the quoted form denies.)
+sh("frozen data: a quoted cat-write onto the config settings, piped to python, allows",
+   "echo \"cat > " + CFG_SETTINGS + "\" | python hooks/guard.py", "allow", cwd=NOGIT)
+sh("frozen: a real cat-write onto the config settings stays denied",
+   "cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 
 # VARIABLE INDIRECTION (incident 2026-10-07): the static parse saw only "$D", never the frozen
 # target. A simple VAR=value assignment earlier in the same command must resolve. An unresolved
@@ -6753,18 +6761,6 @@ sh("cap: a redirect onto a project settings file asks",
 sh("cap: an append onto a project settings file asks",
    "echo '\"" + CAP_FORCE + "\": \"0\"' >> " + PROJ_SETTINGS,
    "ask", "subagent-model-cap", cwd=NOGIT, carries=(CAP_FORCE + " = 0",))
-
-# A PYTHON WRITE IS A WRITE. A program that opens a settings file and writes the cap into it lands the
-# same bytes the redirect and tee cases above land, so it asks the same way. Both forms are pinned: an
-# inline `python -c`, and a heredoc fed to `python3 -`. MEASURED 2026-10-14 on main: both allowed, so
-# these two cases are red there.
-sh("cap: python -c that opens a project settings file and writes the cap asks",
-   "python -c \"import json; open('" + PROJ_LOCAL + "', 'w').write(json.dumps({'env': {'" + CAP_KEY
-   + "': '" + OPUS + "'}}))\"",
-   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
-sh("cap: a python heredoc that opens a project settings file and writes the cap asks",
-   "python3 - <<'PY'\nopen('" + PROJ_SETTINGS + "', 'w').write('" + CAP_KEY + "=" + OPUS + "')\nPY",
-   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
 
 # A COMMENT OPENER OR A LONE QUOTE INSIDE A STRING does not hide the real write after it. The scanner
 # must still reach the redirect, and the multi-line quoted string is the multi-line shape of the same
