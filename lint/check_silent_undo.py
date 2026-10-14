@@ -179,23 +179,67 @@ def rewritten(line, hs, base=(), modified=False):
 OWN_LOOKUPS = 25  # per file: `git log -G` calls spent finding who added a lost line
 
 
-def ere(line):
-    """An ERE for a normalized line, whitespace-flexible."""
-    return "[[:space:]]*" + "[[:space:]]+".join(re.sub(r"([.\[\]{}()*+?^$|\\])", r"\\\1", w) for w in line.split())
+def branch_only_lines(cwd, p, bases, path, lines, refs):
+    """The subset of `lines` that only the branch added: for each, the commit that first added it on
+    the way to parent p is reachable from none of refs (upstream and the default branch). A read that
+    fails, or finds no adding commit, leaves the line out, so it counts. Unknown is never clear.
+    One `git log -m -p` per file, read once: a commit is marked by a changed line (added or removed,
+    as `-G` read it) that holds the line, whitespace-collapsed. `-m` lets a line that entered through
+    a merge's own resolution show up. The oldest marked commit is the real adder: a line from main
+    always has main's own commit in the range, older than any merge that carried it."""
+    try:
+        _, out = git(cwd, "log", "-m", "-p", "-U0", "--no-color", "--no-ext-diff", "--format=\x01%H", p, "--not", *bases, "--", path)
+    except Unknown:
+        return set()
+    commits = []  # (sha, the changed lines of that diff, newline-joined)
+    for chunk in out.split("\x01")[1:]:
+        sha, _, body = chunk.partition("\n")
+        commits.append((sha.strip(), "\n".join(norm(l[1:]) for l in body.splitlines() if l[:1] in "+-" and l[:3] not in ("+++", "---"))))
+    held, res = {}, set()
+    for line in lines:
+        sha = next((c for c, text in reversed(commits) if line in text), None)
+        if sha is None:
+            continue
+        try:
+            if sha not in held:
+                held[sha] = all(git(cwd, "merge-base", "--is-ancestor", sha, r, ok=(0, 1))[0] == 1 for r in refs)
+        except Unknown:
+            held[sha] = False
+        if held[sha]:
+            res.add(line)
+    return res
 
 
 def branch_only(cwd, p, bases, path, line, refs):
-    """True only when the commit that first added `line` on the way to parent p is reachable from none
-    of refs (upstream and the default branch): the branch alone introduced it. A read that fails, or
-    finds no adding commit, is False, so the line counts. Unknown is never clear. `-m` lets a line that
-    entered through a merge's own resolution show up. The oldest entry is the real adder: a line
-    from main always has main's own commit in the range, older than any merge that carried it."""
-    try:
-        _, out = git(cwd, "log", "-m", "-G" + ere(line), "--format=%H", p, "--not", *bases, "--", path)
-        shas = out.split()
-        return bool(shas) and all(git(cwd, "merge-base", "--is-ancestor", shas[-1], r, ok=(0, 1))[0] == 1 for r in refs)
-    except Unknown:
-        return False
+    """True only when the commit that first added `line` on the way to parent p is held by none of refs."""
+    return line in branch_only_lines(cwd, p, bases, path, [line], refs)
+
+
+class Blobs:
+    """Blob text by `rev:path` through one `git cat-file --batch` process; "" for a missing path."""
+
+    def __init__(self, cwd):
+        self.cwd = cwd
+        try:
+            self.proc = subprocess.Popen(["git", "-C", cwd, "cat-file", "--batch"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        except OSError as e:
+            raise Unknown("git cat-file failed: %s" % e)
+
+    def get(self, rev, path):
+        if "\n" in path:
+            return blob(self.cwd, rev, path)
+        self.proc.stdin.write(("%s:%s\n" % (rev, path)).encode("utf-8"))
+        self.proc.stdin.flush()
+        head = self.proc.stdout.readline().split()
+        if len(head) != 3 or head[1] == b"missing":
+            return ""
+        data = self.proc.stdout.read(int(head[2]) + 1)[:-1]  # the reply ends with a newline
+        return data.decode("utf-8", "replace") if head[1] == b"blob" else ""
+
+    def close(self):
+        self.proc.stdin.close()
+        self.proc.stdout.close()
+        self.proc.wait()
 
 
 def lost_lines(cwd, m, refs=()):
@@ -212,39 +256,47 @@ def lost_lines(cwd, m, refs=()):
     rc, out = git(cwd, "merge-base", "--all", *parents, ok=(0, 1))
     bases = out.split() if rc == 0 else []
     found = []
-    for p in parents:
-        pool = pool_of(cwd, p, m)
-        paths = set()
-        for b in bases:
-            paths |= set(raw_files(cwd, b, p))
-        for path in sorted(paths):
-            text_m = blob(cwd, m, path)
-            flat = " ".join(text_m.split())  # a re-wrapped line still reads as a run of this
-            in_p, in_m = counts(blob(cwd, p, path)), counts(text_m)
-            in_b = [counts(blob(cwd, b, path)) for b in bases]
-            lost, hs = [], None
-            for l, n in in_p.items():
-                if any(l in c for c in in_b):
-                    continue
-                missing = n - in_m.get(l, 0)
-                if missing <= 0 or l in flat:
-                    continue
-                moved = min(missing, pool[l])
-                pool[l] -= moved
-                if missing > moved:
-                    hs = hunks(cwd, p, m, path) if hs is None else hs
-                    mod = any(l in hn and ho for b in bases for ho, hn in hunks(cwd, b, p, path))
-                    if not rewritten(l, hs, in_b, mod):
-                        lost.append(l)
-            if refs and lost:
-                budget = [OWN_LOOKUPS]
+    blobs = Blobs(cwd)
+    try:
+        for p in parents:
+            found += lost_in_parent(cwd, m, p, bases, refs, blobs)
+    finally:
+        blobs.close()
+    return found
 
-                def counts_as_lost(l):
-                    budget[0] -= 1
-                    return budget[0] < 0 or not branch_only(cwd, p, bases, path, l, refs)
-                lost = [l for l in lost if counts_as_lost(l)]
-            if lost:
-                found.append((path, p, lost))
+
+def lost_in_parent(cwd, m, p, bases, refs, blobs):
+    """lost_lines for one parent p of merge m; blobs reads every file text."""
+    found = []
+    pool = pool_of(cwd, p, m)
+    paths = set()
+    for b in bases:
+        paths |= set(raw_files(cwd, b, p))
+    paths &= set(raw_files(cwd, p, m))  # a path whose blob is the same in p and m loses nothing
+    for path in sorted(paths):
+        text_m = blobs.get(m, path)
+        flat = " ".join(text_m.split())  # a re-wrapped line still reads as a run of this
+        in_p, in_m = counts(blobs.get(p, path)), counts(text_m)
+        in_b = [counts(blobs.get(b, path)) for b in bases]
+        lost, hs = [], None
+        for l, n in in_p.items():
+            if any(l in c for c in in_b):
+                continue
+            missing = n - in_m.get(l, 0)
+            if missing <= 0 or l in flat:
+                continue
+            moved = min(missing, pool[l])
+            pool[l] -= moved
+            if missing > moved:
+                hs = hunks(cwd, p, m, path) if hs is None else hs
+                mod = any(l in hn and ho for b in bases for ho, hn in hunks(cwd, b, p, path))
+                if not rewritten(l, hs, in_b, mod):
+                    lost.append(l)
+        if refs and lost:
+            own = branch_only_lines(cwd, p, bases, path, lost[:OWN_LOOKUPS], refs)  # the rest count as lost, unread
+            lost = [l for l in lost if l not in own]
+        if lost:
+            found.append((path, p, lost))
     return found
 
 

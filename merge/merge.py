@@ -90,6 +90,8 @@ NET_ERROR = re.compile(r"(?:^|: )(?:(?:Post|Get|Put|Patch|Delete|Head) \x22https
                        r"schannel|\bSSL\b|timed out|context deadline exceeded|Recv failure|the remote end hung up|early EOF|RPC failed|returned error: 50[234])"
                        r"|^ssh: (?:connect to host|Could not resolve hostname)", re.I | re.M)
 
+UNDO_MEMO = {}
+
 def undo_check(wt, base_ref, unknown_ok=""):
     """The shared silent-undo lint (lint/check_silent_undo.py), run on the branch before anything is pushed.
     A finding refuses. An unreadable history refuses too, unless the owner passed
@@ -97,13 +99,21 @@ def undo_check(wt, base_ref, unknown_ok=""):
     git older than 2.38, shallow clone). It is logged and does not excuse a finding."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
     import check_silent_undo as undo
-    try:
-        problems, notes = undo.check(wt, base_ref, "HEAD")
-    except undo.Unknown as e:
+    # The scan is slow on a merge-heavy branch and merge runs it twice. Its answer depends only on the head, the base tip,
+    # and the default refs it reads, so the second call reuses the first when all of them are unchanged.
+    key = (wt, *(git(wt, "rev-parse", "--verify", "-q", r + "^{commit}")[1].strip() for r in ("HEAD", base_ref, "origin/HEAD", "origin/main", "main")))
+    if not (key[1] and key[2]) or key not in UNDO_MEMO:  # a head or base that does not resolve is never reused
+        try:
+            UNDO_MEMO[key] = undo.check(wt, base_ref, "HEAD")
+        except undo.Unknown as e:
+            UNDO_MEMO[key] = e
+    if isinstance(UNDO_MEMO[key], undo.Unknown):
+        e = UNDO_MEMO[key]
         if unknown_ok.strip():
             say(f"merge: silent-undo check UNKNOWN ({e}). Owner override, reason: {unknown_ok.strip()}")
             return
         raise Stop(f"silent-undo check could not read the history: {e}\nIf the owner accepts that, run again with --undo-check-unknown-ok \"<reason>\".")
+    problems, notes = UNDO_MEMO[key]
     for n in notes:
         say("merge: " + n)
     if problems:
