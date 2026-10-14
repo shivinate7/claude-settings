@@ -31,8 +31,8 @@ Owner rulings, 2026-10-08:
   2. Does each option serve the goal?
   3. Is an option that serves the goal better missing?
   4. Can the owner answer from the box alone, with every id, code or name explained in words?
-  5. Does the question point at anything the box does not show, such as an earlier message or
-     "item 4"?
+  5. Does the question point at anything the box does not show? Examples: an earlier
+     message, a time that refers to an earlier message, or "item 4".
   6. Does each option say what the owner gains and what the owner loses, as a change for
      the owner and not for a record (rule `style-option-says-effect`)?
 - Owner ruling, 2026-10-14: a question must be plain, in every repo. The model judge asks all
