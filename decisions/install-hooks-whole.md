@@ -50,7 +50,7 @@ stopped. Arbiter rulings 03:41 and 03:50 CDT.
   The log can also say `settings.json=kept` after a retry recovered it. Debt:
   install-skill-fail-exits-0.
 - The symrun case proves the gap with a reader loop. Its window check is unmeasured on the link
-  route, which only CI runs. Debt: install-symrun-link-gap-unmeasured.
+  route, which only CI runs. Debt: symrun-link-gap-unmeasured.
 - The test reader can die with no output on a fault outside its try. Debt:
   install-reader-can-die-silent.
 
