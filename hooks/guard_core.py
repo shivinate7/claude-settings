@@ -57,18 +57,28 @@ CONTRACTION = re.compile(r"(?<=[A-Za-z])'(?:t|s|re|ll|ve|d|m)(?=[\s.,;:!?)]|$)")
 
 
 @functools.lru_cache(maxsize=1024)   # heredoc_heads asks again for each contraction in its text
-def is_contraction(text: str, index: int) -> bool:
-    """True when the `'` at `index` is a contraction, not a quote. The shape alone is not enough:
-    `echo a's b'; pkill foo` and `sed -e's;a;b;' f; pkill foo` quote real text. So the rest of
-    `text` is read twice, by heredoc_heads (the guard's one quote reader: a `'` inside double
-    quotes, a comment or a heredoc body opens nothing). It must balance if the `'` is text, and
-    stay open if the `'` is a quote. Any other result is unsure, and unsure reads as a quote, the
-    way the shell and main read it: that fails toward deny. No backslash escape is honored,
-    because split_segments honors none: a read that skipped one would miss a quote they open."""
+def contraction_reading(text: str, index: int) -> str:
+    """Read the `'` at `index` as "text" (a contraction), "quote", or "unsure". The shape alone is
+    not enough: `echo a's b'; pkill foo` and `sed -e's;a;b;' f; pkill foo` quote real text. So the
+    rest of `text` is read twice by heredoc_heads (a `'` inside double quotes, a comment or a
+    heredoc body opens nothing): once with the `'` as text, once with it as an open quote. It is
+    text when only the first leaves nothing open, and a quote when only the second does. Both
+    balanced, or neither: unsure. A quote with no close hides every later command, and a
+    contraction can hide one behind a real quote, so no single reading is safe when unsure.
+    split_segments reads both then (it ends up with the segments of each); heredoc_heads takes
+    the quote reading, which keeps more heredoc bodies under inspection. A backslash escape is
+    not read here: split_segments reads none, and a debt names that."""
     if not CONTRACTION.match(text, index):
-        return False
+        return "quote"
     rest = _drop_heredoc_bodies(text[index + 1:])
-    return not heredoc_heads(rest)[1] and bool(heredoc_heads(rest, "'")[1])
+    as_text = not heredoc_heads(rest)[1]
+    as_quote = not heredoc_heads(rest, "'")[1]
+    return "text" if as_text and not as_quote else "quote" if as_quote and not as_text else "unsure"
+
+
+def is_contraction(text: str, index: int) -> bool:
+    """True when the `'` at `index` reads as a contraction for sure (see contraction_reading)."""
+    return contraction_reading(text, index) == "text"
 
 
 def basename(token: str) -> str:
@@ -112,6 +122,16 @@ def split_segments(cmd: str, ends=None):
     """
     if ends is None:   # the same command is split by many rules: split it once
         return list(_split_segments_cached(cmd, POWERSHELL_CALL[0]))
+    unsure = []
+    segments = _split_reading(cmd, ends, False, unsure)
+    if unsure:   # a `'` that could be text or a quote: read it both ways, and judge every segment
+        segments += _split_reading(cmd, ends, True, [])
+    return segments
+
+
+def _split_reading(cmd: str, ends, unsure_is_text: bool, unsure):
+    """One reading of split_segments. An unsure `'` (contraction_reading) is text when
+    `unsure_is_text`, else a quote, and is noted in `unsure` either way."""
     segments = []
     current = []
     quote = ""
@@ -136,7 +156,10 @@ def split_segments(cmd: str, ends=None):
         if char == "\\" and cmd[index + 1:index + 2] == "\n" and not POWERSHELL_CALL[0]:
             index += 2   # a POSIX backslash-newline is a continuation; in PowerShell it ends a path
             continue
-        if char == "'" and is_contraction(cmd, index):
+        reading = contraction_reading(cmd, index) if char == "'" else ""
+        if reading == "unsure":
+            unsure.append(index)
+        if reading == "text" or (reading == "unsure" and unsure_is_text):
             current.append(char)   # `don't` is text: it must not hide the rest of the command
             index += 1
             continue
