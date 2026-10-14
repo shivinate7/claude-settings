@@ -48,6 +48,6 @@ Debts: `mods-check-mjs-skipped` (a red `check.mjs` passes CI), `mods-tests-glob-
 - zizmor on the new step. zizmor is not installed here.
 - Whether `cancelled()` is true on a job timeout. The job is red either way.
 
-Kind: build
+Kind: process
 Plan: decisions/mods-tests-run-in-gates.md#the-ruling (linux)
 Home: .github/workflows/gates.yml

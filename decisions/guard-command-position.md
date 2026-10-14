@@ -25,7 +25,7 @@ The guard tests, families wsl, kill, env, impeccable and shared-tree.
 
 ## Holes, named
 
-Debts: `guard-substitution-in-token` (a substitution inside a token is not read), `env-split-string-wsl-only` (only the WSL rule reads `env -S`), `guard-wrapper-lists-closed` (an unlisted wrapper or value flag hides the command word), `guard-split-ignores-backslash` (the segment split ignores backslash escapes), `guard-cd-walk-extra-reading` (the second reading shows a cd that bash never runs), `guard-timeout-fails-open` (a long command can run unjudged), `guard-lone-quote-overdeny` (a lone quote can deny a clean commit), `guard-redirect-paren-heredoc` (three command shapes hide a kill).
+Debts: `guard-substitution-in-token` (a substitution inside a token is not read), `env-split-string-wsl-only` (only the WSL rule reads `env -S`), `guard-wrapper-lists-closed` (an unlisted wrapper or value flag hides the command word), `guard-split-ignores-backslash` (the segment split ignores backslash escapes), `guard-cd-walk-extra-reading` (the second reading shows a cd that bash never runs), `guard-timeout-fails-open` (a long command can run unjudged), `guard-lone-quote-overdeny` (a lone quote can deny a clean commit), `guard-redirect-paren-heredoc` (three command shapes hide a kill). `guard-split-heredocs-here-string` (a here-string is read as a heredoc). `guard-interp-heredoc-lone-quote` (a lone quote in an interpreter heredoc hides a later command).
 
 Kind: process
 Home: hooks/guard_core.py

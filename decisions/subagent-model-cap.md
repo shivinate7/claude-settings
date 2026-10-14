@@ -20,7 +20,6 @@ Writing prose and records is not building.
 | Point | Model | Effort |
 |---|---|---|
 | `CLAUDE_CODE_SUBAGENT_MODEL` | sonnet | n/a |
-| `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` | sonnet, set beside `CLAUDE_CODE_SUBAGENT_MODEL` (changelog 2.1.296), so workflow agents follow the same default | n/a |
 | Explore, claude-code-guide | haiku | xhigh |
 | Explore that audits or judges meaning, not a plain search | sonnet, set per spawn, which overrides the frontmatter `haiku` | high |
 | test-author | haiku | xhigh |
@@ -75,7 +74,7 @@ A check, `lint/check_skill_model_rows.py`, fails CI when a skill has no row or a
 
 ## Holes, named
 
-Debts: `skill-rows-fence-indent` (a 4-space indented fence mark closes a fence). `skill-rows-phrase-any-cell` (the two phrases match any cell). `skill-rows-unclosed-fence-silent` (an unclosed fence hides rows without a name). `skill-rows-dir-named-skill-md` (a directory named SKILL.md counts as a skill). `skill-rows-test-gaps` (three shapes have no test). `skill-rows-posix-only-test` (the exit 2 test is POSIX only). `sendmessage-judge-blind-recvs` (the busy-state layer does not see some receivers). `sendmessage-judge-dup-names` (a name shared by two sessions is read as unseen). `sendmessage-wording-judge-always` (the wording judge runs on every send).
+Debts: `skill-rows-fence-indent` (a 4-space indented fence mark closes a fence). `skill-rows-phrase-any-cell` (the two phrases match any cell). `skill-rows-unclosed-fence-silent` (an unclosed fence hides rows without a name). `skill-rows-dir-named-skill-md` (a directory named SKILL.md counts as a skill). `skill-rows-test-gaps` (three shapes have no test). `skill-rows-posix-only-test` (the exit 2 test is POSIX only). `sendmessage-judge-blind-recvs` (the busy-state layer does not see some receivers). `sendmessage-judge-dup-names` (a name shared by two sessions is read as unseen). `sendmessage-wording-judge-always` (the wording judge runs on every send). `subagent-workflow-model-unasked` (a write that sets the workflow subagent model is not asked).
 
 ## Named limits
 

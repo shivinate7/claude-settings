@@ -182,7 +182,7 @@ Cost: a pull request run took 0.4 to 5 seconds on this repo. The full-history au
 
 ## Holes, named
 
-Debts: `rebase-loss-before-base-unread` (main work older than a rebase base is not read). `off-line-fork-reads-pre-cut` (a fork point off the first-parent line reads pre-cut main work). `inplace-edit-under-0-9-flagged` (an in-place edit under 0.9 similarity reads as a reversal). `undo-scan-cr-nul-false-alarm` (a lone CR or NUL splits a line, a false alarm).
+Debts: `rebase-loss-before-base-unread` (main work older than a rebase base is not read). `off-line-fork-reads-pre-cut` (a fork point off the first-parent line reads pre-cut main work). `inplace-edit-under-0-9-flagged` (an in-place edit under 0.9 similarity reads as a reversal). `undo-scan-cr-nul-false-alarm` (a lone CR or NUL splits a line, a false alarm). `hint-signed-commit-sha` (a signed commit can get the wrong sha in the trailer hint). `merge-say-surrogate-crash` (the merge tool can crash printing a non-UTF-8 name).
 
 Kind: process
 Home: lint/check_silent_undo.py
