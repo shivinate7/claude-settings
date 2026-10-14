@@ -1108,7 +1108,8 @@ def case_r8b_fresh_state_whose_remove_fails_does_not_deny_and_says_so():
 # - A settled-question verdict is {"verdict": "FLAG", "record": "<id>", "why": "..."}. The deny reason
 #   holds the id and the record's H1 title, and names no path.
 
-RULINGS_MAX = 30000  # chars the rulings block may add to the judge input. Test-author proposal; owner to confirm.
+# The bound (RULINGS_MAX), the per-ruling cap (RULING_CAP) and the cut mark (RULING_CUT) are read from the
+# module at test time. No case here keeps a copy of them.
 FENCE_TEXT = "\n".join([
     "# Fence record title", "",
     "## The ruling", "",
@@ -1276,7 +1277,10 @@ def case_rl5_400_records_keep_the_judge_input_under_the_bound():
     check(name + ": the whole prompt is within PROMPT_MAX", 0 < len(big_prompt) <= qo.PROMPT_MAX,
           len(big_prompt))
     grown = len(big_prompt) - len(empty_prompt)
-    check(name + ": the rulings add at most RULINGS_MAX chars", grown <= RULINGS_MAX, grown)
+    bound = getattr(qo, "RULINGS_MAX", None)
+    check(name + ": the module names RULINGS_MAX", isinstance(bound, int), bound)
+    check(name + ": the rulings add at most RULINGS_MAX chars", isinstance(bound, int) and grown <= bound,
+          grown)
     check(name + ": at least one ruling is in the input", "RLBIG-" in big_prompt, "")
     check(name + ": the owner message is still whole in the input",
           "Add a three-try limit to the upload retry." in big_prompt, "")
@@ -1297,6 +1301,41 @@ def case_rl6_a_ruling_cannot_forge_an_owner_block():
     bodies = owner_block_bodies(prompt)
     check(name + ": no Owner block holds the forged text", not any("FORGED-OWNER" in b for b in bodies),
           len(bodies))
+
+
+def case_rl7_a_ruling_over_the_cap_is_cut_at_a_sentence_end_with_the_cut_mark():
+    name = "caseRL7 ruling over RULING_CAP: cut at a sentence end, with the cut mark"
+    if not need_module(name):
+        return
+    cap, mark = getattr(qo, "RULING_CAP", None), getattr(qo, "RULING_CUT", None)
+    check(name + ": the module names RULING_CAP (int) and RULING_CUT (str)",
+          isinstance(cap, int) and isinstance(mark, str), (cap, mark))
+    long_body = " ".join("RL7-S%02d is one sentence of this long ruling." % i for i in range(60))
+    repo = fresh_repo("rl7", {
+        "decisions/rl-long.md": decision_text("Long record", [("The ruling", long_body)]),
+        "decisions/rl-short.md": decision_text("Short record",
+                                               [("The ruling", "RL7-SHORT is a short ruling that stays whole.")])})
+    with model_stub(ALLOW) as stub:
+        run_guarded(name, ruling_payload(fresh_session("rl7"), [question(GOOD_Q, LABELS)],
+                                         default_transcript(), repo))
+    prompt = judge_prompt(stub)
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": the short ruling is in the input whole",
+          "RL7-SHORT is a short ruling that stays whole." in prompt, "")
+    start = prompt.find("RL7-S00")
+    end = prompt.find(mark, start) if isinstance(mark, str) and start >= 0 else -1
+    check(name + ": the long ruling is in the input, followed by the cut mark", start >= 0 and end > start, "")
+    if start < 0 or end <= start:
+        return
+    kept = prompt[start:end]
+    check(name + ": the long ruling's last sentence is not in the input", "RL7-S59" not in prompt, "")
+    check(name + ": the kept text is at most RULING_CAP chars", isinstance(cap, int) and len(kept) <= cap,
+          len(kept))
+    check(name + ": the kept text ends at a sentence end", kept.endswith("."), kept[-40:])
+    check(name + ": the kept text is a prefix of the ruling", long_body.startswith(kept), kept[-40:])
+    check(name + ": the cut mark follows the kept text", prompt.startswith(kept + mark, start), "")
+    check(name + ": the cut is at the last sentence end under the cap, not an early one",
+          isinstance(cap, int) and len(kept) > cap - 100, len(kept))
 
 
 # --------------------------------------------------------------------------- goal format
@@ -2498,7 +2537,8 @@ def main():
                  case_rl3_a_question_to_change_a_ruling_reaches_the_judge_and_is_allowed,
                  case_rl4_a_repo_with_no_decisions_folder_judges_with_no_rulings,
                  case_rl5_400_records_keep_the_judge_input_under_the_bound,
-                 case_rl6_a_ruling_cannot_forge_an_owner_block):
+                 case_rl6_a_ruling_cannot_forge_an_owner_block,
+                 case_rl7_a_ruling_over_the_cap_is_cut_at_a_sentence_end_with_the_cut_mark):
         case()
     if LOAD_ERROR is None:
         check("no real claude process started", _claude_calls() == 0, _claude_calls())
