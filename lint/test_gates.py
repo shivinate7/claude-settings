@@ -3227,5 +3227,102 @@ class MdSweepLogTests(unittest.TestCase):
         self.assertLess(seconds, 2.0, "the sweep waited for the log write")
 
 
+# ---------------------------------------------------------------- two writers, one guard.log
+#
+# Two processes append to one guard.log at the same time. Each writes APPEND_N lines, so 2 x APPEND_N
+# must land, each exactly once. Red on Windows: a plain append from two processes can overwrite the
+# other's line. MEASURED 2026-10-13 on a Windows PC: a two-process probe of 2000 same-length appends
+# each kept about 3810 of 4000. Linux does not lose these lines, so a green on Linux proves nothing.
+# Two writers are cased: guard_core.record, and the STE gate's logger (lint/_transcript.guard_logger),
+# which reaches record through the same append. The one-writer case is the control: it must stay green.
+APPEND_N = 2000
+APPEND_WRITER_RECORD = r'''
+import sys
+sys.path.insert(0, sys.argv[1])  # the hooks/ folder
+import guard_core
+tag, n, session = sys.argv[2], int(sys.argv[3]), sys.argv[4]
+guard_core.set_log_session(session)
+for i in range(n):
+    guard_core.record("Bash", "deny", "append-race", "{}-{:05d}".format(tag, i))
+'''
+APPEND_WRITER_STE = r'''
+import sys
+sys.path.insert(0, sys.argv[1])  # the lint/ folder: the STE gate's own logger
+from _transcript import guard_logger
+tag, n, session = sys.argv[2], int(sys.argv[3]), sys.argv[4]
+log = guard_logger({"session_id": session})
+for i in range(n):
+    log("Write", "fixed", "STE007,STE008", "{}-{:05d}.md".format(tag, i), "fixed=2")
+'''
+
+
+class GuardLogAppendRaceTests(unittest.TestCase):
+    """Concurrent appends to one guard.log: every line written is kept, once, whole."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cfg = os.path.join(self.tmp.name, "cfg")
+        os.makedirs(self.cfg)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _run_writers(self, source, lib, tags):
+        """Start one writer process per tag at the same time. Each writes APPEND_N lines to self.cfg."""
+        writer = os.path.join(self.tmp.name, "writer.py")
+        with open(writer, "w", encoding="utf-8") as handle:
+            handle.write(source)
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg)
+        procs, outs = [], []
+        for tag in tags:
+            out = open(os.path.join(self.tmp.name, "out-%s.txt" % tag), "w", encoding="utf-8")
+            outs.append(out)
+            procs.append(subprocess.Popen([sys.executable, writer, lib, tag, str(APPEND_N), GL_SESSION],
+                                          env=env, stdout=out, stderr=subprocess.STDOUT))
+        codes = []
+        for proc in procs:
+            try:
+                codes.append(proc.wait(timeout=120))
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                codes.append(None)
+        for out in outs:
+            out.close()
+        self.writer_text = ""
+        for tag in tags:
+            with open(os.path.join(self.tmp.name, "out-%s.txt" % tag), encoding="utf-8") as handle:
+                self.writer_text += handle.read()[:300]
+        return codes
+
+    def _assert_kept_each_once(self, codes, tags, want):
+        """`want` is the matched field of every line that must land, in any order."""
+        self.assertEqual(codes, [0] * len(tags), "a writer failed: " + self.writer_text)
+        rows = gl_lines(self.cfg) or []
+        self.assertEqual(len(rows), len(want), "kept %d of %d written" % (len(rows), len(want)))
+        got = sorted(gl_fields(row)[4] for row in rows)  # six fields each, or this names the row
+        self.assertEqual(len(set(got)), len(got), "a line was doubled")
+        self.assertTrue(got == sorted(want), "missing %d line(s)" % len(set(want) - set(got)))
+
+    def test_one_record_writer_keeps_every_line(self):
+        # Control: one writer, no overlap. Green on main, so a red elsewhere is the race.
+        codes = self._run_writers(APPEND_WRITER_RECORD, HOOKS, ("a",))
+        want = ["a-%05d" % i for i in range(APPEND_N)]
+        self._assert_kept_each_once(codes, ("a",), want)
+
+    def test_two_record_writers_keep_every_line(self):
+        # guard_core.record: the one append that every guard, gate and sweep line goes through.
+        tags = ("a", "b")
+        codes = self._run_writers(APPEND_WRITER_RECORD, HOOKS, tags)
+        want = ["%s-%05d" % (tag, i) for tag in tags for i in range(APPEND_N)]
+        self._assert_kept_each_once(codes, tags, want)
+
+    def test_two_ste_gate_loggers_keep_every_line(self):
+        # The STE gate's real path: lint/_transcript.guard_logger, then core.record.
+        tags = ("a", "b")
+        codes = self._run_writers(APPEND_WRITER_STE, HERE, tags)
+        want = ["%s-%05d.md fixed=2" % (tag, i) for tag in tags for i in range(APPEND_N)]
+        self._assert_kept_each_once(codes, tags, want)
+
+
 if __name__ == "__main__":
     unittest.main()
