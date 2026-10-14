@@ -2923,11 +2923,8 @@ class SteGateLogTests(unittest.TestCase):
             proc.wait()
             self.assertEqual(proc.returncode, 0, err.decode("utf-8", "replace"))
 
-    # (7) twenty gates at once: twenty whole lines, one per session, none lost or joined. Skipped on
-    # Windows: a plain append from many processes is not atomic there, so the exact count cannot hold.
-    # test_19b is the form that holds on every platform.
-    @unittest.skipIf(sys.platform == "win32",
-                     "Windows append from many processes is not atomic: see decisions/guard-log-read-weekly.md Holes")
+    # (7) twenty gates at once: twenty whole lines, one per session, none lost or joined. Runs on every
+    # platform: guard_core.record takes a lock around its append, so Windows keeps every line too.
     def test_19_twenty_parallel_gates_leave_twenty_whole_lines(self):
         self._run_parallel_gates()
         rows = self._rows("twenty parallel writes")
@@ -2935,14 +2932,12 @@ class SteGateLogTests(unittest.TestCase):
         self.assertEqual(sorted(gl_fields(row)[5] for row in rows),
                          sorted("gl-par-%02d" % i for i in range(20)))
 
-    # (7) the Windows-safe form of test 19. What the gate controls holds on every platform: each gate
-    # writes at most one line, no line is corrupted, doubled or joined, no process crashes, and most
-    # lines land (17 to 20).
+    # (7) each gate writes exactly one whole line: no line is corrupted, doubled or joined, no process
+    # crashes, and all twenty land.
     def test_19b_parallel_gates_write_at_most_one_whole_line_each(self):
         self._run_parallel_gates()
         rows = gl_lines(self.cfg) or []
-        self.assertGreaterEqual(len(rows), 17, "too many lines lost")
-        self.assertLessEqual(len(rows), 20)
+        self.assertEqual(len(rows), 20, "lines lost: kept %d of 20" % len(rows))
         sessions = []
         for row in rows:
             when, tool, decision, rule, matched, session = gl_fields(row)
