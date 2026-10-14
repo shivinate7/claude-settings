@@ -14,7 +14,7 @@ A mod. It runs the Stop-time decision watch with this session's own model login.
 - Every failure reads as UNKNOWN. A failure never reads as ALLOW.
 - Phase 1 prints a `key` for the evidence it judged. The mod gives it back to phase 2 as `--key` after the reply. Evidence that moved between the two steps reads UNKNOWN. A phase 1 with no key reads UNKNOWN.
 - Under the split flags, the script prints `verdict` and `notices` as separate JSON fields. The mod does not parse joined text.
-- The verdict toast holds the script's own FLAG or UNKNOWN message, or the mod's own UNKNOWN text. Each notice (config files, merges into main, unread subjects) gets its own toast. The END log line holds the verdict and each notice. A verdict that is neither FLAG nor UNKNOWN is logged as `NOT SHOWN`. A failed toast is logged as `TOAST FAILED`, with the text it failed to show.
+- The verdict toast holds the script's own FLAG or UNKNOWN message, or the mod's own UNKNOWN text. Each notice (config files, merges into main, unread subjects) gets its own toast. Each notice is logged on its own `NOTICE` line or lines before the END line, which holds the verdict only. A verdict that is neither FLAG nor UNKNOWN is logged as `NOT SHOWN`. A failed toast is logged as `TOAST FAILED`, with the text it failed to show.
 - A model verdict that the script cannot use reads as "verdict lost". This happens when another judge already recorded the same turn. The script prints this marker whenever it gets a model reply and ends before the model step. A valid ALLOW that the script uses stays ALLOW.
 - A new human message between the two steps also causes it. The baseline moves, so a real FLAG can print "verdict lost". That is loud and correct.
 - The mod sends the Stop JSON to python as ASCII only. It escapes each other character as `\uXXXX`.
@@ -52,7 +52,7 @@ The last line is "Stops seen: N". N counts the STOP seen lines now in the log. T
 
 - The script must be the version that knows `--emit-prompt`, `--model-text`, and `--model-error`.
 - A bad flag combination on the script falls back to the normal `claude -p` call. This is a hole: a wrong flag from a caller runs the old path.
-- A Stop that arrives during a judge is skipped. The script scopes a turn by the file time after the last human message, so a Stop for a new turn that lands during a judge is never judged. Hole in `decision-watch-mod-limits`.
+- A Stop that arrives during a judge is skipped. The script scopes a turn by the file time after the last human message. So a Stop for a new turn that lands during a judge is never judged. Hole in `decision-watch-mod-limits`.
 - The ruling and the holes: `decision-watch-mod-limits` (limits of the mod).
 
 ## Try in the desktop app

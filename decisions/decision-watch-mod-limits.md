@@ -55,6 +55,7 @@ On 2026-10-13 at 12:09 CDT, a spike ran a mod's `$.model.complete` in the deskto
 - HOLE 9 (minor). `textOf` drops `r.reason`, so an aborted call reads `no text`. The `asciiJson` regex holds a literal U+FFFF character. `pickPython` runs `where.exe` in both phases. No fix is named.
 - HOLE 10. The Stop row is removed, but it is unproven live that `classic.Stop` reaches a mod in the desktop app. The drop is unproven until the mod log shows `STOP seen` lines after merge. The orchestrator measures that and restores the Stop row if none show.
 - HOLE 11. A Stop that lands while a judge runs is skipped (`SKIP busy`). `decision_watch.py` scopes a turn by file time after the last human message, so for a new turn that Stop is never judged: the next Stop of that turn judges it only if one comes. No fix is named.
+- HOLE 15 (minor). The log drops whitespace at the very start of a notice; the toast keeps it. Debt: dw-notice-lead-space-lost.
 
 ## Deferred, not built
 
