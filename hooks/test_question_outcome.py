@@ -77,11 +77,13 @@ Interface the hook must match:
 - A missing style file, or a missing rule anchor: the check still runs (ALLOW gives empty
   stdout, FLAG gives a deny), and writes one stderr line that names the file or the anchor.
 - Plain words (incidents 2026-10-14, lane question-plain; owner ruling 11:00 CDT: no separate no-model
-  check, the model judge asks it all). The judge prompt asks four things: (1) can the owner answer from
-  the box alone, with every id, code or name explained in words; (2) does the question point at anything
-  the box does not show, such as an earlier message or "item 4"; (3) does each option's Lose name what
-  changes for the owner, not for a record; (4) is a better option missing (the existing ask). A FLAG on
-  each of the three incident questions denies, and the judge's reason reaches the session.
+  check, the model judge asks it all). The judge prompt asks six things: (1) does the Goal line match
+  the goal; (2) does each option serve it; (3) is a better option missing (the existing asks); (4) can
+  the owner answer from the box alone, with every id, code or name explained in words; (5) does the
+  question point at anything the box does not show, such as an earlier message or "item 4"; (6) does
+  each option's Gain name what the owner gets, and its Lose name what changes for the owner, not for a
+  record. A FLAG on each of the three incident questions denies, and the judge's reason reaches the
+  session.
 - Override the module under test with the env var QUESTION_OUTCOME_UNDER_TEST.
 """
 import atexit
@@ -2238,43 +2240,53 @@ def window_has(text, word, groups, before=150, after=300):
 
 
 def asks_box_alone(p):
-    """Ask 1: can the owner answer from the box alone, with every id, code or name explained in words."""
+    """Ask 4: can the owner answer from the box alone, with every id, code or name explained in words."""
     return window_has(p, r"\banswer", [[r"\bbox\b", r"\balone\b"],
                                        [r"\bids?\b", r"\bidentifiers?\b", r"\bcodes?\b", r"\bnames?\b"],
                                        [r"\bexplain", r"\bwords?\b"]])
 
 
 def asks_unseen_pointer(p):
-    """Ask 2: does the question point at anything the box does not show, such as an earlier message or an item."""
+    """Ask 5: does the question point at anything the box does not show, such as an earlier message or an item."""
     return window_has(p, r"\b(?:point|points|pointing|refer|refers|referring|reference|references)\b",
                       [[r"\bbox\b"], [r"\bmessages?\b", r"\bearlier\b", r"\bitems?\b"]])
 
 
 def asks_lose_names_owner_change(p):
-    """Ask 3: does each option's Lose name what changes for the owner, not for a record."""
+    """Ask 6, the Lose half: does each option's Lose name what changes for the owner, not for a record."""
     return window_has(p, r"\blose[sd]?\b", [[r"\bowner"], [r"\brecords?\b"]])
 
 
+def asks_gain_names_owner_change(p):
+    """Ask 6, the Gain half: does each option's Gain name what the owner gets, in the same ask as Lose."""
+    return window_has(p, r"\bgain(?:s|ed|ing)?\b", [[r"\bowner"], [r"\blose[sd]?\b"]])
+
+
 def asks_better_option_missing(p):
-    """Ask 4, the existing one: is an option that serves the goal better missing."""
+    """Ask 3, the existing one: is an option that serves the goal better missing."""
     return window_has(p, r"\bmissing\b", [[r"\boptions?\b"], [r"\bbetter\b"]])
 
 
-def case_p1_judge_prompt_asks_the_four_plain_things():
-    name = "caseP1 judge prompt: box alone with every id explained, unseen pointer, Lose, better option missing"
+def case_p1_judge_prompt_asks_the_plain_things():
+    name = "caseP1 judge prompt: box alone, unseen pointer, Gain and Lose, better option missing; allow"
     if not need_module(name):
         return
     mod = fixture_hook(name)
     if mod is None:
         return
     with hook_as(mod), model_stub(ALLOW) as stub:
-        run_main(ask_payload(fresh_session("p1"), [question(GOOD_Q, LABELS)], default_transcript()))
+        _, out, _ = run_main(
+            ask_payload(fresh_session("p1"), [question(GOOD_Q, LABELS)], default_transcript()))
     prompt = (stub.prompts[0] if stub.prompts else "").replace(GOOD_Q, "").lower()
     check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": ALLOW for a plain question: not denied", deny_reason(out) is None, out[:120])
+    check(name + ": ALLOW for a plain question: stdout empty", out.strip() == "", out[:120])
     check(name + ": asks if the owner can answer from the box alone, every id, code or name in words",
           asks_box_alone(prompt), "")
     check(name + ": asks if the question points at anything the box does not show",
           asks_unseen_pointer(prompt), "")
+    check(name + ": asks if each option's Gain names what the owner gets",
+          asks_gain_names_owner_change(prompt), "")
     check(name + ": asks if each option's Lose names what changes for the owner, not for a record",
           asks_lose_names_owner_change(prompt), "")
     check(name + ": keeps the ask for a better option that is missing", asks_better_option_missing(prompt), "")
@@ -2406,7 +2418,7 @@ def main():
              case_k8_one_owner_message_over_the_bound_keeps_text_and_shows_cut_mark,
              case_k9_several_owner_messages_over_the_bound_none_empty_and_cut_ones_keep_their_end,
              case_k10_no_room_for_a_mark_leaves_assistant_text_marked_or_whole_never_absent,
-             case_p1_judge_prompt_asks_the_four_plain_things,
+             case_p1_judge_prompt_asks_the_plain_things,
              case_p2_the_three_incident_questions_reach_the_judge_and_are_denied)
     for case in cases:
         case()
