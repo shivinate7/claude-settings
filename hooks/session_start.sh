@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. Also warns when the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, a freshness check could not run, or the SessionEnd sweep is disarmed or unknown.
+# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, a freshness check could not run, or the SessionEnd sweep is disarmed or unknown.
 # Silent outside a git tree or when git is missing. Always exits 0, nothing on stderr.
 
 input=$(cat 2>/dev/null)
@@ -8,12 +8,15 @@ cwd=$(printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\
 
 command -v git >/dev/null 2>&1 || exit 0
 
-# bounded_fetch <dir> <branch>: quiet `git fetch origin <branch>` in <dir>, killed after
-# CLAUDE_SETTINGS_FETCH_TIMEOUT seconds (default 2). Returns the fetch's status: 0 ran, else not.
-# The one home for both freshness checks below.
-bounded_fetch() {
+# bounded_git <dir> <outfile> <git args...>: runs git in <dir>, stdout to <outfile>, killed after
+# CLAUDE_SETTINGS_FETCH_TIMEOUT seconds (default 2). Returns git's status, or a kill's (above 1)
+# when the bound hit. The one home for every bounded git call below.
+bounded_git() {
   fetch_timeout="${CLAUDE_SETTINGS_FETCH_TIMEOUT:-2}"
-  ( cd "$1" 2>/dev/null && git fetch --quiet origin "$2" >/dev/null 2>&1 ) &
+  git_dir_arg="$1"
+  git_out_arg="$2"
+  shift 2
+  ( cd "$git_dir_arg" 2>/dev/null && git "$@" >"$git_out_arg" 2>/dev/null ) &
   fetch_pid=$!
   ( sleep "$fetch_timeout"; kill "$fetch_pid" >/dev/null 2>&1 ) >/dev/null 2>&1 &
   killer_pid=$!
@@ -22,6 +25,12 @@ bounded_fetch() {
   kill "$killer_pid" >/dev/null 2>&1
   wait "$killer_pid" 2>/dev/null
   return "$fetch_rc"
+}
+
+# bounded_fetch <dir> <branch>: quiet `git fetch origin <branch>` in <dir>, bounded. Returns the
+# fetch's status: 0 ran, else not. The one home for both freshness checks below.
+bounded_fetch() {
+  bounded_git "$1" /dev/null fetch --quiet origin "$2"
 }
 
 toplevel=$(cd "$cwd" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)
@@ -33,6 +42,31 @@ branch=$(cd "$cwd" 2>/dev/null && git rev-parse --abbrev-ref HEAD 2>/dev/null)
 n=$(cd "$cwd" 2>/dev/null && git status --porcelain 2>/dev/null | wc -l | tr -d '[:space:]')
 
 printf 'checkout %s on %s, %s dirty files\n' "$toplevel" "$branch" "$n"
+
+# core.worktree in the SHARED config re-points every checkout of the clone at one tree. Incident
+# (q_max, 2026-10-14): a test's child `git init` inherited GIT_DIR and GIT_WORK_TREE and wrote it.
+# Warns only, never fixes: the value may be someone's live work. Both git calls are bounded, so a
+# slow git never stalls session start. `git config` exits 0 when the key is set, 1 when it is
+# absent, and above 1 when the read failed or was killed, which is reported as unknown, never as
+# clear. A submodule sets this key on purpose, so it is skipped.
+cw_out=$(mktemp 2>/dev/null)
+if [ -n "$cw_out" ]; then
+  if bounded_git "$cwd" "$cw_out" rev-parse --show-superproject-working-tree; then
+    if [ -z "$(cat "$cw_out" 2>/dev/null)" ]; then
+      bounded_git "$cwd" "$cw_out" config --local --get core.worktree
+      core_worktree_rc=$?
+      if [ "$core_worktree_rc" -eq 0 ]; then
+        printf 'checkout %s: core.worktree is set to %s in the shared git config; every checkout of this clone reads that tree. Unset it with git config --local --unset core.worktree\n' \
+          "$cwd" "$(cat "$cw_out" 2>/dev/null)"
+      elif [ "$core_worktree_rc" -gt 1 ]; then
+        printf 'checkout %s: cannot read core.worktree from the git config; its state is unknown\n' "$cwd"
+      fi
+    fi
+  else
+    printf 'checkout %s: cannot read core.worktree from the git config; its state is unknown\n' "$cwd"
+  fi
+  rm -f "$cw_out" 2>/dev/null
+fi
 
 # Divergence check: does ~/.claude/CLAUDE.md's pointer target match this checkout's CLAUDE.md?
 # Same parsing as settings.json's refresh hook. Silent on any missing/unreadable piece.
