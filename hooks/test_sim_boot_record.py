@@ -516,7 +516,8 @@ class SimBootRecordTests(unittest.TestCase):
         self.assertEqual(result.stdout, "", "a healthy boot wrote to stdout")
         self.assertEqual(self.check_calls(), ["bootstatus " + U1, "screenshot " + U1],
                          "the check did not run bootstatus then io screenshot, or ran more")
-        self.assertEqual([r["udid"] for r in self.read_records()], [U1])
+        self.assertEqual([r["udid"] for r in self.read_records()], [U1],
+                         "a healthy boot must leave exactly one record line")
 
     def test_a_healthy_mcp_launch_runs_the_check_and_writes_nothing(self):
         ti = {"action": "launch", "device": U1}
@@ -546,10 +547,11 @@ class SimBootRecordTests(unittest.TestCase):
                 note = out["hookSpecificOutput"]["additionalContext"].lower()
                 self.assertIn("again", note, "the note does not say the device was booted again")
                 self.assertNotIn("decision", out)
+                # Ruling 5: the record goes in before the check, and a retry adds a second line.
                 records = self.read_records()
-                self.assertEqual([r["udid"] for r in records], [U1])
-                self.assertEqual(str(records[0]["launchd_pid"]), "3001",
-                                 "the record holds the pid from before the retry")
+                self.assertEqual([r["udid"] for r in records], [U1, U1])
+                self.assertEqual([str(r["launchd_pid"]) for r in records], ["2001", "3001"],
+                                 "want the old pid first and the retry boot's pid newest")
 
     def test_a_failed_check_after_the_retry_blocks_and_names_the_device(self):
         cases = {"bootstatus": ("bootstatus", [1, 1]), "screenshot": ("screenshot", [1, 1]),
@@ -600,6 +602,30 @@ class SimBootRecordTests(unittest.TestCase):
         result = self.post_raw(self.ON)
         self.assertEqual(result.stdout, "")
         self.assertEqual(self.check_calls(), [], "an owner-booted device was checked")
+
+    def test_a_mixed_call_checks_only_the_device_simctl_boot_names(self):
+        U2_ON = (U2, "Idle Air", "Booted", TYPE_AIR)
+        U2_OFF = (U2, "Idle Air", "Shutdown", TYPE_AIR)
+        ti = {"command": "xcrun simctl boot %s && xcodebuild test -scheme App -destination id=%s"
+                         % (U1, U2)}
+        self.plan("bootstatus", 1, 1)  # a check of U2 would fail and retry
+        self.pre(self.OFF + [U2_OFF], tool_input=ti)
+        self.post_raw(self.ON + [U2_ON], tool_input=ti)
+        self.assertEqual([c for c in self.check_calls() if U2 in c], [],
+                         "the xcodebuild-booted device was checked or retried")
+        self.assertEqual(sorted({r["udid"] for r in self.read_records()}), sorted([U1, U2]),
+                         "both booted devices must still be recorded")
+
+    def test_the_boot_runs_even_when_the_retry_shutdown_fails(self):
+        self.ps_with_retry_pid()
+        self.plan("bootstatus", 1)
+        self.plan("shutdown", 1)
+        result = self.boot_and_check()
+        names = [c.split()[0] for c in self.check_calls()]
+        self.assertEqual([n for n in names if n in ("shutdown", "boot")], ["shutdown", "boot"],
+                         "boot did not run after a failed shutdown")
+        self.assertIn("again", json.loads(result.stdout)["hookSpecificOutput"]
+                      ["additionalContext"].lower())
 
     def tearDown_state(self):
         """Reset the fake's logs, plans, flag and records between sub-cases of one test."""
