@@ -4148,10 +4148,13 @@ for _name, _command in (
        rule=WSL_RULE, cwd=NOGIT)
 
 
-# ---- guard-command-position, try 3 (lane). `env -S` is read after a `$(` too. The `$(` case is
-# RED on a109f84, the state before try 3, and GREEN on 335c4a9. The glued-subshell case is a PIN:
-# it denies on a109f84 as well, and a fix must keep it so.
-sh("guard-command-position: wsl env -S in a dollar paren denies",
+# ---- guard-command-position, try 3 (lane). `env -S` is read after a `$(` too. The RED case is
+# text `env -S` before the real wrapper: it hides the call after `$(`. It is RED on 1633efa and
+# GREEN on 335c4a9. The two cases after it are PINS: each denies on 1633efa and 335c4a9, and a
+# fix must keep them so.
+sh("guard-command-position: wsl env -S text before a dollar-paren env -S denies",
+   "echo env -S x $(env -S 'wsl --shutdown')", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("guard-command-position: wsl pinned, env -S in a dollar paren denies",
    "echo $(env -S 'wsl --shutdown')", "deny", rule=WSL_RULE, cwd=NOGIT)
 sh("guard-command-position: wsl pinned, env -S in a glued subshell denies",
    "(env -S 'wsl --shutdown')", "deny", rule=WSL_RULE, cwd=NOGIT)
