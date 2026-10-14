@@ -328,13 +328,18 @@ def undone(o, n, mine):
     return False
 
 
+progress = None  # a caller may set a callable(done, total): called before each file of reversals
+
+
 def reversals(cwd, old, new, files, earlier):
     """[(path, how, earlier commit)] where old->new undoes a change an earlier commit made.
     A change with no non-blank difference is no undo, and neither is a removal whose lines
     old->new adds to another file (a move)."""
     found = []
     elsewhere = None
-    for path, (a, b) in sorted(files.items()):
+    for i, (path, (a, b)) in enumerate(sorted(files.items())):
+        if progress:
+            progress(i + 1, len(files))
         touched = [e for e in earlier if path in e.files]
         mine = hunks(cwd, old, new, path) if touched else []
         for e in touched if mine else []:
