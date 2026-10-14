@@ -12,6 +12,7 @@ export const MAX_POLLS = 10 // board refreshes on the heartbeat with no /board c
 export const GRACE_MS = 100 // most a hook waits for its refresh
 export const READ_BUDGET_MS = 3000 // most one host read may take
 export const MAX_PATH = 4000
+export const TO_MAX = 300 // a session name is kept and matched to this length (review round 2 of judge-scope), never the 40-char display cap
 export const GIT_SLOW_MS = 5000 // a git read this slow makes the idle beat back off
 export const GIT_BACKOFF_MAX_MS = 300_000 // the idle git read waits at most 5 minutes between reads
 export const MAX_RECENT = 5
@@ -247,7 +248,20 @@ export function agentRows(list) {
   const state = s => (s === 'busy' ? 'working' : s === 'idle' || s === 'waiting' ? 'waiting' : 'unknown')
   return list
     .filter(r => r && typeof r === 'object' && isId(r.sessionId))
-    .map(r => ({ id: r.sessionId, repo: clean(baseName(r.cwd), 40), state: state(r.status), ask: r.status === 'waiting' }))
+    .map(r => ({ id: r.sessionId, name: typeof r.name === 'string' ? clean(r.name, TO_MAX) : '', repo: clean(baseName(r.cwd), 40), state: state(r.status), ask: r.status === 'waiting' }))
+}
+
+// The `claude agents` state of the one row named `name`: busy, idle or waiting (on a permission
+// answer). 'unseen' when no row, or more than one row, has that name, or its state is unknown.
+export function receiverState(rows, name) {
+  const find = n => (rows ?? []).filter(r => n && r.name === n)
+  const full = typeof name === 'string' ? clean(name, TO_MAX) : ''
+  let hits = find(full)
+  // ListAgents prints `name [ref]` when names clash. Only when the full name matches nothing, drop the ref.
+  if (!hits.length && typeof name === 'string') hits = find(clean(name.replace(/ \[[^\]]*\]$/, ''), TO_MAX))
+  if (hits.length !== 1) return 'unseen'
+  const r = hits[0]
+  return r.state === 'working' ? 'busy' : r.state !== 'waiting' ? 'unseen' : r.ask ? 'waiting' : 'idle'
 }
 
 // Rows for the board: `claude agents` rows seeded first, then fresh store entries merged in by

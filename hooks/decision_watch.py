@@ -136,14 +136,10 @@ MODEL_TIMEOUT = 120
 GIT_TIMEOUT = 10
 MAX_DIFFED_FILES = 8
 
-# `invoke_model` puts the whole prompt in one argv element. Windows caps a process's
-# command line around 32,767 characters total; a run touching several protected files, or
-# one large legitimate rewrite of a decision file (exactly the case this hook exists to
-# judge), can build a prompt past that on its own, and `subprocess.run` would then fail to
-# start there -- UNKNOWN, per this hook's own fail-closed contract, but silently so, on the
-# one platform this repo runs Windows parity CI for. Capped well under the limit, with the
-# cut named in the prompt itself so the judge (and anyone reading its "why") knows evidence
-# was dropped rather than concluding nothing else changed.
+# The prompt goes to `claude -p` on stdin, so the Windows command-line cap (about 32,767
+# characters) no longer bounds it. The clip now bounds cost and latency only; the right size
+# is unmeasured. The cut is named in the prompt itself so the judge (and anyone reading its
+# "why") knows evidence was dropped rather than concluding nothing else changed.
 PROMPT_MAX_LEN = 20000
 
 PEER_MESSAGE_TOOLS = ("SendMessage", "Task")
@@ -766,7 +762,7 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
     try:
         run = subprocess.run(
             [
-                "claude", "-p", prompt,
+                "claude", "-p",  # prompt goes on stdin: a Windows command line caps at 32,767 chars
                 "--model", model,
                 "--effort", "xhigh",
                 "--output-format", "json",
@@ -774,11 +770,11 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
                 "--safe-mode",
                 "--permission-mode", "plan",
             ],
-            input="", capture_output=True, text=True, encoding="utf-8", errors="replace",
+            input=prompt.encode("utf-8", "replace"), capture_output=True,  # bytes: text mode turns LF into CRLF on Windows
             timeout=timeout, cwd=root, env=env,
         )
     except subprocess.TimeoutExpired:
-        return None, "model subprocess timed out"  # fixed text: str(exc) holds the argv and prompt
+        return None, "model subprocess timed out"  # fixed text: never put str(exc) in the report
     except Exception as exc:
         return None, scrub("model subprocess failed to start: %s" % exc)
     finally:
@@ -786,10 +782,13 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
             shutil.rmtree(root, ignore_errors=True)
         except Exception:
             pass
+    # Bytes from the pipe; a str passes through, which a stubbed `subprocess.run` may return.
+    text_of = lambda raw: raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw or ""
+    stdout, stderr = text_of(run.stdout), text_of(run.stderr)
     if run.returncode != 0:
-        return None, "model exited %s: %s" % (run.returncode, scrub(run.stderr or "")[:200])
+        return None, "model exited %s: %s" % (run.returncode, scrub(stderr)[:200])
     try:
-        envelope = json.loads(run.stdout)
+        envelope = json.loads(stdout)
     except Exception:
         return None, "model output was not JSON"
     text = envelope.get("result") if isinstance(envelope, dict) else None

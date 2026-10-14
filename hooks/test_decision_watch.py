@@ -697,12 +697,22 @@ def _invoke_model_argv_body():
     check("invoke_model_argv: verdict is ALLOW", verdict == {"verdict": "ALLOW"}, verdict)
 
     argv = captured.get("argv") or []
-    # --effort xhigh is pinned by case_invoke_model_haiku_xhigh_120s; position is free here.
+    kwargs = captured.get("kwargs") or {}
+    # The prompt travels on stdin, never in argv: Windows refuses a command line past 32,767
+    # chars (WinError 206), so a prompt in argv cannot reach `claude` at its real size.
+    pairs = list(zip(argv, argv[1:]))
+    check("invoke_model_argv: --model haiku in argv", ("--model", "haiku") in pairs, argv)
+    check("invoke_model_argv: --effort xhigh in argv", ("--effort", "xhigh") in pairs, argv)
+    check("invoke_model_argv: prompt is not in argv",
+          not any("JUDGE THIS PROMPT" in arg for arg in argv), argv)
+    check("invoke_model_argv: prompt arrives on stdin",
+          kwargs.get("input") == b"JUDGE THIS PROMPT", kwargs.get("input"))
+    # --effort xhigh is checked above; its position is free, so it is dropped before the compare.
     if "--effort" in argv:
         i = argv.index("--effort")
         argv = argv[:i] + argv[i + 2:]
     expected = [
-        "claude", "-p", "JUDGE THIS PROMPT",
+        "claude", "-p",
         "--model", "haiku",
         "--output-format", "json",
         "--tools", "",
@@ -712,7 +722,6 @@ def _invoke_model_argv_body():
     print("invoke_model argv: %r" % argv)
     check("invoke_model_argv: matches the expected restricted command line", argv == expected, argv)
 
-    kwargs = captured.get("kwargs") or {}
     judge_cwd = kwargs.get("cwd")
     check("invoke_model_argv: cwd is set", bool(judge_cwd), judge_cwd)
     check("invoke_model_argv: cwd is not this repository", judge_cwd != HERE and judge_cwd != os.path.dirname(HERE), judge_cwd)
@@ -746,6 +755,80 @@ def _invoke_model_argv_body():
         set(env) <= set(dw.JUDGE_ENV_ALLOWLIST) | {"CLAUDE_CONFIG_DIR"},
         sorted(env),
     )
+
+
+# Prompts reach the child on stdin. The child is a real process. A bare `claude` cannot be
+# started from a script on Windows, so the shim in each case runs this interpreter on a fake.
+# The fake reads stdin as raw bytes with no newline folding. It returns the bytes hex-encoded,
+# so a case compares what the child received with what was sent.
+FAKE_CLAUDE_SRC = '''\
+import json, sys
+raw = sys.stdin.buffer.read()
+text = raw.decode("utf-8")
+verdict = {"verdict": "ALLOW", "stdin_len": len(text), "stdin_tail": text[-40:],
+           "stdin_hex": raw.hex()}
+print(json.dumps({"result": json.dumps(verdict)}))
+'''
+LONG_PROMPT_LEN = 60000
+LONG_PROMPT_END = "<<end-of-prompt>>"
+
+
+def _invoke_through_fake_claude(prompt, name):
+    """invoke_model with `claude` replaced by the fake, in a scratch config. Returns the
+    verdict, the error, and the argv the child was started with."""
+    fake = os.path.join(ROOT, "fake-claude", "fake_claude.py")
+    write(fake, FAKE_CLAUDE_SRC)
+    captured = {}
+    real_run = dw.subprocess.run
+
+    def shim(argv, **kwargs):
+        captured["argv"] = list(argv)
+        child = [sys.executable, fake] + list(argv[1:]) if argv and argv[0] == "claude" else argv
+        return real_run(child, **kwargs)
+
+    dw.subprocess.run = shim
+    try:
+        with scratch_config(name):
+            verdict, error = dw.invoke_model(prompt)
+    finally:
+        dw.subprocess.run = real_run
+    return verdict, error, captured.get("argv") or []
+
+
+# The filler has no newline. A Windows text-mode write turns each "\n" into "\r\n", which would
+# add 1 char per line and make this case measure line endings. The byte-exact case below owns
+# line endings, so this case measures length, the command line, and the tail.
+def case_invoke_model_long_prompt_reaches_child_whole():
+    filler = "evidence row " * LONG_PROMPT_LEN
+    prompt = filler[:LONG_PROMPT_LEN - len(LONG_PROMPT_END)] + LONG_PROMPT_END
+    verdict, error, argv = _invoke_through_fake_claude(prompt, "longprompt")
+
+    cmd_len = sum(len(arg) + 1 for arg in argv)
+    check("long prompt: invoke_model returns no error", error is None, error)
+    check("long prompt: the command line stays under the 32,767-char Windows cap",
+          cmd_len < 32767, cmd_len)
+    check("long prompt: the child reads all 60,000 chars on stdin",
+          (verdict or {}).get("stdin_len") == LONG_PROMPT_LEN, (verdict or {}).get("stdin_len"))
+    check("long prompt: the child reads the prompt's last 40 chars",
+          (verdict or {}).get("stdin_tail") == prompt[-40:], (verdict or {}).get("stdin_tail"))
+
+
+# A prompt with LF, CRLF and non-ASCII characters reaches the child byte for byte, as UTF-8.
+# The text-mode write (`input=prompt`, `text=True`) on Windows turns each "\n" into "\r\n", so
+# "a\nb\r\nc" arrives as b"a\r\nb\r\r\nc". The non-ASCII check is separate: it passes on its own,
+# so a red byte check points at line endings, not at encoding.
+BYTE_PROMPT = "a\nb\r\nc — é"
+
+
+def case_invoke_model_prompt_bytes_reach_child_exact():
+    verdict, error, _ = _invoke_through_fake_claude(BYTE_PROMPT, "promptbytes")
+    received = bytes.fromhex((verdict or {}).get("stdin_hex", ""))
+
+    check("prompt bytes: invoke_model returns no error", error is None, error)
+    check("prompt bytes: the em dash and e-acute arrive as UTF-8",
+          "—".encode("utf-8") in received and "é".encode("utf-8") in received, received)
+    check("prompt bytes: the child receives the prompt byte-for-byte as UTF-8",
+          received == BYTE_PROMPT.encode("utf-8"), received)
 
 
 # --------------------------------------------------------------------------- case 10
@@ -1596,6 +1679,8 @@ def main():
     case_main_stop_hook_active_stays_quiet()
 
     for case in (
+        case_invoke_model_long_prompt_reaches_child_whole,
+        case_invoke_model_prompt_bytes_reach_child_exact,
         case_invoke_model_signature_and_return_shape_pinned,
         case_parse_verdict_default_shape,
         case_parse_verdict_honours_a_custom_shape,

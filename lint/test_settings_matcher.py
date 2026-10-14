@@ -79,6 +79,17 @@ class DecisionJudgeMatch(unittest.TestCase):
                 self.assertNotIn("not under a decisions/ folder", prompt)
                 self.assertIn(JUDGE_RULE, prompt)
 
+    def test_owner_paths_still_fire_and_lookalike_folders_do_not(self):
+        # Green pins, owner ruling 2026-10-13. Commit 8f9a500 widened the glob to any depth.
+        for tool in ("Edit", "Write"):
+            with self.subTest(tool=tool):
+                cond = decision_judge(tool)["if"]
+                rx = glob_to_regex(cond[len(tool) + 1:-1])
+                for path in ("x/decisions/a.md", "decisions/sub/b.md", "decisions/subagent-model-cap.md"):
+                    self.assertRegex(path, rx)
+                for path in ("mydecisions/a.md", "decisions-old/a.md"):
+                    self.assertNotRegex(path, rx)
+
 
 # A prompt or agent hook names its model. Since 2026-10-08 the evaluator has rejected the bare
 # alias "haiku" (stderr unrecognized_model, query_source hook_prompt), so each judge failed and
@@ -179,6 +190,78 @@ class DecisionWatchSwap(unittest.TestCase):
         self.assertTrue(any(h.get("type") == "prompt" for h in hooks), "AskUserQuestion prompt judge missing")
         names = [n for c in command_rows(entries) for n in script_names(c)]
         self.assertIn("question_outcome.py", names)
+
+
+# The SendMessage judge must see the receiver's busy state. A prompt hook sees only its tool
+# input (to, summary, message), so the state has to be read by code: a command or agent hook.
+# `claude agents --json` rows carry name, sessionId, status (busy, idle, waiting), cwd.
+def pre_tool_hooks(matcher):
+    return [h for e in json.load(open(SETTINGS))["hooks"]["PreToolUse"] if e["matcher"] == matcher
+            for h in e["hooks"]]
+
+
+class SendMessageJudge(unittest.TestCase):
+    def test_sendmessage_has_a_hook_that_reads_receiver_state(self):
+        hooks = pre_tool_hooks("SendMessage")
+        self.assertTrue(hooks, "no PreToolUse hook on SendMessage")
+        self.assertTrue(any(h.get("type") in ("command", "agent") for h in hooks),
+                        "SendMessage has only prompt hooks, which cannot read the board's busy state")
+
+    def test_sendmessage_prompt_does_not_claim_the_receiver_is_invisible(self):
+        for h in pre_tool_hooks("SendMessage"):
+            if h.get("type") == "prompt":
+                self.assertNotIn("cannot see the receiver", h.get("prompt", ""))
+
+
+# Every prompt or agent judge in settings.json must have a row in the model-per-role table
+# (decisions/subagent-model-cap.md), and that row's model must equal the hook's model.
+RECORD = os.path.join(os.path.dirname(SETTINGS), "decisions", "subagent-model-cap.md")
+JUDGE_ROW = "prompt-hook judges"
+
+
+def judge_rows(text):
+    """Table rows whose first cell names the prompt-hook judges, as cell lists."""
+    rows = []
+    for line in text.splitlines():
+        if line.startswith("|"):
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if len(cells) >= 2 and JUDGE_ROW in cells[0]:
+                rows.append(cells)
+    return rows
+
+
+def table_gaps(text, hooks):
+    """One line per judge the table does not name, or names with another model."""
+    rows = judge_rows(text)
+    gaps = []
+    for label, hook in hooks:
+        m = re.search(r"matcher=(\S+)", label)
+        name = m.group(1) if m else label
+        named = [r for r in rows if name in re.findall(r"[A-Za-z]+", r[0])]
+        model = hook.get("model") or ""
+        if not named:
+            gaps.append("%s: no model-table row names it" % name)
+        elif not any(model and model in r[1] for r in named):
+            gaps.append("%s: table model is not %s" % (name, model))
+    return gaps
+
+
+class JudgeModelRows(unittest.TestCase):
+    def setUp(self):
+        with open(RECORD, encoding="utf-8") as f:
+            self.text = f.read()
+
+    def test_every_prompt_or_agent_judge_has_a_row_with_its_model(self):
+        hooks = list(judge_hooks())
+        self.assertTrue(hooks, "no judge hook found, so the check proves nothing")
+        self.assertEqual(table_gaps(self.text, hooks), [])
+
+    def test_check_goes_red_when_the_sendmessage_row_is_missing(self):
+        # Mutation: take SendMessage out of the judge row. The check must name it.
+        named = "AskUserQuestion, Agent, Edit, Write, SendMessage"
+        self.assertIn(named, self.text, "the judge row changed; update this mutation")
+        gaps = table_gaps(self.text.replace(named, "AskUserQuestion, Agent, Edit, Write"), list(judge_hooks()))
+        self.assertTrue(any(g.startswith("SendMessage:") for g in gaps), gaps)
 
 
 if __name__ == "__main__":

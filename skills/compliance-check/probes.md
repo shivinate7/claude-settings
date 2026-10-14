@@ -12,8 +12,9 @@ Run each from the child's root. `$P` is the parent clone. A probe that cannot ru
 | `check_agent_models.py` | `python3 $P/lint/check_agent_models.py .claude/agents/*.md` | a Haiku model in agent frontmatter |
 | `check_silent_undo.py` | `python3 $P/lint/check_silent_undo.py --repo . --history` | lost lines and reversals on main |
 
-`check_record_slugs.py` matches only paths that start with `decisions/` or `deferred/`. For a
-child that keeps records in `docs/decisions/`, run it from `docs/`.
+`check_record_slugs.py` matches only paths that start with `decisions/`, `deferred/` or `debts/`.
+For a child that keeps records in `docs/decisions/`, run it from `docs/`, as the row does, with
+file arguments. Its `--dir` and its git diff read this repo's tree, so neither can target a child.
 
 These lints read the parent tree only, and cannot target a child: `rule_audit.py`,
 `check_landed_dirs.py`, `check_unknown_reads_contract.py`. `md_sweep.py`, `ste_gate.py` and
@@ -41,6 +42,7 @@ session transcripts, not a repo.
 | Tokens | none: session practice | `n/a (session)` |
 | Building | `git ls-files \| grep -i test` against product files | each product module has a test |
 | Building | designs in `docs/` or `plans/` with no record | each design has a record, or is marked abandoned |
-| Speak plainly | `grep -rnE "\bD[0-9]+\b" --include=*.md .` with no gloss beside the id | each cited id has a short gloss |
+| Speak plainly | `grep -rnE -e "\bD-?[0-9]+\b" -e "\b[Dd]ecision [a-z0-9]+(-[a-z0-9]+)+" -e "\brecord [a-z0-9]+(-[a-z0-9]+)+" --include=*.md .` finds numbered ids (D12, D-570) and keyword cites (Decision ci-wall-time-cuts). `grep -rnwF -f <(basename -s .md decisions/*.md) --include=*.md .` finds bare slugs. Run both from the records parent | each cited id has a short gloss beside it |
 | Output | `ste_lint` totals on the child's `*.md` | 0 errors |
+| Style | none: `output-styles/shiv-stylisms.md` governs replies, a session act | `n/a (session)` |
 | Reports | none: `report_gate.py` covers it | `parent-covered` |
