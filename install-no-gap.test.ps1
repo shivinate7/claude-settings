@@ -9,8 +9,10 @@
 # The main case runs install.ps1 once, then re-runs it 20 times against a scratch clone and a
 # scratch CLAUDE_CONFIG_DIR, with copy mode forced. Each re-run changes both hook files to the other
 # of two large versions. A reader loop, in this process, opens and reads guard.py and guard_core.py
-# in a tight loop for the whole series. It fails on a missing file, an unreadable file, a read that
-# is not one whole version, or a read pair whose INSTALL_ID values differ. This replaces a watcher
+# in a tight loop for the whole series. It fails on a missing shipped name, an unreadable file, or a
+# read that is not one whole version. A read pair whose INSTALL_ID values differ is a mixed-id
+# window, which the guard waits through: each must clear within 5 s, and none may be open at the
+# end. This replaces a watcher
 # count of Deleted and Renamed events: a rename over a name emits a Deleted event, so that count
 # failed a correct atomic replace (a stale proxy, re-pointed per outcomes-tests-are-claims). The
 # fixture skill has nested dirs, and a nested file the source drops must be pruned.
@@ -129,16 +131,25 @@ public class NoGapRecorder : IDisposable
 }
 '@
 
-# Reads each hook file in a tight loop on its own thread, until Stop. Every read is opened with
-# read, write and delete sharing, so the installer's writes and renames are never refused by the
-# reader. A pass reads each path in order, then compares the two. A fault is counted by kind:
-#   missing <name>               the file, or a path listed in Present, is not there.
-#   unreadable <name>            the open or read failed, a sharing violation for one.
-#   short or mixed <name>        the read is not one whole version (Versions1 or Versions2).
-#   INSTALL_ID mismatch ...      both reads are whole, and their INSTALL_ID values differ.
+# Reads each hook file in a tight loop on its own thread. Every read is opened with read, write and
+# delete sharing, so the installer's writes and renames are never refused by the reader. A pass
+# reads each path in order, checks each Present path exists, then compares the two stamps. The pass
+# that begins after Stop runs too, so the state the installs left is always seen.
+#
+# A stamp is the INSTALL_ID line at the top of a hook file: a commented placeholder reads as
+# "(placeholder)", an uncommented line as its quoted id, and no line as "(none)". A read is whole
+# when its text, without that line, equals one version's text without its line. Faults, by kind:
+#   missing <name>        the file, or a path listed in Present, is not there.
+#   unreadable <name>     the open or read failed, a sharing violation for one.
+#   short read <name>     the read is not one whole version.
+# Mixed-id windows, on the pair of hook files: a window opens at the first pass where both reads
+# are whole and their stamps differ, and closes at the first pass where they match. Its length is
+# the time between those two passes. A window is not a fault. A window that is longer than the
+# guard's wait, or still open when the re-runs end, is.
 Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -149,18 +160,30 @@ public class HookReader
     public string[] Paths = new string[0];
     public string[] Versions1 = new string[0];
     public string[] Versions2 = new string[0];
-    // Paths that must exist on every pass: a file or a directory. Each one missing is a fault.
     public string[] Present = new string[0];
+    private string[] body1 = new string[0];
+    private string[] body2 = new string[0];
     private readonly ConcurrentDictionary<string, long> faults = new ConcurrentDictionary<string, long>();
-    private static readonly Regex StampRe = new Regex("INSTALL_ID = \"([^\"]*)\"");
+    private static readonly Regex QuotedRe = new Regex("INSTALL_ID = \"([^\"]*)\"");
     private long passes;
     private volatile bool stop;
     private Thread worker;
+    private int windows;
+    private double maxWindow;
+    private volatile bool windowOpen;
+    private long windowStart;
 
     public long Passes { get { return Interlocked.Read(ref passes); } }
+    public int Windows { get { return windows; } }
+    public double MaxWindowSeconds { get { return maxWindow; } }
+    public bool WindowOpen { get { return windowOpen; } }
 
     public void Start()
     {
+        body1 = new string[Versions1.Length];
+        body2 = new string[Versions2.Length];
+        for (int i = 0; i < Versions1.Length; i++) body1[i] = StripStamp(Versions1[i]);
+        for (int i = 0; i < Versions2.Length; i++) body2[i] = StripStamp(Versions2[i]);
         worker = new Thread(Loop);
         worker.IsBackground = true;
         worker.Start();
@@ -208,37 +231,73 @@ public class HookReader
         }
     }
 
+    private static bool HasStampLine(string text)
+    {
+        return text.StartsWith("# INSTALL_ID", StringComparison.Ordinal) || text.StartsWith("INSTALL_ID", StringComparison.Ordinal);
+    }
+
+    private static string StripStamp(string text)
+    {
+        if (!HasStampLine(text)) return text;
+        int nl = text.IndexOf('\n');
+        return nl < 0 ? "" : text.Substring(nl + 1);
+    }
+
     private static string StampOf(string text)
     {
-        Match m = StampRe.Match(text);
-        return m.Success ? m.Groups[1].Value : "(none)";
+        if (text.StartsWith("# INSTALL_ID", StringComparison.Ordinal)) return "(placeholder)";
+        if (text.StartsWith("INSTALL_ID", StringComparison.Ordinal))
+        {
+            Match m = QuotedRe.Match(text);
+            return m.Success ? m.Groups[1].Value : "(malformed)";
+        }
+        return "(none)";
+    }
+
+    private void CloseWindow(long now)
+    {
+        double seconds = (double)(now - windowStart) / Stopwatch.Frequency;
+        windows++;
+        if (seconds > maxWindow) maxWindow = seconds;
+        windowOpen = false;
     }
 
     private void Loop()
     {
         string[] got = new string[Paths.Length];
-        while (!stop)
+        bool[] whole = new bool[Paths.Length];
+        string[] stamp = new string[Paths.Length];
+        while (true)
         {
+            bool last = stop;
             for (int i = 0; i < Paths.Length; i++)
             {
                 string name = Path.GetFileName(Paths[i]);
                 got[i] = null;
+                whole[i] = false;
                 try { got[i] = ReadAll(Paths[i]); }
                 catch (FileNotFoundException) { Fault("missing " + name); continue; }
                 catch (DirectoryNotFoundException) { Fault("missing " + name); continue; }
                 catch (IOException) { Fault("unreadable " + name); continue; }
-                if (got[i] != Versions1[i] && got[i] != Versions2[i]) Fault("short or mixed " + name);
+                string body = StripStamp(got[i]);
+                whole[i] = body == body1[i] || body == body2[i];
+                if (whole[i]) stamp[i] = StampOf(got[i]);
+                else Fault("short read " + name);
             }
             for (int j = 0; j < Present.Length; j++)
             {
                 if (!File.Exists(Present[j]) && !Directory.Exists(Present[j]))
                     Fault("missing " + Path.GetFileName(Present[j]));
             }
-            bool whole0 = got[0] != null && (got[0] == Versions1[0] || got[0] == Versions2[0]);
-            bool whole1 = got[1] != null && (got[1] == Versions1[1] || got[1] == Versions2[1]);
-            if (whole0 && whole1 && StampOf(got[0]) != StampOf(got[1]))
-                Fault("INSTALL_ID mismatch between " + Path.GetFileName(Paths[0]) + " and " + Path.GetFileName(Paths[1]));
+            if (whole[0] && whole[1])
+            {
+                long now = Stopwatch.GetTimestamp();
+                bool mixed = stamp[0] != stamp[1];
+                if (mixed && !windowOpen) { windowOpen = true; windowStart = now; }
+                else if (!mixed && windowOpen) CloseWindow(now);
+            }
             Interlocked.Increment(ref passes);
+            if (last) break;
         }
     }
 }
@@ -356,18 +415,20 @@ Write-Fixture 'landed-dirs.txt' (($Landed -join "`n") + "`n")
 Write-Fixture 'agents\builder.md' '# builder'
 Write-Fixture 'lint\ste_gate.py' '# gate'
 Write-Fixture 'lint\ste_lint.py' '# lint'
-# The hook files in two versions, A and B. Each file is one stamp line, a label line, then padding,
-# so a version is large: a copy of it takes long enough for the reader to land inside it. Both files
-# of one version carry that version's INSTALL_ID, as an installed copy does.
+# The hook files in two versions, A and B. Each file is the repo's commented INSTALL_ID placeholder,
+# a label line, then padding, so a version is large: a copy of it takes long enough for the reader
+# to land inside it. The installer swaps the placeholder for its run id at copy time, as it does for
+# the repo's own hook files. The reader compares a read without that line.
 $HookPadLines = 40000
-$HookStampA = '1a2b3c4d-0000-4000-8000-00000000000a'
-$HookStampB = '1a2b3c4d-0000-4000-8000-00000000000b'
-function New-HookText([string]$File, [string]$Stamp, [string]$Label) {
-    $head = 'INSTALL_ID = "' + $Stamp + '"' + "`n" + '# ' + $File + ' ' + $Label + "`n"
+$HookPlaceholder = '# INSTALL_ID = "uninstalled"'
+function New-HookText([string]$File, [string]$Label) {
+    $head = $HookPlaceholder + "`n" + '# ' + $File + ' ' + $Label + "`n"
     return $head + (('# padding, so a copy of this file takes a while to write' + "`n") * $HookPadLines)
 }
-$HookA = @((New-HookText 'guard.py' $HookStampA 'version A'), (New-HookText 'guard_core.py' $HookStampA 'version A'))
-$HookB = @((New-HookText 'guard.py' $HookStampB 'version B'), (New-HookText 'guard_core.py' $HookStampB 'version B'))
+# The text without its INSTALL_ID line, placeholder or stamped: what a landed copy must match.
+function Remove-StampLine([string]$Text) { return ($Text -replace '^(# )?INSTALL_ID = [^\r\n]*\r?\n', '') }
+$HookA = @((New-HookText 'guard.py' 'version A'), (New-HookText 'guard_core.py' 'version A'))
+$HookB = @((New-HookText 'guard.py' 'version B'), (New-HookText 'guard_core.py' 'version B'))
 Write-Fixture 'hooks\guard.py' $HookA[0]
 Write-Fixture 'hooks\guard_core.py' $HookA[1]
 Write-Fixture 'skills\sample\SKILL.md' '# sample'
@@ -444,7 +505,7 @@ try {
             $RoundPasses += ($Reader.Passes - $passesBefore)
             $RoundFaults += ($Reader.Total() - $faultsBefore)
             if ($rcR -eq 0) { $RoundsExit0++ }
-            $landed = ([IO.File]::ReadAllText((Join-Path $Cfg 'hooks\guard.py')) -eq $Want[0]) -and ([IO.File]::ReadAllText((Join-Path $Cfg 'hooks\guard_core.py')) -eq $Want[1])
+            $landed = ((Remove-StampLine ([IO.File]::ReadAllText((Join-Path $Cfg 'hooks\guard.py')))) -eq (Remove-StampLine $Want[0])) -and ((Remove-StampLine ([IO.File]::ReadAllText((Join-Path $Cfg 'hooks\guard_core.py')))) -eq (Remove-StampLine $Want[1]))
             if ($landed) { $RoundsLanded++ }
         }
     } finally {
@@ -461,8 +522,14 @@ try {
     Check "every re-run lands its new text in both hook files ($RoundsLanded of $InstallRounds, non-vacuous)" ($RoundsLanded -eq $InstallRounds)
     Check "no shipped name is missing during the re-runs: the hook files, CLAUDE.md, settings.json, agents, lint, skills ($($Reader.Count('missing ')) faults)" ($Reader.Count('missing ') -eq 0)
     Check "no hook file is unreadable during the re-runs ($($Reader.Count('unreadable ')) faults)" ($Reader.Count('unreadable ') -eq 0)
-    Check "no hook read is short or mixed: each read is one whole version ($($Reader.Count('short or mixed ')) faults)" ($Reader.Count('short or mixed ') -eq 0)
-    Check "guard.py and guard_core.py never carry different INSTALL_IDs during the re-runs ($($Reader.Count('INSTALL_ID mismatch')) faults)" ($Reader.Count('INSTALL_ID mismatch') -eq 0)
+    Check "no hook read is short: each read is one whole version ($($Reader.Count('short read ')) faults)" ($Reader.Count('short read ') -eq 0)
+    # A pair of reads whose INSTALL_IDs differ is a window the guard waits through. It must clear
+    # within the guard's wait, measured from the first mixed read to the first matching read.
+    $MixedMaxSeconds = 5
+    $LongestWindow = [math]::Round($Reader.MaxWindowSeconds, 3)
+    Write-Host "info: $($Reader.Windows) mixed-id windows; longest $LongestWindow s"
+    Check "every mixed-id window clears within $MixedMaxSeconds s ($($Reader.Windows) windows, longest $LongestWindow s)" ($Reader.MaxWindowSeconds -le $MixedMaxSeconds)
+    Check "no mixed-id window is still open when the re-runs end" (-not $Reader.WindowOpen)
     Check "run 2 prunes the nested file the source dropped" (-not (Test-Path -LiteralPath (Join-Path $Cfg $DroppedRel)))
 
     $Missing2 = @($Shipped | Where-Object { -not (Test-Path -LiteralPath (Join-Path $Cfg $_)) })
