@@ -208,7 +208,8 @@ MUTATIONS = [
      'ENV_BASENAME = re.compile(r"^\\.env(\\.[A-Za-z0-9_.\\-]+)?$")',
      'ENV_BASENAME = re.compile(r"^\\.env$")', "guard", 'env: a path token wherever the path puts it, cat .env.local'),
     ("shared-tree: drop the interpreter heredoc exception",
-     '    if INTERPRETER_HEREDOC.search(cmd):\n        return cmd',
+     '    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(_without_message_values(cmd)):\n'
+     '        return cmd',
      '    if False:\n        return cmd', "guard", 'heredoc: a body fed to a shell stays under inspection'),
     ("frozen-path: freeze nothing",
      '    if not path:\n        return False\n    try:\n        literal = _literal_resolved(path, cwd)\n'
