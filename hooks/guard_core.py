@@ -410,20 +410,30 @@ def _walk_wrappers(tokens):
 #
 # EXCEPTION: a heredoc fed to an interpreter can be executed, so the body stays under inspection.
 # The interpreter is a WORD of the header line: not a part of a file name (`node-notes.md`), and not
-# the value of a message flag (`--title "node 20 bump"`). Other quoted text still counts: the shell
-# word of `ssh host "bash -s" <<EOF` runs its body. SHELL_HEREDOC names the shells alone: a rule
-# that reads shell lines keeps only a body a shell runs, never a Python or Node script.
+# the value of a message flag of a commit or a pull request (`gh pr create --title "node 20 bump"`).
+# Other quoted text still counts: the shell word of `ssh host "bash -s" <<EOF` runs its body.
+# SHELL_HEREDOC names the shells alone: a rule that reads shell lines keeps only a body a shell
+# runs, never a Python or Node script.
 HEREDOC_HEADER = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
-_MESSAGE_VALUE = re.compile(
-    r"(-m|-t|-b|--(?:message|title|body|subject|description))[=\s]\s*(?:\"[^\"\n]*\"|'[^'\n]*')")
+_SEGMENT_BREAK = re.compile(r"(&&|\|\||[;|\n])")
+
+
+def _without_message_values(cmd: str) -> str:
+    """Blank each message value of a commit or a pull request, so prose naming a shell reads as
+    text. The detectors are guard_env's own (imported late: guard_env imports this file)."""
+    if "commit" not in cmd and "create" not in cmd:
+        return cmd
+    from guard_env import ENV_MESSAGE_ARG, ENV_MESSAGE_COMMAND
+    return "".join(ENV_MESSAGE_ARG.sub(r"\g<flag>", part) if ENV_MESSAGE_COMMAND.match(part) else part
+                   for part in _SEGMENT_BREAK.split(cmd))
 
 
 def _interpreter_header(words: str):
-    return re.compile(r"(?<![\w.-])(?:[\w.~-]*/)*(?:" + words + r")(?:\.exe)?(?![\w.-])[^\n]*<<").search
+    return re.compile(r"(?<![\w-])(?:[\w.~-]*/)*(?:" + words + r")(?:\.exe)?(?![\w.-])[^\n]*<<").search
 
 
-SHELL_HEREDOC = _interpreter_header("bash|sh|zsh|dash|ksh")
-INTERPRETER_HEREDOC = _interpreter_header("bash|sh|zsh|dash|ksh|python[\\d.]*|perl|ruby|node")
+SHELL_HEREDOC = _interpreter_header("bash|sh|zsh|dash|ksh|pwsh|powershell")
+INTERPRETER_HEREDOC = _interpreter_header("bash|sh|zsh|dash|ksh|pwsh|powershell|python[\\d.]*|perl|ruby|node")
 
 
 # The only characters heredoc_heads acts on when nothing is open.
@@ -521,7 +531,7 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
     only when a shell reads it, for a rule that judges shell lines."""
     if "<<" not in cmd:
         return cmd  # no heredoc: nothing to drop
-    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(_MESSAGE_VALUE.sub(r"\1", cmd)):
+    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(_without_message_values(cmd)):
         return cmd  # the body may be executed, so keep it under inspection
     return _drop_heredoc_bodies(cmd)
 
