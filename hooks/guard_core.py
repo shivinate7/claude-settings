@@ -56,12 +56,19 @@ GLUED_OPEN = re.compile(r"^(?:\$?\()+(?=.)")
 CONTRACTION = re.compile(r"(?<=[A-Za-z])'(?:t|s|re|ll|ve|d|m)(?=[\s.,;:!?)]|$)")
 
 
+@functools.lru_cache(maxsize=1024)   # heredoc_heads asks again for each contraction in its text
 def is_contraction(text: str, index: int) -> bool:
     """True when the `'` at `index` is a contraction, not a quote. The shape alone is not enough:
     `echo a's b'; pkill foo` and `sed -e's;a;b;' f; pkill foo` quote real text. So the rest of
-    `text` must hold an even count of `'` (every `'`: the readers honor no escape), which keeps it
-    balanced. Else it is a quote, the way the shell and main read it: that fails toward deny."""
-    return bool(CONTRACTION.match(text, index)) and text.count("'", index + 1) % 2 == 0
+    `text` is read twice, by heredoc_heads (the guard's one quote reader: a `'` inside double
+    quotes, a comment or a heredoc body opens nothing). It must balance if the `'` is text, and
+    stay open if the `'` is a quote. Any other result is unsure, and unsure reads as a quote, the
+    way the shell and main read it: that fails toward deny. No backslash escape is honored,
+    because split_segments honors none: a read that skipped one would miss a quote they open."""
+    if not CONTRACTION.match(text, index):
+        return False
+    rest = _drop_heredoc_bodies(text[index + 1:])
+    return not heredoc_heads(rest)[1] and bool(heredoc_heads(rest, "'")[1])
 
 
 def basename(token: str) -> str:
