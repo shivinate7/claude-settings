@@ -83,7 +83,12 @@ def git(cwd, *a, input=None):
 
 SETTLE_SECONDS = 30
 NET_RETRIES, NET_PAUSE = 3, 5  # owner ruling 2026-10-13: retry a network error 3 times, a short pause between
-NET_ERROR = re.compile(r"TLS handshake timeout|i/o timeout|connection reset|(?:\x22: |unexpected )EOF\b|HTTP 50[234]\b|\b50[234] (?:Bad Gateway|Service Unavailable|Gateway Time-?out)", re.I)
+# A network error, anchored on the error line, never on refusal text (a PR title "#502 Bad Gateway fix" is no match):
+# gh's Go transport error `Post "https://...": <cause>`, gh's offline line, gh's HTTP 50x line, git's transport lines.
+NET_ERROR = re.compile(r"(?:^|: )(?:(?:Post|Get|Put|Patch|Delete|Head) \x22https?://[^\x22\s]*\x22: |error connecting to |HTTP 50[234]: )"
+                       r"|^(?:fatal|error): .*(?:Could not resolve|Failed to connect|Connection was reset|connection reset|connection refused|connectex|wsarecv|"
+                       r"schannel|SSL|timed out|context deadline exceeded|Recv failure|the remote end hung up|early EOF|RPC failed|returned error: 50[234])"
+                       r"|^ssh: (?:connect to host|Could not resolve hostname)", re.I | re.M)
 
 def undo_check(wt, base_ref, unknown_ok=""):
     """The shared silent-undo lint (lint/check_silent_undo.py), run on the branch before anything is pushed.
@@ -519,31 +524,30 @@ class Host:
 
     def merge(self, n, method, sha):
         """`gh pr merge --match-head-commit sha`. Never --admin, never --delete-branch (cut_branch does that).
-        -> (merge commit oid or None, message). A refusal returns None. When the reply may be lost (a network
-        error before the answer) or says "already merged", the answer is not trusted: the PR state is read.
-        MERGED reads as merged; not merged after a lost reply is a NetStop (no revert); an unreadable state is a NetStop."""
-        lost = None
+        -> (merge commit oid or None, message). The reply is never trusted: after any reply the PR state is read.
+        MERGED at head `sha` is this run's merge. MERGED at another head is not: Stop, no revert. An unreadable state,
+        or OPEN after a reply lost to the network, is a NetStop (no revert). Only a proven refusal returns None (revert)."""
+        lost = False
         try:
             c, out = self.gh(["pr", "merge", str(n), f"--{method}", "--match-head-commit", sha])
         except NetStop as e:
-            lost, c, out = e, 1, str(e)
-        unsure = bool(lost or self.net_retries)
-        if c and not (unsure or "already merged" in out.lower()):
-            return None, out
+            lost, c, out = True, 1, str(e)
         try:
-            c2, view = self.gh(["pr", "view", str(n), "--json", "state,mergeCommit"])
-        except NetStop as e:
-            raise NetStop(f"the merge of #{n} may have landed, and its state cannot be read: {e}")
-        try:
-            d = json.loads(view)
-            if d["state"] == "MERGED" and d["mergeCommit"]:
-                return d["mergeCommit"]["oid"], ""
-        except (ValueError, KeyError, TypeError):
-            pass
+            c2, view = self.gh(["pr", "view", str(n), "--json", "state,mergeCommit,headRefOid"])
+            d = json.loads(view) if not c2 else None
+            state, head, oid = d["state"], d["headRefOid"], d["mergeCommit"] and d["mergeCommit"]["oid"]
+            if state == "MERGED" and not oid:
+                raise ValueError("MERGED with no merge commit")
+        except (NetStop, ValueError, KeyError, TypeError) as e:
+            raise NetStop(f"the merge of #{n} may have landed, and its state cannot be read. Nothing was reverted. Run again.\n{out}\n{e if isinstance(e, NetStop) else view}")
+        if state == "MERGED":
+            if head == sha:
+                return oid, ""
+            raise Stop(f"#{n} is merged at {str(head)[:9]}, not at the proven head {sha[:9]}: not this run's merge. Nothing was reverted.\n{out}")
+        if lost:
+            raise NetStop(f"network error on `gh pr merge` of #{n}, and the pull request is not merged. Nothing was reverted. Run again.\n{out}")
         if not c:
             return None, "gh pr merge passed, but the pull request shows no merge commit: " + view
-        if unsure:
-            raise NetStop(f"network error on `gh pr merge` of #{n}, and the pull request is not merged. Nothing was reverted. Run again.\n{out}")
         return None, out
 
 # ------------------------------------------------------------------ git steps
