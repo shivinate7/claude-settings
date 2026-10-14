@@ -3619,6 +3619,187 @@ class WaitStepLines(unittest.TestCase):
         before = self.first_call_text(host, lambda h: h.merge(7, "merge", "sha"))
         self.assertRegex(before, r"(?m)^merge: merging #7", f"printed before the merge call: {before!r}")
 
+class GhLockRateRetry(unittest.TestCase):
+    """GhLock on a rate-limit 403 (lane merge-rate-limit, review round 1). Each step of acquire, release, unlock and the lock read
+    answers [rate limit, then success]: the step is retried with RATE_WAIT_CAP pauses. A permission 403 stops at once. merge.sh is
+    the seam, so the test holds wherever the retry sits. self.pauses records every pause; nothing sleeps."""
+    NOW = 1000.0
+    OLD, NEW, BASE, TREE = "oldlock", "newlock", "base1", "tree1"
+    EXPIRED = (0, merge.lock_message(10, 0.0))  # expires at 10: expired at NOW
+    LIVE = (0, "merge lock\nexpires: 2000\nowner: x")
+    DEFAULT = {"lock-read": [(1, "gh: Not Found (HTTP 404)")], "lock-commit-read": [EXPIRED], "base-ref": [(0, BASE)],
+               "base-tree": [(0, TREE)], "lock-commit-post": [(0, NEW)], "refs-post": [(0, "")], "delete": [(0, "")]}
+    OK = {"base-ref": (0, BASE), "base-tree": (0, TREE), "lock-commit-post": (0, NEW), "refs-post": (0, "")}
+
+    def setUp(self):
+        self.pauses, self.calls, self.replies = [], {}, {}
+        p = unittest.mock.patch.object(merge, "sh", self.fake_sh)
+        p.start(); self.addCleanup(p.stop)
+
+    @staticmethod
+    def step_of(args):
+        """Names the gh call by its step: the method and path, and for a GET of a commit, its --jq."""
+        if list(args[:2]) != ["gh", "api"]:
+            return "not-gh-api"
+        rest = list(args[2:])
+        method = "GET"
+        if rest[:1] == ["-X"]:
+            method, rest = rest[1], rest[2:]
+        path = rest[0]
+        jq = rest[rest.index("--jq") + 1] if "--jq" in rest else ""
+        if method == "DELETE" and path.endswith("/git/refs/merge-lock/main"):
+            return "delete"
+        if method == "POST" and path.endswith("/git/commits"):
+            return "lock-commit-post"
+        if method == "POST" and path.endswith("/git/refs"):
+            return "refs-post"
+        if "/git/ref/merge-lock/" in path:
+            return "lock-read"
+        if "/git/ref/heads/" in path:
+            return "base-ref"
+        if "/git/commits/" in path:
+            return "base-tree" if jq == ".tree.sha" else "lock-commit-read"
+        return "unhandled"
+
+    def fake_sh(self, args, cwd=None, input=None, env=None):
+        step = self.step_of(args)
+        self.calls[step] = self.calls.get(step, 0) + 1
+        seq = self.replies.get(step) or self.DEFAULT.get(step)
+        if not seq:
+            return 1, f"unhandled {step}: {' '.join(args)}"
+        return seq.pop(0) if len(seq) > 1 else seq[0]
+
+    def reply(self, step, *seq):
+        self.replies[step] = list(seq)
+
+    def lock(self):
+        return merge.GhLock(now=lambda: self.NOW, pause=self.pauses.append)
+
+    def acquire(self):
+        try:
+            return self.lock().acquire("main", 600)
+        except merge.Stop as e:
+            self.fail(f"acquire stopped: {type(e).__name__}: {e}")
+
+    def test_the_fixture_is_a_rate_limit_and_never_a_404(self):  # control: the text the other cases send
+        self.assertTrue(merge.is_net(1, RATE_API_403))
+        self.assertIsNotNone(merge.RATE_LIMIT.search(RATE_API_403))
+        self.assertNotRegex(RATE_API_403, r"404|Not Found|does not exist")
+
+    def test_a_clean_acquire_takes_the_lock_without_a_pause(self):  # control: green on 8459b59
+        self.assertEqual(self.acquire(), self.NEW)
+        self.assertEqual((self.calls.get("delete", 0), self.pauses), (0, []))
+
+    def test_a_clean_acquire_over_an_expired_lock_deletes_it_once(self):  # control: green on 8459b59
+        self.reply("lock-read", (0, self.OLD))
+        self.assertEqual(self.acquire(), self.NEW)
+        self.assertEqual((self.calls["delete"], self.pauses), (1, []))
+
+    def test_a_rate_limit_on_each_acquire_step_is_retried_with_the_rate_wait(self):
+        for step in ("base-ref", "base-tree", "lock-commit-post", "refs-post"):
+            with self.subTest(step=step):
+                self.calls, self.pauses, self.replies = {}, [], {}
+                self.reply(step, (1, RATE_API_403), self.OK[step])
+                self.assertEqual(self.acquire(), self.NEW)
+                self.assertEqual(self.calls[step], 2)
+                self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
+
+    def test_a_rate_limited_expired_lock_delete_is_retried_before_the_lock_is_replaced(self):
+        self.reply("lock-read", (0, self.OLD))
+        self.reply("delete", (1, RATE_API_403), (0, ""))
+        self.assertEqual(self.acquire(), self.NEW)
+        self.assertEqual(self.calls["delete"], 2)
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
+
+    def test_a_404_after_a_rate_limited_expired_lock_delete_counts_as_done(self):
+        self.reply("lock-read", (0, self.OLD))
+        self.reply("delete", (1, RATE_API_403), (1, "gh: Not Found (HTTP 404)"))
+        self.assertEqual(self.acquire(), self.NEW)
+        self.assertEqual(self.calls["delete"], 2)
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
+
+    def test_a_rate_limited_read_of_the_lock_commit_is_retried_and_keeps_its_expiry(self):
+        self.reply("lock-read", (0, self.OLD))
+        self.reply("lock-commit-read", (1, RATE_API_403), self.LIVE)
+        got = self.lock().read("main")
+        self.assertEqual(got[1], 2000)  # base: inf, a live lock for ever
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
+
+    def test_a_permission_403_on_the_lock_commit_stops_at_once(self):  # guard: green on 8459b59, red if a 403 with no rate text is retried
+        self.reply("lock-commit-post", (1, PLAIN_403_API))
+        with self.assertRaises(merge.Stop) as cm:
+            self.lock().acquire("main", 600)
+        self.assertIn("Resource not accessible by integration", str(cm.exception))
+        self.assertEqual((self.calls["lock-commit-post"], self.pauses), (1, []))
+
+    def test_a_refs_post_error_that_is_not_a_rate_limit_keeps_its_text(self):
+        self.reply("refs-post", (1, "gh: Object does not exist (HTTP 422)"))
+        with self.assertRaises(merge.Stop) as cm:
+            self.lock().acquire("main", 600)
+        self.assertIn("Object does not exist", str(cm.exception))
+        self.assertNotIn("another run took", str(cm.exception))
+        self.assertEqual(self.pauses, [])
+
+    def test_a_rate_limited_unlock_is_retried_and_a_404_after_it_counts_as_done(self):
+        self.reply("delete", (1, RATE_API_403), (1, "gh: Not Found (HTTP 404)"))
+        try:
+            self.lock().unlock("main")
+        except merge.Stop as e:
+            self.fail(f"unlock stopped on a rate limit: {e}")
+        self.assertEqual(self.calls["delete"], 2)
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
+
+    def test_a_rate_limited_release_delete_is_retried_and_a_404_after_it_counts_as_done(self):
+        self.reply("lock-read", (0, "tok"))
+        self.reply("lock-commit-read", self.LIVE)
+        self.reply("delete", (1, RATE_API_403), (1, "gh: Not Found (HTTP 404)"))
+        out = release_out(self, self.lock(), "tok")
+        self.assertNotIn("the lock release failed", out)
+        self.assertEqual(self.calls["delete"], 2)
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
+
+class HostDefaultBranchRateRetry(unittest.TestCase):
+    """host_default_branch (`gh repo view`) on a rate-limit error (lane merge-rate-limit, review round 1). It retries like Host.gh:
+    RATE_WAIT_CAP per retry, three retries, then NetStop. The function has no pause parameter, so the pauses are recorded by
+    patching merge.time.sleep. A fix must call time.sleep at call time, or this test sleeps for real."""
+    def patched(self, *seq):
+        """merge.sh answers `seq` in order (the last repeats). merge.time.sleep records. -> (gh calls, pauses)."""
+        seq, calls, pauses = list(seq), [], []
+        def fake(args, cwd=None, input=None, env=None):
+            calls.append(args)
+            return seq.pop(0) if len(seq) > 1 else seq[0]
+        for target in ((merge, "sh", fake), (merge.time, "sleep", pauses.append)):
+            p = unittest.mock.patch.object(*target)
+            p.start(); self.addCleanup(p.stop)
+        return calls, pauses
+
+    def test_a_rate_limited_repo_view_is_retried_and_returns_the_default_branch(self):
+        calls, pauses = self.patched((1, RATE_GQL_ALREADY), (0, '{"defaultBranchRef":{"name":"trunk"}}'))
+        try:
+            got = merge.host_default_branch("/repo")
+        except merge.Stop as e:
+            self.fail(f"host_default_branch stopped on a rate limit: {e}")
+        self.assertEqual(got, "trunk")
+        self.assertEqual((len(calls), pauses), (2, [merge.RATE_WAIT_CAP]))
+
+    def test_a_rate_limit_that_never_clears_is_a_net_stop_after_three_retries(self):
+        calls, pauses = self.patched((1, RATE_GQL_ALREADY))
+        try:
+            merge.host_default_branch("/repo")
+        except merge.NetStop:
+            pass
+        except merge.Stop as e:
+            self.fail(f"a rate limit that never clears stopped as a plain Stop, not a NetStop: {e}")
+        else:
+            self.fail("host_default_branch returned without a stop")
+        self.assertEqual((len(calls), pauses), (4, [merge.RATE_WAIT_CAP] * 3))
+
+    def test_a_permission_403_stops_at_once(self):  # guard: green on 8459b59
+        calls, pauses = self.patched((1, PLAIN_403_API))
+        with self.assertRaises(merge.Stop):
+            merge.host_default_branch("/repo")
+        self.assertEqual((len(calls), pauses), (1, []))
+
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--child":
         # A run that dies without cleanup: os._exit at the wait, so no `finally` runs.
