@@ -131,7 +131,7 @@ Plan: decisions/sweep-shuts-down-idle-simulators.md#mechanism-built (macos)
   is not checked. Nor is a boot by `simctl bootstatus -b`, or a `simctl boot` with a flag
   before the device. A broken device is left booted until the sweep stops it. When no
   single launchd_sim is readable after the retry, no second line goes in, and the newest
-  line keeps the old pid. The device is then most likely shut down, so the sweep does not
+  line keeps the old pid. The device is then most likely stopped, so the sweep does not
   judge it.
 
 ## Measured, 2026-10-10
