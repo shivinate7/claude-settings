@@ -8873,11 +8873,11 @@ def process_start_ms_case():
     elif abs(got_alive - want_alive) > 2000:
         problems.append("alive: got %r want near %r" % (got_alive, want_alive))
 
-    if os.name == "nt":
+    if os.name == "nt":  # the alive read still runs and can fail; the split it names does not run here
         if problems:
             return False, "; ".join(problems)
-        return True, (
-            "alive read matches; skipped: dead-pid and ps-faking techniques are POSIX-only; "
+        return SKIP, (
+            "alive read matches; the dead-pid and ps-faking arms are POSIX-only; "
             "the Windows arm is proven separately by process_start_ms_windows_case"
         )
 
@@ -10553,7 +10553,7 @@ LOG_CHECKS_EXTRA.append(("session-log: a stale guard_core lacking both names sti
                          "its line has five fields", session_log_stale_core_case))
 
 
-LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA) + tuple(SKIP_ROWS)
+LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
 
 # The log checkers tagged "windows". Each one reads a live process's start time (guard.py
 # L1837-1905, the ctypes arm on Windows) or a PowerShell tokenizing rule (L307-320).
@@ -10932,6 +10932,9 @@ if os.name != "nt":
     register_simulator_hold_cases()
 else:
     skip_case("simulator: the boot and hold rules, every case of the family", NO_SIMULATOR)
+
+# The SKIP rows join last, so a skip_case anywhere above, the simulator one too, prints its row.
+LOG_CHECKS = LOG_CHECKS + tuple(SKIP_ROWS)
 
 # Log checks in the literal and the appended extras are tagged by section above. These prefixes give
 # each one its rule's family instead, so GUARD_FAMILY=<rule> runs its log checks too. A prefix that

@@ -63,11 +63,6 @@ TEST_INSTALL_SRC = os.path.join(ROOT, "hooks", "test_install_src.sh")
 
 sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 
-# test_guard.SKIP: what a case returns when it cannot run on this platform. Not imported, because
-# importing test_guard builds every fixture. A skip is reported as SKIP and never as PASS or FAIL.
-SKIP = "skip"
-
-
 def guard_subject_unread_member() -> Tuple[bool, str]:
     """Reuse hooks/test_guard.py's own fixture. Import, not re-implement: the blind-`git`
     setup that makes the read genuinely fail already lives there, and a second copy of it
@@ -128,12 +123,16 @@ def main() -> None:
     failed = skipped = 0
     for label, member in MEMBERS:
         ok, detail = member()
-        if ok == SKIP:
-            skipped += 1
-            verdict = "SKIP"
+        # True passes and False fails. Any other answer is the member's skip token (test_guard.SKIP),
+        # read by kind and not copied here: it prints SKIP, never PASS or FAIL.
+        if ok is True:
+            verdict = "PASS"
+        elif ok is False:
+            verdict = "FAIL"
+            failed += 1
         else:
-            verdict = "PASS" if ok else "FAIL"
-            failed += not ok
+            verdict = "SKIP"
+            skipped += 1
         print("%s  %s  (%s)" % (verdict, label, detail))
     if failed:
         print("check_unknown_reads_contract: FAIL, %d of %d members silent, %d skipped" % (
