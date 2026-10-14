@@ -93,7 +93,9 @@ touched.
 ## An unattended run may remove a worktree
 
 Owner ruling, 2026-10-01: every `--confirm` run, the daily job and SessionEnd
-included, needs both of these to remove a worktree:
+included, needs both of these to remove a worktree. The one other way is the agent rule
+of `agent-end-reap-stops-what-a-finished-agent-left`, for a tree under
+`.claude/worktrees/agent-*`:
 
 - Merged, or pushed and idle 24 hours. Merged means HEAD holds no commit that
   the default branch lacks. The test is the redundancy test of

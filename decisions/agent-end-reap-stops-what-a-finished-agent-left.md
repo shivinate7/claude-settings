@@ -47,8 +47,7 @@ copy without the skip. janitor/mutate_sweep.py carries one mutant for it.
 - **SubagentStop** gives `agent_id`. The harness names the worktree `agent-<agent_id>`.
   The reaper looks for `<primary>/.claude/worktrees/agent-<agent_id>`. It finds the
   primary checkout from the payload `cwd` with `guard.primary_checkout`.
-- **WorktreeRemove** names no target. The reaper had a branch for it with no agent-id
-  check. Review removed that branch on 2026-09-27, after ruling 1. See "Not wired" below.
+- **WorktreeRemove** names no target. The reaper has no branch for it. See "Not wired" below.
 
 The target must have the shape `.claude/worktrees/<name>`. It must exist. It must not be
 a primary checkout. An agent id must match `[A-Za-z0-9_-]{1,64}`.
@@ -140,8 +139,39 @@ The hooks reference says that WorktreeRemove "Replaces default git behavior". A 
 that event would stop the harness from removing agent worktrees. So settings.json wires
 only SubagentStop. Read from docs, on 2026-09-26, unmeasured.
 
-Owner ruling 1, 2026-09-27: WorktreeRemove stays unwired. SubagentStop covers the agent
-end.
+## The sweep removes a finished agent worktree
+
+Kind: process
+Home: janitor/test_sweep.py
+
+Owner ruling, 2026-10-14: the session-end sweep (`sweep.py --confirm`, no `--attended`)
+removes a finished agent's worktree in every repo. It ADDS to the removals of
+`unattended-sweep-stops-proven-orphans` (merged and idle 1 hour, or pushed and idle 24
+hours). It never narrows them. It removes a tree only when all of these hold:
+
+- Its path is `<repo>/.claude/worktrees/agent-*`, a branch or a detached HEAD.
+- It is clean: no uncommitted and no untracked file.
+- It is unlocked, no live session and no process has a cwd inside it.
+- It is idle 4 hours. Idle is the newest mtime of the tree's `index`, `HEAD` and
+  `logs/HEAD`.
+- Its tip is on GitHub. Two reads must both pass: `git ls-remote --heads` read now lists a
+  head that holds HEAD (owner ruling 2026-10-14: the read is live, never a local
+  `origin/*` ref alone), and `git branch -r --contains HEAD` is not empty.
+
+A read that fails or cannot tell keeps the tree. The report line names its path and the
+reason `unreadable-subject`. A repo whose `package.json` defines the script
+`reap:worktrees` gets `npm run reap:worktrees -- --remove` run in its root instead of
+this rule. npm is found with `shutil.which`. An unreadable `package.json` turns the rule
+off for that repo.
+
+Why: q_max held 798 registered worktrees. A lane pushes `HEAD:<lane>` from a local branch
+of another name, so a branch-upstream read called 181 of them never pushed. The remote
+keeps every commit of a removed tree. The test-author makes its red-proof checkout under
+`<repo>/.claude/worktrees/`, so this rule covers it.
+
+The mechanism: `janitor/sweep.py`'s `_is_agent_worktree`, `_agent_rule_keep`, `repo_reaper`
+and `run_repo_reaper`. `janitor/test_sweep.py`'s `AgentWorktreeReapTests` proves it.
+`janitor/mutate_sweep.py` carries 10 mutants for it.
 
 ## Proof
 
