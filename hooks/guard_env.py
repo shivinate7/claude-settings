@@ -180,7 +180,7 @@ ENV_MAX_DEPTH = 64
 ENV_DEPTH_REASON = "substitutions are nested too deep for the guard to read"
 
 
-def _substitutions(cmd: str, depth: int = 0, powershell: bool = False):
+def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: bool = False):
     """Return ([(text, in a message)], too_deep). The last text is the command itself.
 
     One pass, no recursion. Each command substitution `$(...)`, backtick pair or process
@@ -192,7 +192,8 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False):
     backslash per level, so honest input never nests them, and past ENV_MAX_DEPTH it is refused.
 
     `powershell` reads PowerShell's escape: a backtick escapes the next character, as a backslash
-    does in bash, and opens no substitution. A backslash is then a plain character.
+    does in bash, and opens no substitution. A backslash is then a plain character. `heredoc`
+    reads an unquoted heredoc body: there a quote mark is text, until a substitution opens.
     """
     escape = "`" if powershell else "\\"
     if depth > ENV_MAX_DEPTH:
@@ -226,7 +227,9 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False):
             pieces.append(cmd[i:i + 2])
             i += 2
             continue
-        if quote == "'":
+        if heredoc and len(stack) == 1 and char in "'\"":
+            pass   # a quote mark in a heredoc body is text
+        elif quote == "'":
             frame[1] = "" if char == "'" else quote
         elif char == "'" and quote == "":
             frame[1] = "'"

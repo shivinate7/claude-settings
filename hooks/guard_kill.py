@@ -735,11 +735,10 @@ def git_env_command_hit(raw: str, stripped: str) -> str:
     if too_deep:   # the env-file rule refuses a nesting this deep; judge the text as it stands
         texts = [stripped]
     # An UNQUOTED heredoc body runs its substitutions; the body text around them is data. A quoted
-    # delimiter (`<<'EOF'`) runs nothing. The same read as env_heredoc_refusal; a body nested too
-    # deep is refused there. KNOWN LIMIT, shared with that rule: `_substitutions` reads a `'` in the
-    # body as a quote, where bash reads it as text, so `'$(...)'` in a body is not judged.
+    # delimiter (`<<'EOF'`) runs nothing. A quote mark in the body is text (`don't`, `'$(...)'`).
+    # A body nested too deep is refused by env_heredoc_refusal.
     texts = [text for quote, body, _ in _split_heredocs(raw)[1] if not quote
-             for text, _in_message in _substitutions(body)[0][:-1]] + texts   # command stays last
+             for text, _in_message in _substitutions(body, heredoc=True)[0][:-1]] + texts   # command stays last
     for text in texts:
         matched = playwright_command_hit(raw if text == texts[-1] else text, text, GIT_ENV_WATCH)
         if matched:
