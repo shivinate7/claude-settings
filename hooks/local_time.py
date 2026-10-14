@@ -17,7 +17,9 @@ Advisory, fail-open: any error prints one stderr line and exits 0.
 This hook is also the owner feedback inbox's capture (decision owner-feedback-inbox). A UserPromptSubmit
 prompt whose first word is `fb` or `fb:` opens capture. While open, a prompt that starts with `fb done`
 or `fb: done` (any case, any whitespace between the words) closes it, and the rest of that prompt is
-not saved. Capture also ends by itself: when the last captured owner message is more than GAP old, and
+not saved. A prompt that ends with a line `fb done` (same match) is saved without that line and closes
+capture in the same message, whether capture was closed (the prompt opens with `fb`) or open (owner
+ruling 2026-10-14). Capture also ends by itself: when the last captured owner message is more than GAP old, and
 when the Sonnet judge says a prompt is not feedback. Every prompt is saved first. A detached child
 (feedback_judge.py) judges it, off the prompt path: the call takes 8 s or more. On a not-feedback
 answer the child adds a note item under that message and closes capture, if no newer message was
@@ -46,6 +48,7 @@ if HERE not in sys.path:
 CST = timedelta(hours=-6)
 GAP = timedelta(minutes=10)  # quiet time that ends capture
 CLOSE = re.compile(r"fb:?\s+done\b", re.I)  # matched at the start of the stripped prompt
+CLOSE_LINE = re.compile(r"\n[ \t]*fb:?\s+done\W*$", re.I)  # a last line of `fb done`: saves the rest, then closes
 NEAR_MISS = re.compile(r"fb[\W_]+done\b", re.I)  # while closed: never opens
 MESSAGE_MAX = 4000  # the most of a message the judge child gets on its command line
 
@@ -129,13 +132,20 @@ def capture(raw, stamp, at=None):
         elif CLOSE.match(said):
             os.remove(marker)
             return
-        judge = opened and not opener  # saved first, judged after: the judge runs detached
+        closing = CLOSE_LINE.search(prompt)
+        if closing:
+            prompt = prompt[:closing.start()]  # the `fb done` line is not part of the note
+        judge = opened and not opener and not closing  # saved first, judged after: the judge runs detached
         fence = "`" * max([3] + [len(r) + 1 for r in re.findall(r"`+", prompt)])
         os.makedirs(os.path.dirname(inbox), exist_ok=True)
         with open(inbox, "ab") as f:  # bytes: "\n" stays "\n" on Windows, and the text stays verbatim
             f.write(("### %s\n%s\n%s\n%s\n" % (stamp, fence, prompt, fence)).encode("utf-8"))
-        with open(marker, "wb") as f:  # the last captured message's time: the quiet-time clock
-            f.write(at.isoformat().encode("ascii"))
+        if closing:
+            if os.path.exists(marker):
+                os.remove(marker)  # saved, and closed in the same message
+        else:
+            with open(marker, "wb") as f:  # the last captured message's time: the quiet-time clock
+                f.write(at.isoformat().encode("ascii"))
         if judge:
             try:  # the same detached-child pattern as janitor/agent_end_reap.py; the hook does not wait
                 child = subprocess.Popen([sys.executable, os.path.join(HERE, "feedback_judge.py"),
