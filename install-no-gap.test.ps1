@@ -934,13 +934,14 @@ public static class FileIdentity
     $P3 = New-Scratch 'prose-sh' @('hooks')
     $Sh3 = Get-GitSh
     $ShText = [IO.File]::ReadAllText((Join-Path $Repo 'install.sh'))
-    $ShStart = $ShText.IndexOf('put_file() {')
-    $ShEnd = if ($ShStart -ge 0) { $ShText.IndexOf("`n}", $ShStart) + 2 } else { -1 }
+    # The block starts at the variables put_file reads (INSTALL_ID_VALUE, and STAMP_PLACEHOLDER and
+    # STAMP_CR where install.sh defines them), so the driver defines them too.
+    $PutAt = $ShText.IndexOf('put_file() {')
+    $ShStart = $ShText.IndexOf('INSTALL_ID_VALUE="$(date')
+    $ShEnd = if ($PutAt -ge 0) { $ShText.IndexOf("`n}", $PutAt) + 2 } else { -1 }
     $PutFn = if ($ShStart -ge 0 -and $ShEnd -gt $ShStart) { $ShText.Substring($ShStart, $ShEnd - $ShStart) } else { '' }
     Check "prose1: install.sh route: put_file is found in install.sh" ($PutFn -ne '')
     $PutDriver = @(
-        'INSTALL_ID_VALUE=TESTID',
-        'INSTALL_FAILED=0',
         'log() { :; }',
         $PutFn,
         'put_file src/guard_prose.py out/guard_prose.py || exit 1',
