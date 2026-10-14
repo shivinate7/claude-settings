@@ -4223,14 +4223,17 @@ def _process_table(rows):
 
 
 @contextlib.contextmanager
-def _git_reads_fail(match):
-    """Every `git` call that MATCH(argv, cwd) accepts answers exit 128. The rest run for real."""
+def _watch_git(calls, fail=None):
+    """Append the argv of every `git` call to CALLS. A call that FAIL(argv, cwd) accepts answers
+    exit 128. The rest run for real."""
     real = subprocess.run
 
     def run(args, *a, **k):
-        if isinstance(args, (list, tuple)) and args and str(args[0]) == "git" \
-                and match([str(x) for x in args], k.get("cwd")):
-            return subprocess.CompletedProcess(args, 128, "", "fatal: injected read failure\n")
+        if isinstance(args, (list, tuple)) and args and str(args[0]) == "git":
+            argv = [str(x) for x in args]
+            calls.append(argv)
+            if fail and fail(argv, k.get("cwd")):
+                return subprocess.CompletedProcess(args, 128, "", "fatal: injected read failure\n")
         return real(args, *a, **k)
 
     with mock.patch("subprocess.run", run):
@@ -4258,7 +4261,8 @@ class AgentWorktreeReapTests(unittest.TestCase):
     Process table: `sweep.list_all_pids` and `sweep.process_cwd` (darwin: `_all_cwds_macos`).
     npm: a stub `npm` first on PATH logs argv and cwd. It is a real executable, so the sweep
     may reach it by any call form. Failed git read: `subprocess.run` answers 128 for one tree.
-    Every keep case also holds a control tree (`agent-ctl`) that must be removed in the same run,
+    A kept tree must also see no `git worktree remove` call: git refuses a dirty tree on its own,
+    and that refusal is not the sweep's guard. Every keep case also holds a control tree (`agent-ctl`) that must be removed in the same run,
     so a sweep that does nothing, or stops early, cannot pass a keep case."""
 
     def setUp(self):
@@ -4328,12 +4332,12 @@ class AgentWorktreeReapTests(unittest.TestCase):
             kwargs["out"] = out
             return report(*args[:2], **kwargs)
 
+        self.git_calls = []
         with mock.patch.dict(os.environ, env), _machine_quiet(), \
                 mock.patch("time.time", lambda: real() + hours * 3600), \
                 mock.patch.object(sweep, "print_sweep_report", tee), \
                 _process_table(rows or {}), contextlib.redirect_stdout(out), \
-                contextlib.redirect_stderr(out), \
-                (_git_reads_fail(fail) if fail else contextlib.nullcontext()):
+                contextlib.redirect_stderr(out), _watch_git(self.git_calls, fail):
             sweep.main([self.repo, "--confirm", "--restore-log", self.restore_log])
         return out.getvalue()
 
@@ -4351,12 +4355,20 @@ class AgentWorktreeReapTests(unittest.TestCase):
     def lines_about(self, out, name):
         return "\n".join(line for line in out.splitlines() if name in line) or "(no report line)"
 
+    def removal_attempts(self, path):
+        """The `git worktree remove` calls the last run made on PATH. A dirty tree survives such a
+        call, because git refuses it; that refusal is git's, so a kept tree must never see one."""
+        return [call for call in self.git_calls if "worktree" in call and "remove" in call
+                and any(_norm_path(arg) == _norm_path(path) for arg in call[call.index("remove") + 1:])]
+
     # ---- verdicts. The report line is the message, so a red run shows the sweep's own reason.
 
     def assertKept(self, path, out):
         name = os.path.basename(path)
         branch = "wt-" + name.replace("agent-", "")
         why = self.lines_about(out, name)
+        self.assertEqual(self.removal_attempts(path), [], "%s: the sweep tried to remove it. "
+                         "Report: %s" % (name, why))
         self.assertTrue(os.path.isdir(path), "%s was removed. Report: %s" % (name, why))
         self.assertTrue(self.listed(path), "%s was unregistered. Report: %s" % (name, why))
         self.assertIn(branch, sweep.list_local_branches(self.repo) or [], "%s lost its branch" % name)
@@ -4487,6 +4499,23 @@ class AgentWorktreeReapTests(unittest.TestCase):
         tree, ctl = self.agent("h1", "merged"), self.agent("ctl")
         out = self.run_sweep(5, fail=lambda argv, cwd: _aimed_at(tree, argv, cwd))
         self.kept_and_logged(tree, ctl, out, "agent-h1")
+
+    def test_h_keeps_a_tree_when_the_clean_read_fails_and_logs_it(self):
+        """Only `git status` fails here. The case above fails every read in the tree, so a
+        second read that also fails would hide a clean read that fails open."""
+        tree, ctl = self.agent("h3", "merged"), self.agent("ctl")
+        fired = []
+
+        def match(argv, cwd):
+            hit = "status" in argv and _aimed_at(tree, argv, cwd)
+            if hit:
+                fired.append(argv)
+            return hit
+
+        out = self.run_sweep(5, fail=match)
+        self.assertTrue(fired, "no `git status` ran in the tree. Report: "
+                        + self.lines_about(out, "agent-h3"))
+        self.kept_and_logged(tree, ctl, out, "agent-h3")
 
     def test_h_keeps_a_tree_when_the_remote_reach_read_fails_and_logs_it(self):
         """The read that matters here is `git branch -r --contains` (or `for-each-ref
