@@ -32,7 +32,7 @@ OK_SHAPE = {"ok": (True, False)}
 # PreToolUse entry for this hook carries "timeout": 45 = 8 + MODEL_TIMEOUT + 12 s margin.
 READER_TIMEOUT = 12
 MODEL_TIMEOUT = 25
-MESSAGE_MAX = 4000  # one argv element: Windows caps the command line near 32,767 characters
+MESSAGE_MAX = 4000  # the prompt rides stdin (decision_watch.invoke_model), so no argv cap; the clip bounds cost and latency only (unmeasured)
 
 
 def find_reader():
