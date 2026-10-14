@@ -16,7 +16,7 @@ failure never changes a gate's output or exit code: the STE gate and md_sweep lo
 line names the remedy. For `rm_prompt_answer.py`, exit 2 leaves the normal permission prompt
 (see Holes). A missing script names `sh install.sh`, or on Windows
 `powershell -ExecutionPolicy Bypass -File ./install.ps1`. A missing python says to install Python 3 first. No gate carries `onFailure`: a gate that
-times out or crashes lets the call through (see Holes).
+times out or crashes lets the call through (see Holes). Owner, 2026-10-14: the PreToolUse `guard.py` hook timeout is 60 s. A command is judged when the guard finishes inside 60 s. Above that it runs unjudged (debt guard-timeout-fails-open). The command length that crosses 60 s is unmeasured.
 
 A fixer crash or timeout in the STE gate keeps plain lint, never a refusal. That is this crash
 rule applied to the STE fixer. The STE rewrite ruling is ste-gate-fixes-not-nags, which says the
@@ -56,7 +56,7 @@ where a gate carries it.
 ## Holes, named
 
 - Incident 2026-10-12: with `"onFailure": "block"` on the gates, the guard hook ran past its
-  20 s timeout under load. The cause, measured: the wrapper tries `python3` first, and on this
+  timeout under load. The cause, measured: the wrapper tries `python3` first, and on this
   box that is the Windows Store alias. Through it the guard took over 30 s; through `python`
   it took about 0.4 s. Every Bash, PowerShell and Agent call
   in every session on the machine was refused. The key was removed the same day. So a guard

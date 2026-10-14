@@ -68,12 +68,11 @@ MERGE_TOOLS = ("mcp__github__merge_pull_request",)
 MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject",
                      "--match-head-commit", "-A", "--author-email"}
 # Seconds for the WHOLE read, shared: Host.head_read makes three `gh` calls that split this one
-# deadline (merge.py's shared_deadline), each getting whatever of it the earlier calls left. A
-# flat per-call constant cannot give real `gh` headroom and still fit three calls in the 20 s hook
-# timeout in settings.json: measured on Windows under load, `pr view` 3.0-3.8 s, `pr checks`
-# 3.6-3.9 s, the runs read 1.3-1.4 s (incident 2026-10-03, worst-case sum 9.1 s). 14 s leaves
-# headroom over that sum while leaving the hook's own overhead (Python start, the rest of the
-# guard) room inside the 20 s budget.
+# deadline (merge.py's shared_deadline), each getting whatever of it the earlier calls left. The
+# shared deadline bounds a hung `gh` to about 15 s for the whole read (pinned in test_guard.py),
+# so a merge with a dead `gh` is denied fast instead of waiting out each call. Measured on
+# Windows under load: `pr view` 3.0-3.8 s, `pr checks` 3.6-3.9 s, the runs read 1.3-1.4 s
+# (incident 2026-10-03, worst-case sum 9.1 s). 14 s leaves headroom over that sum.
 MERGE_READ_TIMEOUT = 14
 MERGE_TOOL_REL = os.path.join("merge", "merge.py")
 

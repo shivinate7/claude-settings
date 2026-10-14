@@ -1,1 +1,2 @@
 *.cmd text eol=crlf
+actions/ste-lint/run.sh text eol=lf
