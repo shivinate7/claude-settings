@@ -68,7 +68,7 @@ Same files. Prove on the Mac clone after `git pull` and install.sh.
 
 ## Holes, named
 
-Debts, in order of harm: `inbox-midturn-prompt-untested` (mid-turn owner messages fire UserPromptSubmit, and no test pins it), `inbox-path-drop-silent` (an `fb` message is dropped with one stderr line), `inbox-done-forms` (backtick and other done forms do not close capture), `inbox-partial-write-fence` (a partial write can leave a fence open), `inbox-unreadable-drops-ids` (an unreadable inbox drops open ids from the compaction note).
+Debts: in order of harm. `inbox-midturn-prompt-untested` (mid-turn owner messages fire UserPromptSubmit, and no test pins it). `inbox-path-drop-silent` (an `fb` message is dropped with one stderr line). `inbox-done-forms` (backtick and other done forms do not close capture). `inbox-partial-write-fence` (a partial write can leave a fence open). `inbox-unreadable-drops-ids` (an unreadable inbox drops open ids from the compaction note).
 
 Kind: build
 Plan: decisions/owner-feedback-inbox.md#windows (windows)
