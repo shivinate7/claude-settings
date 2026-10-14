@@ -4997,6 +4997,27 @@ sh("git env set: cmd /c set, then a git call, denies",
 sh("git env set: export -n only drops the export attribute, allowed",
    "export -n GIT_DIR", "allow", cwd=NOGIT)
 
+# Round 2 review of 695c944: a set inside a PowerShell block (if, foreach, a pipeline's block, try),
+# a set in a parenthesised assignment, a set in a pwsh -c string, a set after the value, and a set in
+# a bash heredoc. The heredoc runs its substitution only when the delimiter is unquoted.
+for _cmd in (
+    r"if ($true) {$env:GIT_DIR='x'}",
+    r"foreach ($i in 1) {$env:GIT_DIR='x'}",
+    r"1 | ForEach-Object {$env:GIT_DIR='x'}",
+    r"try {$env:GIT_DIR='x'} finally {}",
+    r"($env:GIT_DIR='x')",
+):
+    sh("git env set: PowerShell, a set in a block or a group, %s" % _cmd[:40], _cmd, "deny",
+       GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: pwsh -c with a set inside an if block, denies",
+   "pwsh -c \"if ($true) {$env:GIT_DIR='x'}\"", "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh("git env set: Bash export with -n after the value, denies",
+   "export GIT_DIR=x -n", "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh("git env set: Bash unquoted heredoc runs a substitution with a set, denies",
+   "cat <<EOF\n$(GIT_DIR=x " + VCS + " init)\nEOF", "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh("git env set: Bash quoted heredoc runs no substitution, allowed",
+   "cat <<'EOF'\n$(GIT_DIR=x " + VCS + " init)\nEOF", "allow", cwd=NOGIT)
+
 # =========================================================================== 5. merge into main
 FAMILY = "merge"
 #
