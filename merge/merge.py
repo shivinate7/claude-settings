@@ -107,9 +107,14 @@ def undo_check(wt, base_ref, unknown_ok=""):
             where = f"file {at[0]}/{at[1]}" if at[1] else "reading the history"
             say(f"merge: silent-undo scan: {where}, {(time.time() - t0) / 60:.0f} min")
 
-    threading.Thread(target=beat, daemon=True).start()
+    beater = threading.Thread(target=beat, daemon=True)
+    beater.start()
     try:
-        problems, notes = undo.check(wt, base_ref, "HEAD")
+        try:
+            problems, notes = undo.check(wt, base_ref, "HEAD")
+        finally:  # the beat stops, and is joined, before any line below: no beat prints after "scan done"
+            done.set()
+            beater.join()
         say(f"merge: silent-undo scan done ({time.time() - t0:.0f} s)")
     except undo.Unknown as e:
         if unknown_ok.strip():
@@ -118,6 +123,7 @@ def undo_check(wt, base_ref, unknown_ok=""):
         raise Stop(f"silent-undo check could not read the history: {e}\nIf the owner accepts that, run again with --undo-check-unknown-ok \"<reason>\".")
     finally:
         done.set()
+        undo.progress = None  # the hook is the scan's alone
     for n in notes:
         say("merge: " + n)
     if problems:
@@ -378,11 +384,12 @@ class Host:
         that still reads as `prior` is GitHub lagging the push: keep waiting. Any red check, required or
         not, ends the wait, and any pending check, required or not, is waited on. No sleep: a pending check blocks in `gh run watch <id> --exit-status` for at
         most a minute, then the loop reads again."""
+        say("merge: checking the required checks ...")  # before the first gh read, which can block
         names = self.required_names()
         base = self.base  # the base read under the lock: the last pr() before the wait
         end = self.now() + deadline_minutes * 60
         settled = False
-        say("merge: checking " + ", ".join(names) + " ...")  # before the first gh read, which can block
+        say("merge: required: " + ", ".join(names))
         said, said_at = None, self.now()  # the text last printed, and when (the wait's start before any line)
 
         def progress(what):
