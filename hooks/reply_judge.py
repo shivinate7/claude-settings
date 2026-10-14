@@ -31,7 +31,7 @@ OK_SHAPE = {"ok": (True, False)}
 MODEL_TIMEOUT = 20  # measured 6.6, 7.0, 8.0 s per run on this machine; the Stop entry allows 25
 SAMPLE_EVERY = 5  # owner ruling 2026-10-13: the judge runs on Stops 1, 6, 11 of a session
 COUNT_SUB = "reply-judge"  # <config dir>/state/reply-judge/<sha256 of session_id>.count
-REPLY_MAX = 12000  # one argv element: Windows caps the command line near 32,767 characters
+REPLY_MAX = 12000  # the prompt rides stdin, so no argv cap; the clip bounds cost and latency only (unmeasured)
 
 INSTRUCTIONS = (
     "Judge the final reply below against three rules. "
