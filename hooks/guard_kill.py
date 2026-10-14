@@ -728,7 +728,8 @@ def playwright_command_hit(raw: str, stripped: str, watch=PLAYWRIGHT_WATCH) -> s
 # Playwright rule, plus `VAR+=x cmd` as an inline prefix and PowerShell `New-Item` forms beyond
 # the cmdlets listed in `_PS_CMDLETS`. `git --git-dir` and `git -C` are options, not sets.
 # The quick test in git_env_command_hit strips from a text what shlex drops (`QUOTE_MARKS`), then
-# looks for a watched name, case-blind. The walk reads each substitution as `x` in the text around
+# looks for a watched name, case-blind. Rule: the quick test drops at least what the walk drops
+# before it reads a name, or it sends the text on to the walk. The walk reads each substitution as `x` in the text around
 # it, so `GIT_INDE$(echo X)_FILE` reads as the name `GIT_INDEx_FILE`: a command with a
 # substitution is tested text by text, as the walk reads it, never by its raw text alone.
 _GIT_ENV_NAMES = re.compile("|".join(map(re.escape, GIT_ENV_WATCH[0])), re.I)
@@ -736,7 +737,12 @@ _SUBSTITUTION_OPEN = re.compile(r"[$<>]\(|`")   # `$(`, `<(`, `>(` and a backtic
 
 
 def _holds_git_env_name(text: str) -> bool:
-    return bool(_GIT_ENV_NAMES.search(QUOTE_MARKS.sub("", text)))
+    text = QUOTE_MARKS.sub("", text)
+    # printf's directives and escapes (`_PRINTF_DIRECTIVE`) are the one step past shlex that drops
+    # text inside a name, and the walk takes it only for a printf word. No ordering of that strip
+    # with QUOTE_MARKS reads every case (`%''s`, an unquoted `\\n`), and a strip over the whole
+    # text eats a name's first letter (`x=5% GIT_DIR=...`): any printf goes on to the walk.
+    return "printf" in text.lower() or bool(_GIT_ENV_NAMES.search(text))
 
 
 def git_env_command_hit(raw: str, stripped: str) -> str:

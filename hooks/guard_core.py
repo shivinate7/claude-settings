@@ -68,7 +68,9 @@ def is_contraction(text: str, index: int, closes_after: bool = False) -> bool:
 
 # What shlex and the PowerShell reader drop from a name: a quote inside it, a backslash, backtick
 # or caret escape, a line continuation. A rule's quick test strips these from the command text,
-# then looks for its names: a miss means no token can name them. It may over-match, never under.
+# then looks for its names: a miss means no token can name them. It may over-match, never under,
+# only when the rule's walk drops nothing more from a token before it reads a name. A walk that
+# drops more (git-env: printf directives) needs its quick test to cover that step too.
 QUOTE_MARKS = re.compile(r"""['"`\\^\s]""")
 
 
