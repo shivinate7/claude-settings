@@ -4148,6 +4148,43 @@ for _name, _command in (
        rule=WSL_RULE, cwd=NOGIT)
 
 
+# ---- guard-command-position, review round 3 (lane gcp-quote-fix). Each RED case below is a hole
+# on 335c4a9, and origin/main denies it. is_contraction counted every later `'`, so a later
+# apostrophe (`don't`, `"it's"`) paired with the contraction's own `'`, and the contraction read
+# hid the refused call after it. The first two groups must deny. The scanner group holds comment
+# openers (`#`, `//`, `/*`) inside a quote and a run that spans lines: each must deny too. The
+# pins keep a lone apostrophe, and a quoted one, from hiding a later call that must stay allowed.
+for _name, _command, _rule in (
+    ("a contraction, a quoted apostrophe, then pkill", "echo a's b'; pkill foo; echo \"it's\"",
+     "machine-wide-kill"),
+    ("a contraction, a lone apostrophe, then pkill", "echo a's b'; pkill foo; echo don't",
+     "machine-wide-kill"),
+    ("a sed quote, a lone apostrophe, then pkill", "sed -e's;a;b;' f; pkill foo; echo don't",
+     "machine-wide-kill"),
+    ("a contraction, a quoted apostrophe, then wsl", "echo a's b'; wsl --shutdown; echo \"it's\"",
+     WSL_RULE),
+    ("a contraction, a lone apostrophe, then wsl", "echo a's b'; wsl --shutdown; echo don't",
+     WSL_RULE),
+    ("a sed quote, a lone apostrophe, then wsl", "sed -e's;a;b;' f; wsl --shutdown; echo don't",
+     WSL_RULE),
+    ("a contraction, a hash in the quote, then pkill", "echo a's # b'; pkill foo",
+     "machine-wide-kill"),
+    ("a contraction, a double slash in the quote, then wsl", "echo a's // b'; wsl --shutdown",
+     WSL_RULE),
+    ("a contraction, a slash-star in the quote, then pkill", "echo a's /* b'; pkill foo",
+     "machine-wide-kill"),
+    ("a contraction and a quote, then pkill on the next line",
+     "echo a's b'\npkill foo\necho \"it's\"", "machine-wide-kill"),
+):
+    sh("guard-command-position: regression, %s, denies" % _name, _command, "deny", rule=_rule,
+       cwd=NOGIT)
+for _name, _command in (
+    ("a lone apostrophe, a quoted apostrophe, then ls", "echo don't; echo \"it's\"; ls"),
+    ("a contraction in plain text", "echo it's fine"),
+):
+    sh("guard-command-position: regression, %s, allowed" % _name, _command, "allow", cwd=NOGIT)
+
+
 # =========================================================================== 2d. the silent write
 FAMILY = "write"
 #
