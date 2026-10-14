@@ -91,8 +91,8 @@ the lint cannot tell the two apart.
 - The lint refuses a `--dir` of `..` or a leading `/`, as it refuses any unusable folder.
   `actions/ruling-kind/check.sh` refuses both in `records-dir`. No test covers `..` or a leading
   `/` in either.
-- `lint/check_record_slugs.py` still reads only `decisions/` and `deferred/`, at the top level. It
-  does not read a records folder such as `docs/decisions/`.
+- `lint/check_record_slugs.py` reads `decisions/`, `deferred/` and `debts/` by default, and takes
+  `--dir` for one other records folder, as this lint does. No workflow step passes `--dir` yet.
 
 Kind: process
 Home: lint/check_ruling_kind.py
