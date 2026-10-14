@@ -244,6 +244,28 @@ await test('receiver: a real name that ends in brackets is found by its full to'
   same(lib.receiverState(rows, 'lane-2 [a]'), 'busy', 'to lane-2 [a]')
 })
 
+// Names over 40 chars: agentRows cuts a row's name to 40 chars, so a full to must match by its whole name.
+const SHARED39 = 'worker-' + 'x'.repeat(32) // 39 chars, the part a 40-char cut keeps
+
+await test('receiver: two rows whose 49-char names share the first 39 chars each read their own state', () => {
+  const longA = SHARED39 + 'alpha-0001'
+  const longB = SHARED39 + 'beta-00002'
+  assert.equal(longA.length, 49, 'fixture length')
+  assert.equal(longB.length, 49, 'fixture length')
+  const rows = namedRows(JSON.stringify([
+    { sessionId: sid(1), cwd: '/x/a', name: longA, status: 'busy' },
+    { sessionId: sid(2), cwd: '/x/b', name: longB, status: 'idle' },
+  ]))
+  same([lib.receiverState(rows, longA), lib.receiverState(rows, longB)], ['busy', 'idle'], 'each full to reads its own row')
+})
+
+await test('receiver: a to with no row, sharing the first 39 chars of a busy row, is unseen', () => {
+  const other = SHARED39 + 'gamma-0003'
+  assert.equal(other.length, 49, 'fixture length')
+  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name: SHARED39 + 'alpha-0001', status: 'busy' }]))
+  same(lib.receiverState(rows, other), 'unseen', 'no row has the full to')
+})
+
 // ---- update-ready
 
 await test('update-ready: waiting, no agents, nothing unpushed, clean tree is ready', () => {
