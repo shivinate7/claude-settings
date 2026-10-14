@@ -28,7 +28,7 @@ Prose. The rule has an audit row in `lint/rule_mechanisms.json` (kind `unmechani
 
 ## Holes, named
 
-- No check reads `debts/`. `lint/check_record_slugs.py` covers only `decisions/` and `deferred/`, so debt slugs are not checked.
+- No check reads the structure of `debts/`. `lint/check_record_slugs.py` covers only `decisions/` and `deferred/`, so debt slugs are not checked.
 - No check confirms that a debt's decision still names its gap.
 - The grandfathered sections (see Grandfathering) have no debt files until the planned lane debts-migrate lands.
 - `lint/rule_audit.py` crashes on default Windows at line 212, reached from the per-row loop at line 457. The crash comes after the anchor checks, so the pin compare at line 475 never runs. The cause is `subprocess.run` at lines 205-206, which decodes node output as cp1252. Lane win-defects (f256c4a, on origin/win-defects) fixes it. The bug predates this branch.
