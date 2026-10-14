@@ -84,11 +84,13 @@ Owner rulings, 2026-10-08:
   loses its line breaks, and each run of 3 or more `>` becomes `>>`. So a relay sender cannot
   forge an Owner block through the text or through its session name.
 - The prompt goes to the model on stdin, so no command-line cap applies. The whole prompt stays
-  within PROMPT_MAX (150,000 chars), a context-sized bound, unmeasured against the model timeout
+  within PROMPT_MAX (150,000 chars). The bound fits well inside the model's context and limits cost
+  and latency; it is unmeasured against the model timeout
   (owner ruling, 2026-10-14 00:00 CDT: owner messages whole, no per-message cut). Above it, the
   oldest span text is trimmed first; owner messages are trimmed only as a last resort, from the
-  oldest one. When the fixed text and the question alone go over PROMPT_MAX, the question passes
-  and the hook says the check did not run.
+  oldest one. A cut owner message keeps its end, led by the cut mark; no block is left empty.
+  When the fixed text and the question alone go over PROMPT_MAX, the question passes and the
+  hook says the check did not run. Debt: model-clip-unmeasured.
 - The reason sent back to the session is capped and cleaned.
 
 ## Limits
