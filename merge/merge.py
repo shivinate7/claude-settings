@@ -13,8 +13,9 @@ the minute read and `gh pr merge --match-head-commit`.
 import argparse, contextlib, json, os, re, shutil, socket, subprocess, sys, tempfile, threading, time, uuid
 
 STAMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "actions", "stamp", "stamp.mjs")
-RECORDS_PAGE = "docs/records.md"  # the page lint/hook_catalog.py writes; named here to tell a conflict on the page from any other
 RECORDS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint", "hook_catalog.py")  # the records-page generator; the tool brings it, a repo adds nothing
+sys.path.insert(0, os.path.dirname(RECORDS))
+from hook_catalog import RECORDS_PAGE  # noqa: E402  the page the generator writes; one home, so a conflict on the page is told from any other
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -718,7 +719,9 @@ def records_proof(wt, base_ref):
             if git(wt, "diff", "--name-only", "--diff-filter=U")[1].split() != [RECORDS_PAGE]:
                 raise Stop(f"the head does not merge cleanly with {base_ref}, so the records page cannot be proved fresh: {out}")
             rebuild_records(wt)  # the page is derived: rebuilt on the merged tree, it replaces both sides
-            c, out = git(wt, *identity(wt), "commit", "-q", "-m", f"Merge {base_ref} and rebuild the records page")
+            # the rebuilt page drops lines a side added; the silent-undo check after the next wait must read that as generated
+            c, out = git(wt, *identity(wt), "commit", "-q", "-m", f"Merge {base_ref} and rebuild the records page",
+                         "-m", f"Drops-lines: {RECORDS_PAGE} -- a generated page, rebuilt on the merged tree")
             if c:
                 raise Stop("cannot commit the merge of the base: " + out)
             healed = True
@@ -947,13 +950,15 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         f"  then:   push HEAD:{info['branch']}, wait for the checks, `gh pr merge --{m.get('method', '?')} --match-head-commit`,",
         f"          move local {base}, run {len(m.get('afterMerge', []))} afterMerge command(s)" + (", delete the branch." if m.get("deleteBranch") else "."))
 
+WAITS = 3  # the host.wait_checks calls in confirm, none in a loop: the head, the claim, the merge commit that heals the page
+
 def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None):
     m = cfg.get("merge", {})
     info = info or host.pr(n)  # main read it once already, and the config came from that base. A read: acquire never waits, so the head cannot move before the lock is ours
     base = info["base"]  # the PR's own base; read again under the lock
     base_ref = f"origin/{base}"
     lock.holder = {"pr": n, "branch": info["branch"], "session": session}
-    token = lock.acquire(base, (2 * m["deadlineMinutes"] + 10) * 60)  # two waits: the head, then the claim
+    token = lock.acquire(base, (WAITS * m["deadlineMinutes"] + 10) * 60)  # each wait at most once, ten minutes spare
     tmp = wt = claim_sha = None
     try:
         info = host.pr(n)
@@ -1018,49 +1023,60 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 ok, why = False, str(e)
             if not ok:
                 fail(why)
-            c, out, _ = retry_net(lambda: git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}"), getattr(host, "pause", time.sleep))
-            if is_net(c, out):  # a network error is not a refusal: the claim stays
-                raise NetStop(f"network error on the fetch of origin {base}, still failing after {NET_RETRIES} retries. The claim stays on {branch}. Run again to resume.\n{out}")
-            if c:  # never check against a stale base tip
-                fail(f"cannot fetch origin {base}, so the claim cannot be proved fresh:\n" + out)
-            try:  # main may have moved during the wait: read the branch against the tip fetched just now
-                undo_check(wt, base_ref, unknown_ok)
-            except Stop as e:
-                fail(str(e))
-            if not os.path.exists(os.path.join(wt, ".git")):
-                fail("the worktree is gone, so the claim cannot be proved fresh.")
-            try:  # the config is the base tip's, read just after the fetch
-                stamp_cfg = base_stamp_config(wt, tmp, cfgrel, base_ref)
-            except Stop as e:
-                fail(str(e))
-            if claimed and not stamp_cfg:
-                fail(f"base lost its config: {cfgrel} on {base_ref} no longer holds stamp kinds, so the claim cannot be proved fresh.")
-            c, out = node_stamp(wt, stamp_cfg, "check", base_ref) if stamp_cfg else (0, "")  # each claimed number must still be free on the base tip
-            if c or "UNKNOWN:" in out:
-                fail(str(stamp_stop("the base moved and the claim is stale, or the check could not read the base", out)))
-            if base == cfg["defaultBranch"]:  # the base moved with a record and no rebuild: the merge result would hold a stale page
-                try:
+            def prove(stop):
+                """Read the branch against the base tip fetched now. -> the records proof, or None off the default base.
+                stop(why) refuses. It waits on no check, so WAITS stays the bound."""
+                c, out, _ = retry_net(lambda: git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}"), getattr(host, "pause", time.sleep))
+                if is_net(c, out):  # a network error is not a refusal: the claim stays
+                    raise NetStop(f"network error on the fetch of origin {base}, still failing after {NET_RETRIES} retries. The claim stays on {branch}. Run again to resume.\n{out}")
+                if c:  # never check against a stale base tip
+                    stop(f"cannot fetch origin {base}, so the claim cannot be proved fresh:\n" + out)
+                try:  # main may have moved during the wait: read the branch against the tip fetched just now
+                    undo_check(wt, base_ref, unknown_ok)
+                except Stop as e:
+                    stop(str(e))
+                if not os.path.exists(os.path.join(wt, ".git")):
+                    stop("the worktree is gone, so the claim cannot be proved fresh.")
+                try:  # the config is the base tip's, read just after the fetch
+                    stamp_cfg = base_stamp_config(wt, tmp, cfgrel, base_ref)
+                except Stop as e:
+                    stop(str(e))
+                if claimed and not stamp_cfg:
+                    stop(f"base lost its config: {cfgrel} on {base_ref} no longer holds stamp kinds, so the claim cannot be proved fresh.")
+                c, out = node_stamp(wt, stamp_cfg, "check", base_ref) if stamp_cfg else (0, "")  # each claimed number must still be free on the base tip
+                if c or "UNKNOWN:" in out:
+                    stop(str(stamp_stop("the base moved and the claim is stale, or the check could not read the base", out)))
+                if base != cfg["defaultBranch"]:
+                    return None
+                try:  # the base moved with a record and no rebuild: the merge result would hold a stale page
                     proof = records_proof(wt, base_ref)
                 except Stop as e:
-                    fail(str(e))
+                    stop(str(e))
                 if proof == "stale":
-                    fail(f"the records page is stale for the merge result: {base_ref} gained a record after the rebuild (a push that did not use the tool). Nothing was merged. Run again.")
-                if proof == "healed":  # the page conflicted with the base: the merge commit carries a rebuilt page, so it is pushed and its checks wait
-                    merged = git(wt, "rev-parse", "HEAD")[1]
-                    try:
-                        push_branch(wt, branch)
-                    except Stop as e:
-                        fail(str(e))
-                    say(f"merge: {base_ref} merged into {branch} with the records page rebuilt, pushed at {merged[:9]}.")
-                    try:
-                        ok, why = host.wait_checks(n, merged, m["deadlineMinutes"], sha)
-                    except NetStop:
-                        raise
-                    except Stop as e:
-                        ok, why = False, str(e)
-                    if not ok:  # a revert of a merge commit would undo the base's own work in the branch, so the commit stays
-                        raise Stop(f"the checks on the merge commit {merged[:9]} are not green. It stays on {branch}. Fix the cause and run again.\n{why}")
-                    sha = merged
+                    stop(f"the records page is stale for the merge result: {base_ref} gained a record after the rebuild (a push that did not use the tool). Nothing was merged. Run again.")
+                return proof
+
+            if prove(fail) == "healed":  # the page conflicted with the base: the merge commit carries a rebuilt page, so it is pushed and its checks wait
+                merged = git(wt, "rev-parse", "HEAD")[1]
+                try:
+                    push_branch(wt, branch)
+                except Stop as e:
+                    fail(str(e))
+                say(f"merge: {base_ref} merged into {branch} with the records page rebuilt, pushed at {merged[:9]}.")
+                try:
+                    ok, why = host.wait_checks(n, merged, m["deadlineMinutes"], sha)
+                except NetStop:
+                    raise
+                except Stop as e:
+                    ok, why = False, str(e)
+
+                def keep(why):  # a revert of a merge commit would undo the base's own work in the branch, so the commit stays
+                    raise Stop(f"{why}\nmerge: the merge commit {merged[:9]} stays on {branch}. Fix the cause and run again.")
+                if not ok:
+                    keep(f"the checks on the merge commit {merged[:9]} are not green.\n{why}")
+                sha = merged
+                if prove(keep) == "healed":  # the base moved during that wait and the page conflicts again: a fourth wait would outrun the lock
+                    keep(f"{base_ref} moved during the wait on the merge commit, and the records page conflicts again. Nothing was merged.")
             commit, msg = host.merge(n, m["method"], sha)
             if not commit:
                 fail("the merge was refused:\n" + msg)

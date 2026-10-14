@@ -17,8 +17,8 @@ this script is in. It is never the working folder.
 The catalog needs a hooks/, skills/ or mods/ folder. A root with none gets no catalog and is never asked
 for settings.json. The records page is read from CLAUDE.md (the `<!-- rule:<id> -->` markers) and the .md
 files in decisions/, debts/, deferred/ and plans/. A root with no record gets no records page. A record
-that holds overruled text (a line that opens with Superseded, Overruled, Previously, No longer or Old
-ruling, or any "was:") is a problem, and so is an empty one. No page is written while a problem stands.
+that holds overruled text (a line that opens with Superseded, Overruled, Previously, No longer in force,
+Old ruling or "was:", or a "was:" after the word "old" in its block) is a problem, and so is an empty one. No page is written while a problem stands.
 The merge tool (merge/merge.py) writes the records page on the pull request head before it merges. So
 `--check` waives a stale or missing records page on a pull request run (GITHUB_BASE_REF set, or GITHUB_REF
 under refs/pull/), and fails on any other run.
@@ -488,9 +488,9 @@ HEADING = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$")
 ITEM = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+")
 KIND = re.compile(r"^Kind:\s*(process|build)\s*$")
 CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)
-# A marker opens overruled text. "No longer" is a marker only as a fixed phrase: "No longer used: x" is plain prose.
+# A marker opens overruled text. "No longer" is a marker only as "No longer in force": "No longer used: x" is plain prose.
 # A hyphen after a marker joins it to another word ("Previously-run tests"), so it is no marker.
-OPENS_HISTORY = re.compile(r"(?:superseded|overruled|previously|old ruling|no longer (?:in force|applies|valid|holds))(?![A-Za-z0-9-])", re.I)
+OPENS_HISTORY = re.compile(r"(?:superseded|overruled|previously|old ruling|no longer in force)(?![A-Za-z0-9-])", re.I)
 WAS_COLON = re.compile(r"\bwas:", re.I)
 OLD_WORD = re.compile(r"\bold\b", re.I)
 
