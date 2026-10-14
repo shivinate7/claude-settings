@@ -6,7 +6,7 @@ No network, no real repo. Every run uses a local bare origin in a temp dir, the 
 actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
 """
-import contextlib, io, pathlib, json, os, re, shutil, socket, stat, subprocess, sys, tempfile, threading, time, unittest, unittest.mock
+import ast, contextlib, io, pathlib, json, os, re, shutil, socket, stat, subprocess, sys, tempfile, threading, time, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -114,6 +114,18 @@ class FakeHost:
         sh(o, "git", "push", "-q", "origin", self.base)
         return sh(o, "git", "rev-parse", "HEAD"), ""
 
+def wait_sites(src):
+    """-> (count, in_loop) over the `wait_checks` calls in a Python source. A call inside a for or while may run many
+    times, so a caller trusts the count only when in_loop is False."""
+    found = []
+    def walk(node, looped):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute) and child.func.attr == "wait_checks":
+                found.append(looped)
+            walk(child, looped or isinstance(child, (ast.For, ast.While, ast.AsyncFor)))
+    walk(ast.parse(src), False)
+    return len(found), any(found)
+
 class Env(unittest.TestCase):
     def setUp(self):
         self.t = os.path.realpath(tempfile.mkdtemp(prefix="test-merge-"))
@@ -196,13 +208,22 @@ class Flow(Env):
         rc, out = self.run_merge("7")
         self.assertIn("head checks: red: gates: fail", out)
 
-    def test_the_lock_outlives_two_waits(self):
+    def test_the_lock_outlives_every_wait_one_run_can_take(self):
+        # Each wait_checks call site in merge.py is one wait, and none sits in a loop, so one run takes at most one wait per
+        # site: the head, the claim, the merge commit. Limit: a helper that wraps wait_checks and is called N times undercounts.
+        with open(merge.__file__, encoding="utf-8") as f:
+            sites, looped = wait_sites(f.read())
+        self.assertGreater(sites, 0)
+        self.assertFalse(looped, "a wait_checks call sits in a loop, so the site count is no bound")
+        d = merge.MERGE_DEFAULTS["deadlineMinutes"]  # the code's default deadline, set in the base config as the tool reads it
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deadlineMinutes=d))))
         ttls = []
         acquire = self.lock.acquire
         self.lock.acquire = lambda b, ttl: (ttls.append(ttl), acquire(b, ttl))[1]
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
-        self.assertGreaterEqual(ttls[0], (2 * CONFIG["merge"]["deadlineMinutes"] + 10) * 60)  # head wait, claim wait, ten spare
+        need = sites * d * 60
+        self.assertGreaterEqual(ttls[0], need, "lock ttl %d s; %d waits of %d min need %d s" % (ttls[0], sites, d, need))
 
     def test_head_red_claims_nothing_pushes_nothing_and_frees_the_lock(self):
         before = self.refs()
@@ -653,7 +674,8 @@ class Stopped(Env):
         self.assertEqual(rc, 1)
         self.assertIn("held", out)
         self.assertEqual(self.head(), claim_head)
-        self.now += 21 * 60  # 2 * deadlineMinutes 5 + 10, passed
+        expires = merge.expiry_of(sh(self.bare, "git", "log", "-1", "--format=%B", "refs/merge-lock/main"))  # the expiry the child wrote
+        self.now = expires + 1  # past that lock, whatever its ttl
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertIn("resumed", out)
@@ -3701,6 +3723,23 @@ class RecordsRebuildReal(RecordsEnv):
         self.assertEqual(sh(self.co, "git", "diff", "--stat", before, "origin/feat"), "")
         self.assertFalse(self.lock_ref())
         self.assertEqual(self.worktrees(), 1)
+
+class RecordsPageHome(unittest.TestCase):
+    """The records page path has one home, lint/hook_catalog.py. merge.py imports it and holds no copy.
+    Red on d027e3d: merge.py:16 is a literal copy of the path."""
+    def test_merge_holds_no_copy_of_the_records_page_path(self):
+        with open(merge.__file__, encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        copies = [n.lineno for n in ast.walk(tree) if isinstance(n, ast.Constant) and n.value == "docs/records.md"]
+        self.assertEqual(copies, [], "merge.py copies the records page path at line %s. Import it from the generator." % copies)
+
+    def test_merge_and_the_generator_name_one_value(self):
+        self.assertTrue(hasattr(merge, "RECORDS_PAGE"), "merge.py must bind RECORDS_PAGE, from the generator")
+        with open(merge.RECORDS, encoding="utf-8") as f:
+            homes = [n.value for n in ast.parse(f.read()).body
+                     if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "RECORDS_PAGE" for t in n.targets)]
+        self.assertEqual(len(homes), 1, "lint/hook_catalog.py must assign RECORDS_PAGE exactly once")
+        self.assertEqual(merge.RECORDS_PAGE, ast.literal_eval(homes[0]))
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--child":

@@ -101,11 +101,11 @@ second script.
   text stays as written, so a decision whose paragraph opens with bold text (the real
   one-shared-record-stamp does) keeps it. Debt: the What. Deferred and plan: the first line, its
   leading # dropped.
-- No overruled history. A marker is Superseded, Overruled, Previously, "was:", "no longer" or "Old
-  ruling", in any case. The other five fail only where they open a block: the text of a heading, a
-  paragraph, or a list item, after an optional list marker and emphasis marks around the marker
-  itself. "was:" fails anywhere in prose, since it only ever introduces old text ("the old wording
-  was: ..."). The failure is one line per
+- No overruled history. A marker is Superseded, Overruled, Previously, "was:", "no longer in force"
+  or "Old ruling", in any case. The other five fail only where they open a block: the text of a
+  heading, a paragraph, or a list item, after an optional list marker and emphasis marks around the
+  marker itself. "was:" fails where it opens a block, or where the word "old" comes earlier in the
+  same block ("the old wording was: ..."). A bare "no longer" is no marker. The failure is one line per
   offender, `<path>:<line>`, 1-based, forward slashes. CLAUDE.md, decisions/, debts/, deferred/ and
   plans/ are read; a README.md is not. Fenced blocks and inline code are code, not read. HTML
   comments are not special: their lines are read as prose, so history hidden in a comment fails when
@@ -115,8 +115,7 @@ second script.
   lines in 21 files, almost all of them behaviour prose ("the guard no longer crashes"), CI runs
   ("cancels superseded runs"), or a rule quoted by name. That would cry wolf on day one. The cost:
   kept history that says "(superseded by the floor, kept as evidence)" mid-sentence is not caught. A
-  debt's What describing a gap may say "no longer": it opens with its "**What.**" label, so it never
-  opens with the marker.
+  debt's What describing a gap may say "no longer", and it opens with its "**What.**" label.
 - Scanner cases (rule building-scanner-respects-strings), the markdown form. A comment opener, a
   quote or a backtick inside code or a fence must not hide, or invent, a marker, a heading, a Kind
   line or a rule marker. A multi-line fenced block is the multi-line-template-literal case. A lone
@@ -1330,6 +1329,23 @@ class RecordsHistory(Tree):
                 self.assertEqual(generator(root, "--check"), (0, "", ""))
                 self.assertIn("old", listed(records_rows(self.records_text(root)))["Unsorted decisions"])
         self.assert_history(with_records({"decisions/old.md": old_decision("Old ruling: allow it.")}), "decisions/old.md:7")
+
+    def test_c13_only_in_force_opens_a_no_longer_marker(self):
+        # Review round 2, records-index. "No longer" marks overruled text only as "No longer in force". The first three
+        # lines were markers until the orchestrator dropped them (red on d027e3d). The fourth is a bare "No longer".
+        for line in ["No longer holds: the rule.", "No longer applies: the flag.", "No longer valid: the flag.", "No longer checks the flag."]:
+            with self.subTest(line):
+                root = self.tree(with_records({"decisions/old.md": old_decision(line)}))
+                self.publish(root)
+                self.assertEqual(generator(root, "--check"), (0, "", ""))
+                self.assertIn("old", listed(records_rows(self.records_text(root)))["Unsorted decisions"])
+        self.assert_history(with_records({"decisions/old.md": old_decision("No longer in force: the flag.")}), "decisions/old.md:7")
+
+    def test_c14_limit_old_before_was_colon_flags_as_pinned(self):
+        # NAMED LIMIT, pinned as the current behaviour. The "old" rule flags "was:" when "old" comes earlier in the same
+        # block, so it cannot tell a description from overruled text. Contrast c12: "The flag was: on." has no "old" and
+        # passes. Debt: an entry in the debt store is still owed (debts/ is not a test path). A change here is a rule change.
+        self.assert_history(with_records({"decisions/old.md": old_decision("The old flag was: on.")}), "decisions/old.md:7")
 
 
 class OtherRepos(Tree):
