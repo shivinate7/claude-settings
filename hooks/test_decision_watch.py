@@ -1522,6 +1522,42 @@ def case_model_error_after_a_cached_verdict_is_not_silent():
     check("model-error after a cached verdict: no model subprocess", spawns == 0, spawns)
 
 
+def case_split_output_carries_the_config_notice_apart_from_the_verdict():
+    # Red on c3326be, which prints only the joined systemMessage. Under a split flag (the mod's
+    # --emit-prompt), the script also prints `verdict` (the judgment's text alone) and `notices`
+    # (one string per kind of notice). A settings edit with no protected change is one notice and
+    # no verdict: `verdict` stays empty and does not carry the notice text.
+    name = "split_config_notice"
+    repo = make_repo(name)
+    write(os.path.join(repo, "src", "app.py"), "print('hello')\n")
+    commit_all(repo)
+    target = os.path.join(repo, ".claude", "settings.local.json")
+    edit = {"type": "tool_use", "name": "Edit", "input": {"file_path": target}}
+    records = [
+        human_record("tune the project settings", T0),
+        assistant_record(tool_use=edit),
+        assistant_record(text="done"),
+    ]
+    hook = {"transcript_path": write_transcript(repo, records), "cwd": repo, "session_id": "sess-" + name}
+    with scratch_config(name) as cfg:
+        result = _run_script(hook, ["--emit-prompt"], cfg)
+    got = _json_or_none(result.stdout.strip())
+    got = got if isinstance(got, dict) else {}
+    notices = got.get("notices")
+    first = notices[0] if isinstance(notices, list) and notices and isinstance(notices[0], str) else ""
+    check("split notices: exit 0", result.returncode == 0, result.returncode)
+    check("split notices: one notice for the config edit",
+          isinstance(notices, list) and len(notices) == 1, result.stdout[:300])
+    check("split notices: the notice names the config file",
+          "Config files changed this turn" in first and "settings.local.json" in first, first[:200])
+    check("split notices: systemMessage still carries the joined text",
+          "Config files changed" in str(got.get("systemMessage", "")), result.stdout[:300])
+    check("split verdict: a separate field, empty when there is no judgment",
+          got.get("verdict") == "", result.stdout[:300])
+    check("split verdict: the notice text is not in the verdict",
+          "Config files changed" not in str(got.get("verdict", "")), result.stdout[:300])
+
+
 def main():
     case_flag_unapproved()
     case_flag_deleted_protected_file()
@@ -1581,6 +1617,7 @@ def main():
         case_phase_one_prints_a_key_for_the_evidence_it_judged,
         case_phase_two_with_a_moved_key_reads_unknown_never_allow,
         case_phase_two_with_the_same_key_stays_silent_on_allow,
+        case_split_output_carries_the_config_notice_apart_from_the_verdict,
     ):
         run_case(case)
 

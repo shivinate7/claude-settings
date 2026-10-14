@@ -542,6 +542,14 @@ await test('shown: an ALLOW shows nothing', async () => {
 // marked as a notice. An ALLOW verdict itself stays silent. The notice's marker is the word "notice" (any case).
 const CONFIG_LINE = pyConst('CONFIG_MESSAGE').replace('%s', '.claude/settings.json')
 const CONFIG_NOTICE = CONFIG_LINE + pyConst('TAIL')
+// What decision_watch.py prints under a split flag (the mod's own call): systemMessage is the joined text,
+// verdict is the judgment alone ("" for none), and notices holds one string per kind, each ending in TAIL.
+// The joined text is verdict and notices joined with a space, as main() joins them.
+const splitOut = (verdict, notices) => out({
+  systemMessage: [verdict, ...notices].filter(Boolean).join(' '),
+  verdict,
+  notices,
+})
 
 // The notice toast names the notice, is marked as one, and is not a verdict.
 const noticeToast = t => {
@@ -552,8 +560,8 @@ const noticeToast = t => {
 
 // Case 1: an ALLOW turn that carries a notice: one toast, the notice, and no verdict toast. Two paths reach it.
 const ALLOW_NOTICE_ROWS = [
-  ['phase 2 ALLOW with a config notice', { py2: out({ systemMessage: CONFIG_NOTICE }) }],
-  ['cheap path, no model due, with a config notice', { py1: out({ systemMessage: CONFIG_NOTICE }) }],
+  ['phase 2 ALLOW with a config notice', { py2: splitOut('', [CONFIG_NOTICE]) }],
+  ['cheap path, no model due, with a config notice', { py1: splitOut('', [CONFIG_NOTICE]) }],
 ]
 for (const [label, opts] of ALLOW_NOTICE_ROWS) {
   await test(`config notice: an ALLOW turn shows the notice as its own toast (${label})`, async () => {
@@ -568,7 +576,7 @@ for (const [label, opts] of ALLOW_NOTICE_ROWS) {
 
 // Case 2: a FLAG that carries a notice: two toasts, the FLAG text exactly and the notice, kept apart.
 await test('config notice: a FLAG with a config notice shows two toasts, the FLAG and the notice', async () => {
-  const h = await load(host({ py2: out({ systemMessage: FLAG + ' ' + CONFIG_NOTICE }) }))
+  const h = await load(host({ py2: splitOut(FLAG, [CONFIG_NOTICE]) }))
   await fire(h, 'classic.Stop', stopEvent(), {})
   await judged(h)
   await settle(60)
@@ -580,7 +588,7 @@ await test('config notice: a FLAG with a config notice shows two toasts, the FLA
 // Same ruling for an UNKNOWN verdict: the UNKNOWN text exactly, and the notice as its own toast.
 await test('config notice: an UNKNOWN with a config notice shows two toasts, the UNKNOWN and the notice', async () => {
   const TEXT = UNKNOWN + 'the model judgment could not be completed (model call: model down).'
-  const h = await load(host({ py2: out({ systemMessage: TEXT + ' ' + CONFIG_NOTICE }) }))
+  const h = await load(host({ py2: splitOut(TEXT, [CONFIG_NOTICE]) }))
   await fire(h, 'classic.Stop', stopEvent(), {})
   await judged(h)
   await settle(60)
