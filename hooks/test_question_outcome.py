@@ -1917,7 +1917,8 @@ def case_j10_no_owner_message_in_16_mib_does_what_today_does():
 # The whole judge prompt stays within PROMPT_MAX; a prompt that cannot fit makes no model call.
 # The span is fenced, so no span text can open or close a fence early. An owner message is whole,
 # with no per-message cap (ruling 2026-10-14 00:00 CDT). K4 and K7 pin that.
-PROMPT_LIMIT = 30000  # chars, the whole judge prompt (question_outcome.PROMPT_MAX)
+PROMPT_LIMIT = 30000  # chars: the old gate, now a fixture figure (K7 runs above it)
+PROMPT_BOUND = 150000  # chars, the whole judge prompt (question_outcome.PROMPT_MAX)
 ARGV_UNITS = 32767  # the old Windows command-line cap, in UTF-16 units. argv is gone: a fixture figure only.
 SPAN_HEAD = "Conversation, from the owner's 3rd-last message:\n"
 SPAN_END = "\n\nQuestion: "  # the question body starts here, after the span
@@ -1943,7 +1944,7 @@ def case_k1_1000_small_assistant_blocks_fit_the_prompt_cap_and_the_judge_runs():
         code, out, _ = run_main(ask_payload(fresh_session("k1"), [question(GOOD_Q, LABELS)], path))
     prompt = prompt_of(stub)
     check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
-    check(name + ": PROMPT_MAX is 30,000", getattr(qo, "PROMPT_MAX", None) == PROMPT_LIMIT,
+    check(name + ": PROMPT_MAX is 150,000", getattr(qo, "PROMPT_MAX", None) == PROMPT_BOUND,
           getattr(qo, "PROMPT_MAX", None))
     check(name + ": prompt within PROMPT_MAX", len(prompt) <= PROMPT_LIMIT, len(prompt))
     check(name + ": not denied, exit 0", deny_reason(out) is None and code in (0, None), out)
@@ -1956,11 +1957,11 @@ def case_k2_owner_messages_and_question_over_prompt_max_make_no_model_call():
     name = "caseK2 owner messages and question alone over PROMPT_MAX: no model call, did-not-run line, allowed"
     if not need_module(name):
         return
-    big_q = GOOD_Q + "\n" + "Context for the owner. " * 1150
+    big_q = GOOD_Q + "\n" + "Context for the owner. " * 7000
     records = [owner(("K2-OWN-%d " % i).ljust(1500, "k")) for i in (1, 2, 3)]
     path = write_transcript("k2", records)
     check(name + ": fixture: owner messages and question alone exceed PROMPT_MAX",
-          len(big_q) + 3 * 1500 > PROMPT_LIMIT, len(big_q))
+          len(big_q) + 3 * 1500 > PROMPT_BOUND, len(big_q))
     with model_stub(ALLOW) as stub:
         code, out, _ = run_main(ask_payload(fresh_session("k2"), [question(big_q, LABELS)], path))
     check(name + ": no model call", len(stub.prompts) == 0, len(stub.prompts))

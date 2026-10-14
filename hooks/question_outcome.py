@@ -15,8 +15,10 @@ Per question with two or more options (a clarifying question passes first):
   notifications or system reminders. The read goes back up to SEARCH_BYTES (16 MiB), from the
   end of the transcript, to find that message. Fewer than 3 owner messages in that range: the
   span starts at the oldest owner message found, so an early-session question is still judged.
-  No owner message at all: the check did not run (the path below). Over SPAN_BUDGET chars (labels, fences and separators count; the whole prompt stays within PROMPT_MAX) the
-  oldest assistant and relay text is cut; the owner messages stay whole (MESSAGE_MAX each).
+  No owner message at all: the check did not run (the path below). Over SPAN_BUDGET chars
+  (labels, fences and separators count) the oldest assistant and relay text is cut. The owner
+  messages stay whole. The whole prompt stays within PROMPT_MAX; above it the oldest span text
+  goes first, and owner messages are trimmed only as a last resort, oldest first.
 - After a deny, the next AskUserQuestion in the session passes with no model call and clears
   the state, so no deny can loop. When the state cannot be written, nothing is denied.
 - A failed model call, unreadable transcript, or malformed input lets the question through,
@@ -45,14 +47,15 @@ RULE = "style-question-restates-goal"
 # hook carries "timeout": 105 = MODEL_TIMEOUT + 15 seconds margin. Change both together.
 MODEL_TIMEOUT = 90
 OWNER_MESSAGES = 3
-MESSAGE_MAX = 1500
 STATE_MAX_AGE = 30 * 60  # seconds; an older deny state is ignored
 SEARCH_BYTES = 16 * 1024 * 1024  # how far back from the end the owner's 3rd-last message is sought
-# Chars of span text in the prompt. invoke_model passes the prompt in argv, and Windows refuses
-# a command line over 32,767 chars (WinError 206; measured here: 30,000 runs, 40,000 does not).
-# So the whole prompt, fixed text and question included, must stay well under that.
+# Chars of non-owner span text (assistant and relay) in the prompt. The owner messages are not
+# counted here: they stay whole.
 SPAN_BUDGET = 20000
-PROMPT_MAX = 30000  # the whole prompt, however it is built; span_text gets what the rest leaves
+# The whole prompt, fixed text and question included. The prompt goes to the model on stdin, so
+# no command-line cap applies; this is a context-sized bound (150,000 chars is well inside the
+# model's context window). Unmeasured against MODEL_TIMEOUT.
+PROMPT_MAX = 150000
 CUT_MARK = "[older text cut to fit the budget]"
 MACHINE_TAGS = ("<system-reminder>", "<task-notification>")
 RELAY_TAG = re.compile(r"<cross-session-message\b[^>]*>(.*?)</cross-session-message>", re.DOTALL)
@@ -233,7 +236,7 @@ def _scan(path):
     for rec in reversed(recs):
         text, said, relay = _owner_text(rec, asked), _assistant_text(rec), _relay(rec)
         if text:
-            entries.append(("owner", "Owner message", text[:MESSAGE_MAX]))
+            entries.append(("owner", "Owner message", text))
         elif said:
             entries.append(("text", "Assistant text", said))
         elif relay and relay[1]:
@@ -262,17 +265,40 @@ def _block(label, text):
     return "<<<BEGIN %s>>>\n%s\n<<<END>>>" % (_defang(label, one_line=True), _defang(text))
 
 
+SEP = 2  # "\n\n" between blocks
+
+
+def fit_span(entries, room):
+    """span_text within `room` chars in all, or as near as the owner messages allow. Non-owner text
+    is bounded by SPAN_BUDGET and by what the owner messages leave, oldest cut first. Only when the
+    owner messages alone exceed `room` are they trimmed, oldest message first, from its start."""
+    entries = list(entries)
+
+    def owner_size():
+        return sum(len(_block(l, t)) + SEP for k, l, t in entries if k == "owner")
+
+    while owner_size() > room:
+        i = next((i for i, e in enumerate(entries) if e[0] == "owner" and e[2]), None)
+        if i is None:
+            break
+        k, l, t = entries[i]
+        entries[i] = (k, l, t[owner_size() - room:])
+    budget = min(SPAN_BUDGET, room - owner_size())
+    if budget <= len(CUT_MARK) + SEP:  # no room for even the cut mark: owner messages alone
+        entries = [e for e in entries if e[0] == "owner"]
+    return span_text(entries, budget)
+
+
 def span_text(entries, budget=SPAN_BUDGET):
-    """The entries as fenced, labeled blocks, at most `budget` chars in all: every block, label,
-    fence and separator is charged. Owner messages stay whole; the newest other text is kept, the
-    oldest cut (a block that half fits keeps its end). One CUT_MARK leads the span when text was cut."""
-    sep = 2  # "\n\n" between blocks
-    room = budget - len(CUT_MARK) - sep
-    room -= sum(len(_block(l, t)) + sep for k, l, t in entries if k == "owner")
+    """The entries as fenced, labeled blocks. The non-owner blocks take at most `budget` chars: every
+    block, label, fence and separator is charged. Owner messages stay whole and are not charged; the
+    newest other text is kept, the oldest cut (a block that half fits keeps its end). One CUT_MARK
+    leads the span when text was cut."""
+    room = budget - len(CUT_MARK) - SEP
     kept, cut = [], False
     for kind, label, text in reversed(entries):
         if kind != "owner":
-            overhead = len(_block(label, "")) + sep
+            overhead = len(_block(label, "")) + SEP
             if room - overhead < len(text):
                 avail = room - overhead
                 cut, room = True, 0
@@ -386,10 +412,10 @@ def main():
     rules = _style_rules()
     rules = "Question rules, from the style file:\n%s\n\n" % rules if rules else ""
     shell = "%s\n\n%sConversation, from the owner's 3rd-last message:\n%s\n\n%s"
-    room = min(SPAN_BUDGET, PROMPT_MAX - len(shell % (PROMPT, rules, "", body)))
-    prompt = shell % (PROMPT, rules, span_text(entries, room), body)
-    if len(prompt) > PROMPT_MAX:  # the owner messages and the question alone are too long
-        _did_not_run("the prompt is too long for the command line.")
+    room = PROMPT_MAX - len(shell % (PROMPT, rules, "", body))
+    prompt = shell % (PROMPT, rules, fit_span(entries, room), body)
+    if len(prompt) > PROMPT_MAX:  # the question and fixed text alone fill the bound
+        _did_not_run("the prompt is too long, even with the span trimmed.")
     verdict, _err = invoke_model(prompt, timeout=MODEL_TIMEOUT)  # _err can hold the prompt: never printed
     if not isinstance(verdict, dict):
         _did_not_run("the model call failed.")
