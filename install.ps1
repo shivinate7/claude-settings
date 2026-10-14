@@ -14,6 +14,19 @@ $ErrorActionPreference = 'Stop'
 
 $ScriptPath = $MyInvocation.MyCommand.Path
 $RepoDir   = if ($ScriptPath) { Split-Path -Parent $ScriptPath } else { '' }
+# Incident 2026-10-14: an install from a linked worktree pointed the global config at a temp
+# checkout. Refuse before any write. --git-dir and --git-common-dir differ only in a linked
+# worktree; both print relative to -C, so a string compare is enough. No git, or no .git: go on.
+if ($RepoDir) {
+    try {
+        $gd = & git -C $RepoDir rev-parse --git-dir 2>$null
+        if ($LASTEXITCODE -eq 0) { $gc = & git -C $RepoDir rev-parse --git-common-dir 2>$null }
+        if ($LASTEXITCODE -eq 0 -and $gd -and $gc -and "$gd" -ne "$gc") {
+            Write-Host "claude-settings: ERROR: $RepoDir is a linked git worktree; run the installer from the main clone."
+            exit 1
+        }
+    } catch { }
+}
 $ClaudeDir = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE '.claude' }
 New-Item -ItemType Directory -Force -Path $ClaudeDir | Out-Null
 
