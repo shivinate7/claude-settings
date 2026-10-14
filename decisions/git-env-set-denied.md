@@ -14,7 +14,8 @@ Incident: on q_max, 2026-10-14 02:41-02:47 CDT, an agent set `$env:GIT_DIR` and
 `$env:GIT_WORK_TREE` in PowerShell. A test then ran a child `git init`, which inherited both.
 Git wrote `core.worktree` into the shared config, and every checkout read the wrong tree. No
 agent ran `git config`. The shared-tree gate asked on these sets before; an approved ask would
-reopen that path, so deny wins (arbiter ruling, 03:05 CDT).
+reopen that path, so deny wins (arbiter ruling, 03:05 CDT; the owner kept deny over ask and over a
+named override, 2026-10-14 10:47 CDT).
 
 ## How it works
 
