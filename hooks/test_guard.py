@@ -8741,36 +8741,6 @@ LOG_CHECKS_EXTRA.append(("rm-var: 2000 unclosed $( spans are judged in under 2 s
                          rm_var_slow_case))
 
 
-# Time bound (decision rm-on-a-variable-needs-a-guard, ruling item 1): 4000 assignments and 4000
-# targets, with a bare pwd that taints every name, are judged in under 2 s and denied. Taken out of
-# CASES after add(), as the 2000-span case above is, so the main loop does not judge it twice.
-RM_VAR_WIDE_CMD = (
-    "".join("D%d=/tmp/a%d; " % (n, n) for n in range(4000))
-    + "P=$(pwd); rm -rf "
-    + " ".join('"$D%d"/*' % n for n in range(4000))
-)
-_wide_at = len(CASES)
-add("rm-var: 4000 assignments and 4000 targets with pwd are judged in under 2 s", "deny",
-    cwd=NOGIT, command=RM_VAR_WIDE_CMD)
-RM_VAR_WIDE_CASE = CASES[_wide_at]
-del CASES[_wide_at:]
-
-
-def rm_var_wide_case():
-    start = time.monotonic()
-    got, reason = decide(RM_VAR_WIDE_CASE)
-    took = time.monotonic() - start
-    if took >= 2.0:
-        return False, "judged in %.2f s, not under 2 s" % took
-    if got != "deny":
-        return False, "judged %s in %.2f s, not deny" % (got, took)
-    return True, "judged in %.2f s, under 2 s" % took
-
-
-WIDE_LABEL = "rm-var: 4000 assignments and 4000 targets with pwd are judged in under 2 s"
-LOG_CHECKS_EXTRA.append((WIDE_LABEL, rm_var_wide_case))
-
-
 # In-process timing (ruling item 3). guard.judge runs in this process and only its CPU time is read,
 # so the reading is the guard's own work. A hook subprocess's CPU time is not this process's, so no
 # subprocess is timed here. judge answers by printing one JSON block and exiting, so stdout is
@@ -8804,40 +8774,81 @@ def judge_in_process(command, cwd):
     return block["permissionDecision"], block["permissionDecisionReason"], took
 
 
+# Ratio bounds for the rm-var CPU cases (decision rm-on-a-variable-needs-a-guard, ruling item 3).
+# An absolute bound flaked on busy runners (debts/guard-timing-case-flaky.md). So each big case is
+# judged in this process next to a small case of the same shape, one eighth of its size. Linear
+# work takes about the scaled baseline, a ratio of 1. The quadratic slowdown takes about 8. The big
+# case passes when its ratio stays under RM_VAR_K = 3, the geometric mean of 1 and 8, rounded up,
+# which leaves a margin of about 2.7 on each side.
+RM_VAR_K = 3
+RM_VAR_REPEATS = 3
+
+
+def rm_var_ratio(make, small_n, big_n, must="rm-var-unguarded"):
+    """Return (ok, text) for make(big_n) against make(small_n) scaled by big_n / small_n.
+
+    The sizes alternate, and each keeps its least CPU over RM_VAR_REPEATS runs, so a slow spell
+    reaches both sizes alike. Every run must be a deny whose reason holds `must`. The reason is the
+    rule name, so an empty `must` checks the deny alone.
+    """
+    small, big = [], []
+    for _ in range(RM_VAR_REPEATS):
+        for n, took_list in ((small_n, small), (big_n, big)):
+            got, reason, took = judge_in_process(make(n), NOGIT)
+            if got != "deny" or must not in reason:
+                return False, "n=%d judged %s, not the rm-var refusal" % (n, got)
+            took_list.append(took)
+    size = big_n / small_n
+    ratio = min(big) / (size * min(small))
+    return ratio < RM_VAR_K, ("CPU ratio %.2f to the %dx-scaled baseline, bound %d (big %.2f s, "
+                              "small %.2f s)" % (ratio, size, RM_VAR_K, min(big), min(small)))
+
+
 # Ruling item 3: 4000 names, each bound to /tmp/a and then deleted through a glob under that name,
-# are judged in under 1 s of CPU, and the verdict is the rm-var refusal. Each flagged delete re-reads
-# the rest of the command for later bindings, so the work grows as the square of the segments.
-# The name must differ per segment: a repeated name has more than 64 values and is refused before
-# that re-read, so it never reaches the slow path. A `$D/x` target is not in the flagged shape.
-RM_VAR_LINEAR_CMD = "".join("D%d=/tmp/a; rm -rf $D%d/*; " % (n, n) for n in range(4000))
+# are the rm-var refusal, and their CPU grows linearly. Each flagged delete re-reads the rest of the
+# command for later bindings, so a re-read per delete grows as the square of the segments. The name
+# must differ per segment: a repeated name has more than 64 values and is refused before that
+# re-read, so it never reaches the slow path. A `$D/x` target is not in the flagged shape.
+def rm_var_linear_cmd(n):
+    return "".join("D%d=/tmp/a; rm -rf $D%d/*; " % (k, k) for k in range(n))
 
 
 def rm_var_linear_case():
-    got, reason, took = judge_in_process(RM_VAR_LINEAR_CMD, NOGIT)
-    if took >= 1.0:
-        return False, "judged in %.2f s CPU, not under 1 s" % took
-    if got != "deny" or "rm-var-unguarded" not in reason:
-        return False, "judged %s in %.2f s CPU, not the rm-var refusal" % (got, took)
-    return True, "judged in %.2f s CPU, under 1 s" % took
+    return rm_var_ratio(rm_var_linear_cmd, 500, 4000)
 
 
-LOG_CHECKS_EXTRA.append(("rm-var: 4000 bindings and 4000 flagged deletes are judged in under 1 s CPU",
+LOG_CHECKS_EXTRA.append(("rm-var: 4000 bindings and 4000 flagged deletes scale linearly in CPU",
                          rm_var_linear_case))
 
 
-# The 64000-binding limit, moved from the wall clock of the whole hook to the CPU time of judge.
-# The bound is unchanged: under 2 s. The verdict is refused, and only the time is the point.
+# The 64000-binding limit: one delete after 64000 bindings, judged in CPU time of judge, whose
+# split is cached once for a command of many repeated segments. The verdict is refused, and only the
+# growth of the time is the point.
+def rm_var_64000_cmd(n):
+    return "A=x;" * n + " rm -rf $A/"
+
+
 def rm_var_64000_case():
-    got, reason, took = judge_in_process("A=x;" * 64000 + " rm -rf $A/", NOGIT)
-    if took >= 2.0:
-        return False, "judged in %.2f s CPU, not under 2 s" % took
-    if got != "deny" or "rm-var-unguarded" not in reason:
-        return False, "judged %s in %.2f s CPU, not the rm-var refusal" % (got, took)
-    return True, "judged in %.2f s CPU, under 2 s" % took
+    return rm_var_ratio(rm_var_64000_cmd, 8000, 64000)
 
 
-LOG_CHECKS_EXTRA.append(("rm-var: 64000 bindings before a delete are judged in under 2 s CPU",
+LOG_CHECKS_EXTRA.append(("rm-var: 64000 bindings before a delete scale linearly in CPU",
                          rm_var_64000_case))
+
+
+# 4000 assignments and 4000 targets, with a bare pwd that taints every name, are denied. Judged in
+# CPU, not the wall clock of a hook subprocess, which carries startup cost and runner load.
+def rm_var_wide_cmd(n):
+    return ("".join("D%d=/tmp/a%d; " % (k, k) for k in range(n))
+            + "P=$(pwd); rm -rf " + " ".join('"$D%d"/*' % k for k in range(n)))
+
+
+def rm_var_wide_case():
+    return rm_var_ratio(rm_var_wide_cmd, 500, 4000, must="")
+
+
+LOG_CHECKS_EXTRA.append(("rm-var: 4000 assignments and 4000 targets with pwd scale linearly in CPU",
+                         rm_var_wide_case))
 
 
 # Ruling item 4: _split_segments_cached is keyed on the command alone, but split_segments reads
