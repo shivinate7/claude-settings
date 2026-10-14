@@ -10,7 +10,8 @@ import tempfile
 import guard_core
 from guard_core import (
     GIT_CHECKOUT_TAKES_NAME, PATH_EXTENSION, PATH_PREFIX, REDIRECTION, _inside_work_tree,
-    _segment_git_c_target, basename, git_calls, pathspec_from_file_flag, porcelain, resolve_command,
+    _segment_git_c_target, basename, git_calls, long_flag_abbrev, pathspec_from_file_flag, porcelain,
+    resolve_command,
     segment_tokens, split_segments, stash_stack, worktree_prune_subject, worktree_remove_subject,
 )
 from guard_branch_worktree import (
@@ -72,15 +73,55 @@ STASH_READ_ACTIONS = {"list", "show"}
 STASH_TREE_ACTIONS = {"push", "save"}
 
 
+# Every action word git's `stash` knows.
+STASH_ACTIONS = {"list", "show", "drop", "pop", "apply", "clear", "branch", "push", "save",
+                 "create", "store", "export", "import"}
+
+
+def stash_option_takes_next_word(arg: str) -> bool:
+    """True when a `git stash push` option takes the NEXT word as its value.
+
+    The options that take one are the two in git's synopsis: `-m`/`--message <msg>` and
+    `--pathspec-from-file <file>`. MEASURED 2026-10-13: git reads `-qm list`, `-um show`,
+    `--mess list` as a push with the message `list` or `show`. So a short cluster ending in `m`
+    takes the next word, a long option takes it by any prefix git accepts, and a value glued on
+    (`-mfoo`, `--message=x`) takes nothing more. `-U`/`--unified` and `--inter-hunk-context`
+    (diff options for `-p`, not in the synopsis) are left out on purpose: their value is a
+    number, and a word wrongly read as an action word fails closed, as a push.
+    """
+    if arg.startswith("--"):
+        if "=" in arg:
+            return False
+        return (long_flag_abbrev(arg, "--message", "--m") or pathspec_from_file_flag(arg))
+    return arg.startswith("-") and arg.find("m") == len(arg) - 1
+
+
 def stash_action(args) -> str:
     """Return the stash call's own action word, or 'push' when the call names none.
 
-    A bare `git stash` and `git stash -u` both push, the same as `git stash push`. `stash`
-    takes no flag of its own before the action word, so the first plain word is the action.
+    A bare `git stash`, `git stash -u`, `git stash -- <path>` and `git stash -m <msg>` all push,
+    the same as `git stash push`. Options are skipped, and an option that takes a value skips its
+    value too (stash_option_takes_next_word). The first word left is the action when git knows
+    it. After `--` the call is a push, because a pathspec follows.
+
+    A plain word that is no known action is NOT a push in git: `git stash <path>` with no `--`
+    is refused ("subcommand wasn't specified; 'push' can't be assumed", measured). The guard
+    reads it as a push anyway, to fail closed, so the tree is judged and nothing falls through.
+
+    No word is left unknown, so none lands on the stack side. What lands there is a KNOWN word
+    that is not a read and not a push: pop, apply, drop, clear, branch, create, store, export and
+    import. Git 2.55 lists `export` and `import` in `git stash -h`, so they are known words.
     """
-    for arg in args:
-        if not arg.startswith("-"):
-            return arg
+    args = list(args)
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--":
+            return "push"
+        if arg.startswith("-"):
+            i += 2 if stash_option_takes_next_word(arg) else 1
+        else:
+            return arg if arg in STASH_ACTIONS else "push"
     return "push"
 
 
@@ -91,10 +132,13 @@ def stash_takes_the_stack(args) -> bool:
     stack, puts work onto it, or takes an entry off it. `list` and `show` read. `push`, `save`
     and a bare `git stash` put work on. Every other action takes an entry off: `pop` and
     `branch` consume the entry they use, `drop` and `clear` destroy entries outright, and
-    `apply` reads another session's work into this tree without that session's word.
+    `apply` reads another session's work into this tree without that session's word. `create`,
+    `store`, `export` and `import` touch the stack's entries or refs, so the stack is their
+    subject too, and they fall on its side with the rest.
 
-    An action word this guard does not know falls on the stack side. That is the side where a
-    wrong answer costs another session its work.
+    A word that is no known action is a pathspec, which stash_action reads as a push. Only a
+    known action word that is neither a read nor a push falls on the stack side, the side where
+    a wrong answer costs another session its work.
     """
     action = stash_action(args)
     return action not in STASH_READ_ACTIONS and action not in STASH_TREE_ACTIONS

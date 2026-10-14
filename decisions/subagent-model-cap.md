@@ -52,6 +52,8 @@ Writing prose and records is not building.
 | prompt-hook judges: AskUserQuestion, Agent, Edit, Write, SendMessage (settings.json) | claude-sonnet-5-5 | model default; a prompt hook has no effort field (decision haiku-prompt-hooks) |
 | reply judge (`hooks/reply_judge.py`, Stop) | haiku, through `decision_watch.invoke_model` | xhigh |
 | question outcome check (`hooks/question_outcome.py`) | haiku, through `decision_watch.invoke_model` | xhigh |
+| SendMessage state judge (`hooks/sendmessage_state.py`, PreToolUse; a model call only when the receiver is busy on the session board) | haiku, through `decision_watch.invoke_model` | xhigh |
+| plain-diff mod note (`mods/plain-diff/hooks/register.mjs`, `$.model.complete`, one call per file with no note) | haiku, set in the call | none set: the call passes no effort field |
 | decision watch (`hooks/decision_watch.py`) | haiku | xhigh |
 | every other hook and gate | no model; plain code | n/a |
 
@@ -79,6 +81,14 @@ Holes, named, for the skill rows check:
 6. No test covers a tilde line inside a backtick fence. No test covers an unclosed fence or comment at the end of the file. No test covers a lone backtick before a comment opener. Fix: add a test for each.
 7. The unreadable-folder exit 2 test runs only on POSIX. The symlink case did not run on Windows. No fix known.
 8. The gates steps have no step-level `if` and no `!cancelled()`, by design. The `gates` job is always on. A test pins "no if". No fix, by design.
+
+Holes, named, for the SendMessage state judge (round 2 ruling, orchestrator):
+
+1. The busy-state layer does not see an agent id, a `uds:` address, `main`, or `*` as a receiver. It reads them as unseen and allows. Debt: `sendmessage-judge-blind-recvs`.
+2. The layer does not see a receiver whose name two sessions share. It reads the name as unseen and allows. Debt: `sendmessage-judge-dup-names`.
+3. The wording judge, the SendMessage prompt hook in `settings.json`, still runs on every send. The state judge cuts no model call there. Debt: `sendmessage-wording-judge-always`.
+4. A `to` that ends in `[ref]` and matches no row is matched by its bare name. The ref is dropped, never compared to a row. The board sees only local `claude agents` rows, so the ref may name an off-board receiver that shares the bare name with a local row. The judge then reads the local row's state: it allows a busy receiver, or sends an idle one to the model. Debt: `sendmessage-judge-dup-names`.
+5. The match key is the cleaned name, so two names that clean alike read as one row: names over 300 chars that share the first 299, `<>&"` against `_`, or 3 or more combining marks. One row then reads the other row's state, and two rows read unseen. Real names are under 50 chars. Debt: `sendmessage-judge-dup-names`.
 
 ## The ceiling
 

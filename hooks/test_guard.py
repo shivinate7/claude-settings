@@ -1566,6 +1566,58 @@ sh("subject: setting aside real uncommitted work still denies", VCS + " stash pu
    "deny", "shared-tree", cwd=SUBJDIRTY)
 sh("subject: a bare stash over a clean tree takes nothing", VCS + " stash", "allow",
    cwd=SUBJCLEAN)
+# THE PATHSPEC AND OPTION-VALUE FORMS OF A PUSH (owner's Mac test, 2026-10-13; decision
+# stash-push-is-clone-wide). Git may omit `push` before `--`, before a pathspec after `--`, and
+# before an option, so `stash -- <path>`, `stash -q -- <path>` and `stash -m <msg>` are pushes.
+# A word that is no known action reads as a push, so a pathspec such as `f.txt` pushes too.
+# These rows run in SUBJDIRTY, a real checkout with real uncommitted work, so each push form must
+# deny with the push remedy. `stash .` is not a push: git refuses a pathspec outside `--`, so it
+# takes nothing. It stays a deny anyway, because the guard must not rely on git's refusal.
+PUSH_FRAGMENT = "puts work onto the stash stack"  # only PUSH_DENY_REASON says this
+sh("stash pathspec: stash -- over real uncommitted work denies like a push",
+   VCS + " stash -- f.txt", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash -- . over real uncommitted work denies like a push",
+   VCS + " stash -- .", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash -q -- over real uncommitted work denies like a push",
+   VCS + " stash -q -- f.txt", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash -m over real uncommitted work denies like a push",
+   VCS + " stash -m lane", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash . over real uncommitted work denies", VCS + " stash .", "deny",
+   "shared-tree", cwd=SUBJDIRTY)
+# Combined short flags and abbreviated long options take a value as the next word too (git's
+# parse-options). Each one is a push, so each deny carries the push remedy.
+sh("stash pathspec: stash -qm over real uncommitted work denies like a push",
+   VCS + " stash -qm list", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash -um over real uncommitted work denies like a push",
+   VCS + " stash -um show", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash -pm over real uncommitted work denies like a push",
+   VCS + " stash -pm show", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash --mess over real uncommitted work denies like a push",
+   VCS + " stash --mess list", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash --m over real uncommitted work denies like a push",
+   VCS + " stash --m list", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash --pathspec-from over real uncommitted work denies like a push",
+   VCS + " stash --pathspec-from list", "deny", "shared-tree", cwd=SUBJDIRTY,
+   carries=PUSH_FRAGMENT)
+# `import` and `export` are not git subcommands, but main reads them as stack actions, and they keep
+# that side. Over a real entry in a clean checkout they deny with the stack remedy. Over an empty
+# stack in a dirty checkout they take nothing, the same verdict as main.
+STACK_FRAGMENT = "takes a stash entry"  # only STACK_DENY_REASON says this
+sh("stash import: over a real stack entry in a clean checkout denies, as on main",
+   VCS + " stash import abc123", "deny", "shared-tree", cwd=SUBJSTASH, carries=STACK_FRAGMENT)
+sh("stash export: over a real stack entry in a clean checkout denies, as on main",
+   VCS + " stash export", "deny", "shared-tree", cwd=SUBJSTASH, carries=STACK_FRAGMENT)
+sh("stash import: over an empty stack in a dirty checkout takes nothing, as on main",
+   VCS + " stash import abc123", "allow", cwd=SUBJDIRTY)
+sh("stash export: over an empty stack in a dirty checkout takes nothing, as on main",
+   VCS + " stash export", "allow", cwd=SUBJDIRTY)
+# Pins that stay green. The reads stay allowed, and an explicit push still denies here.
+sh("stash pathspec pin: stash list still reads a dirty checkout", VCS + " stash list", "allow",
+   cwd=SUBJDIRTY)
+sh("stash pathspec pin: stash show still reads a dirty checkout", VCS + " stash show", "allow",
+   cwd=SUBJDIRTY)
+sh("stash pathspec pin: an explicit stash push -- still denies over real uncommitted work",
+   VCS + " stash push -- f.txt", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
 # THE STACK IS ITS OWN SUBJECT. Every action that takes an entry off the stack is read with `git
 # stash list`, never with the tree. SUBJDIRTY is dirty and its stack is empty. SUBJSTASH is clean
 # and its stack holds one entry. The two cases cross, which is what proves the right read is made.
@@ -5838,6 +5890,27 @@ add("test-author: Edit of package.json passes the early warning (the diff judges
 for _path in ("tests/test_a.py", "src/b_test.go", "pytest.ini", "pyproject.toml", "conftest.py",
               "jest.config.js"):
     add("test-author: Edit of %s is allowed" % _path, "allow", tool="Edit", file_path=_path, **A)
+# ---- mutation harnesses are test code: hooks/mutate_*.py holds the mutants the guard suite is judged
+# by, so a test-author edits them. Red on main: the early warning refused them as product code. The
+# builder case stays green and pins the fix to the test-author: agent_brief.py tells a builder to add
+# mutants to hooks/mutate_guard.py when the brief asks, and a builder must keep that.
+for _path in ("hooks/mutate_guard.py", "hooks/mutate_shared.py"):
+    add("test-author: Edit of mutation harness %s is allowed" % _path, "allow", tool="Edit",
+        file_path=_path, **A)
+add("test-author: Edit of hooks/guard_core.py is refused", "deny", rule=TA, tool="Edit",
+    file_path="hooks/guard_core.py", carries=("builder", "Report"), **A)
+add("builder-test: Edit of hooks/mutate_guard.py stays allowed for a builder", "allow", tool="Edit",
+    file_path="hooks/mutate_guard.py", agent_id="bld1", agent_type="builder", cwd=GITMAIN)
+# The harness set is a list of exact names, not a shape: a near miss stays product code, a name with
+# a colon is not a harness, and a name that differs only in case is the same file on Windows.
+add("test-author: Edit of hooks/mutate_x.py is refused", "deny", rule=TA, tool="Edit",
+    file_path="hooks/mutate_x.py", carries=("builder", "Report"), **A)
+add("test-author: Edit of hooks/mutate_:guard_core.py is refused", "deny", rule=TA, tool="Edit",
+    file_path="hooks/mutate_:guard_core.py", carries=("builder", "Report"), **A)
+add("test-author: Edit of janitor/mutate_sweep.py is allowed", "allow", tool="Edit",
+    file_path="janitor/mutate_sweep.py", **A)
+add("test-author: Edit of HOOKS/mutate_guard.py is allowed (case folds)", "allow", tool="Edit",
+    file_path="HOOKS/mutate_guard.py", **A)
 
 # ---- repo self-test files are test paths (Banchi incident, 2026-10-02): `*-selftest.*`,
 # `*_selftest.*`, `selftest_*.*`, in any folder. A .md file does NOT count: a note named like a
@@ -6259,11 +6332,26 @@ def long_lived_no_log_case():
     return True, "allowed with no builder-diff line"
 
 
+_author_mutant = diff_repo("g-author-mutant", _put("hooks/mutate_guard.py", "pass\n"))
+
+
+def author_mutant_no_log_case():
+    """A test-author's edit of a mutation harness is test code: commit and stop log no author-diff line."""
+    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-author-mutant"), _author_mutant,
+                              "test-author", "auth1")
+    rows = [r for r in rows if len(r) > 3 and r[3] == "author-diff"]
+    if out or rows:
+        return False, "a mutation harness was judged: %r %r" % (out[:60], rows)
+    return True, "a mutation harness logs no author-diff line"
+
+
 LOG_CHECKS_EXTRA = _TaggedLogs([
     ("role-diff: every unjudged stop is logged", role_log_case),
     ("builder-diff: the diff check logs for the reviewer and never blocks", diff_logs_case),
     ("builder-diff: main's later tests merged into a long-lived worktree log nothing",
      long_lived_no_log_case),
+    ("author-diff: a test-author's mutation harness edit logs no author-diff line",
+     author_mutant_no_log_case),
 ])
 for _label, _check in LOG_CHECKS_EXTRA:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
