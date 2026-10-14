@@ -214,7 +214,7 @@ while True:
             AUTHOR_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
-            command_root, git_calls, git_common_dir, inline_script, is_worktree, log_path_and_text, norm,
+            command_root, git_calls, git_common_dir, inline_script, is_worktree, log_path_and_text, nested_script, norm,
             path_is_inside, primary_checkout, record, refuse, resolve_command, resolve_default_base,
             segment_tokens, split_segments, strip_heredoc_bodies,
         )
@@ -1486,10 +1486,77 @@ def step_up_hit(tool: str, tool_input) -> str:
     return ""
 
 
+# ASK ALONE (owner rulings 2026-10-14 10:52 and 13:18; incident 2026-10-14 10:51 CDT, an optional
+# `git worktree prune` chained with two more steps sent the whole command to the owner as one
+# permission prompt). A step that would ASK is held, not printed, while the other rules run, so a
+# deny anywhere still wins. At the end, an ask step with any other step in the command (`&&`, `||`,
+# `;`, `|`, a newline, a leading `cd`) is denied, and the same step alone asks as before. The deny
+# names the step by its kind, never its text. Only the first ask step is held: it is the one that
+# printed before.
+PENDING_ASK = []   # [(rule, reason, matched, step)], at most one
+ASK_ALONE_REASON = ("this command chains a step that needs the owner's answer (%s) with other "
+                    "steps. Run that step alone, as its own command, or drop it.")
+
+
+def ask_step(rule: str, reason: str, matched: str, step: str) -> None:
+    if not PENDING_ASK:
+        PENDING_ASK.append((rule, reason, matched, rule + ", " + step))
+
+
+def background_steps(segment: str) -> int:
+    """The steps in one segment once an unquoted single `&` also separates them. `&&` is already
+    split, and a `&` that joins a redirect (`&>`, `>&`, `<&`) is no separator. A `&` with nothing
+    before it (PowerShell's call operator, the tail of `|&`) or nothing after it (a trailing job)
+    adds no step. Local to ask-alone: split_segments stays as the other rules read it."""
+    parts, quote, current, escaped = [], "", [], False
+    for index, char in enumerate(segment):
+        if escaped:
+            escaped = False   # `\"` inside double quotes is text, never the closing mark
+        elif quote:
+            escaped = quote == '"' and char == "\\" and not POWERSHELL_CALL[0]
+            quote = "" if char == quote else quote
+        elif char in "'\"":
+            quote = char
+        elif char == "&" and segment[index - 1:index] not in (">", "<") \
+                and segment[index + 1:index + 2] != ">":
+            parts.append("".join(current))
+            current = []
+            continue
+        current.append(char)
+    parts.append("".join(current))
+    return max(1, sum(1 for part in parts if part.strip()))
+
+
+def count_steps(text: str) -> int:
+    """The steps in a command: its segments, a single `&` as a separator, and the steps inside a
+    script handed to another interpreter (nested_script: `sh -c`, `cmd /c`, `pwsh -c`, `iex`,
+    `env -S`, `eval`), which stand in place of the call that holds them."""
+    steps = 0
+    for segment in split_segments(text):
+        if not segment.strip():
+            continue
+        steps += background_steps(segment)
+        tokens = segment_tokens(segment)
+        script = nested_script(tokens) if tokens else ""
+        if script:
+            steps += count_steps(script) - 1
+    return steps
+
+
+def settle_ask(tool: str, stripped: str) -> None:
+    if not PENDING_ASK:
+        return
+    rule, reason, matched, step = PENDING_ASK[0]
+    if count_steps(stripped) > 1:
+        refuse(tool, "deny", "ask-alone", ASK_ALONE_REASON % step, matched)
+    refuse(tool, "ask", rule, reason, matched)
+
+
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
                 transcript: str = "", subagent: bool = False,
                 background: bool = False, description: str = "") -> None:
     POWERSHELL_CALL[0] = tool == "PowerShell"
+    PENDING_ASK.clear()
     stripped = strip_heredoc_bodies(raw)
     cmd = norm(stripped)
 
@@ -1551,7 +1618,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if subcommand == "worktree-remove":
             refuse(tool, "deny", "shared-tree", WORKTREE_REMOVE_DENY_REASON, matched)
         if subcommand == "worktree-prune":
-            refuse(tool, "ask", "shared-tree", WORKTREE_PRUNE_ASK_REASON, matched)
+            ask_step("shared-tree", WORKTREE_PRUNE_ASK_REASON, matched, "worktree prune")
+            continue
         if subcommand == "stash" and stash_takes_the_stack(args):
             refuse(tool, "deny", "shared-tree", STACK_DENY_REASON, matched)
         # A stash PUT reaches here only when it would discard (state is not True above), and its
@@ -1572,7 +1640,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             # own change to those files, so no ask.
             if names_only_files(subcommand, args, root, segment) and one_place(stripped):
                 continue
-            refuse(tool, "ask", "shared-tree", TREE_ASK_REASON, matched)
+            ask_step("shared-tree", TREE_ASK_REASON, matched, "worktree discard")
+            continue
         refuse(tool, "deny", "shared-tree", TREE_DENY_REASON, matched)
 
     # 1b. The pointer checkout's HEAD. Placed AFTER rule 1 on purpose: a `git checkout` that
@@ -1718,10 +1787,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         for subcommand, args in git_calls(push_text(segment)):
             where, overrides = push_target(segment, stripped, cwd) if subcommand == "push" else ("", {})
             verdict = push_verdict(args, where, overrides) if subcommand == "push" else ""
-            if verdict:
-                refuse(tool, verdict, "force-push",
-                       PUSH_REASON if verdict == "deny" else PUSH_ASK_REASON,
-                       "git push " + " ".join(args))
+            if verdict == "ask":
+                ask_step("force-push", PUSH_ASK_REASON, "git push " + " ".join(args), "forced push")
+            elif verdict:
+                refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
 
     # 5. The environment file. This layer reads the command BEFORE normalization.
     refusal, logged = env_refusal(stripped)
@@ -1767,8 +1836,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         change = cap_change(raw)
         if change:
-            refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, matched),
-                   log_path_and_text(matched, change))
+            ask_step("subagent-model-cap", cap_ask_reason(change, matched),
+                     log_path_and_text(matched, change), "settings write")
+    settle_ask(tool, stripped)
 
 # ------------------------------------------------------------------ impeccable is review-only
 #
