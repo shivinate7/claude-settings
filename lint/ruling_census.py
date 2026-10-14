@@ -305,7 +305,7 @@ def reach_test(cwd, text, timeouts):
     try:
         run = subprocess.run(
             ["git", "-C", cwd, "log", "--all", "-S", collapsed, "-1", "--format=%h"],
-            capture_output=True, text=True, timeout=GIT_TIMEOUT_SECONDS,
+            capture_output=True, encoding="utf-8", errors="replace", timeout=GIT_TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired:
         timeouts[0] += 1

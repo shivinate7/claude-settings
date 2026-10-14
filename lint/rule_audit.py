@@ -203,13 +203,13 @@ def citation_problem(test_id: str, root: str = ROOT):
             return f"`{path}` has no known way to list its tests."
         try:
             run = subprocess.run(cmd, env=env, cwd=os.path.dirname(full), capture_output=True,
-                                 text=True, timeout=NODE_LIST_TIMEOUT)
+                                 encoding="utf-8", errors="replace", timeout=NODE_LIST_TIMEOUT)
         except (OSError, subprocess.TimeoutExpired) as e:
             return f"names in `{path}` could not be read: {e}."
         if run.returncode:
             return f"names in `{path}` could not be read: node exited {run.returncode}: {run.stderr.strip()[:200]}"
         try:
-            listed = [json.loads(l[7:]) for l in run.stdout.split("\n") if l.startswith("LISTED ")]
+            listed = [json.loads(l[7:]) for l in (run.stdout or "").split("\n") if l.startswith("LISTED ")]
         except ValueError as e:
             return f"names in `{path}` could not be read: malformed LISTED line: {e}."
         if name in listed:
