@@ -56,29 +56,14 @@ GLUED_OPEN = re.compile(r"^(?:\$?\()+(?=.)")
 CONTRACTION = re.compile(r"(?<=[A-Za-z])'(?:t|s|re|ll|ve|d|m)(?=[\s.,;:!?)]|$)")
 
 
-@functools.lru_cache(maxsize=1024)   # heredoc_heads asks again for each contraction in its text
-def contraction_reading(text: str, index: int) -> str:
-    """Read the `'` at `index` as "text" (a contraction), "quote", or "unsure". The shape alone is
-    not enough: `echo a's b'; pkill foo` and `sed -e's;a;b;' f; pkill foo` quote real text. So the
-    rest of `text` is read twice by heredoc_heads (a `'` inside double quotes, a comment or a
-    heredoc body opens nothing): once with the `'` as text, once with it as an open quote. It is
-    text when only the first leaves nothing open, and a quote when only the second does. Both
-    balanced, or neither: unsure. A quote with no close hides every later command, and a
-    contraction can hide one behind a real quote, so no single reading is safe when unsure.
-    split_segments reads both then (it ends up with the segments of each); heredoc_heads takes
-    the quote reading, which keeps more heredoc bodies under inspection. A backslash escape is
-    not read here: split_segments reads none, and a debt names that."""
-    if not CONTRACTION.match(text, index):
-        return "quote"
-    rest = _drop_heredoc_bodies(text[index + 1:])
-    as_text = not heredoc_heads(rest)[1]
-    as_quote = not heredoc_heads(rest, "'")[1]
-    return "text" if as_text and not as_quote else "quote" if as_quote and not as_text else "unsure"
-
-
-def is_contraction(text: str, index: int) -> bool:
-    """True when the `'` at `index` reads as a contraction for sure (see contraction_reading)."""
-    return contraction_reading(text, index) == "text"
+def is_contraction(text: str, index: int, closes_after: bool = False) -> bool:
+    """True when the `'` at `index` has a contraction's shape and bash never closes it: no `'`
+    follows it in `text`, nor after `text` when `closes_after`. Bash ends a quote at the next `'`
+    wherever it sits, so `echo a's b'; pkill foo` quotes `s b`. With no later `'`, bash runs
+    nothing after the mark, so reading it as text hides nothing. Each find stops at the next `'`:
+    one pass in all."""
+    return (not closes_after and bool(CONTRACTION.match(text, index))
+            and text.find("'", index + 1) < 0)
 
 
 def basename(token: str) -> str:
@@ -122,19 +107,23 @@ def split_segments(cmd: str, ends=None):
     """
     if ends is None:   # the same command is split by many rules: split it once
         return list(_split_segments_cached(cmd, POWERSHELL_CALL[0]))
-    unsure = []
-    segments = _split_reading(cmd, ends, False, unsure)
-    if unsure:   # a `'` that could be text or a quote: read it both ways, and judge every segment
-        segments += _split_reading(cmd, ends, True, [])
+    segments, open_quote, shaped = _split_reading(cmd, ends, False)
+    if open_quote and shaped:   # bash leaves a quote open: read each contraction as text too
+        segments += _split_reading(cmd, ends, True)[0]
     return segments
 
 
-def _split_reading(cmd: str, ends, unsure_is_text: bool, unsure):
-    """One reading of split_segments. An unsure `'` (contraction_reading) is text when
-    `unsure_is_text`, else a quote, and is noted in `unsure` either way."""
+def _split_reading(cmd: str, ends, contractions_are_text: bool):
+    """One reading of split_segments: (segments, the quote open at the end, whether an unquoted
+    `'` has a contraction's shape). The first reading is bash's own: every unquoted `'` opens a
+    quote, so a call bash runs is always in a segment. When that reading ends inside a quote, bash
+    runs nothing past the open mark, yet `echo don't; wsl --shutdown` must still show its call: a
+    second reading takes each contraction-shaped `'` (CONTRACTION) as text, and its segments are
+    judged too. Two linear passes; no `'` reads the rest of the command again."""
     segments = []
     current = []
     quote = ""
+    shaped = False
     index = 0
     length = len(cmd)
     while index < length:
@@ -156,13 +145,12 @@ def _split_reading(cmd: str, ends, unsure_is_text: bool, unsure):
         if char == "\\" and cmd[index + 1:index + 2] == "\n" and not POWERSHELL_CALL[0]:
             index += 2   # a POSIX backslash-newline is a continuation; in PowerShell it ends a path
             continue
-        reading = contraction_reading(cmd, index) if char == "'" else ""
-        if reading == "unsure":
-            unsure.append(index)
-        if reading == "text" or (reading == "unsure" and unsure_is_text):
-            current.append(char)   # `don't` is text: it must not hide the rest of the command
-            index += 1
-            continue
+        if char == "'" and CONTRACTION.match(cmd, index):
+            shaped = True
+            if contractions_are_text:
+                current.append(char)   # `don't` as text: it must not hide the rest of the command
+                index += 1
+                continue
         if char in ("'", '"'):
             quote = char
             current.append(char)
@@ -195,7 +183,7 @@ def _split_reading(cmd: str, ends, unsure_is_text: bool, unsure):
         index += 1
     segments.append("".join(current))
     ends is None or ends.append("")
-    return segments
+    return segments, quote, shaped
 
 
 # A leading `VAR=value` assignment, which is not a segment's command. Shared with the
@@ -400,12 +388,13 @@ INTERPRETER_HEREDOC = re.compile(
 )
 
 
-def heredoc_heads(text: str, quote: str = ""):
+def heredoc_heads(text: str, quote: str = "", closes_after: bool = False):
     """Return ([(quote char, delimiter)], quote) for the heredoc headers in `text` that sit outside
     quotes and comments, in order, and what is still open at its end. `quote` is a stack of open
     quotes and parentheses. `echo "<<EOF"` and `<<<word` hold no header, but `-m "$(cat <<EOF` does:
-    a `$(` inside double quotes is shell again. Quotes are read as split_segments reads them: no
-    escape, and a contraction (`don't`) opens none."""
+    a `$(` inside double quotes is shell again. Quotes are read as bash reads them, with no escape:
+    only a contraction bash never closes (is_contraction; `closes_after` says a `'` follows `text`)
+    opens none. A mark read as text could show a header bash quotes, and drop a body bash runs."""
     heads = []
     index = 0
     while index < len(text):
@@ -427,7 +416,7 @@ def heredoc_heads(text: str, quote: str = ""):
             while index < len(text) and text[index] != "\n":
                 index += 1
             continue
-        elif char == "'" and is_contraction(text, index):
+        elif char == "'" and is_contraction(text, index, closes_after):
             pass
         elif char in "'\"":
             quote += char
@@ -450,6 +439,7 @@ def _split_heredocs(cmd: str):
     The one walk `_drop_heredoc_bodies` and the environment layer both need. A header is read as
     heredoc_heads reads it, so one in quoted text, a comment or a here-string strips nothing."""
     lines = cmd.split("\n")
+    last = max((i for i, line in enumerate(lines) if "'" in line), default=-1)
     kept = []
     bodies = []
     index = 0
@@ -457,7 +447,7 @@ def _split_heredocs(cmd: str):
     while index < len(lines):
         kept.append(lines[index])
         header_line = lines[index]
-        heads, stack = heredoc_heads(header_line, stack)
+        heads, stack = heredoc_heads(header_line, stack, index < last)   # a later line holds a `'`
         index += 1
         for quote, delimiter in heads:
             start = index
