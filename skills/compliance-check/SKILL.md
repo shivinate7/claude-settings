@@ -14,10 +14,12 @@ parent. If the line or `<dir>/.git` is missing, stop and report the audit as unk
 
 ## 2. Load the rules
 
-- Rule ids: the `<!-- rule:<id> -->` anchors in the parent's `CLAUDE.md`. Read them with `grep`, never the whole file.
+- Rule ids: the `<!-- rule:<id> -->` anchors in the parent's `CLAUDE.md` and
+  `output-styles/shiv-stylisms.md`. `RULE_FILES` in `lint/rule_audit.py` names
+  both files. Read them with `grep`, never the whole file.
 - Group: the id prefix. `outcomes`, `roles`, `parallelism`, `shared-trees`, `git`,
-  `verification`, `tokens`, `building`, `speak`, `output`, `reports`. These are the 11 bold
-  headings of `CLAUDE.md`.
+  `verification`, `tokens`, `building`, `speak`, `output`, `reports`. These are the bold
+  headings of `CLAUDE.md`. The style file adds `style`.
 - Mechanism: `<parent>/lint/rule_mechanisms.json`, key `rules.<id>.mechanism.kind`.
 
 A `guard` or `gate` rule has a mechanism in the parent. Hooks and the report gate run in every
@@ -42,7 +44,7 @@ One line per group, in the order of step 2:
 ```
 
 Each finding cites a file or a command result. A group with mixed probes takes its worst
-known score, and lists each unknown probe after it. Under the 11 lines, name each parent rule
+known score, and lists each unknown probe after it. Under the group lines, name each parent rule
 that no probe and no mechanism covers.
 
 ## 5. Plan

@@ -27,7 +27,7 @@ only if a small script cannot do the job, and name each dependency you add, with
 | Prose | Claims that rot | Rung that fits |
 | --- | --- | --- |
 | README | see `readme.md` in this skill | see `readme.md` |
-| CLAUDE.md, agent files | "the guard blocks X", file paths | Check it: link each rule to a test that runs and goes red, as `lint/rule_audit.py` does |
+| CLAUDE.md, agent files | "the guard blocks X", file paths | Check it: link each rule to a test. `lint/rule_audit.py` checks that the test exists and is collected. The red proof is in `lint/test_rule_audit.py` and `hooks/mutate_guard.py` |
 | docs, guides | commands, flags, config keys | Generate from `--help` or the schema, or run the commands in CI |
 | Decision records | "we chose X because Y was true" | A trigger, not a test: name the fact that would date the record |
 | Code comments | "this is called from A", "the cap is 10" | Delete it, or move the fact next to the code it describes |

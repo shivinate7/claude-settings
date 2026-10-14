@@ -4,17 +4,17 @@ description: Use after a change to a screen in a repo that has screens. Runs two
 ---
 
 Run this in the orchestrator. Workers never spawn, so the orchestrator spawns both reviewers.
-The ruling is the design-skills record, 2026-10-10.
+The ruling is decision design-skills, 2026-10-10.
 
 ## Pinned sources
 
 - Vercel rules: `https://raw.githubusercontent.com/vercel-labs/web-interface-guidelines/434b7f91364665f2f733b310ec54809bf8f37937/command.md`.
-  The commit in the URL is the pin. Renovate proposes each move (`decisions/design-skills.md`).
+  The commit in the URL is the pin. Renovate proposes each move (decision design-skills).
   The upstream skill fetches from `main` on every run, so there is no plugin.
 - impeccable: a pinned copy of `pbakaus/impeccable` `plugin/skills/impeccable` at tag
   `skill-v4.5.2` (Apache 2.0), in `skills/impeccable`. No plugin. Renovate proposes each move of
   the tag, and the `impeccable-sync` workflow replaces the copy with it. Guard rule
-  `impeccable-review-only` lets it load only for `audit` or `critique` (`decisions/design-skills.md`).
+  `impeccable-review-only` lets it load only for `audit` or `critique` (decision design-skills).
 
 ## Procedure
 
@@ -50,4 +50,4 @@ The ruling is the design-skills record, 2026-10-10.
 - No conformity either way. The repo does not silence a skill. A skill does not restyle the
   repo on its own.
 - A skill update does not change a look by itself. Each source stays at its pin.
-- House rules (record ux-house-rules): a builder reads `~/.claude/ux/principles.md` before it writes UI. Reviewer A's brief asks for the house checklist (step 2). House design values: `~/.claude/ux/tokens.md`.
+- House rules (decision ux-house-rules): a builder reads `~/.claude/ux/principles.md` before it writes UI. Reviewer A's brief asks for the house checklist (step 2). House design values: `~/.claude/ux/tokens.md`.

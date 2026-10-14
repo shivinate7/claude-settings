@@ -140,24 +140,30 @@ gh run list --commit <merge-sha> --json name,conclusion
 
 Same-repo action: `uses: $/path` (GitHub changelog 2026-07-30) or `uses: ./path`.
 
-`.github/dependabot.yml`:
+This repo's `.github/dependabot.yml` ignores every version update, so Dependabot opens security
+updates only:
 
 ```yaml
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
-    schedule: {interval: weekly}
-    cooldown: {default-days: 7}
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
 ```
 
-Check the local tool first: `command -v zizmor && zizmor --version` (must match the CI pin).
+Renovate (`renovate.json`) tracks three custom pins. It does not track actions.
 
-Audit with zizmor. Run it locally with the same command and path set as CI, and include
-`dependabot.yml`:
+Audit with zizmor. Run the CI command from the repo root. It is the zizmor step of
+`.github/workflows/gates.yml`:
 
 ```sh
-zizmor .github/workflows .github/dependabot.yml
+pipx run zizmor==1.30.1 .github/ actions/
 ```
 
 ## 9. Wait without loops
@@ -174,7 +180,7 @@ Read the log when it exits. Never send the output to `/dev/null`.
 ```sh
 cp -R . "$(mktemp -d)/scratch" && cd "$_"   # scratch copy
 # break one target, for example replace one pinned SHA with a tag
-zizmor .github/workflows .github/dependabot.yml   # must exit non-zero
+pipx run zizmor==1.30.1 .github/ actions/   # must exit non-zero
 ```
 
 Gate a commit on the gate's own exit code. A pipe takes the exit code of its last command:
