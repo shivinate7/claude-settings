@@ -36,9 +36,11 @@ Home: hooks/question_outcome.py
 
 ## Holes, named
 
-- Measured 2026-10-14 (review round 1): 87 rulings, 100,296 chars uncapped. With the cap and
+- Measured 2026-10-14 (review round 1): 87 rulings, 100,887 chars uncapped. With the cap and
   60,000 chars, 5 of the 87 do not fit and are left out, oldest first. The live model call took
   11 s of the 90 s budget.
 - A ruling over 800 chars is cut, so a settled point late in a long ruling may be missed.
 - A record git does not list (new and not committed) is ordered by mtime, after the listed ones.
 - Rulings under another heading are not read.
+- A decisions/ record and a deferred/ record with the same file stem collide in the titles.
+- The ruling-heading pattern also matches a heading such as "Ruling out ...".

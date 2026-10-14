@@ -54,8 +54,9 @@ from _transcript import is_last_human, safe_finding_text, tail_records  # noqa: 
 from rule_audit import ANCHOR_RE  # noqa: E402  the one anchor parser (lint/ lands beside hooks/)
 
 RULE = "style-question-restates-goal"
-# THE TIME BUDGET. One model call per ask, so the settings.json PreToolUse entry for this
-# hook carries "timeout": 105 = MODEL_TIMEOUT + 15 seconds margin. Change both together.
+# THE TIME BUDGET. One git call and one model call per ask, so the settings.json PreToolUse
+# entry for this hook carries "timeout": 105 = GIT_TIMEOUT 3 + MODEL_TIMEOUT 90 + 12 seconds
+# margin. Change them together.
 MODEL_TIMEOUT = 90
 OWNER_MESSAGES = 3
 STATE_MAX_AGE = 30 * 60  # seconds; an older deny state is ignored
@@ -92,7 +93,7 @@ RULING_CAP = 800  # chars of one ruling; a longer one is cut at a sentence end
 RULING_CUT = " [ruling cut]"
 RULINGS_DIRS = ("decisions", "deferred")
 RULINGS_LEFT_OUT = "[%d older rulings left out to fit the budget]"
-GIT_TIMEOUT = 10  # seconds for the one git log call that orders the records
+GIT_TIMEOUT = 3  # seconds for the one git log call that orders the records
 RULING_HEADING = re.compile(r"(?:the\s+)?(?:owner[’']s\s+)?rulings?\b", re.IGNORECASE)
 WAITS_LABEL = "**Why it waits.**"
 FENCE_LINE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
@@ -419,6 +420,8 @@ def _rulings(cwd):
                           for n in os.listdir(base) if n.endswith(".md")})
         except OSError:
             continue
+    if not found:  # no record, so no git call
+        return "", {}
     order = list(dict.fromkeys(p for p in _git_order(cwd) if p in found))
     order += sorted((p for p in found if p not in order), key=lambda p: (-found[p], p))
     room = RULINGS_MAX - len(RULINGS_INTRO) - len(RULINGS_LEFT_OUT % 99999) - 3 * SEP
