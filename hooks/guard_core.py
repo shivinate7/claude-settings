@@ -5,6 +5,7 @@ guard.py is the only entry point. It loads this module from its own folder (deci
 guard-split-by-family). Other files reach these names through `guard`. A test or the janitor
 that patches one of them patches it here, on the one object that every caller reads.
 """
+import errno
 import functools
 import json
 import os
@@ -1337,8 +1338,12 @@ def _log_lock(handle) -> bool:
                     import fcntl
                     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 return True
-            except OSError:
-                if time.monotonic() >= deadline:
+            except OSError as exc:
+                # Only contention is worth a retry: msvcrt gives EACCES or EDEADLK, flock gives
+                # BlockingIOError (EAGAIN) or EACCES. Any other error returns at once.
+                busy = isinstance(exc, BlockingIOError) or exc.errno in (
+                    errno.EACCES, errno.EAGAIN, errno.EDEADLK)
+                if not busy or time.monotonic() >= deadline:
                     return False
                 time.sleep(0.001)
     except Exception:
