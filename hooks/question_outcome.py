@@ -10,8 +10,8 @@ Per question with two or more options (a clarifying question passes first):
   `Goal:` line matches the owner's goal, whether each option serves that goal, whether
   a better option is missing, whether the owner can answer from the box alone (every id, code
   or name explained in words), whether the question points at anything the box does not show,
-  and whether each option's Lose names what changes for the owner. FLAG denies, and the reason
-  goes to the session.
+  and whether each option says what the owner gains and what the owner loses, as a change for
+  the owner and not for a record. FLAG denies, and the reason goes to the session.
 - The judge reads the conversation text from the owner's 3rd-last message up to the question,
   in transcript order, each block labeled by its source: owner messages, the assistant's text
   blocks, and relayed cross-session messages. It never reads tool calls, tool results, task
@@ -95,8 +95,8 @@ PROMPT = (
     "missing; (4) can the owner answer from the question box alone, with every id, code or name "
     "(a decision id, a branch, a sha, a key, a rule name) explained in plain words; (5) does the "
     "question point at anything the box does not show, such as an earlier message, a time of day "
-    "or an item number like \"item 4\"; (6) does each option's Lose name what changes for the "
-    "owner, not what changes for a record. A goal line is a paraphrase of the goal in plain words; "
+    "or an item number like \"item 4\"; (6) does each option say what the owner gains and what "
+    "the owner loses, each as a change for the owner and not for a record. A goal line is a paraphrase of the goal in plain words; "
     "a paraphrase is not grounds "
     "to deny or flag. Be conservative: FLAG only a clear miss. Reply with one JSON object only: "
     '{"verdict": "ALLOW"} or {"verdict": "FLAG", "why": "<one line: what misses, and the fix>"}.'
