@@ -261,7 +261,7 @@ class Blobs:
             if line.endswith(b" missing"):  # the reply names the spec, which may hold spaces
                 return absent(self.cwd, rev, path)
             head = line.split()
-            if len(head) > 1 and head[1] == b"submodule":  # a gitlink is no blob: its text is "", as `git show` reads it
+            if len(head) > 1 and head[1] == b"submodule":  # a gitlink is no blob: its text is "" (`git show` cannot read it and exits 128)
                 return ""
             if len(head) != 3 or not head[2].isdigit():  # an empty line is EOF: the process died
                 raise Unknown("git cat-file gave no usable header for %s:%s: %r" % (rev[:9], path, line[:80]))
@@ -526,6 +526,13 @@ def history(cwd, rev, window):
     return len(line), out
 
 
+def say(line):
+    """The one home for printed output. A non-UTF-8 name holds surrogates, which a strict stream cannot encode:
+    write them as backslash escapes, so the finding prints and the exit code holds."""
+    enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+    print(line.encode(enc, "backslashreplace").decode(enc))
+
+
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--upstream", default="origin/main")
@@ -538,19 +545,19 @@ def main(argv):
     try:
         if a.history:
             n, hits = history(a.repo, a.history, a.window)
-            print("\n".join(hits))
-            print("silent-undo: %d commit(s) read, %d hit(s)." % (n, len(hits)))
+            say("\n".join(hits))
+            say("silent-undo: %d commit(s) read, %d hit(s)." % (n, len(hits)))
             return 0
         problems, notes = check(a.repo, a.upstream, a.head)
     except Unknown as e:
-        print("silent-undo: UNKNOWN: %s" % e)
+        say("silent-undo: UNKNOWN: %s" % e)
         return 1 if (a.strict or os.environ.get("CI")) else 0
     for n in notes:
-        print("silent-undo: " + n)
+        say("silent-undo: " + n)
     for p in problems:
-        print("silent-undo: FAIL: " + p)
+        say("silent-undo: FAIL: " + p)
     if problems:
-        print("silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER)
+        say("silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER)
     return 1 if problems else 0
 
 
