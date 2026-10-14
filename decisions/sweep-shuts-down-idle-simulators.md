@@ -12,6 +12,15 @@ repository.
 Measured 2026-10-10. Seven iOS simulators were booted at once on a 24 GB Mac. They used
 about 15 GB, about 2 GB each.
 
+## Incident, 2026-10-14
+
+At 14:18 CDT a session ran `simctl boot` on an iPhone 18 Pro. CoreSimulator.log shows
+that SimRenderingServices refused the boot ("Invalid connectionUUID"). The device still
+came up `Booted`, with no display. SpringBoard crashed 14 times, with no main display,
+until the session ran shutdown and boot at 14:20:11. That fixed it. One device was
+booted, so the cap did not fire. Memory was not the cause. Why the render service
+refused the boot is unmeasured. Ruling 5 rests on this incident.
+
 ## Why nothing reaps them today
 
 Three paths boot a simulator: xcodebuild auto-boot, `simctl boot`, and the iOS Simulator
@@ -54,6 +63,19 @@ launchd_sim process has ppid 1. CoreSimulator.log has no requester.
 4. Reuse. A guard rule refuses a boot when an idle booted device of the same type and
    runtime exists. It names that device's UDID. Owner answer, 2026-10-10: "idle" is the
    rule 2 test in full. A device that fails any part of it is not idle.
+5. Boot check. Owner ruling, 2026-10-14: "add boot check", over "note only". After a
+   `simctl boot` or an MCP `launch`, the record hook checks each device that the call
+   took from `Shutdown` to `Booted`. The check passes when `xcrun simctl bootstatus
+   <UDID>` exits 0 and `xcrun simctl io <UDID> screenshot <file>` exits 0. A timeout is a
+   fail. On a fail, the hook runs `simctl shutdown <UDID>` and `simctl boot <UDID>` once,
+   then checks again.
+   - Pass after the retry: the hook tells the session that the device was booted again,
+     and that an app launched by the call must be launched again.
+   - Fail after the retry: the hook tells the session that the device is broken, names
+     its UDID, and says to stop using it. The hook leaves the device booted. The record
+     line still goes in, so the sweep stops the device once it is idle (ruling 2).
+   The check runs before the hook reads launchd_sim, so the record holds the pid of the
+   retry boot, and the sweep does not see `boot-record-mismatch`.
 
 Why the cap: it needs no knowledge of who booted a device.
 
@@ -70,7 +92,13 @@ Why the cap: it needs no knowledge of who booted a device.
 - `janitor/sweep.py`: `sim_tier`, the last tier of a full run. `sim_keep_code` is the one
   idle test. A run stops at most 4 devices. The rest wait for the next run.
 - `hooks/sim_boot_record.py`: a PreToolUse run saves each device's state. The PostToolUse
-  run of the same call records each `Shutdown` to `Booted` change. A Bash call is read only
+  run of the same call records each `Shutdown` to `Booted` change. For a `simctl boot` or
+  an MCP `launch`, it first runs the ruling 5 check on each such device. The hook writes to
+  stdout only when the check failed: a `decision: "block"` reason when the device is
+  broken, an `additionalContext` note when the retry passed. Otherwise stdout stays empty.
+  Each step has its own timeout: bootstatus 90 s, screenshot 15 s, shutdown 30 s, boot
+  60 s. The PostToolUse entry in `settings.json` allows 330 s, the worst case of one check,
+  one retry and a second check. A Bash call is read only
   when its text names a simulator tool as a whole word, such as simctl, xcodebuild or xcrun.
   An MCP call is read only when its action is `launch`. Bandaid: a boot behind a script
   that names no such word goes unrecorded, and an unrecorded device is kept. Matchers for
@@ -90,11 +118,16 @@ Why the cap: it needs no knowledge of who booted a device.
   holds for it too. `OS=latest` with an idle twin on an older runtime is refused: the twin rule matches
   the device type, not the runtime. The record hook records nothing for `OS=latest` on such
   a name, so the sweep keeps that device.
+  Ruling 5 checks only `simctl boot` and MCP `launch`. An `xcodebuild -destination` boot
+  is not checked. A broken device is left booted until the sweep stops it.
 
 ## Measured, 2026-10-10
 
 - `xcrun simctl list devices --json`: 0.19 to 0.48 s in 3 runs. This is why the record hook
   skips Bash calls that name no simulator tool.
+- On a device already booted, 2026-10-14: `simctl bootstatus` 0.10 to 0.14 s, `simctl io
+  screenshot` 0.38 to 0.47 s, 3 runs. Bootstatus right after a fresh boot is unmeasured.
+  The ruling 5 timeouts are sized by judgment, not by measure.
 - One `simctl shutdown`: unmeasured. The only booted device was in use by a running
   `xcodebuild test`, so no shutdown ran.
 - On this Mac, `launchd_sim` argv holds the UDID, and an Xcode-bundled `python3` has
