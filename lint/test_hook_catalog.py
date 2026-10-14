@@ -43,8 +43,9 @@ Interface the generator must meet. The builder builds to this.
   Event, Matcher and If are "-" when absent. Mods and skills have no event, matcher or if.
 
 Red on main: the generator and the page do not exist. Real-repo cases R1-R9 read this repo.
-Fixture cases F1-F24 run the generator on temp trees, so a generator that is silent for every
-input fails them. Unit cases U1-U4 pin the table and sentence helpers used here.
+Fixture cases F1-F29 run the generator on temp trees, so a generator that is silent for every
+input fails them. F25-F29 are round 2: F25, F27 and F28 are red on the lane tip, F26 and F29 are guards.
+Unit cases U1-U4 pin the table and sentence helpers used here. Unit cases U1-U4 pin the table and sentence helpers used here.
 
 Scanner rule: Python docstrings go through ast. The .sh header reader and the frontmatter reader
 are hand scanners; they get the comment-opener, lone-quote and multi-line-string cases (F2-F6,
@@ -592,6 +593,87 @@ class Fixtures(unittest.TestCase):
         row = row_for(self.rows_of(spec), "inline: Notification")
         self.assertEqual(row["What it does"], "Says one plain thing.")
         self.assertEqual((row["Event"], row["Model"], row["Effort"]), ("Notification", "no model", "n/a"))
+
+    # Round 2 cases. F25, F27 and F28 are red on the lane tip. F26 and F29 are guards: they pass there,
+    # and they go red if a change binds the sidecar key to command text or lets an orphan through.
+
+    def test_f25_one_script_under_two_flags_does_not_share_one_summary(self):
+        # A script registered twice with different flags. Under exit 0 the two rows may not show the
+        # same text. Refusing, with the script named, is also allowed: a page cannot tell which mode.
+        hooks = {"Stop": [{"hooks": [{"type": "command", "command": command("hooks/modes.py")["command"] + " " + flag}]}
+                          for flag in ("--nudge", "--reorient")]}
+        root = self.tree(files(hooks=hooks, extra={
+            "hooks/modes.py": '"""Hands off the session on --nudge, and reorients the agent on --reorient."""\nimport sys\nprint(sys.argv)\n'}))
+        code, out, err = generator(root, "--print")
+        if code != 0:
+            self.assertIn("hooks/modes.py", out + err, out + err)
+            return
+        rows = [r for r in page_rows(out) if r["Key"].strip("`") == "hooks/modes.py"]
+        self.assertEqual(len(rows), 2, out + err)
+        self.assertNotEqual(rows[0]["What it does"], rows[1]["What it does"],
+                            "both registrations show one summary: " + rows[0]["What it does"])
+
+    def test_f26_changed_inline_command_text_alone_keeps_check_green(self):
+        # Guard: an edit that keeps the event, matcher and if leaves the summary true, so --check stays green.
+        def settings(text):
+            hooks = dict(CLEAN_HOOKS, Notification=[{"hooks": [{"type": "command", "command": text}]}])
+            return json.dumps({"hooks": hooks, "enabledPlugins": {"tw@claude-settings": True}})
+        spec = clean()
+        spec["settings.json"] = settings("echo one")
+        spec["lint/hook_catalog_inline.json"] = json.dumps({"Notification": "Says one plain thing."})
+        root = self.tree(spec)
+        code, out, err = generator(root, "--print")
+        self.assertEqual(code, 0, out + err)
+        put(root, "docs/catalog.md", out)
+        put(root, "settings.json", settings("echo two-changed"))
+        self.assertEqual(generator(root, "--check"), (0, "", ""))
+
+    def test_f27_two_inline_commands_under_one_label_both_carry_summaries(self):
+        # Two inline commands, same event, matcher and if. The sidecar key shape is not decided (see the
+        # round 2 Input Needed). Either shape passes: a list of summaries under the label, in settings
+        # order, or a label-plus-ordinal key. A refusal does not pass: both commands must carry a summary.
+        hooks = dict(CLEAN_HOOKS, Notification=[{"hooks": [
+            {"type": "command", "command": "echo first"}, {"type": "command", "command": "echo second"}]}])
+        settings = json.dumps({"hooks": hooks, "enabledPlugins": {"tw@claude-settings": True}})
+        shapes = [{"Notification": ["First summary.", "Second summary."]},
+                  {"Notification": "First summary.", "Notification #2": "Second summary."}]
+        problems = []
+        for sidecar in shapes:
+            spec = clean()
+            spec["settings.json"] = settings
+            spec["lint/hook_catalog_inline.json"] = json.dumps(sidecar)
+            root = self.tree(spec)
+            code, out, err = generator(root, "--print")
+            got = sorted(r["What it does"] for r in page_rows(out) if r["Kind"] == "hook" and r["Event"] == "Notification")
+            if got == ["First summary.", "Second summary."]:
+                put(root, "docs/catalog.md", out)
+                self.assertEqual(generator(root, "--check"), (0, "", ""))
+                return
+            problems.append("%s: rows %r, exit %s, %s" % (json.dumps(sidecar), got, code, (out + err).strip()[:160]))
+        self.fail("neither sidecar shape gives both summaries:\n" + "\n".join(problems))
+
+    def test_f28_duplicate_sidecar_key_fails_check(self):
+        # json.loads keeps the last of two equal keys without a word. The file then says two things.
+        hooks = dict(CLEAN_HOOKS, Notification=[{"hooks": [{"type": "command", "command": "echo one"}]}])
+        spec = clean()
+        spec["settings.json"] = json.dumps({"hooks": hooks, "enabledPlugins": {"tw@claude-settings": True}})
+        spec["lint/hook_catalog_inline.json"] = '{"Notification": "First summary.", "Notification": "Second summary."}'
+        root = self.tree(spec)
+        _code, out, err = generator(root, "--print")
+        put(root, "docs/catalog.md", out)
+        code, out, err = generator(root, "--check")
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("Notification", out + err)
+        self.assertNotIn("Traceback", out + err)
+
+    def test_f29_orphan_sidecar_key_fails_check(self):
+        # Guard: an entry that names no inline command fails --check, and the message names the key.
+        hooks = dict(CLEAN_HOOKS, Notification=[{"hooks": [{"type": "command", "command": "echo one"}]}])
+        spec = clean()
+        spec["settings.json"] = json.dumps({"hooks": hooks, "enabledPlugins": {"tw@claude-settings": True}})
+        spec["lint/hook_catalog_inline.json"] = json.dumps(
+            {"Notification": "Says one plain thing.", "PreToolUse matcher=Gone": "Orphan."})
+        self.assert_problem(spec, "PreToolUse matcher=Gone")
 
 
 class Helpers(unittest.TestCase):
