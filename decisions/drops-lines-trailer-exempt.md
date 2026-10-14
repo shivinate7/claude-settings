@@ -44,3 +44,5 @@ Debts: `drops-dot-slash-guard-lint` (`./deferred/a.md` after the key passes the 
 ## Named limits
 
 - A reason that names a record path is refused, by ruling, even where the lint would accept it.
+
+Kind: process

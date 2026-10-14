@@ -49,3 +49,5 @@ Debts: `agent-brief-text-copy-drifts` (the hook text copies the rules, and no ch
 
 - No matcher: every agent type gets the context.
 - Fail-open: a crashed hook injects nothing.
+
+Kind: process
