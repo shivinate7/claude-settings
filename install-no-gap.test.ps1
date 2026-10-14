@@ -12,14 +12,14 @@
 # in a tight loop for the whole series. It fails on a missing shipped name, an unreadable file, or a
 # read that is not one whole version. A read pair whose INSTALL_ID values differ is a mixed-id
 # window, which the guard waits through: each must clear within 5 s, and none may be open at the
-# end. This replaces a watcher
-# count of Deleted and Renamed events: a rename over a name emits a Deleted event, so that count
-# failed a correct atomic replace (a stale proxy, re-pointed per outcomes-tests-are-claims). The
-# fixture skill has nested dirs, and a nested file the source drops must be pruned.
+# end. No case counts watcher events: a rename over a name emits a Deleted event, so a count of
+# them fails a correct atomic replace. The fixture skill has nested dirs, and a nested file the
+# source drops must be pruned.
 #
 # Three more cases, each in its own scratch tree. symrun and linkfail need symlink rights. On a
 # runner without them they print SKIP with the reason and do not count:
-#   symrun    a real file from an earlier copy, then a run where links can be made: no gap event.
+#   symrun    a real file from an earlier copy, then a run where links can be made: the same reader
+#             loop sees no fault, and hooks\guard.py is a link at the end.
 #   linkfail  dest is a symlink to elsewhere and the copy fails: a file must still exist at dest.
 #   lock1     first local run, skill locked: a .bak or no copy marker after run 1, and no person
 #             file lost after run 2. Needs no symlink rights; copy mode is forced.
@@ -47,89 +47,6 @@ $Failed = 0
 function Check([string]$name, [bool]$ok) {
     if ($ok) { Write-Host "PASS: $name" } else { Write-Host "FAIL: $name"; $script:Failed++ }
 }
-
-# Records Deleted and Renamed events on one directory tree. Relative names only.
-# A canary is a file the test creates and deletes; Arm sets its name, WaitCanary waits for it.
-Add-Type -TypeDefinition @'
-using System;
-using System.Collections.Concurrent;
-using System.IO;
-using System.Threading;
-
-public class NoGapRecorder : IDisposable
-{
-    private readonly string root;
-    private readonly FileSystemWatcher watcher;
-    private readonly object armLock = new object();
-    private readonly ManualResetEvent canarySeen = new ManualResetEvent(false);
-    private string canary = "";
-    public readonly ConcurrentQueue<string> Gone = new ConcurrentQueue<string>();
-    public readonly ConcurrentQueue<string> Errors = new ConcurrentQueue<string>();
-
-    public NoGapRecorder(string dir)
-    {
-        root = dir.TrimEnd('\\');
-        watcher = new FileSystemWatcher(dir);
-        watcher.IncludeSubdirectories = true;
-        watcher.InternalBufferSize = 65536;
-        watcher.NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName;
-        watcher.Deleted += OnDeleted;
-        watcher.Renamed += OnRenamed;
-        watcher.Error += OnError;
-        watcher.EnableRaisingEvents = true;
-    }
-
-    private string Rel(string full)
-    {
-        if (full.Length > root.Length + 1
-            && full.StartsWith(root, StringComparison.OrdinalIgnoreCase)
-            && full[root.Length] == '\\')
-            return full.Substring(root.Length + 1);
-        return "OUTSIDE:" + full;
-    }
-
-    public void Arm(string name)
-    {
-        lock (armLock) { canary = name; canarySeen.Reset(); }
-    }
-
-    public bool WaitCanary(int ms)
-    {
-        return canarySeen.WaitOne(ms);
-    }
-
-    private void Seen(string rel)
-    {
-        lock (armLock)
-        {
-            if (string.Equals(rel, canary, StringComparison.OrdinalIgnoreCase)) canarySeen.Set();
-        }
-    }
-
-    private void OnDeleted(object sender, FileSystemEventArgs e)
-    {
-        string rel = Rel(e.FullPath);
-        Gone.Enqueue("D|" + rel);
-        Seen(rel);
-    }
-
-    private void OnRenamed(object sender, RenamedEventArgs e)
-    {
-        Gone.Enqueue("R|" + Rel(e.OldFullPath) + "|" + Rel(e.FullPath));
-    }
-
-    private void OnError(object sender, ErrorEventArgs e)
-    {
-        Errors.Enqueue(e.GetException().Message);
-    }
-
-    public void Dispose()
-    {
-        watcher.EnableRaisingEvents = false;
-        watcher.Dispose();
-    }
-}
-'@
 
 # Reads each hook file in a tight loop on its own thread. Every read is opened with read, write and
 # delete sharing, so the installer's writes and renames are never refused by the reader. A pass
@@ -309,7 +226,6 @@ $Cfg    = Join-Path $Tmp 'claude'
 $EnvSub = 'Software\claude-settings-test-' + [guid]::NewGuid().ToString('N')
 $Utf8   = New-Object Text.UTF8Encoding($false)
 $Landed = @('agents', 'lint', 'hooks', 'skills')
-$Rec    = $null
 
 # Writes one fixture file. $path is absolute.
 function Write-FixtureFile([string]$path, [string]$text) {
@@ -331,16 +247,6 @@ function Invoke-Install([string]$CloneDir, [string]$LogName) {
     return $p.ExitCode
 }
 
-# Creates and deletes one canary file in $Dir, then waits (bounded) for its Deleted event.
-# Returns $true when the watcher delivered it. Events queued before it are then delivered too.
-function Flush-Canary($Recorder, [string]$Name, [string]$Dir) {
-    $Recorder.Arm($Name)
-    $p = Join-Path $Dir $Name
-    [IO.File]::WriteAllText($p, '', $Utf8)
-    Remove-Item -LiteralPath $p -Force
-    return $Recorder.WaitCanary(15000)
-}
-
 # Names the clone ships, relative to the CLAUDE dir: CLAUDE.md, settings.json, and every entry
 # under each landed dir, nested ones too.
 function Get-ShippedNames([string]$CloneDir, [string[]]$Dirs) {
@@ -353,25 +259,6 @@ function Get-ShippedNames([string]$CloneDir, [string[]]$Dirs) {
         }
     }
     return $names
-}
-
-# A set of names. Hashtable keys ignore case.
-function Get-NameSet([string[]]$Names) {
-    $set = @{}
-    foreach ($n in $Names) { $set[$n] = $true }
-    return $set
-}
-
-# Gap events: each Deleted or Renamed event whose name (the old name, for a rename) is in $Set.
-function Get-GapHits($Events, $Set) {
-    $hits = @()
-    foreach ($ev in $Events) {
-        $f    = $ev.Split('|')
-        $name = $f[1]
-        $kind = if ($f[0] -eq 'D') { 'deleted' } else { 'renamed away' }
-        if ($Set.ContainsKey($name)) { $hits += "$kind $name" }
-    }
-    return $hits
 }
 
 # True when $Path is a symlink or junction. A missing path is not a link.
@@ -418,12 +305,13 @@ Write-Fixture 'lint\ste_lint.py' '# lint'
 # The hook files in two versions, A and B. Each file is the repo's commented INSTALL_ID placeholder,
 # a label line, then padding, so a version is large: a copy of it takes long enough for the reader
 # to land inside it. The installer swaps the placeholder for its run id at copy time, as it does for
-# the repo's own hook files. The reader compares a read without that line.
+# the repo's own hook files. The reader compares a read without that line. $Pad is the number of
+# padding lines; a case that needs no long copy passes a small one.
 $HookPadLines = 40000
 $HookPlaceholder = '# INSTALL_ID = "uninstalled"'
-function New-HookText([string]$File, [string]$Label) {
+function New-HookText([string]$File, [string]$Label, [int]$Pad = $HookPadLines) {
     $head = $HookPlaceholder + "`n" + '# ' + $File + ' ' + $Label + "`n"
-    return $head + (('# padding, so a copy of this file takes a while to write' + "`n") * $HookPadLines)
+    return $head + (('# padding, so a copy of this file takes a while to write' + "`n") * $Pad)
 }
 # The text without its INSTALL_ID line, placeholder or stamped: what a landed copy must match.
 function Remove-StampLine([string]$Text) { return ($Text -replace '^(# )?INSTALL_ID = [^\r\n]*\r?\n', '') }
@@ -440,8 +328,7 @@ Write-Fixture 'skills\sample\scripts\data\table.json' '{"rows":1}'
 Write-Fixture 'skills\sample\scripts\data\old.json' '{"dropped":true}'
 $DroppedRel = 'skills\sample\scripts\data\old.json'
 
-$Shipped    = @(Get-ShippedNames $Clone $Landed)
-$ShippedSet = Get-NameSet $Shipped
+$Shipped = @(Get-ShippedNames $Clone $Landed)
 Write-Host "info: $($Shipped.Count) shipped names in the fixture"
 
 $env:CLAUDE_CONFIG_DIR = $Cfg
@@ -474,7 +361,6 @@ try {
     # removal is not a gap. Run 2 must still prune it from the landed copy.
     Remove-Item -LiteralPath (Join-Path $Clone $DroppedRel) -Force
     $Shipped     = @(Get-ShippedNames $Clone $Landed)
-    $ShippedSet  = Get-NameSet $Shipped
     $NestedNames = @($Shipped | Where-Object { ($_ -split '\\').Count -ge 4 })
     Check "fixture: nested names are in the shipped set ($($NestedNames.Count))" ($NestedNames.Count -ge 3)
 
@@ -487,7 +373,7 @@ try {
     $Reader.Paths = [string[]]@((Join-Path $Cfg 'hooks\guard.py'), (Join-Path $Cfg 'hooks\guard_core.py'))
     $Reader.Versions1 = [string[]]$HookA
     $Reader.Versions2 = [string[]]$HookB
-    # The shipped names the watcher used to cover, checked for existence on every pass.
+    # Shipped names checked for existence on every pass.
     $Reader.Present = [string[]]@((Join-Path $Cfg 'CLAUDE.md'), (Join-Path $Cfg 'settings.json'), (Join-Path $Cfg 'agents'), (Join-Path $Cfg 'lint'), (Join-Path $Cfg 'skills'))
     $RoundPasses = @()
     $RoundFaults = @()
@@ -537,13 +423,19 @@ try {
     foreach ($m in $Missing2) { Write-Host "  missing after run 2: $m" }
 
     # ---- symrun: a real file from an earlier copy, then a run where links can be made ----------
+    # Run 1 forces copy mode, so both hook files are real stamped files. Run 2 can make links, so
+    # each is swapped for a link to the repo file, which holds the placeholder. The same reader loop
+    # runs through run 2. The guard_core.py and guard.py reads differ in id (a copy has its stamp, a
+    # link the placeholder) from the first swap to the second: a window, which must clear.
     $Blocker = Get-SymlinkBlocker
     if ($Blocker) {
         Write-Host "SKIP: symrun (no symlink rights: $Blocker)"
     } else {
         $Sym      = New-Scratch 'symrun' @('hooks')
-        Write-FixtureFile (Join-Path $Sym.Clone 'hooks\guard.py') '# guard v1'
-        $SymSet   = Get-NameSet (@(Get-ShippedNames $Sym.Clone @('hooks')))
+        # Small files: a link needs no long copy, and a fast reader pass lands inside a short gap.
+        $SymText  = @((New-HookText 'guard.py' 'symrun' 100), (New-HookText 'guard_core.py' 'symrun' 100))
+        Write-FixtureFile (Join-Path $Sym.Clone 'hooks\guard.py') $SymText[0]
+        Write-FixtureFile (Join-Path $Sym.Clone 'hooks\guard_core.py') $SymText[1]
         $SymGuard = Join-Path $Sym.Cfg 'hooks\guard.py'
 
         $env:CLAUDE_CONFIG_DIR = $Sym.Cfg
@@ -552,23 +444,33 @@ try {
         Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
         Check "symrun: run 1 (forced copy) exits 0 (exit $rcS1)" ($rcS1 -eq 0)
         Check "symrun: run 1 leaves a real file at hooks\guard.py, the earlier copy" ((Test-Path -LiteralPath $SymGuard) -and (-not (Test-ReparsePoint $SymGuard)))
+        Check "symrun: FORCE_COPY is unset for run 2, so links can be made" (-not $env:CLAUDE_SETTINGS_FORCE_COPY)
 
-        $RecS = New-Object -TypeName NoGapRecorder -ArgumentList $Sym.Cfg
+        $SymReader = New-Object -TypeName HookReader
+        $SymReader.Paths = [string[]]@($SymGuard, (Join-Path $Sym.Cfg 'hooks\guard_core.py'))
+        $SymReader.Versions1 = [string[]]$SymText
+        $SymReader.Versions2 = [string[]]$SymText
+        $SymReader.Present = [string[]]@((Join-Path $Sym.Cfg 'CLAUDE.md'), (Join-Path $Sym.Cfg 'settings.json'), (Join-Path $Sym.Cfg 'hooks'))
+        $SymReader.Start()
         try {
-            $preS = Flush-Canary $RecS '__nogap_canary_pre.tmp' $Sym.Cfg
-            Check "symrun: watcher live before run 2 (canary delivered)" $preS
-            Check "symrun: FORCE_COPY is unset for run 2, so links can be made" (-not $env:CLAUDE_SETTINGS_FORCE_COPY)
+            $passesBefore = $SymReader.Passes
             $rcS2 = Invoke-Install $Sym.Clone 'symrun-run2.log'
-            Check "symrun: run 2 exits 0 (exit $rcS2)" ($rcS2 -eq 0)
-            $postS = Flush-Canary $RecS '__nogap_canary_post.tmp' $Sym.Cfg
-            Check "symrun: watcher delivered run 2 events (post canary)" $postS
-            $HitsS = @(Get-GapHits @($RecS.Gone.ToArray()) $SymSet)
-            foreach ($h in $HitsS) { Write-Host "  gap: $h during symrun run 2" }
-            Check "symrun: run 2 deletes or renames no shipped name when a real file is replaced ($($HitsS.Count) gap events)" ($HitsS.Count -eq 0)
+            $SymPasses = $SymReader.Passes - $passesBefore
         } finally {
-            $RecS.Dispose()
+            $SymReader.Stop()
             Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
         }
+        foreach ($line in $SymReader.Report()) { Write-Host "  reader fault: $line" }
+        $SymLongest = [math]::Round($SymReader.MaxWindowSeconds, 3)
+        Write-Host "info: symrun: $($SymReader.Windows) mixed-id windows; longest $SymLongest s"
+        Check "symrun: run 2 exits 0 (exit $rcS2)" ($rcS2 -eq 0)
+        Check "symrun: reader ran during run 2 ($SymPasses passes, want 1 or more)" ($SymPasses -ge 1)
+        Check "symrun: no shipped name is missing during run 2 ($($SymReader.Count('missing ')) faults)" ($SymReader.Count('missing ') -eq 0)
+        Check "symrun: no hook file is unreadable during run 2 ($($SymReader.Count('unreadable ')) faults)" ($SymReader.Count('unreadable ') -eq 0)
+        Check "symrun: no hook read is short during run 2 ($($SymReader.Count('short read ')) faults)" ($SymReader.Count('short read ') -eq 0)
+        Check "symrun: every mixed-id window clears within $MixedMaxSeconds s ($($SymReader.Windows) windows, longest $SymLongest s)" ($SymReader.MaxWindowSeconds -le $MixedMaxSeconds)
+        Check "symrun: no mixed-id window is still open when run 2 ends" (-not $SymReader.WindowOpen)
+        Check "symrun: run 2 leaves hooks\guard.py a link (non-vacuous: the link route ran)" (Test-ReparsePoint $SymGuard)
     }
 
     # ---- linkfail: dest is a symlink to elsewhere and the copy fails: a file must remain -------
@@ -1043,7 +945,6 @@ public static class FileIdentity
     Check "retry1: the install log has no 'failed' for a file the retry recovered" ($T1Text -notmatch '(?i)failed')
     Check "retry1: the install marker is written on the first install" (Test-Path -LiteralPath $T1Marker)
 } finally {
-    if ($Rec) { $Rec.Dispose() }
     Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY, Env:\CLAUDE_SETTINGS_USER_ENV_KEY -ErrorAction SilentlyContinue
     try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($EnvSub, $false) } catch { }
     Remove-Item -LiteralPath $Tmp -Recurse -Force -ErrorAction SilentlyContinue
