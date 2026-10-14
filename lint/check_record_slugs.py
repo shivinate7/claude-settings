@@ -27,7 +27,9 @@ def added():
     return r.stdout.split()
 
 
-args = sys.argv[1:]
+args = []
+for a in sys.argv[1:]:  # --dir=VALUE is --dir VALUE; an empty VALUE then fails closed below
+    args += ["--dir", a[6:]] if a.startswith("--dir=") else [a]
 if args.count("--dir") > 1:  # a second --dir would stay in args and be read as file names
     print("check_record_slugs: FAIL: --dir given more than once")
     sys.exit(1)
@@ -49,9 +51,14 @@ if "--dir" in args:  # the records folder, for a repo that keeps its records els
         if not ok or not os.path.isdir(here):
             print("check_record_slugs: FAIL: records folder '%s' is not a folder under %s" % (given, ROOT))
             sys.exit(1)
+unknown = [a for a in args if a.startswith("-")]
+if unknown:  # read as a file name, an unknown option would skip git and check nothing
+    print("check_record_slugs: FAIL: unknown option: %s" % " ".join(unknown))
+    sys.exit(1)
 files = args or added()
-bad = [f for f in files if f.replace("\\", "/").startswith(DIRS) and f.endswith(".md")
-       and len(os.path.basename(f.replace("\\", "/"))[:-3]) > MAX]
+# Same normpath as lint/check_ruling_kind.py, so ./decisions/x.md is judged like decisions/x.md.
+bad = [f for f in files if os.path.normpath(f).replace("\\", "/").startswith(DIRS)
+       and f.endswith(".md") and len(os.path.basename(f.replace("\\", "/"))[:-3]) > MAX]
 for f in bad:
     print("check_record_slugs: FAIL: slug over %d characters: %s" % (MAX, f))
 sys.exit(1 if bad else 0)
