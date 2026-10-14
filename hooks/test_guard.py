@@ -3877,6 +3877,74 @@ add("background-end: a server named in a multi-line quoted string is data, allow
 add("background-end: a server named in a comment line is not run, allowed", "allow", cwd=NOGIT,
     command="# start npm run dev later\necho ready", run_in_background=True)
 
+# Shapes the rule misses on 4d477a4, so each deny below is red there. Each starts a server or
+# watcher that never ends on its own, and each has no note: a flag before the script name, a
+# Windows executable name, a wrapper that runs the command, or a script name that serves or watches.
+add("background-end: npm --prefix web run dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm --prefix web run dev", run_in_background=True)
+add("background-end: npm -w web run dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm -w web run dev", run_in_background=True)
+add("background-end: pnpm -C web dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="pnpm -C web dev", run_in_background=True)
+add("background-end: pnpm --filter web dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="pnpm --filter web dev", run_in_background=True)
+add("background-end: npm.cmd run dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm.cmd run dev", run_in_background=True)
+add("background-end: python.exe -m http.server under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="python.exe -m http.server", run_in_background=True)
+add("background-end: python -u -m http.server under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="python -u -m http.server", run_in_background=True)
+add("background-end: py -3 -m http.server under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="py -3 -m http.server", run_in_background=True)
+add("background-end: cmd /c npm run dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="cmd /c npm run dev", run_in_background=True)
+add("background-end: bash -c around npm run dev under run_in_background is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command='bash -c "npm run dev"', run_in_background=True)
+add("background-end: a '# ready' comment opener in a bash -c string does not hide npm run dev",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command='bash -c "echo \'# ready\'; npm run dev"', run_in_background=True)
+add("background-end: a PowerShell call operator before npm run dev is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"), tool="PowerShell",
+    command="& npm run dev", run_in_background=True)
+add("background-end: npm run dev under PowerShell run_in_background is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"), tool="PowerShell",
+    command="npm run dev", run_in_background=True)
+add("background-end: npm run dev in a subshell under run_in_background is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="(npm run dev)", run_in_background=True)
+add("background-end: npx vite@5 under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npx vite@5", run_in_background=True)
+add("background-end: npm run build:watch under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm run build:watch", run_in_background=True)
+add("background-end: npm run dev:frontend under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm run dev:frontend", run_in_background=True)
+add("background-end: npx vite build --watch under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npx vite build --watch", run_in_background=True)
+
+# Pins: these end by themselves or are a named hole, and must stay allowed with no note.
+add("background-end: vite build under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="vite build", run_in_background=True)
+add("background-end: next build under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="next build", run_in_background=True)
+add("background-end: node script.js under run_in_background is allowed, a one-off and a named hole",
+    "allow", cwd=NOGIT, command="node script.js", run_in_background=True)
+add("background-end: a server named inside a bash -c string is data, allowed", "allow",
+    cwd=NOGIT, command='bash -c "echo \'npm run dev\'"', run_in_background=True)
+
 
 # =========================================================================== 2c-bis. the WSL launch allow list
 #
