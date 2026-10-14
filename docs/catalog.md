@@ -6,7 +6,7 @@ Run `python3 lint/hook_catalog.py` to write the page again. CI runs `python3 lin
 
 Where each text comes from:
 
-- A hook runs a script. Its text is the first paragraph of the script docstring, or the leading comment block of a shell script. A script with more than one mode has a `Modes:` paragraph in its docstring. Each row takes the line for its flag or its event. A hook whose command is inline shell has no script, so its text is one line in `lint/hook_catalog_inline.json`. The key is the event and matcher, then a short hash of the command. A changed command fails the check until a person reviews its summary.
+- A hook runs a script. Its text is the first paragraph of the script docstring, or the leading comment block of a shell script. A script that runs under more than one flag or event needs a `Modes:` paragraph in its docstring. Each row takes the line for its flag or its event. A hook whose command is inline shell has no script, so its text is one line in `lint/hook_catalog_inline.json`. The key is the event and matcher, then a short hash of the command. A changed command fails the check until a person reviews its summary.
 - A judge is a prompt hook that a model answers. Its key is the first sentence of the prompt. Its text is the rest of the prompt, up to the standard clause that blocks only on a clear breach.
 - A mod is an enabled mod from this repo. Its text is the intro of its `README.md`. A mod with no README takes the `description` in its `plugin.json`, then the text of its `SOURCE.md`.
 - A skill is a folder under `skills/`. Its text is the `description` in its `SKILL.md` frontmatter.
@@ -21,7 +21,7 @@ Model and effort come from the model table (decision `subagent-model-cap`, the m
 | `hooks/stall_watch.py` | hook | Stop | - | - | no model | n/a | At Stop, lists each open background job whose output file did not change for the quiet age. |
 | `lint/report_gate.py` | hook | Stop | - | - | no model | n/a | Claude Code hook: report-shape gate. |
 | `lint/md_sweep.py` | hook | Stop | - | - | no model | n/a | Claude Code hook: markdown sweep (Stop). |
-| `hooks/config_watch.py` | hook | Stop | - | - | no model | n/a | The PostToolUse and Stop watch on the subagent model cap. |
+| `hooks/config_watch.py` | hook | Stop | - | - | no model | n/a | At the end of the turn, checks the subagent model cap in each watched settings file. Reverts a cap change that no tool call explains, or a raise past its expiry time. |
 | `hooks/ruling_home.py` | hook | Stop | - | - | no model | n/a | Claude Code hook: ruling-home check (Stop). |
 | `hooks/precompact_handoff.py` | hook | Stop | - | - | no model | n/a | At Stop, blocks once each time the context size passes a new checkpoint, and tells the session to rewrite its handoff. Silent on stop_hook_active or an error. |
 | `hooks/reply_judge.py` | hook | Stop | - | - | haiku | xhigh | Claude Code hook: reply judge (Stop). Judges the final reply against three style rules. |
@@ -51,7 +51,7 @@ Model and effort come from the model table (decision `subagent-model-cap`, the m
 | `hooks/agent_brief.py` | hook | SubagentStart | - | - | no model | n/a | SubagentStart hook: give every spawned agent the standing rules, so briefs stop retyping them. |
 | `hooks/local_time.py` | hook | SubagentStart | - | - | no model | n/a | At SubagentStart, gives the subagent the time in US Central as context. |
 | `hooks/local_time.py` | hook | UserPromptSubmit | - | - | no model | n/a | Tells the session the time in US Central. A prompt that opens with `fb` starts owner feedback capture to the session's inbox file, until `fb done`. |
-| `hooks/config_watch.py` | hook | PostToolUse | Bash\|PowerShell\|Write\|Edit\|MultiEdit\|NotebookEdit | - | no model | n/a | The PostToolUse and Stop watch on the subagent model cap. |
+| `hooks/config_watch.py` | hook | PostToolUse | Bash\|PowerShell\|Write\|Edit\|MultiEdit\|NotebookEdit | - | no model | n/a | After a write or shell call, checks the subagent model cap in each watched settings file. Reverts a cap change that the guard did not ask about, or a raise past its expiry time. |
 | `hooks/ci_wake.py` | hook | PostToolUse | Bash\|PowerShell | - | no model | n/a | CI wake-up hook. Standard library only. See decisions/handoff-hooks-wave-2.md, part 3. |
 | `hooks/sim_boot_record.py` | hook | PostToolUse | Bash\|mcp__Claude_Code_iOS_Simulator__control | - | no model | n/a | After a Bash or simulator call, appends each simulator that the call took from Shutdown to Booted to the boot record. Never blocks. |
 | `hooks/reread_check.py` | hook | PostCompact | - | - | no model | n/a | After compaction, sets the session's flag that its handoff is not read. |
