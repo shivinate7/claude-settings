@@ -84,11 +84,13 @@ def git(cwd, *a, input=None):
 SETTLE_SECONDS = 30
 NET_RETRIES, NET_PAUSE = 3, 5  # owner ruling 2026-10-13: retry a network error 3 times, a short pause between
 RATE_WAIT_CAP = 60  # seconds: a real gh call shows no Retry-After header, and a GitHub secondary limit needs about a minute; 3 retries bound the wait at 180 s
-# A rate-limit text (gh prints these on a 403): the wrapped HTTPError line, the GraphQL line, and `gh api`'s last line. Same anchors as the 5xx forms.
+# A rate-limit text (gh prints these on a 403 or 429): the wrapped HTTPError line, the GraphQL line, and `gh api`'s last line. Same anchors as the 5xx forms.
 _RATE_WRAPPED = r"(?:^|: )HTTP 403: (?:API rate limit|You have exceeded a secondary rate limit)[^\n]*\(https?://\S+\)\s*$"
 _RATE_GRAPHQL = r"^GraphQL: (?:API rate limit (?:already )?exceeded|You have exceeded a secondary rate limit)"
 _RATE_API_TAIL = r"gh: (?:API rate limit|You have exceeded a secondary rate limit)[^\n]*\(HTTP 403\)\s*\Z"
-RATE_LIMIT = re.compile(f"{_RATE_WRAPPED}|{_RATE_GRAPHQL}|{_RATE_API_TAIL}", re.I | re.M)
+_RATE_429 = (r"^(?:gh: )?(?:Server Error \()?HTTP 429\b|(?:^|: )HTTP 429(?:: [^\n]*)? \(https?://\S+\)\s*$"
+             r"|gh: (?:[^\n]*\()?HTTP 429\)?\s*\Z")  # a 429 is a rate limit too (owner via the coordinator)
+RATE_LIMIT = re.compile(f"{_RATE_WRAPPED}|{_RATE_GRAPHQL}|{_RATE_API_TAIL}|{_RATE_429}", re.I | re.M)
 # A network error, anchored on the error line, never on refusal text (a PR title "#502 Bad Gateway fix" is no match):
 # gh's Go transport error `Post "https://...": <cause>`, gh's offline line, gh's own server-error lines at the start of a line
 # (`HTTP 502 (url)`, `HTTP 500: ...`, `gh: HTTP 503`, `gh: Server Error (HTTP 502)`, `GraphQL: Something went wrong ...`),
