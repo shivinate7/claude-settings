@@ -1447,6 +1447,49 @@ def case_emit_prompt_runs_with_dash_I_as_the_mod_spawns_it():
           (result.stdout[:200], result.stderr[-200:]))
 
 
+def case_phase_one_prints_a_key_for_the_evidence_it_judged():
+    # Red on main. HOLE 1 (decisions/decision-watch-mod-limits.md): phase 1 prints a non-empty
+    # "key" with the needs_model JSON, so phase 2 can be given back the evidence it judged.
+    name = "key_printed"
+    with scratch_config(name):
+        out, spawns = _main_in_process(_judged_hook(name), ["--emit-prompt"])
+    got = _json_or_none(out)
+    key = got.get("key") if isinstance(got, dict) else None
+    check("key: phase 1 prints needs_model with a non-empty key",
+          isinstance(key, str) and key != "", out[:200])
+    check("key: phase 1 calls no model", spawns == 0, spawns)
+
+
+def case_phase_two_with_a_moved_key_reads_unknown_never_allow():
+    # Red on main. The evidence moves between the two phases: the protected file is edited after
+    # phase 1 printed its key. Phase 2 gets that key back, so it reads UNKNOWN and never a silent
+    # ALLOW on evidence that is no longer the evidence judged. On main there is no --key: the argv
+    # falls back to the claude call (HOLE 7 path) and the ALLOW is silent.
+    name = "key_moved"
+    with scratch_config(name):
+        hook = _judged_hook(name)
+        first, _ = _main_in_process(hook, ["--emit-prompt"])
+        key = (_json_or_none(first) or {}).get("key") or "missing"
+        write(os.path.join(hook["cwd"], "CLAUDE.md"), "# Rules\n\nAlways Z.\n")
+        out, spawns = _main_in_process(hook, ["--model-text", ALLOW_JSON, "--key", key])
+    check("key moved: never a silent ALLOW", out != "", out[:200])
+    check("key moved: reads as UNKNOWN", _system_message(out).startswith(dw.UNKNOWN_PREFIX), out[:200])
+    check("key moved: no model subprocess", spawns == 0, spawns)
+
+
+def case_phase_two_with_the_same_key_stays_silent_on_allow():
+    # Guard. An unchanged turn keeps its ALLOW silent: a rule that makes every keyed reply loud
+    # would teach the reader to skip the watch. Red on main only through the missing --key.
+    name = "key_same"
+    with scratch_config(name):
+        hook = _judged_hook(name)
+        first, _ = _main_in_process(hook, ["--emit-prompt"])
+        key = (_json_or_none(first) or {}).get("key") or "missing"
+        out, spawns = _main_in_process(hook, ["--model-text", ALLOW_JSON, "--key", key])
+    check("key same: ALLOW stays silent", out == "", out[:200])
+    check("key same: no model subprocess", spawns == 0, spawns)
+
+
 def case_default_path_still_calls_claude_without_a_flag():
     # Pin, green on main. With no flag the watch calls the model itself. With no claude on PATH
     # that call fails, and the answer is UNKNOWN, never needs_model.
@@ -1548,6 +1591,9 @@ def main():
         case_default_path_still_calls_claude_without_a_flag,
         case_model_text_after_a_cached_verdict_says_verdict_lost,
         case_model_error_after_a_cached_verdict_is_not_silent,
+        case_phase_one_prints_a_key_for_the_evidence_it_judged,
+        case_phase_two_with_a_moved_key_reads_unknown_never_allow,
+        case_phase_two_with_the_same_key_stays_silent_on_allow,
     ):
         run_case(case)
 

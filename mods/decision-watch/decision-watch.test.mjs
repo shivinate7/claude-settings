@@ -27,8 +27,18 @@ const SENTINEL = 'PROMPT-SENTINEL-ALPHA-7'
 const PROMPT = 'Judge this turn. ' + SENTINEL
 const ALLOW_REPLY = '{"verdict": "ALLOW"}'
 const FLAG_REPLY = '{"verdict": "FLAG", "why": "reversed silently"}'
-const UNKNOWN = 'Decision watch: UNKNOWN, '
-const FLAG = 'Decision watch: FLAG, the judge model reported: "reversed silently".'
+// The message texts are read from the script, so the fake python prints what the Stop hook prints today.
+const SCRIPT_SRC = fileURLToPath(new URL('../../hooks/decision_watch.py', import.meta.url))
+const MODEL_CAP = fileURLToPath(new URL('../../decisions/subagent-model-cap.md', import.meta.url))
+const scriptSource = readFileSync(SCRIPT_SRC, 'utf8')
+const pyConst = name => {
+  const m = scriptSource.match(new RegExp('^' + name + ' = "(.*)"$', 'm'))
+  if (!m) throw new Error(name + ' is not a plain string in hooks/decision_watch.py')
+  return m[1]
+}
+const UNKNOWN = pyConst('UNKNOWN_PREFIX')
+const FLAG_PREFIX = pyConst('FLAG_PREFIX')
+const FLAG = FLAG_PREFIX + 'the judge model reported: "reversed silently"'
 const LOST = UNKNOWN + 'verdict lost: the model reply was not used (the watch ended before the model step).'
 const FOUR_MIB = 4 * 1024 * 1024
 
@@ -197,17 +207,25 @@ function replyOut(h, key, text) {
   return UNKNOWN_REPLY
 }
 
+// The evidence key: phase 1 prints it, and phase 2 is given it back with --key. A key the live
+// evidence no longer gives reads UNKNOWN (HOLE 1, decisions/decision-watch-mod-limits.md).
+const keyOf = h => 'key:' + h.evidence
+const keyArg = argv => (argv.indexOf('--key') >= 0 ? argv[argv.indexOf('--key') + 1] : undefined)
+const moved = (h, argv) => keyArg(argv) !== undefined && keyArg(argv) !== keyOf(h)
+const MOVED = UNKNOWN + 'the evidence changed between the two phases, so the reply was not used.'
+
 function defaultPython(h, argv, o) {
   const stdin = JSON.parse(o.stdin || '{}')
   const key = `${o.env && o.env.CLAUDE_CONFIG_DIR}|${stdin.session_id}`
   if (argv.includes('--emit-prompt')) {
     if (h.seen.has(key)) return { exitCode: 0, stdout: '', stderr: '' } // the "already judged" cache
-    return out({ needs_model: true, prompt: PROMPT, model: 'haiku' })
+    return out({ needs_model: true, prompt: PROMPT, model: 'haiku', key: keyOf(h) })
   }
   const i = argv.indexOf('--model-text')
   const j = argv.indexOf('--model-error')
-  if (i >= 0) return replyOut(h, key, argv[i + 1])
+  if (i >= 0) return moved(h, argv) ? out({ systemMessage: MOVED }) : replyOut(h, key, argv[i + 1])
   if (j >= 0) {
+    if (moved(h, argv)) return out({ systemMessage: MOVED })
     if (h.seen.has(key)) return out({ systemMessage: LOST })
     return out({ systemMessage: UNKNOWN + 'the model judgment could not be completed (' + argv[j + 1] + ').' })
   }
@@ -222,7 +240,8 @@ function host(opts = {}) {
     finder: null, finderThrow: false, py1: undefined, py2: undefined,
     model: () => ({ isAnswered: true, text: ALLOW_REPLY, usage: {} }),
     sessionThrow: false,
-    hooks: [], procs: [], modelReqs: [], writes: [], files: new Map(), registered: [], uiLogs: [],
+    hooks: [], procs: [], modelReqs: [], writes: [], files: new Map(), registered: [], uiLogs: [], toasts: [],
+    evidence: 'E1', // the live evidence the fake python keys on; a test moves it to model a change
     seen: new Set(), waiters: [],
     ...opts,
   }
@@ -268,7 +287,11 @@ function host(opts = {}) {
       cwd: async () => h.cwd,
     },
     command: { register: async s => { h.registered.push(s.name) } },
-    ui: { log: text => { h.uiLogs.push(String(text)) } },
+    ui: {
+      log: text => { h.uiLogs.push(String(text)) },
+      // The in-session surface: desktop-statusline shows its own notices this way.
+      toast: (text, opts) => { h.toasts.push(String(text)); void opts },
+    },
   }
   return h
 }
@@ -420,6 +443,91 @@ await test('model error: the shadow log reads UNKNOWN, never ALLOW', async () =>
   const endData = await judged(h)
   assert.match(endData, /UNKNOWN/, 'log holds no UNKNOWN')
   assert.doesNotMatch(endData, /ALLOW/, 'log holds ALLOW for a failed judgment')
+})
+
+// ---- HOLE 1 (decisions/decision-watch-mod-limits.md): phase 2 is given the phase-1 key.
+
+// Red on main: main passes no key, so the moved evidence is judged afresh and reads a silent ALLOW.
+await test('HOLE 1: evidence moved between the phases reads UNKNOWN, never a silent ALLOW', async () => {
+  let h
+  h = await load(host({
+    model: () => {
+      h.evidence = 'E2' // the protected file changed while the model call was in flight
+      return { isAnswered: true, text: ALLOW_REPLY, usage: {} }
+    },
+  }))
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  const endData = await judged(h)
+  assert.doesNotMatch(endData, /ALLOW/, 'ALLOW for a verdict on evidence that moved')
+  assert.match(endData, /UNKNOWN/, 'the log holds no UNKNOWN')
+})
+
+await test('HOLE 1: phase 2 is given the key phase 1 printed, as --key after the reply', async () => {
+  const h = await load(host())
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await judged(h)
+  const p2 = pyCalls(h)[1].argv
+  assert.ok(p2.includes('--key'), `phase 2 has no --key: ${JSON.stringify(p2)}`)
+  same(p2[p2.indexOf('--key') + 1], 'key:E1', 'phase 2 key, from phase 1')
+})
+
+// A phase 1 with no key (an old decision_watch.py) cannot be tied to the evidence, so it reads UNKNOWN.
+await test('HOLE 1: no key from phase 1 reads UNKNOWN, never ALLOW', async () => {
+  const h = await load(host({ py1: () => out({ needs_model: true, prompt: PROMPT, model: 'haiku' }) }))
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  const endData = await judged(h)
+  assert.doesNotMatch(endData, /ALLOW/, 'ALLOW for a verdict that cannot be tied to the evidence')
+  assert.match(endData, /UNKNOWN/, 'the log holds no UNKNOWN')
+})
+
+// ---- what shows in the session: the Stop hook's own systemMessage text, through $.ui.toast.
+// desktop-statusline shows its notices with $.ui.toast(text, { timeoutMs }), so that is the surface.
+
+await test('shown: a FLAG shows the Stop hook text exactly, once', async () => {
+  const h = await load(host({ model: () => ({ isAnswered: true, text: FLAG_REPLY, usage: {} }) }))
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await judged(h)
+  await settle(60)
+  same(h.toasts, [FLAG], 'toasts')
+})
+
+await test('shown: the FLAG wording is the one hooks/decision_watch.py prints today', () => {
+  assert.ok(scriptSource.includes('FLAG_PREFIX + \'the judge model reported: "%s"\''), 'the script no longer prints this FLAG wording')
+})
+
+await test('shown: an UNKNOWN from the judge shows its exact text, once', async () => {
+  const h = await load(host({ model: () => { throw new Error('model down') } }))
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await judged(h)
+  await settle(60)
+  same(h.toasts, [UNKNOWN + 'the model judgment could not be completed (model call: model down).'], 'toasts')
+})
+
+await test('shown: a message from the cheap path shows its exact text, with no prefix added', async () => {
+  const CHEAP = UNKNOWN + 'the transcript could not be read (no such file).'
+  const h = await load(host({ py1: () => out({ systemMessage: CHEAP }) }))
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await judged(h)
+  await settle(60)
+  same(h.toasts, [CHEAP], 'toasts')
+})
+
+// Guard: an ALLOW stays silent in the session. A toast on every Stop would teach the reader to skip it.
+await test('shown: an ALLOW shows nothing', async () => {
+  const h = await load(host())
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await judged(h)
+  await settle(60)
+  same(h.toasts, [], 'toasts')
+})
+
+// ---- the model table: a mod that calls a model has a row (decisions/subagent-model-cap.md)
+
+await test('model table: a row names mods/decision-watch, and that row names haiku', () => {
+  const rows = readFileSync(MODEL_CAP, 'utf8').split('\n').filter(l => l.startsWith('|'))
+  const row = rows.find(l => l.includes('mods/decision-watch'))
+  assert.ok(row, 'no row in decisions/subagent-model-cap.md names mods/decision-watch')
+  assert.match(row, /\bhaiku\b/, 'the mods/decision-watch row does not name haiku')
 })
 
 // ---- the ping bug: $.model.complete returns { isAnswered, text, usage }
