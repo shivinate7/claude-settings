@@ -1,5 +1,5 @@
 // Token Weather context band: the fill is measured against the auto-compact window when auto-compact
-// is on and that window is smaller than the model window, as desktop-statusline does (register.tsx:129-130).
+// is on and that window is smaller than the model window. The rule's home is hooks/token-weather.mjs.
 // Run: node mods/token-weather/token-weather.test.mjs  (stdlib only)
 // Seam: hooks/token-weather.mjs exports register(on). The test collects the handlers by event name,
 // then drives turn.complete and ui.render with a fake host $.
@@ -89,6 +89,20 @@ await test('rawMaxTokens above the model window: model window is used', async ()
 
 await test('no breakdown: model window is used', async () => {
   const text = await bandText(context(undefined))
+  assert.ok(text.includes('25% of context'), text)
+  assert.ok(text.includes('250k / 1M'), text)
+})
+
+await test('auto-compact on, rawMaxTokens missing: model window is used, no NaN or Infinity', async () => {
+  const text = await bandText(context({ isAutoCompactEnabled: true }))
+  assert.ok(!/NaN|Infinity/.test(text), text)
+  assert.ok(text.includes('25% of context'), text)
+  assert.ok(text.includes('250k / 1M'), text)
+})
+
+await test('auto-compact on, rawMaxTokens 0: model window is used, no NaN or Infinity', async () => {
+  const text = await bandText(context({ isAutoCompactEnabled: true, rawMaxTokens: 0 }))
+  assert.ok(!/NaN|Infinity/.test(text), text)
   assert.ok(text.includes('25% of context'), text)
   assert.ok(text.includes('250k / 1M'), text)
 })
