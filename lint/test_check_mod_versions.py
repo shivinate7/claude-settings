@@ -170,6 +170,37 @@ class ModVersionTests(unittest.TestCase):
         self.commit_change()
         self.assert_passes()
 
+    def test_new_plugin_folder_with_a_valid_semver_passes(self):
+        for version in ("0.0.1", "12.3.45"):
+            with self.subTest(version=version):
+                self.fresh_tree()
+                self.base_files()
+                self.commit_base()
+                self.plugin_tree("mods/gamma", "gamma", version)
+                self.put(MARKET, market_json(["./mods/alpha", "./mods/beta", "./mods/gamma"]))
+                self.commit_change()
+                self.assert_passes()
+
+    def test_new_plugin_folder_with_a_non_semver_version_fails(self):
+        # A new folder is not exempt from the version format. "banana" is not MAJOR.MINOR.PATCH.
+        self.base_files()
+        self.commit_base()
+        self.plugin_tree("mods/gamma", "gamma", "banana")
+        self.put(MARKET, market_json(["./mods/alpha", "./mods/beta", "./mods/gamma"]))
+        self.commit_change()
+        out = self.assert_fails()
+        self.assert_flags(out, "mods/gamma")
+
+    def test_rename_to_a_new_folder_and_name_with_the_same_version_passes(self):
+        # The plugin cache keys by name, so a new name installs fresh. The version need not rise.
+        self.base_files()
+        self.commit_base()
+        shutil.rmtree(os.path.join(self.tree, "mods", "alpha"))
+        self.plugin_tree("mods/delta", "delta", "0.1.0")
+        self.put(MARKET, market_json(["./mods/beta", "./mods/delta"]))
+        self.commit_change()
+        self.assert_passes()
+
     def test_change_outside_plugin_folders_passes(self):
         self.base_files()
         self.commit_base()
@@ -292,6 +323,42 @@ class ModVersionTests(unittest.TestCase):
                 self.assertNotEqual(rc, 0, out)
                 self.assertNotIn("Traceback", out)
                 self.assertTrue(token(out, "alpha"), out)
+
+    def test_plugin_json_with_a_utf8_bom_is_read_and_judged(self):
+        # The BOM is tolerated: the version after it is read and judged like plain text.
+        cases = (
+            ("bom at HEAD, bumped", False, True, "0.1.1", True),
+            ("bom at HEAD, not bumped", False, True, "0.1.0", False),
+            ("bom at base, bumped", True, False, "0.1.1", True),
+        )
+        for label, base_bom, head_bom, head_version, passes in cases:
+            with self.subTest(case=label):
+                self.fresh_tree()
+                self.base_files()
+                if base_bom:
+                    self.put("mods/alpha/" + PLUGIN, "﻿" + plugin_json("alpha", "0.1.0"))
+                self.commit_base()
+                self.put("mods/alpha/hooks/x.mjs", "export const x = 2;\n")
+                self.put("mods/alpha/" + PLUGIN,
+                         ("﻿" if head_bom else "") + plugin_json("alpha", head_version))
+                self.commit_change()
+                if passes:
+                    self.assert_passes()
+                else:
+                    out = self.assert_fails()
+                    self.assert_flags(out, "mods/alpha", "0.1.0")
+
+    def test_prerelease_version_in_a_changed_folder_fails(self):
+        for version in ("0.2.0-rc.1", "1.0.0-beta"):
+            with self.subTest(version=version):
+                self.fresh_tree()
+                self.base_files()
+                self.commit_base()
+                self.put("mods/alpha/hooks/x.mjs", "export const x = 2;\n")
+                self.bump("mods/alpha", "alpha", version)
+                self.commit_change()
+                out = self.assert_fails()
+                self.assert_flags(out, "mods/alpha")
 
     def test_malformed_head_plugin_json_fails(self):
         self.base_files()
