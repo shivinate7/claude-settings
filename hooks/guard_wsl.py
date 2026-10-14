@@ -7,7 +7,7 @@ whatever the role.
 import fnmatch
 import re
 
-from guard_core import basename, resolve_command, segment_tokens, split_segments
+from guard_core import QUOTE_MARKS, basename, command_indexes, nested_script, segment_tokens, split_segments
 
 WSL_REASON = (
     "WSL runs only a fixed list of Linux test commands. Allowed forms, each with -e or --exec, "
@@ -31,6 +31,10 @@ DISTRO_LAUNCHER = re.compile(r"ubuntu[\w.-]*\.exe$")
 WSLENV_SET = re.compile(
     r"(?:(?<![\w$:.\-])|\$\{?env:)WSLENV\}?\s*\+?=|(?<!\$)\benv:[\\/]?WSLENV\b|[\"']WSLENV[\"']",
     re.I)
+
+
+# The names `_launcher` reads, as text: `wsl`, `wsl.exe`, `ubuntu*.exe`, the System32 `bash.exe`.
+_LAUNCHER_TEXT = re.compile(r"wsl|ubuntu|bash\.exe", re.I)
 
 
 def _climbs(seg: str) -> bool:
@@ -68,20 +72,37 @@ def _allowed(args) -> bool:
 
 
 def _judge(tokens, closed: str, env_set: bool) -> str:
-    """Return the matched text when this segment runs wsl outside the allowed list, else ''."""
-    at = resolve_command(tokens)
-    kind = _launcher(tokens[at]) if at is not None else ""
-    if not kind:
-        return ""
-    if kind == "other" or closed or env_set or any(t.upper().startswith("WSLENV=") for t in tokens[:at]):
-        return " ".join(tokens[:at + 3])
-    return "" if _allowed(tokens[at + 1:]) else " ".join(tokens[at:at + 3])
+    """Return the matched text when this segment runs wsl outside the allowed list, else ''.
+    A script handed to another interpreter (`bash -c`, `cmd /c`, `iex`) is judged as a command, and
+    so is the command after each `$(` or `(`."""
+    script = nested_script(tokens)
+    if script:
+        hit = wsl_hit(script, env_set or bool(closed))
+        if hit:
+            return hit
+    for at in command_indexes(tokens):
+        kind = _launcher(tokens[at])
+        if not kind:
+            continue
+        if kind == "other" or closed or env_set or any(t.upper().startswith("WSLENV=") for t in tokens[:at]):
+            return " ".join(tokens[:at + 3])
+        args = tokens[at + 1:]
+        while args and not args[-1].strip(")"):
+            args.pop()   # the `)` that closes a subshell is no part of a path
+        if args:
+            args[-1] = args[-1].rstrip(")")
+        if not _allowed(args):
+            return " ".join(tokens[at:at + 3])
+    return ""
 
 
-def wsl_hit(cmd: str) -> str:
-    """Return the matched text when any segment of the command runs wsl outside the allow list."""
+def wsl_hit(cmd: str, env_set: bool = False) -> str:
+    """Return the matched text when any segment of the command runs wsl outside the allow list.
+    `env_set` is true when an outer statement set WSLENV or piped the call onward."""
+    if not _LAUNCHER_TEXT.search(QUOTE_MARKS.sub("", cmd)):
+        return ""   # no launcher name in the text, so no token is one (see _launcher)
     ends = []
-    env_set = bool(WSLENV_SET.search(cmd))   # set in any statement of the same command
+    env_set = env_set or bool(WSLENV_SET.search(cmd))   # set in any statement of the same command
     for segment, closed in zip(split_segments(cmd, ends), ends):
         tokens = segment_tokens(segment)
         if tokens is not None:

@@ -8,12 +8,12 @@
     {
       "name": "token-weather",
       "source": "./mods/token-weather",
-      "description": "token-weather mod (Apache-2.0, vendored unmodified)"
+      "description": "token-weather mod (Apache-2.0, vendored with local changes)"
     },
     {
       "name": "desktop-statusline",
       "source": "./mods/desktop-statusline",
-      "description": "Desktop Statusline mod (MIT, vendored unmodified)"
+      "description": "Desktop Statusline mod (MIT, vendored with local changes)"
     },
     {
       "name": "plain-diff",
