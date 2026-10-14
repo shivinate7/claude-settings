@@ -2,7 +2,8 @@
 # ste-changed <base>: lint what the CI ste-lint step lints for the diff <base>...HEAD.
 # It runs actions/ste-lint/run.sh, the one home of the step, with the step's env and defaults
 # read from actions/ste-lint/action.yml. Same output lines, same exit code. <base>: main or origin/main.
-# Excludes: .ste-lint-exclude at the git top level of the repo being linted. None there, none excluded.
+# Excludes: .ste-lint-exclude at the git top level of the repo being linted. EXCLUDE is set to the
+# input default, so an EXCLUDE in the caller's environment is ignored.
 # Windows: bin\ste-changed.cmd. Needs bash (Git for Windows has it) and python3 on PATH.
 import os, re, shutil, subprocess, sys
 
@@ -36,7 +37,7 @@ def main(argv):
     text = open(os.path.join(ACTION, "action.yml")).read()
     env = dict(os.environ, EVENT_NAME="pull_request", BASE_REF=base, DEFAULT_BRANCH=base,
                REF_NAME=out("rev-parse", "--abbrev-ref", "HEAD"), SCOPE="changed", FAIL="true",
-               PATHS_GLOB=default(text, "paths"),
+               PATHS_GLOB=default(text, "paths"), EXCLUDE=default(text, "exclude"),
                CHANGED_PATHS_GLOB=default(text, "changed_paths"),
                DECISIONS_DIR=default(text, "decisions-dir"))
     run = os.path.join(ACTION, "run.sh").replace("\\", "/")
