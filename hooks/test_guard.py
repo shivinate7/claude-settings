@@ -3946,6 +3946,66 @@ add("background-end: a server named inside a bash -c string is data, allowed", "
     cwd=NOGIT, command='bash -c "echo \'npm run dev\'"', run_in_background=True)
 
 
+# The deny cases are the red proof on the code before this change: each starts a server or watcher the
+# roster does not name yet. The `--watch=false` and `--watch false` allow cases are red there too, since
+# the guard reads `--watch` in any position. `npm run build-docs` is a pin, allowed before and after.
+DEVSERVER_DENY = ("background-end", "until:")
+
+add("background-end: bun --watch server.ts under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="bun --watch server.ts", run_in_background=True)
+add("background-end: bun run --watch server.ts under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="bun run --watch server.ts", run_in_background=True)
+add("background-end: bun --hot server.ts under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="bun --hot server.ts", run_in_background=True)
+add("background-end: deno task dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="deno task dev", run_in_background=True)
+add("background-end: deno serve main.ts under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="deno serve main.ts", run_in_background=True)
+add("background-end: flask run under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="flask run", run_in_background=True)
+add("background-end: uvicorn app:app --reload under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="uvicorn app:app --reload", run_in_background=True)
+add("background-end: jupyter lab under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="jupyter lab", run_in_background=True)
+add("background-end: webpack serve under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="webpack serve", run_in_background=True)
+add("background-end: astro dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="astro dev", run_in_background=True)
+add("background-end: rails s under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="rails s", run_in_background=True)
+add("background-end: streamlit run app.py under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="streamlit run app.py", run_in_background=True)
+add("background-end: npm run dev-server under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="npm run dev-server", run_in_background=True)
+add("background-end: npm run start-api under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY,
+    command="npm run start-api", run_in_background=True)
+
+add("background-end: jest --watch=false under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="jest --watch=false", run_in_background=True)
+add("background-end: vitest --watch=false under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="vitest --watch=false", run_in_background=True)
+add("background-end: vitest --watch false under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="vitest --watch false", run_in_background=True)
+add("background-end: npm test -- --watch=false under run_in_background needs no note, allowed",
+    "allow", cwd=NOGIT, command="npm test -- --watch=false", run_in_background=True)
+add("background-end: npm run build-docs under run_in_background needs no note, allowed", "allow",
+    cwd=NOGIT, command="npm run build-docs", run_in_background=True)
+
+
 # =========================================================================== 2c-bis. the WSL launch allow list
 #
 # Owner ruling 2026-10-13 15:20: an agent may run a fixed list of Linux test commands through WSL.
