@@ -63,19 +63,21 @@ launchd_sim process has ppid 1. CoreSimulator.log has no requester.
 4. Reuse. A guard rule refuses a boot when an idle booted device of the same type and
    runtime exists. It names that device's UDID. Owner answer, 2026-10-10: "idle" is the
    rule 2 test in full. A device that fails any part of it is not idle.
-5. Boot check. Owner ruling, 2026-10-14: "add boot check", over "note only". After a
-   `simctl boot` or an MCP `launch`, the record hook checks each device that the call
-   took from `Shutdown` to `Booted`. The check passes when `xcrun simctl bootstatus
+5. Boot check. Owner ruling, 2026-10-14: "add boot check", over "note only". The record
+   hook checks each device that a `simctl boot` names, or that an MCP `launch` names, when
+   the call took it from `Shutdown` to `Booted`. The check passes when `xcrun simctl bootstatus
    <UDID>` exits 0 and `xcrun simctl io <UDID> screenshot <file>` exits 0. A timeout is a
-   fail. On a fail, the hook runs `simctl shutdown <UDID>` and `simctl boot <UDID>` once,
-   then checks again.
+   fail. On a fail, the hook runs `simctl shutdown <UDID>` and then `simctl boot <UDID>`
+   once, then checks again. The boot runs even when the shutdown failed.
    - Pass after the retry: the hook tells the session that the device was booted again,
      and that an app launched by the call must be launched again.
    - Fail after the retry: the hook tells the session that the device is broken, names
-     its UDID, and says to stop using it. The hook leaves the device booted. The record
-     line still goes in, so the sweep stops the device once it is idle (ruling 2).
-   The check runs before the hook reads launchd_sim, so the record holds the pid of the
-   retry boot, and the sweep does not see `boot-record-mismatch`.
+     its UDID, and says to stop using it. The hook does not shut it down. The sweep stops
+     it once it is idle (ruling 2).
+   The hook writes the record line before the check. After a retry it writes one more
+   line with the retry boot's launchd_sim pid. The sweep reads the newest line, so it does
+   not see `boot-record-mismatch`, and a hook killed during the check still leaves a
+   record.
 
 Why the cap: it needs no knowledge of who booted a device.
 
@@ -97,8 +99,11 @@ Why the cap: it needs no knowledge of who booted a device.
   stdout only when the check failed: a `decision: "block"` reason when the device is
   broken, an `additionalContext` note when the retry passed. Otherwise stdout stays empty.
   Each step has its own timeout: bootstatus 90 s, screenshot 15 s, shutdown 30 s, boot
-  60 s. The PostToolUse entry in `settings.json` allows 330 s, the worst case of one check,
-  one retry and a second check. A Bash call is read only
+  60 s. For one device the worst case is 480 s: the list read 60 s, two launchd_sim reads
+  of 60 s each, one check, one retry and a second check. The PostToolUse entry in
+  `settings.json` allows 600 s. An MCP `launch` whose `device` and `udid` name two
+  devices can pass 600 s. The hook is then killed after the record lines are written, and
+  the session gets no message. A Bash call is read only
   when its text names a simulator tool as a whole word, such as simctl, xcodebuild or xcrun.
   An MCP call is read only when its action is `launch`. Bandaid: a boot behind a script
   that names no such word goes unrecorded, and an unrecorded device is kept. Matchers for
