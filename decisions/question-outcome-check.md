@@ -65,7 +65,7 @@ Owner rulings, 2026-10-08:
 - Owner ruling, 2026-10-13: the judge reads the conversation text (owner messages, assistant
   text, relayed cross-session messages, each labeled) from the owner's 3rd-last message up to
   the question. It searches back up to 16 MiB. It reads no tool calls, tool results, task
-  notices or reminders. Oldest span text is cut to a budget; the owner messages stay whole up to MESSAGE_MAX (1500). Fewer than
+  notices or reminders. Oldest assistant and relay text is cut to SPAN_BUDGET (20,000 chars); the owner messages stay whole. Fewer than
   3 owner messages: the span starts at the oldest found. None: the check did not run.
   The goal is read from owner records only. The owner's words are user records with `origin.kind` "human", plus the owner's answers
   in `AskUserQuestion` tool results. Task notifications, hook feedback, peer messages and
@@ -83,9 +83,14 @@ Owner rulings, 2026-10-08:
   in the label, each run of 3 or more `<` before `BEGIN` or `END` becomes `<<`. A label also
   loses its line breaks, and each run of 3 or more `>` becomes `>>`. So a relay sender cannot
   forge an Owner block through the text or through its session name.
-- The whole prompt stays within PROMPT_MAX (30,000 chars). The span gets the room that the
-  fixed text and the question leave. When the owner messages and the question alone go over
-  PROMPT_MAX, the question passes and the hook says the check did not run.
+- The prompt goes to the model on stdin, so no command-line cap applies. The whole prompt stays
+  within PROMPT_MAX (150,000 chars). The bound fits well inside the model's context and limits cost
+  and latency; it is unmeasured against the model timeout
+  (owner ruling, 2026-10-14 00:00 CDT: owner messages whole, no per-message cut). Above it, the
+  oldest span text is trimmed first; owner messages are trimmed only as a last resort, from the
+  oldest one. A cut owner message keeps its end, led by the cut mark; no block is left empty.
+  When the fixed text and the question alone go over PROMPT_MAX, the question passes and the
+  hook says the check did not run. Debt: model-clip-unmeasured.
 - The reason sent back to the session is capped and cleaned.
 
 ## Limits
@@ -97,7 +102,7 @@ Owner rulings, 2026-10-08:
 
 ## Holes, named
 
-Round 2 and round 3 reviews. Each finding stays open.
+Rounds 2 and 3 of the question-outcome review and round 3 of judge-cap-off. Each stays open.
 
 - A decorated Goal line earlier in the question, such as `- goal: old`, masks a real
   Problem-first order. The order check reads that line first, so it passes. Presence passes
@@ -107,18 +112,18 @@ Round 2 and round 3 reviews. Each finding stays open.
   passes the order check even before `Goal:`.
 - A punctuation-led preface line before `Goal:`, such as `- problem: note`, is denied. That
   is correct: the question breaks Goal first. The free pass lets the retry through.
-- An owner message over 1500 chars is cut, because argv holds at most 32,767 chars on Windows; lane
-  model-prompt-stdin removes the cap. This is a bandaid.
-- PROMPT_MAX counts chars, but Windows counts the command line after argv quoting, in
-  UTF-16 units. Quotes, backslashes and emoji add units, so a prompt under PROMPT_MAX can
-  still go over 32,767 (WinError 206). Then the model call fails, the question passes, and the
-  hook says the check did not run. Lane model-prompt-stdin removes argv, and this hole with it.
 - Question text and option labels reach the judge prompt with no fence and no defang
   (`hooks/question_outcome.py` near line 385). An asker can forge an Owner block there. Low
   risk: the asker already writes the Goal line. Debt: `question-text-not-defanged`.
 - The defang matches the exact fence tokens only, so `<<<end>>>` and `<<< END>>>` pass
   unchanged. Whether the judge reads them as fences is unmeasured. Debt:
   `question-text-not-defanged`.
+- The cut-mark reserve stays when no owner message can be cut, so the prompt can go up to 36
+  chars over PROMPT_MAX. The hook then says the check did not run. Practically unreachable.
+  Debt: `judge-cut-mark-reserve-over`.
+- That PROMPT_MAX fits the model's context is unmeasured for token-dense text. Over the
+  context, the model call fails and the hook says the check did not run. Debt:
+  `model-clip-unmeasured`.
 
 Kind: process
 Home: hooks/question_outcome.py
