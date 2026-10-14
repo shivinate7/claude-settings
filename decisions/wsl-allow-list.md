@@ -64,8 +64,8 @@ The WSL section of the guard tests (section 2c-bis) pins each allowed form and e
 - A bare `bash.exe -c` is not refused. It runs the System32 `bash.exe` when Git bash is not
   first on PATH. See bare-bash-on-windows-can-resolve-to-the-wsl-stub, the WSL stub record.
 - `debian.exe` and `kali.exe` are not refused.
-- Command-position wrappers are not refused: `( )`, `$( )`, `exec`, `cmd /c`, `bash -c`, and
-  PowerShell `&` and `iex`. Lane guard-command-position owns this fix.
+- A substitution inside a token is not read (`x=$(...)`, backticks). See guard-command-position,
+  the one command-word resolver.
 - A WSLENV set with no `=` is not refused. Examples: `New-Item Env:`, `Set-Item` after
   `cd env:`, `read`, `${WSLENV:=x}`, and `printf -v`.
 - False alarms, when the same command also runs wsl: `echo "WSLENV=x"`, `${env:WSLENV}` reads,
