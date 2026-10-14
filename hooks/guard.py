@@ -35,6 +35,9 @@ one fixed order, and the first match wins.
                        untouched.
   1d cite-by-id        a `git commit` message or `gh pr create|edit` body that cites a record by
                        its path. Denied. See "three git acts" below.
+  1d lane-by-slug      a `git commit` message, a `gh pr create|edit|merge` body, `--title` or
+                       `--subject` that names a lane by a session number (`N20`, `(N16)`). Denied:
+                       name it by branch slug.
   2 machine-wide-kill  a kill by name or by pattern, or `kill <pid>` of a live process that is
                        not a descendant of this session's own `claude` process
   2b detached-launch   a command that starts a process and detaches it from the session: a
@@ -46,6 +49,9 @@ one fixed order, and the first match wins.
                        `cmd`/`cmd.exe /c start ...` from either shell. Always denied, the same
                        as rule 2, because a detached process leaves no pid this session can
                        name to stop it later.
+  2c wsl-allow-list    a `wsl` call that is not `-e`/`--exec` with node --test on *.test.mjs, pwsh
+                       -NoProfile -File *.test.ps1, or python3 on test_*.py (alone on the line, or
+                       behind `python bin/verdict`). Always denied.
   3 live-stream        a command that follows a stream and never ends on its own
   3 waiter             a shell segment whose command word is a sleep-and-poll
   4 force-push         a forced push. Allowed with a lease plus --force-if-includes, denied
@@ -168,14 +174,14 @@ if sys.path[:1] != [_HERE]:
 # The rule families in import order: each one imports only guard_core and the families before it.
 _FAMILY_MODULES = ("guard_branch_worktree", "guard_shared_tree", "guard_pointer",
                    "guard_push_delete", "guard_merge", "guard_frozen", "guard_env",
-                   "guard_kill", "guard_stream", "guard_rm_var", "guard_mask_script")
+                   "guard_kill", "guard_stream", "guard_rm_var", "guard_mask_script", "guard_wsl")
 _loading = "guard_core"   # the module being loaded, for the fallback line below
 try:
     import guard_core
     from guard_core import (
-        AUTHOR_ROLE, GIT_WORK_TREE_RE, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
+        AUTHOR_ROLE, GIT_WORK_TREE_RE, HEREDOC_HEADER, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
         SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
-        _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
+        _resolved, _run_dir, _segment_git_c_target, agent_role, basename, cap_safe,
         command_root, git_calls, git_common_dir, inline_script, is_worktree, log_path_and_text, norm,
         path_is_inside, primary_checkout, record, refuse, resolve_command, resolve_default_base,
         segment_tokens, split_segments, strip_heredoc_bodies,
@@ -234,6 +240,8 @@ try:
     from guard_mask_script import (
         mask_script,
     )
+    _loading = "guard_wsl"
+    from guard_wsl import WSL_REASON, wsl_hit
 except Exception as exc:
     # A recovery path must not depend on the module it recovers (CLAUDE.md
     # verification-recovery-not-gated-on-own-state). guard_core holds `record` and `config_dir`,
@@ -779,8 +787,9 @@ def record_path_pattern():
             return pattern
     return None
 DROPS_LINES_PATH = re.compile(r"(?im)^(drops-lines[ \t]*:[ \t]*)(\S+)(?=[ \t]+--[ \t]+\S)")
-MESSAGE_VALUE_FLAGS = {"-m", "--message", "-b", "--body"}
-MESSAGE_FILE_FLAGS = {"-F", "--file", "--body-file"}
+MESSAGE_VALUE_FLAGS = {"--message", "--body"}
+MESSAGE_FILE_FLAGS = {"--file", "--body-file"}
+TITLE_FLAGS = {"--title", "--subject"}
 MESSAGE_FILE_MAX = 64 * 1024
 
 CITE_REASON = (
@@ -792,38 +801,66 @@ CITE_REASON = (
 )
 
 
-def message_sources(args):
+# The short flags of each act, from `git commit -h` and `gh pr <act> --help`. "text" and "file"
+# carry the message, "title" a gh title or squash subject. "value" takes a value that is no message,
+# glued or the next argument (`-Bmain`, `-B main`), and "glued" takes only a glued one (`-uno`). A
+# letter not named takes no value, so the walk over a cluster goes on past it (`-am x`, `-db x`).
+# In gh, `-m` is a milestone, or a merge with no value: never a message.
+SHORT_FLAGS = {
+    "commit": dict(m="text", F="file", C="value", c="value", t="value", u="glued", S="glued"),
+    "create": dict(b="text", F="file", t="title", a="value", B="value", H="value", l="value",
+                   m="value", p="value", r="value", R="value", T="value"),
+    "edit": dict(b="text", F="file", t="title", B="value", m="value", R="value"),
+    "merge": dict(b="text", F="file", t="title", A="value", R="value"),
+}
+
+
+def message_sources(args, act, titles=False):
     """Return (texts, files, stdin) the message flags of a commit or PR call carry.
 
-    `texts` are the inline values, `files` the named files, `stdin` True for `-F -`. Reads
-    `-m x`, `--message=x`, `-mx`, a short cluster ending in m (`-am x`), and the long and short
-    body and file flags. A flag glued to a value in any other way is a form this does not read.
+    `texts` are the inline values, `files` the named files, `stdin` True for `-F -`. Reads a long
+    flag (`--message x`, `--message=x`) or any unique prefix of one of at least four characters
+    (git takes `--mess=x`), and a short cluster such as `-am x`, `-amx`, `-mx`, `-m=x`, `-bx`,
+    `-Fx`: the walk reads each letter of `act`'s SHORT_FLAGS until one takes a value, and what
+    follows it is the value. A letter whose value is no message ends the walk, so `-BmN20` (base
+    `mN20`) holds no message. `titles` also reads `--title`, `--subject` and `-t`, which are a gh call's title or squash
+    subject (a commit's `-t` is a template file, so a commit never passes it).
     """
     texts, files, stdin = [], [], False
+    names = MESSAGE_VALUE_FLAGS | MESSAGE_FILE_FLAGS | (TITLE_FLAGS if titles else set())
     index = 0
     while index < len(args):
         arg = args[index]
         index += 1
-        value = None
-        is_file = False
-        if arg in MESSAGE_VALUE_FLAGS or (re.match(r"^-[A-Za-z]+$", arg) and arg.endswith("m")
-                                          and not arg.startswith("--")):
-            value = args[index] if index < len(args) else ""
-            index += 1
-        elif arg in MESSAGE_FILE_FLAGS:
-            value = args[index] if index < len(args) else ""
-            index += 1
-            is_file = True
-        elif arg.startswith(("--message=", "--body=")):
-            value = arg.split("=", 1)[1]
-        elif arg.startswith(("--file=", "--body-file=")):
-            value = arg.split("=", 1)[1]
-            is_file = True
-        elif arg.startswith("-m") and not arg.startswith("--") and len(arg) > 2:
-            value = arg[2:]
-        if value is None:
+        name = value = None
+        if arg.startswith("--"):
+            flag, equals, glued = arg.partition("=")
+            hits = [n for n in names if n == flag] or \
+                [n for n in names if len(flag) >= 4 and n.startswith(flag)]
+            if len(hits) != 1:
+                continue
+            name = hits[0]
+            value = glued if equals else None
+        elif re.match(r"^-[A-Za-z]", arg):
+            for pos, letter in enumerate(arg[1:], 1):
+                role = SHORT_FLAGS[act].get(letter)
+                if role == "title":
+                    role = "text" if titles else "value"
+                if role is None:
+                    continue
+                rest = arg[pos + 1:]
+                if role in ("text", "file"):
+                    name = "--file" if role == "file" else letter
+                    value = (rest[1:] if rest.startswith("=") else rest) if rest else None
+                elif role == "value" and not rest:
+                    index += 1   # its value is the next argument, never a flag
+                break
+        if name is None:
             continue
-        if not is_file:
+        if value is None:
+            value = args[index] if index < len(args) else ""
+            index += 1
+        if name not in MESSAGE_FILE_FLAGS:
             texts.append(value)
         elif value == "-":
             stdin = True
@@ -840,29 +877,99 @@ UNREAD_REASON = (
 )
 
 
-def cited_record_path(segment: str, raw: str, where: str) -> str:
-    """Return the first record path a commit message or PR body cites, else ''. A message file
-    that cannot be read returns UNREAD_MARK + its name: an unread message is not a clean one.
+def heredoc_heads(text: str, quote: str = ""):
+    """Return (delimiters, quote) for the heredoc headers in `text` that sit outside quotes and
+    comments, in order, and what is still open at its end. `quote` is a stack of open quotes and
+    parentheses. `echo "<<EOF"` and `<<<word` hold no header, but `-m "$(cat <<EOF` does: a `$(`
+    inside double quotes is shell again. Quotes are read as split_segments reads them: no escape.
+    """
+    heads = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        top = quote[-1:]
+        if top == "'":
+            quote = quote[:-1] if char == "'" else quote
+        elif top == '"':
+            if text.startswith("$(", index):
+                quote += "("
+                index += 1
+            elif char == '"':
+                quote = quote[:-1]
+        elif char == "(":
+            quote += "("
+        elif char == ")" and top == "(":
+            quote = quote[:-1]
+        elif char == "#" and (index == 0 or text[index - 1] in " \t\n;|&("):
+            while index < len(text) and text[index] != "\n":
+                index += 1
+            continue
+        elif char in "'\"":
+            quote += char
+        elif text.startswith("<<<", index):
+            index += 3
+            continue
+        elif char == "<":
+            header = HEREDOC_HEADER.match(text, index)
+            if header:
+                heads.append(header.group(2))
+                index = header.end()
+                continue
+        index += 1
+    return heads, quote
 
-    Acts: `git commit` and `gh pr create|edit`. A heredoc body belongs to the act only when the
-    segment itself carries the `<<` header, so a heredoc that writes a record file never counts.
+
+def own_heredoc_bodies(segment: str, raw: str, before: int):
+    """Return the bodies of the heredocs whose headers sit inside this segment, in order. A heredoc
+    of another command (`cat <<A && git commit -F - <<B`) is not the message.
+
+    `before` is the count of headers in the segments ahead of this one. Raw is walked once, as the
+    shell reads it: each header outside quotes and comments takes the next body in turn, and a body
+    line is never read for headers. This segment takes the bodies `before` onward, one per header
+    it holds, so two commits with the same text each take their own body.
+    """
+    count = len(heredoc_heads(segment)[0])
+    if not count:
+        return []
+    found = []
+    lines = raw.split("\n")
+    quote = ""
+    index = 0
+    while index < len(lines):
+        heads, quote = heredoc_heads(lines[index], quote)
+        index += 1
+        for delimiter in heads:
+            start = index
+            while index < len(lines) and lines[index].strip() != delimiter:
+                index += 1
+            found.append("\n".join(lines[start:index]))
+            index += 1   # past the closing delimiter line
+    return found[before:before + count]
+
+
+def message_texts(segment: str, raw: str, where: str, before: int, titles: bool = False):
+    """Return (is_commit, texts, unread) for a `git commit` or `gh pr create|edit` segment, or None
+    when the segment is neither. `titles` also takes `gh pr merge`, whose squash subject and body
+    become a commit on main. `unread` is the name of a message file that could not be read, else
+    ''. An unread message is not a clean one.
+
+    A heredoc body belongs to the act only when the segment itself carries the `<<` header, so a
+    heredoc that writes a record file never counts. `before` is the count of heredoc headers in the
+    segments ahead of this one (own_heredoc_bodies).
     """
     call = git_call_of(segment)
     if call is not None:
         if call[0] != "commit":
-            return ""
+            return None
         args = call[1]
     else:
         rest = gh_call_of(segment)
-        if rest is None or rest[:1] != ["pr"] or rest[1:2] not in (["create"], ["edit"]):
-            return ""
+        acts = (["create"], ["edit"]) + ((["merge"],) if titles else ())
+        if rest is None or rest[:1] != ["pr"] or rest[1:2] not in acts:
+            return None
         args = rest[2:]
-    pattern = record_path_pattern()
-    if pattern is None:
-        # An unread folder list is logged, as every unread subject is, and the rule stands down.
-        record("Bash", "noted", "subject-unread", "cite-by-id: record folders unread")
-        return ""
-    texts, files, stdin = message_sources(args)
+    act = "commit" if call is not None else rest[1]
+    texts, files, stdin = message_sources(args, act, titles=titles and call is None)
     for name in files:
         if is_env(name):
             continue   # never opened here: the environment-file rule judges it, and refuses
@@ -871,10 +978,30 @@ def cited_record_path(segment: str, raw: str, where: str) -> str:
                       errors="replace") as handle:
                 texts.append(handle.read(MESSAGE_FILE_MAX))
         except Exception:
-            return UNREAD_MARK + name   # unknown, never a pass
+            return call is not None, texts, name   # unknown, never a pass
     if "<<" in segment:
-        texts.extend(body for _, body in _split_heredocs(raw)[1])
-    if call is not None:
+        texts.extend(own_heredoc_bodies(segment, raw, before))
+    return call is not None, texts, ""
+
+
+def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
+    """Return the first record path a commit message or PR body cites, else ''. A message file
+    that cannot be read returns UNREAD_MARK + its name.
+
+    Acts: `git commit` and `gh pr create|edit`.
+    """
+    read = message_texts(segment, raw, where, before)
+    if read is None:
+        return ""
+    is_commit, texts, unread = read
+    if unread:
+        return UNREAD_MARK + unread
+    pattern = record_path_pattern()
+    if pattern is None:
+        # An unread folder list is logged, as every unread subject is, and the rule stands down.
+        record("Bash", "noted", "subject-unread", "cite-by-id: record folders unread")
+        return ""
+    if is_commit:
         # Owner ruling 2026-10-12: a commit's trailer `Drops-lines: <path> -- <reason>`, the shape
         # lint/check_silent_undo.py reads, may name its path. Git joins -m values as paragraphs and
         # reads trailers from the last one only, never from a lone subject. Only a token that is one
@@ -889,6 +1016,38 @@ def cited_record_path(segment: str, raw: str, where: str) -> str:
         if found:
             return found.group(0)
     return ""
+
+
+# ---- a message that names a lane by its session number (owner ruling 2026-10-13)
+LANE_NUMBER = re.compile(r"\bN\d{1,3}b?\b")
+LANE_QUOTED = re.compile(
+    r"^[ \t]*(```|~~~).*?^[ \t]*\1|(?<!`)(`+)(?!`)[^\n]*?(?<!`)\2(?!`)", re.MULTILINE | re.DOTALL)
+LANE_REASON = (
+    "Rule (Git): this message names a lane by a session number. That number is handed out in one "
+    "chat and means nothing outside it. "
+    "Remedy: name the lane by its branch slug, like \"lane-number-cite\". A number inside a "
+    "backtick code span or a fenced block is quoted text and stays allowed."
+)
+
+
+def lane_number_named(segment: str, raw: str, where: str, before: int) -> str:
+    """Return the first session-number lane name (`N20`) in a commit message, PR body or title, or
+    `gh pr merge` subject or body, else ''. Fenced blocks and backtick spans are quoted text and
+    skipped. Same text extraction as cite-by-id. An unread message file returns UNREAD_MARK + its
+    name: cite-by-id refuses an unread create or edit file first, so this covers merge.
+    """
+    read = message_texts(segment, raw, where, before, titles=True)
+    if read is None:
+        return ""
+    if read[2]:
+        return UNREAD_MARK + read[2]
+    for text in read[1]:
+        found = LANE_NUMBER.search(LANE_QUOTED.sub(" ", text))
+        if found:
+            return found.group(0)
+    return ""
+
+
 TEST_BASENAME = re.compile(
     r"^(?:test_.*\.py|.*_test\.(?:py|go)|.*\.test\.[cm]?[jt]sx?|.*\.spec\..+|conftest\.py"
     r"|jest\.setup\..+|(?:.*[-_]selftest|selftest_.*)\.(?!md$).+"
@@ -1396,14 +1555,22 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 1d. A commit message or PR body that cites a record by its path.
     cite_where = command_root(stripped, cwd)
+    heads = 0   # heredoc headers in the segments so far: each segment takes its own bodies
     for segment in split_segments(stripped):
+        before = heads
+        heads += len(heredoc_heads(segment)[0])
         if not segment.strip():
             continue
-        matched = cited_record_path(segment, raw, cite_where)
+        matched = cited_record_path(segment, raw, cite_where, before)
         if matched.startswith(UNREAD_MARK):
             refuse(tool, "deny", "cite-by-id", UNREAD_REASON, matched[len(UNREAD_MARK):])
         if matched:
             refuse(tool, "deny", "cite-by-id", CITE_REASON, matched)
+        matched = lane_number_named(segment, raw, cite_where, before)
+        if matched.startswith(UNREAD_MARK):   # a gh pr merge file: cite-by-id never reads merge
+            refuse(tool, "deny", "cite-by-id", UNREAD_REASON, matched[len(UNREAD_MARK):])
+        if matched:
+            refuse(tool, "deny", "lane-by-slug", LANE_REASON, matched)
 
     # 2. A machine-wide kill. Judged in COMMAND POSITION, from the segment's own tokens, never
     # by the word appearing anywhere in the text. A segment shlex cannot parse fails open:
@@ -1431,6 +1598,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = detached_launch_hit(stripped)
     if matched:
         refuse(tool, "deny", "detached-launch", DETACHED_LAUNCH_REASON, matched)
+
+    # 2c. WSL: only the fixed list of test commands (owner ruling 2026-10-13).
+    matched = wsl_hit(stripped)
+    if matched:
+        refuse(tool, "deny", "wsl-allow-list", WSL_REASON, matched)
 
     # 3. A live stream that never ends, or a waiter loop (Rule 9). A waiter loop whose own
     # condition polls a pattern gets the more specific reason: the pattern can match the loop's

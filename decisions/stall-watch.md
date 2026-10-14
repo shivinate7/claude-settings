@@ -72,6 +72,7 @@ The watcher does not change. A false STALL teaches the reader to scroll past a r
 ## Known limits
 
 - Windows is not covered. The hook returns nothing when `os.name` is not posix.
+- The Stop-time check now exists (`stall-watch-stop-check`, a Stop hook). It reports a background shell left open at turn end. The watcher above still does nothing on Windows.
 - A job that is quiet but healthy is reported, not stopped. The session decides.
 - A command that prints progress forever is never reported, even when it is stuck.
 - After a stall report, the log stays in the temp directory. Nothing removes it.
@@ -87,3 +88,6 @@ The watcher does not change. A false STALL teaches the reader to scroll past a r
   The probe reads `/bin/sh`, not the user's shell. Limit: a zsh user on a host whose `/bin/sh` is
   dash gets an extra `\` on that last word.
 - The watcher checks the job with `ps` once each second.
+
+Kind: process
+Home: hooks/stall_watch.py

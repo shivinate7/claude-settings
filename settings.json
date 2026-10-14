@@ -50,6 +50,15 @@
         "hooks": [
           {
             "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/stall_watch.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\" --stop; done; exit 0",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
             "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/lint/report_gate.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 20
           }
@@ -100,6 +109,24 @@
             "async": true
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/feedback_gate.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/reread_check.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\" --stop; done; exit 0",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PreCompact": [
@@ -116,6 +143,16 @@
     "SessionStart": [
       {
         "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/precompact_handoff.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\" --reorient; done; exit 0",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "clear|fork",
         "hooks": [
           {
             "type": "command",
@@ -152,6 +189,16 @@
             "type": "command",
             "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/janitor/session_end_sweep.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 55
+          }
+        ]
+      },
+      {
+        "matcher": "clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/precompact_handoff.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\" --session-end; done; exit 0",
+            "timeout": 10
           }
         ]
       }
@@ -229,7 +276,7 @@
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "Judge this subagent spawn: $ARGUMENTS\nAnswer {\"ok\": true} at once when subagent_type is Explore or claude-code-guide, when the brief is under 60 words, or when the call resumes an existing agent. Only for builder, reviewer, and test-author briefs, apply roles-brief-contents (the brief carries the task, the files, governing rulings, and the check that proves done) and tokens-point-brief-at-files (the brief names files and never pastes their contents). Block only on a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}.",
+            "prompt": "Judge this subagent spawn: $ARGUMENTS\nAnswer {\"ok\": true} at once when subagent_type is claude-code-guide, when the call resumes an existing agent, or when a non-Explore brief is under 60 words. For an Explore spawn, block only when the brief asks it to audit, review, judge, rate or compare meaning (not only to find files, names or text) and the call does not set model sonnet; the fix is model sonnet with effort high (subagent-model-cap, audit Explore row). Otherwise answer {\"ok\": true} for Explore. Only for builder, reviewer, and test-author briefs, apply roles-brief-contents (the brief carries the task, the files, governing rulings, and the check that proves done) and tokens-point-brief-at-files (the brief names files and never pastes their contents). Block only on a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}.",
             "timeout": 30,
             "model": "claude-sonnet-5-5",
             "continueOnBlock": true
@@ -281,6 +328,16 @@
             "type": "command",
             "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/sim_boot_record.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 20
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/reread_check.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\" --pre-read; done; exit 0",
+            "timeout": 10
           }
         ]
       }
@@ -340,12 +397,34 @@
         ]
       },
       {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/ci_wake.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
+            "timeout": 3600,
+            "asyncRewake": true
+          }
+        ]
+      },
+      {
         "matcher": "Bash|mcp__Claude_Code_iOS_Simulator__control",
         "hooks": [
           {
             "type": "command",
             "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/sim_boot_record.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 20
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/reread_check.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\" --post-compact; done; exit 0",
+            "timeout": 10
           }
         ]
       }
@@ -356,7 +435,11 @@
   },
   "enabledPlugins": {
     "ponytail@ponytail": true,
-    "frontend-design@claude-code-plugins": true
+    "frontend-design@claude-code-plugins": true,
+    "token-weather@claude-settings": true,
+    "desktop-statusline@claude-settings": true,
+    "plain-diff@claude-settings": true,
+    "session-board@claude-settings": true
   },
   "extraKnownMarketplaces": {
     "compass-claude-plugins": {
@@ -376,6 +459,12 @@
         "source": "github",
         "repo": "anthropics/claude-code",
         "ref": "v2.1.296"
+      }
+    },
+    "claude-settings": {
+      "source": {
+        "source": "github",
+        "repo": "shivinate7/claude-settings"
       }
     }
   },
