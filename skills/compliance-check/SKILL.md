@@ -18,7 +18,7 @@ parent. If the line or `<dir>/.git` is missing, stop and report the audit as unk
   `output-styles/shiv-stylisms.md`. `RULE_FILES` in `lint/rule_audit.py` names
   both files. Read them with `grep`, never the whole file.
 - Group: the id prefix. `outcomes`, `roles`, `parallelism`, `shared-trees`, `git`,
-  `verification`, `tokens`, `building`, `speak`, `output`, `reports`. These are the bold
+  `verification`, `tokens`, `building`, `speak`, `output`, `reports`. These are the 11 bold
   headings of `CLAUDE.md`. The style file adds `style`.
 - Mechanism: `<parent>/lint/rule_mechanisms.json`, key `rules.<id>.mechanism.kind`.
 

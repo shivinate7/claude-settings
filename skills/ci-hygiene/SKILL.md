@@ -85,8 +85,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     `cache: npm`. Measure the step before and after.
 15. **Split the slowest job for wall time.** Use it where minutes are free, as in a
     public repo. Step 13 saves money, not time. Split the slowest serial job into parallel jobs.
-    Measured in PR 293's CI run 37675874835 (2026-10-07): the Windows jobs started together,
-    and the longest (`gates-windows`) took 6m24s.
+    Decision ci-wall-time-cuts, cut A, made this split. `lint/test_windows_split.py` checks that
+    each suite runs in exactly one job. In PR 293's CI run 37675874835 (2026-10-07), the longest
+    Windows job took 6m24s.
 16. **Pin every suite in a split-job guard.** The guard must pin each suite's `if:`, `shell:` and
     `!cancelled()`, with no env override (`MERGE_TESTS` gap, review of PR 293). A job-level `if:`
     names only its own scope flag, or a non-PR event (step 19).
