@@ -134,7 +134,7 @@ class Env(unittest.TestCase):
             sh(self.t, "git", "clone", "-q", self.bare, d)
         self.now = time.time()
         self.host = FakeHost(self.co, self.other)
-        self.lock = merge.GitLock(self.co, now=lambda: self.now)
+        self.lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)  # a retry pause is a no-op: a test never sleeps
         self.addCleanup(lambda: os.environ.pop("MERGE_TEST_HOOK", None))
 
     def run_merge(self, *args, host=None, lock=None):
@@ -1389,6 +1389,30 @@ class GhHalf(Env):
         self.assertEqual(rc, 0, out)
         self.assertIn("pr merge", self.calls())
         self.assertEqual(self.claims("main"), 1)
+        self.assertFalse(self.lock_ref())
+
+    def test_a_refusal_whose_text_names_an_http_502_title_reverts_and_is_not_retried(self):
+        self.set(merge_replies=[['GraphQL: Pull Request is not mergeable: #7 "Fix (HTTP 502 retry)"', False]])  # a real refusal; its text carries a 5xx-looking title
+        rc, out = self.go()
+        self.assertIn("reverted on feat", out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.calls().count("pr merge"), 1)  # a refusal is not retried
+        self.assertNotIn(merge.NET_PAUSE, self.paused)  # no network-retry pause
+        self.assertTrue(self.reverted())
+        self.assertFalse(self.lock_ref())
+
+    def test_a_red_check_named_http_500_is_a_refusal_that_reverts_and_is_not_retried(self):
+        # the wait after the claim push reads the red check; its name carries "HTTP 500"
+        self.set(checks_seq=[[("gates", "pass", "")], [("gates", "pass", "")],
+                             [("gates", "pass", ""), ("build: HTTP 500 guard", "fail", "https://x/y")]])
+        rc, out = self.go()
+        self.assertIn("a check is red: build: HTTP 500 guard: fail", out)
+        self.assertIn("reverted on feat", out)
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn("pr merge", self.calls())
+        self.assertNotIn(merge.NET_PAUSE, self.paused)  # no network-retry pause
+        self.assertNotIn("network", out.lower())
+        self.assertTrue(self.reverted())
         self.assertFalse(self.lock_ref())
 
     def test_green_run_watches_the_run_and_merges_pinned_to_the_claim_head(self):
