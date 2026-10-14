@@ -11,16 +11,17 @@ its exit code, stdout and stderr. Two fakes sit under it:
 - `claude -p` (the model). A sitecustomize.py on the child's PYTHONPATH wraps subprocess.run, as
   hooks/test_reply_judge.py does, and answers `claude -p` with the JSON envelope that
   decision_watch.invoke_model parses. The real invoke_model runs on each canned answer.
-- `claude agents --json`. The reader is a node child of the hook, so it meets a `claude` launcher
-  on PATH: claude.cmd on Windows, a sh script elsewhere. The launcher runs fake_claude.py, which
-  prints the canned rows and records the call.
-- The reader stub (STUB_READER). A case that sets `reader_mode` points the hook's pointer checkout at
-  a temp clone whose receiver-state.mjs is that stub. Real node runs it, and no claude board read starts.
+- The reader stub (STUB_READER). Every hook run points the hook's pointer checkout at a temp clone
+  whose receiver-state.mjs is that stub. Real node runs it. The stub reads the rows file the case
+  wrote and prints the state with the repo's lib.mjs, so the rows-to-state mapping is real. Only the
+  `claude agents --json` read is stubbed, and a stub failure prints unseen, as the real reader does.
+  fake_claude.py's agents branch is now unused. The claude launcher stays on PATH for the model call.
 Every claude call is recorded, so "no model call" is read from the record, not assumed.
 CLAUDE_CONFIG_DIR is a fresh temp folder: no real pointer file or token is read.
 
 Canary: every hook run must leave a `loaded` file (the sitecustomize ran) and, when the hook
-reaches the board, exactly one agents call. Without them, a "no model call" pass proves nothing.
+reaches the reader, exactly one stub call naming the peer, with no agents call. Without them, a
+"no model call" pass proves nothing.
 
 Mutation: SENDMESSAGE_STATE_UNDER_TEST names another copy of the hook to run instead. Its
 find_reader looks for mods/ beside that copy, so a copy needs a mods/ folder beside its hooks/.
@@ -91,15 +92,28 @@ else:
 # process's stdout open, then sleeps; the hook's kill of this process leaves that pipe held.
 STUB_READER = r'''
 import { spawn } from "node:child_process";
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const dir = process.env.SM_READER_DIR;
 const mode = process.env.SM_READER_MODE;
 const holdMs = Number(process.env.SM_READER_HOLD_MS || "30000");
 appendFileSync(join(dir, "reader.jsonl"), JSON.stringify({ argv: process.argv.slice(2) }) + "\n");
+function report(word) {
+    writeFileSync(join(dir, "word.txt"), word);  // written before the answer, so a crash leaves no word
+    process.stdout.write(word + "\n");
+}
 if (mode === "idle" || mode === "waiting") {
-    process.stdout.write(mode + "\n");
+    report(mode);
+} else if (mode === "board") {
+    // Only the claude board read is stubbed. The rows-to-state step is the repo's lib.mjs.
+    if (process.env.SM_AGENTS_FAIL) {
+        report("unseen");  // a failed board read prints unseen, as receiver-state.mjs does
+    } else {
+        const lib = await import(pathToFileURL(process.env.SM_LIB_PATH).href);
+        report(lib.receiverState(lib.parseAgentsJson(readFileSync(process.env.SM_AGENTS_FILE, "utf8")), process.argv[2]));
+    }
 } else {
     if (mode === "hold") {
         // The child must keep the inherited stdout open for the whole hold. Measured on Windows: a
@@ -157,6 +171,13 @@ def argv_lines(path):
         return [json.loads(line)["argv"] for line in f if line.strip()]
 
 
+def read_text(path):
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
 class Run:
     def __init__(self, proc, base, elapsed):
         self.code = proc.returncode
@@ -165,6 +186,7 @@ class Run:
         self.elapsed = elapsed
         self.loaded = os.path.exists(os.path.join(base, "loaded"))
         self.held = os.path.exists(os.path.join(base, "held.flag"))
+        self.word = read_text(os.path.join(base, "word.txt"))  # the state the stub printed, if it got that far
         self.calls = argv_lines(os.path.join(base, "calls.jsonl"))
         self.reader_calls = argv_lines(os.path.join(base, "reader.jsonl"))
         self.model_calls = [a for a in self.calls if "-p" in a]
@@ -177,13 +199,14 @@ class Run:
         return json.loads(self.out)["hookSpecificOutput"]
 
     def reached_board(self):
-        return self.loaded and len(self.agents_calls) == 1
+        """The hook asked the stub reader once, about PEER, and no claude board read ran."""
+        return self.loaded and self.reader_calls == [[PEER]] and not self.agents_calls
 
 
 def detail(r):
-    return "code=%s out=%r err=%r model=%d agents=%d reader=%d loaded=%s wall=%.1fs" % (
+    return "code=%s out=%r err=%r model=%d agents=%d reader=%d word=%r loaded=%s wall=%.1fs" % (
         r.code, r.out[:160], r.err[-200:], len(r.model_calls), len(r.agents_calls),
-        len(r.reader_calls), r.loaded, r.elapsed)
+        len(r.reader_calls), r.word, r.loaded, r.elapsed)
 
 
 def point_reader_at_stub(cfg, base):
@@ -199,7 +222,7 @@ def point_reader_at_stub(cfg, base):
 
 
 def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=False,
-             reader_mode=None, reader_seconds=None, cap=120):
+             reader_mode="board", reader_seconds=None, cap=120):
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     cfg = os.path.join(base, "config")
@@ -222,9 +245,9 @@ def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=
     if agents_fail:
         env["SM_AGENTS_FAIL"] = "1"
     script = HOOK
-    if reader_mode:
-        point_reader_at_stub(cfg, base)
-        env.update({"SM_READER_DIR": base, "SM_READER_MODE": reader_mode, "SM_READER_HOLD_MS": str(HOLD_MS)})
+    point_reader_at_stub(cfg, base)  # every run: no case reaches the real reader
+    env.update({"SM_READER_DIR": base, "SM_READER_MODE": reader_mode, "SM_READER_HOLD_MS": str(HOLD_MS),
+                "SM_LIB_PATH": os.path.join(os.path.dirname(HERE), "mods", "session-board", "hooks", "lib.mjs")})
     if reader_seconds is not None:
         script = os.path.join(base, "hook_timed.py")
         with open(script, "w", encoding="utf-8") as f:
@@ -337,7 +360,7 @@ def case_busy_blocks_when_the_model_flags():
 def case_busy_allows_when_the_model_does_not_flag():
     r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")], answer=ALLOW)
     check("busy + model ok: allow, one model call, no deny",
-          r.code == 0 and r.out == "" and len(r.model_calls) == 1 and r.reached_board(), detail(r))
+          r.code == 0 and r.out == "" and r.err == "" and len(r.model_calls) == 1 and r.reached_board(), detail(r))
 
 
 def case_busy_flag_with_blank_reason_gets_the_default_reason():
@@ -346,7 +369,7 @@ def case_busy_flag_with_blank_reason_gets_the_default_reason():
     d = r.deny()
     check("busy + FLAG with a blank reason: deny with the default reason",
           r.code == 0 and d is not None and d.get("permissionDecisionReason", "").startswith(
-              "parallelism-no-mid-task-talk"), detail(r))
+              "parallelism-no-mid-task-talk") and r.reached_board(), detail(r))
 
 
 def case_unseen_receivers_allow_with_no_model_call():
@@ -355,13 +378,18 @@ def case_unseen_receivers_allow_with_no_model_call():
         ("a duplicate name", [row(SID_A, PEER, "busy"), row(SID_B, PEER, "idle")]),
         ("an unknown status", [row(SID_A, PEER, "running")]),
     ]
+    # The rows-to-state step is the real lib.mjs, so each row shape must come out unseen there.
+    # The word check catches a stub that crashed: the hook would then read unseen for the wrong reason.
     for label, rows in cases:
         r = run_hook(hook_input(), rows=rows)
         check("unseen (%s): allow, no model call" % label,
-              r.code == 0 and r.out == "" and not r.model_calls and r.reached_board(), detail(r))
+              r.code == 0 and r.out == "" and r.err == "" and not r.model_calls and r.reached_board()
+              and r.word == "unseen", detail(r))
+    # SM_AGENTS_FAIL: the stub stands in for a failed claude read, and prints unseen as the real reader does.
     r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")], agents_fail=True)
     check("unseen (agents list fails): allow, no model call",
-          r.code == 0 and r.out == "" and not r.model_calls and r.loaded, detail(r))
+          r.code == 0 and r.out == "" and r.err == "" and not r.model_calls and r.reached_board()
+          and r.word == "unseen", detail(r))
 
 
 def case_malformed_input_fails_open_with_no_deny():
@@ -372,8 +400,8 @@ def case_malformed_input_fails_open_with_no_deny():
         ("to is blank", '{"tool_input": {"to": "  ", "message": "x"}}'),
     ):
         r = run_hook(text, rows=[row(SID_A, PEER, "busy")], answer=FLAG)
-        check("malformed input (%s): exit 0, no deny, no model call" % label,
-              r.code == 0 and r.out == "" and not r.model_calls, detail(r))
+        check("malformed input (%s): exit 0, no deny, no model call, no reader call" % label,
+              r.code == 0 and r.out == "" and not r.model_calls and r.reader_calls == [], detail(r))
 
 
 def case_reader_timeout_allows_with_one_plain_line():
@@ -409,10 +437,11 @@ def case_reader_that_holds_the_pipe_returns_in_bound():
 def case_model_failures_fail_open_with_no_deny():
     r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")], answer=FLAG, model_fail=True)
     check("busy + model exits non-zero: exit 0, no deny, failed-open line",
-          r.code == 0 and r.out == "" and "failed open" in r.err and len(r.model_calls) == 1, detail(r))
+          r.code == 0 and r.out == "" and "failed open" in r.err and len(r.model_calls) == 1
+          and r.reached_board(), detail(r))
     r = run_hook(hook_input(), rows=[row(SID_A, PEER, "busy")], answer='{"verdict": "FLAG"}')
     check("busy + off-shape model answer: exit 0, no deny, failed-open line",
-          r.code == 0 and r.out == "" and "failed open" in r.err, detail(r))
+          r.code == 0 and r.out == "" and "failed open" in r.err and r.reached_board(), detail(r))
 
 
 def case_model_row_names_the_call():
