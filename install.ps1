@@ -101,15 +101,17 @@ if git rev-parse -q --verify ORIG_HEAD >/dev/null 2>&1 \
 fi
 # put SRC DEST: build the file at "DEST.cs-new" in DEST's folder, then rename it over DEST, so DEST
 # is never absent or half-written (a gate hook reads it at any moment). A .py that carries an
-# `# INSTALL_ID` line gets this run's id, the same stamp install.ps1 writes. A rename a reader blocks
-# is retried for about 2.5 s; if it still fails, DEST stays as it was, the failure is printed and
-# logged, and the hook exits 1 at the end.
+# guard.py or guard_*.py gets this run's id on its whole placeholder line, the same stamp install.ps1
+# writes. A rename a reader blocks is retried for about 2.5 s; if it still fails, DEST stays as it
+# was, the failure is printed and logged, and the hook exits 1 at the end.
 id="`$(date +%Y%m%d%H%M%S)`$`$"
+ph='$StampPlaceholder'
+cr="`$(printf '\r')"
 failed=0
 put() {
   t="`$2.cs-new"
   case "`$1" in
-    *.py) sed "s/^# INSTALL_ID = \".*\"/INSTALL_ID = \"`$id\"/" "`$1" > "`$t" ;;
+    */guard.py|*/guard_*.py) sed "s/^`$ph\(`$cr\{0,1\}\)\`$/INSTALL_ID = \"`$id\"\1/" "`$1" > "`$t" ;;
     *) cp "`$1" "`$t" ;;
   esac && {
     for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do
@@ -268,13 +270,18 @@ public static class ClaudeSettingsMove {
     }
 }
 
-# One id per run. A hook .py that carries a line `# INSTALL_ID = "..."` gets it, uncommented, at copy time, so
-# hooks/guard.py can tell a half-installed set from a whole one. The repo copy holds a placeholder.
-# The embedded post-merge hook and install.sh stamp the same line the same way.
+# One id per run. In guard.py and guard_*.py only, the whole line $StampPlaceholder becomes
+# `INSTALL_ID = "<id>"` at copy time, so hooks/guard.py can tell a half-installed set from a whole one.
+# The repo copy holds the placeholder. No other line is touched: a prose line that starts the same
+# way stays as it is. The post-merge hook above builds its sed from $StampPlaceholder; install.sh
+# holds the same literal, because sh cannot share this code.
 $InstallId = Get-Date -Format yyyyMMddHHmmssfff
+$StampPlaceholder = '# INSTALL_ID = "uninstalled"'
+$StampLineRe = '(?m)^' + [regex]::Escape($StampPlaceholder) + '(?=\r?$)'
+function Test-StampTarget([string]$Name) { return ($Name -ceq 'guard.py' -or $Name -clike 'guard_*.py') }
 function Set-InstallId([string]$Path) {
     $text = [IO.File]::ReadAllText($Path)
-    $new  = [regex]::Replace($text, '(?m)^# INSTALL_ID = "[^"]*"', "INSTALL_ID = `"$InstallId`"")
+    $new  = [regex]::Replace($text, $StampLineRe, "INSTALL_ID = `"$InstallId`"")
     if ($new -ne $text) { [IO.File]::WriteAllText($Path, $new, (New-Object Text.UTF8Encoding $false)) }
 }
 
@@ -291,7 +298,7 @@ function Install-File([string]$Src, [string]$Dest) {
     try {
         Remove-Leftover $new
         try { New-Link $new $Src; $how = 'linked' }
-        catch { $how = 'copied'; Copy-Item -LiteralPath $Src -Destination $new -Force; if ($Dest -like '*.py') { Set-InstallId $new } }
+        catch { $how = 'copied'; Copy-Item -LiteralPath $Src -Destination $new -Force; if (Test-StampTarget (Split-Path $Dest -Leaf)) { Set-InstallId $new } }
         Move-OverFile $new $Dest
         return $how
     } catch {
@@ -430,9 +437,9 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
         } elseif ($how -eq 'copied') {
             $AgentCopied = $true
             Log "copied $dest (symlink not permitted)"
-        } else {
-            $AgentFailed = $true
         }
+        # A 'failed' file is in $FailedFiles; Resolve-Failures retries it and sets $AgentFailed only
+        # for a file that still fails, so a recovered file does not read as failed.
     }
     foreach ($entry in @(Get-ChildItem -Path $destDir -File -ErrorAction SilentlyContinue)) {
         if ($entry.LinkType -ne 'SymbolicLink') { continue }
@@ -451,7 +458,7 @@ if (-not (Get-Command python3 -ErrorAction SilentlyContinue) -and -not (Get-Comm
 }
 
 # Retries each file Install-File could not replace, with a longer back-off (2, 4, 8 s), then re-reads
-# the stamp of every copied guard*.py: a copy that does not carry this run's id is a half install,
+# the stamp of every copied guard.py and guard_*.py: a copy that does not carry this run's id is a half install,
 # so it is retried the same way. A file that still fails is named here and the run exits non-zero
 # at its end; the guard then fails closed and its text names this installer as the remedy.
 # Links are skipped: a link reads the repo file, and the repo copy holds the placeholder.
@@ -461,14 +468,14 @@ function Resolve-Failures {
     $hooksSrc  = Join-Path $RepoDir 'hooks'
     $stampRe   = '(?m)^INSTALL_ID = "([^"]*)"'
     foreach ($delay in 2, 4, 8, 0) {
-        foreach ($f in @(Get-ChildItem -Path $hooksSrc -Filter 'guard*.py' -File -ErrorAction SilentlyContinue)) {
+        foreach ($f in @(Get-ChildItem -Path $hooksSrc -Filter 'guard*.py' -File -ErrorAction SilentlyContinue | Where-Object { Test-StampTarget $_.Name })) {
             $d = Join-Path $hooksDest $f.Name
             $i = Get-Item -LiteralPath $d -Force -ErrorAction SilentlyContinue
             if ($i -and $i.LinkType) { continue }
             # The id the copy must carry: this run's id where the source holds the placeholder, else the
             # id the source already carries. A source with neither has nothing to check.
             $srcText = [IO.File]::ReadAllText($f.FullName)
-            $want = if ($srcText -match '(?m)^# INSTALL_ID = ') { $InstallId }
+            $want = if ($srcText -match $StampLineRe) { $InstallId }
                     elseif ($srcText -match $stampRe) { $Matches[1] }
                     else { continue }
             $ok = $false
@@ -485,7 +492,7 @@ function Resolve-Failures {
             $src = $FailedFiles[$d]
             $FailedFiles.Remove($d)
             $r = Install-File $src $d
-            if ($r -ne 'failed') { $AgentCopied = $AgentCopied -or ($r -eq 'copied') }
+            if ($r -eq 'copied') { $script:AgentCopied = $true }
         }
     }
     foreach ($d in @($FailedFiles.Keys)) { $StillFailed[$d] = $FailedFiles[$d]; Log "could not replace $d after retries; it is not this install's version" }

@@ -183,8 +183,8 @@ if sys.path[:1] != [_HERE]:
 _FAMILY_MODULES = ("guard_branch_worktree", "guard_shared_tree", "guard_pointer",
                    "guard_push_delete", "guard_merge", "guard_frozen", "guard_env",
                    "guard_kill", "guard_stream", "guard_rm_var", "guard_mask_script", "guard_wsl")
-# Each hook .py the installer copies carries `INSTALL_ID = "<id>"`, one value per install run, stamped
-# at copy time in place of the commented placeholder below. A file with no such line is a placeholder
+# guard.py and each guard_*.py the installer copies carry `INSTALL_ID = "<id>"`, one value per install
+# run, stamped at copy time in place of the whole commented placeholder line below. A file with no such line is a placeholder
 # (the repo copy, or an old file from before the stamp). A set of all placeholders matches, which is the
 # repo run. A placeholder beside a real id is mixed, so it differs. A load that fails, or loads modules
 # with different ids, means an install landed between two of our reads: wait, clear the modules, and load again. The wait is bounded; after it the
@@ -312,8 +312,9 @@ while True:
                 "hookEventName": "PreToolUse", "permissionDecision": "deny",
                 "permissionDecisionReason": (
                     "guard-crash: the gate is missing a part and cannot judge this call, so it refuses "
-                    "every call. Remedy: from the claude-settings checkout run install.sh "
-                    "(Windows: install.ps1), then retry.")}}))
+                    "every call, Bash and PowerShell too. Remedy: in your own terminal, not a Claude "
+                    "session, run install.sh from the claude-settings checkout (Windows: install.ps1), "
+                    "then retry.")}}))
         sys.exit(0)
 
 
