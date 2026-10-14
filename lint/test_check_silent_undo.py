@@ -1093,5 +1093,83 @@ class SharedLineRead(unittest.TestCase):
         self.assertSameOrUnknown(preview, self.outcome(r, claim))
 
 
+class Plumb:
+    """Trees and commits made with plumbing, never the worktree. Windows refuses a colon in a path
+    unless core.protectNTFS is off, so the fixture turns it off: the names become real tree entries."""
+
+    def __init__(self, r):
+        self.r, self.n = r, 0
+
+    def run(self, *a, inp=None, env=None):
+        p = subprocess.run(["git", "-C", self.r.dir, "-c", "core.protectNTFS=false", *a], input=inp,
+                           capture_output=True, env=dict(os.environ, **(env or {})))
+        assert p.returncode == 0, (a, p.stderr)
+        return p.stdout.decode("utf-8", "replace").strip()
+
+    def blob(self, text):
+        return self.run("hash-object", "-w", "--stdin", inp="".join(l + "\n" for l in text).encode("utf-8"))
+
+    def tree(self, entries):
+        """entries: (mode, sha, name bytes). -> tree sha, read through a private index file."""
+        self.n += 1
+        idx = os.path.join(self.r.tmp.name, "index-%d" % self.n)
+        rows = b"".join(b"%s %s 0\t%s\n" % (m.encode(), s.encode(), name) for m, s, name in entries)
+        self.run("update-index", "--index-info", inp=rows, env={"GIT_INDEX_FILE": idx})
+        return self.run("write-tree", env={"GIT_INDEX_FILE": idx})
+
+    def commit(self, tree, parents, when):
+        args = ["commit-tree", tree]
+        for p in parents:
+            args += ["-p", p]
+        return self.run(*args, "-m", "fixture", env={"GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when})
+
+
+class ListedReads(unittest.TestCase):
+    """A read that fails on a path the tree lists is UNKNOWN, never empty text. absent() must hold for
+    three shapes: a path that starts with a colon (ls-tree reads it as pathspec magic); a non-UTF-8 name
+    (git() decodes names with errors=replace, so the name that is read is not the tree's name); and a
+    gitlink (not a blob: its text is "", and reading it is no failure)."""
+    T0, T1, T2, T3 = "2025-12-01T10:00:00", "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
+
+    def repo(self):
+        r = Repo()
+        return r, Plumb(r)
+
+    def test_a_failed_read_of_a_colon_path_is_unknown(self):
+        r, p = self.repo()
+        app, name = p.blob(["app"]), b":/X"
+        base = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["1", "2", "3"]), name)]), [], self.T0)
+        lane = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["1 lane", "2", "3"]), name)]), [base], self.T1)
+        main = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["1", "2", "3", "main added"]), name)]), [base], self.T2)
+        merged = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["1 lane", "2", "3", "main added"]), name)]), [lane, main], self.T3)
+        r.sh("update-ref", "refs/remotes/origin/main", main)
+        with FailReads(merged, ":/X").armed():
+            with self.assertRaises(C.Unknown):
+                C.check(r.dir, "origin/main", merged)
+
+    def test_a_non_utf8_tracked_name_whose_read_fails_is_unknown(self):
+        r, p = self.repo()
+        app, name = p.blob(["app"]), b"caf\xe9.txt"
+        base = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z"]), name)]), [], self.T0)
+        lane = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z", "lane line"]), name)]), [base], self.T1)
+        main = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z", "main line"]), name)]), [base], self.T2)
+        merged = p.commit(p.tree([("100644", app, b"app.txt"), ("100644", p.blob(["x", "y", "z", "lane line"]), name)]), [lane, main], self.T3)
+        r.sh("update-ref", "refs/remotes/origin/main", main)
+        with self.assertRaises(C.Unknown):  # the merge drops main's line; the file cannot be read, so clean is a miss
+            C.check(r.dir, "origin/main", merged)
+
+    def test_a_gitlink_with_an_absent_commit_is_not_unknown(self):
+        r, p = self.repo()
+        app = p.blob(["app"])
+        pin = lambda sha: ("160000", sha, b"sub")
+        base = p.commit(p.tree([("100644", app, b"app.txt"), pin("1" * 40)]), [], self.T0)
+        lane = p.commit(p.tree([("100644", app, b"app.txt"), pin("3" * 40)]), [base], self.T1)
+        main = p.commit(p.tree([("100644", app, b"app.txt"), pin("2" * 40)]), [base], self.T2)
+        merged = p.commit(p.tree([("100644", app, b"app.txt"), pin("4" * 40)]), [lane, main], self.T3)
+        r.sh("update-ref", "refs/remotes/origin/main", main)
+        got = C.check(r.dir, "origin/main", merged)
+        self.assertEqual(got[0], [], "a gitlink reads as empty text: no drop, no Unknown")
+
+
 if __name__ == "__main__":
     unittest.main()
