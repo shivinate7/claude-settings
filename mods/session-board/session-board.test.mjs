@@ -215,6 +215,35 @@ await test('receiver: an unknown status is unseen, not busy', () => {
   same(lib.receiverState(rows, 'u'), 'unseen', 'unknown status')
 })
 
+await test('receiver: a name with angle brackets is found by its full to', () => {
+  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name: 'lane <a>', status: 'busy' }]))
+  same(lib.receiverState(rows, 'lane <a>'), 'busy', 'to lane <a>')
+})
+
+await test('receiver: a 45-char name is found by its full to', () => {
+  const name = 'worker-' + 'x'.repeat(38)
+  assert.equal(name.length, 45, 'fixture length')
+  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name, status: 'busy' }]))
+  same(lib.receiverState(rows, name), 'busy', 'full to')
+})
+
+await test('receiver: a name with two spaces is found by the same two spaces', () => {
+  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name: 'a  b', status: 'busy' }]))
+  same(lib.receiverState(rows, 'a  b'), 'busy', 'to a  b')
+})
+
+// Pins the ref strip: ListAgents prints `name [ref]` for a clash, so the bare name finds the row.
+await test('receiver: a to with a [ref] suffix reads the row named by the bare name', () => {
+  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name: 'worker-a', status: 'busy' }]))
+  same(lib.receiverState(rows, 'worker-a [a1b2]'), 'busy', 'to worker-a [a1b2]')
+})
+
+// A real name may end in brackets. The ref strip must not drop it before the exact match.
+await test('receiver: a real name that ends in brackets is found by its full to', () => {
+  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name: 'lane-2 [a]', status: 'busy' }]))
+  same(lib.receiverState(rows, 'lane-2 [a]'), 'busy', 'to lane-2 [a]')
+})
+
 // ---- update-ready
 
 await test('update-ready: waiting, no agents, nothing unpushed, clean tree is ready', () => {
