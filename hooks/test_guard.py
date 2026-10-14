@@ -9533,8 +9533,8 @@ def judge_in_process(command, cwd):
     return block["permissionDecision"], block["permissionDecisionReason"], took
 
 
-# Ratio bounds for the rm-var CPU cases. The speed bound exists because the guard must finish inside
-# its hook timeout (20 s, settings.json; decision gate-hooks-fail-closed). The limits and the one
+# Ratio bounds for the timing cases. The speed bound exists because the guard must finish inside its
+# hook timeout (60 s, settings.json; decision gate-hooks-fail-closed). The limits and the one
 # wall-clock case left live in debts/guard-timing-case-flaky.md. An absolute bound flaked on busy
 # runners, so each big case is judged in this process next to a small case of the same shape, one
 # eighth of its size. Linear work takes about the scaled baseline, a ratio of 1. The quadratic
@@ -9542,32 +9542,43 @@ def judge_in_process(command, cwd):
 # mean of 1 and 8, rounded up, which leaves a margin of about 2.7 on each side.
 #
 # Windows CPU time moves in 15.625 ms ticks, so a baseline of a few ticks reads off by 25% or more.
-# So the small baseline is the mean of batches, each spanning RM_VAR_FLOOR seconds of CPU (25 ticks).
-# The big case takes the least of its runs, which drops upward spikes from the numerator.
+# So each side is tick_safe_mean: the mean of runs that together span RM_VAR_FLOOR seconds of CPU.
 RM_VAR_K = 3
 RM_VAR_REPEATS = 3
-RM_VAR_FLOOR = 0.4       # CPU seconds one small-baseline batch must span
-RM_VAR_BATCH_CAP = 100   # runs in one batch; a clock that never moves ends here as a named FAIL
+RM_VAR_FLOOR = 0.4       # CPU seconds one batch must span (25 ticks)
+RM_VAR_BATCH_CAP = 100   # runs in one batch for a judge call; a clock that never moves ends as a FAIL
 
 
-def rm_var_batch(cmd, must):
-    """Return (ok, mean CPU per run, text): judge cmd in runs until RM_VAR_FLOOR CPU seconds pass.
+def tick_safe_mean(run_once, cap):
+    """Return (ok, mean CPU per run, text). run_once() returns (ok, CPU seconds, text) for one run.
 
-    Every run must be a deny whose reason holds `must`. The reason is the rule name, so an empty
-    `must` checks the deny alone. Too little CPU in RM_VAR_BATCH_CAP runs is a named FAIL, never a
-    division by zero.
+    Runs repeat until RM_VAR_FLOOR CPU seconds have passed, then the mean is returned. Too little CPU
+    in `cap` runs is a named FAIL, so a clock that never moves never divides by zero.
     """
     total, runs = 0.0, 0
-    while total < RM_VAR_FLOOR and runs < RM_VAR_BATCH_CAP:
-        got, reason, took = judge_in_process(cmd, NOGIT)
-        if got != "deny" or must not in reason:
-            return False, 0.0, "judged %s, not the rm-var refusal" % got
+    while total < RM_VAR_FLOOR and runs < cap:
+        ok, took, text = run_once()
+        if not ok:
+            return False, 0.0, text
         total += took
         runs += 1
     if total < RM_VAR_FLOOR:
         return False, 0.0, ("baseline spans %.3f s CPU in %d runs, under the %.2f s floor"
                             % (total, runs, RM_VAR_FLOOR))
     return True, total / runs, ""
+
+
+def rm_var_batch(cmd, must):
+    """Return tick_safe_mean of judging cmd. Every run must be a deny whose reason holds `must`.
+
+    The reason is the rule name, so an empty `must` checks the deny alone.
+    """
+    def run_once():
+        got, reason, took = judge_in_process(cmd, NOGIT)
+        if got != "deny" or must not in reason:
+            return False, 0.0, "judged %s, not the rm-var refusal" % got
+        return True, took, ""
+    return tick_safe_mean(run_once, RM_VAR_BATCH_CAP)
 
 
 def rm_var_ratio(make, small_n, big_n, must="rm-var-unguarded"):
@@ -10391,29 +10402,45 @@ def session_log_astral_cut_case():
 
 
 def session_log_control_id_time_case():
-    """session-log: the sanitizer takes a 1 MB id of control characters in under 100 ms (the best
-    of three runs), and cuts a 1 MB id of mixed text to 64 characters. The sanitizer is timed
-    in-process: a subprocess run would time Python's own start-up.
+    """session-log: sanitizing a 1 MB id of control characters scales linearly in CPU. It is timed
+    against a 128 KB id in this process, each side a tick_safe_mean, and the ratio to the scaled
+    baseline must stay under RM_VAR_K. A quadratic sanitizer gives about 8. The guard_core under test
+    is loaded from the GUARD directory, so a mutated copy is the one timed. A 1 MB mixed id must
+    still cut to 64 characters.
     """
-    if HERE not in sys.path:
-        sys.path.insert(0, HERE)
-    import guard_core  # noqa: F401  (imported for its sys.modules entry)
-    core = sys.modules["guard_core"]
-    control = "\x01" * (1 << 20)
-    best = None
-    for _ in range(3):
-        start = time.perf_counter()
-        got = core.session_log_field(control)
-        elapsed = time.perf_counter() - start
-        best = elapsed if best is None else min(best, elapsed)
-    if got != SESSION_LOG_PLACEHOLDER:
-        return False, "the control-only id gave %r, want the placeholder" % got[:20]
-    if best >= 0.1:
-        return False, "the 1 MB control-character id took %.0f ms, want under 100 ms" % (best * 1000)
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "guard_core", os.path.join(os.path.dirname(GUARD), "guard_core.py"))
+    core = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(core)
+
+    def timed(size):
+        control = "\x01" * size
+
+        def run_once():
+            start = time.process_time()
+            got = core.session_log_field(control)
+            took = time.process_time() - start
+            if got != SESSION_LOG_PLACEHOLDER:
+                return False, 0.0, "the control-only id gave %r, want the placeholder" % got[:20]
+            return True, took, ""
+        return tick_safe_mean(run_once, SESSION_LOG_BATCH_CAP)
+
+    ok, small, text = timed(1 << 17)
+    if not ok:
+        return False, "128 KB baseline: " + text
+    ok, big, text = timed(1 << 20)
+    if not ok:
+        return False, "1 MB id: " + text
+    ratio = big / (8 * small)
     mixed = core.session_log_field("\x01a" * (1 << 19))
     if mixed != "a" * 64:
         return False, "the 1 MB mixed id gave %d characters, want 64 a's" % len(mixed)
-    return True, "1 MB of control characters in %.0f ms, best of three" % (best * 1000)
+    return ratio < RM_VAR_K, ("CPU ratio %.2f to the 8x-scaled baseline, bound %d (1 MB %.4f s, "
+                              "128 KB mean %.5f s)" % (ratio, RM_VAR_K, big, small))
+
+
+SESSION_LOG_BATCH_CAP = 10000   # runs in one batch of the sanitizer timing; a stuck clock ends as a FAIL
 
 
 LOG_CHECKS_EXTRA.append(("session-log: a guard_core without set_log_session still judges and "
@@ -10422,8 +10449,8 @@ LOG_CHECKS_EXTRA.append(("session-log: a lone surrogate in session_id drops or r
                          "and keeps the line", session_log_lone_surrogate_case))
 LOG_CHECKS_EXTRA.append(("session-log: a 64-character cut keeps an astral character whole",
                          session_log_astral_cut_case))
-LOG_CHECKS_EXTRA.append(("session-log: a 1 MB control-character id is sanitized in under "
-                         "100 ms", session_log_control_id_time_case))
+LOG_CHECKS_EXTRA.append(("session-log: sanitizing a 1 MB control-character id scales linearly in CPU",
+                         session_log_control_id_time_case))
 
 
 def session_log_stale_core_case():
