@@ -15,16 +15,17 @@ Contract the builder codes against. Every case is red until hooks/daily_note.py 
   the DST rule; do not copy it. A naive timestamp in guard.log is local Central wall time.
 - Reads <CLAUDE_CONFIG_DIR>/guard.log, six tab fields: time, tool, decision, rule, matched, session.
   The tally comes from lint/guard_log_report.py. Do not parse the log a second time.
-- The checks read the previous Central day, and the 7 days before it for the deny baseline.
-  A later start on the same Central day prints nothing, writes nothing, and runs no check.
+- The checks read the previous Central day. A later start on the same Central day prints
+  nothing, writes nothing, and runs no check.
 - Failed checks, each one stdout line:
   1. A `crash` decision line (rule guard-crash) from the previous day.
   2. An STE-fallback line whose matched field ends fallback=crash, from the previous day.
   3. An STE-unchecked line from the previous day. A read that could not run is unknown.
-  4. A rule whose deny count jumped above its 7-day baseline. The line names that rule.
-  5. guard.log exists but cannot be read. The line says unknown.
+  4. guard.log exists but cannot be read. The line says unknown.
+  No volume check. A day of high but steady denies prints nothing.
 - Each line: plain text, at most 240 characters, names what failed, and names the reader
-  command, lint/guard_log_report.py. Nothing else goes to stdout. stderr stays empty.
+  command by its ABSOLUTE path, built from the hook's own folder: <hook folder>/../lint/
+  guard_log_report.py. Nothing else goes to stdout. stderr stays empty.
 - Done-today stamp: under CLAUDE_CONFIG_DIR, and it records the Central day. Never under TEMP,
   TMP, APPDATA or LOCALAPPDATA.
 - A crash in the note: exit 0, stdout empty, exactly one stderr line.
@@ -79,6 +80,11 @@ def ste_fallback_crash(stamp):
 
 def ste_unchecked(stamp):
     return row(stamp, "noted", "STE-unchecked", "notes.md unchecked", "Write")
+
+
+def reader_path(hook_folder):
+    """The reader's absolute path, one folder up from the hook's own folder: ../lint/guard_log_report.py."""
+    return os.path.normpath(os.path.join(os.path.abspath(hook_folder), "..", "lint", "guard_log_report.py"))
 
 
 def session_start_commands():
@@ -139,6 +145,12 @@ class NoteCase(unittest.TestCase):
         return subprocess.run([sys.executable, script], env=env, cwd=self.root,
                               capture_output=True, text=True, encoding="utf-8", errors="replace",
                               timeout=60)
+
+    def assert_names_reader(self, line, hook_folder):
+        expected = reader_path(hook_folder)
+        self.assertTrue(os.path.isabs(expected))
+        self.assertIn(os.path.normcase(expected), os.path.normcase(line),
+                      "the line does not print the absolute reader path %s: %r" % (expected, line))
 
     def assert_silent(self, result):
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -221,13 +233,9 @@ class CheckTests(NoteCase):
         self.assertEqual(len(lines), 1)
         self.assertIn("unchecked", lines[0].lower())
 
-    def test_deny_jump_names_only_the_rule_that_jumped(self):
-        self.write_log(steady("env-file", 5, BASELINE) + steady("env-file", 500, [YESTERDAY])
-                       + steady("waiter", 30, HISTORY))
-        lines = self.failure_lines(self.run_note(MORNING))
-        self.assertEqual(len(lines), 1)
-        self.assertIn("env-file", lines[0])
-        self.assertNotIn("waiter", lines[0])
+    def test_a_day_of_high_but_steady_denies_prints_nothing(self):
+        self.write_log(steady("env-file", 500, HISTORY) + steady("waiter", 300, HISTORY))
+        self.assert_silent(self.run_note(MORNING))
 
     def test_steady_rules_and_a_new_small_rule_do_not_fail(self):
         self.write_log(healthy_log() + steady("cite-by-id", 3, [YESTERDAY]))
@@ -247,14 +255,35 @@ class CheckTests(NoteCase):
         self.assertEqual(len(lines), 1)
         self.assertLessEqual(len(lines[0]), MAX_LINE)
         self.assertNotIn("\x1b", result.stdout)
-        self.assertIn("guard_log_report.py", lines[0])
+        self.assert_names_reader(lines[0], os.path.dirname(NOTE))
 
     def test_unreadable_guard_log_is_reported_as_unknown(self):
         os.makedirs(os.path.join(self.config, "guard.log"))  # a directory cannot be read as a log
         lines = self.failure_lines(self.run_note(MORNING))
         self.assertEqual(len(lines), 1)
         self.assertIn("unknown", lines[0].lower())
-        self.assertIn("guard_log_report.py", lines[0])
+        self.assert_names_reader(lines[0], os.path.dirname(NOTE))
+
+
+class ReaderPathTests(NoteCase):
+    def test_the_printed_reader_path_follows_the_hook_folder_not_the_repo(self):
+        # A layout like ~/.claude: hooks/ and lint/ side by side. The line must name that copy.
+        for source in (NOTE, os.path.join(ROOT, "hooks", "local_time.py"),
+                       os.path.join(ROOT, "hooks", "guard_core.py"),
+                       os.path.join(ROOT, "lint", "guard_log_report.py")):
+            self.require_file(source)
+        layout = self.scratch("layout")
+        for part in (("hooks", "daily_note.py"), ("hooks", "local_time.py"),
+                     ("hooks", "guard_core.py"), ("lint", "guard_log_report.py")):
+            os.makedirs(os.path.join(layout, part[0]), exist_ok=True)
+            source = os.path.join(ROOT, *part)
+            shutil.copyfile(source, os.path.join(layout, *part))
+        self.write_log(healthy_log() + [guard_crash(CRASH_AT)])
+        lines = self.failure_lines(self.run_note(MORNING, script=os.path.join(layout, "hooks", "daily_note.py")))
+        self.assertEqual(len(lines), 1)
+        self.assert_names_reader(lines[0], os.path.join(layout, "hooks"))
+        self.assertNotIn(os.path.normcase(reader_path(os.path.join(ROOT, "hooks"))),
+                         os.path.normcase(lines[0]))
 
 
 class CrashTests(NoteCase):
