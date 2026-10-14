@@ -211,6 +211,13 @@ function Get-SymlinkBlocker {
     }
 }
 
+# Copies install.py into a fixture clone at $Dest when the repo has one (L1, the installer spine).
+# Every fixture clone below gets it, so none loses the spine.
+function Copy-InstallPy([string]$Dest) {
+    $py = Join-Path $Repo 'install.py'
+    if (Test-Path -LiteralPath $py) { Copy-Item -LiteralPath $py -Destination (Join-Path $Dest 'install.py') }
+}
+
 # A scratch clone and CLAUDE dir for one extra case, under $Tmp. It ships CLAUDE.md, settings.json
 # and the given landed dirs. The caller adds the rest with Write-FixtureFile.
 function New-Scratch([string]$Name, [string[]]$Dirs) {
@@ -218,6 +225,7 @@ function New-Scratch([string]$Name, [string[]]$Dirs) {
     $s = @{ Root = $root; Clone = (Join-Path $root 'clone'); Cfg = (Join-Path $root 'claude') }
     New-Item -ItemType Directory -Force -Path $s.Clone, $s.Cfg | Out-Null
     Copy-Item -LiteralPath (Join-Path $Repo 'install.ps1') -Destination (Join-Path $s.Clone 'install.ps1')
+    Copy-InstallPy $s.Clone
     Write-FixtureFile (Join-Path $s.Clone 'CLAUDE.md') '# scratch fixture'
     Write-FixtureFile (Join-Path $s.Clone 'settings.json') '{}'
     Write-FixtureFile (Join-Path $s.Clone 'landed-dirs.txt') (($Dirs -join "`n") + "`n")
@@ -227,6 +235,7 @@ function New-Scratch([string]$Name, [string[]]$Dirs) {
 # ---- fixture: a small clone with the landed dirs that matter, plus the real install.ps1 --------
 New-Item -ItemType Directory -Force -Path $Clone, $Cfg | Out-Null
 Copy-Item -LiteralPath (Join-Path $Repo 'install.ps1') -Destination (Join-Path $Clone 'install.ps1')
+Copy-InstallPy $Clone
 Write-Fixture 'CLAUDE.md' '# nogap fixture'
 Write-Fixture 'settings.json' '{}'
 Write-Fixture 'landed-dirs.txt' (($Landed -join "`n") + "`n")
@@ -428,6 +437,7 @@ try {
     $SkillKept = @($L1Roots | Where-Object { (Test-Path -LiteralPath (Join-Path $_ 'SKILL.md')) -and ((Get-Content -Raw -LiteralPath (Join-Path $_ 'SKILL.md')).Trim() -eq "person's own skill") }).Count -gt 0
     Check "lock1: run 2 keeps the person's my-notes.md at the skill dir or in a .bak, never pruned" $NotesKept
     Check "lock1: run 2 keeps the person's SKILL.md content at the skill dir or in a .bak" $SkillKept
+
 } finally {
     if ($Rec) { $Rec.Dispose() }
     Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY, Env:\CLAUDE_SETTINGS_USER_ENV_KEY -ErrorAction SilentlyContinue

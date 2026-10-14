@@ -16,6 +16,7 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$HERE/.." && pwd)"
 INSTALL_SH="${INSTALL_SH_UNDER_TEST:-$REPO_ROOT/install.sh}"
+INSTALL_PY="$(dirname "$INSTALL_SH")/install.py"   # the installer spine (L1); copied when it exists
 SESSION_START_SH_DEFAULT="${SESSION_START_SH_UNDER_TEST:-$REPO_ROOT/hooks/session_start.sh}"
 
 PASS=0
@@ -102,7 +103,16 @@ make_checkout() {
       && git remote add origin "$origin" )
   printf '%s\n' "$md_body" > "$dir/CLAUDE.md"
   printf '{}\n' > "$dir/settings.json"
+  # Piped installs take their source from this checkout, so it needs install.py too (L1).
+  if [ -f "$INSTALL_PY" ]; then cp "$INSTALL_PY" "$dir/install.py"; fi
   ( cd "$dir" && git add -A && git commit -q -m init )
+}
+
+# Copies install.sh into the fixture clone $1, and install.py too when it exists (L1). Every
+# fixture that runs install.sh from a clone goes through this, so none loses the spine.
+copy_installer() {
+  cp "$INSTALL_SH" "$1/install.sh"
+  if [ -f "$INSTALL_PY" ]; then cp "$INSTALL_PY" "$1/install.py"; fi
 }
 
 # A curl stub for the fetch-fallback path: writes minimal fixtures instead of hitting
@@ -199,7 +209,7 @@ case3() {
   name="case3: local install.sh from a clone uses the clone"
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/case3-checkout"
   make_checkout "$co" "# repo CLAUDE.md case3"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
 
   out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
         bash ./install.sh 2>&1)
@@ -662,7 +672,7 @@ prune_case1() {
   fi
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/prune1-checkout"
   make_checkout "$co" "# prune1 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
   printf '#!/bin/sh\necho hi\n' > "$co/hooks/temp_hook.sh"
 
   out1=$(run_local_install "$co" "$h" "$cfg"); rc1=$?
@@ -683,7 +693,7 @@ prune_case2() {
   name="prune2: hand-placed regular file in config dir survives prune"
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/prune2-checkout"
   make_checkout "$co" "# prune2 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
   mkdir -p "$cfg/hooks"
   printf 'a person wrote this by hand\n' > "$cfg/hooks/manual.sh"
 
@@ -710,7 +720,7 @@ prune_case3() {
   fi
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/prune3-checkout"
   make_checkout "$co" "# prune3 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
   mkdir -p "$cfg/hooks"
   outside_target="$work/prune3-outside-target.sh"
   printf 'not from this checkout\n' > "$outside_target"
@@ -737,7 +747,7 @@ prune_case4() {
   name="prune4: a .bak.* file land_dir created survives prune"
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/prune4-checkout"
   make_checkout "$co" "# prune4 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
   printf '#!/bin/sh\necho new\n' > "$co/hooks/foo.sh"
   mkdir -p "$cfg/hooks"
   printf 'old hand-placed content\n' > "$cfg/hooks/foo.sh"
@@ -771,7 +781,7 @@ prune_case5() {
   fi
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/prune5-checkout"
   make_checkout "$co" "# prune5 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
   printf '#!/bin/sh\necho keep\n' > "$co/hooks/keep.sh"
 
   out1=$(run_local_install "$co" "$h" "$cfg"); rc1=$?
@@ -793,7 +803,7 @@ prune_case6() {
   name="prune6: cloud mode does not prune a stale copy (documented, not fixed)"
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/prune6-checkout"
   make_checkout "$co" "# prune6 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
   printf '#!/bin/sh\necho cloud\n' > "$co/hooks/cloud_hook.sh"
 
   out1=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
@@ -1029,7 +1039,7 @@ skills_case1() {
   fi
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/skills1-checkout"
   make_checkout "$co" "# skills1 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
   mkdir -p "$co/skills/fresh-prose"
   printf '%s\n' "---" "name: fresh-prose" "---" "shipped skill" > "$co/skills/fresh-prose/SKILL.md"
   mkdir -p "$cfg/skills/my-own"
@@ -1061,7 +1071,7 @@ skills_case2() {
   name="skills2: cloud mode backs up a pre-existing real skill directory before overwriting it"
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/skills2-checkout"
   make_checkout "$co" "# skills2 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
   mkdir -p "$co/skills/fresh-prose"
   printf 'new content\n' > "$co/skills/fresh-prose/SKILL.md"
   mkdir -p "$cfg/skills/fresh-prose"
@@ -1127,7 +1137,7 @@ copymode_case1() {
   name="copymode1: two runs under a copying \`ln\` leave no skill/agent .bak, one settings.json.bak holding run 1, and land current content"
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/copymode1-checkout"
   make_checkout "$co" "# copymode1 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
   mkdir -p "$co/skills/sample-skill"
   printf 'v1\n' > "$co/skills/sample-skill/SKILL.md"
   printf 'agent v1\n' > "$co/agents/sample.md"
@@ -1183,7 +1193,7 @@ backup_case1() {
   name="backup1: a pre-existing CLAUDE.md with its own content is backed up before the pointer replaces it"
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/backup1-checkout"
   make_checkout "$co" "# backup1 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
   mkdir -p "$cfg"
   printf 'my own notes\n' > "$cfg/CLAUDE.md"
 
@@ -1212,7 +1222,7 @@ backup_case2() {
   fi
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/backup2-checkout"
   make_checkout "$co" "# backup2 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
   mkdir -p "$cfg"
   printf '{"mine": true}\n' > "$cfg/settings.json"
 
@@ -1246,7 +1256,7 @@ settings_repeat_case1() {
   fi
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/settings_repeat1-checkout"
   make_checkout "$co" "# settings_repeat1 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
 
   out1=$(run_local_install "$co" "$h" "$cfg"); rc1=$?
   rm -f "$cfg/settings.json"
@@ -1281,7 +1291,7 @@ settings_repeat_case2() {
   fi
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/settings_repeat2-checkout"
   make_checkout "$co" "# settings_repeat2 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
 
   out1=$(run_local_install "$co" "$h" "$cfg"); rc1=$?
   printf '{"older": "first"}\n' > "$cfg/settings.json.bak.20260101000000.1001"
@@ -1314,7 +1324,7 @@ settings_repeat_case3() {
   fi
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/settings_repeat3-checkout"
   make_checkout "$co" "# settings_repeat3 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
 
   out1=$(run_local_install "$co" "$h" "$cfg"); rc1=$?
   printf 'old claude backup\n' > "$cfg/CLAUDE.md.bak.20260101000000"
@@ -1352,7 +1362,7 @@ settings_repeat_case4() {
   fi
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/settings_repeat4-checkout"
   make_checkout "$co" "# settings_repeat4 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
 
   out1=$(run_local_install "$co" "$h" "$cfg"); rc1=$?
   printf '{"older": "first"}\n' > "$cfg/settings.json.bak.20260101000000.1001"
@@ -1421,7 +1431,7 @@ orig_case1() {
   name="orig1: copy-mode runs 2 and 3 leave the user's first settings.json in .orig and one settings.json.bak.*"
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/orig1-checkout"
   make_checkout "$co" "# orig1 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
   log="$work/orig1-mv.log"; : > "$log"
   make_settings_bin "$work/orig1-bin" "$log" ok
   mkdir -p "$cfg"
@@ -1449,7 +1459,7 @@ orig_case2() {
   name="orig2: a repeat run never prunes or overwrites an existing settings.json.orig"
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/orig2-checkout"
   make_checkout "$co" "# orig2 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
   log="$work/orig2-mv.log"; : > "$log"
   make_settings_bin "$work/orig2-bin" "$log" ok
 
@@ -1477,7 +1487,7 @@ bakname_case1() {
   name="bakname1: repeat runs 2 and 3 in the same second back up to distinct names"
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/bakname1-checkout"
   make_checkout "$co" "# bakname1 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
   log="$work/bakname1-mv.log"; : > "$log"
   make_settings_bin "$work/bakname1-bin" "$log" ok
   mkdir -p "$cfg"
@@ -1511,7 +1521,7 @@ bakfail_case1() {
   name="bakfail1: a failed settings.json backup move exits non-zero, prunes nothing, leaves settings.json as it was"
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/bakfail1-checkout"
   make_checkout "$co" "# bakfail1 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
   log="$work/bakfail1-mv.log"; : > "$log"
   make_settings_bin "$work/bakfail1-bin" "$log" fail
 
@@ -1560,7 +1570,7 @@ legacy_case1() {
   fi
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/legacy1-checkout"
   make_checkout "$co" "# legacy1 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
 
   out1=$(run_local_install "$co" "$h" "$cfg"); rc1=$?
   printf '{"legacy": true}\n' > "$cfg/settings.json.bak.20260916213147"
@@ -1594,7 +1604,7 @@ orig_case3() {
   name="orig3: a first install with settings.json.orig present keeps .orig and backs the plain file to .bak.<T>.<pid>"
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/orig3-checkout"
   make_checkout "$co" "# orig3 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
   mkdir -p "$cfg"
   printf '{"orig": "kept"}\n' > "$cfg/settings.json.orig"
   printf '{"mine": 3}\n' > "$cfg/settings.json"
@@ -1630,7 +1640,7 @@ bin_case1() {
   fi
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/bin1-checkout"
   make_checkout "$co" "# bin1 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
   cp "$REPO_ROOT/bin/claude-janitor" "$co/bin/claude-janitor"
   mkdir -p "$cfg/bin"
   printf 'old shim\n' > "$cfg/bin/claude-janitor"
@@ -1667,7 +1677,7 @@ bin_case2() {
   name="bin2: a directory named janitor.py is left alone"
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/bin2-checkout"
   make_checkout "$co" "# bin2 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
   mkdir -p "$cfg/bin/janitor.py"
   printf 'x\n' > "$cfg/bin/janitor.py/inner"
   out=$(run_local_install "$co" "$h" "$cfg"); rc=$?
@@ -1689,7 +1699,7 @@ path_case1() {
   name="path1: zsh SHELL gets the marked block in ~/.zshrc once, not in ~/.bashrc, second run adds nothing"
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/path1-checkout"
   make_checkout "$co" "# path1 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
   printf '# my zshrc\n' > "$h/.zshrc"
   if [ -e "$h/.bashrc" ] || grep -q "claude-settings" "$h/.zshrc"; then
     bad "$name" "fixture precondition failed: rc files not clean"; rm -rf "$h"; return
@@ -1711,7 +1721,7 @@ path_case2() {
   name="path2: bash SHELL gets the marked block in ~/.bashrc, not in ~/.zshrc"
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/path2-checkout"
   make_checkout "$co" "# path2 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
   if [ -e "$h/.bashrc" ] || [ -e "$h/.zshrc" ]; then
     bad "$name" "fixture precondition failed: rc files exist"; rm -rf "$h"; return
   fi
@@ -1728,7 +1738,7 @@ path_case3() {
   name="path3: SHELL unset under set -u does not abort install and writes ~/.bashrc"
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/path3-checkout"
   make_checkout "$co" "# path3 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
   if [ -e "$h/.bashrc" ]; then bad "$name" "fixture precondition failed: ~/.bashrc exists"; rm -rf "$h"; return; fi
   # bash re-creates SHELL at startup, so `env -i bash ./install.sh` would not leave it unset.
   # Unset it inside the shell, assert it is unset (exit 99 if not), then source the installer.
@@ -1745,7 +1755,7 @@ path_case4() {
   name="path4: --cloud and CLAUDE_CODE_REMOTE=true touch no rc file"
   h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/path4-checkout"
   make_checkout "$co" "# path4 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  copy_installer "$co"
   printf '# my bashrc\n' > "$h/.bashrc"; printf '# my zshrc\n' > "$h/.zshrc"
   out1=$( cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" SHELL=/bin/bash bash ./install.sh --cloud 2>&1 ); rc1=$?
   out2=$( cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" SHELL=/usr/bin/zsh CLAUDE_CODE_REMOTE=true bash ./install.sh 2>&1 ); rc2=$?

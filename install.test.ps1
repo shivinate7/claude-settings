@@ -72,6 +72,14 @@ function Test-ReparsePoint([string]$Path) {
     return (([int]$i.Attributes) -band [int][IO.FileAttributes]::ReparsePoint) -ne 0
 }
 
+# Copies install.ps1 into a fixture clone at $Dest, and install.py too when the repo has one.
+# Every fixture clone below is built through this, so none loses the installer spine (L1).
+function Copy-Installer([string]$Dest) {
+    Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $Dest 'install.ps1')
+    $py = Join-Path $Here 'install.py'
+    if (Test-Path $py) { Copy-Item $py (Join-Path $Dest 'install.py') }
+}
+
 # Every subprocess install below writes its PATH change to this throwaway key, never to the real
 # HKCU:\Environment. install.ps1 reads the key path from CLAUDE_SETTINGS_USER_ENV_KEY. The key
 # and the variable are removed at the end of the file.
@@ -98,7 +106,7 @@ $Co   = Join-Path $Tmp2 'clone'
 $Cfg  = Join-Path $Tmp2 'claude'
 New-Item -ItemType Directory -Force -Path $Co, $Cfg | Out-Null
 try {
-    Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $Co 'install.ps1')
+    Copy-Installer $Co
     Set-Content -Path (Join-Path $Co 'CLAUDE.md') -Value "# copymode1 content" -Encoding utf8
     Set-Content -Path (Join-Path $Co 'settings.json') -Value '{}' -Encoding utf8
     Set-Content -Path (Join-Path $Co 'landed-dirs.txt') -Value "skills" -Encoding utf8
@@ -139,7 +147,7 @@ $Co3  = Join-Path $Tmp3 'clone'
 $Cfg3 = Join-Path $Tmp3 'claude'
 New-Item -ItemType Directory -Force -Path $Co3, $Cfg3 | Out-Null
 try {
-    Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $Co3 'install.ps1')
+    Copy-Installer $Co3
     Set-Content -Path (Join-Path $Co3 'CLAUDE.md') -Value "# settingsrepeat1 content" -Encoding utf8
     Set-Content -Path (Join-Path $Co3 'settings.json') -Value '{"v":1}' -Encoding utf8
     Set-Content -Path (Join-Path $Co3 'landed-dirs.txt') -Value "skills" -Encoding utf8
@@ -178,7 +186,7 @@ $Co4  = Join-Path $Tmp4 'clone'
 $Cfg4 = Join-Path $Tmp4 'claude'
 New-Item -ItemType Directory -Force -Path $Co4, $Cfg4 | Out-Null
 try {
-    Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $Co4 'install.ps1')
+    Copy-Installer $Co4
     Set-Content -Path (Join-Path $Co4 'CLAUDE.md') -Value "# firstinstall1 content" -Encoding utf8
     Set-Content -Path (Join-Path $Co4 'settings.json') -Value '{}' -Encoding utf8
     Set-Content -Path (Join-Path $Co4 'landed-dirs.txt') -Value "skills`nagents" -Encoding utf8
@@ -239,7 +247,7 @@ $Co5  = Join-Path $Tmp5 'clone'
 $Cfg5 = Join-Path $Tmp5 'claude'
 New-Item -ItemType Directory -Force -Path $Co5, $Cfg5 | Out-Null
 try {
-    Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $Co5 'install.ps1')
+    Copy-Installer $Co5
     Set-Content -Path (Join-Path $Co5 'CLAUDE.md') -Value "# envkey1 content" -Encoding utf8
     Set-Content -Path (Join-Path $Co5 'settings.json') -Value '{}' -Encoding utf8
     Set-Content -Path (Join-Path $Co5 'landed-dirs.txt') -Value "skills" -Encoding utf8
@@ -283,7 +291,7 @@ if (-not $IsWin) {
     $Cfg5 = Join-Path $Tmp5 'claude'
     New-Item -ItemType Directory -Force -Path $Co5, $Cfg5 | Out-Null
     try {
-        Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $Co5 'install.ps1')
+        Copy-Installer $Co5
         Set-Content -Path (Join-Path $Co5 'CLAUDE.md') -Value "# nonwin1 content" -Encoding utf8
         Set-Content -Path (Join-Path $Co5 'settings.json') -Value '{}' -Encoding utf8
         Set-Content -Path (Join-Path $Co5 'landed-dirs.txt') -Value "skills" -Encoding utf8
