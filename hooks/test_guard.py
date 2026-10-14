@@ -8741,7 +8741,7 @@ LOG_CHECKS_EXTRA.append(("rm-var: 2000 unclosed $( spans are judged in under 2 s
                          rm_var_slow_case))
 
 
-# In-process timing (ruling item 3). guard.judge runs in this process and only its CPU time is read,
+# In-process timing. guard.judge runs in this process and only its CPU time is read,
 # so the reading is the guard's own work. A hook subprocess's CPU time is not this process's, so no
 # subprocess is timed here. judge answers by printing one JSON block and exiting, so stdout is
 # captured and SystemExit is caught. The guard's log goes under CLAUDE_CONFIG_DIR, pointed at the
@@ -8774,37 +8774,63 @@ def judge_in_process(command, cwd):
     return block["permissionDecision"], block["permissionDecisionReason"], took
 
 
-# Ratio bounds for the rm-var CPU cases (decision rm-on-a-variable-needs-a-guard, ruling item 3).
-# An absolute bound flaked on busy runners (debts/guard-timing-case-flaky.md). So each big case is
-# judged in this process next to a small case of the same shape, one eighth of its size. Linear
-# work takes about the scaled baseline, a ratio of 1. The quadratic slowdown takes about 8. The big
-# case passes when its ratio stays under RM_VAR_K = 3, the geometric mean of 1 and 8, rounded up,
-# which leaves a margin of about 2.7 on each side.
+# Ratio bounds for the rm-var CPU cases. The speed bound exists because the guard must finish inside
+# its hook timeout (20 s, settings.json; decision gate-hooks-fail-closed). The limits and the one
+# wall-clock case left live in debts/guard-timing-case-flaky.md. An absolute bound flaked on busy
+# runners, so each big case is judged in this process next to a small case of the same shape, one
+# eighth of its size. Linear work takes about the scaled baseline, a ratio of 1. The quadratic
+# slowdown takes about 8. The big case passes when its ratio stays under RM_VAR_K = 3, the geometric
+# mean of 1 and 8, rounded up, which leaves a margin of about 2.7 on each side.
+#
+# Windows CPU time moves in 15.625 ms ticks, so a baseline of a few ticks reads off by 25% or more.
+# So the small baseline is the mean of batches, each spanning RM_VAR_FLOOR seconds of CPU (25 ticks).
+# The big case takes the least of its runs, which drops upward spikes from the numerator.
 RM_VAR_K = 3
 RM_VAR_REPEATS = 3
+RM_VAR_FLOOR = 0.4       # CPU seconds one small-baseline batch must span
+RM_VAR_BATCH_CAP = 100   # runs in one batch; a clock that never moves ends here as a named FAIL
+
+
+def rm_var_batch(cmd, must):
+    """Return (ok, mean CPU per run, text): judge cmd in runs until RM_VAR_FLOOR CPU seconds pass.
+
+    Every run must be a deny whose reason holds `must`. The reason is the rule name, so an empty
+    `must` checks the deny alone. Too little CPU in RM_VAR_BATCH_CAP runs is a named FAIL, never a
+    division by zero.
+    """
+    total, runs = 0.0, 0
+    while total < RM_VAR_FLOOR and runs < RM_VAR_BATCH_CAP:
+        got, reason, took = judge_in_process(cmd, NOGIT)
+        if got != "deny" or must not in reason:
+            return False, 0.0, "judged %s, not the rm-var refusal" % got
+        total += took
+        runs += 1
+    if total < RM_VAR_FLOOR:
+        return False, 0.0, ("baseline spans %.3f s CPU in %d runs, under the %.2f s floor"
+                            % (total, runs, RM_VAR_FLOOR))
+    return True, total / runs, ""
 
 
 def rm_var_ratio(make, small_n, big_n, must="rm-var-unguarded"):
-    """Return (ok, text) for make(big_n) against make(small_n) scaled by big_n / small_n.
-
-    The sizes alternate, and each keeps its least CPU over RM_VAR_REPEATS runs, so a slow spell
-    reaches both sizes alike. Every run must be a deny whose reason holds `must`. The reason is the
-    rule name, so an empty `must` checks the deny alone.
-    """
+    """Return (ok, text) for make(big_n) against make(small_n) scaled by big_n / small_n."""
     small, big = [], []
     for _ in range(RM_VAR_REPEATS):
-        for n, took_list in ((small_n, small), (big_n, big)):
-            got, reason, took = judge_in_process(make(n), NOGIT)
-            if got != "deny" or must not in reason:
-                return False, "n=%d judged %s, not the rm-var refusal" % (n, got)
-            took_list.append(took)
+        ok, mean, text = rm_var_batch(make(small_n), must)
+        if not ok:
+            return False, "small n=%d: %s" % (small_n, text)
+        small.append(mean)
+        got, reason, took = judge_in_process(make(big_n), NOGIT)
+        if got != "deny" or must not in reason:
+            return False, "big n=%d judged %s, not the rm-var refusal" % (big_n, got)
+        big.append(took)
     size = big_n / small_n
-    ratio = min(big) / (size * min(small))
+    base = sum(small) / len(small)   # each batch mean is positive: it spans RM_VAR_FLOOR
+    ratio = min(big) / (size * base)
     return ratio < RM_VAR_K, ("CPU ratio %.2f to the %dx-scaled baseline, bound %d (big %.2f s, "
-                              "small %.2f s)" % (ratio, size, RM_VAR_K, min(big), min(small)))
+                              "small mean %.3f s)" % (ratio, size, RM_VAR_K, min(big), base))
 
 
-# Ruling item 3: 4000 names, each bound to /tmp/a and then deleted through a glob under that name,
+# Timing case: 4000 names, each bound to /tmp/a and then deleted through a glob under that name,
 # are the rm-var refusal, and their CPU grows linearly. Each flagged delete re-reads the rest of the
 # command for later bindings, so a re-read per delete grows as the square of the segments. The name
 # must differ per segment: a repeated name has more than 64 values and is refused before that
