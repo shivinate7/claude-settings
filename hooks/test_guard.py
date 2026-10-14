@@ -5278,6 +5278,34 @@ sh("git env set: Bash unquoted heredoc runs a substitution with a set, denies",
 sh("git env set: Bash quoted heredoc runs no substitution, allowed",
    "cat <<'EOF'\n$(GIT_DIR=x " + VCS + " init)\nEOF", "allow", cwd=NOGIT)
 
+# Round 1 review of 76b4b0b (guard-speed): a name split by a substitution. The walk reads each
+# `$(...)` as `x`, so `GIT_INDE$(echo X)_FILE` reads as `GIT_INDEx_FILE`, and the case fold makes
+# that the watched name. The raw text holds no whole name, so a quick test of the raw text skips
+# the walk and allows what the walk denied on 46c3191. Each case below is denied there.
+# KNOWN LIMIT: GIT_DIR and GIT_WORK_TREE hold no X, so no substitution builds either name, and
+# the walk allows their split forms on both heads. A bare split assignment with no command after
+# it is allowed on both too (a bare name in capitals is denied only when it is written whole).
+_SPLIT = "GIT_INDE$(echo X)_FILE"
+for _label, _cmd in (
+    ("export", "export %s=/x; python -m pytest"),
+    ("declare -x", "declare -x %s=/x; python -m pytest"),
+    ("typeset -x", "typeset -x %s=/x; python -m pytest"),
+    ("env", "env %s=/x python -m pytest"),
+    ("sh -c export", 'sh -c "export %s=/x; python -m pytest"'),
+    ("a prefix assignment", "%s=/x python -m pytest"),
+    ("setx", "setx %s x"),
+    ("cmd /c setx", "cmd /c setx %s x"),
+):
+    sh("git env set: Bash, a name split by a substitution, %s, denies" % _label, _cmd % _SPLIT,
+       "deny", GIT_ENV_RULE, cwd=NOGIT)
+for _label, _cmd in (
+    ("Set-Item", r'Set-Item env:%s "C:\x\index"; python -m pytest'),
+    ("New-Item", r"New-Item env:%s -Value C:\x\index; python -m pytest"),
+    ("setx", "setx %s x"),
+):
+    sh("git env set: PowerShell, a name split by a substitution, %s, denies" % _label,
+       _cmd % _SPLIT, "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+
 # =========================================================================== 5. merge into main
 FAMILY = "merge"
 #
