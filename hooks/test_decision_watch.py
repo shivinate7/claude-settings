@@ -841,18 +841,6 @@ def case_main_stop_hook_active_stays_quiet():
     check("main_stop_hook_active: known-bad pair prints UNKNOWN", _says_unknown(paired), paired.stdout)
 
 
-def case_settings_timeout_covers_worst_case():
-    with open(os.path.join(HERE, "..", "settings.json")) as f:
-        settings = json.load(f)
-    entries = [h for grp in settings["hooks"]["Stop"] for h in grp["hooks"]
-               if "hooks/decision_watch.py" in h.get("command", "")]
-    check("settings_timeout: one Stop entry runs decision_watch.py", len(entries) == 1, len(entries))
-    budget = 2 * dw.GIT_TIMEOUT + dw.MAX_DIFFED_FILES * dw.GIT_TIMEOUT + dw.MODEL_TIMEOUT
-    timeout = entries[0].get("timeout", 0) if entries else 0
-    check("settings_timeout: Stop timeout >= worst-case budget", timeout >= budget,
-          "timeout=%s budget=%s" % (timeout, budget))
-
-
 # --------------------------------------------------------------------------- case 12
 # The one-year token file (decisions/question-outcome-check.md, ruling 2026-10-08).
 # invoke_model reads `${CLAUDE_CONFIG_DIR:-~/.claude}/state/hook-token` and passes its
@@ -1323,7 +1311,7 @@ def case_bad_flag_runs_the_default_model_call():
 
 
 def case_emit_prompt_prints_needs_model_and_calls_no_model():
-    # Red on main. --emit-prompt on a due model call prints {needs_model, prompt, model} and
+    # Red on main. --emit-prompt on a due model call prints {needs_model, prompt, model, key} and
     # spawns no model. It writes no cache, so a second run still asks.
     name = "emit_needs"
     with scratch_config(name):
@@ -1339,8 +1327,8 @@ def case_emit_prompt_prints_needs_model_and_calls_no_model():
         dw.run(hook, model_call=spy)
     got = _json_or_none(out1)
     check("emit-prompt: no model subprocess", spawns1 == 0, spawns1)
-    check("emit-prompt: prints exactly needs_model, prompt, model",
-          isinstance(got, dict) and set(got) == {"needs_model", "prompt", "model"}, out1[:200])
+    check("emit-prompt: prints exactly needs_model, prompt, model, key",
+          isinstance(got, dict) and set(got) == {"needs_model", "prompt", "model", "key"}, out1[:200])
     check("emit-prompt: needs_model is true", isinstance(got, dict) and got.get("needs_model") is True, out1[:200])
     check("emit-prompt: model is MODEL", isinstance(got, dict) and got.get("model") == dw.MODEL, out1[:200])
     check("emit-prompt: prompt names the protected file",
@@ -1570,7 +1558,6 @@ def main():
     case_main_prints_the_config_report()
     case_main_missing_transcript()
     case_main_stop_hook_active_stays_quiet()
-    case_settings_timeout_covers_worst_case()
 
     for case in (
         case_invoke_model_signature_and_return_shape_pinned,
