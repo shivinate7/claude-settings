@@ -247,12 +247,12 @@ def owner_messages(path):
     return [text for kind, _, text in _scan(path) if kind == "owner"]
 
 
-FENCE_TOKEN = re.compile(r"<<<(BEGIN|END)")
+FENCE_TOKEN = re.compile(r"<{3,}(?=BEGIN|END)")  # any run of 3+ "<" before BEGIN or END
 
 
 def _block(label, text):
     """One fenced block. A fence token inside the text is defanged, so the text cannot close its own fence."""
-    return "<<<BEGIN %s>>>\n%s\n<<<END>>>" % (label, FENCE_TOKEN.sub(r"<<\1", text))
+    return "<<<BEGIN %s>>>\n%s\n<<<END>>>" % (label, FENCE_TOKEN.sub("<<", text))
 
 
 def span_text(entries, budget=SPAN_BUDGET):
