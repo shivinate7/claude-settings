@@ -99,8 +99,10 @@ These stay open. Each is low harm, ranked by harm.
 - While capture is open, `fb:done` and `` `fb done` `` in backticks do not close it. The judge
   or the quiet time ends capture, and the turn-end reminder shows each time.
 - The judge child checks the marker, then writes the note item and removes the marker. A message
-  captured in between keeps capture open, and the note sits under the newer message. It is a note
-  item, so the gate does not block on it.
+  captured in that gap can lose its new marker, so capture closes early. Debt
+  fb-judge-marker-race (the judge can close a newer capture).
+- Two processes that append to the inbox at the same instant can lose a line on Windows. Debt
+  fb-inbox-append-race (concurrent appends drop lines).
 - A partial write can leave a fence open. Later blocks then read as one message with no
   items, and the gate repeats that block. It needs a disk-full failure.
 - An unreadable inbox drops the open ids from the post-compaction note. The Stop gate still
