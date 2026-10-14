@@ -331,7 +331,7 @@ def env_reference(word: str) -> str:
     return word
 
 
-def env_refusal(cmd: str, subs_only: bool = False):
+def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
     """Return (printed reason, logged text) when the command touches an environment file.
 
     Both are the empty string when the command is clean.
@@ -349,7 +349,7 @@ def env_refusal(cmd: str, subs_only: bool = False):
     prints text, so its arguments are data. `subs_only` judges the substitutions and not the text
     around them, for the body of a heredoc.
     """
-    texts, too_deep = _substitutions(cmd)
+    texts, too_deep = _substitutions(cmd, heredoc=heredoc)
     if too_deep:
         return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH
     if subs_only:
@@ -375,7 +375,7 @@ def env_heredoc_refusal(raw: str):
     """
     for quote, body, _ in _split_heredocs(raw)[1]:
         if not quote:
-            refusal = env_refusal(body, subs_only=True)
+            refusal = env_refusal(body, subs_only=True, heredoc=True)
             if refusal[0]:
                 return refusal
     return "", ""

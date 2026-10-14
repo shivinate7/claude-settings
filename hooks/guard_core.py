@@ -246,8 +246,11 @@ def segment_tokens(segment: str):
     if found is None:
         return None
     tokens = _Tokens(found)
-    if any(_GROUP_OPEN.match(t) for t in tokens):
-        tokens.quoted = _quoted_opens(segment, len(tokens))
+    if any(_GROUP_OPEN.search(t) for t in tokens):
+        # A multi-line here-string (`@'`...`'@`) reads as one token `@...@` that holds a newline.
+        # The non-POSIX reading cannot parse it, so its text is claimed here.
+        here = frozenset(i for i, t in enumerate(tokens) if t[:1] == t[-1:] == "@" and "\n" in t)
+        tokens.quoted = _quoted_opens(segment, len(tokens)) | here
     return tokens
 
 

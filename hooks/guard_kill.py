@@ -488,6 +488,7 @@ _PS_UNSET = ("$null", "")
 
 # A script block or a group that runs its body: `{`, `&{`, `.{`, `(`, `$(`, `@(`.
 _PS_BLOCK_OPEN = re.compile(r"[&.]?\{|[&.$@]?\(")
+_PS_GLUED_BRACE = re.compile(r"(?<!\$)\{")
 
 
 def _open_script_blocks(tokens):
@@ -505,7 +506,12 @@ def _open_script_blocks(tokens):
         while (opens := _PS_BLOCK_OPEN.match(tok)) and len(tok) > opens.end():
             out.append(opens.group(0)[-1])
             tok = tok[opens.end():].rstrip("})")
-        out.append(tok)
+        # A `{` glued to its word (`%{`, `){`, `try{`, `$sb={`) opens a block too. `${` is a
+        # braced variable name, so it stays whole.
+        head, *rest = _PS_GLUED_BRACE.split(tok) if len(tok) > 1 else [tok]
+        out.append(head)
+        for part in rest:
+            out += ["{", part.rstrip("})")]
     return out
 
 
