@@ -14,8 +14,13 @@
 // verdict text exactly; a judge slot held by a python call that never returns frees within 60 s.
 // Amended in review round 2 (were pins of e40df46): the two-phase model-call fields (timeoutMs is pinned
 // on its own) and the stop_hook_active case (a STOP seen write is allowed).
+// Guessed contract point, HOLE 12 cases only: the real child's env is the host env merged with the env register.mjs
+// passes (the host may replace it instead). Those cases run the real hooks/decision_watch.py, not the fake.
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mock } from 'node:test'
 
@@ -961,6 +966,116 @@ await test('log: holds the verdict line and timings, never the prompt text', asy
   assert.ok(!allLog(h).includes(SENTINEL), 'the prompt text reached the log')
   assert.match(endData, /\d+ ms/, 'timings missing')
   assert.match(endData, /FLAG/, 'verdict line missing')
+})
+
+// ---- HOLE 12 (decision decision-watch-mod-limits): unread-subject notices under the mod. register.mjs runs python
+// with CLAUDE_CONFIG_DIR set to the mod's state folder, so collect_unread reads guard.log there, not in the real
+// config folder. These cases run the real decision_watch.py with the env register.mjs passes.
+
+const REPO_PY = fileURLToPath(new URL('../../hooks/decision_watch.py', import.meta.url))
+const SUBJECT = 'UNREAD-SUBJECT-ALPHA-3'
+const pad = n => String(n).padStart(2, '0')
+// A naive local stamp, the form guard_core writes into guard.log.
+const localStamp = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+
+// The first python on PATH that runs. The Store stub prints a message and exits non-zero. null when none runs.
+function pythonCmd() {
+  for (const c of ['python', 'python3']) {
+    const r = spawnSync(c, ['--version'], { encoding: 'utf8' })
+    if (r.status === 0 && !/WindowsApps/i.test(`${r.stdout}${r.stderr}`)) return c
+  }
+  return null
+}
+const PY_CMD = pythonCmd()
+
+// A real child, started as register.mjs starts it: the mod's argv, with the script path set to this repo's script.
+function realRun(argv, o) {
+  const rest = argv.slice(1).map(a => (/hooks[\\/]decision_watch\.py$/.test(a) ? REPO_PY : a))
+  const r = spawnSync(argv[0], rest, { input: o.stdin, env: { ...process.env, ...o.env }, encoding: 'utf8', timeout: o.timeoutMs || 30000 })
+  return { exitCode: r.status ?? -1, stdout: r.stdout || '', stderr: r.stderr || (r.error ? String(r.error) : '') }
+}
+
+// A real transcript (one human turn, one reply after it), a clean git repo as cwd, and a guard.log in the real config
+// folder holding one unread-subject line from this turn.
+function unreadFixture() {
+  const root = mkdtempSync(join(tmpdir(), 'dw-unread-'))
+  const cfg = join(root, 'real-config')
+  const repo = join(root, 'repo')
+  mkdirSync(cfg)
+  mkdirSync(repo)
+  spawnSync('git', ['init', '-q'], { cwd: repo })
+  spawnSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'base'], { cwd: repo })
+  const transcript = join(root, 'session.jsonl')
+  const records = [
+    { type: 'user', timestamp: new Date(Date.now() - 60000).toISOString(), message: { role: 'user', content: 'check the record folders' } },
+    { type: 'assistant', timestamp: new Date().toISOString(), message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } },
+  ]
+  writeFileSync(transcript, records.map(r => JSON.stringify(r)).join('\n') + '\n')
+  // guard.log fields: when, tool, decision, rule, matched, session
+  writeFileSync(join(cfg, 'guard.log'), [localStamp(new Date()), 'Bash', 'noted', 'subject-unread', SUBJECT, SID].join('\t') + '\n')
+  return { cfg, repo, transcript }
+}
+
+// The Stop judge through register.mjs, with the python call run for real. h.runs records each child.
+async function realStop(fx) {
+  const h = await load(host({
+    env: { CLAUDE_CONFIG_DIR: fx.cfg },
+    cwd: fx.repo,
+    finder: { exitCode: 0, stdout: PY_CMD + '\n', stderr: '' },
+  }))
+  const fake = h.$.process.run
+  h.runs = []
+  h.$.process.run = async (argv, o = {}) => {
+    if (argv[0] !== PY_CMD || argv[1] !== '-I') return fake(argv, o)
+    const r = realRun(argv, o)
+    h.runs.push(r)
+    return r
+  }
+  return h
+}
+
+await test('HOLE 12: under the mod env, a real python run shows the unread subject from the real config folder', async () => {
+  assert.ok(PY_CMD, 'no python on PATH, so the real-python case cannot run')
+  const fx = unreadFixture()
+  const h = await realStop(fx)
+  await fire(h, 'classic.Stop', stopEvent({ transcript_path: fx.transcript, cwd: fx.repo }), {})
+  await within(h.endLogged, 30000, 'the shadow log END line')
+  await settle(60)
+  assert.ok(h.runs.length > 0 && h.runs.every(r => r.exitCode === 0), `python did not run clean: ${JSON.stringify(h.runs.map(r => r.stderr.slice(0, 300)))}`)
+  const notices = h.toasts.filter(t => /notice/i.test(t))
+  same(notices.length, 1, 'notice toasts')
+  assert.ok(notices[0].includes(SUBJECT), `the notice does not name the unread subject: ${JSON.stringify(notices[0].slice(0, 200))}`)
+})
+
+// The control: the same fixture, read with the real folder as CLAUDE_CONFIG_DIR. It must pass on the old code too,
+// so a red above comes from the state folder and not from the fixture.
+await test('HOLE 12 control: the same log, read under the real folder, gives one notice', async () => {
+  assert.ok(PY_CMD, 'no python on PATH, so the real-python case cannot run')
+  const fx = unreadFixture()
+  const r = realRun([PY_CMD, '-I', fx.cfg + '/hooks/decision_watch.py', '--emit-prompt'], {
+    stdin: JSON.stringify(stopEvent({ transcript_path: fx.transcript, cwd: fx.repo })),
+    env: { CLAUDE_CONFIG_DIR: fx.cfg },
+  })
+  same(r.exitCode, 0, `python exit code, stderr ${JSON.stringify(r.stderr.slice(0, 200))}`)
+  const out = JSON.parse(r.stdout)
+  same(out.notices.length, 1, 'notices under the real folder')
+  assert.ok(out.notices[0].includes(SUBJECT), `the notice does not name the unread subject: ${JSON.stringify(out.notices[0])}`)
+})
+
+// HOLE 13 (same decision): the END line is cut at MAX_LINE (2000 characters), so a notice past the cut leaves the log
+// (its toast still shows). The normal flow cannot reach 3000 characters, so a 3000-character verdict stands in for a
+// long trace. The check reads every log write, not only END, so a fix may shorten or split lines.
+await test('HOLE 13: the END log keeps every notice when the line runs 3000 characters', async () => {
+  const LONG = 'v'.repeat(3000)
+  const MERGE = pyConst('MERGE_MESSAGE').replace('%s', 'PR #9') + pyConst('TAIL')
+  const h = await load(host({ py1: splitOut(LONG, [CONFIG_NOTICE, MERGE]) }))
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await judged(h)
+  await settle(60)
+  const logged = allLog(h)
+  for (const n of [CONFIG_NOTICE, MERGE]) {
+    assert.ok(logged.includes('NOTICE: ' + n), `the log lost a notice: ${JSON.stringify(n.slice(0, 80))}`)
+  }
 })
 
 // ---- the background judge never leaks an unhandled rejection
