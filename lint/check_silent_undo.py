@@ -16,9 +16,10 @@ Two reads, one verdict. Design: decisions/silent-undo-check-design.md.
               earlier first-parent commit of upstream changed it: the exact blob (whole
               file), a -U0 hunk reversed on all but one line, or lines main only added
               that this change removes, even beside an edit. Reads only the commits
-              upstream gained after the branch was cut (from the fork point, the
-              merge base, up, that commit included). Catches
-              `git revert`, a stale copy, a rebase that took its own side.
+              upstream gained after the branch was cut: from where the branch's own
+              first-parent line left main, up, that commit included. Catches
+              `git revert`, a stale copy, and a rebase that took its own side (caught
+              when the lost work is the rebase-base commit or later).
 
 Blank lines and whitespace never count. The escape is a trailer in a commit message, one per
 path: `Drops-lines: <path> -- <reason>`. A trailer with no reason excuses nothing. Each use prints
@@ -375,8 +376,8 @@ def resolve_upstream(cwd, upstream):
 
 def check(cwd, upstream, head, default=None):
     """(problem lines, ALLOWED notes); no problems is green. Raises Unknown. Reads only the commits
-    upstream gained after the branch was cut: from the fork point (merge base) up, the fork commit
-    included. The window starts at the fork point, never at a commit time (one-second resolution)."""
+    upstream gained after the branch was cut: from where the branch's own first-parent line left
+    main, up, the fork commit included. The window starts at the fork point, never at a commit time (one-second resolution)."""
     if git(cwd, "rev-parse", "--is-shallow-repository")[1].strip() != "false":
         raise Unknown("the history is shallow; fetch with depth 0")
     upstream = resolve_upstream(cwd, upstream)

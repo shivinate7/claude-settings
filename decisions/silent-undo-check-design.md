@@ -10,7 +10,7 @@ It reads two things.
   first-parent commit of upstream had it. The proof is one of three. The exact blob
   (whole file). A `-U0` hunk reversed on all but one line. Lines main only added that the
   change removes, even in a hunk that also edits a neighbour. The third is the rebase that
-  took its own side. Catches `git revert` of a merged PR and a stale copy.
+  took its own side. It is caught when the lost work is the rebase-base commit or later. Catches `git revert` of a merged PR and a stale copy.
   Only the fork commit and the commits upstream gained after it are read. See the next
   section. The branch check has no time bound and no commit-count floor.
 - **Lost line.** A merge commit in the branch loses a line one parent added since the
@@ -159,8 +159,7 @@ Cost: a pull request run took 0.4 to 5 seconds on this repo. The full-history au
 - A reversal that also rewrites a line is a new edit, not a reversal.
 - A line that a resolver half-rewrote passes. The merge is then a judgement call.
 - A binary file is not read.
-- A removal of added lines that shares a hunk with an edit is not seen. An edit in place
-  looks the same. Restored lines in a shared hunk are seen.
+- An edit in place of a main-added line is a new edit, not a reversal.
 - A merge of three or more parents is UNKNOWN. So are git older than 2.38, a shallow clone,
   and any history the check cannot read. Aliases and exotic merges count as unknown, not as clean.
   CI is red on unknown. `merge.py` refuses unless the owner passes `--undo-check-unknown-ok`.
@@ -177,6 +176,16 @@ Cost: a pull request run took 0.4 to 5 seconds on this repo. The full-history au
   The run needs 4 words or more. It must start or end at a line edge.
   A whole added block that survives with only its line breaks moved also passes.
   A short line never passes as a re-wrap.
+
+## Holes, named
+
+- After a rebase, the window starts at the rebase base. Main work lost in a commit older than
+  that base is not read. Debt `rebase-loss-before-base-unread`.
+- The `+1` reads the fork commit only when the fork point is on upstream's first-parent line.
+  When the fork point is a PR merge on that line, the `+1` reads the whole PR. When the branch
+  was cut from a PR branch that merged later, the fork point is off the line. Then the `+1`
+  reads the first-parent commit below that PR's merge, which is main work from before the cut.
+  A scratch probe flagged a deliberate removal of it. Debt `off-line-fork-reads-pre-cut`.
 
 Kind: process
 Home: lint/check_silent_undo.py
