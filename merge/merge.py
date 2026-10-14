@@ -116,6 +116,8 @@ def retry_net(call, pause, retries=NET_RETRIES):
         n += 1
         pause(NET_PAUSE)
 
+UNDO_MEMO = {}
+
 def undo_check(wt, base_ref, unknown_ok=""):
     """The shared silent-undo lint (lint/check_silent_undo.py), run on the branch before anything is pushed.
     A finding refuses. An unreadable history refuses too, unless the owner passed
@@ -123,33 +125,42 @@ def undo_check(wt, base_ref, unknown_ok=""):
     git older than 2.38, shallow clone). It is logged and does not excuse a finding."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
     import check_silent_undo as undo
-    c, n = git(wt, "rev-list", "--count", f"{base_ref}..HEAD")
-    say(f"merge: scanning for silent undos ({n.strip() if not c else '?'} commits) ...")  # the scan can run for minutes
-    t0, done, at = time.time(), threading.Event(), [0, 0]  # at: the scan's file counter, set by its progress hook
-    undo.progress = lambda i, total: at.__setitem__(slice(None), [i, total])
-
-    def beat():  # a line every 60 s, with the count, so a reader sees the scan move
-        while not done.wait(60):
-            where = f"file {at[0]}/{at[1]}" if at[1] else "reading the history"
-            say(f"merge: silent-undo scan: {where}, {(time.time() - t0) / 60:.0f} min")
-
-    beater = threading.Thread(target=beat, daemon=True)
-    beater.start()
+    # The scan is slow on a merge-heavy branch and merge runs it twice. Its answer depends only on the head, the base tip,
+    # and the default refs it reads, so the second call reuses the first when all of them are unchanged.
     try:
-        try:
-            problems, notes = undo.check(wt, base_ref, "HEAD")
-        finally:  # the beat stops, and is joined, before any line below: no beat prints after "scan done"
-            done.set()
-            beater.join()
-        say(f"merge: silent-undo scan done ({time.time() - t0:.0f} s)")
+        key = (wt, *(git(wt, "rev-parse", "--verify", "-q", r + "^{commit}")[1].strip() for r in ("HEAD", base_ref, "origin/HEAD", "origin/main", "main")))
+        if not (key[1] and key[2]) or key not in UNDO_MEMO:  # a head or base that does not resolve is never reused; a hit skips the scan and its beat
+            c, n = git(wt, "rev-list", "--count", f"{base_ref}..HEAD")
+            say(f"merge: scanning for silent undos ({n.strip() if not c else '?'} commits) ...")  # the scan can run for minutes
+            t0, done, at = time.time(), threading.Event(), [0, 0]  # at: the scan's file counter, set by its progress hook
+            undo.progress = lambda i, total: at.__setitem__(slice(None), [i, total])
+
+            def beat():  # a line every 60 s, with the count, so a reader sees the scan move
+                while not done.wait(60):
+                    where = f"file {at[0]}/{at[1]}" if at[1] else "reading the history"
+                    say(f"merge: silent-undo scan: {where}, {(time.time() - t0) / 60:.0f} min")
+
+            beater = threading.Thread(target=beat, daemon=True)
+            beater.start()
+            try:
+                UNDO_MEMO[key] = undo.check(wt, base_ref, "HEAD")
+            finally:  # the beat stops, and is joined, before any line below: no beat prints after "scan done"
+                done.set()
+                beater.join()
+                undo.progress = None  # the hook is the scan's alone
+            say(f"merge: silent-undo scan done ({time.time() - t0:.0f} s)")
+        res = UNDO_MEMO[key]
+    except subprocess.TimeoutExpired as e:  # a read that timed out is unknown, and is not remembered
+        res = undo.Unknown(f"a git read timed out after {e.timeout:.0f}s")
     except undo.Unknown as e:
+        res = UNDO_MEMO[key] = e
+    if isinstance(res, Exception):  # an Unknown; the scanner is never asked for its class here
+        e = res
         if unknown_ok.strip():
             say(f"merge: silent-undo check UNKNOWN ({e}). Owner override, reason: {unknown_ok.strip()}")
             return
         raise Stop(f"silent-undo check could not read the history: {e}\nIf the owner accepts that, run again with --undo-check-unknown-ok \"<reason>\".")
-    finally:
-        done.set()
-        undo.progress = None  # the hook is the scan's alone
+    problems, notes = res
     for n in notes:
         say("merge: " + n)
     if problems:
@@ -1011,6 +1022,7 @@ def main(argv, host=None, lock=None):
     p.add_argument("--session", default="", metavar="NAME", help="your session name; the lock shows it to waiting runs")
     p.add_argument("--config", default=".github/stamp.json")
     a = p.parse_args(argv)
+    UNDO_MEMO.clear()  # one merge run owns the memo: equal shas in another run (or test) must not reuse its verdict
     if (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
         p.error("give a pull request number, or --unlock")
     try:

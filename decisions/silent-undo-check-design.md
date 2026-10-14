@@ -190,6 +190,8 @@ Cost: a pull request run took 0.4 to 5 seconds on this repo. The full-history au
   A scratch probe flagged a deliberate removal of it. Debt `off-line-fork-reads-pre-cut`.
 - An in-place edit of a main-added line that keeps under 0.9 similarity reads as a reversal.
   Debt `inplace-edit-under-0-9-flagged`.
+- The faster scan splits a changed line at a lone CR or a NUL, so later lines of that commit
+  read as lost. A false alarm only. Debt `undo-scan-cr-nul-false-alarm`.
 
 Kind: process
 Home: lint/check_silent_undo.py
