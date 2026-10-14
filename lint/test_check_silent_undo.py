@@ -118,9 +118,10 @@ class Red(unittest.TestCase):
         self.assertTrue(any("app.txt" in p and "whole file restored" in p for p in got), got)
 
     def test_stale_merge_whose_first_commit_postdates_the_pr_is_read(self):
-        """The banchi shape with the clock pinned. The branch's first commit lands an hour after the
-        PR merged, so the window (since the first commit's date) excludes the PR and the restore goes
-        unread. Fixed dates, so the verdict does not depend on how fast git runs on the host."""
+        """The banchi shape with the clock pinned. The branch is cut before the PR merges, and its
+        first commit lands about an hour after the merge. The window starts where the branch's own
+        first-parent line left main, so the PR is in it and the restore is read. The dates do not set
+        the window. Fixed dates pin that gap on every run."""
         r = self.r
         r.sh("checkout", "-q", "-b", "stale")
         r.sh("checkout", "-q", "main")
@@ -258,7 +259,8 @@ class Debt19(unittest.TestCase):
 
 class Stale(unittest.TestCase):
     """The owner's incident, single-parent form: main gained lines after the branch was cut, and
-    the branch carries a version without them. Dates are fixed so a rebase keeps the cut."""
+    the branch carries a version without them. A rebase moves the cut to the rebase base, and that
+    commit is read. The dates do not set the window."""
     T0, T1, T2 = "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
 
     def setUp(self):
