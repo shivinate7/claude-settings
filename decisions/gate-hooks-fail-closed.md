@@ -7,7 +7,7 @@ When a gate hook cannot run, does the call it guards run?
 ## The ruling
 
 Owner, 2026-10-12: a gate whose script or python is missing refuses the call. A gate that
-times out or crashes does not, because load must never take the whole setup down. A logging
+times out or crashes does not, because load must never take the setup down, except a missing guard module (guard-audit-high: refuses). A logging
 failure never changes a gate's output or exit code: the STE gate and md_sweep log through
 `guard_logger` in `lint/_transcript.py`, which catches any Exception. The four command gates in
 `settings.json` exit 2 when their script or python is missing. They are PreToolUse

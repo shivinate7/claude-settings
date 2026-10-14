@@ -1304,7 +1304,7 @@ MUTATIONS = [
     ("test-author: the scope is never enforced in the diff",
      '            bad = not all(author_path_ok(n) for n in names)', '            bad = False', "guard", "builder-diff: the diff check logs for the reviewer and never blocks"),
     ("test-author: the write tool lets any path through",
-     '        return "" if author_path_ok(rel) else target', '        return ""', "guard",
+     '        return "" if repo_rel(target, cwd, outside=False) is None else target', '        return ""', "guard",
      "test-author: Edit of product code is refused"),
     ("test-author: test config is not its own",
      '    return is_test_rel(rel) or is_test_config_rel(rel) or basename(rel) in AUTHOR_BASENAMES',

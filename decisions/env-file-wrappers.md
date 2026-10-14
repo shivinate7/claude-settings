@@ -1,45 +1,91 @@
-# The env-file rule looks through three wrappers
+# The env-file rule and its wrappers
 
 ## The question
 
-The `env-file` rule in `hooks/guard.py` allows `--env-file` only when the command word is a
-runner (`ENV_LOADER_COMMANDS`). Which wrappers ahead of the runner may it look through?
+The `env-file` rule allows `--env-file` only when the command word is a runner
+(`ENV_LOADER_COMMANDS`). Which wrappers ahead of the runner may it look through, and which
+words does it read as paths?
 
-## The ruling, 2026-10-12
+## The ruling, 2026-10-13
 
-Three shapes, each by exact form, and no other:
+Owner, 2026-10-13 14:40, rule 1 of guard-audit-high (the audit ruling of the same day):
 
-- `timeout <duration>`, after its own flags (`-k`/`--kill-after` and `-s`/`--signal` with their
-  values, `--preserve-status`, `--foreground`). `timeout /t 5` is Windows `timeout.exe`, a
-  sleep, and stays a `waiter` hit.
-- `verdict`, and `python bin/verdict` or `python3 bin/verdict`: the repo's own runner.
-- A `(` glued to an assignment, as in `(VERIFY_PORT=3001 node --env-file=.env app.js)`.
+- The rule looks through `verdict`, `timeout`, `time` and `do` to the real command.
+- The rule looks through `python`, `python3` and `py` only when the next word is a `verdict`
+  path. Optional launcher flags such as `-3` or `-u` may come first.
+- A grep, sed or awk pattern or program is never read as an env file.
+- File-reading flags still refuse: `-f`, `--file`, `sed -f` and `awk -f`.
 
-A flag's value never becomes the command word. `sudo`, `env`, `nohup` and the other general
-wrappers stay outside the env-file rule, as before. The same unwrap serves every rule that
-reads the command word through `resolve_command`, so `timeout 5 sleep 1` is now a `waiter`
-hit and `timeout 5 pkill x` a `machine-wide-kill` hit.
+## Exact forms
 
-## The incident
+A pinned form has a case in `hooks/test_guard.py`. On 2026-10-13 the env family passed 327 of
+327 cases, and the fail-closed family passed 13 of 13.
 
-MEASURED in this Windows machine's `~/.claude/guard.log`, 30 days to 2026-10-11 (decision
-guard-log-read-weekly). 296 of 766 `env-file` denies named `timeout` (160), `verdict` (78) or
-a word glued to `(` (58) as the command. The rule's own remedy told the agent to use the form
-it then refused.
+- `timeout <duration>`, after its flags. Allowed: `timeout 60 node --env-file=.env app.js`,
+  `timeout --signal=TERM 5 node --env-file=.env app.js`, `timeout --kill-after=2 5 node
+  --env-file=.env app.js`. Refused: `timeout 60 cat --env-file=.env`. Pinned. The bare flags
+  `--preserve-status` and `--foreground` are in the code, but no case pins them.
+- `timeout /t 5` is Windows `timeout.exe`, a sleep. It stays a waiter hit. Pinned.
+- `verdict`. Allowed: `verdict npm --env-file=.env test`. Refused: `verdict pytest
+  --env-file=.env`. Pinned.
+- `python bin/verdict` and `py -3 bin/verdict`. Allowed with a runner after them. Pinned.
+  `python3 bin/verdict` shares the code path, but no case pins it.
+- `time`. Allowed: `time node --env-file=.env app.js` and `time -p node --env-file=.env app.js`.
+  Refused: `time cat .env`. Pinned.
+- `do`. Allowed: `for f in a; do node --env-file=.env app.js; done`. Refused:
+  `for f in a; do cat .env; done`. Pinned.
+- A `(` glued to an assignment. Allowed: `(VERIFY_PORT=3001 node --env-file=.env app.js)`.
+  Refused: `(X='a ls' cat .env)`. Pinned.
+- A flag's value never becomes the command word. Refused: `env -u ls cat .env`,
+  `sudo -u ls cat .env`, `command -p ls cat .env`, `echo x | xargs -I ls cat .env`. Pinned.
+- `sudo`, `env`, `nohup` and the other general wrappers are not looked through. The code ends
+  the unwrap at any other word. A reader behind `env`, `sudo`, `command` or `xargs` is refused,
+  pinned. No case pins a runner behind them.
+- The same unwrap feeds the waiter rule. `timeout 60 sleep 30` is refused. `timeout 60 sleep 5`
+  is allowed. Pinned.
 
-The first build read the word through `resolve_command` as it stood. Review proved nine reads
-of `.env` that main refused and the branch allowed. A wrapper flag's value posed as the
-command word while the real command ran: `env -u ls cat .env`, `sudo -u ls cat .env`,
-`echo x | xargs -I ls cat .env`, `env -u node cat -- --env-file .env`. A quoted glued
-assignment hid the word: `(X='a ls' cat .env)`. Red cases first, then the narrowing.
+## Patterns and flags
 
-## Named limits
+Allowed, pinned: `grep '.*' README.md`, `grep -e '.*' src/`, `sed -n '/.env/p' file`,
+`awk '/.*/' file`, `grep --max-count 5 '.*' file`.
 
-- `node --env-file=.env -e 'console.log(process.env)'` prints the file through the runner.
-  Main allowed it before this change; the runner allow-list is the limit.
-- The log holds the command word, not its arguments, so the 160 `timeout` denies include any
-  `timeout` form.
+Refused, pinned: a real path after a pattern or a value flag, as in `grep -n "def .*" .env`
+and `grep -e foo .env`. File-reading flags, as in `grep -f .env x`, `rg -f .env x`,
+`grep --file .env x`, `grep --file=.env x`, `sed -f.env x`, `awk -f.env x` and
+`time grep -f .env x`.
+
+## Holes, named
+
+- `grep --regex=` style abbreviations of `--regexp`, `--expression` and `--source` are a hole.
+  No case pins them.
+- `ag -f` and `ack -f` now refuse. In those tools `-f` is a boolean, so this is a false alarm.
+- `grep -r --exclude=.env` and `rg -t py .env` are false alarms.
+- A runtime crash in `_env_flat` allows the call.
+- An `awk -v` value holding a glob is cleared.
+- `node --env-file=.env -e 'console.log(process.env)'` prints the file through the runner. The
+  runner allow-list is the limit. Main allowed it before the 2026-10-12 change.
+
+## Incident
+
+Measured in this Windows machine's `~/.claude/guard.log`, 30 days to 2026-10-11 (decision
+guard-log-read-weekly, the weekly table). 296 of 766 env-file denies named `timeout` (160),
+`verdict` (78) or a word glued to `(` (58) as the command. The log holds the command word, not
+its arguments, so the 160 `timeout` denies include any timeout form. The rule's own remedy told
+the agent to use the form it then refused.
+
+Measured in the 2026-10-13 audit (guard-audit-high, the oversight session): about 690
+env-file denies a week. Since 2026-10-12, 25 were for `grep '.*'` and 7 for `do`. Rule 1 covers
+these shapes.
+
+The first build read the word through the unwrap as it stood. Review proved nine reads of `.env`
+that main refused and the branch allowed. A wrapper flag's value posed as the command word while
+the real command ran: `env -u ls cat .env`, `sudo -u ls cat .env`,
+`echo x | xargs -I ls cat .env`, `env -u node cat -- --env-file .env`. A quoted glued assignment
+hid the word: `(X='a ls' cat .env)`. Red cases were committed first, then the narrowing.
 
 ## What reopens it
 
-A fourth wrapper shape with a measured deny count in the weekly table.
+A wrapper shape this ruling does not name, with a measured deny count in the weekly table.
+
+Kind: process
+Home: hooks/guard_env.py
