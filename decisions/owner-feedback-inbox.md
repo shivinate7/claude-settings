@@ -24,9 +24,9 @@ Owner ruling, 2026-10-13, from an interview in the claude-settings audit session
   it, with or without text after it.
 - **Close.** Capture ends in four ways. (1) A message that starts with `fb done` or `fb: done`
   closes it, any case, any whitespace between the words. The rest of that message is not saved and
-  is not judged. A message whose last line is `fb done` (any case, an optional colon, trailing
-  punctuation) saves the lines before it and closes capture, also when the same message opens it
-  (owner, 2026-10-14). That line in a code fence or in backticks does not close. The one-line form
+  is not judged. A message whose last line is `fb done` (any case, leading spaces, an optional colon,
+  trailing punctuation) saves the lines before it and closes capture, also when the same message opens it
+  (owner, 2026-10-14). That line in a closed code fence or in backticks does not close. The one-line form
   `fb: X fb done` does not close. `fb - done` does not close; while capture is open, it is captured. (2) Quiet time:
   10 minutes with no captured owner message. The message after the gap is not saved unless it
   opens with `fb`. (3) The judge: while capture is open,
@@ -99,8 +99,11 @@ These stay open. Each is low harm, ranked by harm.
   session of 2026-10-13 (the time line showed on each). No test pins it.
 - If the inbox path cannot be built (an import error, or an odd session id), an `fb` message
   is dropped with one stderr line only.
-- While capture is open, `fb:done` and `` `fb done` `` in backticks do not close it. The judge
-  or the quiet time ends capture, and the turn-end reminder shows each time.
+- While capture is open, `fb:done` with no space does not close it. The judge or the quiet time
+  ends capture, and the turn-end reminder shows each time.
+- A last `fb done` line after an unclosed code fence closes capture. Debt fb-done-unclosed-fence
+  (an unclosed fence still closes). Also, `fb` and `done` on two last lines close, and no test
+  pins the colon, case, punctuation or CRLF forms. Debt fb-done-forms-unpinned (close forms untested).
 - The judge child checks the marker, then writes the note item and removes the marker. A message
   captured in that gap can lose its new marker, so capture closes early. Debt
   fb-judge-marker-race (the judge can close a newer capture).
