@@ -4248,11 +4248,16 @@ def _aimed_at(path, argv, cwd):
 
 class AgentWorktreeReapTests(unittest.TestCase):
     """Owner ruling 2026-10-14: the end-of-session sweep (`sweep.py --confirm`, no --attended, as
-    session_end_sweep.py runs it) removes a finished agent's worktree. It removes one only when ALL
-    hold: its path is `<repo>/.claude/worktrees/agent-*`; it is clean (no uncommitted, no untracked
-    file); no process has a cwd inside it; its last change is 4 hours old or more; its HEAD commit
-    is reachable from a remote-tracking ref. A repo whose package.json defines `reap:worktrees`
-    gets that script run with `--remove` instead. A read that fails keeps the tree.
+    session_end_sweep.py runs it) removes a finished agent's worktree, IN ADDITION to what the
+    unattended rulings of 2026-10-01 and 2026-10-09 remove (merged and idle 1 hour, or pushed and
+    idle 24 hours, on any path). Those stay: no case here forbids one of their removals. The
+    agent rule removes a tree only when ALL hold: its path is `<repo>/.claude/worktrees/agent-*`
+    (a branch or a detached HEAD); it is clean (no uncommitted, no untracked file); no process has
+    a cwd inside it; its last change is 4 hours old or more; its HEAD commit is reachable from a
+    remote-tracking ref. A repo whose package.json defines `reap:worktrees` gets that script run
+    with `--remove` instead. A read that fails keeps the tree. A tree that should go below is
+    pushed and not merged, which the older rulings keep before 24 hours, so its removal at 5 hours
+    can only be the agent rule's, and its keep can only be that rule's refusal.
 
     Incident: q_max reached 798 registered worktrees. Its remover read 181 as "never pushed",
     because a lane pushes `HEAD:<lane>` from a local branch of another name.
@@ -4273,6 +4278,7 @@ class AgentWorktreeReapTests(unittest.TestCase):
         self.restore_log = os.path.join(self.base, "restore.log")
         self.run_log = os.path.join(self.base, "runs.jsonl")
         self.npm_log = os.path.join(self.base, "npm.jsonl")
+        self.branch_of = {}  # tree path -> its local branch, None when detached
         self.shim = os.path.join(self.base, "shim")
         os.makedirs(self.shim)
         stub = os.path.join(self.shim, "npm_stub.py")
@@ -4291,31 +4297,33 @@ class AgentWorktreeReapTests(unittest.TestCase):
         done = run_vcs(path, *IDENT, "commit", "-q", "-m", name)
         require(done.returncode == 0, "commit in %r failed: %s" % (path, done.stderr.strip()))
 
-    def agent(self, name, state="pushed", path=None):
-        """A linked worktree on local branch `wt-<name>`, by default at
-        `<repo>/.claude/worktrees/agent-<name>`. STATE: "pushed" is one commit pushed with
-        `push origin HEAD:lane-<name>`, so the local branch has no upstream (the incident shape);
-        "merged" is main's own tip, which origin/main holds; "local" is one commit never pushed;
-        "ahead" is pushed, then one more local commit."""
+    def agent(self, name, state="pushed", path=None, detach=False):
+        """A linked worktree, by default at `<repo>/.claude/worktrees/agent-<name>`, with one
+        commit of its own that is not on main, on local branch `wt-<name>` or (DETACH) on no
+        branch. STATE: "pushed" is that commit pushed with `push origin HEAD:lane-<name>`, so a
+        local branch has no upstream (the incident shape); "local" is never pushed; "ahead" is
+        pushed, then one more local commit."""
         path = path or os.path.join(self.repo, ".claude", "worktrees", "agent-" + name)
-        made = run_vcs(self.repo, "worktree", "add", "-q", path, "-b", "wt-" + name)
+        branch = None if detach else "wt-" + name
+        made = run_vcs(self.repo, "worktree", "add", "-q", path, *(["--detach"] if detach else ["-b", branch]))
         require(made.returncode == 0, "worktree add %r failed: %s" % (path, made.stderr.strip()))
-        if state != "merged":
-            self.commit(path, name + ".txt")
+        self.commit(path, name + ".txt")
         if state in ("pushed", "ahead"):
             lane = "lane-" + name
-            pushed = run_vcs(path, "push", "-q", "origin", "HEAD:" + lane)
+            pushed = run_vcs(path, "push", "-q", "origin", "HEAD:refs/heads/" + lane)
             require(pushed.returncode == 0, "push of %s failed: %s" % (lane, pushed.stderr.strip()))
             require(run_vcs(self.repo, "rev-parse", "-q", "--verify",
                             "refs/remotes/origin/" + lane).returncode == 0,
                     "no remote-tracking ref for %s after the push" % lane)
             require(lane in run_vcs(self.repo, "ls-remote", "--heads", "origin").stdout,
                     "the remote does not list %s" % lane)
-            require(run_vcs(path, "rev-parse", "--abbrev-ref", "wt-%s@{upstream}" % name).returncode != 0,
-                    "wt-%s has an upstream; the fixture must not" % name)
+            if branch:
+                require(run_vcs(path, "rev-parse", "--abbrev-ref", branch + "@{upstream}").returncode != 0,
+                        "%s has an upstream; the fixture must not" % branch)
         if state == "ahead":
             self.commit(path, name + "-2.txt")
         require(self.listed(path), "%r is not a registered worktree" % path)
+        self.branch_of[path] = branch
         return path
 
     # ---- the run
@@ -4364,23 +4372,23 @@ class AgentWorktreeReapTests(unittest.TestCase):
     # ---- verdicts. The report line is the message, so a red run shows the sweep's own reason.
 
     def assertKept(self, path, out):
-        name = os.path.basename(path)
-        branch = "wt-" + name.replace("agent-", "")
+        name, branch = os.path.basename(path), self.branch_of[path]
         why = self.lines_about(out, name)
         self.assertEqual(self.removal_attempts(path), [], "%s: the sweep tried to remove it. "
                          "Report: %s" % (name, why))
         self.assertTrue(os.path.isdir(path), "%s was removed. Report: %s" % (name, why))
         self.assertTrue(self.listed(path), "%s was unregistered. Report: %s" % (name, why))
-        self.assertIn(branch, sweep.list_local_branches(self.repo) or [], "%s lost its branch" % name)
+        if branch:
+            self.assertIn(branch, sweep.list_local_branches(self.repo) or [], "%s lost its branch" % name)
 
     def assertRemoved(self, path, out):
-        name = os.path.basename(path)
-        branch = "wt-" + name.replace("agent-", "")
+        name, branch = os.path.basename(path), self.branch_of[path]
         why = self.lines_about(out, name)
         self.assertFalse(os.path.isdir(path), "%s was kept. Report: %s" % (name, why))
         self.assertFalse(self.listed(path), "%s is still registered. Report: %s" % (name, why))
-        self.assertNotIn(branch, sweep.list_local_branches(self.repo) or [],
-                         "%s's local branch is still there. Report: %s" % (name, why))
+        if branch:
+            self.assertNotIn(branch, sweep.list_local_branches(self.repo) or [],
+                             "%s's local branch is still there. Report: %s" % (name, why))
 
     # ---- (a) the incident shape
 
@@ -4397,20 +4405,15 @@ class AgentWorktreeReapTests(unittest.TestCase):
 
     # ---- (b) the 4 hour floor
 
-    def floor(self, state):
-        tree = self.agent("b", state)
+    def test_b_keeps_a_pushed_unmerged_tree_idle_under_4h(self):
+        """Pushed, not merged: the 1 hour and 24 hour rulings keep it too, so only the agent
+        rule's 4 hour floor can be what removes it at 5 hours, and what keeps it before."""
+        tree = self.agent("b")
         for hours in (3, 3.9):
             out = self.run_sweep(hours)
             self.assertKept(tree, out)
         out = self.run_sweep(5)  # the same tree, 1.1 hours later: removable, so the keeps were the floor
         self.assertRemoved(tree, out)
-
-    def test_b_keeps_a_pushed_tree_idle_under_4h(self):
-        self.floor("pushed")
-
-    def test_b_keeps_a_tree_at_origin_main_idle_under_4h(self):
-        """A tree that adds nothing to origin/main is no exception to the 4 hour floor."""
-        self.floor("merged")
 
     # ---- (c) HEAD on no remote-tracking ref
 
@@ -4447,10 +4450,12 @@ class AgentWorktreeReapTests(unittest.TestCase):
     # ---- (f) outside the agent folder, and the main checkout
 
     def test_f_keeps_a_tree_outside_agent_folders_and_the_main_checkout(self):
-        """Both trees are clean, at origin/main, and idle 5 hours: only the path keeps them."""
-        outside = self.agent("f1", "merged", path=os.path.join(self.base, "agent-f1"))
-        renamed = self.agent("f2", "merged",
-                             path=os.path.join(self.repo, ".claude", "worktrees", "lane-f2"))
+        """The agent rule adds removals; it never reaches a tree off its path. Both trees are
+        clean, pushed, not merged, idle 5 hours: the older rulings (merged and idle 1 hour, or
+        pushed and idle 24 hours, on any path) keep them, so only the agent rule could remove
+        them, and its path keeps them."""
+        outside = self.agent("f1", path=os.path.join(self.base, "agent-f1"))
+        renamed = self.agent("f2", path=os.path.join(self.repo, ".claude", "worktrees", "lane-f2"))
         ctl = self.agent("ctl")
         out = self.run_sweep(5)
         self.assertTrue(os.path.isdir(outside), "a tree outside .claude/worktrees was removed. "
@@ -4481,6 +4486,26 @@ class AgentWorktreeReapTests(unittest.TestCase):
         self.assertEqual(_norm_path(calls[0]["cwd"]), _norm_path(self.repo))
         self.assertKept(tree, out)
 
+    # ---- (i) a detached tree: the red-proof checkout a test-author makes under .claude/worktrees
+
+    def test_i_removes_a_detached_tree_on_a_pushed_commit_idle_5h(self):
+        """No local branch holds the commit. It lives on the pushed lane, so the tree can go."""
+        tree = self.agent("i1", detach=True)
+        sha = run_vcs(tree, "rev-parse", "HEAD").stdout.strip()
+        require(run_vcs(tree, "symbolic-ref", "-q", "HEAD").returncode != 0, "the fixture is on a branch")
+        out = self.run_sweep(5)
+        self.assertRemoved(tree, out)
+        self.assertEqual(run_vcs(self.repo, "cat-file", "-e", sha + "^{commit}").returncode, 0,
+                         "the commit is gone from the repository")
+        self.assertIn(sha, run_vcs(self.repo, "ls-remote", "--heads", "origin").stdout)
+
+    def test_i_keeps_a_detached_tree_on_an_unpushed_commit(self):
+        """A detached HEAD has no branch to tombstone: removing this tree loses the commit."""
+        tree, ctl = self.agent("i2", "local", detach=True), self.agent("ctl")
+        out = self.run_sweep(5)
+        self.assertKept(tree, out)
+        self.assertRemoved(ctl, out)
+
     # ---- (h) a failed read
 
     def kept_and_logged(self, tree, ctl, out, name):
@@ -4496,14 +4521,14 @@ class AgentWorktreeReapTests(unittest.TestCase):
         self.assertTrue(logged, "the failed read is not logged (report or run log):\n" + out)
 
     def test_h_keeps_a_tree_when_any_git_read_in_it_fails_and_logs_it(self):
-        tree, ctl = self.agent("h1", "merged"), self.agent("ctl")
+        tree, ctl = self.agent("h1"), self.agent("ctl")
         out = self.run_sweep(5, fail=lambda argv, cwd: _aimed_at(tree, argv, cwd))
         self.kept_and_logged(tree, ctl, out, "agent-h1")
 
     def test_h_keeps_a_tree_when_the_clean_read_fails_and_logs_it(self):
         """Only `git status` fails here. The case above fails every read in the tree, so a
         second read that also fails would hide a clean read that fails open."""
-        tree, ctl = self.agent("h3", "merged"), self.agent("ctl")
+        tree, ctl = self.agent("h3"), self.agent("ctl")
         fired = []
 
         def match(argv, cwd):
@@ -4519,9 +4544,10 @@ class AgentWorktreeReapTests(unittest.TestCase):
 
     def test_h_keeps_a_tree_when_the_remote_reach_read_fails_and_logs_it(self):
         """The read that matters here is `git branch -r --contains` (or `for-each-ref
-        --contains`): is HEAD on a remote-tracking ref? The tree is merged, so the path, the
-        idle time and the clean tree would all allow its removal. Only this read can keep it."""
-        tree, ctl = self.agent("h2", "merged"), self.agent("ctl")
+        --contains`): is HEAD on a remote-tracking ref? The tree is pushed and not merged, so
+        the older rulings keep it. The path, the idle time and the clean tree allow the agent rule
+        to remove it, and only this read can keep it."""
+        tree, ctl = self.agent("h2"), self.agent("ctl")
         sha = run_vcs(tree, "rev-parse", "HEAD").stdout.strip()
         fired = []
 
