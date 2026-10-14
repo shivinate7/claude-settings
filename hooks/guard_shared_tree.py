@@ -10,7 +10,8 @@ import tempfile
 import guard_core
 from guard_core import (
     GIT_CHECKOUT_TAKES_NAME, PATH_EXTENSION, PATH_PREFIX, REDIRECTION, _inside_work_tree,
-    _segment_git_c_target, basename, git_calls, pathspec_from_file_flag, porcelain, resolve_command,
+    _segment_git_c_target, basename, git_calls, long_flag_abbrev, pathspec_from_file_flag, porcelain,
+    resolve_command,
     segment_tokens, split_segments, stash_stack, worktree_prune_subject, worktree_remove_subject,
 )
 from guard_branch_worktree import (
@@ -72,23 +73,40 @@ STASH_READ_ACTIONS = {"list", "show"}
 STASH_TREE_ACTIONS = {"push", "save"}
 
 
-# Every action word git's `stash` knows. Any other plain word is a pathspec, which git reads as
-# a push (`git stash <pathspec>` is its own shorthand for `git stash push -- <pathspec>`).
+# Every action word git's `stash` knows.
 STASH_ACTIONS = {"list", "show", "drop", "pop", "apply", "clear", "branch", "push", "save",
                  "create", "store"}
-# `git stash push` options that take a value. The value is a word, never an action.
-STASH_VALUE_OPTIONS = {"-m", "--message", "--pathspec-from-file", "-U", "--unified",
-                       "--inter-hunk-context"}
+
+
+def stash_option_takes_next_word(arg: str) -> bool:
+    """True when a `git stash push` option takes the NEXT word as its value.
+
+    The options that take one are the two in git's synopsis: `-m`/`--message <msg>` and
+    `--pathspec-from-file <file>`. MEASURED 2026-10-13: git reads `-qm list`, `-um show`,
+    `--mess list` as a push with the message `list` or `show`. So a short cluster ending in `m`
+    takes the next word, a long option takes it by any prefix git accepts, and a value glued on
+    (`-mfoo`, `--message=x`) takes nothing more. `-U`/`--unified` and `--inter-hunk-context`
+    (diff options for `-p`, not in the synopsis) are left out on purpose: their value is a
+    number, and a word wrongly read as an action word fails closed, as a push.
+    """
+    if arg.startswith("--"):
+        if "=" in arg:
+            return False
+        return (long_flag_abbrev(arg, "--message", "--m") or pathspec_from_file_flag(arg))
+    return arg.startswith("-") and arg.find("m") == len(arg) - 1
 
 
 def stash_action(args) -> str:
     """Return the stash call's own action word, or 'push' when the call names none.
 
-    A bare `git stash`, `git stash -u`, `git stash -- <path>`, `git stash -m <msg>` and
-    `git stash <path>` all push, the same as `git stash push`. Options are skipped. An option in
-    STASH_VALUE_OPTIONS consumes the next word as its value (`--message=x` carries its own). The
-    first word left is the action when git knows it. After `--` the call is a push, because a
-    pathspec follows. A plain word that is no known action is a pathspec, so it is a push too.
+    A bare `git stash`, `git stash -u`, `git stash -- <path>` and `git stash -m <msg>` all push,
+    the same as `git stash push`. Options are skipped, and an option that takes a value skips its
+    value too (stash_option_takes_next_word). The first word left is the action when git knows
+    it. After `--` the call is a push, because a pathspec follows.
+
+    A plain word that is no known action is NOT a push in git: `git stash <path>` with no `--`
+    is refused ("subcommand wasn't specified; 'push' can't be assumed", measured). The guard
+    reads it as a push anyway, to fail closed, so the tree is judged and nothing falls through.
 
     No word is left unknown, so none lands on the stack side. What lands there is a KNOWN word
     that is not a read and not a push: pop, apply, drop, clear, branch, create, store.
@@ -99,10 +117,8 @@ def stash_action(args) -> str:
         arg = args[i]
         if arg == "--":
             return "push"
-        if arg in STASH_VALUE_OPTIONS:
-            i += 2
-        elif arg.startswith("-"):
-            i += 1
+        if arg.startswith("-"):
+            i += 2 if stash_option_takes_next_word(arg) else 1
         else:
             return arg if arg in STASH_ACTIONS else "push"
     return "push"

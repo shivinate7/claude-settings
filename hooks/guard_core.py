@@ -396,10 +396,17 @@ def git_calls(segment: str):
     return calls
 
 
+def long_flag_abbrev(arg: str, full: str, shortest: str) -> bool:
+    """True when `arg` spells the long flag `full`, or a prefix of it at least as long as
+    `shortest`. Git's parse-options accepts any unique prefix; `shortest` is the shortest one
+    that no other option of the command shares. A `=value` tail is ignored."""
+    name = arg.split("=", 1)[0]
+    return len(name) >= len(shortest) and full.startswith(name)
+
+
 def pathspec_from_file_flag(arg: str) -> bool:
     """True for `--pathspec-from-file` or any prefix of it git accepts (`--pathspec-from`, ...)."""
-    name = arg.split("=", 1)[0]
-    return len(name) >= len("--pathspec-f") and "--pathspec-from-file".startswith(name)
+    return long_flag_abbrev(arg, "--pathspec-from-file", "--pathspec-f")
 
 
 # ------------------------------------------------------------------ which tree the command runs in
