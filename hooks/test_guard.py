@@ -1791,6 +1791,11 @@ sh("worktree: -C naming the worktree asks, from the shared checkout",
    VCS + " -C " + slash(GITWT) + " reset --hard", "ask", "shared-tree", cwd=GITMAIN)
 sh("worktree: a cd into the worktree asks, from the shared checkout",
    "cd " + slash(GITWT) + " && " + VCS + " reset --hard", "ask", "shared-tree", cwd=GITMAIN)
+# DATA, NOT A DISCARD. The same class as the model-cap data cases: a reset named inside a JSON payload
+# piped to python runs nothing in the lane, so it allows. Pinned, not red: this one passes today.
+sh("worktree data: a reset named in a JSON payload piped to python, inside a worktree, allows",
+   "printf '%s' '" + json.dumps({"tool_input": {"command": VCS + " reset --hard"}})
+   + "' | python hooks/guard.py", "allow", cwd=GITWT)
 
 # THE PER-FILE CARVE-OUT (owner ruling 2026-10-11, "Allow per-file"; decisions/stash-push-is-
 # clone-wide.md). In a linked worktree, a checkout or restore that names only FILES writes the
@@ -2390,6 +2395,11 @@ sh("worktree prune: a stale record asks, never denies",
 sh("worktree prune: nothing to prune passes", VCS + " worktree prune", "allow", cwd=WTMAIN)
 sh("worktree prune: -n itself is a read, not a discard, so it passes unconditionally",
    VCS + " worktree prune -n", "allow", cwd=WTPRUNE)
+# DATA, NOT A PRUNE. A prune named inside a JSON payload piped to python, at the same stale record,
+# changes no record, so it allows. Pinned, not red: this one passes today.
+sh("worktree prune data: a prune named in a JSON payload piped to python, at a stale record, allows",
+   "printf '%s' '" + json.dumps({"tool_input": {"command": VCS + " worktree prune"}})
+   + "' | python hooks/guard.py", "allow", cwd=WTPRUNE)
 
 # SYMLINKS ARE NOT WORK (owner ruling 2026-10-11). Git lists an untracked symlink as a file, so
 # `?? app/node_modules` read as real work and the removal was refused. Deleting a link deletes
@@ -4758,6 +4768,11 @@ push_case("a non-forced bare push on main", "", "allow", cwd=PUSHMAIN)
 push_case("a non-forced push with -u of the current branch", "-u origin HEAD", "allow")
 push_case("a non-forced push with -u where git cannot be read", "-u origin HEAD", "allow", cwd=NOGIT)
 push_case("a push of a branch whose name holds force", "origin force-fix", "allow")
+# DATA, NOT A PUSH. A forced push to the default branch named inside a JSON payload piped to python
+# runs nothing, so it allows. Pinned, not red: this one passes today.
+sh("push: a JSON payload naming a forced push to main, piped to python, allows",
+   "printf '%s' '" + json.dumps({"tool_input": {"command": VCS + " push --force origin main"}})
+   + "' | python hooks/guard.py", "allow", cwd=PUSHMAIN)
 sh("false alarm: --force quoted in a commit message",
    VCS + ' commit -m "never git push --force here"', "allow", cwd=PUSHFEAT)
 sh("false alarm: --force quoted in an echo", 'echo "git push --force"', "allow", cwd=PUSHFEAT)
@@ -6739,6 +6754,30 @@ sh("cap: an append onto a project settings file asks",
    "echo '\"" + CAP_FORCE + "\": \"0\"' >> " + PROJ_SETTINGS,
    "ask", "subagent-model-cap", cwd=NOGIT, carries=(CAP_FORCE + " = 0",))
 
+# A PYTHON WRITE IS A WRITE. A program that opens a settings file and writes the cap into it lands the
+# same bytes the redirect and tee cases above land, so it asks the same way. Both forms are pinned: an
+# inline `python -c`, and a heredoc fed to `python3 -`. (Incident 2026-10-14: both allowed.)
+sh("cap: python -c that opens a project settings file and writes the cap asks",
+   "python -c \"import json; open('" + PROJ_LOCAL + "', 'w').write(json.dumps({'env': {'" + CAP_KEY
+   + "': '" + OPUS + "'}}))\"",
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+sh("cap: a python heredoc that opens a project settings file and writes the cap asks",
+   "python3 - <<'PY'\nopen('" + PROJ_SETTINGS + "', 'w').write('" + CAP_KEY + "=" + OPUS + "')\nPY",
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+
+# A COMMENT OPENER OR A LONE QUOTE INSIDE A STRING does not hide the real write after it. The scanner
+# must still reach the redirect, and the multi-line quoted string is the multi-line shape of the same
+# (rule building-scanner-respects-strings).
+sh("cap: a comment opener inside double quotes does not hide a redirect that writes the cap",
+   "echo \"# keep this line\" && printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+sh("cap: a lone apostrophe inside double quotes does not hide a redirect that writes the cap",
+   "printf \"it's %s\" '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+sh("cap: a comment opener in a multi-line quoted string does not hide a redirect that writes the cap",
+   "printf '%s\n# keep' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+
 # RULE ORDER. The config directory's own settings keep rule 7's deny, which stands ahead of rule 8,
 # so the cap content never turns that wall into a prompt.
 add("cap: the config settings stay denied, never asked", "deny", "frozen-path", tool="Write",
@@ -6764,6 +6803,36 @@ sh("cap: a grep for the variable in a settings file is not a write",
    "grep -n " + CAP_KEY + " " + PROJ_SETTINGS, "allow", cwd=NOGIT)
 sh("cap: reading a settings file into another file is not a write to it",
    "cat " + PROJ_SETTINGS + " > /tmp/copy.json", "allow", cwd=NOGIT)
+
+# THE DATA HALF. A settings write named INSIDE text is not a write: a quoted argument, a heredoc body
+# fed to a program that reads it, or a JSON payload. Incident 2026-10-14: a reviewer's probe piped a
+# JSON tool-call sample holding a cap write into `python hooks/guard.py`, and the owner was asked to
+# approve a call that wrote nothing. Each case names the write the way a probe would: the path, a
+# redirect, the cap key. The comment opener and the lone apostrophe sit inside the strings.
+sh("cap data: a grep naming a cat-write onto a settings file with the cap key allows",
+   "grep -n \"cat > " + PROJ_LOCAL + " " + CAP_KEY + "\" docs/notes.md", "allow", cwd=NOGIT)
+sh("cap data: an echo naming a tee onto a settings file, piped to wc, allows",
+   "echo 'tee " + PROJ_SETTINGS + " " + CAP_KEY + "' | wc -l", "allow", cwd=NOGIT)
+sh("cap data: an && inside double quotes naming a cat-write, piped to python, allows",
+   "echo \"ok && cat > " + PROJ_LOCAL + " " + CAP_KEY + "\" | python hooks/guard.py", "allow", cwd=NOGIT)
+sh("cap data: a comment opener inside double quotes naming a cat-write, piped to python, allows",
+   "echo \"# cat > " + PROJ_LOCAL + " " + CAP_KEY + "\" | python hooks/guard.py", "allow", cwd=NOGIT)
+sh("cap data: a lone apostrophe inside double quotes naming a cat-write, piped to jq, allows",
+   "echo \"don't cat > " + PROJ_LOCAL + " " + CAP_KEY + "\" | jq .", "allow", cwd=NOGIT)
+sh("cap data: a multi-line quoted string naming a cat-write, piped to python, allows",
+   "printf '%s' 'a note\ncat > " + PROJ_LOCAL + " " + CAP_KEY + "' | python hooks/guard.py",
+   "allow", cwd=NOGIT)
+sh("cap data: a heredoc body fed to python stdin naming a cat-write allows",
+   "python hooks/guard.py <<'PAYLOAD'\n{\"tool_input\": {\"command\": \"cat > " + PROJ_LOCAL + " "
+   + CAP_KEY + "\"}}\nPAYLOAD", "allow", cwd=NOGIT)
+sh("cap data: a python heredoc that only prints a cat-write allows",
+   "python3 - <<'PY'\nprint('cat > " + PROJ_LOCAL + " " + CAP_KEY + "')\nPY", "allow", cwd=NOGIT)
+sh("cap data: a JSON tool-call sample holding the cap write, piped to python, allows",
+   "printf '%s' '" + json.dumps({"tool_name": "Bash", "tool_input": {"command": "cat > " + PROJ_LOCAL
+   + " <<JSON\n" + cap_settings() + "\nJSON"}}) + "' | python hooks/guard.py", "allow", cwd=NOGIT)
+sh("cap data: a JSON payload naming a sed -i on a settings file with the cap key, piped to python, allows",
+   "printf '%s' '" + json.dumps({"tool_input": {"command": "sed -i s/x/y/ " + PROJ_SETTINGS + " "
+   + CAP_KEY}}) + "' | python hooks/guard.py", "allow", cwd=NOGIT)
 
 # FAILING OPEN, this rule's own shapes. A content field of the wrong type, an edit list of the
 # wrong type, and a payload with no tool name at all: each allows the call.
