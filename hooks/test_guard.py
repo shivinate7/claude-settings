@@ -2070,7 +2070,10 @@ sh("per-file allow: one -C target repeated, lane restore f.txt then lane restore
 sh("per-file deny: -C lane with --work-tree naming the shared checkout, from a worktree",
    VCS + " -C " + slash(GITWT) + " --work-tree=" + slash(GITMAIN) + " restore f.txt",
    "deny", "shared-tree", cwd=GITWT)
-# 2. GIT_WORK_TREE, alone or with GIT_DIR, set by prefix, by `env`, or by `export`.
+# 2. GIT_WORK_TREE, alone or with GIT_DIR, set by prefix, by `env`, or by `export`. A set is denied
+# by git-env-set, not asked. This was a stale claim: "ask" pinned the q_max core.worktree incident
+# shape (a set GIT_WORK_TREE leaking into child git calls), so these cases are re-pointed to deny.
+GIT_ENV_RULE = "git-env-set"
 for _label, _lead in (("a prefix assignment", ""), ("env", "env "), ("export", None)):
     for _gitdir in (False, True):
         _vars = "GIT_WORK_TREE=" + slash(GITMAIN)
@@ -2080,8 +2083,8 @@ for _label, _lead in (("a prefix assignment", ""), ("env", "env "), ("export", N
             _cmd = "export " + _vars + "; " + VCS + " restore f.txt"
         else:
             _cmd = _lead + _vars + " " + VCS + " restore f.txt"
-        sh("per-file ask: GIT_WORK_TREE naming the shared checkout by %s%s, from a worktree"
-           % (_label, " with GIT_DIR" if _gitdir else ""), _cmd, "ask", "shared-tree", cwd=GITWT)
+        sh("per-file deny: GIT_WORK_TREE set to the shared checkout by %s%s, from a worktree"
+           % (_label, " with GIT_DIR" if _gitdir else ""), _cmd, "deny", GIT_ENV_RULE, cwd=GITWT)
 # 3. A segment with no -C must not borrow another segment's -C. From the shared checkout, the bare
 # restore runs in the shared checkout whichever side the lane's -C status stands on. main asks.
 sh("per-file ask: -C lane status, then a bare restore f.txt, from the shared checkout",
@@ -2104,7 +2107,9 @@ sh("per-file ask: env --chdir into the shared checkout, then restore f.txt, from
 
 # LATE PROBES (named "late probe", so MUTATE_ONLY="late probe" runs this block alone). Each runs a
 # per-file restore in the shared checkout from the lane by a spelling the guard did not read yet.
-# Main reads the lane for all of them and asks, so ask is pinned. The controls stay allowed.
+# Main reads the lane for all of them. The setters are denied by git-env-set (re-pointed from ask,
+# see block 2). The chdir flags only name the shared checkout, so they still ask. The controls stay
+# allowed.
 _SH = slash(GITMAIN)
 for _label, _cmd in (
     ("lower-case git_work_tree prefix", "git_work_tree=" + _SH + " " + VCS + " restore f.txt"),
@@ -2113,6 +2118,10 @@ for _label, _cmd in (
     ("export with +=", "export GIT_WORK_TREE+=" + _SH + "; " + VCS + " restore f.txt"),
     ("printf -v then export", "printf -v GIT_WORK_TREE %s " + _SH + "; export GIT_WORK_TREE; "
      + VCS + " restore f.txt"),
+):
+    sh("per-file deny: late probe, %s sets GIT_WORK_TREE to the shared checkout, from a worktree"
+       % _label, _cmd, "deny", GIT_ENV_RULE, cwd=GITWT)
+for _label, _cmd in (
     ("env -vC", "env -vC " + _SH + " " + VCS + " restore f.txt"),
     ("env --ch= abbreviation", "env --ch=" + _SH + " " + VCS + " restore f.txt"),
 ):
@@ -2126,8 +2135,8 @@ for _label, _cmd in (
     ("SetEnvironmentVariable", '[Environment]::SetEnvironmentVariable("GIT_WORK_TREE","' + _SH
      + '"); ' + VCS + " restore f.txt"),
 ):
-    sh("per-file ask: late probe, PowerShell %s names the shared checkout, from a worktree" % _label,
-       _cmd, "ask", "shared-tree", tool="PowerShell", cwd=GITWT)
+    sh("per-file deny: late probe, PowerShell %s sets GIT_WORK_TREE to the shared checkout"
+       % _label, _cmd, "deny", GIT_ENV_RULE, tool="PowerShell", cwd=GITWT)
 sh("per-file allow: late probe control, a plain restore f.txt in the lane",
    VCS + " restore f.txt", "allow", cwd=GITWT)
 sh("per-file allow: late probe control, a harmless GIT_TRACE prefix in the lane",
@@ -4865,8 +4874,7 @@ for _cmd in (
 # Incident (q_max, 2026-10-14 02:41-02:47 CDT): an agent set $env:GIT_DIR and $env:GIT_WORK_TREE,
 # then ran a test whose child `git init` inherited both, and git wrote core.worktree into the
 # shared .git/config. Reading a variable, unsetting it, and text that only names it stay allowed.
-FAMILY = "git-env"
-GIT_ENV_RULE = "git-env-set"
+FAMILY = "git-env"  # GIT_ENV_RULE, the rule id, is set in the shared-tree section above
 _GIT_ENV_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
 
 # Bash forms that set one of the three. The tail is a harmless test run, so the setter decides.
