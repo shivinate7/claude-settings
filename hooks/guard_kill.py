@@ -3,6 +3,7 @@
 guard.py is the only entry point, and it runs these checks in its fixed order (decision
 guard-split-by-family). Other files reach these names through `guard`.
 """
+import itertools
 import os
 import re
 import subprocess
@@ -14,6 +15,7 @@ from guard_core import (
     _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, inline_script,
     resolve_command, segment_tokens, split_segments,
 )
+from guard_env import _substitutions
 
 
 # ------------------------------------------------------------------ a machine-wide kill
@@ -464,8 +466,82 @@ _PRINTF_DIRECTIVE = re.compile(r"%%|%[-+ #0-9.]*[a-zA-Z]|\\[nrtabfv\\]")
 _REDIRECT_TO_PROFILE = re.compile(r">+\|?\s*[^\s|;&]*" + PLAYWRIGHT_PROFILE.pattern)
 
 
-def _is_playwright_assign(token: str) -> bool:
-    return bool(ASSIGNMENT.match(token)) and token.split("=", 1)[0].upper() == PLAYWRIGHT_VAR
+# A watched set of variable names: (names, fold_case). Both rules fold the name to upper case,
+# because the environment is case-blind on Windows. The git rule passes a bare lower-case
+# assignment with no command after it, `git_dir=$(...)`, as the plain shell variable it is.
+# PowerShell's `env:` is read with re.I below.
+PLAYWRIGHT_WATCH = ((PLAYWRIGHT_VAR,), True)
+GIT_ENV_WATCH = (("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"), True)
+_ASSIGN_NAME = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\+?=")
+
+
+def _assigned_var(token: str, watch) -> str:
+    """The watched name a `VAR=value` (or `VAR+=value`) token assigns, else ''."""
+    found = _ASSIGN_NAME.match(token)
+    name = (found.group(1).upper() if watch[1] else found.group(1)) if found else ""
+    return name if name in watch[0] else ""
+
+
+_PS_CMDLETS = ("set-item", "si", "new-item", "ni", "set-content", "sc")
+_PS_UNSET = ("$null", "")
+
+
+# A script block or a group that runs its body: `{`, `&{`, `.{`, `(`, `$(`, `@(`.
+_PS_BLOCK_OPEN = re.compile(r"[&.]?\{|[&.$@]?\(")
+
+
+def _open_script_blocks(tokens):
+    """Split each glued script block or paren group (`{$env:X=1}`, `&{...}`, `($env:X=1)`) into
+    its opener and its body, after any token: `if (...) {...}`, `ForEach-Object {...}`,
+    `try {...}`. A token that starts inside quotes (`'{$env:X=1}'`, `tokens.quoted`) is text and
+    stays whole. Known ceiling: an unquoted block passed as a plain argument (`Write-Host {...}`)
+    is read as code too, a false deny, the safe side."""
+    quoted = getattr(tokens, "quoted", ())
+    out = []
+    for i, tok in enumerate(tokens):
+        if i in quoted:
+            out.append(tok)
+            continue
+        while (opens := _PS_BLOCK_OPEN.match(tok)) and len(tok) > opens.end():
+            out.append(opens.group(0)[-1])
+            tok = tok[opens.end():].rstrip("})")
+        out.append(tok)
+    return out
+
+
+def _ps_env_set(tokens, watch) -> str:
+    """Return the matched text when a PowerShell statement sets a watched name in the process
+    environment, else ''. Reads the statement's own tokens, so a name inside quoted text, which
+    is one token, never fires. A statement starts at the first token, or after `{`, `(` or `&`.
+    `$env:X = $null` and an empty value unset the name and pass."""
+    alt = "|".join(map(re.escape, watch[0]))
+    tokens = _open_script_blocks(tokens)
+    start = _skip_assignments_and_keywords(tokens)
+    for i, tok in enumerate(tokens):
+        if i != start and not (i and (tokens[i - 1] in ("{", "(", "&") or tokens[i - 1].endswith("{"))):
+            continue
+        found = re.fullmatch(r"\$\{?env:(" + alt + r")\}?(?:([-+*/]?=)(.*))?", tok, re.I | re.S)
+        if found:
+            if found.group(2):
+                value = found.group(3) or "".join(tokens[i + 1:i + 2])
+            elif re.fullmatch(r"[-+*/]?=", "".join(tokens[i + 1:i + 2])):
+                value = "".join(tokens[i + 2:i + 3])
+            else:
+                continue
+            if value not in _PS_UNSET:
+                return "$env:" + found.group(1)
+            continue
+        if basename(tok).lower() in _PS_CMDLETS:
+            rest = tokens[i + 1:]
+            named = [m.group(1) for t in rest if (m := re.fullmatch(
+                r"(?:-\w+:)?env:\\?(" + alt + ")", t, re.I))]
+            if named and rest[-1] not in _PS_UNSET:
+                return tok + " env:" + named[0]
+        found = re.search(r"SetEnvironmentVariable\s*\(\s*(" + alt + r")\s*,(.*)",
+                          " ".join(tokens[i:i + 4]), re.I)
+        if found and not re.match(r"\s*(?:\$null\b|,|\)|$)", found.group(2)):
+            return "SetEnvironmentVariable " + found.group(1)
+    return ""
 
 
 
@@ -510,14 +586,18 @@ def _playwright_install_hit(word, rest, who) -> str:
     return "" if allowed and who == "main" else "playwright install"
 
 
-def _playwright_tokens_hit(tokens, depth=0, install=None) -> str:
+def _playwright_tokens_hit(tokens, depth=0, install=None, watch=PLAYWRIGHT_WATCH) -> str:
     tokens = [t for t in ([tokens[0].lstrip("(")] + tokens[1:] if tokens else []) if t]
     if not tokens or depth > 3:
         return ""
     at = resolve_command(tokens)
-    if not install and any(
-            _is_playwright_assign(t) for t in tokens[:len(tokens) if at is None else at]):
-        return PLAYWRIGHT_VAR + " assignment"
+    for t in ([] if install else tokens[:len(tokens) if at is None else at]):
+        name = _assigned_var(t, watch)
+        # a lower-case name is a plain shell variable unless a command follows it as a prefix,
+        # and a substitution (`git_dir=$(...)`, split by shlex at its spaces) is no prefix
+        if name and (watch is PLAYWRIGHT_WATCH or t.startswith(name)
+                     or (at is not None and "$(" not in t and "`" not in t)):
+            return name + " assignment"
     if at is None:
         return ""
     word, rest = basename(tokens[at]).lower(), tokens[at + 1:]
@@ -525,8 +605,23 @@ def _playwright_tokens_hit(tokens, depth=0, install=None) -> str:
         hit = _playwright_install_hit(word, rest, install)
         if hit:
             return hit
-    elif word in ASSIGNING_BUILTINS and any(_is_playwright_assign(t) for t in rest):
-        return word + " " + PLAYWRIGHT_VAR
+    elif watch is GIT_ENV_WATCH and word == "export" and any(
+            re.fullmatch(r"-[a-zA-Z]*n[a-zA-Z]*", t) for t in itertools.takewhile(
+                lambda t: t.startswith("-") and t != "--", rest)):
+        # `export -n NAME` takes the name OUT of the environment. Only a leading option counts:
+        # export stops reading options at its first name, so `export GIT_DIR=x -n` still sets.
+        pass
+    elif word in ASSIGNING_BUILTINS and any(_assigned_var(t, watch) for t in rest):
+        return word + " " + next(_assigned_var(t, watch) for t in rest if _assigned_var(t, watch))
+    elif watch is GIT_ENV_WATCH and word in ("setx", "setx.exe") and any(
+            t.upper() in watch[0] for t in rest):
+        return word + " " + next(t for t in rest if t.upper() in watch[0])   # a persistent set
+    elif watch is GIT_ENV_WATCH and (word == "export" or (word in ("declare", "typeset") and any(
+            re.fullmatch(r"-[a-zA-Z]*x[a-zA-Z]*", t) for t in rest))) and any(
+            t.upper() in watch[0] for t in rest):
+        # a bare name exports the shell variable of that name, however it was filled
+        # (`read -r`, `printf -v`)
+        return word + " " + next(t for t in rest if t.upper() in watch[0])
     npx_script = ""
     if word == "npx":
         # `npx -c 'script'` runs the string in a shell: walk it like `sh -c`.
@@ -539,29 +634,45 @@ def _playwright_tokens_hit(tokens, depth=0, install=None) -> str:
         for token in rest:
             if not ASSIGNMENT.match(token):
                 break
-            if _is_playwright_assign(token) and not install:
-                return word + " " + PLAYWRIGHT_VAR
-    script = " ".join(rest[1:]) if word in CMD_EXE_NAMES and rest and rest[0].lower() in (
-        "/c", "/k") else None
+            if _assigned_var(token, watch) and not install:
+                return word + " " + _assigned_var(token, watch)
+    cmd_flag = next((n for n, t in enumerate(rest) if t.lower() in ("/c", "/k")), None)
+    script = " ".join(rest[cmd_flag + 1:]) if word in CMD_EXE_NAMES and cmd_flag is not None \
+        else None
     if script is None:
         script = npx_script or (" ".join(rest) if word == "eval" else (
             _pwsh_script(tokens) if word in PLAYWRIGHT_PS_SHELLS else inline_script(tokens)))
+        if word in PLAYWRIGHT_PS_SHELLS and POWERSHELL_CALL[0]:
+            # the outer PowerShell takes its backtick escapes (`` `$env:X ``) before pwsh runs the
+            # script. Known ceiling: a backtick in outer single quotes stays literal; dropping it
+            # there too can only cause a false deny.
+            script = re.sub(r"`(.)", r"\1", script)
     for segment in split_segments(script) if script else ():
         hit = playwright_path_hit(segment, depth + 1, ps_inner=word in PLAYWRIGHT_PS_SHELLS,
-                                  install=install)
+                                  install=install, watch=watch)
         if hit:
             return hit
     return ""
 
 
 def playwright_path_hit(segment: str, depth=0, to_file=False, ps_inner=False,
-                        install=None) -> str:
-    """Return the matched text when a segment sets PLAYWRIGHT_BROWSERS_PATH, else ''.
+                        install=None, watch=PLAYWRIGHT_WATCH) -> str:
+    """Return the matched text when a segment sets a watched name (PLAYWRIGHT_BROWSERS_PATH
+    unless `watch` names others), else ''.
 
     `to_file` says the segment's output goes to a profile (a `tee` further down the pipe). The
     file-write form counts only when the written text starts with the assignment.
     """
     tokens = segment_tokens(segment) or []
+    if watch is not PLAYWRIGHT_WATCH and segment_tokens(segment) is None:
+        # An unterminated quote (`echo don't; export GIT_DIR=x`) makes the shared reader keep the
+        # rest of the line in one segment. Read each piece between unquoted-looking separators on
+        # its own; a piece that still cannot be read is skipped, as everywhere else.
+        for piece in re.split(r"[;&|\n]", segment):
+            if piece != segment and piece.strip():
+                hit = playwright_path_hit(piece, depth, ps_inner=ps_inner, watch=watch)
+                if hit:
+                    return hit
     if install:
         return _playwright_tokens_hit(tokens, depth, install)
     at = resolve_command(tokens) if tokens else None
@@ -570,7 +681,11 @@ def playwright_path_hit(segment: str, depth=0, to_file=False, ps_inner=False,
     outer_ps = word in PLAYWRIGHT_PS_SHELLS and not _pwsh_script(tokens)
     if (POWERSHELL_CALL[0] or outer_ps or ps_inner) and word not in (
             ENV_PATTERN_COMMANDS + PLAYWRIGHT_PS_READERS):
-        found = PLAYWRIGHT_PS_SET.search(segment)
+        if watch is not PLAYWRIGHT_WATCH:
+            hit = _ps_env_set(tokens, watch)
+            if hit:
+                return hit
+        found = PLAYWRIGHT_PS_SET.search(segment) if watch is PLAYWRIGHT_WATCH else None
         # inside pwsh -c, a `$env:` text counts only as a statement, not inside another command's argument
         if found and not (ps_inner and found.group(0).startswith(("$", "{")) and not re.match(
                 r"\s*" + re.escape(found.group(0)), segment)):
@@ -582,25 +697,62 @@ def playwright_path_hit(segment: str, depth=0, to_file=False, ps_inner=False,
         if basename(tokens[0]) == "printf":   # drop printf directives and escapes, keep the text
             words = [_PRINTF_DIRECTIVE.sub("", t) for t in words]
         written = " ".join(w for w in words if w)
-        if _is_playwright_assign(written.removeprefix("export ").lstrip()):
-            return PLAYWRIGHT_VAR + " written to a file"
-    return _playwright_tokens_hit(tokens, depth)
+        name = _assigned_var(written.removeprefix("export ").lstrip(), watch)
+        if name:
+            return name + " written to a file"
+    return _playwright_tokens_hit(tokens, depth, watch=watch)
 
 
-def playwright_command_hit(raw: str, stripped: str) -> str:
+def playwright_command_hit(raw: str, stripped: str, watch=PLAYWRIGHT_WATCH) -> str:
     """Judge a whole command: each segment, plus a profile-bound heredoc body and `tee` pipe."""
     to_file = bool(re.search(r"\btee\b[^|;&]*" + PLAYWRIGHT_PROFILE.pattern, stripped))
     for segment in split_segments(stripped):
-        matched = playwright_path_hit(segment, to_file=to_file)
+        matched = playwright_path_hit(segment, to_file=to_file, watch=watch)
         if matched:
             return matched
     for _, body, header in _split_heredocs(raw)[1]:
         if PLAYWRIGHT_PROFILE.search(header):
             for line in body.split("\n"):
-                matched = playwright_path_hit(line)
+                matched = playwright_path_hit(line, watch=watch)
                 if matched:
                     return matched
     return ""
+
+
+# GIT LOCATION VARIABLES. Incident (q_max, 2026-10-14 02:41-02:47 CDT): an agent set GIT_DIR and
+# GIT_WORK_TREE in PowerShell, then a test's child `git init` inherited them and wrote
+# core.worktree into the shared .git/config. Every checkout then read the wrong tree. One walk
+# with the Playwright rule (same segments, same wrappers, same `sh -c`/`eval`/`pwsh -c` reach),
+# with a different watch list and a quote-safe PowerShell reader. KNOWN LIMITS: those of the
+# Playwright rule, plus `VAR+=x cmd` as an inline prefix and PowerShell `New-Item` forms beyond
+# the cmdlets listed in `_PS_CMDLETS`. `git --git-dir` and `git -C` are options, not sets.
+def git_env_command_hit(raw: str, stripped: str) -> str:
+    """Judge a whole command for a set of GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE. Each command
+    substitution (`$(...)`, backticks, in double quotes too) is judged as a command of its own,
+    through the one reader in guard_env; one nested past its depth bound is refused."""
+    found, too_deep = _substitutions(stripped, powershell=POWERSHELL_CALL[0])
+    texts = [text for text, _in_message in found]
+    if too_deep:   # the env-file rule refuses a nesting this deep; judge the text as it stands
+        texts = [stripped]
+    # An UNQUOTED heredoc body runs its substitutions; the body text around them is data. A quoted
+    # delimiter (`<<'EOF'`) runs nothing. A quote mark in the body is text (`don't`, `'$(...)'`).
+    # A body nested too deep is refused by env_heredoc_refusal.
+    texts = [text for quote, body, _ in _split_heredocs(raw)[1] if not quote
+             for text, _in_message in _substitutions(body, heredoc=True)[0][:-1]] + texts   # command stays last
+    for text in texts:
+        matched = playwright_command_hit(raw if text == texts[-1] else text, text, GIT_ENV_WATCH)
+        if matched:
+            return matched
+    return ""
+
+
+GIT_ENV_REASON = (
+    "a shell that sets the git location variables points every child git at another tree. "
+    "Measured in q_max on 2026-10-14: a test's child `git init` inherited them and wrote "
+    "core.worktree into the shared config, and every checkout read the wrong tree. "
+    "Remedy: pass the repo path with `git -C <dir>`, or scrub every GIT_* name from the child's "
+    "own environment."
+)
 
 
 def playwright_install_hit(stripped: str, subagent: bool) -> str:

@@ -70,6 +70,7 @@ FAMILIES = {
     "write": "the silent write",
     "push-delete": "push and delete",
     "env": "environment files",
+    "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "merge": "merge into main, draft pull requests and the merge gate",
     "cite": "cite by id",
     "frozen": "frozen paths",
@@ -2069,7 +2070,10 @@ sh("per-file allow: one -C target repeated, lane restore f.txt then lane restore
 sh("per-file deny: -C lane with --work-tree naming the shared checkout, from a worktree",
    VCS + " -C " + slash(GITWT) + " --work-tree=" + slash(GITMAIN) + " restore f.txt",
    "deny", "shared-tree", cwd=GITWT)
-# 2. GIT_WORK_TREE, alone or with GIT_DIR, set by prefix, by `env`, or by `export`.
+# 2. GIT_WORK_TREE, alone or with GIT_DIR, set by prefix, by `env`, or by `export`. A set is denied
+# by git-env-set, not asked. This was a stale claim: "ask" pinned the q_max core.worktree incident
+# shape (a set GIT_WORK_TREE leaking into child git calls), so these cases are re-pointed to deny.
+GIT_ENV_RULE = "git-env-set"
 for _label, _lead in (("a prefix assignment", ""), ("env", "env "), ("export", None)):
     for _gitdir in (False, True):
         _vars = "GIT_WORK_TREE=" + slash(GITMAIN)
@@ -2079,8 +2083,8 @@ for _label, _lead in (("a prefix assignment", ""), ("env", "env "), ("export", N
             _cmd = "export " + _vars + "; " + VCS + " restore f.txt"
         else:
             _cmd = _lead + _vars + " " + VCS + " restore f.txt"
-        sh("per-file ask: GIT_WORK_TREE naming the shared checkout by %s%s, from a worktree"
-           % (_label, " with GIT_DIR" if _gitdir else ""), _cmd, "ask", "shared-tree", cwd=GITWT)
+        sh("per-file deny: GIT_WORK_TREE set to the shared checkout by %s%s, from a worktree"
+           % (_label, " with GIT_DIR" if _gitdir else ""), _cmd, "deny", GIT_ENV_RULE, cwd=GITWT)
 # 3. A segment with no -C must not borrow another segment's -C. From the shared checkout, the bare
 # restore runs in the shared checkout whichever side the lane's -C status stands on. main asks.
 sh("per-file ask: -C lane status, then a bare restore f.txt, from the shared checkout",
@@ -2103,7 +2107,9 @@ sh("per-file ask: env --chdir into the shared checkout, then restore f.txt, from
 
 # LATE PROBES (named "late probe", so MUTATE_ONLY="late probe" runs this block alone). Each runs a
 # per-file restore in the shared checkout from the lane by a spelling the guard did not read yet.
-# Main reads the lane for all of them and asks, so ask is pinned. The controls stay allowed.
+# Main reads the lane for all of them. The setters are denied by git-env-set (re-pointed from ask,
+# see block 2). The chdir flags only name the shared checkout, so they still ask. The controls stay
+# allowed.
 _SH = slash(GITMAIN)
 for _label, _cmd in (
     ("lower-case git_work_tree prefix", "git_work_tree=" + _SH + " " + VCS + " restore f.txt"),
@@ -2112,6 +2118,10 @@ for _label, _cmd in (
     ("export with +=", "export GIT_WORK_TREE+=" + _SH + "; " + VCS + " restore f.txt"),
     ("printf -v then export", "printf -v GIT_WORK_TREE %s " + _SH + "; export GIT_WORK_TREE; "
      + VCS + " restore f.txt"),
+):
+    sh("per-file deny: late probe, %s sets GIT_WORK_TREE to the shared checkout, from a worktree"
+       % _label, _cmd, "deny", GIT_ENV_RULE, cwd=GITWT)
+for _label, _cmd in (
     ("env -vC", "env -vC " + _SH + " " + VCS + " restore f.txt"),
     ("env --ch= abbreviation", "env --ch=" + _SH + " " + VCS + " restore f.txt"),
 ):
@@ -2125,8 +2135,8 @@ for _label, _cmd in (
     ("SetEnvironmentVariable", '[Environment]::SetEnvironmentVariable("GIT_WORK_TREE","' + _SH
      + '"); ' + VCS + " restore f.txt"),
 ):
-    sh("per-file ask: late probe, PowerShell %s names the shared checkout, from a worktree" % _label,
-       _cmd, "ask", "shared-tree", tool="PowerShell", cwd=GITWT)
+    sh("per-file deny: late probe, PowerShell %s sets GIT_WORK_TREE to the shared checkout"
+       % _label, _cmd, "deny", GIT_ENV_RULE, tool="PowerShell", cwd=GITWT)
 sh("per-file allow: late probe control, a plain restore f.txt in the lane",
    VCS + " restore f.txt", "allow", cwd=GITWT)
 sh("per-file allow: late probe control, a harmless GIT_TRACE prefix in the lane",
@@ -5319,6 +5329,154 @@ sh("guard-command-position: playwright, two heredoc headers on one line write th
    "cat >> ~/.zshrc <<A <<'B'\nx\nA\nexport PLAYWRIGHT_BROWSERS_PATH=/x\nB", "deny",
    "playwright-browsers-path", cwd=NOGIT)
 
+# =========================================================================== git env set
+# A command that SETS GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE retargets every git call after it.
+# Incident (q_max, 2026-10-14 02:41-02:47 CDT): an agent set $env:GIT_DIR and $env:GIT_WORK_TREE,
+# then ran a test whose child `git init` inherited both, and git wrote core.worktree into the
+# shared .git/config. Reading a variable, unsetting it, and text that only names it stay allowed.
+FAMILY = "git-env"  # GIT_ENV_RULE, the rule id, is set in the shared-tree section above
+_GIT_ENV_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
+
+# Bash forms that set one of the three. The tail is a harmless test run, so the setter decides.
+for _name in _GIT_ENV_VARS:
+    for _label, _cmd in (
+        ("export", "export %s=/x; python -m pytest" % _name),
+        ("export with +=", "export %s+=/x; python -m pytest" % _name),
+        ("a prefix assignment", "%s=/x python -m pytest" % _name),
+        ("env", "env %s=/x python -m pytest" % _name),
+        ("declare -x", "declare -x %s=/x; python -m pytest" % _name),
+    ):
+        sh("git env set: Bash %s by %s, denies" % (_name, _label), _cmd, "deny", GIT_ENV_RULE,
+           cwd=NOGIT)
+sh("git env set: the incident shape in Bash, two variables exported before a test run, denies",
+   "export GIT_DIR=/c/x/.git GIT_WORK_TREE=/c/scratch; python -m pytest", "deny", GIT_ENV_RULE,
+   cwd=NOGIT)
+sh("git env set: the incident shape in Bash, two prefixes on a test run, denies",
+   "GIT_DIR=/c/x/.git GIT_WORK_TREE=/c/scratch python -m pytest", "deny", GIT_ENV_RULE, cwd=NOGIT)
+
+# PowerShell forms that set one of the three, the env drive in every spelling, and a New-Item.
+for _cmd in (
+    r'$env:GIT_DIR = "C:\x\.git"; python -m pytest',
+    r'$env:GIT_WORK_TREE = "C:\scratch"; python -m pytest',
+    r'$env:GIT_INDEX_FILE = "C:\x\index"; python -m pytest',
+    r'$env:GIT_DIR += ";C:\x\.git"; python -m pytest',
+    r'$env:git_dir = "C:\x\.git"; python -m pytest',
+    r'${env:GIT_WORK_TREE} = "C:\scratch"; python -m pytest',
+    r'[Environment]::SetEnvironmentVariable("GIT_DIR", "C:\x\.git", "Process"); python -m pytest',
+    r'Set-Item env:GIT_INDEX_FILE "C:\x\index"; python -m pytest',
+    r'ni env:GIT_DIR -Value C:\x\.git; python -m pytest',
+):
+    sh("git env set: PowerShell %s, denies" % _cmd.split(";")[0][:40], _cmd, "deny", GIT_ENV_RULE,
+       tool="PowerShell", cwd=NOGIT)
+sh("git env set: the incident shape in PowerShell, two variables set before a test run, denies",
+   r'$env:GIT_DIR = "C:\x\.git"; $env:GIT_WORK_TREE = "C:\scratch"; python -m pytest',
+   "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+
+# Scanner cases: a comment opener, a lone quote, and a newline inside a string must not hide the
+# setter that follows them (building-scanner-respects-strings).
+sh('git env set: a hash opener inside quotes does not hide a Bash setter, denies',
+   'echo "# note"; export GIT_DIR=/x; python -m pytest', "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh('git env set: a double slash inside quotes does not hide a Bash setter, denies',
+   'echo "// note"; export GIT_WORK_TREE=/x; python -m pytest', "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh('git env set: a slash-star inside quotes does not hide a Bash setter, denies',
+   'echo "/* note"; export GIT_INDEX_FILE=/x; python -m pytest', "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh("git env set: a lone apostrophe inside double quotes does not hide a Bash setter, denies",
+   "echo \"Don't\"; export GIT_DIR=/x; python -m pytest", "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh("git env set: a lone apostrophe in unquoted text does not hide a Bash setter, denies",
+   "echo don't; export GIT_DIR=/x; python -m pytest", "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh("git env set: a newline inside a quoted string does not hide a setter on the next line, denies",
+   "echo \"first line\nsecond line\"\nexport GIT_DIR=/x\npython -m pytest", "deny", GIT_ENV_RULE,
+   cwd=NOGIT)
+sh("git env set: a commit message ending in a newline does not hide a setter after it, denies",
+   VCS + ' commit -m "note\nline"\nexport GIT_WORK_TREE=/x; python -m pytest', "deny",
+   GIT_ENV_RULE, cwd=NOGIT)
+sh("git env set: a PowerShell here-string does not hide a setter on the next line, denies",
+   "@'\nnote about the variable\n'@\n$env:GIT_DIR = \"C:\\x\\.git\"", "deny", GIT_ENV_RULE,
+   tool="PowerShell", cwd=NOGIT)
+
+# Allow: the same spellings when they only name the variable, print it, or read it.
+sh('git env set: a hash opener in quotes that only names the variable, allowed',
+   'echo "# export GIT_DIR=/x"', "allow", cwd=NOGIT)
+sh("git env set: a quoted apostrophe that only names the variable, allowed",
+   "echo \"Don't mention GIT_DIR\"", "allow", cwd=NOGIT)
+sh("git env set: a quoted echo of a setter line prints it and sets nothing, allowed",
+   'echo "export GIT_DIR=/x"', "allow", cwd=NOGIT)
+sh("git env set: a commit message that only names the variables, allowed",
+   VCS + ' commit -m "doc\nexport GIT_DIR=/x and GIT_WORK_TREE in the message"', "allow",
+   cwd=NOGIT)
+sh("git env set: a PowerShell here-string that only names the variable, allowed",
+   "@'\nexport GIT_DIR=/x\n'@", "allow", tool="PowerShell", cwd=NOGIT)
+
+# Allow: reads and unsets, a git variable outside the list, and names that only start the same.
+for _cmd in (
+    "echo $GIT_DIR",
+    'echo "$GIT_WORK_TREE"',
+    "unset GIT_DIR; python -m pytest",
+    "unset GIT_WORK_TREE GIT_INDEX_FILE; python -m pytest",
+    "env -u GIT_DIR python -m pytest",
+    "GIT_TRACE=1 " + VCS + " rev-parse --git-dir",
+    "GIT_DIRX=1 python -m pytest",
+    "MYGIT_DIR=1 python -m pytest",
+    "export FOO=bar; python -m pytest",
+):
+    sh("git env set: Bash allowed, %s" % _cmd[:40], _cmd, "allow", cwd=NOGIT)
+for _cmd in (
+    r"$env:GIT_DIR",
+    r"Write-Output $env:GIT_WORK_TREE",
+    r"Remove-Item env:GIT_DIR",
+    r"Remove-Item Env:GIT_INDEX_FILE",
+    r'$env:GIT_DIRX = "1"; python -m pytest',
+    r'$env:MYGIT_DIR = "1"; python -m pytest',
+    r'$env:GIT_TRACE = "1"; python -m pytest',
+    r"Select-String '$env:GIT_DIR = ' f.ps1",
+):
+    sh("git env set: PowerShell allowed, %s" % _cmd[:40], _cmd, "allow", tool="PowerShell",
+       cwd=NOGIT)
+
+# Round 1 review of 59f17f8: a set inside a substitution, a backtick, a negation, a wrapper, a
+# script block, a persistent setter or cmd /c. The guard is for accidental sets, not an attacker, so
+# each form is pinned by name and no more.
+for _cmd in (
+    "echo $(GIT_DIR=x " + VCS + " init)",
+    "echo `GIT_DIR=x " + VCS + " init`",
+    '"$(GIT_WORK_TREE=x ' + VCS + ' status)"',
+    "! GIT_DIR=x " + VCS + " init",
+    "nice -n 5 env GIT_DIR=x " + VCS + " init",
+):
+    sh("git env set: Bash, a set in front of a git call, %s" % _cmd[:40], _cmd, "deny",
+       GIT_ENV_RULE, cwd=NOGIT)
+for _cmd in (
+    r"& { $env:GIT_DIR='x'; " + VCS + " init }",
+    r"Invoke-Command -ScriptBlock { $env:GIT_WORK_TREE='x' }",
+    "setx GIT_DIR x",
+):
+    sh("git env set: PowerShell, a set in a script block or a setter, %s" % _cmd[:40], _cmd,
+       "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: cmd /c set, then a git call, denies",
+   "cmd /c set GIT_DIR=x && " + VCS + " init", "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh("git env set: export -n only drops the export attribute, allowed",
+   "export -n GIT_DIR", "allow", cwd=NOGIT)
+
+# Round 2 review of 695c944: a set inside a PowerShell block (if, foreach, a pipeline's block, try),
+# a set in a parenthesised assignment, a set in a pwsh -c string, a set after the value, and a set in
+# a bash heredoc. The heredoc runs its substitution only when the delimiter is unquoted.
+for _cmd in (
+    r"if ($true) {$env:GIT_DIR='x'}",
+    r"foreach ($i in 1) {$env:GIT_DIR='x'}",
+    r"1 | ForEach-Object {$env:GIT_DIR='x'}",
+    r"try {$env:GIT_DIR='x'} finally {}",
+    r"($env:GIT_DIR='x')",
+):
+    sh("git env set: PowerShell, a set in a block or a group, %s" % _cmd[:40], _cmd, "deny",
+       GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: pwsh -c with a set inside an if block, denies",
+   "pwsh -c \"if ($true) {$env:GIT_DIR='x'}\"", "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh("git env set: Bash export with -n after the value, denies",
+   "export GIT_DIR=x -n", "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh("git env set: Bash unquoted heredoc runs a substitution with a set, denies",
+   "cat <<EOF\n$(GIT_DIR=x " + VCS + " init)\nEOF", "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh("git env set: Bash quoted heredoc runs no substitution, allowed",
+   "cat <<'EOF'\n$(GIT_DIR=x " + VCS + " init)\nEOF", "allow", cwd=NOGIT)
 
 # =========================================================================== 5. merge into main
 FAMILY = "merge"

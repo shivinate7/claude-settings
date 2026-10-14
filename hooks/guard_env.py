@@ -180,7 +180,7 @@ ENV_MAX_DEPTH = 64
 ENV_DEPTH_REASON = "substitutions are nested too deep for the guard to read"
 
 
-def _substitutions(cmd: str, depth: int = 0):
+def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: bool = False):
     """Return ([(text, in a message)], too_deep). The last text is the command itself.
 
     One pass, no recursion. Each command substitution `$(...)`, backtick pair or process
@@ -190,7 +190,12 @@ def _substitutions(cmd: str, depth: int = 0):
 
     ponytail: a backtick body is read again by a recursive call. A nested backtick needs a
     backslash per level, so honest input never nests them, and past ENV_MAX_DEPTH it is refused.
+
+    `powershell` reads PowerShell's escape: a backtick escapes the next character, as a backslash
+    does in bash, and opens no substitution. A backslash is then a plain character. `heredoc`
+    reads an unquoted heredoc body: there a quote mark is text, until a substitution opens.
     """
+    escape = "`" if powershell else "\\"
     if depth > ENV_MAX_DEPTH:
         return [], True
     done = []
@@ -218,18 +223,20 @@ def _substitutions(cmd: str, depth: int = 0):
         char = cmd[i]
         frame = stack[-1]
         pieces, quote = frame[0], frame[1]
-        if char == "\\" and quote != "'":
+        if char == escape and quote != "'":
             pieces.append(cmd[i:i + 2])
             i += 2
             continue
-        if quote == "'":
+        if heredoc and len(stack) == 1 and char in "'\"":
+            pass   # a quote mark in a heredoc body is text
+        elif quote == "'":
             frame[1] = "" if char == "'" else quote
         elif char == "'" and quote == "":
             frame[1] = "'"
         elif char == '"':
             frame[1] = "" if quote == '"' else '"'
             frame[4] = quote == "" and opens_message(pieces)
-        elif char == "`":
+        elif char == "`" and not powershell:
             j = i + 1
             while j < n and cmd[j] != "`":
                 j += 2 if cmd[j] == "\\" else 1

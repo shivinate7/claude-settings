@@ -61,6 +61,9 @@ one fixed order, and the first match wins.
                        behind `python bin/verdict`). Always denied.
   3 live-stream        a command that follows a stream and never ends on its own
   3 waiter             a shell segment whose command word is a sleep-and-poll
+  0c git-env-set       a command that SETS GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE, in either
+                       shell. Reading and unsetting pass, and so does a mention in quoted text.
+                       Always denied (q_max incident, 2026-10-14).
   4 force-push         a forced push. Allowed with a lease plus --force-if-includes, denied
                        with --force or a +refspec, asked when it reaches the default branch.
     destructive-delete a recursive delete at a root, a home or a glob
@@ -229,9 +232,10 @@ try:
     )
     _loading = "guard_kill"
     from guard_kill import (
-        DETACHED_LAUNCH_REASON, KILL_PID_REASON, KILL_REASON, PLAYWRIGHT_INSTALL_REASON,
-        PLAYWRIGHT_PATH_REASON, detached_launch_hit, foreign_pid_kill, kill_fed_by_name,
-        kill_fed_by_pipe, kill_hit, playwright_command_hit, playwright_install_hit,
+        DETACHED_LAUNCH_REASON, GIT_ENV_REASON, KILL_PID_REASON, KILL_REASON,
+        PLAYWRIGHT_INSTALL_REASON, PLAYWRIGHT_PATH_REASON, detached_launch_hit, foreign_pid_kill,
+        git_env_command_hit, kill_fed_by_name, kill_fed_by_pipe, kill_hit, playwright_command_hit,
+        playwright_install_hit,
     )
     _loading = "guard_stream"
     from guard_stream import (
@@ -1468,6 +1472,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 if subcommand in ("commit", "push"):
                     diff_refusal(tool, role, command_root(stripped, cwd))
 
+    # 0c. A command that sets a git location variable (q_max incident, 2026-10-14). Placed before
+    # rule 1 on purpose: the deny wins where the shared-tree gate would only ask (arbiter ruling).
+    matched = git_env_command_hit(raw, stripped)
+    if matched:
+        refuse(tool, "deny", "git-env-set", GIT_ENV_REASON, matched)
+
     # 1. Shared trees.
     whole_root = []   # command_root reads the whole command: once per command, never per segment
     for segment in split_segments(stripped):
@@ -1650,7 +1660,6 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = playwright_install_hit(stripped, subagent)
     if matched:
         refuse(tool, "deny", "playwright-install", PLAYWRIGHT_INSTALL_REASON, matched)
-
     # 3d. A recursive delete under an unguarded variable (decision rm-on-a-variable-needs-a-guard).
     # The guard syntax `${NAME:?}` is POSIX, so a PowerShell tool call is not judged.
     hits = [] if POWERSHELL_CALL[0] else rm_var_hits(stripped, cwd)
