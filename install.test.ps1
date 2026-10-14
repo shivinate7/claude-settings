@@ -404,6 +404,232 @@ if (-not $IsWin) {
     }
 }
 
+# ---- P1, P3, P4, P6: installer parity (Windows). Each case is red on today's install.ps1. ----------
+# Each builds its own fixture under a temp root. CLAUDE_CONFIG_DIR and HOME must sit under that root,
+# so the real ~\.claude and the real HKCU:\Environment are never written: Assert-Scratch throws before
+# a child run that would break that rule. Child runs use Start-Process, so their output goes to a log.
+function Assert-Scratch([string]$Path, [string]$Root) {
+    if (-not $Path.StartsWith($Root, [StringComparison]::OrdinalIgnoreCase)) { throw "refusing: $Path is outside $Root" }
+}
+
+# Runs $Exe as a child in $WorkDir, output to $Log. Returns the exit code.
+function Invoke-Child([string]$Exe, [string[]]$ArgList, [string]$WorkDir, [string]$Log) {
+    $p = Start-Process -FilePath $Exe -ArgumentList $ArgList -WorkingDirectory $WorkDir -Wait -PassThru -NoNewWindow `
+        -RedirectStandardOutput $Log -RedirectStandardError ($Log + '.err')
+    return $p.ExitCode
+}
+
+# Writes UTF-8 without a BOM, the text as given.
+function Write-Plain([string]$Path, [string]$Text) {
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
+    [IO.File]::WriteAllText($Path, $Text, [Text.UTF8Encoding]::new($false))
+}
+
+# Restores one environment variable; an unset value removes it (an empty value would read as unset).
+function Restore-Env([string]$Name, $Value) {
+    if ($null -eq $Value) { Remove-Item "Env:\$Name" -ErrorAction SilentlyContinue } else { Set-Item "Env:\$Name" $Value }
+}
+
+# Git Bash's bash, from git's own install dir (never WSL's bash on PATH). Empty when absent.
+function Get-GitBash {
+    $b = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
+    if (Test-Path -LiteralPath $b) { return $b }
+    return ''
+}
+
+# Empty when this runner can make a symlink, else the reason it cannot.
+function Get-LinkBlocker {
+    $d = Join-Path ([IO.Path]::GetTempPath()) ('link-probe-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $d | Out-Null
+    try {
+        Write-Plain (Join-Path $d 'target') 'x'
+        New-Item -ItemType SymbolicLink -Path (Join-Path $d 'link') -Target (Join-Path $d 'target') -ErrorAction Stop | Out-Null
+        return ''
+    } catch {
+        return $_.Exception.Message
+    } finally {
+        Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+if (-not $IsWin) {
+    Write-Host 'SKIP: P1, P3, P4, P6 installer parity (Windows only)'
+} else {
+
+# ---- P1: ps1, then sh, then ps1 on one home makes no new CLAUDE.md.bak -------------------------
+# The sh side writes "@~/..." when the clone sits under $HOME; the ps1 side writes "@C:/...". Today
+# the pointer flips on each hand-over, so every flip backs CLAUDE.md up. One pointer form fixes it.
+$GitBash = Get-GitBash
+$P1 = Join-Path ([IO.Path]::GetTempPath()) ('claude-settings-p1-' + [guid]::NewGuid().ToString('N'))
+try {
+    if (-not $GitBash) {
+        Write-Host 'SKIP: P1 pointer parity (Git Bash not found under Program Files)'
+    } else {
+        $P1Home  = Join-Path $P1 'home'
+        $P1Clone = Join-Path $P1Home 'clone'
+        $P1Cfg   = Join-Path $P1Home '.claude'
+        New-Item -ItemType Directory -Force -Path $P1Clone, $P1Cfg | Out-Null
+        Copy-Installer $P1Clone
+        Copy-Item (Join-Path $Here 'install.sh') (Join-Path $P1Clone 'install.sh')
+        Write-Plain (Join-Path $P1Clone 'CLAUDE.md') "# p1 content`n"
+        Write-Plain (Join-Path $P1Clone 'settings.json') "{}`n"
+        Write-Plain (Join-Path $P1Clone 'landed-dirs.txt') "skills`n"
+        $ps1Args = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + (Join-Path $P1Clone 'install.ps1') + '"'))
+        $savedCfg = $env:CLAUDE_CONFIG_DIR; $savedHome = $env:HOME
+        try {
+            Assert-Scratch $P1Cfg $P1; Assert-Scratch $P1Home $P1
+            $env:CLAUDE_CONFIG_DIR = $P1Cfg; $env:HOME = $P1Home
+            $rcA = Invoke-Child $PsHost $ps1Args $P1Clone (Join-Path $P1 'p1-a.log')
+            $rcB = Invoke-Child $GitBash @('install.sh') $P1Clone (Join-Path $P1 'p1-b.log')
+            $afterB = ''
+            if (Test-Path -LiteralPath (Join-Path $P1Cfg 'CLAUDE.md')) { $afterB = (Get-Content -Raw -LiteralPath (Join-Path $P1Cfg 'CLAUDE.md')).Trim() }
+            $rcC = Invoke-Child $PsHost $ps1Args $P1Clone (Join-Path $P1 'p1-c.log')
+        } finally {
+            Restore-Env 'CLAUDE_CONFIG_DIR' $savedCfg; Restore-Env 'HOME' $savedHome
+        }
+        Check "P1: ps1, sh and ps1 runs each exit 0 (exit $rcA, $rcB, $rcC)" ($rcA -eq 0 -and $rcB -eq 0 -and $rcC -eq 0)
+        Check "P1: the sh run wrote its @~/ pointer, so the fixture reaches the flip (pointer after sh: $afterB)" ($afterB.StartsWith('@~/'))
+        $baks = @(Get-ChildItem -LiteralPath $P1Cfg -Filter 'CLAUDE.md.bak.*' | ForEach-Object { $_.Name })
+        Check "P1: ps1, sh, ps1 make no CLAUDE.md.bak (found $($baks.Count): $($baks -join ', '))" ($baks.Count -eq 0)
+    }
+} finally {
+    Remove-Item -LiteralPath $P1 -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# ---- P3: a repeat run whose settings.json backup fails exits 1 and leaves settings.json as it was ---
+# Copy mode is forced, so run 1 leaves a plain settings.json. Run 2 must back it up, which creates a
+# new file in the config dir. A deny ACE on CreateFiles, on that dir only (no inheritance), makes the
+# create fail. An in-place overwrite of the existing settings.json stays allowed, so an installer that
+# refreshed settings.json before backing it up would change it. The ACL is restored before cleanup.
+$P3 = Join-Path ([IO.Path]::GetTempPath()) ('claude-settings-p3-' + [guid]::NewGuid().ToString('N'))
+try {
+    $P3Clone = Join-Path $P3 'clone'
+    $P3Cfg   = Join-Path $P3 'claude'
+    New-Item -ItemType Directory -Force -Path $P3Clone, $P3Cfg | Out-Null
+    Copy-Installer $P3Clone
+    Write-Plain (Join-Path $P3Clone 'CLAUDE.md') "# p3 content`n"
+    Write-Plain (Join-Path $P3Clone 'settings.json') "{`"src`": 1}`n"
+    Write-Plain (Join-Path $P3Clone 'landed-dirs.txt') "skills`n"
+    $ps1Args = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + (Join-Path $P3Clone 'install.ps1') + '"'))
+    $savedCfg = $env:CLAUDE_CONFIG_DIR; $savedForce = $env:CLAUDE_SETTINGS_FORCE_COPY
+    try {
+        Assert-Scratch $P3Cfg $P3
+        $env:CLAUDE_CONFIG_DIR = $P3Cfg; $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+        $rc1 = Invoke-Child $PsHost $ps1Args $P3Clone (Join-Path $P3 'p3-run1.log')
+        Check "P3: run 1 (forced copy) exits 0 (exit $rc1)" ($rc1 -eq 0)
+        $target = Join-Path $P3Cfg 'settings.json'
+        $before = [IO.File]::ReadAllBytes($target)
+        Write-Plain (Join-Path $P3Clone 'settings.json') "{`"src`": 2}`n"   # the source changes between runs
+        $saved = Get-Acl -LiteralPath $P3Cfg
+        $acl   = Get-Acl -LiteralPath $P3Cfg
+        $sid   = [Security.Principal.WindowsIdentity]::GetCurrent().User
+        $rule  = New-Object Security.AccessControl.FileSystemAccessRule($sid, [Security.AccessControl.FileSystemRights]::CreateFiles, [Security.AccessControl.InheritanceFlags]::None, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Deny)
+        $acl.AddAccessRule($rule)
+        try {
+            Set-Acl -LiteralPath $P3Cfg -AclObject $acl
+            $newDenied = $false
+            try { Write-Plain (Join-Path $P3Cfg 'p3-probe.tmp') 'x' } catch { $newDenied = $true }
+            $overwriteOk = $true
+            try { [IO.File]::WriteAllBytes($target, $before) } catch { $overwriteOk = $false }
+            Check "P3: fixture deny blocks a new file in the config dir" $newDenied
+            Check "P3: fixture deny leaves an in-place overwrite of settings.json working" $overwriteOk
+            $rc2 = Invoke-Child $PsHost $ps1Args $P3Clone (Join-Path $P3 'p3-run2.log')
+        } finally {
+            Set-Acl -LiteralPath $P3Cfg -AclObject $saved
+        }
+        Check "P3: repeat run exits 1 when the settings.json backup fails (exit $rc2)" ($rc2 -eq 1)
+        $after = [IO.File]::ReadAllBytes($target)
+        Check "P3: settings.json is unchanged after the failed backup (still the run 1 copy)" ([Convert]::ToBase64String($after) -eq [Convert]::ToBase64String($before))
+    } finally {
+        Restore-Env 'CLAUDE_CONFIG_DIR' $savedCfg; Restore-Env 'CLAUDE_SETTINGS_FORCE_COPY' $savedForce
+    }
+} finally {
+    Remove-Item -LiteralPath $P3 -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# ---- P4: the old janitor files leave bin\ on Windows (install.sh removes them today) ----------------
+# The three exact names go. Decoys stay: a near name, a suffixed name, and a directory.
+$P4 = Join-Path ([IO.Path]::GetTempPath()) ('claude-settings-p4-' + [guid]::NewGuid().ToString('N'))
+try {
+    $P4Clone = Join-Path $P4 'clone'
+    $P4Cfg   = Join-Path $P4 'claude'
+    $P4Bin   = Join-Path $P4Cfg 'bin'
+    New-Item -ItemType Directory -Force -Path $P4Clone, $P4Bin | Out-Null
+    Copy-Installer $P4Clone
+    Write-Plain (Join-Path $P4Clone 'CLAUDE.md') "# p4 content`n"
+    Write-Plain (Join-Path $P4Clone 'settings.json') "{}`n"
+    Write-Plain (Join-Path $P4Clone 'landed-dirs.txt') "skills`n"
+    foreach ($n in @('janitor.py', 'reap.py', 'session-teardown.sh', 'foo.sh', 'claude-janitor-old')) { Write-Plain (Join-Path $P4Bin $n) 'x' }
+    New-Item -ItemType Directory -Force -Path (Join-Path $P4Bin 'janitor-dir') | Out-Null
+    $savedCfg = $env:CLAUDE_CONFIG_DIR
+    try {
+        Assert-Scratch $P4Cfg $P4
+        $env:CLAUDE_CONFIG_DIR = $P4Cfg
+        $rc4 = Invoke-Child $PsHost @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + (Join-Path $P4Clone 'install.ps1') + '"')) $P4Clone (Join-Path $P4 'p4.log')
+        Check "P4: install.ps1 run exits 0 (exit $rc4)" ($rc4 -eq 0)
+    } finally {
+        Restore-Env 'CLAUDE_CONFIG_DIR' $savedCfg
+    }
+    $left = @(Get-ChildItem -LiteralPath $P4Bin -Force | ForEach-Object { $_.Name })
+    $staleLeft = @($left | Where-Object { $_ -in @('janitor.py', 'reap.py', 'session-teardown.sh') })
+    Check "P4: the three old janitor files are removed from bin\ (still present: $($staleLeft -join ', '))" ($staleLeft.Count -eq 0)
+    $decoyGone = @(@('foo.sh', 'claude-janitor-old', 'janitor-dir') | Where-Object { $left -notcontains $_ })
+    Check "P4: decoys are kept in bin\ (missing: $($decoyGone -join ', '))" ($decoyGone.Count -eq 0)
+} finally {
+    Remove-Item -LiteralPath $P4 -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# ---- P6: settings.json already linked, a later run still adds ~\.claude\bin to the PATH key -----
+# Run 1 links settings.json (needs symlink rights, else SKIP). Run 2, on a fresh PATH key, must still
+# add the bin dir. Today the already-linked branch exits before the PATH step. The log line shows run 2
+# took that branch, so the case cannot pass on another path.
+$p6Blocker = Get-LinkBlocker
+if ($p6Blocker) {
+    Write-Host "SKIP: P6 PATH after an existing link (no symlink rights: $p6Blocker)"
+} else {
+    $P6 = Join-Path ([IO.Path]::GetTempPath()) ('claude-settings-p6-' + [guid]::NewGuid().ToString('N'))
+    try {
+        $P6Clone = Join-Path $P6 'clone'
+        $P6Cfg   = Join-Path $P6 'claude'
+        New-Item -ItemType Directory -Force -Path $P6Clone, $P6Cfg | Out-Null
+        Copy-Installer $P6Clone
+        Write-Plain (Join-Path $P6Clone 'CLAUDE.md') "# p6 content`n"
+        Write-Plain (Join-Path $P6Clone 'settings.json') "{}`n"
+        Write-Plain (Join-Path $P6Clone 'landed-dirs.txt') "skills`n"
+        $ps1Args = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + (Join-Path $P6Clone 'install.ps1') + '"'))
+        $savedCfg = $env:CLAUDE_CONFIG_DIR; $savedKey = $env:CLAUDE_SETTINGS_USER_ENV_KEY
+        try {
+            Assert-Scratch $P6Cfg $P6
+            $env:CLAUDE_CONFIG_DIR = $P6Cfg
+            $env:CLAUDE_SETTINGS_USER_ENV_KEY = "HKCU:\$TestEnvSub\p6a"
+            $rc6a = Invoke-Child $PsHost $ps1Args $P6Clone (Join-Path $P6 'p6-run1.log')
+            $link = Get-Item -LiteralPath (Join-Path $P6Cfg 'settings.json') -Force -ErrorAction SilentlyContinue
+            $linkedTo = ''
+            if ($link -and $link.LinkType -eq 'SymbolicLink') { $linkedTo = [string](@($link.Target)[0]) }
+            Check "P6: run 1 links settings.json to the clone's file (exit $rc6a, link target: '$linkedTo')" ($rc6a -eq 0 -and $linkedTo -eq (Join-Path $P6Clone 'settings.json'))
+
+            $subB = "$TestEnvSub\p6b"
+            [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($subB).Close()   # fresh key: no Path value yet
+            $env:CLAUDE_SETTINGS_USER_ENV_KEY = "HKCU:\$subB"
+            $log6b = Join-Path $P6 'p6-run2.log'
+            $rc6b = Invoke-Child $PsHost $ps1Args $P6Clone $log6b
+            $tookLinked = (Test-Path -LiteralPath $log6b) -and ((Get-Content -Raw -LiteralPath $log6b) -match 'already links to')
+            Check "P6: run 2 took the already-linked branch (exit $rc6b)" ([bool]$tookLinked)
+            $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($subB)
+            $pathVal = ''
+            if ($k) { $pathVal = [string]$k.GetValue('Path', ''); $k.Close() }
+            $binDir = Join-Path $env:USERPROFILE '.claude\bin'
+            Check "P6: run 2 still adds $binDir to the PATH key (PATH key now: '$pathVal')" (($pathVal -split ';') -contains $binDir)
+        } finally {
+            Restore-Env 'CLAUDE_CONFIG_DIR' $savedCfg; Restore-Env 'CLAUDE_SETTINGS_USER_ENV_KEY' $savedKey
+        }
+    } finally {
+        Remove-Item -LiteralPath $P6 -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+}
+
 # ---- gap: the embedded post-merge hook body (install.ps1's Install-PostMergeHook) is not --
 # covered here. It is a heredoc written into .git\hooks\post-merge and run by `git` itself on
 # a real `git pull`, under `sh` inside Git Bash, not by any PowerShell function this file can

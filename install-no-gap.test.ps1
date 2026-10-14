@@ -438,6 +438,95 @@ try {
     Check "lock1: run 2 keeps the person's my-notes.md at the skill dir or in a .bak, never pruned" $NotesKept
     Check "lock1: run 2 keeps the person's SKILL.md content at the skill dir or in a .bak" $SkillKept
 
+    # ---- P2 and P5 helpers: a child run may touch only its own scratch tree ---------------------
+    function Assert-Scratch([string]$Path, [string]$Root) {
+        if (-not $Path.StartsWith($Root, [StringComparison]::OrdinalIgnoreCase)) { throw "refusing: $Path is outside $Root" }
+    }
+    function Invoke-Child([string]$Exe, [string[]]$ArgList, [string]$WorkDir, [string]$Log) {
+        $p = Start-Process -FilePath $Exe -ArgumentList $ArgList -WorkingDirectory $WorkDir -Wait -PassThru -NoNewWindow `
+            -RedirectStandardOutput $Log -RedirectStandardError ($Log + '.err')
+        return $p.ExitCode
+    }
+    function Restore-Env([string]$Name, $Value) {
+        if ($null -eq $Value) { Remove-Item "Env:\$Name" -ErrorAction SilentlyContinue } else { Set-Item "Env:\$Name" $Value }
+    }
+
+    # ---- P2: Windows, forced copy, three runs: .orig kept, one settings.json.bak.<time>.<pid>, no gap ----
+    # The watcher is armed before run 1, so run 1 is covered too. The first install must copy the
+    # person's file aside as settings.json.orig, never rename settings.json away.
+    $p2 = New-Scratch 'p2' @('skills')
+    Write-FixtureFile (Join-Path $p2.Cfg 'settings.json') '{"person": true}'
+    $p2Name  = Get-NameSet @('settings.json')
+    $rec2    = New-Object -TypeName NoGapRecorder -ArgumentList $p2.Cfg
+    $savedCfg2 = $env:CLAUDE_CONFIG_DIR; $savedForce2 = $env:CLAUDE_SETTINGS_FORCE_COPY
+    try {
+        Assert-Scratch $p2.Cfg $Tmp
+        $env:CLAUDE_CONFIG_DIR = $p2.Cfg; $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+        $live2 = Flush-Canary $rec2 '__p2_canary_pre.tmp' $p2.Cfg
+        Check "P2: watcher live before run 1 (canary delivered)" $live2
+        $rcs2 = @()
+        foreach ($i in 1..3) { $rcs2 += (Invoke-Install $p2.Clone "p2-run$i.log") }
+        Check "P2: runs 1, 2 and 3 exit 0 (exits: $($rcs2 -join ', '))" (@($rcs2 | Where-Object { $_ -ne 0 }).Count -eq 0)
+        $post2 = Flush-Canary $rec2 '__p2_canary_post.tmp' $p2.Cfg
+        Check "P2: watcher delivered the events of the three runs (post canary)" $post2
+        Check "P2: watcher raised no error" ($rec2.Errors.Count -eq 0)
+        $hits2 = @(Get-GapHits @($rec2.Gone.ToArray()) $p2Name)
+        foreach ($h in $hits2) { Write-Host "  gap: $h" }
+        Check "P2: no Deleted or Renamed event names settings.json over three runs ($($hits2.Count) gap events)" ($hits2.Count -eq 0)
+        $origFile = Join-Path $p2.Cfg 'settings.json.orig'
+        $origText = '<absent>'
+        if (Test-Path -LiteralPath $origFile) { $origText = ([IO.File]::ReadAllText($origFile)).Trim() }
+        Check "P2: settings.json.orig keeps the person's settings.json (found: $origText)" ($origText -eq '{"person": true}')
+        # A regex, not -Filter: Win32 wildcards make '*.*' match a name with no dot in its tail too.
+        $baks2 = @(Get-ChildItem -LiteralPath $p2.Cfg -File | Where-Object { $_.Name -match '^settings\.json\.bak\.[0-9]+\.[0-9]+$' } | ForEach-Object { $_.Name })
+        $bakAll2 = @(Get-ChildItem -LiteralPath $p2.Cfg -File | Where-Object { $_.Name -like 'settings.json.bak.*' } | ForEach-Object { $_.Name })
+        Check "P2: exactly one settings.json.bak.<time>.<pid> remains after three runs (found $($baks2.Count); all settings.json.bak names: $($bakAll2 -join ', '))" ($baks2.Count -eq 1)
+    } finally {
+        $rec2.Dispose()
+        Restore-Env 'CLAUDE_CONFIG_DIR' $savedCfg2; Restore-Env 'CLAUDE_SETTINGS_FORCE_COPY' $savedForce2
+    }
+
+    # ---- P5: install.sh under Git Bash, forced copy, a repeat run leaves no gap ----------------------
+    # install.sh has no copy-mode seam. On a runner without symlink rights, Git Bash's ln copies, so
+    # the copy path runs; run 1 asserts that no shipped name is a link. Run 2, under watch, must delete
+    # or rename no shipped name. Today install.sh removes each copy before it re-copies (rm -f, rm -rf)
+    # and moves settings.json aside with mv, so the watcher sees gaps.
+    $GitBash5 = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
+    if (-not (Test-Path -LiteralPath $GitBash5)) {
+        Write-Host 'SKIP: P5 install.sh under Git Bash (Git Bash not found under Program Files)'
+    } else {
+        $p5 = New-Scratch 'p5' @('agents', 'skills')
+        Copy-Item -LiteralPath (Join-Path $Repo 'install.sh') -Destination (Join-Path $p5.Clone 'install.sh')
+        Write-FixtureFile (Join-Path $p5.Clone 'agents\builder.md') '# builder'
+        Write-FixtureFile (Join-Path $p5.Clone 'skills\sample\SKILL.md') '# sample'
+        Write-FixtureFile (Join-Path $p5.Clone 'skills\sample\notes.md') '# notes'
+        $p5Home  = Join-Path $p5.Root 'home'
+        New-Item -ItemType Directory -Force -Path $p5Home | Out-Null
+        $p5Names = Get-NameSet @(Get-ShippedNames $p5.Clone @('agents', 'skills'))
+        $savedHome5 = $env:HOME; $savedCfg5 = $env:CLAUDE_CONFIG_DIR; $savedForce5 = $env:CLAUDE_SETTINGS_FORCE_COPY
+        $rec5 = $null
+        try {
+            Assert-Scratch $p5.Cfg $Tmp; Assert-Scratch $p5Home $Tmp
+            $env:HOME = $p5Home; $env:CLAUDE_CONFIG_DIR = $p5.Cfg; $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+            $rc5a = Invoke-Child $GitBash5 @('install.sh') $p5.Clone (Join-Path $p5.Root 'p5-run1.log')
+            Check "P5: sh run 1 exits 0 (exit $rc5a)" ($rc5a -eq 0)
+            $links5 = @($p5Names.Keys | Where-Object { Test-ReparsePoint (Join-Path $p5.Cfg $_) })
+            Check "P5: copy path runs: no shipped name is a link after run 1 ($($links5.Count) linked)" ($links5.Count -eq 0)
+            $rec5 = New-Object -TypeName NoGapRecorder -ArgumentList $p5.Cfg
+            $live5 = Flush-Canary $rec5 '__p5_canary_pre.tmp' $p5.Cfg
+            Check "P5: watcher live before sh run 2 (canary delivered)" $live5
+            $rc5b = Invoke-Child $GitBash5 @('install.sh') $p5.Clone (Join-Path $p5.Root 'p5-run2.log')
+            Check "P5: sh run 2 exits 0 (exit $rc5b)" ($rc5b -eq 0)
+            $post5 = Flush-Canary $rec5 '__p5_canary_post.tmp' $p5.Cfg
+            Check "P5: watcher delivered the sh run 2 events (post canary)" $post5
+            $hits5 = @(Get-GapHits @($rec5.Gone.ToArray()) $p5Names)
+            foreach ($h in $hits5) { Write-Host "  gap: $h during sh run 2" }
+            Check "P5: sh run 2 deletes or renames no shipped name ($($hits5.Count) gap events)" ($hits5.Count -eq 0)
+        } finally {
+            if ($rec5) { $rec5.Dispose() }
+            Restore-Env 'HOME' $savedHome5; Restore-Env 'CLAUDE_CONFIG_DIR' $savedCfg5; Restore-Env 'CLAUDE_SETTINGS_FORCE_COPY' $savedForce5
+        }
+    }
 } finally {
     if ($Rec) { $Rec.Dispose() }
     Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY, Env:\CLAUDE_SETTINGS_USER_ENV_KEY -ErrorAction SilentlyContinue
