@@ -19,8 +19,9 @@ Sources, all read from the root:
   a prompt hook           the key is its first sentence. The text is the rest of the prompt,
                           up to the clause that blocks only on a clear breach.
   enabled repo mods       `enabledPlugins` keys `<name>@claude-settings` set true. The text is
-                          the intro under the first heading of mods/<name>/README.md, or of
-                          mods/<name>/SOURCE.md when the mod has no README.
+                          the intro under the first heading of mods/<name>/README.md. A mod with no
+                          README takes the `description` in its .claude-plugin/plugin.json,
+                          then the text of its SOURCE.md (repo, commit, licence).
   skills                  the `description` in the frontmatter of skills/<name>/SKILL.md.
   model and effort        the row of the model table whose first cell names the script.
 
@@ -186,6 +187,17 @@ def under_first_heading(text):
     return flat(" ".join(out))
 
 
+def mod_manifest_description(base):
+    """The `description` in a mod's .claude-plugin/plugin.json, or "" when it has none."""
+    rel = base + "/.claude-plugin/plugin.json"
+    if not has_file(rel):
+        return ""
+    try:
+        return flat(str(json.loads(read(rel)).get("description") or ""))
+    except ValueError as err:
+        raise Unreadable(rel) from err
+
+
 def judge_text(prompt, key):
     """The prompt after its first sentence, up to the standard block-on-breach clause."""
     rest = prompt.strip()[len(key):]
@@ -250,7 +262,7 @@ Where each text comes from:
 
 - A hook runs a script. Its text is the first paragraph of the script docstring, or the leading comment block of a shell script.
 - A judge is a prompt hook that a model answers. Its key is the first sentence of the prompt. Its text is the rest of the prompt, up to the standard clause that blocks only on a clear breach.
-- A mod is an enabled mod from this repo. Its text is the intro of its `README.md`, or of its `SOURCE.md` when it has no README.
+- A mod is an enabled mod from this repo. Its text is the intro of its `README.md`. A mod with no README takes the `description` in its `plugin.json`, then the text of its `SOURCE.md`.
 - A skill is a folder under `skills/`. Its text is the `description` in its `SKILL.md` frontmatter.
 
 Model and effort come from the model table (decision `subagent-model-cap`, the model per role). A hook with no row in that table calls no model, so its row says "no model". A judge takes the `model` field of its prompt hook, and a prompt hook has no effort field. A skill has no model pin, so its row says "no model" and effort "none". The model table has no row for a mod, so a mod row says "not listed". A mod may still call a model.
@@ -328,10 +340,15 @@ def render():
         if source != "claude-settings":
             external.append(name)
             continue
-        found = [f for f in ("README.md", "SOURCE.md") if has_file("mods/%s/%s" % (name, f))]
-        text = under_first_heading(read("mods/%s/%s" % (name, found[0]))) if found else ""
+        base = "mods/" + name
+        if has_file(base + "/README.md"):
+            text = under_first_heading(read(base + "/README.md"))
+        else:
+            text = mod_manifest_description(base) if has_file(base + "/SOURCE.md") else ""
+            if text:
+                text += " Source: " + under_first_heading(read(base + "/SOURCE.md"))
         if not text:
-            problems.append("mods/%s: no text under the first heading of README.md or SOURCE.md" % name)
+            problems.append("%s: no text under the first heading of README.md, and no plugin.json description with a SOURCE.md" % base)
             continue
         mod_rows.append([key_cell("mods/" + name), "mod", "-", "-", "-", "not listed", "not listed", cell(text)])
 

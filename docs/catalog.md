@@ -8,7 +8,7 @@ Where each text comes from:
 
 - A hook runs a script. Its text is the first paragraph of the script docstring, or the leading comment block of a shell script.
 - A judge is a prompt hook that a model answers. Its key is the first sentence of the prompt. Its text is the rest of the prompt, up to the standard clause that blocks only on a clear breach.
-- A mod is an enabled mod from this repo. Its text is the intro of its `README.md`, or of its `SOURCE.md` when it has no README.
+- A mod is an enabled mod from this repo. Its text is the intro of its `README.md`. A mod with no README takes the `description` in its `plugin.json`, then the text of its `SOURCE.md`.
 - A skill is a folder under `skills/`. Its text is the `description` in its `SKILL.md` frontmatter.
 
 Model and effort come from the model table (decision `subagent-model-cap`, the model per role). A hook with no row in that table calls no model, so its row says "no model". A judge takes the `model` field of its prompt hook, and a prompt hook has no effort field. A skill has no model pin, so its row says "no model" and effort "none". The model table has no row for a mod, so a mod row says "not listed". A mod may still call a model.
@@ -60,8 +60,8 @@ Model and effort come from the model table (decision `subagent-model-cap`, the m
 
 | Key | Kind | Event | Matcher | If | Model | Effort | What it does |
 |---|---|---|---|---|---|---|---|
-| `mods/token-weather` | mod | - | - | - | not listed | not listed | Repo: https://github.com/anthropics/claude-code-playground Path: claude-code/mods/token-weather Commit: 569c5283d9a0a7ee7938df85bb32e4f48cbb8c86 Licence: Apache-2.0 (LICENSE is the repo-root file) Vendored on 2026-10-12. Copied unmodified; markdown docs and unused screenshots omitted. |
-| `mods/desktop-statusline` | mod | - | - | - | not listed | not listed | Repo: https://github.com/centminmod/claude-plugins Path: plugins/desktop-statusline Commit: 5239dd5c241ca5537f4737c25321399734d0c0bc Licence: MIT (LICENSE is the plugin-folder file) Vendored on 2026-10-12. Copied unmodified; markdown docs and unused screenshots omitted. |
+| `mods/token-weather` | mod | - | - | - | not listed | not listed | A live forecast of the context window, drawn above the prompt: a weather icon, the fill percentage, and a chart of the last turns. Source: Repo: https://github.com/anthropics/claude-code-playground Path: claude-code/mods/token-weather Commit: 569c5283d9a0a7ee7938df85bb32e4f48cbb8c86 Licence: Apache-2.0 (LICENSE is the repo-root file) Vendored on 2026-10-12. Copied unmodified; markdown docs and unused screenshots omitted. |
+| `mods/desktop-statusline` | mod | - | - | - | not listed | not listed | Status band above the prompt in the Claude Desktop app's Code tab: folder, git branch and state, session age, prompt count and cost, a context meter, 5-hour and weekly plan usage limit meters with reset countdowns, last-turn model, duration and cache hit rate, idle time against the prompt-cache TTL, compactions, and running agents. Toasts at 80% and 95% of a usage limit. Draws only on the desktop surface, so a CLI statusLine is left alone. Source: Repo: https://github.com/centminmod/claude-plugins Path: plugins/desktop-statusline Commit: 5239dd5c241ca5537f4737c25321399734d0c0bc Licence: MIT (LICENSE is the plugin-folder file) Vendored on 2026-10-12. Copied unmodified; markdown docs and unused screenshots omitted. |
 | `mods/plain-diff` | mod | - | - | - | not listed | not listed | A mod. It adds one command, `/plain-diff`. It draws nothing else. The command opens a pane. The pane lists each changed file. Each file has a short note in plain English above its diff. The note says what changed and why it matters. |
 | `mods/session-board` | mod | - | - | - | not listed | not listed | A mod. It adds two commands, `/board` and `/safe-stop`. It draws nothing else. It calls no model. |
 
