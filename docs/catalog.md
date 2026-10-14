@@ -53,7 +53,7 @@ Model and effort come from the model table (decision `subagent-model-cap`, the m
 | `hooks/local_time.py` | hook | UserPromptSubmit | - | - | no model | n/a | Tells the session the time in US Central. A prompt that opens with `fb` starts owner feedback capture to the session's inbox file, until `fb done`. |
 | `hooks/config_watch.py` | hook | PostToolUse | Bash\|PowerShell\|Write\|Edit\|MultiEdit\|NotebookEdit | - | no model | n/a | After a write or shell call, checks the subagent model cap in each watched settings file. Reverts a cap change that the guard did not ask about, or a raise past its expiry time. |
 | `hooks/ci_wake.py` | hook | PostToolUse | Bash\|PowerShell | - | no model | n/a | Wake the session when CI ends on a PR it marked ready: after `gh pr ready <N>`, wait on that head's runs and print one line with the result. Standard library only. See decisions/handoff-hooks-wave-2.md, part 3. |
-| `hooks/sim_boot_record.py` | hook | PostToolUse | Bash\|mcp__Claude_Code_iOS_Simulator__control | - | no model | n/a | After such a call, appends each simulator that the call took from Shutdown to Booted to the boot record. Never blocks. |
+| `hooks/sim_boot_record.py` | hook | PostToolUse | Bash\|mcp__Claude_Code_iOS_Simulator__control | - | no model | n/a | After such a call, appends each simulator that the call took from Shutdown to Booted to the boot record. After a `simctl boot` or an MCP `launch`, first checks each such device (ruling 5). |
 | `hooks/reread_check.py` | hook | PostCompact | - | - | no model | n/a | After compaction, sets the session's flag that its handoff is not read. |
 
 ## Mods
