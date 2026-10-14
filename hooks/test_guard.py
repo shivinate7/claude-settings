@@ -2188,6 +2188,60 @@ sh("work-tree: the spaced form is read the same way",
    VCS + " --work-tree " + slash(SUBJDIRTY) + " reset --hard", "deny", "shared-tree",
    cwd=SUBJCLEAN)
 
+# ---- guard-command-position (lane). A refused git act hides from this rule in two ways. A subshell
+# or `$( )` glued to git (`(git`, `$(git`) is one word, so the command word is not git. A heredoc
+# header read in quoted text, in a comment, or as a here-string `<<<word` strips every line after
+# it. Named holes: decision lane-by-slug, "Holes, named". Each RED case below is a hole. The
+# PINNED cases already deny or allow, and a fix must keep them so.
+for _name, _command in (
+    ("a glued subshell before reset", "(" + VCS + " reset --hard origin/main)"),
+    ("a glued subshell before stash", "(" + VCS + " stash push -u -m lane)"),
+    ("a dollar paren before stash", "$(" + VCS + " stash push -u -m lane)"),
+    ("a dollar paren inside echo before reset", "echo $(" + VCS + " reset --hard origin/main)"),
+    ("a here-string header before reset", "cat <<<word\n" + VCS + " reset --hard origin/main"),
+    ("a here-string header before stash", "cat <<<word\n" + VCS + " stash push -u -m lane"),
+    ("a quoted header before reset", 'echo "<<EOF"\n' + VCS + " reset --hard origin/main"),
+    ("a single-quoted header before stash", "echo '<<X'\n" + VCS + " stash push -u -m lane"),
+    ("a comment opener in quotes before a quoted header",
+     'echo "# <<EOF"\n' + VCS + " reset --hard origin/main"),
+    ("a commented header before reset", "# note <<EOF\n" + VCS + " reset --hard origin/main"),
+    ("a multi-line quoted text holding a header before reset",
+     'echo "first\n<<EOF"\n' + VCS + " reset --hard origin/main"),
+):
+    sh("guard-command-position: %s denies" % _name, _command, "deny", "shared-tree", cwd=NOGIT)
+for _name, _command in (
+    ("an env value flag", "env -u X " + VCS + " reset --hard origin/main"),
+    ("a nice value flag", "nice -n 5 " + VCS + " reset --hard origin/main"),
+    ("a sudo value flag", "sudo -u root " + VCS + " reset --hard origin/main"),
+    ("an xargs value flag", "xargs -n 1 " + VCS + " stash push -u -m lane"),
+    ("time -p", "time -p " + VCS + " reset --hard origin/main"),
+    ("exec", "exec " + VCS + " reset --hard origin/main"),
+    ("builtin exec", "builtin exec " + VCS + " reset --hard origin/main"),
+    ("a leading bang", "! " + VCS + " reset --hard origin/main"),
+    ("a spaced subshell", "( " + VCS + " reset --hard origin/main )"),
+    ("a brace group", "{ " + VCS + " stash push -u -m lane; }"),
+    ("an assignment prefix", "FOO=1 " + VCS + " reset --hard origin/main"),
+    ("a heredoc body, then a reset after its delimiter",
+     "cat <<EOF\n" + VCS + " reset --hard origin/main\nEOF\n" + VCS + " reset --hard origin/main"),
+    ("a comment opener in quotes before a reset", 'echo "# note"; ' + VCS + " reset --hard origin/main"),
+    ("a lone apostrophe on the line before a reset", "echo don't\n" + VCS + " reset --hard origin/main"),
+    ("a multi-line quoted text before a reset", 'echo "first\nline"\n' + VCS + " reset --hard origin/main"),
+):
+    sh("guard-command-position: pinned, %s denies" % _name, _command, "deny", "shared-tree",
+       cwd=NOGIT)
+for _name, _command in (
+    ("an env value flag before status", "env -u X " + VCS + " status"),
+    ("a nice value flag before status", "nice -n 5 " + VCS + " status"),
+    ("a sudo value flag before status", "sudo -u root " + VCS + " status"),
+    ("a glued subshell around status", "(" + VCS + " status)"),
+    ("a dollar paren around status", "echo $(" + VCS + " status)"),
+    ("a heredoc body that names a reset, then status",
+     "cat <<EOF\n" + VCS + " reset --hard origin/main\nEOF\n" + VCS + " status"),
+    ("a multi-line quoted text, then status", 'echo "first\nline"\n' + VCS + " status"),
+    ("a lone apostrophe on the line before status", "echo don't\n" + VCS + " status"),
+):
+    sh("guard-command-position: pinned, %s allowed" % _name, _command, "allow", cwd=NOGIT)
+
 
 # ============================================================ 1. branch delete / worktree remove/prune
 FAMILY = "branch-worktree"
@@ -3961,6 +4015,76 @@ sh("wsl: a test path whose bracket glob expands to ..",
 sh("wsl: a test path whose dot-led glob expands to ..",
    "wsl -e node --test .*/x.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
 
+# ---- guard-command-position (lane). A refused WSL call hides from the allow list in these ways:
+# a command-position form the rule does not unwrap (`exec`, `builtin exec`, `!`, `$( )`, a glued
+# `(wsl`, `cmd /c`, `bash -c "..."`); a value flag on a wrapper (`nice -n 5`, `sudo -u root`,
+# `env -u X`, `xargs -n 1`, `time -f`), which moves the verb slot onto the value; a heredoc header
+# that strips the line after it; a comment opener in quotes; and PowerShell `&` and `iex`. Named
+# holes: decision wsl-allow-list, "Holes, named". The RED cases are holes. The PINNED cases already
+# refuse or allow, and a fix must keep them so.
+for _name, _command in (
+    ("exec", "exec wsl --shutdown"),
+    ("builtin exec", "builtin exec wsl --shutdown"),
+    ("a leading bang", "! wsl --shutdown"),
+    ("a dollar paren", "$(wsl --shutdown)"),
+    ("a dollar paren inside echo", "echo $(wsl --shutdown)"),
+    ("a glued subshell", "(wsl --shutdown)"),
+    ("cmd /c", "cmd /c wsl --shutdown"),
+    ("bash -c with the call in quotes", 'bash -c "wsl --shutdown"'),
+    ("exec with -a", "exec -a x wsl --shutdown"),
+    ("exec with a refused shell form", "exec wsl -e bash -c ls"),
+    ("a nice value flag", "nice -n 5 wsl --shutdown"),
+    ("a sudo value flag", "sudo -u root wsl --shutdown"),
+    ("an env value flag", "env -u X wsl --shutdown"),
+    ("an xargs value flag", "xargs -n 1 wsl --shutdown"),
+    ("a time format flag", '/usr/bin/time -f "%e" wsl --shutdown'),
+    ("a here-string header", "cat <<<word\nwsl --shutdown"),
+    ("a quoted header", 'echo "<<EOF"\nwsl --shutdown'),
+    ("a commented header", "# note <<EOF\nwsl --shutdown"),
+    ("a comment opener in quotes before exec", 'echo "# note"; exec wsl --shutdown'),
+    ("a lone apostrophe in text before a value flag", "echo don't; nice -n 5 wsl --shutdown"),
+):
+    sh("guard-command-position: wsl %s denies" % _name, _command, "deny", rule=WSL_RULE, cwd=NOGIT)
+for _name, _command in (
+    ("an ampersand call", "& wsl --shutdown"),
+    ("iex with double quotes", 'iex "wsl --shutdown"'),
+    ("iex with single quotes", "iex 'wsl --shutdown'"),
+):
+    sh("guard-command-position: wsl PowerShell %s denies" % _name, _command, "deny",
+       rule=WSL_RULE, tool="PowerShell", cwd=NOGIT)
+for _name, _command in (
+    ("env with a WSL prefix", "env X=1 wsl --shutdown"),
+    ("command", "command wsl --shutdown"),
+    ("nice", "nice wsl --shutdown"),
+    ("timeout", "timeout 5 wsl --shutdown"),
+    ("sudo", "sudo wsl --shutdown"),
+    ("xargs", "xargs wsl --shutdown"),
+    ("time", "time wsl --shutdown"),
+    ("time -p", "time -p wsl --shutdown"),
+    ("doas", "doas wsl --shutdown"),
+    ("a spaced subshell", "( wsl --shutdown )"),
+    ("a brace group", "{ wsl --shutdown; }"),
+    ("an if block", "if true; then wsl --shutdown; fi"),
+    ("two env wrappers", "env X=1 env Y=2 wsl --shutdown"),
+    ("a lone apostrophe on the line before a call", "echo don't\nwsl --shutdown"),
+):
+    sh("guard-command-position: wsl pinned, %s denies" % _name, _command, "deny",
+       rule=WSL_RULE, cwd=NOGIT)
+for _name, _command in (
+    ("an env value flag", "env -u X wsl -e node --test mods/plain-diff/plain-diff.test.mjs"),
+    ("a nice value flag", "nice -n 5 wsl -e node --test mods/plain-diff/plain-diff.test.mjs"),
+    ("a sudo value flag", "sudo -u root wsl -e node --test mods/plain-diff/plain-diff.test.mjs"),
+    ("exec", "exec wsl -e node --test mods/plain-diff/plain-diff.test.mjs"),
+    ("a glued subshell", "(wsl -e node --test mods/plain-diff/plain-diff.test.mjs)"),
+    ("a dollar paren", "echo $(wsl -e node --test mods/plain-diff/plain-diff.test.mjs)"),
+    ("cmd /c", "cmd /c wsl -e node --test mods/plain-diff/plain-diff.test.mjs"),
+    ("bash -c with the allowed call in quotes",
+     'bash -c "wsl -e node --test mods/plain-diff/plain-diff.test.mjs"'),
+    ("a heredoc body that names the refused call", "cat <<'EOF'\nwsl --shutdown\nEOF"),
+    ("a comment opener in quotes", 'echo "# wsl --shutdown"'),
+):
+    sh("guard-command-position: wsl pinned, %s allowed" % _name, _command, "allow", cwd=NOGIT)
+
 
 # =========================================================================== 2d. the silent write
 FAMILY = "write"
@@ -5286,6 +5410,99 @@ def cite_unread_folders_case():
         return False, "want a deny that says could not be read, got %r" % result.stdout[:120]
     return True, "deny: the -F file is unread, and the record folders are unread too"
 
+
+# ---- guard-command-position (lane). A lane number hides from the message scan in these ways: a
+# wrapper the rule does not unwrap (`exec`, `builtin exec`, `!`, `$( )`, a glued `(git`, and value
+# flags such as `nice -n 5`, `sudo -u root`, `env -u X`, `xargs -n 1`); a heredoc header read in
+# quoted text, a comment or a here-string, which strips the commit after it; a `<<word` inside an
+# interpreter-fed body, which shifts the header count so the commit reads another body; and a case
+# pattern's `)` inside an open `$(`. Named holes: decision lane-by-slug, "Holes, named". The RED
+# cases are holes. The PINNED cases already deny or allow, and a fix must keep them so.
+for _name, _command in (
+    ("exec", "exec " + VCS + ' commit -m "fix (N20)"'),
+    ("builtin exec", "builtin exec " + VCS + ' commit -m "fix (N20)"'),
+    ("a leading bang", "! " + VCS + ' commit -m "fix (N20)"'),
+    ("a dollar paren", "$(" + VCS + ' commit -m "fix (N20)")'),
+    ("a glued subshell", "(" + VCS + ' commit -m "fix (N20)")'),
+    ("a nice value flag", "nice -n 5 " + VCS + ' commit -m "fix (N20)"'),
+    ("a sudo value flag", "sudo -u root " + VCS + ' commit -m "fix (N20)"'),
+    ("an env value flag", "env -u X " + VCS + ' commit -m "fix (N20)"'),
+    ("an xargs value flag", "xargs -n 1 " + VCS + ' commit -m "fix (N20)"'),
+    ("a glued subshell with a heredoc commit",
+     "(" + VCS + " commit -F - <<'B'\nLane N20 lands\nB\n)"),
+    ("a nice value flag with a heredoc commit",
+     "nice -n 5 " + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+    ("a nice value flag with a PR create",
+     "nice -n 5 gh pr create --draft -t 'fix (N20)' -b ok"),
+    ("a sudo value flag with a PR create",
+     "sudo -u root gh pr create --draft -t 'fix (N20)' -b ok"),
+    ("an env value flag with a PR create",
+     "env -u X gh pr create --draft -t 'fix (N20)' -b ok"),
+    ("a here-string header", "cat <<<word\n" + VCS + ' commit -m "fix (N20)"'),
+    ("a quoted header", 'echo "<<EOF"\n' + VCS + ' commit -m "fix (N20)"'),
+    ("a commented header", "# note <<EOF\n" + VCS + ' commit -m "fix (N20)"'),
+    ("a comment opener in quotes before a heredoc commit",
+     'echo "# <<EOF"\n' + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+    ("an interpreter body with a << word, then a heredoc commit",
+     "python3 - <<'EOF'\nx = 1 << y\nEOF\n" + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+    ("an interpreter -c body with a << word, then a heredoc commit",
+     "python3 -c 'print(1)' <<EOF\nx = 1 << y\nEOF\n" + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+    ("two interpreter bodies with << words, then a heredoc commit",
+     "python3 - <<'EOF'\nx = 1 << y\nEOF\npython3 - <<'EOF'\nz = 2 << w\nEOF\n"
+     + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+    ("a case pattern paren in an open dollar paren, then an interpreter body with a << word",
+     "echo $(case a in (a) echo ok;; esac\npython3 - <<'EOF'\nx = 1 << y\nEOF\n"
+     + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+    ("a lone apostrophe on the line before a heredoc commit",
+     "echo don't\n" + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+    ("a lone apostrophe on the line before a -m commit",
+     "echo don't\n" + VCS + ' commit -m "fix (N20)"'),
+):
+    sh("guard-command-position: lane %s denies" % _name, _command, "deny", "lane-by-slug",
+       cwd=NOGIT, config=MERGECFG)
+for _name, _command in (
+    ("command", "command " + VCS + ' commit -m "fix (N20)"'),
+    ("nice", "nice " + VCS + ' commit -m "fix (N20)"'),
+    ("timeout", "timeout 5 " + VCS + ' commit -m "fix (N20)"'),
+    ("sudo", "sudo " + VCS + ' commit -m "fix (N20)"'),
+    ("xargs", "xargs " + VCS + ' commit -m "fix (N20)"'),
+    ("time", "time " + VCS + ' commit -m "fix (N20)"'),
+    ("nohup", "nohup " + VCS + ' commit -m "fix (N20)"'),
+    ("doas", "doas " + VCS + ' commit -m "fix (N20)"'),
+    ("an env prefix", "env X=1 " + VCS + ' commit -m "fix (N20)"'),
+    ("a spaced subshell", "( " + VCS + ' commit -m "fix (N20)" )'),
+    ("a brace group", "{ " + VCS + ' commit -m "fix (N20)"; }'),
+    ("an interpreter body with a << word, then a lane -m commit",
+     "python3 - <<'EOF'\nx = 1 << y\nEOF\n" + VCS + ' commit -m "fix (N20)"'),
+    ("an interpreter body with a shift operator, then a heredoc lane commit",
+     "python3 - <<'EOF'\nprint(1 << 2)\nEOF\n" + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+    ("a plain heredoc body with a << word, then a heredoc lane commit",
+     "cat <<'A'\nx = 1 << y\nA\n" + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+    ("a closed case pattern paren in a dollar paren, then a heredoc lane commit",
+     "echo $(case a in (a) echo ok;; esac)\n" + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+    ("an open case pattern paren in a dollar paren, then a heredoc lane commit",
+     "echo $(case a in (a) echo ok;; esac\n" + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+    ("a multi-line quoted text, then a heredoc lane commit",
+     'echo "first\nline"\n' + VCS + " commit -F - <<'B'\nLane N20 lands\nB"),
+):
+    sh("guard-command-position: lane pinned, %s denies" % _name, _command, "deny",
+       "lane-by-slug", cwd=NOGIT, config=MERGECFG)
+for _name, _command in (
+    ("an env value flag with a clean commit", "env -u X " + VCS + ' commit -m "fix guard parsing"'),
+    ("a nice value flag with a clean commit", "nice -n 5 " + VCS + ' commit -m "fix guard parsing"'),
+    ("a sudo value flag with a clean PR create", "sudo -u root gh pr create --draft -t 'fix guard' -b ok"),
+    ("a heredoc body that names a lane", "cat <<'EOF'\n" + VCS + ' commit -m "fix (N20)"\nEOF'),
+    ("a lone apostrophe on the line before a clean commit",
+     "echo don't\n" + VCS + ' commit -m "fix guard"'),
+    ("a quoted lane in echo", 'echo "lane N20 lands"'),
+    ("a comment opener in quotes before a clean commit",
+     'echo "# N20"\n' + VCS + ' commit -m "fix guard parsing"'),
+    ("a glued subshell around a clean commit", "(" + VCS + ' commit -m "fix guard parsing")'),
+    ("an interpreter body with a << word, then a clean heredoc commit",
+     "python3 - <<'EOF'\nx = 1 << y\nEOF\n" + VCS + " commit -F - <<'B'\nclean\nB"),
+):
+    sh("guard-command-position: lane pinned, %s allowed" % _name, _command, "allow", cwd=NOGIT,
+       config=MERGECFG)
 
 # =========================================================================== 6. frozen paths
 FAMILY = "frozen"
