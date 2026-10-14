@@ -28,19 +28,12 @@ named override, 2026-10-14 10:47 CDT).
 
 ## Holes, named
 
+Debts: `git-env-set-indirect-forms` (indirect sets pass the guard), `git-env-glued-block` (a glued block opener hides the set), `git-env-set-false-alarms` (safe forms are denied), `git-env-set-untested-forms` (some escape, group and heredoc forms have no case).
+
+## Named limits
+
 - The warning runs at session start only, so damage done mid-session shows at the next start.
 - Lower-case names fold to the rule, so `git_dir=x cmd` is denied too.
-- Indirect sets pass: a shell function around the set, `set -a` with `read` or `for`, a name
-  built at run time, `iex`, `-EncodedCommand`, or `os.environ` in `python -c`. Debt:
-  git-env-set-indirect-forms.
-- A glued block opener followed by a group, such as `%{($env:GIT_DIR='x')}`, hides the set. The
-  spaced form denies. Debt: git-env-glued-block.
-- False alarms on the safe side: `%{} $env:GIT_DIR='x'`, `try{$env:GIT_DIR=$null}catch{}`, and
-  a quoted glued block in the same segment as a here-string.
-- No case pins the PowerShell backtick escape, the shared group-opener pattern, or quote text in
-  a heredoc body.
-- False alarms on the safe side: backslash- or part-quoted heredoc delimiters read as unquoted,
-  `Write-Host {$env:GIT_DIR=1}`, and a `@'...'@` body with `don't` before a set.
 
 ## Build plan
 

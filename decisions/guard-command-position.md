@@ -15,6 +15,8 @@ One resolver finds the command word for every rule. It lives in `hooks/guard_cor
 - `heredoc_heads` is the one quote-aware reader of heredoc headers.
 - `split_segments` reads quotes as bash does, so each unquoted `'` opens a quote. Only when that reading ends inside an open quote does a second pass read each contraction-shaped `'` (`don't`) as text. The guard judges the segments of both readings. Both passes are linear. So `echo a's b'; pkill foo` and `echo don't (x; pkill foo` show their second command.
 
+An odd count of `'` doubles guard time: a 6,001-word command takes about 15 to 32 s here. That fits inside the 60 s guard hook timeout (`gate-hooks-fail-closed`). A longer command can run unjudged (debt `guard-timeout-fails-open`).
+
 ## Why
 
 The wsl-allow-list record (WSL runs only a fixed list of test commands) named these wrappers as holes. Each one moved the command word off the slot the rules read, so a refused command passed.
@@ -25,15 +27,7 @@ The guard tests, families wsl, kill, env, impeccable and shared-tree.
 
 ## Holes, named
 
-- A substitution inside a token is not read: `$(`, backticks and `x=$(...)`. Debt: guard-substitution-in-token.
-- Only the WSL rule reads the script of `env -S 'cmd'`. The impeccable-review-only, draft-pr, detached-launch and rm-var-unguarded rules do not see inside it. Debt: env-split-string-wsl-only.
-- The wrapper and value-flag lists are closed. An unlisted wrapper, such as `stdbuf` or `chrt`, or an unlisted value flag hides the command word. Debt: guard-wrapper-lists-closed.
-- The segment split ignores backslash escapes, so `echo '; pkill foo; echo 'x'` hides `pkill`. Debt: guard-split-ignores-backslash.
-- The second reading can show a `cd` that bash never runs, as in `git restore f.txt` then `echo don't; cd <lane>`. The run-folder walk then judges the restore in the lane. Debt: guard-cd-walk-extra-reading.
-- An odd count of `'` doubles guard time, so a 6,001-word command takes about 15 to 32 s here. That fits inside the 60 s guard hook timeout (`gate-hooks-fail-closed`). A longer command can run unjudged (debt guard-timeout-fails-open).
-- Commit-message rules read heredoc bodies by both readings (lane gcp-heredoc-two-read). With an unclosed lone `'` line, a later body can be read for the wrong command. The cost is an over-deny: bash stops at the open quote, and a fuzz of 300k cases found no bypass.
-- A lone quote pair, then two interpreter heredoc bodies that name a lane or record, can deny a clean commit.
-- A leading redirect, `)#`, and a heredoc header that ends in an open quote hide a kill, as on main. Debt: guard-redirect-paren-heredoc.
+Debts: `guard-substitution-in-token` (a substitution inside a token is not read), `env-split-string-wsl-only` (only the WSL rule reads `env -S`), `guard-wrapper-lists-closed` (an unlisted wrapper or value flag hides the command word), `guard-split-ignores-backslash` (the segment split ignores backslash escapes), `guard-cd-walk-extra-reading` (the second reading shows a cd that bash never runs), `guard-timeout-fails-open` (a long command can run unjudged), `guard-lone-quote-overdeny` (a lone quote can deny a clean commit), `guard-redirect-paren-heredoc` (three command shapes hide a kill).
 
 Kind: process
 Home: hooks/guard_core.py
