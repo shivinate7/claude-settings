@@ -132,7 +132,7 @@ public class NoGapRecorder : IDisposable
 # Reads each hook file in a tight loop on its own thread, until Stop. Every read is opened with
 # read, write and delete sharing, so the installer's writes and renames are never refused by the
 # reader. A pass reads each path in order, then compares the two. A fault is counted by kind:
-#   missing <name>               the file is not there.
+#   missing <name>               the file, or a path listed in Present, is not there.
 #   unreadable <name>            the open or read failed, a sharing violation for one.
 #   short or mixed <name>        the read is not one whole version (Versions1 or Versions2).
 #   INSTALL_ID mismatch ...      both reads are whole, and their INSTALL_ID values differ.
@@ -149,6 +149,8 @@ public class HookReader
     public string[] Paths = new string[0];
     public string[] Versions1 = new string[0];
     public string[] Versions2 = new string[0];
+    // Paths that must exist on every pass: a file or a directory. Each one missing is a fault.
+    public string[] Present = new string[0];
     private readonly ConcurrentDictionary<string, long> faults = new ConcurrentDictionary<string, long>();
     private static readonly Regex StampRe = new Regex("INSTALL_ID = \"([^\"]*)\"");
     private long passes;
@@ -226,6 +228,11 @@ public class HookReader
                 catch (DirectoryNotFoundException) { Fault("missing " + name); continue; }
                 catch (IOException) { Fault("unreadable " + name); continue; }
                 if (got[i] != Versions1[i] && got[i] != Versions2[i]) Fault("short or mixed " + name);
+            }
+            for (int j = 0; j < Present.Length; j++)
+            {
+                if (!File.Exists(Present[j]) && !Directory.Exists(Present[j]))
+                    Fault("missing " + Path.GetFileName(Present[j]));
             }
             bool whole0 = got[0] != null && (got[0] == Versions1[0] || got[0] == Versions2[0]);
             bool whole1 = got[1] != null && (got[1] == Versions1[1] || got[1] == Versions2[1]);
@@ -419,6 +426,8 @@ try {
     $Reader.Paths = [string[]]@((Join-Path $Cfg 'hooks\guard.py'), (Join-Path $Cfg 'hooks\guard_core.py'))
     $Reader.Versions1 = [string[]]$HookA
     $Reader.Versions2 = [string[]]$HookB
+    # The shipped names the watcher used to cover, checked for existence on every pass.
+    $Reader.Present = [string[]]@((Join-Path $Cfg 'CLAUDE.md'), (Join-Path $Cfg 'settings.json'), (Join-Path $Cfg 'agents'), (Join-Path $Cfg 'lint'), (Join-Path $Cfg 'skills'))
     $RoundPasses = @()
     $RoundFaults = @()
     $RoundsExit0 = 0
@@ -450,7 +459,7 @@ try {
     Check "reader ran during every re-run ($NoPass of $InstallRounds re-runs had no reader pass, want 0)" ($NoPass -eq 0)
     Check "all $InstallRounds re-runs exit 0 ($RoundsExit0 of $InstallRounds)" ($RoundsExit0 -eq $InstallRounds)
     Check "every re-run lands its new text in both hook files ($RoundsLanded of $InstallRounds, non-vacuous)" ($RoundsLanded -eq $InstallRounds)
-    Check "no hook file is missing during the re-runs ($($Reader.Count('missing ')) faults)" ($Reader.Count('missing ') -eq 0)
+    Check "no shipped name is missing during the re-runs: the hook files, CLAUDE.md, settings.json, agents, lint, skills ($($Reader.Count('missing ')) faults)" ($Reader.Count('missing ') -eq 0)
     Check "no hook file is unreadable during the re-runs ($($Reader.Count('unreadable ')) faults)" ($Reader.Count('unreadable ') -eq 0)
     Check "no hook read is short or mixed: each read is one whole version ($($Reader.Count('short or mixed ')) faults)" ($Reader.Count('short or mixed ') -eq 0)
     Check "guard.py and guard_core.py never carry different INSTALL_IDs during the re-runs ($($Reader.Count('INSTALL_ID mismatch')) faults)" ($Reader.Count('INSTALL_ID mismatch') -eq 0)
