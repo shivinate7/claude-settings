@@ -76,6 +76,12 @@ Interface the hook must match:
   one is in its rule bullet in output-styles/shiv-stylisms.md.
 - A missing style file, or a missing rule anchor: the check still runs (ALLOW gives empty
   stdout, FLAG gives a deny), and writes one stderr line that names the file or the anchor.
+- Plain words (incidents 2026-10-14, lane question-plain; owner ruling 11:00 CDT: no separate no-model
+  check, the model judge asks it all). The judge prompt asks four things: (1) can the owner answer from
+  the box alone, with every id, code or name explained in words; (2) does the question point at anything
+  the box does not show, such as an earlier message or "item 4"; (3) does each option's Lose name what
+  changes for the owner, not for a record; (4) is a better option missing (the existing ask). A FLAG on
+  each of the three incident questions denies, and the judge's reason reaches the session.
 - Override the module under test with the env var QUESTION_OUTCOME_UNDER_TEST.
 """
 import atexit
@@ -2211,6 +2217,122 @@ def case_k10_no_room_for_a_mark_leaves_assistant_text_marked_or_whole_never_abse
     owner_claims(name, prompt, [text])
 
 
+# --------------------------------------------------------------------------- plain words, lane question-plain
+# Incidents 2026-10-14: three questions passed this hook and the owner could not use them. (1) and (2)
+# named ids, a branch, a sha and a key with no words saying what they were, and (1) pointed at messages
+# the box does not hold. (3) offered a false choice and left out the better option. Owner ruling 11:00
+# CDT: no separate no-model check; the model judge asks all of it, in one place. These cases pin the
+# asks in the judge prompt, and that a FLAG on each incident question denies with the judge's reason.
+# Every ask is matched by words near an anchor word, not by exact wording, on the hook's own prompt text
+# (the question removed, lowercased) read from a hook copy on STYLE_FIXTURE, so the real style file's
+# own words cannot stand in for an ask.
+
+def window_has(text, word, groups, before=150, after=300):
+    """True when some match of the regex WORD in TEXT has, within the window around it, a match for
+    every group in GROUPS (a group is a list of regexes; one of them is enough)."""
+    for m in re.finditer(word, text):
+        window = text[max(0, m.start() - before):m.end() + after]
+        if all(any(re.search(rx, window) for rx in group) for group in groups):
+            return True
+    return False
+
+
+def asks_box_alone(p):
+    """Ask 1: can the owner answer from the box alone, with every id, code or name explained in words."""
+    return window_has(p, r"\banswer", [[r"\bbox\b", r"\balone\b"],
+                                       [r"\bids?\b", r"\bidentifiers?\b", r"\bcodes?\b", r"\bnames?\b"],
+                                       [r"\bexplain", r"\bwords?\b"]])
+
+
+def asks_unseen_pointer(p):
+    """Ask 2: does the question point at anything the box does not show, such as an earlier message or an item."""
+    return window_has(p, r"\b(?:point|points|pointing|refer|refers|referring|reference|references)\b",
+                      [[r"\bbox\b"], [r"\bmessages?\b", r"\bearlier\b", r"\bitems?\b"]])
+
+
+def asks_lose_names_owner_change(p):
+    """Ask 3: does each option's Lose name what changes for the owner, not for a record."""
+    return window_has(p, r"\blose[sd]?\b", [[r"\bowner"], [r"\brecords?\b"]])
+
+
+def asks_better_option_missing(p):
+    """Ask 4, the existing one: is an option that serves the goal better missing."""
+    return window_has(p, r"\bmissing\b", [[r"\boptions?\b"], [r"\bbetter\b"]])
+
+
+def case_p1_judge_prompt_asks_the_four_plain_things():
+    name = "caseP1 judge prompt: box alone with every id explained, unseen pointer, Lose, better option missing"
+    if not need_module(name):
+        return
+    mod = fixture_hook(name)
+    if mod is None:
+        return
+    with hook_as(mod), model_stub(ALLOW) as stub:
+        run_main(ask_payload(fresh_session("p1"), [question(GOOD_Q, LABELS)], default_transcript()))
+    prompt = (stub.prompts[0] if stub.prompts else "").replace(GOOD_Q, "").lower()
+    check(name + ": model called once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": asks if the owner can answer from the box alone, every id, code or name in words",
+          asks_box_alone(prompt), "")
+    check(name + ": asks if the question points at anything the box does not show",
+          asks_unseen_pointer(prompt), "")
+    check(name + ": asks if each option's Lose names what changes for the owner, not for a record",
+          asks_lose_names_owner_change(prompt), "")
+    check(name + ": keeps the ask for a better option that is missing", asks_better_option_missing(prompt), "")
+
+
+INCIDENT_1_Q = ("Goal: D-139 (V6, V7 and V19 rules) is either current or gone.\n"
+                "Problem: your 14:41 item 4 deletes it as no longer governing, but its V7 rule "
+                "(rerun: true) still governs code. Code-prose held it for you.\nWhat happens to D-139?")
+INCIDENT_2_Q = ("Goal: debt guard-timeout-fails-open is either fixed or dropped.\n"
+                "Problem: branch guard-time-budget (5b256f5) leaves `onFailure` unset, so a guard that "
+                "times out lets the call through.\nWhat should happen to the debt?")
+INCIDENT_3_Q = ("Goal: the size check counts test code apart from product code.\n"
+                "Problem: the folder `harness/specimen/**` fits neither group, so the count may be wrong.\n"
+                "Should `harness/specimen/**` count as test code or as product code?")
+INCIDENT_1_WHY = ("D-139, V6, V7 and V19 are named with no words saying what they are, and your 14:41 and "
+                  "item 4 point at messages the box does not show. Explain each in words.")
+INCIDENT_2_WHY = ("The debt, the branch, the sha 5b256f5 and onFailure are named with no words saying what "
+                  "each one does. Say it in plain words.")
+INCIDENT_3_WHY = "A better option is missing: count only the check files in harness/specimen. Offer it."
+
+
+def judge_that_asks(question_text, why, *asks):
+    """A stub judge. It FLAGs with WHY only when the prompt, less the question text, holds every one of
+    ASKS (the matchers above), and else ALLOWs. So an incident case is red until the judge prompt asks
+    what that incident needed, and green when it does."""
+    def judge(prompt):
+        rest = prompt.replace(question_text, "").lower()
+        return ({"verdict": "FLAG", "why": why}, None) if all(a(rest) for a in asks) else ALLOW
+    return judge
+
+
+def check_incident(name, mod, text, labels, why, asks, tag):
+    with hook_as(mod), model_stub(judge_that_asks(text, why, *asks)) as stub:
+        code, out, _ = run_main(ask_payload(fresh_session(tag), [question(text, labels)], default_transcript()))
+    reason = deny_reason(out)
+    check(name + ": the question reaches the judge once", len(stub.prompts) == 1, len(stub.prompts))
+    check(name + ": the question text is in the judge prompt", bool(stub.prompts) and text in stub.prompts[0], "")
+    check(name + ": denied", reason is not None, out)
+    check(name + ": the judge's reason goes to the session", reason is not None and why in reason, reason)
+    check(name + ": exit 0", code in (0, None), code)
+
+
+def case_p2_the_three_incident_questions_reach_the_judge_and_are_denied():
+    name = "caseP2 incidents 2026-10-14"
+    if not need_module(name):
+        return
+    mod = fixture_hook(name)
+    if mod is None:
+        return
+    check_incident(name + " (1) D-139, V7, 14:41, item 4: needs asks 1 and 2", mod, INCIDENT_1_Q,
+                   ["Keep D-139", "Delete D-139"], INCIDENT_1_WHY, (asks_box_alone, asks_unseen_pointer), "p2a")
+    check_incident(name + " (2) slug, sha, key: needs ask 1", mod, INCIDENT_2_Q,
+                   ["Fix it", "Drop the debt"], INCIDENT_2_WHY, (asks_box_alone,), "p2b")
+    # Green on 1ac9851: the missing-option ask is already in the prompt. This guards that it stays.
+    check_incident(name + " (3) false choice, better option missing: needs ask 4", mod, INCIDENT_3_Q,
+                   ["Test code", "Product code"], INCIDENT_3_WHY, (asks_better_option_missing,), "p2c")
+
+
 def main():
     cases = (case_g1_goal_line_passes_the_presence_check_and_reaches_the_model,
              case_g2_you_want_alone_is_denied_and_the_reason_names_goal,
@@ -2283,7 +2405,9 @@ def main():
              case_k7_whole_owner_messages_over_the_old_argv_cap_still_run_the_judge,
              case_k8_one_owner_message_over_the_bound_keeps_text_and_shows_cut_mark,
              case_k9_several_owner_messages_over_the_bound_none_empty_and_cut_ones_keep_their_end,
-             case_k10_no_room_for_a_mark_leaves_assistant_text_marked_or_whole_never_absent)
+             case_k10_no_room_for_a_mark_leaves_assistant_text_marked_or_whole_never_absent,
+             case_p1_judge_prompt_asks_the_four_plain_things,
+             case_p2_the_three_incident_questions_reach_the_judge_and_are_denied)
     for case in cases:
         case()
     if LOAD_ERROR is None:
