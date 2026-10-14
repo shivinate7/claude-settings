@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """Claude Code hook: get the session's handoff ready before compaction.
 
+Modes:
+- PreCompact: Before compaction, builds a digest of the session's user and assistant
+  text and records the outcome in the session's handoff state. Never blocks compaction.
+- --nudge: At Stop, blocks once each time the context size passes a new checkpoint, and
+  tells the session to rewrite its handoff. Silent on stop_hook_active or an error.
+- --reorient: At SessionStart after compact, clear or fork, tells the session to rewrite
+  its handoff from the digest. After clear or fork, it also names the handoff of the prior
+  session for the same project.
+- --session-end: At SessionEnd with reason clear, writes a pointer file that holds the old
+  session id and the project folder, so the next session can find the old handoff.
+
 Spec: decisions/precompact-handoff.md. Three modes, one file. No mode calls a model:
 the owner rejected a `claude -p` child, since it needs its own command-line login, and
 the desktop app has none.

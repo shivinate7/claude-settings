@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""UserPromptSubmit and SubagentStart hook: tell the session the time in US Central (America/Chicago).
+"""UserPromptSubmit and SubagentStart hook: tell the session the time in US Central (America/Chicago). On UserPromptSubmit it also captures owner feedback: a prompt that opens with `fb` is saved to the session's inbox file until a prompt of `fb done`.
+
+Modes:
+- UserPromptSubmit: Tells the session the time in US Central. A prompt that opens with
+  `fb` starts owner feedback capture to the session's inbox file, until `fb done`.
+- --subagent: At SubagentStart, gives the subagent the time in US Central as context.
 
 Owner ruling 2026-10-13: sessions speak times in US Central, 24-hour clock. See decision
 local-time-central. Prints one line, for example "Local time: 2026-10-13 21:40 CDT (UTC-05:00)".

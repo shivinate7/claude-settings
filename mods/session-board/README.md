@@ -1,6 +1,6 @@
 # session-board
 
-A mod. It adds two commands, `/board` and `/safe-stop`. It draws nothing else. It calls no model.
+A mod. It adds two commands. `/board` shows the local sessions and agents and what each one is doing. `/safe-stop` checks that a session has no running work before you stop it. It draws nothing else. It calls no model.
 
 ## /board
 
