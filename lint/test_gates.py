@@ -3227,12 +3227,13 @@ class MdSweepLogTests(unittest.TestCase):
 
 # ---------------------------------------------------------------- two writers, one guard.log
 #
-# Two processes append to one guard.log at the same time. Each writes APPEND_N lines, so 2 x APPEND_N
-# must land, each exactly once. Red on Windows: a plain append from two processes can overwrite the
-# other's line. MEASURED 2026-10-13 on a Windows PC: a two-process probe of 2000 same-length appends
-# each kept about 3810 of 4000. Linux does not lose these lines, so a green on Linux proves nothing.
+# Guards: two processes appending to one guard.log at the same time keep every line, each exactly
+# once. Each writes APPEND_N lines, so 2 x APPEND_N must land. record() takes a lock around each
+# write, so a Windows append cannot overwrite another writer's line. (Before the lock, a two-process
+# probe on a Windows PC kept about 3810 of 4000 lines, measured 2026-10-13.) Linux does not lose these
+# lines, so a green on Linux proves nothing about the Windows path.
 # Two writers are cased: guard_core.record, and the STE gate's logger (lint/_transcript.guard_logger),
-# which reaches record through the same append. The one-writer case is the control: it must stay green.
+# which reaches record through the same locked append. The one-writer case is the control: it must stay green.
 APPEND_N = 2000
 APPEND_WRITER_RECORD = r'''
 import sys
@@ -3337,8 +3338,8 @@ class GuardLogAppendRaceTests(unittest.TestCase):
         return core, seconds, gl_lines(self.cfg) or []
 
     def test_lock_error_that_is_not_contention_returns_at_once(self):
-        # Red today: _log_lock retries any OSError for the full LOG_LOCK_WAIT, then writes. EINVAL
-        # (errno 22) is not "another writer holds the lock", so waiting buys nothing.
+        # Guards: a lock error that is not contention (EINVAL, errno 22, here) returns at once and keeps
+        # the line. Waiting out LOG_LOCK_WAIT buys nothing when no other writer holds the lock.
         _core, seconds, rows = self._record_with_lock_error(errno.EINVAL)
         self.assertLess(seconds, 0.5, "record() waited %.2f s on errno 22" % seconds)
         self.assertEqual(len(rows), 1, "the line was not kept: %r" % rows)
