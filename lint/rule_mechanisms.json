@@ -669,6 +669,12 @@
         "kind": "unmechanized",
         "reason": "Round counts live in briefs and reviewer reports. No check reads how many rounds a PR had."
       }
+    },
+    "roles-holes-are-debts": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Prose only for now: a check would have to read each named hole in a decision record and find its debt file. The daily-note lane adds that check."
+      }
     }
   }
 }
