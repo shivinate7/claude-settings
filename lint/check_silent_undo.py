@@ -179,6 +179,20 @@ def rewritten(line, hs, base=(), modified=False):
 OWN_LOOKUPS = 25  # per file: `git log -G` calls spent finding who added a lost line
 
 
+def changed(patch):
+    """The normalized added and removed lines of a patch. Headers are skipped by state, never by prefix:
+    a line is content only after the first `@@` of its file section, so `++i;` and `-- note` count."""
+    res, in_hunk = [], False
+    for l in patch.split("\n"):  # not splitlines: a form feed inside a line is no line break
+        if l.startswith("diff --git "):
+            in_hunk = False
+        elif l.startswith("@@"):
+            in_hunk = True
+        elif in_hunk and l[:1] in ("+", "-"):
+            res.append(norm(l[1:]))
+    return res
+
+
 def branch_only_lines(cwd, p, bases, path, lines, refs):
     """The subset of `lines` that only the branch added: for each, the commit that first added it on
     the way to parent p is reachable from none of refs (upstream and the default branch). A read that
@@ -194,7 +208,7 @@ def branch_only_lines(cwd, p, bases, path, lines, refs):
     commits = []  # (sha, the changed lines of that diff, newline-joined)
     for chunk in out.split("\x01")[1:]:
         sha, _, body = chunk.partition("\n")
-        commits.append((sha.strip(), "\n".join(norm(l[1:]) for l in body.splitlines() if l[:1] in "+-" and l[:3] not in ("+++", "---"))))
+        commits.append((sha.strip(), "\n".join(changed(body))))
     held, res = {}, set()
     for line in lines:
         sha = next((c for c, text in reversed(commits) if line in text), None)
@@ -228,16 +242,28 @@ class Blobs:
     def get(self, rev, path):
         if "\n" in path:
             return blob(self.cwd, rev, path)
-        self.proc.stdin.write(("%s:%s\n" % (rev, path)).encode("utf-8"))
-        self.proc.stdin.flush()
-        head = self.proc.stdout.readline().split()
-        if len(head) != 3 or head[1] == b"missing":
-            return ""
-        data = self.proc.stdout.read(int(head[2]) + 1)[:-1]  # the reply ends with a newline
-        return data.decode("utf-8", "replace") if head[1] == b"blob" else ""
+        try:
+            self.proc.stdin.write(("%s:%s\n" % (rev, path)).encode("utf-8"))
+            self.proc.stdin.flush()
+            line = self.proc.stdout.readline().rstrip(b"\r\n")
+            if line.endswith(b" missing"):  # the reply names the spec, which may hold spaces
+                return ""
+            head = line.split()
+            if len(head) != 3 or not head[2].isdigit():  # an empty line is EOF: the process died
+                raise Unknown("git cat-file gave no usable header for %s:%s: %r" % (rev[:9], path, line[:80]))
+            size = int(head[2])
+            data = self.proc.stdout.read(size + 1)  # the reply ends with a newline
+        except OSError as e:
+            raise Unknown("git cat-file failed on %s:%s: %s" % (rev[:9], path, e))
+        if len(data) != size + 1:
+            raise Unknown("git cat-file ended early on %s:%s" % (rev[:9], path))
+        return data[:-1].decode("utf-8", "replace") if head[1] == b"blob" else ""
 
     def close(self):
-        self.proc.stdin.close()
+        try:
+            self.proc.stdin.close()
+        except OSError:  # a dead process: the failure was already raised, never mask it here
+            pass
         self.proc.stdout.close()
         self.proc.wait()
 

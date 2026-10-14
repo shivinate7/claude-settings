@@ -101,19 +101,22 @@ def undo_check(wt, base_ref, unknown_ok=""):
     import check_silent_undo as undo
     # The scan is slow on a merge-heavy branch and merge runs it twice. Its answer depends only on the head, the base tip,
     # and the default refs it reads, so the second call reuses the first when all of them are unchanged.
-    key = (wt, *(git(wt, "rev-parse", "--verify", "-q", r + "^{commit}")[1].strip() for r in ("HEAD", base_ref, "origin/HEAD", "origin/main", "main")))
-    if not (key[1] and key[2]) or key not in UNDO_MEMO:  # a head or base that does not resolve is never reused
-        try:
+    try:
+        key = (wt, *(git(wt, "rev-parse", "--verify", "-q", r + "^{commit}")[1].strip() for r in ("HEAD", base_ref, "origin/HEAD", "origin/main", "main")))
+        if not (key[1] and key[2]) or key not in UNDO_MEMO:  # a head or base that does not resolve is never reused
             UNDO_MEMO[key] = undo.check(wt, base_ref, "HEAD")
-        except undo.Unknown as e:
-            UNDO_MEMO[key] = e
-    if isinstance(UNDO_MEMO[key], undo.Unknown):
-        e = UNDO_MEMO[key]
+        res = UNDO_MEMO[key]
+    except subprocess.TimeoutExpired as e:  # a read that timed out is unknown, and is not remembered
+        res = undo.Unknown(f"a git read timed out after {e.timeout:.0f}s")
+    except undo.Unknown as e:
+        res = UNDO_MEMO[key] = e
+    if isinstance(res, undo.Unknown):
+        e = res
         if unknown_ok.strip():
             say(f"merge: silent-undo check UNKNOWN ({e}). Owner override, reason: {unknown_ok.strip()}")
             return
         raise Stop(f"silent-undo check could not read the history: {e}\nIf the owner accepts that, run again with --undo-check-unknown-ok \"<reason>\".")
-    problems, notes = UNDO_MEMO[key]
+    problems, notes = res
     for n in notes:
         say("merge: " + n)
     if problems:
