@@ -12,9 +12,6 @@ export type Snapshot = {
   ahead: number
   behind: number
   changed: number
-  contextPercent: number | null
-  contextTokens: number | null
-  contextWindow: number
   costUsd: number | null
   limits: Limit[]
   agents: Agent[]
