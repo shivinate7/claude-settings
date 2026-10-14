@@ -779,16 +779,16 @@ MUTATIONS = [
     #   carve-outs undone"
     #     -> "silent-write: commit's own quiet flag is a carve-out, MEASURED 2026-09-19"
     ("silent-write: the rule never denies at all",
-     '        matched, mechanism = silent_write_hit(segment, segments[last] if last > number else "")\n'
-     '        if matched:\n'
+     '        matched, mechanism, kind = silent_write_hit(segment, segments[last] if last > number else "")\n'
+     '        if matched and not in_throwaway(segments, number, cwd):\n'
      '            reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"\n'
      '                      else SILENT_WRITE_QUIET_REASON)\n'
-     '            refuse(tool, "deny", "silent-write", reason, matched)',
-     '        matched, mechanism = silent_write_hit(segment, segments[last] if last > number else "")\n'
+     '            refuse(tool, "deny", "silent-write",',
+     '        matched, mechanism, kind = silent_write_hit(segment, segments[last] if last > number else "")\n'
      '        if False:\n'
      '            reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"\n'
      '                      else SILENT_WRITE_QUIET_REASON)\n'
-     '            refuse(tool, "deny", "silent-write", reason, matched)', "guard",
+     '            refuse(tool, "deny", "silent-write",', "guard",
      "silent-write: a discarded proof of landing, stdout alone"),
     ("silent-write: the quiet-flag arm no longer fires for any subcommand",
      '        if subcommand in QUIET_FLAG_SUBCOMMANDS and quiet_write(args):',
@@ -803,12 +803,12 @@ MUTATIONS = [
      '        if False:\n            continue', "guard",
      'silent-write: an abort lands nothing, so it is carved out'),
     ("silent-write: every fetch is a write, not only a refspec fetch",
-     '            if not any(":" in a and not a.startswith("-") for a in args):\n                continue',
+     '            if not fetch_moves_branch(args):\n                continue',
      '            if False:\n                continue', "guard",
      "silent-write: fetch discarding both streams is a carve-out"),
     ("silent-write: a pipe's tail is no longer followed",
-     '        matched, mechanism = silent_write_hit(segment, segments[last] if last > number else "")',
-     '        matched, mechanism = silent_write_hit(segment)', "guard",
+     '        matched, mechanism, kind = silent_write_hit(segment, segments[last] if last > number else "")',
+     '        matched, mechanism, kind = silent_write_hit(segment)', "guard",
      "silent-write pipe: cat discards the piped output"),
     ("silent-write: >&/dev/null no longer silences",
      '\\d?>>?&?)', '\\d?>>?)', "guard",
@@ -826,7 +826,7 @@ MUTATIONS = [
      'QUIET_FLAG_SUBCOMMANDS = ("push", "merge", "rebase")', "guard",
      "silent-write gap: pull's own quiet flag"),
     ("silent-write: --dry-run no longer carves out",
-     '        if subcommand in ("fetch", "pull") and "--dry-run" in args:\n            continue',
+     '        if read_verb(subcommand, args):\n            continue',
      '        if False:\n            continue', "guard",
      "silent-write gap, allow: a dry-run fetch into a local ref moves nothing"),
     ("silent-write: make merge is no longer a write",

@@ -151,6 +151,12 @@ subcommand, and the test-by-exit-code shape `git rev-parse -q --verify <ref> >/d
 abort lands nothing, so it has no landing to prove. No environment hatch. The permission
 prompt is the grant here, the same as everywhere else in this file.
 
+Narrowed 2026-10-14 after a study of 399 denies (most right, the rest false alarms): a read
+named by argv (`--help`, `-h`, `--dry-run`, `push -n`, `tag -l`) is not a write, and a value
+of `-m` or `-F` is never a flag; a write whose `-C`, `--git-dir`, `cd` or cwd sits under the
+temp folder is a throwaway and passes; `fetch` writes only a `src:dst` whose dst is a branch;
+a redirect named inside quotes is text; the refusal names its step ("step N of M, the push").
+
 Every refusal names its rule and says what to do instead. A remedy never names
 the refused command or the refused path, because a remedy that repeats the
 target reads as permission to run it (CLAUDE.md, Git paragraph). The matched
@@ -211,9 +217,9 @@ while True:
     try:
         import guard_core
         from guard_core import (
-            AUTHOR_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
+            AUTHOR_ROLE, GIT_WORK_TREE_RE, heredoc_heads, is_contraction, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
-            _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
+            _resolved, _run_dir, _segment_cd_target, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             command_root, git_calls, git_common_dir, inline_script, is_worktree, log_path_and_text, norm,
             path_is_inside, primary_checkout, record, refuse, resolve_command, resolve_default_base,
             segment_tokens, split_segments, strip_heredoc_bodies,
@@ -419,9 +425,29 @@ SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-
 QUIET_FLAG_SUBCOMMANDS = ("push", "merge", "rebase", "pull", "fetch")
 
 
+def unquoted_at(text: str, index: int) -> bool:
+    """True when `index` in `text` sits outside every quote. The walk is split_segments' own: a
+    quote closes at the next like mark, a contraction that never closes is text, and an unquoted
+    backslash (POSIX) escapes the next character. An unterminated quote runs to the end."""
+    quote = ""
+    skip = -1
+    for at in range(index):
+        char = text[at]
+        if at == skip:
+            continue
+        if quote:
+            quote = "" if char == quote else quote
+        elif char == "\\" and not POWERSHELL_CALL[0]:
+            skip = at + 1
+        elif char in ("'", '"') and not (char == "'" and is_contraction(text, at)):
+            quote = char
+    return not quote
+
+
 def discards_output(segment: str) -> bool:
-    """True when the segment redirects stdout or stderr, on any descriptor, to a null device."""
-    return bool(SILENT_WRITE_REDIRECT.search(segment))
+    """True when the segment redirects stdout or stderr, on any descriptor, to a null device. A
+    redirect named inside a quoted string (a commit message, an echo) is text, never a redirect."""
+    return any(unquoted_at(segment, m.start()) for m in SILENT_WRITE_REDIRECT.finditer(segment))
 
 
 # PIPES, Banchi review #666 (2026-10-03): a write piped into `cat >/dev/null` threw its output
@@ -445,35 +471,84 @@ def quiet_write(args) -> bool:
     return "-q" in args or "--quiet" in args
 
 
+# A flag that takes the NEXT token as its value. Such a value is text, never a flag: `commit -m -h`
+# and `commit -m "--dry-run"` are real commits. A short cluster ending in one of these letters
+# (`-am`) takes the next token too. A miss here only keeps a deny, never lifts one.
+VALUE_FLAGS = {"-m", "--message", "-F", "--file", "-c", "-C", "--reuse-message", "--reedit-message",
+               "--author", "--date", "--fixup", "--squash", "-t", "--template", "--cleanup"}
+LISTING = re.compile(r"-[ln]+\d*")   # `tag -l`, `-n5`, `-ln1`
+FETCH_VALUE_FLAGS = {"--depth", "-j", "--jobs", "--upload-pack", "--refmap", "-o", "--server-option",
+                     "--deepen", "--shallow-since", "--shallow-exclude"}
+
+
+def read_verb(subcommand: str, args) -> bool:
+    """True when the call's own argv names a read: help, a dry run, a tag listing, a dry-run
+    push. Argv tokens only, never the value of `-m` or `-F`, and nothing after `--`."""
+    skip = False
+    for token in args:
+        if skip:
+            skip = False
+        elif token == "--":
+            return False
+        elif token in ("--help", "-h", "--dry-run") or (subcommand == "push" and token == "-n") or (
+                subcommand == "tag" and (token == "--list" or LISTING.fullmatch(token))):
+            return True
+        elif token in VALUE_FLAGS or (token[:1] == "-" and token[1:2] != "-" and len(token) > 2
+                                      and token[-1] in "mFcCt"):
+            skip = True
+    return False
+
+
+def fetch_moves_branch(args) -> bool:
+    """True when a fetch's refspec writes a local branch: a `src:dst` whose dst is under
+    refs/heads/ or refs/remotes/, or a short name (git resolves that to a branch). The first
+    plain word is the repository, never a refspec."""
+    plain, skip = [], False
+    for token in args:
+        if skip:
+            skip = False
+        elif token in FETCH_VALUE_FLAGS:
+            skip = True
+        elif not token.startswith("-"):
+            plain.append(token)
+    for spec in plain[1:]:
+        dst = spec.lstrip("+").partition(":")[2]
+        if dst and (not dst.startswith("refs/") or dst.startswith(("refs/heads/", "refs/remotes/"))):
+            return True
+    return False
+
+
 def silent_write_hit(segment: str, tail: str = ""):
-    """Return (matched text, mechanism) for a write whose own trace is silenced, else ("", "").
+    """Return (matched text, mechanism, kind) for a write whose own trace is silenced, else
+    ("", "", "").
 
     `mechanism` is `"redirect"` or `"quiet"`, so the caller can print the reason that matches
-    what actually fired: a redirect can hide a refusal AND a proof of landing on any of the six
-    subcommands, while the quiet flag is judged per subcommand against `QUIET_FLAG_SUBCOMMANDS`,
-    the measured set. Only `SILENT_WRITE_SUBCOMMANDS` are judged at all. `fetch`, `rev-parse`, and
-    every other read subcommand fall outside it, which is what keeps `git fetch -q` and the
-    test-by-exit-code shape `git rev-parse -q --verify <ref> >/dev/null 2>&1` allowed. `merge
-    --abort` is carved out inside the loop: it lands nothing, so it has no landing to prove.
+    what actually fired; `kind` is the act's name (`push`, `commit`, `merge`). A redirect can hide
+    a refusal AND a proof of landing on any of the subcommands, while the quiet flag is judged per
+    subcommand against `QUIET_FLAG_SUBCOMMANDS`, the measured set. Only `SILENT_WRITE_SUBCOMMANDS`
+    are judged at all. `fetch`, `rev-parse`, and every other read subcommand fall outside it,
+    which is what keeps the test-by-exit-code shape `git rev-parse -q --verify <ref> >/dev/null
+    2>&1` allowed. `merge --abort` is carved out inside the loop: it lands nothing, so it has no
+    landing to prove. A call whose argv names a read (`read_verb`) is carved out the same way.
     `tail` is the last segment of the pipe this segment feeds, if any (see `tail_discards`).
     """
     silenced = discards_output(segment) or (bool(tail) and tail_discards(tail))
     for subcommand, args in git_calls(segment):
         if subcommand == "fetch":
-            # Only a fetch that moves a local ref (`src:dst`) is a write; a bare one is a read.
-            if not any(":" in a and not a.startswith("-") for a in args):
+            # Only a fetch that moves a local branch (`src:dst`) is a write; a bare one is a read.
+            if not fetch_moves_branch(args):
                 continue
         elif subcommand not in SILENT_WRITE_SUBCOMMANDS:
             continue
         if subcommand == "merge" and "--abort" in args:
             continue
-        if subcommand in ("fetch", "pull") and "--dry-run" in args:
+        if read_verb(subcommand, args):
             continue
         matched = ("git " + subcommand + " " + " ".join(args)).strip()
         if silenced:
-            return matched, "redirect"
+            return matched, "redirect", subcommand
         if subcommand in QUIET_FLAG_SUBCOMMANDS and quiet_write(args):
-            return matched, "quiet"
+            return matched, "quiet", subcommand
     if silenced:
         tokens = segment_tokens(segment)
         index = resolve_command(tokens) if tokens else None
@@ -481,21 +556,58 @@ def silent_write_hit(segment: str, tail: str = ""):
             word, rest = basename(tokens[index]), tokens[index + 1:]
             if (word == "make" and "merge" in rest) or (
                     word in ("gh", "gh.exe") and rest[:2] == ["pr", "merge"]):
-                return word + " " + " ".join(rest), "redirect"
-    return "", ""
+                return word + " " + " ".join(rest), "redirect", "merge"
+    return "", "", ""
+
+
+def _git_dir_target(tokens):
+    """The `--git-dir` a segment's git call names, either spelling, or None."""
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]) not in ("git", "git.exe"):
+        return None
+    for at in range(index + 1, len(tokens)):
+        if tokens[at].startswith("--git-dir="):
+            return tokens[at][len("--git-dir="):]
+        if tokens[at] == "--git-dir":
+            return tokens[at + 1] if at + 1 < len(tokens) else None
+    return None
+
+
+def in_throwaway(segments, number: int, cwd: str) -> bool:
+    """True when the write in `segments[number]` runs under the temp folder, where a lost trace
+    costs nothing real. Its own `-C`, else its own `--git-dir`, else the last `cd` ahead of it,
+    else the shell's cwd names where it runs; a `--git-dir` names the repository, so its parent
+    folder is judged. An unexpanded `$` in the path reads as not throwaway."""
+    tokens = segment_tokens(segments[number])
+    where = None
+    if tokens:
+        where = _segment_git_c_target(tokens)
+        if where is None:
+            git_dir = _git_dir_target(tokens)
+            where = git_dir and os.path.dirname(git_dir.rstrip("/\\")) or git_dir
+    if where is None:
+        for earlier in segments[:number]:
+            earlier_tokens = segment_tokens(earlier)
+            target = earlier_tokens and _segment_cd_target(earlier_tokens)
+            where = target or where
+    where = _absolute(where, cwd) if where else cwd
+    if not where or "$" in where:
+        return False
+    import tempfile   # lazy: only a silenced write reaches here
+    return bool(path_is_inside(where, tempfile.gettempdir()))
 
 
 SILENT_WRITE_REDIRECT_REASON = (
-    "Rule (Git): a redirect silences this write's own output, so neither a refusal nor "
-    "the line that proves it landed would reach the session. "
-    "Remedy: run the same write without silencing either stream, and read what it "
-    "prints before you say it landed."
+    "Rule (Git): step {step} of {total}, the {kind}: a redirect silences this write's own "
+    "output (>/dev/null), so neither a refusal nor the line that proves it landed would reach "
+    "the session. "
+    "Remedy: run `git {kind} 2>&1 | tail -1`, and read the line it prints before you say it landed."
 )
 SILENT_WRITE_QUIET_REASON = (
-    "Rule (Git): this write's own quiet flag drops the one line that told a real update "
-    "apart from one that moved nothing, so the session cannot read which one just ran. "
-    "Remedy: run the same write without the quiet flag, and read what it prints before "
-    "you say it landed."
+    "Rule (Git): step {step} of {total}, the {kind}: its quiet flag (-q) drops the one line "
+    "that told a real update apart from one that moved nothing, so the session cannot read "
+    "which one just ran. "
+    "Remedy: run `git {kind} 2>&1 | tail -1`, and read the line it prints before you say it landed."
 )
 
 
@@ -1592,17 +1704,19 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # defect before anything else judges the same segment.
     ends = []
     segments = split_segments(stripped, ends)
+    live = [number for number, segment in enumerate(segments) if segment.strip()]
     for number, segment in enumerate(segments):
         if not segment.strip():
             continue
         last = number
         while last < len(segments) - 1 and ends[last] == "|":
             last += 1
-        matched, mechanism = silent_write_hit(segment, segments[last] if last > number else "")
-        if matched:
+        matched, mechanism, kind = silent_write_hit(segment, segments[last] if last > number else "")
+        if matched and not in_throwaway(segments, number, cwd):
             reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"
                       else SILENT_WRITE_QUIET_REASON)
-            refuse(tool, "deny", "silent-write", reason, matched)
+            refuse(tool, "deny", "silent-write",
+                   reason.format(step=live.index(number) + 1, total=len(live), kind=kind), matched)
 
     # 1e. The impeccable skill's build and settings-writer commands (design-skills record).
     for segment in split_segments(stripped):
