@@ -84,9 +84,12 @@ def git(cwd, *a, input=None):
 SETTLE_SECONDS = 30
 NET_RETRIES, NET_PAUSE = 3, 5  # owner ruling 2026-10-13: retry a network error 3 times, a short pause between
 # A network error, anchored on the error line, never on refusal text (a PR title "#502 Bad Gateway fix" is no match):
-# gh's Go transport error `Post "https://...": <cause>`, gh's offline line, gh's server-error lines (any HTTP 5xx, HTTP 429, the
-# GraphQL "Something went wrong"), a truncated reply, git's transport lines. The one home: Host.gh, the fetch and the lock read all ask it.
-NET_ERROR = re.compile(r"(?:^|: |\()(?:(?:Post|Get|Put|Patch|Delete|Head) \x22https?://[^\x22\s]*\x22: |error connecting to |HTTP (?:5\d\d|429)\b|Something went wrong)"
+# gh's Go transport error `Post "https://...": <cause>`, gh's offline line, gh's own server-error lines at the start of a line
+# (`HTTP 502 (url)`, `HTTP 500: ...`, `gh: HTTP 503`, `gh: Server Error (HTTP 502)`, `GraphQL: Something went wrong ...`), a truncated reply,
+# git's transport lines. Never free text: a PR title "Fix (HTTP 502 retry)" or a check "build: HTTP 500 guard" is no match.
+# The one home: Host.gh, the fetch and the lock read all ask it.
+NET_ERROR = re.compile(r"(?:^|: )(?:(?:Post|Get|Put|Patch|Delete|Head) \x22https?://[^\x22\s]*\x22: |error connecting to )"
+                       r"|^(?:gh: )?(?:Server Error \()?HTTP (?:5\d\d|429)\b|^GraphQL: Something went wrong"
                        r"|^(?:fatal|error): .*(?:Could not resolve (?:host|proxy)|Failed to connect|Connection was reset|connection reset|connection refused|connectex|wsarecv|"
                        r"schannel|\bSSL\b|GnuTLS|timed out|context deadline exceeded|Recv failure|the remote end hung up|early EOF|RPC failed|returned error: 5\d\d|"
                        r"HTTP/2 stream|Empty reply from server|Failed sending data)"
@@ -217,7 +220,7 @@ class GitLock(Lock):
         ref = f"refs/merge-lock/{b}"
         c, out, _ = retry_net(lambda: git(self.root, "ls-remote", "origin", ref), self.pause)
         if c:
-            raise Stop("cannot read the merge lock: " + out)
+            raise (NetStop if is_net(c, out) else Stop)("cannot read the merge lock: " + out)
         if not out:
             return None
         if git(self.root, "fetch", "-q", "origin", ref)[0]:
@@ -561,6 +564,8 @@ class Host:
         if not c:  # exit 0 and still OPEN: not a refusal (a queued merge, or a lagging read). The claim stays.
             raise NetStop(f"`gh pr merge` of #{n} exited 0, but the pull request still reads OPEN. Nothing was reverted. Check the pull request #{n} on GitHub: "
                           f"if it merged, do the after-merge steps by hand; if it is open, run again.\n{view}")
+        # A refusal reply with the PR still OPEN is proven, even when the first try lost its reply and a retry got the refusal
+        # (gh retried it): gh answered and the merge did not happen. The caller reverts the claim. Owner ruling: only a proven refusal reverts.
         return None, out
 
 # ------------------------------------------------------------------ git steps
