@@ -135,6 +135,16 @@ def script_names(command):
     return re.findall(r'/(\w+\.py)(?=["\s]|$)', command)
 
 
+def decision_watch_stop_rows(settings):
+    """The Stop command rows that run decision_watch.py, quoted path or bare."""
+    return [c for c in command_rows(settings["hooks"]["Stop"]) if "decision_watch.py" in script_names(c)]
+
+
+def stop_settings(command):
+    """A settings dict whose only Stop row runs `command`."""
+    return {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": command}]}]}}
+
+
 class DecisionWatchSwap(unittest.TestCase):
     def setUp(self):
         with open(SETTINGS, encoding="utf-8") as f:
@@ -144,8 +154,16 @@ class DecisionWatchSwap(unittest.TestCase):
         self.assertIs(self.settings["enabledPlugins"].get(DECISION_WATCH_PLUGIN), True)
 
     def test_no_stop_row_runs_decision_watch(self):
-        rows = [c for c in command_rows(self.settings["hooks"]["Stop"]) if "decision_watch.py" in script_names(c)]
-        self.assertEqual(rows, [], "a Stop row still runs decision_watch.py")
+        self.assertEqual(decision_watch_stop_rows(self.settings), [], "a Stop row still runs decision_watch.py")
+
+    # The detector must see both spellings. The unquoted one is the form a row is most likely to take.
+    def test_quoted_decision_watch_stop_row_is_caught(self):
+        rows = decision_watch_stop_rows(stop_settings('python3 "$HOME/.claude/hooks/decision_watch.py"'))
+        self.assertEqual(len(rows), 1, "a quoted decision_watch.py Stop row is not caught")
+
+    def test_unquoted_decision_watch_stop_row_is_caught(self):
+        rows = decision_watch_stop_rows(stop_settings("python3 ~/.claude/hooks/decision_watch.py"))
+        self.assertEqual(len(rows), 1, "an unquoted decision_watch.py Stop row is not caught")
 
     def test_stop_rows_are_the_others_only(self):
         names = sorted(n for c in command_rows(self.settings["hooks"]["Stop"]) for n in script_names(c))

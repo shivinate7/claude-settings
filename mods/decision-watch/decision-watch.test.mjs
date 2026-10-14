@@ -15,6 +15,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { mock } from 'node:test'
 
 const REGISTER = fileURLToPath(new URL('./hooks/register.mjs', import.meta.url))
 const REAL_CFG = '/cfg/real'
@@ -417,15 +418,7 @@ await test('two-phase: phase 1 emits the prompt; the model call takes it with ma
   same(JSON.parse(py[1].opts.stdin).transcript_path, TRANSCRIPT, 'phase 2 stdin is the same Stop JSON')
 })
 
-// Item 5 (part): the model call gets a timeout, a number above 0 and at most 60000.
-await test('model call: carries timeoutMs, a number above 0 and at most 60000', async () => {
-  const h = await load(host())
-  await fire(h, 'classic.Stop', stopEvent(), {})
-  await judged(h)
-  const t = h.modelReqs[0] && h.modelReqs[0].timeoutMs
-  assert.equal(typeof t, 'number', `timeoutMs is ${JSON.stringify(t)}`)
-  assert.ok(t > 0 && t <= 60000, `timeoutMs is ${t}`)
-})
+// The model call's limit is enforced by the mod's own deadline (see the busy cases below), not by a request field.
 
 await test('model error: phase 2 gets --model-error with the message, and no --model-text', async () => {
   const h = await load(host({ model: () => { throw new Error('model down') } }))
@@ -519,6 +512,48 @@ await test('shown: an ALLOW shows nothing', async () => {
   await judged(h)
   await settle(60)
   same(h.toasts, [], 'toasts')
+})
+
+// ---- the config notice. decision_watch.py adds config_report() text to its message on every verdict, ALLOW
+// included. The notice is for the report, so an ALLOW that carries it must not toast. FLAG and UNKNOWN still do.
+const CONFIG_NOTICE = pyConst('CONFIG_MESSAGE').replace('%s', '.claude/settings.json') + pyConst('TAIL')
+
+await test('config notice: an ALLOW that carries a config notice shows nothing', async () => {
+  const h = await load(host({ py2: out({ systemMessage: CONFIG_NOTICE }) }))
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await judged(h)
+  await settle(60)
+  same(h.toasts, [], 'toasts')
+})
+
+await test('config notice: a FLAG that carries a config notice still shows the FLAG', async () => {
+  const h = await load(host({ py2: out({ systemMessage: FLAG + ' ' + CONFIG_NOTICE }) }))
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await judged(h)
+  await settle(60)
+  same(h.toasts.length, 1, 'toast count')
+  assert.ok(h.toasts[0].startsWith(FLAG), `toast text: ${JSON.stringify(h.toasts[0].slice(0, 160))}`)
+})
+
+await test('config notice: an UNKNOWN that carries a config notice still shows the UNKNOWN', async () => {
+  const TEXT = UNKNOWN + 'the model judgment could not be completed (model call: model down).'
+  const h = await load(host({ py2: out({ systemMessage: TEXT + ' ' + CONFIG_NOTICE }) }))
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await judged(h)
+  await settle(60)
+  same(h.toasts.length, 1, 'toast count')
+  assert.ok(h.toasts[0].startsWith(UNKNOWN), `toast text: ${JSON.stringify(h.toasts[0].slice(0, 160))}`)
+})
+
+// A toast that throws is logged, never silent. The verdict line is written before the toast, so the log keeps it.
+await test('toast failure: a FLAG whose toast throws is logged, and a log line names the toast failure', async () => {
+  const h = await load(host({ model: () => ({ isAnswered: true, text: FLAG_REPLY, usage: {} }) }))
+  h.$.ui.toast = async () => { throw new Error('toast host down') }
+  const logged = waitLog(h, /toast/i)
+  logged.catch(() => {})
+  await fire(h, 'classic.Stop', stopEvent(), {})
+  await judged(h)
+  assert.match(await logged, /toast/i, 'no log line names the toast failure')
 })
 
 // ---- the model table (decision subagent-model-cap): a mod that calls a model has a row
@@ -699,6 +734,34 @@ await test('busy guard: a failed judge frees the slot, so the next Stop judges a
   await settle(60)
   same(calls, 2, 'model calls after a failed judge')
   assert.ok(!/SKIP busy/.test(allLog(h)), 'the slot was never freed')
+})
+
+// HOLE 5 (decision decision-watch-mod-limits): the one-judge slot has no watchdog. A model call that never
+// resolves must free the slot at the mod's own limit, log UNKNOWN, and let the next Stop judge. The limit is a
+// timer, so the case runs on fake timers and ticks past MODEL_CEILING_MS. The mod's limit is 50 s, so any
+// limit up to 60 s passes this case.
+const MODEL_CEILING_MS = 60000
+const flush = () => new Promise(r => setImmediate(r)) // real setImmediate: not one of the faked timers
+const logNow = h => String(h.files.get(logPath(h)) ?? '')
+
+await test('busy: a model call that never resolves frees the slot at the mod limit, logs UNKNOWN, and the next Stop judges', async () => {
+  const h = await load(host({ model: () => new Promise(() => {}) }))
+  mock.timers.enable({ apis: ['setTimeout'] })
+  try {
+    await fire(h, 'classic.Stop', stopEvent(), {})
+    await flush()
+    assert.match(logNow(h), /START /, 'the first judge did not start')
+    mock.timers.tick(MODEL_CEILING_MS)
+    await flush()
+    assert.match(logNow(h), /UNKNOWN/, 'no UNKNOWN after the limit: the slot is held by the hung model call')
+    h.model = () => ({ isAnswered: true, text: ALLOW_REPLY, usage: {} })
+    await fire(h, 'classic.Stop', stopEvent(), {})
+    await flush()
+    assert.doesNotMatch(logNow(h), /SKIP busy/, 'the next Stop was skipped as busy')
+    same((logNow(h).match(/START /g) || []).length, 2, 'judges started')
+  } finally {
+    mock.timers.reset()
+  }
 })
 
 // ---- item 6: the log stays bounded.
