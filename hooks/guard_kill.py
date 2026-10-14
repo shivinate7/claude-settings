@@ -9,7 +9,7 @@ import subprocess
 import sys
 
 from guard_core import (
-    ASSIGNMENT, CMD_EXE_NAMES, ENV_PATTERN_COMMANDS, HEREDOC_HEADER, PLAYWRIGHT_PS_SHELLS,
+    ASSIGNMENT, CMD_EXE_NAMES, ENV_PATTERN_COMMANDS, PLAYWRIGHT_PS_SHELLS,
     POWERSHELL_CALL, SILENT_WRITE_REDIRECT, _pwsh_script, _skip_assignments_and_keywords,
     _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, inline_script,
     resolve_command, segment_tokens, split_segments,
@@ -619,8 +619,6 @@ def _playwright_tokens_hit(tokens, depth=0, install=None, watch=PLAYWRIGHT_WATCH
         # a bare name exports the shell variable of that name, however it was filled
         # (`read -r`, `printf -v`)
         return word + " " + next(t for t in rest if t.upper() in watch[0])
-    if word in ("builtin", "exec"):
-        return _playwright_tokens_hit(rest, depth + 1, install, watch)
     npx_script = ""
     if word == "npx":
         # `npx -c 'script'` runs the string in a shell: walk it like `sh -c`.
@@ -704,9 +702,7 @@ def playwright_command_hit(raw: str, stripped: str, watch=PLAYWRIGHT_WATCH) -> s
         matched = playwright_path_hit(segment, to_file=to_file, watch=watch)
         if matched:
             return matched
-    kept, bodies = _split_heredocs(raw)
-    headers = [line for line in kept if HEREDOC_HEADER.search(line)]
-    for header, (_, body) in zip(headers, bodies):
+    for _, body, header in _split_heredocs(raw)[1]:
         if PLAYWRIGHT_PROFILE.search(header):
             for line in body.split("\n"):
                 matched = playwright_path_hit(line, watch=watch)
