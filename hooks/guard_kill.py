@@ -464,11 +464,12 @@ _PRINTF_DIRECTIVE = re.compile(r"%%|%[-+ #0-9.]*[a-zA-Z]|\\[nrtabfv\\]")
 _REDIRECT_TO_PROFILE = re.compile(r">+\|?\s*[^\s|;&]*" + PLAYWRIGHT_PROFILE.pattern)
 
 
-# A watched set of variable names: (names, fold_case). The Playwright rule folds the name to upper
-# case in every form. The git rule does not in a POSIX shell, because `git_dir=$(...)` is a plain
-# shell variable there; PowerShell's `env:` is case-blind and is read with re.I below.
+# A watched set of variable names: (names, fold_case). Both rules fold the name to upper case,
+# because the environment is case-blind on Windows. The git rule passes a bare lower-case
+# assignment with no command after it, `git_dir=$(...)`, as the plain shell variable it is.
+# PowerShell's `env:` is read with re.I below.
 PLAYWRIGHT_WATCH = ((PLAYWRIGHT_VAR,), True)
-GIT_ENV_WATCH = (("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"), False)
+GIT_ENV_WATCH = (("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"), True)
 _ASSIGN_NAME = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\+?=")
 
 
@@ -565,8 +566,12 @@ def _playwright_tokens_hit(tokens, depth=0, install=None, watch=PLAYWRIGHT_WATCH
         return ""
     at = resolve_command(tokens)
     for t in ([] if install else tokens[:len(tokens) if at is None else at]):
-        if _assigned_var(t, watch):
-            return _assigned_var(t, watch) + " assignment"
+        name = _assigned_var(t, watch)
+        # a lower-case name is a plain shell variable unless a command follows it as a prefix,
+        # and a substitution (`git_dir=$(...)`, split by shlex at its spaces) is no prefix
+        if name and (watch is PLAYWRIGHT_WATCH or t.startswith(name)
+                     or (at is not None and "$(" not in t and "`" not in t)):
+            return name + " assignment"
     if at is None:
         return ""
     word, rest = basename(tokens[at]).lower(), tokens[at + 1:]
@@ -576,6 +581,12 @@ def _playwright_tokens_hit(tokens, depth=0, install=None, watch=PLAYWRIGHT_WATCH
             return hit
     elif word in ASSIGNING_BUILTINS and any(_assigned_var(t, watch) for t in rest):
         return word + " " + next(_assigned_var(t, watch) for t in rest if _assigned_var(t, watch))
+    elif watch is GIT_ENV_WATCH and (word == "export" or (word in ("declare", "typeset") and any(
+            re.fullmatch(r"-[a-zA-Z]*x[a-zA-Z]*", t) for t in rest))) and any(
+            t.upper() in watch[0] for t in rest):
+        # a bare name exports the shell variable of that name, however it was filled
+        # (`read -r`, `printf -v`)
+        return word + " " + next(t for t in rest if t.upper() in watch[0])
     if word in ("builtin", "exec"):
         return _playwright_tokens_hit(rest, depth + 1, install, watch)
     npx_script = ""
@@ -614,6 +625,15 @@ def playwright_path_hit(segment: str, depth=0, to_file=False, ps_inner=False,
     file-write form counts only when the written text starts with the assignment.
     """
     tokens = segment_tokens(segment) or []
+    if watch is not PLAYWRIGHT_WATCH and segment_tokens(segment) is None:
+        # An unterminated quote (`echo don't; export GIT_DIR=x`) makes the shared reader keep the
+        # rest of the line in one segment. Read each piece between unquoted-looking separators on
+        # its own; a piece that still cannot be read is skipped, as everywhere else.
+        for piece in re.split(r"[;&|\n]", segment):
+            if piece != segment and piece.strip():
+                hit = playwright_path_hit(piece, depth, ps_inner=ps_inner, watch=watch)
+                if hit:
+                    return hit
     if install:
         return _playwright_tokens_hit(tokens, depth, install)
     at = resolve_command(tokens) if tokens else None
