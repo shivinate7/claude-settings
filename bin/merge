@@ -12,7 +12,7 @@ def rmtree_retry(path):  # standalone shim: can't import merge/launch.py's copy 
     if sys.version_info >= (3, 12): shutil.rmtree(path, onexc=handler)
     else: shutil.rmtree(path, onerror=lambda f, p, ei: handler(f, p, ei[1]))
 def origin(d):
-    r = subprocess.run(["git", "-C", d, "config", "--get", "remote.origin.url"], capture_output=True, text=True)
+    r = subprocess.run(["git", "-C", d, "config", "--get", "remote.origin.url"], capture_output=True, encoding="utf-8", errors="replace")
     return re.fullmatch(OK, r.stdout.strip()) is not None
 def find():
     d = os.environ.get("CLAUDE_SETTINGS_DIR")

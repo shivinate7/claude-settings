@@ -117,6 +117,25 @@ class Red(unittest.TestCase):
         got = r.verdict()
         self.assertTrue(any("app.txt" in p and "whole file restored" in p for p in got), got)
 
+    def test_stale_merge_whose_first_commit_postdates_the_pr_is_read(self):
+        """The banchi shape with the clock pinned. The branch is cut before the PR merges, and its
+        first commit lands about an hour after the merge. The window starts where the branch's own
+        first-parent line left main, so the PR is in it and the restore is read. The dates do not set
+        the window. Fixed dates pin that gap on every run."""
+        r = self.r
+        r.sh("checkout", "-q", "-b", "stale")
+        r.sh("checkout", "-q", "main")
+        r.sh("checkout", "-q", "-b", "pr1")
+        r.commit("delete Card", date="2026-01-01T10:00:00", app_txt=BODY)
+        r.sh("checkout", "-q", "main")
+        r.sh("merge", "-q", "--no-ff", "-m", "Merge pull request #1", "pr1", date="2026-01-01T10:01:00")
+        r.push()
+        r.sh("checkout", "-q", "stale")
+        r.commit("wording", date="2026-01-01T11:00:00", other_txt="other v2\n")
+        r.sh("merge", "-q", "-s", "ours", "--no-edit", "main", date="2026-01-01T11:01:00")
+        got = r.verdict()
+        self.assertTrue(any("app.txt" in p and "whole file restored" in p for p in got), got)
+
     def test_stale_branch_hunk_level(self):
         """Main added a comment after the PR; the branch restores Card but keeps the comment."""
         self.merged_pr()
@@ -240,7 +259,8 @@ class Debt19(unittest.TestCase):
 
 class Stale(unittest.TestCase):
     """The owner's incident, single-parent form: main gained lines after the branch was cut, and
-    the branch carries a version without them. Dates are fixed so a rebase keeps the cut."""
+    the branch carries a version without them. A rebase moves the cut to the rebase base, and that
+    commit is read. The dates do not set the window."""
     T0, T1, T2 = "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
 
     def setUp(self):
@@ -311,8 +331,12 @@ class Stale(unittest.TestCase):
         self.assertTrue(self.hits())
 
     def test_main_work_before_the_cut_is_not_read(self):
-        """Cry-wolf guard: lines main gained BEFORE the branch was cut may be removed on purpose."""
+        """Cry-wolf guard: lines main gained BEFORE the fork point may be removed on purpose.
+        Main gains A's lines, then one more commit (the fork commit); the window starts there, so A is outside it."""
         r = self.r
+        r.sh("checkout", "-q", "main")
+        r.commit("main moves on past A", date="2026-01-15T10:00:00", other_txt="other v2\n")
+        r.push()  # origin/main must move past A, or the fork point resolves to A and the test goes red
         r.sh("checkout", "-q", "-B", "late", "main")
         r.commit("late work removes A's lines on purpose", date="2026-02-01T10:00:00", app_txt=BODY)
         self.assertEqual(r.verdict(), [])

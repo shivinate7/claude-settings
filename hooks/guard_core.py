@@ -576,7 +576,7 @@ def command_root(cmd: str, shell_cwd: str) -> str:
 def _git(where: str, *args):
     try:
         return subprocess.run(
-            ["git", "-C", where, *args], capture_output=True, text=True, timeout=10
+            ["git", "-C", where, *args], capture_output=True, encoding="utf-8", errors="replace", timeout=10
         )
     except Exception:
         return None

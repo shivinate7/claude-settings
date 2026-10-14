@@ -75,7 +75,7 @@ def shared_deadline(seconds):
 def sh(args, cwd=None, input=None, env=None):
     args = [resolve_program(args[0], env), *args[1:]]
     timeout = max(0.05, _READ_DEADLINE - time.monotonic()) if _READ_DEADLINE is not None else SH_TIMEOUT
-    r =subprocess.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, timeout=timeout)
+    r =subprocess.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     return r.returncode, (r.stdout + r.stderr).strip()
 
 def git(cwd, *a, input=None):
@@ -516,7 +516,7 @@ class Host:
             return
         t0 = self.now()
         try:
-            subprocess.run([resolve_program("gh"), "run", "watch", ids[0], "--exit-status"], capture_output=True, text=True, timeout=self.minute)
+            subprocess.run([resolve_program("gh"), "run", "watch", ids[0], "--exit-status"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=self.minute)
         except subprocess.TimeoutExpired:
             pass
         if self.now() - t0 < 1:  # watch returned at once: do not spin on the API
