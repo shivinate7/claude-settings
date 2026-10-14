@@ -6574,6 +6574,25 @@ sh("frozen: a leftover token is not a key to the push rule",
    "GIT_DISCARD_OK=1 " + VCS + " push --force", "deny", "force-push", cwd=PUSHFEAT)
 
 
+# THE SHELL RUNNERS KEEP QUOTED TEXT IN VIEW. Quoted text with a space or an operator is data, unless a
+# shell reads it: text piped into `sh`, or an `iex`. The first two pins deny those shapes. They pass on
+# main, which reads every quoted word as code, and they guard a future regression of the data reading.
+# The commit message and the heredoc body are the two allow shapes that reading made data.
+sh("frozen shell: an echo of a quoted cat-write onto the config settings, piped to sh, denies "
+   "[regression pin: passes on main and d7fb2f1]",
+   'echo "cat > ' + CFG_SETTINGS + '" | sh', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: an iex of a Set-Content onto the config settings denies "
+   "[regression pin: passes on main and d7fb2f1]",
+   'iex "Set-Content -Path ' + CFG_SETTINGS + ' -Value x"', "deny", "frozen-path",
+   tool="PowerShell", cwd=NOGIT)
+sh("frozen data: a quoted commit message naming a cat-write onto the config settings allows "
+   "[new allow: red on main, passes on d7fb2f1]",
+   VCS + ' commit -m "note: cat > ' + CFG_SETTINGS + ' is refused"', "allow", cwd=NOGIT)
+sh("frozen data: a heredoc body naming a cat-write onto the config settings, fed to python, allows "
+   "[new allow: red on main, passes on d7fb2f1]",
+   "python hooks/guard.py <<'DOC'\ncat > " + CFG_SETTINGS + "\nDOC", "allow", cwd=NOGIT)
+
+
 # =========================================================================== 6b. the model cap
 FAMILY = "model-cap"
 #
@@ -6761,6 +6780,13 @@ sh("cap: a redirect onto a project settings file asks",
 sh("cap: an append onto a project settings file asks",
    "echo '\"" + CAP_FORCE + "\": \"0\"' >> " + PROJ_SETTINGS,
    "ask", "subagent-model-cap", cwd=NOGIT, carries=(CAP_FORCE + " = 0",))
+
+# A WRITE PIPED INTO A SHELL IS A WRITE. The cap text sits in double quotes and the sed runs under `sh`,
+# so it is code, and it asks. Regression pin: passes on main and d7fb2f1, which both read it as code.
+sh("cap shell: a sed -i onto a project settings file that sets the cap, piped to sh, asks "
+   "[regression pin: passes on main and d7fb2f1]",
+   'echo "sed -i s/' + CAP_KEY + '=sonnet/' + CAP_KEY + '=' + OPUS + '/ ' + PROJ_SETTINGS + '" | sh',
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
 
 # A COMMENT OPENER OR A LONE QUOTE INSIDE A STRING does not hide the real write after it. The scanner
 # must still reach the redirect, and the multi-line quoted string is the multi-line shape of the same
