@@ -118,9 +118,15 @@ no traceback.
   `set_log_session`, turns STE logging off. No marker line is written. The reader then prints
   empty tables, which read as no events.
 - **Lines lost on Windows.** A plain append from many processes is not atomic on Windows.
-  Measured: a line was lost in 1 round of 12, each round with 20 processes calling `record`. A
-  lost line costs one count and never changes a verdict. `lint/test_gates.py` skips test_19, the
-  exact-count test, on win32. Test_19b checks a range of 17 to 20 lines.
+  Measured before the lock: a line was lost in 1 round of 12, each round with 20 processes
+  calling `record`. A lost line can drop an owner note: `collect_unread` in
+  `hooks/decision_watch.py` names unread subjects from `noted` and `subject-unread` lines.
+  Now `record()` in `hooks/guard_core.py` locks each write: msvcrt on Windows, fcntl on POSIX.
+  If the lock wait passes 2 s (`LOG_LOCK_WAIT`), or the lock call raises, it writes without the
+  lock. So a line can still be lost under a slow holder. Tests: `lint/test_gates.py`,
+  `GuardLogAppendRaceTests`, `test_19_twenty_parallel_gates_leave_twenty_whole_lines` (runs on
+  every platform), and `test_19b_parallel_gates_write_at_most_one_whole_line_each` (exactly 20
+  lines).
 - **Rewrite, then failed lint.** The fixer rewrites the text, then the lint cannot run. The
   rewrite still lands. The log holds `STE-unchecked` and no `fixed` line.
 - **Closed stdout pipe.** If the reader closes stdout early, the STE gate raises at its flush in
