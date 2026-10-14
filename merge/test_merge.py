@@ -2707,6 +2707,23 @@ class NetErrorLines(unittest.TestCase):
             with self.subTest(out=out):
                 self.assertFalse(merge.is_net(1, out))
 
+    def test_a_refusal_that_quotes_a_wrapped_5xx_or_429_line_is_not_a_network_error(self):
+        # Round 3: an unanchored `HTTP 5xx (url)` alternative matched refusal text. A real refusal must revert, not retry into NetStop.
+        for out in ("X Pull request #7 is not mergeable: Retry on HTTP 502 (https://github.com/o/r/issues/12)",
+                    "X Pull request #7 is not mergeable: Retry on HTTP 429 (https://github.com/o/r/issues/12)"):
+            with self.subTest(out=out):
+                self.assertFalse(merge.is_net(1, out))
+
+    def test_a_real_server_error_or_wrapped_run_line_is_a_network_error(self):
+        # Round 3 guard: the anchor fix must keep the 5xx and 429 forms gh really prints, bare or after `: `.
+        for out in ("Server Error (HTTP 502)",
+                    "HTTP 502 (https://api.github.com/repos/o/r/branches/main/protection/required_status_checks)",
+                    "failed to get runs: HTTP 502 (https://api.github.com/repos/o/r/actions/runs?head_sha=abc)",
+                    "HTTP 429: Too Many Requests",
+                    "failed to get runs: HTTP 429: Too Many Requests (https://api.github.com/repos/o/r/actions/runs?head_sha=abc)"):
+            with self.subTest(out=out):
+                self.assertTrue(merge.is_net(1, out))
+
 class GhLockReadRetry(unittest.TestCase):
     """GhLock.read on a network error: retried as GitLock is (round 2: GhLock is in scope). merge.sh is the only seam,
     so the test holds wherever the retry sits, in read or in api."""
