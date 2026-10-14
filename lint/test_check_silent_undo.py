@@ -329,8 +329,12 @@ class Stale(unittest.TestCase):
         self.assertTrue(self.hits())
 
     def test_main_work_before_the_cut_is_not_read(self):
-        """Cry-wolf guard: lines main gained BEFORE the branch was cut may be removed on purpose."""
+        """Cry-wolf guard: lines main gained BEFORE the fork point may be removed on purpose.
+        Main gains A's lines, then one more commit (the fork commit); the window starts there, so A is outside it."""
         r = self.r
+        r.sh("checkout", "-q", "main")
+        r.commit("main moves on past A", date="2026-01-15T10:00:00", other_txt="other v2\n")
+        r.push()  # origin/main must move past A, or the fork point resolves to A and the test goes red
         r.sh("checkout", "-q", "-B", "late", "main")
         r.commit("late work removes A's lines on purpose", date="2026-02-01T10:00:00", app_txt=BODY)
         self.assertEqual(r.verdict(), [])
