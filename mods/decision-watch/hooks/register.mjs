@@ -211,12 +211,20 @@ async function shadow($, stop) {
   try {
     const out = await judge($, stop, "shadow");
     // Each notice goes on its own log lines, before END, so the END cut at MAX_LINE never drops one.
-    // A notice longer than one line is split over several lines with the same prefix: no text is lost.
+    // A longer notice is split over several lines with the same prefix. The pieces, joined, give the notice with
+    // its whitespace folded. A cut never splits a surrogate pair, and no piece after the first starts with a space,
+    // because log() would fold that space into the prefix. Whitespace at the very start of a notice is lost.
     const prefix = `NOTICE ${stop.session_id} | NOTICE: `;
     const room = Math.max(MAX_LINE - TIME_LEN - 1 - prefix.length, 100);
     for (const n of out.notices) {
       const text = n.replace(/\s+/g, " ");
-      for (let i = 0; i === 0 || i < text.length; i += room) await log($, prefix + text.slice(i, i + room));
+      let i = 0;
+      do {
+        let j = Math.min(i + room, text.length);
+        while (j < text.length && j > i + 1 && (text[j] === " " || /[\uDC00-\uDFFF]/.test(text[j]))) j--;
+        await log($, prefix + text.slice(i, j));
+        i = j;
+      } while (i < text.length);
     }
     line = `END ${stop.session_id} | ${out.trace.join(" | ")} | ${out.result}`;
     shown = out.shown;
