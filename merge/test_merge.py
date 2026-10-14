@@ -958,12 +958,18 @@ elif a[:2] == ["pr", "merge"]:
     sha = a[a.index("--match-head-commit") + 1]
     if S.get("merge_fail"):
         print(S["merge_fail"]); sys.exit(1)
+    seq = S.get("merge_replies") or []  # [msg, lands] per call, the last repeats. lands: the merge reaches the server first; msg: the reply ("" for none)
+    msg, lands = (seq.pop(0) if len(seq) > 1 else seq[0]) if seq else ("", True)
+    if seq: save()
+    if not lands:
+        print(msg); sys.exit(1)
     if git("ls-remote", "origin", "refs/heads/feat").split("\t")[0] != sha:
         print("GraphQL: Head branch was modified. Review and try the merge again."); sys.exit(1)
     B = S.get("base", "main")
     git("fetch", "-q", "origin"); git("checkout", "-q", "-B", B, "origin/" + B)
     git("merge", "-q", "--no-ff", "-m", "merge", sha); git("push", "-q", "origin", B)
     S["oid"] = git("rev-parse", "HEAD"); save()
+    if msg: print(msg); sys.exit(1)
 elif a[:2] == ["repo", "view"]:
     print(json.dumps({"defaultBranchRef": {"name": S.get("default_branch", "main")}}))
 elif a[0] == "api" and a[1].endswith("/required_status_checks"):
@@ -1099,6 +1105,90 @@ class GhHalf(Env):
         self.assertIn("reverted on feat", out)
         self.assertNotIn("pr merge", self.calls())
         self.assertTrue(self.reverted())
+        self.assertFalse(self.lock_ref())
+
+    def test_a_lost_merge_reply_then_not_mergeable_reads_merged_and_carries_on(self):
+        self.set(merge_replies=[[NET_TLS, True], ["GraphQL: Pull request is not mergeable: already closed", False]])  # the merge lands, its reply is lost
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("reverted on", out)
+        self.assertEqual(self.calls().count("pr merge"), 2)
+        self.assertIn("state,mergeCommit", self.calls())  # the retry's answer is not trusted: the PR state is read
+        self.assertEqual(self.claims("main"), 1)
+        self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
+        self.assertFalse(self.lock_ref())
+
+    def test_a_lost_merge_reply_then_404_reads_merged_and_carries_on(self):
+        self.set(merge_replies=[[NET_TLS, True], ["HTTP 404: Not Found", False]])  # a stale ref on the retry
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("reverted on", out)
+        self.assertEqual(self.calls().count("pr merge"), 2)
+        self.assertIn("state,mergeCommit", self.calls())
+        self.assertEqual(self.claims("main"), 1)
+        self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
+        self.assertFalse(self.lock_ref())
+
+    def test_a_plain_already_merged_answer_on_the_first_merge_reads_the_state_and_carries_on(self):
+        self.set(merge_replies=[["Pull request #7 is already merged", True]])  # no network error before it
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("reverted on", out)
+        self.assertEqual(self.calls().count("pr merge"), 1)
+        self.assertIn("state,mergeCommit", self.calls())
+        self.assertEqual(self.claims("main"), 1)
+        self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
+        self.assertFalse(self.lock_ref())
+
+    def test_a_red_check_named_eof_is_a_refusal_not_a_network_retry(self):
+        self.set(checks_seq=[[("gates", "pass", ""), ("EOF lint", "fail", "https://x/y")]])  # "EOF" in the JSON must not match the network pattern
+        rc, out = self.go()
+        self.assertEqual(self.paused, [], out)  # no retry, so no pause
+        self.assertEqual(rc, 1, out)
+        self.assertIn("a check is red: EOF lint: fail", out)
+        self.assertNotIn("network", out.lower())
+        self.assertNotIn("pr merge", self.calls())
+        self.assertEqual(self.claims("feat"), 0)  # refused before the claim push
+
+    def test_four_network_errors_on_the_merge_read_merged_and_carry_on(self):
+        self.set(merge_replies=[[NET_TLS, True], [NET_TLS, False]])  # the first merge lands, its reply and the three retries are lost
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.calls().count("pr merge"), 4)
+        self.assertIn("state,mergeCommit", self.calls())
+        self.assertNotIn("reverted on", out)
+        self.assertEqual(self.claims("main"), 1)
+        self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
+        self.assertFalse(self.lock_ref())
+
+    def test_four_network_errors_on_the_merge_with_the_pr_open_stop_without_a_revert(self):
+        self.set(merge_replies=[[NET_TLS, False]])  # nothing lands: four calls, all lost
+        rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.calls().count("pr merge"), 4)
+        self.assertIn("state,mergeCommit", self.calls())  # the PR state is read: OPEN
+        self.assertNotIn("reverted on", out)
+        self.assertIn("network", out.lower())
+        self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
+        self.assertFalse(self.lock_ref())
+
+    def test_a_git_fetch_network_error_after_the_claim_push_stops_without_a_revert(self):
+        real_git, real_push = merge.git, merge.push_branch
+        pushed = []
+        def push(wt, branch):
+            pushed.append(branch)
+            return real_push(wt, branch)
+        def git_net(cwd, *a, input=None):  # the fetch of main after the claim push loses its network
+            if pushed and a[:2] == ("fetch", "-q") and a[-1] == "+refs/heads/main:refs/remotes/origin/main":
+                return 1, NET_TLS
+            return real_git(cwd, *a, input=input)
+        with unittest.mock.patch.object(merge, "push_branch", push), unittest.mock.patch.object(merge, "git", git_net):
+            rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn("reverted on", out)
+        self.assertNotIn("pr merge", self.calls())
+        self.assertIn("network", out.lower())
+        self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
         self.assertFalse(self.lock_ref())
 
     def test_green_run_watches_the_run_and_merges_pinned_to_the_claim_head(self):
