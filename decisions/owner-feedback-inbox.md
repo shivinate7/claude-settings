@@ -24,10 +24,13 @@ Owner ruling, 2026-10-13, from an interview in the claude-settings audit session
   it, with or without text after it.
 - **Close.** Capture ends in four ways. (1) A message that starts with `fb done` or `fb: done`
   closes it, any case, any whitespace between the words. The rest of that message is not saved and
-  is not judged. `fb - done` does not close; while capture is open, it is captured. (2) Quiet time:
+  is not judged. A message whose last line is `fb done` (any case, an optional colon, trailing
+  punctuation) saves the lines before it and closes capture, also when the same message opens it
+  (owner, 2026-10-14). That line in a code fence or in backticks does not close. The one-line form
+  `fb: X fb done` does not close. `fb - done` does not close; while capture is open, it is captured. (2) Quiet time:
   10 minutes with no captured owner message. The message after the gap is not saved unless it
   opens with `fb`. (3) The judge: while capture is open,
-  each message that does not open with `fb` is saved first. Then a detached child
+  each message that does not open with `fb` and does not close capture is saved first. Then a detached child
   (`hooks/feedback_judge.py`) asks a Sonnet judge (`claude-sonnet-5-5`, through
   `decision_watch.invoke_model`) whether it still belongs to the burst. On `{"feedback": false}`
   the child adds the item `- fb-auto-<time> [note] -> judged not feedback` under that message, so
