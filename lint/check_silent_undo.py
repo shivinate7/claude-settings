@@ -93,17 +93,16 @@ def allowed(cwd, rng):
 def misplaced(cwd, rng):
     """Hint lines for commits of the range with a line that starts `Drops-lines:` and that git did not read as a trailer
     (it is not in the last paragraph, so it excuses nothing). A hint never excuses a finding."""
-    key = re.compile(r"^" + TRAILER + r":", re.I | re.M)
-    out = []
+    key = re.compile(r"^" + TRAILER + r":", re.I | re.M | re.ASCII)  # git matches the key in ASCII case only: no U+017F for `s`
     try:  # the hint is an extra: a failed read of it never changes the verdict
-        for sha in git(cwd, "log", "-i", "--grep=^" + TRAILER + ":", "--format=%H", rng)[1].split():  # one read per commit: no body byte can split a record
-            body = git(cwd, "log", "-1", "--format=%B", sha)[1]
-            got = git(cwd, "log", "-1", "--format=%(trailers:key=" + TRAILER + ",unfold)", sha)[1]  # keys, not values: an empty or folded trailer counts once
-            if len(key.findall(body)) > len(key.findall(got)):
-                out.append("%s has a %s: line, read not as a trailer: put it in the last paragraph, with Co-Authored-By." % (sha[:9], TRAILER))
+        # One read and no --grep, which grep.patternType in the repo config would change. git refuses a NUL in a message, so
+        # NUL splits each commit into sha, parsed trailers (keys, not values: an empty or folded trailer counts once), body.
+        f = git(cwd, "log", "-z", "--format=%H%x00%(trailers:key=" + TRAILER + ",unfold)%x00%B", rng)[1].split("\0")
     except Unknown:
-        pass  # ponytail: a failed read gives no hint, and no note; the finding and its exit code stand
-    return out
+        return []  # ponytail: a failed read gives no hint at all, and no note; the finding and its exit code stand
+    return ["%s has a %s: line, read not as a trailer: put it in the last paragraph, with Co-Authored-By." % (sha[:9], TRAILER)
+            for sha, got, body in zip(f[0::3], f[1::3], f[2::3])  # a record short of 3 fields (the closing NUL) drops out
+            if len(key.findall(body)) > len(key.findall(got))]
 
 
 def judge(items, ok):
