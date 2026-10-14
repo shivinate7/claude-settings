@@ -6885,8 +6885,9 @@ sh("cap: a grep for the variable in a settings file is not a write",
 sh("cap: reading a settings file into another file is not a write to it",
    "cat " + PROJ_SETTINGS + " > /tmp/copy.json", "allow", cwd=NOGIT)
 
-# THE DATA HALF. A settings write named INSIDE text is not a write: a quoted argument, a heredoc body
-# fed to a program that reads it, or a JSON payload. Incident 2026-10-14: a reviewer's probe piped a
+# THE DATA HALF. A settings write named INSIDE text is not a write: a quoted argument, or a JSON payload
+# piped in. A heredoc body fed to an interpreter is code, not data, and stays in view (review round 1, F5).
+# Incident 2026-10-14: a reviewer's probe piped a
 # JSON tool-call sample holding a cap write into `python hooks/guard.py`, and the owner was asked to
 # approve a call that wrote nothing. Each case names the write the way a probe would: the path, a
 # redirect, the cap key. The comment opener and the lone apostrophe sit inside the strings.
@@ -6903,11 +6904,12 @@ sh("cap data: a lone apostrophe inside double quotes naming a cat-write, piped t
 sh("cap data: a multi-line quoted string naming a cat-write, piped to python, allows",
    "printf '%s' 'a note\ncat > " + PROJ_LOCAL + " " + CAP_KEY + "' | python hooks/guard.py",
    "allow", cwd=NOGIT)
-sh("cap data: a heredoc body fed to python stdin naming a cat-write allows",
+sh("cap data: a heredoc body fed to python stdin naming a cat-write asks [r1 red, F5 call]",
    "python hooks/guard.py <<'PAYLOAD'\n{\"tool_input\": {\"command\": \"cat > " + PROJ_LOCAL + " "
-   + CAP_KEY + "\"}}\nPAYLOAD", "allow", cwd=NOGIT)
-sh("cap data: a python heredoc that only prints a cat-write allows",
-   "python3 - <<'PY'\nprint('cat > " + PROJ_LOCAL + " " + CAP_KEY + "')\nPY", "allow", cwd=NOGIT)
+   + CAP_KEY + "\"}}\nPAYLOAD", "ask", "subagent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
+sh("cap data: a python heredoc that only prints a cat-write asks [r1 red, F5 call]",
+   "python3 - <<'PY'\nprint('cat > " + PROJ_LOCAL + " " + CAP_KEY + "')\nPY",
+   "ask", "subagent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
 sh("cap data: a JSON tool-call sample holding the cap write, piped to python, allows",
    "printf '%s' '" + json.dumps({"tool_name": "Bash", "tool_input": {"command": "cat > " + PROJ_LOCAL
    + " <<JSON\n" + cap_settings() + "\nJSON"}}) + "' | python hooks/guard.py", "allow", cwd=NOGIT)
