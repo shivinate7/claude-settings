@@ -45,7 +45,7 @@ Interface the generator must meet. The builder builds to this.
 Red on main: the generator and the page do not exist. Real-repo cases R1-R9 read this repo.
 Fixture cases F1-F29 run the generator on temp trees, so a generator that is silent for every
 input fails them. F25-F29 are round 2: F25, F27 and F28 are red on the lane tip, F26 and F29 are guards.
-Unit cases U1-U4 pin the table and sentence helpers used here. Unit cases U1-U4 pin the table and sentence helpers used here.
+Unit cases U1-U4 pin the table and sentence helpers used here.
 
 Scanner rule: Python docstrings go through ast. The .sh header reader and the frontmatter reader
 are hand scanners; they get the comment-opener, lone-quote and multi-line-string cases (F2-F6,
