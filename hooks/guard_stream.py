@@ -254,7 +254,7 @@ RUNNER_VERBS = ("run", "run-script", "exec", "dlx", "x")
 RUNNER_VALUE_FLAGS = ("--prefix", "-w", "--workspace", "-C", "--dir", "--filter", "-F", "--cwd",
                       "-p", "--package")
 SERVER_SCRIPTS = ("dev", "serve", "start", "watch", "preview")
-SERVER_PROGRAMS = ("serve", "http-server", "live-server", "nodemon")
+SERVER_PROGRAMS = ("serve", "http-server", "live-server", "nodemon", "uvicorn", "http.server")
 # A program that serves when its first positional word is one of these verbs.
 SERVER_VERBS = {"next": ("dev", "start"), "deno": ("serve",), "jupyter": ("lab", "notebook"),
                 "webpack": ("serve",), "astro": ("dev",), "rails": ("s", "server"),
@@ -288,8 +288,8 @@ def server_program(word: str, args) -> bool:
         return True
     if re.fullmatch(r"python[\d.]*|py", word):
         for i, a in enumerate(args):  # options (`-u`, `-3`) may come before -m
-            if a == "-m":
-                return args[i + 1:i + 2] == ["http.server"]
+            if a == "-m":  # the module is read as the program: `-m flask run`, `-m http.server`
+                return i + 1 < len(args) and server_program(args[i + 1], args[i + 2:])
             if not a.startswith("-"):
                 return False
         return False
@@ -302,8 +302,6 @@ def server_program(word: str, args) -> bool:
         return positional[:1] != [] and positional[0] in SERVER_VERBS[word]
     if word == "flask":  # `flask --app hello run` puts an option value before the verb
         return "run" in positional
-    if word == "uvicorn":
-        return "--reload" in args
     if word == "tsc":
         return "-w" in args
     return False

@@ -26,11 +26,13 @@ Owner ruling, 2026-10-13 23:41 CDT: "End condition at start."
   - `--watch` or `--watch=<v>` counts on any tool except `gh`, whose watchers end with the run.
     `--watch=false`, `--watch=0`, `--watch false` and `--watch 0` do not count. `bun --hot`
     counts.
-  - Programs (`SERVER_PROGRAMS`): serve, http-server, live-server, nodemon.
+  - Programs (`SERVER_PROGRAMS`): serve, http-server, live-server, nodemon, uvicorn,
+    http.server.
   - Programs by verb (`SERVER_VERBS`, first positional word): next dev or start, deno serve,
     jupyter lab or notebook, webpack serve, astro dev, rails s or server, streamlit run.
-  - `flask run` (also `flask --app <name> run`), `uvicorn` with `--reload`, `vite` without
-    `build`, `tsc -w`, and `python -m http.server`.
+  - `flask run` (also `flask --app <name> run`), `vite` without `build`, and `tsc -w`.
+  - `python -m <module>` reads the module as the program: `python -m http.server`,
+    `python -m flask run`, `python -m uvicorn`, `python -m streamlit run`.
   - The guard reads through `cmd /c`, `bash -c`, `pwsh -Command`, `&`, a subshell, `.cmd` and
     `.exe` names, and `npx pkg@version`.
 - One-off builds, test runs and `gh run watch` pass without the note.
