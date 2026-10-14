@@ -2,7 +2,7 @@
 
 ## The ruling
 
-`lint/check_silent_undo.py` is the one home. CI runs it on each pull request.
+`lint/check_silent_undo.py` is the one home. CI runs it on each pull request with `--strict`.
 `merge/merge.py` calls it through `undo_check` before it pushes or merges.
 It reads two things.
 
@@ -11,15 +11,43 @@ It reads two things.
   (whole file). A `-U0` hunk reversed on all but one line. Lines main only added that the
   change removes, even in a hunk that also edits a neighbour. The third is the rebase that
   took its own side. Catches `git revert` of a merged PR and a stale copy.
-  Only commits upstream gained after the branch was cut are read. That means since the merge
-  base, or since the branch's first commit was authored. A rebase keeps that date.
-  There is no 60-commit floor. The floor read old main work that a branch may remove on purpose.
+  Only commits upstream gained after the fork point are read, and the fork commit is one of
+  them. See the next section. The branch check has no time bound and no commit-count floor.
 - **Lost line.** A merge commit in the branch loses a line one parent added since the
   merge base. Catches a conflict taken "ours" and a hand edit of a merge.
 
 The escape is the trailer `Drops-lines: <path> -- <reason>`, one per path, on any commit of the
 branch. A bare path excuses nothing. Each use prints `ALLOWED <path>: <reason>`. A commit
 message that only names the file does not pass.
+
+## The window starts at the fork point
+
+Owner rulings, 2026-10-13:
+
+- 22:00 CDT, "Cut at fork point". The window starts at the branch's fork point. It does not
+  start at the plain merge-base, which moves to main's tip once the branch merges main. No
+  `--since` time.
+- 23:00 CDT, "read the fork commit". The fork commit is in the window.
+
+Why: the one-second commit-time window let the same shape pass or fail by its timestamp.
+The earlier commit-count floor read old main work that a branch may remove on purpose.
+
+How `check()` finds the window:
+
+1. Fork point: `merge-base(upstream, own[-1] + "^")`. `own` lists the branch's first-parent
+   commits that upstream lacks, newest first. So `own[-1]` is the oldest of them, and its
+   parent is where the branch's own first-parent line left main. If git finds no merge-base
+   there, the plain merge-base is used.
+2. Window: `n` is the count of upstream first-parent commits not reachable from the fork point,
+   plus 1. The read takes the first `n` commits of upstream's first-parent line, from the tip
+   down. The `+1` is the fork commit when the fork point sits on that line.
+3. The result is read against upstream's tip. A conflict leaves no result. Then the branch's
+   own diff is read off the plain merge-base.
+
+Consequence: a branch cut at main's tip that undoes the tip commit is flagged. That includes a
+deliberate revert of that commit, which needs the trailer. Main work before the fork commit is
+not read. `test_main_work_before_the_cut_is_not_read` puts its protected lines before the fork
+commit. The removal is on the branch, after the cut.
 
 ## Required or advisory depends on the lane shape
 
@@ -40,17 +68,18 @@ The agent resolves a conflict to its own side, or writes the whole file from an 
 - `merge/merge.py` runs the check in `confirm`, before the claim and any push, and again
   after the post-wait fetch of the base tip, right before `gh pr merge`. A red at the
   second run reverts the claim. Unknown refuses too.
-- The result is read against the latest upstream tip, never against the merge base.
-- An old branch reads all of main's newer work, by commit count since the merge base or by
-  date since the branch's first commit.
+- The result is read against the latest upstream tip. A conflict has no result, so the
+  branch's own diff is read off the plain merge-base.
+- An old branch reads all of main's work since its fork point.
 
 ## Three shapes that passed Banchi's guard (its DEBT19)
 
-- **Age.** A branch older than a window. There is no window now. Closed.
+- **Age.** A branch older than a window. Closed. The read starts at the fork point, with no
+  time window.
 - **Re-wording.** A restored block with one line changed. A reversal now counts when all
-  but one line of an earlier hunk (3 lines or more) come back or go away. Two changed
-  lines are a new edit. This is a dial. It is set at one line and stays there until a
-  measured case says otherwise.
+  but one line of an earlier hunk (six lines or more, old and new counted together) come
+  back or go away. Two changed lines are a new edit. This is a dial. It is set at one line
+  and stays there until a measured case says otherwise.
 - **Widened hunk.** A reversal that shares a hunk with a real edit. The read counts lines
   across all hunks of the file, so hunk shape no longer hides it.
 
@@ -122,7 +151,11 @@ Cost: a pull request run took 0.4 to 5 seconds on this repo. The full-history au
 
 ## Known limits
 
-- A reversal older than the window is not seen. `--window 0` reads all history.
+- A reversal of main work before the fork commit is not read, by ruling.
+- In the `--history` audit, a reversal older than `--window` (default 60 commits) is not seen.
+  `--window 0` reads all history.
+- `git()` decodes its output as UTF-8 with `errors="replace"`. A bad byte reads as U+FFFD. So two
+  lines that differ only in bad bytes compare equal.
 - A reversal that also rewrites a line is a new edit, not a reversal.
 - A line that a resolver half-rewrote passes. The merge is then a judgement call.
 - A binary file is not read.
@@ -144,3 +177,6 @@ Cost: a pull request run took 0.4 to 5 seconds on this repo. The full-history au
   The run needs 4 words or more. It must start or end at a line edge.
   A whole added block that survives with only its line breaks moved also passes.
   A short line never passes as a re-wrap.
+
+Kind: process
+Home: lint/check_silent_undo.py
