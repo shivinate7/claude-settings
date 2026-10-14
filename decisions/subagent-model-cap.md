@@ -53,7 +53,7 @@ Writing prose and records is not building.
 | reply judge (`hooks/reply_judge.py`, Stop) | haiku, through `decision_watch.invoke_model` | xhigh |
 | question outcome check (`hooks/question_outcome.py`) | haiku, through `decision_watch.invoke_model` | xhigh |
 | decision watch (`hooks/decision_watch.py`) | haiku | xhigh |
-| decision watch mod (`mods/decision-watch`, the Stop-time judge) | haiku, through `$.model.complete`, the app login; the python path above stays xhigh | session default: the mod passes model, prompt, maxTokens and timeoutMs only, and no effort field is known on that call |
+| decision watch mod (`mods/decision-watch`, the Stop-time judge) | haiku, through `$.model.complete`, the app login; the python path above stays xhigh | session default: the mod passes model, prompt, maxTokens and timeoutMs only, and no effort field is known on that call; `timeoutMs` is not a known request field, and the mod enforces 50 s with its own timer |
 | every other hook and gate | no model; plain code | n/a |
 
 The Agent prompt judge checks the Explore audit row (owner ruling, 2026-10-13 12:09 CDT). It

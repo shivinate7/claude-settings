@@ -1,7 +1,7 @@
 // decision-watch: runs the Stop-time decision watch (hooks/decision_watch.py) with the session's
 // own model login, and writes the verdict to a log. A FLAG or UNKNOWN shows in the session with
-// $.ui.toast, the text the Stop hook showed. An ALLOW shows nothing. It never blocks and never
-// changes the Stop result.
+// $.ui.toast, the text the Stop hook showed. An ALLOW, and any other text such as a config notice,
+// goes to the log only. It never blocks and never changes the Stop result.
 //
 // classic.Stop  returns next(e) at once. The judging runs in the background and is skipped when
 //               stop_hook_active is set.
@@ -17,7 +17,7 @@
 // The host reads on(...) and $.noun.method(...) from source, so they are spelled literally.
 
 let lastStop; // the last classic.Stop input this session, for /dw
-let busy = false; // true while a shadow judge runs
+let busy = false; // true while a background judge runs
 
 // The prefix of every UNKNOWN this mod makes itself; python's own UNKNOWN text comes through as printed.
 const UNKNOWN = "Decision watch: UNKNOWN, ";
@@ -48,7 +48,7 @@ export function register(on) {
     return { text: lines.join("\n") };
   });
 
-  // SHADOW. Waits at most STOP_WAIT_MS for one "STOP seen" line, then returns next(e).
+  // Background judge. Waits at most STOP_WAIT_MS for one "STOP seen" line, then returns next(e).
   // The judging is fire-and-forget, one judge at a time. A Stop that finds one running logs "SKIP busy".
   on("classic.Stop", async ($, e, next) => {
     lastStop = stopOf(e);
@@ -115,7 +115,7 @@ async function pickPython($) {
 // ASCII-only JSON: python -I may read stdin in a legacy code page, so escape every non-ASCII character.
 const asciiJson = (v) => JSON.stringify(v).replace(/[\u0080-￿]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
 
-// The shadow judge and /dw each get their own state folder, so neither mutes the other's cache.
+// The background judge and /dw each get their own state folder, so neither mutes the other's cache.
 // Neither is the real config folder, so the real hook's cache is never touched.
 const stateDir = (cfg, who) => `${cfg}/decision-watch-${who}`;
 
@@ -159,7 +159,10 @@ async function judge($, stop, who) {
   let modelFailed = false;
   const t0 = Date.now();
   try {
-    const text = textOf(await $.model.complete({ model: out.model, prompt: out.prompt, maxTokens: 512, timeoutMs: 50000 }));
+    // The host's timeoutMs is unproven, so the mod enforces the limit itself: the race rejects, phase 2
+    // gets --model-error, and the one-judge slot frees. A late reply is dropped.
+    const reply = await deadline($.model.complete({ model: out.model, prompt: out.prompt, maxTokens: 512, timeoutMs: MODEL_MS }), MODEL_MS);
+    const text = textOf(reply);
     if (text === "") throw new Error("the model reply carried no text");
     trace.push(`model call: OK ${Date.now() - t0} ms, reply ${text.length} chars`);
     args = ["--model-text", text.slice(0, 4000)];
@@ -199,12 +202,15 @@ async function shadow($, stop) {
     shown = UNKNOWN + `the mod raised (${msg(err)})`;
   }
   await log($, line);
-  if (shown) {
+  // Only a FLAG or UNKNOWN toasts. Other text (an ALLOW turn's config notice) stays in the log.
+  if (/^Decision watch: (FLAG|UNKNOWN)/.test(shown)) {
     try {
       await $.ui.toast(shown);
-    } catch {
-      // the log already holds the verdict
+    } catch (err) {
+      await log($, `TOAST FAILED ${stop.session_id} | ${msg(err)} | text: ${shown}`);
     }
+  } else if (shown) {
+    await log($, `NOT SHOWN ${stop.session_id} | not a FLAG or UNKNOWN | text: ${shown}`);
   }
 }
 
@@ -212,6 +218,17 @@ const MAX_LOG_LINES = 500;
 const MAX_LINE = 2000;
 const LOG_WAIT_MS = 2000;
 const STOP_WAIT_MS = 500;
+const MODEL_MS = 50000;
+
+// Like within, but a late promise rejects, so the caller can fail the step and free its slot.
+async function deadline(work, ms) {
+  let timer;
+  try {
+    return await Promise.race([work, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`no reply within ${ms} ms`)), ms); })]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // Race a promise against a timer, and free the timer either way.
 async function within(work, ms) {
@@ -243,7 +260,7 @@ function log($, line) {
       const next = `${new Date().toISOString()} ${line}`.slice(0, MAX_LINE);
       await $.fs.write(file, [...old.slice(-(MAX_LOG_LINES - 1)), next].join("\n") + "\n");
     } catch {
-      // shadow mode never fails the Stop
+      // the log never fails the Stop
     }
   };
   const done = logChain.then(() => within(work(), LOG_WAIT_MS));

@@ -132,7 +132,7 @@ def command_rows(entries):
 
 def script_names(command):
     """The hooks/ or lint/ script names a command assigns to g, e.g. decision_watch.py."""
-    return re.findall(r'/(\w+\.py)"', command)
+    return re.findall(r'/(\w+\.py)(?=["\s]|$)', command)
 
 
 class DecisionWatchSwap(unittest.TestCase):
