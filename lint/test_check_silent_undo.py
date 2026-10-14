@@ -913,5 +913,32 @@ class BlobReads(unittest.TestCase):
             b.get("HEAD", "app.txt")
 
 
+class RawBytes(unittest.TestCase):
+    """Control bytes and carriage returns are data. A changed line that holds \\x01 is still one line:
+    the log parse splits on \\x01, so the line and its adding commit must survive it. A path that ends in
+    \\r must not be read as the path without the \\r: the cat-file line protocol drops that CR."""
+
+    def test_a_branch_line_with_a_control_byte_keeps_its_text_and_its_adder(self):
+        r = base_repo()
+        r.sh("checkout", "-q", "-b", "feat")
+        adder = r.commit("feat adds a control byte", app_txt=BODY + "function Card() {}\nctl\x01char\n")
+        base = r.sh("merge-base", "origin/main", "feat")
+        got, calls = git_calls(lambda: C.branch_only_lines(r.dir, adder, [base], "app.txt", ["ctl\x01char"], ["origin/main"]))
+        self.assertEqual(got, {"ctl\x01char"})
+        self.assertEqual([a[2] for a in calls if a[0] == "merge-base" and "--is-ancestor" in a], [adder])
+
+    def test_a_path_ending_in_cr_is_never_read_as_another_path(self):
+        r = base_repo()
+        b = C.Blobs(r.dir)
+        try:
+            try:
+                got = b.get("HEAD", "app.txt\r")
+            except C.Unknown:
+                return  # a refusal is a verdict
+            self.assertEqual(got, "", "app.txt\\r read as another path: %r" % got[:40])
+        finally:
+            b.close()
+
+
 if __name__ == "__main__":
     unittest.main()
