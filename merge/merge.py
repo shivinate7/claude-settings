@@ -315,11 +315,14 @@ class GhLock(Lock):
         self.now, self.pause = now, pause
 
     def api(self, *a):
-        c, out = sh(["gh", "api", *a])
+        """The one home of every lock `gh api` call. A network error or rate limit is retried NET_RETRIES times with `self.pause`
+        (RATE_WAIT_CAP on a rate limit), then the last (code, output) returns: the caller raises NetStop when is_net says so.
+        ponytail: no retry inside `shared_deadline`, as in Host.gh. Long rate waits can outlast the lock TTL spare (debt lock-ttl-rate-wait)."""
+        c, out, _ = retry_net(lambda: sh(["gh", "api", *a]), self.pause, NET_RETRIES if _READ_DEADLINE is None else 0)
         return c, out
 
     def read(self, b):
-        c, sha, _ = retry_net(lambda: self.api(f"repos/{{owner}}/{{repo}}/git/ref/merge-lock/{b}", "--jq", ".object.sha"), self.pause)
+        c, sha = self.api(f"repos/{{owner}}/{{repo}}/git/ref/merge-lock/{b}", "--jq", ".object.sha")
         if c:
             if is_net(c, sha):  # first: a 5xx reply whose url holds "404" is no proof the lock is gone
                 raise NetStop("cannot read the merge lock: " + sha)
@@ -338,13 +341,17 @@ class GhLock(Lock):
         c, head = self.api(f"repos/{{owner}}/{{repo}}/git/ref/heads/{b}", "--jq", ".object.sha")
         c2, tree = self.api(f"repos/{{owner}}/{{repo}}/git/commits/{head}", "--jq", ".tree.sha") if not c else (c, head)
         if c2:
-            raise Stop("cannot read the base branch: " + tree)
+            raise (NetStop if is_net(c2, tree) else Stop)("cannot read the base branch: " + tree)
         c, sha = self.api("-X", "POST", "repos/{owner}/{repo}/git/commits", "-f", f"message={lock_message(ttl, self.now(), self.holder)}",
                           "-f", f"tree={tree}", "--jq", ".sha")
         if c:
-            raise Stop("cannot make the lock commit: " + sha)
+            raise (NetStop if is_net(c, sha) else Stop)("cannot make the lock commit: " + sha)
         c, out = self.api("-X", "POST", "repos/{owner}/{repo}/git/refs", "-f", f"ref=refs/merge-lock/{b}", "-f", f"sha={sha}")
         if c:
+            if is_net(c, out):
+                raise NetStop("cannot take the merge lock: " + out)
+            if "already exists" not in out:  # 422 "Reference already exists" is the race; any other text is the refusal itself
+                raise Stop("cannot take the merge lock: " + out)
             raise Held("another run took the merge lock first")
         self.until = self.now() + ttl
         return sha
@@ -789,7 +796,10 @@ MERGE_DEFAULTS = {"method": "merge", "deadlineMinutes": 45, "requiredChecks": "p
 MERGE_FIELDS = set(MERGE_DEFAULTS) | {"deleteBranch", "ignoreChecks"}
 
 def host_default_branch(root):
-    c, out = sh(["gh", "repo", "view", "--json", "defaultBranchRef"], cwd=root)
+    # time.sleep is looked up at call time, so a test's patch of it holds. No retry inside `shared_deadline`, as in Host.gh.
+    c, out, n = retry_net(lambda: sh(["gh", "repo", "view", "--json", "defaultBranchRef"], cwd=root), lambda s: time.sleep(s), NET_RETRIES if _READ_DEADLINE is None else 0)
+    if is_net(c, out):
+        raise NetStop(f"network error from `gh repo view`, still failing after {n} retries. Run again.\n{out}")
     try:
         if c:
             raise ValueError(out)
