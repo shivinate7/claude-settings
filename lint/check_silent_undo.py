@@ -47,7 +47,8 @@ class Unknown(Exception):
 
 
 def git(cwd, *a, ok=(0,)):
-    r = subprocess.run(["git", "-C", cwd, *a], capture_output=True, encoding="utf-8", errors="replace")
+    # literal pathspecs: a path that starts with `:` is a name, never magic. surrogateescape keeps a non-UTF-8 name exact.
+    r = subprocess.run(["git", "-C", cwd, *a], capture_output=True, encoding="utf-8", errors="surrogateescape", env=dict(os.environ, GIT_LITERAL_PATHSPECS="1"))
     if r.returncode not in ok:
         raise Unknown("git %s failed: %s" % (" ".join(a[:3]), r.stderr.strip() or r.returncode))
     return r.returncode, r.stdout
@@ -63,7 +64,18 @@ def counts(text):
 
 def blob(cwd, rev, path):
     rc, out = git(cwd, "show", "%s:%s" % (rev, path), ok=(0, 128))
-    return out if rc == 0 else ""
+    return out if rc == 0 else absent(cwd, rev, path)
+
+
+def absent(cwd, rev, path):
+    """"" for a path the rev's tree does not list. A failed read of a listed path is Unknown, never empty text."""
+    try:
+        path.encode("utf-8")  # a non-UTF-8 name cannot be passed as an argument: the tree cannot be asked
+    except UnicodeEncodeError:
+        raise Unknown("the read of %s:%s failed, and the name is not UTF-8" % (rev[:9], path.encode("utf-8", "replace").decode()))
+    if git(cwd, "ls-tree", rev, "--", path)[1].strip():
+        raise Unknown("the read of %s:%s failed, though the tree lists it" % (rev[:9], path))
+    return ""
 
 
 def allowed(cwd, rng):
@@ -230,7 +242,7 @@ def branch_only(cwd, p, bases, path, line, refs):
 
 
 class Blobs:
-    """Blob text by `rev:path` through one `git cat-file --batch` process; "" for a missing path."""
+    """Blob text by `rev:path` through one `git cat-file --batch` process; "" for a path the tree lacks."""
 
     def __init__(self, cwd):
         self.cwd = cwd
@@ -243,12 +255,14 @@ class Blobs:
         if "\n" in path or "\r" in path:  # cat-file reads a line and strips a trailing CR
             return blob(self.cwd, rev, path)
         try:
-            self.proc.stdin.write(("%s:%s\n" % (rev, path)).encode("utf-8"))
+            self.proc.stdin.write(("%s:%s\n" % (rev, path)).encode("utf-8", "surrogateescape"))
             self.proc.stdin.flush()
             line = self.proc.stdout.readline().rstrip(b"\r\n")
             if line.endswith(b" missing"):  # the reply names the spec, which may hold spaces
-                return ""
+                return absent(self.cwd, rev, path)
             head = line.split()
+            if len(head) > 1 and head[1] == b"submodule":  # a gitlink is no blob: its text is "" (`git show` cannot read it and exits 128)
+                return ""
             if len(head) != 3 or not head[2].isdigit():  # an empty line is EOF: the process died
                 raise Unknown("git cat-file gave no usable header for %s:%s: %r" % (rev[:9], path, line[:80]))
             size = int(head[2])
@@ -512,6 +526,13 @@ def history(cwd, rev, window):
     return len(line), out
 
 
+def say(line):
+    """The one home for printed output. A non-UTF-8 name holds surrogates, which a strict stream cannot encode:
+    write them as backslash escapes, so the finding prints and the exit code holds."""
+    enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+    print(line.encode(enc, "backslashreplace").decode(enc))
+
+
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--upstream", default="origin/main")
@@ -524,19 +545,19 @@ def main(argv):
     try:
         if a.history:
             n, hits = history(a.repo, a.history, a.window)
-            print("\n".join(hits))
-            print("silent-undo: %d commit(s) read, %d hit(s)." % (n, len(hits)))
+            say("\n".join(hits))
+            say("silent-undo: %d commit(s) read, %d hit(s)." % (n, len(hits)))
             return 0
         problems, notes = check(a.repo, a.upstream, a.head)
     except Unknown as e:
-        print("silent-undo: UNKNOWN: %s" % e)
+        say("silent-undo: UNKNOWN: %s" % e)
         return 1 if (a.strict or os.environ.get("CI")) else 0
     for n in notes:
-        print("silent-undo: " + n)
+        say("silent-undo: " + n)
     for p in problems:
-        print("silent-undo: FAIL: " + p)
+        say("silent-undo: FAIL: " + p)
     if problems:
-        print("silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER)
+        say("silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER)
     return 1 if problems else 0
 
 
