@@ -41,15 +41,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/decision_watch.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
-            "timeout": 230
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
             "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/stall_watch.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\" --stop; done; exit 0",
             "timeout": 10
           }
@@ -439,7 +430,8 @@
     "token-weather@claude-settings": true,
     "desktop-statusline@claude-settings": true,
     "plain-diff@claude-settings": true,
-    "session-board@claude-settings": true
+    "session-board@claude-settings": true,
+    "decision-watch@claude-settings": true
   },
   "extraKnownMarketplaces": {
     "compass-claude-plugins": {

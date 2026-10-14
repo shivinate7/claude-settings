@@ -1,4 +1,4 @@
-# decision-watch runs as a shadow-only mod, on the app's own login
+# decision-watch runs as a mod, on the app's own login
 
 ## The question
 
@@ -6,7 +6,7 @@ Can the Stop-time decision watch run as a mod, with the app's own login and no C
 
 ## The ruling
 
-Yes, in SHADOW mode only. The mod judges each Stop in the background, logs the verdict, and never blocks a turn or shows a message.
+Yes. The mod judges each Stop in the background, logs the verdict, and never blocks a turn. A FLAG or UNKNOWN shows in the session with `$.ui.toast`, the text the Stop hook showed. An ALLOW shows nothing.
 
 `hooks/decision_watch.py` stays the one judge. It gains:
 
@@ -15,9 +15,9 @@ Yes, in SHADOW mode only. The mod judges each Stop in the background, logs the v
 - The flags `--emit-prompt`, `--model-text` and `--model-error`.
 - A "verdict lost" marker. It prints UNKNOWN.
 
-The old `claude -p` path stays the default for the real Stop hook. `invoke_model(prompt, model, timeout, shape)` keeps its signature and its return shape. `hooks/reply_judge.py` and `hooks/question_outcome.py` call it.
+The old `claude -p` path stays the default of the script. `invoke_model(prompt, model, timeout, shape)` keeps its signature and its return shape. `hooks/reply_judge.py` and `hooks/question_outcome.py` call it.
 
-No enforcing until HOLE 1 below is fixed.
+Enabling: the owner ruled 22:00 CDT ("Fix, then swap"). HOLE 1 is closed. `enabledPlugins` has `decision-watch@claude-settings`, and the Stop row that ran `hooks/decision_watch.py` is removed. The mod still never enforces.
 
 ## Why
 
@@ -40,7 +40,7 @@ Rounds 1 and 2 ran on Sonnet. Round 1 fixes are in 5bac016. Round 2 passed with 
 
 ## Holes, named
 
-- HOLE 1. Phase 2 re-runs the cheap path on live state. If the evidence changes between the phases, the verdict applies to new evidence, and the log reads `ALLOW (silent)`. Fix: pass the phase-1 key to phase 2. A mismatch then reads UNKNOWN. This becomes a BLOCKER if the mod ever enforces.
+- HOLE 1, closed. Phase 1 prints a `key`. The mod gives it back to phase 2 as `--key` after the reply. A key the live evidence no longer gives reads UNKNOWN, and so does a phase 1 with no key.
 - HOLE 2. A new human message between the phases moves the baseline. A real FLAG then prints `verdict lost`. The output is loud and correct, but the README named one cause only. Fix: the README now names this cause.
 - HOLE 3. `/dw` prints `nothing to say (no protected change, no model call)` on a cache hit too. A second `/dw` after a FLAG reads like a clean turn. No fix is named.
 - HOLE 4. The log is the only shadow output, and a lost write is silent: an empty catch and a 2 s cap, so START may have no END. Any read error resets the log to one line. Whether `$.fs.write` is atomic is unverified. No fix is named.
@@ -49,6 +49,7 @@ Rounds 1 and 2 ran on Sonnet. Round 1 fixes are in 5bac016. Round 2 passed with 
 - HOLE 7. A bad flag combination on `decision_watch.py` makes the script use `invoke_model` instead. That can start a 120 s `claude -p` call. Fix: none. The fallback is pinned on purpose.
 - HOLE 8. `Stops seen` counts only lines still in the 500-line log, so N is at most 500. A second `/dw` on the same turn says `nothing to say`, because `/dw` keeps its own cache. No fix is named.
 - HOLE 9 (minor). `textOf` drops `r.reason`, so an aborted call reads `no text`. The `asciiJson` regex holds a literal U+FFFF character. `pickPython` runs `where.exe` in both phases. No fix is named.
+- HOLE 10. The Stop row is removed, but it is unproven live that `classic.Stop` reaches a mod in the desktop app. The drop is unproven until the mod log shows `STOP seen` lines after merge. The orchestrator measures that and restores the Stop row if none show.
 
 ## Deferred, not built
 

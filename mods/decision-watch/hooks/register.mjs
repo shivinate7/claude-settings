@@ -1,6 +1,7 @@
-// decision-watch: SHADOW mode. Runs the Stop-time decision watch (hooks/decision_watch.py) with the
-// session's own model login, and writes the verdict to a log. It never blocks, never messages,
-// and never changes the Stop result.
+// decision-watch: runs the Stop-time decision watch (hooks/decision_watch.py) with the session's
+// own model login, and writes the verdict to a log. A FLAG or UNKNOWN shows in the session with
+// $.ui.toast, the text the Stop hook showed. An ALLOW shows nothing. It never blocks and never
+// changes the Stop result.
 //
 // classic.Stop  returns next(e) at once. The judging runs in the background and is skipped when
 //               stop_hook_active is set.
@@ -8,6 +9,8 @@
 //
 // The python script has two phases: --emit-prompt prints the prompt when a model call is due,
 // then --model-text or --model-error finishes the verdict. This mod makes the model call between.
+// Phase 1 prints a "key" for the evidence it judged. Phase 2 gets it back as --key after the reply,
+// so evidence that moved between the phases reads UNKNOWN, never a silent ALLOW. No key reads UNKNOWN.
 // The mod runs the script with its own state folder, so it never mutes the real hook's
 // "already judged" cache. The log holds the verdict line and timings, never the prompt.
 //
@@ -16,6 +19,8 @@
 let lastStop; // the last classic.Stop input this session, for /dw
 let busy = false; // true while a shadow judge runs
 
+// The prefix of every UNKNOWN this mod makes itself; python's own UNKNOWN text comes through as printed.
+const UNKNOWN = "Decision watch: UNKNOWN, ";
 const msg = (err) => String((err && err.message) || err).slice(0, 300);
 // $.model.complete returns {isAnswered, text, usage}. Accept a plain string too.
 const textOf = (r) => (typeof r === "string" ? r : String((r && r.text) ?? ""));
@@ -132,18 +137,22 @@ async function judge($, stop, who) {
   const trace = [];
   const p1 = await dwRun($, stop, ["--emit-prompt"], who);
   trace.push(`phase 1 (python, cheap path): exit ${p1.exitCode}, ${p1.ms} ms`);
-  if (p1.exitCode !== 0) {
-    return { trace, result: `UNKNOWN: decision_watch exited ${p1.exitCode}: ${p1.stderr.slice(0, 200)}` };
-  }
+  if (p1.exitCode !== 0) return unknown(trace, `decision_watch exited ${p1.exitCode}: ${p1.stderr.slice(0, 200)}`);
   const raw = p1.stdout.trim();
   if (raw === "") return { trace, result: "nothing to say (no protected change, no model call)" };
   let out;
   try {
     out = JSON.parse(raw);
   } catch {
-    return { trace, result: `UNKNOWN: phase 1 output was not JSON: ${raw.slice(0, 200)}` };
+    return unknown(trace, `phase 1 output was not JSON: ${raw.slice(0, 200)}`);
   }
-  if (!out.needs_model) return { trace, result: `message from the cheap path: ${out.systemMessage ?? raw.slice(0, 300)}` };
+  if (!out.needs_model) {
+    const shown = typeof out.systemMessage === "string" ? out.systemMessage : "";
+    return { trace, result: `message from the cheap path: ${shown || raw.slice(0, 300)}`, shown };
+  }
+  if (typeof out.key !== "string" || out.key === "") {
+    return unknown(trace, "phase 1 printed no key, so the reply cannot be tied to the evidence judged (an old decision_watch.py?)");
+  }
 
   trace.push(`model due: ${out.model}, prompt ${out.prompt.length} chars`);
   let args;
@@ -159,33 +168,44 @@ async function judge($, stop, who) {
     trace.push(`model call: FAIL ${Date.now() - t0} ms`);
     args = ["--model-error", `model call: ${msg(err)}`];
   }
-  const p2 = await dwRun($, stop, args, who);
+  const p2 = await dwRun($, stop, [...args, "--key", out.key], who);
   trace.push(`phase 2 (python, verdict): exit ${p2.exitCode}, ${p2.ms} ms`);
-  if (p2.exitCode !== 0) {
-    return { trace, result: `UNKNOWN: decision_watch exited ${p2.exitCode} in phase 2: ${p2.stderr.slice(0, 200)}` };
-  }
+  if (p2.exitCode !== 0) return unknown(trace, `decision_watch exited ${p2.exitCode} in phase 2: ${p2.stderr.slice(0, 200)}`);
   let msgOut = "";
   try {
     msgOut = p2.stdout.trim() === "" ? "" : JSON.parse(p2.stdout).systemMessage ?? "";
   } catch {
-    return { trace, result: `UNKNOWN: phase 2 output was not JSON: ${p2.stdout.slice(0, 200)}` };
+    return unknown(trace, `phase 2 output was not JSON: ${p2.stdout.slice(0, 200)}`);
   }
-  if (msgOut === "" && modelFailed) {
-    return { trace, result: "UNKNOWN: the model call failed and the script printed nothing" };
-  }
-  return { trace, result: msgOut === "" ? "ALLOW (silent)" : msgOut };
+  if (msgOut === "" && modelFailed) return unknown(trace, "the model call failed and the script printed nothing");
+  return { trace, result: msgOut === "" ? "ALLOW (silent)" : msgOut, shown: msgOut };
+}
+
+// A failure the mod itself sees is UNKNOWN, and it shows like the script's own UNKNOWN.
+function unknown(trace, why) {
+  return { trace, result: `UNKNOWN: ${why}`, shown: UNKNOWN + why };
 }
 
 async function shadow($, stop) {
   await log($, `START ${stop.session_id}`);
   let line;
+  let shown = "";
   try {
     const out = await judge($, stop, "shadow");
     line = `END ${stop.session_id} | ${out.trace.join(" | ")} | ${out.result}`;
+    shown = out.shown;
   } catch (err) {
     line = `END ${stop.session_id} | MOD ERROR, reads as UNKNOWN: ${msg(err)}`;
+    shown = UNKNOWN + `the mod raised (${msg(err)})`;
   }
   await log($, line);
+  if (shown) {
+    try {
+      await $.ui.toast(shown);
+    } catch {
+      // the log already holds the verdict
+    }
+  }
 }
 
 const MAX_LOG_LINES = 500;

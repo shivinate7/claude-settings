@@ -1,6 +1,6 @@
 # decision-watch
 
-A mod. It runs the Stop-time decision watch with this session's own model login. It runs in shadow mode only. It never blocks a turn and never shows a message in the session.
+A mod. It runs the Stop-time decision watch with this session's own model login. It replaces the Stop hook row. It never blocks a turn. A FLAG or UNKNOWN shows in the session as a toast, with the text the Stop hook showed. An ALLOW shows nothing.
 
 ## What it does
 
@@ -11,6 +11,8 @@ A mod. It runs the Stop-time decision watch with this session's own model login.
   1. `--emit-prompt` runs the cheap path. It prints a prompt only when a model call is due.
   2. The mod calls the model with that prompt. The call has a 50 s limit. Then `--model-text` or `--model-error` gives the verdict.
 - Every failure reads as UNKNOWN. A failure never reads as ALLOW.
+- Phase 1 prints a `key` for the evidence it judged. The mod gives it back to phase 2 as `--key` after the reply. Evidence that moved between the two steps reads UNKNOWN. A phase 1 with no key reads UNKNOWN.
+- The toast holds the script's own message, or the mod's own UNKNOWN text. The log holds the same verdict.
 - A model verdict that the script cannot use reads as "verdict lost". This happens when another judge already recorded the same turn. The script prints this marker whenever it gets a model reply and ends before the model step. A valid ALLOW that the script uses stays ALLOW.
 - A new human message between the two steps also causes it. The baseline moves, so a real FLAG can print "verdict lost". That is loud and correct.
 - The mod sends the Stop JSON to python as ASCII only. It escapes each other character as `\uXXXX`.
@@ -48,7 +50,7 @@ The last line is "Stops seen: N". N counts the STOP seen lines now in the log. T
 - The script must be the version that knows `--emit-prompt`, `--model-text`, and `--model-error`.
 - A bad flag combination on the script falls back to the normal `claude -p` call. This is a hole: a wrong flag from a caller runs the old path.
 - A Stop that arrives during a judge is not judged. The next Stop on an unchanged turn judges it.
-- The ruling and the holes: `decision-watch-mod-limits` (limits of the shadow mod).
+- The ruling and the holes: `decision-watch-mod-limits` (limits of the mod).
 
 ## Try in the desktop app
 

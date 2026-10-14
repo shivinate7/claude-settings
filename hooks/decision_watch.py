@@ -814,11 +814,15 @@ def parse_verdict(text, shape=VERDICT_SHAPE):
 
 # ------------------------------------------------------------------ orchestration
 
-def run(hook, model_call=invoke_model):
+def run(hook, model_call=invoke_model, expect_key=None):
     """Return a systemMessage string, or '' when there is nothing to report.
 
     `model_call` is swapped in tests, so a case can assert it was never called (the common,
     nothing-protected-touched path) or stub its answer without a real subprocess.
+
+    `expect_key` is the key phase 1 printed (the mod's `--key`). A live key that differs means
+    the evidence moved between the two phases, so the reply is not used and the answer is UNKNOWN
+    (HOLE 1 of decision decision-watch-mod-limits).
     """
     path = hook.get("transcript_path")
     if not path or not isinstance(path, str) or not os.path.exists(path):
@@ -889,6 +893,8 @@ def run(hook, model_call=invoke_model):
     # cap" above.
     session_id = hook.get("session_id") or ""
     key = incident_key(protected, evidence, content_digest(cwd, protected))
+    if expect_key is not None and key != expect_key:
+        return MOVED_MESSAGE
     if key in _load_seen(session_id):
         return ""
 
@@ -904,7 +910,10 @@ def run(hook, model_call=invoke_model):
             "length this prompt is passed with.]" % cut
         )
 
-    verdict, error = model_call(prompt)
+    try:
+        verdict, error = model_call(prompt)
+    except NeedsModel as need:
+        raise NeedsModel(need.args[0], key)
     if error is not None:
         return UNKNOWN_PREFIX + "the model judgment could not be completed (%s)." % error
     # An ALLOW is cached like a FLAG: one model call per change, not one per Stop. The key
@@ -1220,8 +1229,12 @@ def config_report(hook):
 LOST_MESSAGE = UNKNOWN_PREFIX + "verdict lost: the model reply was not used (the watch ended before the model step)."
 
 
+MOVED_MESSAGE = UNKNOWN_PREFIX + "the evidence changed between the two phases, so the model reply was not used."
+
+
 class NeedsModel(Exception):
-    """`--emit-prompt`: the cheap path ended at the model call. `args[0]` is the prompt."""
+    """`--emit-prompt`: the cheap path ended at the model call. `args[0]` is the prompt, `args[1]`
+    the evidence key phase 2 gets back as `--key`."""
 
 
 def _model_call_from_argv(argv):
@@ -1230,7 +1243,8 @@ def _model_call_from_argv(argv):
       --emit-prompt       prints {"needs_model": true, "prompt", "model"} and exits, only when
                           a model call is due; otherwise the normal output (usually nothing).
       --model-text TEXT   the model's reply text; parsed by parse_verdict, then normal output.
-      --model-error TEXT  the call failed; prints the UNKNOWN message, never a pass."""
+      --model-error TEXT  the call failed; prints the UNKNOWN message, never a pass.
+    Phase 2 may end with `--key K`, the "key" phase 1 printed; `main` strips it (`_split_key`)."""
     if argv[:1] == ["--emit-prompt"] and len(argv) == 1:
         def emit(prompt):
             raise NeedsModel(prompt)
@@ -1240,6 +1254,13 @@ def _model_call_from_argv(argv):
     if argv[:1] == ["--model-error"] and len(argv) == 2:
         return lambda prompt: (None, argv[1][:200])
     return invoke_model
+
+
+def _split_key(args):
+    """Return (args without a trailing `--key K`, K or None). Only a reply flag takes a key."""
+    if len(args) == 4 and args[0] in ("--model-text", "--model-error") and args[2] == "--key":
+        return args[:2], args[3]
+    return args, None
 
 
 def main():
@@ -1256,21 +1277,22 @@ def main():
         sys.exit(0)  # this Stop firing is already a rewrite; do not re-judge it
 
     try:
-        model_call = _model_call_from_argv(sys.argv[1:])
+        argv, expect_key = _split_key(sys.argv[1:])
+        model_call = _model_call_from_argv(argv)
         used = []
 
         def tracked(prompt):
             used.append(True)
             return model_call(prompt)
 
-        message = run(hook, tracked)
+        message = run(hook, tracked, expect_key)
         handed_reply = sys.argv[1:2] in (["--model-text"], ["--model-error"]) and model_call is not invoke_model
         if handed_reply and not message and not used:
             # A reply was handed in, but the run ended before the model step (the turn's verdict
             # is already recorded). Silence here would read as an ALLOW. Say it was lost.
             message = LOST_MESSAGE
     except NeedsModel as need:
-        print(json.dumps({"needs_model": True, "prompt": need.args[0], "model": MODEL}))
+        print(json.dumps({"needs_model": True, "prompt": need.args[0], "model": MODEL, "key": need.args[1]}))
         sys.exit(0)
     except Exception as exc:
         print(json.dumps({"systemMessage": UNKNOWN_PREFIX + "the watch itself raised (%s)." % exc}))
