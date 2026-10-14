@@ -50,8 +50,10 @@ PROBLEM_LINE = re.compile(r"^[ \t]*%s[ \t]*\S" % re.escape(PROBLEM_LABEL), re.MU
 
 
 def _loose_line(label):
-    """The order check's reading of a label line: any leading space (NBSP too), bold marks, any case."""
-    return re.compile(r"^\s*(?:\*\*|__)?%s" % re.escape(label), re.MULTILINE | re.IGNORECASE)
+    """The order check's reading of a label line: any non-word prefix (space, NBSP, `>`, `-`, `*`, `_`),
+    any case, closing marks before the colon, and a full-width colon."""
+    word = re.escape(label.rstrip(":"))
+    return re.compile(r"^(?:[^\w\n]|_)*%s[*_]*[:：]" % word, re.MULTILINE | re.IGNORECASE)
 
 
 GOAL_LOOSE, PROBLEM_LOOSE = _loose_line(GOAL_LABEL), _loose_line(PROBLEM_LABEL)
@@ -68,7 +70,7 @@ PROMPT = (
     "missing. A goal line is a paraphrase of the goal in plain words; a paraphrase is not grounds "
     "to deny or flag. Be conservative: FLAG only a clear miss. Reply with one JSON object only: "
     '{"verdict": "ALLOW"} or {"verdict": "FLAG", "why": "<one line: what misses, and the fix>"}.'
-    % (PROBLEM_LABEL, GOAL_LABEL, GOAL_LABEL)
+    % (GOAL_LABEL, PROBLEM_LABEL, GOAL_LABEL)
 )
 
 
