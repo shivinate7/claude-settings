@@ -4775,6 +4775,12 @@ sh("silent-write scanner: a discard quoted in echo is text",
    'echo "' + VCS + ' commit -m x >/dev/null"', "allow", cwd=GITMAIN)
 sh("silent-write scanner: a discard named inside a message is text",
    VCS + ' commit -m "log >/dev/null"', "allow", cwd=GITMAIN)
+sh("silent-write scanner: a discard named before a space inside a message is text, with a lone quote "
+   "and a comment opener in the same string",
+   VCS + ' commit -m "log >/dev/null now, it\'s # here"', "allow", cwd=GITMAIN)
+sh("silent-write scanner: a discard named before a space inside an echo string is text, with a lone "
+   "quote and a comment opener in the same string",
+   'echo "log >/dev/null now, it\'s # here"', "allow", cwd=GITMAIN)
 
 TEMP_DIR = None   # back to the system temp for the sections below
 
