@@ -17,4 +17,4 @@ In the PR that closes the gap, delete the debt file. If a decision names the gap
 
 ## Status
 
-No check reads the structure of this folder yet. `lint/check_record_slugs.py` does not cover it, so the slug length is a convention only. The "Holes, named" sections in `decisions/` are grandfathered: they stay where they are until the planned lane debts-migrate files them.
+`lint/check_record_slugs.py` checks each debt file's slug length. No check reads the four parts yet. The "Holes, named" sections in `decisions/` are grandfathered: they stay where they are until the planned lane debts-migrate files them.
