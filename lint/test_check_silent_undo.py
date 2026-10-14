@@ -854,5 +854,64 @@ class NulLine(unittest.TestCase):
         self.assertIn("FAIL", out.getvalue())
 
 
+class OwnContentLines(unittest.TestCase):
+    """A line whose content starts `++` or `--` shows in a diff as `+++` or `---`. branch_only_lines drops
+    those by prefix, so the branch's own line never finds its adding commit and counts as lost (false FAIL).
+    The old per-line `git log -G` read them as content."""
+
+    def test_branch_own_plus_plus_and_dash_dash_lines_dropped_by_the_merge_are_green(self):
+        r = base_repo()
+        r.sh("checkout", "-q", "-b", "feat")
+        r.commit("feat adds a ++ line and a -- note", app_txt=BODY + "function Card() {}\n++i;\n-- note\n")
+        r.commit("feat rewords the note", app_txt=BODY + "function Card() {}\n++i;\n-- note v2\n")
+        r.sh("checkout", "-q", "main")
+        r.commit("main moves", other_txt="other v2\n")
+        r.push()
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "--no-commit", "--no-ff", "main")
+        r.put("app.txt", BODY + "function Card() {}\n")
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge main, drop my lines")
+        self.assertEqual(r.verdict(), [])
+
+
+class BlobReads(unittest.TestCase):
+    """Blobs reads `rev:path` through one cat-file process. The header must read the path as one field
+    (a path may hold a space), a missing path reads as "" (lost_in_parent reads a deleted file this way),
+    and an EOF header means the history cannot be read: Unknown, never an empty blob."""
+
+    def test_a_missing_path_with_a_space_reads_as_empty(self):
+        r = base_repo()
+        b = C.Blobs(r.dir)
+        try:
+            self.assertEqual(b.get("HEAD", "lint/no such.py"), "")
+        finally:
+            b.close()
+
+    def test_an_existing_path_with_a_space_reads_its_text(self):
+        r = base_repo()
+        r.put("lint/with space.txt", "spaced text\n")
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "spaced path")
+        b = C.Blobs(r.dir)
+        try:
+            self.assertEqual(b.get("HEAD", "lint/with space.txt").split(), ["spaced", "text"])
+        finally:
+            b.close()
+
+    def test_an_eof_header_is_unknown_not_an_empty_blob(self):
+        class Dead:
+            def __init__(self, *a, **k):
+                self.stdin, self.stdout = io.BytesIO(), io.BytesIO(b"")
+
+            def wait(self, *a, **k):
+                return 0
+        r = base_repo()
+        with unittest.mock.patch.object(C.subprocess, "Popen", Dead):
+            b = C.Blobs(r.dir)
+        with self.assertRaises(C.Unknown):
+            b.get("HEAD", "app.txt")
+
+
 if __name__ == "__main__":
     unittest.main()
