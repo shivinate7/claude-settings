@@ -25,9 +25,10 @@ Per question with two or more options (a clarifying question passes first):
   fence) of decisions/*.md, and the "**Why it waits.**" paragraph of deferred/*.md. Each ruling
   is fenced and labeled with its record id and H1 title. A question the owner already settled
   is FLAGged with the record id, and the deny reason gives the id and title, never a path. A
-  question that asks to change a ruling passes. The section holds at most RULINGS_MAX chars,
-  the most recently changed files first (file mtime); older rulings are left out, and a mark
-  says so. A ruling under another heading is not read.
+  question that asks to change a ruling passes. Each ruling is cut to RULING_CAP chars at a
+  sentence end. The section holds at most RULINGS_MAX chars, the most recently changed records
+  first (one git log call; file mtime when git fails); older rulings are left out, and a mark
+  says how many. A ruling under another heading is not read.
 - After a deny, the next AskUserQuestion in the session passes with no model call and clears
   the state, so no deny can loop. When the state cannot be written, nothing is denied.
 - A failed model call, unreadable transcript, or malformed input lets the question through,
@@ -39,6 +40,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 
@@ -85,9 +87,12 @@ def _loose_line(label):
 
 GOAL_LOOSE, PROBLEM_LOOSE = _loose_line(GOAL_LABEL), _loose_line(PROBLEM_LABEL)
 
-RULINGS_MAX = 30000  # chars the rulings section (intro, blocks, mark) adds to the prompt
+RULINGS_MAX = 60000  # chars the rulings section (intro, blocks, mark) adds to the prompt
+RULING_CAP = 800  # chars of one ruling; a longer one is cut at a sentence end
+RULING_CUT = " [ruling cut]"
 RULINGS_DIRS = ("decisions", "deferred")
-RULINGS_CUT = "[older rulings left out to fit the budget]"
+RULINGS_LEFT_OUT = "[%d older rulings left out to fit the budget]"
+GIT_TIMEOUT = 10  # seconds for the one git log call that orders the records
 RULING_HEADING = re.compile(r"(?:the\s+)?(?:owner[’']s\s+)?rulings?\b", re.IGNORECASE)
 WAITS_LABEL = "**Why it waits.**"
 FENCE_LINE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
@@ -378,39 +383,66 @@ def _ruling_text(kind, text):
     return title, "\n\n".join("\n".join(sec).strip() for sec in sections)
 
 
+def _cap_ruling(text):
+    """`text` within RULING_CAP chars: a longer one is cut at its last sentence end, or at the cap
+    when it has none, and RULING_CUT marks the cut."""
+    if len(text) <= RULING_CAP:
+        return text
+    head = text[:RULING_CAP]
+    ends = [m.end() for m in re.finditer(r"[.!?](?=\s)", head)]
+    return (head[:ends[-1]] if ends else head) + RULING_CUT
+
+
+def _git_order(cwd):
+    """The record paths ("decisions/x.md") of one `git log` call, newest change first. [] when git
+    fails, so the caller falls back to file mtime."""
+    try:
+        r = subprocess.run(["git", "-c", "core.quotepath=off", "log", "--format=", "--name-only", "--relative",
+                            "--", *RULINGS_DIRS], cwd=cwd, capture_output=True, encoding="utf-8",
+                           errors="replace", timeout=GIT_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return r.stdout.split("\n") if r.returncode == 0 else []
+
+
 def _rulings(cwd):
     """(section, titles): the rulings section of the prompt ("" when none) and {id: title} of the
-    records in it. Files newest first by mtime. A file or folder that cannot be read is skipped.
-    A ruling that does not fit the RULINGS_MAX budget is left out, and the section says so."""
-    files = []
+    records in it. Records are newest first by git history, then by file mtime for any git does
+    not list (or all of them when git fails). A file or folder that cannot be read is skipped.
+    Each ruling is capped at RULING_CAP chars. Rulings over the RULINGS_MAX budget are left out,
+    oldest first, and the section says how many."""
+    found = {}
     for kind in RULINGS_DIRS:
         try:
             base = os.path.join(cwd, kind)
-            files += [(os.path.getmtime(os.path.join(base, n)), n, kind)
-                      for n in os.listdir(base) if n.endswith(".md")]
+            found.update({"%s/%s" % (kind, n): os.path.getmtime(os.path.join(base, n))
+                          for n in os.listdir(base) if n.endswith(".md")})
         except OSError:
             continue
-    files.sort(key=lambda f: (-f[0], f[1]))
-    room = RULINGS_MAX - len(RULINGS_INTRO) - len(RULINGS_CUT) - 3 * SEP
-    blocks, titles, cut = [], {}, False
-    for _, name, kind in files:
+    order = list(dict.fromkeys(p for p in _git_order(cwd) if p in found))
+    order += sorted((p for p in found if p not in order), key=lambda p: (-found[p], p))
+    room = RULINGS_MAX - len(RULINGS_INTRO) - len(RULINGS_LEFT_OUT % 99999) - 3 * SEP
+    blocks, titles, left_out = [], {}, 0
+    for path in order:
         try:
-            with open(os.path.join(cwd, kind, name), encoding="utf-8", errors="replace") as f:
-                title, ruling = _ruling_text(kind, f.read())
+            with open(os.path.join(cwd, *path.split("/")), encoding="utf-8", errors="replace") as f:
+                title, ruling = _ruling_text(path.split("/")[0], f.read())
         except OSError:
             continue
         if not ruling:
             continue
-        block = _block("Ruling of record %s (%s)" % (name[:-3], title or "untitled"), ruling)
-        if len(block) + SEP > room:
-            cut = True
+        rid = path.split("/")[1][:-3]
+        block = _block("Ruling of record %s (%s)" % (rid, title or "untitled"), _cap_ruling(ruling))
+        if left_out or len(block) + SEP > room:
+            left_out += 1
             continue
         room -= len(block) + SEP
         blocks.append(block)
-        titles[name[:-3]] = title
+        titles[rid] = title or "untitled"
     if not blocks:
         return "", {}
-    return "\n\n".join([RULINGS_INTRO] + blocks + ([RULINGS_CUT] if cut else [])) + "\n\n", titles
+    tail = [RULINGS_LEFT_OUT % left_out] if left_out else []
+    return "\n\n".join([RULINGS_INTRO] + blocks + tail) + "\n\n", titles
 
 
 def _state_path(session_id):

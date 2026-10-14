@@ -23,9 +23,11 @@ change a ruling is allowed.
 - The model replies `{"verdict": "FLAG", "record": "<id>", "why": ...}` for a settled
   question. The deny reason gives the record id and title, and no path. An id the hook did
   not show the model is not cited.
-- The rulings section adds at most `RULINGS_MAX` (30,000 chars) to the prompt. When the
-  records hold more, the most recently changed files come first (file mtime) and the rest are
-  left out. The section carries a mark when any are left out.
+- Each ruling is cut to `RULING_CAP` (800 chars) at a sentence end, and a mark shows the cut.
+  The rulings section adds at most `RULINGS_MAX` (60,000 chars) to the prompt. Records come
+  newest first from one `git log` call (0.50 s measured); file mtime orders them only when git
+  fails or does not list a file. When the records hold more, the oldest are left out and the
+  section says how many. A record with no H1 title shows as "untitled".
 - Split between "settled" and "asks to change a ruling": the model makes it, from the intro
   text beside `PROMPT`. No test proves that split.
 
@@ -34,7 +36,9 @@ Home: hooks/question_outcome.py
 
 ## Holes, named
 
-- File mtime orders the records. A fresh checkout gives every file the same time, so the
-  order there is by name. Git history would order them better, and costs one call per read.
-- A ruling that is itself over `RULINGS_MAX` is left out, not cut.
+- Measured 2026-10-14 (review round 1): 87 rulings, 100,296 chars uncapped. With the cap and
+  60,000 chars, 5 of the 87 do not fit and are left out, oldest first. The live model call took
+  11 s of the 90 s budget.
+- A ruling over 800 chars is cut, so a settled point late in a long ruling may be missed.
+- A record git does not list (new and not committed) is ordered by mtime, after the listed ones.
 - Rulings under another heading are not read.
