@@ -14,6 +14,7 @@ from guard_core import (
     _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, inline_script,
     resolve_command, segment_tokens, split_segments,
 )
+from guard_env import _substitutions
 
 
 # ------------------------------------------------------------------ a machine-wide kill
@@ -484,12 +485,37 @@ _PS_CMDLETS = ("set-item", "si", "new-item", "ni", "set-content", "sc")
 _PS_UNSET = ("$null", "")
 
 
+_PS_BLOCK_OPEN = re.compile(r"[&.]?\{")
+_PS_BLOCK_CALLS = ("invoke-command", "icm")
+
+
+def _open_script_blocks(tokens):
+    """Split a glued script block token (`{$env:X=1}`, `&{...}`, `.{...}`) into `{` and its body,
+    where a block can stand: first in the statement, after `&`, `.` or `-ScriptBlock`, or as an
+    argument of Invoke-Command. A `{` token inside quoted text, one argument of another command,
+    is left whole."""
+    start = _skip_assignments_and_keywords(tokens)
+    caller = basename(tokens[start]).lower() if start < len(tokens) else ""
+    out = []
+    for i, tok in enumerate(tokens):
+        opens = _PS_BLOCK_OPEN.match(tok)
+        before = tokens[i - 1].lower() if i else ""
+        if (opens and len(tok) > opens.end() and (
+                i <= start or before in ("&", ".", "-scriptblock")
+                or (caller in _PS_BLOCK_CALLS and i > start))):
+            out += ["{", tok[opens.end():].rstrip("}")]
+        else:
+            out.append(tok)
+    return out
+
+
 def _ps_env_set(tokens, watch) -> str:
     """Return the matched text when a PowerShell statement sets a watched name in the process
     environment, else ''. Reads the statement's own tokens, so a name inside quoted text, which
     is one token, never fires. A statement starts at the first token, or after `{`, `(` or `&`.
     `$env:X = $null` and an empty value unset the name and pass."""
     alt = "|".join(map(re.escape, watch[0]))
+    tokens = _open_script_blocks(tokens)
     start = _skip_assignments_and_keywords(tokens)
     for i, tok in enumerate(tokens):
         if i != start and not (i and (tokens[i - 1] in ("{", "(", "&") or tokens[i - 1].endswith("{"))):
@@ -579,8 +605,14 @@ def _playwright_tokens_hit(tokens, depth=0, install=None, watch=PLAYWRIGHT_WATCH
         hit = _playwright_install_hit(word, rest, install)
         if hit:
             return hit
+    elif watch is GIT_ENV_WATCH and word == "export" and any(
+            re.fullmatch(r"-[a-zA-Z]*n[a-zA-Z]*", t) for t in rest):
+        pass   # `export -n NAME` takes the name OUT of the environment
     elif word in ASSIGNING_BUILTINS and any(_assigned_var(t, watch) for t in rest):
         return word + " " + next(_assigned_var(t, watch) for t in rest if _assigned_var(t, watch))
+    elif watch is GIT_ENV_WATCH and word in ("setx", "setx.exe") and any(
+            t.upper() in watch[0] for t in rest):
+        return word + " " + next(t for t in rest if t.upper() in watch[0])   # a persistent set
     elif watch is GIT_ENV_WATCH and (word == "export" or (word in ("declare", "typeset") and any(
             re.fullmatch(r"-[a-zA-Z]*x[a-zA-Z]*", t) for t in rest))) and any(
             t.upper() in watch[0] for t in rest):
@@ -603,8 +635,9 @@ def _playwright_tokens_hit(tokens, depth=0, install=None, watch=PLAYWRIGHT_WATCH
                 break
             if _assigned_var(token, watch) and not install:
                 return word + " " + _assigned_var(token, watch)
-    script = " ".join(rest[1:]) if word in CMD_EXE_NAMES and rest and rest[0].lower() in (
-        "/c", "/k") else None
+    cmd_flag = next((n for n, t in enumerate(rest) if t.lower() in ("/c", "/k")), None)
+    script = " ".join(rest[cmd_flag + 1:]) if word in CMD_EXE_NAMES and cmd_flag is not None \
+        else None
     if script is None:
         script = npx_script or (" ".join(rest) if word == "eval" else (
             _pwsh_script(tokens) if word in PLAYWRIGHT_PS_SHELLS else inline_script(tokens)))
@@ -690,8 +723,18 @@ def playwright_command_hit(raw: str, stripped: str, watch=PLAYWRIGHT_WATCH) -> s
 # Playwright rule, plus `VAR+=x cmd` as an inline prefix and PowerShell `New-Item` forms beyond
 # the cmdlets listed in `_PS_CMDLETS`. `git --git-dir` and `git -C` are options, not sets.
 def git_env_command_hit(raw: str, stripped: str) -> str:
-    """Judge a whole command for a set of GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE."""
-    return playwright_command_hit(raw, stripped, GIT_ENV_WATCH)
+    """Judge a whole command for a set of GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE. Each command
+    substitution (`$(...)`, backticks, in double quotes too) is judged as a command of its own,
+    through the one reader in guard_env; one nested past its depth bound is refused."""
+    found, too_deep = _substitutions(stripped)
+    texts = [text for text, _in_message in found]
+    if too_deep:
+        return "command substitution nested too deep to read"
+    for text in texts:
+        matched = playwright_command_hit(raw if text == texts[-1] else text, text, GIT_ENV_WATCH)
+        if matched:
+            return matched
+    return ""
 
 
 GIT_ENV_REASON = (
