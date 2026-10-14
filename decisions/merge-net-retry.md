@@ -58,8 +58,6 @@ Review round 3, final, 2026-10-13. Holes 1, 2 and 4 go to fix lane `merge-net-ho
    retry count to 0 there. A network error there reads as unknown.
 6. A refusal whose text ends `: HTTP 5xx (url)` still reads as a network error. Debt:
    net-error-colon-http-refusal.
-7. The lock's expiry read has no retry, so a network blip reads as "never expires". Debt:
-   lock-expiry-read-no-retry.
 
 ## Build plan
 
