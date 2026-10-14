@@ -287,5 +287,6 @@ def rm_var_reason(hits) -> str:
         "which stops the command when the variable is empty. Retry with: " + "; ".join(hits)
     )
 
-# Stamped by the installer at copy time; guard.py compares it across the modules it loads.
-INSTALL_ID = "uninstalled"
+# The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
+# ids across the modules it loads. In the repo it stays a comment, which counts as a match.
+# INSTALL_ID = "uninstalled"

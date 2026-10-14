@@ -100,5 +100,6 @@ def wsl_hit(cmd: str) -> str:
                 return hit
     return ""
 
-# Stamped by the installer at copy time; guard.py compares it across the modules it loads.
-INSTALL_ID = "uninstalled"
+# The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
+# ids across the modules it loads. In the repo it stays a comment, which counts as a match.
+# INSTALL_ID = "uninstalled"

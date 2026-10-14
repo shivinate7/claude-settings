@@ -101,13 +101,13 @@ if git rev-parse -q --verify ORIG_HEAD >/dev/null 2>&1 \
 fi
 # put SRC DEST: build the file at "DEST.cs-new" in DEST's folder, then rename it over DEST, so DEST
 # is never absent or half-written (a gate hook reads it at any moment). A .py that carries an
-# INSTALL_ID line gets this run's id, the same stamp install.ps1 writes. A rename a reader blocks
+# `# INSTALL_ID` line gets this run's id, the same stamp install.ps1 writes. A rename a reader blocks
 # is retried for about 2.5 s; if it still fails, DEST stays as it was.
 id="`$(date +%Y%m%d%H%M%S)`$`$"
 put() {
   t="`$2.cs-new"
   case "`$1" in
-    *.py) sed "s/^INSTALL_ID = \".*\"/INSTALL_ID = \"`$id\"/" "`$1" > "`$t" ;;
+    *.py) sed "s/^# INSTALL_ID = \".*\"/INSTALL_ID = \"`$id\"/" "`$1" > "`$t" ;;
     *) cp "`$1" "`$t" ;;
   esac || { rm -f "`$t"; return 1; }
   for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do
@@ -260,13 +260,13 @@ public static class ClaudeSettingsMove {
     }
 }
 
-# One id per run. A hook .py that carries a line `INSTALL_ID = "..."` gets it at copy time, so
+# One id per run. A hook .py that carries a line `# INSTALL_ID = "..."` gets it, uncommented, at copy time, so
 # hooks/guard.py can tell a half-installed set from a whole one. The repo copy holds a placeholder.
 # The embedded post-merge hook and install.sh stamp the same line the same way.
 $InstallId = Get-Date -Format yyyyMMddHHmmssfff
 function Set-InstallId([string]$Path) {
     $text = [IO.File]::ReadAllText($Path)
-    $new  = [regex]::Replace($text, '(?m)^INSTALL_ID = "[^"]*"', "INSTALL_ID = `"$InstallId`"")
+    $new  = [regex]::Replace($text, '(?m)^# INSTALL_ID = "[^"]*"', "INSTALL_ID = `"$InstallId`"")
     if ($new -ne $text) { [IO.File]::WriteAllText($Path, $new, (New-Object Text.UTF8Encoding $false)) }
 }
 

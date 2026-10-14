@@ -209,7 +209,7 @@ INSTALL_ID_VALUE="$(date +%Y%m%d%H%M%S)$$"
 put_file() {
   t="$2.cs-new"
   case "$1" in
-    *.py) sed "s/^INSTALL_ID = \".*\"/INSTALL_ID = \"$INSTALL_ID_VALUE\"/" "$1" > "$t" ;;
+    *.py) sed "s/^# INSTALL_ID = \".*\"/INSTALL_ID = \"$INSTALL_ID_VALUE\"/" "$1" > "$t" ;;
     *) cp "$1" "$t" ;;
   esac && mv -f "$t" "$2" || { rm -f "$t"; return 1; }
 }
