@@ -66,8 +66,20 @@ def is_contraction(text: str, index: int, closes_after: bool = False) -> bool:
             and text.find("'", index + 1) < 0)
 
 
+# What shlex and the PowerShell reader drop from a name: a quote inside it, a backslash, backtick
+# or caret escape, a line continuation. A rule's quick test strips these from the command text,
+# then looks for its names: a miss means no token can name them. It may over-match, never under,
+# only when the rule's walk drops nothing more from a token before it reads a name. A walk that
+# drops more (git-env: printf directives) needs its quick test to cover that step too. One known
+# under-match: the walk's .upper() folds the ligature U+FB01 to FI and the quick test does not;
+# Windows keeps such a name as its own variable, so no git variable is set.
+QUOTE_MARKS = re.compile(r"""['"`\\^\s]""")
+
+
 def basename(token: str) -> str:
-    return GLUED_OPEN.sub("", token).rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+    if token[:1] in ("(", "$"):   # only these open a glued paren; most tokens skip the regex
+        token = GLUED_OPEN.sub("", token)
+    return token.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
 
 
 @functools.lru_cache(maxsize=8)
@@ -245,13 +257,11 @@ def segment_tokens(segment: str):
     found = _segment_tokens(segment)
     if found is None:
         return None
-    tokens = _Tokens(found)
-    if any(_GROUP_OPEN.search(t) for t in tokens):
-        # A multi-line here-string (`@'`...`'@` or `@"`...`"@`) reads as one token `@...@` that
-        # holds a newline.
-        # The non-POSIX reading cannot parse it, so its text is claimed here.
-        here = frozenset(i for i, t in enumerate(tokens) if t[:1] == t[-1:] == "@" and "\n" in t)
-        tokens.quoted = _quoted_opens(segment, len(tokens)) | here
+    tokens, quoted = found
+    if not quoted:
+        return list(tokens)   # no quoted opener to mark: a plain list, built once per call
+    tokens = _Tokens(tokens)
+    tokens.quoted = quoted
     return tokens
 
 
@@ -266,7 +276,6 @@ class _Tokens(list):
     quoted = frozenset()
 
 
-@functools.lru_cache(maxsize=4096)
 def _quoted_opens(segment: str, count: int):
     """Indexes of the tokens that start inside quotes. Reads the segment again with quotes kept
     (non-POSIX shlex): a token that starts with `'`, or with `"` not followed by `$(`, is quoted
@@ -282,10 +291,19 @@ def _quoted_opens(segment: str, count: int):
 
 @functools.lru_cache(maxsize=16384)   # holds every distinct segment of a 4000-rm command
 def _segment_tokens(segment: str):
+    """(the segment's tokens, `_Tokens.quoted` for them), or None when shlex cannot read it. Both
+    come from one cache, so a call for a segment already read costs one lookup."""
     try:
-        return tuple(shlex.split(segment, posix=True))
+        tokens = tuple(shlex.split(segment, posix=True))
     except ValueError:
         return None
+    quoted = frozenset()
+    if any(map(_GROUP_OPEN.search, tokens)):
+        # A multi-line here-string (`@'`...`'@` or `@"`...`"@`) reads as one token `@...@` that
+        # holds a newline. The non-POSIX reading cannot parse it, so its text is claimed here.
+        here = frozenset(i for i, t in enumerate(tokens) if t[:1] == t[-1:] == "@" and "\n" in t)
+        quoted = _quoted_opens(segment, len(tokens)) | here
+    return tokens, quoted
 
 
 POWERSHELL_CALL = [False]   # set per call by judge_shell: the tool being judged is PowerShell
@@ -397,6 +415,10 @@ INTERPRETER_HEREDOC = re.compile(
 )
 
 
+# The only characters heredoc_heads acts on when nothing is open.
+_HEAD_MARKS = re.compile(r"""['"(#<]""")
+
+
 def heredoc_heads(text: str, quote: str = "", closes_after: bool = False):
     """Return ([(quote char, delimiter)], quote) for the heredoc headers in `text` that sit outside
     quotes and comments, in order, and what is still open at its end. `quote` is a stack of open
@@ -404,6 +426,8 @@ def heredoc_heads(text: str, quote: str = "", closes_after: bool = False):
     a `$(` inside double quotes is shell again. Quotes are read as bash reads them, with no escape:
     only a contraction bash never closes (is_contraction; `closes_after` says a `'` follows `text`)
     opens none. A mark read as text could show a header bash quotes, and drop a body bash runs."""
+    if not quote and not _HEAD_MARKS.search(text):
+        return [], ""   # no quote, paren, comment or `<` to read: nothing opens, nothing is open
     heads = []
     index = 0
     while index < len(text):

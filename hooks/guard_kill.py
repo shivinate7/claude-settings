@@ -10,6 +10,7 @@ import subprocess
 import sys
 
 from guard_core import (
+    QUOTE_MARKS,
     ASSIGNMENT, CMD_EXE_NAMES, ENV_PATTERN_COMMANDS, PLAYWRIGHT_PS_SHELLS,
     POWERSHELL_CALL, SILENT_WRITE_REDIRECT, _pwsh_script, _skip_assignments_and_keywords,
     _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, inline_script,
@@ -734,10 +735,31 @@ def playwright_command_hit(raw: str, stripped: str, watch=PLAYWRIGHT_WATCH) -> s
 # with a different watch list and a quote-safe PowerShell reader. KNOWN LIMITS: those of the
 # Playwright rule, plus `VAR+=x cmd` as an inline prefix and PowerShell `New-Item` forms beyond
 # the cmdlets listed in `_PS_CMDLETS`. `git --git-dir` and `git -C` are options, not sets.
+# The quick test in git_env_command_hit strips from a text what shlex drops (`QUOTE_MARKS`), then
+# looks for a watched name, case-blind. Rule: the quick test drops at least what the walk drops
+# before it reads a name, or it sends the text on to the walk. The walk reads each substitution as `x` in the text around
+# it, so `GIT_INDE$(echo X)_FILE` reads as the name `GIT_INDEx_FILE`: a command with a
+# substitution is tested text by text, as the walk reads it, never by its raw text alone.
+_GIT_ENV_NAMES = re.compile("|".join(map(re.escape, GIT_ENV_WATCH[0])), re.I)
+_SUBSTITUTION_OPEN = re.compile(r"[$<>]\(|`")   # `$(`, `<(`, `>(` and a backtick: what _substitutions cuts
+
+
+def _holds_git_env_name(text: str) -> bool:
+    text = QUOTE_MARKS.sub("", text)
+    # printf's directives and escapes (`_PRINTF_DIRECTIVE`) are the one step past shlex that drops
+    # text inside a name, and the walk takes it only for a printf word. No ordering of that strip
+    # with QUOTE_MARKS reads every case (`%''s`, an unquoted `\\n`), and a strip over the whole
+    # text eats a name's first letter (`x=5% GIT_DIR=...`): any printf goes on to the walk.
+    return "printf" in text.lower() or bool(_GIT_ENV_NAMES.search(text))
+
+
 def git_env_command_hit(raw: str, stripped: str) -> str:
     """Judge a whole command for a set of GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE. Each command
     substitution (`$(...)`, backticks, in double quotes too) is judged as a command of its own,
     through the one reader in guard_env; one nested past its depth bound is refused."""
+    in_raw = _holds_git_env_name(raw)
+    if not in_raw and not _SUBSTITUTION_OPEN.search(raw):
+        return ""   # every hit below needs a watched name as text, once quotes and escapes fall away
     found, too_deep = _substitutions(stripped, powershell=POWERSHELL_CALL[0])
     texts = [text for text, _in_message in found]
     if too_deep:   # the env-file rule refuses a nesting this deep; judge the text as it stands
@@ -748,7 +770,10 @@ def git_env_command_hit(raw: str, stripped: str) -> str:
     texts = [text for quote, body, _ in _split_heredocs(raw)[1] if not quote
              for text, _in_message in _substitutions(body, heredoc=True)[0][:-1]] + texts   # command stays last
     for text in texts:
-        matched = playwright_command_hit(raw if text == texts[-1] else text, text, GIT_ENV_WATCH)
+        last = text == texts[-1]
+        if not (in_raw and last) and not _holds_git_env_name(text):
+            continue   # no name in this text as the walk reads it (the last also reads raw's heredoc bodies)
+        matched = playwright_command_hit(raw if last else text, text, GIT_ENV_WATCH)
         if matched:
             return matched
     return ""

@@ -5429,6 +5429,68 @@ for _cmd in (
 ):
     sh("git env set: PowerShell, a glued group opener, %s, denies" % _cmd[:12], _cmd, "deny",
        GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+# Round 1 review of 76b4b0b (guard-speed): a name split by a substitution. The walk reads each
+# `$(...)` as `x`, so `GIT_INDE$(echo X)_FILE` reads as `GIT_INDEx_FILE`, and the case fold makes
+# that the watched name. The raw text holds no whole name, so a quick test of the raw text skips
+# the walk and allows what the walk denied on 46c3191. Each case below is denied there.
+# KNOWN LIMIT: GIT_DIR and GIT_WORK_TREE hold no X, so no substitution builds either name, and
+# the walk allows their split forms on both heads. A bare split assignment with no command after
+# it is allowed on both too (a bare name in capitals is denied only when it is written whole).
+_SPLIT = "GIT_INDE$(echo X)_FILE"
+for _label, _cmd in (
+    ("export", "export %s=/x; python -m pytest"),
+    ("declare -x", "declare -x %s=/x; python -m pytest"),
+    ("typeset -x", "typeset -x %s=/x; python -m pytest"),
+    ("env", "env %s=/x python -m pytest"),
+    ("sh -c export", 'sh -c "export %s=/x; python -m pytest"'),
+    ("a prefix assignment", "%s=/x python -m pytest"),
+    ("setx", "setx %s x"),
+    ("cmd /c setx", "cmd /c setx %s x"),
+):
+    sh("git env set: Bash, a name split by a substitution, %s, denies" % _label, _cmd % _SPLIT,
+       "deny", GIT_ENV_RULE, cwd=NOGIT)
+for _label, _cmd in (
+    ("Set-Item", r'Set-Item env:%s "C:\x\index"; python -m pytest'),
+    ("New-Item", r"New-Item env:%s -Value C:\x\index; python -m pytest"),
+    ("setx", "setx %s x"),
+):
+    sh("git env set: PowerShell, a name split by a substitution, %s, denies" % _label,
+       _cmd % _SPLIT, "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+
+# Round 2 review of a01afb0 (guard-speed): a name split by a printf directive. `%s` and `%b` with
+# no argument print nothing, so the profile gets `GIT_DIR=/x`. The walk drops the directives
+# (`_PRINTF_DIRECTIVE`) before it reads the name, so the raw text holds no whole name and a quick
+# test of the raw text or of a substitution's text skips the walk. Each case below is denied on
+# 46c3191 and allowed on a01afb0.
+for _label, _cmd in (
+    ("%s, GIT_DIR", r"printf 'GIT_%sDIR=/x\n' >> ~/.bashrc"),
+    ("%b, GIT_DIR", r"printf 'GIT_%bDIR=/x\n' >> ~/.bashrc"),
+    ("%s, GIT_INDEX_FILE", r"printf 'GIT_INDEX_%sFILE=/x\n' >> ~/.bashrc"),
+    ("%s, GIT_WORK_TREE", r"printf 'GIT_WORK_%sTREE=/x\n' >> ~/.bashrc"),
+    ("%s, with an export prefix", r"printf 'export GIT_%sDIR=/x\n' >> ~/.bashrc"),
+    ("%s, piped to tee -a", r"printf 'GIT_%sDIR=/x\n' | tee -a ~/.bashrc"),
+):
+    sh("git env set: Bash printf into a profile, a name split by a directive %s, denies" % _label,
+       _cmd, "deny", GIT_ENV_RULE, cwd=NOGIT)
+for _label, _cmd in (
+    ("%s", r"printf 'GIT_%sDIR=/x\n' >> ~/.bashrc"),
+    ("%b", r"printf 'GIT_%bDIR=/x\n' >> ~/.bashrc"),
+):
+    sh("git env set: PowerShell printf into a profile, a name split by a directive %s, denies"
+       % _label, _cmd, "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+
+# Round 3 review of 78ba117 (guard-speed): the quick test cannot read a printf directive by a strip
+# over the whole text, in either order with `QUOTE_MARKS`. Each case below is denied on 46c3191 and
+# pins one way a whole-text strip under-matches, so the quick test sends any printf on to the walk.
+sh("git env set: Bash, a percent sign and a space before a set, no printf, denies",
+   "x=5% GIT_DIR=/x " + VCS + " status", "deny", GIT_ENV_RULE, cwd=NOGIT)   # `% G` is no directive
+sh("git env set: Bash printf into a profile, a directive split by adjacent quotes, denies",
+   r"printf 'GIT_%''sDIR=/x\n' >> ~/.bashrc", "deny", GIT_ENV_RULE, cwd=NOGIT)
+# KNOWN LIMIT: printf reads `\n` in this argument as a newline, so the file gets `GIT_` and
+# `DIR=/x` and sets nothing. The walk drops `\n` as a directive and denies: a false deny on the
+# safe side, pinned so the speed change keeps the verdict of 46c3191.
+sh("git env set: Bash printf into a profile, a doubled backslash before n inside a name, denies",
+   r"printf GIT_\\nDIR=/x >> ~/.bashrc", "deny", GIT_ENV_RULE, cwd=NOGIT)
 
 # =========================================================================== 5. merge into main
 FAMILY = "merge"
