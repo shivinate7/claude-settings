@@ -177,6 +177,95 @@ await test('agents json: busy is working, idle is waiting, anything else is unkn
   same(lib.parseAgentsJson(text).map(r => r.state), ['working', 'waiting', 'unknown', 'unknown'], 'states')
 })
 
+await test('agents json: a row keeps its name, so a SendMessage to a name can find its busy state', () => {
+  const [row] = lib.parseAgentsJson(JSON.stringify([{ sessionId: sid(1), cwd: '/x/app', status: 'busy', name: 'worker-a' }]))
+  same(row.name, 'worker-a', 'name from claude agents --json')
+})
+
+// ---- receiverState: the state of the one row named like a SendMessage `to`
+
+const namedRows = json => lib.parseAgentsJson(json)
+
+await test('receiver: busy, idle and waiting by name', () => {
+  const rows = namedRows(JSON.stringify([
+    { sessionId: sid(1), cwd: '/x/a', name: 'a', status: 'busy' },
+    { sessionId: sid(2), cwd: '/x/b', name: 'b', status: 'idle' },
+    { sessionId: sid(3), cwd: '/x/c', name: 'c', status: 'waiting' },
+  ]))
+  same([lib.receiverState(rows, 'a'), lib.receiverState(rows, 'b'), lib.receiverState(rows, 'c')], ['busy', 'idle', 'waiting'], 'states')
+})
+
+await test('receiver: no row with the name is unseen', () => {
+  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name: 'a', status: 'busy' }]))
+  same(lib.receiverState(rows, 'zzz'), 'unseen', 'no match')
+  same(lib.receiverState(rows, ''), 'unseen', 'empty name')
+  same(lib.receiverState(null, 'a'), 'unseen', 'no rows')
+})
+
+await test('receiver: two rows with the same name are unseen, busy or not', () => {
+  const rows = namedRows(JSON.stringify([
+    { sessionId: sid(1), cwd: '/x/a', name: 'a', status: 'busy' },
+    { sessionId: sid(2), cwd: '/x/b', name: 'a', status: 'idle' },
+  ]))
+  same(lib.receiverState(rows, 'a'), 'unseen', 'duplicate name')
+})
+
+await test('receiver: an unknown status is unseen, not busy', () => {
+  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name: 'u', status: 'running' }]))
+  same(lib.receiverState(rows, 'u'), 'unseen', 'unknown status')
+})
+
+await test('receiver: a name with angle brackets is found by its full to', () => {
+  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name: 'lane <a>', status: 'busy' }]))
+  same(lib.receiverState(rows, 'lane <a>'), 'busy', 'to lane <a>')
+})
+
+await test('receiver: a 45-char name is found by its full to', () => {
+  const name = 'worker-' + 'x'.repeat(38)
+  assert.equal(name.length, 45, 'fixture length')
+  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name, status: 'busy' }]))
+  same(lib.receiverState(rows, name), 'busy', 'full to')
+})
+
+await test('receiver: a name with two spaces is found by the same two spaces', () => {
+  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name: 'a  b', status: 'busy' }]))
+  same(lib.receiverState(rows, 'a  b'), 'busy', 'to a  b')
+})
+
+// Pins the ref strip: ListAgents prints `name [ref]` for a clash, so the bare name finds the row.
+await test('receiver: a to with a [ref] suffix reads the row named by the bare name', () => {
+  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name: 'worker-a', status: 'busy' }]))
+  same(lib.receiverState(rows, 'worker-a [a1b2]'), 'busy', 'to worker-a [a1b2]')
+})
+
+// A real name may end in brackets. The ref strip must not drop it before the exact match.
+await test('receiver: a real name that ends in brackets is found by its full to', () => {
+  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name: 'lane-2 [a]', status: 'busy' }]))
+  same(lib.receiverState(rows, 'lane-2 [a]'), 'busy', 'to lane-2 [a]')
+})
+
+// Names over 40 chars: agentRows cuts a row's name to 40 chars, so a full to must match by its whole name.
+const SHARED39 = 'worker-' + 'x'.repeat(32) // 39 chars, the part a 40-char cut keeps
+
+await test('receiver: two rows whose 49-char names share the first 39 chars each read their own state', () => {
+  const longA = SHARED39 + 'alpha-0001'
+  const longB = SHARED39 + 'beta-00002'
+  assert.equal(longA.length, 49, 'fixture length')
+  assert.equal(longB.length, 49, 'fixture length')
+  const rows = namedRows(JSON.stringify([
+    { sessionId: sid(1), cwd: '/x/a', name: longA, status: 'busy' },
+    { sessionId: sid(2), cwd: '/x/b', name: longB, status: 'idle' },
+  ]))
+  same([lib.receiverState(rows, longA), lib.receiverState(rows, longB)], ['busy', 'idle'], 'each full to reads its own row')
+})
+
+await test('receiver: a to with no row, sharing the first 39 chars of a busy row, is unseen', () => {
+  const other = SHARED39 + 'gamma-0003'
+  assert.equal(other.length, 49, 'fixture length')
+  const rows = namedRows(JSON.stringify([{ sessionId: sid(1), cwd: '/x/a', name: SHARED39 + 'alpha-0001', status: 'busy' }]))
+  same(lib.receiverState(rows, other), 'unseen', 'no row has the full to')
+})
+
 // ---- update-ready
 
 await test('update-ready: waiting, no agents, nothing unpushed, clean tree is ready', () => {
