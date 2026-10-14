@@ -19,7 +19,7 @@ The restore point is the branch tip only. The sweep saves no snapshot of dirty c
 
 Owner word, 2026-10-13 12:33 CDT: fix the bug, save only the branch tip, no snapshot of dirty content, no log compaction.
 
-Open and separate: whether the sweep may reap dirty trees. That question needs the owner's list of junk files first.
+Closed, by owner word 2026-10-13 15:56 CDT (option A): the sweep does not reap dirty trees. See janitor-dirty-test-stays (the janitor's dirty test stays as it is). The junk-file list is not needed now.
 
 ## Why
 
