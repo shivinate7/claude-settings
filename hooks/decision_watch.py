@@ -120,16 +120,16 @@ else:
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 from _transcript import last_human_epoch, head_moved_since  # noqa: E402
 
-# THE TIME BUDGET. settings.json's Stop entry for this hook carries `"timeout": 170`.
-# Every git call below uses GIT_TIMEOUT (10s). At most MAX_DIFFED_FILES protected files
-# are diffed; the rest are still named in the evidence, but with no git call, so the
-# count of protected files can grow unbounded with no matching growth in wall time.
-# Worst case, computed here rather than assumed: one `git status`
-# (GIT_TIMEOUT) + one `git log` (GIT_TIMEOUT) + MAX_DIFFED_FILES `git diff` calls
-# (MAX_DIFFED_FILES * GIT_TIMEOUT) + one model call (MODEL_TIMEOUT) = 10 + 10 + 80 + 120
-# = 220 seconds. The settings.json Stop entry for this hook must carry a timeout of at least
-# 230 seconds (10 seconds of margin). Changing any of these numbers means re-deriving this
-# sum and the settings.json timeout together. A model timeout is an error from
+# THE TIME BUDGET. The mod (mods/decision-watch/hooks/register.mjs) runs this script, and it
+# caps each python run itself (PY_MS there), so no Stop row timeout bounds it now. In split
+# mode (--emit-prompt, --model-text, --model-error) the script calls no model: the mod makes
+# the model call under its own MODEL_MS. Inside one run, every git call uses GIT_TIMEOUT (10s)
+# and at most MAX_DIFFED_FILES protected files are diffed; the rest are still named in the
+# evidence, with no git call, so the count of protected files can grow with no matching growth
+# in wall time. Worst case for the git part, computed here: one `git status` + one `git log`
+# + MAX_DIFFED_FILES `git diff` calls = 10 + 10 + 80 = 100 seconds, so the mod's cap can stop
+# a run first. A direct run with no split flag also makes one model call (MODEL_TIMEOUT, 120s).
+# Changing these numbers means re-checking the mod's timers. A model timeout is an error from
 # invoke_model, which the caller reports as UNKNOWN, never ALLOW.
 MODEL = "haiku"
 MODEL_TIMEOUT = 120
@@ -1148,7 +1148,9 @@ def collect_unread(stamp):
     if bound is None:
         return []
     try:
-        path = os.path.join(guard.config_dir(), "guard.log")
+        # The mod runs this script with CLAUDE_CONFIG_DIR set to its own state folder, and hands
+        # the real config folder in DW_REAL_CONFIG_DIR. guard.log lives in the real one.
+        path = os.path.join(os.environ.get("DW_REAL_CONFIG_DIR") or guard.config_dir(), "guard.log")
     except Exception:
         return []
     if not os.path.exists(path):

@@ -129,7 +129,7 @@ async function dwRun($, stop, extra, who) {
   // The mod's own timer frees the slot if the host does not stop the child. It does not kill the child.
   const r = await deadline($.process.run([py, "-I", `${cfg}/hooks/decision_watch.py`, ...extra], {
     stdin: asciiJson(stop),
-    env: { CLAUDE_CONFIG_DIR: stateDir(cfg, who) },
+    env: { CLAUDE_CONFIG_DIR: stateDir(cfg, who), DW_REAL_CONFIG_DIR: cfg },
     timeoutMs: PY_MS,
   }), PY_MS + 1000);
   return { ...r, ms: Date.now() - t0 };
@@ -210,7 +210,9 @@ async function shadow($, stop) {
   let notices = [];
   try {
     const out = await judge($, stop, "shadow");
-    line = `END ${stop.session_id} | ${out.trace.join(" | ")} | ${out.result}${out.notices.map((n) => ` | NOTICE: ${n}`).join("")}`;
+    // Each notice gets its own log line, before END, so the END cut at MAX_LINE never drops one.
+    for (const n of out.notices) await log($, `NOTICE ${stop.session_id} | NOTICE: ${n}`);
+    line = `END ${stop.session_id} | ${out.trace.join(" | ")} | ${out.result}`;
     shown = out.shown;
     notices = out.notices;
   } catch (err) {
