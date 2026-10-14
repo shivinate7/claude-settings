@@ -195,7 +195,7 @@ try:
     from guard_shared_tree import (
         PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
         checkout_conflict_resolve, names_only_files, one_place, session_id_of, shared_tree_match,
-        stash_takes_the_stack, subject_state, under_session_scratchpad,
+        in_any_session_scratchpad, stash_takes_the_stack, subject_state, under_session_scratchpad,
     )
     _loading = "guard_pointer"
     from guard_pointer import (
@@ -257,7 +257,22 @@ except Exception as exc:
         pass
     if __name__ != "__main__":
         raise  # a hook that imports guard fails on its own terms, never by a silent allow
-    sys.exit(0)  # fail open: allow the call, as on any other guard defect
+    # Fail closed (decision gate-hooks-fail-closed): a guard with a missing part judges nothing, so
+    # it refuses the call. The reason tells the reader to reinstall and names no file. `refuse`
+    # lives in the module that failed, so the deny is printed here. A SubagentStop has no tool
+    # call to refuse, and a block there could trap the agent: it passes, as the log line records.
+    try:
+        stopping = json.load(sys.stdin).get("hook_event_name") == "SubagentStop"
+    except Exception:
+        stopping = False
+    if not stopping:
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse", "permissionDecision": "deny",
+            "permissionDecisionReason": (
+                "guard-crash: the gate is missing a part and cannot judge this call, so it refuses "
+                "every call. Remedy: from the claude-settings checkout run install.sh "
+                "(Windows: install.ps1), then retry.")}}))
+    sys.exit(0)
 
 
 # `_git`, `config_dir` and the session reads are never bound here: a test or the janitor patches
@@ -1066,6 +1081,9 @@ XCODE_TEST_DIR = re.compile(r"^[A-Z]\w*Tests$")
 TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support"}
 # Dependency lists only a test-author owns. A builder may add a dev dependency.
 AUTHOR_BASENAMES = {"requirements-dev.txt"}
+# The three mutation harnesses are test code for a test-author, named one by one so a later product
+# mutate_*.py stays a builder's. A builder keeps editing them: they are not test paths. Case folds as in `is_test_rel`.
+AUTHOR_HARNESS = {"hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py"}
 TEST_CONFIG = re.compile(
     r"^(?:pytest\.ini|tox\.ini|setup\.cfg|pyproject\.toml|package\.json"
     r"|(?:jest|vitest|playwright|karma)\.conf(?:ig)?\.\w+|vitest\.workspace\.\w+|\.mocharc(?:\.\w+)?|[^/]+\.xctestplan)$")
@@ -1130,12 +1148,14 @@ def is_test_config_rel(rel: str) -> bool:
 def author_path_ok(rel: str) -> bool:
     """A test-author may change a test path, test config, or a dev dependency list. `package.json`
     and `pyproject.toml` pass here and are read by content in `role_offences`."""
-    return is_test_rel(rel) or is_test_config_rel(rel) or basename(rel) in AUTHOR_BASENAMES
+    return (is_test_rel(rel) or is_test_config_rel(rel) or basename(rel) in AUTHOR_BASENAMES
+            or norm(rel).lstrip("/").lower() in AUTHOR_HARNESS)
 
 
-def repo_rel(path: str, cwd: str):
+def repo_rel(path: str, cwd: str, outside: bool = True):
     """The path relative to its repository root (the nearest parent holding `.git`), posix, or the
-    full path when it sits in no repository. None when it cannot be read."""
+    full path when it sits in no repository (`outside` False: None there). None when it cannot be
+    read."""
     if not path or not isinstance(path, str):
         return None
     try:
@@ -1148,16 +1168,27 @@ def repo_rel(path: str, cwd: str):
         if os.path.exists(os.path.join(parent, ".git")):
             return full[len(parent):]
         parent = os.path.dirname(parent)
-    return full
+    return full if outside else None
 
 
-def role_write_hit(role: str, tool_input, target: str, cwd: str) -> str:
-    """The early warning for a write tool call: the target path a role may not change, else ''."""
+def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:
+    """The early warning for a write tool call: the target path a role may not change, else ''.
+
+    A test-author may also write its own session scratchpad and any path in no repository
+    (owner ruling 2026-10-13): only product code IN a repository is out of its scope."""
     rel = repo_rel(target, cwd)
     if rel is None:
         return ""
     if role == AUTHOR_ROLE:
-        return "" if author_path_ok(rel) else target
+        full = _expanded(target, cwd)
+        if author_path_ok(rel) or under_session_scratchpad(full, session_id):
+            return ""
+        # `session_id` is the parent's, the same for a subagent (decision
+        # an-agent-outside-its-home-tree-must-stop), and so is the id in the scratchpad path.
+        # Another session's scratchpad is neither this one's nor "outside a repository".
+        if in_any_session_scratchpad(full):
+            return target
+        return "" if repo_rel(target, cwd, outside=False) is None else target
     if role == WRITER_ROLE:
         return "" if rel.lower().endswith(".md") else target
     if is_test_rel(rel):
@@ -1956,7 +1987,7 @@ def judge(payload) -> None:
         # 0b. The early warning for a builder, test-author or record-writer write (see BUILDER_ROLE). A read is allowed.
         role = agent_role(payload)
         if role and tool in WRITE_TOOLS:
-            matched = role_write_hit(role, tool_input, target, cwd)
+            matched = role_write_hit(role, tool_input, target, cwd, session_id_of(payload))
             if matched:
                 code, why = {AUTHOR_ROLE: ("test-author-scope", AUTHOR_SCOPE_REASON),
                              WRITER_ROLE: ("record-writer-scope", WRITER_SCOPE_REASON)}.get(

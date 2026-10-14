@@ -24,8 +24,9 @@ Contract, from decision gate-hooks-fail-closed:
   skipped, so every wrapper runs the real one. With only the alias on PATH, a gate exits 2 with
   the no-python remedy and an advisory hook exits 0.
 - The guard split (decision guard-split-by-family): a copied guard.py takes split_segments from its
-  own guard_core.py sibling, never the real one. With the sibling missing, a Bash call that guard.py
-  would refuse is allowed, and one fallback line naming guard_core goes to guard.log. Every name other
+  own guard_core.py sibling, never the real one. With the sibling missing, a Bash call is refused with
+  the reinstall step named (audit-high, decision gate-hooks-fail-closed), and one fallback line naming
+  guard_core goes to guard.log. Every name other
   files reach through `guard` still resolves.
 
 Each command string runs through `sh -c` (Git Bash on Windows). The no-python case runs with
@@ -388,9 +389,10 @@ def split_control_case():
 
 
 def missing_sibling_case():
-    """A copied guard.py with no guard_core.py beside it fails open: the call is allowed, and one
-    fallback line naming guard_core goes to guard.log. The payload is a command the guard refuses
-    when it can judge, so a refusal on stdout would show that it did judge it."""
+    """audit-high (owner ruling 2026-10-13, decision gate-hooks-fail-closed): a copied guard.py with
+    no guard_core.py beside it refuses the call. Stdout carries a deny whose reason names the
+    reinstall step and no file, the exit is 0 as for any other deny, and one fallback line naming
+    guard_core goes to guard.log. The payload is a command the guard refuses when it can judge."""
     scratch = tempfile.mkdtemp(prefix="guard-nosib-")
     cfg = os.path.join(scratch, "cfg")
     try:
@@ -410,15 +412,26 @@ def missing_sibling_case():
     problems = []
     if run.returncode != 0:
         problems.append("exit %d" % run.returncode)
-    if run.stdout.strip():
-        problems.append("stdout is not empty, so the call was judged and refused")
+    decision, reason = "", ""
+    try:
+        block = json.loads(run.stdout.strip())["hookSpecificOutput"]
+        decision, reason = block["permissionDecision"], block["permissionDecisionReason"]
+    except Exception:
+        pass  # an empty or unreadable stdout leaves decision "", and that is a problem below
+    if decision != "deny":
+        problems.append("decision %r with guard_core missing, want deny (stdout %r)"
+                        % (decision, run.stdout.strip()[:60]))
+    if not any(step in reason for step in ("install.sh", "install.ps1")):
+        problems.append("the reason names no reinstall step: %r" % reason[:90])
+    if "guard_core" in reason:
+        problems.append("the reason names guard_core, the missing file")
     if len(lines) != 1:
         problems.append("%d guard.log lines, want 1" % len(lines))
     elif "guard_core" not in lines[0]:
         problems.append("the log line does not name guard_core: %r" % lines[0][-120:])
     if problems:
         return False, "; ".join(problems)
-    return True, "allowed, with one fallback line naming guard_core"
+    return True, "refused with exit 0, the reason names the reinstall step, one log line names guard_core"
 
 
 def guard_names_case():
@@ -494,7 +507,7 @@ def build_cases():
                   split_mutant_case))
     cases.append(("guard split control: the same copy with its sibling unmutated passes the check",
                   split_control_case))
-    cases.append(("guard split: a missing guard_core fails open with one fallback line naming it",
+    cases.append(("audit-high fail-closed: a missing guard_core refuses the call and logs one line",
                   missing_sibling_case))
     cases.append(("guard split: every name other files reach through guard still resolves",
                   guard_names_case))

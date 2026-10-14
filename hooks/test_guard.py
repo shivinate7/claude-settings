@@ -82,6 +82,7 @@ FAMILIES = {
     "simulator": "the simulator boot and hold rules",
     "rm-var": "every case named rm-var, wherever it sits",
     "session-log": "the session id column of guard.log",
+    "fail-closed": "a missing sibling module refuses the call, and never allows it",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "misc": "anything outside a tagged section",
 }
@@ -1565,6 +1566,58 @@ sh("subject: setting aside real uncommitted work still denies", VCS + " stash pu
    "deny", "shared-tree", cwd=SUBJDIRTY)
 sh("subject: a bare stash over a clean tree takes nothing", VCS + " stash", "allow",
    cwd=SUBJCLEAN)
+# THE PATHSPEC AND OPTION-VALUE FORMS OF A PUSH (owner's Mac test, 2026-10-13; decision
+# stash-push-is-clone-wide). Git may omit `push` before `--`, before a pathspec after `--`, and
+# before an option, so `stash -- <path>`, `stash -q -- <path>` and `stash -m <msg>` are pushes.
+# A word that is no known action reads as a push, so a pathspec such as `f.txt` pushes too.
+# These rows run in SUBJDIRTY, a real checkout with real uncommitted work, so each push form must
+# deny with the push remedy. `stash .` is not a push: git refuses a pathspec outside `--`, so it
+# takes nothing. It stays a deny anyway, because the guard must not rely on git's refusal.
+PUSH_FRAGMENT = "puts work onto the stash stack"  # only PUSH_DENY_REASON says this
+sh("stash pathspec: stash -- over real uncommitted work denies like a push",
+   VCS + " stash -- f.txt", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash -- . over real uncommitted work denies like a push",
+   VCS + " stash -- .", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash -q -- over real uncommitted work denies like a push",
+   VCS + " stash -q -- f.txt", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash -m over real uncommitted work denies like a push",
+   VCS + " stash -m lane", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash . over real uncommitted work denies", VCS + " stash .", "deny",
+   "shared-tree", cwd=SUBJDIRTY)
+# Combined short flags and abbreviated long options take a value as the next word too (git's
+# parse-options). Each one is a push, so each deny carries the push remedy.
+sh("stash pathspec: stash -qm over real uncommitted work denies like a push",
+   VCS + " stash -qm list", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash -um over real uncommitted work denies like a push",
+   VCS + " stash -um show", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash -pm over real uncommitted work denies like a push",
+   VCS + " stash -pm show", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash --mess over real uncommitted work denies like a push",
+   VCS + " stash --mess list", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash --m over real uncommitted work denies like a push",
+   VCS + " stash --m list", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
+sh("stash pathspec: stash --pathspec-from over real uncommitted work denies like a push",
+   VCS + " stash --pathspec-from list", "deny", "shared-tree", cwd=SUBJDIRTY,
+   carries=PUSH_FRAGMENT)
+# `import` and `export` are not git subcommands, but main reads them as stack actions, and they keep
+# that side. Over a real entry in a clean checkout they deny with the stack remedy. Over an empty
+# stack in a dirty checkout they take nothing, the same verdict as main.
+STACK_FRAGMENT = "takes a stash entry"  # only STACK_DENY_REASON says this
+sh("stash import: over a real stack entry in a clean checkout denies, as on main",
+   VCS + " stash import abc123", "deny", "shared-tree", cwd=SUBJSTASH, carries=STACK_FRAGMENT)
+sh("stash export: over a real stack entry in a clean checkout denies, as on main",
+   VCS + " stash export", "deny", "shared-tree", cwd=SUBJSTASH, carries=STACK_FRAGMENT)
+sh("stash import: over an empty stack in a dirty checkout takes nothing, as on main",
+   VCS + " stash import abc123", "allow", cwd=SUBJDIRTY)
+sh("stash export: over an empty stack in a dirty checkout takes nothing, as on main",
+   VCS + " stash export", "allow", cwd=SUBJDIRTY)
+# Pins that stay green. The reads stay allowed, and an explicit push still denies here.
+sh("stash pathspec pin: stash list still reads a dirty checkout", VCS + " stash list", "allow",
+   cwd=SUBJDIRTY)
+sh("stash pathspec pin: stash show still reads a dirty checkout", VCS + " stash show", "allow",
+   cwd=SUBJDIRTY)
+sh("stash pathspec pin: an explicit stash push -- still denies over real uncommitted work",
+   VCS + " stash push -- f.txt", "deny", "shared-tree", cwd=SUBJDIRTY, carries=PUSH_FRAGMENT)
 # THE STACK IS ITS OWN SUBJECT. Every action that takes an entry off the stack is read with `git
 # stash list`, never with the tree. SUBJDIRTY is dirty and its stack is empty. SUBJSTASH is clean
 # and its stack holds one entry. The two cases cross, which is what proves the right read is made.
@@ -4688,6 +4741,124 @@ sh("env: the accessor search in the other shell",
    tool="PowerShell", cwd=NOGIT)
 
 
+# ---- audit-high (owner ruling 2026-10-13, guard-audit-high): the loader rule reads a wrapper only in
+# its exact shape. `time`, a loop's `do`, a timeout flag written `--flag=value`, and the Windows
+# spellings `bin/verdict.cmd` and `py -3 bin/verdict` all hid a real runner, so `node --env-file` was
+# refused as a non-runner. Each shape below is red on 13cebec. A non-runner stays refused behind any
+# wrapper, and a read stays refused behind any wrapper.
+for _cmd in (
+    "time node --env-file=" + ENV + " app.js",
+    "time -p node --env-file=" + ENV + " app.js",
+    "verdict time node --env-file=" + ENV + " app.js",
+    "time verdict node --env-file=" + ENV + " app.js",
+    "timeout --signal=TERM 5 node --env-file=" + ENV + " app.js",
+    "timeout --kill-after=2 5 node --env-file=" + ENV + " app.js",
+    "bin/verdict.cmd node --env-file=" + ENV + " app.js",
+    "py -3 bin/verdict node --env-file=" + ENV + " app.js",
+    "for f in a; do node --env-file=" + ENV + " t.js; done",
+    "for f in a; do verdict node --env-file=" + ENV + " t.js; done",
+    "for f in a; do time node --env-file=" + ENV + " t.js; done",
+    "for f in a; do timeout 5 node --env-file=" + ENV + " t.js; done",
+    'echo "don\'t"; for f in a; do node --env-file=' + ENV + ' t.js; done',
+):
+    sh("audit-high env: a runner behind a wrapper is allowed, " + _cmd[:34], _cmd, "allow",
+       cwd=NOGIT)
+for _cmd in (
+    "time cat " + ENV,
+    "time -p cat --env-file=" + ENV,
+    "for f in a; do cat " + ENV + "; done",
+    "verdict time cat --env-file=" + ENV,
+    "timeout --signal=TERM 5 cat --env-file=" + ENV,
+    "bin/verdict.cmd cat --env-file=" + ENV,
+    "verdict pytest --env-file=" + ENV,
+    "time node --env-file=" + ENV + " app.js && cat " + ENV,
+    "for f in a; do node --env-file=" + ENV + " t.js; cat " + ENV + "; done",
+):
+    sh("audit-high env: a read or a non-runner behind a wrapper is refused, " + _cmd[:30], _cmd,
+       "deny", "env-file", cwd=NOGIT)
+
+# ---- audit-high: a search pattern is not a path. `_env_words` splits a segment on whitespace and
+# does not read quotes, so a quoted pattern with a space leaves a fragment that reads as a path, and
+# `sed`, `awk` and `grep` patterns with a space were refused. A flag's value (`--max-count`,
+# `--context`, `--include`, `rg -g`) and the `-v` assignment of awk are not patterns either. The
+# multi-line shape is the scanner's own case: a quoted string that holds a newline. Each one is red
+# on 13cebec. The shapes the owner named are green controls below.
+for _cmd in (
+    'grep -n "def .*" f',
+    "grep -rn 'node --env-file=.* x' docs/",
+    "grep -rn -- --env-file=.* hooks/",
+    'grep -n "/\\* .* \\*/" src/a.js',
+    'grep -n "don\'t .*" notes.md',
+    'grep -n "a .* # b" f',
+    'grep -n "a\n.* b" f',
+    "sed -n '/.* err/p' log.txt",
+    "awk '/.* x/' f",
+    "grep --max-count 5 '.*' file",
+    "grep --context 3 '.*' file",
+    "grep --include '*.js' '.*' src/",
+    "rg -g '*.ts' '.*' src/",
+    "time grep '.*' file",
+    'for f in a; do grep ".*" "$f"; done',
+    "awk -v re='.*' '$0 ~ re' file",
+):
+    add("audit-high env: a search pattern is not a path, " + _cmd[:30].replace("\n", " "),
+        "allow", tool="Bash", cwd=NOGIT, command=_cmd)
+for _cmd in (
+    "grep '.*' file",
+    "grep -e '--env-file=.*' f",
+    'grep -n "a # b" f',
+    'grep -n "x // y" f',
+    "grep -n '#.*' file",
+    "sed -n '/.env/p' file",
+    "sed 's/.*//' file",
+    "awk '/.*/' file",
+    "awk -F. '{print $1}' file",
+    "for f in a; do\n  node --env-file=" + ENV + " t.js\ndone",
+):
+    add("audit-high env: a shape the owner named, or a scanner control, stays allowed, "
+        + _cmd[:24].replace("\n", " "), "allow", tool="Bash", cwd=NOGIT, command=_cmd)
+for _cmd in (
+    'grep -n "def .*" ' + ENV,
+    "sed -n '/.* err/p' " + ENV,
+    "awk '/.* x/' " + ENV,
+    "grep --max-count 5 foo " + ENV,
+    "grep --context 3 foo " + ENV,
+    "grep --include '*.js' '.*' " + ENV,
+    "rg -g '*.ts' foo " + ENV,
+    "time grep -f " + ENV + " x",
+    "for f in a; do grep foo " + ENV + "; done",
+):
+    sh("audit-high env: a real path after a pattern or a value flag is refused, " + _cmd[:24],
+       _cmd, "deny", "env-file", cwd=NOGIT)
+
+# ---- audit-high (owner ruling 1, guard-audit-high): a file-reading flag reads the file it names,
+# so that file is judged as a path. The flag may stand alone, carry its value attached, sit inside a
+# cluster of short flags, or be written `--long=value`. `-e` and `--regexp=` name a pattern, but the
+# operand after them is still a file. Each shape is red on 8e69e42. Controls: `grep '.*' file` and
+# `grep -e '--env-file=.*' f` stay allowed in the block above.
+for _cmd in (
+    "grep -f " + ENV + " x",
+    "grep -f" + ENV + " x",
+    "grep -nf " + ENV + " x",
+    "grep -rf " + ENV + " .",
+    "grep -ex " + ENV,
+    "grep --regexp=x " + ENV,
+    "sed -f" + ENV + " x",
+    "awk -f" + ENV + " x",
+):
+    sh("audit-high env: a file-reading flag reads its file, " + _cmd[:24], _cmd, "deny", "env-file",
+       cwd=NOGIT)
+# ---- audit-high regression (13cebec refused these, 8e69e42 allows them): a sed or awk program
+# flag, or a file operand after a long option, reads the file.
+for _cmd in (
+    "sed --expression=p " + ENV,
+    "sed -nf " + ENV + " x",
+    "awk --source='{print}' " + ENV,
+):
+    sh("audit-high env regression: a program flag still reads its file, " + _cmd[:24], _cmd,
+       "deny", "env-file", cwd=NOGIT)
+
+
 # =========================================================================== 5. merge into main
 FAMILY = "merge"
 #
@@ -5672,7 +5843,10 @@ sh("ordinary: npm ci is not the PowerShell ci alias", "npm ci", "allow", tool="P
 BT = "builder-test-edit"
 TA = "test-author-scope"
 B = dict(agent_id="bld1", agent_type="builder", cwd=NOGIT)
-A = dict(agent_id="auth1", agent_type="test-author", cwd=NOGIT)
+# audit-high (owner ruling 2026-10-13): product code is product code IN a repository. The cases
+# below used to run in NOGIT, which is a temp folder in no repository, so their refusals pinned the
+# outside-repo defect. Run in a real checkout, the same refusals hold on either reading of that rule.
+A = dict(agent_id="auth1", agent_type="test-author", cwd=GITMAIN)
 
 # ---- the early warning, by path (write tools)
 for _tool, _field in (("Edit", "file_path"), ("Write", "file_path"), ("MultiEdit", "file_path"),
@@ -5716,6 +5890,27 @@ add("test-author: Edit of package.json passes the early warning (the diff judges
 for _path in ("tests/test_a.py", "src/b_test.go", "pytest.ini", "pyproject.toml", "conftest.py",
               "jest.config.js"):
     add("test-author: Edit of %s is allowed" % _path, "allow", tool="Edit", file_path=_path, **A)
+# ---- mutation harnesses are test code: hooks/mutate_*.py holds the mutants the guard suite is judged
+# by, so a test-author edits them. Red on main: the early warning refused them as product code. The
+# builder case stays green and pins the fix to the test-author: agent_brief.py tells a builder to add
+# mutants to hooks/mutate_guard.py when the brief asks, and a builder must keep that.
+for _path in ("hooks/mutate_guard.py", "hooks/mutate_shared.py"):
+    add("test-author: Edit of mutation harness %s is allowed" % _path, "allow", tool="Edit",
+        file_path=_path, **A)
+add("test-author: Edit of hooks/guard_core.py is refused", "deny", rule=TA, tool="Edit",
+    file_path="hooks/guard_core.py", carries=("builder", "Report"), **A)
+add("builder-test: Edit of hooks/mutate_guard.py stays allowed for a builder", "allow", tool="Edit",
+    file_path="hooks/mutate_guard.py", agent_id="bld1", agent_type="builder", cwd=GITMAIN)
+# The harness set is a list of exact names, not a shape: a near miss stays product code, a name with
+# a colon is not a harness, and a name that differs only in case is the same file on Windows.
+add("test-author: Edit of hooks/mutate_x.py is refused", "deny", rule=TA, tool="Edit",
+    file_path="hooks/mutate_x.py", carries=("builder", "Report"), **A)
+add("test-author: Edit of hooks/mutate_:guard_core.py is refused", "deny", rule=TA, tool="Edit",
+    file_path="hooks/mutate_:guard_core.py", carries=("builder", "Report"), **A)
+add("test-author: Edit of janitor/mutate_sweep.py is allowed", "allow", tool="Edit",
+    file_path="janitor/mutate_sweep.py", **A)
+add("test-author: Edit of HOOKS/mutate_guard.py is allowed (case folds)", "allow", tool="Edit",
+    file_path="HOOKS/mutate_guard.py", **A)
 
 # ---- repo self-test files are test paths (Banchi incident, 2026-10-02): `*-selftest.*`,
 # `*_selftest.*`, `selftest_*.*`, in any folder. A .md file does NOT count: a note named like a
@@ -6137,11 +6332,26 @@ def long_lived_no_log_case():
     return True, "allowed with no builder-diff line"
 
 
+_author_mutant = diff_repo("g-author-mutant", _put("hooks/mutate_guard.py", "pass\n"))
+
+
+def author_mutant_no_log_case():
+    """A test-author's edit of a mutation harness is test code: commit and stop log no author-diff line."""
+    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-author-mutant"), _author_mutant,
+                              "test-author", "auth1")
+    rows = [r for r in rows if len(r) > 3 and r[3] == "author-diff"]
+    if out or rows:
+        return False, "a mutation harness was judged: %r %r" % (out[:60], rows)
+    return True, "a mutation harness logs no author-diff line"
+
+
 LOG_CHECKS_EXTRA = _TaggedLogs([
     ("role-diff: every unjudged stop is logged", role_log_case),
     ("builder-diff: the diff check logs for the reviewer and never blocks", diff_logs_case),
     ("builder-diff: main's later tests merged into a long-lived worktree log nothing",
      long_lived_no_log_case),
+    ("author-diff: a test-author's mutation harness edit logs no author-diff line",
+     author_mutant_no_log_case),
 ])
 for _label, _check in LOG_CHECKS_EXTRA:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
@@ -6237,6 +6447,56 @@ for _tool in ("Edit", "Write"):
                   "hooks/test_guard.py", "settings.json", "notes.md.py"):
         add("record-writer: %s of %s is refused" % (_tool, _path), "deny", rule=RW_RULE,
             carries=("Markdown", "Report"), tool=_tool, file_path=_path, new_string="x", **RW)
+
+# ---- audit-high (owner ruling 2026-10-13, guard-audit-high): the test-author's own scratch writes.
+# A path in no repository was judged by its full path, so the session scratchpad and a temp file
+# were refused (incident: 403 denies a week). Product code IN a repository stays refused. The
+# scratchpad allowance is the one under_session_scratchpad gives, keyed by the session id the payload
+# carries. A scratchpad inside a repository tells that check apart from the outside-repo rule: only
+# the matching session id is allowed there.
+SCRATCH_SID = "audit-high-session-01"
+SCRATCH_OTHER = "audit-high-session-02"
+OUTSIDE_TEMP = os.path.join(ROOT, "outside", "notes.txt")
+SESSION_SCRATCH = os.path.join(ROOT, SCRATCH_SID, "scratchpad", "notes", "out.txt")
+REPO_SCRATCH = os.path.join(GITMAIN, SCRATCH_SID, "scratchpad", "notes", "out.txt")
+REPO_OTHER_SCRATCH = os.path.join(GITMAIN, SCRATCH_OTHER, "scratchpad", "notes", "out.txt")
+for _tool in ("Edit", "Write"):
+    add("audit-high paths: test-author %s of a temp file in no repo is allowed" % _tool, "allow",
+        tool=_tool, file_path=OUTSIDE_TEMP, **A)
+    add("audit-high paths: test-author %s of its session scratchpad is allowed" % _tool, "allow",
+        tool=_tool, file_path=SESSION_SCRATCH, session=SCRATCH_SID, **A)
+    add("audit-high paths: test-author %s of its session scratchpad in a repo is allowed" % _tool,
+        "allow", tool=_tool, file_path=REPO_SCRATCH, session=SCRATCH_SID, **A)
+    add("audit-high paths: test-author %s of another session's scratchpad in a repo is refused"
+        % _tool, "deny", rule=TA, tool=_tool, file_path=REPO_OTHER_SCRATCH, session=SCRATCH_SID,
+        **A)
+    add("audit-high paths: test-author %s of product code in a repo is refused" % _tool, "deny",
+        rule=TA, tool=_tool, file_path=os.path.join(GITMAIN, "src", "app.py"), **A)
+add("audit-high paths: record-writer Write of a temp file in no repo is still refused", "deny",
+    rule=RW_RULE, carries=("Markdown", "Report"), tool="Write", file_path=OUTSIDE_TEMP, **RW)
+# The ruling covers ITS OWN session scratchpad. Another session's scratchpad outside every
+# repository is refused too: the outside-repo allowance above does not reach it. Red on 8e69e42.
+OTHER_SCRATCH_OUT = os.path.join(ROOT, SCRATCH_OTHER, "scratchpad", "notes", "out.txt")
+for _tool in ("Edit", "Write"):
+    add("audit-high paths: test-author %s of another session's scratchpad outside a repo is refused"
+        % _tool, "deny", rule=TA, tool=_tool, file_path=OTHER_SCRATCH_OUT, session=SCRATCH_SID, **A)
+# Windows folder names are case-insensitive: `Scratchpad` and `SCRATCHPAD` are the same folder as
+# `scratchpad`, so another session's folder spelled either way is refused there. On Linux and macOS
+# they are different folders, judged as no scratchpad, so allowed. Red on 5535b17 (Windows).
+for _tool in ("Edit", "Write"):
+    for _spelling in ("Scratchpad", "SCRATCHPAD"):
+        _path = os.path.join(ROOT, SCRATCH_OTHER, _spelling, "notes", "out.txt")
+        add("audit-high paths: test-author %s of another session's %s outside a repo, by OS"
+            % (_tool, _spelling), "deny" if os.name == "nt" else "allow",
+            rule=TA if os.name == "nt" else None, tool=_tool, file_path=_path,
+            session=SCRATCH_SID, **A)
+# A git clone under the test-author's own scratchpad (PRIVREPO sits under FAKE_SESSION's
+# scratchpad): a write to a file in that clone stays allowed, with the clone as the cwd. Pinned,
+# green on 8e69e42.
+for _tool in ("Edit", "Write"):
+    add("audit-high paths: test-author %s of a file in a clone under its own scratchpad is allowed"
+        % _tool, "allow", tool=_tool, file_path=os.path.join(PRIVREPO, "f.txt"),
+        session=FAKE_SESSION, **dict(A, cwd=PRIVREPO))
 
 # ---- every path field a write call carries is judged (PR #304 review). The guard picks ONE target,
 # the first non-empty of file_path, path, notebook_path, so a harmless decoy in file_path hid a real
@@ -8405,6 +8665,120 @@ LOG_CHECKS_EXTRA.append(("split cache: the PowerShell flag is part of the split,
                          split_cache_power_shell_case))
 
 
+# --------------------------------------------------------------------------- fail-closed
+#
+# audit-high (owner ruling 2026-10-13, guard-audit-high; decision gate-hooks-fail-closed): a guard
+# whose sibling module is missing refuses the call. guard.py allows instead, and 121 guard-crash
+# lines on 2026-10-13 (12:03 to 12:44) ran with every guard off. A case copies guard.py and its
+# guard_* siblings into a scratch folder, deletes one sibling, and runs a plain Bash call. The control
+# is an intact copy's deny, so the exit code is read from a real refusal, never assumed.
+FAMILY = "fail-closed"
+FAILCLOSED_MODULES = (
+    "guard_core", "guard_branch_worktree", "guard_shared_tree", "guard_pointer",
+    "guard_push_delete", "guard_merge", "guard_frozen", "guard_env", "guard_kill", "guard_stream",
+    "guard_rm_var", "guard_mask_script",
+)
+FAILCLOSED_REMEDY = ("install.sh", "install.ps1")
+FAILCLOSED_CALL = "ls"                # harmless: a refusal can only come from the missing module
+FAILCLOSED_CONTROL = "pkill -f node"  # an intact copy denies it, so its exit code is the deny's
+FAILCLOSED_CHECKS = []
+
+
+def _guard_copy(name, drop):
+    """A scratch folder with a copy of guard.py and every guard_* sibling, but for `drop`."""
+    source = os.path.dirname(GUARD)
+    folder = os.path.join(ROOT, "failclosed", name)
+    os.makedirs(folder, exist_ok=True)
+    shutil.copy(GUARD, os.path.join(folder, "guard.py"))
+    for entry in sorted(os.listdir(source)):
+        if entry.startswith("guard_") and entry.endswith(".py") and entry != drop:
+            shutil.copy(os.path.join(source, entry), folder)
+    return folder
+
+
+def _run_copy(folder, command, name):
+    """One Bash call through the copy's guard.py, with a config folder of its own. No -I, and no
+    PYTHONPATH, so the script's own folder is on the path and the sibling imports resolve there."""
+    cfg = os.path.join(ROOT, "failclosed-cfg", name)
+    os.makedirs(cfg, exist_ok=True)
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env["CLAUDE_CONFIG_DIR"] = cfg
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": NOGIT})
+    return subprocess.run([sys.executable, os.path.join(folder, "guard.py")], input=payload,
+                          capture_output=True, text=True, env=env, timeout=120)
+
+
+def _decision(run):
+    """(decision, reason) of one guard run. An empty stdout is an allow."""
+    out = run.stdout.strip()
+    if not out:
+        return "allow", ""
+    try:
+        block = json.loads(out)["hookSpecificOutput"]
+        return block["permissionDecision"], block["permissionDecisionReason"]
+    except Exception:
+        return "unparsable", out[:120]
+
+
+def _intact_allows_a_plain_call():
+    run = _run_copy(_guard_copy("intact-call", None), FAILCLOSED_CALL, "intact-call")
+    decision, reason = _decision(run)
+    if decision != "allow" or run.returncode != 0:
+        return False, "an intact copy gave %r, exit %d: %r" % (decision, run.returncode, reason[:90])
+    return True, "an intact copy allows the plain call, exit 0"
+
+
+def fail_closed_case(module):
+    """A copy with `module` deleted refuses a plain Bash call. The intact copy's deny for the control
+    call sets the exit code the refusal must match, and the reason names the reinstall step and no
+    file: not the module, not its folder, and no forbidden target."""
+    drop = module + ".py"
+
+    def check():
+        if not os.path.exists(os.path.join(os.path.dirname(GUARD), drop)):
+            return False, "%s is not beside guard.py, so the case cannot delete it" % drop
+        control = _run_copy(_guard_copy(module + "-intact", None), FAILCLOSED_CONTROL,
+                            module + "-intact")
+        if _decision(control)[0] != "deny":
+            return False, "the intact copy did not deny the control call: %r" % (_decision(control),)
+        folder = _guard_copy(module, drop)
+        run = _run_copy(folder, FAILCLOSED_CALL, module)
+        decision, reason = _decision(run)
+        problems = []
+        if decision != "deny":
+            problems.append("the call is %r with %s missing, want deny" % (decision, drop))
+        if run.returncode != control.returncode:
+            problems.append("exit %d, the other denies exit %d" % (run.returncode, control.returncode))
+        if not any(step in reason for step in FAILCLOSED_REMEDY):
+            problems.append("the reason names no reinstall step: %r" % reason[:90])
+        for leak in (drop, module, folder, slash(folder)):
+            if leak in reason:
+                problems.append("the reason names %r" % leak)
+        named = names_the_target(reason)
+        if named:
+            problems.append("the reason names the forbidden target %r" % named)
+        if problems:
+            return False, "; ".join(problems)
+        return True, "refused with exit %d; the reason names the reinstall step and no file" % (
+            run.returncode)
+    return check
+
+
+for _module in FAILCLOSED_MODULES:
+    _check = fail_closed_case(_module)
+    FAILCLOSED_CHECKS.append(_check)
+    LOG_CHECKS_EXTRA.append(("audit-high fail-closed: a copy missing %s refuses a Bash call"
+                             % _module, _check))
+for _label, _check in (
+    ("audit-high fail-closed: an intact copy allows a plain Bash call", _intact_allows_a_plain_call),
+):
+    FAILCLOSED_CHECKS.append(_check)
+    LOG_CHECKS_EXTRA.append((_label, _check))
+
+
 # --------------------------------------------------------------------------- session-log
 #
 # guard.log gets ONE column for the hook's session_id, LAST, after the matched text. The five
@@ -8829,6 +9203,9 @@ WINDOWS_CHECKERS = {
     worktree_live_session_two_spellings_case,
     worktree_live_session_path_unresolvable_case,
 }
+# audit-high: the fail-closed checks read no Windows-only code, but the Windows slice runs on
+# every pull request, and a missing sibling is the Windows incident. They run in that slice too.
+WINDOWS_CHECKERS.update(FAILCLOSED_CHECKS)
 
 
 # --------------------------------------------------------------------------- the simulator boot rules
