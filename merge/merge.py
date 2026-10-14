@@ -83,7 +83,7 @@ def git(cwd, *a, input=None):
 
 SETTLE_SECONDS = 30
 NET_RETRIES, NET_PAUSE = 3, 5  # owner ruling 2026-10-13: retry a network error 3 times, a short pause between
-NET_ERROR = re.compile(r"TLS handshake timeout|i/o timeout|connection reset|\bEOF\b|HTTP 50[234]\b|\b50[234] (?:Bad Gateway|Service Unavailable|Gateway Time-?out)", re.I)
+NET_ERROR = re.compile(r"TLS handshake timeout|i/o timeout|connection reset|(?:\x22: |unexpected )EOF\b|HTTP 50[234]\b|\b50[234] (?:Bad Gateway|Service Unavailable|Gateway Time-?out)", re.I)
 
 def undo_check(wt, base_ref, unknown_ok=""):
     """The shared silent-undo lint (lint/check_silent_undo.py), run on the branch before anything is pushed.
@@ -297,7 +297,7 @@ class Host:
         self.net_retries = 0
         while True:
             c, out = sh(["gh", *args], cwd=cwd)
-            if not (c and NET_ERROR.search(out)):
+            if not (c and NET_ERROR.search(out) and not out.lstrip().startswith(("[", "{"))):  # JSON is gh's answer (a check named EOF), not its error line
                 return c, out
             if self.net_retries >= (NET_RETRIES if _READ_DEADLINE is None else 0):
                 raise NetStop(f"network error from `gh {' '.join(args[:2])}`, still failing after {self.net_retries} retries. Nothing was reverted. Run again.\n{out}")
@@ -519,21 +519,32 @@ class Host:
 
     def merge(self, n, method, sha):
         """`gh pr merge --match-head-commit sha`. Never --admin, never --delete-branch (cut_branch does that).
-        -> (merge commit oid or None, message)."""
-        c, out = self.gh(["pr", "merge", str(n), f"--{method}", "--match-head-commit", sha])
-        if c and not (self.net_retries and "already merged" in out.lower()):  # a retry that answers "already merged": the lost reply had landed
+        -> (merge commit oid or None, message). A refusal returns None. When the reply may be lost (a network
+        error before the answer) or says "already merged", the answer is not trusted: the PR state is read.
+        MERGED reads as merged; not merged after a lost reply is a NetStop (no revert); an unreadable state is a NetStop."""
+        lost = None
+        try:
+            c, out = self.gh(["pr", "merge", str(n), f"--{method}", "--match-head-commit", sha])
+        except NetStop as e:
+            lost, c, out = e, 1, str(e)
+        unsure = bool(lost or self.net_retries)
+        if c and not (unsure or "already merged" in out.lower()):
             return None, out
         try:
-            c, out = self.gh(["pr", "view", str(n), "--json", "state,mergeCommit"])
+            c2, view = self.gh(["pr", "view", str(n), "--json", "state,mergeCommit"])
         except NetStop as e:
-            raise NetStop(f"the merge of #{n} landed, but its merge commit cannot be read: {e}")
+            raise NetStop(f"the merge of #{n} may have landed, and its state cannot be read: {e}")
         try:
-            d = json.loads(out)
+            d = json.loads(view)
             if d["state"] == "MERGED" and d["mergeCommit"]:
                 return d["mergeCommit"]["oid"], ""
         except (ValueError, KeyError, TypeError):
             pass
-        return None, "gh pr merge passed, but the pull request shows no merge commit: " + out
+        if not c:
+            return None, "gh pr merge passed, but the pull request shows no merge commit: " + view
+        if unsure:
+            raise NetStop(f"network error on `gh pr merge` of #{n}, and the pull request is not merged. Nothing was reverted. Run again.\n{out}")
+        return None, out
 
 # ------------------------------------------------------------------ git steps
 
@@ -893,6 +904,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             if not ok:
                 fail(why)
             c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
+            if c and NET_ERROR.search(out):  # a network error is not a refusal: the claim stays
+                raise NetStop(f"network error on the fetch of origin {base}. The claim stays on {branch}. Run again to resume.\n{out}")
             if c:  # never check against a stale base tip
                 fail(f"cannot fetch origin {base}, so the claim cannot be proved fresh:\n" + out)
             try:  # main may have moved during the wait: read the branch against the tip fetched just now
