@@ -8,8 +8,9 @@ import re
 
 import guard_core
 from guard_core import (
-    REDIRECT, _expanded, _resolved, norm, split_segments,
+    REDIRECT, _drop_heredoc_bodies, _expanded, _resolved, norm, split_segments,
 )
+from guard_env import _quoted_words
 
 
 # ------------------------------------------------------------------ the frozen paths
@@ -228,19 +229,59 @@ def _resolve_vars(cmd: str) -> str:
     return _VAR_TOKEN.sub(step, cmd)
 
 
+# DATA IS NOT A WRITE. Incident 2026-10-14: a reviewer's probe piped a JSON sample that held a cap
+# write into `python hooks/guard.py`, and the owner was asked to approve a call that wrote nothing.
+# A quoted string that holds a space or an operator, and a heredoc body fed to a program that is not a
+# shell, are text for that program: no redirect or `tee` inside them runs. Two cases keep the text
+# in view. A shell reads it (`bash -c "..."`, `eval`, `pwsh -c`, a heredoc fed to `sh`), and a
+# double-quoted string holds `$(` or a backtick, which the shell runs.
+# RESIDUAL GAP: a program that writes from its own code (`python -c`, a python heredoc) is not seen
+# here; debt cap-write-by-python-unseen.
+_SHELL_RUNNERS = frozenset((
+    "bash", "sh", "zsh", "dash", "ksh", "eval", "pwsh", "powershell", "cmd", "wsl", "su"))
+_SHELL_HEREDOC = re.compile(r"\b(?:bash|sh|zsh|dash|ksh)\b[^\n]*<<")
+_DATA_WORD = re.compile(r"[\s<>|;&]")
+
+
+def _text_words(word: str, shell_runs_it: bool):
+    """The words a segment's quoted word stands for: itself when it is no text, one blank when it is
+    data, else the words inside it (a shell runs them: it reads the quote as code)."""
+    if word[:1] not in ("'", '"') or not _DATA_WORD.search(word):
+        return [word]
+    if shell_runs_it or (word[0] == '"' and ("$(" in word or "`" in word)):
+        return REDIRECT.sub(r" \1 ", word).split()
+    return ['""']
+
+
+def _runs_text(words) -> bool:
+    """True when a command word of the segment is a shell, so its quoted argument is code."""
+    for word in words:
+        if word[:1] not in ("'", '"'):
+            name = word.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+            if name.removesuffix(".exe") in _SHELL_RUNNERS:
+                return True
+    return False
+
+
 def _shell_write_hit(cmd: str, cwd: str, predicate) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''."""
     cmd = _resolve_vars(cmd)
+    if not _SHELL_HEREDOC.search(cmd):
+        cmd = _drop_heredoc_bodies(cmd)
     for segment in split_segments(cmd):
         if not segment.strip():
             continue
-        for word in REDIRECT.sub(r" \1 ", segment).split():
+        words = _quoted_words(segment)
+        shell_runs_it = _runs_text(words)
+        words = [part for word in words for part in _text_words(word, shell_runs_it)]
+        text = " ".join(words)
+        for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
             bare = word.strip("'\"")
             if not bare or bare in (">", ">>"):
                 continue
-            if predicate(bare, cwd) and writes_to(word, segment):
+            if predicate(bare, cwd) and writes_to(word, text):
                 return bare
     return ""
 
