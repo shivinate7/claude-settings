@@ -1427,23 +1427,21 @@ class GhHalf(Env):
 
     def test_a_wrapped_run_list_http_502_is_a_network_error_retried_then_stopped(self):
         self.run_list_fails_wrapped("failed to get runs: HTTP 502: 502 Bad Gateway (https://api.github.com/repos/o/r/actions/runs?head_sha=abc)")
+        self.assertEqual(self.paused, [merge.NET_PAUSE] * 3)  # a plain network error waits the normal pause
 
     def test_a_wrapped_run_list_http_429_is_a_network_error_retried_then_stopped(self):
         self.run_list_fails_wrapped("failed to get runs: HTTP 429: Too Many Requests (https://api.github.com/repos/o/r/actions/runs?head_sha=abc)")
+        self.assertEqual(self.paused, [merge.RATE_WAIT_CAP] * 3)  # a 429 is a rate limit: the cap
 
     # ---- lane merge-rate-limit (owner ruling "Retry 3 times", merge-net-retry): a rate-limit 403 or a 429 is a network fault, never "not green" (q_max PR 874, 2026-10-14)
 
-    def waited(self, seconds):
-        """A retry pause of `seconds` (to 1 s over) is in self.paused. The wait loop's own pauses are 60 and 30, so use a value that is neither."""
-        return any(seconds <= p <= seconds + 1 for p in self.paused)
-
     def test_a_run_list_rate_limit_403_is_a_network_error_retried_then_stopped(self):
         self.run_list_fails_wrapped(RATE_403)  # the incident text: 4 calls, a network stop, never "not green"
-        self.assertEqual(self.paused, [merge.NET_PAUSE] * 3)  # no hint in it: the normal pause. Its request timestamp is no reset time.
+        self.assertEqual(self.paused, [merge.RATE_WAIT_CAP] * 3)  # a rate limit waits the cap. Its request timestamp is no reset time.
 
     def test_a_run_list_secondary_rate_limit_403_is_a_network_error_retried_then_stopped(self):
         self.run_list_fails_wrapped(RATE_SECONDARY_403)
-        self.assertEqual(self.paused, [merge.NET_PAUSE] * 3)
+        self.assertEqual(self.paused, [merge.RATE_WAIT_CAP] * 3)
 
     def test_a_run_list_rate_limit_403_that_clears_on_the_retry_lets_the_merge_go_on(self):
         self.set(runs_fail_first=[RATE_403])
@@ -1451,16 +1449,15 @@ class GhHalf(Env):
         self.assertEqual(rc, 0, out)
         self.assertNotIn("not green", out)
         self.assertEqual(self.gh_state("runs_failed"), 1)
-        self.assertIn(merge.NET_PAUSE, self.paused)
+        self.assertEqual(self.paused[0], merge.RATE_WAIT_CAP, self.paused)  # the first pause is the retry's
         self.assertEqual(self.claims("main"), 1)
         self.assertFalse(self.lock_ref())
 
-    def test_a_retry_after_in_the_gh_text_is_the_wait_before_the_retry(self):
+    def test_a_retry_after_in_the_gh_text_never_changes_the_rate_wait(self):
         self.set(runs_fail_first=["Retry-After: 17\n" + RATE_403])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
-        self.assertTrue(self.waited(17), self.paused)
-        self.assertNotIn(merge.NET_PAUSE, self.paused)  # the hint replaced the normal pause
+        self.assertEqual(self.paused[0], merge.RATE_WAIT_CAP, self.paused)  # the header's 17 s is ignored
 
     def checks_read_fails(self, msg, n=99):
         """Every check is green and `gh pr checks` fails n times with `msg`. A network-class text: retried 3 times, then a stop. Nothing is claimed."""
@@ -1475,24 +1472,24 @@ class GhHalf(Env):
         self.assertEqual(self.head(), before)  # nothing claimed or pushed
         self.assertFalse(self.lock_ref())
 
-    def test_a_pr_checks_http_429_is_a_network_error_retried_then_stopped(self):  # (b): green before the lane, a guard
+    def test_a_pr_checks_http_429_is_a_network_error_retried_then_stopped(self):
         self.checks_read_fails("HTTP 429: Too Many Requests (https://api.github.com/graphql)")
-        self.assertEqual(self.paused, [merge.NET_PAUSE] * 3)
+        self.assertEqual(self.paused, [merge.RATE_WAIT_CAP] * 3)  # a 429 is a rate limit: the cap
 
     def test_a_pr_checks_rate_limit_403_is_a_network_error_retried_then_stopped(self):
         self.checks_read_fails(RATE_GQL_403)
-        self.assertEqual(self.paused, [merge.NET_PAUSE] * 3)
+        self.assertEqual(self.paused, [merge.RATE_WAIT_CAP] * 3)
 
     def test_a_pr_checks_graphql_rate_limit_already_exceeded_is_a_network_error_retried_then_stopped(self):
         self.checks_read_fails(RATE_GQL_ALREADY)  # owner's word: it retries like the 403
-        self.assertEqual(self.paused, [merge.NET_PAUSE] * 3)
+        self.assertEqual(self.paused, [merge.RATE_WAIT_CAP] * 3)
 
-    def test_a_retry_after_on_a_pr_checks_429_is_the_wait_before_the_retry(self):
+    def test_a_retry_after_on_a_pr_checks_429_never_changes_the_rate_wait(self):
         self.set(checks_fail={"n": 1, "msg": "Retry-After: 17\nHTTP 429: Too Many Requests (https://api.github.com/graphql)"})
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.gh_state("checks_failed"), 1)
-        self.assertTrue(self.waited(17), self.paused)
+        self.assertEqual(self.paused[0], merge.RATE_WAIT_CAP, self.paused)  # the header's 17 s is ignored
 
     def test_a_required_check_read_with_a_rate_limit_403_stops_without_a_revert(self):
         self.required_read_fails_after_the_claim(RATE_API_403)  # `gh api` form: the claim stays, 4 tries
@@ -2977,8 +2974,8 @@ class RateLimitLines(unittest.TestCase):
 
 class RateLimitWait(unittest.TestCase):
     """retry_net and Host.gh on a rate-limited call (lane merge-rate-limit): how many tries, and how long each wait is. The pause is a
-    recorder, so nothing sleeps. A hint is a header line `Retry-After: <seconds>` or `X-Ratelimit-Reset: <epoch seconds>`, as `gh api -i` prints it.
-    A wait honors it to 1 s over, is never more than merge.RATE_WAIT_CAP, and is never negative (time.sleep raises on one)."""
+    recorder, so nothing sleeps. Headers are ignored (orchestrator ruling 2026-10-14): a rate-limit text (403 or 429, any form) waits
+    merge.RATE_WAIT_CAP per retry, whatever a `Retry-After` or `X-Ratelimit-Reset` line says. Any other network error waits merge.NET_PAUSE."""
     NOW = 1000.0
 
     def setUp(self):
@@ -3004,29 +3001,26 @@ class RateLimitWait(unittest.TestCase):
             return seq[min(self.calls, len(seq)) - 1]
         return merge.retry_net(call, self.pauses.append)
 
-    def assert_waits(self, want):
-        self.assertEqual(len(self.pauses), 1, self.pauses)
-        self.assertTrue(want <= self.pauses[0] <= want + 1, f"waited {self.pauses[0]}, wanted {want}")
-
     # retry_net: the tries
-    def test_a_rate_limit_403_is_retried_with_the_normal_pause(self):
+    def test_a_rate_limit_403_is_retried_with_the_rate_wait(self):
         self.assertEqual(self.retry((1, RATE_403), (1, RATE_SECONDARY_403), (0, "[]")), (0, "[]", 2))
-        self.assertEqual(self.pauses, [merge.NET_PAUSE] * 2)  # no hint in either text, so no wait but the normal one
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP] * 2)  # a rate limit waits the cap, not NET_PAUSE
 
     def test_the_wait_cap_is_60_seconds(self):  # orchestrator's call, 2026-10-14: the one value, so the other cases read the constant
         self.assertEqual(merge.RATE_WAIT_CAP, 60)
 
-    def test_a_graphql_rate_limit_already_exceeded_is_retried_with_the_normal_pause(self):
+    def test_a_graphql_rate_limit_already_exceeded_is_retried_with_the_rate_wait(self):
         self.assertEqual(self.retry((1, RATE_GQL_ALREADY), (0, "[]")), (0, "[]", 1))
-        self.assertEqual(self.pauses, [merge.NET_PAUSE])
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
 
     def test_a_rate_limit_403_that_never_clears_is_tried_four_times(self):
         self.assertEqual(self.retry((1, RATE_403)), (1, RATE_403, 3))
         self.assertEqual(self.calls, 4)  # one try and three retries
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP] * 3)
 
-    def test_a_429_is_retried_with_the_normal_pause(self):  # (b): green before the lane, a guard
+    def test_a_429_is_retried_with_the_rate_wait(self):
         self.assertEqual(self.retry((1, R429), (0, "[]")), (0, "[]", 1))
-        self.assertEqual(self.pauses, [merge.NET_PAUSE])
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
 
     def test_a_plain_403_is_not_retried(self):  # (d): green before the lane, a guard
         for out in (PLAIN_403, PLAIN_403_BRANCH, PLAIN_403_API):
@@ -3035,53 +3029,49 @@ class RateLimitWait(unittest.TestCase):
                 self.assertEqual(self.retry((1, out), (0, "[]")), (1, out, 0))
                 self.assertEqual(self.pauses, [])
 
-    # retry_net: a Retry-After hint. The 429 case isolates the wait: a 429 already retries, so only the wait is new.
-    def test_a_retry_after_is_the_wait_on_a_429_and_on_a_rate_limit_403(self):
-        for text in (R429, RATE_403, RATE_SECONDARY_403):
-            for header in ("Retry-After: 17", "retry-after: 17"):
+    def test_a_plain_network_error_waits_the_normal_pause_whatever_its_headers(self):  # the NET_PAUSE half of the rule
+        for out in (NET_TLS, "failed to get runs: HTTP 502: 502 Bad Gateway (https://api.github.com/repos/o/r/actions/runs?head_sha=abc)",
+                    "Retry-After: 5\n" + NET_TLS):
+            with self.subTest(out=out[:40]):
+                self.pauses.clear()
+                self.assertEqual(self.retry((1, out), (0, "[]")), (0, "[]", 1))
+                self.assertEqual(self.pauses, [merge.NET_PAUSE])
+
+    def test_a_retry_after_never_changes_the_rate_wait(self):  # a Retry-After of 5 s or 600 s is no wait: every rate-limit text waits the cap
+        for text in (R429, RATE_403, RATE_SECONDARY_403, RATE_GQL_ALREADY):
+            for header in ("Retry-After: 5", "retry-after: 17", "Retry-After: 600"):
                 with self.subTest(text=text[:40], header=header):
                     self.pauses.clear()
-                    self.retry((1, header + "\n" + text), (0, "[]"))
-                    self.assert_waits(17)
+                    self.assertEqual(self.retry((1, header + "\n" + text), (0, "[]")), (0, "[]", 1))
+                    self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
 
-    def test_a_retry_after_over_the_cap_waits_the_cap(self):
-        for seconds in (merge.RATE_WAIT_CAP + 1, 3600):
-            with self.subTest(seconds=seconds):
-                self.pauses.clear()
-                self.retry((1, f"Retry-After: {seconds}\n" + R429), (0, "[]"))
-                self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
-
-    # Host.gh: the reset time, read against the host's own clock; and the stop
-    def test_a_reset_time_is_the_wait_on_a_429_and_on_a_rate_limit_403(self):
+    # Host.gh: a reset header is ignored, near, far or past (orchestrator ruling 2026-10-14). The reset time is no wait.
+    def test_a_reset_time_never_changes_the_rate_wait_on_a_429_or_a_rate_limit_403(self):
         for text in (R429, RATE_403):
-            with self.subTest(text=text[:40]):
-                self.pauses.clear()
-                self.replies((1, f"X-Ratelimit-Reset: {int(self.NOW) + 23}\n" + text), (0, "[]"))
-                self.assertEqual(self.host().gh(["run", "list"]), (0, "[]"))
-                self.assert_waits(23)
+            for header in (f"X-Ratelimit-Reset: {int(self.NOW) + 5}", f"X-Ratelimit-Reset: {int(self.NOW) + 23}",
+                           f"X-RateLimit-Reset: {int(self.NOW) + 3600}"):
+                with self.subTest(text=text[:40], header=header):
+                    self.pauses.clear()
+                    self.replies((1, header + "\n" + text), (0, "[]"))
+                    self.assertEqual(self.host().gh(["run", "list"]), (0, "[]"))
+                    self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
 
-    def test_a_reset_time_far_ahead_waits_the_cap(self):
-        self.replies((1, f"X-RateLimit-Reset: {int(self.NOW) + 3600}\n" + R429), (0, "[]"))
-        self.host().gh(["run", "list"])
-        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
-
-    def test_a_reset_time_already_past_never_waits_a_negative_time(self):
+    def test_a_reset_time_already_past_waits_the_rate_wait_never_a_negative_time(self):
         self.replies((1, f"X-Ratelimit-Reset: {int(self.NOW) - 100}\n" + R429), (0, "[]"))
         self.host().gh(["run", "list"])
-        self.assertEqual(len(self.pauses), 1, self.pauses)
-        self.assertTrue(0 <= self.pauses[0] <= merge.RATE_WAIT_CAP, self.pauses)
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])  # a fixed cap: no time is computed from the header
 
-    def test_a_rate_limit_with_no_hint_waits_the_normal_pause_whatever_its_timestamp_says(self):
+    def test_a_rate_limit_waits_the_rate_wait_whatever_its_timestamp_says(self):
         self.replies((1, RATE_403), (0, "[]"))  # "timestamp 2026-10-14 12:26:42 UTC" is the request's time, not a reset
         self.host().gh(["run", "list"])
-        self.assertEqual(self.pauses, [merge.NET_PAUSE])
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP])
 
     def test_a_rate_limit_that_never_clears_is_a_net_stop_after_three_retries(self):  # (e)
         self.replies((1, RATE_403))
         with self.assertRaises(merge.NetStop) as cm:
             self.host().gh(["run", "list"])
         self.assertEqual(self.calls, 4)
-        self.assertEqual(self.pauses, [merge.NET_PAUSE] * 3)
+        self.assertEqual(self.pauses, [merge.RATE_WAIT_CAP] * 3)
         self.assertIn("API rate limit exceeded", str(cm.exception))  # the stop shows gh's own words
 
     def test_a_plain_403_is_returned_at_once_by_host_gh(self):  # (d): a guard
