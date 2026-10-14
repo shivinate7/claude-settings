@@ -2,7 +2,8 @@
 Asserts the gated finding reaches the job log and the ::error annotation, both exit codes,
 the changed-lines scope, the diff range, the exclude split, and annotation escaping.
 Also asserts bin/ste-changed matches the step on the same diff: scope, findings, verdict, exit code.
-Excludes come only from the target repo's own .ste-lint-exclude, never from this repo's file."""
+Excludes are the target repo's own .ste-lint-exclude plus the action's `exclude` input, never this repo's file.
+Also asserts the file's last line counts with no final newline, '**' matches at the root, and a run from a subdirectory."""
 import os, re, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -90,21 +91,24 @@ def run(scope, fail="true", base=BASE_FILES, change=default_change, on_main=Fals
         return run_step(d, work, env)
 
 
-def run_command(work, extra=None):
+def run_command(work, extra=None, sub=None):
     """bin/ste-changed main in the scratch repo, with the step's variables stripped: it finds its own config.
-    `extra` sets more variables on the command, to check that they are not read."""
+    `extra` sets more variables on the command, to check that they are not read.
+    `sub` is a subdirectory of the repo to run it from: the command must not depend on the current directory."""
     if not os.path.exists(CMD):
         return 127, "bin/ste-changed is missing: %s" % CMD
     env = {k: v for k, v in os.environ.items() if k not in STEP_ENV}
     env.update(extra or {})
-    p = subprocess.run([sys.executable, CMD, "main"], cwd=work, env=env, capture_output=True, text=True)
+    p = subprocess.run([sys.executable, CMD, "main"], cwd=os.path.join(work, sub) if sub else work, env=env,
+                       capture_output=True, text=True)
     return p.returncode, p.stdout + p.stderr
 
 
-def run_pair(change, base=BASE_FILES, exclude=EXCLUDE_TEXT, command_env=None):
+def run_pair(change, base=BASE_FILES, exclude=EXCLUDE_TEXT, command_env=None, sub=None):
     """One diff in one target repo, two runs: the step, then bin/ste-changed with no config of its own.
     `exclude` is the target's .ste-lint-exclude text, committed on main; None means the target has no file.
-    The step reads that file from the repo root, as the CI step does. Neither run gets this repo's file."""
+    The step reads that file from the repo root, as the CI step does. Neither run gets this repo's file.
+    The step runs at the repo root, as in CI. `sub` runs the command from that subdirectory instead."""
     files = dict(base)
     if exclude is not None:
         files[".ste-lint-exclude"] = exclude
@@ -115,7 +119,7 @@ def run_pair(change, base=BASE_FILES, exclude=EXCLUDE_TEXT, command_env=None):
                    REF_NAME="topic", SCOPE="changed", FAIL="true", PATHS_GLOB="**/*.md",
                    EXCLUDE="", CHANGED_PATHS_GLOB=changed_paths_default(), DECISIONS_DIR="",
                    GITHUB_STEP_SUMMARY=os.path.join(d, "sum"))
-        return run_step(d, work, env), run_command(work, command_env)
+        return run_step(d, work, env), run_command(work, command_env, sub)
 
 
 def parts(out):
@@ -191,8 +195,8 @@ rc, out = run("changed", change=two_commits, on_main=True, BASE_REF="", REF_NAME
 check("push to default branch: only the last commit is linted", rc == 0 and "STE001" not in out, out)
 
 
-# The action's `exclude` input is dropped: the target repo's .ste-lint-exclude is the one home for excludes.
-# A value passed as EXCLUDE drops nothing, so b.md and c.md are still linted.
+# The action's `exclude` input keeps working (a pinned caller passes it): comma- or newline-separated
+# pathspecs, each dropping its file, added to the target's .ste-lint-exclude patterns.
 def three_files(work):
     write(work, "a.md", "# A\n\nShort line.\n")
     write(work, "b.md", "# B\n\n" + LONG + "\n")
@@ -201,8 +205,35 @@ def three_files(work):
 
 
 rc, out = run("changed", base={"a.md": "# A\n"}, change=three_files, EXCLUDE="b.md,c.md")
-check("exclude input: an EXCLUDE value drops nothing, b.md and c.md are still linted",
-      rc == 1 and "3 file(s) in scope, 0 excluded" in out and "b.md:3: STE001 " in out and "c.md:3: STE001 " in out, out)
+check("exclude input: comma-separated patterns each drop their file",
+      rc == 0 and "1 file(s) in scope, 2 excluded" in out and "STE001" not in out, out)
+check("exclude input: action.yml declares it, default empty, and hands it to the step as EXCLUDE",
+      re.search(r'^  exclude:\n(?:    .*\n)*?    default: ""', text, re.M) is not None
+      and "EXCLUDE: ${{ inputs.exclude }}" in text, "action.yml lacks the exclude input or its EXCLUDE mapping")
+
+
+# The pinned caller's value, '.claude/skills/neon*/**', drops a changed file under that folder with no
+# .ste-lint-exclude in the repo, and alongside the file's own patterns (union) when there is one.
+NEON = ".claude/skills/neon*/**"
+
+
+def neon_change(work):
+    write(work, "a.md", "# A\n\nShort line.\n")
+    write(work, ".claude/skills/neon-x/a.md", "# N\n\n" + LONG + "\n")
+    git(work, "add", "."); git(work, "commit", "-qm", "neon")
+
+
+def neon_gen_change(work):
+    write(work, "gen/x.md", "# G\n\n" + LONG + "\n")
+    neon_change(work)
+
+
+rc, out = run("changed", base={"a.md": "# A\n"}, change=neon_change, EXCLUDE=NEON)
+check("exclude input, no .ste-lint-exclude: the neon pattern drops the neon file, a.md stays",
+      rc == 0 and "1 file(s) in scope, 1 excluded" in out and "STE001" not in out, out)
+rc, out = run("changed", base={"a.md": "# A\n", ".ste-lint-exclude": "gen/**\n"}, change=neon_gen_change, EXCLUDE=NEON)
+check("exclude input with .ste-lint-exclude: the input's pattern and the file's pattern both apply",
+      rc == 0 and "1 file(s) in scope, 2 excluded" in out and "STE001" not in out, out)
 
 
 # '%' in an annotation property is escaped as %25, or the runner decodes the path wrongly.
@@ -310,12 +341,68 @@ check("target exclude: the command skips it too, same header, files, findings, v
 
 
 # bin/ste-changed takes no exclude input. An EXCLUDE value in its environment changes nothing: the command
-# lints the same files, findings and exit code as the step does with EXCLUDE empty.
+# lints the same files, findings and exit code as the step does with EXCLUDE empty (the input's default).
+# The step reads EXCLUDE, so the command must set it to that default and not pass the caller's value on.
 (s_rc, s_out), (c_rc, c_out) = run_pair(target_exclude_change, base={"a.md": "# A\n", "gen/x.md": "# G\n"},
                                          exclude=None, command_env={"EXCLUDE": "gen/**"})
 s, c = parts(s_out), parts(c_out)
 check("exclude input: an EXCLUDE value given to the command drops nothing, same files and findings as the step",
       c_rc == s_rc == 1 and s["files"] == ["a.md", "gen/x.md"] and c["files"] == s["files"]
+      and c["findings"] == s["findings"] and c["verdict"] == s["verdict"], c_out)
+
+
+# A .ste-lint-exclude whose last line has no newline still excludes that line's pattern.
+# Red on b205964: `read -r` returns 1 on the last line, so run.sh dropped it and gen/x.md stayed in scope.
+(s_rc, s_out), (c_rc, c_out) = run_pair(target_exclude_change, base={"a.md": "# A\n", "gen/x.md": "# G\n"},
+                                         exclude="gen/**")
+s, c = parts(s_out), parts(c_out)
+check("no final newline: the step excludes the file's only pattern",
+      s_rc == 1 and s["files"] == ["a.md"] and s["head"].endswith("1 excluded"), s_out)
+check("no final newline: the command excludes it too, same header, files, findings, verdict and exit code",
+      c_rc == s_rc and c["files"] == ["a.md"] and c["head"] == s["head"] and c["files"] == s["files"]
+      and c["findings"] == s["findings"] and c["verdict"] == s["verdict"], c_out)
+
+
+# The command run from a subdirectory lints what it lints at the root, and gates the same lines.
+# `git diff --name-only` prints root-relative paths, so the pathspecs and the file names must not
+# depend on the current directory. Red on b205964: the root file fell out of scope ("no markdown
+# changed", exit 0), or, with a changed file in the subdirectory too, the linter got a path it could not open.
+SUB_BASE = {"a.md": "# A\n", "sub/keep.txt": "x\n"}
+
+
+def root_and_sub_change(work):
+    default_change(work)
+    write(work, "sub/b.md", "# B\n\n" + LONG + "\n")
+    git(work, "add", "."); git(work, "commit", "-qm", "sub")
+
+
+for label, change, files in [("a changed root file", default_change, ["a.md"]),
+                             ("a changed root file and a changed file in the subdirectory",
+                              root_and_sub_change, ["a.md", "sub/b.md"])]:
+    (s_rc, s_out), (c_rc, c_out) = run_pair(change, base=SUB_BASE, sub="sub")
+    s, c = parts(s_out), parts(c_out)
+    check("subdirectory, %s: the step at the root lints them and fails" % label,
+          s_rc == 1 and s["files"] == files and len(s["findings"]) == len(files), s_out)
+    check("subdirectory, %s: the command lints the same files, gates the same lines, exits 1" % label,
+          c_rc == s_rc and c["head"] == s["head"] and c["files"] == s["files"] and c["findings"] == s["findings"]
+          and c["verdict"] == s["verdict"], c_out)
+
+
+# '**/' matches zero directories in the exclude, as in the include: a root file is excluded, a nested one too.
+# Red on b205964: the exclude used git's default pathspec mode, where '**/decisions/**' needs a leading '/'.
+def decisions_change(work):
+    write(work, "a.md", "# A\n\nShort line.\n", "w")
+    write(work, "decisions/x.md", "# X\n\n" + LONG + "\n", "w")
+    write(work, "sub/decisions/y.md", "# Y\n\n" + LONG + "\n", "w")
+    git(work, "add", "-A"); git(work, "commit", "-qm", "decisions")
+
+
+(s_rc, s_out), (c_rc, c_out) = run_pair(decisions_change, base={"a.md": "# A\n"}, exclude="**/decisions/**\n")
+s, c = parts(s_out), parts(c_out)
+check("double-star exclude: the step excludes a root file and a nested file, lints the rest",
+      s_rc == 0 and s["files"] == ["a.md"] and s["head"].endswith("2 excluded") and s["findings"] == [], s_out)
+check("double-star exclude: the command excludes them too, same header, files, findings, verdict and exit code",
+      c_rc == s_rc and c["files"] == ["a.md"] and c["head"] == s["head"] and c["files"] == s["files"]
       and c["findings"] == s["findings"] and c["verdict"] == s["verdict"], c_out)
 
 
