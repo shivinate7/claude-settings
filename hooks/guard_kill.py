@@ -511,7 +511,9 @@ def _open_script_blocks(tokens):
         head, *rest = _PS_GLUED_BRACE.split(tok) if len(tok) > 1 else [tok]
         out.append(head)
         for part in rest:
-            out += ["{", part.rstrip("})")]
+            out.append("{")
+            if part.rstrip("})"):   # a `{` that ends its token leaves no empty piece behind
+                out.append(part.rstrip("})"))
     return out
 
 
