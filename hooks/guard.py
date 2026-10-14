@@ -184,9 +184,10 @@ _FAMILY_MODULES = ("guard_branch_worktree", "guard_shared_tree", "guard_pointer"
                    "guard_push_delete", "guard_merge", "guard_frozen", "guard_env",
                    "guard_kill", "guard_stream", "guard_rm_var", "guard_mask_script", "guard_wsl")
 # Each hook .py the installer copies carries `INSTALL_ID = "<id>"`, one value per install run, stamped
-# at copy time in place of the commented placeholder below. A file with no such line (the repo copy)
-# counts as matching. A load that fails, or loads modules with different ids, means an install landed between
-# two of our reads: wait, clear the modules, and load again. The wait is bounded; after it the
+# at copy time in place of the commented placeholder below. A file with no such line is a placeholder
+# (the repo copy, or an old file from before the stamp). A set of all placeholders matches, which is the
+# repo run. A placeholder beside a real id is mixed, so it differs. A load that fails, or loads modules
+# with different ids, means an install landed between two of our reads: wait, clear the modules, and load again. The wait is bounded; after it the
 # fallback below fails closed, never open. This is the one home of the stamp check.
 # INSTALL_ID = "uninstalled"
 _PLACEHOLDER = None
@@ -198,7 +199,6 @@ def _install_ids_differ():
     ids = {getattr(sys.modules.get(name), "INSTALL_ID", _PLACEHOLDER)
            for name in ("guard_core",) + _FAMILY_MODULES}
     ids.add(globals().get("INSTALL_ID", _PLACEHOLDER))
-    ids.discard(_PLACEHOLDER)
     return len(ids) > 1
 
 

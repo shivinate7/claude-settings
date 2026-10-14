@@ -204,14 +204,20 @@ log "wrote $TARGET_MD -> $POINTER"
 # put_file SRC DEST: build the file at "DEST.cs-new" in DEST's folder, then rename it over DEST, so
 # DEST is never absent or half-written (a gate hook reads it at any moment). A .py that carries an
 # INSTALL_ID line gets this run's id, the same stamp install.ps1 and its post-merge hook write, so
-# hooks/guard.py can tell a half-installed set from a whole one.
+# hooks/guard.py can tell a half-installed set from a whole one. A failure leaves DEST as it was,
+# is printed, and makes the run exit 1; the caller must not count the file as landed.
 INSTALL_ID_VALUE="$(date +%Y%m%d%H%M%S)$$"
+INSTALL_FAILED=0
 put_file() {
   t="$2.cs-new"
   case "$1" in
     *.py) sed "s/^# INSTALL_ID = \".*\"/INSTALL_ID = \"$INSTALL_ID_VALUE\"/" "$1" > "$t" ;;
     *) cp "$1" "$t" ;;
-  esac && mv -f "$t" "$2" || { rm -f "$t"; return 1; }
+  esac && mv -f "$t" "$2" && return 0
+  rm -f "$t"
+  log "could not replace $2; left as it was"
+  INSTALL_FAILED=1
+  return 1
 }
 
 # ---- ~/.claude/agents and ~/.claude/lint --------------------------------------------------------
@@ -245,7 +251,7 @@ land_dir() {
     [ -f "$f" ] || continue
     DEST="$DEST_DIR/$(basename "$f")"
     if [ "$CLOUD" = 1 ]; then
-      put_file "$f" "$DEST"
+      put_file "$f" "$DEST" || continue
     else
       if [ -L "$DEST" ] && [ "$(readlink "$DEST")" = "$f" ]; then LANDED="$LANDED $(basename "$f")"; continue; fi
       # A real file at DEST (not a symlink): on the first local install ever, it is a
@@ -423,4 +429,4 @@ fi
 # definition.
 [ "$CLOUD" = 1 ] || : > "$COPY_MARKER"
 
-exit 0
+exit "$INSTALL_FAILED"

@@ -102,19 +102,27 @@ fi
 # put SRC DEST: build the file at "DEST.cs-new" in DEST's folder, then rename it over DEST, so DEST
 # is never absent or half-written (a gate hook reads it at any moment). A .py that carries an
 # `# INSTALL_ID` line gets this run's id, the same stamp install.ps1 writes. A rename a reader blocks
-# is retried for about 2.5 s; if it still fails, DEST stays as it was.
+# is retried for about 2.5 s; if it still fails, DEST stays as it was, the failure is printed and
+# logged, and the hook exits 1 at the end.
 id="`$(date +%Y%m%d%H%M%S)`$`$"
+failed=0
 put() {
   t="`$2.cs-new"
   case "`$1" in
     *.py) sed "s/^# INSTALL_ID = \".*\"/INSTALL_ID = \"`$id\"/" "`$1" > "`$t" ;;
     *) cp "`$1" "`$t" ;;
-  esac || { rm -f "`$t"; return 1; }
-  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do
-    mv -f "`$t" "`$2" 2>/dev/null && return 0
-    sleep 0.1
-  done
+  esac && {
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do
+      mv -f "`$t" "`$2" 2>/dev/null && return 0
+      sleep 0.1
+    done
+    false
+  }
   rm -f "`$t"
+  echo "claude-settings: could not replace `$2; left as it was. Re-run install.ps1." >&2
+  mkdir -p "`$cfg"
+  echo "`$(date) post-merge: could not replace `$2" >> "`$log"
+  failed=1
   return 1
 }
 dest="`$cfg/settings.json"
@@ -148,7 +156,7 @@ while IFS= read -r sub || [ -n "`$sub" ]; do
     [ -L "`$d" ] || { put "`$f" "`$d" && echo "claude-settings: refreshed `$d"; }
   done
 done < "`$repo/landed-dirs.txt"
-exit 0
+exit "`$failed"
 "@
     $hook = $hook -replace "`r`n", "`n"
     $tmpPath = Join-Path $hooksDir 'post-merge.tmp'
@@ -277,6 +285,7 @@ function Set-InstallId([string]$Path) {
 # $Dest as it was. The failure is logged and the run goes on.
 # Returns 'linked', 'copied', or 'failed'. The temp name ends in .cs-new, so it does not match a
 # name a person gives a file.
+$FailedFiles = [ordered]@{}   # dest -> src, for each file Install-File could not replace
 function Install-File([string]$Src, [string]$Dest) {
     $new = "$Dest.cs-new"
     try {
@@ -289,6 +298,7 @@ function Install-File([string]$Src, [string]$Dest) {
         $err = $_.Exception.Message
         try { Remove-Leftover $new } catch { Log "could not remove $new ($($_.Exception.Message)); left behind" }
         Log "could not replace $Dest ($err); $Dest unchanged"
+        $FailedFiles[$Dest] = $Src
         return 'failed'
     }
 }
@@ -440,6 +450,50 @@ if (-not (Get-Command python3 -ErrorAction SilentlyContinue) -and -not (Get-Comm
     Log "python3 not found on PATH; the guard, STE gate and other gates refuse Bash, Write and Edit calls until Python 3 is installed"
 }
 
+# Retries each file Install-File could not replace, with a longer back-off (2, 4, 8 s), then re-reads
+# the stamp of every copied guard*.py: a copy that does not carry this run's id is a half install,
+# so it is retried the same way. A file that still fails is named here and the run exits non-zero
+# at its end; the guard then fails closed and its text names this installer as the remedy.
+# Links are skipped: a link reads the repo file, and the repo copy holds the placeholder.
+$StillFailed = [ordered]@{}
+function Resolve-Failures {
+    $hooksDest = Join-Path $ClaudeDir 'hooks'
+    $hooksSrc  = Join-Path $RepoDir 'hooks'
+    $stampRe   = '(?m)^INSTALL_ID = "([^"]*)"'
+    foreach ($delay in 2, 4, 8, 0) {
+        foreach ($f in @(Get-ChildItem -Path $hooksSrc -Filter 'guard*.py' -File -ErrorAction SilentlyContinue)) {
+            $d = Join-Path $hooksDest $f.Name
+            $i = Get-Item -LiteralPath $d -Force -ErrorAction SilentlyContinue
+            if ($i -and $i.LinkType) { continue }
+            # The id the copy must carry: this run's id where the source holds the placeholder, else the
+            # id the source already carries. A source with neither has nothing to check.
+            $srcText = [IO.File]::ReadAllText($f.FullName)
+            $want = if ($srcText -match '(?m)^# INSTALL_ID = ') { $InstallId }
+                    elseif ($srcText -match $stampRe) { $Matches[1] }
+                    else { continue }
+            $ok = $false
+            if ($i) {
+                try { $m = [regex]::Match([IO.File]::ReadAllText($d), $stampRe); $ok = ($m.Success -and $m.Groups[1].Value -eq $want) } catch { }
+            }
+            if (-not $ok -and -not $FailedFiles.Contains($d)) { $FailedFiles[$d] = $f.FullName }
+        }
+        if ($FailedFiles.Count -eq 0) { return }
+        if ($delay -eq 0) { break }
+        Log "$($FailedFiles.Count) file(s) not replaced; retrying in $delay s"
+        Start-Sleep -Seconds $delay
+        foreach ($d in @($FailedFiles.Keys)) {
+            $src = $FailedFiles[$d]
+            $FailedFiles.Remove($d)
+            $r = Install-File $src $d
+            if ($r -ne 'failed') { $AgentCopied = $AgentCopied -or ($r -eq 'copied') }
+        }
+    }
+    foreach ($d in @($FailedFiles.Keys)) { $StillFailed[$d] = $FailedFiles[$d]; Log "could not replace $d after retries; it is not this install's version" }
+    $FailedFiles.Clear()
+}
+Resolve-Failures
+if ($StillFailed.Count -gt 0) { $AgentFailed = $true }
+
 # 'copy+failed': some files were copied and at least one replace failed (the run prints which).
 $AgentsMode = if ($AgentCopied -and $AgentFailed) { 'copy+failed' } elseif ($AgentCopied) { 'copy' } elseif ($AgentFailed) { 'kept' } else { 'symlink' }
 
@@ -462,7 +516,7 @@ if ($item -and $item.LinkType -eq 'SymbolicLink' -and $item.Target -eq $SrcJson)
     if ($AgentCopied) { $HookMode = Install-PostMergeHook }
     Write-InstallLog -SettingsMode 'symlink' -AgentsMode $AgentsMode -HookMode $HookMode
     Complete-Run $AgentFailed
-    exit 0
+    exit $(if ($StillFailed.Count -gt 0) { 1 } else { 0 })
 }
 
 # A real file here: on the first local install ever, it is a person's own settings.json,
@@ -484,6 +538,7 @@ if ($how -eq 'linked') {
     $HookMode = Install-PostMergeHook
     Write-InstallLog -SettingsMode $(if ($how -eq 'failed') { 'kept' } else { 'copy' }) -AgentsMode $AgentsMode -HookMode $HookMode
 }
+if ($how -eq 'failed') { Resolve-Failures; if ($StillFailed.Count -gt 0) { $how = 'failed' } else { $how = 'copied' } }
 Complete-Run ($AgentFailed -or $how -eq 'failed')
 
 # ~\.claude\bin on the user PATH, so `merge` and `verdict` resolve in new sessions.
@@ -495,3 +550,4 @@ if ($env:OS -ne 'Windows_NT') {
         Log "added $BinDir to your user PATH; a new session picks it up"
     }
 }
+if ($StillFailed.Count -gt 0) { exit 1 }
