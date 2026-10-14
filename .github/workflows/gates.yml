@@ -185,6 +185,9 @@ jobs:
       - name: Settings matcher fixture suite
         run: python3 lint/test_settings_matcher.py
 
+      - name: Record slug fixture suite
+        run: python3 lint/test_check_record_slugs.py
+
       - name: Record slug length
         run: python3 lint/check_record_slugs.py
 
