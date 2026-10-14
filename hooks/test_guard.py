@@ -4973,6 +4973,30 @@ for _cmd in (
     sh("git env set: PowerShell allowed, %s" % _cmd[:40], _cmd, "allow", tool="PowerShell",
        cwd=NOGIT)
 
+# Round 1 review of 59f17f8: a set inside a substitution, a backtick, a negation, a wrapper, a
+# script block, a persistent setter or cmd /c. The guard is for accidental sets, not an attacker, so
+# each form is pinned by name and no more.
+for _cmd in (
+    "echo $(GIT_DIR=x " + VCS + " init)",
+    "echo `GIT_DIR=x " + VCS + " init`",
+    '"$(GIT_WORK_TREE=x ' + VCS + ' status)"',
+    "! GIT_DIR=x " + VCS + " init",
+    "nice -n 5 env GIT_DIR=x " + VCS + " init",
+):
+    sh("git env set: Bash, a set in front of a git call, %s" % _cmd[:40], _cmd, "deny",
+       GIT_ENV_RULE, cwd=NOGIT)
+for _cmd in (
+    r"& { $env:GIT_DIR='x'; " + VCS + " init }",
+    r"Invoke-Command -ScriptBlock { $env:GIT_WORK_TREE='x' }",
+    "setx GIT_DIR x",
+):
+    sh("git env set: PowerShell, a set in a script block or a setter, %s" % _cmd[:40], _cmd,
+       "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: cmd /c set, then a git call, denies",
+   "cmd /c set GIT_DIR=x && " + VCS + " init", "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh("git env set: export -n only drops the export attribute, allowed",
+   "export -n GIT_DIR", "allow", cwd=NOGIT)
+
 # =========================================================================== 5. merge into main
 FAMILY = "merge"
 #
