@@ -5305,6 +5305,22 @@ for _name, _command in (
 ):
     sh("cite-by-id: %s is no message" % _name, _command, "allow", silent=True, cwd=NOGIT, config=MERGECFG)
 
+# ---- two readings of a lone quote, gcp-heredoc-two-read (round 3 review of the guard pair). Bash
+# reads `echo it's` as an open single quote, and the line holding only a quote closes it. The
+# commit after them is a real command, and its heredoc body is data. own_heredoc_bodies reads the
+# header on one reading only, so it misses this commit and never judges the body. The -m form with
+# a command substitution is the same hole. Main denies every form here, and these cases pin it.
+LONE_PAIR = "echo it's\n'\n"
+sh("cite-by-id: a lone quote pair, then a -F - commit that cites a record denies",
+   LONE_PAIR + VCS + " commit -F - <<'EOF'\ntitle\n\ncites " + CITE + "\nEOF", "deny", "cite-by-id",
+   cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: a lone quote pair, then a -m $(cat heredoc commit that cites a record denies",
+   LONE_PAIR + VCS + ' commit -m "$(cat <<\'EOF\'\ntitle\n\ncites ' + CITE + '\nEOF\n)"', "deny",
+   "cite-by-id", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: a lone quote pair, then a -F - commit with a clean body is allowed",
+   LONE_PAIR + VCS + " commit -F - <<'EOF'\ntitle\n\nclean body\nEOF", "allow", cwd=NOGIT,
+   config=MERGECFG)
+
 # The Drops-lines trailer (owner ruling 2026-10-12): the one place a record path may stand in a
 # commit message is `Drops-lines: <path> -- <reason>`, the shape lint/check_silent_undo.py reads
 # from the last paragraph of a commit. A trailer with no ` -- reason` excuses nothing. The reason
@@ -5597,6 +5613,14 @@ for _name, _command in (
 ):
     sh("guard-command-position: lane %s denies" % _name, _command, "deny", "lane-by-slug",
        cwd=NOGIT, config=MERGECFG)
+# The lone-quote pair of the cite cases, with a lane named in the body (gcp-heredoc-two-read). The
+# lane rule reads the same header, so it shares the hole: a -F - body and a -m $(cat body both hide.
+sh("guard-command-position: lane, a lone quote pair then a -F - commit naming a lane denies",
+   LONE_PAIR + VCS + " commit -F - <<'EOF'\ntitle\n\nLane N20 lands\nEOF", "deny", "lane-by-slug",
+   cwd=NOGIT, config=MERGECFG)
+sh("guard-command-position: lane, a lone quote pair then a -m $(cat commit naming a lane denies",
+   LONE_PAIR + VCS + ' commit -m "$(cat <<\'EOF\'\ntitle\n\nLane N20 lands\nEOF\n)"', "deny",
+   "lane-by-slug", cwd=NOGIT, config=MERGECFG)
 for _name, _command in (
     ("command", "command " + VCS + ' commit -m "fix (N20)"'),
     ("nice", "nice " + VCS + ' commit -m "fix (N20)"'),
