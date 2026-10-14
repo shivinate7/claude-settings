@@ -426,9 +426,8 @@ MUTATIONS = [
      '    return any(os.path.isdir(os.path.join(path, name)) for name in REBASE_STATE_DIRS)',
      '    return True', "guard", "checkout: the same call with no conflict in progress keeps today's decision"),
     ("log: stop logging refusals",
-     '        with open(os.path.join(folder, "guard.log"), "a", encoding="utf-8") as handle:\n'
-     '            handle.write(line + "\\n")',
-     '        pass', "guard", 'log: one line per refusal and none for an allow'),
+     '                handle.write(line + "\\n")',
+     '                pass', "guard", 'log: one line per refusal and none for an allow'),
     ("shared-tree: keep heredoc bodies in every rule",
      '    return "\\n".join(_split_heredocs(cmd)[0])',
      '    return cmd', "guard", 'heredoc: prose naming the stash with no interpreter'),

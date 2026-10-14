@@ -5,6 +5,7 @@ guard.py is the only entry point. It loads this module from its own folder (deci
 guard-split-by-family). Other files reach these names through `guard`. A test or the janitor
 that patches one of them patches it here, on the one object that every caller reads.
 """
+import errno
 import functools
 import json
 import os
@@ -1303,7 +1304,62 @@ def record(tool: str, decision: str, rule: str, matched: str) -> None:
             fields.append(session)
         line = "\t".join(fields)
         with open(os.path.join(folder, "guard.log"), "a", encoding="utf-8") as handle:
-            handle.write(line + "\n")
+            locked = _log_lock(handle)
+            try:
+                handle.write(line + "\n")
+                handle.flush()  # the line leaves while the lock is held
+            finally:
+                if locked:
+                    _log_unlock(handle)
+    except Exception:
+        pass
+
+
+LOG_LOCK_WAIT = 2.0  # seconds; then the line is written unlocked, never dropped
+LOG_LOCK_OFFSET = 1 << 40  # a byte past any log data, so a reader never meets the lock
+
+
+def _log_lock(handle) -> bool:
+    """Take a short exclusive lock on the open log. False if it cannot: the caller writes anyway.
+
+    Two processes appending to one file can lose lines on Windows, where an append seeks and then
+    writes. The lock makes each line land whole. Stdlib only: msvcrt on Windows, fcntl elsewhere.
+    """
+    try:
+        fd = handle.fileno()
+        deadline = time.monotonic() + LOG_LOCK_WAIT
+        while True:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    os.lseek(fd, LOG_LOCK_OFFSET, os.SEEK_SET)
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return True
+            except OSError as exc:
+                # Only contention is worth a retry: msvcrt gives EACCES or EDEADLK, flock gives
+                # BlockingIOError (EAGAIN) or EACCES. Any other error returns at once.
+                busy = isinstance(exc, BlockingIOError) or exc.errno in (
+                    errno.EACCES, errno.EAGAIN, errno.EDEADLK)
+                if not busy or time.monotonic() >= deadline:
+                    return False
+                time.sleep(0.001)
+    except Exception:
+        return False
+
+
+def _log_unlock(handle) -> None:
+    try:
+        fd = handle.fileno()
+        if os.name == "nt":
+            import msvcrt
+            os.lseek(fd, LOG_LOCK_OFFSET, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_UN)
     except Exception:
         pass
 
