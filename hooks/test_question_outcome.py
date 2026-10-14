@@ -81,8 +81,8 @@ Interface the hook must match:
   the goal; (2) does each option serve it; (3) is a better option missing (the existing asks); (4) can
   the owner answer from the box alone, with every id, code or name explained in words; (5) does the
   question point at anything the box does not show, such as an earlier message or "item 4"; (6) does
-  each option's Gain name what the owner gets, and its Lose name what changes for the owner, not for a
-  record. A FLAG on each of the three incident questions denies, and the judge's reason reaches the
+  each option say what the owner gains and what the owner loses, each as a change for the owner, not for
+  a record. A FLAG on each of the three incident questions denies, and the judge's reason reaches the
   session.
 - Override the module under test with the env var QUESTION_OUTCOME_UNDER_TEST.
 """
@@ -2253,12 +2253,12 @@ def asks_unseen_pointer(p):
 
 
 def asks_lose_names_owner_change(p):
-    """Ask 6, the Lose half: does each option's Lose name what changes for the owner, not for a record."""
+    """Ask 6, the Lose half: does each option say what the owner loses, not for a record."""
     return window_has(p, r"\blose[sd]?\b", [[r"\bowner"], [r"\brecords?\b"]])
 
 
 def asks_gain_names_owner_change(p):
-    """Ask 6, the Gain half: does each option's Gain name what the owner gets, in the same ask as Lose."""
+    """Ask 6, the Gain half: does each option say what the owner gains, in the same ask as Lose."""
     return window_has(p, r"\bgain(?:s|ed|ing)?\b", [[r"\bowner"], [r"\blose[sd]?\b"]])
 
 
@@ -2285,9 +2285,9 @@ def case_p1_judge_prompt_asks_the_plain_things():
           asks_box_alone(prompt), "")
     check(name + ": asks if the question points at anything the box does not show",
           asks_unseen_pointer(prompt), "")
-    check(name + ": asks if each option's Gain names what the owner gets",
+    check(name + ": asks if each option says what the owner gains",
           asks_gain_names_owner_change(prompt), "")
-    check(name + ": asks if each option's Lose names what changes for the owner, not for a record",
+    check(name + ": asks if each option says what the owner loses, not for a record",
           asks_lose_names_owner_change(prompt), "")
     check(name + ": keeps the ask for a better option that is missing", asks_better_option_missing(prompt), "")
 
