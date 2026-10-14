@@ -9,8 +9,9 @@ missing, short or mixed set of hook files?
 
 - The installer writes each file to a temp name in the same folder, then renames it over the
   target. A rename held up by an open reader is retried briefly.
-- Each installed hook file carries the same `INSTALL_ID` constant, stamped at install time. The
-  repo copy holds a placeholder, and a placeholder counts as matching.
+- Each installed guard file carries the same `INSTALL_ID`, stamped at install time. The repo
+  copy holds a placeholder line. Only an all-placeholder set matches. A placeholder or a missing
+  line beside a real id is mixed.
 - The guard checks the `INSTALL_ID` of the modules it loaded. On an import failure, a load failure
   or a stamp mismatch, it waits in short steps for about 5 s and loads again. After the wait it
   fails closed with guard-crash, never open.
